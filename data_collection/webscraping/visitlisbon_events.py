@@ -1,0 +1,280 @@
+# ==========================================================================
+# Master Thesis
+#   - André Filipe Gomes Silvestre, 20240502
+# 
+# This module implements a web scraper for the "Visit Lisbon" events page.
+# It extracts event details such as title, description, date, price, and location,
+# and saves the data in a structured JSON format.
+# 
+# Link to the events page: https://www.visitlisboa.com/en/events
+# ==========================================================================
+
+# Required libraries:
+# pip install requests beautifulsoup4 tqdm
+import requests                     # To make HTTP requests
+from bs4 import BeautifulSoup       # To parse HTML content
+import json                         # To handle JSON data
+import time                         # To add delays  
+import random                       # To make delays random
+import os                           # To handle file paths correctly
+import re                           # To extract numbers from strings
+from tqdm import tqdm               # To show progress bars
+
+def get_total_pages(session, headers):
+    """
+    Determines the total number of event pages by inspecting the pagination control.
+    
+    Args:
+        session (requests.Session): The requests session object.
+        headers (dict): Headers to use for the HTTP request.
+    
+    Returns:
+        int: The total number of pages. If unable to determine, returns 0.
+    """
+    base_url = "https://www.visitlisboa.com/en/events"
+    print("Determining the total number of pages...")
+    try:
+        response = session.get(base_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find the pagination navigation bar
+        pagy_nav = soup.find('nav', id='pagy')
+        if not pagy_nav:
+            print("Pagination control not found. Assuming only 1 page.")
+            return 1
+            
+        # Find all links within the pagination bar
+        page_links = pagy_nav.find_all('a', href=True)
+        
+        page_numbers = [1] # Start with 1 in case there's only one page
+        for link in page_links:
+            # Use regex to find numbers in the href attribute
+            if match := re.search(r'page=(\d+)', link['href']):
+                page_numbers.append(int(match.group(1)))
+        
+        total_pages = max(page_numbers)
+        print(f"Found a total of {total_pages} pages.")
+        return total_pages
+        
+    except requests.exceptions.RequestException as e:
+        print(f"Could not determine total pages due to an error: {e}. Aborting.")
+        return 0
+    except (ValueError, TypeError):
+        print("Could not parse page numbers from pagination. Assuming 1 page.")
+        return 1
+
+def get_event_urls_from_page(session, page_number, headers):
+    """
+    Fetches a single page of event listings and extracts the URLs for each event.
+    
+    Args:
+        session (requests.Session): The requests session object.
+        page_number (int): The page number to fetch.
+        headers (dict): Headers to use for the HTTP request.
+    
+    Returns:
+        list or None: A list of event URLs if successful, None otherwise. If no events are found, returns an empty list.
+    """
+    base_url = "https://www.visitlisboa.com"
+    list_page_url = f"{base_url}/en/events?page={page_number}"
+    event_urls = []
+    
+    try:
+        response = session.get(list_page_url, headers=headers)
+        response.raise_for_status()
+        time.sleep(random.uniform(1, 2)) # Polite delay
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        event_cards = soup.find_all('div', attrs={'data-controller': 'clickable-card'})
+        
+        if not event_cards:
+            return []
+            
+        for card in event_cards:
+            link_tag = card.find('a', attrs={'data-clickable-card-target': 'link'})
+            if link_tag and 'href' in link_tag.attrs:
+                event_urls.append(f"{base_url}{link_tag['href']}")
+                
+    except requests.exceptions.RequestException as e:
+        print(f"An error occurred while fetching {list_page_url}: {e}")
+        return None
+        
+    return event_urls
+
+def scrape_event_details(session, event_url, headers):
+    """
+    Scrapes detailed information from a single event page with a retry mechanism.
+    This version is heavily updated to extract more specific details.
+    
+    Args:
+        session (requests.Session): The requests session object.
+        event_url (str): The URL of the event page to scrape.
+        headers (dict): Headers to use for the HTTP request.
+    
+    Returns:
+        dict or None: A dictionary containing event details if successful, None otherwise.
+    """
+    event_data = {'url': event_url}
+    base_url = "https://www.visitlisboa.com"
+    max_retries = 3
+    retry_delay = 5
+
+    for attempt in range(max_retries):
+        try:
+            response = session.get(event_url, headers=headers)
+            if response.status_code == 429:
+                print(f"  [Attempt {attempt + 1}/{max_retries}] Rate limited. Waiting {retry_delay}s...")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+                continue
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # --- General Info ---
+            if title_tag := soup.find('h1'):
+                event_data['title'] = title_tag.get_text(strip=True)
+            if category_tag := soup.find('div', class_='text-green-primary'):
+                event_data['category'] = category_tag.get_text(strip=True)
+
+            # --- Main Short Description ---
+            if h2_title := soup.find('h2', class_='max-w-xl'):
+                if short_desc_tag := h2_title.find_next_sibling('p'):
+                    event_data['short_description'] = short_desc_tag.get_text(strip=True)
+
+            # --- Image & Video URLs ---
+            event_data['image_urls'] = []
+            if carousel := soup.find('div', attrs={'data-carousel-target': 'track'}):
+                images = carousel.find_all('img')
+                for img in images:
+                    if 'src' in img.attrs and img['src']:
+                        event_data['image_urls'].append(f"{base_url}{img['src']}")
+
+            event_data['video_urls'] = []
+            iframes = soup.find_all('iframe')
+            for iframe in iframes:
+                if 'src' in iframe.attrs and iframe['src']:
+                    event_data['video_urls'].append(iframe['src'])
+            
+            # --- Detailed Description ---
+            if details_div := soup.find('div', class_='from-cms'):
+                event_data['full_description'] = details_div.get_text(strip=True, separator='\n')
+
+            # --- Dates & Times ---
+            event_data['dates'] = []
+            main_date_container = soup.find('div', class_='flex-wrap gap-4 mt-2')
+            if main_date_container:
+                times = main_date_container.find_all('time')
+                if len(times) == 2:
+                    event_data['dates'].append({'start': times[0].get_text(strip=True), 'end': times[1].get_text(strip=True)})
+                elif len(times) == 1:
+                    event_data['dates'].append({'start': times[0].get_text(strip=True), 'end': None})
+
+            if more_dates_section := soup.find('div', id='dates'):
+                date_divs = more_dates_section.find_all('div', class_='border-b')
+                for div in date_divs:
+                    times = div.find_all('time')
+                    if len(times) == 2:
+                        event_data['dates'].append({'start': times[0].get_text(strip=True), 'end': times[1].get_text(strip=True)})
+                    elif len(times) == 1:
+                        event_data['dates'].append({'start': times[0].get_text(strip=True), 'end': None})
+
+            # --- Price / Entry Fee ---
+            # Search for the specific span with a ticket icon first, then a generic one
+            if price_span := soup.find('span', class_='bg-yellow-t60'):
+                event_data['price'] = price_span.get_text(strip=True)
+            elif price_span_generic := soup.find('span', string=lambda t: t and ('Free Entry' in t or 'From' in t)):
+                event_data['price'] = price_span_generic.get_text(strip=True)
+
+
+            # --- Location and Information ---
+            info_boxes = soup.find_all('div', class_='info-text')
+            event_data['information_links'] = {}
+            for box in info_boxes:
+                if h3 := box.find('h3'):
+                    h3_text = h3.get_text().strip()
+                    # Check for location keywords
+                    if 'Address' in h3_text or 'Avenida' in h3_text or 'Parque' in h3_text or h3_text == "Estádio da Luz":
+                         if content := box.find('div', class_='info-text__content'):
+                            event_data['location'] = content.get_text(strip=True)
+                    elif 'Information' in h3_text:
+                        links = box.find_all('a')
+                        for link in links:
+                            link_text = link.get_text(strip=True)
+                            if 'href' in link.attrs:
+                                event_data['information_links'][link_text] = link['href']
+            
+            return event_data # Success
+
+        except requests.exceptions.RequestException as e:
+            print(f"  [Attempt {attempt + 1}/{max_retries}] Error: {e}. Retrying...")
+            time.sleep(retry_delay)
+    
+    print(f"  Failed to scrape {event_url} after {max_retries} attempts.")
+    return None
+
+def main():
+    """
+    Main function to orchestrate the scraping process.
+    """
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    output_filepath = os.path.join(script_dir, 'events.json')
+    
+    all_events_data = []
+    # If the JSON file already exists, load its content to avoid duplicates.
+    if os.path.exists(output_filepath) and os.path.getsize(output_filepath) > 0:
+        print(f"Resuming from existing file: {output_filepath}")
+        with open(output_filepath, 'r', encoding='utf-8') as f:
+            try:
+                all_events_data = json.load(f)
+            except json.JSONDecodeError:
+                print("Warning: Could not read existing JSON file. Starting fresh.")
+                all_events_data = []
+
+    scraped_event_urls = {event.get('url') for event in all_events_data}
+    print(f"Found {len(scraped_event_urls)} events already scraped.")
+
+    with requests.Session() as session:
+        total_pages = get_total_pages(session, headers)
+        if total_pages == 0:
+            return # Stop if we couldn't get the page count
+
+        # Iterate through each page and scrape event URLs with tqdm progress bar
+        for page in tqdm(range(1, total_pages + 1), desc="Total Page Progress", unit="page"):
+            
+            # Fetch event URLs from the current page
+            event_urls = get_event_urls_from_page(session, page, headers)
+            
+            if event_urls is None:
+                print(f"Could not fetch URLs from page {page}. Skipping.")
+                continue
+
+            page_events = []
+            for url in event_urls:
+                if url not in scraped_event_urls:
+                    print(f"  - Scraping new event: {url}")
+                    details = scrape_event_details(session, url, headers)
+                    if details:
+                        page_events.append(details)
+                        scraped_event_urls.add(url)
+                    time.sleep(random.uniform(1, 3))
+                else:
+                    print(f"  - Skipping already scraped event: {url}")
+
+            if page_events:
+                all_events_data.extend(page_events)
+                with open(output_filepath, 'w', encoding='utf-8') as f:
+                    json.dump(all_events_data, f, indent=4, ensure_ascii=False)
+                print(f"  >> Saved {len(page_events)} new events. Total saved: {len(all_events_data)}.")
+            else:
+                print("  No new events found on this page.")
+
+    print(f"\nScraping complete. Total unique events in file: {len(all_events_data)}.")
+
+if __name__ == "__main__":
+    main()
