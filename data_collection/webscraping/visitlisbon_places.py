@@ -212,6 +212,8 @@ def scrape_place_details(session, place_url, headers):
 def main():
     """
     Main function to orchestrate the scraping process for places.
+    This function handles updating existing places, adding new ones,
+    and removing places that are no longer listed on the website.
     """
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -221,53 +223,103 @@ def main():
     output_filepath = os.path.join(script_dir, 'places.json')
     base_url = "https://www.visitlisboa.com/en/places"
 
-    all_places_data = []
+    # Load existing places from JSON file
+    existing_places = {}
     if os.path.exists(output_filepath) and os.path.getsize(output_filepath) > 0:
-        print(f"Resuming from existing file: {output_filepath}")
+        print(f"Loading existing places from: {output_filepath}")
         with open(output_filepath, 'r', encoding='utf-8') as f:
             try:
-                all_places_data = json.load(f)
+                places_list = json.load(f)
+                existing_places = {place['url']: place for place in places_list}
+                print(f"Found {len(existing_places)} existing places.")
             except json.JSONDecodeError:
-                all_places_data = []
+                print("Warning: Could not read existing JSON file. Starting fresh.")
 
-    scraped_place_urls = {place.get('url') for place in all_places_data}
-    print(f"Found {len(scraped_place_urls)} places already scraped.")
-
+    # --- Scrape all current place URLs from the website ---
+    all_scraped_urls = set()
     with requests.Session() as session:
         total_pages = get_total_pages(session, headers, base_url)
         if total_pages == 0:
             return
-        
-        # Iterate through each page and scrape place URLs with tqdm progress bar
-        for page in tqdm(range(1, total_pages + 1), desc="Total Page Progress", unit="page"):
-            print(f"\n--- Scraping Page {page}/{total_pages} ---")
-            place_urls = get_place_urls_from_page(session, page, headers, base_url)
-            
-            if place_urls is None:
-                print(f"Could not fetch URLs from page {page}. Skipping.")
-                continue               
 
-            new_places_on_page = []
-            for url in place_urls:
-                if url not in scraped_place_urls:
-                    print(f"  - Scraping new place: {url}")
-                    details = scrape_place_details(session, url, headers)
-                    if details:
-                        new_places_on_page.append(details)
-                        scraped_place_urls.add(url)
-                    time.sleep(random.uniform(1, 2.5)) # Polite delay
+        print("\nScraping all place URLs from the website...")
+        for page in tqdm(range(1, total_pages + 1), desc="Scraping URLs", unit="page"):
+            urls = get_place_urls_from_page(session, page, headers, base_url)
+            if urls:
+                all_scraped_urls.update(urls)
+    
+    print(f"Found {len(all_scraped_urls)} unique place URLs on the website.")
+
+    # --- Process places: identify new, updated, and removed ---
+    new_places = []
+    updated_places = []
+    unchanged_places = []
+    
+    existing_urls = set(existing_places.keys())
+    
+    # URLs for places that are currently on the website
+    scraped_urls_set = all_scraped_urls
+    
+    # URLs for places that are new
+    new_urls = scraped_urls_set - existing_urls
+    
+    # URLs for places that might be updated or are unchanged
+    potentially_updated_urls = scraped_urls_set.intersection(existing_urls)
+    
+    # URLs for places that have been removed
+    removed_urls = existing_urls - scraped_urls_set
+
+    with requests.Session() as session:
+        # Scrape new places
+        if new_urls:
+            print(f"\nScraping {len(new_urls)} new places...")
+            for url in tqdm(new_urls, desc="Scraping new places", unit="place"):
+                details = scrape_place_details(session, url, headers)
+                if details:
+                    new_places.append(details)
+                time.sleep(random.uniform(1, 2))
+
+        # Check for updates in existing places
+        if potentially_updated_urls:
+            print(f"\nChecking {len(potentially_updated_urls)} existing places for updates...")
+            for url in tqdm(potentially_updated_urls, desc="Checking for updates", unit="place"):
+                current_details = scrape_place_details(session, url, headers)
+                if current_details:
+                    # Normalize data for comparison by loading and dumping
+                    existing_place_json = json.dumps(existing_places[url], sort_keys=True)
+                    current_details_json = json.dumps(current_details, sort_keys=True)
+
+                    if existing_place_json != current_details_json:
+                        print(f"  - Place has been updated: {url}")
+                        updated_places.append(current_details)
+                    else:
+                        unchanged_places.append(existing_places[url])
                 else:
-                    print(f"  - Skipping already scraped place: {url}")
+                    # If scraping fails, assume it's unchanged to avoid data loss
+                    unchanged_places.append(existing_places[url])
+                time.sleep(random.uniform(1, 2))
+        else:
+            # If no overlap, all existing places that are not removed are unchanged
+            unchanged_urls = existing_urls - removed_urls
+            for url in unchanged_urls:
+                unchanged_places.append(existing_places[url])
 
-            if new_places_on_page:
-                all_places_data.extend(new_places_on_page)
-                with open(output_filepath, 'w', encoding='utf-8') as f:
-                    json.dump(all_places_data, f, indent=4, ensure_ascii=False)
-                print(f"  >> Saved {len(new_places_on_page)} new places. Total saved: {len(all_places_data)}.")
-            else:
-                print("  No new places found on this page (all previously scraped).")
 
-    print(f"\nScraping complete. Total unique places in file: {len(all_places_data)}.")
+    # --- Consolidate data and save ---
+    final_place_list = unchanged_places + new_places + updated_places
+    
+    print("\n--- Synchronization Report ---")
+    print(f"  - Added: {len(new_places)} new places.")
+    print(f"  - Updated: {len(updated_places)} places.")
+    print(f"  - Removed: {len(removed_urls)} places.")
+    print(f"  - Unchanged: {len(unchanged_places)} places.")
+    print(f"  - Total places to be saved: {len(final_place_list)}")
+
+    # Save the updated list to the JSON file
+    with open(output_filepath, 'w', encoding='utf-8') as f:
+        json.dump(final_place_list, f, indent=4, ensure_ascii=False)
+    
+    print(f"\nSuccessfully saved {len(final_place_list)} places to {output_filepath}")
 
 if __name__ == "__main__":
     main()

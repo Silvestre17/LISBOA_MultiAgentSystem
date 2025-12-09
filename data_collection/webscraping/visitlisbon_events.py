@@ -217,6 +217,8 @@ def scrape_event_details(session, event_url, headers):
 def main():
     """
     Main function to orchestrate the scraping process.
+    This function handles updating existing events, adding new ones,
+    and removing events that are no longer listed on the website.
     """
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -225,56 +227,105 @@ def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     output_filepath = os.path.join(script_dir, 'events.json')
     
-    all_events_data = []
-    # If the JSON file already exists, load its content to avoid duplicates.
+    # Load existing events from JSON file
+    existing_events = {}
     if os.path.exists(output_filepath) and os.path.getsize(output_filepath) > 0:
-        print(f"Resuming from existing file: {output_filepath}")
+        print(f"Loading existing events from: {output_filepath}")
         with open(output_filepath, 'r', encoding='utf-8') as f:
             try:
-                all_events_data = json.load(f)
+                events_list = json.load(f)
+                existing_events = {event['url']: event for event in events_list}
+                print(f"Found {len(existing_events)} existing events.")
             except json.JSONDecodeError:
                 print("Warning: Could not read existing JSON file. Starting fresh.")
-                all_events_data = []
 
-    scraped_event_urls = {event.get('url') for event in all_events_data}
-    print(f"Found {len(scraped_event_urls)} events already scraped.")
-
+    # --- Scrape all current event URLs from the website ---
+    all_scraped_urls = set()
     with requests.Session() as session:
         total_pages = get_total_pages(session, headers)
         if total_pages == 0:
-            return # Stop if we couldn't get the page count
+            return
 
-        # Iterate through each page and scrape event URLs with tqdm progress bar
-        for page in tqdm(range(1, total_pages + 1), desc="Total Page Progress", unit="page"):
-            
-            # Fetch event URLs from the current page
-            event_urls = get_event_urls_from_page(session, page, headers)
-            
-            if event_urls is None:
-                print(f"Could not fetch URLs from page {page}. Skipping.")
-                continue
+        print("\nScraping all event URLs from the website...")
+        for page in tqdm(range(1, total_pages + 1), desc="Scraping URLs", unit="page"):
+            urls = get_event_urls_from_page(session, page, headers)
+            if urls:
+                all_scraped_urls.update(urls)
+    
+    print(f"Found {len(all_scraped_urls)} unique event URLs on the website.")
 
-            page_events = []
-            for url in event_urls:
-                if url not in scraped_event_urls:
-                    print(f"  - Scraping new event: {url}")
-                    details = scrape_event_details(session, url, headers)
-                    if details:
-                        page_events.append(details)
-                        scraped_event_urls.add(url)
-                    time.sleep(random.uniform(1, 3))
+    # --- Process events: identify new, updated, and removed ---
+    new_events = []
+    updated_events = []
+    unchanged_events = []
+    
+    existing_urls = set(existing_events.keys())
+    
+    # URLs for events that are currently on the website
+    scraped_urls_set = all_scraped_urls
+    
+    # URLs for events that are new
+    new_urls = scraped_urls_set - existing_urls
+    
+    # URLs for events that might be updated or are unchanged
+    potentially_updated_urls = scraped_urls_set.intersection(existing_urls)
+    
+    # URLs for events that have been removed
+    removed_urls = existing_urls - scraped_urls_set
+
+    with requests.Session() as session:
+        # Scrape new events
+        if new_urls:
+            print(f"\nScraping {len(new_urls)} new events...")
+            for url in tqdm(new_urls, desc="Scraping new events", unit="event"):
+                details = scrape_event_details(session, url, headers)
+                if details:
+                    new_events.append(details)
+                time.sleep(random.uniform(1, 2))
+
+        # Check for updates in existing events
+        if potentially_updated_urls:
+            print(f"\nChecking {len(potentially_updated_urls)} existing events for updates...")
+            for url in tqdm(potentially_updated_urls, desc="Checking for updates", unit="event"):
+                current_details = scrape_event_details(session, url, headers)
+                if current_details:
+                    # Normalize data for comparison by loading and dumping
+                    # This avoids issues with float precision, key order, etc.
+                    existing_event_json = json.dumps(existing_events[url], sort_keys=True)
+                    current_details_json = json.dumps(current_details, sort_keys=True)
+
+                    if existing_event_json != current_details_json:
+                        print(f"  - Event has been updated: {url}")
+                        updated_events.append(current_details)
+                    else:
+                        unchanged_events.append(existing_events[url])
                 else:
-                    print(f"  - Skipping already scraped event: {url}")
+                    # If scraping fails, assume it's unchanged to avoid data loss
+                    unchanged_events.append(existing_events[url])
+                time.sleep(random.uniform(1, 2))
+        else:
+            # If no overlap, all existing events that are not removed are unchanged
+            unchanged_urls = existing_urls - removed_urls
+            for url in unchanged_urls:
+                unchanged_events.append(existing_events[url])
 
-            if page_events:
-                all_events_data.extend(page_events)
-                with open(output_filepath, 'w', encoding='utf-8') as f:
-                    json.dump(all_events_data, f, indent=4, ensure_ascii=False)
-                print(f"  >> Saved {len(page_events)} new events. Total saved: {len(all_events_data)}.")
-            else:
-                print("  No new events found on this page.")
 
-    print(f"\nScraping complete. Total unique events in file: {len(all_events_data)}.")
+    # --- Consolidate data and save ---
+    final_event_list = unchanged_events + new_events + updated_events
+    
+    print("\n--- Synchronization Report ---")
+    print(f"  - Added: {len(new_events)} new events.")
+    print(f"  - Updated: {len(updated_events)} events.")
+    print(f"  - Removed: {len(removed_urls)} events.")
+    print(f"  - Unchanged: {len(unchanged_events)} events.")
+    print(f"  - Total events to be saved: {len(final_event_list)}")
+
+    # Save the updated list to the JSON file
+    with open(output_filepath, 'w', encoding='utf-8') as f:
+        json.dump(final_event_list, f, indent=4, ensure_ascii=False)
+    
+    print(f"\nSuccessfully saved {len(final_event_list)} events to {output_filepath}")
+
 
 if __name__ == "__main__":
     main()
