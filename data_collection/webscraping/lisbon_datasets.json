@@ -1,0 +1,2482 @@
+[
+    {
+        "title": "Atlas Digital (Atlas Digital)Atlas Digital",
+        "url_portal": "https://dados.gov.pt/pt/datasets/atlas-digital/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/28d9ca5b-aeae-4546-b91e-042d0d348031",
+        "description": "O Atlas Digital da Área Metropolitana de Lisboa é um projeto desenvolvido em colaboração com o Instituto de Geografia e Ordenamento do Território da Universidade de Lisboa, coordenado pelo Professor Jorge Rocha.Este projeto foi financiado ao abrigo do contrato celebrado entre Área Metropolitana de Lisboa, a Direção-Geral das Autarquias Locais e a Comissão de Coordenação e Desenvolvimento Regional de Lisboa e Vale do Tejo, no âmbito da integração e partilha de serviços ou competências municipais.A consulta está disponível em dois blocos de informação. Num primeiro bloco disponibilizam-se os mapas interativos e, num segundo bloco, os textos de enquadramento analítico.A Cobertura temporal dos dados é de 2011 a 2016.",
+        "file_formats": "html, pdf",
+        "last_updated": "2025-08-07T09:01:32.224000"
+    },
+    {
+        "title": "Plano Metropolitano de Adaptação às Alterações Climáticas (PMAAC)PMAAC",
+        "url_portal": "https://dados.gov.pt/pt/datasets/plano-metropolitano-de-adaptacao-as-alteracoes-climaticas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/4c7ea8af-f440-4e4c-9512-aa2c3787b3aa",
+        "description": "O Plano Metropolitano de Adaptação às Alterações Climáticas (PMAAC), visa a integração da adaptação às alterações climáticas no planeamento intermunicipal e municipal, e a criação de uma cultura de cooperação transversal aos vários setores e atores socioeconómicos da região, capaz de reforçar a resiliência territorial em todo o território.A visão metropolitana que esteve na base da construção do plano é a redução da vulnerabilidade da AML às alterações climáticas. A região, no seu todo, deve promover a adaptação como um instrumento para construir um território mais sustentável, capaz de garantir um modelo de desenvolvimento mais equitativo e territorialmente mais justo, que afirme a sua capacidade de inovação e a sua atratividade global.",
+        "file_formats": "pdf, wms",
+        "last_updated": "2025-08-07T09:02:54.011000"
+    },
+    {
+        "title": "Rede de monitorização e de alerta meteorológico metropolitano (Clima.AML)Clima.AML",
+        "url_portal": "https://dados.gov.pt/pt/datasets/rede-de-monitorizacao-e-de-alerta-meteorologico-metropolitano/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/28365431-8e14-428c-9248-25983660f812",
+        "description": "O projeto CLIMA.AML tem como objetivo a criação de uma solução integrada para a monitorização meteorológica em contexto urbano. Foi concretizado através da implementação de uma rede de 18 estações meteorológicas, localizadas em cada um dos municípios da área metropolitana de Lisboa e uma plataforma online que analisa todos os dados e informações essenciais de suporte à monitorização e avaliação dos dados meteorológicos. A implementação deste projeto faz parte do objetivo estratégico para promover o planeamento, a monitorização e a sensibilização na componente de adaptação às cheias e inundações preconizada noPlano Metropolitano de Adaptação às Alterações Climáticas da Área Metropolitana de Lisboa - PMAAC.Encontram-se disponíveis os seguintes dados: Data, Data/Hora da Leitura, Temperatura (Cº), Temperatura Exterior em Cº, Intensidade de precipitação, Quantidade de chuva, Barómetro (Mb), Pressão atmosférica em Mb, Radiação Solar (watts/m2), Radiação Solar Watts/m2, Humidade Exterior (%), Humidade Exterior %, Velocidade Vento Média (km/h), Media da velocidade do Vento Km/h, Velocidade Máxima Vento (km/h), Velocidade Máxima do Vento Km/h, Direção Vento, Direção do vento º, UV, Index de UV, Radiação Solar (watts/m2), Radiação solar máxima, Máxima UVOs dados podem ser acedidos através do site do projeto emhttps://clima.aml.pt/page/publicosendo possível exportar para os formatos txt ou xls, mas também podem ser acedidos através de API, através de credenciação previamente autorizada.A frequência de atualização real é de 30 minutos.",
+        "file_formats": "html, xml",
+        "last_updated": "2025-07-31T10:00:05.407000"
+    },
+    {
+        "title": "Pontos de Interesse Climate Walks",
+        "url_portal": "https://dados.gov.pt/pt/datasets/pontos-de-interesse-climate-walks/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/c4f494b7-d845-4bd5-b638-e257b2ec4f1e",
+        "description": "Indicação do arvoredo, elementos de água, corredor verde e hortas urbanas existentes na cidade de Lisboa. Pontos de Interesse e Percursos Climate Walks.",
+        "file_formats": "geojson",
+        "last_updated": "2025-06-06T00:00:00"
+    },
+    {
+        "title": "Percursos Climate Walks",
+        "url_portal": "https://dados.gov.pt/pt/datasets/percursos-climate-walks/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/06ee59fa-7dc3-4418-887a-9ebc14ce9905",
+        "description": "Indicação do arvoredo, elementos de água, corredor verde e hortas urbanas existentes na cidade de Lisboa. Percursos Climate walks (passeios ou caminhadas sobre o clima).",
+        "file_formats": "geojson",
+        "last_updated": "2025-06-06T00:00:00"
+    },
+    {
+        "title": "Programa 3º Encontro",
+        "url_portal": "https://dados.gov.pt/pt/datasets/programa-3-encontro/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/ee045793-80f7-4871-b97d-446b979eda76",
+        "description": "Programa do 3º Encontro do Laboratório de Dados Urbanos de Lisboa (LxDataLab)",
+        "file_formats": "pdf",
+        "last_updated": "2025-11-27T00:00:00"
+    },
+    {
+        "title": "Lugares de estacionamento na via pública para residentes ou público em geral",
+        "url_portal": "https://dados.gov.pt/pt/datasets/lugares-de-estacionamento-na-via-publica-para-residentes-ou-publico-em-geral/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/ec21e019-b97a-4adf-a9d5-7a3c513cdb51",
+        "description": "O conjunto de dados disponibiliza informação acerca dos lugares de estacionamento nas Zonas de Estacionamento de Duração Limitada (ZEDL) e Zona de Acesso Automóvel Condicionado (ZAAC), destinados a residentes ou público em geral. Inclui informações tais como localização, tipologia, orientação do estacionamento, horário, zona, tarifário e modo de pagamento.",
+        "file_formats": "zip",
+        "last_updated": "2025-05-14T00:00:00"
+    },
+    {
+        "title": "Áreas reguladas de estacionamento na via pública",
+        "url_portal": "https://dados.gov.pt/pt/datasets/areas-reguladas-de-estacionamento-na-via-publica/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/b41e7a70-46f1-40fd-b112-68298d1a1653",
+        "description": "Conjunto de dados disponibiliza informação de cada área da cidade (polígonos) relativa a tarifários, tipo de estacionamento e horários.",
+        "file_formats": "zip",
+        "last_updated": "2025-05-14T00:00:00"
+    },
+    {
+        "title": "Zonas reguladas de estacionamento na via pública",
+        "url_portal": "https://dados.gov.pt/pt/datasets/zonas-reguladas-de-estacionamento-na-via-publica/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/882d81a9-6f33-4c61-ad99-c118542aba64",
+        "description": "O conjunto de dados disponibiliza informação sobre os limites geográficos das Zonas de Estacionamento de Duração Limitada (ZEDL) e das Zona de Acesso Automóvel Condicionado (ZAAC).",
+        "file_formats": "xml",
+        "last_updated": "2025-04-30T00:00:00"
+    },
+    {
+        "title": "Túneis rodoviários geridos pela EMEL",
+        "url_portal": "https://dados.gov.pt/pt/datasets/tuneis-rodoviarios-geridos-pela-emel/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/6cbbff1b-6dbb-4963-aadc-3388cd96f338",
+        "description": "O conjunto de dados disponibiliza informação acerca dos túneis rodoviários geridos pela EMEL na cidade de Lisboa, e lista informações tais como localização, georefenciação, condições de acesso e velocidade máxima de circulação permitida.",
+        "file_formats": "xml",
+        "last_updated": "2025-04-30T00:00:00"
+    },
+    {
+        "title": "Estatísticas do número de lugares, por freguesia e por tipologia de lugar",
+        "url_portal": "https://dados.gov.pt/pt/datasets/estatisticas-do-numero-de-lugares-por-freguesia-e-por-tipologia-de-lugar/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/b60e5dd0-e349-4489-90d6-778aa4e26a5d",
+        "description": "O conjunto de dados disponibiliza informação do número de lugares em Zonas de Estacionamento de Duração Limitada (ZEDL) e Zonas de Acesso Automóvel Condicionado (ZAAC) por freguesia e por tipologia de lugar.",
+        "file_formats": "xml",
+        "last_updated": "2025-04-29T00:00:00"
+    },
+    {
+        "title": "Elevadores e escadas rolantes",
+        "url_portal": "https://dados.gov.pt/pt/datasets/elevadores-e-escadas-rolantes/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/97ed09d3-5e23-46ce-9101-9aaf99cdeed7",
+        "description": "O conjunto de dados disponibiliza a informação acerca das infraestruturas de apoio à mobilidade pedonal em espaço público (elevadores e escadas rolantes) geridos pela EMEL, bem como a lista com informações tais como localização e horário.",
+        "file_formats": "csv",
+        "last_updated": "2025-05-14T00:00:00"
+    },
+    {
+        "title": "Lisboa. Pontos de encontro - Emergência.",
+        "url_portal": "https://dados.gov.pt/pt/datasets/plano-municipal-de-emergencia-em-protecao-civil-pmepc/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/1df28fd3-9c10-4cde-9954-5397e275e333",
+        "description": "Serviço de mapa com indicação da localização de proteção civil e na Cidade de Lisboa. (PMEPC_PE_PT).",
+        "file_formats": "geojason",
+        "last_updated": "2025-10-30T00:00:00"
+    },
+    {
+        "title": "Zonas de Emissões Reduzidas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/zonas-de-emissoes-reduzidas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/20eadc61-b47b-41a2-84bb-02e5666c28bb",
+        "description": "Serviço de mapa com indicação das principais estações de transportes, interfaces fluviais, elevadores e ascensores, postos de carregamento Mobi E de Lisboa, Zonas de Emissões Reduzidas.",
+        "file_formats": "geojason",
+        "last_updated": "2025-10-30T00:00:00"
+    },
+    {
+        "title": "Rede Ferroviária Subterrânea",
+        "url_portal": "https://dados.gov.pt/pt/datasets/https-geodados-cml-hub-arcgis-com-datasets-cml-cartografiabase-explore-layer-3/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/cc9157a3-e708-45c9-9579-07c2fae53846",
+        "description": "Serviço de cartografia base. Lisbon Basemap.",
+        "file_formats": "geojason",
+        "last_updated": "2025-11-04T00:00:00"
+    },
+    {
+        "title": "Rede LoRa",
+        "url_portal": "https://dados.gov.pt/pt/datasets/rede-lora/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/4416a5ad-a537-418c-a4fb-f5f70e79bbf2",
+        "description": "Serviço de mapas com a localização geográfica de vários gateways que integram a infraestrutura da rede de comunicações LoRa Lisboa. Location of several gateways within Lisbon City Council.",
+        "file_formats": "geojason",
+        "last_updated": "2025-02-21T00:00:00"
+    },
+    {
+        "title": "Limite Unidades Territoriais - Micro",
+        "url_portal": "https://dados.gov.pt/pt/datasets/https-geodados-cml-hub-arcgis-com-datasets-cml-limites-gestaourbana-explore-layer-0/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/0192092b-5b0e-4d35-a712-cf029c0b8252",
+        "description": "Serviço de mapa com limites de gestão da Cidade de Lisboa. Map service providing management boundaries of Lisbon.",
+        "file_formats": "geojason",
+        "last_updated": "2025-02-21T00:00:00"
+    },
+    {
+        "title": "Sitios de interesse público",
+        "url_portal": "https://dados.gov.pt/pt/datasets/https-geodados-cml-hub-arcgis-com-datasets-cml-patrimonio-explore-layer-8/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/6b6ed8be-c025-4d05-a2d8-a9879c1831d5",
+        "description": "Conjunto de dados relativos a \"Sítios de interesse público\" - escavações arqueológicas.",
+        "file_formats": "geojason",
+        "last_updated": "2025-02-24T00:00:00"
+    },
+    {
+        "title": "Monitorização de Parâmetros Ambientais da Cidade de Lisboa",
+        "url_portal": "https://dados.gov.pt/pt/datasets/monitorizacao-de-parametros-ambientais-da-cidade-de-lisboa-02/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/1ca62ba3-169b-481f-a921-c608365525a6",
+        "description": "A monitorização de parâmetros ambientais, de qualidade do ar, ruído, tráfego e estado do tempo tem por objeto o mapeamento da cidade em tempo real ou próximo, ao nível destes indicadores, na modalidade “sensing as a service”. A totalidade da rede monitoriza partículas em suspensão (PM2.5 e PM10), monóxido de carbono (CO), dióxido de enxofre (SO2), dióxido de azoto (NO2), ozono(O3), nível sonoro continuo equivalente (LAeq), pressão atmosférica, humidade relativa, vento, precipitação, temperatura , radiação global, radiação ultravioleta e volume de tráfego horário (VTH) sendo que nem todos os parâmetros são monitorizados em todas as localizações. A monitorização comtempla o período de 02/01/2025 a 31/12/2027.",
+        "file_formats": "json, pdf",
+        "last_updated": "2025-03-28T00:00:00"
+    },
+    {
+        "title": "Monitorização de Parâmetros Ambientais da Cidade de Lisboa - Histórico 15/07/2021 a 15/01/2024",
+        "url_portal": "https://dados.gov.pt/pt/datasets/monitorizacao-de-parametros-ambientais-da-cidade-de-lisboa-historico-15-07-2021-a-15-01-2024/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/5521f93e-1ff2-4b12-8f4f-be2a8c630c5c",
+        "description": "Conjunto de parâmetros ambientais inclui: Qualidade do Ar, Ruído, Estado do Tempo e Tráfego. Valores dos parâmetros ambientais obtidos dos sensores instalados em diversos locais da cidade de Lisboa. Inclui na Qualidade do Ar: CO (mg/m3), NO2 (ug/m3), O3 (ug/m3), PM2.5 (ug/m3), PM10 (ug/m3), SO2 (ug/m3), C6H6 (ug/m3); Ruído: LAeq (dB(A)); Meteorologia: Temperatura (Grau C), Pressão Atmosférica (mbar), Humidade Relativa, (%) Intensidade do Vento (km/h), Direção do Vento (Grau), Precipitação (mm), Radiação Global (um) e Radiação UV (Índice UV). A monitorização foi realizada de 15 de julho de 2021 a 15 de janeiro de 2024.",
+        "file_formats": "csv, pdf, zip",
+        "last_updated": "2025-03-28T00:00:00"
+    },
+    {
+        "title": "Beneficiários Programa Subsídio Municipal Arrendamento Acessível 2021 a 2024",
+        "url_portal": "https://dados.gov.pt/pt/datasets/beneficiarios-programa-subsidio-municipal-arrendamento-acessivel-2021-a-2024/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/65e16522-6eaf-4cd1-bcdb-824df13de226",
+        "description": "Total dos beneficiários ao Programa Subsídio Municipal ao Arrendamento Acessível (SMAA) entre 2021 a 2024. Total dos apoios às famílias e respetivo montante pago por ano.",
+        "file_formats": "xlsx",
+        "last_updated": "2025-05-22T00:00:00"
+    },
+    {
+        "title": "Candidaturas ao Programa Subsídio Municipal ao Arrendamento Acessível",
+        "url_portal": "https://dados.gov.pt/pt/datasets/candidaturas-ao-programa-subsidio-municipal-ao-arrendamento-acessivel/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/1c93aed5-f99e-4cea-af54-913b299c84b7",
+        "description": "Evolução das candidaturas submetidas nos concursos ao Programa Subsídio Municipal ao Arrendamento Acessível (SMAA) entre os anos 2021 a 2024.",
+        "file_formats": "xlsx",
+        "last_updated": "2025-05-16T00:00:00"
+    },
+    {
+        "title": "Habitações Arrendadas no âmbito do Programa Renda Acessível nos anos 2020 a 2024",
+        "url_portal": "https://dados.gov.pt/pt/datasets/habitacoes-arrendadas-no-ambito-do-programa-renda-acessivel-nos-anos-2020-a-2024/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/ea5d6e85-5ec3-4c7d-88c4-f15ec4746c1c",
+        "description": "Evolução por ano do total das habitações atribuídas com rendas acessíveis no âmbito do Programa Renda Acessível (PRA), nos anos 2020 a 2024.",
+        "file_formats": "xlsx",
+        "last_updated": "2025-05-22T00:00:00"
+    },
+    {
+        "title": "Perfil do Beneficiário com atribuição habitação municipal no âmbito Programa Arrendamento Apoiado",
+        "url_portal": "https://dados.gov.pt/pt/datasets/perfil-do-beneficiario-com-atribuicao-habitacao-municipal-no-ambito-programa-arrendamento-apoiado/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/3611c37d-97ec-448e-ad70-cc7e96c29723",
+        "description": "Resumo do perfil dos beneficiários/arrendatários municipais no âmbito do Programa Arrendamento Apoiado (PAA), no período entre 2020 a 2023.",
+        "file_formats": "csv, xlsx",
+        "last_updated": "2025-01-13T00:00:00"
+    },
+    {
+        "title": "Candidaturas Submetidas Programa Renda Acessível",
+        "url_portal": "https://dados.gov.pt/pt/datasets/candidaturas-submetidas-programa-renda-acessivel/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/6d9a8029-3dff-4075-a12a-53e0e0b1bb92",
+        "description": "Evolução das candidaturas submetidas nos concursos ao Programa Renda Acessível desde 2020 a 2024.",
+        "file_formats": "xlsx",
+        "last_updated": "2025-05-19T00:00:00"
+    },
+    {
+        "title": "Candidaturas Submetidas ao Programa Arrendamento Apoiado",
+        "url_portal": "https://dados.gov.pt/pt/datasets/candidaturas-submetidas-ao-programa-arrendamento-apoiado/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/d7b77aa7-d225-49d9-9529-5af885858b0c",
+        "description": "Evolução do número de candidaturas classificadas como submetidas, no final do ano, ao Programa do Arrendamento Apoiado.",
+        "file_formats": "xlsx",
+        "last_updated": "2025-05-19T00:00:00"
+    },
+    {
+        "title": "Perfil Candidato ao Programa Subsídio Municipal ao Arrendamento Acessível",
+        "url_portal": "https://dados.gov.pt/pt/datasets/perfil-candidato-ao-programa-subsidio-municipal-ao-arrendamento-acessivel/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/3ffbb5da-a4fa-4417-ab19-209992a4a660",
+        "description": "Resumo do perfil do candidato dos concursos realizado no âmbito do Programa Subsídio Municipal ao Arrendamento Acessível, no período compreendido entre 2021 a 2023.",
+        "file_formats": "csv, xlsx",
+        "last_updated": "2024-07-03T00:00:00"
+    },
+    {
+        "title": "Perfil do Candidato ao Programa Municipal Arrendamento Apoiado",
+        "url_portal": "https://dados.gov.pt/pt/datasets/perfil-do-candidato-ao-programa-municipal-arrendamento-apoiado/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/5ba4d461-dd24-4138-a6cc-e22c18207e9d",
+        "description": "Resumo do perfil do candidato residente em Lisboa com candidatura submetida e/ou válida ao Programa Arrendamento Apoiado (PAA) em 2023.",
+        "file_formats": "csv, xlsx",
+        "last_updated": "2024-07-03T00:00:00"
+    },
+    {
+        "title": "Perfil do Candidato ao Programa Municipal Habitação Renda Acessível",
+        "url_portal": "https://dados.gov.pt/pt/datasets/perfil-do-candidato-ao-programa-municipal-habitacao-renda-acessivel/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/5ce7b691-8f69-43ad-b576-a99cb5c46512",
+        "description": "Resumo do perfil dos candidatos e dos beneficiários aos concursos do Programa Renda Acessível, no período entre 2020 e 2023. Este programa é um dos programas municipais de acesso à habitação, no âmbito do Regulamento Municipal do Direito à Habitação aprovado em novembro de 2019.",
+        "file_formats": "csv, xlsx",
+        "last_updated": "2024-07-03T00:00:00"
+    },
+    {
+        "title": "Perfil do Beneficiário ao Programa Subsídio Municipal Arrendamento Acessível",
+        "url_portal": "https://dados.gov.pt/pt/datasets/resumo-perfil-beneficiario-smaa-2021-2023-vdaf-xlsx/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/a7f4712e-8398-4865-b323-4b8b92bad7c3",
+        "description": "Resumo do perfil dos beneficiários residentes em Lisboa com o apoio financeiro à renda no âmbito do Programa Subsídio Municipal ao Arrendamento Acessível, no período compreendido entre 2021 a 2023.",
+        "file_formats": "csv, xlsx",
+        "last_updated": "2024-07-03T00:00:00"
+    },
+    {
+        "title": "Depósito Coletivo de Resíduos Alimentares",
+        "url_portal": "https://dados.gov.pt/pt/datasets/deposito-coletivo-de-residuos-alimentares/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/2b8b0dc7-f76b-4135-a908-5f8eb7af5145",
+        "description": "Localização dos pontos de deposição coletiva de resíduos alimentares em Lisboa.",
+        "file_formats": "geojson",
+        "last_updated": "2024-11-07T00:00:00"
+    },
+    {
+        "title": "Escolas Públicas - 3º Ciclo e Secundário",
+        "url_portal": "https://dados.gov.pt/pt/datasets/escolas-publicas-3-ciclo-e-secundario/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/eb725d62-db34-43c1-b9ee-37a7a0e3f802",
+        "description": "Conjunto de dados referentes a \"Escolas Públicas do 3º Ciclo e Secundário\" em Lisboa. Dataset of \"Public Schools - 3rd Cycle and Secondary\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-02-09T00:00:00"
+    },
+    {
+        "title": "WDL 2023 - Mobilidade na cidade de Lisboa com base em dados de telemóveis",
+        "url_portal": "https://dados.gov.pt/pt/datasets/wdl-2023-mobilidade-na-cidade-de-lisboa-com-base-em-dados-de-telemoveis-1/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/fda5433d-6149-401b-bc90-89e030f0eab4",
+        "description": "Resumo e Código dos modelos analíticos realizados no âmbito do World Data League 2023. Consulte mais informação na área LXDATALAB | RESULTADOS deste portal.",
+        "file_formats": "zip",
+        "last_updated": "2024-04-11T00:00:00"
+    },
+    {
+        "title": "Ocorrências \"Na Minha Rua\"",
+        "url_portal": "https://dados.gov.pt/pt/datasets/ocorrencias-na-minha-rua/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/d66d2141-5a5e-4725-9593-ac2da4e65f17",
+        "description": "Ocorrências registadas na aplicação “Na Minha Rua LX” desde 2017, para as tipologias: Animais em ambiente urbano, Árvores e Espaços Verdes, Estradas e Ciclovias, Estradas e Sinalização, Higiene Urbana, Iluminação Pública, Passeios e Acessibilidades e Saneamento. Estas ocorrências estão agrupadas por subsecção estatística.",
+        "file_formats": "xlsx",
+        "last_updated": "2025-07-28T00:00:00"
+    },
+    {
+        "title": "Grelha Operacional SMPC",
+        "url_portal": "https://dados.gov.pt/pt/datasets/grelha-operacional-smpc/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/a0976dd0-c779-4e79-97ca-9c341e083d40",
+        "description": "Grelha Operacional (quadrícula de 25x25m) de suporte à atividade da Proteção Civil e demais Agentes da Proteção Civil. Útil para a coordenação de segurança de eventos em Lisboa e na restante atividade operacional.",
+        "file_formats": "geojson",
+        "last_updated": "2024-12-12T00:00:00"
+    },
+    {
+        "title": "Lista de trabalhos - LxDataLab",
+        "url_portal": "https://dados.gov.pt/pt/datasets/lista-de-trabalhos-lxdatalab/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/aed135b6-0996-4d03-94a1-44371cf24de1",
+        "description": "Lista de trabalhos realizados no âmbito do Laboratório de Dados Urbanos de Lisboa e publicados em repositórios das Universidades, revistas científicas e outras.",
+        "file_formats": "xlsx",
+        "last_updated": "2024-04-17T00:00:00"
+    },
+    {
+        "title": "Carta Comportamento Sísmico Solo",
+        "url_portal": "https://dados.gov.pt/pt/datasets/classificacao-do-comportamento-sismico-dos-solos-classe-ec8-edificado/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/700002a9-8418-48f6-9f2a-1186e27ffbfe",
+        "description": "Identificação da Classificação do Comportamento Sísmico dos Solos segundo o Eurocódigo 8 (EC8) na área de implementação de cada edifício. Esta classificação visa identificar o parâmetro S máx. a utilizar no cálculo da Avaliação da Resistência Sísmica do Edificado. A correspondência entre as classes de solo identificadas e o parâmetro S máx. foi definida pela equipa do FUNDEC/IST.",
+        "file_formats": "geojson, pdf",
+        "last_updated": "2025-01-13T00:00:00"
+    },
+    {
+        "title": "Ecocentros móveis - Locais e calendarização",
+        "url_portal": "https://dados.gov.pt/pt/datasets/ecocentros-moveis-locais-e-calendarizacao/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/182f45dd-c14b-46b0-bb49-401e28d277fb",
+        "description": "Localização e calendarização dos ecocentros móveis na cidade de Lisboa.",
+        "file_formats": "geojson",
+        "last_updated": "2024-11-07T00:00:00"
+    },
+    {
+        "title": "Zonas de Acesso Automóvel Condicionado",
+        "url_portal": "https://dados.gov.pt/pt/datasets/zonas-de-acesso-automovel-condicionado/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/ea342ea4-56cf-44b3-beaf-72704d85676a",
+        "description": "Localização, em polígonos, das zonas de acesso automóvel condicionado | Location, in polygons, of restricted car access areas.",
+        "file_formats": "geojson",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Zonas 30",
+        "url_portal": "https://dados.gov.pt/pt/datasets/zonas-30/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/0d5cbd6b-71de-4af4-ad65-5707fa8d1ff9",
+        "description": "Localização, em polígonos, das zonas 30 na cidade de Lisboa | Location, in polygons, of the zones 30 in the city of Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Cartografia Numérica Vetorial",
+        "url_portal": "https://dados.gov.pt/pt/datasets/cartografia-numerica-vetorial/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/f812e6af-cfba-4d02-a59e-3380472810ac",
+        "description": "Cartografia Numérica Vetorial à escala 1.1.000 para o Concelho de Lisboa em formato DWG | Numerical Vector Cartography at scale 1.1.000 for the Municipality of Lisbon in DWG format",
+        "file_formats": "dwg, pdf",
+        "last_updated": "2025-02-20T00:00:00"
+    },
+    {
+        "title": "Centros Desportivos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/centro-desportivos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/f685da35-8c21-427d-86b3-86ba80e31478",
+        "description": "Serviço de mapa com a localização e dados referentes a Centros Desportivos | Map service with the location and data referring to Sports Centers.",
+        "file_formats": "geojson",
+        "last_updated": "2022-08-16T00:00:00"
+    },
+    {
+        "title": "Avaliação da qualidade de metadados (MQA)",
+        "url_portal": "https://dados.gov.pt/pt/datasets/avaliacao-da-qualidade-de-metadados-mqa/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/aabe1c8d-77e8-4c8b-a914-2e9e250c5d1b",
+        "description": "Código da ferramenta de avaliação da qualidade de metadados desenvolvida no contexto do projeto UCD-Lab com o objetivo de estudar a qualidade dos metadados recolhidos pelo Portal Europeu de Dados. Os fornecedores de dados podem usar a ferramenta para validar os seus metadados para formatos válidos e compatíveis com o DCAT Application Profile para portais de dados na Europa (DCAT-AP).",
+        "file_formats": "pdf, zip",
+        "last_updated": "2022-07-21T00:00:00"
+    },
+    {
+        "title": "Taxa de Ocupação Hoteleira - Por amostragem",
+        "url_portal": "https://dados.gov.pt/pt/datasets/taxa-de-ocupacao-hoteleira-por-amostragem/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/0fd124a4-0891-44fe-b01b-ad43ae185e33",
+        "description": "Dados sobre a taxa de ocupação-quarto nos estabelecimentos hoteleiros de 5, 4 e 3 estrelas da cidade de Lisboa, por amostragem.",
+        "file_formats": "xls, zip",
+        "last_updated": "2025-11-04T00:00:00"
+    },
+    {
+        "title": "Preço Médio em Hotéis - Por Amostragem",
+        "url_portal": "https://dados.gov.pt/pt/datasets/preco-medio-em-hoteis-por-amostragem-novo/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/0e2b2c00-c1c9-44a0-a9d2-01921253dbbd",
+        "description": "Preço médio do quarto vendido na hotelaria de 5, 4 e 3 estrelas da Cidade de Lisboa, por amostragem.",
+        "file_formats": "xls, zip",
+        "last_updated": "2025-11-04T00:00:00"
+    },
+    {
+        "title": "Capacidade de Alojamento",
+        "url_portal": "https://dados.gov.pt/pt/datasets/capacidade-de-alojamento-1/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/41840cb6-880d-49f6-9093-ba0e16f67e8f",
+        "description": "Informação sobre a capacidade dos estabelecimentos hoteleiros e do alojamento local - nº unidades, quartos e camas por categoria de hotel.",
+        "file_formats": "xls, xlsx, zip",
+        "last_updated": "2025-10-09T00:00:00"
+    },
+    {
+        "title": "Ocupações Temporárias de Espaço Público - Histórico",
+        "url_portal": "https://dados.gov.pt/pt/datasets/ocupacoes-temporarias-de-espaco-publico-historico-1/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/05430702-ed68-461e-aa19-de6403431ffd",
+        "description": "Conjunto de dados que identifica as ocupações de espaço público já realizadas na cidade de Lisboa, licenciadas pela CML, e que podem ser eventos Desportivos e Culturais, Publicitários, Filmagens, Sessões Fotográficas, Manifestações, Divertimentos/Espetáculos, a partir de dia 22/11/2021.",
+        "file_formats": "geojson",
+        "last_updated": "2023-12-14T00:00:00"
+    },
+    {
+        "title": "Interseções semaforizadas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/intersecoes-semaforizadas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/87719b5b-f824-4546-8ed5-f5fefde8a28e",
+        "description": "Localização, em polígonos, das interseções reguladas por sinalização luminosa (cruzamentos semaforizados).",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Condicionamentos de Trânsito (histórico)",
+        "url_portal": "https://dados.gov.pt/pt/datasets/condicionamentos-de-transito-historico/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/969164e9-9678-4228-ba50-a3fd1c7139f3",
+        "description": "Disponibilização de informação relativa aos condicionamentos de trânsito na cidade de Lisboa. Dados de histórico desde 2018.",
+        "file_formats": "csv",
+        "last_updated": "2023-05-24T00:00:00"
+    },
+    {
+        "title": "Interface Fluvial",
+        "url_portal": "https://dados.gov.pt/pt/datasets/interface-fluvial/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/4933605f-d219-481c-be32-31a7b7d5ff56",
+        "description": "Localização das principais estações de transportes fluviais de Lisboa. Location of Lisbon's main river transport stations.",
+        "file_formats": "geojson",
+        "last_updated": "2025-09-10T00:00:00"
+    },
+    {
+        "title": "Recolha Seletiva de Resíduos de Jardim",
+        "url_portal": "https://dados.gov.pt/pt/datasets/recolha-seletiva-de-residuos-de-jardim/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/53295db8-d592-4fef-b4e6-ddb995be3bd8",
+        "description": "Áreas de recolha seletiva porta-a-porta de resíduos de jardim",
+        "file_formats": "geojson",
+        "last_updated": "2024-11-07T00:00:00"
+    },
+    {
+        "title": "GIRA - Bicicletas de Lisboa (Histórico)",
+        "url_portal": "https://dados.gov.pt/pt/datasets/gira-bicicletas-de-lisboa-historico/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/e1388632-c8e7-4acf-8ddc-c654d66e5b42",
+        "description": "Disponibiliza informação acerca da rede de bicicletas GIRA na cidade de Lisboa - localização das estações, número de bicicletas disponíveis e docas vazias.",
+        "file_formats": "application/x-7z-compressed, csv, xlsx",
+        "last_updated": "2025-04-29T00:00:00"
+    },
+    {
+        "title": "Ocupação de Parques de Estacionamento (Histórico)",
+        "url_portal": "https://dados.gov.pt/pt/datasets/ocupacao-de-parques-de-estacionamento-historico/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/3ed9a4eb-de34-4e41-b11e-87302e04c1f5",
+        "description": "Disponibilização de informação acerca da ocupação de parques de estacionamento na cidade de Lisboa, entre 2020 e 2022.",
+        "file_formats": "xlsx",
+        "last_updated": "2025-04-30T00:00:00"
+    },
+    {
+        "title": "Suportes de Fixação de Contentores",
+        "url_portal": "https://dados.gov.pt/pt/datasets/suportes-de-fixacao-de-contentores/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/65da93d0-141a-437b-97dc-d134bb7b16f0",
+        "description": "Localização dos suportes de fixação de contentores",
+        "file_formats": "geojson",
+        "last_updated": "2024-11-07T00:00:00"
+    },
+    {
+        "title": "Empreitadas Municipais Concluídas 2012-2024",
+        "url_portal": "https://dados.gov.pt/pt/datasets/empreitadas-municipais-concluidas-2012-2024/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/3547cda8-3813-4dfe-9fba-21c071e35c15",
+        "description": "Localização e descrição das empreitadas municipais concluídas entre 2012-2024, por ano de conclusão.",
+        "file_formats": "zip",
+        "last_updated": "2025-04-09T00:00:00"
+    },
+    {
+        "title": "Pilhões",
+        "url_portal": "https://dados.gov.pt/pt/datasets/pilhao/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/4f85d2c9-168e-4f15-ae13-9f5c68a84954",
+        "description": "Serviço de mapa com a localização dos Pilhões em Lisboa",
+        "file_formats": "geojson",
+        "last_updated": "2024-11-08T00:00:00"
+    },
+    {
+        "title": "Papeleiras",
+        "url_portal": "https://dados.gov.pt/pt/datasets/papeleiras-2/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/9ad5f8a7-4373-4f24-84bd-3592dc9df0a4",
+        "description": "Serviço de mapa com a localização das Papeleiras em Lisboa",
+        "file_formats": "geojson",
+        "last_updated": "2024-11-08T00:00:00"
+    },
+    {
+        "title": "Áreas de Recolha de Resíduos - Porta-a-Porta, Entidades e Ecoilhas de Superfície",
+        "url_portal": "https://dados.gov.pt/pt/datasets/areas-de-recolha-de-residuos-porta-a-porta-entidades-e-ecoilhas-de-superficie/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/02865440-0e14-4a4b-b167-9a7ec26dcd30",
+        "description": "Mapa que permite identificar, nas diferentes zonas da cidade e de acordo com o sistema de recolha adotado, quais os dias da semana e/ou horários em que a recolha é efetuada.",
+        "file_formats": "geojson",
+        "last_updated": "2024-11-07T00:00:00"
+    },
+    {
+        "title": "Condicionamentos de Trânsito",
+        "url_portal": "https://dados.gov.pt/pt/datasets/condicionamentos-de-transito/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/0c3616a8-cc25-4660-964e-37a3c70f6eaa",
+        "description": "Condicionamentos de trânsito ativos e previstos na cidade de Lisboa. Disponibiliza informação acerca da localização, do motivo, do tipo de restrição e do impacto na circulação .",
+        "file_formats": "csv",
+        "last_updated": "2023-05-22T00:00:00"
+    },
+    {
+        "title": "Estacionamento de velocípedes do formato HotSpot, com ou sem suportes",
+        "url_portal": "https://dados.gov.pt/pt/datasets/estacionamento-de-velocipedes-do-formato-hotspot-com-ou-sem-suportes/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/15c96980-6f79-483f-afa9-1cf299541154",
+        "description": "Localização das zonas de estacionamento dedicadas a velocípedes com formato do tipo HotSpot (com espaço para estacionamento de velocípedes e/ou veículos equivalentes partilhados do tipo free float).",
+        "file_formats": "geojson",
+        "last_updated": "2023-12-14T00:00:00"
+    },
+    {
+        "title": "Estacionamento para velocípedes",
+        "url_portal": "https://dados.gov.pt/pt/datasets/estacionamento-para-velocipedes/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/305dc911-2459-4c4d-8fd9-14647e75eff4",
+        "description": "Localização das zonas de estacionamento dedicadas a velocípedes, quer seja de curto, médio como longo prazo.",
+        "file_formats": "geojson",
+        "last_updated": "2025-10-26T00:00:00"
+    },
+    {
+        "title": "Mapa do Ruído",
+        "url_portal": "https://dados.gov.pt/pt/datasets/mapa-do-ruido/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/0962f0a2-b3ad-4e12-8bd5-933bdef76f81",
+        "description": "Mostra os diferentes níveis de ruído na cidade de Lisboa: Mapa de Ruído Global, Dia, Entardecer e Noite (Lden) e Mapa de Ruído Global Noite (Ln), para o ano de 2020.",
+        "file_formats": "pdf, shp",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Associações Culturais",
+        "url_portal": "https://dados.gov.pt/pt/datasets/associacoes-culturais/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/f8b22643-6041-4650-aed7-1237e53ebc31",
+        "description": "Conjunto de dados com a localização de Associações Culturais, em Lisboa. Map service providing data concerning Cultural Associations in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-12-12T00:00:00"
+    },
+    {
+        "title": "Paragens",
+        "url_portal": "https://dados.gov.pt/pt/datasets/paragens/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/4169aa6d-61f9-4dae-bc00-ebd873921c94",
+        "description": "Paragens dos Serviços Regulares de Transporte de Passageiros que servem os concelhos de Lisboa e Porto.Fonte: STePP, 2019-versão experimental.",
+        "file_formats": "gtfs",
+        "last_updated": "2019-05-08T17:58:35.238000"
+    },
+    {
+        "title": "Rede Ciclável",
+        "url_portal": "https://dados.gov.pt/pt/datasets/rede-ciclavel/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/33bc10b7-e39a-4798-a95b-bd05b2d3427b",
+        "description": "Serviço de mapa com indicação da rede de ciclovia existente em Lisboa | Map service with the location of the cycle routes in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2025-11-04T00:00:00"
+    },
+    {
+        "title": "Fundações Culturais",
+        "url_portal": "https://dados.gov.pt/pt/datasets/fundacoes-culturais/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/15ca3911-5ae3-47a1-bb5b-925f96442a1f",
+        "description": "Conjunto de dados com a localização de Fundações, em Lisboa, com actividade predominantemente Cultural . Map service providing data concerning Cultural Foundations in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-19T00:00:00"
+    },
+    {
+        "title": "Arte Pública",
+        "url_portal": "https://dados.gov.pt/pt/datasets/arte-publica/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/f97de425-73ea-4f82-8873-e738dea095a5",
+        "description": "Descrição e fotografias da Arte Pública existente no Parque das Nações e criada no âmbito da Expo'98.",
+        "file_formats": "application/x-7z-compressed, ods",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Agenda Cultural de Lisboa",
+        "url_portal": "https://dados.gov.pt/pt/datasets/agenda-cultural-de-lisboa/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/31768e52-787e-40de-8d42-815d9d1206c4",
+        "description": "Dados dos eventos publicados na Agenda Cultural de Lisboa",
+        "file_formats": "json",
+        "last_updated": "2024-01-19T00:00:00"
+    },
+    {
+        "title": "Parques Caninos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/parques-caninos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/3a7a81b0-eb6b-48df-9335-82ba6d5fbca5",
+        "description": "Identifica a localização espacial dos parques caninos.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Topónimos Ibero-Americanos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/toponimos-ibero-americanos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/33fb946f-f0c3-466f-b888-d8a6f1c9b84b",
+        "description": "Identificação das ruas de Lisboa com topónimos ibero-Americanos, incluindo informação sobre cada topónimo.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-03T00:00:00"
+    },
+    {
+        "title": "Casas Regionais",
+        "url_portal": "https://dados.gov.pt/pt/datasets/casas-regionais/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/1147fc32-2fc1-4755-9fc1-6c5d26f9db93",
+        "description": "Conjunto de dados com a localização de Casas Regionais em Lisboa. Map service providing data concerning \"Regional Guilds\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-05T00:00:00"
+    },
+    {
+        "title": "Intervenções Arqueológicas da CML",
+        "url_portal": "https://dados.gov.pt/pt/datasets/intervencoesarqueologicasdacml/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/4a933034-5448-4dbb-9247-7891617a292d",
+        "description": "Conjunto de dados georreferenciados, com aplicação urbanística e histórica, decorrentes das intervenções arqueológicas realizadas pelos serviços municipais de Arqueologia.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Residências Artísticas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/residenciasartisticas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/f307c41c-c024-43bd-92e2-a2b3266f0921",
+        "description": "Conjunto de dados com a localização de Residências Artísticas em Lisboa.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-03T00:00:00"
+    },
+    {
+        "title": "Toponímia de Lisboa",
+        "url_portal": "https://dados.gov.pt/pt/datasets/toponimia-de-lisboa/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/a8729e08-8973-4607-bd2d-cf6ff1183fd0",
+        "description": "Georreferenciação com informação descritiva da toponímia da cidade de Lisboa.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-03T00:00:00"
+    },
+    {
+        "title": "Plantas de Freguesia",
+        "url_portal": "https://dados.gov.pt/pt/datasets/plantas-de-freguesia/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/ecf46d7a-215f-431d-9f0d-37f883018992",
+        "description": "Plantas de Lisboa por freguesia, em formato A1, sobre cartografia base.",
+        "file_formats": "jpeg",
+        "last_updated": "2024-02-02T00:00:00"
+    },
+    {
+        "title": "Ecoilhas Subterrâneas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/ecoilhas-subterraneas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/9a891a7d-28e3-4ebe-95e1-2e2d2fac46a2",
+        "description": "Localização das Ecoilhas Subterrâneas em Lisboa.",
+        "file_formats": "geojson",
+        "last_updated": "2025-02-21T00:00:00"
+    },
+    {
+        "title": "Efemérides do quotidiano de Lisboa até 1921",
+        "url_portal": "https://dados.gov.pt/pt/datasets/efemerides-do-quotidiano-de-lisboa-ate-1920/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/07fb894d-9baf-4c5d-86bc-a09b4cd4de04",
+        "description": "Data e descrição de acontecimentos relevantes na cidade de Lisboa até 1921, incluindo as respectivas fontes de informação.",
+        "file_formats": "ods",
+        "last_updated": "2018-12-26T00:00:00"
+    },
+    {
+        "title": "Serviço de Teleassistência (STA) - N.º de equipamentos de teleassistência instalados, ativos e n.º de beneficiários apoiados por freguesia",
+        "url_portal": "https://dados.gov.pt/pt/datasets/servico-de-teleassistencia/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/716fa517-048c-49ae-bdbb-b54792a2f75d",
+        "description": "Dados relativos ao número de equipamentos de teleassistência instalados, ativos e número de beneficiários apoiados, por freguesia.",
+        "file_formats": "xlsx",
+        "last_updated": "2024-12-16T00:00:00"
+    },
+    {
+        "title": "Fundo de Emergência Social de Lisboa - IPSS e outras entidades sem fins lucrativos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/fundo-de-emergencia-social-de-lisboa-ipss-e-outras-entidades-sem-fins-lucrativos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/25948f71-1874-43e0-819e-0ae87feb4484",
+        "description": "Conjunto de dados relativos aos processos aprovados de 2012 a 2024, por entidade, fundamentação, finalidade do apoio, área de intervenção e valor atribuído pela CMLisboa.",
+        "file_formats": "xlsx",
+        "last_updated": "2025-03-13T00:00:00"
+    },
+    {
+        "title": "Avisos Locais - Porto de Lisboa",
+        "url_portal": "https://dados.gov.pt/pt/datasets/avisos-locais-porto-de-lisboa/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/8cf7db45-d62b-44a1-a400-93f693616d5d",
+        "description": "Avisos aos navegantes cobrindo a área de jurisdição do porto de Lisboa e que não necessitam ser promulgados para fora desses limites.",
+        "file_formats": "json",
+        "last_updated": "2025-11-27T00:00:00"
+    },
+    {
+        "title": "Placas e lápides evocativas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/placas-e-lapides-evocativas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/5f6016e4-ce2b-476c-9f68-b884ee5d28ab",
+        "description": "Informação sobre as placas e lápides evocativas existentes em Lisboa, incluindo a sua localização e ano de descerramento.",
+        "file_formats": "csv",
+        "last_updated": "2024-01-19T00:00:00"
+    },
+    {
+        "title": "Galerias de Arte",
+        "url_portal": "https://dados.gov.pt/pt/datasets/galerias-de-arte/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/f1f494c9-a49f-46c2-ab01-a4a0f85a4934",
+        "description": "Conjunto de dados com indicação de \"Galerias de Arte\" em Lisboa. Map service providing data concerning \"Art Galleries\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-19T00:00:00"
+    },
+    {
+        "title": "Principais obras de promoção da EMEL (Histórico)",
+        "url_portal": "https://dados.gov.pt/pt/datasets/principais-obras-de-promocao-da-emel-historico/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/a673ad78-b6e8-49fc-b2e4-fcc7c5a1713f",
+        "description": "Principais obras de iniciativa da EMEL concluídas no período 2011-2016.",
+        "file_formats": "shp",
+        "last_updated": "2025-04-30T00:00:00"
+    },
+    {
+        "title": "Equipamentos Escolares",
+        "url_portal": "https://dados.gov.pt/pt/datasets/equipamentos-escolares/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/f92bd17f-fd4f-4e96-8fab-e97650daf55a",
+        "description": "Conjunto de dados sobre o edificado da rede escolar pública da cidade de Lisboa (1.º ciclo e pré-escolar) - Espaços comuns existentes.",
+        "file_formats": "xlsx",
+        "last_updated": "2018-05-23T00:00:00"
+    },
+    {
+        "title": "Ocupações Temporárias de Espaço Público - Histórico (até 22/11/2021)",
+        "url_portal": "https://dados.gov.pt/pt/datasets/ocupacoes-temporarias-de-espaco-publico-historico-ate-22-11-2021/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/94cc7adc-8eb5-428e-82d2-354880014d6d",
+        "description": "Este conjunto de dados identifica as ocupações de espaço público já realizadas na cidade de Lisboa, licenciadas pela CML, e que podem ser eventos Desportivos e Culturais, Publicitários, Filmagens, Sessões Fotográficas, Manifestações, Divertimentos/Espetáculos. Até 22/11/2021",
+        "file_formats": "geojson",
+        "last_updated": "2023-12-14T00:00:00"
+    },
+    {
+        "title": "Beneficiários da Ação Social Escolar",
+        "url_portal": "https://dados.gov.pt/pt/datasets/beneficiarios-da-acao-social-escolar/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/38b856c8-d66a-44a8-9361-381c036b39b6",
+        "description": "Nº de crianças (Ensino Pré-Escolar) e alunos (1º Ciclo Ensino Básico) e respetivos escalões da Ação Social Escolar, por Agrupamento de Escolas, da rede pública de Lisboa.",
+        "file_formats": "xls, xlsx",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Áreas suscetíveis de recurso ao Instrumento Financeiro para a Reabilitação e Revitalização Urbanas (IFRRU 2020)",
+        "url_portal": "https://dados.gov.pt/pt/datasets/ifrru-2020/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/e069d388-68e9-42ac-8a32-e2d23fcd836f",
+        "description": "Localização das áreas suscetíveis de recurso ao IFRRU 2020 para reabilitação integral de edifícios.",
+        "file_formats": "geojson",
+        "last_updated": "2024-12-12T00:00:00"
+    },
+    {
+        "title": "Programa Desporto Mexe Comigo",
+        "url_portal": "https://dados.gov.pt/pt/datasets/programa-desporto-mexe-comigo/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/329af9e1-b94f-4994-846a-bdd0d925eb98",
+        "description": "Informação sobre as actividades regulares e pontuais (observação; relatórios de actividades e relatórios de execução física e financeira).",
+        "file_formats": "xls",
+        "last_updated": "2017-03-21T00:00:00"
+    },
+    {
+        "title": "Previsão do estado tempo para 5 dias para Lisboa",
+        "url_portal": "https://dados.gov.pt/pt/datasets/previsao-estado-tempo-para-5-dias-para-lisboa/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/fae09b59-5ee1-41a8-a987-2077467cd4f0",
+        "description": "Previsão estado tempo para 5 dias para Lisboa.",
+        "file_formats": "json",
+        "last_updated": "2020-07-06T00:00:00"
+    },
+    {
+        "title": "Cartografia Histórica de Lisboa",
+        "url_portal": "https://dados.gov.pt/pt/datasets/cartografia-historica-de-lisboa/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/55f427eb-1be3-451c-942e-164a81203c05",
+        "description": "Cartas e séries das diferentes épocas cronológicas da cidade (1650-1911).",
+        "file_formats": "geojson, json",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Localização e identificação das Casas Religiosas de Lisboa existentes em 2015",
+        "url_portal": "https://dados.gov.pt/pt/datasets/localizacao-e-identificacao-das-casas-religiosas-de-lisboa-existentes-em-2015-1/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/ac14b047-1108-4039-9f5f-c217ad45b566",
+        "description": "Dados resultantes do projecto de investigação LxConventos: da Cidade Sacra à Cidade Laica. A extinção das ordens religiosas e as dinâmicas de transformação urbana na Lisboa do século XIX (PTDC/CPC-HAT/4703/2012).",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Medidas de Desempenho do Arquivo Municipal de Lisboa",
+        "url_portal": "https://dados.gov.pt/pt/datasets/medidas-de-desempenho-do-arquivo-municipal-de-lisboa/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/1c707949-5a28-4caa-a56b-72a3066a5841",
+        "description": "Medidas de desempenho do Arquivo Municipal de Lisboa no período compreendido entre 2015 e 2016",
+        "file_formats": "csv",
+        "last_updated": "2024-01-19T00:00:00"
+    },
+    {
+        "title": "Processos de obras de edificação e demolição abrangidas pelo RJUE",
+        "url_portal": "https://dados.gov.pt/pt/datasets/processos-de-obras-de-edificacao-e-demolicao-abrangidas-pelo-rjue-desde-2009/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/a13c5725-a700-4666-8b0d-c760e64742b6",
+        "description": "Pedidos de licenciamento e comunicações prévias para realização de obras particulares, abrangidas pelo Regime Jurídico da Urbanização e Edificação (RJUE) e requeridos desde 2009.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Alvarás para obras de edificação e demolição emitidos ao abrigo do RJUE",
+        "url_portal": "https://dados.gov.pt/pt/datasets/alvaras-para-obras-de-edificacao-e-demolicao-emitidos-ao-abrigo-do-rjue/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/e3e058d4-e418-4a87-9742-388eb9d24b9a",
+        "description": "Alvarás emitidos no âmbito dos procedimentos de controle prévio, ao abrigo do Regime Jurídico da Urbanização e Edificação (RJUE), desde 2009.",
+        "file_formats": "geojson",
+        "last_updated": "2024-05-09T00:00:00"
+    },
+    {
+        "title": "Programa de Apoio à Natação Curricular",
+        "url_portal": "https://dados.gov.pt/pt/datasets/programa-de-apoio-natac-curricular/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/145eaa3c-8eeb-48fa-a5ec-9a0484f8f2f8",
+        "description": "Conjunto de dados sobre o nº de alunos e turmas, por estabelecimento de ensino/Agrupamento de Escolas e por piscina.",
+        "file_formats": "xlsx",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Orquestra Geração",
+        "url_portal": "https://dados.gov.pt/pt/datasets/orquestra-geracao/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/8a2a80e2-02f2-4d09-b4de-602ffa11f53c",
+        "description": "Conjunto de dados sobre o nº de alunos envolvidos no projeto/por estabelecimento de ensino - Ano letivo 2016/2017.",
+        "file_formats": "xls",
+        "last_updated": "2017-01-05T00:00:00"
+    },
+    {
+        "title": "Programas de Apoio à Habitação",
+        "url_portal": "https://dados.gov.pt/pt/datasets/programas-de-apoio-a-habitacao1/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/2ae32350-4b2b-4a29-897e-4646da04857f",
+        "description": "Listagem de programas municipais e do Estado Português de apoio à Habitação e ao Arrendamento.",
+        "file_formats": "xls",
+        "last_updated": "2024-11-25T00:00:00"
+    },
+    {
+        "title": "Programa BIP/ZIP (Bairros e Zonas de Intervenção Prioritária) - Financiamento",
+        "url_portal": "https://dados.gov.pt/pt/datasets/programa-bip-zip-bairros-e-zonas-de-intervencao-prioritaria-financiamento/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/462eea8f-4713-4e04-acd2-5ae5c19b447f",
+        "description": "Conjunto de dados da classificação final das candidaturas ao Programa BIP/ZIP- Parcerias Locais.",
+        "file_formats": "xlsx",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Centros Culturais",
+        "url_portal": "https://dados.gov.pt/pt/datasets/centros-culturais/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/7d8562f3-900b-4ee0-bb4e-da562f9c34c8",
+        "description": "Conjunto de dados com indicação de \"Centros culturais\" em Lisboa. Map service providing data concerning \"Cultural centers\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-19T00:00:00"
+    },
+    {
+        "title": "Alojamentos por Tipo de Alojamento Face à Forma de Ocupação e Edifício",
+        "url_portal": "https://dados.gov.pt/pt/datasets/alojamentos-por-tipo-de-alojamento-face-a-forma-de-ocupacao-e-edificio/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/7c89fff6-eb47-4e8e-be69-81dbb6d2e035",
+        "description": "Descrição dos Dados Nº de Alojamentos por Localização geográfica (à data dos Censos 2011) e Tipo de alojamento face à forma de ocupação e edifício.",
+        "file_formats": "xlsx",
+        "last_updated": "2024-03-25T00:00:00"
+    },
+    {
+        "title": "Agrupamentos de Escolas de Lisboa",
+        "url_portal": "https://dados.gov.pt/pt/datasets/agrupamentos-de-escolas-de-lisboa/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/ac2e2c79-9e10-4f9e-8d83-84537839da18",
+        "description": "Listagem dos Agrupamentos de Escolas de Lisboa e dos estabelecimentos de ensino que os integram, com respetiva caraterização e contatos. Listagem de Escolas Não Agrupadas - com caraterização e contatos.",
+        "file_formats": "xlsx",
+        "last_updated": "2018-05-23T00:00:00"
+    },
+    {
+        "title": "Painéis de Mensagem Variável",
+        "url_portal": "https://dados.gov.pt/pt/datasets/paineis-de-mensagem-variavel/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/2b3efd73-d804-4e7b-b19b-cefab73239ea",
+        "description": "Localização dos painéis de mensagem variável municipais.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Localização de radares",
+        "url_portal": "https://dados.gov.pt/pt/datasets/localizacao-de-radares/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/7fb49c44-9463-49b6-a7b3-c8c0c8694d01",
+        "description": "Identificação da localização dos radares municipais de controlo de velocidade.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Despesa Média de Turistas na Cidade",
+        "url_portal": "https://dados.gov.pt/pt/datasets/despesa-media-de-turistas-na-cidade/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/6bdb8e97-e5f4-4ac8-8a7e-51a4b5e32360",
+        "description": "Gasto médio diário por turista na Cidade de Lisboa (não incluindo o transporte para Lisboa).",
+        "file_formats": "xls, xlsx",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Principais obras de promoção da SRU-OCIDENTAL",
+        "url_portal": "https://dados.gov.pt/pt/datasets/principais-obras-de-promocao-da-sru-ocidental/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/4571b5d7-bfca-4946-a8cb-0684f9f8cf27",
+        "description": "Principais obras de iniciativa da SRU-OCIDENTAL concluídas no período 2012-2019",
+        "file_formats": "shp",
+        "last_updated": "2020-07-09T00:00:00"
+    },
+    {
+        "title": "Medidas de desempenho da Rede de Bibliotecas de Lisboa",
+        "url_portal": "https://dados.gov.pt/pt/datasets/medidas-de-desempenho-da-rede-de-bibliotecas-de-lisboa-1/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/b9b900aa-d9bc-49c5-9f68-4518ebd513e9",
+        "description": "Medidas de desempenho da rede BLX no período compreendido entre 2006 e 2017.",
+        "file_formats": "csv, pdf",
+        "last_updated": "2024-01-19T00:00:00"
+    },
+    {
+        "title": "Inquérito à Satisfação com a Rede de Bibliotecas de Lisboa",
+        "url_portal": "https://dados.gov.pt/pt/datasets/inquerito-a-satisfacao-com-a-rede-de-bibliotecas-de-lisboa/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/5755dc92-8843-4d38-8b91-7a6ab821f4bb",
+        "description": "Resultados dos inquéritos anuais realizados, entre 2014 e 2017, aos utilizadores da Rede de Bibliotecas de Lisboa com o objectivo de aferir o seu grau de satisfação",
+        "file_formats": "csv, pdf",
+        "last_updated": "2024-01-19T00:00:00"
+    },
+    {
+        "title": "Traçado e Georeferenciação da Rede de Distribuição Elétrica",
+        "url_portal": "https://dados.gov.pt/pt/datasets/tracado-e-georeferenciacao-da-rede-de-distribuicao-eletrica/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/7a8a9076-238d-43f4-b3c6-a79428c1d3ae",
+        "description": "Traçado e Georeferenciação da Rede de Distribuição Elétrica – Alta Tensão e Subestações.",
+        "file_formats": "shp",
+        "last_updated": "2020-07-07T00:00:00"
+    },
+    {
+        "title": "Instalações de Iluminação Pública",
+        "url_portal": "https://dados.gov.pt/pt/datasets/instalacoes-de-iluminacao-publica/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/7bfd0e97-ea21-4798-9fc2-4571311e2767",
+        "description": "Georreferenciação das instalações de iluminação pública",
+        "file_formats": "shp",
+        "last_updated": "2020-07-07T00:00:00"
+    },
+    {
+        "title": "Contratos de Empreitadas de Obras Públicas e de Aquisição de Serviços",
+        "url_portal": "https://dados.gov.pt/pt/datasets/contratos-de-empreitadas-de-obras-publicas-e-de-aquisicao-de-servicos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/23aa7744-844c-49e5-9643-74855c25055c",
+        "description": "Informação com todos os contratos de empreitadas de obras públicas e contratos de aquisição de serviços.",
+        "file_formats": "xlsx",
+        "last_updated": "2022-01-07T00:00:00"
+    },
+    {
+        "title": "Ocupações Temporárias de Espaço Público - Licenciadas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/ocupacoes-temporarias-de-espaco-publico/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/2d732ab9-5789-45b1-879b-109a0ff21450",
+        "description": "Conjunto de dados que identifica as ocupações em espaço público que ocorrem semanalmente na cidade de Lisboa, licenciadas pela CML e que podem ser Eventos Desportivos e Culturais, Publicitários, Filmagens, Sessões Fotográficas, Manifestações, Divertimentos/Espetáculos.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Passaporte Escolar",
+        "url_portal": "https://dados.gov.pt/pt/datasets/passaporte-escolar/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/a1b4b192-673d-4c18-a05b-20ab30cd0acb",
+        "description": "Dados relativos a atividades/ visitas destinadas à população escolar - pré-escolar e 1º ciclo do ensino básico.",
+        "file_formats": "xls",
+        "last_updated": "2016-12-20T00:00:00"
+    },
+    {
+        "title": "Espaços Verdes",
+        "url_portal": "https://dados.gov.pt/pt/datasets/espacos-verdes-2/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/6afbde0c-5eae-4f20-977b-06c035fb4edb",
+        "description": "Identificação da localização espacial de todas as áreas verdes, livres ou expectantes de Lisboa.",
+        "file_formats": "geojson",
+        "last_updated": "2025-06-06T00:00:00"
+    },
+    {
+        "title": "Valores das rendas de habitação social do Município de Lisboa",
+        "url_portal": "https://dados.gov.pt/pt/datasets/valores-das-rendas-de-habitacao-social-do-municipio-de-lisboa/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/d7c90aa6-e996-49bc-8919-73d4035e1cc8",
+        "description": "Valores das rendas de habitação social do Município de Lisboa: percentagem dos valores de rendas por escalões no ano 2015.",
+        "file_formats": "xls",
+        "last_updated": "2016-12-20T00:00:00"
+    },
+    {
+        "title": "Programa BIP/ZIP (Bairros e Zonas de Intervenção Prioritária) - Projetos aprovados",
+        "url_portal": "https://dados.gov.pt/pt/datasets/programa-bipzip-parcerias-locais-projetos-aprovados-1/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/9ad636e4-dc21-40bb-9d38-47416c67daaf",
+        "description": "Estatísticas das candidaturas ao programa BIP/ZIP (Bairros e/ou Zonas de Intervenção Prioritária), por ano",
+        "file_formats": "xlsx",
+        "last_updated": "2023-01-04T00:00:00"
+    },
+    {
+        "title": "Hortas Urbanas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/hortas-urbanas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/53c7d535-957d-4dbf-8c6c-0afbc88cf2a9",
+        "description": "Identificação da localização espacial dos diferentes parques hortícolas da cidade de Lisboa. Spatial location of different Urban Gardening in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-22T00:00:00"
+    },
+    {
+        "title": "Elementos de Água",
+        "url_portal": "https://dados.gov.pt/pt/datasets/elementos-de-agua/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/2daf5d1f-76d7-48cd-9c1d-47b8e69e4866",
+        "description": "Identificação da localização espacial dos pontos de água, por tipologia",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-08T00:00:00"
+    },
+    {
+        "title": "Corredor Verde",
+        "url_portal": "https://dados.gov.pt/pt/datasets/corredor-verde/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/727ebd8d-bbfb-4125-9f4d-84a9fbe7329a",
+        "description": "Estrutura natural contínua, constituída por um conjunto coordenado de espaços verdes que pretendem contribuir para trazer de forma contínua o espaço natural para o interior da cidade.",
+        "file_formats": "geojson",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Carta de potencial solar de Lisboa",
+        "url_portal": "https://dados.gov.pt/pt/datasets/carta-de-potencial-solar-de-lisboa/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/fc71fcd9-f565-4c43-aa05-fc2efe4f8a6d",
+        "description": "Carta que permite identificar o potencial solar para todos os edifícios de Lisboa.",
+        "file_formats": "png, tiff",
+        "last_updated": "2021-02-02T00:00:00"
+    },
+    {
+        "title": "Arvoredo",
+        "url_portal": "https://dados.gov.pt/pt/datasets/arvoredo/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/268a877d-6d9b-4868-82d5-55e17b324f04",
+        "description": "Identificação da localização espacial do arvoredo de Lisboa",
+        "file_formats": "geojson",
+        "last_updated": "2025-09-10T00:00:00"
+    },
+    {
+        "title": "Alimentação Escolar",
+        "url_portal": "https://dados.gov.pt/pt/datasets/alimentacao-escolar/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/c71fe3e9-6691-4528-86f3-a8a564c8c08b",
+        "description": "Conjunto de dados sobre o sistema de confeção dos estabelecimentos de ensino com 1.º ciclo e pré-escolar.",
+        "file_formats": "xlsx",
+        "last_updated": "2018-05-23T00:00:00"
+    },
+    {
+        "title": "Eventos e Programas Desportivos previstos para Lisboa",
+        "url_portal": "https://dados.gov.pt/pt/datasets/eventos-e-programas-desportivos-previstos-para-lisboa/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/90ddfb3d-8ea0-462b-bc53-bb1ddf843750",
+        "description": "Lista informativa das actividades desportivas de âmbito Internacional, Nacional, Concelhio e Local, previstas de setembro a dezembro de 2016 e março e dezembro de 2017, na cidade de Lisboa.",
+        "file_formats": "xls, xlsx",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Sondagens Geológicas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/sondagens-geologicas-1/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/70387427-13bd-4d2a-994a-f3f3d62df4be",
+        "description": "Localização das sondagens geológicas, geotécnicas e hidrogeológicas realizadas no concelho de Lisboa, no âmbito de campanhas de prospeção.",
+        "file_formats": "geojson",
+        "last_updated": "2025-10-30T00:00:00"
+    },
+    {
+        "title": "Repavimentações da Rede Viária",
+        "url_portal": "https://dados.gov.pt/pt/datasets/repavimentacoes-da-rede-viaria/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/8fc4a95f-8c76-4c37-abed-cd0200f5c1bc",
+        "description": "Repavimentações da rede viária da responsabilidade da Unidade Coordenação Territorial",
+        "file_formats": "geojson",
+        "last_updated": "2025-04-15T00:00:00"
+    },
+    {
+        "title": "Intervenções Diversas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/intervencoes-diversas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/0ad48b12-b991-4b7a-9199-90d26a123d8e",
+        "description": "Intervenções realizadas no espaço público da responsabilidade da Unidade Coordenação Territorial.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Circuitos de Recolha de Resíduos Urbanos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/circuitos-de-recolha-de-residuos-urbanos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/6db8d6f8-d54a-49f7-9952-312cc363e9ff",
+        "description": "Caracterização dos Circuitos de Remoção em Lisboa em termos de designação, periodicidade e horário de início. Detalhe de cada ponto abrangido pelo circuito no que diz respeito a localização e capacidade instalada desagregada ao nível do tipo de contentor.",
+        "file_formats": "geojson, json-ld",
+        "last_updated": "2023-12-15T00:00:00"
+    },
+    {
+        "title": "Constituição e Dissolução de Empresas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/dissolucao-de-empresas-7/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/47882943-acef-40e2-8b3b-c31e481a9a9f",
+        "description": "Dissolução de Empresas, por Atividade Económica.",
+        "file_formats": "xlsx",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Volume de Negócios dos Estabelecimentos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/volume-de-negocios-dos-estabelecimentos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/9276ac7d-bf59-46e9-9c8a-80fc4a89d3ba",
+        "description": "Volume de negócios (€) dos estabelecimentos por Localização geográfica (NUTS - 2013) e Atividade económica (CAE Rev. 3).",
+        "file_formats": "xlsx",
+        "last_updated": "2024-03-15T00:00:00"
+    },
+    {
+        "title": "Volume de negócios das empresas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/volume-de-negocios-das-empresas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/d2adeca8-c6ad-4235-98e5-e097c81c3460",
+        "description": "Volume de negócios (€) das empresas por Localização geográfica (NUTS - 2013) e Atividade económica (Divisão - CAE Rev. 3).",
+        "file_formats": "xlsx",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Valor Médio das Rendas de Habitação Social",
+        "url_portal": "https://dados.gov.pt/pt/datasets/valor-medio-das-rendas-de-habitacao-social-1/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/469560ee-819b-496e-88a4-050953985b2a",
+        "description": "Valor médio das rendas de habitação social (€) por Localização geográfica (Município) e Tipo de contrato de arrendamento.",
+        "file_formats": "xlsx",
+        "last_updated": "2024-03-19T00:00:00"
+    },
+    {
+        "title": "Taxa de Sobrevivência das Empresas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/taxa-de-sobrevivencia-das-empresas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/c55550f0-be26-4afc-9aaf-d4fd3f0e0b20",
+        "description": "Taxa de sobrevivência (%) das Empresas nascidas 2 anos antes por Localização geográfica (NUTS - 2013).",
+        "file_formats": "xlsx",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Taxa de Crescimento Migratório",
+        "url_portal": "https://dados.gov.pt/pt/datasets/taxa-de-crescimento-migratorio/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/b42c40ea-621c-4323-b4a5-09033af64113",
+        "description": "Taxa de crescimento migratório (%) por Local de residência (NUTS - 2013).",
+        "file_formats": "xlsx",
+        "last_updated": "2024-03-20T00:00:00"
+    },
+    {
+        "title": "Taxa Bruta de Natalidade por 1000 habitantes",
+        "url_portal": "https://dados.gov.pt/pt/datasets/taxa-bruta-de-natalidade-por-1000-habitantes/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/07c57e09-fbce-490f-bfb5-17606ee45981",
+        "description": "Taxa bruta de natalidade (‰) por Local de residência (NUTS - 2013).",
+        "file_formats": "xlsx",
+        "last_updated": "2024-03-20T00:00:00"
+    },
+    {
+        "title": "Superfície das unidades territoriais por localização geográfica (NUTS - 2013)",
+        "url_portal": "https://dados.gov.pt/pt/datasets/superficie/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/81ce5ca0-03a6-4d41-8855-f66044901d37",
+        "description": "Superfície (km²) das unidades territoriais por Localização geográfica (NUTS - 2013).",
+        "file_formats": "xlsx",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Saldo Migratório",
+        "url_portal": "https://dados.gov.pt/pt/datasets/saldo-migratorio/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/70df3853-aac2-4e6b-88c9-70ceb139041c",
+        "description": "Saldo migratório (N.º) por Local de residência (NUTS - 2013).",
+        "file_formats": "xlsx",
+        "last_updated": "2024-03-20T00:00:00"
+    },
+    {
+        "title": "Número de Freguesias",
+        "url_portal": "https://dados.gov.pt/pt/datasets/numero-freguesias/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/4a924528-87a6-442d-aca6-cc0e7d5e35a2",
+        "description": "Freguesias (N.º) por Localização geográfica (NUTS - 2013).",
+        "file_formats": "xlsx",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Número de Estabelecimentos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/numero-de-estabelecimentos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/3a17c23a-ea92-4e92-a88a-248403b32f25",
+        "description": "Estabelecimentos (N.º) por Localização geográfica (NUTS - 2013) e Atividade económica (CAE Rev. 3).",
+        "file_formats": "xlsx",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Número de empresas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/numero-de-empresas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/a68f3bce-f967-4c26-a283-a65e9d777772",
+        "description": "Empresas (N.º) por Localização geográfica (NUTS - 2013), Atividade económica (Divisão - CAE Rev. 3) e Forma jurídica.",
+        "file_formats": "xlsx",
+        "last_updated": "2024-03-25T00:00:00"
+    },
+    {
+        "title": "Índice de Polarização de Emprego",
+        "url_portal": "https://dados.gov.pt/pt/datasets/indice-de-polarizacao-de-emprego/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/0c920a5a-0b4f-4df0-a7e0-fb889a13fbc6",
+        "description": "Índice de polarização de emprego (N.º) por Local de residência à data dos Censos [2021] (NUTS 2013 - Município).",
+        "file_formats": "xlsx",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Índice de Envelhecimento",
+        "url_portal": "https://dados.gov.pt/pt/datasets/indice-de-envelhecimento/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/821aa911-140c-42af-a7a1-3eb41447e32d",
+        "description": "Índice de envelhecimento (N.º) por Local de residência (NUTS - 2013).",
+        "file_formats": "xlsx",
+        "last_updated": "2024-03-20T00:00:00"
+    },
+    {
+        "title": "Idade Média dos Edifícios",
+        "url_portal": "https://dados.gov.pt/pt/datasets/idade-media-dos-edificios/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/b6165595-1a96-4da2-99dd-b89cf7a53279",
+        "description": "Idade média dos edifícios (Ano) por Localização geográfica (NUTS - 2013).",
+        "file_formats": "xlsx",
+        "last_updated": "2024-03-25T00:00:00"
+    },
+    {
+        "title": "Habitação Social",
+        "url_portal": "https://dados.gov.pt/pt/datasets/habitacao-social-1/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/1b95f850-f84d-45e5-b006-2b14e015c7dd",
+        "description": "Edifícios de habitação social (N.º) por Localização geográfica (NUTS - 2002) e Época de construção.",
+        "file_formats": "xlsx",
+        "last_updated": "2024-03-19T00:00:00"
+    },
+    {
+        "title": "Ganho Médio Mensal",
+        "url_portal": "https://dados.gov.pt/pt/datasets/ganho-medio-mensal-1/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/0dc11984-03da-4ffb-9f33-92705a7454dc",
+        "description": "Ganho médio mensal (€) por Localização geográfica (NUTS - 2013), Sexo e Grupo etário.",
+        "file_formats": "xlsx",
+        "last_updated": "2024-03-15T00:00:00"
+    },
+    {
+        "title": "Encargos Médios com Habitação",
+        "url_portal": "https://dados.gov.pt/pt/datasets/encargos-medios-com-habitacao/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/168346c1-789d-4f09-89b7-1ec8b1a6e32e",
+        "description": "Encargos médios mensais com aquisição ou arrendamento de habitação (€) por Localização geográfica (NUTS - 2013).",
+        "file_formats": "xlsx",
+        "last_updated": "2024-03-19T00:00:00"
+    },
+    {
+        "title": "Proporção de edifícios com necessidade de reparação",
+        "url_portal": "https://dados.gov.pt/pt/datasets/proporcao-de-edificios-com-necessidade-de-reparacao/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/4511181b-57e1-451b-b011-f40988a90e40",
+        "description": "Proporção de edifícios com necessidade de reparação (%) por Localização geográfica à data dos Censos [2021] (NUTS - 2024).",
+        "file_formats": "xlsx",
+        "last_updated": "2024-04-02T00:00:00"
+    },
+    {
+        "title": "Compras através de terminais de pagamento automático (€)",
+        "url_portal": "https://dados.gov.pt/pt/datasets/compras-atraves-de-terminais-de-pagamento-automatico-eur/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/7ca7e59c-3a37-44ea-b62b-826b18f223af",
+        "description": "Compras através de terminais de pagamento automático (€) por Localização geográfica (NUTS - 2013) e Proveniência geográfica do cartão.",
+        "file_formats": "xlsx",
+        "last_updated": "2024-04-23T00:00:00"
+    },
+    {
+        "title": "Beneficiários do RSI",
+        "url_portal": "https://dados.gov.pt/pt/datasets/beneficiarios-do-rsi-da-seg-social-por-1000-habitantes-em-idade-ativa/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/f62e0bda-c13d-43ad-b2c8-136abfc9e820",
+        "description": "Beneficiários do RSI da Seg. Social por 1000 habitantes em idade ativa.",
+        "file_formats": "xlsx",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Carta de Tipo de Solos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/carta-de-tipo-de-solos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/6aa88a63-9b4b-41c0-be34-37fad1fc8518",
+        "description": "Carta do tipo de solos do concelho de Lisboa, com base na litologia predominante nas unidades geológicas de Lisboa.",
+        "file_formats": "geojson",
+        "last_updated": "2024-12-12T00:00:00"
+    },
+    {
+        "title": "Carta de Declives",
+        "url_portal": "https://dados.gov.pt/pt/datasets/carta-de-declives/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/23374edb-be52-4e72-8682-968f0cad343a",
+        "description": "Carta de Declives, elaborada com base no Modelo Numérico Altimétrico e no Modelo Digital de Terreno elaborados em 2012 no âmbito do procedimento de Aquisição da Ortofotocartografia à escala 1.1.000 para o Concelho de Lisboa.",
+        "file_formats": "tiff",
+        "last_updated": "2025-10-30T00:00:00"
+    },
+    {
+        "title": "MAPPe  - Mapa de Potencial Pedonal de Lisboa",
+        "url_portal": "https://dados.gov.pt/pt/datasets/mappe-mapa-de-potencial-pedonal-de-lisboa/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/df393525-6e25-4a34-a901-3598fea9b08f",
+        "description": "Modelo preditivo em formato raster que indica onde é mais provável existir peões na cidade de Lisboa.",
+        "file_formats": "tiff",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Índice de Atropelamentos em Lisboa",
+        "url_portal": "https://dados.gov.pt/pt/datasets/indice-de-atropelamentos-em-lisboa/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/f3c981a0-e387-4fc0-b09c-45c4f2ece8ee",
+        "description": "Distribuição do índice pelo território de Lisboa (Concelho), calculado com base nos atropelamentos ocorridos em 2013 e 2015. O índice de atropelamentos é uma medida síntese calculada a partir do índice de sinistralidade e da concentração dos atropelamentos. Toma por referência os três anos mais recentes. A classificação final do índice é feita com base em categorias distribuídas por níveis.",
+        "file_formats": "tiff",
+        "last_updated": "2022-08-19T00:00:00"
+    },
+    {
+        "title": "Declive Longitudinal da Rede Viária",
+        "url_portal": "https://dados.gov.pt/pt/datasets/declive-longitudinal-da-rede-viaria/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/ea1c5180-f9e0-4c49-86ff-fc0ed7dc94a4",
+        "description": "Dados sobre o declive da rede viária, calculado a partir da inclinação longitudinal nas vias de Lisboa.",
+        "file_formats": "geojson, json-ld",
+        "last_updated": "2024-12-12T00:00:00"
+    },
+    {
+        "title": "Tabela de taxas municipais",
+        "url_portal": "https://dados.gov.pt/pt/datasets/tabela-de-taxas-municipais/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/115c51c3-5411-4b15-9576-1a735c1737f1",
+        "description": "Enumeração das taxas praticadas pela CML, agrupadas por conjuntos de atividades, com o respetivo custo e descrição do serviço prestado.",
+        "file_formats": "pdf",
+        "last_updated": "2025-01-13T00:00:00"
+    },
+    {
+        "title": "Sistema de Videovigilância Bairro Alto",
+        "url_portal": "https://dados.gov.pt/pt/datasets/sistema-de-videovigilancia-bairro-alto/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/4c1b0158-fcc3-46e1-8427-282e09ceebde",
+        "description": "Localização das câmaras de vídeo vigilância para proteção de pessoas e bens na via pública dentro do perímetro do Bairro Alto.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-03T00:00:00"
+    },
+    {
+        "title": "Quiosques e Bancas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/quiosques-e-bancas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/79853164-c0c5-4a9a-b7f8-ab03c03c8b5c",
+        "description": "Quiosques e bancas localizadas no espaço público.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Instalações Sanitárias Públicas Automáticas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/instalacoes-sanitarias-publicas-automaticas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/bdada6e1-2862-4bc6-95da-7e704c9f25b6",
+        "description": "Este conjunto de dados localiza as Instalações sanitárias públicas Automáticas na cidade de Lisboa.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-14T00:00:00"
+    },
+    {
+        "title": "Candeeiros de Iluminação Pública",
+        "url_portal": "https://dados.gov.pt/pt/datasets/candeeiros-de-iluminacao-publica/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/d1c35bf2-4420-4f62-8a1f-8c279bb0698c",
+        "description": "Número total de candeeiros de iluminação pública, localizadas no espaço público.",
+        "file_formats": "geojson, json-ld",
+        "last_updated": "2024-12-12T00:00:00"
+    },
+    {
+        "title": "EMEL - Parquímetros (Histórico)",
+        "url_portal": "https://dados.gov.pt/pt/datasets/emel-parquimetros-historico/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/0e7b4abe-d873-4725-bd81-22995dcf6e96",
+        "description": "Caracterização e localização dos parquímetros em exploração pela EMEL, entre 2015 e 2019.",
+        "file_formats": "application/x-7z-compressed",
+        "last_updated": "2025-04-30T00:00:00"
+    },
+    {
+        "title": "EMEL - Sinalização Vertical (Histórico)",
+        "url_portal": "https://dados.gov.pt/pt/datasets/emel-sinalizacao-vertical-historico/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/d4e1d2cb-f125-408c-a857-7dfc38229148",
+        "description": "Identificação e localização de sinalização vertical em exploração pela EMEL.",
+        "file_formats": "application/x-7z-compressed, json-ld",
+        "last_updated": "2025-04-30T00:00:00"
+    },
+    {
+        "title": "EMEL - Lugares de estacionamento na via pública (Histórico)",
+        "url_portal": "https://dados.gov.pt/pt/datasets/emel-lugares-de-estacionamento-na-via-publica-historico/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/cf5f8e2f-affa-4e49-8fbb-5e36554f5237",
+        "description": "Identificação e localização de lugares de estacionamento de via pública em exploração pela EMEL, entre 2014 e 2020.",
+        "file_formats": "application/x-7z-compressed",
+        "last_updated": "2025-04-30T00:00:00"
+    },
+    {
+        "title": "Tabela de preços e outras receitas municipais",
+        "url_portal": "https://dados.gov.pt/pt/datasets/tabela-de-precos-e-outras-receitas-municipais/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/bea484cf-cdf8-4f6b-8541-c314d5b9275e",
+        "description": "Enumeração dos preços praticados pela CML, agrupados por conjuntos de atividades, com o respetivo custo e descrição do serviço prestado - 2025.",
+        "file_formats": "pdf",
+        "last_updated": "2025-02-05T00:00:00"
+    },
+    {
+        "title": "Programa Clubes de Mar",
+        "url_portal": "https://dados.gov.pt/pt/datasets/programa-clubes-de-mar/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/b346a508-dba8-45e5-a793-b164603d94fc",
+        "description": "Dados relativos à participação dos alunos de 2º e 3º ciclo das escolas públicas do Concelho de Lisboa, no programa Clubes de Mar.",
+        "file_formats": "xls",
+        "last_updated": "2018-05-23T00:00:00"
+    },
+    {
+        "title": "Galerias Municipais",
+        "url_portal": "https://dados.gov.pt/pt/datasets/galerias-municipais/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/9220050b-cbfe-4764-9f1a-5f6d4d8e9447",
+        "description": "Listagem das Galerias Municipais da cidade de Lisboa, com respetivos contactos e descrição da atividade desenvolvida.",
+        "file_formats": "xls",
+        "last_updated": "2020-07-06T00:00:00"
+    },
+    {
+        "title": "Balanço Social",
+        "url_portal": "https://dados.gov.pt/pt/datasets/balanco-social-2015/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/c0e6eaa5-d506-4dcc-a66f-bd44cd455bd8",
+        "description": "O Balanço Social é um meio de informação e um instrumento importante no planeamento e gestão nas áreas sociais e de recursos humanos. Inclui indicadores essenciais para uma análise global e precisa da situação dos recursos humanos do Município de Lisboa.",
+        "file_formats": "xls, xlsx",
+        "last_updated": "2025-02-26T00:00:00"
+    },
+    {
+        "title": "EMEL - Parques de estacionamento na via pública",
+        "url_portal": "https://dados.gov.pt/pt/datasets/emel/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/f8ffa392-9376-471b-b54c-3324e34422f9",
+        "description": "Identificação e localização de parques de estacionamento em exploração pela EMEL",
+        "file_formats": "shp",
+        "last_updated": "2025-04-29T00:00:00"
+    },
+    {
+        "title": "Projetos vencedores referentes ao Orçamento Participativo de Lisboa",
+        "url_portal": "https://dados.gov.pt/pt/datasets/lis/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/242db502-527b-4b0f-ad03-787d025cdeec",
+        "description": "Projetos vencedores por votação do cidadão, referentes ao Orçamento Participativo de Lisboa (de 2008 a 2015).",
+        "file_formats": "xlsx",
+        "last_updated": "2024-07-02T00:00:00"
+    },
+    {
+        "title": "Dados Síntese do Património Gerido pela GEBALIS,EM",
+        "url_portal": "https://dados.gov.pt/pt/datasets/dados-sintese-do-patrimonio-gerido-pela-gebalis-em/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/11177ec4-ee02-43f4-9d93-52dbd0106947",
+        "description": "Ficheiro com o nº de edifícios e de frações total ou parcialmente municipais, nº de edifícios e frações de habitação social e privadas, população estimada e rendas médias.",
+        "file_formats": "xlsx",
+        "last_updated": "2020-07-06T00:00:00"
+    },
+    {
+        "title": "Apoio Financeiro ao abrigo do Regulamento de Atribuição de Apoios pelo Município de Lisboa (RAAML)",
+        "url_portal": "https://dados.gov.pt/pt/datasets/apoio-financeiro-ao-abrigo-do-regulamento-de-atribuicao-de-apoios-pelo-municipio-de-lisboa-raaml/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/421798aa-1afa-4b17-bf44-c4671e8f6d76",
+        "description": "Tendo em conta os princípios da legalidade e transparência foi aprovado em 2008 um Regulamento de Atribuição de Apoios pelo Município de Lisboa - RAAML - que permite garantir a equidade e o controlo na atribuição desses apoios, quer sejam de carácter financeiro ou não financeiro. Esses apoios resultam das atribuições e políticas municipais em matéria de desenvolvimento cultural, social, recreativo, desportivo ou outros e destinam-se a apoiar entidades vocacionadas para a promoção do bem-estar e da qualidade de vida da população, através da concretização de programas, projetos ou atividades que prossigam o interesse municipal. Podem candidatar-se a estes apoios entidades e organismos legalmente existentes, designadamente Associações, Fundações Instituições Particulares de Solidariedade Social ou outras entidades que prossigam fins de interesse público municipal.",
+        "file_formats": "xlsx",
+        "last_updated": "2024-02-02T00:00:00"
+    },
+    {
+        "title": "Vidrões",
+        "url_portal": "https://dados.gov.pt/pt/datasets/vidroes/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/d6905799-f247-4633-b978-573007e06e90",
+        "description": "Conjunto de dados relativos a \"Locais de Recolha Seletiva - Vidrões\". Dataset of \"Places for Collecting Glass Waste for Recycling.",
+        "file_formats": "geojson",
+        "last_updated": "2024-11-08T00:00:00"
+    },
+    {
+        "title": "Vestígios Arqueológicos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/vestigios-arqueologicos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/6351cc06-8aed-4b16-9738-b83c37e3f038",
+        "description": "Conjunto de dados relativos a \"Vestígios Arqueológicos\" em Lisboa. Dataset of \"Archaeology\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-03T00:00:00"
+    },
+    {
+        "title": "Turismo Náutico",
+        "url_portal": "https://dados.gov.pt/pt/datasets/turismo-nautico/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/e5a7487e-45b3-4bcc-bc87-5027b44662b0",
+        "description": "Conjunto de dados referentes a \"Turismo Náutico\". O mapa dos Setores Estratégicos - \"Economia do Mar\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Sailing Turism\". The Strategic Actors - Sea Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-03T00:00:00"
+    },
+    {
+        "title": "TukTuk - Estacionamentos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/tuktukestacionamentos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/0478264f-81d8-4397-a8e4-a4e28a585a44",
+        "description": "Serviço de mapa com a localização geográfica e caracterização dos locais de estacionamento de Tuk Tuk no concelho de Lisboa | Map service with the geographic location and characterization of Tuk Tuk parking places in the municipality of Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-03T00:00:00"
+    },
+    {
+        "title": "Topónimos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/toponimos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/8ba565a2-c5ab-4105-9ec2-d2c2db6cd063",
+        "description": "Conjunto de dados referentes aos \"Topónimos\" de Lisboa. Dataset of Lisbon's \"Toponyms\".",
+        "file_formats": "geojson",
+        "last_updated": "2025-11-04T00:00:00"
+    },
+    {
+        "title": "Teatros",
+        "url_portal": "https://dados.gov.pt/pt/datasets/teatros/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/3ae869e8-7c8e-469d-8999-d66cb0a42dfd",
+        "description": "Conjunto de dados com indicação de \"Teatros\" em Lisboa. Map service providing data concerning \"Theaters\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-03T00:00:00"
+    },
+    {
+        "title": "Rede Viária",
+        "url_portal": "https://dados.gov.pt/pt/datasets/rede-viaria-escala-1-20000/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/f262b79a-1449-4ba8-a0c6-315326e30ddd",
+        "description": "Conjunto de dados referentes à \"Rede Viária\" de Lisboa. Dataset of Lisbon's \"Road Network\".",
+        "file_formats": "geojson, json-ld",
+        "last_updated": "2025-11-04T00:00:00"
+    },
+    {
+        "title": "Rede Ferroviária",
+        "url_portal": "https://dados.gov.pt/pt/datasets/rede-ferroviaria/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/c7dc9214-520a-4e46-b234-be21d9c81f38",
+        "description": "Conjunto de dados referentes à \"Ferrovia\" de Lisboa. Dataset of Lisbon's \"Railroad\".",
+        "file_formats": "geojson",
+        "last_updated": "2025-11-06T00:00:00"
+    },
+    {
+        "title": "Rádio e Televisão",
+        "url_portal": "https://dados.gov.pt/pt/datasets/radio-e-televisao/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/88acb442-61f4-472e-aeed-34169eb0891e",
+        "description": "Conjunto de dados relativos a \"Rádio e Televisão\". O mapa dos Setores Estratégicos - \"Economia Criativa\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Radio and Television\". The Strategic Actors - Creative Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Quarteirões",
+        "url_portal": "https://dados.gov.pt/pt/datasets/quarteiroes/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/05f41059-2781-4b4a-91a5-93b126bf7f0c",
+        "description": "Conjunto de dados referentes à \"Quarteirões\" de Lisboa. Dataset of Lisbon's \"City Blocks\".",
+        "file_formats": "geojson",
+        "last_updated": "2025-11-04T00:00:00"
+    },
+    {
+        "title": "Protecção Civil",
+        "url_portal": "https://dados.gov.pt/pt/datasets/proteccao-civil/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/315975d9-3a8d-413e-ab3f-2c75f876f88f",
+        "description": "Conjunto de dados referentes a quartéis de \"Proteção Civil\" de Lisboa. Map service providing data concerning Lisbon's \"Civil Defense\" .",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-09T00:00:00"
+    },
+    {
+        "title": "Publicidade",
+        "url_portal": "https://dados.gov.pt/pt/datasets/publicidade/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/80fa9c21-d2fe-4f18-8e0a-9ee00e8b6eb3",
+        "description": "Conjunto de dados relativos a \"Publicidade\". O mapa dos Setores Estratégicos - \"Economia Criativa\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Publicity\". The Strategic Actors - Creative Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Produção de Hardware",
+        "url_portal": "https://dados.gov.pt/pt/datasets/producao-de-hardware/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/88d17c65-f1aa-4000-9ce0-ffcbb1003040",
+        "description": "Conjunto de dados referentes a \"Produção de Hardware\". O mapa dos Setores Estratégicos - \"Economia Digital\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Hardware Prosuction\". The Strategic Actors - Digital Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Produção de Fármacos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/producao-de-farmacos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/44110d3a-81c0-4b30-854d-30f6c71d196d",
+        "description": "Conjunto de dados referentes a \"Produção de Fármacos\". O mapa dos Setores Estratégicos - \"Economia da Saúde\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of the \"Drug Manufacturing\". The Strategic Actors - Health Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Prestação de Cuidados",
+        "url_portal": "https://dados.gov.pt/pt/datasets/prestacao-de-cuidados/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/245f6bff-8ea5-45e1-9cf1-3592e7bc65d1",
+        "description": "Conjunto de dados referentes a \"Prestação de Cuidados\". O mapa dos Setores Estratégicos - \"Economia da Saúde\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of the \"Healthcare\". The Strategic Actors - Health Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Prémios Valmor/Municipal de Arquitetura/Eugénio dos Santos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/premios-valmor-municipal-de-arquitetura-eugenio-dos-santos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/9c953f14-2a0a-4e11-98a4-3c7b774e8e58",
+        "description": "Conjunto de dados relativos aos Prémios Valmor, Municipal de Arquitetura e Eugénio dos Santos em Lisboa, com indicação de edifícios e conjuntos edificados classificados ou em vias de classificação, bem como outros com relevância histórica e arquitetónica na Cidade de Lisboa.| Dataset relating to the Valmor, Municipal Architecture and Eugénio dos Santos Awards in Lisbon, with an indication of buildings and buildings classified or in the process of being classified, as well as others with historical and architectural relevance in the City of Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Postos de Carregamento Mobi E",
+        "url_portal": "https://dados.gov.pt/pt/datasets/postos-de-carregamento-mobi-e/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/7298d0b8-3d0b-43d3-ad5a-5db61187c595",
+        "description": "Serviço de mapa relativo aos \"Postos de carregamento Mobi.E\" em Lisboa | Map service of \"Electric Mobi.e Points\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2025-09-10T00:00:00"
+    },
+    {
+        "title": "Postos de Limpeza",
+        "url_portal": "https://dados.gov.pt/pt/datasets/postos-de-limpeza/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/d444c89d-3738-4c0c-b894-fb4c326f365c",
+        "description": "Conjunto de dados relativos a \"Postos de Limpeza\". Dataset of \"Cleaning Posts\".",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Polícia Municipal",
+        "url_portal": "https://dados.gov.pt/pt/datasets/policia-municipal/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/50798519-65d6-4939-aaac-d046d0c52b1f",
+        "description": "Conjunto de dados referentes à \"Polícia Municipal\" de Lisboa. Map service providing data concerning Lisbon's \"Municipal Police\" .",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Polícia de Segurança Pública",
+        "url_portal": "https://dados.gov.pt/pt/datasets/policia-de-seguranca-publica/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/531ae836-c7b0-4d4e-b1eb-bdc93eda9580",
+        "description": "Conjunto de dados referentes a esquadras da \"Polícia de Segurança Pública\" de Lisboa. Map service providing data concerning Lisbon's \"Police Stations\".",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Pesca e Derivados",
+        "url_portal": "https://dados.gov.pt/pt/datasets/pesca-e-derivados/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/770c9fd1-0d75-4a61-94de-ad3ab938dc53",
+        "description": "Conjunto de dados referentes a \"Pesca e Derivados\". O mapa dos Setores Estratégicos - \"Economia do Mar\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Fishing and Derivatives\". The Strategic Actors - Sea Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Património Mundial",
+        "url_portal": "https://dados.gov.pt/pt/datasets/patrimonio-mundial/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/ec7144ac-4aea-466d-917c-f7d65a7cb825",
+        "description": "Conjunto de dados relativos a \"Património Mundial\" em Lisboa. Dataset of \"World Heritage\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Parques Infantis",
+        "url_portal": "https://dados.gov.pt/pt/datasets/parques-infantis/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/74208cbf-873b-492b-81e6-b373b63db1b3",
+        "description": "Conjunto de dados relativos aos \"Parques Infantis\" de Lisboa. Dataset of \"Playgrounds\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Parques de Merendas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/parques-de-merendas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/b52b561b-cff9-4e5a-a9cc-1fc4653004a4",
+        "description": "Serviço de mapa com indicação de locais onde pode disfrutar de actividades de \"Ar Livre\". Map service providing areas to enjoy open air activities.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Outras Instituições de I&D e Fundações",
+        "url_portal": "https://dados.gov.pt/pt/datasets/outras-instituicoes-de-id-e-fundacoes/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/3e622352-83bc-4796-b10f-dab3ca626bef",
+        "description": "Conjunto de dados com informação de atores estratégicos de \"Outras Instituições de ID e Fundações\" que atuam na cidade e na região obedecendo a lógicas de cluster, seleccionados pela Direção Municipal de Economia e Inovação. Web map service providing information on \"Other ID Institutions\" strategic actors located in the city and region according to clusters, selected by the Direção Municipal de Economia e Inovação.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Náutica de Recreio e Património",
+        "url_portal": "https://dados.gov.pt/pt/datasets/nautica-de-recreio-e-patrimonio/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/7688f65d-5856-4a6e-abeb-5b0887b82215",
+        "description": "Conjunto de dados referentes a \" Náutica de Recreio e Património\". O mapa dos Setores Estratégicos - \"Economia do Mar\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Recreational Boating and Heritage\". The Strategic Actors - Sea Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Nanotecnologia",
+        "url_portal": "https://dados.gov.pt/pt/datasets/nanotecnologia/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/8366cf18-3e52-4e9e-a2c5-b672663c524d",
+        "description": "Conjunto de dados referentes a \"Nanotecnologia\". O mapa dos Setores Estratégicos - \"Economia da Saúde\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of the \"Nanotechnology\". The Strategic Actors - Health Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Música",
+        "url_portal": "https://dados.gov.pt/pt/datasets/musica/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/4ef77d45-9c04-4e6e-b0ad-5e873ee72153",
+        "description": "Conjunto de dados relativos a \"Música\". O mapa dos Setores Estratégicos - \"Economia Criativa\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Music\". The Strategic Actors - Creative Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Museus, Bibliotecas e Arquivos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/museus-bibliotecas-e-arquivos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/253b34e8-e9ae-4568-abc2-c0a12becad94",
+        "description": "Conjunto de dados relativos a \"Museus, Bibliotecas e Arquivos\". O mapa dos Setores Estratégicos - \"Economia Criativa\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Museums, Libraries, Archives\". The Strategic Actors - Creative Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Museus",
+        "url_portal": "https://dados.gov.pt/pt/datasets/museus/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/8abfc97c-b3b3-431d-9c81-d17a9e52bf5d",
+        "description": "Conjunto de dados com indicação de \"Museus\" em Lisboa. Map service providing data concerning \"Museums\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Monumentos Nacionais",
+        "url_portal": "https://dados.gov.pt/pt/datasets/monumentos-nacionais/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/b3c8fd3b-4ffc-48d2-8df5-9e95bca0ae53",
+        "description": "Conjunto de dados relativos a \"Monumentos Nacionais\" em Lisboa. Dataset of \"National Monuments\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Miradouros",
+        "url_portal": "https://dados.gov.pt/pt/datasets/miradouros/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/fd647466-e411-463a-9f2b-661b50992ebc",
+        "description": "Conjunto de dados relativos aos \"Miradouros\" de Lisboa. Dataset of Lisbon's \"Viewpoints\".",
+        "file_formats": "geojson",
+        "last_updated": "2025-10-30T00:00:00"
+    },
+    {
+        "title": "Mercados",
+        "url_portal": "https://dados.gov.pt/pt/datasets/mercados/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/12b68926-da22-4c93-849e-b162ef112750",
+        "description": "Conjunto de dados relativos a \"Mercados\" de Lisboa. Dataset of Lisbon \"Markets\".",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Lojas Sociais de Lisboa",
+        "url_portal": "https://dados.gov.pt/pt/datasets/lojas-sociais-de-lisboa/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/63a2d11b-5b99-4a75-a734-ed5d02d6ef89",
+        "description": "Informação sobre as lojas sociais de Lisboa e os seus recursos.",
+        "file_formats": "xlsx",
+        "last_updated": "2022-05-09T00:00:00"
+    },
+    {
+        "title": "Mapa do Conhecimento - Incubadoras",
+        "url_portal": "https://dados.gov.pt/pt/datasets/mapaconhecimento-incubadoras/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/8dc7a39a-83f3-4541-81a1-eb215bea8a02",
+        "description": "Conjunto de dados com informação de atores estratégicos de \"Espaços e Ambientes Criativos\" que atuam na cidade e na região obedecendo a lógicas de cluster, seleccionados pela Direção Municipal de Economia e Inovação. Web map service providing information on \"Creative Spaces and Environments\" strategic actors located in the city and region according to clusters, selected by the Direção Municipal de Economia e Inovação.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Loja do Cidadão",
+        "url_portal": "https://dados.gov.pt/pt/datasets/loja-do-cidadao/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/e0f6eb00-f8c6-4d3a-a906-008778619511",
+        "description": "Conjunto de dados relativos aos \"Lojas do Cidadão\" existentes em Lisboa. Dataset of \"Citizen Advice Shops\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-05T00:00:00"
+    },
+    {
+        "title": "Locais de recepção - Resíduos de Equipamentos Eléctricos e Electrónicos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/locais-de-recepcao-residuos-de-equipamentos-electricos-e-electronicos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/6df3abe0-d838-4d4d-ad80-22fd2eeddaf9",
+        "description": "Conjunto de dados relativos a \"Locais de Recolha Seletiva - Equipamentos Eléctricos e Electrónicos\". Dataset of \"Places for Collecting Electric and Electronic Parts for Recycling.",
+        "file_formats": "geojson",
+        "last_updated": "2024-11-07T00:00:00"
+    },
+    {
+        "title": "Locais de Recepção - Óleos Alimentares Usados",
+        "url_portal": "https://dados.gov.pt/pt/datasets/locais-de-recepcao-oleos-alimentares-usados/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/bb9e8490-6784-4bed-86ed-cb8b6e457d50",
+        "description": "Conjunto de dados relativos a \"Locais de Recolha Seletiva - Óleos Alimentares Usados. Dataset of \"Places for Collecting Waste Oil for Recycling\".",
+        "file_formats": "geojson",
+        "last_updated": "2024-11-08T00:00:00"
+    },
+    {
+        "title": "Limite Unidades Territoriais - Macro",
+        "url_portal": "https://dados.gov.pt/pt/datasets/limite-unidades-territoriais-macro/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/c2d91070-25e4-4b60-9fce-f6f74d3e782e",
+        "description": "Conjunto de dados referentes ao \"Limite das Unidades de Intervenção Territorial Macro\" de Lisboa. Dataset of Lisbon's \"Macro Territorial Units Boundary\".",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Limite de Planos de Urbanização",
+        "url_portal": "https://dados.gov.pt/pt/datasets/limite-de-planos-de-urbanizacao/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/584d9eab-5c26-4a8f-a867-fd5c58ad7283",
+        "description": "Conjunto de dados relativos a \"Planos de Urbanização\" de Lisboa. Web map service providing the limits of \"Municipal Urban\" plans.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Limite de Planos de Pormenor",
+        "url_portal": "https://dados.gov.pt/pt/datasets/limite-de-planos-de-pormenor/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/7c6fac0d-2772-4ace-b141-96b0b5a28e42",
+        "description": "Conjunto de dados relativos a \"Planos de Pormenor\" de Lisboa. Web map service providing the limits of \"Municipal Detail\" plans.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Limite de Concelho",
+        "url_portal": "https://dados.gov.pt/pt/datasets/limite-de-concelho/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/8ce46fa8-a969-452d-a26e-6f013079a636",
+        "description": "Conjunto de dados referentes ao \"Limite do Concelho\" de Lisboa. Dataset of Lisbon's \"Council Boundary\".",
+        "file_formats": "geojson",
+        "last_updated": "2025-11-04T00:00:00"
+    },
+    {
+        "title": "Limite de Concelho Oficial",
+        "url_portal": "https://dados.gov.pt/pt/datasets/limite-de-concelho-actual/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/13c306ab-a782-4797-87e4-ad51cfc5299b",
+        "description": "Conjunto de dados referentes ao \"Limite do Concelho\" de Lisboa. Dataset of Lisbon's \"Council Boundary\".",
+        "file_formats": "geojson",
+        "last_updated": "2025-11-04T00:00:00"
+    },
+    {
+        "title": "Lavadouros",
+        "url_portal": "https://dados.gov.pt/pt/datasets/lavadouros/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/7966e8f2-2e18-4b5b-95d2-a7c1a6bc1122",
+        "description": "Conjunto de dados referentes a \"Lavadouros\" públicos, em Lisboa. Dataset of public \"Washhouses\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Laboratórios Associados",
+        "url_portal": "https://dados.gov.pt/pt/datasets/laboratorios-associados/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/70ed7307-0f5b-4e69-88db-43eb13e262df",
+        "description": "Conjunto de dados com informação de atores estratégicos de \"Laboratórios Associados\" que atuam na cidade e na região obedecendo a lógicas de cluster, seleccionados pela Direção Municipal de Economia e Inovação. Web map service providing information on \"Associated Laboratory\" strategic actors located in the city and region according to clusters, selected by the Direção Municipal de Economia e Inovação.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Jardins - Parques Urbanos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/jardins-parques-urbanos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/f2b2348f-0a7f-46d3-afb8-66dc7e82161a",
+        "description": "Conjunto de dados relativos aos \"Jardins e Paques Urbanos\" de Lisboa. Dataset of \"Gardens and Parks\" of Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Juntas de Freguesia",
+        "url_portal": "https://dados.gov.pt/pt/datasets/juntas-de-freguesia/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/68293093-744d-400b-a48a-e4d7cebac2da",
+        "description": "Conjunto de dados relativos às \"Juntas de Freguesia\" de Lisboa. Dataset of \"Parish Councils\" of Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-05T00:00:00"
+    },
+    {
+        "title": "Institutos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/institutos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/c03c12b8-fb37-4948-b9d6-4841989ce8fe",
+        "description": "Conjunto de dados referentes a \"Institutos\". O mapa dos Setores Estratégicos - \"Economia Digital\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Institutes\". The Strategic Actors - Digital Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Instituições",
+        "url_portal": "https://dados.gov.pt/pt/datasets/instituicoes/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/ebafff4c-7e81-45cb-939b-6aece9836e6a",
+        "description": "Conjunto de dados referentes a \"Instituições\". O mapa dos Setores Estratégicos - \"Economia Digital\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Institutes\". The Strategic Actors - Digital Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Instalações Sanitárias",
+        "url_portal": "https://dados.gov.pt/pt/datasets/instalacoes-sanitarias/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/a84b3919-f139-46d2-a4c9-83909e8ed21b",
+        "description": "Conjunto de dados referentes a \"Instalações Sanitárias\" públicas, em Lisboa. Dataset of public \"Lavatories\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-02T00:00:00"
+    },
+    {
+        "title": "Instalações Desportivas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/instalacoes-desportivas-1/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/c965ff5b-137e-4f34-ae59-db82620b5bcc",
+        "description": "Serviço de mapa referente a Instalações Desportivas em Lisboa | Map service of Sports Facilities in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-08T00:00:00"
+    },
+    {
+        "title": "Infraestruturas e Parques de Ciência e Tecnologia",
+        "url_portal": "https://dados.gov.pt/pt/datasets/infraestruturas-e-parques-de-ciencia-e-tecnologia/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/3919b6a7-a0ed-4b9f-9da3-79e71fac4cff",
+        "description": "Conjunto de dados com informação de atores estratégicos de \"Infraestruturas e Parques de Ciência e Tecnologia\" que atuam na cidade e na região obedecendo a lógicas de cluster, seleccionados pela Direção Municipal de Economia e Inovação. Web map service providing information on \"Infrastructure and Science and Technological Parks\" strategic actors located in the city and region according to clusters, selected by the Direção Municipal de Economia e Inovação.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-13T00:00:00"
+    },
+    {
+        "title": "Impressão e Reprodução Gráfica",
+        "url_portal": "https://dados.gov.pt/pt/datasets/impressao-e-reproducao-grafica/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/6ee6c8fe-427e-488d-b186-1fee7a5d6e39",
+        "description": "Conjunto de dados relativos a \"Impressão e Reprodução Gráfica\". O mapa dos Setores Estratégicos - \"Economia Criativa\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Printing and Graphics\". The Strategic Actors - Creative Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-10T00:00:00"
+    },
+    {
+        "title": "Imóveis em Vias de Classificação (CML)",
+        "url_portal": "https://dados.gov.pt/pt/datasets/imoveis-em-vias-de-classificacao-cml/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/fa2a6096-9ab0-4b73-bc52-eccb05ae84f7",
+        "description": "Conjunto de dados relativos a \"Imóveis em Vias de Classificação (CML)\" em Lisboa. Dataset of \"Municipal To Be Classified Property\" buildings in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-09T00:00:00"
+    },
+    {
+        "title": "Imóveis em Vias de Classificação (Ministério da Cultura)",
+        "url_portal": "https://dados.gov.pt/pt/datasets/imoveis-em-vias-de-classificacao/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/69c064a4-7dc9-4917-8951-aa82c9aa54aa",
+        "description": "Conjunto de dados relativos a \"Imóveis em Vias de Classificação\" em Lisboa. Dataset of \"To Be Classified\" buildings in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-12-17T00:00:00"
+    },
+    {
+        "title": "Imóveis, Monumentos e Conjuntos de Interesse Municipal",
+        "url_portal": "https://dados.gov.pt/pt/datasets/imoveis-e-conjuntos-de-interesse-municipal/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/993f6842-fac3-4c46-a815-e56d4e600987",
+        "description": "Conjunto de dados relativos a \"Imóveis, Monumentos e Conjuntos de Interesse Municipal\" em Lisboa. Dataset of \"Municipal Interest Properties, Monuments and Sets\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-09T00:00:00"
+    },
+    {
+        "title": "Imóveis e Monumentos de Interesse Público",
+        "url_portal": "https://dados.gov.pt/pt/datasets/imoveis-de-interesse-publico/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/ce5760b0-24e9-41a4-8e17-949b748d1812",
+        "description": "Conjunto de dados relativos a \"Imóveis e Monumentos de Interesse Público\" em Lisboa. Dataset of \"Public Interest Properties and Monuments\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-12-17T00:00:00"
+    },
+    {
+        "title": "I & D",
+        "url_portal": "https://dados.gov.pt/pt/datasets/i-d/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/e39a8e1f-8e1c-4f07-b2e1-d0ae8146a646",
+        "description": "Conjunto de dados referentes a \"I&D\". O mapa dos Setores Estratégicos - \"Economia da Saúde\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of the \"I&D\". The Strategic Actors - Health Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-15T00:00:00"
+    },
+    {
+        "title": "I & D",
+        "url_portal": "https://dados.gov.pt/pt/datasets/i-d1/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/d4f2a3c8-0dc0-48fb-b39f-92d3b6dbde3d",
+        "description": "Conjunto de dados referentes a \"I&D\". O mapa dos Setores Estratégicos - \"Economia do Mar\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"I&D\". The Strategic Actors - Sea Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-15T00:00:00"
+    },
+    {
+        "title": "Hospitais Públicos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/hospitais-publicos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/214f62f9-ff13-48d2-ae80-c33879c441fa",
+        "description": "Conjunto de dados referentes a \"Hospitais Públicos\" em Lisboa. Dataset of \"Public Hospitals\" in Lisbon.",
+        "file_formats": "geojson, json-ld",
+        "last_updated": "2023-12-15T00:00:00"
+    },
+    {
+        "title": "Hospitais Privados",
+        "url_portal": "https://dados.gov.pt/pt/datasets/hospitais-privados/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/e6e6aa35-55f5-4d37-9ee3-79d28cc07ef5",
+        "description": "Conjunto de dados referentes a \"Hospitais Privados\" em Lisboa. Dataset of \"Private Hospitals\" in Lisbon.",
+        "file_formats": "geojson, json-ld",
+        "last_updated": "2025-01-15T00:00:00"
+    },
+    {
+        "title": "Hospitais Militares",
+        "url_portal": "https://dados.gov.pt/pt/datasets/hospitais-militares/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/fcce2e18-64ac-461a-a171-8a675ec493be",
+        "description": "Conjunto de dados referentes a \"Hospitais Militares\" em Lisboa. Dataset of \"Military Hospitals\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-15T00:00:00"
+    },
+    {
+        "title": "Governação e Outras Entidades",
+        "url_portal": "https://dados.gov.pt/pt/datasets/governacao-e-outras-entidades/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/c823a203-38e1-42b8-b2e3-fd632920bc88",
+        "description": "Conjunto de dados referentes a \"Governação e Outras Entidades\". O mapa dos Setores Estratégicos - \"Economia do Mar\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Governance and Other Entities\". The Strategic Actors - Sea Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-10T00:00:00"
+    },
+    {
+        "title": "Geomonumentos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/geomonumentos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/90f571f3-7a80-4058-b90a-dc90f026a64c",
+        "description": "Conjunto de dados relativos a \"Geomonumentos\" em Lisboa. Dataset of \"Geomonuments\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-12-12T00:00:00"
+    },
+    {
+        "title": "Genómica",
+        "url_portal": "https://dados.gov.pt/pt/datasets/genomica/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/c4b3abda-81cd-42ed-b8a3-80359a2aa355",
+        "description": "Conjunto de dados referentes a \"Genómica\". O mapa dos Setores Estratégicos - \"Economia da Saúde\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of the \"Genomics\". The Strategic Actors - Health Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-10T00:00:00"
+    },
+    {
+        "title": "Fundações",
+        "url_portal": "https://dados.gov.pt/pt/datasets/fundacoes/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/aa46772f-260b-4881-bb3a-3b3edd25f139",
+        "description": "Conjunto de dados referentes a \"Fundações\". O mapa dos Setores Estratégicos - \"Economia Digital\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Associations\". The Strategic Actors - Digital Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-10T00:00:00"
+    },
+    {
+        "title": "Freguesias 2012",
+        "url_portal": "https://dados.gov.pt/pt/datasets/freguesias-2012/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/0d2a6864-5f6a-4882-a0b6-1a38e20e99b2",
+        "description": "Conjunto de dados referentes ao \"Limite das Freguesias\" de Lisboa. Dataset of Lisbon's \"Parish Boundaries\".",
+        "file_formats": "geojson",
+        "last_updated": "2024-12-12T00:00:00"
+    },
+    {
+        "title": "Feiras",
+        "url_portal": "https://dados.gov.pt/pt/datasets/feiras/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/8624bb19-acab-41a6-93d7-6cbdbdc15d7b",
+        "description": "Conjunto de dados relativos a \"Feiras\" existentes em Lisboa. Dataset of \"Markets\" located in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-09T00:00:00"
+    },
+    {
+        "title": "Farmácias e Parafarmácias",
+        "url_portal": "https://dados.gov.pt/pt/datasets/farmacias-e-parafarmacias/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/3c607b29-7423-4a9e-88f3-cda70735c440",
+        "description": "Conjunto de dados referentes a \"Farmácias e Parafarmácias\" em Lisboa. Dataset of \"Drugstores\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-15T00:00:00"
+    },
+    {
+        "title": "Faculdades, Escolas e Institutos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/faculdades-escolas-e-institutos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/8912dbcd-b9fb-42f1-b8c7-2c7f38c079b3",
+        "description": "Conjunto de dados com informação de atores estratégicos de \"Faculdades, Escolas e Institutos\" que atuam na cidade e na região obedecendo a lógicas de cluster, seleccionados pela Direção Municipal de Economia e Inovação. Web map service providing information on \"Higher Education Institutions\" strategic actors located in the city and region according to clusters, selected by the Direção Municipal de Economia e Inovação.",
+        "file_formats": "geojson, json-ld",
+        "last_updated": "2025-01-13T00:00:00"
+    },
+    {
+        "title": "Estatuária",
+        "url_portal": "https://dados.gov.pt/pt/datasets/estatuaria/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/1a5b2ecf-7069-437e-a178-8d35a19620da",
+        "description": "Conjunto de dados relativos a \"Estatuária\" em Lisboa. Dataset of \"Statues\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-12-12T00:00:00"
+    },
+    {
+        "title": "Estações de Metro",
+        "url_portal": "https://dados.gov.pt/pt/datasets/estacoes-de-metro/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/be160193-3eaa-4799-bce1-672d7aa50c2f",
+        "description": "Conjunto de dados relativos a \"Estações de Metro\" em Lisboa. Dataset of \"Underground Station\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2025-09-10T00:00:00"
+    },
+    {
+        "title": "Estações de Comboio",
+        "url_portal": "https://dados.gov.pt/pt/datasets/estacoes-de-comboio/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/672d28f4-db14-4556-9d77-7a02a5fbbb09",
+        "description": "Conjunto de dados relativos a \"Estações de Comboio\" em Lisboa. Dataset of \"Railway Stations\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2025-09-10T00:00:00"
+    },
+    {
+        "title": "Grandes Parques e Jardins de Lisboa",
+        "url_portal": "https://dados.gov.pt/pt/datasets/espacos-verdes/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/efa89248-a765-41bc-b53b-55325c206a39",
+        "description": "Conjunto de dados referentes a \"Espaços Verdes\" de Lisboa. Dataset of Lisbon's \"Green Areas\"",
+        "file_formats": "geojson",
+        "last_updated": "2025-11-04T00:00:00"
+    },
+    {
+        "title": "Espaços e Bairros Criativos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/espacos-e-bairros-criativos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/10623083-919e-44d7-9250-1ffc2a4f52a5",
+        "description": "Conjunto de dados relativos a \"Espaços e Bairros Criativos\". O mapa dos Setores Estratégicos - \"Economia Criativa\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Creative Spaces and Neighbourhoods\". The Strategic Actors - Creative Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-10T00:00:00"
+    },
+    {
+        "title": "Espaços e Ambientes Criativos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/espacos-e-ambientes-criativos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/3732525c-41f1-404b-b71e-e6be91eb0c5c",
+        "description": "Conjunto de dados com informação relativa a incubadoras e espaços de aceleração de empresas. Web map service providing information on startup incubator and acccelerator spaces.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-13T00:00:00"
+    },
+    {
+        "title": "Escolas Públicas - Secundário",
+        "url_portal": "https://dados.gov.pt/pt/datasets/escolas-publicas-secundario/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/1ff7c086-0698-4582-81f5-cbb254a278d9",
+        "description": "Conjunto de dados referentes a \"Escolas Públicas Secundárias\" em Lisboa. Dataset of \"Public Schools - Secondary\" in Lisbon. .",
+        "file_formats": "geojson, json-ld",
+        "last_updated": "2024-12-17T00:00:00"
+    },
+    {
+        "title": "Escolas Públicas - Pré-Escolar",
+        "url_portal": "https://dados.gov.pt/pt/datasets/escolas-publicas-pre-escolar/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/4b416f7b-24d9-4a92-99c6-26bf116b278b",
+        "description": "Conjunto de dados referentes a Escolas Públicas - Pré-Escola\" em Lisboa. Dataset of Public Schools - Early Childhood in Lisbon.",
+        "file_formats": "geojson, json-ld",
+        "last_updated": "2023-12-15T00:00:00"
+    },
+    {
+        "title": "Escolas Públicas - 2º e 3º Ciclo",
+        "url_portal": "https://dados.gov.pt/pt/datasets/escolas-publicas-2o-e-3o-ciclo/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/8d4d07c8-1bec-47b8-ac83-144751561f14",
+        "description": "Conjunto de dados referentes a \"Escolas Públicas do 2º e 3º Ciclo\" em Lisboa. Dataset of \"Public Schools - 2nd and 3rd Cycle\" in Lisbon.",
+        "file_formats": "geojson, json-ld",
+        "last_updated": "2024-12-17T00:00:00"
+    },
+    {
+        "title": "Escolas Públicas - 1º Ciclo",
+        "url_portal": "https://dados.gov.pt/pt/datasets/escolas-publicas-1-ciclo/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/4f854b5c-0102-45db-a10c-b90ae8ecf38a",
+        "description": "Conjunto de dados referentes a \"Escolas Públicas do 1º Ciclo\" em Lisboa. Dataset of \"Public Schools - Primary Schools (1st Cycle)\" in Lisbon.",
+        "file_formats": "geojson, json-ld",
+        "last_updated": "2023-12-15T00:00:00"
+    },
+    {
+        "title": "Escolas Profissionais",
+        "url_portal": "https://dados.gov.pt/pt/datasets/escolas-profissionais/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/c563de6d-8b9c-4b01-8a45-d19ab6c6c607",
+        "description": "Conjunto de dados referentes a \"Escolas Profissionais\" em Lisboa. Dataset of \"Professional Schools\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-09T00:00:00"
+    },
+    {
+        "title": "Escolas Privadas - Secundárias",
+        "url_portal": "https://dados.gov.pt/pt/datasets/escolas-privadas-secundarias/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/1c8f7b5b-e968-4295-987c-d682c2ded78d",
+        "description": "Conjunto de dados referentes a \"Escolas Privadas Secundárias\" em Lisboa. Dataset of \"Private Schools - Secondary\" in Lisbon.",
+        "file_formats": "geojson, json-ld",
+        "last_updated": "2023-12-15T00:00:00"
+    },
+    {
+        "title": "Escolas Privadas - Pré-Escolar",
+        "url_portal": "https://dados.gov.pt/pt/datasets/escolas-privadas-pre-escolar/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/51b04bb5-f869-4980-8f76-0de15399eb9e",
+        "description": "Conjunto de dados referentes a \"Escolas Privadas - Pré-Escolar\" em Lisboa. Dataset of \"Private Schools - Early Childhood\" in Lisbon.",
+        "file_formats": "geojson, json-ld",
+        "last_updated": "2024-12-12T00:00:00"
+    },
+    {
+        "title": "Escolas Privadas - 2º e 3º Ciclo",
+        "url_portal": "https://dados.gov.pt/pt/datasets/escolas-privadas-2-e-3-ciclo/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/5813899a-00b2-45d7-8288-fce05b125d78",
+        "description": "Conjunto de dados referentes a \"Escolas Privadas - 2º e 3º Ciclos\" em Lisboa. Dataset of \"Private Schools - 2nd and 3rd Cycle\" in Lisbon.",
+        "file_formats": "geojson, json-ld",
+        "last_updated": "2023-12-15T00:00:00"
+    },
+    {
+        "title": "Escolas Privadas - 1º Ciclo",
+        "url_portal": "https://dados.gov.pt/pt/datasets/escolas-privadas-1-ciclo/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/951e153e-62ac-425e-8a2d-1a7419527ff3",
+        "description": "Conjunto de dados referentes a \"Escolas Privadas - 1º Ciclo\" em Lisboa. Dataset of \"Private Schools - 1st Cycle\" in Lisbon.",
+        "file_formats": "geojson, json-ld",
+        "last_updated": "2025-01-13T00:00:00"
+    },
+    {
+        "title": "Ensino Superior",
+        "url_portal": "https://dados.gov.pt/pt/datasets/ensino-superior1/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/b46807e2-aa2c-40b2-b245-7f21d3396954",
+        "description": "Conjunto de dados referentes a instituições de \"Ensino Superior\" em Lisboa. Dataset of \"Higher Education\" institutions in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-12-12T00:00:00"
+    },
+    {
+        "title": "Ensino Superior",
+        "url_portal": "https://dados.gov.pt/pt/datasets/ensino-superior/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/2b2f4396-9aa5-45be-876d-e39defa8c3f9",
+        "description": "Conjunto de dados com informação de atores estratégicos de \"Ensino Superior\" que atuam na cidade e na região obedecendo a lógicas de cluster, seleccionados pela Direção Municipal de Economia e Inovação. Web map service providing information on \"Higher Education\" strategic actors located in the city and region according to clusters, selected by the Direção Municipal de Economia e Inovação.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-13T00:00:00"
+    },
+    {
+        "title": "Ensino",
+        "url_portal": "https://dados.gov.pt/pt/datasets/ensino1/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/180feef0-918d-4b57-86e0-0f9b330860de",
+        "description": "Conjunto de dados referentes a \"Ensino\". O mapa dos Setores Estratégicos - \"Economia do Mar\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Teaching\". The Strategic Actors - Sea Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-08T00:00:00"
+    },
+    {
+        "title": "Ensino de Atividades Criativas e Culturais",
+        "url_portal": "https://dados.gov.pt/pt/datasets/ensino-de-atividades-criativas-e-culturais/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/8c844a39-ad3d-4d5a-8792-3e139cba97b4",
+        "description": "Conjunto de dados relativos a \"Ensino de Atividades Criativas e Culturais\". O mapa dos Setores Estratégicos - \"Economia Criativa\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Creative and Cultural Teaching Activities\". The Strategic Actors - Creative Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-10T00:00:00"
+    },
+    {
+        "title": "Ensino",
+        "url_portal": "https://dados.gov.pt/pt/datasets/ensino/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/98bf3492-f3ca-4692-b046-03572f4ce525",
+        "description": "Conjunto de dados referentes a \"Ensino\". O mapa dos Setores Estratégicos - \"Economia da Saúde\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of the \"Health Teaching\". The Strategic Actors - Health Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-15T00:00:00"
+    },
+    {
+        "title": "Embaixadas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/embaixadas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/1c130236-3b92-4b98-9637-01db99fd6030",
+        "description": "Conjunto de dados relativos às embaixadas de Lisboa. Dataset of Lisbon's embassies.",
+        "file_formats": "geojson",
+        "last_updated": "2025-10-30T00:00:00"
+    },
+    {
+        "title": "Elevadores e Ascensores",
+        "url_portal": "https://dados.gov.pt/pt/datasets/elevadores-e-ascensores/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/b212758e-87cc-43d5-ad71-66b931c1a12f",
+        "description": "Serviço de mapa com indicação dos elevadores e ascensores em Lisboa | Map service of \"Funiculars and Elevators\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2025-09-10T00:00:00"
+    },
+    {
+        "title": "Edição (Livros, Jornais e Revistas)",
+        "url_portal": "https://dados.gov.pt/pt/datasets/edicao-livros-jornais-e-revistas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/ef88aa68-9052-493a-bc90-f6cac2ba2a56",
+        "description": "Conjunto de dados relativos a \"Edição (Livros, Jornais e Revistas)\". O mapa dos Setores Estratégicos - \"Economia Criativa\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Publishing (Books, Newspapers, Magazines)\". The Strategic Actors - Creative Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-08T00:00:00"
+    },
+    {
+        "title": "Ecoponto",
+        "url_portal": "https://dados.gov.pt/pt/datasets/ecoponto/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/29e1dcc3-c57b-4f60-bf1a-03c422a549a0",
+        "description": "Conjunto de dados relativos a \"Locais de Recolha Seletiva - Ecoponto\". Dataset of \"Places for Collecting Waste for Recycling\".",
+        "file_formats": "geojson",
+        "last_updated": "2024-11-07T00:00:00"
+    },
+    {
+        "title": "Ecoilhas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/ecoilhas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/8867e00f-13b5-4f1c-a820-984764c11290",
+        "description": "Conjunto de dados relativos a \"Locais de Recolha Seletiva - Ecoilhas\". Dataset of \"Places for Collecting Waste for Recycling\".",
+        "file_formats": "geojson",
+        "last_updated": "2024-11-07T00:00:00"
+    },
+    {
+        "title": "Equipamentos de Fitness ao Ar Livre​",
+        "url_portal": "https://dados.gov.pt/pt/datasets/desporto-equipamentosfitness/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/17a68147-6f1e-4ede-b9a4-10c6cbb4a5d6",
+        "description": "Identificação da localização espacial dos equipamentos de fitness ao ar livre.",
+        "file_formats": "geojson",
+        "last_updated": "2024-12-12T00:00:00"
+    },
+    {
+        "title": "Desporto Entidades Desportivas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/desporto-entidadesdesportivas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/b35a01f8-d4f8-4647-950d-d7a2e4e114dc",
+        "description": "Conjunto de dados referentes a \"Entidades Públicas e Privadas\" que enquadram prática desportiva regular, sedeadas no concelho de Lisboa ou que sejam titulares de instalações desportivas localizadas no concelho de Lisboa. Outras organizações do associativismo desportivo, nomeadamente Federações Desportivas, Associações Territoriais e Associações de Agentes Desportivos. Dataset of Public and private entities, that have regular sports practices, or possess sports facilities located in Lisbon's municipality. Includes other sports associations.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-08T00:00:00"
+    },
+    {
+        "title": "Desporto Actividades Radicais",
+        "url_portal": "https://dados.gov.pt/pt/datasets/desporto-actividadesradicais/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/5bed0e6e-6298-40d6-abb1-90173785c5bd",
+        "description": "Conjunto de dados relativos a equipamentos para a prática de \"Actividades Radicais\" em Lisboa. Dataset of \"Radical Sports\" facilities in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-08T00:00:00"
+    },
+    {
+        "title": "Design",
+        "url_portal": "https://dados.gov.pt/pt/datasets/design-1/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/105dbc67-99b5-41c9-a78e-64b854a96a84",
+        "description": "Conjunto de dados relativos a \"Design\". O mapa dos Setores Estratégicos - \"Economia Criativa\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Design\". The Strategic Actors - Creative Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-08T00:00:00"
+    },
+    {
+        "title": "Defesa e Segurança",
+        "url_portal": "https://dados.gov.pt/pt/datasets/defesa-e-seguranca/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/13244756-0790-4f5e-ab6c-54fb49301d41",
+        "description": "Conjunto de dados referentes a \"Defesa e Segurança\". O mapa dos Setores Estratégicos - \"Economia do Mar\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Defense and Security\". The Strategic Actors - Sea Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-08T00:00:00"
+    },
+    {
+        "title": "Cosmética",
+        "url_portal": "https://dados.gov.pt/pt/datasets/cosmetica/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/ff4afe65-2caa-4fe0-93ec-ed985eb0c3da",
+        "description": "Conjunto de dados referentes a \"Cosmética\". O mapa dos Setores Estratégicos - \"Economia da Saúde\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of the \"Cosmetics\". The Strategic Actors - Health Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-15T00:00:00"
+    },
+    {
+        "title": "Construção e Reparação Naval",
+        "url_portal": "https://dados.gov.pt/pt/datasets/construcao-e-reparacao-naval/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/03e694f3-9c27-4663-89dc-1add7e552392",
+        "description": "Conjunto de dados referentes a \"Construção e Reparação Naval\". O mapa dos Setores Estratégicos - \"Economia do Mar\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Ship Building and Repair\". The Strategic Actors - Sea Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-10T00:00:00"
+    },
+    {
+        "title": "Conservatórias",
+        "url_portal": "https://dados.gov.pt/pt/datasets/conservatorias/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/4a7c1d80-ed29-4a52-a397-10889a69d22d",
+        "description": "Conjunto de dados relativos às \"Conservatórias\" de Lisboa. Dataset of Lisbon's \"Registry Offices\".",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-15T00:00:00"
+    },
+    {
+        "title": "Conjuntos de Interesse Público",
+        "url_portal": "https://dados.gov.pt/pt/datasets/conjuntos-de-interesse-publico/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/076138ae-ed29-494e-aa18-7fa0fee8fbff",
+        "description": "Conjunto de dados relativos a \"Conjuntos de Interesse Público\" em Lisboa. Dataset of \"Public Interest Set\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2025-02-20T00:00:00"
+    },
+    {
+        "title": "Comercialização de Hardware e Software e Serviços",
+        "url_portal": "https://dados.gov.pt/pt/datasets/comercializacao-de-hardware-e-software-e-servicos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/f4547496-ab9e-410a-b934-272e0592dba7",
+        "description": "Conjunto de dados referentes a \"Comercialização de Hardware e Software e Serviços\". O mapa dos Setores Estratégicos - \"Economia Digital\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Services and Hardware and Software Selling\". The Strategic Actors - Digital Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2024-02-02T00:00:00"
+    },
+    {
+        "title": "CM Lisboa - Paços do Concelho",
+        "url_portal": "https://dados.gov.pt/pt/datasets/cm-lisboa-pacos-do-concelho/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/ab5580a3-b2af-4fd2-a08d-9ac90edca589",
+        "description": "Conjunto de dados relativos aos \"Paços do Concelho de Lisboa\". Dataset of \"Lisbon City Council's City Hall\".",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-05T00:00:00"
+    },
+    {
+        "title": "CM Lisboa - Empresas Municipais",
+        "url_portal": "https://dados.gov.pt/pt/datasets/cm-lisboa-empresas-municipais/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/e48e78e0-b06d-4af5-9df9-070676008211",
+        "description": "Conjunto de dados relativos a \"Empresas Municipais de Lisboa\". Web map services providing data concerning \"Lisbon City Council's Companies\".",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-05T00:00:00"
+    },
+    {
+        "title": "CM Lisboa - Atendimento",
+        "url_portal": "https://dados.gov.pt/pt/datasets/cm-lisboa-atendimento/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/8e2731bf-a7e6-462a-bce5-86da9c8065b8",
+        "description": "Serviço de mapa com indicação dos serviços de Atendimento da Câmara Municipal de Lisboa. Map service with indication of the Lisbon City Council's Customer Service.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-08T00:00:00"
+    },
+    {
+        "title": "CM Lisboa - Assembleia Municipal",
+        "url_portal": "https://dados.gov.pt/pt/datasets/cm-lisboa-assembleia-municipal/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/2787f237-d8df-49cb-9435-263becc92746",
+        "description": "Conjunto de dados relativos à \"Assembleia Municipal de Lisboa\". Dataset of \"Lisbon City Council's Assembly\".",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-05T00:00:00"
+    },
+    {
+        "title": "Cinemas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/cinemas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/376ed07d-0510-4e8c-a01a-6eded1e27edb",
+        "description": "Conjunto de dados com indicação de \"Cinemas\" em Lisboa. Map service providing data concerning \"Movie Theaters\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-08T00:00:00"
+    },
+    {
+        "title": "Cinema e Video",
+        "url_portal": "https://dados.gov.pt/pt/datasets/cinema-e-video/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/2226c514-567b-467d-8cc4-dd36d3b2e5ab",
+        "description": "Conjunto de dados relativos a \"Cinema e Video\". O mapa dos Setores Estratégicos - \"Economia Criativa\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Cinema abnd Video\". The Strategic Actors - Creative Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-10T00:00:00"
+    },
+    {
+        "title": "Centros de Saúde",
+        "url_portal": "https://dados.gov.pt/pt/datasets/centros-de-saude/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/fb4dee08-f774-4c9d-a7ed-4f720cf76298",
+        "description": "Conjunto de dados referentes a \"Centros de Saúde\" em Lisboa. Dataset of \"Health Centers\" in Lisbon.",
+        "file_formats": "geojson, json-ld",
+        "last_updated": "2025-01-15T00:00:00"
+    },
+    {
+        "title": "Centros de Investigação",
+        "url_portal": "https://dados.gov.pt/pt/datasets/centros-de-investigacao/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/c0eb94da-29ee-4379-bd0d-55a8cdb91b57",
+        "description": "Conjunto de dados referentes a \"Centros de Investigação\". O mapa dos Setores Estratégicos - \"Economia Digital\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Research Center\". The Strategic Actors - Digital Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2024-12-12T00:00:00"
+    },
+    {
+        "title": "Centros de Investigação e de Estudos",
+        "url_portal": "https://dados.gov.pt/pt/datasets/centros-de-investigacao-e-de-estudos/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/c524fdf8-224f-4e2c-a5ce-340b5e5f0f00",
+        "description": "Conjunto de dados com informação de atores estratégicos de \"Centros de Investigação e de Estudos\" que atuam na cidade e na região obedecendo a lógicas de cluster, seleccionados pela Direção Municipal de Economia e Inovação. Web map service providing information on \"Research Centers\" strategic actors located in the city and region according to clusters, selected by the Direção Municipal de Economia e Inovação.",
+        "file_formats": "geojson",
+        "last_updated": "2024-12-17T00:00:00"
+    },
+    {
+        "title": "Centros de Formação Profissional e Outros",
+        "url_portal": "https://dados.gov.pt/pt/datasets/centros-de-formacao-profissional-e-outros/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/68bdb140-da30-45f7-a7e8-a31644e57eb3",
+        "description": "Conjunto de dados referentes a \"Centros de Formação Profissional e Outros\". O mapa dos Setores Estratégicos - \"Economia Digital\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Trainning Center and Others\". The Strategic Actors - Digital Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-10T00:00:00"
+    },
+    {
+        "title": "Centros Comerciais",
+        "url_portal": "https://dados.gov.pt/pt/datasets/centros-comerciais/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/4c2edc26-01f7-4c27-b7c2-35b79cbe32d9",
+        "description": "Conjunto de dados relativos a \"Centros Comerciais\" em Lisboa. Dataset of \"Shopping Centers\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-09T00:00:00"
+    },
+    {
+        "title": "Centro de Recepção de Papel",
+        "url_portal": "https://dados.gov.pt/pt/datasets/centro-de-recepcao-de-papel/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/4a1327d9-c221-44ae-a63d-28ab3ffccd44",
+        "description": "Conjunto de dados relativos a \"Locais de Recolha Seletiva - Centros de Recepção de Papel\". Dataset of \"Places for Collecting Paper for Recycling\".",
+        "file_formats": "geojson",
+        "last_updated": "2024-11-08T00:00:00"
+    },
+    {
+        "title": "Cemitérios",
+        "url_portal": "https://dados.gov.pt/pt/datasets/cemiterios/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/aa6195cc-0f3e-47f4-9324-0cff25b89743",
+        "description": "Conjunto de dados relativos aos \"Cemitérios\" de Lisboa. Dataset of the Lisbon's \"Cemiteries\".",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-15T00:00:00"
+    },
+    {
+        "title": "Casino",
+        "url_portal": "https://dados.gov.pt/pt/datasets/casino/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/644a88ec-77c5-4b39-a267-6683a542d3f1",
+        "description": "Conjunto de dados relativos ao \"Casino de Lisboa\". Dataset of \"Lisbon's Casino\".",
+        "file_formats": "geojson",
+        "last_updated": "2025-10-30T00:00:00"
+    },
+    {
+        "title": "Bombeiros",
+        "url_portal": "https://dados.gov.pt/pt/datasets/bombeiros/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/694c75f2-c96a-424f-8dd2-9163ee9051f4",
+        "description": "Conjunto de dados referentes a quartéis de \"Bombeiros\" de Lisboa. Map service providing data concerning Lisbon's \"Fire Departments\" .",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-05T00:00:00"
+    },
+    {
+        "title": "Biotecnologia",
+        "url_portal": "https://dados.gov.pt/pt/datasets/biotecnologia/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/9d129c85-177f-4ba0-b52f-77b699f21a06",
+        "description": "Conjunto de dados referentes a \"Biotecnologia\". O mapa dos Setores Estratégicos - \"Economia da Saúde\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of the \"Biotechnology\". The Strategic Actors - Health Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-15T00:00:00"
+    },
+    {
+        "title": "Bibliotecas Arquivos e Centros de Documentação",
+        "url_portal": "https://dados.gov.pt/pt/datasets/bibliotecas-arquivos-e-centros-de-documentacao/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/b85ea07d-a892-4b61-b011-3db1d608ac57",
+        "description": "Conjunto de dados com indicação de \"Bibliotecas / Arquivos / Centros de Documentação\" em Lisboa. Map service providing data concerning \"Libraries / Archives\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-05T00:00:00"
+    },
+    {
+        "title": "Balneários",
+        "url_portal": "https://dados.gov.pt/pt/datasets/balnearios/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/f531ccda-e214-4843-a73e-96649ff36dd5",
+        "description": "Conjunto de dados referentes a \"Balneários\" públicos, em Lisboa. Dataset of public \"Bath Houses\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2025-01-15T00:00:00"
+    },
+    {
+        "title": "Azulejaria",
+        "url_portal": "https://dados.gov.pt/pt/datasets/azulejaria/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/765d92d1-7c96-415a-adf6-79acbbf06269",
+        "description": "Conjunto de dados relativos a \"Azulejaria\" em Lisboa. Dataset of \"Tile Pannels\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-12-12T00:00:00"
+    },
+    {
+        "title": "Auditórios - Anfiteatros",
+        "url_portal": "https://dados.gov.pt/pt/datasets/auditorios-anfiteatros/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/d869c248-d82a-441e-9a1e-e5dbcdb94e43",
+        "description": "Conjunto de dados com indicação de \"Auditórios e Anfiteatros\" em Lisboa. Map service providing data concerning \"Auditoriums and Amphitheaters\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-08T00:00:00"
+    },
+    {
+        "title": "Atividades Portuárias e Marítimas",
+        "url_portal": "https://dados.gov.pt/pt/datasets/atividade-portuarias-e-maritimas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/8ceffb57-4f6c-4c77-b4b8-57f0311b7910",
+        "description": "Conjunto de dados referentes a \"Actividades Portuárias e Marítimas\". O mapa dos Setores Estratégicos - \"Economia do Mar\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Harbor and Ocean Activities\". The Strategic Actors - Sea Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-10T00:00:00"
+    },
+    {
+        "title": "Associações",
+        "url_portal": "https://dados.gov.pt/pt/datasets/associacoes/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/3a28e0cb-6d33-455d-a182-988cade507cb",
+        "description": "Conjunto de dados referentes a \"Associações\". O mapa dos Setores Estratégicos - \"Economia Digital\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Associations\". The Strategic Actors - Digital Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-08T00:00:00"
+    },
+    {
+        "title": "Artes Performativas - Teatro, Dança e Música",
+        "url_portal": "https://dados.gov.pt/pt/datasets/artes-performativas-teatro-danca-e-musica/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/4acacb68-54d5-4927-8825-b461945dc7d4",
+        "description": "Conjunto de dados relativos a \"Artes Performativas - Teatro, Dança e Música\". O mapa dos Setores Estratégicos - \"Economia Criativa\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Performing Arts - Theater, Dance and Music\". The Strategic Actors - Creative Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-10T00:00:00"
+    },
+    {
+        "title": "Arquitetura",
+        "url_portal": "https://dados.gov.pt/pt/datasets/arquitetura/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/3a7a27a6-c42b-4fe4-ab6f-297891c58bfc",
+        "description": "Conjunto de dados relativos a \"Arquitetura\". O mapa dos Setores Estratégicos - \"Economia Criativa\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Architecture\". The Strategic Actors - Creative Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2024-06-28T00:00:00"
+    },
+    {
+        "title": "Arquitetura Religiosa",
+        "url_portal": "https://dados.gov.pt/pt/datasets/arquitetura-religiosa-1/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/0ac68cf5-0784-4c82-8328-c027a68e3069",
+        "description": "Conjunto de dados relativos a edifícios notáveis representativos de \"Arquitetura Religiosa\" em Lisboa. Dataset of remarkable \"Religious Architecture\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-12-12T00:00:00"
+    },
+    {
+        "title": "Arquitetura Nobre",
+        "url_portal": "https://dados.gov.pt/pt/datasets/arquitetura-nobre/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/9b274818-2293-4f6a-afe2-17ebcd558f6b",
+        "description": "Conjunto de dados relativos a edifícios notáveis representativos de \"Arquitetura Nobre\" em Lisboa. Dataset of remarkable \"Palaces\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-06-28T00:00:00"
+    },
+    {
+        "title": "Arquitetura Militar",
+        "url_portal": "https://dados.gov.pt/pt/datasets/arquitetura-militar-1/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/dfe0cfb5-8b81-47f1-8a21-3baf77be0c78",
+        "description": "Conjunto de dados relativos a edifícios notáveis representativos de \"Arquitetura Militar\" em Lisboa. Dataset of remarkable \"Military Buildings\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-12-12T00:00:00"
+    },
+    {
+        "title": "Arquitetura Industrial",
+        "url_portal": "https://dados.gov.pt/pt/datasets/arquitetura-industrial/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/ea54e89a-7de1-49a4-b700-669b1e2a475b",
+        "description": "Conjunto de dados relativos a edifícios notáveis representativos de \"Arquitetura Industrial\" em Lisboa. Dataset of remarkable \"Industrial Buildings\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-06-28T00:00:00"
+    },
+    {
+        "title": "Arquitetura da Água",
+        "url_portal": "https://dados.gov.pt/pt/datasets/arquitetura-da-agua/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/13409840-1326-4503-ba56-dafdce14ccfe",
+        "description": "Conjunto de dados relativos a exemplares notáveis representativos de \"Arquitetura da Água\" em Lisboa. Dataset of remarkable \"Fountains and Other Water Constructions\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-12-12T00:00:00"
+    },
+    {
+        "title": "Arquitetura Civil",
+        "url_portal": "https://dados.gov.pt/pt/datasets/arquitetura-civil/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/da8f5f47-74dd-4880-9d07-5a53566adb6f",
+        "description": "Conjunto de dados relativos a edifícios notáveis representativos de \"Arquitetura Civil\" em Lisboa. Dataset of remarkable \"Civil Architecture\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-06-28T00:00:00"
+    },
+    {
+        "title": "Área Urbana de Génese Ilegal (AUGI)",
+        "url_portal": "https://dados.gov.pt/pt/datasets/area-urbana-de-genese-ilegal-augi/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/1ccdc8ad-e764-4b7d-8264-5945cd569291",
+        "description": "Conjunto de dados que identifica os limites das Áreas Urbanas de Génese Ilegal | Dataset that identifies the limits of the \"Urban Illegal Area\" of Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2024-12-12T00:00:00"
+    },
+    {
+        "title": "Áreas de Gestão de Remoção",
+        "url_portal": "https://dados.gov.pt/pt/datasets/areas-de-gestao-de-remocao/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/17bb766b-b435-4ddb-bc80-f694dfda43de",
+        "description": "Conjunto de dados com a delimitação de \"Áreas de Gestão de Remoção\". Dataset of \"Waste Removal Areas\".",
+        "file_formats": "geojson",
+        "last_updated": "2024-02-06T00:00:00"
+    },
+    {
+        "title": "Área de Reabilitação Urbana (ARU)",
+        "url_portal": "https://dados.gov.pt/pt/datasets/area-de-reabilitacao-urbana-aru/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/b7a1f456-c24c-45b8-8ccd-ef543114abf8",
+        "description": "Conjunto de dados que identifica a Área de Reabilitação Urbana, de acordo com o Plano Diretor Municipal de Lisboa de 2011. Dataset that identifies the \"Urban Rehabilitation Area\", according to the 2011 Lisbon Master Plan.",
+        "file_formats": "geojson",
+        "last_updated": "2024-12-12T00:00:00"
+    },
+    {
+        "title": "Apoio e Financiamento à Inovação",
+        "url_portal": "https://dados.gov.pt/pt/datasets/apoio-e-financiamento-a-inovacao/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/de6d1d37-b652-4cd4-8a0d-02cd31be2d0c",
+        "description": "Conjunto de dados com informação de atores estratégicos de \"Apoio e Financiamento à Inovação\" que atuam na cidade e na região obedecendo a lógicas de cluster, seleccionados pela Direção Municipal de Economia e Inovação. Web map service providing information on \"Innovation Funding and Support\" strategic actors located in the city and region according to clusters, selected by the Direção Municipal de Economia e Inovação.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-05T00:00:00"
+    },
+    {
+        "title": "Ambiente e Exploração Marítima",
+        "url_portal": "https://dados.gov.pt/pt/datasets/ambiente-e-exploracao-maritima/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/fc97b5fc-2ff9-43e3-94d9-42c79c95d4bd",
+        "description": "Conjunto de dados referentes a \"Ambiente e Exploração Marítima\". O mapa dos Setores Estratégicos - \"Economia do Mar\" - de Lisboa não representa um recenseamento exaustivo, mas antes disponibiliza informação de diversos atores estratégicos que atuam na cidade e na região, obedecendo a lógicas de cluster. A análise e seleção dos atores representados foi efetuada pelos técnicos da Direção Municipal de Economia e Inovação, com base em pesquisa online em sites especializados, estando sujeita a permanentes retificações e atualizações. Dataset of \"Environmenty and Ocean Exploration\". The Strategic Actors - Sea Economy - map of Lisbon, doesn't represent an exhaustive inventory. It provides data concerning several strategic actors that operate in the city and region, according to clusters. Its analysis and selection is performed by Direção Municipal de Economia e Inovação, according to online searches, on specialized sites, and is constantly being uptaded and retified.",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-10T00:00:00"
+    },
+    {
+        "title": "Alojamento",
+        "url_portal": "https://dados.gov.pt/pt/datasets/alojamento/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/a5b4647c-2029-4372-8f7e-4d236ebae792",
+        "description": "Conjunto de dados relativos à \"Actividade Hoteleira\" em Lisboa, segundo dados da Direção Municipal de Economia e Inovação. Dataset of \"Hotel Establishments\" in Lisbon (Source -Direção Municipal de Economia e Inovação).",
+        "file_formats": "geojson",
+        "last_updated": "2024-01-05T00:00:00"
+    },
+    {
+        "title": "Administração Central - Finanças",
+        "url_portal": "https://dados.gov.pt/pt/datasets/administracao-central-financas/",
+        "stable_url": "https://dados.gov.pt/pt/datasets/r/44f1d356-8c96-4f1c-b808-81b1baedddd2",
+        "description": "Conjunto de dados relativos às \"Repartições de Finanças\" de Lisboa. Dataset of \"Tax Offices\" in Lisbon.",
+        "file_formats": "geojson",
+        "last_updated": "2022-08-12T00:00:00"
+    }
+]
