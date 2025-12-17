@@ -10,16 +10,23 @@ import os
 import sys
 import json
 import shutil
+import stat
 from typing import List
 
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import PyPDFLoader
 
 # Add parent directory to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config import Config
+
+# Disable telemetry for HuggingFace
+# Telemetry mechanisms from the vector database backend were disabled, 
+# as they are not relevant to system performance or retrieval quality.
+os.environ["ANONYMIZED_TELEMETRY"] = "false"
 
 class KnowledgeBase:
     """
@@ -51,10 +58,30 @@ class KnowledgeBase:
         documents = []
         for item in data:
             # Create a rich textual representation for embedding
-            content = f"Name: {item.get('title', 'Unknown')}\n"
-            content += f"Category: {item.get('category', 'General')}\n"
-            content += f"Description: {item.get('full_description', '') or item.get('short_description', '')}\n"
-            content += f"Location: {item.get('location', 'Lisbon')}\n"
+            # Dynamically include all available fields
+            content_parts = []
+            
+            # Prioritize Title for readability
+            if 'title' in item:
+                content_parts.append(f"Name: {item['title']}")
+            
+            for key, value in item.items():
+                if key == 'title': continue  # Already added
+                if not value: continue       # Skip empty fields
+                
+                # Format complex types (lists/dicts)
+                if isinstance(value, list):
+                    val_str = ", ".join(map(str, value))
+                elif isinstance(value, dict):
+                    val_str = json.dumps(value, ensure_ascii=False)
+                else:
+                    val_str = str(value)
+                
+                # Clean up key name (e.g. full_description -> Full Description)
+                key_clean = key.replace('_', ' ').title()
+                content_parts.append(f"{key_clean}: {val_str}")
+            
+            content = "\n".join(content_parts)
             
             # Store structured data in metadata for retrieval later
             meta = {
@@ -100,7 +127,10 @@ class KnowledgeBase:
         """Ingests all data into ChromaDB."""
         
         if force_rebuild and os.path.exists(self.vector_db_path):
-            shutil.rmtree(self.vector_db_path)
+            def on_rm_error(func, path, exc_info):
+                os.chmod(path, stat.S_IWRITE)
+                func(path)
+            shutil.rmtree(self.vector_db_path, onerror=on_rm_error)
             print("🗑️ Existing database removed.")
 
         # Check if DB exists
@@ -115,7 +145,7 @@ class KnowledgeBase:
         docs_events = self._load_visitlisboa_json(str(Config.PATH_VISIT_LISBOA_EVENTS), "VisitLisboa_Events")
         
         # 2. Load PDF directly
-        docs_pdf = self._load_pdf_guide(str(Config.PATH_PDF_GUIDE))
+        docs_pdf = self._load_pdf_guide(str(Config.PATH_PDF_TEXT))
         
         all_docs = docs_places + docs_events + docs_pdf
         
