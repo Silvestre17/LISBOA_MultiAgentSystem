@@ -1,5 +1,5 @@
 # ==========================================================================
-# Master Thesis
+# Master Thesis - Web Scraper for dados.gov.pt (Lisbon Datasets)
 #   - André Filipe Gomes Silvestre, 20240502
 # 
 # This script scrapes the dados.gov.pt portal specifically for datasets 
