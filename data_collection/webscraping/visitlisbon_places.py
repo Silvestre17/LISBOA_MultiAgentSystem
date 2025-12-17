@@ -1,5 +1,5 @@
 # ==========================================================================
-# Master Thesis
+# Master Thesis - Web Scraper for "Visit Lisbon" Places
 #   - André Filipe Gomes Silvestre, 2025
 # 
 # Description:

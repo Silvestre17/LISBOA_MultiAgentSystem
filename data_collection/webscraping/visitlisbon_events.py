@@ -1,5 +1,5 @@
 # ==========================================================================
-# Master Thesis
+# Master Thesis - Web Scraper for "Visit Lisbon" Events
 #   - André Filipe Gomes Silvestre, 20240502
 # 
 # Description:
