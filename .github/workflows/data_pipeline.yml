@@ -2,11 +2,11 @@ name: Update Lisbon Data
 
 on:
   schedule:
-    # Eventos: Todos os dias às 04:00 AM UTC
+    # Events: Every day at 04:00 AM UTC
     - cron: '0 4 * * *'
-  # Places: Todas as Segundas às 03:00 AM UTC (Separado por lógica if abaixo)
+  # Places: Every Monday at 03:00 AM UTC (Separated by if logic below)
   
-  # Permite correr manualmente no botão "Run workflow" do GitHub
+  # Allows manual run via GitHub "Run workflow" button
   workflow_dispatch:
 
 permissions:
@@ -17,42 +17,42 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout do Repositório
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Configurar Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Instalar Dependências
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements_github_action.txt ]; then pip install -r requirements_github_action.txt; fi
 
-      # 1. Correr Script de Eventos (Diário)
+      # 1. Run Events Script (Daily)
       - name: Run Events Scraper
         run: |
           echo "Running Events Scraper..."
           python data_collection/webscraping/visitlisbon_events.py
 
-      # 2. Correr Script de Places (Apenas às Segundas ou Manualmente)
+      # 2. Run Places Script (Only on Mondays or Manually)
       - name: Run Places Scraper
         if: github.event.schedule == '0 4 * * 1' || github.event_name == 'workflow_dispatch'
         run: |
           echo "Running Places Scraper..."
           python data_collection/webscraping/visitlisbon_places.py
 
-      # 3. Commit e Push das alterações
+      # 3. Commit and Push changes
       - name: Commit and Push
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Adiciona apenas os ficheiros JSON alterados
+          # Add only changed JSON files
           git add data_collection/webscraping/*.json
           
-          # Verifica se há alterações antes de fazer commit
+          # Check for changes before committing
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
