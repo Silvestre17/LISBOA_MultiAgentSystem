@@ -17,7 +17,6 @@ load_dotenv()
 BASE_DIR = Path(__file__).parent.resolve()
 
 
-
 class Config:
     """
     Global configuration settings.
@@ -42,7 +41,7 @@ class Config:
     # ---------------------------------------------------------
     # 🔑 API KEYS (Load from Environment for security)
     # ---------------------------------------------------------
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") # Required for OpenAI models
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") # Required for Gemma/Gemini
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")     # Required for Qwen (Cloud API)
 
