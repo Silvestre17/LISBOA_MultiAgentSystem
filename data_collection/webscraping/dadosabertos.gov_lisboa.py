@@ -346,19 +346,19 @@ def main():
         save_to_json(data, output_filepath)
         
         # Print report
-        print("\n--- Extraction Report ---")
-        print(f"  - Collected: {len(data)}")
-        print(f"  - Skipped: {scraper.skipped_count}")
-        print(f"  - Total processed: {len(data) + scraper.skipped_count}")
+        print("\n\033[1m--- Extraction Report ---\033[0m")
+        print(f"\033[1m  - Collected:\033[0m {len(data)}")
+        print(f"\033[1m  - Skipped:\033[0m {scraper.skipped_count}")
+        print(f"\033[1m  - Total processed:\033[0m {len(data) + scraper.skipped_count}")
         print("Extraction complete.")
         
         # Print a preview
-        print("\n--- Extraction Preview ---")
+        print("\n\033[1m--- Extraction Preview ---\033[0m")
         for i, item in enumerate(data[:3]):
             print(f"[{i+1}] {item['title']}")
-            print(f"    Stable URL: {item['stable_url']}")
-            print(f"    Formats: {item.get('file_formats', 'N/A')}")
-            print(f"    Updated: {item.get('last_updated', 'N/A')}")
+            print(f"\033[1m    Stable URL:\033[0m {item['stable_url']}")
+            print(f"\033[1m    Formats:\033[0m {item.get('file_formats', 'N/A')}")
+            print(f"\033[1m    Updated:\033[0m {item.get('last_updated', 'N/A')}")
             print("-" * 40)
 
 if __name__ == "__main__":

@@ -29,7 +29,7 @@ class Config:
     
     PATH_VISIT_LISBOA_PLACES = DATA_COLLECTION_DIR / "webscraping" / "places.json"
     PATH_VISIT_LISBOA_EVENTS = DATA_COLLECTION_DIR / "webscraping" / "events.json"
-    PATH_DADOS_ABERTOS_METADATA = DATA_COLLECTION_DIR / "webscraping" / "lisbon_datasets.json"
+    PATH_DADOS_ABERTOS_METADATA = DATA_COLLECTION_DIR / "webscraping" / "lisbon_datasets_clean.json"
     PATH_PDF_TEXT = DATA_COLLECTION_DIR / "docs" / "Guia_LxCard_Ing_Esp_Abril_2024.pdf"
     
     # ---------------------------------------------------------
