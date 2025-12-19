@@ -35,7 +35,7 @@ class KnowledgeBase:
     
     def __init__(self):
         # Initialize Embeddings (runs on CPU/GPU depending on torch setup)
-        print(f"📥 Initializing Embeddings: {Config.EMBEDDING_MODEL_NAME}...")
+        print(f"\033[1m📥 Initializing Embeddings:\033[0m {Config.EMBEDDING_MODEL_NAME}...")
         
         # model_kwargs={'device': 'cuda'} forces GPU if available
         self.embeddings = HuggingFaceEmbeddings(
@@ -49,7 +49,7 @@ class KnowledgeBase:
     def _load_visitlisboa_json(self, file_path: str, source_tag: str) -> List[Document]:
         """Converts VisitLisboa JSON structure into LangChain Documents."""
         if not os.path.exists(file_path):
-            print(f"⚠️ Warning: File not found {file_path}")
+            print(f"\033[1m⚠️ Warning:\033[0m File not found {file_path}")
             return []
 
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -103,7 +103,7 @@ class KnowledgeBase:
             print(f"⚠️ Warning: PDF File not found {file_path}")
             return []
             
-        print(f"📖 Reading PDF: {file_path}")
+        print(f"\033[1m📖 Reading PDF:\033[0m {file_path}")
         loader = PyPDFLoader(str(file_path))
         pages = loader.load()
         
@@ -131,14 +131,14 @@ class KnowledgeBase:
                 os.chmod(path, stat.S_IWRITE)
                 func(path)
             shutil.rmtree(self.vector_db_path, onerror=on_rm_error)
-            print("🗑️ Existing database removed.")
+            print("\033[1m🗑️ Existing database removed.\033[0m")
 
         # Check if DB exists
         if os.path.exists(self.vector_db_path) and not force_rebuild:
-            print("✅ Database already exists. Skipping ingestion.")
+            print("\033[1m✅ Database already exists. Skipping ingestion.\033[0m")
             return
 
-        print("🔄 Loading data sources...")
+        print("\033[1m🔄 Loading data sources...\033[0m")
         
         # 1. Load JSONs
         docs_places = self._load_visitlisboa_json(str(Config.PATH_VISIT_LISBOA_PLACES), "VisitLisboa_Places")
@@ -150,10 +150,10 @@ class KnowledgeBase:
         all_docs = docs_places + docs_events + docs_pdf
         
         if not all_docs:
-            print("❌ No documents found to ingest!")
+            print("\033[1m❌ No documents found to ingest!\033[0m")
             return
         
-        print(f"📊 Total documents to index: {len(all_docs)}")
+        print(f"\033[1m📊 Total documents to index:\033[0m {len(all_docs)}")
 
         # Create/Update ChromaDB (Batch size limit prevents memory crash)
         Chroma.from_documents(
@@ -162,7 +162,7 @@ class KnowledgeBase:
             persist_directory=self.vector_db_path
         )
         
-        print("🎉 Vector Store built successfully!")
+        print("\033[1m🎉 Vector Store built successfully!\033[0m")
 
     def get_retriever_tool(self):
         """Returns the vector store as a retriever for LangChain."""
