@@ -49,6 +49,28 @@ def get_headers():
         'Referer': 'https://www.google.com/'
     }
 
+
+def _extract_social_name(link):
+    """Extracts a clean social media name from a link's SVG icon.
+    
+    Args:
+        link: BeautifulSoup anchor tag containing an SVG icon.
+        
+    Returns:
+        str: Social media name (e.g., 'facebook', 'twitter') or the href as fallback.
+    """
+    href = link.get('href', '')
+    try:
+        if use_tag := link.find('use'):
+            icon_href = use_tag.get('href', '')
+            # Extract name from pattern like '/assets/icons/social/facebook-xxx.svg#icon'
+            if '/icons/social/' in icon_href:
+                name = icon_href.split('/icons/social/')[-1].split('-')[0]
+                return name if name else href
+    except Exception:
+        pass
+    return href
+
 def get_total_pages(session, base_url):
     """Determines total pages for places.
     
@@ -118,7 +140,7 @@ def scrape_place_details(session, place_url):
     """
     Scrapes detailed info from a place page.
     
-    Arg:
+    Args:
         session (requests.Session): The requests session.
         place_url (str): The URL of the place page to scrape.
         
@@ -154,6 +176,20 @@ def scrape_place_details(session, place_url):
             if desc := soup.select_one('h2.max-w-xl + p, h1.font-serif + p'):
                 place_data['short_description'] = desc.get_text(strip=True)
                 
+            # Lisboa Card Discount (e.g., "10% with Lisboa Card")
+            # Look for the yellow badge link that leads to lisboa-card shop
+            lisboa_card_link = soup.find('a', href=lambda h: h and 'lisboa-card' in h and 'shop.visitlisboa' in h)
+            if lisboa_card_link:
+                discount_text = lisboa_card_link.get_text(strip=True)
+                if discount_text and '%' in discount_text:
+                    place_data['lisboa_card_discount'] = discount_text
+            
+            # Lisbon Tourism Member badge (div with logo and text)
+            for div in soup.find_all('div', class_=lambda c: c and 'bg-off-white' in c and 'font-bold' in c):
+                if 'Lisbon Tourism Member' in div.get_text():
+                    place_data['lisbon_tourism_member'] = True
+                    break
+                
             # Media
             place_data['image_urls'] = [
                 requests.compat.urljoin(base_domain, img['src'])  # type: ignore
@@ -168,51 +204,92 @@ def scrape_place_details(session, place_url):
             if details := soup.find('div', class_='from-cms'):
                 place_data['full_description'] = details.get_text(separator='\n', strip=True)
                 
-            # Features
+            # Features (e.g., "5 stars", "Wi-Fi", "Bars & Restaurants")
             place_data['features'] = [
                 li.get_text(strip=True) for li in soup.select('ul.flex-wrap li.bg-green-primary')
             ]
             
-            # Contacts, Location, Schedule
+            # Initialize structured fields
             place_data['contact_info'] = {}
             place_data['social_media'] = {}
-            place_data['schedule'] = {}
+            place_data['schedules'] = []  # List to support multiple schedules
+            place_data['tickets_offers'] = None
             
+            # Parse info-text boxes for Location, Information, Schedules, Tickets
             for box in soup.find_all('div', class_='info-text'):
                 if h3 := box.find('h3'):
-                    h3_text = h3.get_text(strip=True).lower()
+                    h3_text = h3.get_text(strip=True)
+                    h3_lower = h3_text.lower()
                     
-                    if 'location' in h3_text:
+                    if 'location' in h3_lower:
                         if content := box.find('div', class_='info-text__content'):
                             place_data['location'] = content.get_text(strip=True)
                             
-                    elif 'information' in h3_text:
+                    elif 'information' in h3_lower:
                         for link in box.find_all('a', href=True):
                             href = link['href']
+                            link_text = link.get_text(strip=True).lower()
+                            
                             if href.startswith('tel:'):
                                 place_data['contact_info']['phone'] = href.replace('tel:', '').strip()
                             elif href.startswith('mailto:'):
                                 place_data['contact_info']['email'] = href.replace('mailto:', '').strip()
-                            elif link.find('svg', {'class': 'select-none'}):
-                                social_name = href
-                                # Attempt to extract readable name from icon
-                                try:
-                                    if use_tag := link.find('use'):
-                                        social_name = use_tag['href'].split('-')[0].replace('#icon', '')
-                                except: pass
+                            elif link.get('data-social') is not None or link.find('svg', {'class': 'select-none'}):
+                                # Social media link (has data-social attr or SVG icon)
+                                social_name = _extract_social_name(link)
                                 place_data['social_media'][social_name] = href
+                            elif 'ticket' in link_text:
+                                # Tickets link in information section
+                                place_data['contact_info']['tickets_url'] = href
                             else:
+                                # Main website
                                 place_data['contact_info']['website'] = href
+                    
+                    elif 'ticket' in h3_lower or 'offer' in h3_lower:
+                        # Tickets & Offers section
+                        if content := box.find('div', class_='info-text__content'):
+                            offers_data = {'title': h3_text, 'links': []}
+                            for link in content.find_all('a', href=True):
+                                offers_data['links'].append({
+                                    'text': link.get_text(strip=True),
+                                    'url': link['href']
+                                })
+                            if not offers_data['links']:
+                                offers_data['description'] = content.get_text(strip=True)
+                            place_data['tickets_offers'] = offers_data
                                 
-                    elif 'schedule' in h3_text:
-                        if today := box.find('p'):
-                            place_data['schedule']['today'] = today.get_text(strip=True)
-                        for li in box.find_all('li'):
-                            day_span = li.find('span', class_='flex-none')
-                            if day_span:
-                                time_span = day_span.find_next_sibling('span')
-                                if time_span:
-                                    place_data['schedule'][day_span.get_text(strip=True)] = time_span.get_text(strip=True)
+                    elif 'schedule' in h3_lower:
+                        # Schedule section (can have multiple: Winter Schedule, Summer Schedule, etc.)
+                        schedule_entry = {'name': h3_text, 'hours': {}}
+                        
+                        # Check for "today" info
+                        if content := box.find('div', class_='info-text__content'):
+                            # Look for today's hours
+                            today_p = content.find('p')
+                            if today_p:
+                                today_text = today_p.get_text(strip=True)
+                                schedule_entry['today'] = today_text
+                            
+                            # Check for date range (e.g., "From 20/03 to 21/12")
+                            date_range_elem = content.find('p', class_=lambda c: c and 'text-xs' in c)
+                            if date_range_elem:
+                                schedule_entry['date_range'] = date_range_elem.get_text(strip=True)
+                            
+                            # Parse weekly hours from dropdown
+                            dropdown = content.find('div', attrs={'data-controller': 'dropdown'})
+                            if dropdown:
+                                for li in dropdown.find_all('li'):
+                                    day_span = li.find('span', class_='flex-none')
+                                    if day_span:
+                                        time_span = day_span.find_next_sibling('span')
+                                        if time_span:
+                                            day = day_span.get_text(strip=True)
+                                            hours = time_span.get_text(strip=True)
+                                            schedule_entry['hours'][day] = hours
+                        
+                        # Only add if we have meaningful data
+                        if schedule_entry.get('hours') or schedule_entry.get('today'):
+                            place_data['schedules'].append(schedule_entry)
 
             # TripAdvisor Ratings (if available)
             if reviews_section := soup.find('h2', string='Reviews'):

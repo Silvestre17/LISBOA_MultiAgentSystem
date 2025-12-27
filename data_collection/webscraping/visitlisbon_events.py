@@ -114,11 +114,57 @@ def get_event_urls_from_page(session, page_number, base_url):
         
     return event_urls
 
+def _extract_time_from_container(container):
+    """
+    Extracts time string from a container that has a schedule icon.
+    
+    Args:
+        container: BeautifulSoup element containing time info.
+        
+    Returns:
+        str or None: Time string if found.
+    """
+    # Look for time in span after schedule icon
+    time_divs = container.find_all('div', class_='fill-current')
+    for div in time_divs:
+        # Check if this div contains a schedule icon (not calendar)
+        svg_use = div.find('use')
+        if svg_use and 'href' in svg_use.attrs:
+            if 'schedule' in svg_use['href']:
+                if time_span := div.find('span'):
+                    return time_span.get_text(strip=True)
+    return None
+
+
+def _parse_date_entry(time_element, time_str=None):
+    """
+    Parses a single date entry from a time element.
+    
+    Args:
+        time_element: BeautifulSoup <time> element.
+        time_str (str, optional): Associated time string (e.g., "18:30").
+        
+    Returns:
+        dict: Date entry with datetime_iso, display_text, and time fields.
+    """
+    entry = {
+        'datetime_iso': time_element.get('datetime'),  # ISO format: "2026-01-04"
+        'display_text': time_element.get_text(strip=True),  # "04 Jan, 2026"
+        'time': time_str  # "18:30" or None
+    }
+    return entry
+
+
 def scrape_event_details(session, event_url):
     """
     Scrapes detailed info from an event page.
     
-    Arg:
+    Handles different page structures for dates:
+    - Single date events (e.g., concerts)
+    - Date range events (e.g., exhibitions)
+    - Multi-date events with specific times (e.g., theater performances)
+    
+    Args:
         session (requests.Session): The requests session.
         event_url (str): The URL of the event page to scrape.
         
@@ -152,9 +198,9 @@ def scrape_event_details(session, event_url):
             if category_tag := soup.find('div', class_='text-green-primary'):
                 event_data['category'] = category_tag.get_text(strip=True)
 
-            # Main Short Description
+            # Main Short Description (paragraph after title h2)
             if h2_title := soup.find('h2', class_='max-w-xl'):
-                if short_desc_tag := h2_title.find_next_sibling('p'):
+                if short_desc_tag := h2_title.find_parent('div').find('p'):
                     event_data['short_description'] = short_desc_tag.get_text(strip=True)
 
             # Image & Video URLs
@@ -175,47 +221,106 @@ def scrape_event_details(session, event_url):
             if details_div := soup.find('div', class_='from-cms'):
                 event_data['full_description'] = details_div.get_text(strip=True, separator='\n')
 
-            # Dates & Times
+            # =============================================
+            # DATES & TIMES - Improved Parsing
+            # =============================================
             event_data['dates'] = []
-            main_date_container = soup.find('div', class_='flex-wrap gap-4 mt-2')
+            
+            # 1. Main date container (header section with date badge)
+            # Use lambda to match all required classes (they may have additional classes)
+            main_date_container = soup.find('div', class_=lambda c: c and all(
+                cls in c for cls in ['flex-wrap', 'gap-4', 'mt-2']
+            ))
             if main_date_container:
-                times = main_date_container.find_all('time')
-                if len(times) == 2:
-                    event_data['dates'].append({'start': times[0].get_text(strip=True), 'end': times[1].get_text(strip=True)})
-                elif len(times) == 1:
-                    event_data['dates'].append({'start': times[0].get_text(strip=True), 'end': None})
+                times_elements = main_date_container.find_all('time')
+                header_time_str = _extract_time_from_container(main_date_container)
+                
+                if len(times_elements) == 2:
+                    # Date RANGE (e.g., exhibitions: "12 Dec, 2024 - 31 Dec, 2025")
+                    event_data['dates'].append({
+                        'type': 'range',
+                        'start': _parse_date_entry(times_elements[0]),
+                        'end': _parse_date_entry(times_elements[1])
+                    })
+                elif len(times_elements) == 1:
+                    # Single date (may or may not have time)
+                    event_data['dates'].append({
+                        'type': 'single',
+                        'date': _parse_date_entry(times_elements[0], header_time_str)
+                    })
 
+            # 2. Additional dates section (id="dates") - for multi-date events
             if more_dates_section := soup.find('div', id='dates'):
-                date_divs = more_dates_section.find_all('div', class_='border-b')
-                for div in date_divs:
-                    times = div.find_all('time')
-                    if len(times) == 2:
-                        event_data['dates'].append({'start': times[0].get_text(strip=True), 'end': times[1].get_text(strip=True)})
-                    elif len(times) == 1:
-                        event_data['dates'].append({'start': times[0].get_text(strip=True), 'end': None})
+                # Find all date rows (border-b class)
+                date_rows = more_dates_section.find_all('div', class_='border-b')
+                
+                for row in date_rows:
+                    time_element = row.find('time')
+                    if time_element:
+                        # Extract time from this specific row
+                        row_time_str = _extract_time_from_container(row)
+                        
+                        date_entry = {
+                            'type': 'single',
+                            'date': _parse_date_entry(time_element, row_time_str)
+                        }
+                        
+                        # Avoid duplicates (header date might be repeated)
+                        is_duplicate = False
+                        for existing in event_data['dates']:
+                            if existing.get('type') == 'single':
+                                if (existing.get('date', {}).get('datetime_iso') == date_entry['date']['datetime_iso'] and
+                                    existing.get('date', {}).get('time') == date_entry['date']['time']):
+                                    is_duplicate = True
+                                    break
+                        
+                        if not is_duplicate:
+                            event_data['dates'].append(date_entry)
 
-            # Price / Entry Fee
-            if price_span := soup.find('span', class_='bg-yellow-t60'):
-                event_data['price'] = price_span.get_text(strip=True)
+            # =============================================
+            # PRICE / Entry Fee
+            # =============================================
+            # Look for price in yellow badge
+            price_container = soup.find('span', class_=lambda c: c and 'bg-yellow' in c)
+            if price_container:
+                event_data['price'] = price_container.get_text(strip=True)
             elif price_span_generic := soup.find('span', string=lambda t: t and ('Free Entry' in t or 'From' in t)):
                 event_data['price'] = price_span_generic.get_text(strip=True)
 
-            # Location and Information
+            # =============================================
+            # LOCATION and VENUE - Improved Parsing
+            # =============================================
             info_boxes = soup.find_all('div', class_='info-text')
             event_data['information_links'] = {}
+            event_data['buy_tickets_url'] = None
+            
             for box in info_boxes:
                 if h3 := box.find('h3'):
                     h3_text = h3.get_text().strip()
-                    # Check for location keywords
-                    if 'Address' in h3_text or 'Avenida' in h3_text or 'Parque' in h3_text or h3_text == "Estádio da Luz":
-                         if content := box.find('div', class_='info-text__content'):
-                            event_data['location'] = content.get_text(strip=True)
-                    elif 'Information' in h3_text:
-                        links = box.find_all('a')
-                        for link in links:
-                            link_text = link.get_text(strip=True)
-                            if 'href' in link.attrs:
-                                event_data['information_links'][link_text] = link['href']
+                    content_div = box.find('div', class_='info-text__content')
+                    
+                    # Check if this is the Information box
+                    if h3_text == 'Information':
+                        if content_div:
+                            links = content_div.find_all('a')
+                            for link in links:
+                                if 'href' in link.attrs:
+                                    # Check for ticket links
+                                    link_text = link.get_text(strip=True)
+                                    if 'Buy Tickets' in link_text or 'ticket' in link['href'].lower():
+                                        event_data['buy_tickets_url'] = link['href']
+                                    else:
+                                        event_data['information_links'][link_text] = link['href']
+                    
+                    # Check if this is the Dates box (skip, handled above)
+                    elif h3_text == 'Dates':
+                        continue
+                    
+                    # Otherwise, assume it's a VENUE/LOCATION box
+                    else:
+                        event_data['venue_name'] = h3_text
+                        if content_div:
+                            event_data['location'] = content_div.get_text(strip=True)
 
             return event_data
 
