@@ -1,21 +1,68 @@
-requests
-beautifulsoup4
-pandas
-lxml
-tqdm
-langchain
-langchain-ollama
-langchain-openai
-langchain-community
-langchain-google-genai 
-langchain-groq
-langchain-chroma
-langchain-huggingface
-pandas
-requests
-streamlit
-fastembed
-chromadb
-sentence-transformers
-pypdf
-python-dotenv
+# ==========================================================================
+# Master Thesis - Dependencies
+#   - André Filipe Gomes Silvestre, 20240502
+#
+# LLM-Powered Urban Exploration: A Framework for Adaptive Tourist
+# and Mobility Itinerary Planning
+#
+# Installation: pip install -r requirements.txt
+# ==========================================================================
+
+# -----------------------------------------------------------------------------
+# Core LangChain Framework
+# -----------------------------------------------------------------------------
+langchain>=0.3.0              # Main LangChain framework
+langchain-core>=0.3.0         # Core abstractions and interfaces
+langgraph>=0.2.0              # Graph-based agent orchestration
+
+# -----------------------------------------------------------------------------
+# LLM Provider Integrations
+# -----------------------------------------------------------------------------
+langchain-groq>=0.2.0         # Groq Cloud (fast inference)
+langchain-google-genai>=2.0.0 # Google Gemini models
+langchain-openai>=0.2.0       # OpenAI GPT models
+langchain-ollama>=0.2.0       # Local Ollama models
+
+# -----------------------------------------------------------------------------
+# Vector Store and Embeddings (RAG)
+# -----------------------------------------------------------------------------
+langchain-chroma>=0.1.0       # ChromaDB integration for LangChain
+langchain-huggingface>=0.1.0  # HuggingFace embeddings
+langchain-community>=0.3.0    # Community integrations
+chromadb>=0.5.0,<0.6.0        # Vector database (pinned to avoid opentelemetry issues)
+sentence-transformers>=3.0.0  # Embedding models
+
+# Fix for chromadb/opentelemetry compatibility
+opentelemetry-api>=1.20.0,<1.28.0
+opentelemetry-sdk>=1.20.0,<1.28.0
+opentelemetry-exporter-otlp-proto-grpc>=1.20.0,<1.28.0
+
+# -----------------------------------------------------------------------------
+# Data Processing and Web Scraping
+# -----------------------------------------------------------------------------
+pandas>=2.0.0                 # DataFrame operations
+requests>=2.31.0              # HTTP client for API calls
+beautifulsoup4>=4.12.0        # HTML parsing for web scraping
+lxml>=5.0.0                   # Fast XML/HTML parser
+tqdm>=4.66.0                  # Progress bars
+
+# -----------------------------------------------------------------------------
+# Document Processing (for RAG ingestion)
+# -----------------------------------------------------------------------------
+pypdf>=4.0.0                  # PDF text extraction
+
+# -----------------------------------------------------------------------------
+# Web Interface
+# -----------------------------------------------------------------------------
+streamlit>=1.30.0             # Interactive web application
+
+# -----------------------------------------------------------------------------
+# Monitoring and Evaluation
+# -----------------------------------------------------------------------------
+langsmith>=0.1.0              # LangSmith tracing and evaluation
+
+# -----------------------------------------------------------------------------
+# Utilities
+# -----------------------------------------------------------------------------
+python-dotenv>=1.0.0          # Environment variable management
+fastembed>=0.3.0              # Fast embedding generation

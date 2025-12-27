@@ -1,20 +1,34 @@
 # ==========================================================================
 # Master Thesis - Dados Abertos Smart Tool
-#   - André Filipe Gomes Silvestre, 2025
+#   - André Filipe Gomes Silvestre, 20240502
 # 
-#   Semantic search over Open Data metadata with dynamic GeoJSON fetching.
-#   - 15 second timeout for requests
-#   - Retry logic with exponential backoff
-#   - GeoJSON validation
+#   Semantic search over Lisboa Aberta Open Data with dynamic GeoJSON fetching.
+#   Features:
+#     - Keyword-based dataset discovery
+#     - Dynamic GeoJSON fetching with retry logic
+#     - Proximity-based filtering with Haversine distance
+#     - Multiple specialized query functions
+# 
+#   Data Source: https://dados.cm-lisboa.pt/
 # ==========================================================================
 
+# Required libraries:
+# pip install requests pandas langchain-core
+
 import json
+import math
+import time
+import logging
+import os
+import sys
+from typing import Optional, Dict, Any, List, Tuple
+
 import requests
 import pandas as pd
-import math
-import logging
-from typing import Optional, Dict, Any
 from langchain_core.tools import tool
+
+# Add parent directory to path for imports
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config import Config
 
 # Configure logging
@@ -26,16 +40,37 @@ REQUEST_TIMEOUT = 15  # seconds
 MAX_RETRIES = 3
 BACKOFF_FACTOR = 2
 
-# Load metadata once into memory for speed
-try:
-    with open(Config.PATH_DADOS_ABERTOS_METADATA, 'r', encoding='utf-8') as f:
-        DATASETS_METADATA = json.load(f)
-    # Convert to simple list of dicts for easier searching
-    DF_METADATA = pd.DataFrame(DATASETS_METADATA)
-    logger.info(f"Loaded {len(DF_METADATA)} datasets from Dados Abertos")
-except Exception as e:
-    logger.error(f"Error loading Dados Abertos metadata: {e}")
-    DF_METADATA = pd.DataFrame()
+# ==========================================================================
+# Data Loading
+# ==========================================================================
+
+def load_metadata() -> pd.DataFrame:
+    """
+    Loads the Dados Abertos metadata from the local JSON file.
+    
+    Returns:
+        pd.DataFrame: Metadata DataFrame with dataset information.
+    """
+    try:
+        with open(Config.PATH_DADOS_ABERTOS_METADATA, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        df = pd.DataFrame(data)
+        logger.info(f"\033[1;32m✅ Loaded {len(df)} datasets from Dados Abertos\033[0m")
+        return df
+    except FileNotFoundError:
+        logger.error(f"\033[1;31m❌ Metadata file not found: {Config.PATH_DADOS_ABERTOS_METADATA}\033[0m")
+        return pd.DataFrame()
+    except Exception as e:
+        logger.error(f"\033[1;31m❌ Error loading metadata: {e}\033[0m")
+        return pd.DataFrame()
+
+# Load metadata once at module import
+DF_METADATA = load_metadata()
+
+
+# ==========================================================================
+# Helper Functions
+# ==========================================================================
 
 def is_valid_geojson(data: Any) -> bool:
     """
@@ -53,11 +88,14 @@ def is_valid_geojson(data: Any) -> bool:
     if "type" not in data:
         return False
     
-    valid_types = ["FeatureCollection", "Feature", "Point", "LineString", 
-                  "Polygon", "MultiPoint", "MultiLineString", "MultiPolygon", 
-                  "GeometryCollection"]
+    valid_types = [
+        "FeatureCollection", "Feature", "Point", "LineString", 
+        "Polygon", "MultiPoint", "MultiLineString", "MultiPolygon", 
+        "GeometryCollection"
+    ]
     
     return data["type"] in valid_types
+
 
 def fetch_geojson_with_retry(url: str) -> Optional[Dict[str, Any]]:
     """
@@ -76,27 +114,25 @@ def fetch_geojson_with_retry(url: str) -> Optional[Dict[str, Any]]:
     """
     for attempt in range(MAX_RETRIES):
         try:
-            logger.info(f"Fetching GeoJSON (attempt {attempt + 1}/{MAX_RETRIES}): {url}")
+            logger.info(f"Fetching GeoJSON (attempt {attempt + 1}/{MAX_RETRIES}): {url[:80]}...")
             
             response = requests.get(url, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
             
-            # Parse JSON
             data = response.json()
             
-            # Validate GeoJSON
             if not is_valid_geojson(data):
                 logger.error("Invalid GeoJSON structure")
                 return None
             
-            logger.info(f"Successfully fetched GeoJSON with {len(data.get('features', []))} features")
+            feature_count = len(data.get('features', []))
+            logger.info(f"\033[1;32m✅ Fetched {feature_count} features\033[0m")
             return data
             
         except requests.exceptions.Timeout:
             wait_time = BACKOFF_FACTOR ** attempt
             logger.warning(f"Timeout after {REQUEST_TIMEOUT}s. Retrying in {wait_time}s...")
             if attempt < MAX_RETRIES - 1:
-                import time
                 time.sleep(wait_time)
                 
         except requests.exceptions.RequestException as e:
@@ -104,7 +140,6 @@ def fetch_geojson_with_retry(url: str) -> Optional[Dict[str, Any]]:
             logger.warning(f"Request error: {e}")
             if attempt < MAX_RETRIES - 1:
                 logger.info(f"Retrying in {wait_time}s...")
-                import time
                 time.sleep(wait_time)
             else:
                 logger.error(f"Failed after {MAX_RETRIES} attempts")
@@ -115,82 +150,199 @@ def fetch_geojson_with_retry(url: str) -> Optional[Dict[str, Any]]:
     
     return None
 
-def haversine_distance(lat1, lon1, lat2, lon2):
-    """Calculates distance between two points (in km)."""
+
+def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """
+    Calculates the great-circle distance between two points on Earth.
+    
+    Args:
+        lat1 (float): Latitude of point 1.
+        lon1 (float): Longitude of point 1.
+        lat2 (float): Latitude of point 2.
+        lon2 (float): Longitude of point 2.
+        
+    Returns:
+        float: Distance in kilometers.
+    """
     R = 6371  # Earth radius in km
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
-    a = (math.sin(dlat / 2) * math.sin(dlat / 2) +
-         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
-         math.sin(dlon / 2) * math.sin(dlon / 2))
+    a = (
+        math.sin(dlat / 2) ** 2 +
+        math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
+        math.sin(dlon / 2) ** 2
+    )
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
 
-@tool
-def find_dataset_and_query(query_theme: str, user_lat: float = None, user_lon: float = None, max_results: int = 5) -> str:
+
+def extract_coordinates(geometry: Dict) -> Optional[Tuple[float, float]]:
     """
-    Search for open data datasets in Lisbon and dynamically fetch GeoJSON data.
-    Returns locations near the user if coordinates are provided.
+    Extracts latitude and longitude from GeoJSON geometry.
     
     Args:
-        query_theme (str): Keyword to search (e.g., 'farmácias', 'metro', 'jardins', 'wifi').
-        user_lat (float, optional): User's latitude for proximity search.
-        user_lon (float, optional): User's longitude for proximity search.
+        geometry (Dict): GeoJSON geometry object.
+        
+    Returns:
+        Optional[Tuple[float, float]]: (latitude, longitude) or None.
+    """
+    if not geometry:
+        return None
+    
+    coords = geometry.get('coordinates', [])
+    if not coords:
+        return None
+    
+    geo_type = geometry.get('type', '')
+    
+    if geo_type == 'Point' and len(coords) >= 2:
+        return (coords[1], coords[0])  # GeoJSON is [lon, lat]
+    elif geo_type in ['MultiPoint', 'LineString'] and coords and len(coords[0]) >= 2:
+        return (coords[0][1], coords[0][0])
+    elif geo_type == 'Polygon' and coords and coords[0] and len(coords[0][0]) >= 2:
+        return (coords[0][0][1], coords[0][0][0])
+    
+    return None
+
+
+def extract_name(properties: Dict) -> str:
+    """
+    Extracts the best available name from feature properties.
+    
+    Args:
+        properties (Dict): GeoJSON feature properties.
+        
+    Returns:
+        str: Best available name or 'N/A'.
+    """
+    name_fields = [
+        'name', 'nome', 'Nome', 'designacao', 'Designacao', 
+        'DESIGNACAO', 'designação', 'título', 'titulo', 'title',
+        'NOME', 'NAME', 'INF_NOME', 'NOME_PARQU', 'NOME_JARDIM'
+    ]
+    
+    for field in name_fields:
+        if field in properties and properties[field]:
+            return str(properties[field])
+    
+    return "N/A"
+
+
+def extract_address(properties: Dict) -> str:
+    """
+    Extracts the best available address from feature properties.
+    
+    Args:
+        properties (Dict): GeoJSON feature properties.
+        
+    Returns:
+        str: Best available address or empty string.
+    """
+    address_fields = [
+        'address', 'morada', 'Morada', 'MORADA', 'endereco',
+        'rua', 'Rua', 'local', 'Local', 'localizacao', 'INF_MORADA'
+    ]
+    
+    for field in address_fields:
+        if field in properties and properties[field]:
+            return str(properties[field])
+    
+    return ""
+
+
+def search_datasets(query: str) -> pd.DataFrame:
+    """
+    Searches metadata for datasets matching the query.
+    
+    Args:
+        query (str): Search term(s).
+        
+    Returns:
+        pd.DataFrame: Matching datasets.
+    """
+    if DF_METADATA.empty:
+        return pd.DataFrame()
+    
+    query_lower = query.lower()
+    
+    # Search in title and description
+    mask = (
+        DF_METADATA['title'].str.lower().str.contains(query_lower, na=False) |
+        DF_METADATA['description'].str.lower().str.contains(query_lower, na=False)
+    )
+    
+    return DF_METADATA[mask]
+
+
+# ==========================================================================
+# LangChain Tools
+# ==========================================================================
+
+@tool
+def find_nearby_services(
+    service_type: str,
+    user_lat: float = None,
+    user_lon: float = None,
+    max_results: int = 5
+) -> str:
+    """
+    Search for public services in Lisbon (pharmacies, hospitals, schools, etc.) 
+    and optionally filter by proximity to user location.
+    
+    Args:
+        service_type (str): Type of service to search (e.g., 'farmácias', 'hospitais', 
+                           'escolas', 'metro', 'wifi', 'jardins', 'parques', 'fontanários').
+        user_lat (float, optional): User's latitude for proximity filtering.
+        user_lon (float, optional): User's longitude for proximity filtering.
         max_results (int): Maximum number of results to return (default: 5).
 
     Returns:
-        str: Text summary of findings with names, addresses, and distances.
+        str: Formatted list of services with names, addresses, and distances.
         
-    Notes:
-        - Always fetches fresh data from the portal (no cached files)
-        - 15 second timeout per request with retry logic
-        - Automatically filters results by proximity if coordinates provided
-        
-    Example:
-        >>> find_dataset_and_query("farmácias", user_lat=38.7223, user_lon=-9.1393)
-        "Found 3 pharmacies near you:
-         1. Farmácia Central (0.2 km) - Rua Augusta 123
-         2. Farmácia São Paulo (0.5 km) - Av. Liberdade 45
-         ..."
+    Examples:
+        >>> find_nearby_services("farmácias", user_lat=38.7223, user_lon=-9.1393)
+        >>> find_nearby_services("wifi")
+        >>> find_nearby_services("jardins", user_lat=38.72, user_lon=-9.14, max_results=3)
     """
     if DF_METADATA.empty:
-        return "❌ Error: Metadata not loaded."
+        return "❌ Error: Metadata not loaded. Check if lisbon_datasets_clean.json exists."
 
-    # 1. Search metadata (case-insensitive)
-    logger.info(f"Searching for: {query_theme}")
-    match = DF_METADATA[
-        DF_METADATA['title'].str.contains(query_theme, case=False, na=False) | 
-        DF_METADATA['description'].str.contains(query_theme, case=False, na=False)
-    ]
+    # Search for matching datasets
+    matches = search_datasets(service_type)
     
-    if match.empty:
-        return f"❌ No datasets found for: {query_theme}"
+    if matches.empty:
+        # Try alternative search terms
+        alternatives = {
+            'pharmacy': 'farmácia', 'hospital': 'hospital', 'school': 'escola',
+            'park': 'jardim', 'garden': 'jardim', 'wifi': 'wifi', 'metro': 'metro',
+            'fountain': 'fontanário', 'parking': 'estacionamento'
+        }
+        alt_term = alternatives.get(service_type.lower(), service_type)
+        matches = search_datasets(alt_term)
     
-    # Pick the first/best match
-    dataset = match.iloc[0]
+    if matches.empty:
+        return f"❌ No datasets found for: '{service_type}'\n💡 Try: farmácias, hospitais, escolas, jardins, wifi, metro, fontanários"
+    
+    # Pick the best matching dataset
+    dataset = matches.iloc[0]
     title = dataset['title']
     stable_url = dataset.get('stable_url')
     
     if not stable_url or stable_url == "N/A":
-        return f"❌ Dataset found but no URL available: {title}"
+        return f"❌ Dataset '{title}' found but no URL available."
     
-    logger.info(f"Found dataset: {title}")
-    
-    # 2. Fetch GeoJSON dynamically (with 15s timeout and retry)
+    # Fetch GeoJSON data
     geojson_data = fetch_geojson_with_retry(stable_url)
     
     if not geojson_data:
-        return f"❌ Failed to fetch data from: {title}\nURL: {stable_url}"
+        return f"❌ Failed to fetch data from: {title}\n   URL: {stable_url}"
     
-    # 3. Extract features
     features = geojson_data.get('features', [])
     
     if not features:
         return f"✓ Dataset '{title}' loaded but contains no features."
     
-    logger.info(f"Loaded {len(features)} features from {title}")
-    
-    # 4. Process features and calculate distances if coordinates provided
+    # Process features
     results = []
     
     for feature in features:
@@ -198,26 +350,19 @@ def find_dataset_and_query(query_theme: str, user_lat: float = None, user_lon: f
             properties = feature.get('properties', {})
             geometry = feature.get('geometry', {})
             
-            # Extract coordinates
-            coords = geometry.get('coordinates', [])
-            if not coords or len(coords) < 2:
+            coords = extract_coordinates(geometry)
+            if not coords:
                 continue
             
-            # Handle different geometry types
-            if geometry.get('type') == 'Point':
-                lon, lat = coords[0], coords[1]
-            else:
-                # For MultiPoint, LineString, etc., take first coordinate
-                lon, lat = coords[0][0], coords[0][1]
+            lat, lon = coords
             
             # Calculate distance if user coordinates provided
             distance = None
             if user_lat is not None and user_lon is not None:
                 distance = haversine_distance(user_lat, user_lon, lat, lon)
             
-            # Extract name/address from properties
-            name = properties.get('name') or properties.get('designacao') or properties.get('Nome') or 'N/A'
-            address = properties.get('address') or properties.get('morada') or properties.get('Morada') or ''
+            name = extract_name(properties)
+            address = extract_address(properties)
             
             results.append({
                 'name': name,
@@ -232,27 +377,163 @@ def find_dataset_and_query(query_theme: str, user_lat: float = None, user_lon: f
             logger.warning(f"Error processing feature: {e}")
             continue
     
-    # 5. Sort by distance if coordinates provided
+    # Sort by distance if coordinates provided
     if user_lat is not None and user_lon is not None and results:
         results = [r for r in results if r['distance'] is not None]
         results.sort(key=lambda x: x['distance'])
-        results = results[:max_results]
-    else:
-        results = results[:max_results]
     
-    # 6. Format response
+    results = results[:max_results]
+    
     if not results:
-        return f"✓ Dataset '{title}' loaded with {len(features)} features, but couldn't extract location data."
+        return f"✓ Dataset '{title}' loaded ({len(features)} features) but couldn't extract location data."
     
-    response = f"✓ Found {len(results)} results from '{title}':\n\n"
+    # Format response
+    response = f"📍 Found {len(results)} results from '{title}':\n\n"
     
-    for i, result in enumerate(results, 1):
-        response += f"{i}. {result['name']}\n"
-        if result['address']:
-            response += f"   📍 {result['address']}\n"
-        if result['distance'] is not None:
-            response += f"   📏 Distance: {result['distance']:.2f} km\n"
-        response += f"   🗺️ Coordinates: {result['lat']:.6f}, {result['lon']:.6f}\n"
-        response += "\n"
+    for i, r in enumerate(results, 1):
+        response += f"{i}. {r['name']}\n"
+        if r['address']:
+            response += f"   📍 {r['address']}\n"
+        if r['distance'] is not None:
+            response += f"   📏 {r['distance']:.2f} km away\n"
+        response += f"   🗺️ ({r['lat']:.6f}, {r['lon']:.6f})\n\n"
     
     return response
+
+
+@tool
+def list_available_datasets(category: str = None) -> str:
+    """
+    Lists all available open data datasets from Lisboa Aberta.
+    Optionally filter by category keyword.
+    
+    Args:
+        category (str, optional): Filter datasets by category/keyword 
+                                 (e.g., 'saúde', 'educação', 'ambiente', 'transportes').
+
+    Returns:
+        str: Formatted list of available datasets with titles and descriptions.
+        
+    Examples:
+        >>> list_available_datasets()
+        >>> list_available_datasets("saúde")
+        >>> list_available_datasets("ambiente")
+    """
+    if DF_METADATA.empty:
+        return "❌ Error: Metadata not loaded."
+    
+    df = DF_METADATA.copy()
+    
+    if category:
+        df = search_datasets(category)
+        if df.empty:
+            return f"❌ No datasets found for category: '{category}'"
+    
+    # Format response
+    response = f"📂 Available Datasets ({len(df)} total):\n\n"
+    
+    for i, (_, row) in enumerate(df.head(20).iterrows(), 1):
+        title = row.get('title', 'N/A')
+        desc = row.get('description', '')
+        if desc and len(desc) > 100:
+            desc = desc[:100] + "..."
+        
+        response += f"{i}. {title}\n"
+        if desc:
+            response += f"   {desc}\n"
+        response += "\n"
+    
+    if len(df) > 20:
+        response += f"... and {len(df) - 20} more datasets.\n"
+        response += "💡 Use a category filter to narrow results."
+    
+    return response
+
+
+@tool
+def get_dataset_details(dataset_name: str) -> str:
+    """
+    Gets detailed information about a specific dataset including 
+    schema inspection and sample data.
+    
+    Args:
+        dataset_name (str): Name or keyword to identify the dataset.
+
+    Returns:
+        str: Detailed information about the dataset including available fields.
+        
+    Example:
+        >>> get_dataset_details("farmácias")
+    """
+    if DF_METADATA.empty:
+        return "❌ Error: Metadata not loaded."
+    
+    matches = search_datasets(dataset_name)
+    
+    if matches.empty:
+        return f"❌ No dataset found matching: '{dataset_name}'"
+    
+    dataset = matches.iloc[0]
+    title = dataset['title']
+    description = dataset.get('description', 'N/A')
+    stable_url = dataset.get('stable_url', 'N/A')
+    last_updated = dataset.get('last_updated', 'N/A')
+    
+    response = f"📊 Dataset: {title}\n"
+    response += f"{'=' * 50}\n\n"
+    response += f"📝 Description: {description}\n\n"
+    response += f"🔗 URL: {stable_url}\n"
+    response += f"📅 Last Updated: {last_updated}\n\n"
+    
+    # Try to fetch and inspect schema
+    if stable_url and stable_url != "N/A":
+        geojson_data = fetch_geojson_with_retry(stable_url)
+        
+        if geojson_data:
+            features = geojson_data.get('features', [])
+            response += f"📦 Total Features: {len(features)}\n\n"
+            
+            if features:
+                # Inspect first feature's properties
+                sample = features[0].get('properties', {})
+                response += "🔍 Available Fields:\n"
+                for key, value in list(sample.items())[:15]:
+                    val_type = type(value).__name__
+                    response += f"   • {key} ({val_type})\n"
+                
+                if len(sample) > 15:
+                    response += f"   ... and {len(sample) - 15} more fields\n"
+    
+    return response
+
+
+# ==========================================================================
+# Test Block
+# ==========================================================================
+if __name__ == "__main__":
+    print("\033[1m" + "=" * 60 + "\033[0m")
+    print("\033[1m🧪 Dados Abertos Tool Test\033[0m")
+    print("\033[1m" + "=" * 60 + "\033[0m")
+    
+    # Test 1: List datasets
+    print("\n\033[1m📂 Test 1: List Available Datasets\033[0m")
+    print("-" * 40)
+    result = list_available_datasets.invoke({"category": "saúde"})
+    print(result[:500] + "..." if len(result) > 500 else result)
+    
+    # Test 2: Find nearby services
+    print("\n\033[1m📍 Test 2: Find Nearby Services\033[0m")
+    print("-" * 40)
+    result = find_nearby_services.invoke({
+        "service_type": "farmácias",
+        "user_lat": Config.LISBON_LATITUDE,
+        "user_lon": Config.LISBON_LONGITUDE,
+        "max_results": 3
+    })
+    print(result)
+    
+    # Test 3: Get dataset details
+    print("\n\033[1m📊 Test 3: Dataset Details\033[0m")
+    print("-" * 40)
+    result = get_dataset_details.invoke({"dataset_name": "jardins"})
+    print(result)

@@ -1,0 +1,29 @@
+# ==========================================================================
+# Streamlit Configuration
+# Master Thesis - Lisbon Urban Assistant
+# ==========================================================================
+
+[server]
+# Disable file watcher to prevent PyTorch/Streamlit conflict
+# The torch.classes RuntimeError is a known issue between PyTorch and
+# Streamlit's file watching system. This setting prevents the error.
+fileWatcherType = "none"
+
+# Port configuration (optional, uses 8501 by default)
+# port = 8501
+
+[browser]
+# Disable usage statistics collection
+gatherUsageStats = false
+
+[theme]
+# Custom theme for Lisbon Urban Assistant
+primaryColor = "#667eeaff"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f5f5f5"
+textColor = "#333333"
+font = "sans serif"
+
+[logger]
+# Reduce log verbosity
+level = "warning"
