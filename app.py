@@ -498,6 +498,11 @@ section[data-testid="stSidebar"] button[kind="primary"]:hover {
     transition: all 0.2s ease;
 }
 
+[data-testid="stChatInput"] > div > div > div {
+    background: white !important;
+}
+
+
 [data-testid="stChatInput"] > div:focus-within {
     border-color: var(--lisbon-orange) !important;
     box-shadow: 0 0 0 3px rgba(255, 64, 17, 0.1) !important;
@@ -522,7 +527,7 @@ section[data-testid="stSidebar"] button[kind="primary"]:hover {
     left: 0;
     right: 0;
     height: 4px;
-    background: linear-gradient(90deg, var(--lisbon-orange), var(--lisbon-yellow), var(--lisbon-orange));
+    background: linear-gradient(90deg, var(--lisbon-orange), var(--lisbon-yellow));
 }
 
 .welcome-card h3 {
@@ -801,6 +806,19 @@ def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
     """Initialize or reinitialize the LisbonAssistant."""
     try:
         set_credentials_env()
+        
+        # Pre-warm the vector store to avoid delays during first tool call
+        # This loads the embedding model (~30s) before user interacts
+        if "vector_store_ready" not in st.session_state:
+            try:
+                from tools.visitlisboa_api import _get_vector_store
+                _get_vector_store()  # Force initialization
+                st.session_state.vector_store_ready = True
+            except Exception as e:
+                # Non-fatal: tools will use fallback if vector store fails
+                import logging
+                logging.warning(f"Vector store pre-warming failed: {e}")
+        
         st.session_state.assistant = create_assistant(provider)
         st.session_state.provider = provider
         st.session_state.initialized = True
@@ -851,12 +869,12 @@ def render_provider_credentials():
     st.markdown(f"### {t('llm_provider')}")
     
     provider_info = {
+        "lmstudio": ("LM Studio", "Local server (OpenAI-compatible)", "local"),
+        "ollama": ("Ollama", "Local Ollama models", "ollama"),
         "groq": ("Groq", "Fast inference with Qwen/Llama models", "api_key"),
         "google": ("Google Gemini", "Google's Gemini models", "api_key"),
         "openai": ("OpenAI", "GPT-4 and GPT-3.5 models", "api_key"),
         "azure": ("Azure OpenAI", "Enterprise Azure deployment", "azure"),
-        "lmstudio": ("LM Studio", "Local server (OpenAI-compatible)", "local"),
-        "ollama": ("Ollama", "Local Ollama models", "ollama"),
     }
     
     provider_names = [info[0] for info in provider_info.values()]
@@ -1090,7 +1108,7 @@ def render_chat_messages():
     """Render chat message history."""
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+            st.markdown(message["content"], unsafe_allow_html=True)
 
 
 def render_example_queries() -> Optional[str]:
@@ -1117,37 +1135,37 @@ def render_example_queries() -> Optional[str]:
     return selected
 
 
-def render_error_panel():
-    """Render error panel when initialization fails."""
-    st.error(t('error_not_initialized'))
+# def render_error_panel():
+#     """Render error panel when initialization fails."""
+#     st.error(t('error_not_initialized'))
     
-    with st.expander(t('error_troubleshooting'), expanded=True):
-        st.markdown(f"""
-**{t('error_common_issues')}**
+#     with st.expander(t('error_troubleshooting'), expanded=True):
+#         st.markdown(f"""
+# **{t('error_common_issues')}**
 
-1. **{t('error_missing_api')}**
-   - Groq: Get key from [console.groq.com](https://console.groq.com/keys)
-   - Google: Get key from [Google AI Studio](https://aistudio.google.com/app/apikey)
-   - OpenAI: Get key from [platform.openai.com](https://platform.openai.com/api-keys)
+# 1. **{t('error_missing_api')}**
+#    - Groq: Get key from [console.groq.com](https://console.groq.com/keys)
+#    - Google: Get key from [Google AI Studio](https://aistudio.google.com/app/apikey)
+#    - OpenAI: Get key from [platform.openai.com](https://platform.openai.com/api-keys)
 
-2. **{t('error_local_models')}**
-   - LM Studio: Start server on port 1234
-   - Ollama: Run 'ollama serve' and ensure model is downloaded
+# 2. **{t('error_local_models')}**
+#    - LM Studio: Start server on port 1234
+#    - Ollama: Run 'ollama serve' and ensure model is downloaded
 
-3. **{t('error_network')}**
-   - Check internet connection
-   - Verify firewall settings
-        """)
+# 3. **{t('error_network')}**
+#    - Check internet connection
+#    - Verify firewall settings
+#         """)
         
-        if st.session_state.error:
-            # Debug purpose only - show full error
-            st.code(st.session_state.error, language="text")
+#         if st.session_state.error:
+#             # Debug purpose only - show full error
+#             st.code(st.session_state.error, language="text")
     
-    if st.button(t('retry_init'), use_container_width=True, type="primary"):
-        with st.spinner("..."):
-            success, _ = initialize_assistant(st.session_state.provider)
-            if success:
-                st.rerun()
+#     if st.button(t('retry_init'), use_container_width=True, type="primary"):
+#         with st.spinner("..."):
+#             success, _ = initialize_assistant(st.session_state.provider)
+#             if success:
+#                 st.rerun()
 
 
 def process_user_input(user_input: str):
@@ -1176,13 +1194,24 @@ def process_user_input(user_input: str):
                 else:
                     error_msg = f"{t('error_generic')}\n\n{str(e)}"
                 
-                st.error(error_msg)
-                # Debug purpose only - uncomment to see full traceback
-                # st.code(traceback.format_exc())
+                # Format full error message with traceback
+                full_error_content = f"""
+### ⚠️ Error
+{error_msg}
+
+<details>
+<summary>Technical Details</summary>
+
+```python
+{traceback.format_exc()}
+```
+</details>
+"""
+                st.markdown(full_error_content, unsafe_allow_html=True)
                 
                 st.session_state.messages.append({
                     "role": "assistant", 
-                    "content": "Sorry, I encountered an error. Please check the message above."
+                    "content": full_error_content
                 })
 
 
@@ -1235,16 +1264,16 @@ def main():
     main_container = st.container()
     
     with main_container:
-        if not st.session_state.initialized:
-            with st.spinner("Starting Lisbon Urban Assistant..."):
-                success, _ = initialize_assistant(selected_provider)
-                if not success:
-                    render_error_panel()
-                    return
+        # if not st.session_state.initialized:
+        #     with st.spinner("Starting Lisbon Urban Assistant..."):
+        #         success, _ = initialize_assistant(selected_provider)
+        #         if not success:
+        #             render_error_panel()
+        #             return
         
-        if not st.session_state.assistant:
-            render_error_panel()
-            return
+        # if not st.session_state.assistant:
+        #     render_error_panel()
+        #     return
         
         render_chat_messages()
         

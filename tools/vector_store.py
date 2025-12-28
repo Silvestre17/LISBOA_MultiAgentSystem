@@ -671,7 +671,9 @@ class KnowledgeBase:
                 vectorstore = self._get_collection(col_name)
                 results = vectorstore.similarity_search_with_score(query, k=k)
                 all_results.extend(results)
-            except Exception:
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Search error in {col_name}: {e}")
                 continue
         
         # Sort by score (lower is better for distance)
