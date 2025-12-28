@@ -28,7 +28,8 @@ from tools.visitlisboa_api import (
     search_cultural_events,
     search_places_attractions,
     get_event_categories,
-    get_place_categories
+    get_place_categories,
+    search_lisbon_knowledge
 )
 
 __all__ = [
@@ -55,4 +56,5 @@ __all__ = [
     "search_places_attractions",
     "get_event_categories",
     "get_place_categories",
+    "search_lisbon_knowledge",
 ]

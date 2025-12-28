@@ -1,0 +1,50 @@
+# ==========================================================================
+# Master Thesis - Vector DB GitHub Action Dependencies
+#   - André Filipe Gomes Silvestre, 20240502
+#
+# Minimal requirements for vector store sync in GitHub Actions.
+# These packages are cached to avoid re-downloading on each run.
+#
+# Usage: pip install -r requirements_github_action_vectordb.txt
+#
+# Note: This uses CPU-only inference for GitHub Actions (no CUDA).
+#       The embedding model (BAAI/bge-m3) is ~600MB and will be cached.
+# ==========================================================================
+
+# -----------------------------------------------------------------------------
+# Core Dependencies
+# -----------------------------------------------------------------------------
+langchain-core>=0.3.0             # LangChain core abstractions
+langchain-community>=0.3.0        # Community integrations (PyPDFLoader)
+langchain-chroma>=0.1.0           # ChromaDB integration
+langchain-huggingface>=0.1.0      # HuggingFace embeddings
+langchain-text-splitters>=0.3.0   # Text splitting utilities
+
+# -----------------------------------------------------------------------------
+# Vector Database
+# -----------------------------------------------------------------------------
+chromadb>=1.0.0                   # Vector database
+
+# ChromaDB OpenTelemetry dependencies (pinned for compatibility)
+opentelemetry-api>=1.39.0
+opentelemetry-sdk>=1.39.0
+opentelemetry-exporter-otlp-proto-grpc>=1.39.0
+opentelemetry-exporter-otlp-proto-common>=1.39.0
+
+# -----------------------------------------------------------------------------
+# Embeddings & ML
+# -----------------------------------------------------------------------------
+sentence-transformers>=3.0.0      # Embedding models
+torch>=2.0.0                      # PyTorch (CPU version for Actions)
+transformers>=4.40.0              # HuggingFace transformers
+
+# -----------------------------------------------------------------------------
+# Document Processing
+# -----------------------------------------------------------------------------
+pypdf>=4.0.0                      # PDF text extraction
+
+# -----------------------------------------------------------------------------
+# Utilities
+# -----------------------------------------------------------------------------
+tqdm>=4.66.0                      # Progress bars
+python-dotenv>=1.0.0              # Environment variables
