@@ -8,6 +8,7 @@
 # The torch.classes RuntimeError is a known issue between PyTorch and
 # Streamlit's file watching system. This setting prevents the error.
 fileWatcherType = "none"
+runOnSave = true
 
 # Port configuration (optional, uses 8501 by default)
 # port = 8501
@@ -18,7 +19,7 @@ gatherUsageStats = false
 
 [theme]
 # Custom theme for Lisbon Urban Assistant
-primaryColor = "#667eeaff"
+primaryColor = "#f6da00"
 backgroundColor = "#ffffff"
 secondaryBackgroundColor = "#f5f5f5"
 textColor = "#333333"
