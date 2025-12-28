@@ -27,7 +27,7 @@
 # ==========================================================================
 
 # Required libraries:
-# pip install langchain-chroma langchain-huggingface pypdf langchain-community
+# pip install langchain-chroma langchain-huggingface pypdf langchain-community tqdm
 
 import os
 import sys
@@ -36,30 +36,19 @@ import shutil
 import stat
 import warnings
 from typing import List, Optional
+from tqdm import tqdm
 
 # Suppress opentelemetry warnings that may arise from version conflicts
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="opentelemetry")
 os.environ["OTEL_SDK_DISABLED"] = "true"  # Disable OpenTelemetry SDK entirely
 
 # Import ChromaDB with error handling for version conflicts
-try:
-    from langchain_chroma import Chroma
-    from langchain_huggingface import HuggingFaceEmbeddings
-    from langchain_core.documents import Document
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-    from langchain_community.document_loaders import PyPDFLoader
-    CHROMADB_AVAILABLE = True
-except ImportError as e:
-    print(f"\033[1;33m⚠️ Warning:\033[0m ChromaDB/dependencies not fully available: {e}")
-    print("   Vector store functionality will be limited.")
-    print("   Try: pip install langchain-chroma langchain-huggingface")
-    CHROMADB_AVAILABLE = False
-    # Define placeholders for type hints
-    Chroma = None
-    HuggingFaceEmbeddings = None
-    Document = None
-    RecursiveCharacterTextSplitter = None
-    PyPDFLoader = None
+from langchain_chroma import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import PyPDFLoader
+CHROMADB_AVAILABLE = True
 
 # Add parent directory to sys.path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -298,15 +287,38 @@ class KnowledgeBase:
             return False
         
         print(f"\n\033[1m📊 Total documents to index:\033[0m {len(all_docs)}")
-        print("   Creating embeddings and storing in ChromaDB...")
+        print("   Creating embeddings and storing in ChromaDB...\n")
 
-        # Create ChromaDB with all documents
-        # This automatically handles batching to prevent memory issues
-        Chroma.from_documents(
-            documents=all_docs,
-            embedding=self.embeddings,
-            persist_directory=self.vector_db_path
+        # Process documents in batches with progress tracking
+        # Batch size of 100 balances progress visibility with performance
+        batch_size = 100
+        vectorstore = None
+        
+        # Create progress bar
+        pbar = tqdm(
+            total=len(all_docs),
+            desc="   🔄 Indexing",
+            unit="docs",
+            bar_format="   {desc}: {percentage:3.0f}%|{bar:30}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
         )
+        
+        for i in range(0, len(all_docs), batch_size):
+            batch = all_docs[i:i + batch_size]
+            
+            if vectorstore is None:
+                # First batch: create new ChromaDB
+                vectorstore = Chroma.from_documents(
+                    documents=batch,
+                    embedding=self.embeddings,
+                    persist_directory=self.vector_db_path
+                )
+            else:
+                # Subsequent batches: add to existing
+                vectorstore.add_documents(batch)
+            
+            pbar.update(len(batch))
+        
+        pbar.close()
         
         print("\n\033[1;32m🎉 Vector Store built successfully!\033[0m")
         print(f"   Location: {self.vector_db_path}")
