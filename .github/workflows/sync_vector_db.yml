@@ -1,0 +1,214 @@
+# ==========================================================================
+# Master Thesis - Vector Store Sync Workflow
+#   - André Filipe Gomes Silvestre, 20240502
+#
+# Automatically syncs the vector database when JSON data files change.
+# This workflow triggers after the data pipeline completes.
+#
+# Strategy:
+#   1. Uses CPU-only inference (no GPU available in GitHub Actions)
+#   2. Caches pip packages and HuggingFace models to reduce runtime
+#   3. Only syncs places and events collections (PDF is static)
+#   4. Commits the updated vector_db to the repository
+#
+# Cache sizes (approximate):
+#   - pip packages: ~2GB
+#   - HuggingFace model (bge-m3): ~600MB
+#   - Total: ~2.6GB (within GitHub Pro's 10GB limit)
+#
+# Runtime (estimated):
+#   - First run (no cache): ~20-30 minutes
+#   - Cached run (no changes): ~2-3 minutes
+#   - Cached run (with changes): ~5-15 minutes (depends on changes)
+# ==========================================================================
+
+name: Sync Vector Database
+
+on:
+  # Trigger after data pipeline completes
+  workflow_run:
+    workflows: ["Update Lisbon Data"]
+    types:
+      - completed
+  
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      rebuild_events:
+        description: 'Force rebuild events collection'
+        required: false
+        default: false
+        type: boolean
+      rebuild_places:
+        description: 'Force rebuild places collection'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  PYTHON_VERSION: '3.10'
+  # Disable telemetry for faster startup
+  OTEL_SDK_DISABLED: 'true'
+  ANONYMIZED_TELEMETRY: 'false'
+  CHROMA_TELEMETRY: 'false'
+  # HuggingFace cache directory
+  HF_HOME: ${{ github.workspace }}/.cache/huggingface
+
+jobs:
+  sync-vector-db:
+    # Only run if previous workflow succeeded (or manual trigger)
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      # =====================================================================
+      # Setup
+      # =====================================================================
+      
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          # Fetch all history for proper git operations
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # =====================================================================
+      # Caching (Critical for Performance)
+      # =====================================================================
+      
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        id: cache-pip
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-vectordb-${{ hashFiles('requirements_github_action_vectordb.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-vectordb-
+
+      - name: Cache HuggingFace models
+        uses: actions/cache@v4
+        id: cache-hf
+        with:
+          path: ${{ env.HF_HOME }}
+          key: ${{ runner.os }}-hf-bge-m3-v1
+          restore-keys: |
+            ${{ runner.os }}-hf-bge-m3-
+
+      # =====================================================================
+      # Install Dependencies
+      # =====================================================================
+      
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements_github_action_vectordb.txt
+          echo "✅ Dependencies installed"
+
+      # =====================================================================
+      # Check for Data Changes
+      # =====================================================================
+      
+      - name: Check if JSON files changed
+        id: check-changes
+        run: |
+          # Get the last commit that modified JSON files
+          EVENTS_CHANGED=$(git diff --name-only HEAD~1 HEAD -- 'data_collection/webscraping/events.json' | wc -l)
+          PLACES_CHANGED=$(git diff --name-only HEAD~1 HEAD -- 'data_collection/webscraping/places.json' | wc -l)
+          
+          echo "events_changed=$EVENTS_CHANGED" >> $GITHUB_OUTPUT
+          echo "places_changed=$PLACES_CHANGED" >> $GITHUB_OUTPUT
+          
+          if [ "$EVENTS_CHANGED" -gt 0 ] || [ "$PLACES_CHANGED" -gt 0 ]; then
+            echo "changes_detected=true" >> $GITHUB_OUTPUT
+            echo "📝 Data changes detected"
+          else
+            echo "changes_detected=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ No data changes detected"
+          fi
+
+      # =====================================================================
+      # Sync Vector Store
+      # =====================================================================
+      
+      - name: Sync Vector Database
+        if: steps.check-changes.outputs.changes_detected == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          echo "============================================================"
+          echo "🔄 Starting Vector Store Sync"
+          echo "============================================================"
+          
+          # Build sync command with optional force rebuild flags
+          SYNC_CMD="python tools/vector_store.py --no-gpu"
+          
+          if [ "${{ github.event.inputs.rebuild_events }}" == "true" ]; then
+            SYNC_CMD="$SYNC_CMD --rebuild-events"
+            echo "⚠️ Force rebuilding events collection"
+          fi
+          
+          if [ "${{ github.event.inputs.rebuild_places }}" == "true" ]; then
+            SYNC_CMD="$SYNC_CMD --rebuild-places"
+            echo "⚠️ Force rebuilding places collection"
+          fi
+          
+          echo "Running: $SYNC_CMD"
+          $SYNC_CMD
+          
+          echo "============================================================"
+          echo "📊 Sync completed"
+          echo "============================================================"
+
+      - name: Show Vector DB Stats
+        if: steps.check-changes.outputs.changes_detected == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          python tools/vector_store.py --stats --no-gpu
+
+      # =====================================================================
+      # Commit Changes
+      # =====================================================================
+      
+      - name: Commit Vector Database Changes
+        if: steps.check-changes.outputs.changes_detected == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Add vector database files
+          git add data/vector_db/
+          
+          # Check for changes before committing
+          if git diff --staged --quiet; then
+            echo "ℹ️ No vector DB changes to commit"
+          else
+            COMMIT_MSG="Vector DB Sync: $(date +'%Y-%m-%d %H:%M')"
+            
+            # Add details about what was synced
+            if [ "${{ steps.check-changes.outputs.events_changed }}" -gt 0 ]; then
+              COMMIT_MSG="$COMMIT_MSG [events]"
+            fi
+            if [ "${{ steps.check-changes.outputs.places_changed }}" -gt 0 ]; then
+              COMMIT_MSG="$COMMIT_MSG [places]"
+            fi
+            
+            git commit -m "$COMMIT_MSG"
+            git push
+            echo "✅ Vector database committed and pushed"
+          fi
+
+      # =====================================================================
+      # Skip notification
+      # =====================================================================
+      
+      - name: Skip Notification
+        if: steps.check-changes.outputs.changes_detected == 'false' && github.event_name != 'workflow_dispatch'
+        run: |
+          echo "ℹ️ Skipped: No JSON data changes detected"
+          echo "Vector database is already up-to-date"

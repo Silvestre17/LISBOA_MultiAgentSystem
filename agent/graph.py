@@ -50,7 +50,8 @@ from tools.visitlisboa_api import (
     search_cultural_events,
     search_places_attractions,
     get_event_categories,
-    get_place_categories
+    get_place_categories,
+    search_lisbon_knowledge
 )
 
 
@@ -84,11 +85,12 @@ def get_all_tools() -> List:
         list_available_datasets,
         get_dataset_details,
         
-        # VisitLisboa Tools (Events & Places)
+        # VisitLisboa Tools (Events & Places) - Semantic Search
         search_cultural_events,
         search_places_attractions,
         get_event_categories,
         get_place_categories,
+        search_lisbon_knowledge,  # Comprehensive RAG search
     ]
 
 

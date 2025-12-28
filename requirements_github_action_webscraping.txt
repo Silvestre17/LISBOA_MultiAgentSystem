@@ -1,5 +1,26 @@
-requests
-beautifulsoup4
-pandas
-lxml
-tqdm
+# ==========================================================================
+# Master Thesis - Webscraping GitHub Action Dependencies
+#   - André Filipe Gomes Silvestre, 20240502
+#
+# Minimal requirements for VisitLisboa webscraping in GitHub Actions.
+# Scrapes events and places data from visitlisboa.com
+#
+# Usage: pip install -r requirements_github_action_webscraping.txt
+# ==========================================================================
+
+# -----------------------------------------------------------------------------
+# HTTP & Web Scraping
+# -----------------------------------------------------------------------------
+requests                          # HTTP requests
+beautifulsoup4                    # HTML parsing
+lxml                              # Fast XML/HTML parser (BS4 backend)
+
+# -----------------------------------------------------------------------------
+# Data Processing
+# -----------------------------------------------------------------------------
+pandas                            # Data manipulation
+
+# -----------------------------------------------------------------------------
+# Utilities
+# -----------------------------------------------------------------------------
+tqdm                              # Progress bars
