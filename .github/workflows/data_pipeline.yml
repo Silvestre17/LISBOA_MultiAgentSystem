@@ -2,9 +2,10 @@ name: Update Lisbon Data
 
 on:
   schedule:
-    # TEMP TEST: 15:00 UTC (15h em Portugal no inverno)
-    # TODO: Voltar para '0 4 * * *' após teste!
-    - cron: '0 15 * * *'
+    # Daily at 04:00 AM UTC
+    # - Events: Every day
+    # - Places: Only on Mondays (controlled by if logic below)
+    - cron: '0 4 * * *'
   
   # Allows manual run via GitHub "Run workflow" button
   workflow_dispatch:
