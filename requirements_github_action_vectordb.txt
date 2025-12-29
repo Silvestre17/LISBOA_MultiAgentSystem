@@ -35,8 +35,14 @@ opentelemetry-exporter-otlp-proto-common>=1.39.0
 # Embeddings & ML
 # -----------------------------------------------------------------------------
 sentence-transformers>=3.0.0      # Embedding models
-torch>=2.0.0                      # PyTorch (CPU version for Actions)
 transformers>=4.40.0              # HuggingFace transformers
+
+# -----------------------------------------------------------------------------
+# PyTorch CPU-only (CRITICAL: Must be installed from CPU index)
+# The default torch package includes CUDA (~3GB), which exceeds GitHub Actions disk space.
+# Install separately with: pip install torch --index-url https://download.pytorch.org/whl/cpu
+# -----------------------------------------------------------------------------
+# torch is installed via workflow command, not here
 
 # -----------------------------------------------------------------------------
 # Document Processing
