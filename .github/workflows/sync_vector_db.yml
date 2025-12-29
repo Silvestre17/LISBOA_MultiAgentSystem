@@ -67,7 +67,7 @@ jobs:
 
     steps:
       # =====================================================================
-      # Free Disk Space (Required for ML dependencies)
+      # Free Disk Space (Required for ML dependencies ~15GB freed)
       # =====================================================================
       
       - name: Free Disk Space
@@ -75,11 +75,17 @@ jobs:
           echo "📊 Disk space before cleanup:"
           df -h /
           
-          # Remove unnecessary large packages
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          # Remove unnecessary large packages (saves ~15GB)
+          sudo rm -rf /usr/share/dotnet              # ~6GB
+          sudo rm -rf /usr/local/lib/android         # ~6GB
+          sudo rm -rf /opt/ghc                       # ~2GB
+          sudo rm -rf /opt/hostedtoolcache/CodeQL    # ~1GB
+          sudo rm -rf /usr/share/swift               # ~1GB
+          sudo rm -rf /usr/local/share/powershell    # ~500MB
+          sudo rm -rf /usr/local/.ghcup              # ~500MB
+          
+          # Clean apt cache
+          sudo apt-get clean
           
           echo "📊 Disk space after cleanup:"
           df -h /
