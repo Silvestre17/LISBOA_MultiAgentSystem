@@ -67,6 +67,24 @@ jobs:
 
     steps:
       # =====================================================================
+      # Free Disk Space (Required for ML dependencies)
+      # =====================================================================
+      
+      - name: Free Disk Space
+        run: |
+          echo "📊 Disk space before cleanup:"
+          df -h /
+          
+          # Remove unnecessary large packages
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          
+          echo "📊 Disk space after cleanup:"
+          df -h /
+
+      # =====================================================================
       # Setup
       # =====================================================================
       
@@ -110,7 +128,16 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
+          
+          # Install PyTorch CPU-only FIRST (before other packages that depend on it)
+          # This avoids downloading the 3GB+ CUDA version
+          echo "📦 Installing PyTorch (CPU-only)..."
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          
+          # Install remaining dependencies
+          echo "📦 Installing other dependencies..."
           pip install -r requirements_github_action_vectordb.txt
+          
           echo "✅ Dependencies installed"
 
       # =====================================================================
