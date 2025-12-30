@@ -7,10 +7,10 @@
 #   regardless of the underlying provider (cloud or local).
 # 
 #   Supported Providers:
-#     - Groq:     High-speed inference API (Default: qwen/qwen3-4b-2507)
+#     - LMStudio: Local server with OpenAI-compatible API (Default: qwen/qwen3-4b-2507)
+#     - Groq:     High-speed inference API (qwen/llama models)
 #     - Google:   Google AI Studio (Gemini models)
 #     - OpenAI:   OpenAI API (GPT models)
-#     - LMStudio: Local server with OpenAI-compatible API
 #     - Ollama:   Local model execution
 # 
 #   Design Pattern: Factory Pattern
@@ -48,10 +48,10 @@ class LLMFactory:
     API key validation, provider-specific configuration, and error messages.
     
     Supported Providers:
+        - lmstudio: Local OpenAI-compatible server (recommended for development)
         - groq: High-speed cloud inference (recommended for production)
         - google: Google's Gemini models via AI Studio
         - openai: OpenAI's GPT models
-        - lmstudio: Local OpenAI-compatible server (for development)
         - ollama: Local model execution (for offline use)
     
     Attributes:
@@ -85,10 +85,10 @@ class LLMFactory:
         
         Args:
             provider (str): The LLM provider to use. Options:
-                - 'groq': Groq cloud API (fast inference, recommended)
+                - 'lmstudio': Local LM Studio server (recommended for development)
+                - 'groq': Groq cloud API (fast inference, recommended for production)
                 - 'google': Google AI Studio (Gemini models)
                 - 'openai': OpenAI API (GPT models)
-                - 'lmstudio': Local LM Studio server
                 - 'ollama': Local Ollama server
                 Default: Config.MODEL_PROVIDER (from config.py)
             
@@ -115,13 +115,31 @@ class LLMFactory:
         provider = provider.lower().strip()
         
         # =====================================================================
-        # PROVIDER 1: GROQ (Default - High-speed inference)
+        # PROVIDER 1: LM STUDIO (Default - Local OpenAI-compatible server)
+        # =====================================================================
+        # LM Studio provides a local server with OpenAI-compatible API.
+        # Recommended for: Development, offline use, privacy-sensitive data
+        # Setup: Download LM Studio, load a model, start local server
+        # Default URL: http://localhost:1234/v1
+        if provider == "lmstudio":
+            # Import OpenAI integration (LM Studio uses OpenAI-compatible API)
+            from langchain_openai import ChatOpenAI
+            
+            return ChatOpenAI(
+                model=Config.LMSTUDIO_MODEL_NAME,  # e.g., "qwen/qwen3-4b-2507"
+                temperature=temperature,
+                base_url=Config.LMSTUDIO_BASE_URL,  # e.g., "http://localhost:1234/v1"
+                api_key="lm-studio"  # LM Studio ignores API key, any string works
+            )
+        
+        # =====================================================================
+        # PROVIDER 2: GROQ (High-speed inference)
         # =====================================================================
         # Groq provides extremely fast inference for open-source models.
         # Recommended for: Production use, real-time chat applications
         # Models available: Qwen, Llama, Mixtral
         # Free tier: 14,400 requests/day
-        if provider == "groq":
+        elif provider == "groq":
             # Validate API key exists
             if not Config.GROQ_API_KEY:
                 raise ValueError(
@@ -134,13 +152,13 @@ class LLMFactory:
             from langchain_groq import ChatGroq
             
             return ChatGroq(
-                model_name=Config.GROQ_MODEL_NAME,  # e.g., "qwen/qwen3-4b-2507"
+                model_name=Config.GROQ_MODEL_NAME,  # e.g., "llama-3.3-70b-versatile"
                 temperature=temperature,
                 api_key=Config.GROQ_API_KEY
             )
         
         # =====================================================================
-        # PROVIDER 2: GOOGLE (Gemini models)
+        # PROVIDER 3: GOOGLE (Gemini models)
         # =====================================================================
         # Google AI Studio provides access to Gemini models.
         # Recommended for: Tasks requiring multimodal capabilities
@@ -168,7 +186,7 @@ class LLMFactory:
             )
         
         # =====================================================================
-        # PROVIDER 3: OPENAI (GPT models)
+        # PROVIDER 4: OPENAI (GPT models)
         # =====================================================================
         # OpenAI API provides access to GPT models.
         # Recommended for: Tasks requiring highest quality outputs
@@ -190,24 +208,6 @@ class LLMFactory:
                 model=Config.OPENAI_MODEL_NAME,  # e.g., "gpt-4o-mini"
                 temperature=temperature,
                 api_key=Config.OPENAI_API_KEY
-            )
-        
-        # =====================================================================
-        # PROVIDER 4: LM STUDIO (Local OpenAI-compatible server)
-        # =====================================================================
-        # LM Studio provides a local server with OpenAI-compatible API.
-        # Recommended for: Development, offline use, privacy-sensitive data
-        # Setup: Download LM Studio, load a model, start local server
-        # Default URL: http://localhost:1234/v1
-        elif provider == "lmstudio":
-            # Import OpenAI integration (LM Studio uses OpenAI-compatible API)
-            from langchain_openai import ChatOpenAI
-            
-            return ChatOpenAI(
-                model=Config.LMSTUDIO_MODEL_NAME,  # e.g., "openai/gpt-oss-20b"
-                temperature=temperature,
-                base_url=Config.LMSTUDIO_BASE_URL,  # e.g., "http://localhost:1234/v1"
-                api_key="lm-studio"  # LM Studio ignores API key, any string works
             )
         
         # =====================================================================
@@ -233,7 +233,7 @@ class LLMFactory:
         else:
             raise ValueError(
                 f"\033[1;31m❌ Unsupported provider: '{provider}'\033[0m\n"
-                f"   Supported providers: groq, google, openai, lmstudio, ollama\n"
+                f"   Supported providers: lmstudio, groq, google, openai, ollama\n"
                 f"   Default provider: {Config.MODEL_PROVIDER}"
             )
     
