@@ -19,7 +19,8 @@
 # Runtime (estimated):
 #   - First run (no cache): ~20-30 minutes
 #   - Cached run (no changes): ~2-3 minutes
-#   - Cached run (with changes): ~5-15 minutes (depends on changes)
+#   - Cached run (with changes): ~57 minutes/200 docs (observed: ~17s/doc)
+#   - Max per workflow run: 2000 docs (10 iterations × 200 docs)
 # ==========================================================================
 
 name: Sync Vector Database
@@ -194,22 +195,27 @@ jobs:
           
           echo "Running: $SYNC_CMD"
           
-          # Run sync multiple times if needed (processes 300 docs per iteration)
+          # Run sync multiple times if needed (processes 200 docs per iteration)
+          # MAX_DOCS_PER_RUN=200 (defined in vector_store.py)
+          # Total capacity: 10 iterations × 200 docs = 2000 docs max
           MAX_ITERATIONS=10
           for i in $(seq 1 $MAX_ITERATIONS); do
             echo ""
             echo "🔄 Iteration $i/$MAX_ITERATIONS"
-            $SYNC_CMD
             
-            # Check if there are still pending updates
-            # (script will show "No changes detected" when done)
-            if ! $SYNC_CMD --check-only 2>&1 | grep -q "Modified:.*[1-9]"; then
+            # Capture output to check for completion
+            OUTPUT=$($SYNC_CMD 2>&1 | tee /dev/tty)
+            
+            # If script reports no changes, we're done
+            if echo "$OUTPUT" | grep -q "No changes detected"; then
               echo "✅ All documents processed!"
               break
             fi
             
+            # If we've hit max iterations, warn user
             if [ $i -eq $MAX_ITERATIONS ]; then
-              echo "⚠️ Reached max iterations. Run workflow again to continue."
+              echo "⚠️ Reached max iterations ($MAX_ITERATIONS)."
+              echo "   If more documents remain, run workflow again to continue."
             fi
           done
           
