@@ -63,7 +63,7 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 360  # 6 hours max
 
     steps:
       # =====================================================================
@@ -193,7 +193,25 @@ jobs:
           fi
           
           echo "Running: $SYNC_CMD"
-          $SYNC_CMD
+          
+          # Run sync multiple times if needed (processes 300 docs per iteration)
+          MAX_ITERATIONS=10
+          for i in $(seq 1 $MAX_ITERATIONS); do
+            echo ""
+            echo "🔄 Iteration $i/$MAX_ITERATIONS"
+            $SYNC_CMD
+            
+            # Check if there are still pending updates
+            # (script will show "No changes detected" when done)
+            if ! $SYNC_CMD --check-only 2>&1 | grep -q "Modified:.*[1-9]"; then
+              echo "✅ All documents processed!"
+              break
+            fi
+            
+            if [ $i -eq $MAX_ITERATIONS ]; then
+              echo "⚠️ Reached max iterations. Run workflow again to continue."
+            fi
+          done
           
           echo "============================================================"
           echo "📊 Sync completed"

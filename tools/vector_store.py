@@ -511,10 +511,17 @@ class KnowledgeBase:
         # Add new and modified documents
         ids_to_add = list(new_ids | modified_ids)
         if ids_to_add:
+            # Limit to 200 docs/run to stay under 60min timeout (observed: ~17s/doc = 57min total)
+            MAX_DOCS_PER_RUN = 200
+            if len(ids_to_add) > MAX_DOCS_PER_RUN:
+                print(f"   ⚠️ Limiting to {MAX_DOCS_PER_RUN} docs (total: {len(ids_to_add)}). Run again to process remaining.")
+                ids_to_add = ids_to_add[:MAX_DOCS_PER_RUN]
+            
             docs_to_add = [current_docs[doc_id] for doc_id in ids_to_add]
             
             # Process in batches with progress bar
-            batch_size = 50
+            # Larger batches reduce overhead (speed bottleneck is embedding, not batching)
+            batch_size = 250
             total_batches = (len(docs_to_add) + batch_size - 1) // batch_size
             
             if total_batches > 1:
