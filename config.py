@@ -115,31 +115,32 @@ class Config:
     # MODEL NAMES
     # =========================================================================
     
-    # Google Gemini model (Free tier via AI Studio)
-    # Options: gemini-2.0-flash-exp, gemini-1.5-pro, gemini-1.5-flash
-    GOOGLE_MODEL_NAME = "gemini-2.0-flash-exp"
+    # Google Gemini model
+    # Options: gemini-3-pro, gemini-3-flash, gemini-2.5-pro, gemini-2.5-flash e gemini-2.5-flash-lite
+    GOOGLE_MODEL_NAME = "gemini-3-flash"
     
-    # OpenAI GPT model (Standard API or Azure)
-    # Options: gpt-4o-mini, gpt-4o, gpt-4-turbo, gpt-3.5-turbo
-    OPENAI_MODEL_NAME = "gpt-4o-mini"
+    # OpenAI GPT model
+    # Options: gpt-5.2, gpt-5.1, gpt-5, gpt-5-mini
+    OPENAI_MODEL_NAME = "gpt-5-mini"
     
     # Groq model (High-speed inference for open models)
-    # Available models (as of Dec 2024):
-    #   - llama-3.3-70b-versatile (RECOMMENDED - best tool calling support)
-    #   - qwen/qwen3-32b (fast, but weaker at tool calling)
-    #   - llama-3.1-8b-instant (fastest, less capable)
-    #   - meta-llama/llama-4-maverick-17b-128e-instruct (newest)
+    # Available models for tool calling (as of Dec 2025):
+    #   - openai/gpt-oss-120b AND openai/gpt-oss-20b
+    #   - meta-llama/llama-4-scout-17b-16e-instruct
+    #   - qwen/qwen3-32b
+    #   - moonshotai/kimi-k2-instruct-0905
     # Check available models: https://console.groq.com/docs/models
     GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
     
     # LM Studio model (Local server on port 1234)
     # Set to match the model loaded in your local LM Studio instance
-    LMSTUDIO_MODEL_NAME = "openai/gpt-oss-20b"
-    # LMSTUDIO_MODEL_NAME = "qwen/qwen3-4b-2507"
+    # LMSTUDIO_MODEL_NAME = 'openai/gpt-oss-20b'
+    LMSTUDIO_MODEL_NAME = "qwen/qwen3-4b-2507"
     LMSTUDIO_BASE_URL = "http://localhost:1234/v1"
     
     # Ollama model (Local model execution)
     # Requires: ollama pull qwen2.5:7b && ollama serve
+    # OLLAMA_MODEL_NAME = "qwen/qwen2.5:7b"
     OLLAMA_MODEL_NAME = "openai/gpt-oss-20b"
     
     # =========================================================================

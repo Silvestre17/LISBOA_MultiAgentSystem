@@ -58,10 +58,11 @@
 - **Streamlit**: Web interface (v1.30.0+)
 
 ### LLM Providers
-- **Groq** (Default): qwen/qwen3-4b-2507
-- **Google**: gemini-2.0-flash-exp
-- **OpenAI**: gpt-4o-mini
-- **Local**: LM Studio, Ollama
+- **LM Studio** (Default): qwen/qwen3-4b-2507 (local)
+- **Groq**: llama-3.3-70b-versatile (cloud)
+- **Google**: gemini-2.0-flash-exp (cloud)
+- **OpenAI**: gpt-4o-mini (cloud)
+- **Ollama**: Any local model
 
 ### Data Layer
 - **ChromaDB**: Vector database (v1.0.0+)
@@ -325,8 +326,23 @@ Transport routing with:
 
 #### Supported Providers
 
-##### 1. Groq (Default)
+##### 1. LM Studio (Default)
 **Model**: `qwen/qwen3-4b-2507`  
+**Type**: Local OpenAI-compatible server  
+**Privacy**: Full offline, no API key required  
+**Setup**: Download LM Studio, load model, start server on port 1234
+
+```python
+from agent.llm_factory import LLMFactory
+
+llm = LLMFactory.get_llm()  # Uses default (lmstudio)
+# or explicitly:
+llm = LLMFactory.get_llm(provider="lmstudio")
+```
+
+##### 2. Groq
+##### 2. Groq
+**Model**: `llama-3.3-70b-versatile`  
 **Speed**: Extremely fast  
 **Free Tier**: 14,400 requests/day  
 
@@ -336,7 +352,8 @@ from agent.llm_factory import LLMFactory
 llm = LLMFactory.get_llm(provider="groq")
 ```
 
-##### 2. Google
+##### 3. Google
+##### 3. Google
 **Model**: `gemini-2.0-flash-exp`  
 **Features**: Multimodal  
 **Free Tier**: 60 requests/minute  
@@ -345,21 +362,14 @@ llm = LLMFactory.get_llm(provider="groq")
 llm = LLMFactory.get_llm(provider="google")
 ```
 
-##### 3. OpenAI
+##### 4. OpenAI
+##### 4. OpenAI
 **Model**: `gpt-4o-mini`  
 **Quality**: Highest  
 **Pricing**: Pay-per-use  
 
 ```python
 llm = LLMFactory.get_llm(provider="openai")
-```
-
-##### 4. LM Studio (Local)
-**Server**: http://localhost:1234/v1  
-**Privacy**: Full offline  
-
-```python
-llm = LLMFactory.get_llm(provider="lmstudio")
 ```
 
 ##### 5. Ollama (Local)

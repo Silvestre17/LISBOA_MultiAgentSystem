@@ -758,7 +758,7 @@ def initialize_session_state():
     defaults = {
         "messages": [],
         "assistant": None,
-        "provider": "groq",
+        "provider": "lmstudio",
         "initialized": False,
         "error": None,
         "language": "en",
@@ -767,12 +767,7 @@ def initialize_session_state():
             "groq": {"api_key": os.getenv("GROQ_API_KEY", "")},
             "google": {"api_key": os.getenv("GOOGLE_API_KEY", "")},
             "openai": {"api_key": os.getenv("OPENAI_API_KEY", "")},
-            "azure": {
-                "api_key": os.getenv("AZURE_OPENAI_API_KEY", ""),
-                "endpoint": os.getenv("AZURE_OPENAI_ENDPOINT", ""),
-                "deployment": os.getenv("AZURE_OPENAI_DEPLOYMENT", ""),
-            },
-            "lmstudio": {"base_url": "http://localhost:1234/v1"},
+            "lmstudio": {"base_url": "http://localhost:1234/v1", "model": "qwen/qwen3-4b-2507"},
             "ollama": {"model": "llama3.2"},
         },
     }
@@ -793,13 +788,6 @@ def set_credentials_env():
         os.environ["GOOGLE_API_KEY"] = creds["google"]["api_key"]
     elif provider == "openai" and creds["openai"]["api_key"]:
         os.environ["OPENAI_API_KEY"] = creds["openai"]["api_key"]
-    elif provider == "azure":
-        if creds["azure"]["api_key"]:
-            os.environ["AZURE_OPENAI_API_KEY"] = creds["azure"]["api_key"]
-        if creds["azure"]["endpoint"]:
-            os.environ["AZURE_OPENAI_ENDPOINT"] = creds["azure"]["endpoint"]
-        if creds["azure"]["deployment"]:
-            os.environ["AZURE_OPENAI_DEPLOYMENT"] = creds["azure"]["deployment"]
 
 
 def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
@@ -871,10 +859,9 @@ def render_provider_credentials():
     provider_info = {
         "lmstudio": ("LM Studio", "Local server (OpenAI-compatible)", "local"),
         "ollama": ("Ollama", "Local Ollama models", "ollama"),
-        "groq": ("Groq", "Fast inference with Qwen/Llama models", "api_key"),
+        "groq": ("Groq", "Fast inference with Qwen/Llama", "api_key"),
         "google": ("Google Gemini", "Google's Gemini models", "api_key"),
         "openai": ("OpenAI", "GPT-4 and GPT-3.5 models", "api_key"),
-        "azure": ("Azure OpenAI", "Enterprise Azure deployment", "azure"),
     }
     
     provider_names = [info[0] for info in provider_info.values()]
@@ -909,43 +896,26 @@ def render_provider_credentials():
             st.session_state.credentials[selected_provider]["api_key"] = api_key
             credentials_changed = True
             
-    elif provider_type == "azure":
-        api_key = st.text_input(
-            t("api_key"),
-            value=st.session_state.credentials["azure"].get("api_key", ""),
-            type="password",
-            placeholder=t("api_key_placeholder"),
-            key="azure_api_key"
-        )
-        endpoint = st.text_input(
-            "Endpoint URL",
-            value=st.session_state.credentials["azure"].get("endpoint", ""),
-            placeholder="https://your-resource.openai.azure.com/",
-            key="azure_endpoint"
-        )
-        deployment = st.text_input(
-            "Deployment Name",
-            value=st.session_state.credentials["azure"].get("deployment", ""),
-            placeholder="gpt-4",
-            key="azure_deployment"
-        )
-        if (api_key != st.session_state.credentials["azure"]["api_key"] or
-            endpoint != st.session_state.credentials["azure"]["endpoint"] or
-            deployment != st.session_state.credentials["azure"]["deployment"]):
-            st.session_state.credentials["azure"] = {
-                "api_key": api_key, "endpoint": endpoint, "deployment": deployment
-            }
-            credentials_changed = True
-            
     elif provider_type == "local":
-        base_url = st.text_input(
-            t("local_url"),
-            value=st.session_state.credentials["lmstudio"].get("base_url", "http://localhost:1234/v1"),
-            placeholder=t("local_url_placeholder"),
-            key="lmstudio_url"
-        )
-        if base_url != st.session_state.credentials["lmstudio"]["base_url"]:
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            base_url = st.text_input(
+                t("local_url"),
+                value=st.session_state.credentials["lmstudio"].get("base_url", "http://localhost:1234/v1"),
+                placeholder=t("local_url_placeholder"),
+                key="lmstudio_url"
+            )
+        with col2:
+            model = st.text_input(
+                t("model_name"),
+                value=st.session_state.credentials["lmstudio"].get("model", "qwen/qwen3-4b-2507"),
+                placeholder="qwen/qwen3-4b-2507",
+                key="lmstudio_model"
+            )
+        if (base_url != st.session_state.credentials["lmstudio"].get("base_url", "") or 
+            model != st.session_state.credentials["lmstudio"].get("model", "")):
             st.session_state.credentials["lmstudio"]["base_url"] = base_url
+            st.session_state.credentials["lmstudio"]["model"] = model
             credentials_changed = True
             
     elif provider_type == "ollama":

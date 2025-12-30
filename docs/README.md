@@ -70,7 +70,7 @@ docs/
 - **ReAct Pattern**: Reasoning and Acting paradigm
 - **Tool-based**: Modular tools for different data sources
 - **State Management**: Persistent conversation context
-- **Multi-provider**: Supports Groq, Google, OpenAI, local LLMs
+- **Multi-provider**: Supports LM Studio (default), Groq, Google, OpenAI, Ollama
 
 ### 2. Data Sources
 - **IPMA**: Weather forecasts and warnings

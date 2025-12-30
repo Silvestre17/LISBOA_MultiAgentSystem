@@ -104,10 +104,11 @@ The system follows a **modular, tool-based architecture** powered by **LangGraph
 </p>
 
 **Supported Models:**
-- **Groq**: `llama-3.3-70b-versatile`, `llama-3.1-70b-versatile`, `qwen3-4b-2507` (default)
+- **LM Studio** (default): Local models via `qwen/qwen3-4b-2507` or any OpenAI-compatible model
+- **Groq**: `llama-3.3-70b-versatile`, `llama-3.1-70b-versatile`, `qwen3-4b-2507`
 - **Google**: `gemini-2.0-flash-exp`, `gemini-1.5-flash`, `gemini-1.5-pro`
 - **OpenAI**: `gpt-4o`, `gpt-4o-mini`, `gpt-3.5-turbo`
-- **Local**: Any model via LM Studio or Ollama (OpenAI-compatible API)
+- **Ollama**: Any locally installed model
 
 ### Data & ML Stack
 
@@ -299,7 +300,8 @@ Thesis2025-26_AFGS/
 
 - **Python 3.10+**
 - **Git**
-- **API Keys** (at least one):
+- **LM Studio** (recommended) or **API Keys** (at least one):
+  - [LM Studio](https://lmstudio.ai/) (Free, local, privacy-focused)
   - [Groq](https://console.groq.com/) (Free: 14,400 requests/day)
   - [Google AI Studio](https://aistudio.google.com/apikey) (Free: 60 requests/min)
   - [OpenAI](https://platform.openai.com/api-keys) (Pay-per-use)
@@ -317,7 +319,17 @@ Thesis2025-26_AFGS/
    pip install -r requirements.txt
    ```
 
-3. **Configure API keys** (create `.env` file):
+3. **Configure LLM provider** (create `.env` file):
+   
+   **Option A: LM Studio (Recommended - No API Key Required)**
+   ```bash
+   # 1. Download LM Studio from https://lmstudio.ai/
+   # 2. Load model: qwen/qwen3-4b-2507
+   # 3. Start local server on port 1234
+   # No additional configuration needed!
+   ```
+   
+   **Option B: Cloud Providers (Requires API Keys)**
    ```bash
    # LLM Providers (at least one required)
    GROQ_API_KEY=gsk_...
@@ -345,8 +357,8 @@ Thesis2025-26_AFGS/
 ```python
 from agent.graph import create_assistant
 
-# Create assistant instance
-assistant = create_assistant(provider="groq")
+# Create assistant instance (uses LM Studio by default)
+assistant = create_assistant()  # or specify provider: create_assistant(provider="groq")
 
 # Ask a question
 response = assistant.chat("What's the weather in Lisbon this weekend?")
