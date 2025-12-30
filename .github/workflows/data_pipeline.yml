@@ -4,7 +4,7 @@ on:
   schedule:
     # Daily at 04:00 AM UTC
     # - Events: Every day
-    # - Places: Only on Tuesdays (controlled by if logic below)
+    # - Places: Only on Mondays (controlled by if logic below)
     - cron: '0 4 * * *'
   
   # Allows manual run via GitHub "Run workflow" button
@@ -45,20 +45,20 @@ jobs:
           echo "Running Events Scraper..."
           python data_collection/webscraping/visitlisbon_events.py
 
-      # 2. Run Places Script (Only on Tuesdays or Manually)
-      - name: Check if Tuesday
+      # 2. Run Places Script (Only on Mondays or Manually)
+      - name: Check if Monday
         id: check_day
         run: |
           DAY_OF_WEEK=$(date -u +%u)
           echo "day_of_week=$DAY_OF_WEEK" >> $GITHUB_OUTPUT
-          if [ "$DAY_OF_WEEK" -eq 2 ]; then
-            echo "📅 Today is Tuesday - Places will be scraped"
+          if [ "$DAY_OF_WEEK" -eq 1 ]; then
+            echo "📅 Today is Monday - Places will be scraped"
           else
-            echo "📅 Today is not Tuesday (day $DAY_OF_WEEK) - Places scraper will be skipped"
+            echo "📅 Today is not Monday (day $DAY_OF_WEEK) - Places scraper will be skipped"
           fi
 
       - name: Run Places Scraper
-        if: steps.check_day.outputs.day_of_week == '2' || github.event_name == 'workflow_dispatch'
+        if: steps.check_day.outputs.day_of_week == '1' || github.event_name == 'workflow_dispatch'
         run: |
           echo "Running Places Scraper..."
           python data_collection/webscraping/visitlisbon_places.py
