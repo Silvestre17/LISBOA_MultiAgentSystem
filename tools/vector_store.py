@@ -977,7 +977,7 @@ Examples:
             rebuild_pdf=rebuild_all or args.rebuild_pdf,
             rebuild_places=rebuild_all or args.rebuild_places,
             rebuild_events=rebuild_all or args.rebuild_events,
-            max_docs=max_docs
+            max_docs=args.max_docs
         )
         
         # Exit code based on whether more work is pending
