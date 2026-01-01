@@ -860,9 +860,8 @@ Examples:
     
     # Initialize knowledge base
     kb = KnowledgeBase(use_gpu=not args.no_gpu)
-        
-        # Default max_docs for CI environments (200 docs = ~15-20 min)
-        max_docs = args.max_docs if args.max_docs else 200
+    
+    if args.stats:
         # Show statistics only
         print("\n\033[1m📊 Database Statistics\033[0m")
         stats = kb.get_stats()
