@@ -203,11 +203,14 @@ jobs:
             echo ""
             echo "🔄 Iteration $i/$MAX_ITERATIONS"
             
-            # Capture output to check for completion
-            OUTPUT=$($SYNC_CMD 2>&1 | tee /dev/tty)
+            # Run command and capture output to file (to avoid /dev/tty issues in CI)
+            $SYNC_CMD > sync_output.txt 2>&1
+            
+            # Display output in logs
+            cat sync_output.txt
             
             # If script reports no changes, we're done
-            if echo "$OUTPUT" | grep -q "No changes detected"; then
+            if grep -q "No changes detected" sync_output.txt; then
               echo "✅ All documents processed!"
               break
             fi
@@ -218,6 +221,9 @@ jobs:
               echo "   If more documents remain, run workflow again to continue."
             fi
           done
+          
+          # Clean up temporary log file
+          rm -f sync_output.txt
           
           echo "============================================================"
           echo "📊 Sync completed"
