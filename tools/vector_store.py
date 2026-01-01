@@ -5,6 +5,32 @@
 #   Manages the RAG (Retrieval-Augmented Generation) knowledge base.
 #   Uses separate ChromaDB collections for different data sources with
 #   incremental synchronization to avoid redundant processing.
+# 
+#   Collections:
+#     - lisbon_pdf: Static PDF guide (indexed once, never updated)
+#     - lisbon_places: VisitLisboa places (weekly sync)
+#     - lisbon_events: VisitLisboa events (daily sync)
+# 
+#   Features:
+#     - Incremental sync: only process changed documents
+#     - Content hashing to detect modifications
+#     - Automatic cleanup of deleted items
+#     - Separate collections for independent management
+# 
+#   Usage:
+#     # Full sync (checks all collections, only processes changes)
+#     python tools/vector_store.py
+#     
+#     # Force rebuild specific collection
+#     python tools/vector_store.py --rebuild-pdf
+#     python tools/vector_store.py --rebuild-places
+#     python tools/vector_store.py --rebuild-events
+#     
+#     # Rebuild everything
+#     python tools/vector_store.py --rebuild-all
+#     
+#     # Test search
+#     python tools/vector_store.py --test
 # ==========================================================================
 
 import sys
@@ -12,7 +38,6 @@ import os
 
 # 🚀 CRITICAL: Force unbuffered output immediately to debug GitHub Actions hangs
 sys.stdout.reconfigure(line_buffering=True)
-print(f"\033[1m🚀 Starting vector_store.py at {os.getcwd()}...\033[0m", flush=True)
 
 # Set environment variables BEFORE any heavy imports
 os.environ["OTEL_SDK_DISABLED"] = "true"
@@ -23,22 +48,25 @@ import json
 import hashlib
 import warnings
 import argparse
+import gc
+import time
 from typing import List, Dict, Optional, Tuple, Any, TYPE_CHECKING
 from datetime import datetime
+from tqdm import tqdm
 
 # Add parent directory to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config import Config
+
+# Suppress warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=ImportWarning)
 
 # Lazy imports for heavy libraries to prevent startup hangs
 if TYPE_CHECKING:
     from langchain_chroma import Chroma
     from langchain_huggingface import HuggingFaceEmbeddings
     from langchain_core.documents import Document
-
-# Suppress warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning)
-warnings.filterwarnings("ignore", category=ImportWarning)
 
 # ==========================================================================
 # Constants
@@ -49,21 +77,48 @@ COLLECTION_EVENTS = "lisbon_events"
 
 
 def compute_content_hash(content: str) -> str:
-    """Computes a SHA-256 hash of the content."""
+    """
+    Computes a SHA-256 hash of the content string.
+
+    Args:
+        content (str): The text content to hash.
+
+    Returns:
+        str: The first 16 characters of the hex digest.
+    """
     return hashlib.sha256(content.encode('utf-8')).hexdigest()[:16]
 
 
 def generate_doc_id(url: str, source: str) -> str:
-    """Generates a stable document ID from URL and source."""
+    """
+    Generates a stable document ID based on URL and source.
+
+    Args:
+        url (str): The URL or unique identifier of the item.
+        source (str): The source tag (e.g., 'VisitLisboa_Places').
+
+    Returns:
+        str: A unique document ID string.
+    """
     url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()[:12]
     return f"{source}_{url_hash}"
 
 
 class KnowledgeBase:
-    """Manages the RAG knowledge base with incremental synchronization."""
+    """
+    Manages the RAG knowledge base with incremental synchronization capabilities.
+    
+    Handles initialization of embeddings, vector store connections, and 
+    synchronization logic for different data sources.
+    """
     
     def __init__(self, use_gpu: bool = True):
-        """Initializes the KnowledgeBase with embedding model."""
+        """
+        Initializes the KnowledgeBase.
+
+        Args:
+            use_gpu (bool): Whether to attempt using GPU for embeddings. Defaults to True.
+        """
         print(f"\033[1m📥 Initializing KnowledgeBase...\033[0m", flush=True)
         
         # Lazy import heavy libraries here
@@ -74,8 +129,6 @@ class KnowledgeBase:
         from langchain_core.documents import Document
         from langchain_text_splitters import RecursiveCharacterTextSplitter
         from langchain_community.document_loaders import PyPDFLoader
-        from tqdm import tqdm
-        self.tqdm = tqdm
         
         print(f"   Loading Embeddings: {Config.EMBEDDING_MODEL_NAME}...", flush=True)
         
@@ -100,6 +153,15 @@ class KnowledgeBase:
         print(f"   DB Path: {self.vector_db_path}", flush=True)
 
     def _get_collection(self, collection_name: str) -> 'Chroma':
+        """
+        Retrieves a ChromaDB collection object.
+
+        Args:
+            collection_name (str): The name of the collection to retrieve.
+
+        Returns:
+            Chroma: The ChromaDB collection object.
+        """
         return Chroma(
             collection_name=collection_name,
             persist_directory=self.vector_db_path,
@@ -107,6 +169,15 @@ class KnowledgeBase:
         )
     
     def _get_existing_docs(self, collection_name: str) -> Dict[str, str]:
+        """
+        Retrieves existing document IDs and their content hashes from a collection.
+
+        Args:
+            collection_name (str): The name of the collection.
+
+        Returns:
+            Dict[str, str]: A dictionary mapping document IDs to their content hashes.
+        """
         try:
             vectorstore = self._get_collection(collection_name)
             # Access the underlying chromadb collection directly for speed
@@ -125,6 +196,12 @@ class KnowledgeBase:
             return {}
 
     def _delete_collection(self, collection_name: str) -> None:
+        """
+        Deletes a collection from the vector database.
+
+        Args:
+            collection_name (str): The name of the collection to delete.
+        """
         try:
             vectorstore = self._get_collection(collection_name)
             vectorstore.delete_collection()
@@ -133,6 +210,16 @@ class KnowledgeBase:
             pass
 
     def _extract_title(self, item: Dict[str, Any], source_tag: str) -> str:
+        """
+        Extracts a meaningful title from a data item.
+
+        Args:
+            item (Dict[str, Any]): The data item.
+            source_tag (str): The source tag.
+
+        Returns:
+            str: The extracted title or 'Unknown'.
+        """
         if 'title' in item and item['title']:
             return item['title']
         
@@ -153,6 +240,16 @@ class KnowledgeBase:
         return 'Unknown'
 
     def _json_to_document(self, item: Dict[str, Any], source_tag: str) -> Tuple[str, 'Document']:
+        """
+        Converts a JSON item into a LangChain Document.
+
+        Args:
+            item (Dict[str, Any]): The JSON item.
+            source_tag (str): The source tag.
+
+        Returns:
+            Tuple[str, Document]: A tuple containing the document ID and the Document object.
+        """
         title = self._extract_title(item, source_tag)
         content_parts = [f"Name: {title}"]
         
@@ -184,6 +281,16 @@ class KnowledgeBase:
         return doc_id, Document(page_content=content, metadata=metadata)
 
     def _load_json_data(self, file_path: str, source_tag: str) -> Dict[str, 'Document']:
+        """
+        Loads JSON data from a file and converts it to Documents.
+
+        Args:
+            file_path (str): Path to the JSON file.
+            source_tag (str): The source tag.
+
+        Returns:
+            Dict[str, Document]: A dictionary mapping document IDs to Document objects.
+        """
         if not os.path.exists(file_path):
             print(f"\033[1;33m⚠️ Warning:\033[0m File not found: {file_path}", flush=True)
             return {}
@@ -202,6 +309,15 @@ class KnowledgeBase:
         return docs
 
     def sync_pdf_collection(self, force_rebuild: bool = False) -> Dict[str, int]:
+        """
+        Synchronizes the PDF collection.
+
+        Args:
+            force_rebuild (bool): Whether to force a full rebuild of the collection.
+
+        Returns:
+            Dict[str, int]: Statistics about the sync operation.
+        """
         print(f"\n\033[1m📚 PDF Collection ({COLLECTION_PDF})\033[0m", flush=True)
         
         if force_rebuild:
@@ -235,29 +351,48 @@ class KnowledgeBase:
             doc_id = f"pdf_chunk_{i:04d}"
             doc_ids.append(doc_id)
             page_num = doc.metadata.get('page', i)
-            doc.metadata.update({
-                "source": "TurismoLisboa_OfficialGuide_PDF",
-                "title": f"{pdf_title} (p.{page_num + 1})",
-                "url": f"{os.path.basename(pdf_path)}#page={page_num + 1}",
-                "category": "Official Guide",
-                "page": page_num + 1,
-                "content_hash": compute_content_hash(doc.page_content),
-                "indexed_at": datetime.now().isoformat()
-            })
+            doc.metadata["source"] = "TurismoLisboa_OfficialGuide_PDF"
+            doc.metadata["title"] = f"{pdf_title} (p.{page_num + 1})"
+            doc.metadata["url"] = f"{os.path.basename(pdf_path)}#page={page_num + 1}"
+            doc.metadata["category"] = "Official Guide"
+            doc.metadata["page"] = page_num + 1
+            doc.metadata["content_hash"] = compute_content_hash(doc.page_content)
+            doc.metadata["indexed_at"] = datetime.now().isoformat()
         
         print(f"   📊 Indexing {len(docs)} chunks...", flush=True)
-        Chroma.from_documents(
-            documents=docs, embedding=self.embeddings,
-            collection_name=COLLECTION_PDF, persist_directory=self.vector_db_path,
+        
+        vectorstore = Chroma.from_documents(
+            documents=docs,
+            embedding=self.embeddings,
+            collection_name=COLLECTION_PDF,
+            persist_directory=self.vector_db_path,
             ids=doc_ids
         )
+        
         print(f"   \033[1;32m✓ Indexed {len(docs)} PDF chunks\033[0m", flush=True)
         return {"status": "indexed", "added": len(docs)}
 
     def _sync_json_collection(
-        self, collection_name: str, json_path: str, source_tag: str,
-        force_rebuild: bool = False, max_docs: int = None
+        self, 
+        collection_name: str, 
+        json_path: str, 
+        source_tag: str,
+        force_rebuild: bool = False,
+        max_docs: int = None
     ) -> Dict[str, int]:
+        """
+        Synchronizes a JSON-based collection (Places or Events).
+
+        Args:
+            collection_name (str): The name of the collection.
+            json_path (str): Path to the JSON source file.
+            source_tag (str): The source tag for documents.
+            force_rebuild (bool): Whether to force a full rebuild.
+            max_docs (int, optional): Maximum number of documents to process.
+
+        Returns:
+            Dict[str, int]: Statistics about the sync operation.
+        """
         print(f"\n\033[1m📁 {source_tag} Collection ({collection_name})\033[0m", flush=True)
         
         if force_rebuild:
@@ -309,21 +444,29 @@ class KnowledgeBase:
         
         if ids_to_add:
             docs_to_add = [current_docs[doc_id] for doc_id in ids_to_add]
-            batch_size = 100  # Smaller batch size for safety
+            batch_size = 20  # Reduced to prevent OOM on GitHub Actions
             
-            print(f"   🔄 Indexing {len(docs_to_add)} documents...", flush=True)
+            print(f"   🔄 Indexing {len(docs_to_add)} documents (batch size: {batch_size})...", flush=True)
             
-            # Use tqdm if available and running interactively, else simple print
+            # Use tqdm always to show progress in logs
             iterator = range(0, len(docs_to_add), batch_size)
-            if sys.stdout.isatty():
-                iterator = self.tqdm(iterator, total=(len(docs_to_add) + batch_size - 1) // batch_size, desc="   Batch")
+            iterator = tqdm(
+                iterator, 
+                total=(len(docs_to_add) + batch_size - 1) // batch_size, 
+                desc="   Batch",
+                file=sys.stdout,
+                mininterval=1.0
+            )
 
             for i in iterator:
                 batch_docs = docs_to_add[i:i + batch_size]
                 batch_ids = ids_to_add[i:i + batch_size]
                 vectorstore.add_documents(batch_docs, ids=batch_ids)
-                if not sys.stdout.isatty():
-                    print(f"      Processed batch {i//batch_size + 1} ({len(batch_ids)} docs)", flush=True)
+                
+                # 🧹 Force garbage collection to free memory
+                gc.collect()
+                # ⏳ Sleep briefly to let CPU cool down
+                time.sleep(0.5)
             
             print(f"   \033[1;32m✓ Added/Updated {len(ids_to_add)} documents\033[0m", flush=True)
         
@@ -338,17 +481,31 @@ class KnowledgeBase:
         }
 
     def sync_places_collection(self, force_rebuild: bool = False, max_docs: int = None) -> Dict[str, int]:
+        """Synchronizes the VisitLisboa Places collection."""
         return self._sync_json_collection(
             COLLECTION_PLACES, str(Config.PATH_VISIT_LISBOA_PLACES), "VisitLisboa_Places", force_rebuild, max_docs
         )
     
     def sync_events_collection(self, force_rebuild: bool = False, max_docs: int = None) -> Dict[str, int]:
+        """Synchronizes the VisitLisboa Events collection."""
         return self._sync_json_collection(
             COLLECTION_EVENTS, str(Config.PATH_VISIT_LISBOA_EVENTS), "VisitLisboa_Events", force_rebuild, max_docs
         )
 
     def sync_all(self, rebuild_pdf: bool = False, rebuild_places: bool = False, 
                  rebuild_events: bool = False, max_docs: int = None) -> Dict[str, Any]:
+        """
+        Runs synchronization for all collections.
+
+        Args:
+            rebuild_pdf (bool): Force rebuild PDF collection.
+            rebuild_places (bool): Force rebuild Places collection.
+            rebuild_events (bool): Force rebuild Events collection.
+            max_docs (int, optional): Max docs to process per collection.
+
+        Returns:
+            Dict[str, Any]: Summary of synchronization results.
+        """
         print("\033[1m" + "=" * 60 + "\033[0m", flush=True)
         print("\033[1m🔄 Vector Store Incremental Sync\033[0m", flush=True)
         if max_docs:
@@ -363,16 +520,6 @@ class KnowledgeBase:
         results["places"] = self.sync_places_collection(force_rebuild=rebuild_places, max_docs=max_docs)
         if results["places"].get("has_more_work"):
             has_more_work = True
-        
-        # If places took the quota, we still check events but maybe with 0 limit? 
-        # Actually, let's allow events to run with the SAME limit, or remaining limit?
-        # The user wants "PERFEITO". 
-        # If we have a global timeout, we should probably respect max_docs strictly per run.
-        # If places used 200 docs, and we have 200 limit, we should probably stop or let events run another 200?
-        # The shell script says "max 200 docs per batch".
-        # If we process 200 places AND 200 events, that's 400 docs. Might timeout.
-        # Let's be conservative. If places used the quota, skip events for this run?
-        # Or just let it run. Events are usually few.
         
         events_max_docs = max_docs
         results["events"] = self.sync_events_collection(force_rebuild=rebuild_events, max_docs=events_max_docs)
@@ -407,6 +554,12 @@ class KnowledgeBase:
         return results
 
     def get_stats(self) -> Dict[str, Any]:
+        """
+        Retrieves statistics about the vector store collections.
+
+        Returns:
+            Dict[str, Any]: A dictionary containing counts and status for each collection.
+        """
         stats = {}
         for col_name in [COLLECTION_PDF, COLLECTION_PLACES, COLLECTION_EVENTS]:
             try:
@@ -420,6 +573,17 @@ class KnowledgeBase:
         return stats
 
     def search(self, query: str, k: int = 5, collections: Optional[List[str]] = None) -> List['Document']:
+        """
+        Searches the knowledge base for relevant documents.
+
+        Args:
+            query (str): The search query.
+            k (int): Number of results to return.
+            collections (List[str], optional): List of collections to search.
+
+        Returns:
+            List[Document]: A list of matching documents sorted by relevance.
+        """
         if collections is None:
             collections = [COLLECTION_PDF, COLLECTION_PLACES, COLLECTION_EVENTS]
         all_results = []
@@ -435,37 +599,131 @@ class KnowledgeBase:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Vector Store Management")
-    parser.add_argument("--rebuild-all", action="store_true")
-    parser.add_argument("--rebuild-pdf", action="store_true")
-    parser.add_argument("--rebuild-places", action="store_true")
-    parser.add_argument("--rebuild-events", action="store_true")
-    parser.add_argument("--test", action="store_true")
-    parser.add_argument("--stats", action="store_true")
-    parser.add_argument("--no-gpu", action="store_true")
-    parser.add_argument("--max-docs", type=int, default=None)
+    parser = argparse.ArgumentParser(
+        description="Vector Store Management with Incremental Sync",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python tools/vector_store.py                    # Incremental sync (default)
+  python tools/vector_store.py --rebuild-all      # Force rebuild everything
+  python tools/vector_store.py --rebuild-events   # Rebuild events only
+  python tools/vector_store.py --test             # Test search functionality
+  python tools/vector_store.py --stats            # Show database statistics
+        """
+    )
+    
+    parser.add_argument("--rebuild-all", action="store_true", help="Force rebuild all collections")
+    parser.add_argument("--rebuild-pdf", action="store_true", help="Force rebuild PDF collection")
+    parser.add_argument("--rebuild-places", action="store_true", help="Force rebuild places collection")
+    parser.add_argument("--rebuild-events", action="store_true", help="Force rebuild events collection")
+    parser.add_argument("--test", action="store_true", help="Test search functionality")
+    parser.add_argument("--stats", action="store_true", help="Show database statistics")
+    parser.add_argument("--no-gpu", action="store_true", help="Disable GPU (use CPU only)")
+    parser.add_argument("--max-docs", type=int, default=None, help="Max documents to process per collection")
     
     args = parser.parse_args()
     
     print("\033[1m" + "=" * 60 + "\033[0m", flush=True)
-    print("\033[1m🧪 Vector Store CLI\033[0m", flush=True)
+    print("\033[1m🧪 Vector Store Management (Incremental Sync)\033[0m", flush=True)
     print("\033[1m" + "=" * 60 + "\033[0m", flush=True)
     
     try:
         kb = KnowledgeBase(use_gpu=not args.no_gpu)
         
         if args.stats:
+            print("\n\033[1m📊 Database Statistics\033[0m", flush=True)
             stats = kb.get_stats()
-            print(f"Total: {stats['total']}", flush=True)
-            for k, v in stats.items():
-                if k != "total" and k != "path":
-                    print(f" - {k}: {v.get('count', 0)}", flush=True)
+            print(f"   Path: {stats['path']}", flush=True)
+            print(f"   Total documents: {stats['total']}", flush=True)
+            for col_name in [COLLECTION_PDF, COLLECTION_PLACES, COLLECTION_EVENTS]:
+                col_stats = stats.get(col_name, {})
+                status = col_stats.get("status", "unknown")
+                count = col_stats.get("count", 0)
+                print(f"   - {col_name}: {count} docs ({status})", flush=True)
         
         elif args.test:
-            print("Testing search...", flush=True)
-            results = kb.search("museums", k=3)
-            for doc in results:
-                print(f" - {doc.metadata.get('title')}", flush=True)
+            print("\n\033[1m🔍 Testing Vector Store...\033[0m", flush=True)
+            stats = kb.get_stats()
+            print(f"   Total documents: {stats['total']}", flush=True)
+            
+            if stats['total'] == 0:
+                print("   \033[1;33m⚠️ Database is empty. Run sync first.\033[0m", flush=True)
+            else:
+                required_fields = {
+                    "TurismoLisboa_OfficialGuide_PDF": ["source", "title", "url", "category", "content_hash", "indexed_at", "page"],
+                    "VisitLisboa_Places": ["source", "title", "url", "category", "content_hash", "indexed_at"],
+                    "VisitLisboa_Events": ["source", "title", "url", "category", "content_hash", "indexed_at"]
+                }
+                
+                print("\n\033[1m📋 Metadata Validation by Collection:\033[0m", flush=True)
+                
+                for col_name, source_name in [
+                    (COLLECTION_PDF, "TurismoLisboa_OfficialGuide_PDF"),
+                    (COLLECTION_PLACES, "VisitLisboa_Places"),
+                    (COLLECTION_EVENTS, "VisitLisboa_Events")
+                ]:
+                    try:
+                        vectorstore = kb._get_collection(col_name)
+                        collection = vectorstore._collection
+                        result = collection.get(include=["metadatas", "documents"], limit=5)
+                        
+                        if not result or not result.get("ids"):
+                            print(f"\n   \033[1;33m⚠️ {col_name}: Empty collection\033[0m", flush=True)
+                            continue
+                        
+                        count = collection.count()
+                        print(f"\n   \033[1m{col_name}\033[0m ({count} docs)", flush=True)
+                        
+                        sample_size = min(3, len(result["ids"]))
+                        missing_fields = set()
+                        empty_fields = set()
+                        
+                        for i in range(sample_size):
+                            metadata = result["metadatas"][i]
+                            for field in required_fields.get(source_name, []):
+                                if field not in metadata:
+                                    missing_fields.add(field)
+                                else:
+                                    val = metadata[field]
+                                    if isinstance(val, (int, float)):
+                                        continue
+                                    elif not val or val in ["N/A", "Unknown", ""]:
+                                        empty_fields.add(field)
+                            
+                            title = metadata.get('title', 'N/A')[:60]
+                            url = metadata.get('url', 'N/A')[:50]
+                            category = metadata.get('category', 'N/A')
+                            print(f"      {i+1}. Title: \033[1;36m{title}\033[0m", flush=True)
+                            print(f"         URL: {url}", flush=True)
+                            print(f"         Category: {category}", flush=True)
+                        
+                        if missing_fields:
+                            print(f"      \033[1;31m❌ Missing fields: {', '.join(missing_fields)}\033[0m", flush=True)
+                        if empty_fields:
+                            print(f"      \033[1;33m⚠️ Empty/Invalid fields: {', '.join(empty_fields)}\033[0m", flush=True)
+                        if not missing_fields and not empty_fields:
+                            print(f"      \033[1;32m✓ All metadata fields valid\033[0m", flush=True)
+                            
+                    except Exception as e:
+                        print(f"\n   \033[1;31m❌ {col_name}: Error - {e}\033[0m", flush=True)
+                
+                print("\n\033[1m🔍 Search Quality Test:\033[0m", flush=True)
+                test_queries = [
+                    ("museums in Belém", "Should return places/PDF about Belém museums"),
+                    ("traditional Portuguese food", "Should return restaurants"),
+                    ("events this week", "Should return events"),
+                    ("metro transport", "Should return transport info from PDF/places")
+                ]
+                
+                for query, expected in test_queries:
+                    print(f"\n   \033[1m📝 Query:\033[0m {query}", flush=True)
+                    print(f"      Expected: {expected}", flush=True)
+                    results = kb.search(query, k=3)
+                    for i, doc in enumerate(results, 1):
+                        title = doc.metadata.get('title', 'N/A')[:50]
+                        source = doc.metadata.get('source', 'N/A')
+                        score_indicator = "✓" if title != "N/A" and title != "Unknown" else "✗"
+                        print(f"      {i}. [{score_indicator}] {title} ({source})", flush=True)
         
         else:
             result = kb.sync_all(
