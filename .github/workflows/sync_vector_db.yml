@@ -8,19 +8,26 @@
 # Strategy:
 #   1. Uses CPU-only inference (no GPU available in GitHub Actions)
 #   2. Caches pip packages and HuggingFace models to reduce runtime
-#   3. Only syncs places and events collections (PDF is static)
-#   4. Commits the updated vector_db to the repository
+#   3. Processes documents in batches (200 docs per run = ~15-20 min)
+#   4. Multiple workflow runs handle large updates incrementally
+#   5. Commits the updated vector_db to the repository
 #
 # Cache sizes (approximate):
-#   - pip packages: ~2GB
-#   - HuggingFace model (bge-m3): ~600MB
-#   - Total: ~2.6GB (within GitHub Pro's 10GB limit)
+#   - pip packages: ~350MB
+#   - HuggingFace model (bge-m3): ~2.5GB
+#   - Total: ~2.9GB (within GitHub Pro's 10GB limit)
 #
 # Runtime (estimated):
 #   - First run (no cache): ~20-30 minutes
 #   - Cached run (no changes): ~2-3 minutes
-#   - Cached run (with changes): ~57 minutes/200 docs (observed: ~17s/doc)
-#   - Max per workflow run: 2000 docs (10 iterations × 200 docs)
+#   - Cached run (200 docs): ~15-20 minutes
+#   - Large updates: Multiple runs (200 docs each)
+#
+# GitHub Actions Limits (Free/Pro):
+#   - Max runtime per job: 6 hours (we use 90 min timeout)
+#   - Max concurrent jobs: 20 (Free) / 180 (Pro)
+#   - Storage: 500MB (Free) / 2GB (Pro) - we use ~3GB cache
+#   - Minutes: 2000/month (Free) / 3000/month (Pro)
 # ==========================================================================
 
 name: Sync Vector Database
@@ -45,6 +52,11 @@ on:
         required: false
         default: false
         type: boolean
+      max_docs:
+        description: 'Max docs per run (default: 200)'
+        required: false
+        default: '200'
+        type: string
 
 permissions:
   contents: write
@@ -64,7 +76,7 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6 hours max
+    timeout-minutes: 90  # 1.5 hours max per batch
 
     steps:
       # =====================================================================
@@ -170,7 +182,7 @@ jobs:
           fi
 
       # =====================================================================
-      # Sync Vector Store
+      # Sync Vector Store (Incremental Batching)
       # =====================================================================
       
       - name: Sync Vector Database
@@ -180,8 +192,14 @@ jobs:
           echo "🔄 Starting Vector Store Sync"
           echo "============================================================"
           
-          # Build sync command with optional force rebuild flags
-          SYNC_CMD="python tools/vector_store.py --no-gpu"
+          # Configure max docs per iteration (default: 200)
+          MAX_DOCS="${{ github.event.inputs.max_docs }}"
+          if [ -z "$MAX_DOCS" ]; then
+            MAX_DOCS=200
+          fi
+          
+          # Build base sync command
+          SYNC_CMD="python tools/vector_store.py --no-gpu --max-docs $MAX_DOCS"
           
           if [ "${{ github.event.inputs.rebuild_events }}" == "true" ]; then
             SYNC_CMD="$SYNC_CMD --rebuild-events"
@@ -193,40 +211,55 @@ jobs:
             echo "⚠️ Force rebuilding places collection"
           fi
           
-          echo "Running: $SYNC_CMD"
+          echo "Command: $SYNC_CMD"
+          echo ""
           
-          # Run sync multiple times if needed (processes 200 docs per iteration)
-          # MAX_DOCS_PER_RUN=200 (defined in vector_store.py)
-          # Total capacity: 10 iterations × 200 docs = 2000 docs max
+          # Incremental sync loop
+          # Exit codes: 0 = complete, 2 = more work pending, other = error
+          # Total capacity: 10 iterations × 200 docs = 2000 docs max per workflow run
           MAX_ITERATIONS=10
+          TOTAL_PROCESSED=0
+          
           for i in $(seq 1 $MAX_ITERATIONS); do
+            echo "────────────────────────────────────────────────────────────"
+            echo "📦 Batch $i/$MAX_ITERATIONS (max $MAX_DOCS docs per batch)"
+            echo "────────────────────────────────────────────────────────────"
+            
+            # Run sync and capture exit code
+            set +e  # Don't exit on non-zero
+            $SYNC_CMD
+            EXIT_CODE=$?
+            set -e
+            
             echo ""
-            echo "🔄 Iteration $i/$MAX_ITERATIONS"
+            echo "Exit code: $EXIT_CODE"
             
-            # Run command and capture output to file (to avoid /dev/tty issues in CI)
-            $SYNC_CMD > sync_output.txt 2>&1
-            
-            # Display output in logs
-            cat sync_output.txt
-            
-            # If script reports no changes, we're done
-            if grep -q "No changes detected" sync_output.txt; then
-              echo "✅ All documents processed!"
+            # Handle different exit codes
+            if [ $EXIT_CODE -eq 0 ]; then
+              echo "✅ Sync complete (all documents processed)"
               break
+            elif [ $EXIT_CODE -eq 2 ]; then
+              echo "⏳ More work pending, continuing..."
+              TOTAL_PROCESSED=$((TOTAL_PROCESSED + MAX_DOCS))
+            else
+              echo "❌ Sync failed with exit code $EXIT_CODE"
+              exit $EXIT_CODE
             fi
             
-            # If we've hit max iterations, warn user
-            if [ $i -eq $MAX_ITERATIONS ]; then
-              echo "⚠️ Reached max iterations ($MAX_ITERATIONS)."
-              echo "   If more documents remain, run workflow again to continue."
+            # Warn if max iterations reached with work pending
+            if [ $i -eq $MAX_ITERATIONS ] && [ $EXIT_CODE -eq 2 ]; then
+              echo ""
+              echo "⚠️ WARNING: Reached max iterations ($MAX_ITERATIONS)"
+              echo "   Processed approximately: $TOTAL_PROCESSED documents"
+              echo "   More documents remain pending"
+              echo "   → Re-run this workflow to continue processing"
+              echo "   → Or increase max_docs parameter for larger batches"
             fi
           done
           
-          # Clean up temporary log file
-          rm -f sync_output.txt
-          
+          echo ""
           echo "============================================================"
-          echo "📊 Sync completed"
+          echo "✅ Vector Store Sync Completed"
           echo "============================================================"
 
       - name: Show Vector DB Stats

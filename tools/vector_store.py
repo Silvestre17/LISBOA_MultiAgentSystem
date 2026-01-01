@@ -428,7 +428,8 @@ class KnowledgeBase:
         collection_name: str, 
         json_path: str, 
         source_tag: str,
-        force_rebuild: bool = False
+        force_rebuild: bool = False,
+        max_docs: int = None
     ) -> Dict[str, int]:
         """
         Performs incremental sync for a JSON-based collection.
@@ -508,8 +509,16 @@ class KnowledgeBase:
             collection.delete(ids=ids_to_delete)
             print(f"   🗑️ Deleted {len(ids_to_delete)} documents from DB")
         
-        # Add new and modified documents
+        # Add new and modified documents (with optional limit)
         ids_to_add = list(new_ids | modified_ids)
+        
+        # Apply document limit if specified
+        has_more_work = False
+        if max_docs and len(ids_to_add) > max_docs:
+            print(f"   ⚠️ Limiting to {max_docs} documents (out of {len(ids_to_add)})")
+            ids_to_add = ids_to_add[:max_docs]
+            has_more_work = True
+        
         if ids_to_add:
             # Limit to 200 docs/run to stay under 60min timeout (observed: ~17s/doc = 57min total)
             MAX_DOCS_PER_RUN = 200
@@ -547,18 +556,21 @@ class KnowledgeBase:
         
         return {
             "status": "synced",
-            "added": len(new_ids),
-            "modified": len(modified_ids),
+            "added": len([x for x in ids_to_add if x in new_ids]),
+            "modified": len([x for x in ids_to_add if x in modified_ids]),
             "deleted": len(deleted_ids),
-            "total": len(current_ids)
+            "total": len(current_ids),
+            "has_more_work": has_more_work,
+            "pending": len(new_ids | modified_ids) - len(ids_to_add) if has_more_work else 0
         }
     
-    def sync_places_collection(self, force_rebuild: bool = False) -> Dict[str, int]:
+    def sync_places_collection(self, force_rebuild: bool = False, max_docs: int = None) -> Dict[str, int]:
         """
         Syncs the places collection with incremental updates.
         
         Args:
             force_rebuild (bool): If True, rebuilds from scratch.
+            max_docs (int): Maximum documents to process per run.
         
         Returns:
             Dict[str, int]: Sync statistics.
@@ -567,15 +579,17 @@ class KnowledgeBase:
             collection_name=COLLECTION_PLACES,
             json_path=str(Config.PATH_VISIT_LISBOA_PLACES),
             source_tag="VisitLisboa_Places",
-            force_rebuild=force_rebuild
+            force_rebuild=force_rebuild,
+            max_docs=max_docs
         )
     
-    def sync_events_collection(self, force_rebuild: bool = False) -> Dict[str, int]:
+    def sync_events_collection(self, force_rebuild: bool = False, max_docs: int = None) -> Dict[str, int]:
         """
         Syncs the events collection with incremental updates.
         
         Args:
             force_rebuild (bool): If True, rebuilds from scratch.
+            max_docs (int): Maximum documents to process per run.
         
         Returns:
             Dict[str, int]: Sync statistics.
@@ -584,7 +598,8 @@ class KnowledgeBase:
             collection_name=COLLECTION_EVENTS,
             json_path=str(Config.PATH_VISIT_LISBOA_EVENTS),
             source_tag="VisitLisboa_Events",
-            force_rebuild=force_rebuild
+            force_rebuild=force_rebuild,
+            max_docs=max_docs
         )
     
     # =========================================================================
@@ -595,7 +610,8 @@ class KnowledgeBase:
         self, 
         rebuild_pdf: bool = False,
         rebuild_places: bool = False,
-        rebuild_events: bool = False
+        rebuild_events: bool = False,
+        max_docs: int = None
     ) -> Dict[str, Any]:
         """
         Synchronizes all collections with incremental updates.
@@ -604,24 +620,40 @@ class KnowledgeBase:
             rebuild_pdf (bool): Force rebuild PDF collection.
             rebuild_places (bool): Force rebuild places collection.
             rebuild_events (bool): Force rebuild events collection.
+            max_docs (int): Maximum documents to process per collection.
         
         Returns:
-            Dict[str, Any]: Statistics for all collections.
+            Dict[str, Any]: Statistics for all collections including 'has_more_work' flag.
         """
         print("\033[1m" + "=" * 60 + "\033[0m")
         print("\033[1m🔄 Vector Store Incremental Sync\033[0m")
+        if max_docs:
+            print(f"\033[1m   (Max {max_docs} docs per collection)\033[0m")
         print("\033[1m" + "=" * 60 + "\033[0m")
         
         results = {}
+        has_more_work = False
         
         # Sync PDF (static, skip if exists)
         results["pdf"] = self.sync_pdf_collection(force_rebuild=rebuild_pdf)
         
-        # Sync Places (weekly updates)
-        results["places"] = self.sync_places_collection(force_rebuild=rebuild_places)
+        # Sync Places (weekly updates) - may be rate-limited
+        results["places"] = self.sync_places_collection(
+            force_rebuild=rebuild_places,
+            max_docs=max_docs
+        )
+        if results["places"].get("has_more_work"):
+            has_more_work = True
         
-        # Sync Events (daily updates)
-        results["events"] = self.sync_events_collection(force_rebuild=rebuild_events)
+        # Sync Events (daily updates) - usually small, process all
+        # Only apply limit if places didn't use the quota
+        events_max_docs = max_docs if not has_more_work else None
+        results["events"] = self.sync_events_collection(
+            force_rebuild=rebuild_events,
+            max_docs=events_max_docs
+        )
+        if results["events"].get("has_more_work"):
+            has_more_work = True
         
         # Summary
         print("\n\033[1m" + "=" * 60 + "\033[0m")
@@ -639,12 +671,28 @@ class KnowledgeBase:
                 modified = stats.get("modified", 0)
                 deleted = stats.get("deleted", 0)
                 total = stats.get("total", 0)
-                print(f"   {name}: \033[1;32m✓ Synced\033[0m (+{added} ~{modified} -{deleted} = {total} docs)")
+                pending = stats.get("pending", 0)
+                msg = f"   {name}: \033[1;32m✓ Synced\033[0m (+{added} ~{modified} -{deleted} = {total} docs)"
+                if pending > 0:
+                    msg += f" \033[1;33m({pending} pending)\033[0m"
+                print(msg)
             elif status == "indexed":
                 print(f"   {name}: \033[1;32m✓ Indexed\033[0m ({stats.get('added', 0)} docs)")
             else:
                 print(f"   {name}: \033[1;31m✗ {status}\033[0m")
         
+        # Final statistics
+        print("\n\033[1m📊 Final Statistics\033[0m")
+        stats = self.get_stats()
+        print(f"   Total documents: {stats['total_documents']}")
+        for name, count in stats["collections"].items():
+            print(f"   - {name}: {count} docs")
+        
+        # Flag if more work is needed
+        if has_more_work:
+            print("\n\033[1;33m⚠️  More work pending - run again to continue sync\033[0m")
+        
+        results["has_more_work"] = has_more_work
         return results
     
     # =========================================================================
@@ -797,6 +845,12 @@ Examples:
         action="store_true",
         help="Disable GPU (use CPU only)"
     )
+    parser.add_argument(
+        "--max-docs",
+        type=int,
+        default=None,
+        help="Maximum documents to process per run (for incremental sync)"
+    )
     
     args = parser.parse_args()
     
@@ -806,8 +860,9 @@ Examples:
     
     # Initialize knowledge base
     kb = KnowledgeBase(use_gpu=not args.no_gpu)
-    
-    if args.stats:
+        
+        # Default max_docs for CI environments (200 docs = ~15-20 min)
+        max_docs = args.max_docs if args.max_docs else 200
         # Show statistics only
         print("\n\033[1m📊 Database Statistics\033[0m")
         stats = kb.get_stats()
@@ -918,11 +973,20 @@ Examples:
         # Sync mode
         rebuild_all = args.rebuild_all
         
-        kb.sync_all(
+        # Sync with optional document limit
+        result = kb.sync_all(
             rebuild_pdf=rebuild_all or args.rebuild_pdf,
             rebuild_places=rebuild_all or args.rebuild_places,
-            rebuild_events=rebuild_all or args.rebuild_events
+            rebuild_events=rebuild_all or args.rebuild_events,
+            max_docs=max_docs
         )
+        
+        # Exit code based on whether more work is pending
+        # Exit code 0: All done
+        # Exit code 2: More work pending (not an error, just a signal)
+        if result.get("has_more_work"):
+            import sys
+            sys.exit(2)
         
         # Show final stats
         print("\n\033[1m📊 Final Statistics\033[0m")
