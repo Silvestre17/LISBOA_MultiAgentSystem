@@ -63,6 +63,8 @@ permissions:
 
 env:
   PYTHON_VERSION: '3.10'
+  # Force unbuffered output to see logs immediately
+  PYTHONUNBUFFERED: '1'
   # Disable telemetry for faster startup
   OTEL_SDK_DISABLED: 'true'
   ANONYMIZED_TELEMETRY: 'false'
