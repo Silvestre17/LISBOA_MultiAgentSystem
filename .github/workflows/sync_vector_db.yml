@@ -1,5 +1,5 @@
 # ==========================================================================
-# Master Thesis - Vector Store Sync Workflow
+# Master Thesis - Vector Store Sync Workflow (GitHub Actions)
 #   - André Filipe Gomes Silvestre, 20240502
 #
 # Automatically syncs the vector database when JSON data files change.
