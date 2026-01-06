@@ -18,13 +18,11 @@
 #   - Total: ~2.9GB (within GitHub Pro's 10GB limit)
 #
 # Runtime (estimated):
-#   - First run (no cache): ~20-30 minutes
-#   - Cached run (no changes): ~2-3 minutes
-#   - Cached run (200 docs): ~15-20 minutes
-#   - Large updates: Multiple runs (200 docs each)
+#   - Events update: ~10/30 minutes (small/large changes)
+#   - Places update: ~60 minutes
 #
 # GitHub Actions Limits (Free/Pro):
-#   - Max runtime per job: 6 hours (we use 90 min timeout)
+#   - Max runtime per job: 6 hours (we use 120 min timeout)
 #   - Max concurrent jobs: 20 (Free) / 180 (Pro)
 #   - Storage: 500MB (Free) / 2GB (Pro) - we use ~3GB cache
 #   - Minutes: 2000/month (Free) / 3000/month (Pro)
@@ -78,7 +76,7 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     
     runs-on: ubuntu-latest
-    timeout-minutes: 90  # 1.5 hours max per batch
+    timeout-minutes: 120  # 2 hours max per batch
 
     steps:
       # =====================================================================
