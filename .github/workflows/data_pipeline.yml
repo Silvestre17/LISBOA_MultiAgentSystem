@@ -1,3 +1,19 @@
+# ==========================================================================
+# Master Thesis - Automated Data Pipeline for VisitLisbon.pt (GitHub Actions)
+#   - André Filipe Gomes Silvestre, 20240502
+#
+# GitHub Actions Workflow to automate data scraping and updating of JSON files
+# 
+# Strategy:
+#   1. Scrape Events data daily
+#   2. Scrape Places data weekly (only on Mondays)
+#   3. Commit and push changes if any data has changed
+#
+# Runtime (estimated):
+#   - Events Scraper: ~8 minutes
+#   - Places Scraper: ~60 minutes
+# ==========================================================================
+
 name: Update Lisbon Data
 
 on:

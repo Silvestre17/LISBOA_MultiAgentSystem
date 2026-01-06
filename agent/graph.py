@@ -336,6 +336,5 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n\033[1;31m❌ Error:\033[0m {e}")
         print("\n\033[1m💡 Tips:\033[0m")
-        print("   1. Ensure API keys are set in .env file")
-        print("   2. Check internet connectivity")
-        print("   3. Verify LangGraph is installed: pip install langgraph")
+        print("   1. Ensure API keys are set in .env file or local LLM are running.")
+        print("   2. Check network connectivity.")
