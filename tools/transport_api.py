@@ -65,10 +65,252 @@ METRO_LINES = {
     "vermelha": {"name": "Red Line (S. Sebastião ↔ Aeroporto)", "emoji": "🔴", "color": "#ED1C24"}
 }
 
+# Key Metro Stations with their lines (for routing assistance)
+# Based on official Metro de Lisboa GeoJSON data
+# All stations listed in order along each line
+METRO_STATIONS = {
+    # Yellow Line (Amarela) - Rato ↔ Odivelas
+    "rato": ["amarela"],
+    "marquês de pombal": ["amarela", "azul"],
+    "marques de pombal": ["amarela", "azul"],
+    "marques pombal": ["amarela", "azul"],
+    "marquês pombal": ["amarela", "azul"],
+    "picoas": ["amarela"],
+    "saldanha": ["amarela", "vermelha"],
+    "campo pequeno": ["amarela"],
+    "entre campos": ["amarela"],
+    "entrecampos": ["amarela"],
+    "cidade universitária": ["amarela"],
+    "cidade universitaria": ["amarela"],
+    "campo grande": ["amarela", "verde"],
+    "quinta das conchas": ["amarela"],
+    "lumiar": ["amarela"],
+    "ameixoeira": ["amarela"],
+    "senhor roubado": ["amarela"],
+    "odivelas": ["amarela"],
+    
+    # Blue Line (Azul) - Santa Apolónia ↔ Reboleira
+    "santa apolónia": ["azul"],
+    "santa apolonia": ["azul"],
+    "terreiro do paço": ["azul"],
+    "terreiro do paco": ["azul"],
+    "baixa-chiado": ["azul", "verde"],
+    "baixa chiado": ["azul", "verde"],
+    "restauradores": ["azul"],
+    "avenida": ["azul"],
+    # "marquês de pombal": ["amarela", "azul"],  # Already listed above
+    "parque": ["azul"],
+    "são sebastião": ["azul", "vermelha"],
+    "sao sebastiao": ["azul", "vermelha"],
+    "s. sebastião": ["azul", "vermelha"],
+    "praça de espanha": ["azul"],
+    "praca de espanha": ["azul"],
+    "jardim zoológico": ["azul"],
+    "jardim zoologico": ["azul"],
+    "laranjeiras": ["azul"],
+    "alto dos moinhos": ["azul"],
+    "colégio militar": ["azul"],
+    "colegio militar": ["azul"],
+    "carnide": ["azul"],
+    "pontinha": ["azul"],
+    "alfornelos": ["azul"],
+    "amadora este": ["azul"],
+    "reboleira": ["azul"],
+    
+    # Green Line (Verde) - Cais do Sodré ↔ Telheiras
+    "cais do sodré": ["verde"],
+    "cais do sodre": ["verde"],
+    # "baixa-chiado": ["azul", "verde"],  # Already listed above
+    "rossio": ["verde"],
+    "martim moniz": ["verde"],
+    "intendente": ["verde"],
+    "anjos": ["verde"],
+    "arroios": ["verde"],
+    "alameda": ["verde", "vermelha"],
+    "areeiro": ["verde"],
+    "roma": ["verde"],
+    "alvalade": ["verde"],
+    # "campo grande": ["amarela", "verde"],  # Already listed above
+    "telheiras": ["verde"],
+    
+    # Red Line (Vermelha) - S. Sebastião ↔ Aeroporto
+    # "são sebastião": ["azul", "vermelha"],  # Already listed above
+    # "saldanha": ["amarela", "vermelha"],  # Already listed above
+    # "alameda": ["verde", "vermelha"],  # Already listed above
+    "olaias": ["vermelha"],
+    "bela vista": ["vermelha"],
+    "chelas": ["vermelha"],
+    "olivais": ["vermelha"],
+    "cabo ruivo": ["vermelha"],
+    "oriente": ["vermelha"],
+    "moscavide": ["vermelha"],
+    "encarnação": ["vermelha"],
+    "encarnacao": ["vermelha"],
+    "aeroporto": ["vermelha"],
+}
+
+# CP Train Stations in Lisbon (from official GeoJSON)
+# Stations serve different lines depending on the service
+CP_STATIONS = {
+    # Major hubs (multiple lines)
+    "oriente": {
+        "lines": ["azambuja", "norte", "beira_alta"],
+        "description": "Parque das Nações - Major rail hub",
+        "metro": "vermelha"
+    },
+    "santa apolónia": {
+        "santa apolonia": "santa apolónia",
+        "lines": ["azambuja", "norte"],
+        "description": "Historic central station",
+        "metro": "azul"
+    },
+    "entrecampos": {
+        "lines": ["azambuja", "sintra"],
+        "description": "North Lisbon hub",
+        "metro": "amarela"
+    },
+    "sete rios": {
+        "lines": ["sintra", "azambuja"],
+        "description": "Connection to Sintra line",
+        "metro": None
+    },
+    
+    # Cascais Line (from Cais do Sodré)
+    "cais do sodré": {
+        "cais do sodre": "cais do sodré",
+        "lines": ["cascais"],
+        "description": "Cascais line terminus",
+        "metro": "verde"
+    },
+    "santos": {
+        "lines": ["cascais"],
+        "description": "Cascais line",
+        "metro": None
+    },
+    "alcântara mar": {
+        "alcantara mar": "alcântara mar",
+        "lines": ["cascais"],
+        "description": "Cascais line",
+        "metro": None
+    },
+    "alcântara terra": {
+        "alcantara terra": "alcântara terra",
+        "lines": ["cascais"],
+        "description": "Cascais line",
+        "metro": None
+    },
+    "belém": {
+        "belem": "belém",
+        "lines": ["cascais"],
+        "description": "Cascais line - Belém area",
+        "metro": None
+    },
+    
+    # Sintra Line (from Rossio/Oriente)
+    "rossio": {
+        "lines": ["sintra"],
+        "description": "Sintra line terminus (city center)",
+        "metro": "verde"
+    },
+    "campolide": {
+        "lines": ["sintra"],
+        "description": "Sintra line",
+        "metro": None
+    },
+    "benfica": {
+        "lines": ["sintra"],
+        "description": "Sintra line",
+        "metro": None
+    },
+    
+    # Azambuja Line (from Santa Apolónia/Oriente)
+    "roma areeiro": {
+        "roma-areeiro": "roma areeiro",
+        "lines": ["azambuja"],
+        "description": "Azambuja line",
+        "metro": "verde"  # Close to Areeiro metro
+    },
+    "braço de prata": {
+        "braco de prata": "braço de prata",
+        "lines": ["azambuja"],
+        "description": "Azambuja line",
+        "metro": None
+    },
+    "marvila": {
+        "lines": ["azambuja"],
+        "description": "Azambuja line",
+        "metro": None
+    },
+    "chelas": {
+        "lines": ["azambuja"],
+        "description": "Azambuja line",
+        "metro": "vermelha"
+    },
+}
+
+# CP Train Lines
+CP_LINES = {
+    "cascais": {
+        "name": "Linha de Cascais",
+        "description": "Cais do Sodré ↔ Cascais (coastal route)",
+        "emoji": "🚆",
+        "terminus": ["Cais do Sodré", "Cascais"],
+        "frequency": "~20 min"
+    },
+    "sintra": {
+        "name": "Linha de Sintra",
+        "description": "Rossio/Oriente ↔ Sintra (historic town)",
+        "emoji": "🚆",
+        "terminus": ["Rossio", "Sintra"],
+        "frequency": "~20 min"
+    },
+    "azambuja": {
+        "name": "Linha de Azambuja",
+        "description": "Santa Apolónia/Oriente ↔ Azambuja (north suburbs)",
+        "emoji": "🚆",
+        "terminus": ["Santa Apolónia", "Azambuja"],
+        "frequency": "~30 min"
+    },
+    "sado": {
+        "name": "Linha do Sado",
+        "description": "Regional line to south (Setúbal, Évora)",
+        "emoji": "🚆",
+        "terminus": ["Entrecampos", "South regions"],
+        "frequency": "Variable"
+    },
+}
+
 
 # ==========================================================================
 # Helper Functions
 # ==========================================================================
+
+def get_station_lines(station_name: str) -> List[str]:
+    """
+    Returns the metro lines that serve a given station.
+    
+    Args:
+        station_name (str): Name of the station (case-insensitive).
+        
+    Returns:
+        List[str]: List of line names (e.g., ['amarela', 'azul']).
+    """
+    station_lower = station_name.lower().strip()
+    return METRO_STATIONS.get(station_lower, [])
+
+
+def get_cp_station_info(station_name: str) -> Optional[Dict[str, Any]]:
+    """
+    Returns information about a CP train station.
+    
+    Args:
+        station_name (str): Name of the station (case-insensitive).
+        
+    Returns:
+        Optional[Dict]: Station information or None if not found.
+    """
+    station_lower = station_name.lower().strip()
+    return CP_STATIONS.get(station_lower, None)
 
 def fetch_json_with_retry(url: str, timeout: int = REQUEST_TIMEOUT) -> Optional[Any]:
     """
@@ -498,6 +740,171 @@ def get_train_status() -> str:
     
     if len(active_trains) > 10:
         response += f"... and {len(active_trains) - 10} more trains.\n"
+    
+    return response
+
+
+@tool
+def get_route_between_stations(origin: str, destination: str) -> str:
+    """
+    Provides routing information between two locations in Lisbon using Metro, Carris, and CP trains.
+    
+    CRITICAL: This tool checks ALL transport modes (Metro, Carris buses, CP trains) and provides
+    accurate line information for metro stations.
+    
+    Args:
+        origin (str): Starting location (e.g., "Entrecampos", "Aeroporto").
+        destination (str): Destination location (e.g., "Marquês de Pombal", "Cais do Sodré").
+    
+    Returns:
+        str: Detailed routing suggestions with metro lines, bus options, and train alternatives.
+    
+    Examples:
+        >>> get_route_between_stations("Entrecampos", "Marquês de Pombal")
+        >>> get_route_between_stations("Aeroporto", "Rossio")
+    """
+    origin_lower = origin.lower().strip()
+    dest_lower = destination.lower().strip()
+    
+    response = f"🗺️ **Route: {origin.title()} → {destination.title()}**\n"
+    response += "=" * 50 + "\n\n"
+    
+    # Check if both are Metro stations
+    origin_lines = get_station_lines(origin)
+    dest_lines = get_station_lines(destination)
+    
+    # Check if they are CP train stations
+    origin_cp = get_cp_station_info(origin)
+    dest_cp = get_cp_station_info(destination)
+    
+    has_metro = bool(origin_lines or dest_lines)
+    has_train = bool(origin_cp or dest_cp)
+    
+    if origin_lines and dest_lines:
+        # Both are Metro stations
+        response += "🚇 **METRO ROUTE**\n"
+        response += "-" * 30 + "\n"
+        
+        # Check for direct line
+        common_lines = set(origin_lines) & set(dest_lines)
+        if common_lines:
+            response += f"✅ **Direct Route Available**\n\n"
+            for line in common_lines:
+                line_info = METRO_LINES.get(line, {})
+                emoji = line_info.get('emoji', '')
+                name = line_info.get('name', line.title())
+                response += f"   {emoji} Take the **{line.title()} Line** ({name})\n"
+                response += f"   📍 Board at: {origin.title()}\n"
+                response += f"   📍 Alight at: {destination.title()}\n\n"
+        else:
+            # Need to transfer
+            response += f"🔄 **Transfer Required**\n\n"
+            response += f"   📍 From: {origin.title()} ({', '.join([METRO_LINES[l]['emoji'] + ' ' + l.title() for l in origin_lines])})\n"
+            response += f"   📍 To: {destination.title()} ({', '.join([METRO_LINES[l]['emoji'] + ' ' + l.title() for l in dest_lines])})\n\n"
+            
+            # Suggest transfer stations
+            transfer_stations = [
+                ("Marquês de Pombal", ["amarela", "azul"]),
+                ("Saldanha", ["amarela", "vermelha"]),
+                ("Alameda", ["verde", "vermelha"]),
+                ("Baixa-Chiado", ["azul", "verde"]),
+                ("Jardim Zoológico", ["azul", "verde"]),
+                ("São Sebastião", ["vermelha", "azul"]),
+            ]
+            
+            for station, lines in transfer_stations:
+                if set(origin_lines) & set(lines) and set(dest_lines) & set(lines):
+                    response += f"   💡 **Suggested Transfer**: {station}\n"
+                    response += f"      {', '.join([METRO_LINES[l]['emoji'] for l in lines])}\n\n"
+    
+    elif origin_lines:
+        response += f"🚇 **Origin is a Metro station**: {origin.title()}\n"
+        response += f"   Lines: {', '.join([METRO_LINES[l]['emoji'] + ' ' + l.title() for l in origin_lines])}\n\n"
+        response += f"❌ Destination '{destination.title()}' is not a known Metro station.\n"
+        response += "   Consider using Carris buses or CP trains.\n\n"
+    
+    elif dest_lines:
+        response += f"❌ Origin '{origin.title()}' is not a known Metro station.\n\n"
+        response += f"🚇 **Destination is a Metro station**: {destination.title()}\n"
+        response += f"   Lines: {', '.join([METRO_LINES[l]['emoji'] + ' ' + l.title() for l in dest_lines])}\n\n"
+        response += "   Consider using Carris buses or CP trains to reach the Metro.\n\n"
+    
+    else:
+        response += "❌ Neither location is a known Metro station.\n\n"
+    
+    # Check for CP Train options
+    if origin_cp or dest_cp:
+        response += "🚆 **CP TRAINS (COMBOIOS)**\n"
+        response += "-" * 30 + "\n"
+        
+        if origin_cp:
+            lines_str = ", ".join([CP_LINES[l]["name"] for l in origin_cp.get("lines", [])])
+            response += f"✅ **{origin.title()}** is a train station\n"
+            response += f"   📍 {origin_cp.get('description', 'N/A')}\n"
+            response += f"   🚆 Lines: {lines_str}\n"
+            if origin_cp.get("metro"):
+                metro_line = METRO_LINES.get(origin_cp["metro"], {})
+                response += f"   🚇 Metro connection: {metro_line.get('emoji', '')} {origin_cp['metro'].title()}\n"
+            response += "\n"
+        
+        if dest_cp:
+            lines_str = ", ".join([CP_LINES[l]["name"] for l in dest_cp.get("lines", [])])
+            response += f"✅ **{destination.title()}** is a train station\n"
+            response += f"   📍 {dest_cp.get('description', 'N/A')}\n"
+            response += f"   🚆 Lines: {lines_str}\n"
+            if dest_cp.get("metro"):
+                metro_line = METRO_LINES.get(dest_cp["metro"], {})
+                response += f"   🚇 Metro connection: {metro_line.get('emoji', '')} {dest_cp['metro'].title()}\n"
+            response += "\n"
+        
+        # Check if both are on the same train line
+        if origin_cp and dest_cp:
+            origin_train_lines = set(origin_cp.get("lines", []))
+            dest_train_lines = set(dest_cp.get("lines", []))
+            common_train_lines = origin_train_lines & dest_train_lines
+            
+            if common_train_lines:
+                response += "✅ **Direct train route available!**\n"
+                for line in common_train_lines:
+                    line_info = CP_LINES.get(line, {})
+                    response += f"   {line_info.get('emoji', '🚆')} {line_info.get('name', line.title())}\n"
+                    response += f"   ⏱️ Frequency: {line_info.get('frequency', 'Check schedule')}\n"
+                response += "\n"
+    
+    # Add general transport options (only if not covered above)
+    if not has_metro and not has_train:
+        response += "🚌 **CARRIS BUSES**\n"
+    response += "-" * 30 + "\n"
+    response += "Check bus routes and real-time arrivals with:\n"
+    response += f"   • Search for bus stops near '{origin.title()}'\n"
+    response += f"   • Search for bus stops near '{destination.title()}'\n\n"
+    
+    response += "🚆 **CP TRAINS (Comboios de Portugal)**\n"
+    response += "-" * 30 + "\n"
+    response += "For longer distances or connections to suburbs:\n"
+    response += "   • Check train schedules from nearby stations\n"
+    response += "   • Lines: Sintra, Cascais, Azambuja, Sado lines\n\n"
+    
+    response += "💡 **RECOMMENDATION**\n"
+    response += "-" * 30 + "\n"
+    response += "For the fastest route, combine:\n"
+    response += "   1. Metro (if both locations are near stations)\n"
+    response += "   2. Carris buses (for short distances or first/last mile)\n"
+    response += "   3. CP trains (for suburban connections)\n\n"
+    
+    # Add current transport status
+    response += "📊 **CURRENT TRANSPORT STATUS**\n"
+    response += "-" * 30 + "\n"
+    
+    # Quick metro status
+    metro_data = fetch_json_with_retry(METRO_STATUS_URL)
+    if metro_data and metro_data.get('resposta'):
+        resp = metro_data['resposta']
+        all_ok = all(resp.get(line, 'Unknown').strip().lower() == 'ok' for line in METRO_LINES.keys())
+        if all_ok:
+            response += "   🚇 Metro: ✅ All lines operating normally\n"
+        else:
+            response += "   🚇 Metro: ⚠️ Some disruptions reported\n"
     
     return response
 

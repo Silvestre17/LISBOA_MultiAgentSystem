@@ -9,7 +9,7 @@
 #     - Proximity-based filtering with Haversine distance
 #     - Multiple specialized query functions
 # 
-#   Data Source: https://dados.cm-lisboa.pt/
+#   Data Source: https://dados.gov.pt/pt/datasets/?geozone=pt%3Aconcelho%3A1106 / https://dados.cm-lisboa.pt/
 # ==========================================================================
 
 # Required libraries:
@@ -505,6 +505,230 @@ def get_dataset_details(dataset_name: str) -> str:
                     response += f"   ... and {len(sample) - 15} more fields\n"
     
     return response
+
+
+def _search_place_in_datasets_logic(query: str, max_results: int = 5) -> str:
+    """
+    Core logic for searching places in open datasets.
+    This is a regular function (not a tool) that can be called directly.
+    
+    Args:
+        query (str): The name of the place to find.
+        max_results (int): Maximum number of results to return.
+    
+    Returns:
+        str: Formatted string with found places or empty string if nothing found.
+    """
+    if DF_METADATA.empty:
+        return ""
+    
+    query_lower = query.lower()
+    found_places = []
+    
+    # 1. Identify potential datasets
+    # Strategy: Map common keywords to specific datasets + default keyword search
+    
+    potential_datasets = pd.DataFrame()
+    
+    # Comprehensive Mapping of Keywords to Datasets
+    keyword_map = {
+        # Shopping & Commerce
+        'shopping': ['Centros Comerciais', 'Mercados', 'Quiosques e Bancas', 'Lojas Sociais de Lisboa'],
+        'centro comercial': ['Centros Comerciais'],
+        'mercado': ['Mercados', 'Feiras'],
+        'feira': ['Feiras'],
+        'loja': ['Lojas Sociais de Lisboa', 'Comercialização de Hardware e Software e Serviços', 'Quiosques e Bancas'],
+        'quiosque': ['Quiosques e Bancas'],
+        
+        # Health & Emergency
+        'hospital': ['Hospitais Públicos', 'Hospitais Privados', 'Hospitais Militares', 'Centros de Saúde', 'Prestação de Cuidados'],
+        'saude': ['Centros de Saúde', 'Hospitais Públicos', 'Hospitais Privados'],
+        'clinica': ['Hospitais Privados', 'Prestação de Cuidados'],
+        'farmacia': ['Farmácias e Parafarmácias'],
+        'bombeiros': ['Bombeiros'],
+        'policia': ['Polícia Municipal', 'Polícia de Segurança Pública', 'GNR', 'Defesa e Segurança'],
+        'seguranca': ['Polícia Municipal', 'Polícia de Segurança Pública'],
+        'proteccao civil': ['Protecção Civil', 'Lisboa. Pontos de encontro - Emergência'],
+        
+        # Education
+        'escola': ['Escolas Públicas - 1º Ciclo', 'Escolas Públicas - 2º e 3º Ciclo', 'Escolas Públicas - Secundário', 'Escolas Públicas - Pré-Escolar', 'Agrupamentos de Escolas de Lisboa', 'Escolas Privadas - 1º Ciclo', 'Escolas Privadas - 2º e 3º Ciclo', 'Escolas Privadas - Secundárias', 'Equipamentos Escolares'],
+        'colegio': ['Escolas Privadas - 1º Ciclo', 'Escolas Privadas - 2º e 3º Ciclo', 'Escolas Privadas - Secundárias'],
+        'universidade': ['Ensino Superior', 'Faculdades, Escolas e Institutos'],
+        'faculdade': ['Ensino Superior', 'Faculdades, Escolas e Institutos'],
+        'instituto': ['Institutos', 'Instituições'],
+        'creche': ['Escolas Públicas - Pré-Escolar', 'Escolas Privadas - Pré-Escolar'],
+        
+        # Culture & Tourism
+        'museu': ['Museus', 'Museus, Bibliotecas e Arquivos'],
+        'biblioteca': ['Bibliotecas Arquivos e Centros de Documentação', 'Medidas de desempenho da Rede de Bibliotecas de Lisboa'],
+        'teatro': ['Teatros', 'Artes Performativas - Teatro, Dança e Música'],
+        'cinema': ['Cinemas', 'Cinema e Video'],
+        'galeria': ['Galerias de Arte', 'Galerias Municipais', 'Espaços e Bairros Criativos'],
+        'monumento': ['Monumentos Nacionais', 'Imóveis e Monumentos de Interesse Público', 'Estatuária', 'Património Mundial'],
+        'miradouro': ['Miradouros'],
+        'igreja': ['Arquitetura Religiosa', 'Localização e identificação das Casas Religiosas de Lisboa existentes em 2015'],
+        'hotel': ['Capacidade de Alojamento', 'Alojamento'],
+        'turismo': ['Postos de Turismo', 'Turismo Náutico'],
+        'wi-fi': ['Rede LoRa'], # Approximate
+        
+        # Outdoors & Leisure
+        'jardim': ['Jardins - Parques Urbanos', 'Grandes Parques e Jardins de Lisboa', 'Espaços Verdes'],
+        'parque': ['Grandes Parques e Jardins de Lisboa', 'Jardins - Parques Urbanos', 'Parques Infantis', 'Parques de Merendas', 'Parques Caninos'],
+        'praia': [], # Not many open datasets for beaches in CML directly besides river ones
+        'desporto': ['Instalações Desportivas', 'Centros Desportivos', 'Equipamentos de Fitness ao Ar Livre\u200b', 'Programa Desporto Mexe Comigo'],
+        'piscina': ['Instalações Desportivas', 'Programa de Apoio à Natação Curricular'],
+        
+        # Services & Amenities
+        'wc': ['Instalações Sanitárias', 'Instalações Sanitárias Públicas Automáticas', 'Balneários'],
+        'banheiro': ['Instalações Sanitárias', 'Instalações Sanitárias Públicas Automáticas'],
+        'estacionamento': ['Parques de estacionamento na via pública', 'EMEL - Parques de estacionamento na via pública', 'Lugares de estacionamento na via pública para residentes ou público em geral', 'Zonas reguladas de estacionamento na via pública'],
+        'embaixada': ['Embaixadas'],
+        'ctt': [], # Post offices
+        'cemiterio': ['Cemitérios'],
+        'loja cidadao': ['Loja do Cidadão'],
+        'camara': ['CM Lisboa - Paços do Concelho', 'CM Lisboa - Atendimento', 'Juntas de Freguesia'],
+        'junta': ['Juntas de Freguesia'],
+        
+        # Streets & Locations
+        'rua': ['Toponímia de Lisboa', 'Topónimos', 'Eixos de Via'],
+        'avenida': ['Toponímia de Lisboa', 'Topónimos'],
+        'praca': ['Toponímia de Lisboa', 'Topónimos'],
+        'largo': ['Toponímia de Lisboa', 'Topónimos'],
+        'bairro': ['Bairros e Zonas de Intervenção Prioritária', 'Localização e identificação das Casas Religiosas de Lisboa existentes em 2015'], # Proxy
+    }
+
+    # Add matched datasets from mapping
+    for key, titles in keyword_map.items():
+        if key in query_lower:
+            for title in titles:
+                matches = DF_METADATA[DF_METADATA['title'] == title]
+                if not matches.empty:
+                    potential_datasets = pd.concat([potential_datasets, matches])
+
+    # Keywords to ignore (stopwords)
+    ignore_words = {'de', 'do', 'da', 'em', 'para', 'com', 'the', 'in', 'at', 'lisboa', 'lisbon', 'perto', 'near', 'proximo', 'onde', 'fica', 'existe', 'ha'}
+    tokens = [w for w in query_lower.split() if w not in ignore_words and len(w) > 3]
+    
+    
+    if not tokens:
+        tokens = [query_lower]
+        
+    for token in tokens:
+        matches = search_datasets(token)
+        if not matches.empty:
+            potential_datasets = pd.concat([potential_datasets, matches])
+    
+    # Also handle specific cases where category might be implied
+    if any(x in query_lower for x in ['shopping', 'centro comercial', 'mall']):
+        matches = search_datasets('comerciais')
+        potential_datasets = pd.concat([potential_datasets, matches])
+    
+    if potential_datasets.empty:
+        return ""
+        
+    potential_datasets = potential_datasets.drop_duplicates(subset='stable_url')
+    
+    # Limit to top 5 datasets to ensure responsiveness
+    for idx, dataset in potential_datasets.head(5).iterrows():
+        title = dataset['title']
+        url = dataset.get('stable_url')
+        
+        if not url or url == "N/A":
+            continue
+            
+        # Optimization: Skip likely irrelevant large datasets based on title
+        if any(x in title.lower() for x in ['limites', 'rede', 'carta', 'zonamento']):
+            continue
+            
+        data = fetch_geojson_with_retry(url)
+        if not data:
+            continue
+            
+        features = data.get('features', [])
+        for feature in features:
+            properties = feature.get('properties', {})
+            
+            # Extract name and address
+            name = extract_name(properties)
+            address = extract_address(properties)
+            
+            # Check match: Name contains query token OR query contains Name
+            if name == "N/A":
+                continue
+                
+            match_score = 0
+            name_lower = name.lower()
+            
+            # Full match check
+            if query_lower in name_lower or name_lower in query_lower:
+                match_score = 100
+            else:
+                # Token match check
+                matches = sum(1 for t in tokens if t in name_lower)
+                if matches > 0:
+                    match_score = (matches / len(tokens)) * 100
+            
+            if match_score > 50:  # Threshold
+                # Extract coordinates
+                coords = extract_coordinates(feature.get('geometry', {}))
+                lat, lon = coords if coords else (None, None)
+                
+                found_places.append({
+                    'title': name,
+                    'category': title, # Use dataset title as category
+                    'location': address,
+                    'lat': lat,
+                    'lon': lon,
+                    'short_description': f"Found in open data dataset: {title}",
+                    'score': match_score
+                })
+    
+    # Deduplicate by name
+    unique_places = {}
+    for p in found_places:
+        if p['title'] not in unique_places:
+            unique_places[p['title']] = p
+        else:
+            # Keep the one with better info
+            if len(p['location']) > len(unique_places[p['title']]['location']):
+                unique_places[p['title']] = p
+                
+    results = sorted(unique_places.values(), key=lambda x: x['score'], reverse=True)[:max_results]
+    
+    if not results:
+        return ""
+
+    # Format output compatible with VisitLisboa style
+    output_parts = [f"🏛️ **Found {len(results)} Places in Open Data (Lisboa Aberta):**\n"]
+    
+    for i, place in enumerate(results, 1):
+        output_parts.append(f"{i}. 🏛️ **{place['title']}**")
+        output_parts.append(f"   📂 Category: {place['category']}")
+        output_parts.append(f"   📝 {place['short_description']}")
+        
+        if place['location']:
+            output_parts.append(f"   📍 {place['location']}")
+        if place['lat'] and place['lon']:
+            output_parts.append(f"   🗺️ Coordinates: ({place['lat']:.5f}, {place['lon']:.5f})")
+            
+    return "\n".join(output_parts)
+
+
+@tool
+def find_place_in_datasets(query: str, max_results: int = 5) -> str:
+    """
+    Searches for a specific place by name across relevant open datasets.
+    Useful when standard place search fails but the place might exist in open data catalogs
+    (e.g., specific shopping malls, markets, public facilities).
+
+    Args:
+        query (str): The name of the place to find (e.g., "Centro Comercial Colombo").
+        max_results (int): Maximum number of results to return.
+
+    Returns:
+        str: Formatted string with found places or empty string if nothing found.
+    """
+    return _search_place_in_datasets_logic(query, max_results)
 
 
 # ==========================================================================

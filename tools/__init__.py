@@ -15,7 +15,8 @@ from tools.transport_api import (
     get_carris_stop_info,
     search_carris_lines,
     get_train_status,
-    get_transport_summary
+    get_transport_summary,
+    get_route_between_stations
 )
 
 from tools.dados_abertos import (
@@ -45,6 +46,7 @@ __all__ = [
     "search_carris_lines",
     "get_train_status",
     "get_transport_summary",
+    "get_route_between_stations",  # NEW: Routing tool
     
     # Open Data (Lisboa Aberta)
     "find_nearby_services",
