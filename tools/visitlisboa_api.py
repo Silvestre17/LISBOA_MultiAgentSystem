@@ -36,6 +36,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=ImportWarning)
 
 from langchain_core.tools import tool
+from tools.dados_abertos import _search_place_in_datasets_logic
 
 # Add parent directory to path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -713,7 +714,16 @@ def search_places_attractions(
         results = _fallback_search(query, category, places_data, max_results)
         
         if not results:
-            return f"No places found matching: '{query or 'all'}'"
+            # 3. Last Resort: Try Open Data (Lisboa Aberta)
+            # This is useful for shopping malls ("Centro Comercial"), markets, schools, etc.
+            # which might not be in the tourist-focused VisitLisboa database.
+            if query:
+                logger.info(f"Using Open Data fallback for: {query}")
+                open_data_results = _search_place_in_datasets_logic(query, max_results=max_results)
+                if open_data_results:
+                    return open_data_results
+            
+            return f"No places found matching: '{query or 'all'}' in VisitLisboa or Open Data registries."
         
         output_parts = [f"🏛️ **Found {len(results)} Places/Attractions (keyword search):**\n"]
         
