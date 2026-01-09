@@ -1234,16 +1234,21 @@ def main():
     main_container = st.container()
     
     with main_container:
-        # if not st.session_state.initialized:
-        #     with st.spinner("Starting Lisbon Urban Assistant..."):
-        #         success, _ = initialize_assistant(selected_provider)
-        #         if not success:
-        #             render_error_panel()
-        #             return
+        # Initialize assistant if not already done or if provider changed
+        if not st.session_state.initialized or st.session_state.provider != selected_provider:
+            with st.spinner("Starting Lisbon Urban Assistant..."):
+                success, error = initialize_assistant(selected_provider)
+                if not success:
+                    st.error(f"Failed to initialize assistant: {error}")
+                    st.info("Please check your API credentials in the sidebar.")
+                    render_footer()
+                    return
         
-        # if not st.session_state.assistant:
-        #     render_error_panel()
-        #     return
+        # Safety check: ensure assistant exists
+        if not st.session_state.assistant:
+            st.error("Assistant not initialized. Please refresh the page.")
+            render_footer()
+            return
         
         render_chat_messages()
         
