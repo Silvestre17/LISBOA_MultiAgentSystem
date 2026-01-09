@@ -16,7 +16,10 @@ from tools.transport_api import (
     search_carris_lines,
     get_train_status,
     get_transport_summary,
-    get_route_between_stations
+    get_route_between_stations,
+    find_bus_routes,           # Bus routing between locations
+    search_bus_stops_nearby,   # Find bus stops near GPS coordinates
+    search_cp_stations         # NEW: Search CP train stations in AML
 )
 
 from tools.dados_abertos import (
@@ -46,7 +49,10 @@ __all__ = [
     "search_carris_lines",
     "get_train_status",
     "get_transport_summary",
-    "get_route_between_stations",  # NEW: Routing tool
+    "get_route_between_stations",   # Metro routing tool
+    "find_bus_routes",              # Bus routing between locations
+    "search_bus_stops_nearby",      # GPS-based stop search
+    "search_cp_stations",           # NEW: CP train station search (AML)
     
     # Open Data (Lisboa Aberta)
     "find_nearby_services",
