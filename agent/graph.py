@@ -248,8 +248,12 @@ class LisbonAssistant:
         # Add user message to state
         self.state["messages"].append(HumanMessage(content=message))
         
-        # Run the graph
-        result = self.graph.invoke(self.state)
+        # Run the graph with recursion limit to prevent infinite loops
+        # Default LangGraph limit is 25, we set 15 for safety
+        result = self.graph.invoke(
+            self.state,
+            config={"recursion_limit": 15}
+        )
         
         # Update state with result
         self.state = result
