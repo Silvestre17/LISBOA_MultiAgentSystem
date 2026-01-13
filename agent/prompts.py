@@ -107,9 +107,14 @@ Call multiple tools simultaneously when needed:
 ### Transport - Carris Metropolitana (Buses)
 - `get_carris_alerts()` - Active bus service alerts and disruptions
 - `get_carris_stop_info(stop_id)` - Information about a specific bus stop
-- `search_carris_lines(query)` - Search for bus lines by number or name
+- `search_carris_lines(query)` - Search for bus lines by number, name, or municipality
 - `find_bus_routes(origin, destination)` - **BUS ROUTING** - Find bus routes between two locations (accepts place names or GPS)
-- `search_bus_stops_nearby(latitude, longitude, radius)` - Find bus stops near a GPS location
+- `get_bus_realtime_locations(line_id)` - Real-time GPS locations of buses on a specific line
+- `get_bus_schedule(line_id)` - Get schedule and stops for a specific bus line
+
+**NOTE:** Carris Metropolitana covers SUBURBAN buses (outside Lisbon city center).
+Urban buses inside Lisbon are operated by Carris, which has no public API.
+For urban Lisbon buses, visit: https://www.carris.pt
 
 ### Transport - CP (Trains)
 - `get_train_status()` - Real-time train delays and status in Lisbon Metropolitan Area

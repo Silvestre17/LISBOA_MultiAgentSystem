@@ -4,14 +4,19 @@
 # 
 #   Real-time transport data for Lisbon Metropolitan Area.
 #   Features:
-#     - Metro de Lisboa: Line status and routing
+#     - Metro de Lisboa: Official API with OAuth2 authentication
+#       * Real-time waiting times per station/line
+#       * Line status and disruptions
+#       * Station information with GPS coordinates
+#       * Service frequency/intervals
+#       * Automatic token refresh
 #     - Carris Metropolitana: Alerts, stops, lines, real-time arrivals, routing
 #     - CP (Comboios de Portugal): Train status and delays
 #     - Bus Route Finder: Find bus routes between two locations using GPS
 #     - Smart Geocoding: Converts place names to GPS coordinates automatically
 # 
 #   APIs:
-#     - Metro: https://app.metrolisboa.pt/status/getLinhas.php
+#     - Metro Official: https://api.metrolisboa.pt:8243/estadoServicoML/1.0.1/
 #     - Carris: https://api.carrismetropolitana.pt/
 #     - CP: https://comboios.live/api/
 #     - Nominatim (OpenStreetMap): https://nominatim.openstreetmap.org/
@@ -20,7 +25,7 @@
 #     - On-demand loading of ~12000 bus stops from Carris API
 #     - In-memory cache for fast proximity search (no database needed)
 #     - Haversine distance calculation for GPS-based stop finding
-#     - Smart geocoding: "Colombo" → GPS → nearest bus stops
+#     - Smart geocoding: "X POI" → GPS → nearest bus stops
 #     - Pattern matching to find bus routes between two stops
 #     - Streamlit Cloud compatible (no external dependencies)
 # ==========================================================================
@@ -34,12 +39,17 @@ import logging
 import time
 import math
 import re
-from datetime import datetime
+import base64
+import urllib3
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Tuple
 from urllib.parse import quote
 
 import requests
 from langchain_core.tools import tool
+
+# Suppress SSL warnings globally for Metro API
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Add parent directory to path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -51,26 +61,35 @@ logger = logging.getLogger(__name__)
 
 # Request configuration
 REQUEST_TIMEOUT = 15  # seconds
-MAX_RETRIES = 3
-BACKOFF_FACTOR = 2
+MAX_RETRIES = 3       # number of retries for API calls
+BACKOFF_FACTOR = 2    # exponential backoff factor (it is the multiplier for wait time between retries)
 
 # ==========================================================================
 # API Endpoints
 # ==========================================================================
 
-# Metro de Lisboa
+# Metro de Lisboa - Official API (OAuth2 authenticated)
+# Documentation: https://api.metrolisboa.pt/store/
+METRO_API_BASE = "https://api.metrolisboa.pt:8243/estadoServicoML/1.0.1"
+METRO_TOKEN_URL = "https://api.metrolisboa.pt:8243/token"
+METRO_CONSUMER_KEY = os.getenv("METRO_CONSUMER_KEY", "")
+METRO_CONSUMER_SECRET = os.getenv("METRO_CONSUMER_SECRET", "")
+
+# Metro de Lisboa - Fallback (unofficial, no auth required)
 METRO_STATUS_URL = "https://app.metrolisboa.pt/status/getLinhas.php"
 
 # Carris Metropolitana (using v1 - official documented API with more complete data)
 # API Documentation: https://github.com/carrismetropolitana/schedules-api
+# IMPORTANT: Carris Metropolitana covers SUBURBAN buses (outside Lisbon city center).
+#            Urban buses INSIDE Lisbon city are operated by Carris (different company)
+#            which does NOT provide a public API.
 CARRIS_BASE_URL = "https://api.carrismetropolitana.pt/v1"
 CARRIS_ALERTS_URL = f"{CARRIS_BASE_URL}/alerts"
 CARRIS_STOPS_URL = f"{CARRIS_BASE_URL}/stops"
 CARRIS_LINES_URL = f"{CARRIS_BASE_URL}/lines"
 CARRIS_ROUTES_URL = f"{CARRIS_BASE_URL}/routes"
-CARRIS_PATTERNS_URL = f"{CARRIS_BASE_URL}/patterns"
-CARRIS_VEHICLES_URL = f"{CARRIS_BASE_URL}/vehicles"
-CARRIS_MUNICIPALITIES_URL = f"{CARRIS_BASE_URL}/municipalities"
+CARRIS_PATTERNS_URL = f"{CARRIS_BASE_URL}/patterns"   # Bus route patterns (schedule + stops sequence)
+CARRIS_VEHICLES_URL = f"{CARRIS_BASE_URL}/vehicles"   # Real-time bus GPS locations
 
 # Nominatim (OpenStreetMap) - Free geocoding service
 # Rate limit: 1 request per second (we add delay between calls)
@@ -88,6 +107,50 @@ AML_BOUNDS = {
     "lon_min": -9.5,
     "lon_max": -8.8
 }
+
+# Lisbon City Center Bounding Box (Município de Lisboa)
+# Used to detect when users are asking about routes within Lisbon city
+# where Carris (not Carris Metropolitana) operates urban buses
+LISBOA_CITY_BOUNDS = {
+    "lat_min": 38.69,
+    "lat_max": 38.80,
+    "lon_min": -9.23,
+    "lon_max": -9.09
+}
+
+# ==========================================================================
+# Carris vs Carris Metropolitana - Important Distinction
+# ==========================================================================
+# CARRIS: Operates urban buses INSIDE Lisbon city (e.g., lines 28E tram, 738, 732)
+#         Does NOT provide a public API - no real-time data available.
+#         Website: https://www.carris.pt/viaje/planear-viagem/
+#
+# CARRIS METROPOLITANA: Operates suburban buses in the Lisbon Metropolitan Area
+#                       (Amadora, Sintra, Cascais, Almada, Setúbal, etc.)
+#                       Provides full API with real-time data.
+#                       API: https://api.carrismetropolitana.pt/
+#
+# This limitation means we CANNOT provide bus routes for trips entirely
+# within Lisbon city center (e.g., Marquês de Pombal → Campo Pequeno).
+# In such cases, Metro de Lisboa is usually the best alternative.
+# ==========================================================================
+
+CARRIS_LIMITATION_NOTICE = """
+⚠️ **Nota sobre autocarros urbanos de Lisboa**
+
+Os autocarros que circulam dentro da cidade de Lisboa (ex: linhas 28E, 738, 732)
+são operados pela **Carris**, que infelizmente não disponibiliza uma API pública
+com informação em tempo real.
+
+A informação disponível neste sistema é da **Carris Metropolitana**, que opera
+os autocarros suburbanos (Amadora, Sintra, Cascais, Oeiras, Almada, etc.).
+
+📍 Para planear viagens de autocarro dentro de Lisboa, consulta:
+   🔗 https://www.carris.pt/viaje/planear-viagem/
+
+💡 **Alternativa recomendada**: O **Metro de Lisboa** cobre a maioria das
+   deslocações dentro da cidade e temos informação completa em tempo real!
+"""
 
 # ==========================================================================
 # Carris Stops Cache (In-Memory)
@@ -112,19 +175,31 @@ _carris_routes_last_load: Optional[datetime] = None
 _cp_stations_cache: Optional[Dict[str, Dict[str, Any]]] = None  # code -> station
 _cp_stations_last_load: Optional[datetime] = None
 
+# ==========================================================================
+# Metro de Lisboa Official API Cache (OAuth2 Token + Station Data)
+# ==========================================================================
+# Token management for Metro API with automatic refresh
+# Station data cached for 24h (GPS coordinates don't change)
+
+_metro_access_token: Optional[str] = None
+_metro_token_expiry: Optional[datetime] = None
+_metro_stations_cache: Optional[List[Dict[str, Any]]] = None
+_metro_stations_last_load: Optional[datetime] = None
+_metro_destinations_cache: Optional[Dict[str, str]] = None  # id -> name
+
 # Cache expiration time (24 hours - stops don't change frequently)
 CACHE_EXPIRATION_HOURS = 24
 
 # Metro line colors and names
 METRO_LINES = {
-    "amarela": {"name": "Yellow Line (Rato ↔ Odivelas)", "emoji": "🟡", "color": "#FFCD41"},
-    "azul": {"name": "Blue Line (Santa Apolónia ↔ Reboleira)", "emoji": "🔵", "color": "#0075BF"},
-    "verde": {"name": "Green Line (Telheiras ↔ Cais do Sodré)", "emoji": "🟢", "color": "#00A651"},
-    "vermelha": {"name": "Red Line (S. Sebastião ↔ Aeroporto)", "emoji": "🔴", "color": "#ED1C24"}
+    "amarela": {"name": "Yellow Line (Rato ↔ Odivelas)", "emoji": "🟡", "color": "#F7A71C"},
+    "azul": {"name": "Blue Line (Santa Apolónia ↔ Reboleira)", "emoji": "🔵", "color": "#3877BD"},
+    "verde": {"name": "Green Line (Telheiras ↔ Cais do Sodré)", "emoji": "🟢", "color": "#00A497"},
+    "vermelha": {"name": "Red Line (S. Sebastião ↔ Aeroporto)", "emoji": "🔴", "color": "#E81775"}
 }
 
 # Key Metro Stations with their lines (for routing assistance)
-# Based on official Metro de Lisboa GeoJSON data
+# Based on official Metro de Lisboa GeoJSON data and verified manually
 # All stations listed in order along each line
 METRO_STATIONS = {
     # Yellow Line (Amarela) - Rato ↔ Odivelas
@@ -205,6 +280,114 @@ METRO_STATIONS = {
     "encarnação": ["vermelha"],
     "encarnacao": ["vermelha"],
     "aeroporto": ["vermelha"],
+}
+
+# Metro Station ID mapping (name -> API code)
+# Based on official Metro de Lisboa API /infoEstacao/todos response
+METRO_STATION_IDS = {
+    # Amarela (Yellow)
+    "rato": "RA",
+    "marquês de pombal": "MP",
+    "marques de pombal": "MP",
+    "picoas": "PI",
+    "saldanha": "SA",
+    "campo pequeno": "CP",
+    "entre campos": "EC",
+    "entrecampos": "EC",
+    "cidade universitária": "CU",
+    "cidade universitaria": "CU",
+    "campo grande": "CG",
+    "quinta das conchas": "QC",
+    "lumiar": "LU",
+    "ameixoeira": "AX",
+    "senhor roubado": "SR",
+    "odivelas": "OD",
+    
+    # Azul (Blue)
+    "santa apolónia": "SP",
+    "santa apolonia": "SP",
+    "terreiro do paço": "TP",
+    "terreiro do paco": "TP",
+    "baixa-chiado": "BC",
+    "baixa chiado": "BC",
+    "restauradores": "RE",
+    "avenida": "AV",
+    "parque": "PA",
+    "são sebastião": "SS",
+    "sao sebastiao": "SS",
+    "s. sebastião": "SS",
+    "praça de espanha": "PE",
+    "praca de espanha": "PE",
+    "jardim zoológico": "JZ",
+    "jardim zoologico": "JZ",
+    "laranjeiras": "LA",
+    "alto dos moinhos": "AH",
+    "colégio militar": "CM",
+    "colegio militar": "CM",
+    "colégio militar/luz": "CM",
+    "carnide": "CA",
+    "pontinha": "PO",
+    "alfornelos": "AF",
+    "amadora este": "AS",
+    "reboleira": "RB",
+    
+    # Verde (Green)
+    "cais do sodré": "CS",
+    "cais do sodre": "CS",
+    "rossio": "RO",
+    "martim moniz": "MM",
+    "intendente": "IN",
+    "anjos": "AN",
+    "arroios": "AR",
+    "alameda": "AM",
+    "areeiro": "AE",
+    "roma": "RM",
+    "alvalade": "AL",
+    "telheiras": "TE",
+    
+    # Vermelha (Red)
+    "olaias": "OL",
+    "bela vista": "BV",
+    "chelas": "CH",
+    "olivais": "OS",
+    "cabo ruivo": "CR",
+    "oriente": "OR",
+    "moscavide": "MO",
+    "encarnação": "EN",
+    "encarnacao": "EN",
+    "aeroporto": "AP",
+}
+
+# Reverse mapping (code -> name) for display
+METRO_STATION_NAMES = {v: k.title() for k, v in METRO_STATION_IDS.items() if len(k) > 2}
+
+# Metro destination ID mapping (from /infoDestinos/todos)
+# Note: Some destinations are missing (e.g., Oriente, Encarnação, Entrecampos, etc.)
+METRO_DESTINATIONS = {
+    "33": "Reboleira",
+    "34": "Amadora Este",
+    "35": "Pontinha",
+    "36": "Colégio Militar/Luz",
+    "37": "Laranjeiras",
+    "38": "São Sebastião",
+    "39": "Avenida",
+    "40": "Baixa-Chiado",
+    "41": "Terreiro do Paço",
+    "42": "Santa Apolónia",
+    "43": "Odivelas",
+    "44": "Lumiar",
+    "45": "Campo Grande",
+    "46": "Campo Pequeno",
+    "48": "Rato",
+    "50": "Telheiras",
+    "51": "Alvalade",
+    "52": "Alameda",
+    "53": "Martim Moniz",
+    "54": "Cais do Sodré",
+    "56": "Bela Vista",
+    "57": "Chelas",
+    "59": "Moscavide",
+    "60": "Aeroporto",
 }
 
 # CP Train Stations in Lisbon (from official GeoJSON)
@@ -375,6 +558,47 @@ def get_cp_station_info(station_name: str) -> Optional[Dict[str, Any]]:
 # Carris Bus Stops Cache Functions
 # ==========================================================================
 
+def is_within_lisbon_city(lat: float, lon: float) -> bool:
+    """
+    Checks if GPS coordinates are within Lisbon city center.
+    
+    This is used to detect when users are asking about routes that would
+    require Carris urban buses (not available via API) vs Carris Metropolitana
+    suburban buses (API available).
+    
+    Args:
+        lat (float): Latitude.
+        lon (float): Longitude.
+        
+    Returns:
+        bool: True if within Lisbon city bounds, False otherwise.
+    """
+    return (LISBOA_CITY_BOUNDS["lat_min"] <= lat <= LISBOA_CITY_BOUNDS["lat_max"] and
+            LISBOA_CITY_BOUNDS["lon_min"] <= lon <= LISBOA_CITY_BOUNDS["lon_max"])
+
+
+def both_locations_in_lisbon_city(
+    origin_lat: Optional[float], origin_lon: Optional[float],
+    dest_lat: Optional[float], dest_lon: Optional[float]
+) -> bool:
+    """
+    Checks if both origin and destination are within Lisbon city center.
+    
+    When both locations are within Lisbon city, urban buses (Carris) would
+    typically be the bus option, but we don't have API access to that data.
+    
+    Args:
+        origin_lat, origin_lon: Origin coordinates.
+        dest_lat, dest_lon: Destination coordinates.
+        
+    Returns:
+        bool: True if BOTH locations are within Lisbon city.
+    """
+    if origin_lat is None or origin_lon is None or dest_lat is None or dest_lon is None:
+        return False
+    return is_within_lisbon_city(origin_lat, origin_lon) and is_within_lisbon_city(dest_lat, dest_lon)
+
+
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """
     Calculates the great-circle distance between two points on Earth.
@@ -427,6 +651,380 @@ def _is_cache_valid(last_load: Optional[datetime]) -> bool:
     
     hours_elapsed = (datetime.now() - last_load).total_seconds() / 3600
     return hours_elapsed < CACHE_EXPIRATION_HOURS
+
+
+# ==========================================================================
+# Metro de Lisboa Official API - OAuth2 Authentication
+# ==========================================================================
+
+def _get_metro_access_token(force_refresh: bool = False) -> Optional[str]:
+    """
+    Gets a valid access token for the Metro de Lisboa API.
+    
+    Implements OAuth2 Client Credentials flow with automatic token refresh.
+    Tokens are valid for 3600 seconds (1 hour) and cached in memory.
+    
+    Args:
+        force_refresh (bool): Force token refresh even if current token is valid.
+        
+    Returns:
+        Optional[str]: Access token if successful, None otherwise.
+        
+    Notes:
+        - Requires METRO_CONSUMER_KEY and METRO_CONSUMER_SECRET in environment
+        - Token is cached and automatically refreshed before expiry
+        - Uses 5-minute buffer before expiry to prevent edge cases
+    """
+    global _metro_access_token, _metro_token_expiry
+    
+    # Check if we have valid credentials
+    if not METRO_CONSUMER_KEY or not METRO_CONSUMER_SECRET:
+        logger.warning("Metro API credentials not configured. Set METRO_CONSUMER_KEY and METRO_CONSUMER_SECRET in .env")
+        return None
+    
+    # Check if current token is still valid (with 5-minute buffer)
+    if not force_refresh and _metro_access_token and _metro_token_expiry:
+        if datetime.now() < _metro_token_expiry - timedelta(minutes=5):
+            return _metro_access_token
+    
+    # Request new token using Client Credentials grant
+    try:
+        import base64
+        
+        # Create Basic auth header
+        credentials = f"{METRO_CONSUMER_KEY}:{METRO_CONSUMER_SECRET}"
+        encoded_credentials = base64.b64encode(credentials.encode()).decode()
+        
+        headers = {
+            "Authorization": f"Basic {encoded_credentials}",
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+        
+        data = {"grant_type": "client_credentials"}
+        
+        response = requests.post(
+            METRO_TOKEN_URL,
+            headers=headers,
+            data=data,
+            timeout=REQUEST_TIMEOUT,
+            verify=False  # Metro API SSL certificate may have issues
+        )
+        
+        if response.status_code != 200:
+            logger.error(f"Failed to get Metro access token: HTTP {response.status_code}")
+            logger.debug(f"Response: {response.text}")
+            return None
+        
+        token_data = response.json()
+        
+        _metro_access_token = token_data.get("access_token")
+        expires_in = token_data.get("expires_in", 3600)  # 1 hour (according to docs: 3600s)
+        _metro_token_expiry = datetime.now() + timedelta(seconds=expires_in)
+        
+        logger.info(f"Got new Metro access token (expires in {expires_in}s)")
+        return _metro_access_token
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Network error getting Metro token: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error getting Metro token: {e}")
+        return None
+
+
+def _metro_api_request(endpoint: str, params: Dict = None) -> Optional[Dict[str, Any]]:
+    """
+    Makes an authenticated request to the Metro de Lisboa Official API.
+    
+    Handles OAuth2 token management and automatic retry on token expiry.
+    
+    Args:
+        endpoint (str): API endpoint (e.g., '/tempoEspera/Estacao/CG').
+        params (Dict): Optional query parameters.
+        
+    Returns:
+        Optional[Dict]: JSON response if successful, None otherwise.
+        
+    Example:
+        >>> data = _metro_api_request('/estadoLinha/todos')
+        >>> data['resposta']['amarela']
+        ' Ok'
+    """
+    token = _get_metro_access_token()
+    
+    if not token:
+        logger.warning("No Metro API token available, cannot make request")
+        return None
+    
+    url = f"{METRO_API_BASE}{endpoint}"
+    
+    headers = {
+        "accept": "application/json",
+        "Authorization": f"Bearer {token}"
+    }
+    
+    try:
+        # Suppress SSL warnings for Metro API
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
+        response = requests.get(
+            url,
+            headers=headers,
+            params=params,
+            timeout=REQUEST_TIMEOUT,
+            verify=False  # Metro API SSL certificate
+        )
+        
+        # If unauthorized, try to refresh token and retry once
+        if response.status_code == 401:
+            logger.info("Metro token expired, refreshing...")
+            token = _get_metro_access_token(force_refresh=True)
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+                response = requests.get(
+                    url,
+                    headers=headers,
+                    params=params,
+                    timeout=REQUEST_TIMEOUT,
+                    verify=False
+                )
+        
+        if response.status_code != 200:
+            logger.error(f"Metro API error: HTTP {response.status_code} for {endpoint}")
+            return None
+        
+        return response.json()
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Network error calling Metro API {endpoint}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error calling Metro API {endpoint}: {e}")
+        return None
+
+def _is_metro_api_available() -> bool:
+    """
+    Checks if the Metro Official API is available and configured.
+    
+    Returns:
+        bool: True if API is available and credentials are configured.
+    """
+    return bool(METRO_CONSUMER_KEY and METRO_CONSUMER_SECRET)
+
+
+# ==========================================================================
+# Metro de Lisboa - Station Data Functions
+# ==========================================================================
+
+def load_metro_stations(force_reload: bool = False) -> List[Dict[str, Any]]:
+    """
+    Loads all Metro de Lisboa stations with GPS coordinates from Official API.
+    
+    Fetches station information including:
+        - Station ID (stop_id)
+        - Station name (stop_name)
+        - GPS coordinates (stop_lat, stop_lon)
+        - Lines served (linha)
+        - Zone ID (zone_id)
+        - URL for more info (stop_url)
+    
+    Data is cached for 24 hours as station data rarely changes.
+    
+    Args:
+        force_reload (bool): Force refresh even if cache is valid.
+        
+    Returns:
+        List[Dict]: List of station dictionaries.
+        
+    Example:
+        >>> stations = load_metro_stations()
+        >>> len(stations)
+        55  # All Metro stations
+        >>> stations[0]['stop_name']
+        'Alameda'
+    """
+    global _metro_stations_cache, _metro_stations_last_load
+    
+    # Return cached data if valid
+    if not force_reload and _metro_stations_cache and _is_cache_valid(_metro_stations_last_load):
+        logger.info(f"Using cached Metro stations ({len(_metro_stations_cache)} stations)")
+        return _metro_stations_cache
+    
+    # Try Official API first
+    if _is_metro_api_available():
+        data = _metro_api_request("/infoEstacao/todos")
+        
+        if data and data.get("codigo") == "200":
+            _metro_stations_cache = data.get("resposta", [])
+            _metro_stations_last_load = datetime.now()
+            logger.info(f"Loaded {len(_metro_stations_cache)} Metro stations from Official API")
+            return _metro_stations_cache
+    
+    logger.warning("Metro Official API unavailable, using static station data")
+    
+    # Fallback to hardcoded data if API unavailable
+    # This is extracted from a previous successful API call
+    _metro_stations_cache = [
+        {"stop_id": "AM", "stop_name": "Alameda", "stop_lat": "38.7373", "stop_lon": "-9.13409", "linha": "[Verde, Vermelha]", "zone_id": "L"},
+        {"stop_id": "AF", "stop_name": "Alfornelos", "stop_lat": "38.7606", "stop_lon": "-9.20471", "linha": "[Azul]", "zone_id": "C"},
+        {"stop_id": "AH", "stop_name": "Alto dos Moinhos", "stop_lat": "38.7496", "stop_lon": "-9.17995", "linha": "[Azul]", "zone_id": "L"},
+        {"stop_id": "AL", "stop_name": "Alvalade", "stop_lat": "38.7535", "stop_lon": "-9.14388", "linha": "[Verde]", "zone_id": "L"},
+        {"stop_id": "AS", "stop_name": "Amadora Este", "stop_lat": "38.7584", "stop_lon": "-9.21917", "linha": "[Azul]", "zone_id": "C"},
+        {"stop_id": "AX", "stop_name": "Ameixoeira", "stop_lat": "38.7799", "stop_lon": "-9.15999", "linha": "[Amarela]", "zone_id": "L"},
+        {"stop_id": "AN", "stop_name": "Anjos", "stop_lat": "38.7266", "stop_lon": "-9.13503", "linha": "[Verde]", "zone_id": "L"},
+        {"stop_id": "AE", "stop_name": "Areeiro", "stop_lat": "38.7426", "stop_lon": "-9.13381", "linha": "[Verde]", "zone_id": "L"},
+        {"stop_id": "AR", "stop_name": "Arroios", "stop_lat": "38.7335", "stop_lon": "-9.13445", "linha": "[Verde]", "zone_id": "L"},
+        {"stop_id": "AV", "stop_name": "Avenida", "stop_lat": "38.7201", "stop_lon": "-9.14582", "linha": "[Azul]", "zone_id": "L"},
+        {"stop_id": "BC", "stop_name": "Baixa/Chiado", "stop_lat": "38.7107", "stop_lon": "-9.13909", "linha": "[Azul, Verde]", "zone_id": "L"},
+        {"stop_id": "BV", "stop_name": "Bela Vista", "stop_lat": "38.7477", "stop_lon": "-9.11855", "linha": "[Vermelha]", "zone_id": "L"},
+        {"stop_id": "CR", "stop_name": "Cabo Ruivo", "stop_lat": "38.7632", "stop_lon": "-9.10409", "linha": "[Vermelha]", "zone_id": "L"},
+        {"stop_id": "CS", "stop_name": "Cais do Sodré", "stop_lat": "38.7062", "stop_lon": "-9.14503", "linha": "[Verde]", "zone_id": "L"},
+        {"stop_id": "CG", "stop_name": "Campo Grande", "stop_lat": "38.7599", "stop_lon": "-9.15794", "linha": "[Amarela, Verde]", "zone_id": "L"},
+        {"stop_id": "CP", "stop_name": "Campo Pequeno", "stop_lat": "38.7414", "stop_lon": "-9.14703", "linha": "[Amarela]", "zone_id": "L"},
+        {"stop_id": "CA", "stop_name": "Carnide", "stop_lat": "38.7593", "stop_lon": "-9.19281", "linha": "[Azul]", "zone_id": "L"},
+        {"stop_id": "CH", "stop_name": "Chelas", "stop_lat": "38.7553", "stop_lon": "-9.11414", "linha": "[Vermelha]", "zone_id": "L"},
+        {"stop_id": "CU", "stop_name": "Cidade Universitária", "stop_lat": "38.7519", "stop_lon": "-9.15863", "linha": "[Amarela]", "zone_id": "L"},
+        {"stop_id": "CM", "stop_name": "Colégio Militar/Luz", "stop_lat": "38.7533", "stop_lon": "-9.18866", "linha": "[Azul]", "zone_id": "L"},
+        {"stop_id": "EC", "stop_name": "Entre Campos", "stop_lat": "38.7479", "stop_lon": "-9.14856", "linha": "[Amarela]", "zone_id": "L"},
+        {"stop_id": "IN", "stop_name": "Intendente", "stop_lat": "38.7222", "stop_lon": "-9.13531", "linha": "[Verde]", "zone_id": "L"},
+        {"stop_id": "JZ", "stop_name": "Jardim Zoológico", "stop_lat": "38.7422", "stop_lon": "-9.16872", "linha": "[Azul]", "zone_id": "L"},
+        {"stop_id": "LA", "stop_name": "Laranjeiras", "stop_lat": "38.7485", "stop_lon": "-9.17243", "linha": "[Azul]", "zone_id": "L"},
+        {"stop_id": "LU", "stop_name": "Lumiar", "stop_lat": "38.7728", "stop_lon": "-9.1597", "linha": "[Amarela]", "zone_id": "L"},
+        {"stop_id": "MP", "stop_name": "Marquês de Pombal", "stop_lat": "38.7249", "stop_lon": "-9.15081", "linha": "[Amarela, Azul]", "zone_id": "L"},
+        {"stop_id": "MM", "stop_name": "Martim Moniz", "stop_lat": "38.7168", "stop_lon": "-9.13575", "linha": "[Verde]", "zone_id": "L"},
+        {"stop_id": "OD", "stop_name": "Odivelas", "stop_lat": "38.7932", "stop_lon": "-9.17322", "linha": "[Amarela]", "zone_id": "C"},
+        {"stop_id": "OL", "stop_name": "Olaias", "stop_lat": "38.7392", "stop_lon": "-9.12366", "linha": "[Vermelha]", "zone_id": "L"},
+        {"stop_id": "OS", "stop_name": "Olivais", "stop_lat": "38.7613", "stop_lon": "-9.11204", "linha": "[Vermelha]", "zone_id": "L"},
+        {"stop_id": "OR", "stop_name": "Oriente", "stop_lat": "38.7678", "stop_lon": "-9.09977", "linha": "[Vermelha]", "zone_id": "L"},
+        {"stop_id": "PA", "stop_name": "Parque", "stop_lat": "38.7297", "stop_lon": "-9.15028", "linha": "[Azul]", "zone_id": "L"},
+        {"stop_id": "PI", "stop_name": "Picoas", "stop_lat": "38.7306", "stop_lon": "-9.1465", "linha": "[Amarela]", "zone_id": "L"},
+        {"stop_id": "PO", "stop_name": "Pontinha", "stop_lat": "38.7624", "stop_lon": "-9.19693", "linha": "[Azul]", "zone_id": "C"},
+        {"stop_id": "PE", "stop_name": "Praça de Espanha", "stop_lat": "38.7377", "stop_lon": "-9.15845", "linha": "[Azul]", "zone_id": "L"},
+        {"stop_id": "QC", "stop_name": "Quinta das Conchas", "stop_lat": "38.7671", "stop_lon": "-9.15546", "linha": "[Amarela]", "zone_id": "L"},
+        {"stop_id": "RA", "stop_name": "Rato", "stop_lat": "38.7201", "stop_lon": "-9.15411", "linha": "[Amarela]", "zone_id": "L"},
+        {"stop_id": "RE", "stop_name": "Restauradores", "stop_lat": "38.7151", "stop_lon": "-9.14162", "linha": "[Azul]", "zone_id": "L"},
+        {"stop_id": "RM", "stop_name": "Roma", "stop_lat": "38.7485", "stop_lon": "-9.14135", "linha": "[Verde]", "zone_id": "L"},
+        {"stop_id": "RO", "stop_name": "Rossio", "stop_lat": "38.7138", "stop_lon": "-9.13896", "linha": "[Verde]", "zone_id": "L"},
+        {"stop_id": "SA", "stop_name": "Saldanha", "stop_lat": "38.7353", "stop_lon": "-9.14558", "linha": "[Amarela, Vermelha]", "zone_id": "L"},
+        {"stop_id": "SP", "stop_name": "Santa Apolónia", "stop_lat": "38.7138", "stop_lon": "-9.12256", "linha": "[Azul]", "zone_id": "L"},
+        {"stop_id": "SS", "stop_name": "São Sebastião", "stop_lat": "38.7348", "stop_lon": "-9.15423", "linha": "[Azul, Vermelha]", "zone_id": "L"},
+        {"stop_id": "SR", "stop_name": "Senhor Roubado", "stop_lat": "38.7858", "stop_lon": "-9.17215", "linha": "[Amarela]", "zone_id": "C"},
+        {"stop_id": "TE", "stop_name": "Telheiras", "stop_lat": "38.7604", "stop_lon": "-9.16606", "linha": "[Verde]", "zone_id": "L"},
+        {"stop_id": "TP", "stop_name": "Terreiro do Paço", "stop_lat": "38.7072", "stop_lon": "-9.13335", "linha": "[Azul]", "zone_id": "L"},
+        {"stop_id": "MO", "stop_name": "Moscavide", "stop_lat": "38.7748", "stop_lon": "-9.10266", "linha": "[Vermelha]", "zone_id": "L"},
+        {"stop_id": "EN", "stop_name": "Encarnação", "stop_lat": "38.775", "stop_lon": "-9.11498", "linha": "[Vermelha]", "zone_id": "L"},
+        {"stop_id": "AP", "stop_name": "Aeroporto", "stop_lat": "38.7686", "stop_lon": "-9.12833", "linha": "[Vermelha]", "zone_id": "L"},
+        {"stop_id": "RB", "stop_name": "Reboleira", "stop_lat": "38.7522", "stop_lon": "-9.22414", "linha": "[Azul]", "zone_id": "L"},
+    ]
+    _metro_stations_last_load = datetime.now()
+    return _metro_stations_cache
+
+
+def find_nearest_metro_station(lat: float, lon: float, max_results: int = 3) -> List[Dict[str, Any]]:
+    """
+    Finds the nearest Metro stations to given GPS coordinates.
+    
+    Uses Haversine distance formula for accurate GPS-based search.
+    
+    Args:
+        lat (float): Latitude in degrees.
+        lon (float): Longitude in degrees.
+        max_results (int): Maximum stations to return (default: 3).
+        
+    Returns:
+        List[Dict]: List of nearest stations with distance in meters.
+        
+    Example:
+        >>> # Near Colombo shopping center
+        >>> stations = find_nearest_metro_station(38.7548, -9.1867)
+        >>> stations[0]['stop_name']
+        'Colégio Militar/Luz'
+        >>> stations[0]['distance_m']
+        487
+    """
+    stations = load_metro_stations()
+    
+    if not stations:
+        return []
+    
+    # Calculate distances to all stations
+    stations_with_distance = []
+    
+    for station in stations:
+        try:
+            station_lat = float(station.get("stop_lat", 0))
+            station_lon = float(station.get("stop_lon", 0))
+            
+            distance_km = haversine_distance(lat, lon, station_lat, station_lon)
+            distance_m = int(distance_km * 1000)
+            
+            stations_with_distance.append({
+                **station,
+                "distance_km": round(distance_km, 2),
+                "distance_m": distance_m
+            })
+        except (ValueError, TypeError):
+            continue
+    
+    # Sort by distance and return top results
+    stations_with_distance.sort(key=lambda x: x["distance_m"])
+    
+    return stations_with_distance[:max_results]
+
+
+def get_station_id(station_name: str) -> Optional[str]:
+    """
+    Gets the Metro API station ID from a station name.
+    
+    Args:
+        station_name (str): Station name (e.g., 'Campo Grande', 'Aeroporto').
+        
+    Returns:
+        Optional[str]: Station ID (e.g., 'CG', 'AP') or None if not found.
+    """
+    # Try direct lookup in our mapping
+    station_lower = station_name.lower().strip()
+    
+    if station_lower in METRO_STATION_IDS:
+        return METRO_STATION_IDS[station_lower]
+    
+    # Try partial match
+    for name, code in METRO_STATION_IDS.items():
+        if station_lower in name or name in station_lower:
+            return code
+    
+    # Try loading from API and matching
+    stations = load_metro_stations()
+    for station in stations:
+        if station_lower in station.get("stop_name", "").lower():
+            return station.get("stop_id")
+    
+    return None
+
+
+def _format_wait_time(seconds: int) -> str:
+    """
+    Formats waiting time in seconds to human-readable string.
+    
+    Args:
+        seconds (int): Waiting time in seconds.
+        
+    Returns:
+        str: Formatted string (e.g., '2 min 30s', '< 1 min').
+    """
+    if seconds <= 0:
+        return "arriving"
+    elif seconds < 60:
+        return f"{seconds}s"
+    elif seconds < 120:
+        return f"1 min {seconds - 60}s"
+    else:
+        minutes = seconds // 60
+        remaining_seconds = seconds % 60
+        if remaining_seconds > 0:
+            return f"{minutes} min {remaining_seconds}s"
+        return f"{minutes} min"
 
 
 # ==========================================================================
@@ -1357,7 +1955,7 @@ def format_timestamp(ts: int) -> str:
 
 
 # ==========================================================================
-# Metro de Lisboa Tools
+# Metro de Lisboa Tools (Official API with OAuth2)
 # ==========================================================================
 
 @tool
@@ -1365,12 +1963,53 @@ def get_metro_status() -> str:
     """
     Gets the current operational status of all Lisbon Metro lines.
     
+    Uses the official Metro de Lisboa API when available, with fallback
+    to the unofficial endpoint.
+    
     Returns:
-        str: Status of each metro line (Yellow, Blue, Green, Red).
+        str: Status of each metro line (Yellow, Blue, Green, Red)
+             with service disruption details if any.
         
     Example:
         >>> get_metro_status()
     """
+    # Try Official API first
+    if _is_metro_api_available():
+        data = _metro_api_request("/estadoLinha/todos")
+        
+        if data and data.get("codigo") == "200":
+            response_data = data.get("resposta", {})
+            
+            response = "🚇 Metro de Lisboa Status (Official API)\n"
+            response += "=" * 45 + "\n\n"
+            
+            all_ok = True
+            
+            for line_key, line_info in METRO_LINES.items():
+                status = response_data.get(line_key, 'Unknown').strip()
+                status_short = response_data.get(f"{line_key}_curta", "unknown")
+                emoji = line_info['emoji']
+                name = line_info['name']
+                
+                if status.lower() == 'ok' or status_short.lower() == 'normal':
+                    status_emoji = "✅"
+                    status_text = "Normal service"
+                else:
+                    status_emoji = "⚠️"
+                    status_text = status if status.lower() != 'ok' else status_short
+                    all_ok = False
+                
+                response += f"{emoji} {name}\n"
+                response += f"   {status_emoji} {status_text}\n\n"
+            
+            if all_ok:
+                response += "✅ All lines operating normally."
+            else:
+                response += "⚠️ Some lines have service disruptions."
+            
+            return response
+    
+    # Fallback to unofficial API
     data = fetch_json_with_retry(METRO_STATUS_URL)
     
     if not data:
@@ -1406,6 +2045,425 @@ def get_metro_status() -> str:
         response += "✅ All lines operating normally."
     else:
         response += "⚠️ Some lines have service disruptions."
+    
+    return response
+
+
+@tool
+def get_metro_wait_time(station: str) -> str:
+    """
+    Gets real-time waiting times for the next metro trains at a specific station.
+    
+    Returns the next 3 trains for each platform/direction with:
+    - Waiting time in minutes/seconds
+    - Train destination
+    - Platform information
+    
+    Args:
+        station (str): Station name (e.g., 'Campo Grande', 'Aeroporto', 'Baixa-Chiado').
+                      Accepts Portuguese names with or without accents.
+        
+    Returns:
+        str: Formatted waiting times for all platforms at the station.
+        
+    Example:
+        >>> get_metro_wait_time("Campo Grande")
+        "🚇 Metro Wait Times at Campo Grande
+         ...
+         🟡 Direction: Cais do Sodré
+            Next train: 1 min 48s
+            Following: 9 min 3s, 15 min 18s"
+    """
+    if not _is_metro_api_available():
+        return ("❌ Metro wait times require API credentials.\n"
+                "Configure METRO_CONSUMER_KEY and METRO_CONSUMER_SECRET in .env\n"
+                "Register at: https://api.metrolisboa.pt/store/")
+    
+    # Get station ID
+    station_id = get_station_id(station)
+    
+    if not station_id:
+        # Try to suggest similar stations
+        stations = load_metro_stations()
+        suggestions = [s["stop_name"] for s in stations if station.lower()[:3] in s["stop_name"].lower()][:5]
+        
+        return (f"❌ Station '{station}' not found.\n\n"
+                f"Did you mean one of these?\n" +
+                "\n".join(f"  • {s}" for s in suggestions) if suggestions else
+                "Use station names like: Campo Grande, Aeroporto, Baixa-Chiado, Rossio")
+    
+    # Fetch wait times from Official API
+    data = _metro_api_request(f"/tempoEspera/Estacao/{station_id}")
+    
+    if not data or data.get("codigo") != "200":
+        return f"❌ Failed to fetch wait times for station {station}. Please try again."
+    
+    wait_data = data.get("resposta", [])
+    
+    if not wait_data:
+        return f"❌ No waiting time data available for {station}."
+    
+    # Get station name from first result
+    station_name = METRO_STATION_NAMES.get(station_id, station.title())
+    
+    response = f"🚇 Metro Wait Times at {station_name}\n"
+    response += "=" * 50 + "\n\n"
+    
+    # Group by destination to show different directions
+    destinations_seen = {}
+    
+    for entry in wait_data:
+        dest_id = entry.get("destino", "")
+        dest_name = METRO_DESTINATIONS.get(dest_id, f"Destination {dest_id}")
+        
+        # Parse waiting times (in seconds)
+        try:
+            wait1 = int(entry.get("tempoChegada1", "0"))
+            wait2 = int(entry.get("tempoChegada2", "0"))
+            wait3 = int(entry.get("tempoChegada3", "0"))
+        except (ValueError, TypeError):
+            continue
+        
+        # Skip if no valid times
+        if wait1 == 0 and "--" in str(entry.get("tempoChegada1", "")):
+            continue
+        
+        # Format times
+        time1 = _format_wait_time(wait1)
+        time2 = _format_wait_time(wait2)
+        time3 = _format_wait_time(wait3)
+        
+        # Determine line color emoji based on destination
+        line_emoji = "🚇"
+        dest_lower = dest_name.lower()
+        if dest_lower in ["odivelas", "rato", "campo grande", "lumiar"]:
+            line_emoji = "🟡"  # Yellow
+        elif dest_lower in ["reboleira", "santa apolónia", "terreiro do paço"]:
+            line_emoji = "🔵"  # Blue
+        elif dest_lower in ["telheiras", "cais do sodré"]:
+            line_emoji = "🟢"  # Green
+        elif dest_lower in ["aeroporto", "são sebastião", "alameda"]:
+            line_emoji = "🔴"  # Red
+        
+        # Only show each destination once (first platform)
+        if dest_name not in destinations_seen:
+            destinations_seen[dest_name] = True
+            
+            response += f"{line_emoji} Direction: {dest_name}\n"
+            response += f"   ⏱️ Next train: {time1}\n"
+            response += f"   ⏳ Following: {time2}, {time3}\n\n"
+    
+    if not destinations_seen:
+        return f"❌ No trains currently scheduled at {station_name}."
+    
+    # Add timestamp
+    response += f"📍 Updated: {datetime.now().strftime('%H:%M:%S')}"
+    
+    return response
+
+
+@tool
+def get_metro_line_wait_times(line: str) -> str:
+    """
+    Gets real-time waiting times for all stations on a specific Metro line.
+    
+    Useful for getting an overview of service frequency across an entire line.
+    
+    Args:
+        line (str): Line name - 'Amarela'/'Yellow', 'Azul'/'Blue', 
+                    'Verde'/'Green', or 'Vermelha'/'Red'.
+        
+    Returns:
+        str: Formatted waiting times for all stations on the line.
+        
+    Example:
+        >>> get_metro_line_wait_times("Verde")
+    """
+    if not _is_metro_api_available():
+        return ("❌ Metro wait times require API credentials.\n"
+                "Configure METRO_CONSUMER_KEY and METRO_CONSUMER_SECRET in .env")
+    
+    # Normalize line name
+    line_map = {
+        "amarela": "Amarela", "yellow": "Amarela", "amarelo": "Amarela",
+        "azul": "Azul", "blue": "Azul",
+        "verde": "Verde", "green": "Verde",
+        "vermelha": "Vermelha", "red": "Vermelha", "vermelho": "Vermelha"
+    }
+    
+    line_normalized = line_map.get(line.lower().strip())
+    
+    if not line_normalized:
+        return (f"❌ Unknown line '{line}'.\n\n"
+                "Available lines:\n"
+                "  🟡 Amarela (Yellow) - Rato ↔ Odivelas\n"
+                "  🔵 Azul (Blue) - Santa Apolónia ↔ Reboleira\n"
+                "  🟢 Verde (Green) - Cais do Sodré ↔ Telheiras\n"
+                "  🔴 Vermelha (Red) - São Sebastião ↔ Aeroporto")
+    
+    # Fetch wait times for the line
+    data = _metro_api_request(f"/tempoEspera/Linha/{line_normalized}")
+    
+    if not data or data.get("codigo") != "200":
+        return f"❌ Failed to fetch wait times for {line_normalized} line."
+    
+    wait_data = data.get("resposta", [])
+    
+    if not wait_data:
+        return f"❌ No waiting time data available for {line_normalized} line."
+    
+    # Get line info
+    line_key = line_normalized.lower()
+    line_info = METRO_LINES.get(line_key, {})
+    emoji = line_info.get("emoji", "🚇")
+    name = line_info.get("name", line_normalized)
+    
+    response = f"{emoji} {name} - Wait Times\n"
+    response += "=" * 55 + "\n\n"
+    
+    # Group by station
+    stations_data = {}
+    
+    for entry in wait_data:
+        station_id = entry.get("stop_id", "")
+        station_name = METRO_STATION_NAMES.get(station_id, station_id)
+        dest_id = entry.get("destino", "")
+        dest_name = METRO_DESTINATIONS.get(dest_id, "?")
+        
+        try:
+            wait1 = int(entry.get("tempoChegada1", "0"))
+        except (ValueError, TypeError):
+            wait1 = 0
+        
+        if station_name not in stations_data:
+            stations_data[station_name] = []
+        
+        stations_data[station_name].append({
+            "dest": dest_name,
+            "wait": wait1
+        })
+    
+    # Display stations with shortest wait time
+    for station_name in sorted(stations_data.keys()):
+        directions = stations_data[station_name]
+        
+        response += f"📍 {station_name}\n"
+        for d in directions[:2]:  # Max 2 directions
+            time_str = _format_wait_time(d["wait"])
+            response += f"   → {d['dest']}: {time_str}\n"
+        response += "\n"
+    
+    response += f"📍 Updated: {datetime.now().strftime('%H:%M:%S')}"
+    
+    return response
+
+
+@tool
+def find_nearest_metro(latitude: float, longitude: float) -> str:
+    """
+    Finds the nearest Metro stations to a GPS location.
+    
+    Useful when a user is at a specific location and wants to find
+    the closest metro station. Returns the 3 nearest stations with
+    walking distance estimates.
+    
+    Args:
+        latitude (float): GPS latitude (e.g., 38.7548 for Colombo area).
+        longitude (float): GPS longitude (e.g., -9.1867 for Colombo area).
+        
+    Returns:
+        str: Formatted list of nearest metro stations with distances.
+        
+    Example:
+        >>> find_nearest_metro(38.7548, -9.1867)
+        "🚇 Nearest Metro Stations
+         1. Colégio Militar/Luz (487m) - 🔵 Blue Line
+         2. Carnide (623m) - 🔵 Blue Line
+         3. Laranjeiras (1.2km) - 🔵 Blue Line"
+    """
+    nearest = find_nearest_metro_station(latitude, longitude, max_results=5)
+    
+    if not nearest:
+        return ("❌ Could not find nearby Metro stations.\n"
+                "Make sure coordinates are within Lisbon area.")
+    
+    response = "🚇 Nearest Metro Stations\n"
+    response += "=" * 45 + "\n\n"
+    
+    for i, station in enumerate(nearest, 1):
+        name = station.get("stop_name", "Unknown")
+        distance_m = station.get("distance_m", 0)
+        lines = station.get("linha", "[]")
+        
+        # Format distance
+        if distance_m < 1000:
+            dist_str = f"{distance_m}m"
+        else:
+            dist_str = f"{distance_m/1000:.1f}km"
+        
+        # Estimate walking time (average 5 km/h = 83m/min)
+        walk_min = max(1, distance_m // 83)
+        
+        # Get line emoji
+        line_emoji = "🚇"
+        if "Amarela" in lines:
+            line_emoji = "🟡"
+        elif "Azul" in lines:
+            line_emoji = "🔵"
+        elif "Verde" in lines:
+            line_emoji = "🟢"
+        elif "Vermelha" in lines:
+            line_emoji = "🔴"
+        
+        # Clean lines string
+        lines_clean = lines.replace("[", "").replace("]", "")
+        
+        response += f"{i}. {line_emoji} {name}\n"
+        response += f"   📏 Distance: {dist_str} (~{walk_min} min walk)\n"
+        response += f"   🚇 Lines: {lines_clean}\n\n"
+    
+    return response
+
+
+@tool
+def get_metro_frequency(line: str, day_type: str = "weekday") -> str:
+    """
+    Gets the service frequency (intervals between trains) for a Metro line.
+    
+    Shows how often trains run throughout the day, useful for planning trips.
+    
+    Args:
+        line (str): Line name - 'Amarela', 'Azul', 'Verde', or 'Vermelha'.
+        day_type (str): 'weekday' for Monday-Friday (S), 
+                       'weekend' for Saturday/Sunday/Holidays (F).
+        
+    Returns:
+        str: Formatted frequency schedule for the line.
+        
+    Example:
+        >>> get_metro_frequency("Verde", "weekday")
+    """
+    if not _is_metro_api_available():
+        return ("❌ Metro frequency info requires API credentials.\n"
+                "Configure METRO_CONSUMER_KEY and METRO_CONSUMER_SECRET in .env")
+    
+    # Normalize line name to lowercase for API
+    line_map = {
+        "amarela": "amarela", "yellow": "amarela",
+        "azul": "azul", "blue": "azul",
+        "verde": "verde", "green": "verde",
+        "vermelha": "vermelha", "red": "vermelha"
+    }
+    
+    line_normalized = line_map.get(line.lower().strip())
+    
+    if not line_normalized:
+        return f"❌ Unknown line '{line}'. Use: Amarela, Azul, Verde, or Vermelha."
+    
+    # Normalize day type - API uses S (Semana/weekday) and F (Fim-de-semana/weekend)
+    day_code = "S" if day_type.lower() in ["weekday", "s", "semana", "week", "du"] else "F"
+    day_label = "Weekdays" if day_code == "S" else "Weekends/Holidays"
+    
+    # Fetch frequency data - API uses lowercase line name
+    data = _metro_api_request(f"/infoIntervalos/{line_normalized}/{day_code}")
+    
+    if not data or data.get("codigo") != "200":
+        return f"❌ Failed to fetch frequency data for {line_normalized} line."
+    
+    intervals = data.get("resposta", [])
+    
+    if not intervals:
+        return f"❌ No frequency data available for {line_normalized} line."
+    
+    # Get line info
+    line_key = line_normalized.lower()
+    line_info = METRO_LINES.get(line_key, {})
+    emoji = line_info.get("emoji", "🚇")
+    name = line_info.get("name", line_normalized)
+    
+    response = f"{emoji} {name}\n"
+    response += f"📅 Service Frequency ({day_label})\n"
+    response += "=" * 50 + "\n\n"
+    
+    for interval in intervals:
+        start = interval.get("HoraInicio", "")
+        end = interval.get("HoraFim", "")
+        freq = interval.get("Intervalo", "")
+        
+        # Parse frequency (format: "HH:MM:SS" representing minutes:seconds)
+        try:
+            parts = freq.split(":")
+            minutes = int(parts[0])
+            seconds = int(parts[1]) if len(parts) > 1 else 0
+            freq_str = f"{minutes}:{seconds:02d}" if seconds else f"{minutes} min"
+        except:
+            freq_str = freq
+        
+        # Simplify time range display
+        start_short = start[:5] if start else ""
+        end_short = end[:5] if end else ""
+        
+        response += f"⏰ {start_short} - {end_short}\n"
+        response += f"   🚇 Train every {freq_str}\n\n"
+    
+    response += "💡 Tip: Trains are more frequent during rush hours (7:15-9:30 and 16:45-19:00)."
+    
+    return response
+
+
+@tool
+def get_all_metro_stations() -> str:
+    """
+    Lists all Metro de Lisboa stations with their lines.
+    
+    Useful for getting an overview of the entire network or finding
+    station names when unsure of exact spelling.
+    
+    Returns:
+        str: Formatted list of all 55 Metro stations organized by line.
+        
+    Example:
+        >>> get_all_metro_stations()
+    """
+    stations = load_metro_stations()
+    
+    if not stations:
+        return "❌ Failed to load Metro stations data."
+    
+    response = "🚇 Metro de Lisboa - All Stations\n"
+    response += "=" * 50 + "\n\n"
+    
+    # Group stations by line
+    line_stations = {
+        "Amarela": [],
+        "Azul": [],
+        "Verde": [],
+        "Vermelha": []
+    }
+    
+    for station in stations:
+        name = station.get("stop_name", "")
+        lines = station.get("linha", "[]")
+        
+        for line in ["Amarela", "Azul", "Verde", "Vermelha"]:
+            if line in lines:
+                line_stations[line].append(name)
+    
+    # Display by line
+    line_display = [
+        ("Amarela", "🟡", "Yellow Line (Rato ↔ Odivelas)"),
+        ("Azul", "🔵", "Blue Line (Santa Apolónia ↔ Reboleira)"),
+        ("Verde", "🟢", "Green Line (Cais do Sodré ↔ Telheiras)"),
+        ("Vermelha", "🔴", "Red Line (São Sebastião ↔ Aeroporto)")
+    ]
+    
+    for line_key, emoji, description in line_display:
+        stations_list = sorted(line_stations[line_key])
+        response += f"{emoji} {description}\n"
+        response += f"   {', '.join(stations_list)}\n\n"
+    
+    response += f"📊 Total: {len(stations)} stations across 4 lines\n"
+    response += "💡 Interchange stations: Campo Grande, Alameda, Saldanha, Marquês de Pombal, Baixa-Chiado, São Sebastião"
     
     return response
 
@@ -1600,44 +2658,62 @@ def get_carris_stop_info(stop_id: str) -> str:
 @tool
 def search_carris_lines(query: str) -> str:
     """
-    Searches for Carris bus lines by name or number.
+    Searches for Carris Metropolitana (suburban) bus lines by number, name, or destination.
+    
+    IMPORTANT: This searches SUBURBAN bus lines only. Urban Lisbon buses (Carris)
+    like lines 28E, 738, 732 are NOT included as they don't have a public API.
     
     Args:
-        query (str): Line number or name to search (e.g., '728', 'aeroporto').
+        query (str): Line number, destination name, or area to search.
+                     Examples: '1718', 'Sintra', 'Cascais', 'Almada', 'Oriente'
 
     Returns:
-        str: Matching lines with details.
+        str: Matching lines with route details.
         
-    Example:
-        >>> search_carris_lines("728")
-        >>> search_carris_lines("aeroporto")
+    Examples:
+        >>> search_carris_lines("1718")     # By line number
+        >>> search_carris_lines("Belem")     # By destination
+        >>> search_carris_lines("Cascais")   # By area
     """
     data = fetch_json_with_retry(CARRIS_LINES_URL)
     
     if not data:
-        return "❌ Failed to fetch Carris lines data."
+        return "❌ Failed to fetch Carris Metropolitana lines data."
     
     if not isinstance(data, list):
         return "❌ Unexpected response format."
     
-    # Search for matching lines
+    # Normalize query for accent-insensitive search
     query_lower = query.lower()
+    query_normalized = query_lower.replace('é', 'e').replace('ã', 'a').replace('õ', 'o').replace('ç', 'c')
+    
     matches = []
     
     for line in data:
         short_name = line.get('short_name', '')
         long_name = line.get('long_name', '')
         line_id = line.get('id', '')
+        municipalities = line.get('municipalities', [])
+        
+        # Normalize for matching
+        long_name_norm = long_name.lower().replace('é', 'e').replace('ã', 'a').replace('õ', 'o').replace('ç', 'c')
+        muni_str = ' '.join(municipalities).lower()
         
         if (query_lower in short_name.lower() or 
-            query_lower in long_name.lower() or
-            query_lower in line_id.lower()):
+            query_normalized in long_name_norm or
+            query_lower in line_id.lower() or
+            query_lower in muni_str):
             matches.append(line)
     
     if not matches:
-        return f"❌ No lines found matching: '{query}'"
+        # Check if searching for urban Lisbon routes
+        urban_keywords = ['rossio', 'baixa', 'chiado', 'alfama', 'bairro alto', '28e', '738', '732', '15e']
+        if any(kw in query_lower for kw in urban_keywords):
+            return (f"❌ No Carris Metropolitana lines found for '{query}'\n\n"
+                    + CARRIS_LIMITATION_NOTICE)
+        return f"❌ No lines found matching: '{query}'\n\n💡 Try searching by area: Sintra, Cascais, Almada, Oeiras, Loures"
     
-    response = f"🚌 Carris Lines matching '{query}' ({len(matches)} found)\n"
+    response = f"🚌 **Carris Metropolitana lines matching '{query}'** ({len(matches)} found)\n"
     response += "=" * 50 + "\n\n"
     
     for i, line in enumerate(matches[:10], 1):
@@ -1645,7 +2721,7 @@ def search_carris_lines(query: str) -> str:
         long_name = line.get('long_name', 'N/A')
         municipalities = line.get('municipalities', [])
         
-        response += f"{i}. Line {short_name}\n"
+        response += f"{i}. **Line {short_name}**\n"
         response += f"   📍 {long_name}\n"
         if municipalities:
             response += f"   🏘️ {', '.join(municipalities[:3])}\n"
@@ -1653,6 +2729,260 @@ def search_carris_lines(query: str) -> str:
     
     if len(matches) > 10:
         response += f"... and {len(matches) - 10} more lines.\n"
+    
+    response += "\n" + "-" * 40 + "\n"
+    response += "💡 Use `get_bus_schedule` with line number for full route details.\n"
+    
+    return response
+
+
+# ==========================================================================
+# Carris Metropolitana - Real-Time Bus Tracking Tools
+# ==========================================================================
+
+@tool
+def get_bus_realtime_locations(line_id: Optional[str] = None) -> str:
+    """
+    Gets real-time GPS locations of Carris Metropolitana buses.
+    
+    Use this tool to track where buses are right now. You can filter by line
+    to see only buses on a specific route.
+    
+    IMPORTANT: This only works for Carris Metropolitana (suburban buses).
+    Urban buses within Lisbon city center (Carris) do not have a public API.
+    
+    Args:
+        line_id (str, optional): Filter by line ID (e.g., '1718', '3703').
+                                If None, shows overview of all active buses.
+    
+    Returns:
+        str: Real-time locations with speed, status, and next stop.
+        
+    Examples:
+        >>> get_bus_realtime_locations()  # All buses overview
+        >>> get_bus_realtime_locations("1718")  # Buses on line 1718
+    """
+    data = fetch_json_with_retry(CARRIS_VEHICLES_URL)
+    
+    if not data:
+        return "❌ Failed to fetch real-time bus locations. The API may be temporarily unavailable."
+    
+    if not isinstance(data, list):
+        return "❌ Unexpected response format from vehicles API."
+    
+    if not data:
+        return "ℹ️ No active buses reported at this time."
+    
+    # Filter by line if specified
+    if line_id:
+        filtered = [v for v in data if v.get('line_id') == line_id]
+        if not filtered:
+            return f"ℹ️ No active buses found on line {line_id} at this time.\n\n" \
+                   f"💡 The line may not be operating right now, or buses haven't started their routes yet."
+        buses = filtered
+        response = f"🚌 **Real-Time Bus Locations - Line {line_id}**\n"
+    else:
+        buses = data
+        response = f"🚌 **Real-Time Bus Locations Overview**\n"
+    
+    response += "=" * 50 + "\n"
+    response += f"📊 Active buses: {len(buses)}\n"
+    response += f"🕐 Updated: {datetime.now().strftime('%H:%M:%S')}\n"
+    response += "=" * 50 + "\n\n"
+    
+    if line_id:
+        # Show detailed info for specific line
+        for i, bus in enumerate(buses[:15], 1):
+            lat = bus.get('lat', 0)
+            lon = bus.get('lon', 0)
+            speed = bus.get('speed', 0)
+            bearing = bus.get('bearing', 0)
+            status = bus.get('current_status', 'UNKNOWN')
+            stop_id = bus.get('stop_id', 'N/A')
+            
+            # Status emoji
+            status_emoji = {
+                'IN_TRANSIT_TO': '🚌➡️',
+                'STOPPED_AT': '🚏',
+                'INCOMING_AT': '📍'
+            }.get(status, '🚌')
+            
+            # Direction based on bearing
+            directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+            dir_idx = int((bearing + 22.5) % 360 / 45)
+            direction = directions[dir_idx] if bearing else '?'
+            
+            response += f"**{i}. Bus {bus.get('id', 'N/A')[:20]}**\n"
+            response += f"   {status_emoji} Status: {status.replace('_', ' ').title()}\n"
+            response += f"   📍 Position: ({lat:.5f}, {lon:.5f})\n"
+            response += f"   🧭 Direction: {direction} | Speed: {speed:.1f} km/h\n"
+            response += f"   🚏 Next stop ID: {stop_id}\n\n"
+        
+        if len(buses) > 15:
+            response += f"... and {len(buses) - 15} more buses on this line.\n"
+    else:
+        # Group by line for overview
+        from collections import Counter
+        line_counts = Counter(v.get('line_id', 'Unknown') for v in buses)
+        
+        response += "**Top 15 lines by active buses:**\n\n"
+        for line, count in line_counts.most_common(15):
+            response += f"   🚌 Line **{line}**: {count} buses\n"
+        
+        response += f"\n... {len(line_counts)} lines total with active buses.\n"
+    
+    response += "\n" + "-" * 40 + "\n"
+    response += "💡 Use `get_bus_realtime_locations('LINE_ID')` for detailed tracking.\n"
+    response += "💡 Use `get_bus_schedule('LINE_ID', 'STOP_ID')` for arrival times.\n"
+    
+    return response
+
+
+@tool
+def get_bus_schedule(line_id: str, stop_id: Optional[str] = None) -> str:
+    """
+    Gets the schedule and route details for a Carris Metropolitana bus line.
+    
+    This tool fetches the pattern (route) information including:
+    - Complete list of stops along the route
+    - Scheduled arrival times for each stop
+    - Days when the line operates
+    
+    IMPORTANT: This only works for Carris Metropolitana (suburban buses).
+    Urban buses within Lisbon city center (Carris) do not have a public API.
+    
+    Args:
+        line_id (str): The line ID (e.g., '1718', '3703', '3710').
+        stop_id (str, optional): Specific stop ID to highlight arrival times.
+    
+    Returns:
+        str: Route information with stops and schedules.
+        
+    Examples:
+        >>> get_bus_schedule("1718")  # Full route info
+        >>> get_bus_schedule("3703", "061216")  # Route with specific stop highlighted
+    """
+    # First, get line info to find patterns
+    lines_data = fetch_json_with_retry(CARRIS_LINES_URL)
+    
+    if not lines_data:
+        return "❌ Failed to fetch line information."
+    
+    # Find the line
+    line_info = None
+    for line in lines_data:
+        if line.get('id') == line_id or line.get('short_name') == line_id:
+            line_info = line
+            break
+    
+    if not line_info:
+        return f"❌ Line '{line_id}' not found.\n\n" \
+               f"💡 Use `search_carris_lines` to find the correct line ID."
+    
+    patterns = line_info.get('patterns', [])
+    if not patterns:
+        return f"❌ No route patterns found for line {line_id}."
+    
+    response = f"🚌 **Line {line_info.get('short_name', line_id)} Schedule**\n"
+    response += "=" * 50 + "\n"
+    response += f"📍 {line_info.get('long_name', 'N/A')}\n"
+    response += "=" * 50 + "\n\n"
+    
+    # Get first pattern details (main direction)
+    pattern_id = patterns[0]
+    pattern_url = f"{CARRIS_PATTERNS_URL}/{pattern_id}"
+    pattern_data = fetch_json_with_retry(pattern_url)
+    
+    if not pattern_data:
+        return f"❌ Failed to fetch schedule for pattern {pattern_id}."
+    
+    # Pattern info
+    headsign = pattern_data.get('headsign', 'N/A')
+    valid_days = pattern_data.get('valid_on', [])
+    path = pattern_data.get('path', [])
+    trips = pattern_data.get('trips', [])
+    
+    response += f"**Direction**: {headsign}\n"
+    response += f"**Total stops**: {len(path)}\n"
+    response += f"**Daily trips**: {len(trips)}\n"
+    response += f"**Operating days**: {len(valid_days)} days\n\n"
+    
+    # Show route stops - compact view
+    response += "**🚏 Route Stops:**\n"
+    response += "-" * 30 + "\n"
+    
+    stop_found_idx = None
+    for i, stop_info in enumerate(path):
+        stop = stop_info.get('stop', {})
+        stop_name = stop.get('name', 'Unknown')
+        current_stop_id = stop.get('id', '')
+        
+        # Highlight the requested stop
+        if stop_id and current_stop_id == stop_id:
+            response += f"   **{i+1}. ► {stop_name}** ◄\n"
+            stop_found_idx = i
+        elif i < 3:  # First 3 stops
+            response += f"   {i+1}. {stop_name}\n"
+        elif i == 3 and len(path) > 6:  # Ellipsis
+            remaining = len(path) - 6
+            response += f"   ... ({remaining} more stops) ...\n"
+        elif i >= len(path) - 3:  # Last 3 stops
+            response += f"   {i+1}. {stop_name}\n"
+    
+    response += "\n"
+    
+    # Show schedules for today
+    today = datetime.now().strftime('%Y%m%d')
+    today_trips = [t for t in trips if today in t.get('dates', [])]
+    
+    if today_trips:
+        response += f"**🕐 Today's Departures** ({len(today_trips)} trips):\n"
+        response += "-" * 30 + "\n"
+        
+        # Get departure times (first stop time)
+        departures = []
+        for trip in today_trips:
+            schedule = trip.get('schedule', [])
+            if schedule:
+                first_time = schedule[0].get('arrival_time', 'N/A')
+                departures.append(first_time)
+        
+        departures.sort()
+        
+        # Show next departures
+        now = datetime.now().strftime('%H:%M:%S')
+        upcoming = [d for d in departures if d > now]
+        
+        if upcoming:
+            response += f"**Next departures**: {', '.join(upcoming[:8])}\n"
+            if len(upcoming) > 8:
+                response += f"   ... and {len(upcoming) - 8} more today.\n"
+        else:
+            response += "ℹ️ No more departures today. First tomorrow:\n"
+            response += f"   {departures[0] if departures else 'N/A'}\n"
+        
+        # If stop_id provided, show times for that stop
+        if stop_id and stop_found_idx is not None:
+            response += f"\n**⏱️ Times at stop {stop_id}:**\n"
+            stop_times = []
+            for trip in today_trips:
+                schedule = trip.get('schedule', [])
+                if len(schedule) > stop_found_idx:
+                    time_at_stop = schedule[stop_found_idx].get('arrival_time', 'N/A')
+                    stop_times.append(time_at_stop)
+            
+            stop_times.sort()
+            upcoming_at_stop = [t for t in stop_times if t > now]
+            
+            if upcoming_at_stop:
+                response += f"   Next: {', '.join(upcoming_at_stop[:6])}\n"
+            else:
+                response += f"   First tomorrow: {stop_times[0] if stop_times else 'N/A'}\n"
+    else:
+        response += f"ℹ️ Line not operating today ({today}).\n"
+    
+    response += "\n" + "-" * 40 + "\n"
+    response += "💡 Use `get_bus_realtime_locations` to track buses in real-time.\n"
     
     return response
 
@@ -1883,21 +3213,26 @@ def search_cp_stations(query: str) -> str:
 @tool
 def get_route_between_stations(origin: str, destination: str) -> str:
     """
-    Provides routing information between two locations in Lisbon using Metro, Carris, and CP trains.
+    Plans a multi-modal route between two locations using Metro, buses, and trains.
     
-    CRITICAL: This tool checks ALL transport modes (Metro, Carris buses, CP trains) and provides
-    accurate line information for metro stations.
+    This is the MAIN ROUTING TOOL for planning trips across Lisbon. It:
+    - Detects Metro stations and shows direct/transfer routes
+    - Identifies CP train stations and suggests train connections
+    - Recommends bus alternatives where appropriate
+    
+    For BUS-ONLY routes, use `find_bus_routes` instead.
     
     Args:
-        origin (str): Starting location (e.g., "Entrecampos", "Aeroporto").
-        destination (str): Destination location (e.g., "Marquês de Pombal", "Cais do Sodré").
+        origin (str): Starting location (Metro station, train station, or landmark).
+        destination (str): Destination location.
     
     Returns:
-        str: Detailed routing suggestions with metro lines, bus options, and train alternatives.
+        str: Multi-modal route suggestions with Metro, train, and bus options.
     
     Examples:
-        >>> get_route_between_stations("Entrecampos", "Marquês de Pombal")
-        >>> get_route_between_stations("Aeroporto", "Rossio")
+        >>> get_route_between_stations("Aeroporto", "Rossio")   # Metro route
+        >>> get_route_between_stations("Sintra", "Cascais")     # Train route
+        >>> get_route_between_stations("Entrecampos", "Belem")  # Mixed transport
     """
     origin_lower = origin.lower().strip()
     dest_lower = destination.lower().strip()
@@ -2010,10 +3345,15 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     # Add general transport options (only if not covered above)
     if not has_metro and not has_train:
         response += "🚌 **CARRIS BUSES**\n"
-    response += "-" * 30 + "\n"
-    response += "Check bus routes and real-time arrivals with:\n"
-    response += f"   • Search for bus stops near '{origin.title()}'\n"
-    response += f"   • Search for bus stops near '{destination.title()}'\n\n"
+        response += "-" * 30 + "\n"
+        # Add Carris limitation notice for urban Lisbon routes
+        response += CARRIS_LIMITATION_NOTICE
+        response += "\n"
+    else:
+        response += "-" * 30 + "\n"
+        response += "Check bus routes and real-time arrivals with:\n"
+        response += f"   • Search for bus stops near '{origin.title()}'\n"
+        response += f"   • Search for bus stops near '{destination.title()}'\n\n"
     
     response += "🚆 **CP TRAINS (Comboios de Portugal)**\n"
     response += "-" * 30 + "\n"
@@ -2144,10 +3484,17 @@ def find_bus_routes(
     
     if not origin_stops:
         response += f"\n❌ **No bus stops found near '{origin}'**\n"
-        response += "   💡 Try:\n"
-        response += "   • Adding 'Lisboa' to your search (e.g., 'Colombo Lisboa')\n"
-        response += "   • Using a more specific name or address\n"
-        response += "   • Using landmarks near your location\n"
+        
+        # Check if geocoded location is within Lisbon city - this explains why no stops
+        origin_loc = origin_resolved.get("location")
+        if origin_loc and is_within_lisbon_city(origin_loc.get("lat"), origin_loc.get("lon")):
+            response += "\n" + "-" * 50 + "\n"
+            response += CARRIS_LIMITATION_NOTICE
+        else:
+            response += "   💡 Try:\n"
+            response += "   • Adding 'Lisboa' to your search (e.g., 'Colombo Lisboa')\n"
+            response += "   • Using a more specific name or address\n"
+            response += "   • Using landmarks near your location\n"
         return response
     
     response += "\n"
@@ -2202,10 +3549,17 @@ def find_bus_routes(
     
     if not dest_stops:
         response += f"\n❌ **No bus stops found near '{destination}'**\n"
-        response += "   💡 Try:\n"
-        response += "   • Adding 'Lisboa' to your search (e.g., 'Vasco da Gama Lisboa')\n"
-        response += "   • Using a more specific name or address\n"
-        response += "   • Using landmarks near your destination\n"
+        
+        # Check if geocoded location is within Lisbon city - this explains why no stops
+        dest_loc = dest_resolved.get("location")
+        if dest_loc and is_within_lisbon_city(dest_loc.get("lat"), dest_loc.get("lon")):
+            response += "\n" + "-" * 50 + "\n"
+            response += CARRIS_LIMITATION_NOTICE
+        else:
+            response += "   💡 Try:\n"
+            response += "   • Adding 'Lisboa' to your search (e.g., 'Vasco da Gama Lisboa')\n"
+            response += "   • Using a more specific name or address\n"
+            response += "   • Using landmarks near your destination\n"
         return response
     
     response += "\n"
@@ -2272,74 +3626,51 @@ def find_bus_routes(
             response += "\n"
     
     # -------------------------------------------------------------------------
-    # Step 4: Add helpful tips
+    # Step 4: Add helpful tips and check for Lisbon city limitation
     # -------------------------------------------------------------------------
+    
+    # Check if both locations are within Lisbon city (Carris limitation)
+    # Try to get coordinates from geocoding, or from the first stop found
+    origin_loc = origin_resolved.get("location")
+    dest_loc = dest_resolved.get("location")
+    
+    # Get origin coordinates
+    if origin_loc:
+        o_lat = origin_loc.get("lat")
+        o_lon = origin_loc.get("lon")
+    elif origin_lat and origin_lon:
+        o_lat, o_lon = origin_lat, origin_lon
+    elif origin_stops:
+        # Use first stop's coordinates
+        o_lat = origin_stops[0].get("lat")
+        o_lon = origin_stops[0].get("lon")
+    else:
+        o_lat, o_lon = None, None
+    
+    # Get destination coordinates
+    if dest_loc:
+        d_lat = dest_loc.get("lat")
+        d_lon = dest_loc.get("lon")
+    elif dest_lat and dest_lon:
+        d_lat, d_lon = dest_lat, dest_lon
+    elif dest_stops:
+        # Use first stop's coordinates
+        d_lat = dest_stops[0].get("lat")
+        d_lon = dest_stops[0].get("lon")
+    else:
+        d_lat, d_lon = None, None
+    
+    # If no direct routes found AND both locations are in Lisbon city center
+    if not route_options and both_locations_in_lisbon_city(o_lat, o_lon, d_lat, d_lon):
+        response += "\n" + "-" * 50 + "\n"
+        response += CARRIS_LIMITATION_NOTICE
+        response += "\n"
+    
     response += "\n" + "-" * 40 + "\n"
     response += "💡 **Tips:**\n"
     response += "   • Use 'get_carris_stop_info' for real-time arrivals\n"
     response += "   • Check 'get_carris_alerts' for service disruptions\n"
     response += "   • Metro may be faster for cross-city travel\n"
-    
-    return response
-
-
-@tool
-def search_bus_stops_nearby(
-    lat: float,
-    lon: float,
-    radius_km: float = 0.5,
-    max_results: int = 10
-) -> str:
-    """
-    Finds Carris bus stops near GPS coordinates.
-    
-    Use this tool when you have GPS coordinates and want to find
-    nearby bus stops with the lines that serve them.
-    
-    Args:
-        lat (float): Latitude of the search center.
-        lon (float): Longitude of the search center.
-        radius_km (float): Search radius in kilometers (default: 0.5km).
-        max_results (int): Maximum stops to return (default: 10).
-        
-    Returns:
-        str: Formatted list of nearby stops with distance and lines.
-        
-    Example:
-        >>> search_bus_stops_nearby(38.7223, -9.1393, radius_km=0.3)
-    """
-    response = "🚏 **NEARBY BUS STOPS**\n"
-    response += "=" * 50 + "\n"
-    response += f"📍 Search center: {lat:.6f}, {lon:.6f}\n"
-    response += f"📏 Radius: {radius_km}km ({radius_km*1000:.0f}m)\n"
-    response += "=" * 50 + "\n\n"
-    
-    stops = find_stops_near_coordinates(lat, lon, radius_km, max_results)
-    
-    if not stops:
-        response += f"❌ No bus stops found within {radius_km}km\n"
-        response += "   Try increasing the search radius.\n"
-        return response
-    
-    response += f"✅ **Found {len(stops)} stops:**\n\n"
-    
-    for i, stop in enumerate(stops, 1):
-        distance_m = stop["distance_km"] * 1000
-        response += f"**{i}. {stop['name']}**\n"
-        response += f"   📏 Distance: {distance_m:.0f}m\n"
-        response += f"   📍 Location: {stop['municipality']}\n"
-        
-        lines = stop.get("lines", [])
-        if lines:
-            lines_str = ", ".join(lines[:10])
-            if len(lines) > 10:
-                lines_str += f" (+{len(lines)-10} more)"
-            response += f"   🚌 Lines: {lines_str}\n"
-        
-        response += f"   🔖 Stop ID: {stop['id']}\n\n"
-    
-    response += "-" * 40 + "\n"
-    response += "💡 Use stop ID with 'get_carris_stop_info' for real-time arrivals.\n"
     
     return response
 
@@ -2672,33 +4003,47 @@ if __name__ == "__main__":
     run_test("Test 10: Bus Route Finder (Direct Names)", test_find_bus_routes_tool)
     
     # =========================================================================
-    # TEST 11: Search Bus Stops Nearby Tool (@tool)
+    # TEST 11: Bus Real-Time Locations (@tool)
     # =========================================================================
-    def test_search_bus_stops_nearby_tool():
-        # Coordinates for Gare do Oriente (where Carris operates)
-        lat, lon = 38.7678, -9.0990
+    def test_get_bus_realtime_locations():
+        print("Testing get_bus_realtime_locations tool...")
         
-        print(f"Testing search_bus_stops_nearby tool near Oriente ({lat}, {lon})...")
-        print("Note: Using Oriente instead of Rossio (Carris serves suburbs)")
+        # Test with a known line (1718 - Grajal to Belém)
+        print("\n🚌 Getting real-time locations for line 1718...")
+        result = get_bus_realtime_locations.invoke({"line_id": "1718"})
         
-        result = search_bus_stops_nearby.invoke({
-            "lat": lat,
-            "lon": lon,
-            "radius_km": 0.5,
-            "max_results": 5
-        })
+        print(result[:1500] + "..." if len(result) > 1500 else result)
         
-        print(result)
-        
-        assert "NEARBY" in result.upper() or "STOP" in result.upper(), \
-            "Should contain stop information"
-        print("\n\033[1;32m✅ Nearby stops search tool works correctly\033[0m")
+        assert "1718" in result or "Real-Time" in result or "🚌" in result, \
+            "Should contain line info or real-time header"
+        print("\n\033[1;32m✅ Bus real-time locations tool works correctly\033[0m")
         return result
     
-    run_test("Test 11: Search Bus Stops Nearby Tool (@tool)", test_search_bus_stops_nearby_tool)
+    run_test("Test 11: Bus Real-Time Locations", test_get_bus_realtime_locations)
     
     # =========================================================================
-    # TEST 12: Metro Routing (get_route_between_stations)
+    # TEST 12: Bus Schedule (@tool)
+    # =========================================================================
+    def test_get_bus_schedule():
+        print("Testing get_bus_schedule tool...")
+        
+        # Test with a known line
+        print("\n🚌 Getting schedule for line 1718...")
+        result = get_bus_schedule.invoke({"line_id": "1718"})
+        
+        print(result[:2000] + "..." if len(result) > 2000 else result)
+        
+        assert "1718" in result or "Schedule" in result, \
+            "Should contain line info or schedule"
+        assert "stops" in result.lower() or "🚏" in result, \
+            "Should show route stops"
+        print("\n\033[1;32m✅ Bus schedule tool works correctly\033[0m")
+        return result
+    
+    run_test("Test 12: Bus Schedule", test_get_bus_schedule)
+    
+    # =========================================================================
+    # TEST 13: Metro Routing (get_route_between_stations)
     # =========================================================================
     def test_metro_routing():
         print("Testing Metro routing (Entrecampos → São Sebastião)...")
@@ -2715,14 +4060,14 @@ if __name__ == "__main__":
         print("\n\033[1;32m✅ Metro routing works correctly\033[0m")
         return result
     
-    run_test("Test 12: Metro Routing", test_metro_routing)
+    run_test("Test 13: Metro Routing", test_metro_routing)
     
     # =========================================================================
-    # TEST 13: Carris Stop Info with Real-time Arrivals
+    # TEST 14: Carris Stop Info with Real-time Arrivals
     # =========================================================================
     def test_carris_stop_info():
-        # Use a known stop ID (Marquês de Pombal)
-        stop_id = "060101"
+        # Use a known stop ID (Gare do Oriente)
+        stop_id = "060323"
         
         print(f"Testing get_carris_stop_info for stop {stop_id}...")
         
@@ -2733,29 +4078,33 @@ if __name__ == "__main__":
         print("\n\033[1;32m✅ Carris stop info retrieved successfully\033[0m")
         return result
     
-    run_test("Test 13: Carris Stop Info (Real-time)", test_carris_stop_info)
+    run_test("Test 14: Carris Stop Info (Real-time)", test_carris_stop_info)
     
     # =========================================================================
-    # TEST 14: Search Carris Lines
+    # TEST 15: Search Carris Lines (with Carris urban notice)
     # =========================================================================
     def test_search_carris_lines():
-        search_query = "Colombo"
+        # Test suburban search
+        print("Testing search_carris_lines for 'Belem' (suburban)...")
+        result = search_carris_lines.invoke({"query": "Belem"})
+        print(result[:1000] + "..." if len(result) > 1000 else result)
+        assert "LINE" in result.upper() or "1718" in result, \
+            "Should find Belem lines"
         
-        print(f"Testing search_carris_lines for '{search_query}'...")
+        # Test urban search (should show Carris notice)
+        print("\n\nTesting search_carris_lines for 'Rossio' (should show notice)...")
+        result2 = search_carris_lines.invoke({"query": "Rossio"})
+        print(result2)
+        assert "Nota sobre autocarros" in result2 or "carris.pt" in result2.lower(), \
+            "Should show Carris urban limitation notice"
         
-        result = search_carris_lines.invoke({"query": search_query})
-        
-        print(result[:1500] + "..." if len(result) > 1500 else result)
-        
-        assert "LINE" in result.upper() or search_query.upper() in result.upper(), \
-            "Should contain line information"
         print("\n\033[1;32m✅ Carris lines search works correctly\033[0m")
         return result
     
-    run_test("Test 14: Search Carris Lines", test_search_carris_lines)
+    run_test("Test 15: Search Carris Lines", test_search_carris_lines)
     
     # =========================================================================
-    # TEST 15: Geocoding - Centro Comercial Colombo
+    # TEST 16: Geocoding - Centro Comercial Colombo
     # =========================================================================
     def test_geocode_colombo():
         print("Testing geocoding for 'Centro Comercial Colombo'...")
@@ -2779,10 +4128,10 @@ if __name__ == "__main__":
         
         return result
     
-    run_test("Test 15: Geocoding - Colombo", test_geocode_colombo)
+    run_test("Test 16: Geocoding - Colombo", test_geocode_colombo)
     
     # =========================================================================
-    # TEST 16: Geocoding - Vasco da Gama
+    # TEST 17: Geocoding - Vasco da Gama
     # =========================================================================
     def test_geocode_vasco_da_gama():
         print("Testing geocoding for 'Centro Comercial Vasco da Gama'...")
@@ -2806,10 +4155,10 @@ if __name__ == "__main__":
         
         return result
     
-    run_test("Test 16: Geocoding - Vasco da Gama", test_geocode_vasco_da_gama)
+    run_test("Test 17: Geocoding - Vasco da Gama", test_geocode_vasco_da_gama)
     
     # =========================================================================
-    # TEST 17: Smart Location Resolution - Colombo
+    # TEST 18: Smart Location Resolution - Colombo
     # =========================================================================
     def test_resolve_location_colombo():
         print("Testing smart location resolution for 'Colombo'...")
@@ -2839,10 +4188,10 @@ if __name__ == "__main__":
         print("\033[1;32m✅ Smart location resolution works for Colombo\033[0m")
         return result
     
-    run_test("Test 17: Smart Location Resolution - Colombo", test_resolve_location_colombo)
+    run_test("Test 18: Smart Location Resolution - Colombo", test_resolve_location_colombo)
     
     # =========================================================================
-    # TEST 18: Bus Routes with Smart Resolution (Colombo → Vasco da Gama)
+    # TEST 19: Bus Routes with Smart Resolution (Colombo → Vasco da Gama)
     # =========================================================================
     def test_bus_routes_smart():
         print("Testing bus routes with smart geocoding...")
@@ -2863,10 +4212,10 @@ if __name__ == "__main__":
         print("\n\033[1;32m✅ Smart bus routing works correctly\033[0m")
         return result
     
-    run_test("Test 18: Bus Routes Smart (Colombo → Vasco da Gama)", test_bus_routes_smart)
+    run_test("Test 19: Bus Routes Smart (Colombo → Vasco da Gama)", test_bus_routes_smart)
     
     # =========================================================================
-    # TEST 19: Load CP AML Stations (Cache)
+    # TEST 20: Load CP AML Stations (Cache)
     # =========================================================================
     def test_load_cp_aml_stations():
         print("Loading CP AML stations (first call loads from API)...")
@@ -2910,10 +4259,10 @@ if __name__ == "__main__":
         print("\n\033[1;32m✅ CP AML stations cache works correctly\033[0m")
         return stations
     
-    run_test("Test 19: Load CP AML Stations (Cache)", test_load_cp_aml_stations)
+    run_test("Test 20: Load CP AML Stations (Cache)", test_load_cp_aml_stations)
     
     # =========================================================================
-    # TEST 20: Get CP AML Trains (Filtered)
+    # TEST 21: Get CP AML Trains (Filtered)
     # =========================================================================
     def test_get_cp_aml_trains():
         print("Getting CP trains filtered to AML region...")
@@ -2951,10 +4300,10 @@ if __name__ == "__main__":
         print("\n\033[1;32m✅ CP AML trains filter works correctly\033[0m")
         return trains
     
-    run_test("Test 20: Get CP AML Trains (Filtered)", test_get_cp_aml_trains)
+    run_test("Test 21: Get CP AML Trains (Filtered)", test_get_cp_aml_trains)
     
     # =========================================================================
-    # TEST 21: Search CP Stations
+    # TEST 22: Search CP Stations
     # =========================================================================
     def test_search_cp_stations():
         print("Testing CP station search...")
@@ -2988,10 +4337,10 @@ if __name__ == "__main__":
         print("\n\033[1;32m✅ CP station search works correctly\033[0m")
         return result
     
-    run_test("Test 21: Search CP Stations", test_search_cp_stations)
+    run_test("Test 22: Search CP Stations", test_search_cp_stations)
     
     # =========================================================================
-    # TEST 22: Get Train Status (AML Filtered)
+    # TEST 23: Get Train Status (AML Filtered)
     # =========================================================================
     def test_get_train_status_aml():
         print("Testing get_train_status with AML filter...")
@@ -3014,7 +4363,269 @@ if __name__ == "__main__":
         print("\n\033[1;32m✅ Train status with AML filter works correctly\033[0m")
         return result
     
-    run_test("Test 22: Get Train Status (AML Filtered)", test_get_train_status_aml)
+    run_test("Test 23: Get Train Status (AML Filtered)", test_get_train_status_aml)
+    
+    # =========================================================================
+    # TEST 24: Metro Official API - OAuth2 Token
+    # =========================================================================
+    def test_metro_oauth_token():
+        print("Testing Metro de Lisboa OAuth2 authentication...")
+        
+        if not _is_metro_api_available():
+            print("\n⚠️ Metro API credentials not configured.")
+            print("   Set METRO_CONSUMER_KEY and METRO_CONSUMER_SECRET in .env")
+            print("   Register at: https://api.metrolisboa.pt/store/")
+            print("\n\033[1;33m⏭️ SKIPPED (no credentials)\033[0m")
+            return None
+        
+        # Get token
+        print("\n🔑 Requesting OAuth2 access token...")
+        token = _get_metro_access_token()
+        
+        if token:
+            print(f"   ✅ Token obtained: {token[:20]}...")
+            print(f"   ⏰ Expires at: {_metro_token_expiry}")
+            
+            # Test token reuse (should be instant)
+            print("\n🔄 Testing token cache...")
+            start = time.time()
+            token2 = _get_metro_access_token()
+            cache_time = time.time() - start
+            print(f"   ✅ Cache retrieval: {cache_time:.4f}s")
+            assert token2 == token, "Should return same cached token"
+            assert cache_time < 0.01, "Cache should be instant"
+            
+            print("\n\033[1;32m✅ Metro OAuth2 authentication works correctly\033[0m")
+            return token
+        else:
+            print("\n\033[1;31m❌ Failed to get Metro access token\033[0m")
+            return None
+    
+    run_test("Test 24: Metro OAuth2 Token", test_metro_oauth_token)
+    
+    # =========================================================================
+    # TEST 25: Metro Official API - Line Status
+    # =========================================================================
+    def test_metro_official_status():
+        print("Testing Metro Official API - Line Status...")
+        
+        if not _is_metro_api_available():
+            print("\n⚠️ Skipping (no credentials)")
+            print("\033[1;33m⏭️ SKIPPED\033[0m")
+            return None
+        
+        result = get_metro_status.invoke({})
+        print(result)
+        
+        # Should use Official API
+        assert "Official API" in result or "Metro de Lisboa Status" in result, \
+            "Should show Metro status"
+        assert any(emoji in result for emoji in ["🟡", "🔵", "🟢", "🔴"]), \
+            "Should have line color emojis"
+        
+        print("\n\033[1;32m✅ Metro Official API status works correctly\033[0m")
+        return result
+    
+    run_test("Test 25: Metro Official Status", test_metro_official_status)
+    
+    # =========================================================================
+    # TEST 26: Metro Wait Times - Single Station
+    # =========================================================================
+    def test_metro_wait_time_station():
+        print("Testing Metro wait times for single station...")
+        
+        assert _is_metro_api_available(), \
+            "Metro API credentials not configured in .env"
+        
+        # Test Campo Grande (major interchange)
+        print("\n📍 Getting wait times for Campo Grande...")
+        result = get_metro_wait_time.invoke({"station": "Campo Grande"})
+        print(result)
+        
+        assert "Campo Grande" in result, "Should show station name"
+        assert "Direction" in result or "min" in result, \
+            "Should show directions with wait times"
+        
+        # Test with different spelling
+        print("\n📍 Testing with 'Baixa-Chiado'...")
+        result2 = get_metro_wait_time.invoke({"station": "Baixa-Chiado"})
+        print(result2[:500] if len(result2) > 500 else result2)
+        
+        # Test invalid station
+        print("\n📍 Testing invalid station...")
+        result3 = get_metro_wait_time.invoke({"station": "Invalid Station XYZ"})
+        print(result3)
+        assert "not found" in result3.lower() or "❌" in result3 or "Use station" in result3, \
+            "Should handle invalid station"
+        
+        print("\n\033[1;32m✅ Metro wait times work correctly\033[0m")
+        return result
+    
+    run_test("Test 26: Metro Wait Time (Station)", test_metro_wait_time_station)
+    
+    # =========================================================================
+    # TEST 27: Metro Wait Times - Line Overview
+    # =========================================================================
+    def test_metro_line_wait_times():
+        print("Testing Metro wait times for entire line...")
+        
+        assert _is_metro_api_available(), \
+            "Metro API credentials not configured in .env"
+        
+        # Test Verde line
+        print("\n🟢 Getting wait times for Verde (Green) line...")
+        result = get_metro_line_wait_times.invoke({"line": "Verde"})
+        print(result[:1500] if len(result) > 1500 else result)
+        
+        assert "Verde" in result or "Green" in result or "🟢" in result, \
+            "Should show line name"
+        
+        # Test with English name
+        print("\n🔴 Testing with 'Red' line...")
+        result2 = get_metro_line_wait_times.invoke({"line": "Red"})
+        print(result2[:500] if len(result2) > 500 else result2)
+        assert "Vermelha" in result2 or "Red" in result2, \
+            "Should accept English line names"
+        
+        print("\n\033[1;32m✅ Metro line wait times work correctly\033[0m")
+        return result
+    
+    run_test("Test 27: Metro Line Wait Times", test_metro_line_wait_times)
+    
+    # =========================================================================
+    # TEST 28: Find Nearest Metro Station
+    # =========================================================================
+    def test_find_nearest_metro():
+        print("Testing find nearest Metro station by GPS...")
+        
+        # Test near Colombo shopping center
+        print("\n📍 Location: Near Centro Comercial Colombo")
+        print("   GPS: 38.7548, -9.1867")
+        result = find_nearest_metro.invoke({
+            "latitude": 38.7548,
+            "longitude": -9.1867
+        })
+        print(result)
+        
+        assert "Nearest" in result or "Metro" in result, \
+            "Should show nearest stations"
+        assert "Colégio Militar" in result or "Carnide" in result or "🚇" in result, \
+            "Should find nearby stations"
+        
+        # Test near Rossio
+        print("\n📍 Location: Near Rossio/Baixa")
+        print("   GPS: 38.7138, -9.1390")
+        result2 = find_nearest_metro.invoke({
+            "latitude": 38.7138,
+            "longitude": -9.1390
+        })
+        print(result2)
+        
+        assert "Rossio" in result2 or "Baixa" in result2, \
+            "Should find Rossio or Baixa-Chiado"
+        
+        print("\n\033[1;32m✅ Find nearest Metro works correctly\033[0m")
+        return result
+    
+    run_test("Test 28: Find Nearest Metro", test_find_nearest_metro)
+    
+    # =========================================================================
+    # TEST 29: Metro Frequency/Intervals
+    # =========================================================================
+    def test_metro_frequency():
+        print("Testing Metro service frequency...")
+        
+        assert _is_metro_api_available(), \
+            "Metro API credentials not configured in .env"
+        
+        # Test Amarela line weekday
+        print("\n🟡 Getting frequency for Amarela line (weekday)...")
+        result = get_metro_frequency.invoke({
+            "line": "Amarela",
+            "day_type": "weekday"
+        })
+        print(result)
+        
+        assert "Amarela" in result or "Yellow" in result or "🟡" in result, \
+            "Should show line name"
+        assert "every" in result.lower() or ":" in result, \
+            "Should show train frequency"
+        
+        # Test weekend
+        print("\n🔵 Getting frequency for Azul line (weekend)...")
+        result2 = get_metro_frequency.invoke({
+            "line": "Azul",
+            "day_type": "weekend"
+        })
+        print(result2[:800] if len(result2) > 800 else result2)
+        
+        assert "Weekend" in result2 or "Holiday" in result2, \
+            "Should show weekend schedule"
+        
+        print("\n\033[1;32m✅ Metro frequency works correctly\033[0m")
+        return result
+    
+    run_test("Test 29: Metro Frequency", test_metro_frequency)
+    
+    # =========================================================================
+    # TEST 30: List All Metro Stations
+    # =========================================================================
+    def test_all_metro_stations():
+        print("Testing list all Metro stations...")
+        
+        result = get_all_metro_stations.invoke({})
+        print(result)
+        
+        assert "Metro de Lisboa" in result, "Should have title"
+        assert "55" in result or "station" in result.lower(), \
+            "Should mention number of stations"
+        assert all(emoji in result for emoji in ["🟡", "🔵", "🟢", "🔴"]), \
+            "Should have all line colors"
+        
+        # Check for interchange stations
+        assert "Campo Grande" in result, "Should list Campo Grande"
+        assert "Alameda" in result, "Should list Alameda"
+        
+        print("\n\033[1;32m✅ All Metro stations listed correctly\033[0m")
+        return result
+    
+    run_test("Test 30: All Metro Stations", test_all_metro_stations)
+    
+    # =========================================================================
+    # TEST 31: Metro Station ID Lookup
+    # =========================================================================
+    def test_station_id_lookup():
+        print("Testing Metro station ID lookup...")
+        
+        # Test known stations
+        test_cases = [
+            ("Campo Grande", "CG"),
+            ("Aeroporto", "AP"),
+            ("Baixa-Chiado", "BC"),
+            ("Marquês de Pombal", "MP"),
+            ("Cais do Sodré", "CS"),
+            ("São Sebastião", "SS"),
+        ]
+        
+        all_passed = True
+        for station_name, expected_id in test_cases:
+            result_id = get_station_id(station_name)
+            status = "✅" if result_id == expected_id else "❌"
+            print(f"   {status} {station_name} → {result_id} (expected: {expected_id})")
+            if result_id != expected_id:
+                all_passed = False
+        
+        assert all_passed, "All station IDs should match"
+        
+        # Test with lowercase/variations
+        print("\n   Testing variations...")
+        assert get_station_id("campo grande") == "CG", "Should handle lowercase"
+        assert get_station_id("marques de pombal") == "MP", "Should handle no accents"
+        
+        print("\n\033[1;32m✅ Station ID lookup works correctly\033[0m")
+        return True
+    
+    run_test("Test 31: Station ID Lookup", test_station_id_lookup)
     
     # =========================================================================
     # SUMMARY
@@ -3025,6 +4636,18 @@ if __name__ == "__main__":
     print(f"\033[1;32m✅ Passed: {test_results['passed']}\033[0m")
     print(f"\033[1;31m❌ Failed: {test_results['failed']}\033[0m")
     print(f"📊 Total:  {test_results['passed'] + test_results['failed']}")
+    print("=" * 70)
+    
+    # Show Metro API status
+    print("\n\033[1m🚇 Metro Official API Status:\033[0m")
+    if _is_metro_api_available():
+        print("   ✅ Credentials configured")
+        if _metro_access_token:
+            print(f"   ✅ Token valid until: {_metro_token_expiry}")
+    else:
+        print("   ⚠️ Credentials not configured")
+        print("   Set METRO_CONSUMER_KEY and METRO_CONSUMER_SECRET in .env")
+    
     print("=" * 70)
     
     if test_results['failed'] == 0:

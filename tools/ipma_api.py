@@ -37,23 +37,97 @@ REQUEST_TIMEOUT = 10  # seconds
 # ==========================================================================
 # IPMA API Endpoints
 # ==========================================================================
+
+# -----------------------------------------------------------------------------
+# Weather Warnings (up to 3 days)
+# -----------------------------------------------------------------------------
+# Endpoint: https://api.ipma.pt/open-data/forecast/warnings/warnings_www.json
+# 
+# Response Fields:
+#   - text: Warning description (only filled for yellow, orange, red levels)
+#   - awarenessTypeName: Warning type (e.g., "Trovoada", "Agitação Marítima", 
+#                        "Precipitação", "Vento", "Nevoeiro", "Neve", 
+#                        "Tempo Frio", "Tempo Quente")
+#   - awarenessLevelID: Warning level/color ("green", "yellow", "orange", "red")
+#                       Note: Only non-green warnings are actual alerts
+#   - startTime: Warning start datetime (ISO format)
+#   - endTime: Warning end datetime (ISO format)
+#   - idAreaAviso: Area identifier (see distrits-islands.json for codes)
+#
+# Example Response:
+#   [{"text": "", "awarenessTypeName": "Agitação Marítima", "idAreaAviso": "BGC",
+#     "startTime": "2021-03-25T07:25:00", "awarenessLevelID": "green", 
+#     "endTime": "2021-03-28T07:00:00"}, ...]
+# -----------------------------------------------------------------------------
 IPMA_WARNINGS_URL = "https://api.ipma.pt/open-data/forecast/warnings/warnings_www.json"
+
+# -----------------------------------------------------------------------------
+# Daily Weather Forecast (up to 5 days) by Location
+# -----------------------------------------------------------------------------
+# Endpoint: https://api.ipma.pt/open-data/forecast/meteorology/cities/daily/{globalIdLocal}.json
+# Note: Only daily data available. Updates hourly.
+#
+# Response Fields:
+#   - forecastDate: Forecast date (YYYY-MM-DD)
+#   - dataUpdate: File update timestamp (hourly refresh)
+#   - globalIdLocal: Location identifier (see distrits-islands.json)
+#   - idWeatherType: Weather type code (see weather-type-classe.json)
+#   - tMin: Daily minimum temperature (°C)
+#   - tMax: Daily maximum temperature (°C)
+#   - classWindSpeed: Wind intensity class (see wind-speed-daily-classe.json)
+#   - predWindDir: Predominant wind direction (N, NE, E, SE, S, SW, W, NW)
+#   - precipitaProb: Precipitation probability (%)
+#   - classPrecInt: Precipitation intensity class (see precipitation-classe.json)
+#   - latitude: Location latitude
+#   - longitude: Location longitude
+#
+# Example Response:
+#   {"owner": "IPMA", "country": "PT", "globalIdLocal": 1110600,
+#    "dataUpdate": "2018-01-26T09:02:03",
+#    "data": [{"precipitaProb": "0.0", "tMin": "7.6", "tMax": "13.3", 
+#              "predWindDir": "N", "idWeatherType": 2, "classWindSpeed": 2,
+#              "classPrecInt": 0, "forecastDate": "2018-01-26", 
+#              "latitude": "38.8", "longitude": "-9.1"}, ...]}
+# -----------------------------------------------------------------------------
 IPMA_FORECAST_URL = "https://api.ipma.pt/open-data/forecast/meteorology/cities/daily/{global_id}.json"
 
+# -----------------------------------------------------------------------------
+# Aggregated Daily Forecast (All Locations for a Specific Day)
+# -----------------------------------------------------------------------------
+# Endpoint: https://api.ipma.pt/open-data/forecast/meteorology/cities/daily/hp-daily-forecast-day{idDay}.json
+# 
+# This endpoint returns forecast data for ALL districts/islands at once,
+# aggregated by day. Useful for getting a Portugal-wide overview.
+#
+# Parameters:
+#   - idDay: 0=today, 1=tomorrow, 2=day after tomorrow
+#
+# Response Fields (same as daily forecast):
+#   - globalIdLocal: Location identifier
+#   - idWeatherType: Weather type code
+#   - tMin, tMax: Temperature range
+#   - precipitaProb: Precipitation probability
+#   - predWindDir: Wind direction
+#   - classWindSpeed: Wind speed class
+# -----------------------------------------------------------------------------
+IPMA_FORECAST_AGGREGATED_URL = "https://api.ipma.pt/open-data/forecast/meteorology/cities/daily/hp-daily-forecast-day{id_day}.json"
+
 # Weather type mapping (IPMA codes to descriptions)
+# Source: https://api.ipma.pt/open-data/weather-type-classe.json
 WEATHER_TYPES = {
+    -99: "--",
     0: "No information",
     1: "Clear sky",
     2: "Partly cloudy",
     3: "Sunny intervals",
     4: "Cloudy",
-    5: "Cloudy (high clouds)",
-    6: "Showers",
-    7: "Light showers",
-    8: "Heavy showers",
-    9: "Rain",
+    5: "Cloudy (High cloud)",
+    6: "Showers/rain",
+    7: "Light showers/rain",
+    8: "Heavy showers/rain",
+    9: "Rain/showers",
     10: "Light rain",
-    11: "Heavy rain",
+    11: "Heavy rain/showers",
     12: "Intermittent rain",
     13: "Intermittent light rain",
     14: "Intermittent heavy rain",
@@ -69,10 +143,14 @@ WEATHER_TYPES = {
     24: "Convective clouds",
     25: "Partly cloudy",
     26: "Fog",
-    27: "Cloudy"
+    27: "Cloudy",
+    28: "Snow showers",
+    29: "Rain and snow",
+    30: "Rain and snow"
 }
 
 # Warning level colors and severity
+# Source: https://www.ipma.pt/pt/enciclopedia/otempo/sam/
 WARNING_LEVELS = {
     "green": {"emoji": "🟢", "severity": 0, "description": "No warning"},
     "yellow": {"emoji": "🟡", "severity": 1, "description": "Be aware"},
@@ -80,11 +158,44 @@ WARNING_LEVELS = {
     "red": {"emoji": "🔴", "severity": 3, "description": "Take action"}
 }
 
+# Warning types mapping (Portuguese to English with specific emojis)
+# Source: https://api.ipma.pt/open-data/forecast/warnings/warnings_www.json
+WARNING_TYPES = {
+    "Precipitação": {"en": "Precipitation", "emoji": "🌧️"},
+    "Trovoada": {"en": "Thunderstorm", "emoji": "⛈️"},
+    "Agitação Marítima": {"en": "Rough Sea", "emoji": "🌊"},
+    "Vento": {"en": "Wind", "emoji": "💨"},
+    "Nevoeiro": {"en": "Fog", "emoji": "🌫️"},
+    "Neve": {"en": "Snow", "emoji": "❄️"},
+    "Tempo Frio": {"en": "Cold Weather", "emoji": "🥶"},
+    "Tempo Quente": {"en": "Hot Weather", "emoji": "🥵"}
+}
+
 # Wind direction mapping
 WIND_DIRECTIONS = {
     "N": "North", "NE": "Northeast", "E": "East", "SE": "Southeast",
     "S": "South", "SW": "Southwest", "W": "West", "NW": "Northwest",
     "": "Variable"
+}
+
+# Wind Speed Classes
+# Source: https://api.ipma.pt/open-data/wind-speed-daily-classe.json
+WIND_SPEED_CLASSES = {
+    -99: "--",
+    1: "Weak",
+    2: "Moderate",
+    3: "Strong",
+    4: "Very strong"
+}
+
+# Precipitation Intensity Classes
+# Source: https://api.ipma.pt/open-data/precipitation-classe.json
+PRECIPITATION_INTENSITY_CLASSES = {
+    -99: "--",
+    0: "No precipitation",
+    1: "Weak",
+    2: "Moderate",
+    3: "Strong"
 }
 
 
@@ -128,6 +239,32 @@ def get_weather_description(weather_type_id: int) -> str:
         str: Weather description.
     """
     return WEATHER_TYPES.get(weather_type_id, f"Unknown ({weather_type_id})")
+
+
+def get_wind_speed_description(class_wind_speed: int) -> str:
+    """
+    Converts IPMA wind speed class to human-readable description.
+    
+    Args:
+        class_wind_speed (int): IPMA wind speed class code.
+        
+    Returns:
+        str: Wind speed description.
+    """
+    return WIND_SPEED_CLASSES.get(class_wind_speed, f"Unknown ({class_wind_speed})")
+
+
+def get_precipitation_intensity_description(class_prec_int: int) -> str:
+    """
+    Converts IPMA precipitation intensity class to human-readable description.
+    
+    Args:
+        class_prec_int (int): IPMA precipitation intensity class code.
+        
+    Returns:
+        str: Precipitation intensity description.
+    """
+    return PRECIPITATION_INTENSITY_CLASSES.get(class_prec_int, f"Unknown ({class_prec_int})")
 
 
 def format_date(date_str: str) -> str:
@@ -187,7 +324,9 @@ def get_weather_warnings(area: str = "LSB") -> str:
     
     Args:
         area (str): Area code for warnings (default: 'LSB' for Lisbon).
-                   Other codes: 'BGC' (Bragança), 'VCT' (Viana do Castelo), etc.
+                   Other codes: 'BGC' (Bragança), 'VCT' (Viana do Castelo), 
+                   'PTO' (Porto), 'FAR' (Faro), etc.
+                   See: https://api.ipma.pt/open-data/distrits-islands.json
 
     Returns:
         str: Formatted list of active weather warnings with severity and timing.
@@ -204,7 +343,7 @@ def get_weather_warnings(area: str = "LSB") -> str:
     if not isinstance(data, list):
         return "❌ Unexpected response format from IPMA warnings API."
     
-    # Filter warnings for Lisbon area and non-green levels
+    # Filter warnings for requested area and non-green levels
     active_warnings = []
     for warning in data:
         warning_area = warning.get('idAreaAviso', '')
@@ -217,22 +356,27 @@ def get_weather_warnings(area: str = "LSB") -> str:
         active_warnings.append(warning)
     
     if not active_warnings:
-        return f"✅ No active weather warnings for Lisbon ({area}).\n\n🌤️ Weather conditions are normal."
+        return f"✅ No active weather warnings for area '{area}'.\n\n🌤️ Weather conditions are normal."
     
-    # Sort by severity (red > orange > yellow)
+    # Sort by severity (red > orange > yellow), then by start time
     active_warnings.sort(
-        key=lambda x: WARNING_LEVELS.get(x.get('awarenessLevelID', 'green').lower(), {}).get('severity', 0),
-        reverse=True
+        key=lambda x: (
+            -WARNING_LEVELS.get(x.get('awarenessLevelID', 'green').lower(), {}).get('severity', 0),
+            x.get('startTime', '')
+        )
     )
     
     # Format response
-    response = f"⚠️ Active Weather Warnings for Lisbon:\n\n"
+    response = f"⚠️ Active Weather Warnings ({area}):\n"
+    response += "=" * 40 + "\n\n"
     
-    for i, warning in enumerate(active_warnings, 1):
+    for warning in active_warnings:
         level = warning.get('awarenessLevelID', 'unknown').lower()
         level_info = WARNING_LEVELS.get(level, {"emoji": "⚪", "description": "Unknown"})
         
-        warning_type = warning.get('awarenessTypeName', 'Unknown')
+        warning_type_pt = warning.get('awarenessTypeName', 'Unknown')
+        warning_type_info = WARNING_TYPES.get(warning_type_pt, {"en": warning_type_pt, "emoji": "⚠️"})
+        
         text = warning.get('text', '')
         start_time = warning.get('startTime', 'N/A')
         end_time = warning.get('endTime', 'N/A')
@@ -241,11 +385,12 @@ def get_weather_warnings(area: str = "LSB") -> str:
         try:
             start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
             end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
-            time_str = f"{start_dt.strftime('%b %d, %H:%M')} to {end_dt.strftime('%b %d, %H:%M')}"
+            time_str = f"{start_dt.strftime('%b %d, %H:%M')} → {end_dt.strftime('%b %d, %H:%M')}"
         except (ValueError, AttributeError):
-            time_str = f"{start_time} to {end_time}"
+            time_str = f"{start_time} → {end_time}"
         
-        response += f"{level_info['emoji']} {warning_type.upper()} ({level_info['description']})\n"
+        response += f"{level_info['emoji']} {warning_type_info['emoji']} {warning_type_info['en'].upper()}\n"
+        response += f"   Level: {level_info['description']}\n"
         response += f"   ⏰ {time_str}\n"
         if text:
             response += f"   📝 {text}\n"
@@ -301,19 +446,23 @@ def get_weather_forecast(days: int = 3) -> str:
         precip_prob = day.get('precipitaProb', '0')
         wind_dir = day.get('predWindDir', '')
         weather_type = day.get('idWeatherType', 0)
+        wind_speed_class = day.get('classWindSpeed', -99)
+        precip_intensity_class = day.get('classPrecInt', -99)
         
         # Format output
         formatted_date = format_date(date)
         weather_desc = get_weather_description(weather_type)
-        wind_desc = WIND_DIRECTIONS.get(wind_dir, wind_dir)
+        wind_dir_desc = WIND_DIRECTIONS.get(wind_dir, wind_dir)
+        wind_speed_desc = get_wind_speed_description(wind_speed_class)
         precip_text = precipitation_to_text(precip_prob)
+        precip_intensity_desc = get_precipitation_intensity_description(precip_intensity_class)
         
         # Weather emoji based on type
         if weather_type in [1, 2, 3]:
             emoji = "☀️"
         elif weather_type in [4, 5, 25, 27]:
             emoji = "☁️"
-        elif weather_type in [6, 7, 8, 9, 10, 11, 12, 13, 14, 15]:
+        elif weather_type in [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 28, 29, 30]:
             emoji = "🌧️"
         elif weather_type in [18]:
             emoji = "❄️"
@@ -327,10 +476,95 @@ def get_weather_forecast(days: int = 3) -> str:
         response += f"{emoji} {formatted_date}\n"
         response += f"   🌡️ {t_min}°C to {t_max}°C\n"
         response += f"   🌤️ {weather_desc}\n"
-        response += f"   💧 Rain: {precip_text} ({precip_prob}%)\n"
-        if wind_desc:
-            response += f"   💨 Wind: {wind_desc}\n"
+        response += f"   💧 Rain: {precip_text} ({precip_prob}%)"
+        if precip_intensity_class not in [-99, 0]:
+            response += f" | Intensity: {precip_intensity_desc}"
         response += "\n"
+        if wind_dir_desc:
+            response += f"   💨 Wind: {wind_dir_desc} ({wind_speed_desc})\n"
+        response += "\n"
+    
+    return response
+
+
+@tool
+def get_portugal_weather_overview(day: int = 0) -> str:
+    """
+    Gets weather forecast for all Portugal locations for a specific day.
+    
+    Returns an aggregated view of weather across all districts and islands,
+    useful for comparing conditions across the country.
+    
+    Args:
+        day (int): Day index: 0=today, 1=tomorrow, 2=day after tomorrow.
+
+    Returns:
+        str: Formatted weather overview for all locations in Portugal.
+        
+    Examples:
+        >>> get_portugal_weather_overview()  # Today's weather across Portugal
+        >>> get_portugal_weather_overview(1)  # Tomorrow's weather
+    """
+    # Validate day parameter
+    if day not in [0, 1, 2]:
+        return "❌ Invalid day parameter. Use 0 (today), 1 (tomorrow), or 2 (day after tomorrow)."
+    
+    day_names = {0: "Today", 1: "Tomorrow", 2: "Day After Tomorrow"}
+    url = IPMA_FORECAST_AGGREGATED_URL.format(id_day=day)
+    
+    data = fetch_json(url)
+    
+    if not data:
+        return "❌ Failed to fetch aggregated forecast from IPMA."
+    
+    forecast_data = data.get('data', [])
+    
+    if not forecast_data:
+        return "❌ No aggregated forecast data available."
+    
+    # Get update time and forecast date
+    update_time = data.get('dataUpdate', 'N/A')
+    forecast_date = data.get('forecastDate', 'N/A')
+    
+    response = f"🇵🇹 Portugal Weather Overview - {day_names[day]}\n"
+    response += f"{'=' * 50}\n"
+    response += f"📅 Forecast Date: {forecast_date}\n"
+    response += f"🔄 Updated: {update_time}\n"
+    response += f"📊 Locations: {len(forecast_data)}\n\n"
+    
+    # Find Lisbon in the data (globalIdLocal = 1110600)
+    lisbon_data = None
+    for loc in forecast_data:
+        if loc.get('globalIdLocal') == Config.LISBON_GLOBAL_ID:
+            lisbon_data = loc
+            break
+    
+    if lisbon_data:
+        response += "🏙️ **LISBON (Focus Area)**\n"
+        response += "-" * 30 + "\n"
+        
+        weather_type = lisbon_data.get('idWeatherType', 0)
+        weather_desc = get_weather_description(weather_type)
+        t_min = lisbon_data.get('tMin', 'N/A')
+        t_max = lisbon_data.get('tMax', 'N/A')
+        precip_prob = lisbon_data.get('precipitaProb', '0')
+        wind_dir = lisbon_data.get('predWindDir', '')
+        wind_dir_desc = WIND_DIRECTIONS.get(wind_dir, wind_dir)
+        
+        response += f"   🌤️ {weather_desc}\n"
+        response += f"   🌡️ {t_min}°C to {t_max}°C\n"
+        response += f"   💧 Precipitation: {precip_prob}%\n"
+        response += f"   💨 Wind: {wind_dir_desc}\n\n"
+    
+    # Summary statistics across all locations
+    temps_min = [float(loc.get('tMin', 0)) for loc in forecast_data if loc.get('tMin')]
+    temps_max = [float(loc.get('tMax', 0)) for loc in forecast_data if loc.get('tMax')]
+    
+    if temps_min and temps_max:
+        response += "📈 **Portugal Summary**\n"
+        response += "-" * 30 + "\n"
+        response += f"   🌡️ Temperature range: {min(temps_min):.0f}°C to {max(temps_max):.0f}°C\n"
+        response += f"   📍 Coldest: {min(temps_min):.0f}°C | Warmest: {max(temps_max):.0f}°C\n"
     
     return response
 
@@ -364,13 +598,25 @@ def get_current_weather_summary() -> str:
         t_max = today.get('tMax', 'N/A')
         weather_type = today.get('idWeatherType', 0)
         precip_prob = today.get('precipitaProb', '0')
+        wind_dir = today.get('predWindDir', '')
+        wind_speed_class = today.get('classWindSpeed', -99)
+        precip_intensity_class = today.get('classPrecInt', -99)
         
         weather_desc = get_weather_description(weather_type)
+        wind_dir_desc = WIND_DIRECTIONS.get(wind_dir, wind_dir)
+        wind_speed_desc = get_wind_speed_description(wind_speed_class)
+        precip_intensity_desc = get_precipitation_intensity_description(precip_intensity_class)
         
         response += f"📅 Today ({today.get('forecastDate', 'N/A')}):\n"
         response += f"   🌡️ Temperature: {t_min}°C to {t_max}°C\n"
         response += f"   🌤️ Conditions: {weather_desc}\n"
-        response += f"   💧 Rain probability: {precip_prob}%\n\n"
+        response += f"   💧 Rain probability: {precip_prob}%"
+        if precip_intensity_class not in [-99, 0]:
+            response += f" ({precip_intensity_desc})"
+        response += "\n"
+        if wind_dir_desc:
+            response += f"   💨 Wind: {wind_dir_desc} ({wind_speed_desc})\n"
+        response += "\n"
     else:
         response += "❌ Could not fetch today's forecast.\n\n"
     
@@ -385,8 +631,9 @@ def get_current_weather_summary() -> str:
             for w in active[:3]:  # Max 3 warnings
                 level = w.get('awarenessLevelID', 'unknown').lower()
                 level_info = WARNING_LEVELS.get(level, {"emoji": "⚪"})
-                warning_type = w.get('awarenessTypeName', 'Unknown')
-                response += f"   {level_info['emoji']} {warning_type}\n"
+                warning_type_pt = w.get('awarenessTypeName', 'Unknown')
+                warning_type_info = WARNING_TYPES.get(warning_type_pt, {"en": warning_type_pt, "emoji": "⚠️"})
+                response += f"   {level_info['emoji']} {warning_type_info['emoji']} {warning_type_info['en']}\n"
         else:
             response += "✅ No active weather warnings.\n"
     else:
@@ -399,24 +646,264 @@ def get_current_weather_summary() -> str:
 # Test Block
 # ==========================================================================
 if __name__ == "__main__":
-    print("\033[1m" + "=" * 60 + "\033[0m")
-    print("\033[1m🧪 IPMA Weather API Tool Test\033[0m")
-    print("\033[1m" + "=" * 60 + "\033[0m")
+    import time
     
-    # Test 1: Weather Summary
-    print("\n\033[1m🌤️ Test 1: Current Weather Summary\033[0m")
-    print("-" * 40)
-    result = get_current_weather_summary.invoke({})
-    print(result)
+    print("\033[1m" + "=" * 70 + "\033[0m")
+    print("\033[1m🧪 IPMA Weather API Tool - Comprehensive Test Suite\033[0m")
+    print("\033[1m" + "=" * 70 + "\033[0m")
+    print(f"📅 Test Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"🎯 Target Area: Lisbon (LSB) | Global ID: {Config.LISBON_GLOBAL_ID}")
+    print("\033[1m" + "=" * 70 + "\033[0m")
     
-    # Test 2: Weather Warnings
-    print("\n\033[1m⚠️ Test 2: Weather Warnings\033[0m")
-    print("-" * 40)
-    result = get_weather_warnings.invoke({"area": "LSB"})
-    print(result)
+    # Track test results
+    tests_passed = 0
+    tests_failed = 0
     
-    # Test 3: 5-day Forecast
-    print("\n\033[1m📅 Test 3: 5-Day Forecast\033[0m")
-    print("-" * 40)
-    result = get_weather_forecast.invoke({"days": 5})
-    print(result)
+    # =========================================================================
+    # Test 1: API Connectivity - Forecast Endpoint
+    # =========================================================================
+    print("\n\033[1m📡 Test 1: API Connectivity - Forecast Endpoint\033[0m")
+    print("-" * 50)
+    
+    url = IPMA_FORECAST_URL.format(global_id=Config.LISBON_GLOBAL_ID)
+    print(f"   URL: {url}")
+    
+    start_time = time.time()
+    data = fetch_json(url)
+    elapsed = time.time() - start_time
+    
+    if data:
+        print(f"\033[1;32m   ✅ Connection successful ({elapsed:.2f}s)\033[0m")
+        print(f"   📊 Data points received: {len(data.get('data', []))}")
+        print(f"   🕐 Last update: {data.get('dataUpdate', 'N/A')}")
+        tests_passed += 1
+    else:
+        print(f"\033[1;31m   ❌ Connection failed\033[0m")
+        tests_failed += 1
+    
+    # =========================================================================
+    # Test 2: API Connectivity - Warnings Endpoint
+    # =========================================================================
+    print("\n\033[1m📡 Test 2: API Connectivity - Warnings Endpoint\033[0m")
+    print("-" * 50)
+    
+    print(f"   URL: {IPMA_WARNINGS_URL}")
+    
+    start_time = time.time()
+    warnings_data = fetch_json(IPMA_WARNINGS_URL)
+    elapsed = time.time() - start_time
+    
+    if warnings_data:
+        print(f"\033[1;32m   ✅ Connection successful ({elapsed:.2f}s)\033[0m")
+        print(f"   📊 Total warnings in response: {len(warnings_data)}")
+        
+        # Count warnings by area
+        lisbon_warnings = [w for w in warnings_data if w.get('idAreaAviso') == 'LSB']
+        active_lisbon = [w for w in lisbon_warnings if w.get('awarenessLevelID', 'green').lower() != 'green']
+        print(f"   🏙️ Lisbon (LSB) entries: {len(lisbon_warnings)} total, {len(active_lisbon)} active")
+        tests_passed += 1
+    else:
+        print(f"\033[1;31m   ❌ Connection failed\033[0m")
+        tests_failed += 1
+    
+    # =========================================================================
+    # Test 3: Weather Forecast Tool (3 days - default)
+    # =========================================================================
+    print("\n\033[1m🌤️ Test 3: Weather Forecast Tool (3 days - default)\033[0m")
+    print("-" * 50)
+    
+    try:
+        result = get_weather_forecast.invoke({})
+        print(result)
+        if "❌" not in result:
+            print(f"\n\033[1;32m   ✅ Tool executed successfully\033[0m")
+            tests_passed += 1
+        else:
+            print(f"\n\033[1;31m   ❌ Tool returned error\033[0m")
+            tests_failed += 1
+    except Exception as e:
+        print(f"\033[1;31m   ❌ Exception: {e}\033[0m")
+        tests_failed += 1
+    
+    # =========================================================================
+    # Test 4: Weather Forecast Tool (5 days - max)
+    # =========================================================================
+    print("\n\033[1m📅 Test 4: Weather Forecast Tool (5 days - max)\033[0m")
+    print("-" * 50)
+    
+    try:
+        result = get_weather_forecast.invoke({"days": 5})
+        print(result)
+        if "❌" not in result:
+            print(f"\n\033[1;32m   ✅ Tool executed successfully\033[0m")
+            tests_passed += 1
+        else:
+            print(f"\n\033[1;31m   ❌ Tool returned error\033[0m")
+            tests_failed += 1
+    except Exception as e:
+        print(f"\033[1;31m   ❌ Exception: {e}\033[0m")
+        tests_failed += 1
+    
+    # =========================================================================
+    # Test 5: Weather Warnings Tool (Lisbon)
+    # =========================================================================
+    print("\n\033[1m⚠️ Test 5: Weather Warnings Tool (Lisbon - LSB)\033[0m")
+    print("-" * 50)
+    
+    try:
+        result = get_weather_warnings.invoke({"area": "LSB"})
+        print(result)
+        if "❌" not in result:
+            print(f"\n\033[1;32m   ✅ Tool executed successfully\033[0m")
+            tests_passed += 1
+        else:
+            print(f"\n\033[1;31m   ❌ Tool returned error\033[0m")
+            tests_failed += 1
+    except Exception as e:
+        print(f"\033[1;31m   ❌ Exception: {e}\033[0m")
+        tests_failed += 1
+    
+    # =========================================================================
+    # Test 6: Weather Warnings Tool (Porto - different area)
+    # =========================================================================
+    print("\n\033[1m⚠️ Test 6: Weather Warnings Tool (Porto - PTO)\033[0m")
+    print("-" * 50)
+    
+    try:
+        result = get_weather_warnings.invoke({"area": "PTO"})
+        print(result)
+        if "❌" not in result:
+            print(f"\n\033[1;32m   ✅ Tool executed successfully\033[0m")
+            tests_passed += 1
+        else:
+            print(f"\n\033[1;31m   ❌ Tool returned error\033[0m")
+            tests_failed += 1
+    except Exception as e:
+        print(f"\033[1;31m   ❌ Exception: {e}\033[0m")
+        tests_failed += 1
+    
+    # =========================================================================
+    # Test 7: Current Weather Summary Tool
+    # =========================================================================
+    print("\n\033[1m📊 Test 7: Current Weather Summary Tool\033[0m")
+    print("-" * 50)
+    
+    try:
+        result = get_current_weather_summary.invoke({})
+        print(result)
+        if "❌" not in result or "Could not fetch" not in result:
+            print(f"\n\033[1;32m   ✅ Tool executed successfully\033[0m")
+            tests_passed += 1
+        else:
+            print(f"\n\033[1;31m   ❌ Tool returned error\033[0m")
+            tests_failed += 1
+    except Exception as e:
+        print(f"\033[1;31m   ❌ Exception: {e}\033[0m")
+        tests_failed += 1
+    
+    # =========================================================================
+    # Test 8: Helper Functions Validation
+    # =========================================================================
+    print("\n\033[1m🔧 Test 8: Helper Functions Validation\033[0m")
+    print("-" * 50)
+    
+    helper_tests_passed = 0
+    
+    # Test weather description
+    desc = get_weather_description(6)
+    expected = "Showers/rain"
+    if desc == expected:
+        print(f"   ✅ get_weather_description(6) = '{desc}'")
+        helper_tests_passed += 1
+    else:
+        print(f"   ❌ get_weather_description(6) = '{desc}' (expected '{expected}')")
+    
+    # Test unknown weather type
+    desc = get_weather_description(999)
+    if "Unknown" in desc:
+        print(f"   ✅ get_weather_description(999) = '{desc}' (handles unknown)")
+        helper_tests_passed += 1
+    else:
+        print(f"   ❌ get_weather_description(999) should return 'Unknown'")
+    
+    # Test wind speed description
+    desc = get_wind_speed_description(2)
+    expected = "Moderate"
+    if desc == expected:
+        print(f"   ✅ get_wind_speed_description(2) = '{desc}'")
+        helper_tests_passed += 1
+    else:
+        print(f"   ❌ get_wind_speed_description(2) = '{desc}' (expected '{expected}')")
+    
+    # Test precipitation intensity
+    desc = get_precipitation_intensity_description(3)
+    expected = "Strong"
+    if desc == expected:
+        print(f"   ✅ get_precipitation_intensity_description(3) = '{desc}'")
+        helper_tests_passed += 1
+    else:
+        print(f"   ❌ get_precipitation_intensity_description(3) = '{desc}' (expected '{expected}')")
+    
+    # Test precipitation to text
+    text = precipitation_to_text("85")
+    if text == "Very likely":
+        print(f"   ✅ precipitation_to_text('85') = '{text}'")
+        helper_tests_passed += 1
+    else:
+        print(f"   ❌ precipitation_to_text('85') = '{text}' (expected 'Very likely')")
+    
+    # Test date formatting
+    formatted = format_date("2026-01-13")
+    if "Monday" in formatted or "Jan" in formatted:
+        print(f"   ✅ format_date('2026-01-13') = '{formatted}'")
+        helper_tests_passed += 1
+    else:
+        print(f"   ❌ format_date('2026-01-13') = '{formatted}'")
+    
+    if helper_tests_passed == 6:
+        print(f"\n\033[1;32m   ✅ All helper functions working correctly ({helper_tests_passed}/6)\033[0m")
+        tests_passed += 1
+    else:
+        print(f"\n\033[1;31m   ❌ Some helper functions failed ({helper_tests_passed}/6)\033[0m")
+        tests_failed += 1
+    
+    # =========================================================================
+    # Test 9: Dictionary Completeness Check
+    # =========================================================================
+    print("\n\033[1m📚 Test 9: Dictionary Completeness Check\033[0m")
+    print("-" * 50)
+    
+    print(f"   WEATHER_TYPES: {len(WEATHER_TYPES)} entries (IDs -99 to 30)")
+    print(f"   WARNING_LEVELS: {len(WARNING_LEVELS)} entries (green, yellow, orange, red)")
+    print(f"   WARNING_TYPES: {len(WARNING_TYPES)} entries (8 warning categories)")
+    print(f"   WIND_DIRECTIONS: {len(WIND_DIRECTIONS)} entries (N, NE, E, SE, S, SW, W, NW, '')")
+    print(f"   WIND_SPEED_CLASSES: {len(WIND_SPEED_CLASSES)} entries (IDs -99, 1-4)")
+    print(f"   PRECIPITATION_INTENSITY_CLASSES: {len(PRECIPITATION_INTENSITY_CLASSES)} entries (IDs -99, 0-3)")
+    
+    # Validate counts
+    if (len(WEATHER_TYPES) >= 30 and len(WARNING_LEVELS) == 4 and 
+        len(WARNING_TYPES) == 8 and len(WIND_SPEED_CLASSES) == 5 and
+        len(PRECIPITATION_INTENSITY_CLASSES) == 5):
+        print(f"\n\033[1;32m   ✅ All dictionaries complete\033[0m")
+        tests_passed += 1
+    else:
+        print(f"\n\033[1;31m   ❌ Some dictionaries incomplete\033[0m")
+        tests_failed += 1
+    
+    # =========================================================================
+    # Final Summary
+    # =========================================================================
+    print("\n" + "\033[1m" + "=" * 70 + "\033[0m")
+    print("\033[1m📊 TEST SUMMARY\033[0m")
+    print("\033[1m" + "=" * 70 + "\033[0m")
+    
+    total_tests = tests_passed + tests_failed
+    
+    if tests_failed == 0:
+        print(f"\n\033[1;32m✅ ALL TESTS PASSED: {tests_passed}/{total_tests}\033[0m")
+    else:
+        print(f"\n\033[1;32m✅ Tests Passed: {tests_passed}\033[0m")
+        print(f"\033[1;31m❌ Tests Failed: {tests_failed}\033[0m")
+        print(f"\n\033[1mTotal: {tests_passed}/{total_tests}\033[0m")
+    
+    print("\n" + "\033[1m" + "=" * 70 + "\033[0m")

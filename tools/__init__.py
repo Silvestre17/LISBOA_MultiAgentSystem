@@ -11,15 +11,21 @@ from tools.ipma_api import (
 
 from tools.transport_api import (
     get_metro_status,
+    get_metro_wait_time,           # Real-time metro wait times
+    get_metro_line_wait_times,     # Wait times for entire line
+    find_nearest_metro,            # Find nearest metro station by GPS
+    get_metro_frequency,           # Train frequency schedules
+    get_all_metro_stations,        # List all metro stations
     get_carris_alerts,
     get_carris_stop_info,
     search_carris_lines,
     get_train_status,
     get_transport_summary,
     get_route_between_stations,
-    find_bus_routes,           # Bus routing between locations
-    search_bus_stops_nearby,   # Find bus stops near GPS coordinates
-    search_cp_stations         # NEW: Search CP train stations in AML
+    find_bus_routes,               # Bus routing between locations
+    get_bus_realtime_locations,    # Real-time bus GPS locations
+    get_bus_schedule,              # Bus route schedule/stops
+    search_cp_stations             # Search CP train stations in AML
 )
 
 from tools.dados_abertos import (
@@ -42,17 +48,29 @@ __all__ = [
     "get_weather_forecast",
     "get_current_weather_summary",
     
-    # Transport
+    # Transport - Metro
     "get_metro_status",
+    "get_metro_wait_time",
+    "get_metro_line_wait_times",
+    "find_nearest_metro",
+    "get_metro_frequency",
+    "get_all_metro_stations",
+    
+    # Transport - Bus (Carris Metropolitana)
     "get_carris_alerts",
     "get_carris_stop_info",
     "search_carris_lines",
+    "find_bus_routes",
+    "get_bus_realtime_locations",
+    "get_bus_schedule",
+    
+    # Transport - Train (CP)
     "get_train_status",
+    "search_cp_stations",
+    
+    # Transport - Multi-modal
     "get_transport_summary",
-    "get_route_between_stations",   # Metro routing tool
-    "find_bus_routes",              # Bus routing between locations
-    "search_bus_stops_nearby",      # GPS-based stop search
-    "search_cp_stations",           # NEW: CP train station search (AML)
+    "get_route_between_stations",
     
     # Open Data (Lisboa Aberta)
     "find_nearby_services",
