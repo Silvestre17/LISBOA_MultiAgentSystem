@@ -35,15 +35,21 @@ from tools.ipma_api import (
 )
 from tools.transport_api import (
     get_metro_status,
+    get_metro_wait_time,           # Real-time metro wait times
+    get_metro_line_wait_times,     # Wait times for entire line
+    find_nearest_metro,            # Find nearest metro station by GPS
+    get_metro_frequency,           # Train frequency schedules
+    get_all_metro_stations,        # List all metro stations
     get_carris_alerts,
     get_carris_stop_info,
     search_carris_lines,
     get_train_status,
     get_transport_summary,
     get_route_between_stations,
-    find_bus_routes,           # Bus routing between locations
-    search_bus_stops_nearby,   # GPS-based bus stop search
-    search_cp_stations         # NEW: CP train station search (AML)
+    find_bus_routes,               # Bus routing between locations
+    get_bus_realtime_locations,    # Real-time bus GPS locations
+    get_bus_schedule,              # Bus route schedule/stops
+    search_cp_stations             # CP train station search (AML)
 )
 from tools.dados_abertos import (
     find_nearby_services,
@@ -78,15 +84,21 @@ def get_all_tools() -> List:
         
         # Transport Tools
         get_metro_status,
+        get_metro_wait_time,          # Real-time metro wait times
+        get_metro_line_wait_times,    # Wait times for entire line
+        find_nearest_metro,           # Find nearest metro by GPS
+        get_metro_frequency,          # Train frequency schedules
+        get_all_metro_stations,       # List all metro stations
         get_carris_alerts,
         get_carris_stop_info,
         search_carris_lines,
         get_train_status,
         get_transport_summary,
-        get_route_between_stations,  # Metro routing assistance
-        find_bus_routes,             # Bus routing between locations
-        search_bus_stops_nearby,     # GPS-based bus stop search
-        search_cp_stations,          # NEW: CP train station search (AML)
+        get_route_between_stations,   # Metro routing assistance
+        find_bus_routes,              # Bus routing between locations
+        get_bus_realtime_locations,   # Real-time bus GPS locations
+        get_bus_schedule,             # Bus route schedule/stops
+        search_cp_stations,           # CP train station search (AML)
         
         # Open Data Tools (Lisboa Aberta)
         find_nearby_services,
