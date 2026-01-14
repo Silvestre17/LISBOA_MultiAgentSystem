@@ -11,6 +11,7 @@
 #   3. Processes documents in batches (200 docs per run = ~15-20 min)
 #   4. Multiple workflow runs handle large updates incrementally
 #   5. Commits the updated vector_db to the repository
+#   6. Handles SIGTERM (exit code 143) gracefully for runner timeouts
 #
 # Cache sizes (approximate):
 #   - pip packages: ~350MB
@@ -187,6 +188,7 @@ jobs:
       
       - name: Sync Vector Database
         if: steps.check-changes.outputs.changes_detected == 'true' || github.event_name == 'workflow_dispatch'
+        timeout-minutes: 90  # Step-level timeout (less than job timeout)
         run: |
           echo "============================================================"
           echo "🔄 Starting Vector Store Sync"
@@ -234,13 +236,19 @@ jobs:
             echo ""
             echo "Exit code: $EXIT_CODE"
             
-            # Handle different exit codes
+            # Handle different exit codes (including SIGTERM = 143)
             if [ $EXIT_CODE -eq 0 ]; then
               echo "✅ Sync complete (all documents processed)"
               break
             elif [ $EXIT_CODE -eq 2 ]; then
               echo "⏳ More work pending, continuing..."
               TOTAL_PROCESSED=$((TOTAL_PROCESSED + MAX_DOCS))
+            elif [ $EXIT_CODE -eq 143 ]; then
+              # SIGTERM received (runner timeout/memory pressure)
+              echo "⚠️ SIGTERM received (exit code 143) - runner terminated process"
+              echo "   Work completed so far has been saved"
+              echo "   Re-run workflow to continue processing"
+              exit 0  # Exit gracefully so commit step runs
             else
               echo "❌ Sync failed with exit code $EXIT_CODE"
               exit $EXIT_CODE
