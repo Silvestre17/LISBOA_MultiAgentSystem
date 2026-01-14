@@ -390,6 +390,7 @@ def main():
             for url in tqdm(new_urls, desc="New Events", mininterval=5):
                 if details := scrape_event_details(session, url):
                     final_list.append(details)
+                    logging.info(f"New event added: {url}")
         
         # B. Updated
         if potential_updates:
@@ -423,6 +424,9 @@ def main():
     logging.info(f"  - Added: {len(new_urls)} new events.")
     logging.info(f"  - Updated: {len(updated_urls)} events.")
     logging.info(f"  - Removed: {len(removed_urls)} events.")
+    if removed_urls:
+        for url in removed_urls:
+            logging.info(f"    Removed event: {url}")
     logging.info(f"  - Unchanged: {len(unchanged_urls)} events.")
     logging.info(f"  - Total events to be saved: {len(final_list)}")
     logging.info("Events synchronization complete.")

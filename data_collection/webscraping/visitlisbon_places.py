@@ -369,6 +369,7 @@ def main():
             for url in tqdm(new_urls, desc="New Places", mininterval=5):
                 if details := scrape_place_details(session, url):
                     final_list.append(details)
+                    logging.info(f"New place added: {url}")
         
         # B. Updated
         if potential_updates:
@@ -402,6 +403,9 @@ def main():
     logging.info(f"  - Added: {len(new_urls)} new places.")
     logging.info(f"  - Updated: {len(updated_urls)} places.")
     logging.info(f"  - Removed: {len(removed_urls)} places.")
+    if removed_urls:
+        for url in removed_urls:
+            logging.info(f"    Removed place: {url}")
     logging.info(f"  - Unchanged: {len(unchanged_urls)} places.")
     logging.info(f"  - Total places to be saved: {len(final_list)}")
     logging.info("Places synchronization complete.")
