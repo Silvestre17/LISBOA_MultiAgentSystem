@@ -35,6 +35,7 @@
 
 import sys
 import os
+import signal
 
 # 🚀 CRITICAL: Force unbuffered output immediately to debug GitHub Actions hangs
 sys.stdout.reconfigure(line_buffering=True)
@@ -53,6 +54,23 @@ import time
 from typing import List, Dict, Optional, Tuple, Any, TYPE_CHECKING
 from datetime import datetime
 from tqdm import tqdm
+
+# ==========================================================================
+# Signal Handling (Exit Code 143 = SIGTERM from GitHub Actions)
+# ==========================================================================
+_graceful_exit_requested = False
+
+def _sigterm_handler(signum, frame):
+    """Handle SIGTERM gracefully to avoid exit code 143."""
+    global _graceful_exit_requested
+    _graceful_exit_requested = True
+    print("\n\033[1;33m⚠️  SIGTERM received - Gracefully exiting...\033[0m", flush=True)
+    print("   Will complete current batch and exit with code 2 (more work pending)", flush=True)
+
+# Register handler for SIGTERM (signal 15)
+signal.signal(signal.SIGTERM, _sigterm_handler)
+# Also handle SIGINT (Ctrl+C) for local testing
+signal.signal(signal.SIGINT, _sigterm_handler)
 
 # Add parent directory to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -444,7 +462,8 @@ class KnowledgeBase:
         
         if ids_to_add:
             docs_to_add = [current_docs[doc_id] for doc_id in ids_to_add]
-            batch_size = 20  # Reduced to prevent OOM on GitHub Actions
+            # Reduced from 20 to 10 to prevent OOM/SIGTERM on GitHub Actions
+            batch_size = 10
             
             print(f"   🔄 Indexing {len(docs_to_add)} documents (batch size: {batch_size})...", flush=True)
             
@@ -457,18 +476,27 @@ class KnowledgeBase:
                 file=sys.stdout,
                 mininterval=1.0
             )
-
+            
+            processed_count = 0
             for i in iterator:
+                # Check for graceful exit signal (SIGTERM from GitHub Actions)
+                if _graceful_exit_requested:
+                    print(f"\n   \033[1;33m⚠️ Graceful exit: Processed {processed_count}/{len(docs_to_add)} docs\033[0m", flush=True)
+                    has_more_work = True
+                    break
+                
                 batch_docs = docs_to_add[i:i + batch_size]
                 batch_ids = ids_to_add[i:i + batch_size]
                 vectorstore.add_documents(batch_docs, ids=batch_ids)
+                processed_count += len(batch_docs)
                 
                 # 🧹 Force garbage collection to free memory
                 gc.collect()
-                # ⏳ Sleep briefly to let CPU cool down
+                # ⏳ Sleep briefly to let CPU cool down and reduce resource pressure
                 time.sleep(0.5)
             
-            print(f"   \033[1;32m✓ Added/Updated {len(ids_to_add)} documents\033[0m", flush=True)
+            if not _graceful_exit_requested:
+                print(f"   \033[1;32m✓ Added/Updated {len(ids_to_add)} documents\033[0m", flush=True)
         
         return {
             "status": "synced",
@@ -517,14 +545,25 @@ class KnowledgeBase:
         
         results["pdf"] = self.sync_pdf_collection(force_rebuild=rebuild_pdf)
         
+        # Check for graceful exit signal between collections
+        if _graceful_exit_requested:
+            print("\n\033[1;33m⚠️ Graceful exit requested, skipping remaining collections\033[0m", flush=True)
+            results["has_more_work"] = True
+            return results
+        
         results["places"] = self.sync_places_collection(force_rebuild=rebuild_places, max_docs=max_docs)
         if results["places"].get("has_more_work"):
             has_more_work = True
         
-        events_max_docs = max_docs
-        results["events"] = self.sync_events_collection(force_rebuild=rebuild_events, max_docs=events_max_docs)
-        if results["events"].get("has_more_work"):
+        # Check for graceful exit signal between collections
+        if _graceful_exit_requested:
+            print("\n\033[1;33m⚠️ Graceful exit requested, skipping remaining collections\033[0m", flush=True)
             has_more_work = True
+        else:
+            events_max_docs = max_docs
+            results["events"] = self.sync_events_collection(force_rebuild=rebuild_events, max_docs=events_max_docs)
+            if results["events"].get("has_more_work"):
+                has_more_work = True
             
         print("\n\033[1m" + "=" * 60 + "\033[0m", flush=True)
         print("\033[1m📊 Sync Summary\033[0m", flush=True)
