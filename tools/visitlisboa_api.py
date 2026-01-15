@@ -36,7 +36,6 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=ImportWarning)
 
 from langchain_core.tools import tool
-from tools.dados_abertos import _search_place_in_datasets_logic
 
 # Add parent directory to path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -276,6 +275,106 @@ def filter_events_by_date(
     return filtered
 
 
+def get_event_duration_days(event: Dict) -> int:
+    """
+    Calculates the total duration span of an event in days.
+    
+    Single-day events return 1.
+    Multi-day events return the span between first and last date.
+    Long-running exhibitions (>30 days) are penalized in ranking.
+    
+    Args:
+        event: Event dictionary with 'dates' field.
+    
+    Returns:
+        int: Duration in days (1 for single-day, span for ranges).
+    """
+    dates = get_event_dates(event)
+    if not dates:
+        return 365  # No dates = low priority (assume permanent)
+    
+    if len(dates) == 1:
+        return 1  # Single-day event
+    
+    # Calculate span between min and max dates
+    min_date = min(dates)
+    max_date = max(dates)
+    duration = (max_date - min_date).days + 1
+    
+    return max(1, duration)
+
+
+def calculate_temporal_relevance_score(
+    event: Dict,
+    query_start: Optional[datetime],
+    query_end: Optional[datetime]
+) -> float:
+    """
+    Calculates a temporal relevance score for ranking events.
+    
+    CRITICAL: Prioritizes ephemeral (short-duration) events over long exhibitions.
+    A tourist asking "what to do today?" wants unique events, not 4-month exhibitions.
+    
+    Scoring factors:
+        1. Duration penalty: Longer events get lower scores
+        2. Proximity bonus: Events closer to query start date get higher scores
+        3. Uniqueness bonus: Single-day events get priority
+    
+    Args:
+        event: Event dictionary.
+        query_start: Start of the query date range.
+        query_end: End of the query date range.
+    
+    Returns:
+        float: Score (higher = more relevant). Range: 0.0 to 100.0
+    """
+    score = 50.0  # Base score
+    
+    duration = get_event_duration_days(event)
+    event_dates = get_event_dates(event)
+    
+    if not event_dates:
+        return 10.0  # No dates = very low priority
+    
+    # 1. Duration penalty: Short events are more valuable for tourists
+    #    Single day: +30, 2-3 days: +20, 1 week: +10, 1 month: 0, >3 months: -20
+    if duration == 1:
+        score += 30.0  # Single-day concert/performance
+    elif duration <= 3:
+        score += 20.0  # Weekend event
+    elif duration <= 7:
+        score += 10.0  # Week-long event
+    elif duration <= 30:
+        score += 0.0   # Month-long (neutral)
+    elif duration <= 90:
+        score -= 10.0  # Quarter-long exhibition
+    else:
+        score -= 20.0  # Permanent/long-running
+    
+    # 2. Proximity bonus: Events starting soon are more urgent
+    if query_start:
+        earliest_date = min(event_dates)
+        days_until = (earliest_date - query_start).days
+        
+        if days_until <= 0:  # Today or past (but still active)
+            score += 5.0
+        elif days_until <= 1:  # Tomorrow
+            score += 10.0
+        elif days_until <= 7:  # This week
+            score += 5.0
+        elif days_until > 30:
+            score -= 5.0  # Far in the future
+    
+    # 3. Category bonus: Certain categories are more "event-like"
+    category = event.get('category', '').lower()
+    ephemeral_categories = ['music', 'theater', 'concerts', 'festivals', 'sports']
+    if any(cat in category for cat in ephemeral_categories):
+        score += 5.0
+    
+    # Ensure score is within bounds
+    return max(0.0, min(100.0, score))
+
+
 def format_event_dates(event: Dict) -> str:
     """Formats event dates for display."""
     dates = event.get('dates', [])
@@ -334,6 +433,176 @@ def _get_vector_store():
             _vector_store = False  # Mark as unavailable
     
     return _vector_store if _vector_store else None
+
+
+# ==========================================================================
+# Hybrid Search: VisitLisboa + Dados Abertos
+# ==========================================================================
+
+# Keywords that trigger Dados Abertos search (in addition to VisitLisboa)
+DADOS_ABERTOS_KEYWORDS = {
+    # Shopping & Commerce
+    'shopping', 'centro comercial', 'mall', 'mercado', 'feira', 'quiosque', 'loja',
+    # Health & Emergency
+    'hospital', 'urgência', 'urgencias', 'saude', 'saúde', 'clinica', 'clínica',
+    'farmacia', 'farmácia', 'bombeiros', 'policia', 'polícia', 'segurança', 'seguranca',
+    # Education
+    'escola', 'colegio', 'colégio', 'universidade', 'faculdade', 'instituto', 'creche',
+    # Culture (complement)
+    'biblioteca', 'teatro', 'cinema', 'galeria', 'monumento', 'miradouro', 'igreja',
+    # Outdoors & Leisure
+    'jardim', 'parque', 'piscina', 'desporto',
+    # Services & Amenities
+    'wc', 'banheiro', 'sanitário', 'sanitario', 'estacionamento', 'parking',
+    'embaixada', 'cemiterio', 'cemitério', 'junta', 'câmara', 'camara',
+    # Streets & Locations
+    'rua', 'avenida', 'praça', 'praca', 'largo', 'bairro'
+}
+
+
+def _should_search_dados_abertos(query: Optional[str]) -> bool:
+    """
+    Checks if query contains keywords that warrant searching Dados Abertos.
+    
+    Args:
+        query: The search query.
+    
+    Returns:
+        bool: True if Dados Abertos should be searched.
+    """
+    if not query:
+        return False
+    
+    query_lower = query.lower()
+    return any(keyword in query_lower for keyword in DADOS_ABERTOS_KEYWORDS)
+
+
+def _search_dados_abertos_hybrid(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
+    """
+    Searches Dados Abertos and returns structured results for merging.
+    
+    Args:
+        query: Search query.
+        max_results: Maximum results.
+    
+    Returns:
+        List of place dictionaries compatible with VisitLisboa format.
+    """
+    try:
+        from tools.dados_abertos import _search_place_in_datasets_logic, DF_METADATA, search_datasets, fetch_geojson_with_retry, extract_name, extract_address, extract_coordinates
+        
+        if DF_METADATA.empty:
+            return []
+        
+        query_lower = query.lower()
+        found_places = []
+        
+        # Keyword mapping (simplified from dados_abertos.py)
+        keyword_map = {
+            'hospital': ['Hospitais Públicos', 'Hospitais Privados', 'Centros de Saúde'],
+            'farmacia': ['Farmácias e Parafarmácias'],
+            'escola': ['Escolas Públicas - 1º Ciclo', 'Escolas Públicas - 2º e 3º Ciclo', 'Escolas Públicas - Secundário'],
+            'universidade': ['Ensino Superior', 'Faculdades, Escolas e Institutos'],
+            'faculdade': ['Ensino Superior', 'Faculdades, Escolas e Institutos'],
+            'biblioteca': ['Bibliotecas Arquivos e Centros de Documentação'],
+            'jardim': ['Jardins - Parques Urbanos', 'Grandes Parques e Jardins de Lisboa'],
+            'parque': ['Grandes Parques e Jardins de Lisboa', 'Parques Infantis'],
+            'mercado': ['Mercados', 'Feiras'],
+            'centro comercial': ['Centros Comerciais'],
+            'shopping': ['Centros Comerciais'],
+            'policia': ['Polícia Municipal', 'Polícia de Segurança Pública'],
+            'bombeiros': ['Bombeiros'],
+            'miradouro': ['Miradouros'],
+            'estacionamento': ['Parques de estacionamento na via pública'],
+            'wc': ['Instalações Sanitárias'],
+            'piscina': ['Instalações Desportivas'],
+        }
+        
+        # Find matching datasets
+        potential_datasets = []
+        for key, titles in keyword_map.items():
+            if key in query_lower:
+                for title in titles:
+                    matches = DF_METADATA[DF_METADATA['title'] == title]
+                    for _, row in matches.iterrows():
+                        if row.get('stable_url') and row.get('stable_url') != "N/A":
+                            potential_datasets.append(row)
+        
+        # Also do keyword search
+        tokens = [w for w in query_lower.split() if len(w) > 3]
+        for token in tokens:
+            matches = search_datasets(token)
+            for _, row in matches.head(3).iterrows():
+                if row.get('stable_url') and row.get('stable_url') != "N/A":
+                    potential_datasets.append(row)
+        
+        # Deduplicate
+        seen_urls = set()
+        unique_datasets = []
+        for ds in potential_datasets:
+            url = ds.get('stable_url')
+            if url not in seen_urls:
+                seen_urls.add(url)
+                unique_datasets.append(ds)
+        
+        # Fetch and search (limit to 3 datasets for speed)
+        for dataset in unique_datasets[:3]:
+            title = dataset.get('title', 'Unknown')
+            url = dataset.get('stable_url')
+            
+            if not url:
+                continue
+            
+            # Skip large/irrelevant datasets
+            if any(x in title.lower() for x in ['limites', 'rede viária', 'carta', 'zonamento']):
+                continue
+            
+            data = fetch_geojson_with_retry(url)
+            if not data:
+                continue
+            
+            features = data.get('features', [])
+            for feature in features[:100]:  # Limit per dataset
+                properties = feature.get('properties', {})
+                name = extract_name(properties)
+                
+                if name == "N/A":
+                    continue
+                
+                # Check match
+                name_lower = name.lower()
+                if any(t in name_lower for t in tokens) or query_lower in name_lower:
+                    address = extract_address(properties)
+                    coords = extract_coordinates(feature.get('geometry', {}))
+                    
+                    found_places.append({
+                        'title': name,
+                        'category': f"📊 Open Data: {title}",
+                        'location': address if address != "N/A" else "Lisboa",
+                        'short_description': f"From Lisboa Aberta dataset: {title}",
+                        'url': None,
+                        'lat': coords[0] if coords else None,
+                        'lon': coords[1] if coords else None,
+                        'source': 'dados_abertos'
+                    })
+                    
+                    if len(found_places) >= max_results:
+                        break
+            
+            if len(found_places) >= max_results:
+                break
+        
+        # Deduplicate by title
+        unique = {}
+        for p in found_places:
+            if p['title'] not in unique:
+                unique[p['title']] = p
+        
+        return list(unique.values())[:max_results]
+    
+    except Exception as e:
+        logger.warning(f"Dados Abertos hybrid search failed: {e}")
+        return []
 
 
 # ==========================================================================
@@ -569,9 +838,31 @@ def search_cultural_events(
             events_data = [e for e in events_data if category_lower in e.get('category', '').lower()]
             logger.info(f"After category filter: {len(events_data)} events")
         
-        # Step 3: Filter by query (keyword match)
+        # Step 3: Filter by query (TOKEN-BASED matching for better recall)
         if query:
-            query_lower = query.lower()
+            # Tokenize query into individual words for flexible matching
+            query_tokens = [t.strip().lower() for t in query.split() if len(t.strip()) >= 3]
+            
+            # Also create synonyms/related terms for common queries
+            query_synonyms = {
+                'music': ['concert', 'concerto', 'live', 'band', 'artist', 'musical', 'fado', 'jazz', 'rock', 'pop'],
+                'concert': ['music', 'live', 'performance', 'show', 'gig'],
+                'concerts': ['music', 'live', 'performance', 'show', 'gig'],
+                'art': ['exhibition', 'gallery', 'museum', 'painting', 'sculpture', 'artwork'],
+                'exhibition': ['art', 'gallery', 'museum', 'display', 'expo'],
+                'theater': ['theatre', 'play', 'drama', 'stage', 'performance'],
+                'theatre': ['theater', 'play', 'drama', 'stage', 'performance'],
+                'dance': ['ballet', 'dancing', 'choreography', 'performance'],
+                'family': ['children', 'kids', 'child', 'families'],
+                'food': ['gastronomy', 'culinary', 'wine', 'taste', 'restaurant'],
+            }
+            
+            # Expand query tokens with synonyms
+            expanded_tokens = set(query_tokens)
+            for token in query_tokens:
+                if token in query_synonyms:
+                    expanded_tokens.update(query_synonyms[token])
+            
             filtered = []
             for event in events_data:
                 searchable = " ".join([
@@ -580,13 +871,25 @@ def search_cultural_events(
                     event.get('short_description', ''),
                     event.get('category', ''),
                 ]).lower()
-                if query_lower in searchable:
+                
+                # Match if ANY expanded token is found
+                if any(token in searchable for token in expanded_tokens):
                     filtered.append(event)
+            
             events_data = filtered
-            logger.info(f"After query filter: {len(events_data)} events")
+            logger.info(f"After query filter: {len(events_data)} events (tokens: {list(expanded_tokens)[:5]}...)")
         
         if not events_data:
-            return f"No events found matching: '{query or 'all'}' in date range {date_info}"
+            return f"No events found matching: '{query or 'all'}' in date range {date_info}\n\n💡 Try broader terms like 'music', 'art', or 'festival'."
+        
+        # Step 4: SORT BY TEMPORAL RELEVANCE (CRITICAL!)
+        # Ephemeral events (single-day concerts) should rank ABOVE long exhibitions
+        for event in events_data:
+            event['_relevance_score'] = calculate_temporal_relevance_score(event, start_date, end_date)
+            event['_duration_days'] = get_event_duration_days(event)
+        
+        events_data.sort(key=lambda e: e.get('_relevance_score', 0), reverse=True)
+        logger.info(f"Sorted by temporal relevance (top score: {events_data[0].get('_relevance_score', 0):.1f})")
         
         # Limit results
         results = events_data[:max_results]
@@ -602,9 +905,24 @@ def search_cultural_events(
             cat = event.get('category', 'General')
             loc = event.get('location', 'Lisbon')
             dates_str = format_event_dates(event)
+            duration = event.get('_duration_days', get_event_duration_days(event))
+            relevance = event.get('_relevance_score', 50.0)
+            
+            # Duration label for clarity
+            if duration == 1:
+                duration_label = "🎯 Single day"
+            elif duration <= 3:
+                duration_label = f"📆 {duration} days"
+            elif duration <= 7:
+                duration_label = f"📅 ~1 week"
+            elif duration <= 30:
+                duration_label = f"📅 ~1 month"
+            else:
+                duration_label = f"🏛️ Long-running ({duration} days)"
             
             output_parts.append(f"{i}. 📅 **{title}**")
             output_parts.append(f"   🗓️ **When:** {dates_str}")
+            output_parts.append(f"   ⏱️ **Duration:** {duration_label}")
             output_parts.append(f"   📂 Category: {cat}")
             
             if event.get('full_description'):
@@ -636,15 +954,17 @@ def search_places_attractions(
     max_results: int = 10
 ) -> str:
     """
-    Search for places and attractions in Lisbon using semantic search.
+    Search for places and attractions in Lisbon using HYBRID search.
     
-    This tool uses AI-powered semantic search to find relevant places based on
-    meaning, not just keyword matching. It searches the VisitLisboa places database.
+    This tool combines:
+    1. VisitLisboa semantic search (tourist attractions, restaurants, hotels)
+    2. Dados Abertos (public infrastructure: hospitals, schools, parks, etc.)
     
     Args:
         query (str, optional): Natural language query describing what you're looking for.
             Examples: 'museums with art', 'good restaurants for dinner',
-                     'places to see sunset', 'historic monuments', 'beaches nearby'.
+                     'places to see sunset', 'historic monuments', 'beaches nearby',
+                     'hospital urgências', 'escola secundária', 'jardim parque'.
         category (str, optional): Filter by place category. Options include:
             'Museums & Monuments', 'Restaurants', 'Hotels', 'View Points',
             'Beaches', 'Shopping', 'Nightlife', 'Parks & Gardens', 'Tours'.
@@ -656,7 +976,7 @@ def search_places_attractions(
     Examples:
         - search_places_attractions(query="tower") -> Belém Tower, etc.
         - search_places_attractions(category="Museums") -> All museums
-        - search_places_attractions(query="romantic dinner") -> Restaurants
+        - search_places_attractions(query="hospital santa maria") -> Hybrid results
     """
     try:
         # Normalize inputs
@@ -668,76 +988,152 @@ def search_places_attractions(
         
         logger.info(f"search_places_attractions: query='{query}', category='{category}', max={max_results}")
         
-        # Try vector store first
+        # Check if we should also search Dados Abertos (hybrid mode)
+        search_dados_abertos = _should_search_dados_abertos(query)
+        dados_abertos_results = []
+        
+        if search_dados_abertos and query:
+            logger.info(f"Hybrid mode: Query contains Dados Abertos keywords")
+            dados_abertos_results = _search_dados_abertos_hybrid(query, max_results=max_results // 2 + 1)
+            logger.info(f"Dados Abertos returned {len(dados_abertos_results)} results")
+        
+        # =====================================================================
+        # STEP 1: Search VisitLisboa (Vector Store)
+        # =====================================================================
+        visitlisboa_results = []
         kb = _get_vector_store()
         
         if kb:
             try:
-                # Build search query
                 search_query = query or "places and attractions in Lisbon"
                 if category:
                     search_query = f"{category} {search_query}"
                 
-                logger.info(f"search_places_attractions: searching for '{search_query}'")
+                logger.info(f"search_places_attractions: searching VisitLisboa for '{search_query}'")
                 
-                # Semantic search in places collection only
-                results = kb.search(
+                results_with_scores = kb.search_with_scores(
                     query=search_query, 
-                    k=max_results, 
+                    k=max_results * 2,
                     collections=[COLLECTION_PLACES]
                 )
                 
-                logger.info(f"search_places_attractions: found {len(results)} results")
+                RELEVANCE_THRESHOLD = 1.8
+                relevant_results = [(doc, score) for doc, score in results_with_scores if score <= RELEVANCE_THRESHOLD]
                 
-                if results:
-                    # Format output
-                    output_parts = [f"🏛️ **Found {len(results)} Places/Attractions in Lisbon:**\n"]
-                    
-                    for i, doc in enumerate(results, 1):
-                        output_parts.append(f"\n{i}. {_extract_place_from_doc(doc)}")
-                    
-                    output_parts.append(f"\n\n📊 **Search method:** Semantic (AI-powered)")
-                    output_parts.append("💡 Try more specific queries for better results.")
-                    
-                    return "\n".join(output_parts)
+                logger.info(f"VisitLisboa: {len(results_with_scores)} raw, {len(relevant_results)} after threshold")
+                
+                # Convert to standard format
+                for doc, score in relevant_results[:max_results]:
+                    metadata = doc.metadata
+                    visitlisboa_results.append({
+                        'title': metadata.get('title', 'Unknown'),
+                        'category': metadata.get('category', 'General'),
+                        'location': 'Lisbon',
+                        'short_description': doc.page_content[:200] if doc.page_content else '',
+                        'url': metadata.get('url', ''),
+                        'source': 'visitlisboa',
+                        'score': score
+                    })
                     
             except Exception as e:
-                logger.warning(f"Vector search failed, falling back to JSON: {e}")
+                logger.warning(f"Vector search failed: {e}")
         
-        # Fallback to JSON search (if vector store fails or returns no results)
-        logger.info("Using JSON fallback for places search")
-        places_data = _load_places_json()
+        # =====================================================================
+        # STEP 2: Merge Results (VisitLisboa + Dados Abertos)
+        # =====================================================================
         
-        if not places_data:
-            return "❌ Places data not available."
+        # HYBRID STRATEGY: Interleave results from both sources
+        # For queries matching Dados Abertos keywords, prioritize those results
+        # since the user is likely looking for public infrastructure
+        all_results = []
+        existing_titles = set()
         
-        results = _fallback_search(query, category, places_data, max_results)
+        if search_dados_abertos and dados_abertos_results:
+            # User searched for infrastructure -> prioritize Dados Abertos
+            # Take half from Dados Abertos, half from VisitLisboa
+            da_quota = max_results // 2 + 1
+            vl_quota = max_results - da_quota + 1
+            
+            # Add Dados Abertos first (more relevant for infrastructure queries)
+            for r in dados_abertos_results[:da_quota]:
+                if r['title'].lower() not in existing_titles:
+                    all_results.append(r)
+                    existing_titles.add(r['title'].lower())
+            
+            # Then add VisitLisboa (tourist-focused, but may have relevant results)
+            for r in visitlisboa_results[:vl_quota]:
+                if r['title'].lower() not in existing_titles:
+                    all_results.append(r)
+                    existing_titles.add(r['title'].lower())
+        else:
+            # Standard tourist query -> prioritize VisitLisboa
+            for r in visitlisboa_results:
+                all_results.append(r)
+                existing_titles.add(r['title'].lower())
+            
+            # Add any Dados Abertos results that don't duplicate
+            for r in dados_abertos_results:
+                if r['title'].lower() not in existing_titles:
+                    all_results.append(r)
+                    existing_titles.add(r['title'].lower())
         
-        if not results:
-            # 3. Last Resort: Try Open Data (Lisboa Aberta)
-            # This is useful for shopping malls ("Centro Comercial"), markets, schools, etc.
-            # which might not be in the tourist-focused VisitLisboa database.
+        # =====================================================================
+        # STEP 3: Format Output
+        # =====================================================================
+        
+        if not all_results:
+            # Last resort fallback
             if query:
-                logger.info(f"Using Open Data fallback for: {query}")
+                logger.info(f"No results from hybrid search, trying direct Dados Abertos")
+                from dados_abertos import _search_place_in_datasets_logic
                 open_data_results = _search_place_in_datasets_logic(query, max_results=max_results)
                 if open_data_results:
                     return open_data_results
             
             return f"No places found matching: '{query or 'all'}' in VisitLisboa or Open Data registries."
         
-        output_parts = [f"🏛️ **Found {len(results)} Places/Attractions (keyword search):**\n"]
+        # Limit to max_results
+        final_results = all_results[:max_results]
         
-        for i, place in enumerate(results, 1):
+        # Count sources
+        vl_count = sum(1 for r in final_results if r.get('source') == 'visitlisboa')
+        da_count = sum(1 for r in final_results if r.get('source') == 'dados_abertos')
+        
+        output_parts = [f"🏛️ **Found {len(final_results)} Places/Attractions in Lisbon:**\n"]
+        
+        for i, place in enumerate(final_results, 1):
             title = place.get('title', 'Unknown')
             cat = place.get('category', 'General')
             loc = place.get('location', 'Lisbon')
-            output_parts.append(f"\n{i}. 🏛️ **{title}**")
-            output_parts.append(f"   Category: {cat}")
+            source = place.get('source', 'unknown')
+            
+            # Source indicator
+            if source == 'dados_abertos':
+                output_parts.append(f"\n{i}. 📊 **{title}**")  # Open Data icon
+            else:
+                output_parts.append(f"\n{i}. 🏛️ **{title}**")  # VisitLisboa icon
+            
+            output_parts.append(f"   📂 Category: {cat}")
+            
             if place.get('short_description'):
-                output_parts.append(f"   {place['short_description'][:200]}")
+                desc = place['short_description'][:200]
+                if len(place['short_description']) > 200:
+                    desc += "..."
+                output_parts.append(f"   {desc}")
+            
             output_parts.append(f"   📍 {loc}")
+            
+            if place.get('url'):
+                output_parts.append(f"   🔗 {place['url']}")
+            
+            if place.get('lat') and place.get('lon'):
+                output_parts.append(f"   🗺️ GPS: ({place['lat']:.5f}, {place['lon']:.5f})")
         
-        output_parts.append(f"\n\n📊 **Total places in database:** {len(places_data)}")
+        # Source breakdown
+        output_parts.append(f"\n\n📊 **Sources:** {vl_count} from VisitLisboa, {da_count} from Lisboa Aberta")
+        if search_dados_abertos:
+            output_parts.append("🔄 **Hybrid search:** Public infrastructure included")
+        output_parts.append("💡 Try more specific queries for better results.")
         
         return "\n".join(output_parts)
     
@@ -926,34 +1322,206 @@ def search_lisbon_knowledge(
 # Test Block
 # ==========================================================================
 if __name__ == "__main__":
-    print("\n" + "=" * 60)
-    print("🧪 Testing VisitLisboa Semantic Search Tools")
-    print("=" * 60)
+    print("\n" + "=" * 70)
+    print("\033[1m🧪 COMPREHENSIVE TEST: VisitLisboa Semantic Search Tools\033[0m")
+    print("=" * 70)
     
-    # Test event categories
-    print("\n📋 Event Categories:")
-    print(get_event_categories.invoke({}))
+    test_results = {"passed": 0, "failed": 0, "total": 0}
     
-    # Test event search
-    print("\n" + "-" * 40)
-    print("🔍 Searching for 'music' events (semantic):")
-    print(search_cultural_events.invoke({"query": "music concerts", "max_results": 3}))
+    def run_test(test_name: str, test_func, *args, **kwargs):
+        """Helper to run tests with error handling."""
+        test_results["total"] += 1
+        print(f"\n\033[1m{'─' * 70}\033[0m")
+        print(f"\033[1;36m🔬 TEST {test_results['total']}: {test_name}\033[0m")
+        print(f"{'─' * 70}")
+        try:
+            result = test_func(*args, **kwargs)
+            print(result)
+            test_results["passed"] += 1
+            print(f"\n\033[1;32m✅ PASSED\033[0m")
+            return result
+        except Exception as e:
+            print(f"\n\033[1;31m❌ FAILED: {str(e)}\033[0m")
+            test_results["failed"] += 1
+            return None
     
-    # Test place categories
-    print("\n" + "-" * 40)
-    print("📋 Place Categories:")
-    print(get_place_categories.invoke({}))
+    # =========================================================================
+    # CATEGORY DISCOVERY TESTS
+    # =========================================================================
+    # TEST 1: Get Event Categories
+    run_test(
+        "Get Event Categories",
+        get_event_categories.invoke,
+        {}
+    )
+    # TEST 2: Get Place Categories
+    run_test(
+        "Get Place Categories",
+        get_place_categories.invoke,
+        {}
+    )
     
-    # Test place search
-    print("\n" + "-" * 40)
-    print("🔍 Searching for 'historic' places (semantic):")
-    print(search_places_attractions.invoke({"query": "historic monuments", "max_results": 3}))
+    # =========================================================================
+    # EVENT SEARCH TESTS (with different date filters)
+    # CRITICAL: Verifying TEMPORAL RELEVANCE - ephemeral events should rank first!
+    # =========================================================================
+    # TEST 3: Search Events - Semantic Query (Music)
+    # NOTE: Should find concerts/music events via token matching + synonyms
+    run_test(
+        "Search Events - Semantic Query (Music) [TESTS TOKEN MATCHING]",
+        search_cultural_events.invoke,
+        {"query": "music concerts", "max_results": 3}
+    )
     
-    # Test comprehensive search
-    print("\n" + "-" * 40)
-    print("🔍 Searching across all knowledge bases:")
-    print(search_lisbon_knowledge.invoke({"query": "Lisboa Card benefits"}))
+    # TEST 4: Search Events - By Category (Exhibitions)
+    # NOTE: Even exhibitions should be sorted by temporal relevance
+    run_test(
+        "Search Events - By Category (Exhibitions) [TESTS DURATION SORTING]",
+        search_cultural_events.invoke,
+        {"category": "Exhibitions", "max_results": 3}
+    )
     
-    print("\n" + "=" * 60)
-    print("✅ All tests completed!")
-    print("=" * 60)
+    # TEST 5: Search Events - This Week
+    # CRITICAL: Single-day events should appear BEFORE long exhibitions!
+    run_test(
+        "Search Events - This Week [TESTS TEMPORAL RELEVANCE]",
+        search_cultural_events.invoke,
+        {"date_filter": "this week", "max_results": 5}
+    )
+    
+    # TEST 6: Search Events - This Weekend
+    run_test(
+        "Search Events - This Weekend [TESTS TEMPORAL RELEVANCE]",
+        search_cultural_events.invoke,
+        {"date_filter": "this weekend", "max_results": 5}
+    )
+    
+    # TEST 7: Search Events - Next Month
+    run_test(
+        "Search Events - Next Month",
+        search_cultural_events.invoke,
+        {"date_filter": "next month", "max_results": 3}
+    )
+    
+    # TEST 8: Search Events - Today
+    # CRITICAL: Only TODAY events, single-day performances prioritized
+    run_test(
+        "Search Events - Today [CRITICAL: EPHEMERAL FIRST]",
+        search_cultural_events.invoke,
+        {"date_filter": "today", "max_results": 5}
+    )
+    
+    # =========================================================================
+    # PLACE SEARCH TESTS (including Dados Abertos fallback)
+    # =========================================================================
+    # TEST 9: Search Places - Semantic Query
+    run_test(
+        "Search Places - Semantic Query (Museums)",
+        search_places_attractions.invoke,
+        {"query": "historic museums art", "max_results": 3}
+    )
+    
+    # TEST 10: Search Places - By Category
+    run_test(
+        "Search Places - By Category (Restaurants)",
+        search_places_attractions.invoke,
+        {"category": "Restaurant", "max_results": 3}
+    )
+    
+    # TEST 11: Search Places - View Points
+    run_test(
+        "Search Places - View Points",
+        search_places_attractions.invoke,
+        {"query": "panoramic views sunset", "max_results": 3}
+    )
+    
+    # TEST 12: HYBRID SEARCH - Hospital (VisitLisboa + Dados Abertos)
+    # NOTE: "hospital" keyword triggers hybrid mode, combining tourist data
+    # with public infrastructure from Lisboa Aberta (GPS coords included)
+    run_test(
+        "HYBRID SEARCH - Hospital (VisitLisboa + Dados Abertos)",
+        search_places_attractions.invoke,
+        {"query": "hospital", "max_results": 5}
+    )
+    
+    # TEST 13: HYBRID SEARCH - University/Education
+    # NOTE: "universidade" keyword triggers Dados Abertos for public institutions
+    run_test(
+        "HYBRID SEARCH - University (VisitLisboa + Dados Abertos)",
+        search_places_attractions.invoke,
+        {"query": "universidade", "max_results": 5}
+    )
+    
+    # TEST 14: Tourist Query (NO hybrid, VisitLisboa only)
+    # NOTE: "tower belem" is a tourist query, should NOT trigger Dados Abertos
+    run_test(
+        "Tourist Query - Torre de Belém (VisitLisboa only)",
+        search_places_attractions.invoke,
+        {"query": "tower belem monument", "max_results": 3}
+    )
+    
+    # =========================================================================
+    # COMPREHENSIVE KNOWLEDGE SEARCH TESTS
+    # =========================================================================
+    # TEST 15: Search Knowledge - Lisboa Card Info
+    run_test(
+        "Search Knowledge - Lisboa Card Info",
+        search_lisbon_knowledge.invoke,
+        {"query": "Lisboa Card benefits", "max_results": 3}
+    )
+    
+    # TEST 16: Search Knowledge - Transport Tips
+    run_test(
+        "Search Knowledge - Transport Tips",
+        search_lisbon_knowledge.invoke,
+        {"query": "public transport metro tram", "max_results": 3}
+    )
+    
+    # TEST 17: Search Knowledge - Food & Gastronomy
+    run_test(
+        "Search Knowledge - Food & Gastronomy",
+        search_lisbon_knowledge.invoke,
+        {"query": "pasteis de nata traditional food", "max_results": 3}
+    )
+    
+    # =========================================================================
+    # EDGE CASES & ERROR HANDLING
+    # =========================================================================
+    
+    # TEST 18: Edge Case - Empty Query
+    run_test(
+        "Edge Case - Empty Query (Events)",
+        search_cultural_events.invoke,
+        {"max_results": 3}
+    )
+    
+    # TEST 19: Edge Case - Empty Query
+    run_test(
+        "Edge Case - Empty Query (Places)",
+        search_places_attractions.invoke,
+        {"max_results": 3}
+    )
+    
+    # TEST 20: Edge Case - Invalid Date Format
+    run_test(
+        "Edge Case - Invalid Date Format",
+        search_cultural_events.invoke,
+        {"date_filter": "invalid_date_xyz", "max_results": 3}
+    )
+    
+    # =========================================================================
+    # TEST SUMMARY
+    # =========================================================================
+    
+    print("\n" + "=" * 70)
+    print("\033[1m📊 TEST SUMMARY\033[0m")
+    print("=" * 70)
+    print(f"\033[1;32m✅ Passed: {test_results['passed']}/{test_results['total']}\033[0m")
+    print(f"\033[1;31m❌ Failed: {test_results['failed']}/{test_results['total']}\033[0m")
+    
+    if test_results['failed'] == 0:
+        print(f"\n\033[1;32m🎉 ALL TESTS PASSED! System is working correctly.\033[0m")
+    else:
+        print(f"\n\033[1;33m⚠️  Some tests failed. Check errors above.\033[0m")
+    
+    print("=" * 70 + "\n")

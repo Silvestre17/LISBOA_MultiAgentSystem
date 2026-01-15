@@ -612,7 +612,7 @@ class KnowledgeBase:
         stats["path"] = self.vector_db_path
         return stats
 
-    def search(self, query: str, k: int = 5, collections: Optional[List[str]] = None) -> List['Document']:
+    def search(self, query: str, k: int = 5, collections: Optional[List[str]] = None, min_score: float = None) -> List['Document']:
         """
         Searches the knowledge base for relevant documents.
 
@@ -620,6 +620,9 @@ class KnowledgeBase:
             query (str): The search query.
             k (int): Number of results to return.
             collections (List[str], optional): List of collections to search.
+            min_score (float, optional): Minimum relevance score threshold.
+                ChromaDB returns L2 distance (lower = better).
+                Typical thresholds: 1.5 for high relevance, 2.0 for medium.
 
         Returns:
             List[Document]: A list of matching documents sorted by relevance.
@@ -635,7 +638,39 @@ class KnowledgeBase:
             except Exception:
                 continue
         all_results.sort(key=lambda x: x[1])
+        
+        # Apply minimum score threshold if specified
+        # ChromaDB uses L2 distance: lower scores = more similar
+        if min_score is not None:
+            all_results = [(doc, score) for doc, score in all_results if score <= min_score]
+        
         return [doc for doc, score in all_results[:k]]
+    
+    def search_with_scores(self, query: str, k: int = 5, collections: Optional[List[str]] = None) -> List[Tuple['Document', float]]:
+        """
+        Searches and returns documents WITH their relevance scores.
+
+        Args:
+            query (str): The search query.
+            k (int): Number of results to return.
+            collections (List[str], optional): List of collections to search.
+
+        Returns:
+            List[Tuple[Document, float]]: Documents with their L2 distance scores.
+                Lower scores = more relevant. Typical ranges: 0.5-1.5 (good), 1.5-2.5 (medium), >2.5 (poor).
+        """
+        if collections is None:
+            collections = [COLLECTION_PDF, COLLECTION_PLACES, COLLECTION_EVENTS]
+        all_results = []
+        for col_name in collections:
+            try:
+                vectorstore = self._get_collection(col_name)
+                results = vectorstore.similarity_search_with_score(query, k=k)
+                all_results.extend(results)
+            except Exception:
+                continue
+        all_results.sort(key=lambda x: x[1])
+        return all_results[:k]
 
 
 if __name__ == "__main__":
