@@ -41,6 +41,7 @@ import signal
 sys.stdout.reconfigure(line_buffering=True)
 
 # Set environment variables BEFORE any heavy imports
+# This environment disables telemetry for OpenTelemetry and ChromaDB (privacy)
 os.environ["OTEL_SDK_DISABLED"] = "true"
 os.environ["ANONYMIZED_TELEMETRY"] = "false"
 os.environ["CHROMA_TELEMETRY"] = "false"
@@ -638,6 +639,7 @@ class KnowledgeBase:
 
 
 if __name__ == "__main__":
+    # Command-Line Interface
     parser = argparse.ArgumentParser(
         description="Vector Store Management with Incremental Sync",
         formatter_class=argparse.RawDescriptionHelpFormatter,
