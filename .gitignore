@@ -2,15 +2,14 @@
 desktop.ini
 ThesisCode.md
 AI.Evaluation_OpenAI_Gemini_Grok_Claude.md
-.github\copilot-instructions.md
+.github/copilot-instructions.md
 
 # Specific Folders
 _/
 data_collection/docs/extracted_content
 .gemini/
 
-# Created by .ignore support plugin (hsz.mobi)
-# Source: https://gist.github.com/MOOOWOOO/3cf91616c9f3bbc3d1339adfc707b08a
+# Created by .ignore support plugin
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
