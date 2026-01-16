@@ -7,11 +7,11 @@
 #   regardless of the underlying provider (cloud or local).
 # 
 #   Supported Providers:
-#     - LMStudio: Local server with OpenAI-compatible API (Default: qwen/qwen3-4b-2507)
+#     - LMStudio: Local server with OpenAI-compatible API (open-source models)
+#     - Ollama:   Local model execution (open-source models)
 #     - Groq:     High-speed inference API (qwen/llama models)
 #     - Google:   Google AI Studio (Gemini models)
 #     - OpenAI:   OpenAI API (GPT models)
-#     - Ollama:   Local model execution
 # 
 #   Design Pattern: Factory Pattern
 #     - Encapsulates object creation logic
@@ -250,7 +250,7 @@ class LLMFactory:
             llm (BaseChatModel): The LLM instance to inspect.
         
         Returns:
-            str: The model name (e.g., "qwen/qwen3-4b-2507", "gpt-4o-mini").
+            str: The model name (e.g., "qwen/qwen3-4b-2507", "gpt-5o-mini").
                 Returns "Unknown" if the model name cannot be determined.
         
         Example:

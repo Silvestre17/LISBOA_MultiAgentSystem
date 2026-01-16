@@ -69,9 +69,16 @@ def _sigterm_handler(signum, frame):
     print("   Will complete current batch and exit with code 2 (more work pending)", flush=True)
 
 # Register handler for SIGTERM (signal 15)
-signal.signal(signal.SIGTERM, _sigterm_handler)
-# Also handle SIGINT (Ctrl+C) for local testing
-signal.signal(signal.SIGINT, _sigterm_handler)
+# NOTE: signal handlers can only be registered in the main thread.
+# When imported from Streamlit or other multi-threaded contexts, skip registration.
+try:
+    signal.signal(signal.SIGTERM, _sigterm_handler)
+    # Also handle SIGINT (Ctrl+C) for local testing
+    signal.signal(signal.SIGINT, _sigterm_handler)
+except ValueError:
+    # "signal only works in main thread of the main interpreter"
+    # This is expected when running under Streamlit or other threaded contexts
+    pass
 
 # Add parent directory to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
