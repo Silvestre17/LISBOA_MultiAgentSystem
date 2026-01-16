@@ -144,7 +144,7 @@ TRANSLATIONS = {
         
         # Footer
         "footer_version": "Lisbon Urban Assistant v1.0",
-        "footer_made": "Made with love at NOVA IMS",
+        "footer_made": "André Filipe Gomes Silvestre | Master's Student\nNOVA IMS",
         
         # Info Page
         "info_title": "About This Assistant",
@@ -272,7 +272,7 @@ NOVA IMS - Universidade NOVA de Lisboa
         
         # Footer
         "footer_version": "Assistente Urbano de Lisboa v1.0",
-        "footer_made": "Feito com amor na NOVA IMS",
+        "footer_made": "André Filipe Gomes Silvestre | Mestrando\nNOVA IMS",
         
         # Info Page
         "info_title": "Sobre Este Assistente",
@@ -761,14 +761,14 @@ def initialize_session_state():
         "provider": "lmstudio",
         "initialized": False,
         "error": None,
-        "language": "en",
+        "language": "pt",
         "current_page": "chat",
         "credentials": {
             "groq": {"api_key": os.getenv("GROQ_API_KEY", "")},
             "google": {"api_key": os.getenv("GOOGLE_API_KEY", "")},
             "openai": {"api_key": os.getenv("OPENAI_API_KEY", "")},
-            "lmstudio": {"base_url": "http://localhost:1234/v1", "model": "qwen/qwen3-4b-2507"},
-            "ollama": {"model": "llama3.2"},
+            "lmstudio": {"base_url": Config.LMSTUDIO_BASE_URL, "model": Config.LMSTUDIO_MODEL_NAME},
+            "ollama": {"model": Config.OLLAMA_MODEL_NAME},
         },
     }
     
@@ -857,11 +857,11 @@ def render_provider_credentials():
     st.markdown(f"### {t('llm_provider')}")
     
     provider_info = {
-        "lmstudio": ("LM Studio", "Local server (OpenAI-compatible)", "local"),
+        "lmstudio": ("LM Studio", "Local server", "local"),
         "ollama": ("Ollama", "Local Ollama models", "ollama"),
         "groq": ("Groq", "Fast inference with Qwen/Llama", "api_key"),
-        "google": ("Google Gemini", "Google's Gemini models", "api_key"),
-        "openai": ("OpenAI", "GPT-4 and GPT-3.5 models", "api_key"),
+        "google": ("Google Gemini", "Google's Gemini 3 models", "api_key"),
+        "openai": ("OpenAI", "GPT-5 models", "api_key"),
     }
     
     provider_names = [info[0] for info in provider_info.values()]
@@ -897,21 +897,21 @@ def render_provider_credentials():
             credentials_changed = True
             
     elif provider_type == "local":
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            base_url = st.text_input(
-                t("local_url"),
-                value=st.session_state.credentials["lmstudio"].get("base_url", "http://localhost:1234/v1"),
-                placeholder=t("local_url_placeholder"),
-                key="lmstudio_url"
-            )
-        with col2:
-            model = st.text_input(
-                t("model_name"),
-                value=st.session_state.credentials["lmstudio"].get("model", "qwen/qwen3-4b-2507"),
-                placeholder="qwen/qwen3-4b-2507",
-                key="lmstudio_model"
-            )
+        # LM Studio: Server URL
+        base_url = st.text_input(
+            t("local_url"),
+            value=st.session_state.credentials["lmstudio"].get("base_url", Config.LMSTUDIO_BASE_URL),
+            placeholder=t("local_url_placeholder"),
+            key="lmstudio_url"
+        )
+        # LM Studio: Model name on separate line for better visibility
+        model = st.text_input(
+            t("model_name"),
+            value=st.session_state.credentials["lmstudio"].get("model", Config.LMSTUDIO_MODEL_NAME),
+            placeholder=Config.LMSTUDIO_MODEL_NAME,
+            key="lmstudio_model",
+            help="Nome do modelo carregado no LM Studio"
+        )
         if (base_url != st.session_state.credentials["lmstudio"].get("base_url", "") or 
             model != st.session_state.credentials["lmstudio"].get("model", "")):
             st.session_state.credentials["lmstudio"]["base_url"] = base_url

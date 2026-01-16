@@ -14,9 +14,11 @@
 
 import os
 import sys
-from typing import List
+import re
+import json
+from typing import List, Set, Tuple
 
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 
@@ -63,6 +65,44 @@ from tools.visitlisboa_api import (
     get_place_categories,
     search_lisbon_knowledge
 )
+
+
+# ==========================================================================
+# Response Cleaning
+# ==========================================================================
+
+def _clean_response(content: str) -> str:
+    """
+    Cleans model-specific artifacts from the response before displaying to user.
+    
+    Removes:
+        - <think>...</think> blocks (Qwen3 reasoning)
+        - <|im_start|>, <|im_end|> tokens (chat template artifacts)
+        - Leading/trailing whitespace
+    
+    Args:
+        content: Raw response from the LLM.
+        
+    Returns:
+        str: Cleaned response suitable for user display.
+    """
+    if not content:
+        return content
+    
+    # Remove <think>...</think> blocks (Qwen3 reasoning) - handles multiline
+    content = re.sub(r'<think>.*?</think>\s*', '', content, flags=re.DOTALL)
+    
+    # Remove chat template tokens that might leak through
+    content = re.sub(r'<\|im_start\|>.*?\n?', '', content)
+    content = re.sub(r'<\|im_end\|>\s*', '', content)
+    
+    # Remove any other common model tokens
+    content = re.sub(r'<\|.*?\|>\s*', '', content)
+    
+    # Clean up excess whitespace
+    content = content.strip()
+    
+    return content
 
 
 # ==========================================================================
@@ -118,19 +158,103 @@ def get_all_tools() -> List:
 # Agent Nodes
 # ==========================================================================
 
-def create_agent_node(llm_with_tools):
+def _get_tool_call_signature(tool_call) -> str:
+    """
+    Creates a signature string for a tool call to detect duplicates.
+    
+    Args:
+        tool_call: A tool call object with 'name' and 'args' attributes.
+        
+    Returns:
+        str: Unique signature for this tool call.
+    """
+    try:
+        args_str = json.dumps(tool_call.get("args", {}), sort_keys=True)
+    except (TypeError, AttributeError):
+        args_str = str(getattr(tool_call, 'args', {}))
+    
+    name = tool_call.get("name", "") if isinstance(tool_call, dict) else getattr(tool_call, 'name', '')
+    return f"{name}:{args_str}"
+
+
+def _get_recent_tool_calls(messages, n: int = 5) -> Set[str]:
+    """
+    Gets the signatures of recent tool calls from message history.
+    
+    Args:
+        messages: List of messages.
+        n: Number of recent AI messages to check.
+        
+    Returns:
+        Set[str]: Set of tool call signatures.
+    """
+    signatures = set()
+    ai_msg_count = 0
+    
+    for msg in reversed(messages):
+        if hasattr(msg, "tool_calls") and msg.tool_calls:
+            ai_msg_count += 1
+            for tc in msg.tool_calls:
+                signatures.add(_get_tool_call_signature(tc))
+            if ai_msg_count >= n:
+                break
+    
+    return signatures
+
+
+def _check_for_tool_loop(messages, new_tool_calls) -> bool:
+    """
+    Checks if the new tool calls are duplicates of recent ones.
+    
+    Args:
+        messages: Current message history.
+        new_tool_calls: Tool calls from the latest AI response.
+        
+    Returns:
+        bool: True if this is a repeat loop, False otherwise.
+    """
+    if not new_tool_calls:
+        return False
+    
+    # Get signatures of new tool calls
+    new_signatures = {_get_tool_call_signature(tc) for tc in new_tool_calls}
+    
+    # Get signatures of recent tool calls
+    recent_signatures = _get_recent_tool_calls(messages, n=3)
+    
+    # If all new tool calls were already made recently, it's a loop
+    return bool(new_signatures) and new_signatures.issubset(recent_signatures)
+
+
+def _has_tool_results_pending(messages) -> bool:
+    """
+    Checks if the last message is a tool result that should be summarized.
+    
+    Args:
+        messages: List of messages.
+        
+    Returns:
+        bool: True if last message is a ToolMessage.
+    """
+    if not messages:
+        return False
+    return isinstance(messages[-1], ToolMessage)
+
+
+def create_agent_node(llm_with_tools, llm_base=None):
     """
     Creates the main agent node that decides actions.
     
     Args:
         llm_with_tools: LLM instance with tools bound.
+        llm_base: Optional LLM without tools for generating final responses.
         
     Returns:
         Callable: Agent node function.
     """
     def agent_node(state: AgentState) -> dict:
         """
-        Main agent decision node.
+        Main agent decision node with loop detection.
         
         Args:
             state (AgentState): Current state.
@@ -145,12 +269,84 @@ def create_agent_node(llm_with_tools):
             system_msg = SystemMessage(content=get_system_prompt())
             messages = [system_msg] + list(messages)
         
-        # Call the LLM
-        response = llm_with_tools.invoke(messages)
+        # Check if we have tool results that need to be summarized
+        # Count consecutive tool messages at the end
+        tool_result_count = 0
+        for msg in reversed(messages):
+            if isinstance(msg, ToolMessage):
+                tool_result_count += 1
+            else:
+                break
+        
+        # If we have tool results, add a hint to summarize (helps small LLMs)
+        if tool_result_count > 0:
+            # Add a subtle prompt to encourage the LLM to respond
+            hint_msg = SystemMessage(
+                content="IMPORTANT: You have received tool results above. NOW RESPOND TO THE USER with the information. Do NOT call the same tool again."
+            )
+            messages_with_hint = list(messages) + [hint_msg]
+            response = llm_with_tools.invoke(messages_with_hint)
+        else:
+            response = llm_with_tools.invoke(messages)
+        
+        # Check for tool call loops
+        if hasattr(response, "tool_calls") and response.tool_calls:
+            is_loop = _check_for_tool_loop(messages, response.tool_calls)
+            
+            if is_loop:
+                # Loop detected! Force the LLM to generate a response without tools
+                print("\n⚠️ Tool loop detected - forcing response generation...")
+                
+                # Create a message asking the LLM to summarize the tool results
+                force_response_msg = SystemMessage(
+                    content=(
+                        "STOP! You are repeating the same tool call. "
+                        "You already have the data from your previous tool call. "
+                        "NOW RESPOND TO THE USER with the information you received. "
+                        "DO NOT call any more tools."
+                    )
+                )
+                
+                # Try with the hint
+                messages_with_force = list(messages) + [force_response_msg]
+                
+                # Use base LLM without tools if available, otherwise try again
+                if llm_base:
+                    response = llm_base.invoke(messages_with_force)
+                else:
+                    # Remove tool_calls and create a text response from tool results
+                    response = _create_fallback_response(messages)
         
         return {"messages": [response]}
     
     return agent_node
+
+
+def _create_fallback_response(messages) -> AIMessage:
+    """
+    Creates a fallback response when the LLM is stuck in a loop.
+    Extracts tool results and formats them as an AI response.
+    
+    Args:
+        messages: List of messages containing tool results.
+        
+    Returns:
+        AIMessage: A simple response with the tool results.
+    """
+    # Find the most recent tool results
+    tool_results = []
+    for msg in reversed(messages):
+        if isinstance(msg, ToolMessage):
+            tool_results.append(msg.content)
+        elif hasattr(msg, "tool_calls") and msg.tool_calls:
+            break  # Stop at the tool call, we have all results
+    
+    if tool_results:
+        # Create a simple response with the tool results
+        combined = "\n\n".join(reversed(tool_results))
+        return AIMessage(content=f"Here's what I found:\n\n{combined}")
+    else:
+        return AIMessage(content="I apologize, but I'm having trouble processing your request. Could you please try rephrasing your question?")
 
 
 def should_continue(state: AgentState) -> str:
@@ -191,6 +387,9 @@ def build_agent_graph(provider: str = None):
     # Initialize LLM
     llm = LLMFactory.get_llm(provider) if provider else LLMFactory.get_llm()
     
+    # Create a base LLM without tools for fallback responses
+    llm_base = LLMFactory.get_llm(provider) if provider else LLMFactory.get_llm()
+    
     # Get tools and bind to LLM
     tools = get_all_tools()
     llm_with_tools = llm.bind_tools(tools)
@@ -198,8 +397,8 @@ def build_agent_graph(provider: str = None):
     # Create the graph
     workflow = StateGraph(AgentState)
     
-    # Add nodes
-    workflow.add_node("agent", create_agent_node(llm_with_tools))
+    # Add nodes - pass both LLMs to agent node (with and without tools)
+    workflow.add_node("agent", create_agent_node(llm_with_tools, llm_base))
     workflow.add_node("tools", ToolNode(tools))
     
     # Set entry point
@@ -261,10 +460,10 @@ class LisbonAssistant:
         self.state["messages"].append(HumanMessage(content=message))
         
         # Run the graph with recursion limit to prevent infinite loops
-        # Default LangGraph limit is 25, we set 15 for safety
+        # Default LangGraph limit is 25, increased for smaller models with tool calling
         result = self.graph.invoke(
             self.state,
-            config={"recursion_limit": 15}
+            config={"recursion_limit": 25}
         )
         
         # Update state with result
@@ -274,9 +473,10 @@ class LisbonAssistant:
         last_message = result["messages"][-1]
         
         if hasattr(last_message, "content"):
-            return last_message.content
+            # Clean model-specific artifacts (thinking tags, chat tokens, etc.)
+            return _clean_response(last_message.content)
         
-        return str(last_message)
+        return _clean_response(str(last_message))
     
     def reset(self):
         """Resets the conversation state."""

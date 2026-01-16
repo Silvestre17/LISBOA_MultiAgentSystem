@@ -136,7 +136,8 @@ class Config:
     # Set to match the model loaded in your local LM Studio instance
     # LMSTUDIO_MODEL_NAME = 'openai/gpt-oss-20b'
     # LMSTUDIO_MODEL_NAME = "qwen/qwen3-4b-2507"
-    LMSTUDIO_MODEL_NAME = "deepseek/deepseek-r1-0528-qwen3-8b"
+    # LMSTUDIO_MODEL_NAME = "deepseek/deepseek-r1-0528-qwen3-8b"
+    LMSTUDIO_MODEL_NAME = "qwen/qwen3-8b"
     LMSTUDIO_BASE_URL = "http://localhost:1234/v1"
     
     # Ollama model (Local model execution)
