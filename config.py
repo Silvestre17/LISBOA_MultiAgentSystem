@@ -130,14 +130,14 @@ class Config:
     #   - qwen/qwen3-32b
     #   - moonshotai/kimi-k2-instruct-0905
     # Check available models: https://console.groq.com/docs/models
-    GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
+    GROQ_MODEL_NAME = "openai/gpt-oss-20b"
     
     # LM Studio model (Local server on port 1234)
     # Set to match the model loaded in your local LM Studio instance
     # LMSTUDIO_MODEL_NAME = 'openai/gpt-oss-20b'
-    # LMSTUDIO_MODEL_NAME = "qwen/qwen3-4b-2507"
+    LMSTUDIO_MODEL_NAME = "qwen/qwen3-4b-2507"
     # LMSTUDIO_MODEL_NAME = "deepseek/deepseek-r1-0528-qwen3-8b"
-    LMSTUDIO_MODEL_NAME = "qwen/qwen3-8b"
+    # LMSTUDIO_MODEL_NAME = "qwen/qwen3-8b"
     LMSTUDIO_BASE_URL = "http://localhost:1234/v1"
     
     # Ollama model (Local model execution)

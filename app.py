@@ -140,7 +140,7 @@ TRANSLATIONS = {
         "error_connection": "Connection Error",
         "error_connection_msg": "Could not connect to the API. Please check your internet connection.",
         "error_generic": "An error occurred while processing your request.",
-        "thinking": "Thinking...",
+        "thinking": "Analyzing and gathering information...",
         
         # Footer
         "footer_version": "Lisbon Urban Assistant v1.0",
@@ -268,7 +268,7 @@ NOVA IMS - Universidade NOVA de Lisboa
         "error_connection": "Erro de Ligação",
         "error_connection_msg": "Não foi possível ligar à API. Verifique a sua ligação à internet.",
         "error_generic": "Ocorreu um erro ao processar o seu pedido.",
-        "thinking": "A pensar...",
+        "thinking": "A analisar e recolher informação...",
         
         # Footer
         "footer_version": "Assistente Urbano de Lisboa v1.0",
