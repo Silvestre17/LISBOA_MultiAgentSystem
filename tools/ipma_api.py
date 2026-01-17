@@ -406,6 +406,12 @@ def get_weather_forecast(days: int = 3) -> str:
     """
     Gets the daily weather forecast for Lisbon from IPMA.
     
+    ⚠️ IMPORTANT LIMITATIONS:
+    - Maximum forecast range: 5 DAYS from today
+    - If user asks for a date BEYOND 5 days, you MUST inform them that
+      weather data is only available for the next 5 days
+    - NEVER invent or hallucinate weather data for dates outside this range
+    
     Args:
         days (int): Number of days to forecast (1-5, default: 3).
 
@@ -417,6 +423,7 @@ def get_weather_forecast(days: int = 3) -> str:
         >>> get_weather_forecast()
         >>> get_weather_forecast(5)
     """
+
     url = IPMA_FORECAST_URL.format(global_id=Config.LISBON_GLOBAL_ID)
     data = fetch_json(url)
     

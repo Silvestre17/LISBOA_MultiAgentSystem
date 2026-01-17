@@ -77,6 +77,8 @@ def _clean_response(content: str) -> str:
     
     Removes:
         - <think>...</think> blocks (Qwen3 reasoning)
+        - <tool_call>...</tool_call> blocks (some models embed these in text)
+        - Embedded JSON tool call syntax
         - <|im_start|>, <|im_end|> tokens (chat template artifacts)
         - Leading/trailing whitespace
     
@@ -92,6 +94,12 @@ def _clean_response(content: str) -> str:
     # Remove <think>...</think> blocks (Qwen3 reasoning) - handles multiline
     content = re.sub(r'<think>.*?</think>\s*', '', content, flags=re.DOTALL)
     
+    # Remove <tool_call>...</tool_call> blocks that some models embed in text
+    content = re.sub(r'</?tool_call>\s*', '', content, flags=re.DOTALL)
+    
+    # Remove embedded JSON tool call syntax (e.g., {"name": "...", "arguments": {...}})
+    content = re.sub(r'\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{[^}]*\}\s*\}', '', content)
+    
     # Remove chat template tokens that might leak through
     content = re.sub(r'<\|im_start\|>.*?\n?', '', content)
     content = re.sub(r'<\|im_end\|>\s*', '', content)
@@ -103,6 +111,7 @@ def _clean_response(content: str) -> str:
     content = content.strip()
     
     return content
+
 
 
 # ==========================================================================
