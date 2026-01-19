@@ -9,7 +9,6 @@ test_*.py
 
 # Specific Folders
 _/
-data_collection/docs/extracted_content
 .gemini/
 
 # Created by .ignore support plugin
