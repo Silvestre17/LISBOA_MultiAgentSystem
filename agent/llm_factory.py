@@ -74,7 +74,8 @@ class LLMFactory:
     @staticmethod
     def get_llm(
         provider: str = Config.MODEL_PROVIDER,
-        temperature: float = Config.TEMPERATURE
+        temperature: float = Config.TEMPERATURE,
+        model: str = None  # Optional: override model from AGENT_MODELS
     ) -> BaseChatModel:
         """
         Creates and returns a configured LLM instance.
@@ -97,6 +98,10 @@ class LLMFactory:
                 - 0.5: Balanced creativity
                 - 1.0: Maximum creativity/randomness
                 Default: Config.TEMPERATURE (from config.py)
+            
+            model (str, optional): Specific model name to use. If None,
+                uses the default model for the provider from config.py.
+                This is used by get_agent_llm() to support per-agent models.
         
         Returns:
             BaseChatModel: A configured LangChain chat model instance
@@ -125,11 +130,17 @@ class LLMFactory:
             # Import OpenAI integration (LM Studio uses OpenAI-compatible API)
             from langchain_openai import ChatOpenAI
             
+            # Use provided model or fall back to default
+            model_name = model if model else Config.LMSTUDIO_MODEL_NAME
+            
             return ChatOpenAI(
-                model=Config.LMSTUDIO_MODEL_NAME,  # e.g., "qwen/qwen3-4b-2507"
+                model=model_name,  # e.g., "qwen/qwen3-4b-2507"
                 temperature=temperature,
                 base_url=Config.LMSTUDIO_BASE_URL,  # e.g., "http://localhost:1234/v1"
-                api_key="lm-studio"  # LM Studio ignores API key, any string works
+                api_key="lm-studio",  # LM Studio ignores API key, any string works
+                # Add penalties to prevent repetition (critical for small models)
+                frequency_penalty=0.5,
+                presence_penalty=0.3,
             )
         
         # =====================================================================
@@ -151,8 +162,10 @@ class LLMFactory:
             # Import Groq-specific LangChain integration
             from langchain_groq import ChatGroq
             
+            model_name = model if model else Config.GROQ_MODEL_NAME
+            
             return ChatGroq(
-                model_name=Config.GROQ_MODEL_NAME,  # e.g., "llama-3.3-70b-versatile"
+                model_name=model_name,  # e.g., "llama-3.3-70b-versatile"
                 temperature=temperature,
                 api_key=Config.GROQ_API_KEY
             )
@@ -176,8 +189,10 @@ class LLMFactory:
             # Import Google-specific LangChain integration
             from langchain_google_genai import ChatGoogleGenerativeAI
             
+            model_name = model if model else Config.GOOGLE_MODEL_NAME
+            
             return ChatGoogleGenerativeAI(
-                model=Config.GOOGLE_MODEL_NAME,  # e.g., "gemini-2.0-flash-exp"
+                model=model_name,  # e.g., "gemini-2.0-flash-exp"
                 temperature=temperature,
                 google_api_key=Config.GOOGLE_API_KEY,
                 # Gemini doesn't support system messages natively
@@ -204,8 +219,10 @@ class LLMFactory:
             # Import OpenAI-specific LangChain integration
             from langchain_openai import ChatOpenAI
             
+            model_name = model if model else Config.OPENAI_MODEL_NAME
+            
             return ChatOpenAI(
-                model=Config.OPENAI_MODEL_NAME,  # e.g., "gpt-4o-mini"
+                model=model_name,  # e.g., "gpt-4o-mini"
                 temperature=temperature,
                 api_key=Config.OPENAI_API_KEY
             )
@@ -221,8 +238,10 @@ class LLMFactory:
             # Import Ollama-specific LangChain integration
             from langchain_ollama import ChatOllama
             
+            model_name = model if model else Config.OLLAMA_MODEL_NAME
+            
             return ChatOllama(
-                model=Config.OLLAMA_MODEL_NAME,  # e.g., "qwen2.5:7b"
+                model=model_name,  # e.g., "qwen2.5:7b"
                 temperature=temperature,
                 keep_alive="5m"  # Keep model loaded for 5 minutes after last request
             )
@@ -263,6 +282,39 @@ class LLMFactory:
         # Default to "Unknown" if neither exists
         model_name = getattr(llm, 'model_name', getattr(llm, 'model', 'Unknown'))
         return model_name
+    
+    @staticmethod
+    def get_agent_llm(agent_name: str) -> BaseChatModel:
+        """
+        Creates an LLM instance configured for a specific agent.
+        
+        Uses AGENT_MODELS from config.py to get per-agent model configuration.
+        This allows different agents to use different models/providers.
+        
+        Args:
+            agent_name (str): Name of the agent (e.g., 'supervisor', 'weather',
+                            'transport', 'researcher', 'planner').
+        
+        Returns:
+            BaseChatModel: Configured LLM for the specified agent.
+        
+        Example:
+            >>> llm = LLMFactory.get_agent_llm("supervisor")
+            >>> # Returns LLM configured with supervisor's provider/model
+        """
+        # Get agent-specific config or fallback to default
+        agent_config = Config.AGENT_MODELS.get(agent_name, Config.DEFAULT_AGENT_MODEL)
+        
+        provider = agent_config.get("provider", Config.MODEL_PROVIDER)
+        model = agent_config.get("model", None)  # Get specific model name
+        temperature = agent_config.get("temperature", Config.TEMPERATURE)
+        
+        # Create LLM with the agent's configured provider/temperature/model
+        return LLMFactory.get_llm(
+            provider=provider, 
+            temperature=temperature,
+            model=model
+        )
 
 
 # ==========================================================================

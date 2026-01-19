@@ -39,8 +39,9 @@ from typing import Optional, Dict, Any, Tuple
 # Add project root to path for imports
 sys.path.insert(0, ".")
 
-from agent.graph import create_assistant, LisbonAssistant
+from agent.graph import create_assistant, LisbonAssistant, MultiAgentAssistant
 from config import Config
+from tools.visitlisboa_api import initialize_vector_store
 
 
 # ==========================================================================
@@ -770,6 +771,7 @@ def initialize_session_state():
             "lmstudio": {"base_url": Config.LMSTUDIO_BASE_URL, "model": Config.LMSTUDIO_MODEL_NAME},
             "ollama": {"model": Config.OLLAMA_MODEL_NAME},
         },
+        "agent_overrides": {},  # Store custom model selection per agent
     }
     
     for key, value in defaults.items():
@@ -790,28 +792,79 @@ def set_credentials_env():
         os.environ["OPENAI_API_KEY"] = creds["openai"]["api_key"]
 
 
+@st.cache_resource
+def pre_warm_vector_store():
+    """
+    Pre-warm the vector store to avoid delays during first interaction.
+    This is cached globally by Streamlit so it only runs once per server start.
+    """
+    try:
+        initialize_vector_store()
+        return True
+    except Exception as e:
+        print(f"Vector store warming failed: {e}")
+        return False
+
+
 def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
     """Initialize or reinitialize the LisbonAssistant."""
     try:
         set_credentials_env()
         
-        # Pre-warm the vector store to avoid delays during first tool call
-        # This loads the embedding model (~30s) before user interacts
-        if "vector_store_ready" not in st.session_state:
-            try:
-                from tools.visitlisboa_api import _get_vector_store
-                _get_vector_store()  # Force initialization
-                st.session_state.vector_store_ready = True
-            except Exception as e:
-                # Non-fatal: tools will use fallback if vector store fails
-                import logging
-                logging.warning(f"Vector store pre-warming failed: {e}")
+        # Pre-warm vector store (cached)
+        # Only needed if using Multi-Agent or Researcher (which uses tools)
+        if Config.USE_MULTI_AGENT:
+            with st.spinner("Loading knowledge base (this happens only once)..."):
+                pre_warm_vector_store()
         
-        st.session_state.assistant = create_assistant(provider)
-        st.session_state.provider = provider
-        st.session_state.initialized = True
-        st.session_state.error = None
-        return True, None
+        # Initialize assistant based on mode
+        if Config.USE_MULTI_AGENT:
+            # Multi-Agent Mode
+            
+            # Apply UI overrides if any
+            if "agent_overrides" in st.session_state:
+                for agent, model_cfg in st.session_state.agent_overrides.items():
+                    if agent in Config.AGENT_MODELS:
+                        Config.AGENT_MODELS[agent]["model"] = model_cfg
+            
+            st.session_state.assistant = MultiAgentAssistant()
+            
+            # =========================================================
+            # CONNECTION TEST
+            # =========================================================
+            # Verify if the configured model is actually reachable
+            connection_placeholder = st.empty()
+            connection_placeholder.info(f"🔄 Testing connection to supervisor model: {st.session_state.assistant.model_name}...")
+            
+            try:
+                # access the supervisor LLM directly
+                test_llm = st.session_state.assistant.supervisor.llm
+                # Simple ping
+                response = test_llm.invoke("ping")
+                # If we get here, connection is successful
+                connection_placeholder.success(f"✅ Connection successful! Model is ready.")
+                import time
+                time.sleep(1.0) # Show success briefly
+                connection_placeholder.empty()
+                
+            except Exception as e:
+                connection_placeholder.empty()
+                error_msg = f"❌ Connection Timeout/Error: Could not connect to model '{st.session_state.assistant.model_name}'. Check LM Studio server or model name. Details: {str(e)}"
+                st.session_state.assistant = None # Rollback
+                return False, error_msg
+
+            st.session_state.initialized = True
+            st.session_state.provider = provider
+            st.session_state.error = None
+            return True, None
+            
+        else:
+            # Single-Agent Mode (Legacy)
+            st.session_state.assistant = create_assistant(provider)
+            st.session_state.initialized = True
+            st.session_state.provider = provider
+            st.session_state.error = None
+            return True, None
     except Exception as e:
         error_msg = str(e)
         st.session_state.error = error_msg
@@ -928,6 +981,34 @@ def render_provider_credentials():
         if model != st.session_state.credentials["ollama"]["model"]:
             st.session_state.credentials["ollama"]["model"] = model
             credentials_changed = True
+
+    # =========================================================================
+    # ADVANCED AGENT CONFIGURATION (Multi-Agent Only)
+    # =========================================================================
+    if Config.USE_MULTI_AGENT:
+        with st.expander("🛠️ Advanced: Agent Models"):
+            st.caption("Customize models for each agent. Default: Config.py")
+            
+            # Agents list
+            agents = ["supervisor", "weather", "transport", "researcher", "planner"]
+            
+            for agent in agents:
+                # Get current config or default
+                default_model = Config.AGENT_MODELS.get(agent, {}).get("model", Config.LMSTUDIO_MODEL_NAME)
+                current_override = st.session_state.agent_overrides.get(agent, default_model)
+                
+                # Render input for this agent
+                new_model = st.text_input(
+                    f"{agent.capitalize()} Model",
+                    value=current_override,
+                    key=f"agent_model_{agent}",
+                    help=f"Model for {agent} agent"
+                )
+                
+                # Check for changes
+                if new_model != current_override:
+                    st.session_state.agent_overrides[agent] = new_model
+                    credentials_changed = True
     
     needs_reinit = (selected_provider != st.session_state.provider or 
                    not st.session_state.initialized or credentials_changed)
@@ -1146,13 +1227,33 @@ def process_user_input(user_input: str):
         st.markdown(user_input)
     
     with st.chat_message("assistant"):
-        with st.spinner(t('thinking')):
-            try:
-                response = st.session_state.assistant.chat(user_input)
-                st.markdown(response)
-                st.session_state.messages.append({"role": "assistant", "content": response})
-                
-            except Exception as e:
+        try:
+            # Dynamic Status Update Implementation
+            with st.status("🤔 A analisar e recolher informação...", expanded=False) as status:
+                def update_ui_status(message: str):
+                    """Callback to update UI status from agent graph."""
+                    status.update(label=message, state="running")
+                    
+                try:
+                    # Enable verbose mode and pass status callback
+                    response = st.session_state.assistant.chat(
+                        user_input, 
+                        verbose=True, 
+                        on_status_change=update_ui_status
+                    )
+                    
+                    # Mark as complete
+                    status.update(label="✅ Resposta pronta!", state="complete", expanded=False)
+                    
+                except Exception as e:
+                    status.update(label="❌ Erro no processamento", state="error", expanded=True)
+                    raise e # Re-raise to be caught by the outer except block
+
+            # Display response only if successful (outside status container)
+            st.markdown(response)
+            st.session_state.messages.append({"role": "assistant", "content": response})
+            
+        except Exception as e:
                 error_str = str(e).lower()
                 
                 if "401" in error_str or "unauthorized" in error_str:

@@ -84,6 +84,14 @@ class AgentState(TypedDict):
         current_plan (List[dict]): Current itinerary items.
         session_id (str): Unique session identifier.
         last_tool_result (str): Result from the last tool call.
+        
+        Multi-Agent Orchestration:
+        next_agent (str): Name of the next agent to execute.
+        agents_to_call (List[str]): Queue of agents to invoke.
+        candidate_pois (List[dict]): Places/attractions from RAG search.
+        events_data (List[dict]): Events data from RAG search.
+        agent_outputs (dict): Collected outputs from specialized agents.
+        iteration_count (int): Loop prevention counter.
     """
     # Conversation history (uses add_messages reducer for proper appending)
     messages: Annotated[List[BaseMessage], add_messages]
@@ -99,6 +107,14 @@ class AgentState(TypedDict):
     # Session metadata
     session_id: Optional[str]
     last_tool_result: Optional[str]
+    
+    # Multi-Agent orchestration fields
+    next_agent: Optional[str]              # Current agent being executed
+    agents_to_call: Optional[List[str]]    # Queue of agents to invoke
+    candidate_pois: Optional[List[dict]]   # RAG places/attractions results
+    events_data: Optional[List[dict]]      # RAG events results
+    agent_outputs: Optional[dict]          # Outputs from each agent {agent_name: output}
+    iteration_count: Optional[int]         # Prevent infinite loops (max ~10)
 
 
 class PlanItem(TypedDict):
@@ -147,7 +163,14 @@ def create_initial_state(session_id: str = None) -> AgentState:
         transport_context=None,
         current_plan=None,
         session_id=session_id or str(uuid4())[:8],
-        last_tool_result=None
+        last_tool_result=None,
+        # Multi-Agent fields
+        next_agent=None,
+        agents_to_call=None,
+        candidate_pois=None,
+        events_data=None,
+        agent_outputs={},
+        iteration_count=0
     )
 
 
