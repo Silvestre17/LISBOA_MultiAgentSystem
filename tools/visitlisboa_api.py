@@ -435,6 +435,10 @@ def _get_vector_store():
     return _vector_store if _vector_store else None
 
 
+# Expose initialization for external use (e.g., app startup)
+initialize_vector_store = _get_vector_store
+
+
 # ==========================================================================
 # Hybrid Search: VisitLisboa + Dados Abertos
 # ==========================================================================
@@ -1025,10 +1029,12 @@ def search_places_attractions(
                 # Convert to standard format
                 for doc, score in relevant_results[:max_results]:
                     metadata = doc.metadata
+                    # Attempt to get real address/location
+                    real_location = metadata.get('address') or metadata.get('location') or 'Lisbon'
                     visitlisboa_results.append({
                         'title': metadata.get('title', 'Unknown'),
                         'category': metadata.get('category', 'General'),
-                        'location': 'Lisbon',
+                        'location': real_location,
                         'short_description': doc.page_content[:200] if doc.page_content else '',
                         'url': metadata.get('url', ''),
                         'source': 'visitlisboa',

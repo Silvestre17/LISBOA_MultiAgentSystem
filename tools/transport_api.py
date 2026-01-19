@@ -921,16 +921,18 @@ def load_metro_stations(force_reload: bool = False) -> List[Dict[str, Any]]:
     return _metro_stations_cache
 
 
-def find_nearest_metro_station(lat: float, lon: float, max_results: int = 3) -> List[Dict[str, Any]]:
+def find_nearest_metro_station(lat: float, lon: float, max_results: int = 3, max_dist_km: float = 50.0) -> List[Dict[str, Any]]:
     """
     Finds the nearest Metro stations to given GPS coordinates.
     
     Uses Haversine distance formula for accurate GPS-based search.
+    Filters out stations that are too far away (default > 50km).
     
     Args:
         lat (float): Latitude in degrees.
         lon (float): Longitude in degrees.
         max_results (int): Maximum stations to return (default: 3).
+        max_dist_km (float): Maximum distance in km to search (default: 50.0).
         
     Returns:
         List[Dict]: List of nearest stations with distance in meters.
@@ -957,6 +959,11 @@ def find_nearest_metro_station(lat: float, lon: float, max_results: int = 3) -> 
             station_lon = float(station.get("stop_lon", 0))
             
             distance_km = haversine_distance(lat, lon, station_lat, station_lon)
+            
+            # Skip if too far
+            if distance_km > max_dist_km:
+                continue
+                
             distance_m = int(distance_km * 1000)
             
             stations_with_distance.append({
@@ -2259,28 +2266,44 @@ def get_metro_line_wait_times(line: str) -> str:
 
 
 @tool
-def find_nearest_metro(latitude: float, longitude: float) -> str:
+def find_nearest_metro(
+    latitude: float = None, 
+    longitude: float = None,
+    near_location_name: str = None
+) -> str:
     """
-    Finds the nearest Metro stations to a GPS location.
+    Finds the nearest Metro stations to a GPS location or named place.
     
     Useful when a user is at a specific location and wants to find
     the closest metro station. Returns the 3 nearest stations with
     walking distance estimates.
     
     Args:
-        latitude (float): GPS latitude (e.g., 38.7548 for Colombo area).
-        longitude (float): GPS longitude (e.g., -9.1867 for Colombo area).
+        latitude (float, optional): GPS latitude (e.g., 38.7548).
+        longitude (float, optional): GPS longitude (e.g., -9.1867).
+        near_location_name (str, optional): Name of a place (e.g., "Colombo", "Martim Moniz").
+                                           Used if coordinates are not provided.
         
     Returns:
         str: Formatted list of nearest metro stations with distances.
         
     Example:
-        >>> find_nearest_metro(38.7548, -9.1867)
+        >>> find_nearest_metro(near_location_name="Colombo")
         "🚇 Nearest Metro Stations
-         1. Colégio Militar/Luz (487m) - 🔵 Blue Line
-         2. Carnide (623m) - 🔵 Blue Line
-         3. Laranjeiras (1.2km) - 🔵 Blue Line"
+         1. Colégio Militar/Luz (487m) - 🔵 Blue Line..."
     """
+    # Resolve location if name provided
+    if near_location_name and (latitude is None or longitude is None):
+        loc = geocode_location(near_location_name)
+        if loc:
+            latitude = loc["lat"]
+            longitude = loc["lon"]
+        else:
+            return f"❌ Could not resolve location '{near_location_name}'. Please provide coordinates."
+            
+    if latitude is None or longitude is None:
+        return "❌ Please provide either coordinates or a location name."
+
     nearest = find_nearest_metro_station(latitude, longitude, max_results=5)
     
     if not nearest:

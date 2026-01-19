@@ -4,6 +4,9 @@ ThesisCode.md
 AI.Evaluation_OpenAI_Gemini_Grok_Claude.md
 .github/copilot-instructions.md
 
+# All files starting with "test_"
+test_*.py
+
 # Specific Folders
 _/
 data_collection/docs/extracted_content

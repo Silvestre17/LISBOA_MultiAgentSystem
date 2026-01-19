@@ -130,7 +130,8 @@ class Config:
     #   - qwen/qwen3-32b
     #   - moonshotai/kimi-k2-instruct-0905
     # Check available models: https://console.groq.com/docs/models
-    GROQ_MODEL_NAME = "openai/gpt-oss-20b"
+    # GROQ_MODEL_NAME = "openai/gpt-oss-20b"
+    GROQ_MODEL_NAME = "qwen/qwen3-32b"
     
     # LM Studio model (Local server on port 1234)
     # Set to match the model loaded in your local LM Studio instance
@@ -177,6 +178,58 @@ class Config:
     
     # Area code for weather warnings (LSB = Lisbon district)
     LISBON_AREA_AVISO = "LSB"
+    
+    # =========================================================================
+    # MULTI-AGENT SYSTEM CONFIGURATION
+    # =========================================================================
+    # Enable/disable multi-agent mode (False = use single-agent V1)
+    USE_MULTI_AGENT = True
+    
+    # Agent model assignments - change models per agent here
+    # Each agent can use a different provider/model combination
+    # Format: "agent_name": {"provider": "...", "model": "..."}
+    # 
+    # Available providers: lmstudio, groq, google, openai, ollama
+    # 
+    # Recommendation:
+    #   - Supervisor/Planner/Researcher: Use powerful models (reasoning-heavy)
+    #   - Weather/Transport: Use fast/light models (tool-calling only)
+    #
+    # TESTING MODE: All agents using LM Studio local model
+    AGENT_MODELS = {
+        "supervisor": {
+            "provider": "lmstudio",
+            "model": "qwen/qwen3-4b-2507",  # LOCAL TEST - 4B
+            "temperature": 0.1,
+        },
+        "weather": {
+            "provider": "lmstudio",
+            "model": "qwen/qwen3-4b-2507",  # LOCAL TEST - 4B
+            "temperature": 0,
+        },
+        "transport": {
+            "provider": "lmstudio", 
+            "model": "qwen/qwen3-4b-2507",  # LOCAL TEST - 4B
+            "temperature": 0,
+        },
+        "researcher": {
+            "provider": "lmstudio",
+            "model": "qwen/qwen3-4b-2507",  # LOCAL TEST - 4B
+            "temperature": 0.2,
+        },
+        "planner": {
+            "provider": "lmstudio",
+            "model": "qwen/qwen3-4b-2507",  # LOCAL TEST - 4B
+            "temperature": 0.3,
+        },
+    }
+    
+    # Fallback model when agent-specific config not found
+    DEFAULT_AGENT_MODEL = {
+        "provider": "lmstudio",
+        "model": "qwen/qwen3-4b-2507",
+        "temperature": 0,
+    }
 
 
 # ==========================================================================

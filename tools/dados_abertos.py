@@ -391,17 +391,20 @@ def find_nearby_services(
     service_type: str,
     user_lat: float = None,
     user_lon: float = None,
+    near_location_name: str = None,
     max_results: int = 5
 ) -> str:
     """
     Search for public services in Lisbon (pharmacies, hospitals, schools, etc.) 
-    and optionally filter by proximity to user location.
+    and optionally filter by proximity to user location or a specific place name.
     
     Args:
         service_type (str): Type of service to search (e.g., 'farmácias', 'hospitais', 
                            'escolas', 'metro', 'wifi', 'jardins', 'parques', 'fontanários').
         user_lat (float, optional): User's latitude for proximity filtering.
         user_lon (float, optional): User's longitude for proximity filtering.
+        near_location_name (str, optional): Name of a place to filter by proximity (e.g., "Martim Moniz").
+                                           Used if user_lat/lon are not provided.
         max_results (int): Maximum number of results to return (default: 5).
 
     Returns:
@@ -409,11 +412,35 @@ def find_nearby_services(
         
     Examples:
         >>> find_nearby_services("farmácias", user_lat=38.7223, user_lon=-9.1393)
-        >>> find_nearby_services("wifi")
-        >>> find_nearby_services("jardins", user_lat=38.72, user_lon=-9.14, max_results=3)
+        >>> find_nearby_services("hospitais", near_location_name="Martim Moniz")
     """
     if DF_METADATA.empty:
         return "❌ Error: Metadata not loaded. Check if lisbon_datasets_clean.json exists."
+
+    # Geocoding Logic: Resolve location name if coordinates missing
+    if near_location_name and (user_lat is None or user_lon is None):
+        logger.info(f"Geocoding '{near_location_name}' via Open Data...")
+        places = _search_places_raw(near_location_name, max_results=1)
+        
+        if places and places[0]['lat'] and places[0]['lon']:
+            user_lat = places[0]['lat']
+            user_lon = places[0]['lon']
+            logger.info(f"✅ Geocoded '{near_location_name}' to ({user_lat}, {user_lon})")
+        else:
+            # Fallback to Nominatim (Transport API)
+            try:
+                logger.info(f"Open Data lookup failed for '{near_location_name}'. Trying Nominatim fallback...")
+                from tools.transport_api import geocode_location
+                loc = geocode_location(near_location_name)
+                
+                if loc:
+                    user_lat = loc['lat']
+                    user_lon = loc['lon']
+                    logger.info(f"✅ Geocoded '{near_location_name}' via Nominatim to ({user_lat}, {user_lon})")
+                else:
+                    return f"❌ Could not resolve location '{near_location_name}'. Tried Open Data and Geocoding service. Please provide coordinates."
+            except ImportError:
+                 return f"❌ Could not resolve location '{near_location_name}' in Open Data. External geocoder unavailable."
 
     # Search for matching datasets
     matches = search_datasets(service_type)
@@ -489,6 +516,12 @@ def find_nearby_services(
     if user_lat is not None and user_lon is not None and results:
         results = [r for r in results if r['distance'] is not None]
         results.sort(key=lambda x: x['distance'])
+        
+        # Add header about proximity
+        if near_location_name:
+            title += f" (near {near_location_name})"
+        else:
+            title += " (sorted by distance)"
     
     results = results[:max_results]
     
@@ -615,20 +648,12 @@ def get_dataset_details(dataset_name: str) -> str:
     return response
 
 
-def _search_place_in_datasets_logic(query: str, max_results: int = 5) -> str:
+def _search_places_raw(query: str, max_results: int = 5) -> List[Dict]:
     """
-    Core logic for searching places in open datasets.
-    This is a regular function (not a tool) that can be called directly.
-    
-    Args:
-        query (str): The name of the place to find.
-        max_results (int): Maximum number of results to return.
-    
-    Returns:
-        str: Formatted string with found places or empty string if nothing found.
+    Search for places and return raw data (lat/lon).
     """
     if DF_METADATA.empty:
-        return ""
+        return []
     
     query_lower = query.lower()
     found_places = []
@@ -717,7 +742,6 @@ def _search_place_in_datasets_logic(query: str, max_results: int = 5) -> str:
     ignore_words = {'de', 'do', 'da', 'em', 'para', 'com', 'the', 'in', 'at', 'lisboa', 'lisbon', 'perto', 'near', 'proximo', 'onde', 'fica', 'existe', 'ha'}
     tokens = [w for w in query_lower.split() if w not in ignore_words and len(w) > 3]
     
-    
     if not tokens:
         tokens = [query_lower]
         
@@ -732,7 +756,7 @@ def _search_place_in_datasets_logic(query: str, max_results: int = 5) -> str:
         potential_datasets = pd.concat([potential_datasets, matches])
     
     if potential_datasets.empty:
-        return ""
+        return []
         
     potential_datasets = potential_datasets.drop_duplicates(subset='stable_url')
     
@@ -801,7 +825,14 @@ def _search_place_in_datasets_logic(query: str, max_results: int = 5) -> str:
             if len(p['location']) > len(unique_places[p['title']]['location']):
                 unique_places[p['title']] = p
                 
-    results = sorted(unique_places.values(), key=lambda x: x['score'], reverse=True)[:max_results]
+    return sorted(unique_places.values(), key=lambda x: x['score'], reverse=True)[:max_results]
+
+
+def _search_place_in_datasets_logic(query: str, max_results: int = 5) -> str:
+    """
+    Search wrapper that returns formatted string (for VisitLisboa integration).
+    """
+    results = _search_places_raw(query, max_results)
     
     if not results:
         return ""

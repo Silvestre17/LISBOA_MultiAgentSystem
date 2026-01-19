@@ -16,7 +16,29 @@ import os
 import sys
 import re
 import json
-from typing import List, Set, Tuple
+from typing import List, Set, Tuple, Callable, Optional
+
+# LangSmith tracing support (optional - graceful fallback if not available)
+try:
+    from langsmith.run_helpers import traceable, get_current_run_tree
+    from langsmith import ContextThreadPoolExecutor
+    from langsmith.run_trees import RunTree
+    LANGSMITH_AVAILABLE = True
+except ImportError:
+    LANGSMITH_AVAILABLE = False
+    # Fallback: no-op decorator and standard ThreadPoolExecutor
+    def traceable(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+    def get_current_run_tree():
+        return None
+    RunTree = None
+    from concurrent.futures import ThreadPoolExecutor as ContextThreadPoolExecutor
+
+# Always need as_completed for collecting parallel results
+from concurrent.futures import as_completed
+import time as time_module  # For latency tracking
 
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 from langgraph.graph import StateGraph, END
@@ -28,6 +50,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from agent.state import AgentState, create_initial_state
 from agent.prompts import get_system_prompt
 from agent.llm_factory import LLMFactory
+from agent.agents.base import clean_response
 
 # Import tools
 from tools.ipma_api import (
@@ -483,9 +506,9 @@ class LisbonAssistant:
         
         if hasattr(last_message, "content"):
             # Clean model-specific artifacts (thinking tags, chat tokens, etc.)
-            return _clean_response(last_message.content)
+            return clean_response(last_message.content)
         
-        return _clean_response(str(last_message))
+        return clean_response(str(last_message))
     
     def reset(self):
         """Resets the conversation state."""
@@ -534,40 +557,432 @@ def quick_chat(message: str, provider: str = None) -> str:
 
 
 # ==========================================================================
-# Test Block
+# Multi-Agent System
+# ==========================================================================
+
+class MultiAgentAssistant:
+    """
+    Multi-Agent Lisbon Urban Assistant.
+    
+    Uses a Supervisor agent to route queries to specialized agents:
+        - WeatherAgent: IPMA weather data
+        - TransportAgent: Metro, bus, train information
+        - ResearcherAgent: RAG for places and events
+        - PlannerAgent: Itinerary synthesis
+    
+    Key features:
+        - Smart routing: Only calls agents that are needed
+        - Direct responses for simple queries (greetings, general chat)
+        - Parallel agent execution for complex queries
+        - Configurable models per agent via config.py
+    """
+    
+    def __init__(self):
+        """Initializes the multi-agent assistant."""
+        from agent.agents.supervisor import SupervisorAgent
+        from agent.agents.weather_agent import WeatherAgent
+        from agent.agents.transport_agent import TransportAgent
+        from agent.agents.researcher_agent import ResearcherAgent
+        from agent.agents.planner_agent import PlannerAgent
+        from agent.state import create_initial_state
+        
+        # Initialize agents
+        self.supervisor = SupervisorAgent()
+        self.agents = {
+            "weather": WeatherAgent(),
+            "transport": TransportAgent(),
+            "researcher": ResearcherAgent(),
+            "planner": PlannerAgent(),
+        }
+        
+        # Initialize state
+        self.state = create_initial_state()
+        
+        self.model_info = {
+            "supervisor": self.supervisor.get_model_info(),
+            **{name: agent.get_model_info() for name, agent in self.agents.items()}
+        }
+    
+    @property
+    def model_name(self) -> str:
+        """Returns the model name for display (compatibility with V1 app)."""
+        sv_model = self.model_info.get("supervisor", "Unknown")
+        return f"Multi-Agent ({sv_model})"
+    
+    @traceable(name="multi_agent_chat", run_type="chain")
+    def chat(self, message: str, verbose: bool = False, on_status_change: Optional[Callable[[str], None]] = None) -> str:
+        """
+        Processes a user message using the multi-agent system.
+        
+        Uses @traceable decorator to create a single parent trace in LangSmith
+        that encompasses all agent and tool calls. The ContextThreadPoolExecutor
+        ensures proper context propagation across parallel agent executions.
+        
+        Flow:
+            1. Supervisor analyzes query and decides which agents to call
+            2. If no agents needed, Supervisor provides direct response
+            3. If agents needed, they are called (in sequence or parallel)
+            4. If Planner is in the list, it synthesizes the final response
+            5. Otherwise, agent outputs are combined
+        
+        Args:
+            message (str): User message.
+            verbose (bool): If True, prints routing decisions and agent calls.
+            on_status_change (func, optional): Callback for UI status updates.
+            
+        Returns:
+            str: Assistant response.
+        """
+        # Add to conversation history
+        from langchain_core.messages import HumanMessage
+        self.state["messages"].append(HumanMessage(content=message))
+        
+        # Notify status: Routing
+        if on_status_change:
+            on_status_change("🤔 A analisar o pedido...")
+        
+        # Step 1: Route the query
+        routing = self.supervisor.route(message)
+        agents_to_call = routing.get("agents", [])
+        direct_response = routing.get("direct_response")
+        reasoning = routing.get("reasoning", "")
+        
+        if verbose:
+            print(f"\n   [ROUTING] Supervisor decision:")
+            print(f"      Reasoning: {reasoning}")
+            print(f"      Agents: {agents_to_call if agents_to_call else 'None (direct response)'}")
+        
+        # Inject LangSmith metadata and tags based on routing decision
+        if LANGSMITH_AVAILABLE and agents_to_call:
+            try:
+                run_tree = get_current_run_tree()
+                if run_tree:
+                    # Ensure metadata structure exists
+                    if not hasattr(run_tree, 'extra') or run_tree.extra is None:
+                        run_tree.extra = {}
+                    if 'metadata' not in run_tree.extra:
+                        run_tree.extra['metadata'] = {}
+                    
+                    # Add routing metadata
+                    run_tree.extra['metadata']['agents_called'] = agents_to_call
+                    run_tree.extra['metadata']['num_agents'] = len(agents_to_call)
+                    run_tree.extra['metadata']['supervisor_reasoning'] = reasoning[:200]  # Truncate
+                    
+                    # Determine query type tags
+                    query_tags = []
+                    if "weather" in agents_to_call:
+                        query_tags.append("weather")
+                    if "transport" in agents_to_call:
+                        query_tags.append("transport")
+                    if "researcher" in agents_to_call:
+                        query_tags.append("research")
+                    if "planner" in agents_to_call:
+                        query_tags.append("itinerary")
+                    if not agents_to_call:
+                        query_tags.append("direct_response")
+                    
+                    run_tree.extra['metadata']['query_tags'] = query_tags
+                    
+                    # Add tags to run_tree if supported
+                    if hasattr(run_tree, 'tags') and run_tree.tags is not None:
+                        run_tree.tags.extend(query_tags)
+                    elif hasattr(run_tree, 'tags'):
+                        run_tree.tags = query_tags
+            except Exception:
+                pass  # Silently ignore metadata errors
+        
+        # Notify status: Agents selected
+        if agents_to_call:
+            # Map internal names to friendly PT names
+            name_map = {
+                "weather": "Meteorologia 🌤️",
+                "transport": "Transportes 🚇",
+                "researcher": "Pesquisa Local 🔎",
+                "planner": "Planeador 📅"
+            }
+            # Filter out planner from the "Consulting" list as it runs last
+            consulting = [name_map.get(a, a) for a in agents_to_call if a != "planner"]
+            
+            if consulting and on_status_change:
+                on_status_change(f"🚀 Vou consultar: {', '.join(consulting)}...")
+        
+        # Step 2: Handle direct response (no agents needed)
+        if direct_response and not agents_to_call:
+            if verbose:
+                print(f"      Mode: DIRECT RESPONSE (no agents called)")
+            return clean_response(direct_response)
+        
+        # Step 3: Execute agents (Parallelized with LangSmith context propagation)
+        agent_outputs = {}
+        
+        # Identify worker agents (exclude planner which runs last)
+        workers = [a for a in agents_to_call if a != "planner" and a in self.agents]
+        
+        if workers:
+            if verbose:
+                print(f"      [PARALLEL] Executing {len(workers)} agents: {workers}")
+            
+            if on_status_change:
+                on_status_change(f"⏳ A aguardar respostas de: {', '.join(workers)}...")
+            
+            # Use ContextThreadPoolExecutor to propagate LangSmith tracing context
+            with ContextThreadPoolExecutor(max_workers=len(workers)) as executor:
+                # Submit all tasks with timing
+                future_to_agent = {}
+                agent_start_times = {}
+                
+                for agent_name in workers:
+                    if verbose:
+                        print(f"\n   [AGENT: {agent_name.upper()}] Starting...")
+                    agent_start_times[agent_name] = time_module.time()
+                    
+                    # Pass verbose=verbose to invoke
+                    future_to_agent[executor.submit(
+                        self.agents[agent_name].invoke, 
+                        message, 
+                        "",     # context
+                        verbose # verbose flag
+                    )] = agent_name
+                
+                # Collect results as they complete with latency tracking
+                for future in as_completed(future_to_agent):
+                    agent_name = future_to_agent[future]
+                    agent_latency = time_module.time() - agent_start_times[agent_name]
+                    
+                    try:
+                        output = future.result()
+                        agent_outputs[agent_name] = output
+                        
+                        # Log latency to LangSmith metadata if available
+                        if LANGSMITH_AVAILABLE:
+                            try:
+                                run_tree = get_current_run_tree()
+                                if run_tree:
+                                    if not hasattr(run_tree, 'extra') or run_tree.extra is None:
+                                        run_tree.extra = {}
+                                    if 'metadata' not in run_tree.extra:
+                                        run_tree.extra['metadata'] = {}
+                                    run_tree.extra['metadata'][f'agent_{agent_name}_latency_ms'] = int(agent_latency * 1000)
+                                    run_tree.extra['metadata'][f'agent_{agent_name}_output_chars'] = len(output)
+                            except Exception:
+                                pass  # Silently ignore metadata errors
+                        
+                        if verbose:
+                            print(f"   [AGENT: {agent_name.upper()}] Finished ({len(output)} chars, {agent_latency:.2f}s)")
+                    except Exception as e:
+                        error_msg = f"Error: {str(e)}"
+                        agent_outputs[agent_name] = error_msg
+                        if verbose:
+                            print(f"   [AGENT: {agent_name.upper()}] Failed: {str(e)}")
+        
+        # Step 4: If Planner was requested, synthesize final response
+        if "planner" in agents_to_call:
+            if verbose:
+                print(f"\n   [AGENT: PLANNER] Synthesizing from {list(agent_outputs.keys())}...")
+            
+            if on_status_change:
+                on_status_change("✍️ A escrever o itinerário final...")
+                
+            response = self.agents["planner"].synthesize(message, agent_outputs)
+        elif agent_outputs:
+            # Combine agent outputs if no planner
+            response = self._combine_outputs(agent_outputs)
+        else:
+            # Fallback: Use researcher for general queries
+            if verbose:
+                print(f"\n   [FALLBACK] Using researcher agent")
+            response = self.agents["researcher"].invoke(message, verbose=verbose)
+        
+        return clean_response(response)
+    
+    def _combine_outputs(self, agent_outputs: dict) -> str:
+        """
+        Combines outputs from multiple agents into a single response.
+        
+        Args:
+            agent_outputs: Dict mapping agent names to their outputs.
+            
+        Returns:
+            str: Combined response.
+        """
+        sections = []
+        
+        if "weather" in agent_outputs:
+            sections.append(agent_outputs["weather"])
+        
+        if "researcher" in agent_outputs:
+            sections.append(agent_outputs["researcher"])
+        
+        if "transport" in agent_outputs:
+            sections.append(agent_outputs["transport"])
+        
+        return "\n\n---\n\n".join(sections)
+    
+    def reset(self):
+        """Resets the conversation state."""
+        from agent.state import create_initial_state
+        self.state = create_initial_state()
+    
+    def get_history(self) -> List:
+        """Returns the conversation history."""
+        return self.state["messages"]
+
+
+def create_multiagent_assistant() -> MultiAgentAssistant:
+    """
+    Creates a new Multi-Agent Lisbon Assistant instance.
+    
+    Returns:
+        MultiAgentAssistant: Configured multi-agent assistant.
+    """
+    return MultiAgentAssistant()
+
+
+# ==========================================================================
+# Test Block - Comprehensive Multi-Agent System Tests
 # ==========================================================================
 if __name__ == "__main__":
-    print("\033[1m" + "=" * 60 + "\033[0m")
-    print("\033[1m🧪 LangGraph Agent Test\033[0m")
-    print("\033[1m" + "=" * 60 + "\033[0m")
+    from config import Config
+    import sys
+    
+    # Fix Windows console encoding
+    if sys.platform == "win32":
+        try:
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        except AttributeError:
+            pass
+    
+    print("=" * 70)
+    print("MULTI-AGENT SYSTEM - COMPREHENSIVE TEST SUITE")
+    print("=" * 70)
     
     try:
-        # Initialize assistant
-        print("\n\033[1m🔄 Initializing Lisbon Assistant...\033[0m")
-        assistant = create_assistant()
-        print(f"\033[1;32m✅ Ready!\033[0m Model: {assistant.model_name}")
+        # Initialize
+        if Config.USE_MULTI_AGENT:
+            print("\n[INIT] Initializing Multi-Agent Assistant...")
+            assistant = MultiAgentAssistant()
+            print("[OK] Ready!")
+            print(f"   Supervisor: {assistant.model_info['supervisor']}")
+            print(f"   Weather:    {assistant.model_info['weather']}")
+            print(f"   Transport:  {assistant.model_info['transport']}")
+            print(f"   Researcher: {assistant.model_info['researcher']}")
+            print(f"   Planner:    {assistant.model_info['planner']}")
+        else:
+            print("\n[INIT] Single-Agent mode - switching to Multi-Agent for tests...")
+            assistant = MultiAgentAssistant()
         
-        # Test queries
-        test_queries = [
-            "What's the weather like in Lisbon today?",
-            "Is the metro working?",
+        # =================================================================
+        # TEST CATEGORIES
+        # =================================================================
+        
+        test_cases = [
+            # ---------------------------------------------------------
+            # CATEGORY 1: OFF-TOPIC / GENERAL (No agents needed)
+            # ---------------------------------------------------------
+            {
+                "category": "OFF-TOPIC / GENERAL",
+                "description": "Questions unrelated to Lisbon - should respond directly without agents",
+                "queries": [
+                    ("Hello!", "Greeting - no agents needed"),
+                    ("What is the capital of France?", "Off-topic - should decline or answer directly"),
+                    ("Who won the World Cup in 2022?", "Off-topic - not about Lisbon"),
+                ]
+            },
+            # ---------------------------------------------------------
+            # CATEGORY 2: SINGLE AGENT - WEATHER ONLY
+            # ---------------------------------------------------------
+            {
+                "category": "SINGLE AGENT - WEATHER",
+                "description": "Weather questions - should ONLY call weather agent",
+                "queries": [
+                    ("What's the weather in Lisbon today?", "Should use only weather agent"),
+                    ("Is it going to rain tomorrow?", "Simple forecast - weather only"),
+                ]
+            },
+            # ---------------------------------------------------------
+            # CATEGORY 3: SINGLE AGENT - TRANSPORT ONLY
+            # ---------------------------------------------------------
+            {
+                "category": "SINGLE AGENT - TRANSPORT",
+                "description": "Transport questions - should ONLY call transport agent",
+                "queries": [
+                    ("Is the metro working?", "Metro status - transport only"),
+                    ("How do I get from Rossio to Belem?", "Routing - transport only"),
+                ]
+            },
+            # ---------------------------------------------------------
+            # CATEGORY 4: SINGLE AGENT - RESEARCHER ONLY
+            # ---------------------------------------------------------
+            {
+                "category": "SINGLE AGENT - RESEARCHER",
+                "description": "Places/events questions - should ONLY call researcher agent",
+                "queries": [
+                    ("What are the best museums in Lisbon?", "Places search - researcher only"),
+                    ("Are there any events today?", "Events search - researcher only"),
+                ]
+            },
+            # ---------------------------------------------------------
+            # CATEGORY 5: MULTI-AGENT - COMPLEX QUERIES
+            # ---------------------------------------------------------
+            {
+                "category": "MULTI-AGENT - COMPLEX",
+                "description": "Complex queries requiring multiple agents + planner",
+                "queries": [
+                    ("Plan my day visiting museums, considering the weather", "Needs weather + researcher + planner"),
+                    ("Suggest outdoor activities for today based on weather", "Needs weather + researcher + planner"),
+                ]
+            },
         ]
         
-        for i, query in enumerate(test_queries, 1):
-            print(f"\n\033[1m📝 Test {i}: {query}\033[0m")
-            print("-" * 40)
-            
-            response = assistant.chat(query)
-            print(f"\n\033[1m🤖 Response:\033[0m")
-            print(response[:1000] + "..." if len(response) > 1000 else response)
-            
-            # Reset for next test
-            assistant.reset()
+        # =================================================================
+        # RUN TESTS
+        # =================================================================
         
-        print(f"\n\033[1;32m✅ All tests completed!\033[0m")
+        total_tests = 0
+        
+        for category_data in test_cases:
+            print("\n" + "=" * 70)
+            print(f"CATEGORY: {category_data['category']}")
+            print(f"   {category_data['description']}")
+            print("=" * 70)
+            
+            for query, expected in category_data["queries"]:
+                total_tests += 1
+                print(f"\n{'─' * 70}")
+                print(f"[TEST {total_tests}]: {query}")
+                print(f"   Expected: {expected}")
+                print("─" * 70)
+                
+                # Run with verbose mode to show routing and agent usage
+                response = assistant.chat(query, verbose=True)
+                
+                print(f"\n[RESPONSE]:")
+                # Truncate long responses
+                if len(response) > 600:
+                    print(response[:600] + "\n   [...truncated...]")
+                else:
+                    print(response)
+                
+                # Reset state for next test
+                assistant.reset()
+        
+        # =================================================================
+        # SUMMARY
+        # =================================================================
+        print("\n" + "=" * 70)
+        print(f"TEST SUMMARY: {total_tests} tests completed")
+        print("=" * 70)
+        print("\nKey observations to verify:")
+        print("   1. OFF-TOPIC: Should show 'DIRECT RESPONSE' (no agents called)")
+        print("   2. SINGLE AGENT: Should show only ONE agent being called")
+        print("   3. MULTI-AGENT: Should show multiple agents + PLANNER synthesizing")
+        print("\n[OK] All tests completed!")
         
     except Exception as e:
-        print(f"\n\033[1;31m❌ Error:\033[0m {e}")
-        print("\n\033[1m💡 Tips:\033[0m")
-        print("   1. Ensure API keys are set in .env file or local LLM are running.")
-        print("   2. Check network connectivity.")
+        print(f"\n[ERROR]: {e}")
+        import traceback
+        traceback.print_exc()
+        print("\n[Tips]:")
+        print("   1. Ensure API keys are set in .env file")
+        print("   2. Check LM Studio is running for local models")
+        print("   3. Check network connectivity for Groq API")
