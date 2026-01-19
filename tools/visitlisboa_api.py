@@ -631,6 +631,29 @@ def _load_places_json() -> List[Dict[str, Any]]:
         return []
 
 
+# Cached places data for enrichment lookup
+_places_cache: Optional[Dict[str, Dict]] = None
+
+def _get_place_by_url(url: str) -> Optional[Dict[str, Any]]:
+    """
+    Looks up full place data from JSON by URL.
+    Uses caching to avoid repeated file reads.
+    
+    Args:
+        url: The VisitLisboa URL of the place.
+        
+    Returns:
+        Full place dictionary or None if not found.
+    """
+    global _places_cache
+    
+    if _places_cache is None:
+        places = _load_places_json()
+        _places_cache = {p.get('url', ''): p for p in places if p.get('url')}
+    
+    return _places_cache.get(url)
+
+
 # ==========================================================================
 # Helper Functions
 # ==========================================================================
@@ -935,8 +958,16 @@ def search_cultural_events(
             
             output_parts.append(f"   📍 {loc}")
             
+            # Show price information if available
+            if event.get('price'):
+                output_parts.append(f"   💰 Preço: {event['price']}")
+            
             if event.get('url'):
                 output_parts.append(f"   🔗 {event['url']}")
+            
+            # Show buy tickets link if available
+            if event.get('buy_tickets_url'):
+                output_parts.append(f"   🎟️ Comprar bilhetes: {event['buy_tickets_url']}")
             
             output_parts.append("")  # Empty line between events
         
@@ -1113,6 +1144,11 @@ def search_places_attractions(
             loc = place.get('location', 'Lisbon')
             source = place.get('source', 'unknown')
             
+            # Try to get full data from JSON for richer output
+            full_data = None
+            if place.get('url') and source == 'visitlisboa':
+                full_data = _get_place_by_url(place['url'])
+            
             # Source indicator
             if source == 'dados_abertos':
                 output_parts.append(f"\n{i}. 📊 **{title}**")  # Open Data icon
@@ -1121,6 +1157,10 @@ def search_places_attractions(
             
             output_parts.append(f"   📂 Category: {cat}")
             
+            # Lisboa Card discount (from enriched data)
+            if full_data and full_data.get('lisboa_card_discount'):
+                output_parts.append(f"   🎫 {full_data['lisboa_card_discount']}")
+            
             if place.get('short_description'):
                 desc = place['short_description'][:200]
                 if len(place['short_description']) > 200:
@@ -1128,6 +1168,34 @@ def search_places_attractions(
                 output_parts.append(f"   {desc}")
             
             output_parts.append(f"   📍 {loc}")
+            
+            # Schedule/opening hours (from enriched data)
+            if full_data and full_data.get('schedules'):
+                for schedule in full_data['schedules']:
+                    if schedule.get('today'):
+                        output_parts.append(f"   🕐 {schedule['today']}")
+                        break
+            
+            # Tickets/prices (from enriched data)
+            if full_data and full_data.get('tickets_offers'):
+                tickets = full_data['tickets_offers']
+                if tickets.get('description'):
+                    price_desc = tickets['description'][:80]
+                    if len(tickets['description']) > 80:
+                        price_desc += "..."
+                    output_parts.append(f"   💰 {price_desc}")
+            
+            # TripAdvisor rating (from enriched data)
+            if full_data and full_data.get('tripadvisor'):
+                ta = full_data['tripadvisor']
+                if ta.get('rating'):
+                    output_parts.append(f"   ⭐ TripAdvisor: {ta['rating']}/5 ({ta.get('reviews_count', '?')} reviews)")
+            
+            # Contact info (from enriched data)
+            if full_data and full_data.get('contact_info'):
+                contact = full_data['contact_info']
+                if contact.get('phone'):
+                    output_parts.append(f"   📞 {contact['phone']}")
             
             if place.get('url'):
                 output_parts.append(f"   🔗 {place['url']}")
