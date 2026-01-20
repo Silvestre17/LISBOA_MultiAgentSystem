@@ -17,7 +17,7 @@
 3. **[ARCHITECTURE_DIAGRAMS.md](architecture/ARCHITECTURE_DIAGRAMS.md)** - Visual system architecture and workflows
 
 ### API Reference
-4. **[tools_overview.md](api/tools_overview.md)** - Overview of all 18 tools with usage guide
+4. **[tools_overview.md](tools_overview.md)** - Overview of all 29 tools with usage guide
 
 ---
 
@@ -93,9 +93,10 @@ print(f"First event: {events[0]}")
 ## 📊 Project Statistics
 
 ### Code Base
-- **Python Modules**: 15
-- **Lines of Code**: ~5,000
-- **Tools Implemented**: 18
+- **Python Modules**: 20+
+- **Lines of Code**: ~8,000+
+- **Tools Implemented**: 29
+- **Specialized Agents**: 5
 - **Data Sources**: 4 APIs + 2 scraped sources
 
 ### Datasets
@@ -372,6 +373,12 @@ LANGCHAIN_PROJECT=thesis-project
 ## 🔄 Documentation Updates
 
 ### Version History
+- **v2.0** (Jan 20, 2026): Multi-Agent System update
+  - Added 5 specialized agents (Supervisor, Weather, Transport, Researcher, Planner)
+  - Expanded from 18 to 29 tools
+  - Added Metro Official API with OAuth2
+  - Renamed Carris functions to Carris Metropolitana
+  - Added CP AML stations
 - **v1.0** (Dec 30, 2025): Initial comprehensive documentation
   - Complete API reference
   - Architecture diagrams
@@ -406,4 +413,4 @@ LANGCHAIN_PROJECT=thesis-project
 
 *This index serves as the central navigation point for all project documentation.*
 
-**Last Updated**: December 30, 2025
+**Last Updated**: January 20, 2026

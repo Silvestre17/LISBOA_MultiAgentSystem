@@ -30,30 +30,31 @@
                        │
                        ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                       LANGGRAPH AGENT                           │
+│                    MULTI-AGENT SYSTEM                           │
+│                      (Supervisor)                               │
 │  ┌────────────┐      ┌────────────┐      ┌──────────────┐     │
-│  │   State    │◄────►│   Agent    │◄────►│    Tools     │     │
-│  │ Management │      │   (ReAct)  │      │    Node      │     │
+│  │   State    │◄────►│ Supervisor │◄────►│  Specialized │     │
+│  │ Management │      │   Agent    │      │    Agents    │     │
 │  └────────────┘      └────────────┘      └──────────────┘     │
 └──────────────────────┬──────────────────────────────────────────┘
                        │
-         ┌─────────────┼─────────────┐
-         ▼             ▼             ▼
-    ┌────────┐   ┌──────────┐  ┌────────────┐
-    │  LLM   │   │  Tools   │  │  Vector    │
-    │Factory │   │  (18)    │  │   Store    │
-    └────────┘   └──────────┘  └────────────┘
-         │             │              │
-         ▼             ▼              ▼
-    [Groq/     [APIs: IPMA,    [ChromaDB:
-     Google/    Metro, Carris,   PDF, Places,
-     OpenAI]    CP, Dados]       Events]
+         ┌─────────────┼─────────────┬──────────────┐
+         ▼             ▼             ▼              ▼
+    ┌────────┐   ┌──────────┐  ┌────────────┐  ┌──────────┐
+    │ Weather│   │Transport │  │ Researcher │  │ Planner  │
+    │ Agent  │   │  Agent   │  │   Agent    │  │  Agent   │
+    └────┬───┘   └─────┬────┘  └─────┬──────┘  └────┬─────┘
+         │             │             │              │
+         ▼             ▼             ▼              ▼
+    [IPMA API]    [Metro,     [Vector DB,     [Synthesis]
+                  Carris,      Open Data,
+                  CP APIs]     VisitLisboa]
 ```
 
 ## 1.2 Technology Stack
 
 ### Core Framework
-- **LangGraph**: Agent orchestration (v0.2.0+)
+- **LangGraph**: Multi-agent orchestration (v0.2.0+)
 - **LangChain**: LLM abstraction (v0.3.0+)
 - **Streamlit**: Web interface (v1.30.0+)
 
@@ -70,78 +71,66 @@
 - **BeautifulSoup4**: Web scraping
 - **Pandas**: Data manipulation
 
-### APIs
-- **IPMA**: Weather data
-- **Metro de Lisboa**: Line status
-- **Carris Metropolitana**: Bus alerts/schedules
-- **CP**: Train status
-- **Dados.gov**: Open government data
+### APIs & Data Sources (29 Tools)
+- **IPMA**: Weather data (4 tools)
+- **Metro de Lisboa**: Official API (6 tools)
+- **Carris Metropolitana**: Suburban buses (6 tools)
+- **CP**: Train status (2 tools)
+- **Dados Aberta**: Open government data (4 tools)
+- **VisitLisboa**: Events & Places (5 tools)
+- **Multi-modal**: Routing & Summary (2 tools)
 
 ---
 
 # 2. AGENT COMPONENTS
 
-## 2.1 Agent Architecture
+## 2.1 Multi-Agent Architecture
 
-### File: `agent/graph.py`
+### File: `agent/supervisor.py` & `agent/graph.py`
 
-**Purpose**: Implements the LangGraph agent using ReAct pattern.
+**Purpose**: Implements the Supervisor-Worker pattern using LangGraph.
 
 #### Key Components
 
-##### `create_agent_node(llm_with_tools)`
-Creates the main reasoning node.
+##### `Supervisor Agent`
+The orchestrator node that routes user queries to specialized agents.
+- **Role**: Router & State Manager
+- **Decisions**: Which worker to call next, or if the task is FINISH.
+- **Prompt**: System prompt defines routing logic based on user intent.
 
-**Process**:
-1. Receives current state
-2. Adds system prompt if missing
-3. Invokes LLM with tools
-4. Returns updated state
+##### `Specialized Agents` (Workers)
+Each agent is a focused ReAct agent with specific tools:
 
-**Input**:
-- `llm_with_tools`: LLM instance with bound tools
+1.  **Weather Agent** (`agent/agents/weather_agent.py`)
+    -   **Tools**: `get_weather_forecast`, `get_weather_warnings`, etc.
+    -   **Prompt**: Customized for meteorological interpretation.
 
-**Output**:
-- Callable that processes state
+2.  **Transport Agent** (`agent/agents/transport_agent.py`)
+    -   **Tools**: `get_metro_status`, `get_carris_metropolitana_alerts`, `get_train_status`, etc.
+    -   **Prompt**: Focused on logistics, status checking, and routing.
 
-##### `should_continue(state: AgentState) -> str`
-Conditional routing function.
+3.  **Researcher Agent** (`agent/agents/researcher_agent.py`)
+    -   **Tools**: `search_cultural_events`, `search_places_attractions`, `find_nearby_services`.
+    -   **Prompt**: Balanced between RAG (Vector Store) and Open Data search.
 
-**Logic**:
-```python
-if last_message.tool_calls:
-    return "tools"  # Continue to tool execution
-else:
-    return "end"    # End conversation
+4.  **Planner Agent** (`agent/agents/planner_agent.py`)
+    -   **Tools**: None (Pure synthesis).
+    -   **Prompt**: Creates cohesive itineraries based on data from other agents.
+
+#### Graph Structure
 ```
-
-##### `build_agent_graph(provider: str = None)`
-Constructs the complete workflow graph.
-
-**Graph Structure**:
+          ┌─────────────┐
+          │ Supervisor  │
+          └───┬─────┬───┘
+              │     │
+      ┌───────▼─────▼───────┐
+      │  Specialized Agents │
+      └───────┬─────┬───────┘
+              │     │
+          ┌───▼─────▼───┐
+          │    Tools    │
+          └─────────────┘
 ```
-                  ┌─────────┐
-                  │  START  │
-                  └────┬────┘
-                       │
-                       ▼
-                  ┌─────────┐
-           ┌──────┤  Agent  ├──────┐
-           │      └─────────┘      │
-           │                       │
-      tool_calls              no tool_calls
-           │                       │
-           ▼                       ▼
-      ┌─────────┐              ┌─────┐
-      │  Tools  │              │ END │
-      └────┬────┘              └─────┘
-           │
-      (always back to Agent)
-           │
-           └──────────────┘
-```
-
-**Returns**: Compiled graph ready for invocation
 
 #### LisbonAssistant Class
 
@@ -396,267 +385,133 @@ def get_model_info(llm: BaseChatModel) -> str:
 
 # 3. TOOLS API REFERENCE
 
+# 3. TOOLS API REFERENCE
+
 ## 3.1 Weather Tools (IPMA)
 
-### File: `tools/ipma_api.py`
+**Module**: `tools/ipma_api.py`
 
 #### `get_weather_warnings(area: str = "LSB") -> str`
-
-**Purpose**: Fetch active weather warnings for Lisbon.
-
-**Parameters**:
-- `area` (str): Area code (default: "LSB" for Lisbon)
-
-**Returns**: Formatted warning list or "No warnings" message
-
-**API**: `https://api.ipma.pt/open-data/forecast/warnings/warnings_www.json`
-
-**Warning Levels**:
-- 🟢 Green: No warning (filtered out)
-- 🟡 Yellow: Be aware
-- 🟠 Orange: Be prepared
-- 🔴 Red: Take action
-
-**Example Output**:
-```
-⚠️ Active Weather Warnings for Lisbon:
-
-🟡 WIND (Be aware)
-   ⏰ Dec 30, 14:00 to Dec 31, 06:00
-   📝 Strong winds expected in coastal areas
-
-💡 Check IPMA.pt for detailed information.
-```
-
-**Error Handling**:
-- Timeout: 10s with no retry (fast failure)
-- Invalid JSON: Returns error message
-- Empty data: Returns "No warnings"
-
----
+Fetch active weather warnings for Lisbon.
+- **API**: `https://api.ipma.pt/open-data/forecast/warnings/warnings_www.json`
+- **Levels**: Green (No), Yellow (Aware), Orange (Prepared), Red (Action)
 
 #### `get_weather_forecast(days: int = 3) -> str`
-
-**Purpose**: Get daily forecast for Lisbon (1-5 days).
-
-**Parameters**:
-- `days` (int): Number of days (1-5, default: 3)
-
-**Returns**: Formatted forecast with temperatures, precipitation, wind
-
-**API**: `https://api.ipma.pt/open-data/forecast/meteorology/cities/daily/{global_id}.json`
-
-**Lisbon ID**: `1110600` (from `Config.LISBON_GLOBAL_ID`)
-
-**Weather Type Mapping**: 27 IPMA codes to descriptions
-
-**Example Output**:
-```
-🌤️ Weather Forecast for Lisbon
-========================================
-📅 Updated: 2025-12-30T06:00:00
-
-☀️ Monday, Dec 30
-   🌡️ 12°C to 18°C
-   🌤️ Partly cloudy
-   💧 Rain: Unlikely (15%)
-   💨 Wind: Northwest
-
-🌧️ Tuesday, Dec 31
-   🌡️ 14°C to 16°C
-   🌤️ Rain
-   💧 Rain: Likely (75%)
-   💨 Wind: Southwest
-```
-
----
+Get daily forecast for Lisbon (1-5 days).
+- **API**: `https://api.ipma.pt/open-data/forecast/meteorology/cities/daily/{global_id}.json`
+- **Lisbon ID**: 1110600
 
 #### `get_current_weather_summary() -> str`
+Quick summary of today's weather + active warnings.
 
-**Purpose**: Quick summary of today's weather + warnings.
-
-**Parameters**: None
-
-**Returns**: Combined today's forecast and active warnings
-
-**Use Case**: First call for weather queries
-
-**Example Output**:
-```
-🌤️ Lisbon Weather Summary
-========================================
-
-📅 Today (2025-12-30):
-   🌡️ Temperature: 12°C to 18°C
-   🌤️ Conditions: Partly cloudy
-   💧 Rain probability: 15%
-
-✅ No active weather warnings.
-```
+#### `get_portugal_weather_overview() -> str`
+Broad overview of weather across all districts in Portugal.
+- **Use Case**: Queries like "How is the weather in the north?" or specific other cities.
 
 ---
 
 ## 3.2 Transport Tools
 
-### File: `tools/transport_api.py`
+**Module**: `tools/transport_api.py`
 
-#### Metro de Lisboa
+### 3.2.1 Metro de Lisboa (Official API)
 
-##### `get_metro_status() -> str`
+#### `get_metro_status() -> str`
+Real-time status of all 4 lines (Yellow, Blue, Green, Red).
+- **API**: `https://api.metrolisboa.pt` (OAuth2)
 
-**Purpose**: Real-time status of all 4 metro lines.
+#### `get_metro_wait_time(station: str) -> str`
+Real-time wait times for next trains at specific station.
 
-**Returns**: Operational status for each line
+#### `get_metro_line_wait_times(line: str) -> str`
+Wait times for all stations on a given line.
 
-**API**: `https://app.metrolisboa.pt/status/getLinhas.php`
+#### `find_nearest_metro(lat: float, lon: float) -> str`
+Finds nearest stations to GPS coordinates.
 
-**Lines**:
-- 🟡 Yellow (Rato ↔ Odivelas)
-- 🔵 Blue (Santa Apolónia ↔ Reboleira)
-- 🟢 Green (Telheiras ↔ Cais do Sodré)
-- 🔴 Red (S. Sebastião ↔ Aeroporto)
+#### `get_metro_frequency(line: str) -> str`
+Train frequency schedules (e.g., "Every 4 minutes").
 
-**Example Output**:
-```
-🚇 Metro de Lisboa Status
-========================================
+#### `get_all_metro_stations() -> str`
+Lists all stations grouped by line.
 
-🟡 Yellow Line (Rato ↔ Odivelas)
-   ✅ Normal service
+### 3.2.2 Carris Metropolitana (Bus)
 
-🔵 Blue Line (Santa Apolónia ↔ Reboleira)
-   ⚠️ Delays due to technical issues
+#### `get_carris_metropolitana_alerts() -> str`
+Active service alerts (detours, stops moved, suspended service).
+- **API**: `https://api.carrismetropolitana.pt`
 
-🟢 Green Line (Telheiras ↔ Cais do Sodré)
-   ✅ Normal service
+#### `get_carris_metropolitana_stop_info(stop_id: str) -> str`
+Details + Real-time arrivals for a specific stop.
 
-🔴 Red Line (S. Sebastião ↔ Aeroporto)
-   ✅ Normal service
+#### `search_carris_metropolitana_lines(query: str) -> str`
+Search bus lines by number or description.
 
-⚠️ Some lines have service disruptions.
-```
+#### `find_bus_routes(origin, dest) -> str`
+Finds routes between two locations within AML.
 
----
+#### `get_bus_realtime_locations(line_id: str) -> str`
+Real-time GPS positions of buses on a line.
 
-#### Carris Metropolitana (Buses)
+#### `get_bus_schedule(line_id: str) -> str`
+Timetable and stop sequence for a route.
 
-##### `get_carris_alerts() -> str`
+### 3.2.3 CP (Trains)
 
-**Purpose**: Active service alerts for bus network.
+#### `get_train_status() -> str`
+Real-time train delays (filtered for Lisbon area).
 
-**Returns**: Alert descriptions with affected routes
+#### `search_cp_stations(query: str) -> str`
+Search for train stations in AML.
 
-**API**: `https://api.carrismetropolitana.pt/v2/alerts`
+### 3.2.4 Multi-modal
 
-**Alert Effects**:
-- 🚫 NO_SERVICE: Complete suspension
-- ⚠️ REDUCED_SERVICE: Limited frequency
-- 🕐 SIGNIFICANT_DELAYS: Major delays
-- ↩️ DETOUR: Route changes
-- 📍 STOP_MOVED: Stop relocation
+#### `get_transport_summary() -> str`
+Combined status dashboard (Metro + Bus + Train).
 
-**Example Output**:
-```
-🚌 Carris Metropolitana Alerts (3 active)
-==================================================
-
-1. ↩️ Route Deviation - Line 728
-   📍 Routes: 728, 729, 730
-   🔸 Cause: Construction Work
-   🔸 Effect: Detour
-   📝 Temporary route change due to road works
-
-2. ⚠️ Service Reduction
-   📍 Routes: 705, 710
-   🔸 Cause: Weather
-   🔸 Effect: Reduced Service
-```
-
-##### `get_carris_stop_info(stop_id: str) -> str`
-
-**Purpose**: Bus stop details + real-time arrivals.
-
-**Parameters**:
-- `stop_id` (str): Stop ID (e.g., "060001")
-
-**Returns**: Stop info with next arrivals
-
-**Example Output**:
-```
-🚏 Bus Stop Information
-========================================
-
-📍 Praça do Comércio
-   📌 Lisbon
-   🗺️ (38.7076, -9.1365)
-   🚌 Lines: 728, 711, 714, 732, 735
-
-⏱️ Upcoming Arrivals:
-   1. Line 728 → Portela (Aeroporto)
-      ⏰ 3 min
-   2. Line 711 → Amadora
-      ⏰ 12 min
-```
+#### `get_route_between_stations(origin, dest) -> str`
+Routing assistance between transport nodes.
 
 ---
 
 ## 3.3 Open Data Tools
 
-### File: `tools/dados_abertos.py`
+**Module**: `tools/dados_abertos.py`
 
-#### `find_nearby_services(service_type, user_lat, user_lon, max_results) -> str`
+#### `find_nearby_services(service_type, lat, lon) -> str`
+Find public services (pharmacies, hospitals, wifi) by proximity.
+- **Source**: Dados Abertos (GeoJSON)
 
-**Purpose**: Find public services with proximity filtering.
+#### `list_available_datasets() -> str`
+Browse all available 100+ datasets.
 
-**Parameters**:
-- `service_type` (str): Service type (farmácias, hospitais, escolas, wifi, metro, jardins)
-- `user_lat` (float, optional): User latitude
-- `user_lon` (float, optional): User longitude
-- `max_results` (int): Maximum results (default: 5)
+#### `get_dataset_details(name) -> str`
+Get metadata and schema for a dataset.
 
-**Process**:
-1. Search metadata for matching dataset
-2. Fetch GeoJSON from stable URL (with retry)
-3. Extract coordinates from features
-4. Calculate Haversine distances
-5. Sort by proximity
-6. Return top N results
-
-**Example Output**:
-```
-📍 Found 5 results from 'Farmácias de Lisboa':
-
-1. Farmácia Central
-   📍 Rua Augusta 125, Lisboa
-   📏 0.32 km away
-   🗺️ (38.7125, -9.1386)
-
-2. Farmácia Barreiros
-   📍 Praça da Figueira 7, Lisboa
-   📏 0.58 km away
-   🗺️ (38.7141, -9.1389)
-```
-
-**Error Handling**:
-- Retry logic: 3 attempts with exponential backoff (2s, 4s, 8s)
-- Timeout: 15s per request
-- GeoJSON validation before processing
+#### `find_place_in_datasets(query) -> str`
+Search for specific places/entities by name across all datasets.
 
 ---
 
 ## 3.4 VisitLisboa Tools
 
-### File: `tools/visitlisboa_api.py`
+**Module**: `tools/visitlisboa_api.py`
 
-#### `search_cultural_events(query, category, date_filter, max_results) -> str`
+#### `search_cultural_events(query, category, date_filter) -> str`
+Search events with **date filtering** importance.
+- **Parameters**: `date_filter` ("today", "this weekend") is critical.
 
-**Purpose**: Search events with CRITICAL date filtering.
+#### `search_places_attractions(query, category) -> str`
+Semantic search for places (museums, viewpoints, restaurants).
 
-**Parameters**:
-- `query` (str, optional): Natural language search
-- `category` (str, optional): Event category filter
-- `date_filter` (str, optional): Date range (default: "upcoming")
-- `max_results` (int): Max results (default: 10)
+#### `get_event_categories() -> str`
+List available event categories.
+
+#### `get_place_categories() -> str`
+List available place categories.
+
+#### `search_lisbon_knowledge(query) -> str`
+ Comprehensive RAG search across PDF guide, Events, and Places.
 
 **Date Parsing**:
 Supports natural language:
@@ -1430,7 +1285,13 @@ lisbon_places (301 docs)
 ### Agent Test Flow
 
 ```bash
-python agent/graph.py
+# Test the Multi-Agent System (Supervisor + Agents)
+python agent/agents/supervisor.py
+
+# Test Specialized Agents individually
+python agent/agents/weather_agent.py
+python agent/agents/transport_agent.py
+python agent/agents/researcher_agent.py
 ```
 
 **Tests**:

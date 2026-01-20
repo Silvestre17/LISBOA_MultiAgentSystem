@@ -56,11 +56,14 @@ The system follows a **modular, tool-based architecture** powered by **LangGraph
 
 ### Core Components
 
-1. **LangGraph Agent (ReAct Pattern)** 🤖
-   - **Reasoning and Acting** paradigm for intelligent decision-making
-   - **18 specialized tools** for different data sources
-   - **Persistent state management** for conversational context
-   - **Multi-provider LLM support** (Groq, Google, OpenAI, local)
+1. **Multi-Agent System (LangGraph)** 🤖
+   - **Supervisor Agent**: Orchestrator that analyzes queries and routes them to the most appropriate specialized agent (parallel execution supported)
+   - **Weather Agent**: IPMA weather data and forecasts
+   - **Transport Agent**: Metro, bus, and train information
+   - **Researcher Agent**: RAG for places and events
+   - **Planner Agent**: Itinerary synthesis
+   - **29 specialized tools** for different data sources
+   - **Multi-provider LLM support** (LM Studio, Groq, Google, OpenAI, Ollama)
 
 2. **Vector Store (RAG)** 📚
    - **ChromaDB** with **BAAI/bge-m3** multilingual embeddings
@@ -70,9 +73,9 @@ The system follows a **modular, tool-based architecture** powered by **LangGraph
 
 3. **Real-Time APIs** ⚡
    - **IPMA**: Weather forecasts, warnings, current conditions
-   - **Metro de Lisboa**: Line status and disruptions
-   - **Carris Metropolitana**: Bus alerts, stops, routes, real-time arrivals
-   - **CP (Comboios de Portugal)**: Train status and delays
+   - **Metro de Lisboa**: Official API with OAuth2 - Line status, wait times, frequencies
+   - **Carris Metropolitana**: Bus alerts, stops, routes, real-time arrivals, GPS tracking
+   - **CP (Comboios de Portugal)**: Train status, delays, AML stations
 
 4. **Static Knowledge** 📊
    - **VisitLisboa**: Cultural events, tourist attractions (web-scraped)
@@ -235,12 +238,12 @@ Thesis2025-26_AFGS/
 │   ├── llm_factory.py                  # LLM provider factory (5 providers)
 │   └── __init__.py
 │
-├── tools/                              # Agent Tools (18 total)
+├── tools/                              # Agent Tools (27 total)
 │   ├── ipma_api.py                     # Weather tools (3 tools)
-│   ├── transport_api.py                # Transport tools (6 tools)
-│   ├── dados_abertos.py                # Open data tools (2 tools)
-│   ├── visitlisboa_api.py              # VisitLisboa search tools (3 tools)
-│   ├── vector_store.py                 # RAG tools (2 tools + sync)
+│   ├── transport_api.py                # Transport tools (16 tools)
+│   ├── dados_abertos.py                # Open data tools (3 tools)
+│   ├── visitlisboa_api.py              # VisitLisboa search tools (5 tools)
+│   ├── vector_store.py                 # RAG tools (sync + search)
 │   └── __init__.py
 │
 ├── data_collection/                    # Data Collection Scripts
@@ -286,7 +289,7 @@ Thesis2025-26_AFGS/
 - **[INDEX.md](./docs/INDEX.md)** - Quick reference guide with navigation
 - **[COMPLETE_DOCUMENTATION.md](./docs/COMPLETE_DOCUMENTATION.md)** - ⭐ **START HERE** - Full technical reference (100+ pages)
 - **[ARCHITECTURE_DIAGRAMS.md](./docs/architecture/ARCHITECTURE_DIAGRAMS.md)** - 8 detailed system diagrams
-- **[tools_overview.md](./docs/api/tools_overview.md)** - API reference for all 18 tools
+- **[tools_overview.md](./docs/tools_overview.md)** - API reference for all 29 tools
 
 ### Quick Links
 - **Installation & Setup**: See [Getting Started](#-getting-started) below
@@ -395,13 +398,14 @@ python agent/graph.py
 
 ## 📈 Project Statistics
 
-- **Python Modules**: 15+
-- **Agent Tools**: 18 (across 5 modules)
+- **Python Modules**: 20+
+- **Agent Tools**: 29 (across 4 modules)
+- **Specialized Agents**: 5 (Supervisor, Weather, Transport, Researcher, Planner)
 - **Data Sources**: 4 real-time APIs + 2 scraped sources
 - **Vector DB Documents**: ~1,400 chunks (PDF guide + events + places)
 - **Datasets**: 200+ events, 300+ places, 100+ open data GeoJSON
-- **Lines of Code**: ~5,000
-- **Documentation**: 100+ pages
+- **Lines of Code**: ~8,000+
+- **Documentation**: 150+ pages
 
 ## 🤝 Contributing
 

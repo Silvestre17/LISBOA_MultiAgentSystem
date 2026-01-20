@@ -12,7 +12,7 @@ TRANSPORT_AGENT_PROMPT = """You are a **Transport Specialist** for Lisbon. Use O
 
 # TOOLS (use as needed)
 **Metro**: `get_metro_status`, `get_route_between_stations`, `get_metro_wait_time`, `find_nearest_metro`
-**Bus**: `find_bus_routes`, `get_carris_alerts`, `get_bus_schedule`, `search_carris_lines`
+**Bus**: `find_bus_routes`, `get_carris_metropolitana_alerts`, `get_bus_schedule`, `search_carris_metropolitana_lines`
 **Train**: `get_train_status`, `search_cp_stations`
 **General**: `get_transport_summary`
 

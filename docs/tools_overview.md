@@ -1,6 +1,8 @@
 # Tools API Overview
 
-This document provides an overview of all available tools in the Lisbon Urban Assistant project.
+This document provides an overview of all **29 available tools** in the Lisbon Urban Assistant project.
+
+**Last Updated**: January 2026
 
 ---
 
@@ -28,6 +30,7 @@ This document provides an overview of all available tools in the Lisbon Urban As
 | `get_weather_warnings()` | Active weather warnings for Lisbon | Formatted warning list |
 | `get_weather_forecast()` | 1-5 day forecast | Daily forecast with temps, precipitation |
 | `get_current_weather_summary()` | Combined summary | Today's weather + warnings |
+| `get_portugal_weather_overview()` | Weather for all Portugal locations | List of forecasts by district |
 
 **See**: [ipma_api.md](ipma_api.md) for detailed documentation.
 
@@ -36,19 +39,46 @@ This document provides an overview of all available tools in the Lisbon Urban As
 ## Transport Tools
 
 **Module**: `tools/transport_api.py`  
-**Data Sources**: Metro de Lisboa, Carris Metropolitana, CP  
+**Data Sources**: Metro de Lisboa (Official API), Carris Metropolitana, CP  
 **Update Frequency**: Real-time API calls
 
-### Available Functions
+### Metro de Lisboa (6 tools)
 
 | Function | Description | Returns |
 |----------|-------------|---------|
 | `get_metro_status()` | Status of all 4 metro lines | Line-by-line operational status |
-| `get_carris_alerts()` | Active bus service alerts | Alert descriptions and affected routes |
-| `get_carris_stop_info()` | Bus stop details + arrivals | Stop info with real-time arrivals |
-| `search_carris_lines()` | Search bus lines by name/number | Matching line information |
-| `get_train_status()` | CP train delays | Train status with delay information |
-| `get_transport_summary()` | All transport overview | Combined status of metro/bus/train |
+| `get_metro_wait_time(station)` | Real-time wait times at a station | Next trains per direction |
+| `get_metro_line_wait_times(line)` | Wait times for all stations on a line | Line-wide wait times |
+| `find_nearest_metro(lat, lon)` | Find nearest metro stations by GPS | Sorted by distance |
+| `get_metro_frequency(line, day_type)` | Train frequency schedules | Timetable by period |
+| `get_all_metro_stations()` | List all 50 metro stations | Stations grouped by line |
+
+### Carris Metropolitana - Bus (6 tools)
+
+| Function | Description | Returns |
+|----------|-------------|---------|
+| `get_carris_metropolitana_alerts()` | Active bus service alerts | Alert descriptions and affected routes |
+| `get_carris_metropolitana_stop_info(stop_id)` | Bus stop details + real-time arrivals | Stop info with ETAs |
+| `search_carris_metropolitana_lines(query)` | Search bus lines by name/number | Matching line information |
+| `find_bus_routes(origin, destination)` | Find bus routes between locations | Direct and connecting routes |
+| `get_bus_realtime_locations(line_id)` | Real-time GPS bus tracking | Active buses on a line |
+| `get_bus_schedule(line_id)` | Bus route schedule and stops | Timetable and stop list |
+
+### CP - Trains (2 tools)
+
+| Function | Description | Returns |
+|----------|-------------|---------|
+| `get_train_status()` | CP train delays (AML filtered) | Train status with delays |
+| `search_cp_stations(query)` | Search CP stations in AML region | Station list with codes |
+
+### Multi-modal (2 tools)
+
+| Function | Description | Returns |
+|----------|-------------|---------|
+| `get_transport_summary()` | Overview of all transport systems | Combined metro/bus/train status |
+| `get_route_between_stations(origin, dest)` | Metro routing assistance | Route with transfers |
+
+**Note**: Carris Metropolitana operates suburban buses in the Greater Lisbon Area. Urban buses within Lisbon city are operated by Carris (no public API).
 
 **See**: [transport_api.md](transport_api.md) for detailed documentation.
 
@@ -67,6 +97,7 @@ This document provides an overview of all available tools in the Lisbon Urban As
 | `find_nearby_services()` | Search services by type + location | Service list with distances |
 | `list_available_datasets()` | Browse all available datasets | Dataset list with descriptions |
 | `get_dataset_details()` | Get dataset schema and info | Detailed dataset information |
+| `find_place_in_datasets()` | Search places by name across datasets | List of places from GeoJSON files |
 
 **Key Features**:
 - **Dynamic GeoJSON Fetching**: Fetches data on-demand from stable URLs
@@ -74,6 +105,17 @@ This document provides an overview of all available tools in the Lisbon Urban As
 - **Retry Logic**: 3 retries with exponential backoff (15s timeout)
 
 **See**: [dados_abertos.md](dados_abertos.md) for detailed documentation.
+
+### Example Usage
+
+```python
+# Search for specific places in open data (e.g. "Fernando Pessoa")
+places = find_place_in_datasets.invoke({
+    "query": "Fernando Pessoa",
+    "max_results": 3
+})
+# Returns: List of libraries, gardens, or statues with that name
+```
 
 ---
 
@@ -139,7 +181,7 @@ This document provides an overview of all available tools in the Lisbon Urban As
 Real-Time (API):
 ├── IPMA Weather (get_weather_*, get_current_weather_summary)
 ├── Metro Status (get_metro_status)
-├── Carris Alerts (get_carris_alerts, get_carris_stop_info)
+├── Carris Metropolitana Alerts (get_carris_metropolitana_alerts, get_carris_metropolitana_stop_info)
 └── Train Status (get_train_status)
 
 On-Demand Fetch:
@@ -180,10 +222,11 @@ Textual Data:
 - "What's the weather?" → `get_current_weather_summary()`
 - "Weather next week?" → `get_weather_forecast(days=7)`
 - "Any weather warnings?" → `get_weather_warnings()`
+- "Weather in Porto/Faro?" → `get_portugal_weather_overview()`
 
 **Transport**:
 - "Is metro working?" → `get_metro_status()`
-- "Bus delays?" → `get_carris_alerts()`
+- "Bus delays?" → `get_carris_metropolitana_alerts()`
 - "Transport status?" → `get_transport_summary()`
 
 **Places/Attractions**:
@@ -228,6 +271,19 @@ All tools implement:
 
 ## Performance Considerations
 
+### Project Statistics
+
+| Category | Count |
+|----------|-------|
+| Weather Tools (IPMA) | 4 |
+| Transport - Metro | 6 |
+| Transport - Bus (Carris Metropolitana) | 6 |
+| Transport - Train (CP) | 2 |
+| Transport - Multi-modal | 2 |
+| Open Data (Lisboa Aberta) | 4 |
+| VisitLisboa (Events & Places) | 5 |
+| **Total Tools** | **29** |
+
 ### Response Times
 
 | Tool Category | Avg Response Time | Notes |
@@ -269,6 +325,16 @@ The agent:
 4. **Handles errors** transparently
 
 **See**: [agent_architecture.md](../architecture/agent_architecture.md) for agent design.
+
+### Example 5: Searching Datasets by Name
+
+```python
+from tools.dados_abertos import find_place_in_datasets
+
+# Find dataset entries dealing with "Fernando Pessoa"
+results = find_place_in_datasets.invoke({"query": "Fernando Pessoa"})
+print(results)
+```
 
 ---
 
