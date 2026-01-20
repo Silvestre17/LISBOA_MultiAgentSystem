@@ -4,6 +4,8 @@
 
 **Root Cause:** Python script processed all documents in a single run without batch limiting.
 
+**Context:** This workflow maintains the knowledge base for the **Researcher Agent**, ensuring it has access to the latest events and places from VisitLisboa.
+
 ---
 
 ## Solution: Incremental Batch Processing

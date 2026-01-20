@@ -56,7 +56,8 @@ from agent.agents.base import clean_response
 from tools.ipma_api import (
     get_weather_warnings,
     get_weather_forecast,
-    get_current_weather_summary
+    get_current_weather_summary,
+    get_portugal_weather_overview   # Weather for all Portugal locations
 )
 from tools.transport_api import (
     get_metro_status,
@@ -65,9 +66,9 @@ from tools.transport_api import (
     find_nearest_metro,            # Find nearest metro station by GPS
     get_metro_frequency,           # Train frequency schedules
     get_all_metro_stations,        # List all metro stations
-    get_carris_alerts,
-    get_carris_stop_info,
-    search_carris_lines,
+    get_carris_metropolitana_alerts,
+    get_carris_metropolitana_stop_info,
+    search_carris_metropolitana_lines,
     get_train_status,
     get_transport_summary,
     get_route_between_stations,
@@ -79,7 +80,8 @@ from tools.transport_api import (
 from tools.dados_abertos import (
     find_nearby_services,
     list_available_datasets,
-    get_dataset_details
+    get_dataset_details,
+    find_place_in_datasets          # Search places by name across datasets
 )
 from tools.visitlisboa_api import (
     search_cultural_events,
@@ -149,10 +151,11 @@ def get_all_tools() -> List:
         List: List of LangChain tools.
     """
     return [
-        # Weather Tools
+        # Weather Tools (IPMA)
         get_weather_warnings,
         get_weather_forecast,
         get_current_weather_summary,
+        get_portugal_weather_overview,  # Weather for all Portugal
         
         # Transport Tools
         get_metro_status,
@@ -161,9 +164,9 @@ def get_all_tools() -> List:
         find_nearest_metro,           # Find nearest metro by GPS
         get_metro_frequency,          # Train frequency schedules
         get_all_metro_stations,       # List all metro stations
-        get_carris_alerts,
-        get_carris_stop_info,
-        search_carris_lines,
+        get_carris_metropolitana_alerts,
+        get_carris_metropolitana_stop_info,
+        search_carris_metropolitana_lines,
         get_train_status,
         get_transport_summary,
         get_route_between_stations,   # Metro routing assistance
@@ -176,6 +179,7 @@ def get_all_tools() -> List:
         find_nearby_services,
         list_available_datasets,
         get_dataset_details,
+        find_place_in_datasets,       # Search places by name
         
         # VisitLisboa Tools (Events & Places) - Semantic Search
         search_cultural_events,

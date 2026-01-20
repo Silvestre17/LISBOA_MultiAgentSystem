@@ -153,18 +153,18 @@ os autocarros suburbanos (Amadora, Sintra, Cascais, Oeiras, Almada, etc.).
 """
 
 # ==========================================================================
-# Carris Stops Cache (In-Memory)
+# Carris Metropolitana Stops Cache (In-Memory)
 # ==========================================================================
-# Cache for all Carris bus stops and lines - loaded on demand
+# Cache for all Carris Metropolitana bus stops and lines - loaded on demand
 # This avoids repeated API calls and enables fast proximity search
 # Memory usage: ~12000 stops * ~250 bytes = ~3MB (very efficient)
 
-_carris_stops_cache: Optional[List[Dict[str, Any]]] = None
-_carris_stops_last_load: Optional[datetime] = None
-_carris_lines_cache: Optional[List[Dict[str, Any]]] = None
-_carris_lines_last_load: Optional[datetime] = None
-_carris_routes_cache: Optional[List[Dict[str, Any]]] = None
-_carris_routes_last_load: Optional[datetime] = None
+_carris_metropolitana_stops_cache: Optional[List[Dict[str, Any]]] = None
+_carris_metropolitana_stops_last_load: Optional[datetime] = None
+_carris_metropolitana_lines_cache: Optional[List[Dict[str, Any]]] = None
+_carris_metropolitana_lines_last_load: Optional[datetime] = None
+_carris_metropolitana_routes_cache: Optional[List[Dict[str, Any]]] = None
+_carris_metropolitana_routes_last_load: Optional[datetime] = None
 
 # ==========================================================================
 # CP Stations Cache (In-Memory) - AML Only
@@ -1477,11 +1477,11 @@ def resolve_location(
     return result
 
 
-def load_carris_stops(force_reload: bool = False) -> List[Dict[str, Any]]:
+def load_carris_metropolitana_stops(force_reload: bool = False) -> List[Dict[str, Any]]:
     """
     Loads all Carris Metropolitana bus stops into memory cache.
     
-    This function fetches ~5000 bus stops from the Carris API and caches
+    This function fetches ~5000 bus stops from the Carris Metropolitana API and caches
     them in memory for fast proximity searches. The cache is automatically
     refreshed every 24 hours or when force_reload is True.
     
@@ -1498,28 +1498,28 @@ def load_carris_stops(force_reload: bool = False) -> List[Dict[str, Any]]:
         List[Dict]: List of stop dictionaries with id, name, lat, lon, lines.
         
     Example:
-        >>> stops = load_carris_stops()
+        >>> stops = load_carris_metropolitana_stops()
         >>> len(stops)
         5234  # Approximately 5000 stops
     """
-    global _carris_stops_cache, _carris_stops_last_load
+    global _carris_metropolitana_stops_cache, _carris_metropolitana_stops_last_load
     
     # Return cached data if valid and not forcing reload
-    if not force_reload and _carris_stops_cache and _is_cache_valid(_carris_stops_last_load):
-        logger.info(f"Using cached Carris stops ({len(_carris_stops_cache)} stops)")
-        return _carris_stops_cache
+    if not force_reload and _carris_metropolitana_stops_cache and _is_cache_valid(_carris_metropolitana_stops_last_load):
+        logger.info(f"Using cached Carris Metropolitana stops ({len(_carris_metropolitana_stops_cache)} stops)")
+        return _carris_metropolitana_stops_cache
     
-    logger.info("Loading all Carris stops from API...")
+    logger.info("Loading all Carris Metropolitana stops from API...")
     
     try:
-        # Fetch all stops from Carris API (returns JSON array)
+        # Fetch all stops from Carris Metropolitana API (returns JSON array)
         response = requests.get(CARRIS_STOPS_URL, timeout=30)
         response.raise_for_status()
         raw_stops = response.json()
         
         if not isinstance(raw_stops, list):
-            logger.error("Unexpected response format from Carris stops API")
-            return _carris_stops_cache or []
+            logger.error("Unexpected response format from Carris Metropolitana stops API")
+            return _carris_metropolitana_stops_cache or []
         
         # Process and cache stops
         # v1 API fields: id, name, lat, lon, municipality_name, lines, locality, facilities
@@ -1550,24 +1550,24 @@ def load_carris_stops(force_reload: bool = False) -> List[Dict[str, Any]]:
                 processed_stops.append(processed_stop)
         
         # Update cache
-        _carris_stops_cache = processed_stops
-        _carris_stops_last_load = datetime.now()
+        _carris_metropolitana_stops_cache = processed_stops
+        _carris_metropolitana_stops_last_load = datetime.now()
         
-        logger.info(f"\033[1;32m✅ Loaded {len(processed_stops)} Carris stops\033[0m")
+        logger.info(f"\033[1;32m✅ Loaded {len(processed_stops)} Carris Metropolitana stops\033[0m")
         return processed_stops
         
     except requests.exceptions.Timeout:
-        logger.error("Timeout loading Carris stops (30s)")
-        return _carris_stops_cache or []
+        logger.error("Timeout loading Carris Metropolitana stops (30s)")
+        return _carris_metropolitana_stops_cache or []
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error loading Carris stops: {e}")
-        return _carris_stops_cache or []
+        logger.error(f"Error loading Carris Metropolitana stops: {e}")
+        return _carris_metropolitana_stops_cache or []
     except Exception as e:
-        logger.error(f"Unexpected error loading Carris stops: {e}")
-        return _carris_stops_cache or []
+        logger.error(f"Unexpected error loading Carris Metropolitana stops: {e}")
+        return _carris_metropolitana_stops_cache or []
 
 
-def load_carris_lines(force_reload: bool = False) -> List[Dict[str, Any]]:
+def load_carris_metropolitana_lines(force_reload: bool = False) -> List[Dict[str, Any]]:
     """
     Loads all Carris Metropolitana bus lines into memory cache.
     
@@ -1582,28 +1582,28 @@ def load_carris_lines(force_reload: bool = False) -> List[Dict[str, Any]]:
         List[Dict]: List of line dictionaries with id, name, color, municipalities.
         
     Example:
-        >>> lines = load_carris_lines()
+        >>> lines = load_carris_metropolitana_lines()
         >>> lines[0]
         {'id': '1001', 'short_name': '1001', 'long_name': 'Alfragide - Reboleira', 'color': '#C61D23'}
     """
-    global _carris_lines_cache, _carris_lines_last_load
+    global _carris_metropolitana_lines_cache, _carris_metropolitana_lines_last_load
     
     # Return cached data if valid and not forcing reload
-    if not force_reload and _carris_lines_cache and _is_cache_valid(_carris_lines_last_load):
-        logger.info(f"Using cached Carris lines ({len(_carris_lines_cache)} lines)")
-        return _carris_lines_cache
+    if not force_reload and _carris_metropolitana_lines_cache and _is_cache_valid(_carris_metropolitana_lines_last_load):
+        logger.info(f"Using cached Carris Metropolitana lines ({len(_carris_metropolitana_lines_cache)} lines)")
+        return _carris_metropolitana_lines_cache
     
-    logger.info("Loading all Carris lines from API...")
+    logger.info("Loading all Carris Metropolitana lines from API...")
     
     try:
-        # Fetch all lines from Carris API
+        # Fetch all lines from Carris Metropolitana API
         response = requests.get(CARRIS_LINES_URL, timeout=30)
         response.raise_for_status()
         raw_lines = response.json()
         
         if not isinstance(raw_lines, list):
-            logger.error("Unexpected response format from Carris lines API")
-            return _carris_lines_cache or []
+            logger.error("Unexpected response format from Carris Metropolitana lines API")
+            return _carris_metropolitana_lines_cache or []
         
         # Process and cache lines
         # v1 API: id, short_name, long_name, color, text_color, municipalities, localities, routes, patterns
@@ -1623,31 +1623,31 @@ def load_carris_lines(force_reload: bool = False) -> List[Dict[str, Any]]:
             processed_lines.append(processed_line)
         
         # Update cache
-        _carris_lines_cache = processed_lines
-        _carris_lines_last_load = datetime.now()
+        _carris_metropolitana_lines_cache = processed_lines
+        _carris_metropolitana_lines_last_load = datetime.now()
         
-        logger.info(f"\033[1;32m✅ Loaded {len(processed_lines)} Carris lines\033[0m")
+        logger.info(f"\033[1;32m✅ Loaded {len(processed_lines)} Carris Metropolitana lines\033[0m")
         return processed_lines
         
     except requests.exceptions.Timeout:
-        logger.error("Timeout loading Carris lines (30s)")
-        return _carris_lines_cache or []
+        logger.error("Timeout loading Carris Metropolitana lines (30s)")
+        return _carris_metropolitana_lines_cache or []
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error loading Carris lines: {e}")
-        return _carris_lines_cache or []
+        logger.error(f"Error loading Carris Metropolitana lines: {e}")
+        return _carris_metropolitana_lines_cache or []
     except Exception as e:
-        logger.error(f"Unexpected error loading Carris lines: {e}")
-        return _carris_lines_cache or []
+        logger.error(f"Unexpected error loading Carris Metropolitana lines: {e}")
+        return _carris_metropolitana_lines_cache or []
 
 
-def load_carris_routes(force_reload: bool = False) -> List[Dict[str, Any]]:
+def load_carris_metropolitana_routes(force_reload: bool = False) -> List[Dict[str, Any]]:
     """
     Loads all Carris Metropolitana bus routes into memory cache.
     
-    This function fetches all bus routes (800+) from the Carris API and 
+    This function fetches all bus routes (800+) from the Carris Metropolitana API and 
     caches them for route matching. Each route has a line_id and patterns.
     
-    Note: For user display, prefer load_carris_lines() which has more info.
+    Note: For user display, prefer load_carris_metropolitana_lines() which has more info.
     Routes are useful for internal pattern matching.
     
     Args:
@@ -1657,28 +1657,28 @@ def load_carris_routes(force_reload: bool = False) -> List[Dict[str, Any]]:
         List[Dict]: List of route dictionaries with id, line_id, name, patterns.
         
     Example:
-        >>> routes = load_carris_routes()
+        >>> routes = load_carris_metropolitana_routes()
         >>> len(routes)
         850  # Approximately 800+ routes
     """
-    global _carris_routes_cache, _carris_routes_last_load
+    global _carris_metropolitana_routes_cache, _carris_metropolitana_routes_last_load
     
     # Return cached data if valid and not forcing reload
-    if not force_reload and _carris_routes_cache and _is_cache_valid(_carris_routes_last_load):
-        logger.info(f"Using cached Carris routes ({len(_carris_routes_cache)} routes)")
-        return _carris_routes_cache
+    if not force_reload and _carris_metropolitana_routes_cache and _is_cache_valid(_carris_metropolitana_routes_last_load):
+        logger.info(f"Using cached Carris Metropolitana routes ({len(_carris_metropolitana_routes_cache)} routes)")
+        return _carris_metropolitana_routes_cache
     
-    logger.info("Loading all Carris routes from API...")
+    logger.info("Loading all Carris Metropolitana routes from API...")
     
     try:
-        # Fetch all routes from Carris API
+        # Fetch all routes from Carris Metropolitana API
         response = requests.get(CARRIS_ROUTES_URL, timeout=30)
         response.raise_for_status()
         raw_routes = response.json()
         
         if not isinstance(raw_routes, list):
-            logger.error("Unexpected response format from Carris routes API")
-            return _carris_routes_cache or []
+            logger.error("Unexpected response format from Carris Metropolitana routes API")
+            return _carris_metropolitana_routes_cache or []
         
         # Process and cache routes
         # v1 API: id, short_name, long_name, color, text_color, line_id, patterns, municipalities, localities
@@ -1698,21 +1698,21 @@ def load_carris_routes(force_reload: bool = False) -> List[Dict[str, Any]]:
             processed_routes.append(processed_route)
         
         # Update cache
-        _carris_routes_cache = processed_routes
-        _carris_routes_last_load = datetime.now()
+        _carris_metropolitana_routes_cache = processed_routes
+        _carris_metropolitana_routes_last_load = datetime.now()
         
-        logger.info(f"\033[1;32m✅ Loaded {len(processed_routes)} Carris routes\033[0m")
+        logger.info(f"\033[1;32m✅ Loaded {len(processed_routes)} Carris Metropolitana routes\033[0m")
         return processed_routes
         
     except requests.exceptions.Timeout:
-        logger.error("Timeout loading Carris routes (30s)")
-        return _carris_routes_cache or []
+        logger.error("Timeout loading Carris Metropolitana routes (30s)")
+        return _carris_metropolitana_routes_cache or []
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error loading Carris routes: {e}")
-        return _carris_routes_cache or []
+        logger.error(f"Error loading Carris Metropolitana routes: {e}")
+        return _carris_metropolitana_routes_cache or []
     except Exception as e:
-        logger.error(f"Unexpected error loading Carris routes: {e}")
-        return _carris_routes_cache or []
+        logger.error(f"Unexpected error loading Carris Metropolitana routes: {e}")
+        return _carris_metropolitana_routes_cache or []
 
 
 def find_stops_near_coordinates(
@@ -1745,10 +1745,10 @@ def find_stops_near_coordinates(
         {'name': 'Praça do Comércio', 'distance_km': 0.05, 'lines': ['15E', '25E']}
     """
     # Ensure stops are loaded
-    stops = load_carris_stops()
+    stops = load_carris_metropolitana_stops()
     
     if not stops:
-        logger.warning("No Carris stops available for proximity search")
+        logger.warning("No Carris Metropolitana stops available for proximity search")
         return []
     
     # Calculate distance for each stop and filter by radius
@@ -1801,10 +1801,10 @@ def find_stops_by_name(
         {'name': 'Centro Comercial Colombo', 'lines': ['701', '750', '754']}
     """
     # Ensure stops are loaded
-    stops = load_carris_stops()
+    stops = load_carris_metropolitana_stops()
     
     if not stops:
-        logger.warning("No Carris stops available for name search")
+        logger.warning("No Carris Metropolitana stops available for name search")
         return []
     
     query_lower = name_query.lower().strip()
@@ -1850,8 +1850,8 @@ def find_common_routes(
         {'line_id': '750', 'long_name': 'Algés - Campo Grande', 'origin_stop': {...}, 'dest_stop': {...}}
     """
     # Ensure stops and lines are loaded
-    stops = load_carris_stops()
-    lines = load_carris_lines()
+    stops = load_carris_metropolitana_stops()
+    lines = load_carris_metropolitana_lines()
     
     if not stops:
         return []
@@ -2496,7 +2496,7 @@ def get_all_metro_stations() -> str:
 # ==========================================================================
 
 @tool
-def get_carris_alerts() -> str:
+def get_carris_metropolitana_alerts() -> str:
     """
     Gets active service alerts from Carris Metropolitana (bus network).
     Includes information about route disruptions, detours, and service changes.
@@ -2505,15 +2505,15 @@ def get_carris_alerts() -> str:
         str: List of active alerts with affected routes and timing.
         
     Example:
-        >>> get_carris_alerts()
+        >>> get_carris_metropolitana_alerts()
     """
     data = fetch_json_with_retry(CARRIS_ALERTS_URL)
     
     if not data:
-        return "❌ Failed to fetch Carris alerts. The API may be temporarily unavailable."
+        return "❌ Failed to fetch Carris Metropolitana alerts. The API may be temporarily unavailable."
     
     if not isinstance(data, list):
-        return "❌ Unexpected response format from Carris API."
+        return "❌ Unexpected response format from Carris Metropolitana API."
     
     if not data:
         return "✅ No active alerts from Carris Metropolitana.\n\n🚌 Bus services operating normally."
@@ -2604,9 +2604,9 @@ def get_carris_alerts() -> str:
 
 
 @tool
-def get_carris_stop_info(stop_id: str) -> str:
+def get_carris_metropolitana_stop_info(stop_id: str) -> str:
     """
-    Gets information about a specific Carris bus stop including real-time arrivals.
+    Gets information about a specific Carris Metropolitana bus stop including real-time arrivals.
     
     Args:
         stop_id (str): The stop ID (e.g., '060001' for a specific stop).
@@ -2615,7 +2615,7 @@ def get_carris_stop_info(stop_id: str) -> str:
         str: Stop information and upcoming arrivals.
         
     Example:
-        >>> get_carris_stop_info("060001")
+        >>> get_carris_metropolitana_stop_info("060001")
     """
     # Get stop details
     stop_url = f"{CARRIS_STOPS_URL}/{stop_id}"
@@ -2679,7 +2679,7 @@ def get_carris_stop_info(stop_id: str) -> str:
 
 
 @tool
-def search_carris_lines(query: str) -> str:
+def search_carris_metropolitana_lines(query: str) -> str:
     """
     Searches for Carris Metropolitana (suburban) bus lines by number, name, or destination.
     
@@ -2694,9 +2694,9 @@ def search_carris_lines(query: str) -> str:
         str: Matching lines with route details.
         
     Examples:
-        >>> search_carris_lines("1718")     # By line number
-        >>> search_carris_lines("Belem")     # By destination
-        >>> search_carris_lines("Cascais")   # By area
+        >>> search_carris_metropolitana_lines("1718")     # By line number
+        >>> search_carris_metropolitana_lines("Belem")     # By destination
+        >>> search_carris_metropolitana_lines("Cascais")   # By area
     """
     data = fetch_json_with_retry(CARRIS_LINES_URL)
     
@@ -2900,7 +2900,7 @@ def get_bus_schedule(line_id: str, stop_id: Optional[str] = None) -> str:
     
     if not line_info:
         return f"❌ Line '{line_id}' not found.\n\n" \
-               f"💡 Use `search_carris_lines` to find the correct line ID."
+               f"💡 Use `search_carris_metropolitana_lines` to find the correct line ID."
     
     patterns = line_info.get('patterns', [])
     if not patterns:
@@ -3690,9 +3690,9 @@ def find_bus_routes(
         response += "\n"
     
     response += "\n" + "-" * 40 + "\n"
-    response += "💡 **Tips:**\n"
-    response += "   • Use 'get_carris_stop_info' for real-time arrivals\n"
-    response += "   • Check 'get_carris_alerts' for service disruptions\n"
+    response += "✨ **Tips:**\n"
+    response += "   • Use 'get_carris_metropolitana_stop_info' for real-time arrivals\n"
+    response += "   • Check 'get_carris_metropolitana_alerts' for service disruptions\n"
     response += "   • Metro may be faster for cross-city travel\n"
     
     return response
@@ -3828,17 +3828,17 @@ if __name__ == "__main__":
     run_test("Test 2: Metro Status", test_metro_status)
     
     # =========================================================================
-    # TEST 3: Carris Alerts
+    # TEST 3: Carris Metropolitana Alerts
     # =========================================================================
-    def test_carris_alerts():
-        result = get_carris_alerts.invoke({})
+    def test_carris_metropolitana_alerts():
+        result = get_carris_metropolitana_alerts.invoke({})
         print(result[:1000] + "..." if len(result) > 1000 else result)
         assert "CARRIS" in result.upper() or "ALERT" in result.upper(), \
-            "Should contain Carris alert info"
-        print("\033[1;32m✅ Carris alerts retrieved successfully\033[0m")
+            "Should contain Carris Metropolitana alert info"
+        print("\033[1;32m✅ Carris Metropolitana alerts retrieved successfully\033[0m")
         return result
     
-    run_test("Test 3: Carris Alerts", test_carris_alerts)
+    run_test("Test 3: Carris Metropolitana Alerts", test_carris_metropolitana_alerts)
     
     # =========================================================================
     # TEST 4: Train Status (CP)
@@ -3854,12 +3854,12 @@ if __name__ == "__main__":
     run_test("Test 4: Train Status (CP)", test_train_status)
     
     # =========================================================================
-    # TEST 5: Load Carris Stops (Cache System)
+    # TEST 5: Load Carris Metropolitana Stops (Cache System)
     # =========================================================================
-    def test_load_carris_stops():
-        print("Loading all Carris stops (first call loads from API)...")
+    def test_load_carris_metropolitana_stops():
+        print("Loading all Carris Metropolitana stops (first call loads from API)...")
         start_time = time.time()
-        stops = load_carris_stops()
+        stops = load_carris_metropolitana_stops()
         load_time = time.time() - start_time
         
         print(f"\n📊 \033[1mStops Statistics:\033[0m")
@@ -3879,23 +3879,23 @@ if __name__ == "__main__":
         # Test cache (second call should be instant)
         print("\n🔄 Testing cache (second call)...")
         start_time = time.time()
-        stops2 = load_carris_stops()
+        stops2 = load_carris_metropolitana_stops()
         cache_time = time.time() - start_time
         print(f"   • Cache retrieval time: {cache_time:.4f}s")
         
         assert len(stops) > 10000, f"Expected >10000 stops, got {len(stops)}"
         assert cache_time < 0.1, "Cache should be nearly instant"
-        print("\033[1;32m✅ Carris stops loaded and cached successfully\033[0m")
+        print("\033[1;32m✅ Carris Metropolitana stops loaded and cached successfully\033[0m")
         return stops
     
-    run_test("Test 5: Load Carris Stops (Cache System)", test_load_carris_stops)
+    run_test("Test 5: Load Carris Metropolitana Stops (Cache System)", test_load_carris_metropolitana_stops)
     
     # =========================================================================
-    # TEST 6: Load Carris Lines
+    # TEST 6: Load Carris Metropolitana Lines
     # =========================================================================
-    def test_load_carris_lines():
-        print("Loading all Carris lines...")
-        lines = load_carris_lines()
+    def test_load_carris_metropolitana_lines():
+        print("Loading all Carris Metropolitana lines...")
+        lines = load_carris_metropolitana_lines()
         
         print(f"\n📊 \033[1mLines Statistics:\033[0m")
         print(f"   • Total lines loaded: {len(lines)}")
@@ -3911,10 +3911,10 @@ if __name__ == "__main__":
             print(f"   • Localities: {', '.join(sample.get('localities', [])[:5])}")
         
         assert len(lines) > 500, f"Expected >500 lines, got {len(lines)}"
-        print("\033[1;32m✅ Carris lines loaded successfully\033[0m")
+        print("\033[1;32m✅ Carris Metropolitana lines loaded successfully\033[0m")
         return lines
     
-    run_test("Test 6: Load Carris Lines", test_load_carris_lines)
+    run_test("Test 6: Load Carris Metropolitana Lines", test_load_carris_metropolitana_lines)
     
     # =========================================================================
     # TEST 7: Find Stops Near Coordinates (GPS Search)
@@ -4086,45 +4086,45 @@ if __name__ == "__main__":
     run_test("Test 13: Metro Routing", test_metro_routing)
     
     # =========================================================================
-    # TEST 14: Carris Stop Info with Real-time Arrivals
+    # TEST 14: Carris Metropolitana Stop Info with Real-time Arrivals
     # =========================================================================
-    def test_carris_stop_info():
+    def test_carris_metropolitana_stop_info():
         # Use a known stop ID (Gare do Oriente)
         stop_id = "060323"
         
-        print(f"Testing get_carris_stop_info for stop {stop_id}...")
+        print(f"Testing get_carris_metropolitana_stop_info for stop {stop_id}...")
         
-        result = get_carris_stop_info.invoke({"stop_id": stop_id})
+        result = get_carris_metropolitana_stop_info.invoke({"stop_id": stop_id})
         
         print(result[:1500] + "..." if len(result) > 1500 else result)
         
-        print("\n\033[1;32m✅ Carris stop info retrieved successfully\033[0m")
+        print("\n\033[1;32m✅ Carris Metropolitana stop info retrieved successfully\033[0m")
         return result
     
-    run_test("Test 14: Carris Stop Info (Real-time)", test_carris_stop_info)
+    run_test("Test 14: Carris Metropolitana Stop Info (Real-time)", test_carris_metropolitana_stop_info)
     
     # =========================================================================
-    # TEST 15: Search Carris Lines (with Carris urban notice)
+    # TEST 15: Search Carris Metropolitana Lines (with Carris urban notice)
     # =========================================================================
-    def test_search_carris_lines():
+    def test_search_carris_metropolitana_lines():
         # Test suburban search
-        print("Testing search_carris_lines for 'Belem' (suburban)...")
-        result = search_carris_lines.invoke({"query": "Belem"})
+        print("Testing search_carris_metropolitana_lines for 'Belem' (suburban)...")
+        result = search_carris_metropolitana_lines.invoke({"query": "Belem"})
         print(result[:1000] + "..." if len(result) > 1000 else result)
         assert "LINE" in result.upper() or "1718" in result, \
             "Should find Belem lines"
         
         # Test urban search (should show Carris notice)
-        print("\n\nTesting search_carris_lines for 'Rossio' (should show notice)...")
-        result2 = search_carris_lines.invoke({"query": "Rossio"})
+        print("\n\nTesting search_carris_metropolitana_lines for 'Rossio' (should show notice)...")
+        result2 = search_carris_metropolitana_lines.invoke({"query": "Rossio"})
         print(result2)
         assert "Nota sobre autocarros" in result2 or "carris.pt" in result2.lower(), \
             "Should show Carris urban limitation notice"
         
-        print("\n\033[1;32m✅ Carris lines search works correctly\033[0m")
+        print("\n\033[1;32m✅ Carris Metropolitana lines search works correctly\033[0m")
         return result
     
-    run_test("Test 15: Search Carris Lines", test_search_carris_lines)
+    run_test("Test 15: Search Carris Metropolitana Lines", test_search_carris_metropolitana_lines)
     
     # =========================================================================
     # TEST 16: Geocoding - Centro Comercial Colombo

@@ -39,12 +39,14 @@ def get_agent_tools(agent_name: str) -> List:
         from tools.ipma_api import (
             get_weather_warnings,
             get_weather_forecast,
-            get_current_weather_summary
+            get_current_weather_summary,
+            get_portugal_weather_overview
         )
         return [
             get_weather_warnings,
             get_weather_forecast,
             get_current_weather_summary,
+            get_portugal_weather_overview,
         ]
     
     elif agent_name == "transport":
@@ -55,9 +57,9 @@ def get_agent_tools(agent_name: str) -> List:
             find_nearest_metro,
             get_metro_frequency,
             get_all_metro_stations,
-            get_carris_alerts,
-            get_carris_stop_info,
-            search_carris_lines,
+            get_carris_metropolitana_alerts,
+            get_carris_metropolitana_stop_info,
+            search_carris_metropolitana_lines,
             get_train_status,
             get_transport_summary,
             get_route_between_stations,
@@ -73,9 +75,9 @@ def get_agent_tools(agent_name: str) -> List:
             find_nearest_metro,
             get_metro_frequency,
             get_all_metro_stations,
-            get_carris_alerts,
-            get_carris_stop_info,
-            search_carris_lines,
+            get_carris_metropolitana_alerts,
+            get_carris_metropolitana_stop_info,
+            search_carris_metropolitana_lines,
             get_train_status,
             get_transport_summary,
             get_route_between_stations,
@@ -96,7 +98,8 @@ def get_agent_tools(agent_name: str) -> List:
         from tools.dados_abertos import (
             find_nearby_services,
             list_available_datasets,
-            get_dataset_details
+            get_dataset_details,
+            find_place_in_datasets
         )
         return [
             search_cultural_events,
@@ -107,6 +110,7 @@ def get_agent_tools(agent_name: str) -> List:
             find_nearby_services,
             list_available_datasets,
             get_dataset_details,
+            find_place_in_datasets,
         ]
     
     elif agent_name == "planner":

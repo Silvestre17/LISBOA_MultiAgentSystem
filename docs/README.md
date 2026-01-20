@@ -66,15 +66,20 @@ docs/
 
 ## 🔑 Key Components
 
-### 1. LangGraph Agent
-- **ReAct Pattern**: Reasoning and Acting paradigm
-- **Tool-based**: Modular tools for different data sources
-- **State Management**: Persistent conversation context
+### 1. Multi-Agent System
+- **Supervisor Agent**: Routes queries to specialized agents
+- **Weather Agent**: IPMA weather data and forecasts
+- **Transport Agent**: Metro, bus, and train information
+- **Researcher Agent**: RAG for places and events
+- **Planner Agent**: Itinerary synthesis
+- **29 specialized tools** for different data sources
 - **Multi-provider**: Supports LM Studio (default), Groq, Google, OpenAI, Ollama
 
 ### 2. Data Sources
 - **IPMA**: Weather forecasts and warnings
-- **Metro/Carris/CP**: Real-time transport status
+- **Metro de Lisboa**: Official API - Line status, wait times, frequencies
+- **Carris Metropolitana**: Bus alerts, stops, routes, real-time tracking
+- **CP (Comboios de Portugal)**: Train status, delays, AML stations
 - **Lisboa Aberta**: Open government data (GeoJSON)
 - **VisitLisboa**: Cultural events and tourist attractions
 
@@ -128,10 +133,11 @@ This project is part of a Master's thesis exploring:
 ## 📊 Statistics
 
 ### Code Base
-- **Python Modules**: 15+
-- **Tools Implemented**: 18
+- **Python Modules**: 20+
+- **Tools Implemented**: 29
+- **Specialized Agents**: 5
 - **Data Sources**: 4 APIs + 2 scraped sources
-- **Vector DB Documents**: ~3000+ chunks
+- **Vector DB Documents**: ~1,400 chunks
 
 ### Datasets
 - **Events**: 200+ cultural events
@@ -167,4 +173,4 @@ NOVA IMS - Master in Data Science and Advanced Analytics
 
 ---
 
-*Last Updated: December 2025*
+*Last Updated: January 2026*

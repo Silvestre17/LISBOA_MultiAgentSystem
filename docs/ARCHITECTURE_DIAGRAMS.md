@@ -1,162 +1,125 @@
 # System Architecture Diagrams
 
-**Project**: LLM-Powered Urban Exploration  
-**Author**: André Filipe Gomes Silvestre
+**Project**: Multi-Agent System for Urban Exploration  
+**Author**: André Filipe Gomes Silvestre (Updated v2.0)  
+**Last Updated**: January 2026
 
 ---
 
 ## 1. High-Level System Architecture
 
+```mermaid
+graph TD
+    User([User Interface]) -->|Chat Messages| Supervisor[Supervisor Agent]
+    
+    subgraph "Multi-Agent System"
+        Supervisor -->|Routes Query| Research[Researcher Agent]
+        Supervisor -->|Routes Query| Transport[Transport Agent]
+        Supervisor -->|Routes Query| Weather[Weather Agent]
+        Supervisor -->|Routes Query| Planner[Planner Agent]
+        
+        Research <-->|VisitsLisboa| VectorDB[(Vector Store)]
+        Research <-->|Open Data| DadosAPI[Dados Abertos API]
+        
+        Transport <-->|Status/Times| MetroAPI[Metro Official API]
+        Transport <-->|Bus Alerts/Loc| CarrisAPI[Carris Metro API]
+        Transport <-->|Train Info| CPAPI[CP API]
+        
+        Weather <-->|Forecasts| IPMA[IPMA API]
+    end
+    
+    Planner -->|Synthesizes| Supervisor
+    Research -->|Results| Supervisor
+    Transport -->|Results| Supervisor
+    Weather -->|Results| Supervisor
+    
+    Supervisor -->|Final Response| User
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                          USER INTERFACE                             │
-│                                                                     │
-│  ┌───────────────────────────────────────────────────────────────┐ │
-│  │                    Streamlit Web App                          │ │
-│  │  - Chat Interface                                             │ │
-│  │  - Multi-language Support (EN/PT)                             │ │
-│  │  - Provider Selection                                         │ │
-│  │  - Session Management                                         │ │
-│  └───────────────────────────────────────────────────────────────┘ │
-└───────────────────────────────┬─────────────────────────────────────┘
-                                │
-                                │ User Messages
-                                ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                        LANGGRAPH AGENT                              │
-│                                                                     │
-│  ┌──────────────┐      ┌──────────────┐      ┌─────────────────┐  │
-│  │              │      │              │      │                 │  │
-│  │    STATE     │◄────►│    AGENT     │◄────►│     TOOLS       │  │
-│  │  MANAGEMENT  │      │   (ReAct)    │      │      NODE       │  │
-│  │              │      │              │      │                 │  │
-│  └──────────────┘      └──────────────┘      └─────────────────┘  │
-│        │                     │                       │             │
-│        │                     │                       │             │
-│        │                     ▼                       │             │
-│        │            ┌──────────────┐                 │             │
-│        │            │  SYSTEM      │                 │             │
-│        └───────────►│  PROMPT      │                 │             │
-│                     └──────────────┘                 │             │
-└──────────────────────────────────────────────────────┼─────────────┘
-                                                       │
-                                                       │
-            ┌──────────────────────────────────────────┼──────────┐
-            │                                          │          │
-            ▼                                          ▼          ▼
-     ┌──────────────┐                          ┌────────────────────┐
-     │  LLM FACTORY │                          │   TOOL MODULES     │
-     └──────────────┘                          └────────────────────┘
-            │                                          │
-            │ Provider Selection                       │ Data Fetching
-            ▼                                          ▼
-     ┌──────────────┐                          ┌────────────────────┐
-     │   LLM APIs   │                          │   DATA SOURCES     │
-     │              │                          │                    │
-     │ - Groq       │                          │ - IPMA (Weather)   │
-     │ - Google     │                          │ - Metro Lisboa     │
-     │ - OpenAI     │                          │ - Carris Metro     │
-     │ - Local      │                          │ - CP (Trains)      │
-     └──────────────┘                          │ - Dados Abertos    │
-                                               │ - Vector Store     │
-                                               └────────────────────┘
+
+### Component Roles
+
+1.  **Supervisor Agent**: The orchestrator. Analyzes user intent and routes tasks to the appropriate specialized agent. It maintains the global conversation state.
+2.  **Specialized Agents**:
+    *   **Weather Agent**: Handles all meteorological queries using IPMA data.
+    *   **Transport Agent**: manages real-time transport data (Metro, Bus, Train).
+    *   **Researcher Agent**: Retrieves static knowledge (events, places) and open data.
+    *   **Planner Agent**: Synthesizes information into coherent itineraries.
+3.  **Tool Layer**: 29 specialized tools providing direct access to external APIs and databases.
+
+---
+
+## 2. Multi-Agent Workflow (LangGraph)
+
+```
+       ┌──────────────┐
+       │     START    │
+       └──────┬───────┘
+              │
+              ▼
+    ┌────────────────────┐
+    │  Supervisor Node   │◄─────────────────────────────┐
+    │  (Router LLM)      │                              │
+    └──────┬──────┬──────┘                              │
+           │      │                                     │
+   Weather │      │ Transport                           │
+   Query   │      │ Query                               │
+           ▼      ▼                                     │
+   ┌─────────┐  ┌───────────┐                           │
+   │ Weather │  │ Transport │    (Other Agents...)      │
+   │  Agent  │  │   Agent   │                           │
+   └────┬────┘  └─────┬─────┘                           │
+        │             │                                 │
+        ▼             ▼                                 │
+   ┌─────────┐  ┌───────────┐                           │
+   │  Tools  │  │   Tools   │                           │
+   │  Node   │  │   Node    │                           │
+   └────┬────┘  └─────┬─────┘                           │
+        │             │                                 │
+        └─────────────┴──────────► [Results] ───────────┘
 ```
 
 ---
 
-## 2. LangGraph Agent Flow
+## 3. Tool Execution Workflow (Example)
+
+### Scenario: User asks about weather and bus delays
 
 ```
-START
-  │
-  ▼
-┌─────────────────┐
-│  User Message   │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────────────────────────┐
-│   Agent Node                        │
-│                                     │
-│  1. Load conversation state         │
-│  2. Add system prompt (if missing)  │
-│  3. Invoke LLM with tools           │
-│  4. Return response                 │
-└────────┬────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────┐
-│   Conditional Edge                  │
-│                                     │
-│   Has tool_calls?                   │
-└────────┬─────────────┬──────────────┘
-         │             │
-    YES  │             │  NO
-         │             │
-         ▼             ▼
-┌─────────────────┐   ┌─────────────┐
-│   Tools Node    │   │     END     │
-│                 │   │             │
-│  1. Execute     │   │  Return to  │
-│     tools       │   │    User     │
-│  2. Collect     │   └─────────────┘
-│     results     │
-└────────┬────────┘
-         │
-         │ (always loops back)
-         │
-         └──────────► Agent Node
-```
-
----
-
-## 3. Tool Execution Workflow
-
-```
-User Query: "What's the weather in Lisbon today?"
+User: "Is it raining? And are there bus delays?"
     │
     ▼
 ┌─────────────────────────────────────────────────┐
-│  Agent Reasoning (LLM)                          │
-│                                                 │
-│  "I need to call get_current_weather_summary()" │
-└────────────────┬────────────────────────────────┘
-                 │
-                 ▼ tool_call
+│  Supervisor Reasoning                           │
+│  "Complex query detected. Routing to:"          │
+│  1. Weather Agent (for rain)                    │
+│  2. Transport Agent (for bus delays)            │
+└──────┬───────────────────────┬──────────────────┘
+       │                       │
+       ▼ (Parallel)            ▼
+┌────────────────────┐   ┌──────────────────────────┐
+│ Weather Agent      │   │ Transport Agent          │
+│ Call:              │   │ Call:                    │
+│ get_current_       │   │ get_carris_              │
+│ weather_summary()  │   │ metropolitana_alerts()   │
+└──────┬─────────────┘   └───────────┬──────────────┘
+       │                             │
+       ▼ IPMA API                    ▼ Carris API
+┌────────────────────┐   ┌──────────────────────────┐
+│ Result:            │   │ Result:                  │
+│ "Light rain, 15°C" │   │ "Delays on line 728"     │
+└──────┬─────────────┘   └───────────┬──────────────┘
+       │                             │
+       └──────────────┬──────────────┘
+                      │
+                      ▼
 ┌─────────────────────────────────────────────────┐
-│  Tool Execution                                 │
-│                                                 │
-│  Function: get_current_weather_summary()        │
-│  Parameters: {}                                 │
-└────────────────┬────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────┐
-│  HTTP Request to IPMA API                       │
-│                                                 │
-│  GET https://api.ipma.pt/.../1110600.json       │
-│  GET https://api.ipma.pt/.../warnings_www.json  │
-└────────────────┬────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────┐
-│  Data Processing                                │
-│                                                 │
-│  - Parse JSON                                   │
-│  - Format temperatures                          │
-│  - Check warnings                               │
-│  - Build human-readable response                │
-└────────────────┬────────────────────────────────┘
-                 │
-                 ▼ tool_result
-┌─────────────────────────────────────────────────┐
-│  Agent Formatting (LLM)                         │
-│                                                 │
-│  "Today in Lisbon: 12-18°C, partly cloudy..."   │
-└────────────────┬────────────────────────────────┘
-                 │
-                 ▼
-              User Response
+│  Supervisor Synthesis                           │
+│  "It is currently raining (15°C). Additionally, │
+│   be aware of delays on bus line 728."          │
+└─────────────────────┬───────────────────────────┘
+                      │
+                      ▼
+                 User Response
 ```
 
 ---
@@ -169,54 +132,25 @@ GitHub Actions Trigger (Daily 2 AM UTC)
     ▼
 ┌─────────────────────────────────────────────────┐
 │  Web Scraping Jobs                              │
-│                                                 │
-│  ┌─────────────────┐    ┌──────────────────┐   │
-│  │ VisitLisboa     │    │ VisitLisboa      │   │
-│  │ Events Scraper  │    │ Places Scraper   │   │
-│  └────────┬────────┘    └────────┬─────────┘   │
-│           │                      │             │
-│           └──────────┬───────────┘             │
-└──────────────────────┼─────────────────────────┘
+│  (VisitLisboa Events & Places)                  │
+└──────────────────────┬──────────────────────────┘
                        │
-                       ▼ Updated JSON files
+                       ▼ JSON Files
 ┌─────────────────────────────────────────────────┐
-│  Vector Store Sync (3 AM UTC)                   │
+│  Vector Store Sync (Incremental)                │
 │                                                 │
-│  FOR each collection:                           │
-│                                                 │
-│    ┌──────────────────────────────┐             │
-│    │ 1. Load JSON Data            │             │
-│    └──────────┬───────────────────┘             │
-│               ▼                                 │
-│    ┌──────────────────────────────┐             │
-│    │ 2. Compute Content Hashes    │             │
-│    └──────────┬───────────────────┘             │
-│               ▼                                 │
-│    ┌──────────────────────────────┐             │
-│    │ 3. Get Existing DB Hashes    │             │
-│    └──────────┬───────────────────┘             │
-│               ▼                                 │
-│    ┌──────────────────────────────┐             │
-│    │ 4. Identify Changes          │             │
-│    │    - New IDs                 │             │
-│    │    - Modified IDs (hash ≠)   │             │
-│    │    - Deleted IDs             │             │
-│    └──────────┬───────────────────┘             │
-│               ▼                                 │
-│    ┌──────────────────────────────┐             │
-│    │ 5. Delete Old Documents      │             │
-│    │    (modified + deleted)      │             │
-│    └──────────┬───────────────────┘             │
-│               ▼                                 │
-│    ┌──────────────────────────────┐             │
-│    │ 6. Add New Documents         │             │
-│    │    (new + modified)          │             │
-│    └──────────┬───────────────────┘             │
-│               ▼                                 │
-│    ┌──────────────────────────────┐             │
-│    │ 7. Commit Changes            │             │
-│    └──────────────────────────────┘             │
-│                                                 │
+│  Input: JSON Data                               │
+│  Process:                                       │
+│    1. Compute Content Hashes                    │
+│    2. Compare with ChromaDB Metadata            │
+│    3. Identify Add/Mod/Del                      │
+│    4. Batch Update (200 docs/run)               │
+└──────────────────────┬──────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────┐
+│  Commit & Push                                  │
+│  (Updated ChromaDB files to repo)               │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -229,49 +163,19 @@ GitHub Actions Trigger (Daily 2 AM UTC)
 │                    REAL-TIME APIs                        │
 └──────────────────────────────────────────────────────────┘
     │           │            │            │
-    │           │            │            │
     ▼           ▼            ▼            ▼
 ┌────────┐ ┌─────────┐ ┌──────────┐ ┌─────────┐
 │  IPMA  │ │  Metro  │ │  Carris  │ │   CP    │
-│Weather │ │ Status  │ │   Bus    │ │ Trains  │
+│Weather │ │ Status  │ │Metro Bus │ │ Trains  │
 └────────┘ └─────────┘ └──────────┘ └─────────┘
     │           │            │            │
-    └───────────┴────────────┴────────────┘
-                      │
-                      ▼
-              Direct API Calls
-               (No Caching)
-                      │
-                      ▼
+    ▼           ▼            ▼            ▼
 ┌──────────────────────────────────────────────────────────┐
-│                  AGENT TOOLS LAYER                       │
+│                  TRANSPORT & WEATHER AGENTS              │
 │  - get_weather_forecast()                                │
 │  - get_metro_status()                                    │
-│  - get_carris_alerts()                                   │
+│  - get_carris_metropolitana_alerts()                     │
 │  - get_train_status()                                    │
-└──────────────────────────────────────────────────────────┘
-
-
-┌──────────────────────────────────────────────────────────┐
-│                 ON-DEMAND FETCH                          │
-└──────────────────────────────────────────────────────────┘
-                      │
-                      ▼
-                ┌──────────┐
-                │  Dados   │
-                │  Abertos │
-                │ (GeoJSON)│
-                └──────────┘
-                      │
-                      ▼
-         Metadata in JSON → Fetch on request
-                      │
-                      ▼
-┌──────────────────────────────────────────────────────────┐
-│                  AGENT TOOLS LAYER                       │
-│  - find_nearby_services()                                │
-│  - list_available_datasets()                             │
-│  - get_dataset_details()                                 │
 └──────────────────────────────────────────────────────────┘
 
 
@@ -291,16 +195,11 @@ GitHub Actions Trigger (Daily 2 AM UTC)
                ┌─────────────────┐
                │   ChromaDB      │
                │  Vector Store   │
-               │                 │
-               │ - Embeddings    │
-               │ - Collections   │
-               │ - Semantic      │
-               │   Search        │
                └─────────────────┘
                          │
                          ▼
 ┌──────────────────────────────────────────────────────────┐
-│                  AGENT TOOLS LAYER                       │
+│                  RESEARCHER AGENT                        │
 │  - search_cultural_events()                              │
 │  - search_places_attractions()                           │
 │  - search_lisbon_knowledge()                             │
@@ -309,218 +208,24 @@ GitHub Actions Trigger (Daily 2 AM UTC)
 
 ---
 
-## 6. State Flow Through Agent
-
-```
-┌─────────────────────────────────────────────────────┐
-│  Initial State (Session Start)                      │
-│                                                     │
-│  {                                                  │
-│    messages: [],                                    │
-│    user_context: null,                              │
-│    weather_context: null,                           │
-│    transport_context: null,                         │
-│    current_plan: null,                              │
-│    session_id: "a3f9c2b1"                           │
-│  }                                                  │
-└────────────────┬────────────────────────────────────┘
-                 │
-                 │ User: "What's the weather?"
-                 ▼
-┌─────────────────────────────────────────────────────┐
-│  State After User Message                           │
-│                                                     │
-│  {                                                  │
-│    messages: [                                      │
-│      HumanMessage("What's the weather?")            │
-│    ],                                               │
-│    ...                                              │
-│  }                                                  │
-└────────────────┬────────────────────────────────────┘
-                 │
-                 │ Agent adds system prompt
-                 ▼
-┌─────────────────────────────────────────────────────┐
-│  State With System Prompt                           │
-│                                                     │
-│  {                                                  │
-│    messages: [                                      │
-│      SystemMessage("You are Lisbon Assistant..."),  │
-│      HumanMessage("What's the weather?")            │
-│    ],                                               │
-│    ...                                              │
-│  }                                                  │
-└────────────────┬────────────────────────────────────┘
-                 │
-                 │ LLM generates tool call
-                 ▼
-┌─────────────────────────────────────────────────────┐
-│  State After LLM Call                               │
-│                                                     │
-│  {                                                  │
-│    messages: [                                      │
-│      SystemMessage(...),                            │
-│      HumanMessage(...),                             │
-│      AIMessage(                                     │
-│        content="",                                  │
-│        tool_calls=[                                 │
-│          {name: "get_current_weather_summary"}      │
-│        ]                                            │
-│      )                                              │
-│    ],                                               │
-│    ...                                              │
-│  }                                                  │
-└────────────────┬────────────────────────────────────┘
-                 │
-                 │ Tools execute
-                 ▼
-┌─────────────────────────────────────────────────────┐
-│  State After Tool Execution                         │
-│                                                     │
-│  {                                                  │
-│    messages: [                                      │
-│      ...,                                           │
-│      ToolMessage(                                   │
-│        content="🌤️ Today: 12-18°C, ..."             │
-│      )                                              │
-│    ],                                               │
-│    weather_context: {                               │
-│      temperature_min: 12,                           │
-│      temperature_max: 18,                           │
-│      ...                                            │
-│    }                                                │
-│  }                                                  │
-└────────────────┬────────────────────────────────────┘
-                 │
-                 │ LLM formats final response
-                 ▼
-┌─────────────────────────────────────────────────────┐
-│  Final State                                        │
-│                                                     │
-│  {                                                  │
-│    messages: [                                      │
-│      ...,                                           │
-│      AIMessage(                                     │
-│        content="Today in Lisbon: sunny, 12-18°C..." │
-│      )                                              │
-│    ],                                               │
-│    weather_context: {...},                          │
-│    ...                                              │
-│  }                                                  │
-└─────────────────────────────────────────────────────┘
-```
-
----
-
-## 7. Error Handling Flow
-
-```
-Tool Call: get_metro_status()
-    │
-    ▼
-HTTP Request to Metro API
-    │
-    ├─► SUCCESS ──────────┐
-    │                     │
-    └─► TIMEOUT           │
-         │                │
-         ▼                │
-    Retry #1 (wait 1s)    │
-         │                │
-         ├─► SUCCESS ─────┤
-         │                │
-         └─► TIMEOUT      │
-              │           │
-              ▼           │
-         Retry #2 (2s)    │
-              │           │
-              ├─► SUCCESS ┤
-              │           │
-              └─► TIMEOUT │
-                   │      │
-                   ▼      │
-            Retry #3 (4s) │
-                   │      │
-                   ├─►────┤
-                   │      │
-                   └─► FAIL
-                        │
-                        ▼
-               ┌───────────────────┐
-               │  Return Error Msg │
-               │  to Agent         │
-               └────────┬──────────┘
-                        │
-                        ▼
-               ┌───────────────────┐
-               │ Agent Formats     │
-               │ User-Friendly     │
-               │ Error Message     │
-               └────────┬──────────┘
-                        │
-                        ▼
-           "❌ Metro status temporarily
-            unavailable. Try again in a
-            few minutes."
-```
-
----
-
-## 8. Deployment Architecture (GitHub Actions)
+## 6. Deployment Architecture
 
 ```
 ┌────────────────────────────────────────────────┐
 │          GitHub Repository                     │
 │                                                │
-│  - Source Code                                 │
+│  - Source Code (Multi-Agent System)            │
 │  - Data Files (JSON)                           │
 │  - Vector DB (ChromaDB files)                  │
 └───────────────┬────────────────────────────────┘
                 │
-                │ Push Trigger / Scheduled Cron
-                │
-                ▼
-┌────────────────────────────────────────────────┐
-│          GitHub Actions Runners                │
-└────────────────────────────────────────────────┘
-    │                          │
-    │ 2 AM UTC                 │ 3 AM UTC
-    │                          │
-    ▼                          ▼
-┌──────────────┐       ┌──────────────────┐
-│ Web Scraping │       │ Vector Store     │
-│   Workflow   │       │  Sync Workflow   │
-└──────┬───────┘       └────────┬─────────┘
-       │                        │
-       │ Updates JSON           │ Reads JSON
-       │                        │ Updates ChromaDB
-       ▼                        ▼
-┌──────────────────────────────────────────┐
-│     Git Commit & Push                    │
-│                                          │
-│  - events.json                           │
-│  - places.json                           │
-│  - ChromaDB files                        │
-└──────────────────────────────────────────┘
-                │
-                │ Updated Files
                 ▼
 ┌──────────────────────────────────────────┐
-│    Production Deployment                 │
-│    (Streamlit Cloud / Local)             │
+│    Streamlit Cloud / Local Runtime       │
 │                                          │
-│  - Pulls latest from GitHub              │
-│  - Loads updated vector store            │
-│  - Serves users                          │
+│  1. Pulls latest code & DB               │
+│  2. Initializes LangGraph Supervisor     │
+│  3. Loads Vector Store into memory       │
+│  4. Serves UI to User                    │
 └──────────────────────────────────────────┘
 ```
-
----
-
-**Mermaid Diagram Exports Available**:  
-These ASCII diagrams can be converted to Mermaid for visualization tools.
-
----
-
-*Created: December 30, 2025*  
-*Author: André Filipe Gomes Silvestre*
