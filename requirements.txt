@@ -46,6 +46,8 @@ requests>=2.31.0              # HTTP client for API calls
 beautifulsoup4>=4.12.0        # HTML parsing for web scraping
 lxml>=5.0.0                   # Fast XML/HTML parser
 tqdm>=4.66.0                  # Progress bars
+protobuf>=3.20.0              # Protocol Buffers for data serialization
+gtfs-realtime-bindings>=0.0.0 # GTFS real-time protocol bindings
 
 # -----------------------------------------------------------------------------
 # Document Processing (for RAG ingestion)

@@ -1,0 +1,2036 @@
+# ==========================================================================
+# Master Thesis - Carris API Tools (Urban Lisbon Buses & Trams)
+#   - André Filipe Gomes Silvestre, 20240502
+# 
+#   Static GTFS data and real-time vehicle tracking for Carris
+#   (Lisbon's urban bus and tram operator, NOT Carris Metropolitana).
+#
+#   Data Sources:
+#     - GTFS Static: https://gateway.carris.pt/gateway/gtfs/api/v2.8/GTFS
+#     - GTFS-RT (Real-Time): https://gateway.carris.pt/gateway/gtfs/api/v2.8/GTFS/realtime/vehiclepositions
+# 
+#   Storage:
+#     - SQLite database in ./data/carris/carris.db
+#     - Update check via HTTP headers (Content-Disposition filename date)
+#
+#   GTFS-RT Vehicle Positions Feed:
+#     - Protocol Buffers format (requires gtfs-realtime-bindings)
+#     - Provides: trip_id, route_id, stop_id, position (lat/lon), vehicle_id, license_plate
+#     - Links to static GTFS via trip_id, route_id, and stop_id
+# ==========================================================================
+
+# Required libraries:
+# pip install protobuf gtfs-realtime-bindings requests langchain-core
+
+import os
+import sys
+import csv
+import json
+import sqlite3
+import zipfile
+import logging
+import re
+import math
+import time
+from io import BytesIO
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, List, Tuple
+
+import requests
+from langchain_core.tools import tool
+
+# GTFS-RT Protocol Buffers
+try:
+    from google.transit import gtfs_realtime_pb2
+    GTFS_RT_AVAILABLE = True
+except ImportError:
+    GTFS_RT_AVAILABLE = False
+    gtfs_realtime_pb2 = None
+
+# Add parent directory to path for imports
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# ==========================================================================
+# Configuration
+# ==========================================================================
+
+# GTFS Static Data
+CARRIS_GTFS_URL = "https://gateway.carris.pt/gateway/gtfs/api/v2.8/GTFS"
+
+# GTFS-RT Real-Time Vehicle Positions (Official Carris API - Protocol Buffers)
+CARRIS_GTFS_RT_URL = "https://gateway.carris.pt/gateway/gtfs/api/v2.8/GTFS/realtime/vehiclepositions"
+
+# Data directory (relative to project root)
+CARRIS_DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "carris")
+CARRIS_DB_PATH = os.path.join(CARRIS_DATA_DIR, "carris.db")
+CARRIS_METADATA_PATH = os.path.join(CARRIS_DATA_DIR, "metadata.json")
+
+# Request timeout
+REQUEST_TIMEOUT = 120  # GTFS download can take time
+REALTIME_TIMEOUT = 15  # Real-time requests should be fast
+
+# Cache for GTFS-RT data (avoid excessive API calls)
+_gtfs_rt_cache: Dict[str, Any] = {
+    "data": None,
+    "timestamp": 0,
+    "ttl": 30  # Cache for 30 seconds
+}
+
+# Route type mapping (GTFS standard: 0=Tram, 3=Bus)
+ROUTE_TYPES = {
+    "tram": 0,
+    "elétrico": 0,
+    "eletrico": 0,
+    "bus": 3,
+    "autocarro": 3,
+}
+
+# Vehicle status mapping (GTFS-RT VehicleStopStatus)
+VEHICLE_STATUS = {
+    0: "INCOMING_AT",      # Approaching stop
+    1: "STOPPED_AT",       # At stop
+    2: "IN_TRANSIT_TO"     # In transit to next stop
+}
+
+# Nominatim geocoding
+NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+
+
+# ==========================================================================
+# Utility Functions
+# ==========================================================================
+
+def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """
+    Calculate distance in km between two GPS coordinates using Haversine formula.
+    
+    Args:
+        lat1, lon1: First point coordinates
+        lat2, lon2: Second point coordinates
+        
+    Returns:
+        Distance in kilometers
+    """
+    R = 6371  # Earth's radius in km
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+    return 2 * R * math.asin(math.sqrt(a))
+
+
+def geocode_location(place_name: str) -> Tuple[Optional[float], Optional[float], Optional[str]]:
+    """
+    Geocode a place name to GPS coordinates using Nominatim (OpenStreetMap).
+    
+    Args:
+        place_name: Place name to geocode (e.g., "Rossio, Lisboa")
+        
+    Returns:
+        Tuple of (latitude, longitude, display_name) or (None, None, None) on error
+    """
+    try:
+        params = {
+            "q": f"{place_name}, Lisboa, Portugal",
+            "format": "json",
+            "limit": 1,
+            "addressdetails": 1
+        }
+        headers = {"User-Agent": "LisbonUrbanAssistant/1.0 (Thesis Project)"}
+        resp = requests.get(NOMINATIM_URL, params=params, headers=headers, timeout=10)
+        
+        if resp.status_code == 200 and resp.json():
+            data = resp.json()[0]
+            return float(data["lat"]), float(data["lon"]), data.get("display_name", place_name)
+    except Exception as e:
+        logger.warning(f"Geocoding failed for '{place_name}': {e}")
+    
+    return None, None, None
+
+
+def time_str_to_minutes(time_str: str) -> int:
+    """
+    Convert HH:MM:SS time string to minutes since midnight.
+    Handles times > 24:00:00 (GTFS convention for trips past midnight).
+    
+    Args:
+        time_str: Time in format "HH:MM:SS" or "HH:MM"
+        
+    Returns:
+        Minutes since midnight
+    """
+    parts = time_str.split(":")
+    hours = int(parts[0])
+    minutes = int(parts[1])
+    return hours * 60 + minutes
+
+
+def minutes_to_time_str(minutes: int) -> str:
+    """
+    Convert minutes since midnight to HH:MM format.
+    
+    Args:
+        minutes: Minutes since midnight
+        
+    Returns:
+        Time string in HH:MM format
+    """
+    hours = minutes // 60
+    mins = minutes % 60
+    return f"{hours:02d}:{mins:02d}"
+
+
+# ==========================================================================
+# GTFS Manager Class
+# ==========================================================================
+
+class CarrisGTFSManager:
+    """
+    Manages GTFS data download, update checking, and SQLite storage.
+    
+    Features:
+        - HTTP header-based update checking (no full download needed)
+        - SQLite conversion with optimized schema (v2.0)
+        - PRIMARY KEYs on all tables (composite for stop_times, calendar_dates, shapes)
+        - FOREIGN KEYs defined (declarative, not enforced - GTFS data has orphan refs)
+        - 13 optimized indexes for common query patterns
+        - ANALYZE and VACUUM for query performance
+        - Graceful fallback to stale data on errors
+    """
+    
+    def __init__(self, data_dir: str = CARRIS_DATA_DIR, db_path: str = CARRIS_DB_PATH):
+        self.data_dir = data_dir
+        self.db_path = db_path
+        self.metadata_path = CARRIS_METADATA_PATH
+        
+    def _ensure_data_dir(self):
+        """Creates data directory if it doesn't exist."""
+        os.makedirs(self.data_dir, exist_ok=True)
+        
+    def _load_metadata(self) -> Dict[str, Any]:
+        """Loads metadata (last update date, etc.)."""
+        try:
+            if os.path.exists(self.metadata_path):
+                with open(self.metadata_path, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.warning(f"Could not load metadata: {e}")
+        return {}
+    
+    def _save_metadata(self, data: Dict[str, Any]):
+        """Saves metadata to JSON file."""
+        try:
+            self._ensure_data_dir()
+            with open(self.metadata_path, 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logger.warning(f"Could not save metadata: {e}")
+    
+    def check_for_updates(self) -> Tuple[bool, Optional[str]]:
+        """
+        Checks if GTFS data needs updating by examining HTTP headers.
+        
+        Uses stream=True to get headers without downloading the full file.
+        Extracts date from Content-Disposition filename (e.g., gtfs_2026-01-20.zip).
+        
+        Returns:
+            Tuple of (needs_update, remote_date)
+        """
+        try:
+            response = requests.get(CARRIS_GTFS_URL, stream=True, timeout=30)
+            response.close()
+            
+            if response.status_code != 200:
+                logger.warning(f"GTFS check failed: HTTP {response.status_code}")
+                return False, None
+            
+            content_disp = response.headers.get('Content-Disposition', '')
+            match = re.search(r'filename=gtfs_(\d{4}-\d{2}-\d{2})\.zip', content_disp)
+            
+            if not match:
+                logger.warning(f"Could not parse GTFS date from: {content_disp}")
+                return True, None
+            
+            remote_date = match.group(1)
+            metadata = self._load_metadata()
+            local_date = metadata.get('gtfs_date')
+            
+            if local_date != remote_date:
+                logger.info(f"GTFS update available: {local_date} -> {remote_date}")
+                return True, remote_date
+            
+            logger.info(f"GTFS is up-to-date ({remote_date})")
+            return False, remote_date
+            
+        except Exception as e:
+            logger.error(f"Error checking for GTFS updates: {e}")
+            return False, None
+    
+    def download_gtfs(self) -> Optional[bytes]:
+        """Downloads the GTFS ZIP file."""
+        try:
+            logger.info("Downloading Carris GTFS data (~34MB)...")
+            response = requests.get(CARRIS_GTFS_URL, timeout=REQUEST_TIMEOUT)
+            response.raise_for_status()
+            
+            size_mb = len(response.content) / (1024 * 1024)
+            logger.info(f"Downloaded {size_mb:.2f} MB")
+            return response.content
+            
+        except Exception as e:
+            logger.error(f"Failed to download GTFS: {e}")
+            return None
+    
+    def convert_to_sqlite(self, gtfs_zip_content: bytes, gtfs_date: str) -> bool:
+        """
+        Converts GTFS ZIP to SQLite database with optimized schema.
+        
+        Schema Features:
+            - PRIMARY KEYs on all tables (composite for stop_times, calendar_dates, shapes)
+            - FOREIGN KEYs for referential integrity
+            - NOT NULL constraints on required GTFS fields
+            - Optimized indexes for common query patterns
+            - ANALYZE and VACUUM for query optimization
+        """
+        self._ensure_data_dir()
+        
+        if os.path.exists(self.db_path):
+            os.remove(self.db_path)
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # IMPORTANT: Keep FKs OFF during import - real GTFS data often has
+            # orphan references (e.g., service_ids in calendar_dates not in calendar,
+            # shape_ids in trips not in shapes). FKs are defined for documentation
+            # but not enforced to avoid import failures.
+            cursor.execute("PRAGMA foreign_keys = OFF")
+            
+            # =================================================================
+            # Table Definitions with PKs, FKs, and NOT NULL constraints
+            # FKs are declarative only (not enforced) for GTFS compatibility
+            # =================================================================
+            
+            # 1. Agency (no dependencies)
+            cursor.execute('''
+                CREATE TABLE agency (
+                    agency_id TEXT PRIMARY KEY,
+                    agency_name TEXT NOT NULL,
+                    agency_url TEXT,
+                    agency_timezone TEXT NOT NULL,
+                    agency_lang TEXT,
+                    agency_phone TEXT,
+                    agency_fare_url TEXT,
+                    agency_email TEXT
+                )
+            ''')
+            
+            # 2. Calendar (no dependencies)
+            cursor.execute('''
+                CREATE TABLE calendar (
+                    service_id TEXT PRIMARY KEY,
+                    monday INTEGER NOT NULL,
+                    tuesday INTEGER NOT NULL,
+                    wednesday INTEGER NOT NULL,
+                    thursday INTEGER NOT NULL,
+                    friday INTEGER NOT NULL,
+                    saturday INTEGER NOT NULL,
+                    sunday INTEGER NOT NULL,
+                    start_date TEXT NOT NULL,
+                    end_date TEXT NOT NULL
+                )
+            ''')
+            
+            # 3. Calendar Dates (depends on calendar)
+            cursor.execute('''
+                CREATE TABLE calendar_dates (
+                    service_id TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    exception_type INTEGER NOT NULL,
+                    PRIMARY KEY (service_id, date),
+                    FOREIGN KEY (service_id) REFERENCES calendar(service_id)
+                )
+            ''')
+            
+            # 4. Routes (depends on agency)
+            cursor.execute('''
+                CREATE TABLE routes (
+                    route_id TEXT PRIMARY KEY,
+                    agency_id TEXT,
+                    route_short_name TEXT,
+                    route_long_name TEXT,
+                    route_desc TEXT,
+                    route_type INTEGER NOT NULL,
+                    route_url TEXT,
+                    route_color TEXT,
+                    route_text_color TEXT,
+                    FOREIGN KEY (agency_id) REFERENCES agency(agency_id)
+                )
+            ''')
+            
+            # 5. Stops (no dependencies)
+            cursor.execute('''
+                CREATE TABLE stops (
+                    stop_id TEXT PRIMARY KEY,
+                    stop_code TEXT,
+                    stop_name TEXT NOT NULL,
+                    stop_desc TEXT,
+                    stop_lat REAL NOT NULL,
+                    stop_lon REAL NOT NULL,
+                    zone_id TEXT,
+                    stop_url TEXT,
+                    location_type INTEGER,
+                    parent_station TEXT,
+                    stop_timezone TEXT,
+                    wheelchair_boarding INTEGER
+                )
+            ''')
+            
+            # 6. Shapes (no dependencies)
+            cursor.execute('''
+                CREATE TABLE shapes (
+                    shape_id TEXT NOT NULL,
+                    shape_pt_lat REAL NOT NULL,
+                    shape_pt_lon REAL NOT NULL,
+                    shape_pt_sequence INTEGER NOT NULL,
+                    shape_dist_traveled REAL,
+                    PRIMARY KEY (shape_id, shape_pt_sequence)
+                )
+            ''')
+            
+            # 7. Trips (depends on routes, calendar, shapes)
+            cursor.execute('''
+                CREATE TABLE trips (
+                    trip_id TEXT PRIMARY KEY,
+                    route_id TEXT NOT NULL,
+                    service_id TEXT NOT NULL,
+                    trip_headsign TEXT,
+                    trip_short_name TEXT,
+                    direction_id INTEGER,
+                    block_id TEXT,
+                    shape_id TEXT,
+                    wheelchair_accessible INTEGER,
+                    bikes_allowed INTEGER,
+                    FOREIGN KEY (route_id) REFERENCES routes(route_id),
+                    FOREIGN KEY (service_id) REFERENCES calendar(service_id),
+                    FOREIGN KEY (shape_id) REFERENCES shapes(shape_id)
+                )
+            ''')
+            
+            # 8. Stop Times (depends on trips, stops) - largest table
+            cursor.execute('''
+                CREATE TABLE stop_times (
+                    trip_id TEXT NOT NULL,
+                    arrival_time TEXT NOT NULL,
+                    departure_time TEXT NOT NULL,
+                    stop_id TEXT NOT NULL,
+                    stop_sequence INTEGER NOT NULL,
+                    stop_headsign TEXT,
+                    pickup_type INTEGER,
+                    drop_off_type INTEGER,
+                    shape_dist_traveled REAL,
+                    timepoint INTEGER,
+                    PRIMARY KEY (trip_id, stop_sequence),
+                    FOREIGN KEY (trip_id) REFERENCES trips(trip_id),
+                    FOREIGN KEY (stop_id) REFERENCES stops(stop_id)
+                )
+            ''')
+            
+            logger.info("Schema created with PKs and FKs")
+            
+            # =================================================================
+            # Import Data (order matters for FK constraints)
+            # =================================================================
+            
+            z = zipfile.ZipFile(BytesIO(gtfs_zip_content))
+            
+            # Import order respects foreign key dependencies
+            import_order = [
+                'agency', 'calendar', 'calendar_dates', 'routes', 
+                'stops', 'shapes', 'trips', 'stop_times'
+            ]
+            
+            for table_name in import_order:
+                filename = f"{table_name}.txt"
+                
+                try:
+                    with z.open(filename) as f:
+                        content = f.read().decode('utf-8-sig')
+                        reader = csv.DictReader(content.splitlines())
+                        rows = list(reader)
+                        
+                        if rows:
+                            cols = list(rows[0].keys())
+                            placeholders = ','.join(['?' for _ in cols])
+                            sql = f"INSERT INTO {table_name} ({','.join(cols)}) VALUES ({placeholders})"
+                            
+                            data = [[row.get(c, '') or None for c in cols] for row in rows]
+                            cursor.executemany(sql, data)
+                    
+                    logger.info(f"  {filename}: {len(rows):,} rows")
+                    
+                except KeyError:
+                    logger.warning(f"  {filename}: not found in ZIP")
+                except Exception as e:
+                    logger.error(f"  {filename}: error - {e}")
+            
+            conn.commit()
+            
+            # =================================================================
+            # Create Optimized Indexes (after data import for performance)
+            # =================================================================
+            
+            indexes = [
+                # Routes indexes
+                'CREATE INDEX idx_routes_short_name ON routes (route_short_name)',
+                'CREATE INDEX idx_routes_type ON routes (route_type)',
+                # Stops indexes
+                'CREATE INDEX idx_stops_name ON stops (stop_name)',
+                'CREATE INDEX idx_stops_coords ON stops (stop_lat, stop_lon)',
+                # Trips indexes
+                'CREATE INDEX idx_trips_route ON trips (route_id)',
+                'CREATE INDEX idx_trips_service ON trips (service_id)',
+                'CREATE INDEX idx_trips_route_service ON trips (route_id, service_id)',
+                # Stop Times indexes (critical for arrivals queries)
+                'CREATE INDEX idx_stop_times_stop ON stop_times (stop_id)',
+                'CREATE INDEX idx_stop_times_stop_time ON stop_times (stop_id, arrival_time)',
+                'CREATE INDEX idx_stop_times_trip_seq ON stop_times (trip_id, stop_sequence)',
+                # Calendar indexes
+                'CREATE INDEX idx_calendar_dates ON calendar (start_date, end_date)',
+                'CREATE INDEX idx_calendar_dates_date ON calendar_dates (date)',
+                # Shapes index
+                'CREATE INDEX idx_shapes_id ON shapes (shape_id)',
+            ]
+            
+            logger.info("Creating indexes...")
+            for idx_sql in indexes:
+                try:
+                    cursor.execute(idx_sql)
+                except Exception as e:
+                    logger.warning(f"Index warning: {e}")
+            
+            # =================================================================
+            # Optimize Database
+            # =================================================================
+            
+            logger.info("Running ANALYZE for query optimization...")
+            cursor.execute("ANALYZE")
+            
+            conn.commit()
+            conn.close()
+            
+            # VACUUM must be outside transaction (separate connection)
+            logger.info("Running VACUUM to reclaim space...")
+            conn = sqlite3.connect(self.db_path)
+            conn.execute("VACUUM")
+            conn.close()
+            
+            self._save_metadata({
+                'gtfs_date': gtfs_date,
+                'updated_at': datetime.now().isoformat(),
+                'db_path': os.path.basename(self.db_path),
+                'schema_version': '2.0',  # Indicates optimized schema
+                'features': ['primary_keys', 'foreign_keys_declarative', 'indexes', 'analyzed']
+            })
+            
+            db_size = os.path.getsize(self.db_path) / (1024 * 1024)
+            logger.info(f"SQLite database created: {db_size:.1f} MB (optimized schema v2.0)")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to convert GTFS to SQLite: {e}")
+            return False
+    
+    def ensure_database(self, force_update: bool = False) -> bool:
+        """Ensures database exists and is up-to-date."""
+        if not force_update and os.path.exists(self.db_path):
+            needs_update, remote_date = self.check_for_updates()
+            if not needs_update:
+                return True
+        else:
+            needs_update = True
+            _, remote_date = self.check_for_updates()
+        
+        if needs_update or force_update:
+            gtfs_content = self.download_gtfs()
+            if gtfs_content:
+                return self.convert_to_sqlite(gtfs_content, remote_date or 'unknown')
+            else:
+                if os.path.exists(self.db_path):
+                    logger.warning("Using stale database due to download failure")
+                    return True
+                return False
+        
+        return True
+
+
+# ==========================================================================
+# Database Query Helpers
+# ==========================================================================
+
+def _get_db_connection() -> Optional[sqlite3.Connection]:
+    """Gets a database connection, ensuring DB exists."""
+    manager = CarrisGTFSManager()
+    if not manager.ensure_database():
+        return None
+    
+    try:
+        conn = sqlite3.connect(CARRIS_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn
+    except Exception as e:
+        logger.error(f"Database connection error: {e}")
+        return None
+
+
+def _get_active_services(conn: sqlite3.Connection, date: datetime = None) -> List[str]:
+    """Gets active service_ids for a given date."""
+    if date is None:
+        date = datetime.now()
+    
+    date_str = date.strftime("%Y%m%d")
+    day_of_week = date.strftime("%A").lower()
+    
+    cursor = conn.cursor()
+    
+    cursor.execute(f"""
+        SELECT service_id FROM calendar 
+        WHERE {day_of_week} = 1 
+        AND start_date <= ? AND end_date >= ?
+    """, (date_str, date_str))
+    
+    active_services = set(row['service_id'] for row in cursor.fetchall())
+    
+    cursor.execute("""
+        SELECT service_id FROM calendar_dates 
+        WHERE date = ? AND exception_type = 1
+    """, (date_str,))
+    for row in cursor.fetchall():
+        active_services.add(row['service_id'])
+    
+    cursor.execute("""
+        SELECT service_id FROM calendar_dates 
+        WHERE date = ? AND exception_type = 2
+    """, (date_str,))
+    for row in cursor.fetchall():
+        active_services.discard(row['service_id'])
+    
+    return list(active_services)
+
+
+def _get_route_info_by_id(conn: sqlite3.Connection, route_id: str) -> Optional[Dict]:
+    """Gets route information from route_id."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT route_id, route_short_name, route_long_name, route_type
+        FROM routes WHERE route_id = ?
+    """, (route_id,))
+    row = cursor.fetchone()
+    return dict(row) if row else None
+
+
+def _get_stop_info_by_id(conn: sqlite3.Connection, stop_id: str) -> Optional[Dict]:
+    """Gets stop information from stop_id."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT stop_id, stop_name, stop_lat, stop_lon, stop_code
+        FROM stops WHERE stop_id = ?
+    """, (stop_id,))
+    row = cursor.fetchone()
+    return dict(row) if row else None
+
+
+def _get_trip_info_by_id(conn: sqlite3.Connection, trip_id: str) -> Optional[Dict]:
+    """Gets trip information including route details."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT t.trip_id, t.trip_headsign, t.direction_id, t.route_id,
+               r.route_short_name, r.route_long_name
+        FROM trips t
+        JOIN routes r ON t.route_id = r.route_id
+        WHERE t.trip_id = ?
+    """, (trip_id,))
+    row = cursor.fetchone()
+    return dict(row) if row else None
+
+
+# ==========================================================================
+# GTFS-RT Real-Time Data
+# ==========================================================================
+
+def fetch_gtfs_rt_vehicles(use_cache: bool = True) -> List[Dict[str, Any]]:
+    """
+    Fetches real-time vehicle positions from Carris GTFS-RT feed.
+    
+    Args:
+        use_cache: Whether to use cached data if available (default: True)
+        
+    Returns:
+        List of vehicle dictionaries with parsed GTFS-RT data.
+    """
+    global _gtfs_rt_cache
+    
+    if not GTFS_RT_AVAILABLE:
+        logger.error("gtfs-realtime-bindings library not installed")
+        return []
+    
+    now = time.time()
+    if use_cache and _gtfs_rt_cache["data"] is not None:
+        age = now - _gtfs_rt_cache["timestamp"]
+        if age < _gtfs_rt_cache["ttl"]:
+            logger.debug(f"Using cached GTFS-RT data (age: {age:.1f}s)")
+            return _gtfs_rt_cache["data"]
+    
+    try:
+        response = requests.get(CARRIS_GTFS_RT_URL, timeout=REALTIME_TIMEOUT)
+        response.raise_for_status()
+        
+        feed = gtfs_realtime_pb2.FeedMessage()
+        feed.ParseFromString(response.content)
+        
+        vehicles = []
+        feed_timestamp = feed.header.timestamp
+        
+        for entity in feed.entity:
+            if not entity.HasField('vehicle'):
+                continue
+                
+            v = entity.vehicle
+            vehicle_data = {
+                "entity_id": entity.id,
+                "feed_timestamp": feed_timestamp,
+                "trip_id": v.trip.trip_id if v.HasField('trip') else None,
+                "route_id": v.trip.route_id if v.HasField('trip') else None,
+                "direction_id": v.trip.direction_id if v.HasField('trip') and v.trip.HasField('direction_id') else None,
+                "latitude": v.position.latitude if v.HasField('position') else None,
+                "longitude": v.position.longitude if v.HasField('position') else None,
+                "bearing": v.position.bearing if v.HasField('position') and v.position.HasField('bearing') else None,
+                "speed": v.position.speed if v.HasField('position') and v.position.HasField('speed') else None,
+                "vehicle_id": v.vehicle.id if v.HasField('vehicle') else None,
+                "vehicle_label": v.vehicle.label if v.HasField('vehicle') and v.vehicle.label else None,
+                "license_plate": v.vehicle.license_plate if v.HasField('vehicle') and v.vehicle.license_plate else None,
+                "current_status": VEHICLE_STATUS.get(v.current_status, f"UNKNOWN({v.current_status})"),
+                "current_status_code": v.current_status,
+                "stop_id": v.stop_id if v.stop_id else None,
+                "timestamp": v.timestamp,
+            }
+            vehicles.append(vehicle_data)
+        
+        logger.info(f"Fetched {len(vehicles)} vehicles from GTFS-RT feed")
+        
+        _gtfs_rt_cache["data"] = vehicles
+        _gtfs_rt_cache["timestamp"] = now
+        
+        return vehicles
+        
+    except requests.exceptions.Timeout:
+        logger.warning("GTFS-RT request timed out")
+        return _gtfs_rt_cache["data"] or []
+    except requests.exceptions.RequestException as e:
+        logger.error(f"GTFS-RT request failed: {e}")
+        return _gtfs_rt_cache["data"] or []
+    except Exception as e:
+        logger.error(f"Error parsing GTFS-RT data: {e}")
+        return _gtfs_rt_cache["data"] or []
+
+
+def enrich_vehicle_with_static_data(vehicle: Dict, conn: sqlite3.Connection) -> Dict:
+    """Enriches a GTFS-RT vehicle with static GTFS data."""
+    enriched = vehicle.copy()
+    
+    # Get route info (short name, long name)
+    if vehicle.get("route_id"):
+        route_info = _get_route_info_by_id(conn, vehicle["route_id"])
+        if route_info:
+            enriched["route_short_name"] = route_info["route_short_name"]
+            enriched["route_long_name"] = route_info["route_long_name"]
+            enriched["is_tram"] = route_info["route_short_name"].endswith("E")
+    
+    # Get stop name
+    if vehicle.get("stop_id"):
+        stop_info = _get_stop_info_by_id(conn, vehicle["stop_id"])
+        if stop_info:
+            enriched["stop_name"] = stop_info["stop_name"]
+    
+    # Get trip headsign (destination)
+    if vehicle.get("trip_id"):
+        trip_info = _get_trip_info_by_id(conn, vehicle["trip_id"])
+        if trip_info:
+            # Use trip_headsign if available, otherwise fall back to route_long_name
+            enriched["trip_headsign"] = trip_info["trip_headsign"] or trip_info.get("route_long_name")
+    
+    # Final fallback: if trip_headsign is still None, use route_long_name
+    if not enriched.get("trip_headsign") and enriched.get("route_long_name"):
+        enriched["trip_headsign"] = enriched["route_long_name"]
+    
+    return enriched
+
+
+def get_vehicles_for_route(route_short_name: str) -> List[Dict]:
+    """Gets all real-time vehicles for a specific route."""
+    vehicles = fetch_gtfs_rt_vehicles()
+    conn = _get_db_connection()
+    
+    if not conn:
+        return []
+    
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT route_id FROM routes WHERE route_short_name = ?", (route_short_name,))
+        
+        route_ids = [row['route_id'] for row in cursor.fetchall()]
+        
+        result = []
+        for v in vehicles:
+            if v.get("route_id") in route_ids:
+                result.append(enrich_vehicle_with_static_data(v, conn))
+        
+        conn.close()
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error getting vehicles for route {route_short_name}: {e}")
+        conn.close()
+        return []
+
+
+def get_vehicle_eta_at_stop(vehicle: Dict, target_stop_id: str, conn: sqlite3.Connection) -> Optional[Dict]:
+    """Estimates arrival time of a vehicle at a target stop."""
+    trip_id = vehicle.get("trip_id")
+    current_stop_id = vehicle.get("stop_id")
+    
+    if not trip_id or not current_stop_id:
+        return None
+    
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT stop_sequence, departure_time 
+        FROM stop_times 
+        WHERE trip_id = ? AND stop_id = ?
+    """, (trip_id, current_stop_id))
+    
+    current_row = cursor.fetchone()
+    if not current_row:
+        return None
+    
+    current_seq = current_row['stop_sequence']
+    current_scheduled_dep = current_row['departure_time']
+    
+    cursor.execute("""
+        SELECT stop_sequence, arrival_time, departure_time
+        FROM stop_times 
+        WHERE trip_id = ? AND stop_id = ?
+    """, (trip_id, target_stop_id))
+    
+    target_row = cursor.fetchone()
+    if not target_row:
+        return None
+    
+    target_seq = target_row['stop_sequence']
+    target_scheduled_arr = target_row['arrival_time']
+    
+    if current_seq >= target_seq:
+        return None
+    
+    current_mins = time_str_to_minutes(current_scheduled_dep)
+    target_mins = time_str_to_minutes(target_scheduled_arr)
+    scheduled_travel_mins = target_mins - current_mins
+    
+    now = datetime.now()
+    now_mins = now.hour * 60 + now.minute
+    scheduled_now_mins = time_str_to_minutes(current_scheduled_dep)
+    delay_mins = now_mins - scheduled_now_mins
+    
+    estimated_arrival_mins = target_mins + max(0, delay_mins)
+    
+    return {
+        "target_stop_id": target_stop_id,
+        "scheduled_arrival": target_scheduled_arr[:5],
+        "estimated_arrival": minutes_to_time_str(estimated_arrival_mins),
+        "scheduled_travel_mins": scheduled_travel_mins,
+        "current_delay_mins": delay_mins,
+        "stops_remaining": target_seq - current_seq,
+    }
+
+
+def get_next_arrivals_at_stop(stop_id: str, limit: int = 10) -> List[Dict]:
+    """Gets next scheduled and real-time arrivals at a stop."""
+    conn = _get_db_connection()
+    if not conn:
+        return []
+    
+    try:
+        now = datetime.now()
+        current_time = now.strftime("%H:%M:%S")
+        
+        active_services = _get_active_services(conn, now)
+        
+        if not active_services:
+            logger.warning("No active services found for today")
+            conn.close()
+            return []
+        
+        cursor = conn.cursor()
+        placeholders = ','.join(['?' for _ in active_services])
+        
+        cursor.execute(f"""
+            SELECT st.trip_id, st.arrival_time, st.departure_time, st.stop_sequence,
+                   t.trip_headsign, t.route_id, t.direction_id,
+                   r.route_short_name, r.route_long_name
+            FROM stop_times st
+            JOIN trips t ON st.trip_id = t.trip_id
+            JOIN routes r ON t.route_id = r.route_id
+            WHERE st.stop_id = ?
+            AND t.service_id IN ({placeholders})
+            AND st.departure_time >= ?
+            ORDER BY st.departure_time
+            LIMIT ?
+        """, (stop_id, *active_services, current_time, limit * 2))
+        
+        scheduled = cursor.fetchall()
+        
+        rt_vehicles = fetch_gtfs_rt_vehicles()
+        rt_by_trip = {v["trip_id"]: v for v in rt_vehicles if v.get("trip_id")}
+        
+        arrivals = []
+        for row in scheduled:
+            trip_id = row['trip_id']
+            scheduled_time = row['departure_time'][:5]
+            
+            arrival = {
+                "trip_id": trip_id,
+                "route_short_name": row['route_short_name'],
+                "route_long_name": row['route_long_name'],
+                "headsign": row['trip_headsign'] or row['route_long_name'],
+                "scheduled_time": scheduled_time,
+                "estimated_time": scheduled_time,
+                "is_realtime": False,
+                "delay_mins": 0,
+                "vehicle_id": None,
+                "is_tram": row['route_short_name'].endswith("E"),
+            }
+            
+            if trip_id in rt_by_trip:
+                vehicle = rt_by_trip[trip_id]
+                arrival["is_realtime"] = True
+                arrival["vehicle_id"] = vehicle.get("vehicle_id")
+                arrival["license_plate"] = vehicle.get("license_plate")
+                
+                eta_info = get_vehicle_eta_at_stop(vehicle, stop_id, conn)
+                if eta_info:
+                    arrival["estimated_time"] = eta_info["estimated_arrival"]
+                    arrival["delay_mins"] = eta_info["current_delay_mins"]
+                    arrival["stops_remaining"] = eta_info["stops_remaining"]
+            
+            arrivals.append(arrival)
+        
+        arrivals.sort(key=lambda x: time_str_to_minutes(x["estimated_time"]))
+        
+        conn.close()
+        return arrivals[:limit]
+        
+    except Exception as e:
+        logger.error(f"Error getting arrivals at stop {stop_id}: {e}")
+        conn.close()
+        return []
+
+
+# ==========================================================================
+# Tool Functions
+# ==========================================================================
+
+@tool
+def carris_get_stops(query: str = "", limit: int = 20) -> str:
+    """
+    Searches Carris (Lisbon urban) bus and tram stops.
+    
+    Args:
+        query: Search term for stop name (empty = list all stops)
+        limit: Maximum results (default: 20)
+        
+    Returns:
+        Formatted list of matching stops with ID, name, and coordinates.
+    """
+    conn = _get_db_connection()
+    if not conn:
+        return "Base de dados da Carris indisponível."
+    
+    try:
+        cursor = conn.cursor()
+        
+        if query:
+            sql = """
+                SELECT stop_id, stop_name, stop_lat, stop_lon, stop_code
+                FROM stops WHERE stop_name LIKE ? ORDER BY stop_name LIMIT ?
+            """
+            cursor.execute(sql, (f'%{query}%', limit))
+        else:
+            sql = """
+                SELECT stop_id, stop_name, stop_lat, stop_lon, stop_code
+                FROM stops ORDER BY stop_name LIMIT ?
+            """
+            cursor.execute(sql, (limit,))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        if not rows:
+            return f"Nenhuma paragem Carris encontrada para '{query}'"
+        
+        response = f"Paragens Carris (pesquisa: '{query}')\n"
+        response += "=" * 45 + "\n\n"
+        
+        for row in rows:
+            response += f"PARAGEM: {row['stop_name']}\n"
+            response += f"   ID: {row['stop_id']} | Código: {row['stop_code'] or 'N/A'}\n"
+            if row['stop_lat'] and row['stop_lon']:
+                response += f"   GPS: {row['stop_lat']:.5f}, {row['stop_lon']:.5f}\n"
+            response += "\n"
+        
+        response += f"A mostrar {len(rows)} paragens\n"
+        response += "Usa o ID da paragem com carris_get_arrivals para ver chegadas em tempo real.\n"
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error searching stops: {e}")
+        return f"Erro ao pesquisar paragens: {e}"
+
+
+@tool
+def carris_get_routes(route_type: str = "", route_id: str = "", limit: int = 50) -> str:
+    """
+    Gets Carris (Lisbon urban) bus and tram routes.
+    
+    Args:
+        route_type: Filter by type - "bus", "tram", "elétrico", "autocarro" (optional)
+        route_id: Search for specific route ID or short name (optional)
+        limit: Maximum results (default: 50)
+        
+    Returns:
+        Formatted list of routes with ID, name, and type.
+    """
+    conn = _get_db_connection()
+    if not conn:
+        return "Base de dados da Carris indisponível."
+    
+    try:
+        cursor = conn.cursor()
+        
+        conditions = []
+        params = []
+        
+        if route_type:
+            type_lower = route_type.lower().strip()
+            if type_lower in ["tram", "elétrico", "eletrico"]:
+                conditions.append("route_short_name LIKE '%E'")
+            elif type_lower in ["bus", "autocarro"]:
+                conditions.append("route_short_name NOT LIKE '%E'")
+        
+        if route_id:
+            conditions.append("(route_id LIKE ? OR route_short_name LIKE ?)")
+            params.extend([f'%{route_id}%', f'%{route_id}%'])
+        
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+        
+        sql = f"""
+            SELECT route_id, route_short_name, route_long_name, route_type
+            FROM routes WHERE {where_clause} ORDER BY route_short_name LIMIT ?
+        """
+        params.append(limit)
+        
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
+        conn.close()
+        
+        if not rows:
+            filter_msg = f" (tipo: {route_type})" if route_type else ""
+            return f"Nenhuma rota Carris encontrada{filter_msg}"
+        
+        trams = [r for r in rows if r['route_short_name'].endswith('E')]
+        buses = [r for r in rows if not r['route_short_name'].endswith('E')]
+        
+        response = "Rotas Carris (Lisboa Urbano)\n"
+        response += "=" * 45 + "\n\n"
+        
+        if trams:
+            response += "ELÉTRICOS\n" + "-" * 30 + "\n"
+            for r in trams:
+                response += f"   {r['route_short_name']}: {r['route_long_name'] or 'N/A'}\n"
+            response += "\n"
+        
+        if buses:
+            response += "AUTOCARROS\n" + "-" * 30 + "\n"
+            for r in buses[:25]:
+                response += f"   {r['route_short_name']}: {r['route_long_name'] or 'N/A'}\n"
+            if len(buses) > 25:
+                response += f"   ... e mais {len(buses) - 25} rotas de autocarro\n"
+            response += "\n"
+        
+        response += f"Total: {len(trams)} elétricos + {len(buses)} autocarros\n"
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error getting routes: {e}")
+        return f"Erro ao obter rotas: {e}"
+
+
+@tool
+def carris_get_arrivals(stop_id: str, limit: int = 10) -> str:
+    """
+    Gets real-time arrivals at a Carris stop combining schedule and live tracking.
+    
+    This is the PRIMARY tool for "when is the next bus/tram at stop X".
+    Combines GTFS schedule with GTFS-RT live vehicle positions.
+    
+    Args:
+        stop_id: Stop ID (from carris_get_stops)
+        limit: Maximum arrivals to show (default: 10)
+        
+    Returns:
+        Formatted list of upcoming arrivals with times and delay info.
+    """
+    conn = _get_db_connection()
+    if not conn:
+        return "Base de dados da Carris indisponível."
+    
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT stop_name FROM stops WHERE stop_id = ?", (stop_id,))
+        stop_row = cursor.fetchone()
+        
+        if not stop_row:
+            conn.close()
+            return f"Paragem '{stop_id}' não encontrada. Usa carris_get_stops para pesquisar."
+        
+        stop_name = stop_row['stop_name']
+        conn.close()
+        
+        arrivals = get_next_arrivals_at_stop(stop_id, limit)
+        
+        if not arrivals:
+            return f"Sem mais partidas hoje na paragem {stop_name} (ID: {stop_id})."
+        
+        response = f"Próximas Chegadas: {stop_name}\n"
+        response += f"   ID: {stop_id} | Atualizado: {datetime.now().strftime('%H:%M')}\n"
+        response += "=" * 55 + "\n\n"
+        
+        for arr in arrivals:
+            vehicle_type = "Elétrico" if arr["is_tram"] else "Autocarro"
+            rt_indicator = "[TEMPO REAL]" if arr["is_realtime"] else "[HORÁRIO]"
+            
+            if arr["is_realtime"] and arr["delay_mins"] != 0:
+                if arr["delay_mins"] > 0:
+                    time_display = f"{arr['estimated_time']} (atrasado {arr['delay_mins']} min)"
+                else:
+                    time_display = f"{arr['estimated_time']} (adiantado {abs(arr['delay_mins'])} min)"
+            else:
+                time_display = arr['scheduled_time']
+            
+            response += f"{rt_indicator} {vehicle_type} {arr['route_short_name']} -> {arr['headsign'][:35]}\n"
+            response += f"   Hora: {time_display}\n"
+            
+            if arr["is_realtime"] and arr.get("stops_remaining"):
+                response += f"   Faltam {arr['stops_remaining']} paragens\n"
+            
+            if arr.get("vehicle_id"):
+                plate_info = f" | Matrícula: {arr['license_plate']}" if arr.get('license_plate') else ""
+                response += f"   Veículo: {arr['vehicle_id']}{plate_info}\n"
+            
+            response += "\n"
+        
+        response += "-" * 55 + "\n"
+        response += "[TEMPO REAL] = Dados GPS do veículo | [HORÁRIO] = Horário previsto\n"
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error getting arrivals: {e}")
+        return f"Erro ao obter chegadas: {e}"
+
+
+@tool
+def carris_get_stop_schedule(stop_id: str, limit: int = 15) -> str:
+    """
+    Gets the STATIC schedule for a Carris stop (no real-time data).
+    
+    Args:
+        stop_id: Stop ID (from carris_get_stops)
+        limit: Maximum departures (default: 15)
+        
+    Returns:
+        Formatted schedule with times and route info.
+    """
+    conn = _get_db_connection()
+    if not conn:
+        return "Base de dados da Carris indisponível."
+    
+    try:
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT stop_name FROM stops WHERE stop_id = ?", (stop_id,))
+        stop_row = cursor.fetchone()
+        
+        if not stop_row:
+            conn.close()
+            return f"Paragem '{stop_id}' não encontrada."
+        
+        stop_name = stop_row['stop_name']
+        
+        now = datetime.now()
+        current_time = now.strftime("%H:%M:%S")
+        
+        active_services = _get_active_services(conn, now)
+        
+        if not active_services:
+            conn.close()
+            return "Nenhum serviço ativo encontrado para hoje."
+        
+        placeholders = ','.join(['?' for _ in active_services])
+        
+        sql = f"""
+            SELECT st.departure_time, r.route_short_name, r.route_long_name, t.trip_headsign
+            FROM stop_times st
+            JOIN trips t ON st.trip_id = t.trip_id
+            JOIN routes r ON t.route_id = r.route_id
+            WHERE st.stop_id = ? AND t.service_id IN ({placeholders}) AND st.departure_time >= ?
+            ORDER BY st.departure_time LIMIT ?
+        """
+        
+        cursor.execute(sql, (stop_id, *active_services, current_time, limit))
+        rows = cursor.fetchall()
+        conn.close()
+        
+        response = f"Horário: {stop_name}\n"
+        response += f"   ID: {stop_id}\n"
+        response += "=" * 50 + "\n\n"
+        
+        if not rows:
+            response += "Sem mais partidas hoje nesta paragem.\n"
+            return response
+        
+        response += "Próximas Partidas (Horário Estático)\n" + "-" * 40 + "\n"
+        
+        for row in rows:
+            vehicle_type = "Elétrico" if row['route_short_name'].endswith('E') else "Autocarro"
+            time_str = row['departure_time'][:5]
+            destination = row['trip_headsign'] or row['route_long_name'] or 'N/A'
+            
+            response += f"{time_str} - {vehicle_type} Linha {row['route_short_name']}\n"
+            response += f"      Destino: {destination[:40]}\n"
+        
+        response += f"\nA mostrar {len(rows)} partidas (horário estático)\n"
+        response += "Para tempos reais, usa carris_get_arrivals\n"
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error getting schedule: {e}")
+        return f"Erro ao obter horário: {e}"
+
+
+@tool
+def carris_find_routes_between(origin: str, destination: str, search_radius_km: float = 0.4) -> str:
+    """
+    Finds Carris routes connecting two locations with real-time estimates.
+    
+    Args:
+        origin: Origin location (e.g., "Rossio", "Praça do Comércio")
+        destination: Destination (e.g., "Belém", "Parque das Nações")
+        search_radius_km: Initial search radius (default: 0.4km)
+        
+    Returns:
+        Route options with real-time waiting times.
+    """
+    conn = _get_db_connection()
+    if not conn:
+        return "Base de dados da Carris indisponível."
+    
+    try:
+        cursor = conn.cursor()
+        
+        response = f"Rotas: {origin} -> {destination}\n"
+        response += "=" * 55 + "\n\n"
+        
+        response += "A resolver localizações...\n"
+        
+        origin_lat, origin_lon, origin_name = geocode_location(origin)
+        dest_lat, dest_lon, dest_name = geocode_location(destination)
+        
+        if origin_lat is None:
+            cursor.execute("SELECT stop_lat, stop_lon, stop_name FROM stops WHERE stop_name LIKE ? LIMIT 1", (f'%{origin}%',))
+            row = cursor.fetchone()
+            if row:
+                origin_lat, origin_lon, origin_name = row['stop_lat'], row['stop_lon'], row['stop_name']
+            else:
+                conn.close()
+                return f"Não foi possível localizar '{origin}'."
+        
+        if dest_lat is None:
+            cursor.execute("SELECT stop_lat, stop_lon, stop_name FROM stops WHERE stop_name LIKE ? LIMIT 1", (f'%{destination}%',))
+            row = cursor.fetchone()
+            if row:
+                dest_lat, dest_lon, dest_name = row['stop_lat'], row['stop_lon'], row['stop_name']
+            else:
+                conn.close()
+                return f"Não foi possível localizar '{destination}'."
+        
+        origin_display = origin_name.split(',')[0] if origin_name else origin
+        dest_display = dest_name.split(',')[0] if dest_name else destination
+        
+        response += f"   De: {origin_display}\n"
+        response += f"   Para: {dest_display}\n\n"
+        
+        def find_stops_near(lat: float, lon: float, radius: float) -> List[Dict]:
+            cursor.execute("SELECT stop_id, stop_name, stop_lat, stop_lon FROM stops")
+            all_stops = cursor.fetchall()
+            
+            nearby = []
+            for stop in all_stops:
+                if stop['stop_lat'] and stop['stop_lon']:
+                    dist = haversine_distance(lat, lon, stop['stop_lat'], stop['stop_lon'])
+                    if dist <= radius:
+                        nearby.append({
+                            'id': stop['stop_id'],
+                            'name': stop['stop_name'],
+                            'lat': stop['stop_lat'],
+                            'lon': stop['stop_lon'],
+                            'distance_km': dist
+                        })
+            return sorted(nearby, key=lambda x: x['distance_km'])
+        
+        routes_found = []
+        origin_stops = []
+        final_radius = search_radius_km
+        
+        for r in [search_radius_km, search_radius_km * 2, search_radius_km * 3]:
+            final_radius = r
+            origin_stops = find_stops_near(origin_lat, origin_lon, r)
+            dest_stops = find_stops_near(dest_lat, dest_lon, r)
+            
+            if not origin_stops or not dest_stops:
+                continue
+            
+            origin_ids = [s['id'] for s in origin_stops]
+            dest_ids = [s['id'] for s in dest_stops]
+            
+            ph_o = ','.join(['?' for _ in origin_ids])
+            ph_d = ','.join(['?' for _ in dest_ids])
+            
+            sql = f"""
+                SELECT DISTINCT r.route_id, r.route_short_name, r.route_long_name
+                FROM routes r
+                WHERE r.route_id IN (
+                    SELECT DISTINCT t.route_id FROM stop_times st 
+                    JOIN trips t ON st.trip_id = t.trip_id
+                    WHERE st.stop_id IN ({ph_o})
+                )
+                AND r.route_id IN (
+                    SELECT DISTINCT t.route_id FROM stop_times st 
+                    JOIN trips t ON st.trip_id = t.trip_id
+                    WHERE st.stop_id IN ({ph_d})
+                )
+            """
+            cursor.execute(sql, origin_ids + dest_ids)
+            routes_found = cursor.fetchall()
+            
+            if routes_found:
+                break
+        
+        if not routes_found:
+            conn.close()
+            response += f"Nenhuma rota Carris direta encontrada (raio: {final_radius}km).\n"
+            response += "   Sugestões:\n"
+            response += "   - Usa o Metro (mais rápido para distâncias longas)\n"
+            response += "   - Verifica hubs como Entrecampos, Rossio ou Cais do Sodré\n"
+            return response
+        
+        response += f"Encontradas {len(routes_found)} rotas diretas!\n\n"
+        
+        now = datetime.now()
+        current_time = now.strftime("%H:%M:%S")
+        active_services = _get_active_services(conn, now)
+        
+        trams = [r for r in routes_found if r['route_short_name'].endswith('E')]
+        buses = [r for r in routes_found if not r['route_short_name'].endswith('E')]
+        
+        def get_next_departure(route_short_name: str) -> str:
+            for stop in origin_stops[:5]:
+                if not active_services:
+                    return "Sem serviço"
+                
+                ph_svc = ','.join(['?' for _ in active_services])
+                cursor.execute(f"""
+                    SELECT st.departure_time, t.trip_headsign
+                    FROM stop_times st
+                    JOIN trips t ON st.trip_id = t.trip_id
+                    JOIN routes r ON t.route_id = r.route_id
+                    WHERE st.stop_id = ? AND r.route_short_name = ? AND t.service_id IN ({ph_svc})
+                    AND st.departure_time >= ?
+                    ORDER BY st.departure_time LIMIT 2
+                """, (stop['id'], route_short_name, *active_services, current_time))
+                
+                deps = cursor.fetchall()
+                if deps:
+                    times = [d['departure_time'][:5] for d in deps]
+                    return f"Próximos: {', '.join(times)} (paragem {stop['name'][:20]})"
+            
+            return "Ver horário"
+        
+        if trams:
+            response += "ELÉTRICOS\n" + "-" * 40 + "\n"
+            for r in trams:
+                next_dep = get_next_departure(r['route_short_name'])
+                response += f"   {r['route_short_name']}: {r['route_long_name']}\n"
+                response += f"     {next_dep}\n\n"
+        
+        if buses:
+            response += "AUTOCARROS\n" + "-" * 40 + "\n"
+            for r in buses[:5]:
+                next_dep = get_next_departure(r['route_short_name'])
+                response += f"   {r['route_short_name']}: {r['route_long_name']}\n"
+                response += f"     {next_dep}\n\n"
+            if len(buses) > 5:
+                response += f"   ... e mais {len(buses)-5} rotas\n\n"
+        
+        conn.close()
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error finding routes: {e}")
+        return f"Erro ao encontrar rotas: {e}"
+
+
+@tool
+def carris_get_realtime_vehicles(route_id: str = "", vehicle_type: str = "") -> str:
+    """
+    Gets real-time Carris vehicle positions from official GTFS-RT feed.
+    
+    Args:
+        route_id: Filter by route (e.g., "28E", "15E", "732") - optional
+        vehicle_type: Filter by "tram" or "bus" - optional
+        
+    Returns:
+        Real-time vehicle positions with route and location info.
+    """
+    vehicles = fetch_gtfs_rt_vehicles()
+    
+    if not vehicles:
+        if not GTFS_RT_AVAILABLE:
+            return "Biblioteca GTFS-RT não instalada. Executa: pip install gtfs-realtime-bindings"
+        return "Dados de veículos em tempo real indisponíveis."
+    
+    conn = _get_db_connection()
+    if not conn:
+        return "Base de dados indisponível para enriquecer dados."
+    
+    try:
+        enriched = [enrich_vehicle_with_static_data(v, conn) for v in vehicles]
+        conn.close()
+        
+        filtered = enriched
+        
+        if route_id:
+            route_upper = route_id.upper()
+            filtered = [v for v in filtered if v.get('route_short_name', '').upper() == route_upper]
+        
+        if vehicle_type:
+            type_lower = vehicle_type.lower()
+            if type_lower in ["tram", "elétrico", "eletrico"]:
+                filtered = [v for v in filtered if v.get('is_tram', False)]
+            elif type_lower in ["bus", "autocarro"]:
+                filtered = [v for v in filtered if not v.get('is_tram', False)]
+        
+        if not filtered:
+            filter_msg = ""
+            if route_id:
+                filter_msg += f" rota={route_id}"
+            if vehicle_type:
+                filter_msg += f" tipo={vehicle_type}"
+            return f"Nenhum veículo encontrado com filtros:{filter_msg}"
+        
+        response = "Veículos Carris em Tempo Real\n"
+        response += "=" * 55 + "\n"
+        
+        feed_time = filtered[0].get('feed_timestamp', 0)
+        if feed_time:
+            response += f"Dados de: {datetime.fromtimestamp(feed_time).strftime('%H:%M:%S')}\n\n"
+        
+        trams = [v for v in filtered if v.get('is_tram', False)]
+        buses = [v for v in filtered if not v.get('is_tram', False)]
+        
+        def format_vehicle(v: Dict) -> str:
+            route = v.get('route_short_name', 'N/A')
+            # Proper fallback chain: trip_headsign -> route_long_name -> 'N/A'
+            headsign = v.get('trip_headsign') or v.get('route_long_name') or 'N/A'
+            lat = v.get('latitude', 0)
+            lon = v.get('longitude', 0)
+            stop = v.get('stop_name', 'Em trânsito')
+            plate = v.get('license_plate', '')
+            status = v.get('current_status', 'N/A')
+            
+            status_text = "Em trânsito" if status == "IN_TRANSIT_TO" else "Parado" if status == "STOPPED_AT" else "A chegar"
+            
+            line = f"{route} -> {headsign[:30]} [{status_text}]\n"
+            line += f"   GPS: {lat:.5f}, {lon:.5f}"
+            if stop and stop != 'Em trânsito':
+                line += f" | Próxima paragem: {stop[:25]}"
+            if plate:
+                line += f"\n   Matrícula: {plate}"
+            return line + "\n"
+        
+        if trams:
+            response += "ELÉTRICOS\n" + "-" * 40 + "\n"
+            for v in trams[:15]:
+                response += format_vehicle(v)
+            if len(trams) > 15:
+                response += f"   ... e mais {len(trams) - 15} elétricos\n"
+            response += "\n"
+        
+        if buses:
+            response += "AUTOCARROS\n" + "-" * 40 + "\n"
+            for v in buses[:20]:
+                response += format_vehicle(v)
+            if len(buses) > 20:
+                response += f"   ... e mais {len(buses) - 20} autocarros\n"
+            response += "\n"
+        
+        response += f"Total: {len(trams)} elétricos + {len(buses)} autocarros = {len(filtered)} veículos\n"
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error getting realtime vehicles: {e}")
+        return f"Erro ao obter veículos: {e}"
+
+
+@tool
+def carris_vehicle_eta(route_short_name: str, stop_name: str) -> str:
+    """
+    Calculates estimated arrival time for vehicles of a specific route at a stop.
+    
+    This is the BEST tool for "when will bus/tram X arrive at stop Y".
+    Combines real-time vehicle positions with static schedule for accurate ETAs.
+    
+    Args:
+        route_short_name: Route number (e.g., "28E", "15E", "732")
+        stop_name: Stop name or partial name
+        
+    Returns:
+        Detailed ETA information with vehicle positions and delays.
+    """
+    conn = _get_db_connection()
+    if not conn:
+        return "Base de dados indisponível."
+    
+    try:
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT stop_id, stop_name, stop_lat, stop_lon FROM stops WHERE stop_name LIKE ? LIMIT 5", (f'%{stop_name}%',))
+        
+        stops = cursor.fetchall()
+        if not stops:
+            conn.close()
+            return f"Paragem '{stop_name}' não encontrada."
+        
+        target_stop = stops[0]
+        target_stop_id = target_stop['stop_id']
+        target_stop_name = target_stop['stop_name']
+        
+        vehicles = get_vehicles_for_route(route_short_name)
+        
+        if not vehicles:
+            conn.close()
+            return f"Nenhum veículo da linha {route_short_name} em circulação."
+        
+        response = f"ETA: Linha {route_short_name} -> {target_stop_name}\n"
+        response += "=" * 55 + "\n"
+        response += f"Hora atual: {datetime.now().strftime('%H:%M')}\n\n"
+        
+        etas = []
+        for v in vehicles:
+            eta_info = get_vehicle_eta_at_stop(v, target_stop_id, conn)
+            if eta_info:
+                etas.append({
+                    **eta_info,
+                    "vehicle_id": v.get("vehicle_id"),
+                    "license_plate": v.get("license_plate"),
+                    "current_stop": v.get("stop_name", "Em trânsito"),
+                })
+        
+        if not etas:
+            response += "Nenhum veículo da linha a caminho desta paragem.\n\n"
+            response += "Próximas partidas (horário):\n"
+            
+            now = datetime.now()
+            active_services = _get_active_services(conn, now)
+            
+            if active_services:
+                ph = ','.join(['?' for _ in active_services])
+                cursor.execute(f"""
+                    SELECT st.departure_time, t.trip_headsign
+                    FROM stop_times st
+                    JOIN trips t ON st.trip_id = t.trip_id
+                    JOIN routes r ON t.route_id = r.route_id
+                    WHERE st.stop_id = ? AND r.route_short_name = ? AND t.service_id IN ({ph})
+                    AND st.departure_time >= ?
+                    ORDER BY st.departure_time LIMIT 5
+                """, (target_stop_id, route_short_name, *active_services, now.strftime("%H:%M:%S")))
+                
+                deps = cursor.fetchall()
+                for d in deps:
+                    response += f"   {d['departure_time'][:5]} -> {d['trip_headsign'] or 'N/A'}\n"
+            
+            conn.close()
+            return response
+        
+        etas.sort(key=lambda x: time_str_to_minutes(x["estimated_arrival"]))
+        
+        response += f"{len(etas)} veículos a caminho:\n" + "-" * 40 + "\n\n"
+        
+        for i, eta in enumerate(etas[:5], 1):
+            delay_str = ""
+            if eta["current_delay_mins"] > 0:
+                delay_str = f" (atrasado +{eta['current_delay_mins']} min)"
+            elif eta["current_delay_mins"] < 0:
+                delay_str = f" (adiantado {abs(eta['current_delay_mins'])} min)"
+            
+            response += f"{i}. Chegada estimada: {eta['estimated_arrival']}{delay_str}\n"
+            response += f"   Posição atual: {eta['current_stop']}\n"
+            response += f"   Faltam {eta['stops_remaining']} paragens\n"
+            
+            if eta.get("license_plate"):
+                response += f"   Matrícula: {eta['license_plate']}\n"
+            
+            response += f"   Tempo viagem estimado: ~{eta['scheduled_travel_mins']} min\n\n"
+        
+        if len(etas) > 5:
+            response += f"   ... e mais {len(etas) - 5} veículos\n"
+        
+        conn.close()
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error calculating ETA: {e}")
+        return f"Erro ao calcular ETA: {e}"
+
+
+# ==========================================================================
+# Test Block
+# ==========================================================================
+if __name__ == "__main__":
+    import time as time_module
+    
+    print("\n" + "=" * 70)
+    print("\033[1m🧪 COMPREHENSIVE TEST: Carris Urban API Tools\033[0m")
+    print("=" * 70)
+    print(f"📅 Test Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"🗄️ Database: {CARRIS_DB_PATH}")
+    print(f"📡 GTFS-RT Available: {GTFS_RT_AVAILABLE}")
+    print("=" * 70)
+    
+    test_results = {"passed": 0, "failed": 0, "total": 0}
+    
+    def run_test(test_name: str, test_func, *args, **kwargs):
+        """Helper to run tests with error handling."""
+        test_results["total"] += 1
+        print(f"\n\033[1m{'─' * 70}\033[0m")
+        print(f"\033[1;36m🔬 TEST {test_results['total']}: {test_name}\033[0m")
+        print(f"{'─' * 70}")
+        try:
+            result = test_func(*args, **kwargs)
+            # Truncate long outputs for readability
+            if isinstance(result, str) and len(result) > 800:
+                print(result[:800] + "\n\n... (truncated for readability)")
+            elif result is not None:
+                print(result)
+            test_results["passed"] += 1
+            print(f"\n\033[1;32m✅ PASSED\033[0m")
+            return result
+        except Exception as e:
+            print(f"\n\033[1;31m❌ FAILED: {str(e)}\033[0m")
+            test_results["failed"] += 1
+            return None
+    
+    # =========================================================================
+    # DATABASE SETUP TESTS
+    # =========================================================================
+    # TEST 1: Database Rebuild (Force Update)
+    def _test_database_rebuild():
+        print("Forcing database rebuild (force_update=True)...")
+        manager = CarrisGTFSManager()
+        start = time_module.time()
+        success = manager.ensure_database(force_update=True)
+        elapsed = time_module.time() - start
+        
+        if not success:
+            raise AssertionError("Database rebuild failed")
+        
+        db_size = os.path.getsize(CARRIS_DB_PATH) / (1024 * 1024)
+        return f"Database rebuilt in {elapsed:.1f}s ({db_size:.1f} MB)"
+    
+    run_test("Database Rebuild (force_update=True)", _test_database_rebuild)
+    
+    # =========================================================================
+    # SCHEMA VERIFICATION TESTS
+    # =========================================================================
+    # TEST 2: Primary Keys Verification
+    def _test_schema_pks():
+        conn = sqlite3.connect(CARRIS_DB_PATH)
+        cur = conn.cursor()
+        
+        expected_pks = {
+            'agency': ['agency_id'],
+            'routes': ['route_id'],
+            'stops': ['stop_id'],
+            'trips': ['trip_id'],
+            'stop_times': ['trip_id', 'stop_sequence'],
+            'calendar': ['service_id'],
+            'calendar_dates': ['service_id', 'date'],
+            'shapes': ['shape_id', 'shape_pt_sequence'],
+        }
+        
+        results = []
+        all_ok = True
+        
+        for table, expected in expected_pks.items():
+            cur.execute(f'PRAGMA table_info({table})')
+            pk_cols = [r[1] for r in cur.fetchall() if r[5] > 0]
+            
+            if pk_cols == expected:
+                results.append(f"   ✅ {table}: PK = {pk_cols}")
+            else:
+                results.append(f"   ❌ {table}: Expected {expected}, got {pk_cols}")
+                all_ok = False
+        
+        conn.close()
+        
+        if not all_ok:
+            raise AssertionError("Primary key verification failed")
+        
+        return "\n".join(results)
+    
+    run_test("Schema Verification (PRIMARY KEYs)", _test_schema_pks)
+    
+    # TEST 3: Index Verification
+    def _test_schema_indexes():
+        conn = sqlite3.connect(CARRIS_DB_PATH)
+        cur = conn.cursor()
+        
+        expected_indexes = [
+            'idx_routes_short_name', 'idx_routes_type',
+            'idx_stops_name', 'idx_stops_coords',
+            'idx_trips_route', 'idx_trips_service', 'idx_trips_route_service',
+            'idx_stop_times_stop', 'idx_stop_times_stop_time', 'idx_stop_times_trip_seq',
+            'idx_calendar_dates', 'idx_calendar_dates_date',
+            'idx_shapes_id',
+        ]
+        
+        cur.execute('SELECT name FROM sqlite_master WHERE type="index" AND name NOT LIKE "sqlite_%"')
+        actual_indexes = [r[0] for r in cur.fetchall()]
+        conn.close()
+        
+        missing = set(expected_indexes) - set(actual_indexes)
+        
+        if missing:
+            raise AssertionError(f"Missing indexes: {missing}")
+        
+        return f"   ✅ All {len(expected_indexes)} expected indexes present\n   📊 Found: {len(actual_indexes)} total indexes"
+    
+    run_test("Index Verification (13 indexes)", _test_schema_indexes)
+    
+    # =========================================================================
+    # DATA VERIFICATION TESTS
+    # =========================================================================
+    # TEST 4: Row Count Verification
+    def _test_row_counts():
+        conn = sqlite3.connect(CARRIS_DB_PATH)
+        cur = conn.cursor()
+        
+        min_expected = {
+            'agency': 1,
+            'calendar': 1,
+            'calendar_dates': 1,
+            'routes': 100,
+            'stops': 2000,
+            'trips': 50000,
+            'stop_times': 2000000,
+            'shapes': 100000,
+        }
+        
+        results = []
+        all_ok = True
+        
+        for table, min_rows in min_expected.items():
+            cur.execute(f'SELECT COUNT(*) FROM {table}')
+            count = cur.fetchone()[0]
+            
+            if count >= min_rows:
+                results.append(f"   ✅ {table}: {count:,} rows (min: {min_rows:,})")
+            else:
+                results.append(f"   ❌ {table}: {count:,} rows (expected min: {min_rows:,})")
+                all_ok = False
+        
+        conn.close()
+        
+        if not all_ok:
+            raise AssertionError("Row count verification failed")
+        
+        return "\n".join(results)
+    
+    run_test("Row Count Verification", _test_row_counts)
+    
+    # TEST 5: Query Performance
+    def _test_query_performance():
+        conn = sqlite3.connect(CARRIS_DB_PATH)
+        cur = conn.cursor()
+        
+        queries = [
+            ("Stop by name (indexed)", "SELECT * FROM stops WHERE stop_name LIKE '%Rossio%'"),
+            ("Route by short_name", "SELECT * FROM routes WHERE route_short_name = '28E'"),
+            ("Trips for route", "SELECT COUNT(*) FROM trips WHERE route_id = (SELECT route_id FROM routes WHERE route_short_name = '28E' LIMIT 1)"),
+            ("Stop times for stop", "SELECT COUNT(*) FROM stop_times WHERE stop_id = (SELECT stop_id FROM stops LIMIT 1)"),
+            ("Active services today", f"SELECT * FROM calendar WHERE {datetime.now().strftime('%A').lower()} = 1"),
+        ]
+        
+        results = []
+        
+        for name, sql in queries:
+            start = time_module.time()
+            cur.execute(sql)
+            rows = cur.fetchall()
+            elapsed_ms = (time_module.time() - start) * 1000
+            
+            status = "✅" if elapsed_ms < 100 else ("⚠️" if elapsed_ms < 500 else "❌")
+            results.append(f"   {status} {name}: {elapsed_ms:.1f}ms ({len(rows)} rows)")
+        
+        conn.close()
+        return "\n".join(results)
+    
+    run_test("Query Performance (<100ms target)", _test_query_performance)
+    
+    # TEST 6: Data Integrity (FK-like checks)
+    def _test_data_integrity():
+        conn = sqlite3.connect(CARRIS_DB_PATH)
+        cur = conn.cursor()
+        
+        results = []
+        
+        # Check trips reference valid routes
+        cur.execute("""
+            SELECT COUNT(*) FROM trips t 
+            WHERE NOT EXISTS (SELECT 1 FROM routes r WHERE r.route_id = t.route_id)
+        """)
+        orphan_trips = cur.fetchone()[0]
+        results.append(f"   {'⚠️' if orphan_trips > 0 else '✅'} Trips with invalid route_id: {orphan_trips}")
+        
+        # Check stop_times reference valid trips
+        cur.execute("""
+            SELECT COUNT(*) FROM stop_times st 
+            WHERE NOT EXISTS (SELECT 1 FROM trips t WHERE t.trip_id = st.trip_id)
+        """)
+        orphan_st = cur.fetchone()[0]
+        results.append(f"   {'⚠️' if orphan_st > 0 else '✅'} Stop_times with invalid trip_id: {orphan_st}")
+        
+        # Check stop_times reference valid stops
+        cur.execute("""
+            SELECT COUNT(*) FROM stop_times st 
+            WHERE NOT EXISTS (SELECT 1 FROM stops s WHERE s.stop_id = st.stop_id)
+        """)
+        orphan_stops = cur.fetchone()[0]
+        results.append(f"   {'⚠️' if orphan_stops > 0 else '✅'} Stop_times with invalid stop_id: {orphan_stops}")
+        
+        conn.close()
+        return "\n".join(results)
+    
+    run_test("Data Integrity (FK-like checks)", _test_data_integrity)
+    
+    # TEST 7: Metadata Check
+    def _test_metadata():
+        manager = CarrisGTFSManager()
+        metadata = manager._load_metadata()
+        
+        if not metadata:
+            raise AssertionError("Metadata not found")
+        
+        if metadata.get('schema_version') != '2.0':
+            raise AssertionError(f"Expected schema v2.0, got {metadata.get('schema_version')}")
+        
+        results = [
+            f"   📅 GTFS Date: {metadata.get('gtfs_date', 'N/A')}",
+            f"   🕐 Updated At: {metadata.get('updated_at', 'N/A')}",
+            f"   📊 Schema Version: {metadata.get('schema_version', 'N/A')}",
+            f"   🔧 Features: {metadata.get('features', [])}",
+        ]
+        return "\n".join(results)
+    
+    run_test("Metadata Check (Schema v2.0)", _test_metadata)
+    
+    # =========================================================================
+    # GTFS-RT REAL-TIME TESTS
+    # =========================================================================
+    # TEST 8: GTFS-RT Feed
+    def _test_gtfs_rt():
+        if not GTFS_RT_AVAILABLE:
+            return "⚠️ GTFS-RT library not available (install gtfs-realtime-bindings)"
+        
+        vehicles = fetch_gtfs_rt_vehicles(use_cache=False)
+        
+        if not vehicles:
+            raise AssertionError("No vehicles from GTFS-RT feed")
+        
+        with_trip = sum(1 for v in vehicles if v.get('trip_id'))
+        with_position = sum(1 for v in vehicles if v.get('latitude'))
+        with_route = sum(1 for v in vehicles if v.get('route_id'))
+        
+        results = [
+            f"   📊 Vehicles fetched: {len(vehicles)}",
+            f"   🎫 With trip_id: {with_trip} ({100*with_trip/len(vehicles):.0f}%)",
+            f"   📍 With position: {with_position} ({100*with_position/len(vehicles):.0f}%)",
+            f"   🚌 With route_id: {with_route} ({100*with_route/len(vehicles):.0f}%)",
+        ]
+        
+        if vehicles:
+            v = vehicles[0]
+            lat = v.get('latitude', 0)
+            lon = v.get('longitude', 0)
+            results.append(f"   📌 Sample: {v.get('vehicle_id')} @ ({lat:.4f}, {lon:.4f})")
+        
+        return "\n".join(results)
+    
+    run_test("GTFS-RT Feed (Real-time Vehicles)", _test_gtfs_rt)
+    
+    # =========================================================================
+    # TOOL TESTS - STOP SEARCH
+    # =========================================================================
+    # TEST 9: Stop Search - Belém
+    run_test(
+        "Tool: carris_get_stops('Belém')",
+        carris_get_stops.invoke,
+        {"query": "Belém", "limit": 5}
+    )
+    
+    # TEST 10: Stop Search - Rossio
+    run_test(
+        "Tool: carris_get_stops('Rossio')",
+        carris_get_stops.invoke,
+        {"query": "Rossio", "limit": 5}
+    )
+    
+    # =========================================================================
+    # TOOL TESTS - ROUTES
+    # =========================================================================
+    # TEST 11: Get Routes - Trams
+    run_test(
+        "Tool: carris_get_routes(type='tram')",
+        carris_get_routes.invoke,
+        {"route_type": "tram"}
+    )
+    
+    # TEST 12: Get Routes - Buses
+    run_test(
+        "Tool: carris_get_routes(type='bus')",
+        carris_get_routes.invoke,
+        {"route_type": "bus", "limit": 10}
+    )
+    
+    # =========================================================================
+    # TOOL TESTS - REAL-TIME VEHICLES
+    # =========================================================================
+    # TEST 13: Real-time Vehicles - Trams
+    run_test(
+        "Tool: carris_get_realtime_vehicles(type='tram')",
+        carris_get_realtime_vehicles.invoke,
+        {"vehicle_type": "tram"}
+    )
+    
+    # TEST 14: Real-time Vehicles - All
+    run_test(
+        "Tool: carris_get_realtime_vehicles(all)",
+        carris_get_realtime_vehicles.invoke,
+        {}
+    )
+    
+    # =========================================================================
+    # TOOL TESTS - ARRIVALS
+    # =========================================================================
+    # TEST 15: Get Arrivals (need to find a valid stop_id first)
+    def _test_arrivals():
+        conn = sqlite3.connect(CARRIS_DB_PATH)
+        cur = conn.cursor()
+        cur.execute("SELECT stop_id FROM stops WHERE stop_name LIKE '%Rossio%' LIMIT 1")
+        row = cur.fetchone()
+        conn.close()
+        
+        if not row:
+            return "⚠️ No Rossio stop found in database"
+        
+        stop_id = row[0]
+        return carris_get_arrivals.invoke({"stop_id": stop_id, "limit": 5})
+    
+    run_test("Tool: carris_get_arrivals (Rossio stop)", _test_arrivals)
+    
+    # =========================================================================
+    # TOOL TESTS - ROUTE FINDING
+    # =========================================================================
+    # TEST 16: Find Routes Between - Cais Sodré to Belém
+    run_test(
+        "Tool: carris_find_routes_between('Cais Sodré', 'Belém')",
+        carris_find_routes_between.invoke,
+        {"origin": "Cais Sodré", "destination": "Belém"}
+    )
+    
+    # TEST 17: Find Routes Between - Rossio to Martim Moniz
+    run_test(
+        "Tool: carris_find_routes_between('Rossio', 'Martim Moniz')",
+        carris_find_routes_between.invoke,
+        {"origin": "Rossio", "destination": "Martim Moniz"}
+    )
+    
+    # =========================================================================
+    # EDGE CASES & ERROR HANDLING
+    # =========================================================================
+    # TEST 18: Stop Search - Empty Query
+    run_test(
+        "Edge Case: Empty Stop Query",
+        carris_get_stops.invoke,
+        {"query": "", "limit": 3}
+    )
+    
+    # TEST 19: Stop Search - Nonexistent Stop
+    run_test(
+        "Edge Case: Nonexistent Stop",
+        carris_get_stops.invoke,
+        {"query": "xyznonexistent123", "limit": 3}
+    )
+    
+    # TEST 20: Route Finding - Same Origin/Destination
+    run_test(
+        "Edge Case: Same Origin and Destination",
+        carris_find_routes_between.invoke,
+        {"origin": "Rossio", "destination": "Rossio"}
+    )
+    
+    # =========================================================================
+    # TEST SUMMARY
+    # =========================================================================
+    print("\n" + "=" * 70)
+    print("\033[1m📊 TEST SUMMARY\033[0m")
+    print("=" * 70)
+    print(f"\033[1;32m✅ Passed: {test_results['passed']}/{test_results['total']}\033[0m")
+    print(f"\033[1;31m❌ Failed: {test_results['failed']}/{test_results['total']}\033[0m")
+    
+    if test_results['failed'] == 0:
+        print(f"\n\033[1;32m🎉 ALL TESTS PASSED! Carris API system is working correctly.\033[0m")
+    else:
+        print(f"\n\033[1;33m⚠️  Some tests failed. Check errors above.\033[0m")
+    
+    # Database info
+    print("\n" + "-" * 70)
+    print(f"📁 Database: {CARRIS_DB_PATH}")
+    print(f"📊 Size: {os.path.getsize(CARRIS_DB_PATH) / (1024*1024):.1f} MB")
+    print(f"📡 GTFS-RT: {'Available' if GTFS_RT_AVAILABLE else 'Not available'}")
+    print("=" * 70 + "\n")

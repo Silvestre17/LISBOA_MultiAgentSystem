@@ -10,23 +10,28 @@
 #       * Station information with GPS coordinates
 #       * Service frequency/intervals
 #       * Automatic token refresh
-#     - Carris Metropolitana: Alerts, stops, lines, real-time arrivals, routing
+#     - Carris Urban: City buses and trams (28E, 15E, 732, etc.)
+#       * GTFS data with SQLite storage (see tools/carris_api.py)
+#       * Real-time vehicle tracking
+#       * GPS-based stop finding with geocoding
+#     - Carris Metropolitana: Suburban buses (Sintra, Cascais, Almada, etc.)
+#       * Alerts, stops, lines, real-time arrivals, routing
 #     - CP (Comboios de Portugal): Train status and delays
-#     - Bus Route Finder: Find bus routes between two locations using GPS
-#     - Smart Geocoding: Converts place names to GPS coordinates automatically
+#     - Smart Routing: Find routes using GPS-based stop search
 # 
 #   APIs:
 #     - Metro Official: https://api.metrolisboa.pt:8243/estadoServicoML/1.0.1/
-#     - Carris: https://api.carrismetropolitana.pt/
+#     - Carris Urban: https://gateway.carris.pt/gateway/gtfs/api/v2.8/GTFS
+#     - Carris Metropolitana: https://api.carrismetropolitana.pt/
 #     - CP: https://comboios.live/api/
 #     - Nominatim (OpenStreetMap): https://nominatim.openstreetmap.org/
 # 
 #   Bus Routing System:
-#     - On-demand loading of ~12000 bus stops from Carris API
+#     - On-demand loading of bus stops from Carris/Carris Metropolitana
 #     - In-memory cache for fast proximity search (no database needed)
 #     - Haversine distance calculation for GPS-based stop finding
 #     - Smart geocoding: "X POI" → GPS → nearest bus stops
-#     - Pattern matching to find bus routes between two stops
+#     - Automatic fallback: Carris Metropolitana → Carris Urban for city center
 #     - Streamlit Cloud compatible (no external dependencies)
 # ==========================================================================
 
@@ -91,6 +96,9 @@ CARRIS_ROUTES_URL = f"{CARRIS_BASE_URL}/routes"
 CARRIS_PATTERNS_URL = f"{CARRIS_BASE_URL}/patterns"   # Bus route patterns (schedule + stops sequence)
 CARRIS_VEHICLES_URL = f"{CARRIS_BASE_URL}/vehicles"   # Real-time bus GPS locations
 
+# limitation notice for fallback messages
+CARRIS_LIMITATION_NOTICE = "⚠️ Note: Carris Urban real-time data is experimental."
+
 # Nominatim (OpenStreetMap) - Free geocoding service
 # Rate limit: 1 request per second (we add delay between calls)
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
@@ -117,40 +125,22 @@ LISBOA_CITY_BOUNDS = {
     "lon_min": -9.23,
     "lon_max": -9.09
 }
-
 # ==========================================================================
 # Carris vs Carris Metropolitana - Important Distinction
 # ==========================================================================
-# CARRIS: Operates urban buses INSIDE Lisbon city (e.g., lines 28E tram, 738, 732)
-#         Does NOT provide a public API - no real-time data available.
-#         Website: https://www.carris.pt/viaje/planear-viagem/
+# CARRIS (URBAN): Operates urban buses and trams INSIDE Lisbon city
+#                 (e.g., lines 28E tram, 738, 732)
+#                 ✅ AVAILABLE via GTFS data + Real-time API
+#                 Tools: carris_get_stops, carris_get_routes, carris_find_routes_between
+#                 See: tools/carris_api.py
 #
 # CARRIS METROPOLITANA: Operates suburban buses in the Lisbon Metropolitan Area
 #                       (Amadora, Sintra, Cascais, Almada, Setúbal, etc.)
-#                       Provides full API with real-time data.
 #                       API: https://api.carrismetropolitana.pt/
 #
-# This limitation means we CANNOT provide bus routes for trips entirely
-# within Lisbon city center (e.g., Marquês de Pombal → Campo Pequeno).
-# In such cases, Metro de Lisboa is usually the best alternative.
+# NOTE: When find_bus_routes doesn't find Carris Metropolitana stops in Lisbon
+#       city center, it automatically falls back to carris_find_routes_between.
 # ==========================================================================
-
-CARRIS_LIMITATION_NOTICE = """
-⚠️ **Nota sobre autocarros urbanos de Lisboa**
-
-Os autocarros que circulam dentro da cidade de Lisboa (ex: linhas 28E, 738, 732)
-são operados pela **Carris**, que infelizmente não disponibiliza uma API pública
-com informação em tempo real.
-
-A informação disponível neste sistema é da **Carris Metropolitana**, que opera
-os autocarros suburbanos (Amadora, Sintra, Cascais, Oeiras, Almada, etc.).
-
-📍 Para planear viagens de autocarro dentro de Lisboa, consulta:
-   🔗 https://www.carris.pt/viaje/planear-viagem/
-
-💡 **Alternativa recomendada**: O **Metro de Lisboa** cobre a maioria das
-   deslocações dentro da cidade e temos informação completa em tempo real!
-"""
 
 # ==========================================================================
 # Carris Metropolitana Stops Cache (In-Memory)
@@ -244,6 +234,8 @@ METRO_STATIONS = {
     "alto dos moinhos": ["azul"],
     "colégio militar": ["azul"],
     "colegio militar": ["azul"],
+    "colégio militar/luz": ["azul"],
+    "colegio militar/luz": ["azul"],
     "carnide": ["azul"],
     "pontinha": ["azul"],
     "alfornelos": ["azul"],
@@ -521,6 +513,106 @@ CP_LINES = {
     },
 }
 
+# ==========================================================================
+# Lisbon Landmarks → Nearest Metro Station Mapping
+# ==========================================================================
+# This helps with common tourist queries about how to reach major landmarks.
+# Landmarks WITHOUT nearby metro are marked with "metro": None
+
+LISBON_LANDMARKS = {
+    # Shopping Centers
+    "colombo": {
+        "name": "Centro Comercial Colombo",
+        "metro": "colégio militar/luz",
+        "line": "azul",
+        "description": "Largest shopping center in the Iberian Peninsula"
+    },
+    "vasco da gama": {
+        "name": "Centro Comercial Vasco da Gama",
+        "metro": "oriente",
+        "line": "vermelha",
+        "description": "Shopping center at Parque das Nações"
+    },
+    "el corte inglés": {
+        "name": "El Corte Inglés",
+        "metro": "são sebastião",
+        "line": "azul/vermelha",
+        "description": "Department store near Marquês roundabout"
+    },
+    "amoreiras": {
+        "name": "Amoreiras Shopping Center",
+        "metro": "marquês de pombal",
+        "line": "amarela/azul",
+        "description": "Shopping center at Amoreiras (15 min walk from metro)"
+    },
+    
+    # Major Attractions (WITH metro)
+    "aeroporto": {
+        "name": "Aeroporto Humberto Delgado",
+        "metro": "aeroporto",
+        "line": "vermelha",
+        "description": "Lisbon Airport"
+    },
+    "oceanário": {
+        "name": "Oceanário de Lisboa",
+        "metro": "oriente",
+        "line": "vermelha",
+        "description": "Lisbon Oceanarium at Parque das Nações"
+    },
+    "parque das nações": {
+        "name": "Parque das Nações",
+        "metro": "oriente",
+        "line": "vermelha",
+        "description": "Expo'98 area"
+    },
+    "jardim zoológico": {
+        "name": "Jardim Zoológico de Lisboa",
+        "metro": "jardim zoológico",
+        "line": "azul",
+        "description": "Lisbon Zoo"
+    },
+    "gulbenkian": {
+        "name": "Fundação Calouste Gulbenkian",
+        "metro": "são sebastião",
+        "line": "azul/vermelha",
+        "description": "Gulbenkian Museum and Gardens"
+    },
+    
+    # Major Attractions (WITHOUT metro - need alternative transport)
+    "belém": {
+        "name": "Belém",
+        "metro": None,
+        "alternative": "Tram 15E (Praça da Figueira) or CP Train (from Cais do Sodré)",
+        "description": "Jerónimos Monastery, Belém Tower, Padrão dos Descobrimentos"
+    },
+    "torre de belém": {
+        "name": "Torre de Belém",
+        "metro": None,
+        "alternative": "Tram 15E or CP Train to Belém",
+        "description": "UNESCO Monument"
+    },
+    "mosteiro dos jerónimos": {
+        "name": "Mosteiro dos Jerónimos",
+        "metro": None,
+        "alternative": "Tram 15E or CP Train to Belém",
+        "description": "UNESCO Monument"
+    },
+    "castelo de são jorge": {
+        "name": "Castelo de São Jorge",
+        "metro": "rossio",
+        "line": "verde",
+        "alternative": "From Rossio metro, walk up through Alfama (15 min) or Tram 28E",
+        "description": "Medieval castle with panoramic views"
+    },
+    "alfama": {
+        "name": "Alfama",
+        "metro": "terreiro do paço",
+        "line": "azul",
+        "alternative": "Tram 28E crosses Alfama",
+        "description": "Lisbon's oldest historic neighborhood"
+    },
+}
+
 
 # ==========================================================================
 # Helper Functions
@@ -538,6 +630,39 @@ def get_station_lines(station_name: str) -> List[str]:
     """
     station_lower = station_name.lower().strip()
     return METRO_STATIONS.get(station_lower, [])
+
+
+def get_landmark_info(location: str) -> Optional[Dict[str, Any]]:
+    """
+    Returns transport information for a known Lisbon landmark.
+    
+    Args:
+        location (str): Location name (case-insensitive).
+        
+    Returns:
+        Optional[Dict]: Landmark info with nearest metro or alternative transport.
+    """
+    import unicodedata
+    
+    def normalize_text(text: str) -> str:
+        """Remove accents and convert to lowercase."""
+        normalized = unicodedata.normalize('NFKD', text)
+        return ''.join(c for c in normalized if not unicodedata.combining(c)).lower().strip()
+    
+    location_norm = normalize_text(location)
+    
+    # Try exact match first (with normalized comparison)
+    for key, info in LISBON_LANDMARKS.items():
+        if normalize_text(key) == location_norm:
+            return info
+    
+    # Try partial match
+    for key, info in LISBON_LANDMARKS.items():
+        key_norm = normalize_text(key)
+        if key_norm in location_norm or location_norm in key_norm:
+            return info
+    
+    return None
 
 
 def get_cp_station_info(station_name: str) -> Optional[Dict[str, Any]]:
@@ -3113,11 +3238,12 @@ def get_train_status() -> str:
             origin_name = origin.get('designation', 'N/A') if origin else 'N/A'
             dest_name = destination.get('designation', 'N/A') if destination else 'N/A'
             
-            # Delay indicator
-            if delay == 0:
+            # Delay indicator - API returns delay in SECONDS, convert to minutes
+            delay_minutes = delay // 60 if delay else 0
+            if delay_minutes == 0:
                 delay_str = "✅ On time"
-            elif delay > 0:
-                delay_str = f"⚠️ {delay} min late"
+            elif delay_minutes > 0:
+                delay_str = f"⚠️ {delay_minutes} min late"
             else:
                 delay_str = "✅ Ahead"
             
@@ -3240,6 +3366,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     
     This is the MAIN ROUTING TOOL for planning trips across Lisbon. It:
     - Detects Metro stations and shows direct/transfer routes
+    - Identifies Lisbon landmarks (Colombo, Belém, etc.) and suggests best transport
     - Identifies CP train stations and suggests train connections
     - Recommends bus alternatives where appropriate
     
@@ -3255,13 +3382,17 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     Examples:
         >>> get_route_between_stations("Aeroporto", "Rossio")   # Metro route
         >>> get_route_between_stations("Sintra", "Cascais")     # Train route
-        >>> get_route_between_stations("Entrecampos", "Belem")  # Mixed transport
+        >>> get_route_between_stations("Entrecampos", "Colombo") # Landmark with metro
     """
     origin_lower = origin.lower().strip()
     dest_lower = destination.lower().strip()
     
     response = f"🗺️ **Route: {origin.title()} → {destination.title()}**\n"
     response += "=" * 50 + "\n\n"
+    
+    # First, check if origin or destination is a known landmark
+    origin_landmark = get_landmark_info(origin)
+    dest_landmark = get_landmark_info(destination)
     
     # Check if both are Metro stations
     origin_lines = get_station_lines(origin)
@@ -3273,6 +3404,115 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     
     has_metro = bool(origin_lines or dest_lines)
     has_train = bool(origin_cp or dest_cp)
+    has_landmarks = bool(origin_landmark or dest_landmark)
+    
+    # Handle landmarks first (e.g., Colombo, Belém)
+    if has_landmarks:
+        response += "📍 **LOCATION INFORMATION**\n"
+        response += "-" * 30 + "\n"
+        
+        if origin_landmark:
+            response += f"**{origin_landmark['name']}**\n"
+            if origin_landmark.get('metro'):
+                line = origin_landmark.get('line', '')
+                line_emoji = METRO_LINES.get(line.split('/')[0], {}).get('emoji', '🚇')
+                response += f"   🚇 Nearest Metro: **{origin_landmark['metro'].title()}** ({line_emoji} {line.title()} Line)\n"
+            elif origin_landmark.get('alternative'):
+                response += f"   ⚠️ No direct Metro!\n"
+                response += f"   🚌 Alternative: {origin_landmark['alternative']}\n"
+            response += f"   ℹ️ {origin_landmark.get('description', '')}\n\n"
+        
+        if dest_landmark:
+            response += f"**{dest_landmark['name']}**\n"
+            if dest_landmark.get('metro'):
+                line = dest_landmark.get('line', '')
+                line_emoji = METRO_LINES.get(line.split('/')[0], {}).get('emoji', '🚇')
+                response += f"   🚇 Nearest Metro: **{dest_landmark['metro'].title()}** ({line_emoji} {line.title()} Line)\n"
+            elif dest_landmark.get('alternative'):
+                response += f"   ⚠️ No direct Metro!\n"
+                response += f"   🚌 Alternative: {dest_landmark['alternative']}\n"
+            response += f"   ℹ️ {dest_landmark.get('description', '')}\n\n"
+        
+        # If both landmarks have metro, calculate the route between them
+        if origin_landmark and dest_landmark:
+            origin_metro = origin_landmark.get('metro')
+            dest_metro = dest_landmark.get('metro')
+            
+            if origin_metro and dest_metro:
+                # Get the actual metro lines for route calculation
+                origin_lines = get_station_lines(origin_metro)
+                dest_lines = get_station_lines(dest_metro)
+                
+                response += "🚇 **SUGGESTED METRO ROUTE**\n"
+                response += "-" * 30 + "\n"
+                response += f"1. Board Metro at **{origin_metro.title()}**\n"
+                
+                common_lines = set(origin_lines) & set(dest_lines)
+                if common_lines:
+                    for line in common_lines:
+                        line_info = METRO_LINES.get(line, {})
+                        response += f"2. {line_info.get('emoji', '')} Take **{line.title()} Line** directly\n"
+                else:
+                    response += f"2. Transfer as needed\n"
+                
+                response += f"3. Exit at **{dest_metro.title()}**\n\n"
+                return response
+            
+            # If destination has no metro (e.g., Belém)
+            elif origin_metro and not dest_metro:
+                response += "📋 **RECOMMENDATION**\n"
+                response += "-" * 30 + "\n"
+                response += f"Since {dest_landmark['name']} has no nearby Metro:\n"
+                response += f"   👉 {dest_landmark.get('alternative', 'Use bus or train')}\n\n"
+                return response
+        
+        # Handle: Origin is metro station, destination is a landmark with metro
+        if origin_lines and dest_landmark and dest_landmark.get('metro'):
+            dest_metro = dest_landmark['metro']
+            dest_metro_lines = get_station_lines(dest_metro)
+            
+            response += "🚇 **METRO ROUTE**\n"
+            response += "-" * 30 + "\n"
+            
+            common_lines = set(origin_lines) & set(dest_metro_lines)
+            if common_lines:
+                for line in common_lines:
+                    line_info = METRO_LINES.get(line, {})
+                    response += f"✅ **Direct Route**: {line_info.get('emoji', '')} {line.title()} Line\n"
+                    response += f"   1. Board at **{origin.title()}**\n"
+                    response += f"   2. Exit at **{dest_metro.title()}**\n"
+                    response += f"   3. Walk to {dest_landmark['name']}\n\n"
+            else:
+                # Need transfer
+                response += f"🔄 **Transfer Required**\n\n"
+                response += f"   📍 From: {origin.title()} ({', '.join([METRO_LINES[l]['emoji'] + ' ' + l.title() for l in origin_lines])})\n"
+                response += f"   📍 To: {dest_metro.title()} ({', '.join([METRO_LINES[l]['emoji'] + ' ' + l.title() for l in dest_metro_lines])})\n\n"
+                
+                # Suggest transfer station for Amarela → Azul specifically
+                if 'amarela' in origin_lines and 'azul' in dest_metro_lines:
+                    response += f"   💡 **Suggested transfer**: Marquês de Pombal (🟡 Amarela ↔ 🔵 Azul)\n\n"
+                    response += f"   **Full route**:\n"
+                    response += f"   1. 🟡 Board at **{origin.title()}** (Yellow Line)\n"
+                    response += f"   2. Exit at **Marquês de Pombal**\n"
+                    response += f"   3. 🔵 Transfer to **Blue Line** (direction Reboleira)\n"
+                    response += f"   4. Exit at **{dest_metro.title()}**\n"
+                    response += f"   5. Walk to {dest_landmark['name']}\n\n"
+                else:
+                    # Generic transfer suggestion
+                    transfer_stations = [
+                        ("Marquês de Pombal", ["amarela", "azul"]),
+                        ("Saldanha", ["amarela", "vermelha"]),
+                        ("Alameda", ["verde", "vermelha"]),
+                        ("Campo Grande", ["amarela", "verde"]),
+                        ("São Sebastião", ["vermelha", "azul"]),
+                    ]
+                    
+                    for station, lines in transfer_stations:
+                        if set(origin_lines) & set(lines) and set(dest_metro_lines) & set(lines):
+                            response += f"   💡 **Suggested transfer**: {station}\n\n"
+                            break
+            
+            return response
     
     if origin_lines and dest_lines:
         # Both are Metro stations
@@ -3287,9 +3527,9 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                 line_info = METRO_LINES.get(line, {})
                 emoji = line_info.get('emoji', '')
                 name = line_info.get('name', line.title())
-                response += f"   {emoji} Take the **{line.title()} Line** ({name})\n"
+                response += f"   {emoji} Take **{line.title()} Line** ({name})\n"
                 response += f"   📍 Board at: {origin.title()}\n"
-                response += f"   📍 Alight at: {destination.title()}\n\n"
+                response += f"   📍 Exit at: {destination.title()}\n\n"
         else:
             # Need to transfer
             response += f"🔄 **Transfer Required**\n\n"
@@ -3302,7 +3542,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                 ("Saldanha", ["amarela", "vermelha"]),
                 ("Alameda", ["verde", "vermelha"]),
                 ("Baixa-Chiado", ["azul", "verde"]),
-                ("Jardim Zoológico", ["azul", "verde"]),
+                ("Campo Grande", ["amarela", "verde"]),
                 ("São Sebastião", ["vermelha", "azul"]),
             ]
             
@@ -3323,12 +3563,12 @@ def get_route_between_stations(origin: str, destination: str) -> str:
         response += f"   Lines: {', '.join([METRO_LINES[l]['emoji'] + ' ' + l.title() for l in dest_lines])}\n\n"
         response += "   Consider using Carris buses or CP trains to reach the Metro.\n\n"
     
-    else:
+    elif not has_landmarks:
         response += "❌ Neither location is a known Metro station.\n\n"
     
     # Check for CP Train options
     if origin_cp or dest_cp:
-        response += "🚆 **CP TRAINS (COMBOIOS)**\n"
+        response += "🚆 **CP TRAINS**\n"
         response += "-" * 30 + "\n"
         
         if origin_cp:
@@ -3365,45 +3605,13 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                     response += f"   ⏱️ Frequency: {line_info.get('frequency', 'Check schedule')}\n"
                 response += "\n"
     
-    # Add general transport options (only if not covered above)
-    if not has_metro and not has_train:
-        response += "🚌 **CARRIS BUSES**\n"
-        response += "-" * 30 + "\n"
-        # Add Carris limitation notice for urban Lisbon routes
-        response += CARRIS_LIMITATION_NOTICE
-        response += "\n"
-    else:
-        response += "-" * 30 + "\n"
-        response += "Check bus routes and real-time arrivals with:\n"
-        response += f"   • Search for bus stops near '{origin.title()}'\n"
-        response += f"   • Search for bus stops near '{destination.title()}'\n\n"
-    
-    response += "🚆 **CP TRAINS (Comboios de Portugal)**\n"
+    # Add suggestion to check official sources
     response += "-" * 30 + "\n"
-    response += "For longer distances or connections to suburbs:\n"
-    response += "   • Check train schedules from nearby stations\n"
-    response += "   • Lines: Sintra, Cascais, Azambuja, Sado lines\n\n"
-    
-    response += "💡 **RECOMMENDATION**\n"
-    response += "-" * 30 + "\n"
-    response += "For the fastest route, combine:\n"
-    response += "   1. Metro (if both locations are near stations)\n"
-    response += "   2. Carris buses (for short distances or first/last mile)\n"
-    response += "   3. CP trains (for suburban connections)\n\n"
-    
-    # Add current transport status
-    response += "📊 **CURRENT TRANSPORT STATUS**\n"
-    response += "-" * 30 + "\n"
-    
-    # Quick metro status
-    metro_data = fetch_json_with_retry(METRO_STATUS_URL)
-    if metro_data and metro_data.get('resposta'):
-        resp = metro_data['resposta']
-        all_ok = all(resp.get(line, 'Unknown').strip().lower() == 'ok' for line in METRO_LINES.keys())
-        if all_ok:
-            response += "   🚇 Metro: ✅ All lines operating normally\n"
-        else:
-            response += "   🚇 Metro: ⚠️ Some disruptions reported\n"
+    response += "💡 **More information:**\n"
+    response += "   • Metro: metrolisboa.pt\n"
+    response += "   • Buses (Lisbon): carris.pt\n"
+    response += "   • Buses (Metropolitan): carrismetropolitana.pt\n"
+    response += "   • Trains: cp.pt\n"
     
     return response
 
@@ -3506,14 +3714,25 @@ def find_bus_routes(
     origin_stops = origin_resolved.get("stops", [])
     
     if not origin_stops:
-        response += f"\n❌ **No bus stops found near '{origin}'**\n"
-        
-        # Check if geocoded location is within Lisbon city - this explains why no stops
+        # Check if geocoded location is within Lisbon city - use Carris Urban instead!
         origin_loc = origin_resolved.get("location")
         if origin_loc and is_within_lisbon_city(origin_loc.get("lat"), origin_loc.get("lon")):
-            response += "\n" + "-" * 50 + "\n"
-            response += CARRIS_LIMITATION_NOTICE
+            response += f"\n📍 **'{origin}' is in central Lisbon**\n"
+            response += "   🚋 Using **Carris Urbana** data (buses and trams)...\n\n"
+            
+            # Use Carris Urban tools instead!
+            try:
+                from tools.carris_api import carris_find_routes_between
+                carris_result = carris_find_routes_between.invoke({
+                    "origin": origin,
+                    "destination": destination
+                })
+                return carris_result
+            except Exception as e:
+                logger.warning(f"Carris Urban fallback failed: {e}")
+                response += f"   ⚠️ Error accessing Carris data: {e}\n"
         else:
+            response += f"\n❌ **No bus stops found near '{origin}'**\n"
             response += "   💡 Try:\n"
             response += "   • Adding 'Lisboa' to your search (e.g., 'Colombo Lisboa')\n"
             response += "   • Using a more specific name or address\n"
@@ -3571,14 +3790,25 @@ def find_bus_routes(
     dest_stops = dest_resolved.get("stops", [])
     
     if not dest_stops:
-        response += f"\n❌ **No bus stops found near '{destination}'**\n"
-        
-        # Check if geocoded location is within Lisbon city - this explains why no stops
+        # Check if geocoded location is within Lisbon city - use Carris Urban instead!
         dest_loc = dest_resolved.get("location")
         if dest_loc and is_within_lisbon_city(dest_loc.get("lat"), dest_loc.get("lon")):
-            response += "\n" + "-" * 50 + "\n"
-            response += CARRIS_LIMITATION_NOTICE
+            response += f"\n📍 **'{destination}' is in central Lisbon**\n"
+            response += "   🚋 Using **Carris Urbana** data (buses and trams)...\n\n"
+            
+            # Use Carris Urban tools instead!
+            try:
+                from tools.carris_api import carris_find_routes_between
+                carris_result = carris_find_routes_between.invoke({
+                    "origin": origin,
+                    "destination": destination
+                })
+                return carris_result
+            except Exception as e:
+                logger.warning(f"Carris Urban fallback failed: {e}")
+                response += f"   ⚠️ Erro ao aceder dados Carris: {e}\n"
         else:
+            response += f"\n❌ **No bus stops found near '{destination}'**\n"
             response += "   💡 Try:\n"
             response += "   • Adding 'Lisboa' to your search (e.g., 'Vasco da Gama Lisboa')\n"
             response += "   • Using a more specific name or address\n"
@@ -3690,10 +3920,10 @@ def find_bus_routes(
         response += "\n"
     
     response += "\n" + "-" * 40 + "\n"
-    response += "✨ **Tips:**\n"
-    response += "   • Use 'get_carris_metropolitana_stop_info' for real-time arrivals\n"
-    response += "   • Check 'get_carris_metropolitana_alerts' for service disruptions\n"
-    response += "   • Metro may be faster for cross-city travel\n"
+    response += "💡 **Tips:**\n"
+    response += "   • Check carrismetropolitana.pt or carris.pt for detailed schedules\n"
+    response += "   • Metro may be faster for longer trips\n"
+    response += "   • Check service alerts in case of delays\n"
     
     return response
 
@@ -3734,7 +3964,28 @@ def get_transport_summary() -> str:
     
     response += "\n"
     
-    # 2. Carris Alerts
+    # 2. Carris (Urban Lisbon - Buses & Trams)
+    response += "🚋 CARRIS (LISBON URBAN)\n"
+    response += "-" * 20 + "\n"
+    
+    try:
+        # Import carris_api module for real-time data
+        from tools.carris_api import fetch_realtime_vehicles
+        vehicles = fetch_realtime_vehicles()
+        if vehicles:
+            trams = [v for v in vehicles if v.get('vehicleRouteType') == 'TRAM']
+            buses = [v for v in vehicles if v.get('vehicleRouteType') == 'BUS']
+            response += f"   🚋 {len(trams)} trams active\n"
+            response += f"   🚌 {len(buses)} buses active\n"
+        else:
+            response += "   ❌ Real-time data unavailable\n"
+    except Exception as e:
+        logger.warning(f"Carris urban data error: {e}")
+        response += "   ⚠️ Real-time data temporarily unavailable\n"
+    
+    response += "\n"
+    
+    # 3. Carris Metropolitana (Suburban)
     response += "🚌 CARRIS METROPOLITANA\n"
     response += "-" * 20 + "\n"
     
@@ -3749,7 +4000,7 @@ def get_transport_summary() -> str:
     
     response += "\n"
     
-    # 3. Train Status
+    # 4. Train Status
     response += "🚆 CP TRAINS\n"
     response += "-" * 20 + "\n"
     
@@ -4649,6 +4900,100 @@ if __name__ == "__main__":
         return True
     
     run_test("Test 31: Station ID Lookup", test_station_id_lookup)
+    
+    # =========================================================================
+    # TEST 32: Carris Urban - Get Stops
+    # =========================================================================
+    def test_carris_urban_stops():
+        print("Testing Carris Urban stops search...")
+        
+        from tools.carris_api import carris_get_stops
+        
+        result = carris_get_stops.invoke({"query": "Rossio", "limit": 5})
+        print(result)
+        
+        assert "Rossio" in result, "Should find stops with Rossio"
+        assert "🚏" in result, "Should have stop emoji"
+        
+        print("\n\033[1;32m✅ Carris Urban stops search works\033[0m")
+        return result
+    
+    run_test("Test 32: Carris Urban - Get Stops", test_carris_urban_stops)
+    
+    # =========================================================================
+    # TEST 33: Carris Urban - Get Routes (Trams)
+    # =========================================================================
+    def test_carris_urban_routes_tram():
+        print("Testing Carris Urban tram routes...")
+        
+        from tools.carris_api import carris_get_routes
+        
+        result = carris_get_routes.invoke({"route_type": "tram"})
+        print(result)
+        
+        assert "28E" in result or "15E" in result, "Should find tram routes"
+        assert "🚋" in result, "Should have tram emoji"
+        
+        print("\n\033[1;32m✅ Carris Urban tram routes work\033[0m")
+        return result
+    
+    run_test("Test 33: Carris Urban - Get Routes (Trams)", test_carris_urban_routes_tram)
+    
+    # =========================================================================
+    # TEST 34: Carris Urban - Find Routes Between
+    # =========================================================================
+    def test_carris_urban_find_routes():
+        print("Testing Carris Urban route finder...")
+        
+        from tools.carris_api import carris_find_routes_between
+        
+        result = carris_find_routes_between.invoke({
+            "origin": "Cais Sodré",
+            "destination": "Belém"
+        })
+        print(result)
+        
+        assert "Route" in result or "route" in result, "Should show route results"
+        
+        print("\n\033[1;32m✅ Carris Urban route finder works\033[0m")
+        return result
+    
+    run_test("Test 34: Carris Urban - Find Routes Between", test_carris_urban_find_routes)
+    
+    # =========================================================================
+    # TEST 35: Carris Urban - Real-time Vehicles
+    # =========================================================================
+    def test_carris_urban_realtime():
+        print("Testing Carris Urban real-time vehicles...")
+        
+        from tools.carris_api import carris_get_realtime_vehicles
+        
+        result = carris_get_realtime_vehicles.invoke({"vehicle_type": "TRAM"})
+        print(result[:1500] if len(result) > 1500 else result)
+        
+        assert "tram" in result.lower() or "🚋" in result, "Should show trams"
+        
+        print("\n\033[1;32m✅ Carris Urban real-time works\033[0m")
+        return result
+    
+    run_test("Test 35: Carris Urban - Real-time Vehicles", test_carris_urban_realtime)
+    
+    # =========================================================================
+    # TEST 36: Transport Summary includes Carris Urban
+    # =========================================================================
+    def test_transport_summary_carris_urban():
+        print("Testing transport summary includes Carris Urban...")
+        
+        result = get_transport_summary.invoke({})
+        print(result)
+        
+        assert "CARRIS (LISBON URBAN)" in result, "Should have Carris Urban section"
+        assert "trams active" in result or "🚋" in result, "Should show tram count"
+        
+        print("\n\033[1;32m✅ Transport summary includes Carris Urban\033[0m")
+        return result
+    
+    run_test("Test 36: Transport Summary includes Carris Urban", test_transport_summary_carris_urban)
     
     # =========================================================================
     # SUMMARY

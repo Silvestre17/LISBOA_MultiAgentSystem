@@ -44,6 +44,14 @@ from tools.visitlisboa_api import (
     search_lisbon_knowledge
 )
 
+from tools.carris_api import (
+    carris_get_stops,
+    carris_get_routes,
+    carris_get_stop_schedule,
+    carris_find_routes_between,
+    carris_get_realtime_vehicles,
+)
+
 __all__ = [
     # Weather (IPMA)
     "get_weather_warnings",
@@ -87,4 +95,11 @@ __all__ = [
     "get_event_categories",
     "get_place_categories",
     "search_lisbon_knowledge",
+    
+    # Transport - Carris (Urban Lisbon Buses & Trams)
+    "carris_get_stops",
+    "carris_get_routes",
+    "carris_get_stop_schedule",
+    "carris_find_routes_between",
+    "carris_get_realtime_vehicles",
 ]

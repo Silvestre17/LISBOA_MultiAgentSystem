@@ -147,7 +147,7 @@ The system follows a **modular, tool-based architecture** powered by **LangGraph
 </p>
 
 - **Metro de Lisboa**: Line status (4 lines: Amarela, Azul, Verde, Vermelha)
-- **Carris Metropolitana**: Alerts, stops, routes, real-time arrivals
+- **Carris Metropolitana & Urban**: Alerts, stops, routes, real-time arrivals (with delay integration)
 - **CP (via Comboios.live)**: Train status, delays, vehicle tracking
 - **Update Frequency**: Real-time API calls
 
