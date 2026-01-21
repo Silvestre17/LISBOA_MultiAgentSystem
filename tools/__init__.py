@@ -25,7 +25,7 @@ from tools.transport_api import (
     get_route_between_stations,
     find_bus_routes,               # Bus routing between locations
     get_bus_realtime_locations,    # Real-time bus GPS locations
-    get_bus_schedule,              # Bus route schedule/stops
+    get_bus_next_departures,       # Bus route schedule/stops
     search_cp_stations             # Search CP train stations in AML
 )
 
@@ -47,7 +47,7 @@ from tools.visitlisboa_api import (
 from tools.carris_api import (
     carris_get_stops,
     carris_get_routes,
-    carris_get_stop_schedule,
+    carris_get_next_departures,
     carris_find_routes_between,
     carris_get_realtime_vehicles,
 )
@@ -73,7 +73,7 @@ __all__ = [
     "search_carris_metropolitana_lines",
     "find_bus_routes",
     "get_bus_realtime_locations",
-    "get_bus_schedule",
+    "get_bus_next_departures",
     
     # Transport - Train (CP)
     "get_train_status",
@@ -99,7 +99,7 @@ __all__ = [
     # Transport - Carris (Urban Lisbon Buses & Trams)
     "carris_get_stops",
     "carris_get_routes",
-    "carris_get_stop_schedule",
+    "carris_get_next_departures",
     "carris_find_routes_between",
     "carris_get_realtime_vehicles",
 ]

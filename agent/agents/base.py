@@ -65,8 +65,15 @@ def get_agent_tools(agent_name: str) -> List:
             get_route_between_stations,
             find_bus_routes,
             get_bus_realtime_locations,
-            get_bus_schedule,
+            get_bus_next_departures,
             search_cp_stations
+        )
+        from tools.carris_api import (
+            carris_get_stops,
+            carris_get_routes,
+            carris_get_next_departures,
+            carris_find_routes_between,
+            carris_get_realtime_vehicles,
         )
         return [
             get_metro_status,
@@ -83,8 +90,13 @@ def get_agent_tools(agent_name: str) -> List:
             get_route_between_stations,
             find_bus_routes,
             get_bus_realtime_locations,
-            get_bus_schedule,
+            get_bus_next_departures,
             search_cp_stations,
+            carris_get_stops,
+            carris_get_routes,
+            carris_get_next_departures,
+            carris_find_routes_between,
+            carris_get_realtime_vehicles,
         ]
     
     elif agent_name == "researcher":
