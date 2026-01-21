@@ -1,6 +1,6 @@
 # Tools API Overview
 
-This document provides an overview of all **29 available tools** in the Lisbon Urban Assistant project.
+This document provides an overview of all **36 available tools** in the Lisbon Urban Assistant project.
 
 **Last Updated**: January 2026
 
@@ -38,8 +38,8 @@ This document provides an overview of all **29 available tools** in the Lisbon U
 
 ## Transport Tools
 
-**Module**: `tools/transport_api.py`  
-**Data Sources**: Metro de Lisboa (Official API), Carris Metropolitana, CP  
+**Modules**: `tools/transport_api.py`, `tools/carris_api.py`  
+**Data Sources**: Metro de Lisboa (Official API), Carris Urban (GTFS), Carris Metropolitana, CP  
 **Update Frequency**: Real-time API calls
 
 ### Metro de Lisboa (6 tools)
@@ -78,9 +78,43 @@ This document provides an overview of all **29 available tools** in the Lisbon U
 | `get_transport_summary()` | Overview of all transport systems | Combined metro/bus/train status |
 | `get_route_between_stations(origin, dest)` | Metro routing assistance | Route with transfers |
 
-**Note**: Carris Metropolitana operates suburban buses in the Greater Lisbon Area. Urban buses within Lisbon city are operated by Carris (no public API).
+### Carris Urban - Lisbon City Buses & Trams (7 tools)
 
-**See**: [transport_api.md](transport_api.md) for detailed documentation.
+**Module**: `tools/carris_api.py`  
+**Data Sources**: 
+- **GTFS Static**: https://gateway.carris.pt/gateway/gtfs/api/v2.8/GTFS (routes, stops, schedules)
+- **GTFS-RT Real-Time**: https://gateway.carris.pt/gateway/gtfs/api/v2.8/GTFS/realtime/vehiclepositions (Protocol Buffers)
+
+| Function | Description | Returns |
+|----------|-------------|---------|
+| `carris_get_stops(query)` | Search urban bus/tram stops | Stop list with GPS coords and IDs |
+| `carris_get_routes(route_type, route_id)` | List bus/tram lines (28E, 15E, 732...) | Routes by type with names |
+| `carris_get_arrivals(stop_id, limit)` | **REAL-TIME** arrivals at a stop | Combined schedule + live GPS data |
+| `carris_get_stop_schedule(stop_id)` | Static GTFS schedule for a stop | Upcoming departures (no real-time) |
+| `carris_find_routes_between(origin, dest)` | GPS-based route finding | Direct routes + next departure times |
+| `carris_get_realtime_vehicles(route_id, type)` | Live vehicle positions (GTFS-RT) | Real-time bus/tram GPS + license plates |
+| `carris_vehicle_eta(route, stop_name)` | **REAL-TIME** ETA for a specific route | Estimated arrival time with delay info |
+
+**Key Features (NEW - GTFS-RT Integration)**:
+- **Real-Time Vehicle Tracking**: GPS positions of ~400 vehicles via Protocol Buffers feed
+- **ETA Calculation**: Combines real-time position with static schedule for accurate ETAs
+- **Delay Detection**: Shows current delays (e.g., "atrasado 5 min")
+- **Vehicle Identification**: Shows vehicle ID and license plate
+- **Stops Remaining**: Shows how many stops until arrival
+
+**Workflow for "when is next bus at X"**:
+1. `carris_get_stops("stop name")` → Get stop_id
+2. `carris_get_arrivals(stop_id)` → Real-time arrivals with delays
+
+**Workflow for "when will tram 28E arrive at Y"**:
+1. `carris_vehicle_eta("28E", "stop name")` → Direct ETA calculation
+
+**Note**: 
+- Carris Urban operates city buses and the famous historic trams (28E, 15E, 12E, 25E, 18E, 24E)
+- Carris Metropolitana operates suburban buses in the Greater Lisbon Area
+- Both systems are now fully supported via the tools above
+
+**See**: [transport_api.md](transport_api.md) and [carris_api.md](carris_api.md) for detailed documentation.
 
 ---
 
@@ -278,11 +312,12 @@ All tools implement:
 | Weather Tools (IPMA) | 4 |
 | Transport - Metro | 6 |
 | Transport - Bus (Carris Metropolitana) | 6 |
+| Transport - Carris Urban (Buses & Trams) | 5 |
 | Transport - Train (CP) | 2 |
 | Transport - Multi-modal | 2 |
 | Open Data (Lisboa Aberta) | 4 |
 | VisitLisboa (Events & Places) | 5 |
-| **Total Tools** | **29** |
+| **Total Tools** | **34** |
 
 ### Response Times
 

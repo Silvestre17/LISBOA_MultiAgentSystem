@@ -69,16 +69,17 @@ docs/
 ### 1. Multi-Agent System
 - **Supervisor Agent**: Routes queries to specialized agents
 - **Weather Agent**: IPMA weather data and forecasts
-- **Transport Agent**: Metro, bus, and train information
+- **Transport Agent**: Metro, bus, tram, and train information
 - **Researcher Agent**: RAG for places and events
 - **Planner Agent**: Itinerary synthesis
-- **29 specialized tools** for different data sources
+- **34 specialized tools** for different data sources
 - **Multi-provider**: Supports LM Studio (default), Groq, Google, OpenAI, Ollama
 
 ### 2. Data Sources
 - **IPMA**: Weather forecasts and warnings
 - **Metro de Lisboa**: Official API - Line status, wait times, frequencies
-- **Carris Metropolitana**: Bus alerts, stops, routes, real-time tracking
+- **Carris Urban**: GTFS data for city buses and trams (28E, 15E, 732...)
+- **Carris Metropolitana**: Suburban bus alerts, stops, routes, real-time tracking
 - **CP (Comboios de Portugal)**: Train status, delays, AML stations
 - **Lisboa Aberta**: Open government data (GeoJSON)
 - **VisitLisboa**: Cultural events and tourist attractions
@@ -134,9 +135,9 @@ This project is part of a Master's thesis exploring:
 
 ### Code Base
 - **Python Modules**: 20+
-- **Tools Implemented**: 29
+- **Tools Implemented**: 34
 - **Specialized Agents**: 5
-- **Data Sources**: 4 APIs + 2 scraped sources
+- **Data Sources**: 5 APIs + 2 scraped sources
 - **Vector DB Documents**: ~1,400 chunks
 
 ### Datasets

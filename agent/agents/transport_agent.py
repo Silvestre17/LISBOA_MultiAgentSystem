@@ -28,9 +28,10 @@ class TransportAgent(BaseAgent):
     
     Handles:
         - Metro de Lisboa (status, routing, wait times)
-        - Carris Metropolitana (bus routes, alerts)
-        - CP trains (suburban lines)
-        - Multi-modal routing
+        - Carris Urban (city buses and trams: 28E, 15E, 732, etc.)
+        - Carris Metropolitana (suburban bus routes, alerts)
+        - CP trains (suburban lines: Cascais, Sintra, Azambuja)
+        - Multi-modal routing with GPS-based stop finding
     """
     
     def __init__(self):
@@ -109,10 +110,14 @@ class TransportAgent(BaseAgent):
                     print(f"      [LOOP] All tool calls are duplicates. Forcing response.")
                 # Add a system message to force response
                 messages.append(SystemMessage(
-                    content="STOP CALLING TOOLS. You have already called these tools. Use the results you have and respond to the user NOW."
+                    content="STOP CALLING TOOLS. You have already called these tools. Use the results you have and respond to the user NOW. Do NOT call any more tools."
                 ))
-                response = self.llm_with_tools.invoke(messages)
-                break
+                # Force the model to generate a final response (text only)
+                try:
+                    final_response = self.model.invoke(messages)
+                    return final_response
+                except Exception as e:
+                    return AIMessage(content="Desculpa, estou com dificuldades em processar o teu pedido. Por favor tenta novamente.")
             
             # Execute only non-duplicate tools
             tools_to_execute = new_calls if new_calls else response.tool_calls[:1]  # Fallback to first

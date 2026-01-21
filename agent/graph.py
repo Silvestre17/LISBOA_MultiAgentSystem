@@ -90,6 +90,13 @@ from tools.visitlisboa_api import (
     get_place_categories,
     search_lisbon_knowledge
 )
+from tools.carris_api import (
+    carris_get_stops,
+    carris_get_routes,
+    carris_get_stop_schedule,
+    carris_find_routes_between,
+    carris_get_realtime_vehicles,
+)
 
 
 # ==========================================================================
@@ -187,6 +194,13 @@ def get_all_tools() -> List:
         get_event_categories,
         get_place_categories,
         search_lisbon_knowledge,  # Comprehensive RAG search
+        
+        # Carris Urban Tools (Lisbon city buses & trams)
+        carris_get_stops,             # Search Carris urban stops
+        carris_get_routes,            # Get bus/tram routes (701, 15E, etc.)
+        carris_get_stop_schedule,     # Schedule for a stop
+        carris_find_routes_between,   # Find routes connecting two areas
+        carris_get_realtime_vehicles, # Real-time bus/tram positions
     ]
 
 

@@ -1,3 +1,6 @@
+# Carris Metropolitana data directory (exceeds 100MB)
+/data/carris/
+
 # Specific Files
 desktop.ini
 ThesisCode.md

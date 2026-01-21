@@ -42,6 +42,7 @@ sys.path.insert(0, ".")
 from agent.graph import create_assistant, LisbonAssistant, MultiAgentAssistant
 from config import Config
 from tools.visitlisboa_api import initialize_vector_store
+from tools.carris_api import CarrisGTFSManager, CARRIS_DB_PATH
 
 
 # ==========================================================================
@@ -806,6 +807,46 @@ def pre_warm_vector_store():
         return False
 
 
+@st.cache_resource(show_spinner=False)
+def initialize_carris_database():
+    """
+    Initialize the Carris GTFS database at startup.
+    Downloads and converts GTFS data if database doesn't exist or is outdated.
+    This is cached globally by Streamlit so it only runs once per server start.
+    
+    Returns:
+        Tuple[bool, str]: (success, status_message)
+    """
+    try:
+        manager = CarrisGTFSManager()
+        
+        # Check if database exists
+        db_exists = os.path.exists(CARRIS_DB_PATH)
+        
+        if db_exists:
+            # Check if update is needed
+            needs_update, remote_date = manager.check_for_updates()
+            if not needs_update:
+                db_size = os.path.getsize(CARRIS_DB_PATH) / (1024 * 1024)
+                return True, f"Database ready ({db_size:.0f} MB)"
+        
+        # Database doesn't exist or needs update - create/update it
+        success = manager.ensure_database(force_update=False)
+        
+        if success:
+            db_size = os.path.getsize(CARRIS_DB_PATH) / (1024 * 1024)
+            if db_exists:
+                return True, f"Database updated ({db_size:.0f} MB)"
+            else:
+                return True, f"Database created ({db_size:.0f} MB)"
+        else:
+            return False, "Failed to initialize database"
+            
+    except Exception as e:
+        print(f"Carris database initialization failed: {e}")
+        return False, f"Error: {str(e)[:50]}"
+
+
 def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
     """Initialize or reinitialize the LisbonAssistant."""
     try:
@@ -1324,6 +1365,20 @@ def main():
     st.markdown(LISBON_CSS, unsafe_allow_html=True)
     initialize_session_state()
     render_header()
+    
+    # =========================================================================
+    # STARTUP: Initialize Carris Database (cached - runs only once)
+    # =========================================================================
+    if "carris_db_initialized" not in st.session_state:
+        with st.spinner("🚌 Initializing Carris transport database (first time only)..."):
+            success, status_msg = initialize_carris_database()
+            st.session_state.carris_db_initialized = success
+            st.session_state.carris_db_status = status_msg
+            
+            if success:
+                st.toast(f"✅ Carris: {status_msg}", icon="🚌")
+            else:
+                st.warning(f"⚠️ Carris database: {status_msg}")
     
     selected_provider, quick_action = render_sidebar()
     

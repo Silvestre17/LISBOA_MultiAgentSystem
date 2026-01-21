@@ -71,9 +71,10 @@
 - **BeautifulSoup4**: Web scraping
 - **Pandas**: Data manipulation
 
-### APIs & Data Sources (29 Tools)
+### APIs & Data Sources (34 Tools)
 - **IPMA**: Weather data (4 tools)
 - **Metro de Lisboa**: Official API (6 tools)
+- **Carris Urban**: City buses & trams (5 tools)
 - **Carris Metropolitana**: Suburban buses (6 tools)
 - **CP**: Train status (2 tools)
 - **Dados Aberta**: Open government data (4 tools)
@@ -106,7 +107,7 @@ Each agent is a focused ReAct agent with specific tools:
     -   **Prompt**: Customized for meteorological interpretation.
 
 2.  **Transport Agent** (`agent/agents/transport_agent.py`)
-    -   **Tools**: `get_metro_status`, `get_carris_metropolitana_alerts`, `get_train_status`, etc.
+    -   **Tools**: `get_metro_status`, `carris_find_routes_between`, `get_carris_metropolitana_alerts`, `get_train_status`, etc.
     -   **Prompt**: Focused on logistics, status checking, and routing.
 
 3.  **Researcher Agent** (`agent/agents/researcher_agent.py`)
@@ -467,10 +468,31 @@ Search for train stations in AML.
 ### 3.2.4 Multi-modal
 
 #### `get_transport_summary() -> str`
-Combined status dashboard (Metro + Bus + Train).
+Combined status dashboard (Metro + Carris Urban + Carris Metropolitana + Train).
 
 #### `get_route_between_stations(origin, dest) -> str`
 Routing assistance between transport nodes.
+
+### 3.2.5 Carris Urban (City Buses & Trams)
+
+**Module**: `tools/carris_api.py`
+
+#### `carris_get_stops(query: str) -> str`
+Search urban bus/tram stops by name.
+- **Data**: GTFS SQLite database
+
+#### `carris_get_routes(route_type, route_id) -> str`
+List bus/tram routes. Trams identified by 'E' suffix (28E, 15E, etc.).
+
+#### `carris_get_stop_schedule(stop_id) -> str`
+GTFS-based schedule for a specific stop.
+
+#### `carris_find_routes_between(origin, dest) -> str`
+GPS-based route finding using geocoding + Haversine distance.
+
+#### `carris_get_realtime_vehicles(route_id, vehicle_type) -> str`
+Real-time bus/tram positions from tracking API.
+- **API**: `ride.carris-prod.realcity.io`
 
 ---
 
