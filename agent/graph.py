@@ -74,7 +74,7 @@ from tools.transport_api import (
     get_route_between_stations,
     find_bus_routes,               # Bus routing between locations
     get_bus_realtime_locations,    # Real-time bus GPS locations
-    get_bus_schedule,              # Bus route schedule/stops
+    get_bus_next_departures,       # Bus route schedule/stops
     search_cp_stations             # CP train station search (AML)
 )
 from tools.dados_abertos import (
@@ -93,7 +93,7 @@ from tools.visitlisboa_api import (
 from tools.carris_api import (
     carris_get_stops,
     carris_get_routes,
-    carris_get_stop_schedule,
+    carris_get_next_departures,
     carris_find_routes_between,
     carris_get_realtime_vehicles,
 )
@@ -179,7 +179,7 @@ def get_all_tools() -> List:
         get_route_between_stations,   # Metro routing assistance
         find_bus_routes,              # Bus routing between locations
         get_bus_realtime_locations,   # Real-time bus GPS locations
-        get_bus_schedule,             # Bus route schedule/stops
+        get_bus_next_departures,      # Bus route schedule/stops
         search_cp_stations,           # CP train station search (AML)
         
         # Open Data Tools (Lisboa Aberta)
@@ -198,7 +198,7 @@ def get_all_tools() -> List:
         # Carris Urban Tools (Lisbon city buses & trams)
         carris_get_stops,             # Search Carris urban stops
         carris_get_routes,            # Get bus/tram routes (701, 15E, etc.)
-        carris_get_stop_schedule,     # Schedule for a stop
+        carris_get_next_departures,   # Schedule for a stop
         carris_find_routes_between,   # Find routes connecting two areas
         carris_get_realtime_vehicles, # Real-time bus/tram positions
     ]

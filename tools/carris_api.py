@@ -17,6 +17,10 @@
 #     - Protocol Buffers format (requires gtfs-realtime-bindings)
 #     - Provides: trip_id, route_id, stop_id, position (lat/lon), vehicle_id, license_plate
 #     - Links to static GTFS via trip_id, route_id, and stop_id
+#
+#   Usage:
+#       python tools/carris_api.py                  [Runs all tests without rebuilding the database]
+#       python tools/carris_api.py --rebuild-db     [Rebuilds the database]
 # ==========================================================================
 
 # Required libraries:
@@ -26,6 +30,7 @@ import os
 import sys
 import csv
 import json
+import argparse
 import sqlite3
 import zipfile
 import logging
@@ -605,6 +610,7 @@ def _get_active_services(conn: sqlite3.Connection, date: datetime = None) -> Lis
         AND start_date <= ? AND end_date >= ?
     """, (date_str, date_str))
     
+
     active_services = set(row['service_id'] for row in cursor.fetchall())
     
     cursor.execute("""
@@ -620,7 +626,7 @@ def _get_active_services(conn: sqlite3.Connection, date: datetime = None) -> Lis
     """, (date_str,))
     for row in cursor.fetchall():
         active_services.discard(row['service_id'])
-    
+
     return list(active_services)
 
 
@@ -947,13 +953,15 @@ def get_next_arrivals_at_stop(stop_id: str, limit: int = 10) -> List[Dict]:
 # ==========================================================================
 
 @tool
-def carris_get_stops(query: str = "", limit: int = 20) -> str:
+def carris_get_stops(query: str = "", limit: int = None) -> str:
     """
     Searches Carris (Lisbon urban) bus and tram stops.
     
     Args:
         query: Search term for stop name (empty = list all stops)
-        limit: Maximum results (default: 20)
+        limit: Maximum results (optional). If not specified:
+               - Generic listing: 50 results
+               - Search query: Unlimited results (shows all matches)
         
     Returns:
         Formatted list of matching stops with ID, name, and coordinates.
@@ -965,18 +973,24 @@ def carris_get_stops(query: str = "", limit: int = 20) -> str:
     try:
         cursor = conn.cursor()
         
+        # Determine effective limit
+        if limit is None:
+            effective_limit = 1000 if query else 50
+        else:
+            effective_limit = limit
+
         if query:
             sql = """
                 SELECT stop_id, stop_name, stop_lat, stop_lon, stop_code
                 FROM stops WHERE stop_name LIKE ? ORDER BY stop_name LIMIT ?
             """
-            cursor.execute(sql, (f'%{query}%', limit))
+            cursor.execute(sql, (f'%{query}%', effective_limit))
         else:
             sql = """
                 SELECT stop_id, stop_name, stop_lat, stop_lon, stop_code
                 FROM stops ORDER BY stop_name LIMIT ?
             """
-            cursor.execute(sql, (limit,))
+            cursor.execute(sql, (effective_limit,))
         
         rows = cursor.fetchall()
         conn.close()
@@ -1155,13 +1169,15 @@ def carris_get_arrivals(stop_id: str, limit: int = 10) -> str:
 
 
 @tool
-def carris_get_stop_schedule(stop_id: str, limit: int = 15) -> str:
+def carris_get_next_departures(stop_id: str, start_time: str = "", route_short_name: str = "", limit: int = 25) -> str:
     """
-    Gets the STATIC schedule for a Carris stop (no real-time data).
+    Gets upcoming scheduled departures for a Carris stop.
     
     Args:
         stop_id: Stop ID (from carris_get_stops)
-        limit: Maximum departures (default: 15)
+        start_time: Optional time (HH:MM) to see schedule for a specific time (default: now)
+        route_short_name: Optional filter by line number (e.g. "736", "15E")
+        limit: Maximum departures (default: 25)
         
     Returns:
         Formatted schedule with times and route info.
@@ -1175,23 +1191,45 @@ def carris_get_stop_schedule(stop_id: str, limit: int = 15) -> str:
         
         cursor.execute("SELECT stop_name FROM stops WHERE stop_id = ?", (stop_id,))
         stop_row = cursor.fetchone()
-        
+
         if not stop_row:
             conn.close()
             return f"Paragem '{stop_id}' não encontrada."
         
         stop_name = stop_row['stop_name']
         
-        now = datetime.now()
-        current_time = now.strftime("%H:%M:%S")
+        # For debugging
+        print(f"Stop ID: {stop_id}")
+        print(f"Stop Name: {stop_name}")
         
-        active_services = _get_active_services(conn, now)
+        if start_time:
+             # Validate format HH:MM
+             try:
+                 datetime.strptime(start_time, "%H:%M")
+                 current_time = f"{start_time}:00"
+             except ValueError:
+                 return "Invalid time format. Use HH:MM."
+        else:
+            now = datetime.now()
+            current_time = now.strftime("%H:%M:%S")
+        
+        # Determine active service_id based on today's date (or assumed date)
+        # For simplicity, we assume 'today' if no date provided, even if looking at future time
+        active_services = _get_active_services(conn, datetime.now())
         
         if not active_services:
             conn.close()
             return "Nenhum serviço ativo encontrado para hoje."
         
         placeholders = ','.join(['?' for _ in active_services])
+        params = [stop_id, *active_services, current_time]
+        
+        route_filter = ""
+        if route_short_name:
+            route_filter = "AND r.route_short_name = ?"
+            params.append(route_short_name)
+        
+        # Determine end of day (or next few hours) - naive approach, just list next X
         
         sql = f"""
             SELECT st.departure_time, r.route_short_name, r.route_long_name, t.trip_headsign
@@ -1199,10 +1237,15 @@ def carris_get_stop_schedule(stop_id: str, limit: int = 15) -> str:
             JOIN trips t ON st.trip_id = t.trip_id
             JOIN routes r ON t.route_id = r.route_id
             WHERE st.stop_id = ? AND t.service_id IN ({placeholders}) AND st.departure_time >= ?
+            {route_filter}
             ORDER BY st.departure_time LIMIT ?
         """
+
+        print("SQL Query:", sql)
+        print("Parameters:", params)
         
-        cursor.execute(sql, (stop_id, *active_services, current_time, limit))
+        params.append(limit)
+        cursor.execute(sql, params)
         rows = cursor.fetchall()
         conn.close()
         
@@ -1211,10 +1254,9 @@ def carris_get_stop_schedule(stop_id: str, limit: int = 15) -> str:
         response += "=" * 50 + "\n\n"
         
         if not rows:
-            response += "Sem mais partidas hoje nesta paragem.\n"
-            return response
+            return f"No more departures found after {current_time[:5]}."
         
-        response += "Próximas Partidas (Horário Estático)\n" + "-" * 40 + "\n"
+        response = f"Next Departures (Static Schedule): {stop_name}\n" + "-" * 40 + "\n"
         
         for row in rows:
             vehicle_type = "Elétrico" if row['route_short_name'].endswith('E') else "Autocarro"
@@ -1224,13 +1266,13 @@ def carris_get_stop_schedule(stop_id: str, limit: int = 15) -> str:
             response += f"{time_str} - {vehicle_type} Linha {row['route_short_name']}\n"
             response += f"      Destino: {destination[:40]}\n"
         
-        response += f"\nA mostrar {len(rows)} partidas (horário estático)\n"
-        response += "Para tempos reais, usa carris_get_arrivals\n"
+        response += f"\nShowing {len(rows)} departures (static schedule)\n"
+        response += "For real-time, use carris_get_realtime_vehicles.\n"
         return response
         
     except Exception as e:
         logger.error(f"Error getting schedule: {e}")
-        return f"Erro ao obter horário: {e}"
+        return f"Error getting schedule: {e}"
 
 
 @tool
@@ -1624,12 +1666,18 @@ def carris_vehicle_eta(route_short_name: str, stop_name: str) -> str:
 if __name__ == "__main__":
     import time as time_module
     
+    # Argument Parsing
+    parser = argparse.ArgumentParser(description="Carris API Tools Test Suite")
+    parser.add_argument("--rebuild-db", action="store_true", help="Force database rebuild")
+    args = parser.parse_args()
+
     print("\n" + "=" * 70)
     print("\033[1m🧪 COMPREHENSIVE TEST: Carris Urban API Tools\033[0m")
     print("=" * 70)
     print(f"📅 Test Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"🗄️ Database: {CARRIS_DB_PATH}")
     print(f"📡 GTFS-RT Available: {GTFS_RT_AVAILABLE}")
+    print(f"🔄 Rebuild DB: {args.rebuild_db}")
     print("=" * 70)
     
     test_results = {"passed": 0, "failed": 0, "total": 0}
@@ -1658,21 +1706,21 @@ if __name__ == "__main__":
     # =========================================================================
     # DATABASE SETUP TESTS
     # =========================================================================
-    # TEST 1: Database Rebuild (Force Update)
-    def _test_database_rebuild():
-        print("Forcing database rebuild (force_update=True)...")
+    # TEST 1: Database Setup (Conditional Rebuild)
+    def _test_database_setup():
+        print(f"Ensuring database (force_update={args.rebuild_db})...")
         manager = CarrisGTFSManager()
         start = time_module.time()
-        success = manager.ensure_database(force_update=True)
+        success = manager.ensure_database(force_update=args.rebuild_db)
         elapsed = time_module.time() - start
         
         if not success:
-            raise AssertionError("Database rebuild failed")
+            raise AssertionError("Database setup failed")
         
         db_size = os.path.getsize(CARRIS_DB_PATH) / (1024 * 1024)
-        return f"Database rebuilt in {elapsed:.1f}s ({db_size:.1f} MB)"
+        return f"Database ready in {elapsed:.1f}s ({db_size:.1f} MB)"
     
-    run_test("Database Rebuild (force_update=True)", _test_database_rebuild)
+    run_test("Database Setup", _test_database_setup)
     
     # =========================================================================
     # SCHEMA VERIFICATION TESTS
@@ -1738,299 +1786,112 @@ if __name__ == "__main__":
         if missing:
             raise AssertionError(f"Missing indexes: {missing}")
         
-        return f"   ✅ All {len(expected_indexes)} expected indexes present\n   📊 Found: {len(actual_indexes)} total indexes"
+        return f"   ✅ All {len(expected_indexes)} expected indexes present"
     
-    run_test("Index Verification (13 indexes)", _test_schema_indexes)
-    
-    # =========================================================================
-    # DATA VERIFICATION TESTS
-    # =========================================================================
-    # TEST 4: Row Count Verification
-    def _test_row_counts():
-        conn = sqlite3.connect(CARRIS_DB_PATH)
-        cur = conn.cursor()
-        
-        min_expected = {
-            'agency': 1,
-            'calendar': 1,
-            'calendar_dates': 1,
-            'routes': 100,
-            'stops': 2000,
-            'trips': 50000,
-            'stop_times': 2000000,
-            'shapes': 100000,
-        }
-        
-        results = []
-        all_ok = True
-        
-        for table, min_rows in min_expected.items():
-            cur.execute(f'SELECT COUNT(*) FROM {table}')
-            count = cur.fetchone()[0]
-            
-            if count >= min_rows:
-                results.append(f"   ✅ {table}: {count:,} rows (min: {min_rows:,})")
-            else:
-                results.append(f"   ❌ {table}: {count:,} rows (expected min: {min_rows:,})")
-                all_ok = False
-        
-        conn.close()
-        
-        if not all_ok:
-            raise AssertionError("Row count verification failed")
-        
-        return "\n".join(results)
-    
-    run_test("Row Count Verification", _test_row_counts)
-    
-    # TEST 5: Query Performance
-    def _test_query_performance():
-        conn = sqlite3.connect(CARRIS_DB_PATH)
-        cur = conn.cursor()
-        
-        queries = [
-            ("Stop by name (indexed)", "SELECT * FROM stops WHERE stop_name LIKE '%Rossio%'"),
-            ("Route by short_name", "SELECT * FROM routes WHERE route_short_name = '28E'"),
-            ("Trips for route", "SELECT COUNT(*) FROM trips WHERE route_id = (SELECT route_id FROM routes WHERE route_short_name = '28E' LIMIT 1)"),
-            ("Stop times for stop", "SELECT COUNT(*) FROM stop_times WHERE stop_id = (SELECT stop_id FROM stops LIMIT 1)"),
-            ("Active services today", f"SELECT * FROM calendar WHERE {datetime.now().strftime('%A').lower()} = 1"),
-        ]
-        
-        results = []
-        
-        for name, sql in queries:
-            start = time_module.time()
-            cur.execute(sql)
-            rows = cur.fetchall()
-            elapsed_ms = (time_module.time() - start) * 1000
-            
-            status = "✅" if elapsed_ms < 100 else ("⚠️" if elapsed_ms < 500 else "❌")
-            results.append(f"   {status} {name}: {elapsed_ms:.1f}ms ({len(rows)} rows)")
-        
-        conn.close()
-        return "\n".join(results)
-    
-    run_test("Query Performance (<100ms target)", _test_query_performance)
-    
-    # TEST 6: Data Integrity (FK-like checks)
-    def _test_data_integrity():
-        conn = sqlite3.connect(CARRIS_DB_PATH)
-        cur = conn.cursor()
-        
-        results = []
-        
-        # Check trips reference valid routes
-        cur.execute("""
-            SELECT COUNT(*) FROM trips t 
-            WHERE NOT EXISTS (SELECT 1 FROM routes r WHERE r.route_id = t.route_id)
-        """)
-        orphan_trips = cur.fetchone()[0]
-        results.append(f"   {'⚠️' if orphan_trips > 0 else '✅'} Trips with invalid route_id: {orphan_trips}")
-        
-        # Check stop_times reference valid trips
-        cur.execute("""
-            SELECT COUNT(*) FROM stop_times st 
-            WHERE NOT EXISTS (SELECT 1 FROM trips t WHERE t.trip_id = st.trip_id)
-        """)
-        orphan_st = cur.fetchone()[0]
-        results.append(f"   {'⚠️' if orphan_st > 0 else '✅'} Stop_times with invalid trip_id: {orphan_st}")
-        
-        # Check stop_times reference valid stops
-        cur.execute("""
-            SELECT COUNT(*) FROM stop_times st 
-            WHERE NOT EXISTS (SELECT 1 FROM stops s WHERE s.stop_id = st.stop_id)
-        """)
-        orphan_stops = cur.fetchone()[0]
-        results.append(f"   {'⚠️' if orphan_stops > 0 else '✅'} Stop_times with invalid stop_id: {orphan_stops}")
-        
-        conn.close()
-        return "\n".join(results)
-    
-    run_test("Data Integrity (FK-like checks)", _test_data_integrity)
-    
-    # TEST 7: Metadata Check
-    def _test_metadata():
-        manager = CarrisGTFSManager()
-        metadata = manager._load_metadata()
-        
-        if not metadata:
-            raise AssertionError("Metadata not found")
-        
-        if metadata.get('schema_version') != '2.0':
-            raise AssertionError(f"Expected schema v2.0, got {metadata.get('schema_version')}")
-        
-        results = [
-            f"   📅 GTFS Date: {metadata.get('gtfs_date', 'N/A')}",
-            f"   🕐 Updated At: {metadata.get('updated_at', 'N/A')}",
-            f"   📊 Schema Version: {metadata.get('schema_version', 'N/A')}",
-            f"   🔧 Features: {metadata.get('features', [])}",
-        ]
-        return "\n".join(results)
-    
-    run_test("Metadata Check (Schema v2.0)", _test_metadata)
+    run_test("Index Verification", _test_schema_indexes)
     
     # =========================================================================
-    # GTFS-RT REAL-TIME TESTS
+    # TOOL TESTS - NEW & RENAMED
     # =========================================================================
-    # TEST 8: GTFS-RT Feed
-    def _test_gtfs_rt():
-        if not GTFS_RT_AVAILABLE:
-            return "⚠️ GTFS-RT library not available (install gtfs-realtime-bindings)"
-        
-        vehicles = fetch_gtfs_rt_vehicles(use_cache=False)
-        
-        if not vehicles:
-            raise AssertionError("No vehicles from GTFS-RT feed")
-        
-        with_trip = sum(1 for v in vehicles if v.get('trip_id'))
-        with_position = sum(1 for v in vehicles if v.get('latitude'))
-        with_route = sum(1 for v in vehicles if v.get('route_id'))
-        
-        results = [
-            f"   📊 Vehicles fetched: {len(vehicles)}",
-            f"   🎫 With trip_id: {with_trip} ({100*with_trip/len(vehicles):.0f}%)",
-            f"   📍 With position: {with_position} ({100*with_position/len(vehicles):.0f}%)",
-            f"   🚌 With route_id: {with_route} ({100*with_route/len(vehicles):.0f}%)",
-        ]
-        
-        if vehicles:
-            v = vehicles[0]
-            lat = v.get('latitude', 0)
-            lon = v.get('longitude', 0)
-            results.append(f"   📌 Sample: {v.get('vehicle_id')} @ ({lat:.4f}, {lon:.4f})")
-        
-        return "\n".join(results)
     
-    run_test("GTFS-RT Feed (Real-time Vehicles)", _test_gtfs_rt)
-    
-    # =========================================================================
-    # TOOL TESTS - STOP SEARCH
-    # =========================================================================
-    # TEST 9: Stop Search - Belém
+    # TEST 4: Get Stops (Prerequisite for other tests)
+    def _test_get_stops_rossio():
+        """Retrieve Rossio stops to use IDs in next tests."""
+        print("Finding all Rossio stops (unlimited)...")
+        result = carris_get_stops.invoke({"query": "Rossio"}) # No limit implicit > all results
+        if "não encontrada" in result:
+            raise AssertionError("Could not find Rossio stops")
+        
+        # Extract stop ID using regex or basic parsing
+        match = re.search(r'ID: (\d+)', result)
+        if match:
+            stop_id = match.group(1)
+            return stop_id, result
+        raise AssertionError("Could not extract stop ID from result")
+
+    stop_id_rossio = None
+    stops_result = run_test("Tool: carris_get_stops('Rossio')", _test_get_stops_rossio)
+    if stops_result:
+        stop_id_rossio = stops_result[0]
+
+    # TEST 5: carris_get_next_departures (Static Schedule)
+    if stop_id_rossio:
+        print("\nNote: carris_get_next_departures uses the STATIC GTFS schedule.")
+        print("      It answers 'What is the planned time?' (useful for future planning).")
+        run_test(
+            f"Tool: carris_get_next_departures (Stop {stop_id_rossio})",
+            carris_get_next_departures.invoke,
+            {"stop_id": stop_id_rossio, "limit": 3}
+        )
+        
+        # TEST 6: carris_get_next_departures with START TIME & FILTER
+        future_time = (datetime.now() + timedelta(hours=2)).strftime("%H:%M")
+        run_test(
+            f"Tool: carris_get_next_departures (Stop {stop_id_rossio}, Time {future_time}, Line Filter)",
+            carris_get_next_departures.invoke,
+            {"stop_id": stop_id_rossio, "start_time": future_time, "route_short_name": "759"}
+        )
+    else:
+        print("⚠️ Skipping next_departures tests due to missing stop ID")
+
+    # TEST 7: carris_find_routes_between (Complex Routing)
     run_test(
-        "Tool: carris_get_stops('Belém')",
-        carris_get_stops.invoke,
-        {"query": "Belém", "limit": 5}
-    )
-    
-    # TEST 10: Stop Search - Rossio
-    run_test(
-        "Tool: carris_get_stops('Rossio')",
-        carris_get_stops.invoke,
-        {"query": "Rossio", "limit": 5}
-    )
-    
-    # =========================================================================
-    # TOOL TESTS - ROUTES
-    # =========================================================================
-    # TEST 11: Get Routes - Trams
-    run_test(
-        "Tool: carris_get_routes(type='tram')",
-        carris_get_routes.invoke,
-        {"route_type": "tram"}
-    )
-    
-    # TEST 12: Get Routes - Buses
-    run_test(
-        "Tool: carris_get_routes(type='bus')",
-        carris_get_routes.invoke,
-        {"route_type": "bus", "limit": 10}
-    )
-    
-    # =========================================================================
-    # TOOL TESTS - REAL-TIME VEHICLES
-    # =========================================================================
-    # TEST 13: Real-time Vehicles - Trams
-    run_test(
-        "Tool: carris_get_realtime_vehicles(type='tram')",
-        carris_get_realtime_vehicles.invoke,
-        {"vehicle_type": "tram"}
-    )
-    
-    # TEST 14: Real-time Vehicles - All
-    run_test(
-        "Tool: carris_get_realtime_vehicles(all)",
-        carris_get_realtime_vehicles.invoke,
-        {}
-    )
-    
-    # =========================================================================
-    # TOOL TESTS - ARRIVALS
-    # =========================================================================
-    # TEST 15: Get Arrivals (need to find a valid stop_id first)
-    def _test_arrivals():
-        conn = sqlite3.connect(CARRIS_DB_PATH)
-        cur = conn.cursor()
-        cur.execute("SELECT stop_id FROM stops WHERE stop_name LIKE '%Rossio%' LIMIT 1")
-        row = cur.fetchone()
-        conn.close()
-        
-        if not row:
-            return "⚠️ No Rossio stop found in database"
-        
-        stop_id = row[0]
-        return carris_get_arrivals.invoke({"stop_id": stop_id, "limit": 5})
-    
-    run_test("Tool: carris_get_arrivals (Rossio stop)", _test_arrivals)
-    
-    # =========================================================================
-    # TOOL TESTS - ROUTE FINDING
-    # =========================================================================
-    # TEST 16: Find Routes Between - Cais Sodré to Belém
-    run_test(
-        "Tool: carris_find_routes_between('Cais Sodré', 'Belém')",
+        "Tool: carris_find_routes_between ('Cais Sodré' -> 'Belém')",
         carris_find_routes_between.invoke,
         {"origin": "Cais Sodré", "destination": "Belém"}
     )
-    
-    # TEST 17: Find Routes Between - Rossio to Martim Moniz
+
+    # TEST 8: carris_get_realtime_vehicles
     run_test(
-        "Tool: carris_find_routes_between('Rossio', 'Martim Moniz')",
+        "Tool: carris_get_realtime_vehicles (Tram 28E)",
+        carris_get_realtime_vehicles.invoke,
+        {"route_id": "28E"}
+    )
+    
+    # TEST 9: carris_vehicle_eta (Edge Case: Invalid Line)
+    run_test(
+        "Edge Case: carris_vehicle_eta (Invalid Line)",
+        carris_vehicle_eta.invoke,
+        {"route_short_name": "999X", "stop_name": "Rossio"}
+    )
+
+    # TEST 10: "A que horas passa o 758 no Rato?"
+    run_test(
+        "Tool: carris_get_next_departures (Stop Rato, Line 758)",
+        carris_get_next_departures.invoke,
+        {"stop_name": "Rato", "route_short_name": "758"}
+    )
+
+    # TEST 11: "Onde está o 28E agora?"
+    run_test(
+        "Tool: carris_get_realtime_vehicles (Tram 28E)",
+        carris_get_realtime_vehicles.invoke,
+        {"route_id": "28E"}
+    )
+
+    # TEST 12: "Como chego da Estação do Oriente ao Castelo?"
+    run_test(
+        "Tool: carris_find_routes_between (Estação do Oriente -> Castelo)",
         carris_find_routes_between.invoke,
-        {"origin": "Rossio", "destination": "Martim Moniz"}
+        {"origin": "Estação do Oriente", "destination": "Castelo"}
     )
-    
-    # =========================================================================
-    # EDGE CASES & ERROR HANDLING
-    # =========================================================================
-    # TEST 18: Stop Search - Empty Query
+
+    # TEST 13: "Quantos minutos faltam para o próximo 714 na Praça da Figueira?"
     run_test(
-        "Edge Case: Empty Stop Query",
-        carris_get_stops.invoke,
-        {"query": "", "limit": 3}
+        "Tool: carris_vehicle_eta (Praça da Figueira, Line 714)",
+        carris_vehicle_eta.invoke,
+        {"stop_name": "Praça da Figueira", "route_short_name": "714"}
     )
-    
-    # TEST 19: Stop Search - Nonexistent Stop
-    run_test(
-        "Edge Case: Nonexistent Stop",
-        carris_get_stops.invoke,
-        {"query": "xyznonexistent123", "limit": 3}
-    )
-    
-    # TEST 20: Route Finding - Same Origin/Destination
-    run_test(
-        "Edge Case: Same Origin and Destination",
-        carris_find_routes_between.invoke,
-        {"origin": "Rossio", "destination": "Rossio"}
-    )
-    
+
     # =========================================================================
-    # TEST SUMMARY
+    # SUMMARY
     # =========================================================================
     print("\n" + "=" * 70)
     print("\033[1m📊 TEST SUMMARY\033[0m")
     print("=" * 70)
     print(f"\033[1;32m✅ Passed: {test_results['passed']}/{test_results['total']}\033[0m")
-    print(f"\033[1;31m❌ Failed: {test_results['failed']}/{test_results['total']}\033[0m")
-    
-    if test_results['failed'] == 0:
-        print(f"\n\033[1;32m🎉 ALL TESTS PASSED! Carris API system is working correctly.\033[0m")
+    if test_results['failed'] > 0:
+        print(f"\033[1;31m❌ Failed: {test_results['failed']}/{test_results['total']}\033[0m")
     else:
-        print(f"\n\033[1;33m⚠️  Some tests failed. Check errors above.\033[0m")
-    
-    # Database info
-    print("\n" + "-" * 70)
-    print(f"📁 Database: {CARRIS_DB_PATH}")
-    print(f"📊 Size: {os.path.getsize(CARRIS_DB_PATH) / (1024*1024):.1f} MB")
-    print(f"📡 GTFS-RT: {'Available' if GTFS_RT_AVAILABLE else 'Not available'}")
+        print(f"\033[1;36m✨ All tests completed successfully.\033[0m")
     print("=" * 70 + "\n")

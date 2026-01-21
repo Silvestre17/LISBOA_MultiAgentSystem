@@ -13,6 +13,7 @@ test_*.py
 # Specific Folders
 _/
 .gemini/
+tests/
 
 # Created by .ignore support plugin
 # Byte-compiled / optimized / DLL files
