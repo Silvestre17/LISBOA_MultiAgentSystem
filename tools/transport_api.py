@@ -182,10 +182,30 @@ CACHE_EXPIRATION_HOURS = 24
 
 # Metro line colors and names
 METRO_LINES = {
-    "amarela": {"name": "Yellow Line (Rato ↔ Odivelas)", "emoji": "🟡", "color": "#F7A71C"},
-    "azul": {"name": "Blue Line (Santa Apolónia ↔ Reboleira)", "emoji": "🔵", "color": "#3877BD"},
-    "verde": {"name": "Green Line (Telheiras ↔ Cais do Sodré)", "emoji": "🟢", "color": "#00A497"},
-    "vermelha": {"name": "Red Line (S. Sebastião ↔ Aeroporto)", "emoji": "🔴", "color": "#E81775"}
+    "amarela": {
+        "name": "Yellow Line (Rato ↔ Odivelas)",
+        "emoji": "🟡",
+        "color": "#F7A71C",
+        "stations": ["rato", "marquês de pombal", "picoas", "saldanha", "campo pequeno", "entrecampos", "cidade universitária", "campo grande", "quinta das conchas", "lumiar", "ameixoeira", "senhor roubado", "odivelas"]
+    },
+    "azul": {
+        "name": "Blue Line (Santa Apolónia ↔ Reboleira)",
+        "emoji": "🔵",
+        "color": "#3877BD",
+        "stations": ["santa apolónia", "terreiro do paço", "baixa-chiado", "restauradores", "avenida", "marquês de pombal", "parque", "são sebastião", "praça de espanha", "jardim zoológico", "laranjeiras", "alto dos moinhos", "colégio militar/luz", "carnide", "pontinha", "alfornelos", "amadora este", "reboleira"]
+    },
+    "verde": {
+        "name": "Green Line (Telheiras ↔ Cais do Sodré)",
+        "emoji": "🟢",
+        "color": "#00A497",
+        "stations": ["cais do sodré", "baixa-chiado", "rossio", "martim moniz", "intendente", "anjos", "arroios", "alameda", "areeiro", "roma", "alvalade", "campo grande", "telheiras"]
+    },
+    "vermelha": {
+        "name": "Red Line (S. Sebastião ↔ Aeroporto)",
+        "emoji": "🔴",
+        "color": "#E81775",
+        "stations": ["são sebastião", "saldanha", "alameda", "olaias", "bela vista", "chelas", "olivais", "cabo ruivo", "oriente", "moscavide", "encarnação", "aeroporto"]
+    }
 }
 
 # Key Metro Stations with their lines (for routing assistance)
@@ -479,6 +499,31 @@ CP_STATIONS = {
         "description": "Azambuja line",
         "metro": "vermelha"
     },
+    "sintra": {
+        "lines": ["sintra"],
+        "description": "Sintra line terminus (UNESCO town)",
+        "metro": None
+    },
+    "amadora": {
+        "lines": ["sintra"],
+        "description": "Sintra line",
+        "metro": None
+    },
+    "queluz-belas": {
+        "lines": ["sintra"],
+        "description": "Sintra line",
+        "metro": None
+    },
+    "rio de mouro": {
+         "lines": ["sintra"],
+         "description": "Sintra line",
+         "metro": None
+    },
+    "cacém": {
+         "lines": ["sintra"],
+         "description": "Junction Sintra/Azambuja line",
+         "metro": None
+    },
 }
 
 # CP Train Lines
@@ -503,6 +548,20 @@ CP_LINES = {
         "emoji": "🚆",
         "terminus": ["Santa Apolónia", "Azambuja"],
         "frequency": "~30 min"
+    },
+    "norte": {
+        "name": "Linha do Norte",
+        "description": "Lisboa ↔ Porto (long distance / regional)",
+        "emoji": "🚄",
+        "terminus": ["Santa Apolónia", "Porto-Campanhã"],
+        "frequency": "Variable"
+    },
+    "beira_alta": {
+        "name": "Linha da Beira Alta",
+        "description": "International/Regional Line",
+        "emoji": "🚄",
+        "terminus": ["Santa Apolónia", "Vilar Formoso"],
+        "frequency": "Variable"
     },
     "sado": {
         "name": "Linha do Sado",
@@ -3104,6 +3163,40 @@ def get_bus_next_departures(line_id: str, stop_id: str = "", start_time: str = "
                     response += f"   Next: {', '.join(upcoming_at[:6])}\n"
                 else:
                     response += "   No more stops today.\n"
+            else:
+                # Fallback: Try to match by name if exact ID not found
+                # (e.g. user provided hub ID A, but this line stops at hub ID B)
+                stops_cache = load_carris_metropolitana_stops()
+                input_stop_name = next((s['name'] for s in stops_cache if s['id'] == stop_id), None)
+                
+                if input_stop_name:
+                    # Find any stop in path with same name
+                    stop_idx = next((i for i, s in enumerate(path) if s.get('stop', {}).get('name') == input_stop_name), None)
+                    
+                    if stop_idx is not None:
+                        matched_name = path[stop_idx].get('stop', {}).get('name')
+                        matched_id = path[stop_idx].get('stop', {}).get('id')
+                        response += f"\n**⏱️ At stop {matched_name} (ID: {matched_id}):**\n"
+                        response += f"   (Matched by name - original ID {stop_id} not in this path)\n"
+                        
+                        stop_times = []
+                        for trip in today_trips:
+                            schedule = trip.get('schedule', [])
+                            if len(schedule) > stop_idx:
+                                time_at = schedule[stop_idx].get('arrival_time', 'N/A')
+                                stop_times.append(time_at)
+                        
+                        stop_times.sort()
+                        upcoming_at = [t for t in stop_times if t > ref_time]
+                        
+                        if upcoming_at:
+                            response += f"   Next: {', '.join(upcoming_at[:6])}\n"
+                        else:
+                            response += "   No more stops today.\n"
+                    else:
+                        response += f"\n❌ Stop {stop_id} (or similar name) not found on this line's path.\n"
+                else:
+                    response += f"\n❌ Stop {stop_id} not found on this line's path.\n"
     else:
         response += f"ℹ️ Line not operating today ({today}).\n"
     
@@ -3334,6 +3427,33 @@ def search_cp_stations(query: str) -> str:
     return response
 
 
+def _get_metro_direction(line_id: str, start: str, end: str) -> str:
+    """Helper to determine direction (terminal station) on a Metro line."""
+    stations = METRO_LINES.get(line_id, {}).get("stations", [])
+    if not stations: return ""
+    
+    # Normalize for matching
+    import unicodedata
+    def norm(t): return ''.join(c for c in unicodedata.normalize('NFD', t) if unicodedata.category(c) != 'Mn').lower().strip()
+    
+    # Find canonical names
+    start_c = next((s for s in stations if norm(s) == norm(start)), None)
+    if not start_c: start_c = next((s for s in stations if norm(start) in norm(s) or norm(s) in norm(start)), start)
+    
+    end_c = next((s for s in stations if norm(s) == norm(end)), None)
+    if not end_c: end_c = next((s for s in stations if norm(end) in norm(s) or norm(s) in norm(end)), end)
+    
+    try:
+        idx_start = stations.index(start_c)
+        idx_end = stations.index(end_c)
+        
+        if idx_start < idx_end:
+            return f"(direction {stations[-1].title()})"
+        else:
+            return f"(direction {stations[0].title()})"
+    except ValueError:
+        return "" # Fallback if precise station matching fails
+
 @tool
 def get_route_between_stations(origin: str, destination: str) -> str:
     """
@@ -3418,19 +3538,60 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                 origin_lines = get_station_lines(origin_metro)
                 dest_lines = get_station_lines(dest_metro)
                 
-                response += "🚇 **SUGGESTED METRO ROUTE**\n"
+                response += "🚇 **METRO ROUTE**\n"
                 response += "-" * 30 + "\n"
-                response += f"1. Board Metro at **{origin_metro.title()}**\n"
                 
                 common_lines = set(origin_lines) & set(dest_lines)
                 if common_lines:
+                    response += f"✅ **Direct Route Available**\n\n"
                     for line in common_lines:
                         line_info = METRO_LINES.get(line, {})
-                        response += f"2. {line_info.get('emoji', '')} Take **{line.title()} Line** directly\n"
+                        direction = _get_metro_direction(line, origin_metro, dest_metro)
+                        response += f"   {line_info.get('emoji', '')} Take **{line.title()} Line**\n"
+                        response += f"   1. Walk from {origin.title()} to **{origin_metro.title()}**\n"
+                        response += f"   2. Board at **{origin_metro.title()}** {direction}\n"
+                        response += f"   3. Exit at **{dest_metro.title()}**\n"
+                        response += f"   4. Walk to {dest_landmark['name']}\n\n"
                 else:
-                    response += f"2. Transfer as needed\n"
-                
-                response += f"3. Exit at **{dest_metro.title()}**\n\n"
+                    # Transfer Logic
+                    hubs = [
+                        ("Marquês de Pombal", ["amarela", "azul"]),
+                        ("Saldanha", ["amarela", "vermelha"]),
+                        ("Alameda", ["verde", "vermelha"]),
+                        ("Baixa-Chiado", ["azul", "verde"]),
+                        ("Campo Grande", ["amarela", "verde"]),
+                        ("São Sebastião", ["vermelha", "azul"]),
+                    ]
+                    
+                    transfer_hub = None
+                    for station, lines in hubs:
+                        if set(origin_lines) & set(lines) and set(dest_lines) & set(lines):
+                            transfer_hub = station
+                            break
+
+                    if transfer_hub:
+                        hub_lines = next(lines for st, lines in hubs if st == transfer_hub)
+                        l1 = list(set(origin_lines) & set(hub_lines))[0]
+                        l2 = list(set(dest_lines) & set(hub_lines))[0]
+                        l1_info = METRO_LINES[l1]
+                        l2_info = METRO_LINES[l2]
+
+                        response += f"🔄 **Transfer Required**\n"
+                        response += f"   💡 **Suggested Transfer**: {transfer_hub} ({l1_info['emoji']} ↔ {l2_info['emoji']})\n\n"
+                        response += f"   **Full Route**:\n"
+                        response += f"   1. Walk from {origin.title()} to **{origin_metro.title()}**\n"
+                        
+                        dir1 = _get_metro_direction(l1, origin_metro, transfer_hub)
+                        response += f"   2. {l1_info['emoji']} Board at **{origin_metro.title()}** {dir1}\n"
+                        response += f"   3. Exit at **{transfer_hub}**\n"
+                        
+                        dir2 = _get_metro_direction(l2, transfer_hub, dest_metro)
+                        response += f"   4. {l2_info['emoji']} Transfer to **{l2_info['name']}** {dir2}\n"
+                        response += f"   5. Exit at **{dest_metro.title()}**\n"
+                        response += f"   6. Walk to {dest_landmark['name']}\n\n"
+                    else:
+                         response += f"⚠️ Complex route. Check [Metro map](https://www.metrolisboa.pt/viajar/mapas-e-diagramas/).\n\n"
+
                 return response
             
             # If destination has no metro (e.g., Belém)
@@ -3453,39 +3614,63 @@ def get_route_between_stations(origin: str, destination: str) -> str:
             if common_lines:
                 for line in common_lines:
                     line_info = METRO_LINES.get(line, {})
+                    direction = _get_metro_direction(line, origin, dest_metro)
                     response += f"✅ **Direct Route**: {line_info.get('emoji', '')} {line.title()} Line\n"
-                    response += f"   1. Board at **{origin.title()}**\n"
+                    response += f"   1. Board at **{origin.title()}** {direction}\n"
                     response += f"   2. Exit at **{dest_metro.title()}**\n"
                     response += f"   3. Walk to {dest_landmark['name']}\n\n"
             else:
                 # Need transfer
                 response += f"🔄 **Transfer Required**\n\n"
-                response += f"   📍 From: {origin.title()} ({', '.join([METRO_LINES[l]['emoji'] + ' ' + l.title() for l in origin_lines])})\n"
-                response += f"   📍 To: {dest_metro.title()} ({', '.join([METRO_LINES[l]['emoji'] + ' ' + l.title() for l in dest_metro_lines])})\n\n"
+                response += f"   📍 From: {origin.title()} ({', '.join([METRO_LINES[l]['emoji'] + ' ' + l.title() + ' Line' for l in origin_lines])})\n"
+                response += f"   📍 To: {dest_metro.title()} ({', '.join([METRO_LINES[l]['emoji'] + ' ' + l.title() + ' Line' for l in dest_metro_lines])})\n\n"
                 
-                # Suggest transfer station for Amarela → Azul specifically
-                if 'amarela' in origin_lines and 'azul' in dest_metro_lines:
-                    response += f"   💡 **Suggested transfer**: Marquês de Pombal (🟡 Amarela ↔ 🔵 Azul)\n\n"
-                    response += f"   **Full route**:\n"
-                    response += f"   1. 🟡 Board at **{origin.title()}** (Yellow Line)\n"
-                    response += f"   2. Exit at **Marquês de Pombal**\n"
-                    response += f"   3. 🔵 Transfer to **Blue Line** (direction Reboleira)\n"
+                # -----------------------------------------------------------------
+                # GENERALIZED TRANSFER LOGIC
+                # -----------------------------------------------------------------
+                # Find best transfer station
+                transfer_hub = None
+                
+                # List of all transfer hubs and their lines
+                hubs = [
+                    ("Marquês de Pombal", ["amarela", "azul"]),
+                    ("Saldanha", ["amarela", "vermelha"]),
+                    ("Alameda", ["verde", "vermelha"]),
+                    ("Baixa-Chiado", ["azul", "verde"]),
+                    ("Campo Grande", ["amarela", "verde"]),
+                    ("São Sebastião", ["vermelha", "azul"]),
+                ]
+                
+                for station, lines in hubs:
+                    # Check if this hub connects origin line AND destination line
+                    if set(origin_lines) & set(lines) and set(dest_metro_lines) & set(lines):
+                        transfer_hub = station
+                        break
+                
+                if transfer_hub:
+                    # Find connecting lines
+                    hub_lines = next(lines for st, lines in hubs if st == transfer_hub)
+                    l1 = list(set(origin_lines) & set(hub_lines))[0]
+                    l2 = list(set(dest_metro_lines) & set(hub_lines))[0]
+                    l1_info = METRO_LINES[l1]
+                    l2_info = METRO_LINES[l2]
+
+                    response += f"   💡 **Suggested Transfer**: {transfer_hub} ({l1_info['emoji']} ↔ {l2_info['emoji']})\n\n"
+                    response += f"   **Full Route**:\n"
+                    
+                    # Step 1: Origin -> Hub
+                    dir1 = _get_metro_direction(l1, origin, transfer_hub)
+                    response += f"   1. {l1_info['emoji']} Board at **{origin.title()}** {dir1}\n"
+                    response += f"   2. Exit at **{transfer_hub}**\n"
+                    
+                    # Step 2: Transfer -> Dest
+                    dir2 = _get_metro_direction(l2, transfer_hub, dest_metro)
+                    response += f"   3. {l2_info['emoji']} Transfer to **{l2_info['name']}** {dir2}\n"
                     response += f"   4. Exit at **{dest_metro.title()}**\n"
                     response += f"   5. Walk to {dest_landmark['name']}\n\n"
                 else:
-                    # Generic transfer suggestion
-                    transfer_stations = [
-                        ("Marquês de Pombal", ["amarela", "azul"]),
-                        ("Saldanha", ["amarela", "vermelha"]),
-                        ("Alameda", ["verde", "vermelha"]),
-                        ("Campo Grande", ["amarela", "verde"]),
-                        ("São Sebastião", ["vermelha", "azul"]),
-                    ]
-                    
-                    for station, lines in transfer_stations:
-                        if set(origin_lines) & set(lines) and set(dest_metro_lines) & set(lines):
-                            response += f"   💡 **Suggested transfer**: {station}\n\n"
-                            break
+                    response += f"   ⚠️ Complex route (requires >1 transfer or bus).\n"
+                    response += f"   Suggestion: Check the [Metro map](https://www.metrolisboa.pt/viajar/mapas-e-diagramas/).\n\n"
             
             return response
     
@@ -3502,14 +3687,15 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                 line_info = METRO_LINES.get(line, {})
                 emoji = line_info.get('emoji', '')
                 name = line_info.get('name', line.title())
+                
+                direction = _get_metro_direction(line, origin, destination)
+                
                 response += f"   {emoji} Take **{line.title()} Line** ({name})\n"
-                response += f"   📍 Board at: {origin.title()}\n"
+                response += f"   📍 Board at: {origin.title()} {direction}\n"
                 response += f"   📍 Exit at: {destination.title()}\n\n"
         else:
             # Need to transfer
             response += f"🔄 **Transfer Required**\n\n"
-            response += f"   📍 From: {origin.title()} ({', '.join([METRO_LINES[l]['emoji'] + ' ' + l.title() for l in origin_lines])})\n"
-            response += f"   📍 To: {destination.title()} ({', '.join([METRO_LINES[l]['emoji'] + ' ' + l.title() for l in dest_lines])})\n\n"
             
             # Suggest transfer stations
             transfer_stations = [
@@ -3521,21 +3707,53 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                 ("São Sebastião", ["vermelha", "azul"]),
             ]
             
+            best_hub = None
+            common_hub_lines = None
+            
             for station, lines in transfer_stations:
                 if set(origin_lines) & set(lines) and set(dest_lines) & set(lines):
-                    response += f"   💡 **Suggested Transfer**: {station}\n"
-                    response += f"      {', '.join([METRO_LINES[l]['emoji'] for l in lines])}\n\n"
+                    # We found a valid hub
+                    best_hub = station
+                    # Determine which lines to use (in case multiple)
+                    l1 = list(set(origin_lines) & set(lines))[0]
+                    l2 = list(set(dest_lines) & set(lines))[0]
+                    common_hub_lines = (l1, l2)
+                    break
+            
+            if best_hub and common_hub_lines:
+                l1, l2 = common_hub_lines
+                l1_info = METRO_LINES[l1]
+                l2_info = METRO_LINES[l2]
+                
+                response += f"   💡 **Suggested Transfer**: {best_hub} ({l1_info['emoji']} ↔ {l2_info['emoji']})\n\n"
+                response += f"   **Full Route**:\n"
+                
+                # Step 1: Origin -> Hub
+                dir1 = _get_metro_direction(l1, origin, best_hub)
+                response += f"   1. {l1_info['emoji']} Board at **{origin.title()}** {dir1}\n"
+                response += f"   2. Exit at **{best_hub}**\n"
+                
+                # Step 2: Transfer -> Dest
+                dir2 = _get_metro_direction(l2, best_hub, destination)
+                response += f"   3. {l2_info['emoji']} Transfer to **{l2_info['name']}** {dir2}\n"
+                response += f"   4. Exit at **{destination.title()}**\n\n"
+                
+            else:
+                 # Generic fallback if no standard hub found
+                response += f"   📍 From: {origin.title()} ({', '.join([METRO_LINES[l]['emoji'] + ' ' + l.title() for l in origin_lines])})\n"
+                response += f"   📍 To: {destination.title()} ({', '.join([METRO_LINES[l]['emoji'] + ' ' + l.title() for l in dest_lines])})\n"
+                response += f"   ⚠️ Route requires complex transfer. Please check [Metro map](https://www.metrolisboa.pt/viajar/mapas-e-diagramas/).\n\n"
     
     elif origin_lines:
         response += f"🚇 **Origin is a Metro station**: {origin.title()}\n"
-        response += f"   Lines: {', '.join([METRO_LINES[l]['emoji'] + ' ' + l.title() for l in origin_lines])}\n\n"
+        response += f"   Lines: {', '.join([METRO_LINES[l]['emoji'] + ' ' + l.title() + ' Line' for l in origin_lines])}\n\n"
         response += f"❌ Destination '{destination.title()}' is not a known Metro station.\n"
         response += "   Consider using Carris buses or CP trains.\n\n"
     
     elif dest_lines:
         response += f"❌ Origin '{origin.title()}' is not a known Metro station.\n\n"
         response += f"🚇 **Destination is a Metro station**: {destination.title()}\n"
-        response += f"   Lines: {', '.join([METRO_LINES[l]['emoji'] + ' ' + l.title() for l in dest_lines])}\n\n"
+        response += f"   Lines: {', '.join([METRO_LINES[l]['emoji'] + ' ' + l.title() + ' Line' for l in dest_lines])}\n\n"
         response += "   Consider using Carris buses or CP trains to reach the Metro.\n\n"
     
     elif not has_landmarks:
@@ -3546,6 +3764,25 @@ def get_route_between_stations(origin: str, destination: str) -> str:
         response += "🚆 **CP TRAINS**\n"
         response += "-" * 30 + "\n"
         
+        # Check for direct CP route
+        if origin_cp and dest_cp:
+            common_lines = set(origin_cp.get("lines", [])) & set(dest_cp.get("lines", []))
+            
+            if common_lines:
+                response += f"✅ **Direct Train Route Available**\n\n"
+                for line in common_lines:
+                    line_info = CP_LINES.get(line, {"name": line.title()})
+                    response += f"   🚆 Take **{line_info['name']}**\n"
+                    response += f"   📍 Board at: {origin.title()}\n"
+                    response += f"   📍 Exit at: {destination.title()}\n"
+                    if line_info.get("frequency"):
+                         response += f"   🕒 Frequency: {line_info['frequency']}\n"
+                    response += "\n"
+                return response # Return early as we found a primary route
+            else:
+                 response += f"⚠️ No direct train line linking {origin.title()} and {destination.title()}.\n"
+                 response += "   You may need to transfer at a major hub (e.g., Entrecampos, Oriente, Sete Rios).\n\n"
+
         if origin_cp:
             lines_str = ", ".join([CP_LINES[l]["name"] for l in origin_cp.get("lines", [])])
             response += f"✅ **{origin.title()}** is a train station\n"

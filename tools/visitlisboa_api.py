@@ -868,43 +868,58 @@ def search_cultural_events(
         # Step 3: Filter by query (TOKEN-BASED matching for better recall)
         if query:
             # Tokenize query into individual words for flexible matching
-            query_tokens = [t.strip().lower() for t in query.split() if len(t.strip()) >= 3]
+            original_tokens = [t.strip().lower() for t in query.split() if len(t.strip()) >= 3]
             
-            # Also create synonyms/related terms for common queries
-            query_synonyms = {
-                'music': ['concert', 'concerto', 'live', 'band', 'artist', 'musical', 'fado', 'jazz', 'rock', 'pop'],
-                'concert': ['music', 'live', 'performance', 'show', 'gig'],
-                'concerts': ['music', 'live', 'performance', 'show', 'gig'],
-                'art': ['exhibition', 'gallery', 'museum', 'painting', 'sculpture', 'artwork'],
-                'exhibition': ['art', 'gallery', 'museum', 'display', 'expo'],
-                'theater': ['theatre', 'play', 'drama', 'stage', 'performance'],
-                'theatre': ['theater', 'play', 'drama', 'stage', 'performance'],
-                'dance': ['ballet', 'dancing', 'choreography', 'performance'],
-                'family': ['children', 'kids', 'child', 'families'],
-                'food': ['gastronomy', 'culinary', 'wine', 'taste', 'restaurant'],
+            # FILTER OUT GENERIC TERMS that would cause false negatives
+            # Example: "eventos culturais" shouldn't filter out a music concert just because it lacks those words
+            generic_terms = {
+                'event', 'events', 'evento', 'eventos', 
+                'cultura', 'cultural', 'culture', 'culturais', 
+                'lisbon', 'lisboa', 'portugal', 'city', 'cidade'
             }
             
-            # Expand query tokens with synonyms
-            expanded_tokens = set(query_tokens)
-            for token in query_tokens:
-                if token in query_synonyms:
-                    expanded_tokens.update(query_synonyms[token])
+            # Only keep tokens that are NOT generic terms
+            query_tokens = [t for t in original_tokens if t not in generic_terms]
             
-            filtered = []
-            for event in events_data:
-                searchable = " ".join([
-                    event.get('title', ''),
-                    event.get('full_description', ''),
-                    event.get('short_description', ''),
-                    event.get('category', ''),
-                ]).lower()
+            # If we have meaningful tokens left, apply the filter
+            if query_tokens:
+                # Also create synonyms/related terms for common queries
+                query_synonyms = {
+                    'music': ['concert', 'concerto', 'live', 'band', 'artist', 'musical', 'fado', 'jazz', 'rock', 'pop'],
+                    'concert': ['music', 'live', 'performance', 'show', 'gig'],
+                    'concerts': ['music', 'live', 'performance', 'show', 'gig'],
+                    'art': ['exhibition', 'gallery', 'museum', 'painting', 'sculpture', 'artwork'],
+                    'exhibition': ['art', 'gallery', 'museum', 'display', 'expo'],
+                    'theater': ['theatre', 'play', 'drama', 'stage', 'performance'],
+                    'theatre': ['theater', 'play', 'drama', 'stage', 'performance'],
+                    'dance': ['ballet', 'dancing', 'choreography', 'performance'],
+                    'family': ['children', 'kids', 'child', 'families'],
+                    'food': ['gastronomy', 'culinary', 'wine', 'taste', 'restaurant'],
+                }
                 
-                # Match if ANY expanded token is found
-                if any(token in searchable for token in expanded_tokens):
-                    filtered.append(event)
-            
-            events_data = filtered
-            logger.info(f"After query filter: {len(events_data)} events (tokens: {list(expanded_tokens)[:5]}...)")
+                # Expand query tokens with synonyms
+                expanded_tokens = set(query_tokens)
+                for token in query_tokens:
+                    if token in query_synonyms:
+                        expanded_tokens.update(query_synonyms[token])
+                
+                filtered = []
+                for event in events_data:
+                    searchable = " ".join([
+                        event.get('title', ''),
+                        event.get('full_description', ''),
+                        event.get('short_description', ''),
+                        event.get('category', ''),
+                    ]).lower()
+                    
+                    # Match if ANY expanded token is found
+                    if any(token in searchable for token in expanded_tokens):
+                        filtered.append(event)
+                
+                events_data = filtered
+                logger.info(f"After query filter: {len(events_data)} events (tokens: {list(expanded_tokens)[:5]}...)")
+            else:
+                logger.info(f"Query '{query}' contained only generic terms, skipping text filter.")
         
         if not events_data:
             return f"No events found matching: '{query or 'all'}' in date range {date_info}\n\n💡 Try broader terms like 'music', 'art', or 'festival'."

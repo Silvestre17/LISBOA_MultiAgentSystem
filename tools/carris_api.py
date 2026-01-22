@@ -1137,13 +1137,13 @@ def carris_get_arrivals(stop_id: str, limit: int = 10) -> str:
         
         for arr in arrivals:
             vehicle_type = "Elétrico" if arr["is_tram"] else "Autocarro"
-            rt_indicator = "[TEMPO REAL]" if arr["is_realtime"] else "[HORÁRIO]"
+            rt_indicator = "[REAL-TIME]" if arr["is_realtime"] else "[SCHEDULE]"
             
             if arr["is_realtime"] and arr["delay_mins"] != 0:
                 if arr["delay_mins"] > 0:
-                    time_display = f"{arr['estimated_time']} (atrasado {arr['delay_mins']} min)"
+                    time_display = f"{arr['estimated_time']} ({arr['delay_mins']} min late)"
                 else:
-                    time_display = f"{arr['estimated_time']} (adiantado {abs(arr['delay_mins'])} min)"
+                    time_display = f"{arr['estimated_time']} ({abs(arr['delay_mins'])} min early)"
             else:
                 time_display = arr['scheduled_time']
             
@@ -1151,27 +1151,27 @@ def carris_get_arrivals(stop_id: str, limit: int = 10) -> str:
             response += f"   Hora: {time_display}\n"
             
             if arr["is_realtime"] and arr.get("stops_remaining"):
-                response += f"   Faltam {arr['stops_remaining']} paragens\n"
+                response += f"   {arr['stops_remaining']} stops remaining\n"
             
             if arr.get("vehicle_id"):
-                plate_info = f" | Matrícula: {arr['license_plate']}" if arr.get('license_plate') else ""
-                response += f"   Veículo: {arr['vehicle_id']}{plate_info}\n"
+                plate_info = f" | Plate: {arr['license_plate']}" if arr.get('license_plate') else ""
+                response += f"   Vehicle: {arr['vehicle_id']}{plate_info}\n"
             
             response += "\n"
         
         response += "-" * 55 + "\n"
-        response += "[TEMPO REAL] = Dados GPS do veículo | [HORÁRIO] = Horário previsto\n"
+        response += "[REAL-TIME] = Vehicle GPS data | [SCHEDULE] = Scheduled time\n"
         return response
         
     except Exception as e:
         logger.error(f"Error getting arrivals: {e}")
-        return f"Erro ao obter chegadas: {e}"
+        return f"Error getting arrivals: {e}"
 
 
 @tool
 def carris_get_next_departures(stop_id: str, start_time: str = "", route_short_name: str = "", limit: int = 25) -> str:
     """
-    Gets upcoming scheduled departures for a Carris stop.
+    Gets upcoming scheduled departures for a Carris stop, ENRICHED with Real-Time data.
     
     Args:
         stop_id: Stop ID (from carris_get_stops)
@@ -1180,11 +1180,11 @@ def carris_get_next_departures(stop_id: str, start_time: str = "", route_short_n
         limit: Maximum departures (default: 25)
         
     Returns:
-        Formatted schedule with times and route info.
+        Formatted schedule with times, route info, and real-time updates.
     """
     conn = _get_db_connection()
     if not conn:
-        return "Base de dados da Carris indisponível."
+        return "Carris database unavailable."
     
     try:
         cursor = conn.cursor()
@@ -1194,83 +1194,160 @@ def carris_get_next_departures(stop_id: str, start_time: str = "", route_short_n
 
         if not stop_row:
             conn.close()
-            return f"Paragem '{stop_id}' não encontrada."
+            return f"Stop '{stop_id}' not found."
         
         stop_name = stop_row['stop_name']
         
-        # For debugging
-        print(f"Stop ID: {stop_id}")
-        print(f"Stop Name: {stop_name}")
-        
+        # Time handling
+        is_future_query = False
         if start_time:
-             # Validate format HH:MM
              try:
                  datetime.strptime(start_time, "%H:%M")
                  current_time = f"{start_time}:00"
+                 # If user asks for a specific time, assume they want static schedule or it's a future plan
+                 # We'll still try to match RT if the time is close to now, but flagged as future query if distinct
+                 now_str = datetime.now().strftime("%H:%M")
+                 if start_time[:2] != now_str[:2]: # Simple heuristic to detect future hours
+                     is_future_query = True
              except ValueError:
+                 conn.close()
                  return "Invalid time format. Use HH:MM."
         else:
             now = datetime.now()
             current_time = now.strftime("%H:%M:%S")
         
-        # Determine active service_id based on today's date (or assumed date)
-        # For simplicity, we assume 'today' if no date provided, even if looking at future time
         active_services = _get_active_services(conn, datetime.now())
         
         if not active_services:
             conn.close()
-            return "Nenhum serviço ativo encontrado para hoje."
+            return "No active services found for today."
+        
+        # Hub logic (same stop name = multiple stop_ids)
+        cursor.execute("SELECT stop_id FROM stops WHERE stop_name = ?", (stop_name,))
+        stop_ids = [row['stop_id'] for row in cursor.fetchall()]
         
         placeholders = ','.join(['?' for _ in active_services])
-        params = [stop_id, *active_services, current_time]
+        stop_placeholders = ','.join(['?' for _ in stop_ids])
+        
+        params = list(stop_ids) + list(active_services) + [current_time]
         
         route_filter = ""
         if route_short_name:
             route_filter = "AND r.route_short_name = ?"
             params.append(route_short_name)
         
-        # Determine end of day (or next few hours) - naive approach, just list next X
-        
+        # Added st.trip_id to query to enable real-time matching
         sql = f"""
-            SELECT st.departure_time, r.route_short_name, r.route_long_name, t.trip_headsign
+            SELECT st.trip_id, st.departure_time, r.route_short_name, r.route_long_name, t.trip_headsign, t.direction_id
             FROM stop_times st
             JOIN trips t ON st.trip_id = t.trip_id
             JOIN routes r ON t.route_id = r.route_id
-            WHERE st.stop_id = ? AND t.service_id IN ({placeholders}) AND st.departure_time >= ?
+            WHERE st.stop_id IN ({stop_placeholders}) 
+            AND t.service_id IN ({placeholders}) 
+            AND st.departure_time >= ?
             {route_filter}
             ORDER BY st.departure_time LIMIT ?
         """
 
-        print("SQL Query:", sql)
-        print("Parameters:", params)
-        
         params.append(limit)
         cursor.execute(sql, params)
         rows = cursor.fetchall()
-        conn.close()
-        
-        response = f"Horário: {stop_name}\n"
-        response += f"   ID: {stop_id}\n"
-        response += "=" * 50 + "\n\n"
         
         if not rows:
+            conn.close()
             return f"No more departures found after {current_time[:5]}."
-        
-        response = f"Next Departures (Static Schedule): {stop_name}\n" + "-" * 40 + "\n"
+
+        # Fetch Real-Time Data if not a distant future query
+        rt_by_trip = {}
+        if not is_future_query:
+            try:
+                rt_vehicles = fetch_gtfs_rt_vehicles()
+                rt_by_trip = {v["trip_id"]: v for v in rt_vehicles if v.get("trip_id")}
+            except Exception as e:
+                logger.error(f"Failed to fetch RT data in next_departures: {e}")
+
+        # Group by (Route, Destination)
+        # key: (route_short_name, destination) -> list of formatted time strings
+        departures = {}
         
         for row in rows:
-            vehicle_type = "Elétrico" if row['route_short_name'].endswith('E') else "Autocarro"
-            time_str = row['departure_time'][:5]
-            destination = row['trip_headsign'] or row['route_long_name'] or 'N/A'
+            trip_id = row['trip_id']
+            route_short = row['route_short_name']
+            dest = row['trip_headsign']
             
-            response += f"{time_str} - {vehicle_type} Linha {row['route_short_name']}\n"
-            response += f"      Destino: {destination[:40]}\n"
+            # Destination fallback logic
+            if not dest or str(dest).lower() == 'none':
+                long_name = row['route_long_name'] or ""
+                parts = long_name.split(' - ')
+                if len(parts) == 2:
+                    if row['direction_id'] == 0:
+                        dest = parts[1]
+                    else:
+                        dest = parts[0]
+                else:
+                    dest = long_name or "Unknown"
+            
+            group_key = (route_short, dest)
+            if group_key not in departures:
+                departures[group_key] = []
+            
+            # Calculate Display Time
+            scheduled_time = row['departure_time'][:5]
+            display_time = scheduled_time
+            is_rt = False
+            
+            if trip_id in rt_by_trip:
+                vehicle = rt_by_trip[trip_id]
+                # Use helper to calculate exact ETA at THIS stop considering delays
+                eta_info = get_vehicle_eta_at_stop(vehicle, stop_id, conn)
+                if eta_info:
+                    estimated_time = eta_info['estimated_arrival']
+                    delay = eta_info['current_delay_mins']
+                    
+                    # Formatting: **17:45** (Live)
+                    # We use simple string indicators
+                    if delay > 2:
+                        display_time = f"**{estimated_time}** ({delay}m late)"
+                    elif delay < -2:
+                        display_time = f"**{estimated_time}** ({abs(delay)}m early)"
+                    else:
+                        display_time = f"**{estimated_time}** (Live)"
+                    is_rt = True
+            
+            departures[group_key].append(display_time)
+            
+        conn.close()
         
-        response += f"\nShowing {len(rows)} departures (static schedule)\n"
-        response += "For real-time, use carris_get_realtime_vehicles.\n"
+        
+        # Check if we actually used any real-time data in the final list
+        has_realtime_data = any(
+            any(t.startswith("**") for t in times) 
+            for times in departures.values()
+        )
+
+        response = f"🚌 **Next Departures from {stop_name}**\n"
+        if has_realtime_data:
+             response += f"   (📡 Real-Time Data Active)\n"
+        response += "-" * 50 + "\n"
+        
+        for (route, dest), times in departures.items():
+            # Show top 5 times per destination
+            shown_times = times[:5]
+            remaining = len(times) - 5
+            
+            times_str = ", ".join(shown_times)
+            if remaining > 0:
+                times_str += f" (+{remaining} more)"
+                
+            # USER REQUEST: "DIZER O NOME DA ROTA"
+            response += f"📍 **[{route}] Para {dest}**\n"
+            response += f"   🕒 {times_str}\n\n"
+
+        response += f"Showing next {limit} departures.\n"
         return response
         
     except Exception as e:
+        if conn: conn.close()
         logger.error(f"Error getting schedule: {e}")
         return f"Error getting schedule: {e}"
 
@@ -1290,15 +1367,15 @@ def carris_find_routes_between(origin: str, destination: str, search_radius_km: 
     """
     conn = _get_db_connection()
     if not conn:
-        return "Base de dados da Carris indisponível."
+        return "Carris database unavailable."
     
     try:
         cursor = conn.cursor()
         
-        response = f"Rotas: {origin} -> {destination}\n"
+        response = f"Routes: {origin} -> {destination}\n"
         response += "=" * 55 + "\n\n"
         
-        response += "A resolver localizações...\n"
+        response += "Resolving locations...\n"
         
         origin_lat, origin_lon, origin_name = geocode_location(origin)
         dest_lat, dest_lon, dest_name = geocode_location(destination)
@@ -1310,7 +1387,7 @@ def carris_find_routes_between(origin: str, destination: str, search_radius_km: 
                 origin_lat, origin_lon, origin_name = row['stop_lat'], row['stop_lon'], row['stop_name']
             else:
                 conn.close()
-                return f"Não foi possível localizar '{origin}'."
+                return f"Could not locate '{origin}'."
         
         if dest_lat is None:
             cursor.execute("SELECT stop_lat, stop_lon, stop_name FROM stops WHERE stop_name LIKE ? LIMIT 1", (f'%{destination}%',))
@@ -1319,13 +1396,13 @@ def carris_find_routes_between(origin: str, destination: str, search_radius_km: 
                 dest_lat, dest_lon, dest_name = row['stop_lat'], row['stop_lon'], row['stop_name']
             else:
                 conn.close()
-                return f"Não foi possível localizar '{destination}'."
+                return f"Could not locate '{destination}'."
         
         origin_display = origin_name.split(',')[0] if origin_name else origin
         dest_display = dest_name.split(',')[0] if dest_name else destination
         
-        response += f"   De: {origin_display}\n"
-        response += f"   Para: {dest_display}\n\n"
+        response += f"   From: {origin_display}\n"
+        response += f"   To: {dest_display}\n\n"
         
         def find_stops_near(lat: float, lon: float, radius: float) -> List[Dict]:
             cursor.execute("SELECT stop_id, stop_name, stop_lat, stop_lon FROM stops")
@@ -1385,13 +1462,13 @@ def carris_find_routes_between(origin: str, destination: str, search_radius_km: 
         
         if not routes_found:
             conn.close()
-            response += f"Nenhuma rota Carris direta encontrada (raio: {final_radius}km).\n"
-            response += "   Sugestões:\n"
-            response += "   - Usa o Metro (mais rápido para distâncias longas)\n"
-            response += "   - Verifica hubs como Entrecampos, Rossio ou Cais do Sodré\n"
+            response += f"No direct Carris route found (radius: {final_radius}km).\n"
+            response += "   Suggestions:\n"
+            response += "   - Use Metro (faster for long distances)\n"
+            response += "   - Check connecting hubs like Entrecampos, Rossio or Cais do Sodré\n"
             return response
         
-        response += f"Encontradas {len(routes_found)} rotas diretas!\n\n"
+        response += f"Found {len(routes_found)} direct routes!\n\n"
         
         now = datetime.now()
         current_time = now.strftime("%H:%M:%S")
@@ -1403,7 +1480,7 @@ def carris_find_routes_between(origin: str, destination: str, search_radius_km: 
         def get_next_departure(route_short_name: str) -> str:
             for stop in origin_stops[:5]:
                 if not active_services:
-                    return "Sem serviço"
+                    return "No service"
                 
                 ph_svc = ','.join(['?' for _ in active_services])
                 cursor.execute(f"""
@@ -1419,25 +1496,25 @@ def carris_find_routes_between(origin: str, destination: str, search_radius_km: 
                 deps = cursor.fetchall()
                 if deps:
                     times = [d['departure_time'][:5] for d in deps]
-                    return f"Próximos: {', '.join(times)} (paragem {stop['name'][:20]})"
+                    return f"Next: {', '.join(times)} (stop {stop['name'][:20]})"
             
-            return "Ver horário"
+            return "Check schedule"
         
         if trams:
-            response += "ELÉTRICOS\n" + "-" * 40 + "\n"
+            response += "TRAMS\n" + "-" * 40 + "\n"
             for r in trams:
                 next_dep = get_next_departure(r['route_short_name'])
                 response += f"   {r['route_short_name']}: {r['route_long_name']}\n"
                 response += f"     {next_dep}\n\n"
         
         if buses:
-            response += "AUTOCARROS\n" + "-" * 40 + "\n"
+            response += "BUSES\n" + "-" * 40 + "\n"
             for r in buses[:5]:
                 next_dep = get_next_departure(r['route_short_name'])
                 response += f"   {r['route_short_name']}: {r['route_long_name']}\n"
                 response += f"     {next_dep}\n\n"
             if len(buses) > 5:
-                response += f"   ... e mais {len(buses)-5} rotas\n\n"
+                response += f"   ... and {len(buses)-5} more routes\n\n"
         
         conn.close()
         return response
