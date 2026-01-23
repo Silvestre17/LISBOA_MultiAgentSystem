@@ -53,6 +53,9 @@ gtfs-realtime-bindings>=0.0.0 # GTFS real-time protocol bindings
 # Document Processing (for RAG ingestion)
 # -----------------------------------------------------------------------------
 pypdf>=4.0.0                  # PDF text extraction
+wikipedia>=1.4.0              # Wikipedia API wrapper
+duckduckgo-search>=5.0.0      # DuckDuckGo search tool
+
 
 # -----------------------------------------------------------------------------
 # Web Interface

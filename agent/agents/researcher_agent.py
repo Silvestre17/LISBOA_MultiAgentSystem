@@ -21,6 +21,16 @@ from agent.agents.base import BaseAgent, clean_response, traceable
 from agent.prompts.researcher import get_researcher_prompt
 from agent.state import AgentState
 
+# Import tools
+from tools.visitlisboa_api import (
+    search_places_attractions,
+    search_cultural_events,
+    search_lisbon_knowledge,
+    get_event_categories,
+    get_place_categories,
+)
+from tools.web_knowledge import search_history_culture
+
 
 class ResearcherAgent(BaseAgent):
     """
@@ -33,12 +43,22 @@ class ResearcherAgent(BaseAgent):
         - find_nearby_services
         - get_event_categories
         - get_place_categories
+        - search_history_culture
     """
     
     def __init__(self):
         """Initializes the researcher agent."""
         super().__init__("researcher")
         self.system_prompt = get_researcher_prompt()
+        # Define the tools specific to this agent
+        self.tools = [
+            search_places_attractions,
+            search_cultural_events,
+            search_lisbon_knowledge,
+            get_event_categories,
+            get_place_categories,
+            search_history_culture,
+        ]
     
     @traceable(name="researcher_agent", run_type="chain")
     def invoke(self, user_message: str, context: str = "", verbose: bool = False) -> str:
