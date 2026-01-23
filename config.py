@@ -215,12 +215,12 @@ class Config:
         "researcher": {
             "provider": "lmstudio",
             "model": "qwen/qwen3-4b-2507",  # LOCAL TEST - 4B
-            "temperature": 0.2,
+            "temperature": 0,
         },
         "planner": {
             "provider": "lmstudio",
             "model": "qwen/qwen3-4b-2507",  # LOCAL TEST - 4B
-            "temperature": 0.3,
+            "temperature": 0.1,
         },
     }
     
