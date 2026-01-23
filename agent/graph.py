@@ -16,7 +16,7 @@ import os
 import sys
 import re
 import json
-from typing import List, Set, Tuple, Callable, Optional
+from typing import List, Set, Tuple, Callable, Optional, Dict, Any
 
 # LangSmith tracing support (optional - graceful fallback if not available)
 try:
@@ -493,8 +493,10 @@ class LisbonAssistant:
         self.state = create_initial_state()
         
         # Get model info for display
+        # Get model info for display
         llm = LLMFactory.get_llm(provider) if provider else LLMFactory.get_llm()
-        self.model_name = LLMFactory.get_model_info(llm)
+        self.model_info = LLMFactory.get_model_info(llm)
+        self.model_name = self.model_info.get("model", "Unknown")
     
     def chat(self, message: str) -> str:
         """
@@ -624,7 +626,11 @@ class MultiAgentAssistant:
     @property
     def model_name(self) -> str:
         """Returns the model name for display (compatibility with V1 app)."""
-        sv_model = self.model_info.get("supervisor", "Unknown")
+        sv_info = self.model_info.get("supervisor", {})
+        if isinstance(sv_info, dict):
+             sv_model = sv_info.get("model", "Unknown")
+        else:
+             sv_model = str(sv_info)
         return f"Multi-Agent ({sv_model})"
     
     @traceable(name="multi_agent_chat", run_type="chain")
@@ -937,6 +943,7 @@ if __name__ == "__main__":
                 "queries": [
                     ("What are the best museums in Lisbon?", "Places search - researcher only"),
                     ("Are there any events today?", "Events search - researcher only"),
+                    ("Tell me about the history of Castelo de São Jorge", "History search - researcher only")
                 ]
             },
             # ---------------------------------------------------------
@@ -975,11 +982,15 @@ if __name__ == "__main__":
                 response = assistant.chat(query, verbose=True)
                 
                 print(f"\n[RESPONSE]:")
-                # Truncate long responses
-                if len(response) > 600:
-                    print(response[:600] + "\n   [...truncated...]")
-                else:
-                    print(response)
+                
+                # # Truncate long responses
+                # if len(response) > 600:
+                #     print(response[:600] + "\n   [...truncated...]")
+                # else:
+                #     print(response)~
+
+                # Print full response
+                print(response)
                 
                 # Reset state for next test
                 assistant.reset()

@@ -15,7 +15,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 # Add parent directory to path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
-from agent.agents.base import BaseAgent, parse_json_response, clean_response
+from agent.agents.base import BaseAgent, parse_json_response, clean_response, traceable
 from agent.prompts.supervisor import get_supervisor_prompt
 
 
@@ -35,6 +35,7 @@ class SupervisorAgent(BaseAgent):
         super().__init__("supervisor")
         self.system_prompt = get_supervisor_prompt()
     
+    @traceable(name="supervisor_agent", run_type="chain")
     def route(self, user_message: str) -> Dict[str, Any]:
         """
         Analyzes user message and returns routing decision.
@@ -84,6 +85,15 @@ class SupervisorAgent(BaseAgent):
         """
         message_lower = user_message.lower()
         
+        # 1. Check for Out-of-Scope keywords (Locations outside Lisbon)
+        forbidden_keywords = ["porto", "aveiro", "braga", "coimbra", "faro", "algarve", "madrid", "paris", "london"]
+        if any(city in message_lower for city in forbidden_keywords):
+             return {
+                "reasoning": "Fallback: Detected out-of-scope location",
+                "agents": [],
+                "direct_response": "Peço desculpa, mas o meu conhecimento limita-se à cidade de Lisboa. Posso ajudar com algo por cá? 🚋"
+            }
+            
         # Weather keywords
         weather_keywords = ["weather", "rain", "temperature", "chover", "tempo", "meteo", 
                           "previsão", "sol", "chuva", "temperatura", "forecast"]
@@ -185,18 +195,20 @@ if __name__ == "__main__":
             "How do I get to Belém?",
             "Recommend some museums",
             "Plan my day visiting museums and considering the weather",
+            "Quanto é 2+2?",
+            "Que sitios posso visitar no Porto?",
+            "Como está o tempo em Aveiro?"
         ]
         
         for query in test_queries:
             print(f"\n\033[1m📝 Query:\033[0m {query}")
             decision = supervisor.route(query)
             print(f"   \033[1mAgents:\033[0m {decision['agents']}")
-            print(f"   \033[1mReason:\033[0m {decision['reasoning'][:50]}...")
+            print(f"   \033[1mReason:\033[0m {decision['reasoning']}")
             if decision['direct_response']:
-                print(f"   \033[1mDirect:\033[0m {decision['direct_response'][:50]}...")
+                print(f"   \033[1mDirect:\033[0m {decision['direct_response']}")
         
         print(f"\n\033[1;32m✅ Supervisor agent working!\033[0m")
         
     except Exception as e:
         print(f"\n\033[1;31m❌ Error:\033[0m {e}")
-        print("   Make sure LM Studio or Groq API is available.")

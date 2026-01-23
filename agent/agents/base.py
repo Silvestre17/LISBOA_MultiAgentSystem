@@ -17,6 +17,20 @@ from langchain_core.language_models.chat_models import BaseChatModel
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from config import Config
 
+# ==========================================================================
+# LangSmith Tracing Support
+# ==========================================================================
+try:
+    from langsmith.run_helpers import traceable
+    LANGSMITH_AVAILABLE = True
+except ImportError:
+    LANGSMITH_AVAILABLE = False
+    # Fallback: no-op decorator
+    def traceable(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
 
 # ==========================================================================
 # Tool Definitions by Agent
@@ -74,6 +88,8 @@ def get_agent_tools(agent_name: str) -> List:
             carris_get_next_departures,
             carris_find_routes_between,
             carris_get_realtime_vehicles,
+            carris_get_arrivals,
+            carris_vehicle_eta,
         )
         return [
             get_metro_status,
@@ -97,6 +113,8 @@ def get_agent_tools(agent_name: str) -> List:
             carris_get_next_departures,
             carris_find_routes_between,
             carris_get_realtime_vehicles,
+            carris_get_arrivals,
+            carris_vehicle_eta,
         ]
     
     elif agent_name == "researcher":
@@ -283,8 +301,8 @@ class BaseAgent:
         else:
             self.llm_with_tools = self.llm
     
-    def get_model_info(self) -> str:
-        """Returns the model name being used by this agent."""
+    def get_model_info(self) -> Dict[str, Any]:
+        """Returns the model info dictionary."""
         from agent.llm_factory import LLMFactory
         return LLMFactory.get_model_info(self.llm)
     
@@ -306,9 +324,7 @@ if __name__ == "__main__":
         tools = get_agent_tools(agent)
         print(f"\n\033[1m{agent.capitalize()} Agent:\033[0m {len(tools)} tools")
         if tools:
-            for t in tools[:3]:
+            for t in tools:
                 print(f"   - {t.name}")
-            if len(tools) > 3:
-                print(f"   - ... and {len(tools) - 3} more")
     
     print(f"\n\033[1;32m✅ Base utilities loaded successfully!\033[0m")

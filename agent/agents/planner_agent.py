@@ -15,7 +15,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 # Add parent directory to path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
-from agent.agents.base import BaseAgent, clean_response
+from agent.agents.base import BaseAgent, clean_response, traceable
 from agent.prompts.planner import get_planner_prompt
 
 
@@ -37,6 +37,7 @@ class PlannerAgent(BaseAgent):
         super().__init__("planner")
         self.system_prompt = get_planner_prompt()
     
+    @traceable(name="planner_agent", run_type="chain")
     def invoke(
         self, 
         user_message: str, 

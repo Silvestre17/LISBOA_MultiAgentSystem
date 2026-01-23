@@ -17,7 +17,7 @@ from langgraph.prebuilt import ToolNode
 # Add parent directory to path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
-from agent.agents.base import BaseAgent, clean_response
+from agent.agents.base import BaseAgent, clean_response, traceable
 from agent.prompts.researcher import get_researcher_prompt
 from agent.state import AgentState
 
@@ -40,6 +40,7 @@ class ResearcherAgent(BaseAgent):
         super().__init__("researcher")
         self.system_prompt = get_researcher_prompt()
     
+    @traceable(name="researcher_agent", run_type="chain")
     def invoke(self, user_message: str, context: str = "", verbose: bool = False) -> str:
         """
         Processes a places/events query using semantic search.
@@ -202,7 +203,7 @@ if __name__ == "__main__":
         print(f"\n\033[1m📝 Testing query:\033[0m 'Museums in Lisbon'")
         response = agent.invoke("Museums in Lisbon")
         print(f"\n\033[1m🤖 Response:\033[0m")
-        print(response[:500] + "..." if len(response) > 500 else response)
+        print(response)
         
         print(f"\n\033[1;32m✅ Researcher agent working!\033[0m")
         

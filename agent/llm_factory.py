@@ -20,7 +20,7 @@
 # 
 #   Usage:
 #     from agent.llm_factory import LLMFactory
-#     llm = LLMFactory.get_llm()  # Uses default provider from config
+#     llm = LLMFactory.get_llm()                   # Uses default provider from config
 #     llm = LLMFactory.get_llm(provider="google")  # Override provider
 # ==========================================================================
 
@@ -29,7 +29,7 @@
 
 import os
 import sys
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -257,31 +257,91 @@ class LLMFactory:
             )
     
     @staticmethod
-    def get_model_info(llm: BaseChatModel) -> str:
+    def get_model_info(llm: BaseChatModel) -> Dict[str, Any]:
         """
-        Extracts and returns the model name from an LLM instance.
+        Extracts comprehensive information from an LLM instance.
         
-        Different LLM providers store the model name in different attributes.
-        This method provides a unified way to retrieve the model name
-        regardless of the provider.
+        Returns a dictionary with all relevant configuration details including
+        model name, temperature, penalty parameters, and provider-specific settings.
+        Handles various providers (OpenAI, Groq, Google, Ollama) dynamically.
         
         Args:
             llm (BaseChatModel): The LLM instance to inspect.
         
         Returns:
-            str: The model name (e.g., "qwen/qwen3-4b-2507", "gpt-5o-mini").
-                Returns "Unknown" if the model name cannot be determined.
-        
+            Dict[str, Any]: Comprehensive configuration dictionary.
+            
         Example:
             >>> llm = LLMFactory.get_llm()
-            >>> print(LLMFactory.get_model_info(llm))
-            'qwen/qwen3-4b-2507'
+            >>> info = LLMFactory.get_model_info(llm)
+            >>> print(info['frequency_penalty'])
+            0.5
         """
-        # Try 'model_name' first (used by Groq, Ollama)
-        # Then try 'model' (used by OpenAI, Google)
-        # Default to "Unknown" if neither exists
-        model_name = getattr(llm, 'model_name', getattr(llm, 'model', 'Unknown'))
-        return model_name
+        info = {
+            "type": llm.__class__.__name__,
+            "model": "Unknown"
+        }
+        
+        # 1. Standard Attributes to inspect
+        # Note: Different versions of LangChain might store these differently
+        standard_attrs = [
+            "model_name", "model", 
+            "temperature", 
+            "max_tokens", 
+            "top_p", "top_k", 
+            "frequency_penalty", "presence_penalty", 
+            "n", 
+            "streaming", 
+            "max_retries", 
+            "request_timeout", 
+            "base_url", "openai_api_base", "api_base", # various URL attributes
+            "timeout"
+        ]
+        
+        for attr in standard_attrs:
+            if hasattr(llm, attr):
+                val = getattr(llm, attr)
+                if val is not None:
+                    # Normalize model name key
+                    if attr in ["model_name", "model"]:
+                        info["model"] = val
+                    # Normalize base_url key
+                    elif attr in ["base_url", "openai_api_base", "api_base"]:
+                        info["base_url"] = val
+                    else:
+                        info[attr] = val
+
+        # 2. Inspect model_kwargs (Common bucket for extra params)
+        if hasattr(llm, "model_kwargs") and isinstance(llm.model_kwargs, dict):
+            # We add these but don't overwrite existing high-level keys if they exist
+            # This captures provider-specific params passed during init
+            for k, v in llm.model_kwargs.items():
+                if k not in info and v is not None:
+                    info[k] = v
+
+        # 3. Provider-Specific Extraction
+        
+        # Google/Gemini specific
+        if "Google" in info["type"]:
+            # Check for generation_config
+            gen_config = getattr(llm, "generation_config", None)
+            if gen_config:
+                if isinstance(gen_config, dict):
+                    info.update({k: v for k, v in gen_config.items() if v is not None})
+                elif hasattr(gen_config, "__dict__"):
+                     try:
+                        info.update({k: v for k, v in vars(gen_config).items() if v is not None})
+                     except:
+                        pass
+        
+        # Ollama specific
+        if "Ollama" in info["type"]:
+            if hasattr(llm, "keep_alive"):
+                info["keep_alive"] = llm.keep_alive
+            if hasattr(llm, "num_ctx"):
+                 info["num_ctx"] = llm.num_ctx
+        
+        return info
     
     @staticmethod
     def get_agent_llm(agent_name: str) -> BaseChatModel:
@@ -350,15 +410,17 @@ if __name__ == "__main__":
         
         # Create LLM instance using factory
         llm = LLMFactory.get_llm()
-        model_name = LLMFactory.get_model_info(llm)
+        model_info = LLMFactory.get_model_info(llm)
         
-        print(f"\n\033[1;32m✅ LLM Ready:\033[0m {model_name}")
+        print(f"\n\033[1;32m✅ LLM Ready:\033[0m {model_info['model']}")
+        print(f"   Details: {model_info}")
         
         # Test with a simple prompt
         print(f"\n\033[1m🧪 Testing with prompt...\033[0m")
-        print("   Prompt: 'What is the capital of Portugal? Answer in one sentence.'")
+        prompt = "What is the capital of Portugal? Answer in one sentence."
+        print(f"   Prompt: '{prompt}'")
         
-        response = llm.invoke("What is the capital of Portugal? Answer in one sentence.")
+        response = llm.invoke(prompt)
         
         print(f"\n\033[1m🤖 Response:\033[0m")
         print(f"   {response.content}")

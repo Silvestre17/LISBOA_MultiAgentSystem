@@ -17,7 +17,7 @@ from langgraph.prebuilt import ToolNode
 # Add parent directory to path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
-from agent.agents.base import BaseAgent, clean_response
+from agent.agents.base import BaseAgent, clean_response, traceable
 from agent.prompts.transport import get_transport_prompt
 from agent.state import AgentState
 
@@ -39,6 +39,7 @@ class TransportAgent(BaseAgent):
         super().__init__("transport")
         self.system_prompt = get_transport_prompt()
     
+    @traceable(name="transport_agent", run_type="chain")
     def invoke(self, user_message: str, context: str = "", verbose: bool = False) -> str:
         """
         Processes a transport-related query.
@@ -212,11 +213,12 @@ if __name__ == "__main__":
         agent = TransportAgent()
         print(f"\n\033[1m✅ Transport Agent initialized:\033[0m {agent.get_model_info()}")
         print(f"   Tools: {len(agent.tools)} transport tools")
+        print(f"          {[t.name for t in agent.tools]}")
         
         print(f"\n\033[1m📝 Testing query:\033[0m 'Is the metro working?'")
         response = agent.invoke("Is the metro working?")
         print(f"\n\033[1m🤖 Response:\033[0m")
-        print(response[:500] + "..." if len(response) > 500 else response)
+        print(response)
         
         print(f"\n\033[1;32m✅ Transport agent working!\033[0m")
         

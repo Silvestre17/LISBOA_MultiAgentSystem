@@ -16,7 +16,7 @@ from langgraph.prebuilt import ToolNode
 # Add parent directory to path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
-from agent.agents.base import BaseAgent, clean_response
+from agent.agents.base import BaseAgent, clean_response, traceable
 from agent.prompts.weather import get_weather_prompt
 from agent.state import AgentState
 
@@ -36,6 +36,7 @@ class WeatherAgent(BaseAgent):
         super().__init__("weather")
         self.system_prompt = get_weather_prompt()
     
+    @traceable(name="weather_agent", run_type="chain")
     def invoke(self, user_message: str, context: str = "", verbose: bool = False) -> str:
         """
         Processes a weather-related query.
@@ -168,7 +169,7 @@ if __name__ == "__main__":
         print(f"\n\033[1m📝 Testing query:\033[0m 'What is the weather in Lisbon?'")
         response = agent.invoke("What is the weather in Lisbon?")
         print(f"\n\033[1m🤖 Response:\033[0m")
-        print(response[:500] + "..." if len(response) > 500 else response)
+        print(response)
         
         print(f"\n\033[1;32m✅ Weather agent working!\033[0m")
         

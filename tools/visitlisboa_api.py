@@ -24,6 +24,7 @@ import os
 import sys
 import json
 import logging
+import math
 import warnings
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
@@ -1068,13 +1069,49 @@ def search_places_attractions(
                 )
                 
                 RELEVANCE_THRESHOLD = 1.8
-                relevant_results = [(doc, score) for doc, score in results_with_scores if score <= RELEVANCE_THRESHOLD]
+                # Fetch more results to allow for re-ranking
+                candidate_pool = [r for r in results_with_scores if r[1] <= RELEVANCE_THRESHOLD]
                 
-                logger.info(f"VisitLisboa: {len(results_with_scores)} raw, {len(relevant_results)} after threshold")
+                logger.info(f"VisitLisboa: {len(results_with_scores)} raw, {len(candidate_pool)} candidates for ranking")
+
+                scored_candidates = []
+                
+                for doc, vector_score in candidate_pool:
+                    metadata = doc.metadata
+                    
+                    # Calculate Rank Score
+                    # Formula: (relevance * 0.6) + (rating * 0.3) + (log(reviews) * 0.1)
+                    
+                    # 1. Relevance: vector_score is distance (lower=better). Invert it.
+                    # typical distance 0.2 to 1.5. 
+                    relevance_val = 1.0 / (1.0 + vector_score)
+                    
+                    # 2. Rating: Try to find distinct rating in metadata (or default 3.0)
+                    # Note: Metadata usually lacks deep rating info unless enriched.
+                    # We'll default to 0 if missing, to penalty unrated places slightly, or 3.0 neutral
+                    rating_val = float(metadata.get('rating', 0)) or 3.0
+                    rating_norm = rating_val / 5.0
+                    
+                    # 3. Reviews: Log10
+                    reviews_val = int(metadata.get('reviews', 0))
+                    reviews_log = math.log10(reviews_val + 1) / 5.0 # Max typical ~5
+                    
+                    final_score = (relevance_val * 0.6) + (rating_norm * 0.3) + (reviews_log * 0.1)
+                    
+                    scored_candidates.append({
+                        'doc': doc,
+                        'vector_score': vector_score,
+                        'final_score': final_score,
+                        'metadata': metadata
+                    })
+                
+                # Sort by FINAL SCORE descending
+                scored_candidates.sort(key=lambda x: x['final_score'], reverse=True)
                 
                 # Convert to standard format
-                for doc, score in relevant_results[:max_results]:
-                    metadata = doc.metadata
+                for item in scored_candidates[:max_results]:
+                    doc = item['doc']
+                    metadata = item['metadata']
                     # Attempt to get real address/location
                     real_location = metadata.get('address') or metadata.get('location') or 'Lisbon'
                     visitlisboa_results.append({
@@ -1084,7 +1121,8 @@ def search_places_attractions(
                         'short_description': doc.page_content[:200] if doc.page_content else '',
                         'url': metadata.get('url', ''),
                         'source': 'visitlisboa',
-                        'score': score
+                        'score': item['vector_score'], # Keep original for debug if needed
+                        'ranking_score': item['final_score']
                     })
                     
             except Exception as e:

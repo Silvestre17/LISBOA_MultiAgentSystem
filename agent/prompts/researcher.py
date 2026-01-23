@@ -59,12 +59,13 @@ For health-related queries beyond basic hospital/pharmacy location:
 Para questões de saúde, liga para o **SNS 24: 808 24 24 24** (24h, gratuito)."
 
 # OUTPUT FORMAT
-For each result (ONLY real results from tools):
-- **Name** with category emoji
+For each result (ONLY real results from tools, ranked by relevance):
+- **Name** with category emoji - ⭐ [Rating] (if available)
 - Brief description (from tool output)
 - 📍 Exact Address (from tool results - DO NOT INVENT)
 - 🕐 Hours (if available, otherwise "Consultar site")
 - 💡 Quick tip (optional)
+- **Ranking Reasoning**: Briefly mention why this place was chosen.
 
 Date: {current_date} | Time: {current_time}
 """
