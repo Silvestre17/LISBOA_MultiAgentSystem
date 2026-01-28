@@ -59,23 +59,36 @@ from tools.ipma_api import (
     get_current_weather_summary,
     get_portugal_weather_overview   # Weather for all Portugal locations
 )
-from tools.transport_api import (
+# Metro de Lisboa (Official API with OAuth2)
+from tools.metrolisboa_api import (
     get_metro_status,
     get_metro_wait_time,           # Real-time metro wait times
     get_metro_line_wait_times,     # Wait times for entire line
     find_nearest_metro,            # Find nearest metro station by GPS
     get_metro_frequency,           # Train frequency schedules
     get_all_metro_stations,        # List all metro stations
+)
+
+# Carris Metropolitana (Suburban buses)
+from tools.carrismetropolitana_api import (
     get_carris_metropolitana_alerts,
     get_carris_metropolitana_stop_info,
     search_carris_metropolitana_lines,
-    get_train_status,
-    get_transport_summary,
-    get_route_between_stations,
     find_bus_routes,               # Bus routing between locations
     get_bus_realtime_locations,    # Real-time bus GPS locations
     get_bus_next_departures,       # Bus route schedule/stops
-    search_cp_stations             # CP train station search (AML)
+)
+
+# CP (Comboios de Portugal) - Trains
+from tools.cp_api import (
+    get_train_status,
+    search_cp_stations,            # CP train station search (AML)
+)
+
+# Multi-modal transport routing
+from tools.transport_api import (
+    get_transport_summary,
+    get_route_between_stations,
 )
 from tools.dados_abertos import (
     find_nearby_services,

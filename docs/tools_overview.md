@@ -1,8 +1,8 @@
 # Tools API Overview
 
-This document provides an overview of all **36 available tools** in the Lisbon Urban Assistant project.
+This document provides an overview of all **40 available tools** in the Lisbon Urban Assistant project.
 
-**Last Updated**: January 2026
+**Last Updated**: January 28, 2026
 
 ---
 
@@ -64,12 +64,15 @@ This document provides an overview of all **36 available tools** in the Lisbon U
 | `get_bus_realtime_locations(line_id)` | Real-time GPS bus tracking | Active buses on a line |
 | `get_bus_schedule(line_id)` | Bus route schedule and stops | Timetable and stop list |
 
-### CP - Trains (2 tools)
+### CP - Trains (5 tools)
 
 | Function | Description | Returns |
 |----------|-------------|---------|
 | `get_train_status()` | CP train delays (AML filtered) | Train status with delays |
 | `search_cp_stations(query)` | Search CP stations in AML region | Station list with codes |
+| `get_cp_train_schedule(station)` | Train schedule for a station | Upcoming departures |
+| `get_cp_line_info(line)` | Information about a CP line | Line details and stops |
+| `get_cp_realtime_arrivals(station)` | Real-time arrival info | Live train arrivals |
 
 ### Multi-modal (2 tools)
 
@@ -176,6 +179,31 @@ places = find_place_in_datasets.invoke({
 - **Fallback**: JSON keyword search if vector store unavailable
 
 **See**: [visitlisboa_api.md](visitlisboa_api.md) for detailed documentation.
+
+---
+
+## Web Knowledge Tools
+
+**Module**: `tools/web_knowledge.py`  
+**Data Source**: Real-time web search (Tavily, DuckDuckGo, Wikipedia)  
+**Search Method**: Cascading search waterfall strategy
+
+### Available Functions
+
+| Function | Description | Returns |
+|----------|-------------|---------|
+| `search_history_culture(query)` | Search for history/culture facts about Lisbon | Web search results with sources |
+
+**Key Features**:
+- **Search Waterfall**: Tries Tavily (if API key), then DuckDuckGo, then Wikipedia
+- **History/Facts**: Optimized for historical and cultural queries about Lisbon
+- **Multilingual**: Works with both English and Portuguese queries
+
+**Usage Example**:
+```python
+# Search for history of a Lisbon landmark
+result = search_history_culture.invoke({"query": "História do Castelo de São Jorge"})
+```
 
 ---
 
@@ -312,12 +340,13 @@ All tools implement:
 | Weather Tools (IPMA) | 4 |
 | Transport - Metro | 6 |
 | Transport - Bus (Carris Metropolitana) | 6 |
-| Transport - Carris Urban (Buses & Trams) | 5 |
-| Transport - Train (CP) | 2 |
+| Transport - Carris Urban (Buses & Trams) | 7 |
+| Transport - Train (CP) | 5 |
 | Transport - Multi-modal | 2 |
 | Open Data (Lisboa Aberta) | 4 |
 | VisitLisboa (Events & Places) | 5 |
-| **Total Tools** | **34** |
+| Web Knowledge | 1 |
+| **Total Tools** | **40** |
 
 ### Response Times
 

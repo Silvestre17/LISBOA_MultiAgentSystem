@@ -2,7 +2,8 @@
 
 **Master Thesis - LLM-Powered Urban Exploration**  
 **André Filipe Gomes Silvestre** (20240502)  
-**NOVA IMS** - 2025/2026
+**NOVA IMS** - 2025/2026  
+**Last Updated**: January 28, 2026
 
 ---
 
@@ -71,15 +72,16 @@
 - **BeautifulSoup4**: Web scraping
 - **Pandas**: Data manipulation
 
-### APIs & Data Sources (34 Tools)
+### APIs & Data Sources (40 Tools)
 - **IPMA**: Weather data (4 tools)
 - **Metro de Lisboa**: Official API (6 tools)
-- **Carris Urban**: City buses & trams (5 tools)
+- **Carris Urban**: City buses & trams (7 tools)
 - **Carris Metropolitana**: Suburban buses (6 tools)
-- **CP**: Train status (2 tools)
+- **CP**: Train status (5 tools)
 - **Dados Aberta**: Open government data (4 tools)
 - **VisitLisboa**: Events & Places (5 tools)
 - **Multi-modal**: Routing & Summary (2 tools)
+- **Web Knowledge**: History & culture search (1 tool)
 
 ---
 

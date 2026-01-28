@@ -153,7 +153,7 @@ class SupervisorAgent(BaseAgent):
             return {
                 "reasoning": "Simple greeting/general query",
                 "agents": [],
-                "direct_response": "Olá! 👋 Sou o Lisbon Urban Assistant. Como posso ajudar-te a explorar Lisboa hoje?"
+                "direct_response": "Hello! 👋 I'm the Lisbon Urban Assistant. How can I help you explore Lisbon today?"
             }
         
         # If still no agents and not a greeting, default to researcher
