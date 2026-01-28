@@ -64,23 +64,33 @@ def get_agent_tools(agent_name: str) -> List:
         ]
     
     elif agent_name == "transport":
-        from tools.transport_api import (
+        # Metro de Lisboa (Official API with OAuth2)
+        from tools.metrolisboa_api import (
             get_metro_status,
             get_metro_wait_time,
             get_metro_line_wait_times,
             find_nearest_metro,
             get_metro_frequency,
             get_all_metro_stations,
+        )
+        # Carris Metropolitana (Suburban buses)
+        from tools.carrismetropolitana_api import (
             get_carris_metropolitana_alerts,
             get_carris_metropolitana_stop_info,
             search_carris_metropolitana_lines,
-            get_train_status,
-            get_transport_summary,
-            get_route_between_stations,
             find_bus_routes,
             get_bus_realtime_locations,
             get_bus_next_departures,
-            search_cp_stations
+        )
+        # CP (Comboios de Portugal) - Trains
+        from tools.cp_api import (
+            get_train_status,
+            search_cp_stations,
+        )
+        # Multi-modal transport routing
+        from tools.transport_api import (
+            get_transport_summary,
+            get_route_between_stations,
         )
         from tools.carris_api import (
             carris_get_stops,
@@ -224,7 +234,7 @@ def clean_response(content: str) -> str:
     for pattern in wrong_question_patterns:
         if re.match(pattern, content, flags=re.DOTALL | re.IGNORECASE):
             # The entire response is internal reasoning - return error message
-            return "Desculpa, estou com dificuldades em processar o teu pedido. Por favor tenta novamente."
+            return "Sorry, I'm having difficulty processing your request. Please try again."
     
     thinking_patterns = [
         # "How do I..." followed by step-by-step reasoning (different question hallucination)
@@ -296,7 +306,7 @@ def clean_response(content: str) -> str:
     
     # Final check: If content is nearly empty after cleaning, return error
     if len(content) < 20:
-        return "Desculpa, estou com dificuldades em processar o teu pedido. Por favor tenta novamente."
+        return "Sorry, I'm having difficulty processing your request. Please try again."
     
     return content
 

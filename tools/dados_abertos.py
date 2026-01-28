@@ -427,10 +427,10 @@ def find_nearby_services(
             user_lon = places[0]['lon']
             logger.info(f"✅ Geocoded '{near_location_name}' to ({user_lat}, {user_lon})")
         else:
-            # Fallback to Nominatim (Transport API)
+            # Fallback to Nominatim (Carris Metropolitana API)
             try:
                 logger.info(f"Open Data lookup failed for '{near_location_name}'. Trying Nominatim fallback...")
-                from tools.transport_api import geocode_location
+                from tools.carrismetropolitana_api import geocode_location
                 loc = geocode_location(near_location_name)
                 
                 if loc:

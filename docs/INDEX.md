@@ -93,11 +93,11 @@ print(f"First event: {events[0]}")
 ## 📊 Project Statistics
 
 ### Code Base
-- **Python Modules**: 20+
-- **Lines of Code**: ~8,000+
-- **Tools Implemented**: 29
+- **Python Modules**: 25+
+- **Lines of Code**: ~15,000+
+- **Tools Implemented**: 40
 - **Specialized Agents**: 5
-- **Data Sources**: 4 APIs + 2 scraped sources
+- **Data Sources**: 6 APIs + 2 scraped sources
 
 ### Datasets
 - **Events**: 200+ cultural events
@@ -373,11 +373,16 @@ LANGCHAIN_PROJECT=thesis-project
 ## 🔄 Documentation Updates
 
 ### Version History
+- **v2.1** (Jan 28, 2026): Documentation sync with current code
+  - Updated tool count to 40 tools total
+  - Added Carris Urban GTFS-RT integration (7 tools)
+  - Added CP train tools (5 tools)
+  - Added web knowledge search tool
+  - Improved documentation accuracy
 - **v2.0** (Jan 20, 2026): Multi-Agent System update
   - Added 5 specialized agents (Supervisor, Weather, Transport, Researcher, Planner)
-  - Expanded from 18 to 29 tools
   - Added Metro Official API with OAuth2
-  - Renamed Carris functions to Carris Metropolitana
+  - Added Carris Metropolitana tools
   - Added CP AML stations
 - **v1.0** (Dec 30, 2025): Initial comprehensive documentation
   - Complete API reference
@@ -413,4 +418,4 @@ LANGCHAIN_PROJECT=thesis-project
 
 *This index serves as the central navigation point for all project documentation.*
 
-**Last Updated**: January 20, 2026
+**Last Updated**: January 28, 2026

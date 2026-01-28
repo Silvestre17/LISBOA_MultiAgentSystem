@@ -114,7 +114,7 @@ class TransportAgent(BaseAgent):
                 if last_tool_results:
                     # The tool result is already formatted, just return it
                     return clean_response(last_tool_results[-1])
-                return "Desculpa, estou com dificuldades em processar o teu pedido. Por favor tenta novamente."
+                return "Sorry, I'm having difficulty processing your request. Please try again."
             
             # Execute only non-duplicate tools
             tools_to_execute = new_calls if new_calls else response.tool_calls[:1]  # Fallback to first
@@ -160,7 +160,7 @@ class TransportAgent(BaseAgent):
             # Return the most recent tool result directly if available
             if last_tool_results:
                 return clean_response(last_tool_results[-1])
-            return "Desculpa, estou com dificuldades em processar o teu pedido. Por favor tenta novamente."
+            return "Sorry, I'm having difficulty processing your request. Please try again."
         
         return clean_response(response.content)
     

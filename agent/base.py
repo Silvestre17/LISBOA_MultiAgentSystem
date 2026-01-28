@@ -16,23 +16,36 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from langchain_core.tools import tool
 
 # Import tools from respective modules
-from tools.transport_api import (
+# Metro de Lisboa (Official API with OAuth2)
+from tools.metrolisboa_api import (
     get_metro_status,
     get_metro_wait_time,
     get_metro_line_wait_times,
     find_nearest_metro,
     get_metro_frequency,
     get_all_metro_stations,
+)
+
+# Carris Metropolitana (Suburban buses)
+from tools.carrismetropolitana_api import (
     get_carris_metropolitana_alerts,
     get_carris_metropolitana_stop_info,
     search_carris_metropolitana_lines,
     get_bus_realtime_locations,
     get_bus_next_departures,
+    find_bus_routes,
+)
+
+# CP (Comboios de Portugal) - Trains
+from tools.cp_api import (
     get_train_status,
     search_cp_stations,
+)
+
+# Multi-modal transport routing
+from tools.transport_api import (
     get_route_between_stations,
-    find_bus_routes,
-    get_transport_summary
+    get_transport_summary,
 )
 
 from tools.carris_api import (

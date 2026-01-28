@@ -1,8 +1,8 @@
 # System Architecture Diagrams
 
 **Project**: Multi-Agent System for Urban Exploration  
-**Author**: André Filipe Gomes Silvestre (Updated v2.0)  
-**Last Updated**: January 2026
+**Author**: André Filipe Gomes Silvestre (Updated v2.1)  
+**Last Updated**: January 28, 2026
 
 ---
 
@@ -44,7 +44,7 @@ graph TD
     *   **Transport Agent**: manages real-time transport data (Metro, Bus, Train).
     *   **Researcher Agent**: Retrieves static knowledge (events, places) and open data.
     *   **Planner Agent**: Synthesizes information into coherent itineraries.
-3.  **Tool Layer**: 29 specialized tools providing direct access to external APIs and databases.
+3.  **Tool Layer**: 40 specialized tools providing direct access to external APIs and databases.
 
 ---
 

@@ -52,17 +52,17 @@ The system follows a **modular, tool-based architecture** powered by **LangGraph
 <p align="center">
     <img src="./docs/architecture/system_diagram.png" alt="System Architecture" width="800" style="background-color: white;">
 </p>
-<p align="center"><i><b>Figure 1:</b> High-Level System Architecture (see <a href="./docs/architecture/ARCHITECTURE_DIAGRAMS.md">ARCHITECTURE_DIAGRAMS.md</a> for detailed diagrams).</i></p>
+<p align="center"><i><b>Figure 1:</b> High-Level System Architecture (see <a href="./docs/ARCHITECTURE_DIAGRAMS.md">ARCHITECTURE_DIAGRAMS.md</a> for detailed diagrams).</i></p>
 
 ### Core Components
 
 1. **Multi-Agent System (LangGraph)** 🤖
    - **Supervisor Agent**: Orchestrator that analyzes queries and routes them to the most appropriate specialized agent (parallel execution supported)
    - **Weather Agent**: IPMA weather data and forecasts
-   - **Transport Agent**: Metro, bus, and train information
+   - **Transport Agent**: Metro, bus, tram, and train information
    - **Researcher Agent**: RAG for places and events
    - **Planner Agent**: Itinerary synthesis
-   - **29 specialized tools** for different data sources
+   - **40 specialized tools** for different data sources
    - **Multi-provider LLM support** (LM Studio, Groq, Google, OpenAI, Ollama)
 
 2. **Vector Store (RAG)** 📚
@@ -146,8 +146,9 @@ The system follows a **modular, tool-based architecture** powered by **LangGraph
     <a href="https://www.cp.pt/"><img src="https://img.shields.io/badge/CP_Trains-003DA5?style=for-the-badge&logo=train&logoColor=white" alt="CP"></a>
 </p>
 
-- **Metro de Lisboa**: Line status (4 lines: Amarela, Azul, Verde, Vermelha)
-- **Carris Metropolitana & Urban**: Alerts, stops, routes, real-time arrivals (with delay integration)
+- **Metro de Lisboa**: Line status (4 lines: Amarela, Azul, Verde, Vermelha), real-time wait times, frequencies
+- **Carris Urban**: City buses and historic trams (28E, 15E, etc.) with GTFS + GTFS-RT real-time tracking
+- **Carris Metropolitana**: Suburban bus alerts, stops, routes, real-time arrivals
 - **CP (via Comboios.live)**: Train status, delays, vehicle tracking
 - **Update Frequency**: Real-time API calls
 
@@ -234,15 +235,33 @@ Thesis2025-26_AFGS/
 ├── agent/                              # LangGraph Agent Components
 │   ├── graph.py                        # Agent graph definition (ReAct pattern)
 │   ├── state.py                        # State schema (TypedDict)
-│   ├── prompts.py                      # System prompts and instructions
 │   ├── llm_factory.py                  # LLM provider factory (5 providers)
+│   ├── base.py                         # Agent tools configuration
+│   ├── agents/                         # Specialized agents
+│   │   ├── supervisor.py               # Query router agent
+│   │   ├── weather_agent.py            # IPMA weather specialist
+│   │   ├── transport_agent.py          # Transport specialist
+│   │   ├── researcher_agent.py         # RAG researcher
+│   │   ├── planner_agent.py            # Itinerary planner
+│   │   └── base.py                     # Agent utilities
+│   ├── prompts/                        # Agent system prompts
+│   │   ├── supervisor.py               # Supervisor routing prompt
+│   │   ├── weather.py                  # Weather agent prompt
+│   │   ├── transport.py                # Transport agent prompt
+│   │   ├── researcher.py               # Researcher agent prompt
+│   │   └── planner.py                  # Planner agent prompt
 │   └── __init__.py
 │
-├── tools/                              # Agent Tools (27 total)
-│   ├── ipma_api.py                     # Weather tools (3 tools)
-│   ├── transport_api.py                # Transport tools (16 tools)
-│   ├── dados_abertos.py                # Open data tools (3 tools)
+├── tools/                              # Agent Tools (40 total)
+│   ├── ipma_api.py                     # Weather tools (4 tools)
+│   ├── metrolisboa_api.py              # Metro de Lisboa (6 tools)
+│   ├── carrismetropolitana_api.py      # Suburban bus tools (6 tools)
+│   ├── carris_api.py                   # Urban bus & tram tools (7 tools)
+│   ├── cp_api.py                       # CP train tools (5 tools)
+│   ├── transport_api.py                # Multi-modal routing (2 tools)
+│   ├── dados_abertos.py                # Open data tools (4 tools)
 │   ├── visitlisboa_api.py              # VisitLisboa search tools (5 tools)
+│   ├── web_knowledge.py                # Web search tool (1 tool)
 │   ├── vector_store.py                 # RAG tools (sync + search)
 │   └── __init__.py
 │
@@ -288,13 +307,13 @@ Thesis2025-26_AFGS/
 
 - **[INDEX.md](./docs/INDEX.md)** - Quick reference guide with navigation
 - **[COMPLETE_DOCUMENTATION.md](./docs/COMPLETE_DOCUMENTATION.md)** - ⭐ **START HERE** - Full technical reference (100+ pages)
-- **[ARCHITECTURE_DIAGRAMS.md](./docs/architecture/ARCHITECTURE_DIAGRAMS.md)** - 8 detailed system diagrams
-- **[tools_overview.md](./docs/tools_overview.md)** - API reference for all 29 tools
+- **[ARCHITECTURE_DIAGRAMS.md](./docs/ARCHITECTURE_DIAGRAMS.md)** - 8 detailed system diagrams
+- **[tools_overview.md](./docs/tools_overview.md)** - API reference for all 40 tools
 
 ### Quick Links
 - **Installation & Setup**: See [Getting Started](#-getting-started) below
 - **Tool Usage Examples**: [COMPLETE_DOCUMENTATION.md §3](./docs/COMPLETE_DOCUMENTATION.md#3-tools-api-reference)
-- **Agent Architecture**: [ARCHITECTURE_DIAGRAMS.md §2](./docs/architecture/ARCHITECTURE_DIAGRAMS.md#2-langgraph-agent-flow)
+- **Agent Architecture**: [ARCHITECTURE_DIAGRAMS.md §2](./docs/ARCHITECTURE_DIAGRAMS.md#2-multi-agent-workflow-langgraph)
 - **Dataset Schemas**: [COMPLETE_DOCUMENTATION.md §4](./docs/COMPLETE_DOCUMENTATION.md#4-dataset-documentation)
 
 ## 🚀 Getting Started
@@ -398,13 +417,13 @@ python agent/graph.py
 
 ## 📈 Project Statistics
 
-- **Python Modules**: 20+
-- **Agent Tools**: 29 (across 4 modules)
+- **Python Modules**: 25+
+- **Agent Tools**: 40 (across 9 modules)
 - **Specialized Agents**: 5 (Supervisor, Weather, Transport, Researcher, Planner)
-- **Data Sources**: 4 real-time APIs + 2 scraped sources
+- **Data Sources**: 6 real-time APIs + 2 scraped sources
 - **Vector DB Documents**: ~1,400 chunks (PDF guide + events + places)
 - **Datasets**: 200+ events, 300+ places, 100+ open data GeoJSON
-- **Lines of Code**: ~8,000+
+- **Lines of Code**: ~15,000+
 - **Documentation**: 150+ pages
 
 ## 🤝 Contributing
