@@ -24,12 +24,12 @@ from agent.state import (
 
 from agent.prompts import (
     get_system_prompt,
-    SYSTEM_PROMPT,
+    SYSTEM_PROMPT_EN, SYSTEM_PROMPT_PT,
     ITINERARY_PLANNING_PROMPT,
     WEATHER_ANALYSIS_PROMPT,
     TRANSPORT_ANALYSIS_PROMPT,
     # Multi-Agent Prompts
-    SUPERVISOR_PROMPT, get_supervisor_prompt,
+    SUPERVISOR_PROMPT_EN, SUPERVISOR_PROMPT_PT, get_supervisor_prompt,
     WEATHER_AGENT_PROMPT, get_weather_prompt,
     TRANSPORT_AGENT_PROMPT, get_transport_prompt,
     RESEARCHER_AGENT_PROMPT, get_researcher_prompt,
@@ -58,13 +58,14 @@ __all__ = [
     
     # Prompts
     "get_system_prompt",
-    "SYSTEM_PROMPT",
+    "SYSTEM_PROMPT_EN",
+    "SYSTEM_PROMPT_PT",
     "ITINERARY_PLANNING_PROMPT",
     "WEATHER_ANALYSIS_PROMPT",
     "TRANSPORT_ANALYSIS_PROMPT",
     
     # Multi-Agent Prompts
-    "SUPERVISOR_PROMPT", "get_supervisor_prompt",
+    "SUPERVISOR_PROMPT_EN", "SUPERVISOR_PROMPT_PT", "get_supervisor_prompt",
     "WEATHER_AGENT_PROMPT", "get_weather_prompt",
     "TRANSPORT_AGENT_PROMPT", "get_transport_prompt",
     "RESEARCHER_AGENT_PROMPT", "get_researcher_prompt",

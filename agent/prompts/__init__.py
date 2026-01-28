@@ -10,7 +10,7 @@
 # ==========================================================================
 
 # Import from specialized agent prompts
-from agent.prompts.supervisor import SUPERVISOR_PROMPT, get_supervisor_prompt
+from agent.prompts.supervisor import SUPERVISOR_PROMPT_EN, SUPERVISOR_PROMPT_PT, get_supervisor_prompt
 from agent.prompts.weather import WEATHER_AGENT_PROMPT, get_weather_prompt
 from agent.prompts.transport import TRANSPORT_AGENT_PROMPT, get_transport_prompt
 from agent.prompts.researcher import RESEARCHER_AGENT_PROMPT, get_researcher_prompt
@@ -19,8 +19,10 @@ from agent.prompts.planner import PLANNER_AGENT_PROMPT, get_planner_prompt
 # Import from original system prompt module (renamed to _system_prompt.py)
 # This maintains backward compatibility with existing code
 from agent.prompts._system_prompt import (
-    SYSTEM_PROMPT,
-    COMPACT_SYSTEM_PROMPT,
+    SYSTEM_PROMPT_EN,
+    SYSTEM_PROMPT_PT,
+    COMPACT_SYSTEM_PROMPT_EN,
+    COMPACT_SYSTEM_PROMPT_PT,
     ITINERARY_PLANNING_PROMPT,
     WEATHER_ANALYSIS_PROMPT,
     TRANSPORT_ANALYSIS_PROMPT,
@@ -31,8 +33,10 @@ from agent.prompts._system_prompt import (
 
 __all__ = [
     # Original single-agent prompts (backward compatibility)
-    "SYSTEM_PROMPT",
-    "COMPACT_SYSTEM_PROMPT",
+    "SYSTEM_PROMPT_EN",
+    "SYSTEM_PROMPT_PT",
+    "COMPACT_SYSTEM_PROMPT_EN",
+    "COMPACT_SYSTEM_PROMPT_PT",
     "ITINERARY_PLANNING_PROMPT",
     "WEATHER_ANALYSIS_PROMPT",
     "TRANSPORT_ANALYSIS_PROMPT",
@@ -41,7 +45,8 @@ __all__ = [
     "get_system_prompt",
     
     # Multi-agent specialized prompts
-    "SUPERVISOR_PROMPT",
+    "SUPERVISOR_PROMPT_EN",
+    "SUPERVISOR_PROMPT_PT",
     "get_supervisor_prompt",
     "WEATHER_AGENT_PROMPT", 
     "get_weather_prompt",

@@ -4040,25 +4040,39 @@ def find_bus_routes(
     route_options = find_common_routes(origin_stop_ids, dest_stop_ids)
     
     if route_options:
-        response += f"✅ **{len(route_options)} DIRECT ROUTE(S) FOUND!**\n"
-        response += "-" * 40 + "\n\n"
-        
-        for i, route in enumerate(route_options[:5], 1):
-            response += f"🚌 **Option {i}: Line {route['short_name']}**\n"
-            response += f"   📍 Route: {route['long_name']}\n"
-            
+        # Group routes by origin/destination stop pair to avoid repetition
+        grouped_routes = {}
+        for route in route_options:
             origin_stop = route.get("origin_stop", {})
             dest_stop = route.get("dest_stop", {})
+            key = (origin_stop.get("name", "?"), dest_stop.get("name", "?"))
             
-            if origin_stop:
-                response += f"   🚏 Board at: {origin_stop.get('name', 'N/A')}\n"
-            if dest_stop:
-                response += f"   🚏 Alight at: {dest_stop.get('name', 'N/A')}\n"
+            if key not in grouped_routes:
+                grouped_routes[key] = {
+                    "origin_stop": origin_stop,
+                    "dest_stop": dest_stop,
+                    "lines": []
+                }
+            grouped_routes[key]["lines"].append(route.get("short_name", "?"))
+        
+        response += f"✅ **{len(grouped_routes)} ROUTE OPTION(S) FOUND** ({len(route_options)} lines total)\n"
+        response += "-" * 40 + "\n\n"
+        
+        for i, ((origin_name, dest_name), group) in enumerate(list(grouped_routes.items())[:5], 1):
+            lines_str = ", ".join(sorted(group["lines"]))
             
+            response += f"🚌 **Option {i}**\n"
+            response += f"   🚏 Board at: {origin_name}\n"
+            response += f"   🚏 Alight at: {dest_name}\n"
+            response += f"   🚍 Lines: **{lines_str}**\n"
             response += "\n"
         
-        if len(route_options) > 5:
-            response += f"   ... and {len(route_options) - 5} more routes available.\n\n"
+        if len(grouped_routes) > 5:
+            response += f"   ... and {len(grouped_routes) - 5} more route options available.\n\n"
+        
+        # Direction warning
+        response += "⚠️ **Note:** Verify that buses run in your intended direction "
+        response += f"({origin} → {destination}). Check schedules at carrismetropolitana.pt\n\n"
     
     else:
         response += "❌ **No direct bus routes found**\n\n"

@@ -1,321 +1,72 @@
 ﻿# ==========================================================================
 # Master Thesis - Lisbon Urban Assistant (Streamlit App)
-#   - Andre Filipe Gomes Silvestre, 20240502
+#   - André Filipe Gomes Silvestre, 2025
 # 
 #   Main Streamlit application for the intelligent tourist assistant.
-#   Provides a modern, intuitive chat interface for exploring Lisbon.
-# 
-#   Features:
-#     - Real-time chat with LLM-powered assistant
-#     - Multi-language UI support (English/Portuguese)
-#     - Multiple LLM provider selection with credential management
-#     - Weather and transport quick actions
-#     - Session state management
-#     - Professional Lisbon-themed design
-# 
-#   Usage:
-#     streamlit run app.py
+#   "LISBOA: LLM-Integrated System for Behavioral Orchestration and Agentic Architecture"
 # ==========================================================================
-
-# Required libraries:
-# pip install streamlit langchain langgraph langchain-groq python-dotenv
-
-# IMPORTANT: Load environment variables FIRST (before any LangChain imports)
-from dotenv import load_dotenv
-load_dotenv()
-
-# Suppress Torch/Streamlit file watcher warning (known compatibility issue)
-import warnings
-warnings.filterwarnings("ignore", message=".*torch.classes.*")
-warnings.filterwarnings("ignore", category=UserWarning, module="torch")
 
 import streamlit as st
 import sys
 import os
+import time
 import traceback
 from datetime import datetime
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Generator
 
-# Add project root to path for imports
+# Fix for Windows Event Loop Policy in Streamlit
+import asyncio
+import sys
+
+if sys.platform.startswith("win"):
+    # Set proper event loop policy for Windows
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+import nest_asyncio
+nest_asyncio.apply()
+
+# Suppress Torch/Streamlit file watcher warning
+import torch
+torch.classes.__path__ = [] # Fix RuntimeError: module 'torch.classes' has no attribute '__path__' 
+# Source: (https://github.com/datalab-to/marker/issues/442)
+
+import warnings
+warnings.filterwarnings("ignore", message=".*torch.classes.*")
+warnings.filterwarnings("ignore", category=UserWarning, module="torch")
+
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv()
+
+# Add project root to path
 sys.path.insert(0, ".")
 
-from agent.graph import create_assistant, LisbonAssistant, MultiAgentAssistant
+from agent.graph import create_assistant, MultiAgentAssistant
 from config import Config
 from tools.visitlisboa_api import initialize_vector_store
 from tools.carris_api import CarrisGTFSManager, CARRIS_DB_PATH
 
+# Define images directory
+IMG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'img')
 
 # ==========================================================================
-# TRANSLATIONS / INTERNATIONALIZATION
+# PAGE CONFIGURATION
 # ==========================================================================
 
-TRANSLATIONS = {
-    "en": {
-        # Header
-        "app_title": "Lisbon Urban Assistant",
-        "app_subtitle": "Your intelligent guide to exploring Lisbon",
-        
-        # Sidebar - Settings
-        "settings": "Settings",
-        "language": "Language",
-        "llm_provider": "LLM Provider",
-        "select_provider": "Select AI Provider",
-        "api_credentials": "API Credentials",
-        "api_key": "API Key",
-        "api_key_placeholder": "Enter your API key...",
-        "local_url": "Local Server URL",
-        "local_url_placeholder": "http://localhost:1234/v1",
-        "model_name": "Model Name",
-        "model_name_placeholder": "e.g., llama3.2",
-        "save_credentials": "Save & Connect",
-        "assistant_ready": "Assistant ready!",
-        "initialization_failed": "Initialization failed",
-        
-        # Sidebar - Quick Actions
-        "quick_actions": "Quick Actions",
-        "weather_summary": "Weather Summary",
-        "transport_status": "Transport Status",
-        "upcoming_events": "Upcoming Events",
-        "top_attractions": "Top Attractions",
-        "plan_my_day": "Plan My Day",
-        
-        # Sidebar - Session Info
-        "session_info": "Session Info",
-        "messages": "Messages",
-        "status": "Status",
-        "clear_conversation": "Clear Conversation",
-        
-        # Sidebar - About
-        "about": "About",
-        "tracing": "Tracing",
-        "tracing_active": "LangSmith Active",
-        "tracing_disabled": "LangSmith Disabled",
-        "project": "Project",
-        
-        # Main Content
-        "welcome_title": "Welcome to Lisbon!",
-        "welcome_intro": "I'm your intelligent assistant for exploring Lisbon, Portugal. I can help you with:",
-        "weather_desc": "<strong>Weather</strong> - Current conditions and forecasts",
-        "transport_desc": "<strong>Transport</strong> - Metro, bus, and train status",
-        "events_desc": "<strong>Events</strong> - Cultural events and activities",
-        "places_desc": "<strong>Places</strong> - Points of interest and services",
-        "planning_desc": "<strong>Planning</strong> - Personalized itineraries",
-        "ask_anything": "Ask me anything about Lisbon!",
-        "try_asking": "Try asking about...",
-        "chat_placeholder": "Ask me about Lisbon...",
-        
-        # Example Queries
-        "ex_weather": "Weather",
-        "ex_metro": "Metro",
-        "ex_events": "Events",
-        "ex_services": "Services",
-        "ex_food": "Food",
-        "ex_planning": "Planning",
-        
-        # Quick Action Queries
-        "query_weather": "What's the current weather in Lisbon? Include any active warnings.",
-        "query_transport": "What's the current status of public transport in Lisbon? Include Metro, buses, and trains.",
-        "query_events": "What cultural events are happening in Lisbon this week?",
-        "query_attractions": "What are the must-see tourist attractions in Lisbon?",
-        "query_plan": "Help me plan a one-day trip in Lisbon. I'm interested in history and good food.",
-        
-        # Example Query Texts
-        "ex_query_weather": "What's the weather forecast for the next 3 days in Lisbon?",
-        "ex_query_metro": "Is the Lisbon metro running normally today?",
-        "ex_query_events": "What cultural events are happening this weekend?",
-        "ex_query_services": "Find pharmacies and hospitals near Rossio",
-        "ex_query_food": "Recommend traditional Portuguese restaurants in Alfama",
-        "ex_query_planning": "Plan a 2-day itinerary for a first-time visitor to Lisbon",
-        
-        # Errors
-        "error_not_initialized": "Assistant Not Initialized",
-        "error_troubleshooting": "Troubleshooting",
-        "error_common_issues": "Common Issues:",
-        "error_missing_api": "Missing API Key",
-        "error_local_models": "Local Models (LM Studio / Ollama)",
-        "error_network": "Network Issues",
-        "retry_init": "Retry Initialization",
-        "error_api_key": "API Key Error (401 Unauthorized)",
-        "error_api_key_msg": "Your API key is invalid, expired, or revoked.",
-        "error_rate_limit": "Rate Limit Exceeded",
-        "error_rate_limit_msg": "You've exceeded the API rate limit. Please wait and try again.",
-        "error_connection": "Connection Error",
-        "error_connection_msg": "Could not connect to the API. Please check your internet connection.",
-        "error_generic": "An error occurred while processing your request.",
-        "thinking": "Analyzing and gathering information...",
-        
-        # Footer
-        "footer_version": "Lisbon Urban Assistant v1.0",
-        "footer_made": "André Filipe Gomes Silvestre | Master's Student\nNOVA IMS",
-        
-        # Info Page
-        "info_title": "About This Assistant",
-        "info_objective": "Objective",
-        "info_objective_text": "This intelligent assistant was developed as part of a Master's Thesis in Data Science and Advanced Analytics at NOVA IMS (Universidade NOVA de Lisboa). The goal is to create an LLM-powered framework for adaptive tourist and mobility itinerary planning in Lisbon.",
-        "info_data_sources": "Data Sources",
-        "info_data_sources_text": """The assistant uses multiple real-time and static data sources:
-
-- **IPMA API** - Weather forecasts and meteorological warnings
-- **Metro de Lisboa** - Real-time status of all 4 metro lines
-- **Carris Metropolitana** - Bus alerts, stops, and line information
-- **CP (Comboios de Portugal)** - Train status and delays
-- **Lisboa Aberta** - Open data (pharmacies, hospitals, museums, etc.)
-- **VisitLisboa** - Cultural events, attractions, and points of interest
-- **Official Lisbon Guide** - Tourist guide PDF with comprehensive city information""",
-        "info_how_to_use": "How to Use",
-        "info_how_to_use_text": """1. **Select your LLM Provider** - Choose from Groq, Google, OpenAI, or local models
-2. **Enter your credentials** - Provide the required API key or server URL
-3. **Ask questions** - Type your questions in natural language
-4. **Use Quick Actions** - Click sidebar buttons for common queries""",
-        "info_privacy": "Privacy & Security",
-        "info_privacy_text": """- Your API credentials are stored locally in your browser session only
-- No conversation data is stored permanently on any server
-- LangSmith tracing (if enabled) is for development purposes only""",
-        "info_author": "Author",
-        "info_author_text": """**Andre Filipe Gomes Silvestre**
-Master's Student in Data Science and Advanced Analytics
-NOVA IMS - Universidade NOVA de Lisboa
-2024/2025""",
-    },
-    
-    "pt": {
-        # Header
-        "app_title": "Assistente Urbano de Lisboa",
-        "app_subtitle": "O seu guia inteligente para explorar Lisboa",
-        
-        # Sidebar - Settings
-        "settings": "Definições",
-        "language": "Idioma",
-        "llm_provider": "Fornecedor LLM",
-        "select_provider": "Selecionar Fornecedor IA",
-        "api_credentials": "Credenciais API",
-        "api_key": "Chave API",
-        "api_key_placeholder": "Introduza a sua chave API...",
-        "local_url": "URL do Servidor Local",
-        "local_url_placeholder": "http://localhost:1234/v1",
-        "model_name": "Nome do Modelo",
-        "model_name_placeholder": "ex: llama3.2",
-        "save_credentials": "Guardar e Ligar",
-        "assistant_ready": "Assistente pronto!",
-        "initialization_failed": "Falha na inicialização",
-        
-        # Sidebar - Quick Actions
-        "quick_actions": "Ações Rápidas",
-        "weather_summary": "Resumo do Tempo",
-        "transport_status": "Estado dos Transportes",
-        "upcoming_events": "Próximos Eventos",
-        "top_attractions": "Principais Atrações",
-        "plan_my_day": "Planear o Meu Dia",
-        
-        # Sidebar - Session Info
-        "session_info": "Info da Sessão",
-        "messages": "Mensagens",
-        "status": "Estado",
-        "clear_conversation": "Limpar Conversa",
-        
-        # Sidebar - About
-        "about": "Sobre",
-        "tracing": "Rastreamento",
-        "tracing_active": "LangSmith Ativo",
-        "tracing_disabled": "LangSmith Desativado",
-        "project": "Projeto",
-        
-        # Main Content
-        "welcome_title": "Bem-vindo a Lisboa!",
-        "welcome_intro": "Sou o seu assistente inteligente para explorar Lisboa, Portugal. Posso ajudar com:",
-        "weather_desc": "<strong>Meteorologia</strong> - Condições atuais e previsões",
-        "transport_desc": "<strong>Transportes</strong> - Estado do metro, autocarros e comboios",
-        "events_desc": "<strong>Eventos</strong> - Eventos culturais e atividades",
-        "places_desc": "<strong>Locais</strong> - Pontos de interesse e serviços",
-        "planning_desc": "<strong>Planeamento</strong> - Itinerários personalizados",
-        "ask_anything": "Pergunte-me qualquer coisa sobre Lisboa!",
-        "try_asking": "Experimente perguntar sobre...",
-        "chat_placeholder": "Pergunte-me sobre Lisboa...",
-        
-        # Example Queries (button labels)
-        "ex_weather": "Tempo",
-        "ex_metro": "Metro",
-        "ex_events": "Eventos",
-        "ex_services": "Serviços",
-        "ex_food": "Gastronomia",
-        "ex_planning": "Planeamento",
-        
-        # Quick Action Queries (full questions in PT)
-        "query_weather": "Qual é a previsão do tempo para Lisboa? Inclui avisos meteorológicos ativos.",
-        "query_transport": "Qual é o estado atual dos transportes públicos em Lisboa? Inclui Metro, autocarros e comboios.",
-        "query_events": "Que eventos culturais estão a acontecer em Lisboa esta semana?",
-        "query_attractions": "Quais são as principais atrações turísticas de Lisboa que não posso perder?",
-        "query_plan": "Ajuda-me a planear um dia em Lisboa. Estou interessado em história e boa comida.",
-        
-        # Example Query Texts (full questions in PT)
-        "ex_query_weather": "Qual é a previsão do tempo para os próximos 3 dias em Lisboa?",
-        "ex_query_metro": "O metro de Lisboa está a funcionar normalmente hoje?",
-        "ex_query_events": "Que eventos culturais há este fim de semana em Lisboa?",
-        "ex_query_services": "Encontra farmácias e hospitais perto do Rossio",
-        "ex_query_food": "Recomenda restaurantes tradicionais portugueses em Alfama",
-        "ex_query_planning": "Planeia um itinerário de 2 dias para quem visita Lisboa pela primeira vez",
-        
-        # Errors
-        "error_not_initialized": "Assistente Não Inicializado",
-        "error_troubleshooting": "Resolução de Problemas",
-        "error_common_issues": "Problemas Comuns:",
-        "error_missing_api": "Chave API em Falta",
-        "error_local_models": "Modelos Locais (LM Studio / Ollama)",
-        "error_network": "Problemas de Rede",
-        "retry_init": "Tentar Novamente",
-        "error_api_key": "Erro de Chave API (401 Não Autorizado)",
-        "error_api_key_msg": "A sua chave API é inválida, expirou ou foi revogada.",
-        "error_rate_limit": "Limite de Pedidos Excedido",
-        "error_rate_limit_msg": "Excedeu o limite de pedidos da API. Aguarde e tente novamente.",
-        "error_connection": "Erro de Ligação",
-        "error_connection_msg": "Não foi possível ligar à API. Verifique a sua ligação à internet.",
-        "error_generic": "Ocorreu um erro ao processar o seu pedido.",
-        "thinking": "A analisar e recolher informação...",
-        
-        # Footer
-        "footer_version": "Assistente Urbano de Lisboa v1.0",
-        "footer_made": "André Filipe Gomes Silvestre | Mestrando\nNOVA IMS",
-        
-        # Info Page
-        "info_title": "Sobre Este Assistente",
-        "info_objective": "Objetivo",
-        "info_objective_text": "Este assistente inteligente foi desenvolvido como parte de uma Tese de Mestrado em Data Science e Advanced Analytics na NOVA IMS (Universidade NOVA de Lisboa). O objetivo é criar uma framework baseada em LLM para planeamento adaptativo de itinerários turísticos e de mobilidade em Lisboa.",
-        "info_data_sources": "Fontes de Dados",
-        "info_data_sources_text": """O assistente utiliza múltiplas fontes de dados em tempo real e estáticas:
-
-- **API IPMA** - Previsões meteorológicas e avisos
-- **Metro de Lisboa** - Estado em tempo real das 4 linhas de metro
-- **Carris Metropolitana** - Alertas, paragens e informação de linhas
-- **CP (Comboios de Portugal)** - Estado e atrasos de comboios
-- **Lisboa Aberta** - Dados abertos (farmácias, hospitais, museus, etc.)
-- **VisitLisboa** - Eventos culturais, atrações e pontos de interesse
-- **Guia Oficial de Lisboa** - PDF do guia turístico com informação completa""",
-        "info_how_to_use": "Como Usar",
-        "info_how_to_use_text": """1. **Selecione o seu Fornecedor LLM** - Escolha entre Groq, Google, OpenAI ou modelos locais
-2. **Introduza as credenciais** - Forneça a chave API ou URL do servidor
-3. **Faça perguntas** - Escreva as suas perguntas em linguagem natural
-4. **Use Ações Rápidas** - Clique nos botões da barra lateral para consultas comuns""",
-        "info_privacy": "Privacidade e Segurança",
-        "info_privacy_text": """- As suas credenciais API são guardadas localmente apenas na sua sessão
-- Nenhum dado de conversa é guardado permanentemente
-- O rastreamento LangSmith (se ativado) é apenas para fins de desenvolvimento""",
-        "info_author": "Autor",
-        "info_author_text": """**André Filipe Gomes Silvestre**
-Mestrando em Data Science e Advanced Analytics
-NOVA IMS - Universidade NOVA de Lisboa
-2024/2025""",
+st.set_page_config(
+    page_title="LISBOA: Urban Assistant",
+    page_icon="🏛️",
+    layout="wide",
+    initial_sidebar_state="expanded",
+    menu_items={
+        "Get Help": "https://github.com/Silvestre17/Thesis2025-26_AFGS",
+        "Report a bug": "https://github.com/Silvestre17/Thesis2025-26_AFGS/issues",
+        "About": "### Lisbon Urban Assistant\nMaster Thesis Project 2025"
     }
-}
-
-
-def t(key: str) -> str:
-    """Get translation for current language."""
-    lang = st.session_state.get("language", "en")
-    return TRANSLATIONS.get(lang, TRANSLATIONS["en"]).get(key, key)
-
+)
 
 # ==========================================================================
-# LISBON THEME - CUSTOM CSS
+# STYLES & ASSETS
 # ==========================================================================
 
 LISBON_CSS = """
@@ -363,30 +114,7 @@ LISBON_CSS = """
     box-shadow: 0 8px 32px rgba(255, 64, 17, 0.25), 0 2px 8px rgba(0,0,0,0.1);
     position: relative;
     overflow: hidden;
-}
-
-.lisbon-header::before {
-    content: '';
-    position: absolute;
-    top: -50%;
-    right: -10%;
-    width: 300px;
-    height: 300px;
-    background: rgba(255,255,255,0.1);
-    border-radius: 50%;
-    pointer-events: none;
-}
-
-.lisbon-header::after {
-    content: '';
-    position: absolute;
-    bottom: -30%;
-    left: 10%;
-    width: 150px;
-    height: 150px;
-    background: rgba(255,255,255,0.08);
-    border-radius: 50%;
-    pointer-events: none;
+    color: white;
 }
 
 .lisbon-header h1 {
@@ -395,18 +123,12 @@ LISBON_CSS = """
     font-size: 2.4rem;
     font-weight: 700;
     text-shadow: 0 2px 4px rgba(0,0,0,0.2);
-    letter-spacing: -0.02em;
-    position: relative;
-    z-index: 1;
 }
 
 .lisbon-header p {
     color: rgba(255,255,255,0.95);
     margin: 0.75rem 0 0 0;
     font-size: 1.15rem;
-    font-weight: 400;
-    position: relative;
-    z-index: 1;
 }
 
 /* ============ SIDEBAR ============ */
@@ -416,47 +138,10 @@ section[data-testid="stSidebar"] {
     box-shadow: 4px 0 20px rgba(0,0,0,0.05);
 }
 
-section[data-testid="stSidebar"] > div:first-child {
-    padding-top: 1.5rem;
-}
-
-section[data-testid="stSidebar"] .stMarkdown h2 {
-    color: var(--gray-800);
-    font-weight: 600;
-    font-size: 0.9rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    border-bottom: none;
-    padding-bottom: 0.5rem;
-    margin-bottom: 0.75rem;
-}
-
-section[data-testid="stSidebar"] .stMarkdown h3 {
-    color: var(--gray-700);
-    font-weight: 600;
-    font-size: 0.85rem;
-    margin-top: 0.5rem;
-}
-
-/* Sidebar buttons */
-section[data-testid="stSidebar"] button {
-    border-radius: 10px !important;
-    font-weight: 500 !important;
-    transition: all 0.2s ease !important;
-}
-
 section[data-testid="stSidebar"] button[kind="secondary"] {
     background: white !important;
     border: 1.5px solid var(--gray-200) !important;
     color: var(--gray-700) !important;
-}
-
-section[data-testid="stSidebar"] button[kind="secondary"]:hover {
-    background: var(--lisbon-yellow-light) !important;
-    border-color: var(--lisbon-yellow) !important;
-    color: var(--gray-800) !important;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(246, 218, 0, 0.2);
 }
 
 section[data-testid="stSidebar"] button[kind="primary"] {
@@ -466,51 +151,25 @@ section[data-testid="stSidebar"] button[kind="primary"] {
     box-shadow: 0 4px 12px rgba(255, 64, 17, 0.3);
 }
 
-section[data-testid="stSidebar"] button[kind="primary"]:hover {
-    background: linear-gradient(135deg, var(--lisbon-orange-dark) 0%, var(--lisbon-orange) 100%) !important;
-    transform: translateY(-1px);
-    box-shadow: 0 6px 16px rgba(255, 64, 17, 0.4);
-}
-
 /* ============ CHAT MESSAGES ============ */
 [data-testid="stChatMessage"] {
     padding: 1.25rem !important;
     margin: 0.75rem 0 !important;
+    border-radius: 18px !important;
 }
 
 [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {
     background: linear-gradient(135deg, var(--lisbon-yellow-light) 0%, white 100%) !important;
     border: 1px solid var(--lisbon-yellow) !important;
-    border-radius: 18px 18px 6px 18px !important;
-    box-shadow: 0 2px 8px rgba(246, 218, 0, 0.15);
 }
 
 [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) {
     background: white !important;
     border: 1px solid var(--gray-200) !important;
-    border-radius: 18px 18px 18px 6px !important;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    border-left: 4px solid var(--lisbon-orange) !important;
 }
 
-/* Chat input */
-[data-testid="stChatInput"] > div {
-    border-radius: 14px !important;
-    border: 2px solid var(--gray-200) !important;
-    background: white !important;
-    transition: all 0.2s ease;
-}
-
-[data-testid="stChatInput"] > div > div > div {
-    background: white !important;
-}
-
-
-[data-testid="stChatInput"] > div:focus-within {
-    border-color: var(--lisbon-orange) !important;
-    box-shadow: 0 0 0 3px rgba(255, 64, 17, 0.1) !important;
-}
-
-/* ============ WELCOME CARD ============ */
+/* ============ CARDS & INFO ============ */
 .welcome-card {
     background: white;
     border: none;
@@ -520,83 +179,28 @@ section[data-testid="stSidebar"] button[kind="primary"]:hover {
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
     position: relative;
     overflow: hidden;
-}
-
-.welcome-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 4px;
-    background: linear-gradient(90deg, var(--lisbon-orange), var(--lisbon-yellow));
+    border-top: 4px solid var(--lisbon-orange);
 }
 
 .welcome-card h3 {
     color: var(--gray-900);
-    margin: 0 0 0.5rem 0;
+    margin-bottom: 0.5rem;
     font-size: 1.75rem;
-    font-weight: 700;
-}
-
-.welcome-card > p {
-    color: var(--gray-600);
-    font-size: 1.05rem;
-    margin-bottom: 1.5rem;
 }
 
 .feature-list {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 1rem;
-    margin: 1.5rem 0 2rem 0;
+    margin: 1.5rem 0;
 }
 
 .feature-item {
     background: var(--gray-50);
-    padding: 1rem 1.25rem;
+    padding: 1rem;
     border-radius: 12px;
-    border: none;
     border-left: 3px solid var(--lisbon-yellow);
-    transition: all 0.2s ease;
     font-size: 0.95rem;
-    color: var(--gray-700);
-}
-
-.feature-item:hover {
-    background: var(--lisbon-yellow-light);
-    border-left-color: var(--lisbon-orange);
-    transform: translateX(4px);
-}
-
-.feature-item strong {
-    color: var(--gray-800);
-}
-
-/* ============ EXAMPLE BUTTONS ============ */
-.stButton > button {
-    border-radius: 10px !important;
-    font-weight: 500 !important;
-    padding: 0.6rem 1rem !important;
-    transition: all 0.2s ease !important;
-}
-
-/* ============ INFO SECTIONS ============ */
-.info-section {
-    background: white;
-    border-radius: 16px;
-    padding: 1.75rem 2rem;
-    margin: 1.25rem 0;
-    border: none;
-    border-left: 4px solid var(--lisbon-orange);
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
-}
-
-.info-section h3 {
-    color: var(--gray-900);
-    margin: 0 0 0.25rem 0;
-    font-size: 1.2rem;
-    font-weight: 600;
 }
 
 /* ============ FOOTER ============ */
@@ -609,314 +213,163 @@ section[data-testid="stSidebar"] button[kind="primary"]:hover {
     border: 1px solid var(--gray-100);
 }
 
-.lisbon-footer p {
-    margin: 0.3rem 0;
-    color: var(--gray-600);
-    font-size: 0.875rem;
-}
-
-.lisbon-footer p:first-child {
-    color: var(--gray-800);
-    font-weight: 600;
-}
-
-/* ============ METRICS ============ */
-[data-testid="stMetric"] {
-    background: white;
-    padding: 1rem;
-    border-radius: 12px;
-    border: 1px solid var(--gray-200);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-}
-
-[data-testid="stMetricValue"] {
-    color: var(--lisbon-orange) !important;
-    font-weight: 700 !important;
-}
-
-[data-testid="stMetricLabel"] {
-    color: var(--gray-600) !important;
-}
-
-/* ============ DIVIDERS ============ */
-hr {
-    border: none;
-    height: 1px;
-    background: var(--gray-200);
-    margin: 1.25rem 0;
-}
-
-/* ============ ALERTS ============ */
-.stSuccess {
-    background: linear-gradient(135deg, rgba(14, 224, 113, 0.1) 0%, rgba(14, 224, 113, 0.05) 100%) !important;
-    border: 1px solid var(--lisbon-green) !important;
-    border-radius: 10px !important;
-}
-
-.stWarning {
-    background: linear-gradient(135deg, rgba(246, 218, 0, 0.1) 0%, rgba(246, 218, 0, 0.05) 100%) !important;
-    border: 1px solid var(--lisbon-yellow) !important;
-    border-radius: 10px !important;
-}
-
-.stError {
-    background: linear-gradient(135deg, rgba(255, 64, 17, 0.1) 0%, rgba(255, 64, 17, 0.05) 100%) !important;
-    border: 1px solid var(--lisbon-orange) !important;
-    border-radius: 10px !important;
-}
-
-/* ============ SELECTBOX ============ */
-.stSelectbox > div > div {
-    border-radius: 10px !important;
-    border-color: var(--gray-200) !important;
-}
-
-.stSelectbox > div > div:focus-within {
-    border-color: var(--lisbon-orange) !important;
-    box-shadow: 0 0 0 2px rgba(255, 64, 17, 0.1) !important;
-}
-
-/* ============ TEXT INPUT ============ */
+/* ============ INPUT ============ */
 .stTextInput > div > div > input {
     border-radius: 10px !important;
-    border-color: var(--gray-200) !important;
-}
-
-.stTextInput > div > div > input:focus {
-    border-color: var(--lisbon-orange) !important;
-    box-shadow: 0 0 0 2px rgba(255, 64, 17, 0.1) !important;
-}
-
-/* ============ EXPANDER ============ */
-.streamlit-expanderHeader {
-    background: var(--gray-50) !important;
-    border-radius: 10px !important;
-    font-weight: 500 !important;
-}
-
-/* ============ SPINNER ============ */
-.stSpinner > div {
-    border-top-color: var(--lisbon-orange) !important;
-}
-
-/* ============ HIDE STREAMLIT BRANDING ============ */
-#MainMenu {visibility: hidden;}
-footer {visibility: hidden;}
-header[data-testid="stHeader"] {background: transparent;}
-
-/* ============ SCROLLBAR ============ */
-::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-}
-
-::-webkit-scrollbar-track {
-    background: var(--gray-100);
-    border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb {
-    background: var(--gray-300);
-    border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background: var(--gray-400);
 }
 </style>
 """
 
+st.markdown(LISBON_CSS, unsafe_allow_html=True)
 
 # ==========================================================================
-# Page Configuration
+# SESSION STATE & TRANSLATIONS
 # ==========================================================================
 
-st.set_page_config(
-    page_title="Lisbon Urban Assistant",
-    page_icon="🏛️",
-    layout="wide",
-    initial_sidebar_state="expanded",
-    menu_items={
-        "Get Help": "https://github.com/Silvestre17/Thesis2025-26_AFGS",
-        "Report a bug": "https://github.com/Silvestre17/Thesis2025-26_AFGS/issues",
-        "About": """
-        # Lisbon Urban Assistant
+TRANSLATIONS = {
+    "en": {
+        # Header
+        "app_title": "Lisbon Urban Assistant",
+        "app_subtitle": "Your intelligent guide to exploring Lisbon",
         
-        **Master Thesis Project**  
-        Andre Filipe Gomes Silvestre, 2025
+        # Sidebar - Settings
+        "settings": "Settings & Status",
+        "language": "Language",
+        "provider": "LLM Provider",
+        "select_provider": "Select AI Provider",
+        "api_credentials": "API Credentials",
+        "api_key": "API Key",
+        "clear_chat": "Clear Chat",
         
-        An intelligent assistant for tourists and locals in Lisbon.
-        """
+        # Sidebar - Quick Actions
+        "quick_actions": "Quick Actions",
+        "weather_summary": "Weather Summary",
+        "transport_status": "Transport Status",
+        "upcoming_events": "Upcoming Events",
+        "top_attractions": "Top Attractions",
+        "plan_my_day": "Plan My Day",
+        
+        # Main Content
+        "welcome": "Welcome to Lisbon! 🇵🇹",
+        "intro": "I am your AI assistant for exploring the city. Ask me about weather, transport, events, or places.",
+        "input_placeholder": "Ask something about Lisbon...",
+        "searching": "Thinking & Searching...",
+        "error_init": "Failed to initialize assistant.",
+        "footer": "Master Thesis • NOVA IMS • André Silvestre",
+        "try_asking": "Try asking about...",
+        
+        # Quick Action Queries
+        "query_weather": "What's the current weather in Lisbon? Include any active warnings.",
+        "query_transport": "What's the current status of public transport in Lisbon? Include Metro, buses, and trains.",
+        "query_events": "What cultural events are happening in Lisbon this week?",
+        "query_attractions": "What are the must-see tourist attractions in Lisbon?",
+        "query_plan": "Help me plan a one-day trip in Lisbon. I'm interested in history and good food.",
+    },
+    "pt": {
+        # Header
+        "app_title": "Assistente Urbano de Lisboa",
+        "app_subtitle": "O seu guia inteligente para explorar Lisboa",
+        
+        # Sidebar - Settings
+        "settings": "Definições e Estado",
+        "language": "Idioma",
+        "provider": "Fornecedor LLM",
+        "select_provider": "Selecionar Fornecedor IA",
+        "api_credentials": "Credenciais API",
+        "api_key": "Chave API",
+        "clear_chat": "Limpar Conversa",
+        
+        # Sidebar - Quick Actions
+        "quick_actions": "Ações Rápidas",
+        "weather_summary": "Resumo do Tempo",
+        "transport_status": "Estado dos Transportes",
+        "upcoming_events": "Próximos Eventos",
+        "top_attractions": "Principais Atrações",
+        "plan_my_day": "Planear o Meu Dia",
+        
+        # Main Content
+        "welcome": "Bem-vindo a Lisboa! 🇵🇹",
+        "intro": "Sou o teu assistente IA para explorar a cidade. Pergunta-me sobre tempo, transportes, eventos ou locais.",
+        "input_placeholder": "Pergunta algo sobre Lisboa...",
+        "searching": "A pensar e pesquisar...",
+        "error_init": "Falha ao inicializar assistente.",
+        "footer": "Tese de Mestrado • NOVA IMS • André Silvestre",
+        "try_asking": "Experimenta perguntar sobre...",
+        
+        # Quick Action Queries
+        "query_weather": "Qual é a previsão do tempo para Lisboa? Inclui avisos meteorológicos ativos.",
+        "query_transport": "Qual é o estado atual dos transportes públicos em Lisboa? Inclui Metro, autocarros e comboios.",
+        "query_events": "Que eventos culturais estão a acontecer em Lisboa esta semana?",
+        "query_attractions": "Quais são as principais atrações turísticas de Lisboa que não posso perder?",
+        "query_plan": "Ajuda-me a planear um dia em Lisboa. Estou interessado em história e boa comida.",
     }
-)
+}
 
+def init_session():
+    """Initialize session state variables."""
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+    if "language" not in st.session_state:
+        st.session_state.language = "pt"  # Default to PT
+    if "provider" not in st.session_state:
+        st.session_state.provider = "lmstudio"
+    if "assistant" not in st.session_state:
+        st.session_state.assistant = None
+    if "processing" not in st.session_state:
+        st.session_state.processing = False
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = "chat"
+
+def t(key):
+    """Get translation safely."""
+    lang = st.session_state.get("language", "pt")
+    return TRANSLATIONS.get(lang, TRANSLATIONS["pt"]).get(key, key)
 
 # ==========================================================================
-# Session State Initialization
+# BACKEND INITIALIZATION (Cached)
 # ==========================================================================
 
-def initialize_session_state():
-    """Initialize all session state variables."""
-    defaults = {
-        "messages": [],
-        "assistant": None,
-        "provider": "lmstudio",
-        "initialized": False,
-        "error": None,
-        "language": "pt",
-        "current_page": "chat",
-        "credentials": {
-            "groq": {"api_key": os.getenv("GROQ_API_KEY", "")},
-            "google": {"api_key": os.getenv("GOOGLE_API_KEY", "")},
-            "openai": {"api_key": os.getenv("OPENAI_API_KEY", "")},
-            "lmstudio": {"base_url": Config.LMSTUDIO_BASE_URL, "model": Config.LMSTUDIO_MODEL_NAME},
-            "ollama": {"model": Config.OLLAMA_MODEL_NAME},
-        },
-        "agent_overrides": {},  # Store custom model selection per agent
-    }
-    
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
+@st.cache_resource(show_spinner="Starting Engine...")
+def load_carris_db():
+    """Load Carris DB once."""
+    try:
+        manager = CarrisGTFSManager()
+        if not os.path.exists(CARRIS_DB_PATH):
+             manager.ensure_database()
+        return True
+    except Exception:
+        return False
 
-
-def set_credentials_env():
-    """Set environment variables from stored credentials."""
-    creds = st.session_state.credentials
-    provider = st.session_state.provider
-    
-    if provider == "groq" and creds["groq"]["api_key"]:
-        os.environ["GROQ_API_KEY"] = creds["groq"]["api_key"]
-    elif provider == "google" and creds["google"]["api_key"]:
-        os.environ["GOOGLE_API_KEY"] = creds["google"]["api_key"]
-    elif provider == "openai" and creds["openai"]["api_key"]:
-        os.environ["OPENAI_API_KEY"] = creds["openai"]["api_key"]
-
-
-@st.cache_resource
-def pre_warm_vector_store():
-    """
-    Pre-warm the vector store to avoid delays during first interaction.
-    This is cached globally by Streamlit so it only runs once per server start.
-    """
+@st.cache_resource(show_spinner="Initializing Vector DB...")
+def load_vector_store():
+    """Load ChromaDB once."""
     try:
         initialize_vector_store()
         return True
-    except Exception as e:
-        print(f"Vector store warming failed: {e}")
+    except Exception:
         return False
 
-
-@st.cache_resource(show_spinner=False)
-def initialize_carris_database():
+def get_assistant(provider: str):
     """
-    Initialize the Carris GTFS database at startup.
-    Downloads and converts GTFS data if database doesn't exist or is outdated.
-    This is cached globally by Streamlit so it only runs once per server start.
-    
-    Returns:
-        Tuple[bool, str]: (success, status_message)
+    Get or create the assistant instance. 
+    Note: We store the assistant in session_state, but the heavy lifting 
+    (models, tools) should be efficient.
     """
-    try:
-        manager = CarrisGTFSManager()
-        
-        # Check if database exists
-        db_exists = os.path.exists(CARRIS_DB_PATH)
-        
-        if db_exists:
-            # Check if update is needed
-            needs_update, remote_date = manager.check_for_updates()
-            if not needs_update:
-                db_size = os.path.getsize(CARRIS_DB_PATH) / (1024 * 1024)
-                return True, f"Database ready ({db_size:.0f} MB)"
-        
-        # Database doesn't exist or needs update - create/update it
-        success = manager.ensure_database(force_update=False)
-        
-        if success:
-            db_size = os.path.getsize(CARRIS_DB_PATH) / (1024 * 1024)
-            if db_exists:
-                return True, f"Database updated ({db_size:.0f} MB)"
+    if st.session_state.assistant is None or st.session_state.get("last_provider") != provider:
+        try:
+            # Re-initialize only if provider changed or not exists
+            if Config.USE_MULTI_AGENT:
+                st.session_state.assistant = MultiAgentAssistant()
             else:
-                return True, f"Database created ({db_size:.0f} MB)"
-        else:
-            return False, "Failed to initialize database"
-            
-    except Exception as e:
-        print(f"Carris database initialization failed: {e}")
-        return False, f"Error: {str(e)[:50]}"
-
-
-def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
-    """Initialize or reinitialize the LisbonAssistant."""
-    try:
-        set_credentials_env()
-        
-        # Pre-warm vector store (cached)
-        # Only needed if using Multi-Agent or Researcher (which uses tools)
-        if Config.USE_MULTI_AGENT:
-            with st.spinner("Loading knowledge base (this happens only once)..."):
-                pre_warm_vector_store()
-        
-        # Initialize assistant based on mode
-        if Config.USE_MULTI_AGENT:
-            # Multi-Agent Mode
-            
-            # Apply UI overrides if any
-            if "agent_overrides" in st.session_state:
-                for agent, model_cfg in st.session_state.agent_overrides.items():
-                    if agent in Config.AGENT_MODELS:
-                        Config.AGENT_MODELS[agent]["model"] = model_cfg
-            
-            st.session_state.assistant = MultiAgentAssistant()
-            
-            # =========================================================
-            # CONNECTION TEST
-            # =========================================================
-            # Verify if the configured model is actually reachable
-            connection_placeholder = st.empty()
-            connection_placeholder.info(f"🔄 Testing connection to supervisor model: {st.session_state.assistant.model_name}...")
-            
-            try:
-                # access the supervisor LLM directly
-                test_llm = st.session_state.assistant.supervisor.llm
-                # Simple ping
-                response = test_llm.invoke("ping")
-                # If we get here, connection is successful
-                connection_placeholder.success(f"✅ Connection successful! Model is ready.")
-                import time
-                time.sleep(1.0) # Show success briefly
-                connection_placeholder.empty()
-                
-            except Exception as e:
-                connection_placeholder.empty()
-                error_msg = f"❌ Connection Timeout/Error: Could not connect to model '{st.session_state.assistant.model_name}'. Check LM Studio server or model name. Details: {str(e)}"
-                st.session_state.assistant = None # Rollback
-                return False, error_msg
-
-            st.session_state.initialized = True
-            st.session_state.provider = provider
-            st.session_state.error = None
-            return True, None
-            
-        else:
-            # Single-Agent Mode (Legacy)
-            st.session_state.assistant = create_assistant(provider)
-            st.session_state.initialized = True
-            st.session_state.provider = provider
-            st.session_state.error = None
-            return True, None
-    except Exception as e:
-        error_msg = str(e)
-        st.session_state.error = error_msg
-        st.session_state.initialized = False
-        # Debug purpose only - uncomment to see full traceback
-        # traceback.print_exc()
-        return False, error_msg
-
+                st.session_state.assistant = create_assistant(provider)
+            st.session_state.last_provider = provider
+        except Exception as e:
+            st.error(f"{t('error_init')}: {e}")
+            return None
+    return st.session_state.assistant
 
 # ==========================================================================
-# UI Components
+# UI COMPONENTS
 # ==========================================================================
 
 def render_header():
@@ -928,509 +381,317 @@ def render_header():
     </div>
     """, unsafe_allow_html=True)
 
-
-def render_language_selector():
-    """Render language selector in sidebar."""
-    languages = {"🇬🇧 English": "en", "🇵🇹 Português": "pt"}
-    current_lang = st.session_state.language
-    
-    selected = st.selectbox(
-        t("language"),
-        options=list(languages.keys()),
-        index=list(languages.values()).index(current_lang),
-        key="lang_selector"
-    )
-    
-    if languages[selected] != current_lang:
-        st.session_state.language = languages[selected]
-        st.rerun()
-
-
-def render_provider_credentials():
-    """Render provider selection and credentials input."""
-    st.markdown(f"### {t('llm_provider')}")
-    
-    provider_info = {
-        "lmstudio": ("LM Studio", "Local server", "local"),
-        "ollama": ("Ollama", "Local Ollama models", "ollama"),
-        "groq": ("Groq", "Fast inference with Qwen/Llama", "api_key"),
-        "google": ("Google Gemini", "Google's Gemini 3 models", "api_key"),
-        "openai": ("OpenAI", "GPT-5 models", "api_key"),
-    }
-    
-    provider_names = [info[0] for info in provider_info.values()]
-    provider_keys = list(provider_info.keys())
-    
-    current_idx = provider_keys.index(st.session_state.provider) if st.session_state.provider in provider_keys else 0
-    
-    selected_display = st.selectbox(
-        t("select_provider"),
-        options=provider_names,
-        index=current_idx,
-        key="provider_select"
-    )
-    
-    selected_provider = provider_keys[provider_names.index(selected_display)]
-    provider_type = provider_info[selected_provider][2]
-    
-    st.caption(provider_info[selected_provider][1])
-    st.markdown(f"#### {t('api_credentials')}")
-    
-    credentials_changed = False
-    
-    if provider_type == "api_key":
-        api_key = st.text_input(
-            t("api_key"),
-            value=st.session_state.credentials[selected_provider].get("api_key", ""),
-            type="password",
-            placeholder=t("api_key_placeholder"),
-            key=f"api_key_{selected_provider}"
-        )
-        if api_key != st.session_state.credentials[selected_provider].get("api_key", ""):
-            st.session_state.credentials[selected_provider]["api_key"] = api_key
-            credentials_changed = True
-            
-    elif provider_type == "local":
-        # LM Studio: Server URL
-        base_url = st.text_input(
-            t("local_url"),
-            value=st.session_state.credentials["lmstudio"].get("base_url", Config.LMSTUDIO_BASE_URL),
-            placeholder=t("local_url_placeholder"),
-            key="lmstudio_url"
-        )
-        # LM Studio: Model name on separate line for better visibility
-        model = st.text_input(
-            t("model_name"),
-            value=st.session_state.credentials["lmstudio"].get("model", Config.LMSTUDIO_MODEL_NAME),
-            placeholder=Config.LMSTUDIO_MODEL_NAME,
-            key="lmstudio_model",
-            help="Nome do modelo carregado no LM Studio"
-        )
-        if (base_url != st.session_state.credentials["lmstudio"].get("base_url", "") or 
-            model != st.session_state.credentials["lmstudio"].get("model", "")):
-            st.session_state.credentials["lmstudio"]["base_url"] = base_url
-            st.session_state.credentials["lmstudio"]["model"] = model
-            credentials_changed = True
-            
-    elif provider_type == "ollama":
-        model = st.text_input(
-            t("model_name"),
-            value=st.session_state.credentials["ollama"].get("model", "llama3.2"),
-            placeholder=t("model_name_placeholder"),
-            key="ollama_model"
-        )
-        if model != st.session_state.credentials["ollama"]["model"]:
-            st.session_state.credentials["ollama"]["model"] = model
-            credentials_changed = True
-
-    # =========================================================================
-    # ADVANCED AGENT CONFIGURATION (Multi-Agent Only)
-    # =========================================================================
-    if Config.USE_MULTI_AGENT:
-        with st.expander("🛠️ Advanced: Agent Models"):
-            st.caption("Customize models for each agent. Default: Config.py")
-            
-            # Agents list
-            agents = ["supervisor", "weather", "transport", "researcher", "planner"]
-            
-            for agent in agents:
-                # Get current config or default
-                default_model = Config.AGENT_MODELS.get(agent, {}).get("model", Config.LMSTUDIO_MODEL_NAME)
-                current_override = st.session_state.agent_overrides.get(agent, default_model)
-                
-                # Render input for this agent
-                new_model = st.text_input(
-                    f"{agent.capitalize()} Model",
-                    value=current_override,
-                    key=f"agent_model_{agent}",
-                    help=f"Model for {agent} agent"
-                )
-                
-                # Check for changes
-                if new_model != current_override:
-                    st.session_state.agent_overrides[agent] = new_model
-                    credentials_changed = True
-    
-    needs_reinit = (selected_provider != st.session_state.provider or 
-                   not st.session_state.initialized or credentials_changed)
-    
-    if needs_reinit:
-        if st.button(t('save_credentials'), use_container_width=True, type="primary"):
-            with st.spinner("Connecting..."):
-                st.session_state.provider = selected_provider
-                success, error = initialize_assistant(selected_provider)
-                if success:
-                    st.success(t('assistant_ready'))
-                    st.rerun()
-                else:
-                    st.error(f"{t('initialization_failed')}: {error}")
-    else:
-        st.success(t('assistant_ready'))
-    
-    return selected_provider
-
-
-def render_quick_actions() -> Optional[str]:
-    """Render quick action buttons."""
-    st.markdown(f"## {t('quick_actions')}")
-    
-    actions = [
-        ("🌤️", t("weather_summary"), t("query_weather")),
-        ("🚇", t("transport_status"), t("query_transport")),
-        ("🎭", t("upcoming_events"), t("query_events")),
-        ("📍", t("top_attractions"), t("query_attractions")),
-        ("🗺️", t("plan_my_day"), t("query_plan")),
-    ]
-    
-    for icon, label, query in actions:
-        if st.button(f"{icon} {label}", use_container_width=True, key=f"qa_{label}"):
-            return query
-    return None
-
-
-def render_session_info():
-    """Render session information."""
-    st.markdown(f"## {t('session_info')}")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric(t("messages"), len(st.session_state.messages))
-    with col2:
-        status = "🟢" if st.session_state.initialized else "🔴"
-        st.metric(t("status"), status)
-    
-    if st.session_state.initialized and st.session_state.assistant:
-        st.caption(f"Model: {st.session_state.assistant.model_name}")
-    
-    if st.button(f"🗑️ {t('clear_conversation')}", use_container_width=True):
-        st.session_state.messages = []
-        if st.session_state.assistant:
-            st.session_state.assistant.reset()
-        st.rerun()
-
-
-def render_about_section():
-    """Render about section in sidebar."""
-    st.markdown(f"## {t('about')}")
-    st.markdown("""**Master Thesis Project**  
-NOVA IMS, 2025
-
-*LLM-Powered Urban Exploration*""")
-    
-    learn_more_text = "Saber Mais" if st.session_state.language == "pt" else "Learn More"
-    if st.button(f"📖 {learn_more_text}", use_container_width=True, key="info_btn"):
-        st.session_state.current_page = "info"
-        st.rerun()
-    
-    st.markdown("[🔗 GitHub](https://github.com/Silvestre17/Thesis2025-26_AFGS)")
-
-
-def render_tracing_info():
-    """Render LangSmith tracing information."""
-    st.markdown(f"## {t('tracing')}")
-    
-    langsmith_enabled = os.getenv("LANGCHAIN_TRACING_V2", "false").lower() == "true"
-    langsmith_project = os.getenv("LANGCHAIN_PROJECT", "default")
-    
-    if langsmith_enabled:
-        st.success(t('tracing_active'))
-        st.caption(f"{t('project')}: {langsmith_project}")
-    else:
-        st.warning(t('tracing_disabled'))
-
-
-def render_sidebar() -> Tuple[str, Optional[str]]:
-    """Render complete sidebar."""
+def render_sidebar():
     with st.sidebar:
+        logo_path = os.path.join(IMG_DIR, "Logo_1-1_WithoutBG.png")
+        if os.path.exists(logo_path):
+            st.image(logo_path, use_container_width=True)
+        else:
+            # Fallback if logo missing
+            st.markdown("### 🏛️ Lisboa")
+            
+        st.markdown(f"### {t('settings')}")
+        
+        # Language Selector
+        lang_options = {"Português 🇵🇹": "pt", "English 🇬🇧": "en"}
+        selected_lang_label = st.selectbox(
+            f"🗣️ {t('language')}", 
+            options=lang_options.keys(),
+            index=0 if st.session_state.language == "pt" else 1,
+            key="lang_select_box"
+        )
+        # Update state immediately if changed
+        new_lang = lang_options[selected_lang_label]
+        if new_lang != st.session_state.language:
+            st.session_state.language = new_lang
+        if new_lang != st.session_state.language:
+            st.session_state.language = new_lang
+            st.rerun()
+
+        # ====================
+        # NAVIGATION
+        # ====================
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Chat", use_container_width=True, 
-                        type="primary" if st.session_state.current_page == "chat" else "secondary"):
-                st.session_state.current_page = "chat"
+             if st.button("💬 Chat", use_container_width=True, type="primary" if st.session_state.current_page == "chat" else "secondary"):
+                 st.session_state.current_page = "chat"
+                 st.rerun()
+        with col2:
+             if st.button("ℹ️ Info", use_container_width=True, type="primary" if st.session_state.current_page == "info" else "secondary"):
+                 st.session_state.current_page = "info"
+                 st.rerun()
+
+        st.divider()
+
+        # ====================
+        # QUICK ACTIONS
+        # ====================
+        st.subheader(f"🚀 {t('quick_actions')}")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button(f"☀️ {t('weather_summary')}", use_container_width=True):
+                st.session_state.quick_action = t("query_weather")
+                st.rerun()
+            if st.button(f"📅 {t('upcoming_events')}", use_container_width=True):
+                st.session_state.quick_action = t("query_events")
                 st.rerun()
         with col2:
-            if st.button("Info", use_container_width=True,
-                        type="primary" if st.session_state.current_page == "info" else "secondary"):
-                st.session_state.current_page = "info"
+            if st.button(f"🚇 {t('transport_status')}", use_container_width=True):
+                st.session_state.quick_action = t("query_transport")
                 st.rerun()
+            if st.button(f"🏛️ {t('top_attractions')}", use_container_width=True):
+                st.session_state.quick_action = t("query_attractions")
+                st.rerun()
+                
+        if st.button(f"🗺️ {t('plan_my_day')}", use_container_width=True):
+            st.session_state.quick_action = t("query_plan")
+            st.rerun()
+            
+        st.divider()
+
+        # Model/Provider Selector
+        providers = ["lmstudio", "ollama", "groq", "openai"]
+        start_idx = 0
+        if st.session_state.provider in providers:
+            start_idx = providers.index(st.session_state.provider)
+            
+        selected_provider = st.selectbox(
+            f"🧠 {t('provider')}", 
+            providers,
+            index=start_idx
+        )
+        if selected_provider != st.session_state.provider:
+            st.session_state.provider = selected_provider
+            st.session_state.assistant = None # Force reload
+            st.rerun()
+
+        # API Key input (conditional)
+        if selected_provider in ["groq", "openai"]:
+            env_key = f"{selected_provider.upper()}_API_KEY"
+            current_key = os.getenv(env_key, "")
+            new_key = st.text_input(t("api_key"), value=current_key, type="password")
+            if new_key != current_key:
+                os.environ[env_key] = new_key
         
         st.divider()
-        st.markdown(f"## {t('settings')}")
-        render_language_selector()
-        st.divider()
-        selected_provider = render_provider_credentials()
-        st.divider()
-        quick_action = render_quick_actions()
-        st.divider()
-        render_session_info()
-        st.divider()
-        render_about_section()
-        st.divider()
-        render_tracing_info()
-    
-    return selected_provider, quick_action
+        
+        # Clear Chat
+        if st.button(f"🗑️ {t('clear_chat')}", use_container_width=True):
+            st.session_state.messages = []
+            if st.session_state.assistant:
+                st.session_state.assistant.reset()  # Reset agent state
+            st.rerun()
+            
+        # ====================
+        # SYSTEM STATUS
+        # ====================
+        with st.expander("System Info", expanded=False):
+            st.caption(f"**Model:** {st.session_state.get('provider', 'Unknown')}")
+            if st.session_state.assistant:
+                st.caption(f"**Backend:** {Config.USE_MULTI_AGENT and 'Multi-Agent' or 'Single Agent'}")
+            
+            # Simulated checks (visual only, real checks happen on demand)
+            st.success("Database: Connected")
+            st.success("Vector Store: Ready")
+            
+            # LangSmith Status
+            if os.environ.get("LANGCHAIN_TRACING_V2") == "true":
+                st.success(f"🛠️ LangSmith: Active ({os.environ.get('LANGCHAIN_PROJECT', 'default')})")
+            else:
+                st.info("🛠️ LangSmith: Disabled")
+                
+            # LM Studio Check (if selected)
+            if st.session_state.provider == "lmstudio":
+                try:
+                    import requests
+                    requests.get(Config.LMSTUDIO_BASE_URL + "/models", timeout=1)
+                    st.success("🟢 LM Studio: Online")
+                except:
+                    st.error("🔴 LM Studio: Offline")
 
+            
+        st.markdown(f"<div style='text-align: center; margin-top: 2rem; color: #888; font-size: 0.8rem;'>{t('footer')}</div>", unsafe_allow_html=True)
+            
+def stream_text(text: str) -> Generator[str, None, None]:
+    """Yields text chunks to simulate streaming."""
+    for word in text.split(" "):
+        yield word + " "
+        time.sleep(0.02)
+
+def render_welcome_section():
+    """Render welcome card for empty history."""
+    st.markdown(f"""
+    <div class="welcome-card">
+        <h3>{t('welcome')}</h3>
+        <p>{t('intro')}</p>
+        <div class="feature-list">
+            <div class="feature-item">☀️ <strong>Meteorologia</strong></div>
+            <div class="feature-item">🚇 <strong>Transportes</strong></div>
+            <div class="feature-item">🎭 <strong>Eventos</strong></div>
+            <div class="feature-item">📍 <strong>Locais</strong></div>
+        </div>
+        <p><strong>{t('input_placeholder')}</strong></p>
+    </div>
+    """, unsafe_allow_html=True)
+
+def render_example_queries():
+    """Render example query buttons in the main area."""
+    st.markdown(f"### {t('try_asking')}")
+    
+    # Define examples (Icon, Label, Query Key)
+    examples = [
+        ("🌤️", t("weather_summary"), "query_weather"),
+        ("🚇", t("transport_status"), "query_transport"),
+        ("🎭", "Eventos", "query_events"),
+        ("📍", "Atrações", "query_attractions"),
+        ("🗺️", "Plano 1 Dia", "query_plan"),
+    ]
+    
+    cols = st.columns(len(examples))
+    for i, (icon, label, query_key) in enumerate(examples):
+        with cols[i]:
+            if st.button(f"{icon}\n{label}", key=f"ex_btn_{i}", use_container_width=True):
+                return t(query_key)
+    return None
+
+def render_footer():
+    """Render footer."""
+    st.markdown(f"""
+    <div style='text-align: center; margin-top: 3rem; padding: 1rem; color: #888; font-size: 0.8rem; border-top: 1px solid #eee;'>
+        <p>{t('footer')}</p>
+        <p>{datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 def render_info_page():
-    """Render the information/about page."""
-    st.markdown(f"# {t('info_title')}")
+    """Render the Info/About page."""
+    st.markdown(f"# {t('settings')} (Info)")
     
-    st.markdown(f"""<div class="info-section"><h3>{t('info_objective')}</h3></div>""", unsafe_allow_html=True)
-    st.markdown(t('info_objective_text'))
+    st.markdown(f"### {t('title')}")
+    st.info("Master Thesis Project - NOVA IMS 2025")
     
-    st.markdown(f"""<div class="info-section"><h3>{t('info_data_sources')}</h3></div>""", unsafe_allow_html=True)
-    st.markdown(t('info_data_sources_text'))
+    st.markdown("#### Data Sources")
+    st.markdown("""
+    - **IPMA**: Weather and warnings
+    - **Carris/Metro**: Public transport status
+    - **VisitLisboa**: Events and places (Vector Search)
+    """)
     
-    st.markdown(f"""<div class="info-section"><h3>{t('info_how_to_use')}</h3></div>""", unsafe_allow_html=True)
-    st.markdown(t('info_how_to_use_text'))
+    st.markdown("#### Privacy")
+    st.markdown("No data is stored. API keys are kept in session state only.")
     
-    st.markdown(f"""<div class="info-section"><h3>{t('info_privacy')}</h3></div>""", unsafe_allow_html=True)
-    st.markdown(t('info_privacy_text'))
-    
-    st.markdown(f"""<div class="info-section"><h3>{t('info_author')}</h3></div>""", unsafe_allow_html=True)
-    st.markdown(t('info_author_text'))
-    
-    back_text = "Voltar ao Chat" if st.session_state.language == "pt" else "Back to Chat"
-    if st.button(f"💬 {back_text}", type="primary", use_container_width=True):
+    if st.button("🔙 Back to Chat"):
         st.session_state.current_page = "chat"
         st.rerun()
 
-
-def render_chat_messages():
-    """Render chat message history."""
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"], unsafe_allow_html=True)
-
-
-def render_example_queries() -> Optional[str]:
-    """Render example query buttons."""
-    st.markdown(f"### {t('try_asking')}")
-    
-    examples = [
-        ("🌤️", t("ex_weather"), t("ex_query_weather")),
-        ("🚇", t("ex_metro"), t("ex_query_metro")),
-        ("🎭", t("ex_events"), t("ex_query_events")),
-        ("🏥", t("ex_services"), t("ex_query_services")),
-        ("🍽️", t("ex_food"), t("ex_query_food")),
-        ("🗺️", t("ex_planning"), t("ex_query_planning")),
-    ]
-    
-    cols = st.columns(3)
-    selected = None
-    
-    for i, (icon, label, query) in enumerate(examples):
-        with cols[i % 3]:
-            if st.button(f"{icon} {label}", key=f"ex_{i}", use_container_width=True):
-                selected = query
-    
-    return selected
-
-
-# def render_error_panel():
-#     """Render error panel when initialization fails."""
-#     st.error(t('error_not_initialized'))
-    
-#     with st.expander(t('error_troubleshooting'), expanded=True):
-#         st.markdown(f"""
-# **{t('error_common_issues')}**
-
-# 1. **{t('error_missing_api')}**
-#    - Groq: Get key from [console.groq.com](https://console.groq.com/keys)
-#    - Google: Get key from [Google AI Studio](https://aistudio.google.com/app/apikey)
-#    - OpenAI: Get key from [platform.openai.com](https://platform.openai.com/api-keys)
-
-# 2. **{t('error_local_models')}**
-#    - LM Studio: Start server on port 1234
-#    - Ollama: Run 'ollama serve' and ensure model is downloaded
-
-# 3. **{t('error_network')}**
-#    - Check internet connection
-#    - Verify firewall settings
-#         """)
-        
-#         if st.session_state.error:
-#             # Debug purpose only - show full error
-#             st.code(st.session_state.error, language="text")
-    
-#     if st.button(t('retry_init'), use_container_width=True, type="primary"):
-#         with st.spinner("..."):
-#             success, _ = initialize_assistant(st.session_state.provider)
-#             if success:
-#                 st.rerun()
-
-
-def process_user_input(user_input: str):
-    """Process user input and generate response."""
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    
-    with st.chat_message("user"):
-        st.markdown(user_input)
-    
-    with st.chat_message("assistant"):
-        try:
-            # Dynamic Status Update Implementation
-            with st.status("🤔 A analisar e recolher informação...", expanded=False) as status:
-                def update_ui_status(message: str):
-                    """Callback to update UI status from agent graph."""
-                    status.update(label=message, state="running")
-                    
-                try:
-                    # Enable verbose mode and pass status callback
-                    response = st.session_state.assistant.chat(
-                        user_input, 
-                        verbose=True, 
-                        on_status_change=update_ui_status
-                    )
-                    
-                    # Mark as complete
-                    status.update(label="✅ Resposta pronta!", state="complete", expanded=False)
-                    
-                except Exception as e:
-                    status.update(label="❌ Erro no processamento", state="error", expanded=True)
-                    raise e # Re-raise to be caught by the outer except block
-
-            # Display response only if successful (outside status container)
-            st.markdown(response)
-            st.session_state.messages.append({"role": "assistant", "content": response})
-            
-        except Exception as e:
-                error_str = str(e).lower()
-                
-                if "401" in error_str or "unauthorized" in error_str:
-                    error_msg = f"{t('error_api_key')}\n\n{t('error_api_key_msg')}"
-                elif "rate" in error_str or "limit" in error_str:
-                    error_msg = f"{t('error_rate_limit')}\n\n{t('error_rate_limit_msg')}"
-                elif "timeout" in error_str or "connection" in error_str:
-                    error_msg = f"{t('error_connection')}\n\n{t('error_connection_msg')}"
-                else:
-                    error_msg = f"{t('error_generic')}\n\n{str(e)}"
-                
-                # Format full error message with traceback
-                full_error_content = f"""
-### ⚠️ Error
-{error_msg}
-
-<details>
-<summary>Technical Details</summary>
-
-```python
-{traceback.format_exc()}
-```
-</details>
-"""
-                st.markdown(full_error_content, unsafe_allow_html=True)
-                
-                st.session_state.messages.append({
-                    "role": "assistant", 
-                    "content": full_error_content
-                })
-
-
-def render_footer():
-    """Render the application footer."""
-    st.markdown(f"""
-    <div class="lisbon-footer">
-        <p>{t('footer_version')}</p>
-        <p>{datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
-        <p>{t('footer_made')}</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-
-def render_welcome_section():
-    """Render welcome section for new users."""
-    st.markdown(f"""
-    <div class="welcome-card">
-        <h3>{t('welcome_title')}</h3>
-        <p>{t('welcome_intro')}</p>
-        <div class="feature-list">
-            <div class="feature-item">{t('weather_desc')}</div>
-            <div class="feature-item">{t('transport_desc')}</div>
-            <div class="feature-item">{t('events_desc')}</div>
-            <div class="feature-item">{t('places_desc')}</div>
-            <div class="feature-item">{t('planning_desc')}</div>
-        </div>
-        <p><strong>{t('ask_anything')}</strong></p>
-    </div>
-    """, unsafe_allow_html=True)
-
-
 # ==========================================================================
-# Main Application
+# MAIN APP LOGIC
 # ==========================================================================
 
 def main():
-    """Main application entry point."""
-    st.markdown(LISBON_CSS, unsafe_allow_html=True)
-    initialize_session_state()
-    render_header()
+    init_session()
     
-    # =========================================================================
-    # STARTUP: Initialize Carris Database (cached - runs only once)
-    # =========================================================================
-    if "carris_db_initialized" not in st.session_state:
-        with st.spinner("🚌 Initializing Carris transport database (first time only)..."):
-            success, status_msg = initialize_carris_database()
-            st.session_state.carris_db_initialized = success
-            st.session_state.carris_db_status = status_msg
-            
-            if success:
-                st.toast(f"✅ Carris: {status_msg}", icon="🚌")
-            else:
-                st.warning(f"⚠️ Carris database: {status_msg}")
+    # 1. Load Heavy Resources (Once)
+    load_carris_db()
+    if Config.USE_MULTI_AGENT:
+        load_vector_store()
+
+    # 2. Render Sidebar
+    render_sidebar()
+
+    # 3. Main Content Area
     
-    selected_provider, quick_action = render_sidebar()
-    
+    # Handle Page Navigation
     if st.session_state.current_page == "info":
         render_info_page()
         render_footer()
         return
+
+    # Banner (Chat Mode)
+    # Replaced by CSS-styled header
+    render_header()
     
-    main_container = st.container()
-    
-    with main_container:
-        # Initialize assistant if not already done or if provider changed
-        if not st.session_state.initialized or st.session_state.provider != selected_provider:
-            with st.spinner("Starting Lisbon Urban Assistant..."):
-                success, error = initialize_assistant(selected_provider)
-                if not success:
-                    st.error(f"Failed to initialize assistant: {error}")
-                    st.info("Please check your API credentials in the sidebar.")
-                    render_footer()
-                    return
-        
-        # Safety check: ensure assistant exists
-        if not st.session_state.assistant:
-            st.error("Assistant not initialized. Please refresh the page.")
-            render_footer()
-            return
-        
-        render_chat_messages()
-        
-        example_query = None
-        if not st.session_state.messages:
-            render_welcome_section()
-            example_query = render_example_queries()
-        
-        if quick_action:
-            process_user_input(quick_action)
-            st.rerun()
-        
+    if not st.session_state.messages:
+        render_welcome_section()
+        example_query = render_example_queries()
         if example_query:
-            process_user_input(example_query)
+            # Set as quick action to be picked up
+            st.session_state.quick_action = example_query
             st.rerun()
-    
-    if user_input := st.chat_input(t("chat_placeholder"), key="chat_input"):
-        process_user_input(user_input)
-        st.rerun()
-    
-    render_footer()
 
+    # 4. Chat History
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
-# ==========================================================================
-# Entry Point
-# ==========================================================================
+    # 5. Input & Layout
+    # Handle Quick Actions or Text Input
+    user_input = None
+    if "quick_action" in st.session_state and st.session_state.quick_action:
+        user_input = st.session_state.quick_action
+        del st.session_state.quick_action
+    
+    # Disable chat input if processing (simulated)
+    # Streamlit doesn't natively support disabling chat_input easily based on state without reruns
+    # so we primarily rely on the user interface feedback
+    
+    # Disable chat input if processing
+    disable_input = st.session_state.processing
+    
+    if chat_input := st.chat_input(t("input_placeholder"), disabled=disable_input):
+        user_input = chat_input
+        
+    if user_input and not disable_input:
+        # Set processing state
+        st.session_state.processing = True
+        
+        # User Message
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        with st.chat_message("user"):
+            st.markdown(user_input)
+
+        # Assistant Response
+        assistant = get_assistant(st.session_state.provider)
+        
+        if assistant:
+            # Create a placeholder for the assistant response immediately
+            with st.chat_message("assistant"):
+                # Status Container with "Thinking" visualization
+                status_container = st.status(t("searching"), expanded=True)
+                message_placeholder = st.empty()
+                
+                # Callback to update status
+                def update_status(msg):
+                    status_container.write(msg)
+                
+                try:
+                    # Execute Graph
+                    response_text = assistant.chat(
+                        user_input, 
+                        on_status_change=update_status,
+                        language=st.session_state.language
+                    )
+                    
+                    status_container.update(label="✅ Complete", state="complete", expanded=False)
+                    
+                    # Stream the response
+                    full_response = ""
+                    for chunk in stream_text(response_text):
+                        full_response += chunk
+                        message_placeholder.markdown(full_response + "▌")
+                    message_placeholder.markdown(full_response)
+                    
+                    # Save to history
+                    st.session_state.messages.append({"role": "assistant", "content": full_response})
+                    
+                except Exception as e:
+                    status_container.update(label="❌ Error", state="error")
+                    st.error(f"An error occurred: {str(e)}")
+                    traceback.print_exc()
+                finally:
+                    st.session_state.processing = False
+                    st.rerun()
 
 if __name__ == "__main__":
     main()

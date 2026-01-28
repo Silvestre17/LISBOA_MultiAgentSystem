@@ -316,7 +316,12 @@ def create_agent_node(llm_with_tools, llm_base=None):
         
         # Add system prompt if not present
         if not messages or not isinstance(messages[0], SystemMessage):
-            system_msg = SystemMessage(content=get_system_prompt())
+            # Get language from state user_context
+            language = "en"  # Default
+            if state.get("user_context") and state["user_context"].get("language"):
+                language = state["user_context"]["language"]
+                
+            system_msg = SystemMessage(content=get_system_prompt(language=language))
             messages = [system_msg] + list(messages)
         
         # Check if we have tool results that need to be summarized
@@ -634,7 +639,7 @@ class MultiAgentAssistant:
         return f"Multi-Agent ({sv_model})"
     
     @traceable(name="multi_agent_chat", run_type="chain")
-    def chat(self, message: str, verbose: bool = False, on_status_change: Optional[Callable[[str], None]] = None) -> str:
+    def chat(self, message: str, verbose: bool = False, on_status_change: Optional[Callable[[str], None]] = None, language: str = "en") -> str:
         """
         Processes a user message using the multi-agent system.
         
@@ -661,12 +666,19 @@ class MultiAgentAssistant:
         from langchain_core.messages import HumanMessage
         self.state["messages"].append(HumanMessage(content=message))
         
+        # Update user language preference in state
+        if self.state.get("user_context") is None:
+            self.state["user_context"] = {"language": language}
+        else:
+            self.state["user_context"]["language"] = language
+            
         # Notify status: Routing
         if on_status_change:
-            on_status_change("🤔 A analisar o pedido...")
+            status_msg = "🤔 A analisar o pedido..." if language == "pt" else "🤔 Analyzing request..."
+            on_status_change(status_msg)
         
         # Step 1: Route the query
-        routing = self.supervisor.route(message)
+        routing = self.supervisor.route(message, language=language)
         agents_to_call = routing.get("agents", [])
         direct_response = routing.get("direct_response")
         reasoning = routing.get("reasoning", "")
@@ -728,7 +740,8 @@ class MultiAgentAssistant:
             consulting = [name_map.get(a, a) for a in agents_to_call if a != "planner"]
             
             if consulting and on_status_change:
-                on_status_change(f"🚀 Vou consultar: {', '.join(consulting)}...")
+                msg = f"🚀 Vou consultar: {', '.join(consulting)}..." if language == "pt" else f"🚀 Consulting: {', '.join(consulting)}..."
+                on_status_change(msg)
         
         # Step 2: Handle direct response (no agents needed)
         if direct_response and not agents_to_call:
@@ -747,7 +760,11 @@ class MultiAgentAssistant:
                 print(f"      [PARALLEL] Executing {len(workers)} agents: {workers}")
             
             if on_status_change:
-                on_status_change(f"⏳ A aguardar respostas de: {', '.join(workers)}...")
+                msg = f"⏳ A aguardar respostas de: {', '.join(workers)}..." if language == "pt" else f"⏳ Waiting for: {', '.join(workers)}..."
+                on_status_change(msg)
+            
+            # Context for agents (include language instruction)
+            agent_context = f"User language: {language}. Respond in {language}."
             
             # Use ContextThreadPoolExecutor to propagate LangSmith tracing context
             with ContextThreadPoolExecutor(max_workers=len(workers)) as executor:
@@ -764,7 +781,7 @@ class MultiAgentAssistant:
                     future_to_agent[executor.submit(
                         self.agents[agent_name].invoke, 
                         message, 
-                        "",     # context
+                        agent_context,     # context with language
                         verbose # verbose flag
                     )] = agent_name
                 

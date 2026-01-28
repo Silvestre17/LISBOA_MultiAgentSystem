@@ -189,6 +189,8 @@ def clean_response(content: str) -> str:
         - <tool_call>...</tool_call> blocks
         - Embedded JSON tool call syntax
         - Chat template tokens
+        - Qwen3 "thinking out loud" patterns (e.g., "How do I..." followed by reasoning)
+        - Step-by-step internal reasoning ("Step 1:", "Wait -", etc.)
         
     Args:
         content: Raw response from the LLM.
@@ -198,6 +200,73 @@ def clean_response(content: str) -> str:
     """
     if not content:
         return content
+    
+    # CRITICAL: Detect and remove Qwen3 "thinking out loud" pattern
+    # Pattern: Model starts answering a DIFFERENT question and reasons through it
+    # Example: "How do I get to airport from Rossio?\n\nWe are in English...\n\nStep-by-step:..."
+    
+    # FIRST: Check if entire response is a "thinking" block about a wrong question
+    # This is the CRITICAL fix for the hallucination bug where the model answers
+    # a completely different question than what was asked
+    wrong_question_patterns = [
+        # Full response is about getting to airport when that wasn't the question
+        r'^How do I get to (?:the )?airport.*$',
+        # Model "thinking" about the question
+        r'^We are in (?:English|Portuguese)\.\s*The user wants to.*$',
+        # Internal planning that leaked through
+        r'^Step-by-step:.*$',
+        # "Note:" at the very start indicates internal reasoning
+        r'^Note:.*Rossio is a major station.*$',
+        # Important internal marker
+        r'^Important:.*(?:is served by|does NOT).*$',
+    ]
+    
+    for pattern in wrong_question_patterns:
+        if re.match(pattern, content, flags=re.DOTALL | re.IGNORECASE):
+            # The entire response is internal reasoning - return error message
+            return "Desculpa, estou com dificuldades em processar o teu pedido. Por favor tenta novamente."
+    
+    thinking_patterns = [
+        # "How do I..." followed by step-by-step reasoning (different question hallucination)
+        r'^How do I [^?]+\?\s*(?:\n.*)?We are in (?:English|Portuguese).*$',
+        # "Step-by-step:" internal reasoning
+        r'Step-by-step:\s*\n.*(?:Check if|If not|Use tools).*',
+        # "Wait -" reasoning pattern
+        r'\n\s*Wait\s*[-–]\s*.*(?:\n.*)*',
+        # "But wait" reasoning pattern  
+        r'\n\s*But wait\s*[-–]?\s*.*(?:\n.*)*',
+        # "Let me check" / "Let me recheck" internal reasoning
+        r'\n\s*Let me (?:check|recheck).*(?:\n.*)*',
+        # "Therefore," followed by internal logic
+        r'\n\s*Therefore,\s*(?:I must|we must|from|the).*(?:\n.*)*',
+        # "So final response:" marker
+        r'\n\s*So final response:.*(?:\n.*)*',
+        # "Final output:" marker
+        r'\n\s*Final output[:\s].*(?:\n.*)*',
+        # Checkmarks at the end of reasoning
+        r'\n\s*✅\s*(?:Language|No origin|Clear)[^\n]*(?:\n.*)*$',
+        # "Ah!" discovery pattern
+        r'\n\s*Ah!.*(?:\n.*)*',
+        # "So from Rossio to..." planning pattern
+        r'\n\s*So from [A-Z][a-z]+ to (?:airport|[A-Z]).*(?:\n.*)*',
+        # "But is there a..." questioning pattern
+        r'\n\s*But is there a.*(?:\n.*)*',
+        # "This is correct and follows all rules" reasoning marker
+        r'\n\s*This is correct and follows all rules.*(?:\n.*)*',
+        # "No hallucination" marker
+        r'\n\s*No hallucination.*(?:\n.*)*',
+        # "The CP train lines:" internal knowledge dump
+        r'\n\s*The CP train lines:.*(?:\n.*)*',
+        # "The metro lines are:" internal knowledge dump
+        r'\n\s*The metro lines are:.*(?:\n.*)*',
+        # "Actually, the" reasoning
+        r'\n\s*Actually, the.*(?:\n.*)*',
+        # "The only train line" reasoning
+        r'\n\s*The only train line.*(?:\n.*)*',
+    ]
+    
+    for pattern in thinking_patterns:
+        content = re.sub(pattern, '', content, flags=re.DOTALL | re.MULTILINE | re.IGNORECASE)
     
     # Remove <think>...</think> blocks (Qwen3 reasoning) - handles multiline
     content = re.sub(r'<think>.*?</think>\s*', '', content, flags=re.DOTALL)
@@ -224,6 +293,10 @@ def clean_response(content: str) -> str:
     
     # Clean up excess whitespace
     content = content.strip()
+    
+    # Final check: If content is nearly empty after cleaning, return error
+    if len(content) < 20:
+        return "Desculpa, estou com dificuldades em processar o teu pedido. Por favor tenta novamente."
     
     return content
 

@@ -79,6 +79,7 @@ class TransportAgent(BaseAgent):
         max_iterations = 5  # Reduced from 8 to prevent runaway loops
         iteration = 0
         called_tools = set()  # Track tool signatures to prevent duplicates
+        last_tool_results = []  # Store tool results for fallback response
         
         while hasattr(response, "tool_calls") and response.tool_calls and iteration < max_iterations:
             messages.append(response)
@@ -105,20 +106,15 @@ class TransportAgent(BaseAgent):
                     called_tools.add(signature)
                     new_calls.append(tool_call)
             
-            # If all calls are duplicates, force response generation
+            # If all calls are duplicates, force response generation using tool results
             if duplicate_detected and not new_calls:
                 if verbose:
-                    print(f"      [LOOP] All tool calls are duplicates. Forcing response.")
-                # Add a system message to force response
-                messages.append(SystemMessage(
-                    content="STOP CALLING TOOLS. You have already called these tools. Use the results you have and respond to the user NOW. Do NOT call any more tools."
-                ))
-                # Force the model to generate a final response (text only)
-                try:
-                    final_response = self.model.invoke(messages)
-                    return final_response
-                except Exception as e:
-                    return AIMessage(content="Desculpa, estou com dificuldades em processar o teu pedido. Por favor tenta novamente.")
+                    print(f"      [LOOP] All tool calls are duplicates. Using cached tool results.")
+                # Return the most recent tool result directly if available
+                if last_tool_results:
+                    # The tool result is already formatted, just return it
+                    return clean_response(last_tool_results[-1])
+                return "Desculpa, estou com dificuldades em processar o teu pedido. Por favor tenta novamente."
             
             # Execute only non-duplicate tools
             tools_to_execute = new_calls if new_calls else response.tool_calls[:1]  # Fallback to first
@@ -137,6 +133,8 @@ class TransportAgent(BaseAgent):
                     if tool.name == tool_name:
                         try:
                             tool_result = tool.invoke(tool_args)
+                            # Store tool result for fallback
+                            last_tool_results.append(str(tool_result))
                             if verbose:
                                 result_preview = str(tool_result)[:100] + "..." if len(str(tool_result)) > 100 else str(tool_result)
                                 print(f"      [TOOL] Result: {result_preview}")
@@ -155,15 +153,14 @@ class TransportAgent(BaseAgent):
             response = self.llm_with_tools.invoke(messages)
             iteration += 1
         
-        # If we hit max iterations, force a response
+        # If we hit max iterations, force a response using tool results
         if iteration >= max_iterations and hasattr(response, "tool_calls") and response.tool_calls:
             if verbose:
-                print(f"      [LIMIT] Max iterations reached. Forcing response.")
-            messages.append(response)
-            messages.append(SystemMessage(
-                content="MAXIMUM TOOL CALLS REACHED. Stop calling tools and respond to the user with the information you have collected."
-            ))
-            response = self.llm_with_tools.invoke(messages)
+                print(f"      [LIMIT] Max iterations reached. Using tool results directly.")
+            # Return the most recent tool result directly if available
+            if last_tool_results:
+                return clean_response(last_tool_results[-1])
+            return "Desculpa, estou com dificuldades em processar o teu pedido. Por favor tenta novamente."
         
         return clean_response(response.content)
     

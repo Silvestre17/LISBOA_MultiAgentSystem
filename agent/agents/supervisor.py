@@ -33,15 +33,16 @@ class SupervisorAgent(BaseAgent):
     def __init__(self):
         """Initializes the supervisor agent."""
         super().__init__("supervisor")
-        self.system_prompt = get_supervisor_prompt()
+        # System prompt is now dynamic per request
     
     @traceable(name="supervisor_agent", run_type="chain")
-    def route(self, user_message: str) -> Dict[str, Any]:
+    def route(self, user_message: str, language: str = "en") -> Dict[str, Any]:
         """
         Analyzes user message and returns routing decision.
         
         Args:
             user_message: The user's query.
+            language: Language code ('en' or 'pt').
             
         Returns:
             Dict with:
@@ -49,8 +50,10 @@ class SupervisorAgent(BaseAgent):
                 - agents: List of agent names to call (can be empty)
                 - direct_response: Response if no agents needed (or None)
         """
+        system_prompt = get_supervisor_prompt(language)
+        
         messages = [
-            SystemMessage(content=self.system_prompt),
+            SystemMessage(content=system_prompt),
             HumanMessage(content=user_message)
         ]
         
@@ -85,13 +88,26 @@ class SupervisorAgent(BaseAgent):
         """
         message_lower = user_message.lower()
         
-        # 1. Check for Out-of-Scope keywords (Locations outside Lisbon)
-        forbidden_keywords = ["porto", "aveiro", "braga", "coimbra", "faro", "algarve", "madrid", "paris", "london"]
+        # 1. Check for Out-of-Scope keywords (Locations outside AML)
+        # Note: AML includes Sintra, Cascais, Montijo, Setúbal, etc. - these are IN SCOPE!
+        forbidden_keywords = ["porto", "aveiro", "braga", "coimbra", "faro", "algarve", "évora", "madrid", "paris", "london", "barcelona"]
         if any(city in message_lower for city in forbidden_keywords):
              return {
-                "reasoning": "Fallback: Detected out-of-scope location",
+                "reasoning": "Fallback: Detected out-of-scope location (outside AML)",
                 "agents": [],
-                "direct_response": "Peço desculpa, mas o meu conhecimento limita-se à cidade de Lisboa. Posso ajudar com algo por cá? 🚋"
+                "direct_response": "Sou especializado na Área Metropolitana de Lisboa! Posso ajudar-te com transportes, locais ou eventos na região da capital? 🏙️"
+            }
+        
+        # 2. AML locations that ARE in scope - should trigger transport agent
+        aml_keywords = ["sintra", "cascais", "oeiras", "amadora", "loures", "odivelas", 
+                       "almada", "seixal", "barreiro", "montijo", "alcochete", "setúbal",
+                       "palmela", "sesimbra", "mafra", "vila franca"]
+        if any(loc in message_lower for loc in aml_keywords):
+            # These are AML locations - use transport agent
+            return {
+                "reasoning": f"Fallback: AML location detected - using transport agent",
+                "agents": ["transport"],
+                "direct_response": None
             }
             
         # Weather keywords
@@ -100,7 +116,8 @@ class SupervisorAgent(BaseAgent):
         
         # Transport keywords
         transport_keywords = ["metro", "bus", "train", "carris", "comboio", "autocarro",
-                            "route", "rota", "como chego", "how to get", "transporte"]
+                            "route", "rota", "como chego", "how to get", "transporte",
+                            "ferry", "barco", "fertagus", "cp"]
         
         # Places/Events keywords
         places_keywords = ["museum", "restaurant", "park", "museu", "restaurante", "parque",

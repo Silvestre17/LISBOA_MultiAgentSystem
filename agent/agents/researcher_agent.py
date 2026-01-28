@@ -30,6 +30,7 @@ from tools.visitlisboa_api import (
     get_place_categories,
 )
 from tools.web_knowledge import search_history_culture
+from tools.dados_abertos import find_nearby_services
 
 
 class ResearcherAgent(BaseAgent):
@@ -40,10 +41,10 @@ class ResearcherAgent(BaseAgent):
         - search_places_attractions
         - search_cultural_events
         - search_lisbon_knowledge
-        - find_nearby_services
+        - find_nearby_services (pharmacies, hospitals, etc.)
         - get_event_categories
         - get_place_categories
-        - search_history_culture
+        - search_history_culture (web search for history/facts)
     """
     
     def __init__(self):
@@ -55,6 +56,7 @@ class ResearcherAgent(BaseAgent):
             search_places_attractions,
             search_cultural_events,
             search_lisbon_knowledge,
+            find_nearby_services,  # For pharmacies, hospitals, etc.
             get_event_categories,
             get_place_categories,
             search_history_culture,
