@@ -80,6 +80,8 @@ AML_BOUNDS = {
     'lon_max': -8.7   # Eastern limit (Montijo area)
 }
 
+# Check area coverage: https://www.keene.edu/campus/maps/tool/?coordinates=-9.5000000%2C%2038.4000000%0A-8.7000000%2C%2038.4000000%0A-8.7000000%2C%2039.0000000%0A-9.5000000%2C%2039.0000000%0A-9.5000000%2C%2038.4000000
+
 # CP Lines serving the AML region
 CP_LINES = {
     "cascais": {
@@ -1636,6 +1638,214 @@ def get_cp_routes() -> str:
         response += "\n"
     
     return response
+
+
+@tool
+def plan_train_trip(origin: str, destination: str) -> str:
+    """
+    Plans a train trip between two stations using GTFS schedule data.
+    
+    Calculates travel time based on actual GTFS timetables (NOT estimated).
+    Also shows real-time delay information when available.
+    
+    Args:
+        origin: Starting station name (e.g., 'Entrecampos', 'Rossio').
+        destination: Ending station name (e.g., 'Sintra', 'Cascais').
+        
+    Returns:
+        str: Trip details including travel time from GTFS, next departures, and delays.
+    """
+    manager = get_gtfs_manager()
+    
+    # Find origin station
+    origin_stops = search_gtfs_stop(origin, limit=3)
+    if not origin_stops:
+        return (f"❌ Station '{origin}' not found.\n\n"
+               f"💡 Try: Oriente, Rossio, Entrecampos, Cais do Sodré, Cascais, Sintra")
+    
+    # Find destination station
+    dest_stops = search_gtfs_stop(destination, limit=3)
+    if not dest_stops:
+        return (f"❌ Station '{destination}' not found.\n\n"
+               f"💡 Try: Oriente, Rossio, Entrecampos, Cais do Sodré, Cascais, Sintra")
+    
+    origin_station = origin_stops[0]
+    dest_station = dest_stops[0]
+    origin_id = origin_station['stop_id']
+    dest_id = dest_station['stop_id']
+    origin_name = origin_station['stop_name']
+    dest_name = dest_station['stop_name']
+    
+    now = datetime.now()
+    current_time = now.strftime('%H:%M:%S')
+    
+    # Get active services for today
+    active_services = manager.get_active_services(now)
+    
+    if not active_services:
+        return "❌ No train services active today. This might be a holiday or data issue."
+    
+    conn = manager.get_db_connection()
+    if not conn:
+        return "❌ Database not available. Try running `initialize_cp_gtfs()` first."
+    
+    try:
+        cursor = conn.cursor()
+        placeholders = ','.join(['?' for _ in active_services])
+        
+        # Find trips that go from origin to destination (origin stop before dest stop)
+        query = f"""
+            SELECT 
+                st_origin.trip_id,
+                st_origin.departure_time as origin_departure,
+                st_dest.arrival_time as dest_arrival,
+                st_origin.stop_sequence as origin_seq,
+                st_dest.stop_sequence as dest_seq,
+                t.trip_headsign,
+                r.route_short_name,
+                r.route_long_name
+            FROM stop_times st_origin
+            JOIN stop_times st_dest ON st_origin.trip_id = st_dest.trip_id
+            JOIN trips t ON st_origin.trip_id = t.trip_id
+            JOIN routes r ON t.route_id = r.route_id
+            WHERE st_origin.stop_id = ?
+            AND st_dest.stop_id = ?
+            AND st_origin.stop_sequence < st_dest.stop_sequence
+            AND t.service_id IN ({placeholders})
+            AND st_origin.departure_time >= ?
+            ORDER BY st_origin.departure_time
+            LIMIT 10
+        """
+        
+        cursor.execute(query, [origin_id, dest_id] + active_services + [current_time])
+        trips = cursor.fetchall()
+        conn.close()
+        
+        if not trips:
+            # Try without time constraint to see if route exists at all
+            conn = manager.get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                SELECT COUNT(*) 
+                FROM stop_times st_origin
+                JOIN stop_times st_dest ON st_origin.trip_id = st_dest.trip_id
+                JOIN trips t ON st_origin.trip_id = t.trip_id
+                WHERE st_origin.stop_id = ?
+                AND st_dest.stop_id = ?
+                AND st_origin.stop_sequence < st_dest.stop_sequence
+            """, (origin_id, dest_id))
+            total_trips = cursor.fetchone()[0]
+            conn.close()
+            
+            if total_trips == 0:
+                return (f"❌ No direct train service found between **{origin_name}** and **{dest_name}**.\n\n"
+                       f"💡 These stations may be on different lines. Consider:\n"
+                       f"   • Transfer at a connecting station (e.g., Oriente, Entrecampos)\n"
+                       f"   • Use `search_cp_stations` to find line information")
+            else:
+                return (f"⏰ No more trains today from **{origin_name}** to **{dest_name}**.\n\n"
+                       f"There are {total_trips} trips on other days. Try again tomorrow or check schedules online.")
+        
+        # Calculate travel time from GTFS data
+        def parse_gtfs_time(time_str: str) -> int:
+            """Convert GTFS time (HH:MM:SS) to minutes since midnight."""
+            parts = time_str.split(':')
+            return int(parts[0]) * 60 + int(parts[1])
+        
+        def format_time(time_str: str) -> str:
+            """Format GTFS time for display (handle times > 24:00)."""
+            parts = time_str.split(':')
+            hour = int(parts[0]) % 24
+            return f"{hour:02d}:{parts[1]}"
+        
+        # Calculate travel time from first trip for summary
+        first_trip = trips[0]
+        first_dep_mins = parse_gtfs_time(first_trip['origin_departure'])
+        first_arr_mins = parse_gtfs_time(first_trip['dest_arrival'])
+        travel_time = first_arr_mins - first_dep_mins
+        if travel_time < 0:
+            travel_time += 24 * 60
+        
+        # Get route name from first trip
+        route_name = first_trip['route_short_name'] or first_trip['route_long_name'] or 'CP'
+        
+        # Get real-time delay info
+        aml_trains = get_cp_aml_trains()
+        
+        # Build map of real-time train info (keyed by departure time or headsign)
+        realtime_trains = {}
+        route_has_delays = False
+        for train in aml_trains:
+            train_headsign = train.get('destination', {}).get('designation', '')
+            if dest_name.lower() in train_headsign.lower() or train_headsign.lower() in dest_name.lower():
+                delay = train.get('delay') or 0
+                delay_mins = delay // 60 if delay else 0
+                train_number = train.get('trainNumber', '')
+                realtime_trains[train_number] = {
+                    'delay_mins': delay_mins,
+                    'headsign': train_headsign,
+                    'status': train.get('status', '')
+                }
+                if delay_mins > 0:
+                    route_has_delays = True
+        
+        # Build response - Clean formatting without technical jargon
+        response = f"🚆 **Comboio: {origin_name} → {dest_name}**\n"
+        response += "=" * 50 + "\n\n"
+        
+        # Summary box at top
+        response += "📊 **RESUMO DA VIAGEM**\n"
+        response += f"   🚆 Linha: **{route_name}**\n"
+        response += f"   ⏱️ Duração: **{travel_time} minutos**\n"
+        # Only show delay status if we have real-time info
+        if realtime_trains:
+            if route_has_delays:
+                max_delay = max(t['delay_mins'] for t in realtime_trains.values())
+                response += f"   📍 Estado: ⚠️ Alguns comboios com +{max_delay}min atraso\n"
+            else:
+                response += f"   📍 Estado: ✅ Comboios a horas (tempo real)\n"
+        else:
+            response += f"   📍 Estado: ℹ️ Sem dados em tempo real\n"
+        response += "\n"
+        
+        response += "-" * 50 + "\n"
+        response += "📋 **Próximas Partidas:**\n\n"
+        
+        for i, trip in enumerate(trips[:8], 1):
+            origin_dep = trip['origin_departure']
+            dest_arr = trip['dest_arrival']
+            headsign = trip['trip_headsign'] or dest_name
+            
+            # Calculate travel time in minutes
+            dep_mins = parse_gtfs_time(origin_dep)
+            arr_mins = parse_gtfs_time(dest_arr)
+            trip_travel_mins = arr_mins - dep_mins
+            if trip_travel_mins < 0:
+                trip_travel_mins += 24 * 60
+            
+            # Format display times
+            dep_display = format_time(origin_dep)
+            arr_display = format_time(dest_arr)
+            
+            # Only show real-time indicators if we have actual data for this departure
+            # We don't have train numbers in GTFS, so we can't match specific departures
+            # Just show scheduled times without false confirmations
+            response += f"   🕐 **{dep_display}** → {arr_display} ({trip_travel_mins}min)\n"
+        
+        if len(trips) > 8:
+            response += f"\n   ... e mais {len(trips) - 8} partidas hoje.\n"
+        
+        response += "\n" + "-" * 50 + "\n"
+        response += f"📅 {now.strftime('%A, %d %B %Y')} | {now.strftime('%H:%M')}\n"
+        response += "💡 Horários: cp.pt | Bilhetes: app CP ou estação\n"
+        
+        return response
+        
+    except Exception as e:
+        if conn:
+            conn.close()
+        logger.error(f"Error planning train trip: {e}")
+        return f"❌ Error planning trip: {str(e)}"
 
 
 @tool  
