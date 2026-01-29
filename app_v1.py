@@ -33,6 +33,7 @@ import streamlit as st
 import sys
 import os
 import traceback
+import base64
 from datetime import datetime
 from typing import Optional, Dict, Any, Tuple
 
@@ -145,7 +146,7 @@ TRANSLATIONS = {
         "thinking": "Analyzing and gathering information...",
         
         # Footer
-        "footer_version": "Lisbon Urban Assistant v1.0",
+        "footer_version": "LISBOA v2.5",
         "footer_made": "André Filipe Gomes Silvestre | Master's Student\nNOVA IMS",
         
         # Info Page
@@ -273,7 +274,7 @@ NOVA IMS - Universidade NOVA de Lisboa
         "thinking": "A analisar e recolher informação...",
         
         # Footer
-        "footer_version": "Assistente Urbano de Lisboa v1.0",
+        "footer_version": "LISBOA v2.5",
         "footer_made": "André Filipe Gomes Silvestre | Mestrando\nNOVA IMS",
         
         # Info Page
@@ -318,6 +319,17 @@ def t(key: str) -> str:
 # LISBON THEME - CUSTOM CSS
 # ==========================================================================
 
+def get_base64_image(image_path):
+    try:
+        with open(image_path, "rb") as img_file:
+            return base64.b64encode(img_file.read()).decode()
+    except Exception:
+        return ""
+
+banner_path = os.path.join(os.path.dirname(__file__), "img", "BannerLSIBOA_21-9.png")
+banner_b64 = get_base64_image(banner_path)
+banner_url = f"data:image/png;base64,{banner_b64}" if banner_b64 else ""
+
 LISBON_CSS = """
 <style>
 /* ==========================================================================
@@ -356,9 +368,11 @@ LISBON_CSS = """
 
 /* ============ HEADER ============ */
 .lisbon-header {
-    background: linear-gradient(135deg, var(--lisbon-orange) 0%, var(--lisbon-orange-light) 50%, var(--lisbon-yellow) 100%);
+    background: linear-gradient(135deg, rgba(255, 64, 17, 0.65) 0%, rgba(255, 107, 71, 0.65) 50%, rgba(246, 218, 0, 0.65) 100%), url('__BANNER_IMAGE__');
+    background-size: cover;
+    background-position: center;
     border-radius: 20px;
-    padding: 2rem 2.5rem;
+    padding: 4rem 3.5rem;
     margin-bottom: 2rem;
     box-shadow: 0 8px 32px rgba(255, 64, 17, 0.25), 0 2px 8px rgba(0,0,0,0.1);
     position: relative;
@@ -725,6 +739,9 @@ header[data-testid="stHeader"] {background: transparent;}
 }
 </style>
 """
+
+# Inject dynamic banner URL
+LISBON_CSS = LISBON_CSS.replace("__BANNER_IMAGE__", banner_url)
 
 
 # ==========================================================================

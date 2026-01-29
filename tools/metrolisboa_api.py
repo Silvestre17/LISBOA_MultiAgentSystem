@@ -113,6 +113,8 @@ METRO_STATIONS = {
     "rato": ["amarela"],
     "marquês de pombal": ["amarela", "azul"],
     "marques de pombal": ["amarela", "azul"],
+    "marques": ["amarela", "azul"],
+    "marquês": ["amarela", "azul"],
     "marques pombal": ["amarela", "azul"],
     "marquês pombal": ["amarela", "azul"],
     "picoas": ["amarela"],
@@ -188,6 +190,7 @@ METRO_STATIONS = {
 # Metro Station ID mapping (name -> API code)
 METRO_STATION_IDS = {
     "rato": "RA", "marquês de pombal": "MP", "marques de pombal": "MP",
+    "marques": "MP", "marquês": "MP",
     "picoas": "PI", "saldanha": "SA", "campo pequeno": "CP",
     "entre campos": "EC", "entrecampos": "EC",
     "cidade universitária": "CU", "cidade universitaria": "CU",
@@ -244,6 +247,8 @@ LISBON_LANDMARKS = {
     "mosteiro dos jerónimos": {"name": "Mosteiro dos Jerónimos", "metro": None, "alternative": "Tram 15E or CP Train to Belém", "description": "UNESCO Monument"},
     "castelo de são jorge": {"name": "Castelo de São Jorge", "metro": "rossio", "line": "verde", "alternative": "From Rossio metro, walk up through Alfama (15 min) or Tram 28E", "description": "Medieval castle with panoramic views"},
     "alfama": {"name": "Alfama", "metro": "terreiro do paço", "line": "azul", "alternative": "Tram 28E crosses Alfama", "description": "Lisbon's oldest historic neighborhood"},
+    "nova ims": {"name": "NOVA IMS (Campus de Campolide)", "metro": "são sebastião", "line": "azul/vermelha", "description": "NOVA Information Management School"},
+    "campus de campolide": {"name": "Campus de Campolide (UNL)", "metro": "são sebastião", "line": "azul/vermelha", "description": "Universidade NOVA de Lisboa Campus"},
 }
 
 

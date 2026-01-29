@@ -8,3 +8,4 @@ font = "sans serif"
 [server]
 enableCORS = false
 enableXsrfProtection = false
+fileWatcherType = "poll"

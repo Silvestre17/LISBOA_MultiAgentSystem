@@ -875,6 +875,186 @@ def get_carris_metropolitana_stop_info(stop_id: str) -> str:
 
 
 @tool
+def find_direct_bus_lines(origin: str, destination: str) -> str:
+    """
+    Finds Carris Metropolitana bus lines that connect two locations directly.
+    
+    This is the BEST TOOL for answering "How do I get from X to Y by bus?" questions.
+    It searches the line data to find buses that serve BOTH the origin AND destination.
+    Also checks for service alerts affecting the routes.
+    
+    Works with:
+        - Town/city names: 'Montijo', 'Alcochete', 'Loures'
+        - Transport hubs: 'Oriente', 'Campo Grande', 'Cais do Sodré'
+        - Neighborhoods: 'Parque das Nações', 'Moscavide'
+    
+    Args:
+        origin: Starting location name.
+        destination: Ending location name.
+
+    Returns:
+        str: List of direct bus lines with line numbers, route details, and alerts.
+    """
+    data = fetch_json_with_retry(CARRIS_LINES_URL)
+    
+    if not data:
+        return "❌ Failed to fetch Carris Metropolitana lines data."
+    
+    if not isinstance(data, list):
+        return "❌ Unexpected response format."
+    
+    def normalize(text: str) -> str:
+        """Normalize text for comparison."""
+        return text.lower().replace('é', 'e').replace('ã', 'a').replace('õ', 'o').replace('ç', 'c').replace('á', 'a').replace('ó', 'o').replace('í', 'i').replace('ú', 'u')
+    
+    origin_norm = normalize(origin)
+    dest_norm = normalize(destination)
+    
+    direct_lines = []
+    
+    for line in data:
+        short_name = line.get('short_name', '')
+        long_name = line.get('long_name') or ''
+        line_id = line.get('id', '')
+        localities = line.get('localities') or []
+        municipalities = line.get('municipalities') or []
+        
+        # Normalize all searchable fields
+        long_name_norm = normalize(long_name)
+        localities_norm = [normalize(loc) for loc in localities if loc]
+        muni_norm = [normalize(m) for m in municipalities if m]
+        
+        # Check if origin is served
+        origin_match = (
+            origin_norm in long_name_norm or
+            any(origin_norm in loc for loc in localities_norm) or
+            any(origin_norm in m for m in muni_norm)
+        )
+        
+        # Check if destination is served
+        dest_match = (
+            dest_norm in long_name_norm or
+            any(dest_norm in loc for loc in localities_norm) or
+            any(dest_norm in m for m in muni_norm)
+        )
+        
+        if origin_match and dest_match:
+            direct_lines.append({
+                'id': line_id,
+                'short_name': short_name,
+                'long_name': long_name,
+                'localities': [loc for loc in localities if loc],
+                'municipalities': [m for m in municipalities if m]
+            })
+    
+    if not direct_lines:
+        response = f"❌ **Sem linhas diretas entre '{origin}' e '{destination}'**\n\n"
+        response += "💡 **Sugestões:**\n"
+        response += "   • Pode ser necessário fazer transbordo\n"
+        response += "   • Considere combinar Metro + Autocarro\n"
+        response += f"   • Consulte carrismetropolitana.pt para mais opções\n"
+        return response
+    
+    # Fetch alerts to check if any affect these lines
+    alerts_data = fetch_json_with_retry(CARRIS_ALERTS_URL)
+    alerts_list = alerts_data if isinstance(alerts_data, list) else (alerts_data.get('entity', []) if alerts_data else [])
+    
+    # Build set of affected line IDs
+    affected_lines = set()
+    relevant_alerts = []
+    for alert in alerts_list:
+        alert_data = alert.get('alert', alert)
+        informed_entity = alert_data.get('informed_entity', [])
+        for entity in informed_entity:
+            route_id = entity.get('route_id', '')
+            if route_id:
+                affected_lines.add(route_id)
+        # Check if alert affects any of our direct lines
+        for line in direct_lines:
+            if line['id'] in affected_lines or line['short_name'] in affected_lines:
+                header_text = alert_data.get('header_text', {})
+                header = header_text.get('translation', [{}])[0].get('text', '')
+                if header and header not in [a['header'] for a in relevant_alerts]:
+                    relevant_alerts.append({
+                        'header': header,
+                        'lines': [e.get('route_id', '') for e in informed_entity if e.get('route_id')]
+                    })
+    
+    # Build response - RESPECT the user's direction: origin → destination
+    response = f"🚌 **Autocarros: {origin.title()} → {destination.title()}**\n"
+    response += "=" * 50 + "\n\n"
+    
+    # Show alerts first if any
+    if relevant_alerts:
+        response += "⚠️ **ALERTAS DE SERVIÇO:**\n"
+        for alert in relevant_alerts[:3]:
+            response += f"   • {alert['header']}\n"
+        response += "\n"
+    
+    response += f"✅ **{len(direct_lines)} linha(s) direta(s) encontrada(s):**\n\n"
+    
+    for i, line in enumerate(direct_lines[:6], 1):
+        short_name = line['short_name']
+        long_name = line['long_name']
+        localities = line['localities']
+        line_id = line['id']
+        
+        # Check if this line has alerts
+        has_alert = line_id in affected_lines or short_name in affected_lines
+        alert_icon = " ⚠️" if has_alert else ""
+        
+        response += f"**{i}. 🚍 Linha {short_name}**{alert_icon}\n"
+        
+        # Show the official route terminals (not direction, just terminals served)
+        if long_name:
+            # Replace " - " with " ↔ " to show it's bidirectional
+            display_name = long_name.replace(' - ', ' ↔ ')
+            response += f"   📍 Terminais: {display_name}\n"
+        
+        # Show localities if available, ordered from origin to destination when possible
+        if localities:
+            origin_idx = -1
+            dest_idx = -1
+            for idx, loc in enumerate(localities):
+                loc_norm = normalize(loc)
+                if origin_idx < 0 and (origin_norm in loc_norm or loc_norm in origin_norm):
+                    origin_idx = idx
+                if dest_idx < 0 and (dest_norm in loc_norm or loc_norm in dest_norm):
+                    dest_idx = idx
+            
+            if origin_idx >= 0 and dest_idx >= 0:
+                if origin_idx < dest_idx:
+                    key_stops = localities[origin_idx:dest_idx+1]
+                else:
+                    key_stops = localities[dest_idx:origin_idx+1][::-1]
+                
+                if len(key_stops) > 6:
+                    display_stops = key_stops[:6]
+                    response += f"   🚏 {' → '.join(display_stops)} (+{len(key_stops)-6})\n"
+                else:
+                    response += f"   🚏 {' → '.join(key_stops)}\n"
+            else:
+                key_stops = localities[:6]
+                response += f"   🚏 Passa por: {', '.join(key_stops)}"
+                if len(localities) > 6:
+                    response += f" (+{len(localities)-6})"
+                response += "\n"
+        response += "\n"
+    
+    if len(direct_lines) > 6:
+        other_lines = [l['short_name'] for l in direct_lines[6:]]
+        response += f"📋 Outras linhas: {', '.join(other_lines)}\n\n"
+    
+    response += "-" * 50 + "\n"
+    response += "💡 **Como usar:**\n"
+    response += f"   • Procure pelo número da linha (ex: **{direct_lines[0]['short_name']}**) na paragem\n"
+    response += f"   • Verifique a direção do autocarro ({origin.title()} → {destination.title()})\n"
+    response += "   • Horários e paragens: carrismetropolitana.pt\n"
+    
+    return response
+
+
+@tool
 def search_carris_metropolitana_lines(query: str) -> str:
     """
     Searches for Carris Metropolitana (suburban) bus lines.
@@ -882,12 +1062,18 @@ def search_carris_metropolitana_lines(query: str) -> str:
     IMPORTANT: This searches SUBURBAN bus lines only. Urban Lisbon buses
     like lines 28E, 738, 732 are NOT included.
     
+    Searches in:
+        - Line number (short_name)
+        - Line description (long_name)
+        - Municipalities served
+        - Localities served (includes landmarks like 'Oriente', 'Parque das Nações')
+    
     Args:
         query: Line number, destination name, or area to search.
-               Examples: '1718', 'Sintra', 'Cascais', 'Almada', 'Oriente'
+               Examples: '1718', 'Sintra', 'Cascais', 'Almada', 'Oriente', 'Montijo'
 
     Returns:
-        str: Matching lines with route details.
+        str: Matching lines with route details and localities served.
     """
     data = fetch_json_with_retry(CARRIS_LINES_URL)
     
@@ -904,17 +1090,25 @@ def search_carris_metropolitana_lines(query: str) -> str:
     
     for line in data:
         short_name = line.get('short_name', '')
-        long_name = line.get('long_name', '')
+        long_name = line.get('long_name') or ''
         line_id = line.get('id', '')
-        municipalities = line.get('municipalities', [])
+        municipalities = line.get('municipalities') or []
+        localities = line.get('localities') or []
         
+        # Normalize long_name for accent-insensitive search
         long_name_norm = long_name.lower().replace('é', 'e').replace('ã', 'a').replace('õ', 'o').replace('ç', 'c')
-        muni_str = ' '.join(municipalities).lower()
         
+        # Build searchable strings (filter None values)
+        muni_str = ' '.join([m for m in municipalities if m]).lower()
+        localities_str = ' '.join([loc for loc in localities if loc]).lower()
+        localities_norm = localities_str.replace('é', 'e').replace('ã', 'a').replace('õ', 'o').replace('ç', 'c')
+        
+        # Search in all fields: short_name, long_name, line_id, municipalities, localities
         if (query_lower in short_name.lower() or 
             query_normalized in long_name_norm or
             query_lower in line_id.lower() or
-            query_lower in muni_str):
+            query_lower in muni_str or
+            query_normalized in localities_norm):
             matches.append(line)
     
     if not matches:
@@ -922,27 +1116,34 @@ def search_carris_metropolitana_lines(query: str) -> str:
         if any(kw in query_lower for kw in urban_keywords):
             return (f"❌ No Carris Metropolitana lines found for '{query}'\n\n"
                     + CARRIS_LIMITATION_NOTICE)
-        return f"❌ No lines found matching: '{query}'\n\n💡 Try searching by area: Sintra, Cascais, Almada, Oeiras, Loures"
+        return f"❌ No lines found matching: '{query}'\n\n💡 Try searching by area: Sintra, Cascais, Almada, Oeiras, Loures, Montijo, Oriente"
     
     response = f"🚌 **Carris Metropolitana lines matching '{query}'** ({len(matches)} found)\n"
     response += "=" * 50 + "\n\n"
     
-    for i, line in enumerate(matches[:10], 1):
+    for i, line in enumerate(matches[:15], 1):
         short_name = line.get('short_name', 'N/A')
-        long_name = line.get('long_name', 'N/A')
-        municipalities = line.get('municipalities', [])
+        long_name = line.get('long_name') or 'N/A'
+        municipalities = line.get('municipalities') or []
+        localities = line.get('localities') or []
         
         response += f"{i}. **Line {short_name}**\n"
         response += f"   📍 {long_name}\n"
         if municipalities:
-            response += f"   🏘️ {', '.join(municipalities[:3])}\n"
+            muni_list = [m for m in municipalities[:4] if m]
+            response += f"   🏘️ Municipalities: {', '.join(muni_list)}\n"
+        if localities:
+            # Show key localities that might match the query
+            key_localities = [loc for loc in localities[:8] if loc]
+            response += f"   📌 Localities: {', '.join(key_localities)}\n"
         response += "\n"
     
-    if len(matches) > 10:
-        response += f"... and {len(matches) - 10} more lines.\n"
+    if len(matches) > 15:
+        response += f"... and {len(matches) - 15} more lines.\n"
     
     response += "\n" + "-" * 40 + "\n"
-    response += "💡 Use `get_bus_schedule` with line number for full route details.\n"
+    response += "💡 Use `find_bus_routes(origin, destination)` to find direct routes between two places.\n"
+    response += "💡 Use `get_bus_next_departures(line_id)` for schedule details.\n"
     
     return response
 

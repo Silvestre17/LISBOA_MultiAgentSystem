@@ -79,6 +79,7 @@ def get_agent_tools(agent_name: str) -> List:
             get_carris_metropolitana_stop_info,
             search_carris_metropolitana_lines,
             find_bus_routes,
+            find_direct_bus_lines,
             get_bus_realtime_locations,
             get_bus_next_departures,
         )
@@ -86,6 +87,8 @@ def get_agent_tools(agent_name: str) -> List:
         from tools.cp_api import (
             get_train_status,
             search_cp_stations,
+            plan_train_trip,
+            get_train_schedule,
         )
         # Multi-modal transport routing
         from tools.transport_api import (
@@ -111,7 +114,10 @@ def get_agent_tools(agent_name: str) -> List:
             get_carris_metropolitana_alerts,
             get_carris_metropolitana_stop_info,
             search_carris_metropolitana_lines,
+            find_direct_bus_lines,
             get_train_status,
+            plan_train_trip,
+            get_train_schedule,
             get_transport_summary,
             get_route_between_stations,
             find_bus_routes,
