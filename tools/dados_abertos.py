@@ -389,9 +389,9 @@ def search_datasets(query: str) -> pd.DataFrame:
 @tool
 def find_nearby_services(
     service_type: str,
-    user_lat: float = None,
-    user_lon: float = None,
-    near_location_name: str = None,
+    user_lat: Optional[float] = None,
+    user_lon: Optional[float] = None,
+    near_location_name: Optional[str] = None,
     max_results: int = 5
 ) -> str:
     """
@@ -543,7 +543,7 @@ def find_nearby_services(
 
 
 @tool
-def list_available_datasets(category: str = None) -> str:
+def list_available_datasets(category: Optional[str] = None) -> str:
     """
     Lists all available open data datasets from Lisboa Aberta.
     Optionally filter by category keyword.

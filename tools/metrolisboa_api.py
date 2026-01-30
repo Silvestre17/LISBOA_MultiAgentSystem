@@ -422,7 +422,7 @@ def _get_metro_access_token(force_refresh: bool = False) -> Optional[str]:
         return None
 
 
-def _metro_api_request(endpoint: str, params: Dict = None) -> Optional[Dict[str, Any]]:
+def _metro_api_request(endpoint: str, params: Optional[Dict] = None) -> Optional[Dict[str, Any]]:
     """
     Makes an authenticated request to the Metro de Lisboa Official API.
     
@@ -925,9 +925,9 @@ def get_metro_line_wait_times(line: str) -> str:
 
 @tool
 def find_nearest_metro(
-    latitude: float = None, 
-    longitude: float = None,
-    near_location_name: str = None
+    latitude: Optional[float] = None, 
+    longitude: Optional[float] = None,
+    near_location_name: Optional[str] = None
 ) -> str:
     """
     Finds the nearest Metro stations to a GPS location or named place.

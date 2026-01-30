@@ -594,7 +594,7 @@ def _get_db_connection() -> Optional[sqlite3.Connection]:
         return None
 
 
-def _get_active_services(conn: sqlite3.Connection, date: datetime = None) -> List[str]:
+def _get_active_services(conn: sqlite3.Connection, date: Optional[datetime] = None) -> List[str]:
     """Gets active service_ids for a given date."""
     if date is None:
         date = datetime.now()
@@ -953,7 +953,7 @@ def get_next_arrivals_at_stop(stop_id: str, limit: int = 10) -> List[Dict]:
 # ==========================================================================
 
 @tool
-def carris_get_stops(query: str = "", limit: int = None) -> str:
+def carris_get_stops(query: str = "", limit: Optional[int] = None) -> str:
     """
     Searches Carris (Lisbon urban) bus and tram stops.
     
