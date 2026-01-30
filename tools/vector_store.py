@@ -404,7 +404,7 @@ class KnowledgeBase:
         json_path: str, 
         source_tag: str,
         force_rebuild: bool = False,
-        max_docs: int = None
+        max_docs: Optional[int] = None
     ) -> Dict[str, int]:
         """
         Synchronizes a JSON-based collection (Places or Events).
@@ -516,20 +516,20 @@ class KnowledgeBase:
             "pending": len(new_ids | modified_ids) - len(ids_to_add) if has_more_work else 0
         }
 
-    def sync_places_collection(self, force_rebuild: bool = False, max_docs: int = None) -> Dict[str, int]:
+    def sync_places_collection(self, force_rebuild: bool = False, max_docs: Optional[int] = None) -> Dict[str, int]:
         """Synchronizes the VisitLisboa Places collection."""
         return self._sync_json_collection(
             COLLECTION_PLACES, str(Config.PATH_VISIT_LISBOA_PLACES), "VisitLisboa_Places", force_rebuild, max_docs
         )
     
-    def sync_events_collection(self, force_rebuild: bool = False, max_docs: int = None) -> Dict[str, int]:
+    def sync_events_collection(self, force_rebuild: bool = False, max_docs: Optional[int] = None) -> Dict[str, int]:
         """Synchronizes the VisitLisboa Events collection."""
         return self._sync_json_collection(
             COLLECTION_EVENTS, str(Config.PATH_VISIT_LISBOA_EVENTS), "VisitLisboa_Events", force_rebuild, max_docs
         )
 
     def sync_all(self, rebuild_pdf: bool = False, rebuild_places: bool = False, 
-                 rebuild_events: bool = False, max_docs: int = None) -> Dict[str, Any]:
+                 rebuild_events: bool = False, max_docs: Optional[int] = None) -> Dict[str, Any]:
         """
         Runs synchronization for all collections.
 
