@@ -1,7 +1,7 @@
-﻿# ==========================================================================
+# ==========================================================================
 # Master Thesis - Lisbon Urban Assistant (Streamlit App)
 #   - André Filipe Gomes Silvestre, 2025
-# 
+#
 #   Main Streamlit application for the intelligent tourist assistant.
 #   "LISBOA: LLM-Integrated System for Behavioral Orchestration and Agentic Architecture"
 # ==========================================================================
@@ -23,19 +23,23 @@ if sys.platform.startswith("win"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 import nest_asyncio
+
 nest_asyncio.apply()
 
 # Suppress Torch/Streamlit file watcher warning
 import torch
-torch.classes.__path__ = [] # Fix RuntimeError: module 'torch.classes' has no attribute '__path__' 
+
+torch.classes.__path__ = []  # Fix RuntimeError: module 'torch.classes' has no attribute '__path__'
 # Source: (https://github.com/datalab-to/marker/issues/442)
 
 import warnings
+
 warnings.filterwarnings("ignore", message=".*torch.classes.*")
 warnings.filterwarnings("ignore", category=UserWarning, module="torch")
 
 # Load environment variables
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # Add project root to path
@@ -47,7 +51,7 @@ from tools.visitlisboa_api import initialize_vector_store
 from tools.carris_api import CarrisGTFSManager, CARRIS_DB_PATH
 
 # Define images directory
-IMG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'img')
+IMG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "img")
 
 # ==========================================================================
 # PAGE CONFIGURATION
@@ -61,8 +65,8 @@ st.set_page_config(
     menu_items={
         "Get Help": "https://github.com/Silvestre17/Thesis2025-26_AFGS",
         "Report a bug": "https://github.com/Silvestre17/Thesis2025-26_AFGS/issues",
-        "About": "### Lisbon Urban Assistant\nMaster Thesis Project 2025"
-    }
+        "About": "### Lisbon Urban Assistant\nMaster Thesis Project 2025",
+    },
 )
 
 # ==========================================================================
@@ -231,7 +235,6 @@ TRANSLATIONS = {
         # Header
         "app_title": "Lisbon Urban Assistant",
         "app_subtitle": "Your intelligent guide to exploring Lisbon",
-        
         # Sidebar - Settings
         "settings": "Settings & Status",
         "language": "Language",
@@ -240,7 +243,6 @@ TRANSLATIONS = {
         "api_credentials": "API Credentials",
         "api_key": "API Key",
         "clear_chat": "Clear Chat",
-        
         # Sidebar - Quick Actions
         "quick_actions": "Quick Actions",
         "weather_summary": "Weather Summary",
@@ -248,7 +250,6 @@ TRANSLATIONS = {
         "upcoming_events": "Upcoming Events",
         "top_attractions": "Top Attractions",
         "plan_my_day": "Plan My Day",
-        
         # Main Content
         "welcome": "Welcome to Lisbon! 🇵🇹",
         "intro": "I am your AI assistant for exploring the city. Ask me about weather, transport, events, or places.",
@@ -257,7 +258,6 @@ TRANSLATIONS = {
         "error_init": "Failed to initialize assistant.",
         "footer": "Master Thesis • NOVA IMS • André Silvestre",
         "try_asking": "Try asking about...",
-        
         # Quick Action Queries
         "query_weather": "What's the current weather in Lisbon? Include any active warnings.",
         "query_transport": "What's the current status of public transport in Lisbon? Include Metro, buses, and trains.",
@@ -269,7 +269,6 @@ TRANSLATIONS = {
         # Header
         "app_title": "Assistente Urbano de Lisboa",
         "app_subtitle": "O seu guia inteligente para explorar Lisboa",
-        
         # Sidebar - Settings
         "settings": "Definições e Estado",
         "language": "Idioma",
@@ -278,7 +277,6 @@ TRANSLATIONS = {
         "api_credentials": "Credenciais API",
         "api_key": "Chave API",
         "clear_chat": "Limpar Conversa",
-        
         # Sidebar - Quick Actions
         "quick_actions": "Ações Rápidas",
         "weather_summary": "Resumo do Tempo",
@@ -286,7 +284,6 @@ TRANSLATIONS = {
         "upcoming_events": "Próximos Eventos",
         "top_attractions": "Principais Atrações",
         "plan_my_day": "Planear o Meu Dia",
-        
         # Main Content
         "welcome": "Bem-vindo a Lisboa! 🇵🇹",
         "intro": "Sou o teu assistente IA para explorar a cidade. Pergunta-me sobre tempo, transportes, eventos ou locais.",
@@ -295,15 +292,15 @@ TRANSLATIONS = {
         "error_init": "Falha ao inicializar assistente.",
         "footer": "Tese de Mestrado • NOVA IMS • André Silvestre",
         "try_asking": "Experimenta perguntar sobre...",
-        
         # Quick Action Queries
         "query_weather": "Qual é a previsão do tempo para Lisboa? Inclui avisos meteorológicos ativos.",
         "query_transport": "Qual é o estado atual dos transportes públicos em Lisboa? Inclui Metro, autocarros e comboios.",
         "query_events": "Que eventos culturais estão a acontecer em Lisboa esta semana?",
         "query_attractions": "Quais são as principais atrações turísticas de Lisboa que não posso perder?",
         "query_plan": "Ajuda-me a planear um dia em Lisboa. Estou interessado em história e boa comida.",
-    }
+    },
 }
+
 
 def init_session():
     """Initialize session state variables."""
@@ -320,14 +317,17 @@ def init_session():
     if "current_page" not in st.session_state:
         st.session_state.current_page = "chat"
 
-def t(key):
+
+def t(key: str) -> str:
     """Get translation safely."""
     lang = st.session_state.get("language", "pt")
     return TRANSLATIONS.get(lang, TRANSLATIONS["pt"]).get(key, key)
 
+
 # ==========================================================================
 # BACKEND INITIALIZATION (Cached)
 # ==========================================================================
+
 
 @st.cache_resource(show_spinner="Starting Engine...")
 def load_carris_db():
@@ -335,10 +335,11 @@ def load_carris_db():
     try:
         manager = CarrisGTFSManager()
         if not os.path.exists(CARRIS_DB_PATH):
-             manager.ensure_database()
+            manager.ensure_database()
         return True
     except Exception:
         return False
+
 
 @st.cache_resource(show_spinner="Initializing Vector DB...")
 def load_vector_store():
@@ -349,13 +350,17 @@ def load_vector_store():
     except Exception:
         return False
 
+
 def get_assistant(provider: str):
     """
-    Get or create the assistant instance. 
-    Note: We store the assistant in session_state, but the heavy lifting 
+    Get or create the assistant instance.
+    Note: We store the assistant in session_state, but the heavy lifting
     (models, tools) should be efficient.
     """
-    if st.session_state.assistant is None or st.session_state.get("last_provider") != provider:
+    if (
+        st.session_state.assistant is None
+        or st.session_state.get("last_provider") != provider
+    ):
         try:
             # Re-initialize only if provider changed or not exists
             if Config.USE_MULTI_AGENT:
@@ -368,18 +373,24 @@ def get_assistant(provider: str):
             return None
     return st.session_state.assistant
 
+
 # ==========================================================================
 # UI COMPONENTS
 # ==========================================================================
 
+
 def render_header():
     """Render the Lisbon-themed header."""
-    st.markdown(f"""
+    st.markdown(
+        f"""
     <div class="lisbon-header">
         <h1>🏛️ {t("app_title")}</h1>
         <p>{t("app_subtitle")}</p>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
+
 
 def render_sidebar():
     with st.sidebar:
@@ -389,16 +400,16 @@ def render_sidebar():
         else:
             # Fallback if logo missing
             st.markdown("### 🏛️ Lisboa")
-            
+
         st.markdown(f"### {t('settings')}")
-        
+
         # Language Selector
         lang_options = {"Português 🇵🇹": "pt", "English 🇬🇧": "en"}
         selected_lang_label = st.selectbox(
-            f"🗣️ {t('language')}", 
+            f"🗣️ {t('language')}",
             options=lang_options.keys(),
             index=0 if st.session_state.language == "pt" else 1,
-            key="lang_select_box"
+            key="lang_select_box",
         )
         # Update state immediately if changed
         new_lang = lang_options[selected_lang_label]
@@ -413,13 +424,25 @@ def render_sidebar():
         # ====================
         col1, col2 = st.columns(2)
         with col1:
-             if st.button("💬 Chat", use_container_width=True, type="primary" if st.session_state.current_page == "chat" else "secondary"):
-                 st.session_state.current_page = "chat"
-                 st.rerun()
+            if st.button(
+                "💬 Chat",
+                use_container_width=True,
+                type="primary"
+                if st.session_state.current_page == "chat"
+                else "secondary",
+            ):
+                st.session_state.current_page = "chat"
+                st.rerun()
         with col2:
-             if st.button("ℹ️ Info", use_container_width=True, type="primary" if st.session_state.current_page == "info" else "secondary"):
-                 st.session_state.current_page = "info"
-                 st.rerun()
+            if st.button(
+                "ℹ️ Info",
+                use_container_width=True,
+                type="primary"
+                if st.session_state.current_page == "info"
+                else "secondary",
+            ):
+                st.session_state.current_page = "info"
+                st.rerun()
 
         st.divider()
 
@@ -427,7 +450,7 @@ def render_sidebar():
         # QUICK ACTIONS
         # ====================
         st.subheader(f"🚀 {t('quick_actions')}")
-        
+
         col1, col2 = st.columns(2)
         with col1:
             if st.button(f"☀️ {t('weather_summary')}", use_container_width=True):
@@ -443,11 +466,11 @@ def render_sidebar():
             if st.button(f"🏛️ {t('top_attractions')}", use_container_width=True):
                 st.session_state.quick_action = t("query_attractions")
                 st.rerun()
-                
+
         if st.button(f"🗺️ {t('plan_my_day')}", use_container_width=True):
             st.session_state.quick_action = t("query_plan")
             st.rerun()
-            
+
         st.divider()
 
         # Model/Provider Selector
@@ -455,15 +478,13 @@ def render_sidebar():
         start_idx = 0
         if st.session_state.provider in providers:
             start_idx = providers.index(st.session_state.provider)
-            
+
         selected_provider = st.selectbox(
-            f"🧠 {t('provider')}", 
-            providers,
-            index=start_idx
+            f"🧠 {t('provider')}", providers, index=start_idx
         )
         if selected_provider != st.session_state.provider:
             st.session_state.provider = selected_provider
-            st.session_state.assistant = None # Force reload
+            st.session_state.assistant = None  # Force reload
             st.rerun()
 
         # API Key input (conditional)
@@ -473,72 +494,85 @@ def render_sidebar():
             new_key = st.text_input(t("api_key"), value=current_key, type="password")
             if new_key != current_key:
                 os.environ[env_key] = new_key
-        
+
         st.divider()
-        
+
         # Clear Chat
         if st.button(f"🗑️ {t('clear_chat')}", use_container_width=True):
             st.session_state.messages = []
             if st.session_state.assistant:
                 st.session_state.assistant.reset()  # Reset agent state
             st.rerun()
-            
+
         # ====================
         # SYSTEM STATUS
         # ====================
         with st.expander("System Info", expanded=False):
             st.caption(f"**Model:** {st.session_state.get('provider', 'Unknown')}")
             if st.session_state.assistant:
-                st.caption(f"**Backend:** {Config.USE_MULTI_AGENT and 'Multi-Agent' or 'Single Agent'}")
-            
+                st.caption(
+                    f"**Backend:** {Config.USE_MULTI_AGENT and 'Multi-Agent' or 'Single Agent'}"
+                )
+
             # Simulated checks (visual only, real checks happen on demand)
             st.success("Database: Connected")
             st.success("Vector Store: Ready")
-            
+
             # LangSmith Status
             if os.environ.get("LANGCHAIN_TRACING_V2") == "true":
-                st.success(f"🛠️ LangSmith: Active ({os.environ.get('LANGCHAIN_PROJECT', 'default')})")
+                st.success(
+                    f"🛠️ LangSmith: Active ({os.environ.get('LANGCHAIN_PROJECT', 'default')})"
+                )
             else:
                 st.info("🛠️ LangSmith: Disabled")
-                
+
             # LM Studio Check (if selected)
             if st.session_state.provider == "lmstudio":
                 try:
                     import requests
+
                     requests.get(Config.LMSTUDIO_BASE_URL + "/models", timeout=1)
                     st.success("🟢 LM Studio: Online")
                 except:
                     st.error("🔴 LM Studio: Offline")
 
-            
-        st.markdown(f"<div style='text-align: center; margin-top: 2rem; color: #888; font-size: 0.8rem;'>{t('footer')}</div>", unsafe_allow_html=True)
-            
+        st.markdown(
+            f"<div style='text-align: center; margin-top: 2rem; color: #888; font-size: 0.8rem;'>{t('footer')}</div>",
+            unsafe_allow_html=True,
+        )
+
+
 def stream_text(text: str) -> Generator[str, None, None]:
     """Yields text chunks to simulate streaming."""
     for word in text.split(" "):
         yield word + " "
         time.sleep(0.02)
 
+
 def render_welcome_section():
     """Render welcome card for empty history."""
-    st.markdown(f"""
+    st.markdown(
+        f"""
     <div class="welcome-card">
-        <h3>{t('welcome')}</h3>
-        <p>{t('intro')}</p>
+        <h3>{t("welcome")}</h3>
+        <p>{t("intro")}</p>
         <div class="feature-list">
             <div class="feature-item">☀️ <strong>Meteorologia</strong></div>
             <div class="feature-item">🚇 <strong>Transportes</strong></div>
             <div class="feature-item">🎭 <strong>Eventos</strong></div>
             <div class="feature-item">📍 <strong>Locais</strong></div>
         </div>
-        <p><strong>{t('input_placeholder')}</strong></p>
+        <p><strong>{t("input_placeholder")}</strong></p>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
+
 
 def render_example_queries():
     """Render example query buttons in the main area."""
     st.markdown(f"### {t('try_asking')}")
-    
+
     # Define examples (Icon, Label, Query Key)
     examples = [
         ("🌤️", t("weather_summary"), "query_weather"),
@@ -547,51 +581,60 @@ def render_example_queries():
         ("📍", "Atrações", "query_attractions"),
         ("🗺️", "Plano 1 Dia", "query_plan"),
     ]
-    
+
     cols = st.columns(len(examples))
     for i, (icon, label, query_key) in enumerate(examples):
         with cols[i]:
-            if st.button(f"{icon}\n{label}", key=f"ex_btn_{i}", use_container_width=True):
+            if st.button(
+                f"{icon}\n{label}", key=f"ex_btn_{i}", use_container_width=True
+            ):
                 return t(query_key)
     return None
 
+
 def render_footer():
     """Render footer."""
-    st.markdown(f"""
+    st.markdown(
+        f"""
     <div style='text-align: center; margin-top: 3rem; padding: 1rem; color: #888; font-size: 0.8rem; border-top: 1px solid #eee;'>
-        <p>{t('footer')}</p>
-        <p>{datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
+        <p>{t("footer")}</p>
+        <p>{datetime.now().strftime("%Y-%m-%d %H:%M")}</p>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
+
 
 def render_info_page():
     """Render the Info/About page."""
     st.markdown(f"# {t('settings')} (Info)")
-    
+
     st.markdown(f"### {t('title')}")
     st.info("Master Thesis Project - NOVA IMS 2025")
-    
+
     st.markdown("#### Data Sources")
     st.markdown("""
     - **IPMA**: Weather and warnings
     - **Carris/Metro**: Public transport status
     - **VisitLisboa**: Events and places (Vector Search)
     """)
-    
+
     st.markdown("#### Privacy")
     st.markdown("No data is stored. API keys are kept in session state only.")
-    
+
     if st.button("🔙 Back to Chat"):
         st.session_state.current_page = "chat"
         st.rerun()
+
 
 # ==========================================================================
 # MAIN APP LOGIC
 # ==========================================================================
 
+
 def main():
     init_session()
-    
+
     # 1. Load Heavy Resources (Once)
     load_carris_db()
     if Config.USE_MULTI_AGENT:
@@ -601,7 +644,7 @@ def main():
     render_sidebar()
 
     # 3. Main Content Area
-    
+
     # Handle Page Navigation
     if st.session_state.current_page == "info":
         render_info_page()
@@ -611,7 +654,7 @@ def main():
     # Banner (Chat Mode)
     # Replaced by CSS-styled header
     render_header()
-    
+
     if not st.session_state.messages:
         render_welcome_section()
         example_query = render_example_queries()
@@ -631,21 +674,21 @@ def main():
     if "quick_action" in st.session_state and st.session_state.quick_action:
         user_input = st.session_state.quick_action
         del st.session_state.quick_action
-    
+
     # Disable chat input if processing (simulated)
     # Streamlit doesn't natively support disabling chat_input easily based on state without reruns
     # so we primarily rely on the user interface feedback
-    
+
     # Disable chat input if processing
     disable_input = st.session_state.processing
-    
+
     if chat_input := st.chat_input(t("input_placeholder"), disabled=disable_input):
         user_input = chat_input
-        
+
     if user_input and not disable_input:
         # Set processing state
         st.session_state.processing = True
-        
+
         # User Message
         st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
@@ -653,38 +696,42 @@ def main():
 
         # Assistant Response
         assistant = get_assistant(st.session_state.provider)
-        
+
         if assistant:
             # Create a placeholder for the assistant response immediately
             with st.chat_message("assistant"):
                 # Status Container with "Thinking" visualization
                 status_container = st.status(t("searching"), expanded=True)
                 message_placeholder = st.empty()
-                
+
                 # Callback to update status
                 def update_status(msg):
                     status_container.write(msg)
-                
+
                 try:
                     # Execute Graph
                     response_text = assistant.chat(
-                        user_input, 
+                        user_input,
                         on_status_change=update_status,
-                        language=st.session_state.language
+                        language=st.session_state.language,
                     )
-                    
-                    status_container.update(label="✅ Complete", state="complete", expanded=False)
-                    
+
+                    status_container.update(
+                        label="✅ Complete", state="complete", expanded=False
+                    )
+
                     # Stream the response
                     full_response = ""
                     for chunk in stream_text(response_text):
                         full_response += chunk
                         message_placeholder.markdown(full_response + "▌")
                     message_placeholder.markdown(full_response)
-                    
+
                     # Save to history
-                    st.session_state.messages.append({"role": "assistant", "content": full_response})
-                    
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": full_response}
+                    )
+
                 except Exception as e:
                     status_container.update(label="❌ Error", state="error")
                     st.error(f"An error occurred: {str(e)}")
@@ -692,6 +739,7 @@ def main():
                 finally:
                     st.session_state.processing = False
                     st.rerun()
+
 
 if __name__ == "__main__":
     main()
