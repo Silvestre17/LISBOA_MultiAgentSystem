@@ -29,6 +29,17 @@ import warnings
 warnings.filterwarnings("ignore", message=".*torch.classes.*")
 warnings.filterwarnings("ignore", category=UserWarning, module="torch")
 
+# WORKAROUND: Fix Streamlit file watcher crash with PyTorch
+#             Streamlit tries to inspect torch.classes.__path__, which triggers a runtime error
+try:
+    import torch
+    if not hasattr(torch.classes, "__path__"):
+        torch.classes.__path__ = []
+except ImportError:
+    pass
+except Exception as e:
+    print(f"Failed to apply torch workaround: {e}")
+
 import streamlit as st
 import sys
 import os
@@ -1297,7 +1308,8 @@ def process_user_input(user_input: str):
                     response = st.session_state.assistant.chat(
                         user_input, 
                         verbose=True, 
-                        on_status_change=update_ui_status
+                        on_status_change=update_ui_status,
+                        language=st.session_state.get("language", "en")  # Pass current language
                     )
                     
                     # Mark as complete

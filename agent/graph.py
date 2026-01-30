@@ -516,18 +516,27 @@ class LisbonAssistant:
         self.model_info = LLMFactory.get_model_info(llm)
         self.model_name = self.model_info.get("model", "Unknown")
     
-    def chat(self, message: str) -> str:
+    def chat(self, message: str, language: str = "en", verbose: bool = False, on_status_change: Optional[Callable[[str], None]] = None) -> str:
         """
         Sends a message to the assistant and gets a response.
         
         Args:
             message (str): User message.
+            language (str): Language code ('en' or 'pt').
+            verbose (bool): Whether to print verbose output.
+            on_status_change (func): Callback for status updates.
             
         Returns:
             str: Assistant response.
         """
         # Add user message to state
         self.state["messages"].append(HumanMessage(content=message))
+        
+        # Update user language preference in state
+        if self.state.get("user_context") is None:
+            self.state["user_context"] = {"language": language}
+        else:
+            self.state["user_context"]["language"] = language
         
         # Run the graph with recursion limit to prevent infinite loops
         # Default LangGraph limit is 25, increased for smaller models with tool calling
