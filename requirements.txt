@@ -18,10 +18,7 @@ langgraph>=0.2.0              # Graph-based agent orchestration
 # -----------------------------------------------------------------------------
 # LLM Provider Integrations
 # -----------------------------------------------------------------------------
-langchain-groq>=0.2.0         # Groq Cloud (fast inference)
-langchain-google-genai>=2.0.0 # Google Gemini models
-langchain-openai>=0.2.0       # OpenAI GPT models
-langchain-ollama>=0.2.0       # Local Ollama models
+langchain-openai>=0.2.0       # OpenAI GPT models & Azure OpenAI Service
 
 # -----------------------------------------------------------------------------
 # Vector Store and Embeddings (RAG)

@@ -14,6 +14,7 @@ test_*.py
 _/
 .gemini/
 .kilocode/
+.ruff_cache/
 tests/
 
 # Created by .ignore support plugin

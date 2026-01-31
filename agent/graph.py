@@ -600,7 +600,7 @@ def create_assistant(provider: str = None) -> LisbonAssistant:
     Creates a new Lisbon Assistant instance.
 
     Args:
-        provider (str, optional): LLM provider ('groq', 'google', 'openai', etc.).
+        provider (str, optional): LLM provider ('openai', 'azure', 'lmstudio').
 
     Returns:
         LisbonAssistant: Configured assistant instance.
@@ -677,11 +677,13 @@ class MultiAgentAssistant:
         sv_info = self.model_info.get("supervisor", {})
         if isinstance(sv_info, dict):
             sv_model = sv_info.get("model", "Unknown")
-        else:
-            sv_model = str(sv_info)
         return f"Multi-Agent ({sv_model})"
 
-    @traceable(name="multi_agent_chat", run_type="chain")
+    @traceable(
+        name="multi_agent_chat",
+        run_type="chain",
+        tags=["multi-agent", "user-query"],
+    )
     def chat(
         self,
         message: str,
@@ -695,6 +697,10 @@ class MultiAgentAssistant:
         Uses @traceable decorator to create a single parent trace in LangSmith
         that encompasses all agent and tool calls. The ContextThreadPoolExecutor
         ensures proper context propagation across parallel agent executions.
+
+        INPUT for LangSmith: The 'message' parameter (user question)
+        OUTPUT for LangSmith: The returned string (assistant response)
+
 
         Flow:
             1. Supervisor analyzes query and decides which agents to call
@@ -1139,4 +1145,4 @@ if __name__ == "__main__":
         print("\n[Tips]:")
         print("   1. Ensure API keys are set in .env file")
         print("   2. Check LM Studio is running for local models")
-        print("   3. Check network connectivity for Groq API")
+        print("   3. Check network connectivity for cloud providers")

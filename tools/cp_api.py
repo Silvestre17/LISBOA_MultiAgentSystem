@@ -1848,7 +1848,7 @@ def plan_train_trip(origin: str, destination: str) -> str:
         return f"❌ Error planning trip: {str(e)}"
 
 
-@tool  
+
 def initialize_cp_gtfs(force_refresh: bool = False) -> str:
     """
     Initializes or updates the CP GTFS database.

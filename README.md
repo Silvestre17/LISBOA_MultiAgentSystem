@@ -42,7 +42,7 @@ The primary objectives of this thesis are to:
 - **Integrate Real-Time Data Sources** (weather, transport, events) with static knowledge (tourist guides, POIs).
 - **Implement RAG (Retrieval-Augmented Generation)** for semantic search over cultural events, places, and local knowledge.
 - **Create an Adaptive Itinerary Planner** that considers user preferences, real-time conditions, and dynamic constraints.
-- **Evaluate LLM Performance** across multiple providers (Groq, Google, OpenAI, local models) for conversational AI tasks.
+- **Evaluate LLM Performance** across multiple providers (OpenAI, Azure, LM Studio) for conversational AI tasks.
 - **Automate Data Collection** through web scraping and GitHub Actions for continuous knowledge base updates.
 
 ## 🏗️ System Architecture
@@ -62,8 +62,8 @@ The system follows a **modular, tool-based architecture** powered by **LangGraph
    - **Transport Agent**: Metro, bus, tram, and train information
    - **Researcher Agent**: RAG for places and events
    - **Planner Agent**: Itinerary synthesis
-   - **40 specialized tools** for different data sources
-   - **Multi-provider LLM support** (LM Studio, Groq, Google, OpenAI, Ollama)
+   - **41 specialized tools** for different data sources
+    - **Multi-provider LLM support** (OpenAI, Azure, LM Studio)
 
 2. **Vector Store (RAG)** 📚
    - **ChromaDB** with **BAAI/bge-m3** multilingual embeddings
@@ -99,19 +99,15 @@ The system follows a **modular, tool-based architecture** powered by **LangGraph
 ### LLM Providers & Models
 
 <p align="center">
-    <a href="https://groq.com/"><img src="https://img.shields.io/badge/Groq-000000?style=for-the-badge&logo=groq&logoColor=white" alt="Groq"></a>
-    <a href="https://ai.google.dev/"><img src="https://img.shields.io/badge/Google_Gemini-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="Google Gemini"></a>
     <a href="https://openai.com/"><img src="https://img.shields.io/badge/OpenAI-412991?style=for-the-badge&logo=openai&logoColor=white" alt="OpenAI"></a>
+    <a href="https://azure.microsoft.com/"><img src="https://img.shields.io/badge/Azure_OpenAI-0078D4?style=for-the-badge&logo=microsoftazure&logoColor=white" alt="Azure OpenAI"></a>
     <a href="https://lmstudio.ai/"><img src="https://img.shields.io/badge/LM_Studio-000000?style=for-the-badge&logo=lmstudio&logoColor=white" alt="LM Studio"></a>
-    <a href="https://ollama.ai/"><img src="https://img.shields.io/badge/Ollama-000000?style=for-the-badge&logo=ollama&logoColor=white" alt="Ollama"></a>
 </p>
 
 **Supported Models:**
 - **LM Studio** (default): Local models via `qwen/qwen3-4b-2507` or any OpenAI-compatible model
-- **Groq**: `llama-3.3-70b-versatile`, `llama-3.1-70b-versatile`, `qwen3-4b-2507`
-- **Google**: `gemini-2.0-flash-exp`, `gemini-1.5-flash`, `gemini-1.5-pro`
-- **OpenAI**: `gpt-4o`, `gpt-4o-mini`, `gpt-3.5-turbo`
-- **Ollama**: Any locally installed model
+- **OpenAI**: `gpt-5.2`, `gpt-5.1`, `gpt-5`, `gpt-5-mini`
+- **Azure OpenAI**: `gpt-5`, `gpt-5-nano`
 
 ### Data & ML Stack
 
@@ -221,7 +217,7 @@ The system follows a **modular, tool-based architecture** powered by **LangGraph
 **Interactive Chat Interface:**
 - **Real-time streaming** of agent responses
 - **Conversation history** with session persistence
-- **LLM provider selection** (Groq, Google, OpenAI, local)
+- **LLM provider selection** (OpenAI, Azure, LM Studio)
 - **Model configuration** UI
 
 <p align="center">
@@ -235,7 +231,7 @@ Thesis2025-26_AFGS/
 ├── agent/                              # LangGraph Agent Components
 │   ├── graph.py                        # Agent graph definition (ReAct pattern)
 │   ├── state.py                        # State schema (TypedDict)
-│   ├── llm_factory.py                  # LLM provider factory (5 providers)
+│   ├── llm_factory.py                  # LLM provider factory (3 providers)
 │   ├── base.py                         # Agent tools configuration
 │   ├── agents/                         # Specialized agents
 │   │   ├── supervisor.py               # Query router agent
@@ -308,7 +304,7 @@ Thesis2025-26_AFGS/
 - **[INDEX.md](./docs/INDEX.md)** - Quick reference guide with navigation
 - **[COMPLETE_DOCUMENTATION.md](./docs/COMPLETE_DOCUMENTATION.md)** - ⭐ **START HERE** - Full technical reference (100+ pages)
 - **[ARCHITECTURE_DIAGRAMS.md](./docs/ARCHITECTURE_DIAGRAMS.md)** - 8 detailed system diagrams
-- **[tools_overview.md](./docs/tools_overview.md)** - API reference for all 40 tools
+- **[tools_overview.md](./docs/tools_overview.md)** - API reference for all 41 tools
 
 ### Quick Links
 - **Installation & Setup**: See [Getting Started](#-getting-started) below
@@ -324,9 +320,8 @@ Thesis2025-26_AFGS/
 - **Git**
 - **LM Studio** (recommended) or **API Keys** (at least one):
   - [LM Studio](https://lmstudio.ai/) (Free, local, privacy-focused)
-  - [Groq](https://console.groq.com/) (Free: 14,400 requests/day)
-  - [Google AI Studio](https://aistudio.google.com/apikey) (Free: 60 requests/min)
   - [OpenAI](https://platform.openai.com/api-keys) (Pay-per-use)
+  - [Azure OpenAI](https://azure.microsoft.com/) (Enterprise cloud)
 
 ### Installation
 
@@ -351,12 +346,15 @@ Thesis2025-26_AFGS/
    # No additional configuration needed!
    ```
    
-   **Option B: Cloud Providers (Requires API Keys)**
-   ```bash
-   # LLM Providers (at least one required)
-   GROQ_API_KEY=gsk_...
-   GOOGLE_API_KEY=AIza...
-   OPENAI_API_KEY=sk-...
+    **Option B: Cloud Providers (Requires API Keys)**
+    ```bash
+    # LLM Providers (at least one required)
+    OPENAI_API_KEY=sk-...
+    
+    # Or Azure OpenAI
+    AZURE_OPENAI_API_KEY=...
+    AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com/
+    AZURE_OPENAI_DEPLOYMENT_NAME=gpt-5-nano
 
    # Optional: LangSmith (for tracing/debugging)
    LANGCHAIN_TRACING_V2=true
@@ -380,7 +378,7 @@ Thesis2025-26_AFGS/
 from agent.graph import create_assistant
 
 # Create assistant instance (uses LM Studio by default)
-assistant = create_assistant()  # or specify provider: create_assistant(provider="groq")
+assistant = create_assistant()  # or specify provider: create_assistant(provider="openai")
 
 # Ask a question
 response = assistant.chat("What's the weather in Lisbon this weekend?")
@@ -418,7 +416,7 @@ python agent/graph.py
 ## 📈 Project Statistics
 
 - **Python Modules**: 25+
-- **Agent Tools**: 40 (across 9 modules)
+- **Agent Tools**: 41 (across 9 modules)
 - **Specialized Agents**: 5 (Supervisor, Weather, Transport, Researcher, Planner)
 - **Data Sources**: 6 real-time APIs + 2 scraped sources
 - **Vector DB Documents**: ~1,400 chunks (PDF guide + events + places)

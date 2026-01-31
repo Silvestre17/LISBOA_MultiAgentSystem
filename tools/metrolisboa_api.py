@@ -485,22 +485,53 @@ def _is_cache_valid(last_load: Optional[datetime]) -> bool:
     return hours_elapsed < CACHE_EXPIRATION_HOURS
 
 
-def fetch_json_with_retry(url: str, timeout: int = REQUEST_TIMEOUT) -> Optional[Any]:
+def fetch_json_with_retry(url: str, timeout: int = REQUEST_TIMEOUT, use_cache: bool = True) -> Optional[Any]:
     """
     Fetches JSON data from a URL with retry logic.
+    Uses connection pooling and optional caching for performance.
 
     Args:
         url: URL to fetch from.
         timeout: Request timeout in seconds.
+        use_cache: Whether to use caching (default True for real-time data with 60s TTL).
 
     Returns:
         JSON data if successful, None otherwise.
     """
+    # Import optimization utilities for caching and connection pooling
+    try:
+        from agent.utils.optimization import http_pool, transport_cache
+        import hashlib
+        OPTIMIZATION_AVAILABLE = True
+    except ImportError:
+        OPTIMIZATION_AVAILABLE = False
+        http_pool = None
+        transport_cache = None
+
+    # Check cache first (1 minute TTL for transport data)
+    if use_cache and OPTIMIZATION_AVAILABLE and transport_cache:
+        cache_key = hashlib.md5(url.encode()).hexdigest()
+        cached_result = transport_cache.get(cache_key)
+        if cached_result is not None:
+            logger.debug(f"Cache hit for {url}")
+            return cached_result
+
     for attempt in range(MAX_RETRIES):
         try:
-            response = requests.get(url, timeout=timeout)
+            # Use pooled connection if available
+            if OPTIMIZATION_AVAILABLE and http_pool:
+                response = http_pool.get(url, timeout=timeout)
+            else:
+                response = requests.get(url, timeout=timeout)
+            
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            
+            # Cache the result
+            if use_cache and OPTIMIZATION_AVAILABLE and transport_cache:
+                transport_cache.set(cache_key, data, ttl=60)  # 1 minute
+            
+            return data
         except requests.exceptions.Timeout:
             wait_time = BACKOFF_FACTOR**attempt
             logger.warning(f"Timeout. Retrying in {wait_time}s...")

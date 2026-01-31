@@ -37,7 +37,7 @@ class PlannerAgent(BaseAgent):
         super().__init__("planner")
         self.system_prompt = get_planner_prompt()
     
-    @traceable(name="planner_agent", run_type="chain")
+    @traceable(name="planner_agent", run_type="chain", tags=["sub-agent", "planner"])
     def invoke(
         self, 
         user_message: str, 

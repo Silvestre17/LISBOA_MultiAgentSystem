@@ -3,7 +3,7 @@
 **Master Thesis - LLM-Powered Urban Exploration**  
 **André Filipe Gomes Silvestre** (20240502)  
 **NOVA IMS** - 2025/2026  
-**Last Updated**: January 28, 2026
+**Last Updated**: January 30, 2026
 
 ---
 
@@ -61,10 +61,8 @@
 
 ### LLM Providers
 - **LM Studio** (Default): qwen/qwen3-4b-2507 (local)
-- **Groq**: llama-3.3-70b-versatile (cloud)
-- **Google**: gemini-2.0-flash-exp (cloud)
-- **OpenAI**: gpt-4o-mini (cloud)
-- **Ollama**: Any local model
+- **OpenAI**: gpt-5-nano (cloud)
+- **Azure**: gpt-5-nano via Azure OpenAI Service (cloud)
 
 ### Data Layer
 - **ChromaDB**: Vector database (v1.0.0+)
@@ -72,11 +70,11 @@
 - **BeautifulSoup4**: Web scraping
 - **Pandas**: Data manipulation
 
-### APIs & Data Sources (40 Tools)
+### APIs & Data Sources (41 Tools)
 - **IPMA**: Weather data (4 tools)
 - **Metro de Lisboa**: Official API (6 tools)
 - **Carris Urban**: City buses & trams (7 tools)
-- **Carris Metropolitana**: Suburban buses (6 tools)
+- **Carris Metropolitana**: Suburban buses (7 tools)
 - **CP**: Train status (5 tools)
 - **Dados Aberta**: Open government data (4 tools)
 - **VisitLisboa**: Events & Places (5 tools)
@@ -332,44 +330,24 @@ llm = LLMFactory.get_llm()  # Uses default (lmstudio)
 llm = LLMFactory.get_llm(provider="lmstudio")
 ```
 
-##### 2. Groq
-##### 2. Groq
-**Model**: `llama-3.3-70b-versatile`  
-**Speed**: Extremely fast  
-**Free Tier**: 14,400 requests/day  
-
-```python
-from agent.llm_factory import LLMFactory
-
-llm = LLMFactory.get_llm(provider="groq")
-```
-
-##### 3. Google
-##### 3. Google
-**Model**: `gemini-2.0-flash-exp`  
-**Features**: Multimodal  
-**Free Tier**: 60 requests/minute  
-
-```python
-llm = LLMFactory.get_llm(provider="google")
-```
-
-##### 4. OpenAI
-##### 4. OpenAI
-**Model**: `gpt-4o-mini`  
+##### 2. OpenAI
+**Model**: `gpt-5-nano`  
 **Quality**: Highest  
 **Pricing**: Pay-per-use  
 
 ```python
+from agent.llm_factory import LLMFactory
+
 llm = LLMFactory.get_llm(provider="openai")
 ```
 
-##### 5. Ollama (Local)
-**Model**: `qwen2.5:7b`  
-**Setup**: `ollama pull qwen2.5:7b`  
+##### 3. Azure
+**Model**: `gpt-5-nano` via Azure OpenAI Service  
+**Quality**: Enterprise-grade  
+**Setup**: Requires Azure subscription and OpenAI resource  
 
 ```python
-llm = LLMFactory.get_llm(provider="ollama")
+llm = LLMFactory.get_llm(provider="azure")
 ```
 
 #### Methods

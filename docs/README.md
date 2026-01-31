@@ -72,8 +72,8 @@ docs/
 - **Transport Agent**: Metro, bus, tram, and train information
 - **Researcher Agent**: RAG for places and events
 - **Planner Agent**: Itinerary synthesis
-- **40 specialized tools** for different data sources
-- **Multi-provider**: Supports LM Studio (default), Groq, Google, OpenAI, Ollama
+- **41 specialized tools** for different data sources
+- **Multi-provider**: Supports LM Studio (default), OpenAI, Azure
 
 ### 2. Data Sources
 - **IPMA**: Weather forecasts and warnings
@@ -135,7 +135,7 @@ This project is part of a Master's thesis exploring:
 
 ### Code Base
 - **Python Modules**: 25+
-- **Tools Implemented**: 40
+- **Tools Implemented**: 41
 - **Specialized Agents**: 5
 - **Data Sources**: 6 APIs + 2 scraped sources
 - **Vector DB Documents**: ~1,400 chunks
@@ -174,4 +174,4 @@ NOVA IMS - Master in Data Science and Advanced Analytics
 
 ---
 
-*Last Updated: January 28, 2026*
+*Last Updated: January 30, 2026*

@@ -1,10 +1,10 @@
-﻿# ==========================================================================
+# ==========================================================================
 # Master Thesis - Lisbon Urban Assistant (Streamlit App)
 #   - Andre Filipe Gomes Silvestre, 20240502
-# 
+#
 #   Main Streamlit application for the intelligent tourist assistant.
 #   Provides a modern, intuitive chat interface for exploring Lisbon.
-# 
+#
 #   Features:
 #     - Real-time chat with LLM-powered assistant
 #     - Multi-language UI support (English/Portuguese)
@@ -12,20 +12,22 @@
 #     - Weather and transport quick actions
 #     - Session state management
 #     - Professional Lisbon-themed design
-# 
+#
 #   Usage:
 #     streamlit run app.py
 # ==========================================================================
 
 # Required libraries:
-# pip install streamlit langchain langgraph langchain-groq python-dotenv
+# pip install streamlit langchain langgraph langchain-openai python-dotenv
 
 # IMPORTANT: Load environment variables FIRST (before any LangChain imports)
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # Suppress Torch/Streamlit file watcher warning (known compatibility issue)
 import warnings
+
 warnings.filterwarnings("ignore", message=".*torch.classes.*")
 warnings.filterwarnings("ignore", category=UserWarning, module="torch")
 
@@ -33,6 +35,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="torch")
 #             Streamlit tries to inspect torch.classes.__path__, which triggers a runtime error
 try:
     import torch
+
     if not hasattr(torch.classes, "__path__"):
         torch.classes.__path__ = []
 except ImportError:
@@ -66,7 +69,6 @@ TRANSLATIONS = {
         # Header
         "app_title": "Lisbon Urban Assistant",
         "app_subtitle": "Your intelligent guide to exploring Lisbon",
-        
         # Sidebar - Settings
         "settings": "Settings",
         "language": "Language",
@@ -82,7 +84,6 @@ TRANSLATIONS = {
         "save_credentials": "Save & Connect",
         "assistant_ready": "Assistant ready!",
         "initialization_failed": "Initialization failed",
-        
         # Sidebar - Quick Actions
         "quick_actions": "Quick Actions",
         "weather_summary": "Weather Summary",
@@ -90,20 +91,17 @@ TRANSLATIONS = {
         "upcoming_events": "Upcoming Events",
         "top_attractions": "Top Attractions",
         "plan_my_day": "Plan My Day",
-        
         # Sidebar - Session Info
         "session_info": "Session Info",
         "messages": "Messages",
         "status": "Status",
         "clear_conversation": "Clear Conversation",
-        
         # Sidebar - About
         "about": "About",
         "tracing": "Tracing",
         "tracing_active": "LangSmith Active",
         "tracing_disabled": "LangSmith Disabled",
         "project": "Project",
-        
         # Main Content
         "welcome_title": "Welcome to Lisbon!",
         "welcome_intro": "I'm your intelligent assistant for exploring Lisbon, Portugal. I can help you with:",
@@ -115,7 +113,6 @@ TRANSLATIONS = {
         "ask_anything": "Ask me anything about Lisbon!",
         "try_asking": "Try asking about...",
         "chat_placeholder": "Ask me about Lisbon...",
-        
         # Example Queries
         "ex_weather": "Weather",
         "ex_metro": "Metro",
@@ -123,14 +120,12 @@ TRANSLATIONS = {
         "ex_services": "Services",
         "ex_food": "Food",
         "ex_planning": "Planning",
-        
         # Quick Action Queries
         "query_weather": "What's the current weather in Lisbon? Include any active warnings.",
         "query_transport": "What's the current status of public transport in Lisbon? Include Metro, buses, and trains.",
         "query_events": "What cultural events are happening in Lisbon this week?",
         "query_attractions": "What are the must-see tourist attractions in Lisbon?",
         "query_plan": "Help me plan a one-day trip in Lisbon. I'm interested in history and good food.",
-        
         # Example Query Texts
         "ex_query_weather": "What's the weather forecast for the next 3 days in Lisbon?",
         "ex_query_metro": "Is the Lisbon metro running normally today?",
@@ -138,13 +133,12 @@ TRANSLATIONS = {
         "ex_query_services": "Find pharmacies and hospitals near Rossio",
         "ex_query_food": "Recommend traditional Portuguese restaurants in Alfama",
         "ex_query_planning": "Plan a 2-day itinerary for a first-time visitor to Lisbon",
-        
         # Errors
         "error_not_initialized": "Assistant Not Initialized",
         "error_troubleshooting": "Troubleshooting",
         "error_common_issues": "Common Issues:",
         "error_missing_api": "Missing API Key",
-        "error_local_models": "Local Models (LM Studio / Ollama)",
+        "error_local_models": "Local Models (LM Studio)",
         "error_network": "Network Issues",
         "retry_init": "Retry Initialization",
         "error_api_key": "API Key Error (401 Unauthorized)",
@@ -155,11 +149,9 @@ TRANSLATIONS = {
         "error_connection_msg": "Could not connect to the API. Please check your internet connection.",
         "error_generic": "An error occurred while processing your request.",
         "thinking": "Analyzing and gathering information...",
-        
         # Footer
-        "footer_version": "LISBOA v2.5",
+        "footer_version": "LISBOA v3.0",
         "footer_made": "André Filipe Gomes Silvestre | Master's Student\nNOVA IMS",
-        
         # Info Page
         "info_title": "About This Assistant",
         "info_objective": "Objective",
@@ -175,10 +167,10 @@ TRANSLATIONS = {
 - **VisitLisboa** - Cultural events, attractions, and points of interest
 - **Official Lisbon Guide** - Tourist guide PDF with comprehensive city information""",
         "info_how_to_use": "How to Use",
-        "info_how_to_use_text": """1. **Select your LLM Provider** - Choose from Groq, Google, OpenAI, or local models
-2. **Enter your credentials** - Provide the required API key or server URL
-3. **Ask questions** - Type your questions in natural language
-4. **Use Quick Actions** - Click sidebar buttons for common queries""",
+        "info_how_to_use_text": """1. **Select your LLM Provider** - Choose from OpenAI, Azure, or LM Studio
+ 2. **Enter your credentials** - Provide the required API key or server URL
+ 3. **Ask questions** - Type your questions in natural language
+ 4. **Use Quick Actions** - Click sidebar buttons for common queries""",
         "info_privacy": "Privacy & Security",
         "info_privacy_text": """- Your API credentials are stored locally in your browser session only
 - No conversation data is stored permanently on any server
@@ -189,12 +181,10 @@ Master's Student in Data Science and Advanced Analytics
 NOVA IMS - Universidade NOVA de Lisboa
 2024/2025""",
     },
-    
     "pt": {
         # Header
         "app_title": "Assistente Urbano de Lisboa",
         "app_subtitle": "O seu guia inteligente para explorar Lisboa",
-        
         # Sidebar - Settings
         "settings": "Definições",
         "language": "Idioma",
@@ -210,7 +200,6 @@ NOVA IMS - Universidade NOVA de Lisboa
         "save_credentials": "Guardar e Ligar",
         "assistant_ready": "Assistente pronto!",
         "initialization_failed": "Falha na inicialização",
-        
         # Sidebar - Quick Actions
         "quick_actions": "Ações Rápidas",
         "weather_summary": "Resumo do Tempo",
@@ -218,20 +207,17 @@ NOVA IMS - Universidade NOVA de Lisboa
         "upcoming_events": "Próximos Eventos",
         "top_attractions": "Principais Atrações",
         "plan_my_day": "Planear o Meu Dia",
-        
         # Sidebar - Session Info
         "session_info": "Info da Sessão",
         "messages": "Mensagens",
         "status": "Estado",
         "clear_conversation": "Limpar Conversa",
-        
         # Sidebar - About
         "about": "Sobre",
         "tracing": "Rastreamento",
         "tracing_active": "LangSmith Ativo",
         "tracing_disabled": "LangSmith Desativado",
         "project": "Projeto",
-        
         # Main Content
         "welcome_title": "Bem-vindo a Lisboa!",
         "welcome_intro": "Sou o seu assistente inteligente para explorar Lisboa, Portugal. Posso ajudar com:",
@@ -243,7 +229,6 @@ NOVA IMS - Universidade NOVA de Lisboa
         "ask_anything": "Pergunte-me qualquer coisa sobre Lisboa!",
         "try_asking": "Experimente perguntar sobre...",
         "chat_placeholder": "Pergunte-me sobre Lisboa...",
-        
         # Example Queries (button labels)
         "ex_weather": "Tempo",
         "ex_metro": "Metro",
@@ -251,14 +236,12 @@ NOVA IMS - Universidade NOVA de Lisboa
         "ex_services": "Serviços",
         "ex_food": "Gastronomia",
         "ex_planning": "Planeamento",
-        
         # Quick Action Queries (full questions in PT)
         "query_weather": "Qual é a previsão do tempo para Lisboa? Inclui avisos meteorológicos ativos.",
         "query_transport": "Qual é o estado atual dos transportes públicos em Lisboa? Inclui Metro, autocarros e comboios.",
         "query_events": "Que eventos culturais estão a acontecer em Lisboa esta semana?",
         "query_attractions": "Quais são as principais atrações turísticas de Lisboa que não posso perder?",
         "query_plan": "Ajuda-me a planear um dia em Lisboa. Estou interessado em história e boa comida.",
-        
         # Example Query Texts (full questions in PT)
         "ex_query_weather": "Qual é a previsão do tempo para os próximos 3 dias em Lisboa?",
         "ex_query_metro": "O metro de Lisboa está a funcionar normalmente hoje?",
@@ -266,13 +249,12 @@ NOVA IMS - Universidade NOVA de Lisboa
         "ex_query_services": "Encontra farmácias e hospitais perto do Rossio",
         "ex_query_food": "Recomenda restaurantes tradicionais portugueses em Alfama",
         "ex_query_planning": "Planeia um itinerário de 2 dias para quem visita Lisboa pela primeira vez",
-        
         # Errors
         "error_not_initialized": "Assistente Não Inicializado",
         "error_troubleshooting": "Resolução de Problemas",
         "error_common_issues": "Problemas Comuns:",
         "error_missing_api": "Chave API em Falta",
-        "error_local_models": "Modelos Locais (LM Studio / Ollama)",
+        "error_local_models": "Modelos Locais (LM Studio)",
         "error_network": "Problemas de Rede",
         "retry_init": "Tentar Novamente",
         "error_api_key": "Erro de Chave API (401 Não Autorizado)",
@@ -283,11 +265,9 @@ NOVA IMS - Universidade NOVA de Lisboa
         "error_connection_msg": "Não foi possível ligar à API. Verifique a sua ligação à internet.",
         "error_generic": "Ocorreu um erro ao processar o seu pedido.",
         "thinking": "A analisar e recolher informação...",
-        
         # Footer
-        "footer_version": "LISBOA v2.5",
+        "footer_version": "LISBOA v3.0",
         "footer_made": "André Filipe Gomes Silvestre | Mestrando\nNOVA IMS",
-        
         # Info Page
         "info_title": "Sobre Este Assistente",
         "info_objective": "Objetivo",
@@ -303,10 +283,10 @@ NOVA IMS - Universidade NOVA de Lisboa
 - **VisitLisboa** - Eventos culturais, atrações e pontos de interesse
 - **Guia Oficial de Lisboa** - PDF do guia turístico com informação completa""",
         "info_how_to_use": "Como Usar",
-        "info_how_to_use_text": """1. **Selecione o seu Fornecedor LLM** - Escolha entre Groq, Google, OpenAI ou modelos locais
-2. **Introduza as credenciais** - Forneça a chave API ou URL do servidor
-3. **Faça perguntas** - Escreva as suas perguntas em linguagem natural
-4. **Use Ações Rápidas** - Clique nos botões da barra lateral para consultas comuns""",
+        "info_how_to_use_text": """1. **Selecione o seu Fornecedor LLM** - Escolha entre OpenAI, Azure ou LM Studio
+ 2. **Introduza as credenciais** - Forneça a chave API ou URL do servidor
+ 3. **Faça perguntas** - Escreva as suas perguntas em linguagem natural
+ 4. **Use Ações Rápidas** - Clique nos botões da barra lateral para consultas comuns""",
         "info_privacy": "Privacidade e Segurança",
         "info_privacy_text": """- As suas credenciais API são guardadas localmente apenas na sua sessão
 - Nenhum dado de conversa é guardado permanentemente
@@ -316,7 +296,7 @@ NOVA IMS - Universidade NOVA de Lisboa
 Mestrando em Data Science e Advanced Analytics
 NOVA IMS - Universidade NOVA de Lisboa
 2024/2025""",
-    }
+    },
 }
 
 
@@ -330,12 +310,14 @@ def t(key: str) -> str:
 # LISBON THEME - CUSTOM CSS
 # ==========================================================================
 
+
 def get_base64_image(image_path):
     try:
         with open(image_path, "rb") as img_file:
             return base64.b64encode(img_file.read()).decode()
     except Exception:
         return ""
+
 
 banner_path = os.path.join(os.path.dirname(__file__), "img", "BannerLSIBOA_21-9.png")
 banner_b64 = get_base64_image(banner_path)
@@ -352,15 +334,17 @@ LISBON_CSS = """
 
 :root {
     --lisbon-yellow: #f6da00;
-    --lisbon-yellow-light: #fff9e6;
-    --lisbon-yellow-dark: #d4bb00;
+    --lisbon-yellow-light: #e7c968;
+    --lisbon-yellow-dark: #c7b002;
     --lisbon-orange: #ff4011;
     --lisbon-orange-light: #ff6b47;
-    --lisbon-orange-dark: #e63600;
+    --lisbon-orange-dark: #b92b00;
     --lisbon-blue: #3777ff;
     --lisbon-blue-light: #5a91ff;
+    --lisbon-blue-dark: #1e408e;
     --lisbon-green: #0ee071;
     --lisbon-green-light: #3de88f;
+    --lisbon-green-dark: #067e3a;
     --gray-50: #fafafa;
     --gray-100: #f4f4f5;
     --gray-200: #e4e4e7;
@@ -379,7 +363,7 @@ LISBON_CSS = """
 
 /* ============ HEADER ============ */
 .lisbon-header {
-    background: linear-gradient(135deg, rgba(255, 64, 17, 0.65) 0%, rgba(255, 107, 71, 0.65) 50%, rgba(246, 218, 0, 0.65) 100%), url('__BANNER_IMAGE__');
+    background: linear-gradient(135deg, rgba(255, 64, 17, 0.15) 0%, rgba(255, 107, 71, 0.35) 30%, rgba(246, 218, 0, 0.35) 100%), url('__BANNER_IMAGE__');
     background-size: cover;
     background-position: center;
     border-radius: 20px;
@@ -485,14 +469,14 @@ section[data-testid="stSidebar"] button[kind="secondary"]:hover {
 }
 
 section[data-testid="stSidebar"] button[kind="primary"] {
-    background: linear-gradient(135deg, var(--lisbon-orange) 0%, var(--lisbon-orange-light) 100%) !important;
+    background: linear-gradient(135deg, var(--lisbon-yellow-dark) 0%, var(--lisbon-orange) 100%) !important;
     border: none !important;
     color: white !important;
     box-shadow: 0 4px 12px rgba(255, 64, 17, 0.3);
 }
 
 section[data-testid="stSidebar"] button[kind="primary"]:hover {
-    background: linear-gradient(135deg, var(--lisbon-orange-dark) 0%, var(--lisbon-orange) 100%) !important;
+    background: linear-gradient(135deg, var(--lisbon-yellow-dark) 0%, var(--lisbon-orange-light) 100%) !important;
     transform: translateY(-1px);
     box-shadow: 0 6px 16px rgba(255, 64, 17, 0.4);
 }
@@ -774,8 +758,8 @@ st.set_page_config(
         Andre Filipe Gomes Silvestre, 2025
         
         An intelligent assistant for tourists and locals in Lisbon.
-        """
-    }
+        """,
+    },
 )
 
 
@@ -783,26 +767,42 @@ st.set_page_config(
 # Session State Initialization
 # ==========================================================================
 
+
 def initialize_session_state():
     """Initialize all session state variables."""
     defaults = {
         "messages": [],
         "assistant": None,
-        "provider": "lmstudio",
+        "provider": "openai",  # Default to OpenAI
         "initialized": False,
         "error": None,
         "language": "pt",
         "current_page": "chat",
+        # Credentials loaded from env but NOT displayed in UI for security
         "credentials": {
             "groq": {"api_key": os.getenv("GROQ_API_KEY", "")},
-            "google": {"api_key": os.getenv("GOOGLE_API_KEY", "")},
             "openai": {"api_key": os.getenv("OPENAI_API_KEY", "")},
-            "lmstudio": {"base_url": Config.LMSTUDIO_BASE_URL, "model": Config.LMSTUDIO_MODEL_NAME},
-            "ollama": {"model": Config.OLLAMA_MODEL_NAME},
+            "azure": {
+                "api_key": os.getenv("AZURE_OPENAI_API_KEY", ""),
+                "endpoint": os.getenv("AZURE_OPENAI_ENDPOINT", ""),
+                "model": os.getenv("AZURE_OPENAI_MODEL_NAME", "gpt-5-nano"),
+            },
+            "lmstudio": {
+                "base_url": Config.LMSTUDIO_BASE_URL,
+                "model": Config.LMSTUDIO_MODEL_NAME,
+            },
+        },
+        # UI display values (empty by default for security - don't show env keys)
+        "ui_api_key_values": {
+            "groq": "",
+            "openai": "",
+            "azure_api_key": "",
+            "azure_endpoint": "",
+            "azure_model": "gpt-5-nano",
         },
         "agent_overrides": {},  # Store custom model selection per agent
     }
-    
+
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
@@ -812,13 +812,17 @@ def set_credentials_env():
     """Set environment variables from stored credentials."""
     creds = st.session_state.credentials
     provider = st.session_state.provider
-    
+
     if provider == "groq" and creds["groq"]["api_key"]:
         os.environ["GROQ_API_KEY"] = creds["groq"]["api_key"]
-    elif provider == "google" and creds["google"]["api_key"]:
-        os.environ["GOOGLE_API_KEY"] = creds["google"]["api_key"]
     elif provider == "openai" and creds["openai"]["api_key"]:
         os.environ["OPENAI_API_KEY"] = creds["openai"]["api_key"]
+    elif provider == "azure" and creds["azure"]["api_key"]:
+        os.environ["AZURE_OPENAI_API_KEY"] = creds["azure"]["api_key"]
+        if creds["azure"]["endpoint"]:
+            os.environ["AZURE_OPENAI_ENDPOINT"] = creds["azure"]["endpoint"]
+        if creds["azure"]["model"]:
+            os.environ["AZURE_OPENAI_MODEL_NAME"] = creds["azure"]["model"]
 
 
 @st.cache_resource
@@ -841,26 +845,26 @@ def initialize_carris_database():
     Initialize the Carris GTFS database at startup.
     Downloads and converts GTFS data if database doesn't exist or is outdated.
     This is cached globally by Streamlit so it only runs once per server start.
-    
+
     Returns:
         Tuple[bool, str]: (success, status_message)
     """
     try:
         manager = CarrisGTFSManager()
-        
+
         # Check if database exists
         db_exists = os.path.exists(CARRIS_DB_PATH)
-        
+
         if db_exists:
             # Check if update is needed
             needs_update, remote_date = manager.check_for_updates()
             if not needs_update:
                 db_size = os.path.getsize(CARRIS_DB_PATH) / (1024 * 1024)
                 return True, f"Database ready ({db_size:.0f} MB)"
-        
+
         # Database doesn't exist or needs update - create/update it
         success = manager.ensure_database(force_update=False)
-        
+
         if success:
             db_size = os.path.getsize(CARRIS_DB_PATH) / (1024 * 1024)
             if db_exists:
@@ -869,7 +873,7 @@ def initialize_carris_database():
                 return True, f"Database created ({db_size:.0f} MB)"
         else:
             return False, "Failed to initialize database"
-            
+
     except Exception as e:
         print(f"Carris database initialization failed: {e}")
         return False, f"Error: {str(e)[:50]}"
@@ -879,54 +883,110 @@ def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
     """Initialize or reinitialize the LisbonAssistant."""
     try:
         set_credentials_env()
-        
+
         # Pre-warm vector store (cached)
         # Only needed if using Multi-Agent or Researcher (which uses tools)
         if Config.USE_MULTI_AGENT:
             with st.spinner("Loading knowledge base (this happens only once)..."):
                 pre_warm_vector_store()
-        
+
         # Initialize assistant based on mode
         if Config.USE_MULTI_AGENT:
             # Multi-Agent Mode
-            
+
             # Apply UI overrides if any
+            # Get the correct agent models configuration based on provider
+            if provider == "azure":
+                agent_models = Config.AGENT_MODELS_AZURE
+            elif provider == "openai":
+                agent_models = Config.AGENT_MODELS_OPENAI
+            else:  # lmstudio
+                agent_models = Config.AGENT_MODELS_LMSTUDIO
+
+            # Apply overrides to the appropriate config
             if "agent_overrides" in st.session_state:
-                for agent, model_cfg in st.session_state.agent_overrides.items():
-                    if agent in Config.AGENT_MODELS:
-                        Config.AGENT_MODELS[agent]["model"] = model_cfg
-            
+                for agent, model_name in st.session_state.agent_overrides.items():
+                    if agent in agent_models:
+                        agent_models[agent]["model"] = model_name
+                        # Ensure provider matches the selected provider
+                        agent_models[agent]["provider"] = provider
+
             st.session_state.assistant = MultiAgentAssistant()
-            
+
             # =========================================================
             # CONNECTION TEST
             # =========================================================
             # Verify if the configured model is actually reachable
             connection_placeholder = st.empty()
-            connection_placeholder.info(f"🔄 Testing connection to supervisor model: {st.session_state.assistant.model_name}...")
-            
+            connection_placeholder.info(
+                f"🔄 Testing connection to supervisor model: {st.session_state.assistant.model_name}..."
+            )
+
             try:
                 # access the supervisor LLM directly
                 test_llm = st.session_state.assistant.supervisor.llm
-                # Simple ping
-                response = test_llm.invoke("ping")
-                # If we get here, connection is successful
-                connection_placeholder.success(f"✅ Connection successful! Model is ready.")
-                import time
-                time.sleep(1.0) # Show success briefly
-                connection_placeholder.empty()
                 
+                # Temporarily disable LangSmith tracing during ping test
+                # to avoid polluting the LangSmith dashboard with "human: ping" traces
+                original_tracing = os.environ.get("LANGCHAIN_TRACING_V2", "")
+                os.environ["LANGCHAIN_TRACING_V2"] = "false"
+                
+                try:
+                    # Simple ping
+                    response = test_llm.invoke("ping")
+                finally:
+                    # Restore original tracing setting
+                    if original_tracing:
+                        os.environ["LANGCHAIN_TRACING_V2"] = original_tracing
+                    elif "LANGCHAIN_TRACING_V2" in os.environ:
+                        del os.environ["LANGCHAIN_TRACING_V2"]
+                # If we get here, connection is successful
+                connection_placeholder.success(
+                    f"✅ Connection successful! Model is ready."
+                )
+                import time
+
+                time.sleep(1.0)  # Show success briefly
+                connection_placeholder.empty()
+
             except Exception as e:
                 connection_placeholder.empty()
-                error_msg = f"❌ Connection Timeout/Error: Could not connect to model '{st.session_state.assistant.model_name}'. Check LM Studio server or model name. Details: {str(e)}"
-                st.session_state.assistant = None # Rollback
+                # Get the actual supervisor model name for clearer error message
+                sv_info = st.session_state.assistant.model_info.get("supervisor", {})
+                actual_model = (
+                    sv_info.get("model", "Unknown")
+                    if isinstance(sv_info, dict)
+                    else str(sv_info)
+                )
+                base_url = (
+                    st.session_state.assistant.agents.get("supervisor", {}).base_url
+                    if hasattr(
+                        st.session_state.assistant.agents.get("supervisor", {}),
+                        "base_url",
+                    )
+                    else "http://localhost:1234/v1"
+                )
+
+                error_msg = f"""❌ **Connection Failed**
+
+**Model:** `{actual_model}`
+**Server:** `{base_url}`
+
+**Common fixes:**
+1. **LM Studio not running** - Open LM Studio and start the local server (port 1234)
+2. **Model not loaded** - Load the model `{actual_model}` in LM Studio
+3. **Wrong port** - Check if server is on port 1234 (settings > local server)
+4. **Firewall** - Allow LM Studio through your firewall
+
+**Error details:** {str(e)}"""
+                st.session_state.assistant = None  # Rollback
                 return False, error_msg
 
             st.session_state.initialized = True
             st.session_state.provider = provider
             st.session_state.error = None
             return True, None
-            
+
         else:
             # Single-Agent Mode (Legacy)
             st.session_state.assistant = create_assistant(provider)
@@ -947,28 +1007,32 @@ def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
 # UI Components
 # ==========================================================================
 
+
 def render_header():
     """Render the Lisbon-themed header."""
-    st.markdown(f"""
+    st.markdown(
+        f"""
     <div class="lisbon-header">
         <h1>🏛️ {t("app_title")}</h1>
         <p>{t("app_subtitle")}</p>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_language_selector():
     """Render language selector in sidebar."""
     languages = {"🇬🇧 English": "en", "🇵🇹 Português": "pt"}
     current_lang = st.session_state.language
-    
+
     selected = st.selectbox(
         t("language"),
         options=list(languages.keys()),
         index=list(languages.values()).index(current_lang),
-        key="lang_selector"
+        key="lang_selector",
     )
-    
+
     if languages[selected] != current_lang:
         st.session_state.language = languages[selected]
         st.rerun()
@@ -977,78 +1041,150 @@ def render_language_selector():
 def render_provider_credentials():
     """Render provider selection and credentials input."""
     st.markdown(f"### {t('llm_provider')}")
-    
+
+    # Get current OpenAI model from Config (dynamic - updates when config changes)
+    openai_model = Config.OPENAI_MODEL_NAME
+
     provider_info = {
         "lmstudio": ("LM Studio", "Local server", "local"),
-        "ollama": ("Ollama", "Local Ollama models", "ollama"),
-        "groq": ("Groq", "Fast inference with Qwen/Llama", "api_key"),
-        "google": ("Google Gemini", "Google's Gemini 3 models", "api_key"),
-        "openai": ("OpenAI", "GPT-5 models", "api_key"),
+        "openai": ("OpenAI", f"Model: {openai_model}", "api_key"),
+        "azure": ("Azure OpenAI", "Microsoft Azure enterprise cloud", "azure"),
     }
-    
+
     provider_names = [info[0] for info in provider_info.values()]
     provider_keys = list(provider_info.keys())
-    
-    current_idx = provider_keys.index(st.session_state.provider) if st.session_state.provider in provider_keys else 0
-    
+
+    current_idx = (
+        provider_keys.index(st.session_state.provider)
+        if st.session_state.provider in provider_keys
+        else 0
+    )
+
     selected_display = st.selectbox(
         t("select_provider"),
         options=provider_names,
         index=current_idx,
-        key="provider_select"
+        key="provider_select",
     )
-    
+
     selected_provider = provider_keys[provider_names.index(selected_display)]
     provider_type = provider_info[selected_provider][2]
-    
+
     st.caption(provider_info[selected_provider][1])
     st.markdown(f"#### {t('api_credentials')}")
-    
+
     credentials_changed = False
-    
+
     if provider_type == "api_key":
+        # Show status if API key is already configured from environment
+        env_key_exists = bool(
+            st.session_state.credentials[selected_provider].get("api_key", "")
+        )
+        if env_key_exists:
+            st.success("✅ API Key configured from environment (.env)", icon="🔐")
+
+        # Use empty UI value for security - don't show env keys in the field
+        current_ui_value = st.session_state.ui_api_key_values.get(selected_provider, "")
         api_key = st.text_input(
             t("api_key"),
-            value=st.session_state.credentials[selected_provider].get("api_key", ""),
+            value=current_ui_value,  # Always empty initially for security
             type="password",
             placeholder=t("api_key_placeholder"),
-            key=f"api_key_{selected_provider}"
+            key=f"api_key_{selected_provider}",
         )
-        if api_key != st.session_state.credentials[selected_provider].get("api_key", ""):
+        # Update UI state and actual credentials if user entered something
+        if api_key != current_ui_value:
+            st.session_state.ui_api_key_values[selected_provider] = api_key
             st.session_state.credentials[selected_provider]["api_key"] = api_key
             credentials_changed = True
-            
+
     elif provider_type == "local":
         # LM Studio: Server URL
         base_url = st.text_input(
             t("local_url"),
-            value=st.session_state.credentials["lmstudio"].get("base_url", Config.LMSTUDIO_BASE_URL),
+            value=st.session_state.credentials["lmstudio"].get(
+                "base_url", Config.LMSTUDIO_BASE_URL
+            ),
             placeholder=t("local_url_placeholder"),
-            key="lmstudio_url"
+            key="lmstudio_url",
         )
         # LM Studio: Model name on separate line for better visibility
         model = st.text_input(
             t("model_name"),
-            value=st.session_state.credentials["lmstudio"].get("model", Config.LMSTUDIO_MODEL_NAME),
+            value=st.session_state.credentials["lmstudio"].get(
+                "model", Config.LMSTUDIO_MODEL_NAME
+            ),
             placeholder=Config.LMSTUDIO_MODEL_NAME,
             key="lmstudio_model",
-            help="Nome do modelo carregado no LM Studio"
+            help="Nome do modelo carregado no LM Studio",
         )
-        if (base_url != st.session_state.credentials["lmstudio"].get("base_url", "") or 
-            model != st.session_state.credentials["lmstudio"].get("model", "")):
+        if base_url != st.session_state.credentials["lmstudio"].get(
+            "base_url", ""
+        ) or model != st.session_state.credentials["lmstudio"].get("model", ""):
             st.session_state.credentials["lmstudio"]["base_url"] = base_url
             st.session_state.credentials["lmstudio"]["model"] = model
             credentials_changed = True
-            
-    elif provider_type == "ollama":
-        model = st.text_input(
-            t("model_name"),
-            value=st.session_state.credentials["ollama"].get("model", "llama3.2"),
-            placeholder=t("model_name_placeholder"),
-            key="ollama_model"
+
+    elif provider_type == "azure":
+        # Show status for Azure credentials configured from environment
+        azure_creds = st.session_state.credentials["azure"]
+        azure_env_status = []
+        if azure_creds.get("api_key"):
+            azure_env_status.append("API Key")
+        if azure_creds.get("endpoint"):
+            azure_env_status.append("Endpoint")
+        if azure_creds.get("model"):
+            azure_env_status.append("Model")
+        if azure_env_status:
+            st.success(
+                f"✅ Configured from .env: {', '.join(azure_env_status)}", icon="🔐"
+            )
+
+        # Azure OpenAI: API Key (UI shows empty, actual value stored separately)
+        current_azure_key_ui = st.session_state.ui_api_key_values.get(
+            "azure_api_key", ""
         )
-        if model != st.session_state.credentials["ollama"]["model"]:
-            st.session_state.credentials["ollama"]["model"] = model
+        api_key = st.text_input(
+            "Azure API Key",
+            value=current_azure_key_ui,  # Empty for security
+            type="password",
+            placeholder="Enter your Azure OpenAI API key...",
+            key="azure_api_key_input",
+        )
+        # Azure OpenAI: Endpoint (UI shows empty, actual value stored separately)
+        current_azure_endpoint_ui = st.session_state.ui_api_key_values.get(
+            "azure_endpoint", ""
+        )
+        endpoint = st.text_input(
+            "Azure Endpoint",
+            value=current_azure_endpoint_ui,  # Empty for security
+            placeholder="https://<resource-name>.openai.azure.com/",
+            key="azure_endpoint_input",
+            help="Your Azure OpenAI resource endpoint URL",
+        )
+        # Azure OpenAI: Model/Deployment Name
+        current_azure_model_ui = st.session_state.ui_api_key_values.get(
+            "azure_model", "gpt-5-nano"
+        )
+        model = st.text_input(
+            "Deployment Name",
+            value=current_azure_model_ui,
+            placeholder="e.g., gpt-5-nano",
+            key="azure_model_input",
+            help="The deployment name in your Azure OpenAI resource",
+        )
+        # Update UI state and actual credentials if user entered something
+        if api_key != current_azure_key_ui:
+            st.session_state.ui_api_key_values["azure_api_key"] = api_key
+            st.session_state.credentials["azure"]["api_key"] = api_key
+            credentials_changed = True
+        if endpoint != current_azure_endpoint_ui:
+            st.session_state.ui_api_key_values["azure_endpoint"] = endpoint
+            st.session_state.credentials["azure"]["endpoint"] = endpoint
+            credentials_changed = True
+        if model != current_azure_model_ui:
+            st.session_state.ui_api_key_values["azure_model"] = model
+            st.session_state.credentials["azure"]["model"] = model
             credentials_changed = True
 
     # =========================================================================
@@ -1056,52 +1192,126 @@ def render_provider_credentials():
     # =========================================================================
     if Config.USE_MULTI_AGENT:
         with st.expander("🛠️ Advanced: Agent Models"):
-            st.caption("Customize models for each agent. Default: Config.py")
-            
+            # Show current provider and available presets
+            if selected_provider == "azure":
+                default_provider_models = Config.AGENT_MODELS_AZURE
+                st.caption(f"🌐 Provider: **Azure OpenAI** | Default: {default_provider_models['supervisor']['model']}")
+                available_models = [
+                    "gpt-5.2",
+                    "gpt-5.1",
+                    "gpt-5",
+                    "gpt-5-mini",
+                    "gpt-5-nano",
+                ]
+            elif selected_provider == "openai":
+                default_provider_models = Config.AGENT_MODELS_OPENAI
+                st.caption(f"🤖 Provider: **OpenAI** | Default: {default_provider_models['supervisor']['model']}")
+                available_models = [
+                    "gpt-5.2",
+                    "gpt-5.1",
+                    "gpt-5",
+                    "gpt-5-mini",
+                    "gpt-5-nano",
+                ]
+            elif selected_provider == "openai":
+                default_provider_models = Config.AGENT_MODELS_OPENAI
+                st.caption(f"🤖 Provider: **OpenAI** | Default: {default_provider_models['supervisor']['model']}")
+                available_models = [
+                    "gpt-5.2",
+                    "gpt-5.1",
+                    "gpt-5",
+                    "gpt-5-mini",
+                    "gpt-5-nano",
+                ]
+            else:  # lmstudio
+                default_provider_models = Config.AGENT_MODELS_LMSTUDIO
+                st.caption(f"💻 Provider: **LM Studio (Local)** | Default: {default_provider_models['supervisor']['model']}")
+                available_models = [
+                    "qwen/qwen3-4b-2507",
+                    "qwen/qwen3-8b",
+                    "deepseek/deepseek-r1-0528-qwen3-8b",
+                    "openai/gpt-oss-20b",
+                ]
+
+            st.markdown("**Quick Presets:**")
+            preset_cols = st.columns(len(available_models))
+            for idx, model_name in enumerate(available_models):
+                with preset_cols[idx]:
+                    if st.button(
+                        model_name,
+                        key=f"preset_{model_name}_{selected_provider}",
+                        use_container_width=True,
+                    ):
+                        # Apply this model to all agents
+                        for agent in [
+                            "supervisor",
+                            "weather",
+                            "transport",
+                            "researcher",
+                            "planner",
+                        ]:
+                            st.session_state.agent_overrides[agent] = model_name
+                        credentials_changed = True
+                        st.rerun()
+
+            st.divider()
+            st.markdown("**Individual Agent Models:**")
+
             # Agents list
             agents = ["supervisor", "weather", "transport", "researcher", "planner"]
-            
+
             for agent in agents:
-                # Get current config or default
-                default_model = Config.AGENT_MODELS.get(agent, {}).get("model", Config.LMSTUDIO_MODEL_NAME)
-                current_override = st.session_state.agent_overrides.get(agent, default_model)
-                
-                # Render input for this agent
-                new_model = st.text_input(
-                    f"{agent.capitalize()} Model",
-                    value=current_override,
-                    key=f"agent_model_{agent}",
-                    help=f"Model for {agent} agent"
+                # Get current config based on selected provider
+                default_config = default_provider_models.get(agent, {})
+                default_model = default_config.get("model", "")
+
+                # Check for user override
+                current_override = st.session_state.agent_overrides.get(
+                    agent, default_model
                 )
-                
+
+                # Render dropdown for this agent
+                new_model = st.selectbox(
+                    f"{agent.capitalize()} Model",
+                    options=available_models,
+                    index=available_models.index(current_override)
+                    if current_override in available_models
+                    else 0,
+                    key=f"agent_model_{agent}_{selected_provider}",
+                    help=f"Model for {agent} agent ({default_config.get('provider', selected_provider)})",
+                )
+
                 # Check for changes
                 if new_model != current_override:
                     st.session_state.agent_overrides[agent] = new_model
                     credentials_changed = True
-    
-    needs_reinit = (selected_provider != st.session_state.provider or 
-                   not st.session_state.initialized or credentials_changed)
-    
+
+    needs_reinit = (
+        selected_provider != st.session_state.provider
+        or not st.session_state.initialized
+        or credentials_changed
+    )
+
     if needs_reinit:
-        if st.button(t('save_credentials'), use_container_width=True, type="primary"):
+        if st.button(t("save_credentials"), use_container_width=True, type="primary"):
             with st.spinner("Connecting..."):
                 st.session_state.provider = selected_provider
                 success, error = initialize_assistant(selected_provider)
                 if success:
-                    st.success(t('assistant_ready'))
+                    st.success(t("assistant_ready"))
                     st.rerun()
                 else:
                     st.error(f"{t('initialization_failed')}: {error}")
     else:
-        st.success(t('assistant_ready'))
-    
+        st.success(t("assistant_ready"))
+
     return selected_provider
 
 
 def render_quick_actions() -> Optional[str]:
     """Render quick action buttons."""
     st.markdown(f"## {t('quick_actions')}")
-    
+
     actions = [
         ("🌤️", t("weather_summary"), t("query_weather")),
         ("🚇", t("transport_status"), t("query_transport")),
@@ -1109,7 +1319,7 @@ def render_quick_actions() -> Optional[str]:
         ("📍", t("top_attractions"), t("query_attractions")),
         ("🗺️", t("plan_my_day"), t("query_plan")),
     ]
-    
+
     for icon, label, query in actions:
         if st.button(f"{icon} {label}", use_container_width=True, key=f"qa_{label}"):
             return query
@@ -1119,17 +1329,17 @@ def render_quick_actions() -> Optional[str]:
 def render_session_info():
     """Render session information."""
     st.markdown(f"## {t('session_info')}")
-    
+
     col1, col2 = st.columns(2)
     with col1:
         st.metric(t("messages"), len(st.session_state.messages))
     with col2:
         status = "🟢" if st.session_state.initialized else "🔴"
         st.metric(t("status"), status)
-    
+
     if st.session_state.initialized and st.session_state.assistant:
         st.caption(f"Model: {st.session_state.assistant.model_name}")
-    
+
     if st.button(f"🗑️ {t('clear_conversation')}", use_container_width=True):
         st.session_state.messages = []
         if st.session_state.assistant:
@@ -1144,27 +1354,29 @@ def render_about_section():
 NOVA IMS, 2025
 
 *LLM-Powered Urban Exploration*""")
-    
-    learn_more_text = "Saber Mais" if st.session_state.language == "pt" else "Learn More"
+
+    learn_more_text = (
+        "Saber Mais" if st.session_state.language == "pt" else "Learn More"
+    )
     if st.button(f"📖 {learn_more_text}", use_container_width=True, key="info_btn"):
         st.session_state.current_page = "info"
         st.rerun()
-    
+
     st.markdown("[🔗 GitHub](https://github.com/Silvestre17/Thesis2025-26_AFGS)")
 
 
 def render_tracing_info():
     """Render LangSmith tracing information."""
     st.markdown(f"## {t('tracing')}")
-    
+
     langsmith_enabled = os.getenv("LANGCHAIN_TRACING_V2", "false").lower() == "true"
     langsmith_project = os.getenv("LANGCHAIN_PROJECT", "default")
-    
+
     if langsmith_enabled:
-        st.success(t('tracing_active'))
+        st.success(t("tracing_active"))
         st.caption(f"{t('project')}: {langsmith_project}")
     else:
-        st.warning(t('tracing_disabled'))
+        st.warning(t("tracing_disabled"))
 
 
 def render_sidebar() -> Tuple[str, Optional[str]]:
@@ -1172,16 +1384,26 @@ def render_sidebar() -> Tuple[str, Optional[str]]:
     with st.sidebar:
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Chat", use_container_width=True, 
-                        type="primary" if st.session_state.current_page == "chat" else "secondary"):
+            if st.button(
+                "Chat",
+                use_container_width=True,
+                type="primary"
+                if st.session_state.current_page == "chat"
+                else "secondary",
+            ):
                 st.session_state.current_page = "chat"
                 st.rerun()
         with col2:
-            if st.button("Info", use_container_width=True,
-                        type="primary" if st.session_state.current_page == "info" else "secondary"):
+            if st.button(
+                "Info",
+                use_container_width=True,
+                type="primary"
+                if st.session_state.current_page == "info"
+                else "secondary",
+            ):
                 st.session_state.current_page = "info"
                 st.rerun()
-        
+
         st.divider()
         st.markdown(f"## {t('settings')}")
         render_language_selector()
@@ -1195,30 +1417,47 @@ def render_sidebar() -> Tuple[str, Optional[str]]:
         render_about_section()
         st.divider()
         render_tracing_info()
-    
+
     return selected_provider, quick_action
 
 
 def render_info_page():
     """Render the information/about page."""
     st.markdown(f"# {t('info_title')}")
-    
-    st.markdown(f"""<div class="info-section"><h3>{t('info_objective')}</h3></div>""", unsafe_allow_html=True)
-    st.markdown(t('info_objective_text'))
-    
-    st.markdown(f"""<div class="info-section"><h3>{t('info_data_sources')}</h3></div>""", unsafe_allow_html=True)
-    st.markdown(t('info_data_sources_text'))
-    
-    st.markdown(f"""<div class="info-section"><h3>{t('info_how_to_use')}</h3></div>""", unsafe_allow_html=True)
-    st.markdown(t('info_how_to_use_text'))
-    
-    st.markdown(f"""<div class="info-section"><h3>{t('info_privacy')}</h3></div>""", unsafe_allow_html=True)
-    st.markdown(t('info_privacy_text'))
-    
-    st.markdown(f"""<div class="info-section"><h3>{t('info_author')}</h3></div>""", unsafe_allow_html=True)
-    st.markdown(t('info_author_text'))
-    
-    back_text = "Voltar ao Chat" if st.session_state.language == "pt" else "Back to Chat"
+
+    st.markdown(
+        f"""<div class="info-section"><h3>{t("info_objective")}</h3></div>""",
+        unsafe_allow_html=True,
+    )
+    st.markdown(t("info_objective_text"))
+
+    st.markdown(
+        f"""<div class="info-section"><h3>{t("info_data_sources")}</h3></div>""",
+        unsafe_allow_html=True,
+    )
+    st.markdown(t("info_data_sources_text"))
+
+    st.markdown(
+        f"""<div class="info-section"><h3>{t("info_how_to_use")}</h3></div>""",
+        unsafe_allow_html=True,
+    )
+    st.markdown(t("info_how_to_use_text"))
+
+    st.markdown(
+        f"""<div class="info-section"><h3>{t("info_privacy")}</h3></div>""",
+        unsafe_allow_html=True,
+    )
+    st.markdown(t("info_privacy_text"))
+
+    st.markdown(
+        f"""<div class="info-section"><h3>{t("info_author")}</h3></div>""",
+        unsafe_allow_html=True,
+    )
+    st.markdown(t("info_author_text"))
+
+    back_text = (
+        "Voltar ao Chat" if st.session_state.language == "pt" else "Back to Chat"
+    )
     if st.button(f"💬 {back_text}", type="primary", use_container_width=True):
         st.session_state.current_page = "chat"
         st.rerun()
@@ -1234,7 +1473,7 @@ def render_chat_messages():
 def render_example_queries() -> Optional[str]:
     """Render example query buttons."""
     st.markdown(f"### {t('try_asking')}")
-    
+
     examples = [
         ("🌤️", t("ex_weather"), t("ex_query_weather")),
         ("🚇", t("ex_metro"), t("ex_query_metro")),
@@ -1243,44 +1482,42 @@ def render_example_queries() -> Optional[str]:
         ("🍽️", t("ex_food"), t("ex_query_food")),
         ("🗺️", t("ex_planning"), t("ex_query_planning")),
     ]
-    
+
     cols = st.columns(3)
     selected = None
-    
+
     for i, (icon, label, query) in enumerate(examples):
         with cols[i % 3]:
             if st.button(f"{icon} {label}", key=f"ex_{i}", use_container_width=True):
                 selected = query
-    
+
     return selected
 
 
 # def render_error_panel():
 #     """Render error panel when initialization fails."""
 #     st.error(t('error_not_initialized'))
-    
+
 #     with st.expander(t('error_troubleshooting'), expanded=True):
 #         st.markdown(f"""
 # **{t('error_common_issues')}**
 
 # 1. **{t('error_missing_api')}**
-#    - Groq: Get key from [console.groq.com](https://console.groq.com/keys)
-#    - Google: Get key from [Google AI Studio](https://aistudio.google.com/app/apikey)
 #    - OpenAI: Get key from [platform.openai.com](https://platform.openai.com/api-keys)
+#    - Azure: Get key from Azure Portal
 
 # 2. **{t('error_local_models')}**
 #    - LM Studio: Start server on port 1234
-#    - Ollama: Run 'ollama serve' and ensure model is downloaded
 
 # 3. **{t('error_network')}**
 #    - Check internet connection
 #    - Verify firewall settings
 #         """)
-        
+
 #         if st.session_state.error:
 #             # Debug purpose only - show full error
 #             st.code(st.session_state.error, language="text")
-    
+
 #     if st.button(t('retry_init'), use_container_width=True, type="primary"):
 #         with st.spinner("..."):
 #             success, _ = initialize_assistant(st.session_state.provider)
@@ -1288,55 +1525,92 @@ def render_example_queries() -> Optional[str]:
 #                 st.rerun()
 
 
+def stream_response(text: str, delay: float = 0.01):
+    """Generator function that yields chunks of text for streaming display.
+
+    Args:
+        text: The complete text to stream
+        delay: Time delay between chunks in seconds
+
+    Yields:
+        Chunks of text word by word
+    """
+    import time
+
+    words = text.split(" ")
+    for i, word in enumerate(words):
+        # Yield word with space (except for last word)
+        if i < len(words) - 1:
+            yield word + " "
+        else:
+            yield word
+        time.sleep(delay)
+
+
 def process_user_input(user_input: str):
     """Process user input and generate response."""
     st.session_state.messages.append({"role": "user", "content": user_input})
-    
+
     with st.chat_message("user"):
         st.markdown(user_input)
-    
+
     with st.chat_message("assistant"):
         try:
             # Dynamic Status Update Implementation
-            with st.status("🤔 A analisar e recolher informação...", expanded=False) as status:
+            with st.status(
+                "🤔 A analisar e recolher informação...", expanded=False
+            ) as status:
+
                 def update_ui_status(message: str):
                     """Callback to update UI status from agent graph."""
                     status.update(label=message, state="running")
-                    
+
                 try:
                     # Enable verbose mode and pass status callback
                     response = st.session_state.assistant.chat(
-                        user_input, 
-                        verbose=True, 
+                        user_input,
+                        verbose=True,
                         on_status_change=update_ui_status,
-                        language=st.session_state.get("language", "en")  # Pass current language
+                        language=st.session_state.get(
+                            "language", "en"
+                        ),  # Pass current language
                     )
-                    
-                    # Mark as complete
-                    status.update(label="✅ Resposta pronta!", state="complete", expanded=False)
-                    
-                except Exception as e:
-                    status.update(label="❌ Erro no processamento", state="error", expanded=True)
-                    raise e # Re-raise to be caught by the outer except block
 
-            # Display response only if successful (outside status container)
-            st.markdown(response)
+                    # Mark as complete
+                    status.update(
+                        label="✅ Resposta pronta!", state="complete", expanded=False
+                    )
+
+                except Exception as e:
+                    status.update(
+                        label="❌ Erro no processamento", state="error", expanded=True
+                    )
+                    raise e  # Re-raise to be caught by the outer except block
+
+            # Display response with streaming effect
+            response_container = st.empty()
+            streamed_text = ""
+
+            for chunk in stream_response(response, delay=0.01):
+                streamed_text += chunk
+                response_container.markdown(streamed_text)
+
             st.session_state.messages.append({"role": "assistant", "content": response})
-            
+
         except Exception as e:
-                error_str = str(e).lower()
-                
-                if "401" in error_str or "unauthorized" in error_str:
-                    error_msg = f"{t('error_api_key')}\n\n{t('error_api_key_msg')}"
-                elif "rate" in error_str or "limit" in error_str:
-                    error_msg = f"{t('error_rate_limit')}\n\n{t('error_rate_limit_msg')}"
-                elif "timeout" in error_str or "connection" in error_str:
-                    error_msg = f"{t('error_connection')}\n\n{t('error_connection_msg')}"
-                else:
-                    error_msg = f"{t('error_generic')}\n\n{str(e)}"
-                
-                # Format full error message with traceback
-                full_error_content = f"""
+            error_str = str(e).lower()
+
+            if "401" in error_str or "unauthorized" in error_str:
+                error_msg = f"{t('error_api_key')}\n\n{t('error_api_key_msg')}"
+            elif "rate" in error_str or "limit" in error_str:
+                error_msg = f"{t('error_rate_limit')}\n\n{t('error_rate_limit_msg')}"
+            elif "timeout" in error_str or "connection" in error_str:
+                error_msg = f"{t('error_connection')}\n\n{t('error_connection_msg')}"
+            else:
+                error_msg = f"{t('error_generic')}\n\n{str(e)}"
+
+            # Format full error message with traceback
+            full_error_content = f"""
 ### ⚠️ Error
 {error_msg}
 
@@ -1348,79 +1622,90 @@ def process_user_input(user_input: str):
 ```
 </details>
 """
-                st.markdown(full_error_content, unsafe_allow_html=True)
-                
-                st.session_state.messages.append({
-                    "role": "assistant", 
-                    "content": full_error_content
-                })
+            st.markdown(full_error_content, unsafe_allow_html=True)
+
+            st.session_state.messages.append(
+                {"role": "assistant", "content": full_error_content}
+            )
 
 
 def render_footer():
     """Render the application footer."""
-    st.markdown(f"""
+    st.markdown(
+        f"""
     <div class="lisbon-footer">
-        <p>{t('footer_version')}</p>
-        <p>{datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
-        <p>{t('footer_made')}</p>
+        <p>{t("footer_version")}</p>
+        <p>{datetime.now().strftime("%Y-%m-%d %H:%M")}</p>
+        <p>{t("footer_made")}</p>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_welcome_section():
     """Render welcome section for new users."""
-    st.markdown(f"""
+    st.markdown(
+        f"""
     <div class="welcome-card">
-        <h3>{t('welcome_title')}</h3>
-        <p>{t('welcome_intro')}</p>
+        <h3>{t("welcome_title")}</h3>
+        <p>{t("welcome_intro")}</p>
         <div class="feature-list">
-            <div class="feature-item">{t('weather_desc')}</div>
-            <div class="feature-item">{t('transport_desc')}</div>
-            <div class="feature-item">{t('events_desc')}</div>
-            <div class="feature-item">{t('places_desc')}</div>
-            <div class="feature-item">{t('planning_desc')}</div>
+            <div class="feature-item">{t("weather_desc")}</div>
+            <div class="feature-item">{t("transport_desc")}</div>
+            <div class="feature-item">{t("events_desc")}</div>
+            <div class="feature-item">{t("places_desc")}</div>
+            <div class="feature-item">{t("planning_desc")}</div>
         </div>
-        <p><strong>{t('ask_anything')}</strong></p>
+        <p><strong>{t("ask_anything")}</strong></p>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
 
 # ==========================================================================
 # Main Application
 # ==========================================================================
 
+
 def main():
     """Main application entry point."""
     st.markdown(LISBON_CSS, unsafe_allow_html=True)
     initialize_session_state()
     render_header()
-    
+
     # =========================================================================
     # STARTUP: Initialize Carris Database (cached - runs only once)
     # =========================================================================
     if "carris_db_initialized" not in st.session_state:
-        with st.spinner("🚌 Initializing Carris transport database (first time only)..."):
+        with st.spinner(
+            "🚌 Initializing Carris transport database (first time only)..."
+        ):
             success, status_msg = initialize_carris_database()
             st.session_state.carris_db_initialized = success
             st.session_state.carris_db_status = status_msg
-            
+
             if success:
                 st.toast(f"✅ Carris: {status_msg}", icon="🚌")
             else:
                 st.warning(f"⚠️ Carris database: {status_msg}")
-    
+
     selected_provider, quick_action = render_sidebar()
-    
+
     if st.session_state.current_page == "info":
         render_info_page()
         render_footer()
         return
-    
+
     main_container = st.container()
-    
+
     with main_container:
         # Initialize assistant if not already done or if provider changed
-        if not st.session_state.initialized or st.session_state.provider != selected_provider:
+        if (
+            not st.session_state.initialized
+            or st.session_state.provider != selected_provider
+        ):
             with st.spinner("Starting Lisbon Urban Assistant..."):
                 success, error = initialize_assistant(selected_provider)
                 if not success:
@@ -1428,32 +1713,32 @@ def main():
                     st.info("Please check your API credentials in the sidebar.")
                     render_footer()
                     return
-        
+
         # Safety check: ensure assistant exists
         if not st.session_state.assistant:
             st.error("Assistant not initialized. Please refresh the page.")
             render_footer()
             return
-        
+
         render_chat_messages()
-        
+
         example_query = None
         if not st.session_state.messages:
             render_welcome_section()
             example_query = render_example_queries()
-        
+
         if quick_action:
             process_user_input(quick_action)
             st.rerun()
-        
+
         if example_query:
             process_user_input(example_query)
             st.rerun()
-    
+
     if user_input := st.chat_input(t("chat_placeholder"), key="chat_input"):
         process_user_input(user_input)
         st.rerun()
-    
+
     render_footer()
 
 
