@@ -215,7 +215,6 @@ class LLMFactory:
                 # Reasoning models (gpt-5, o1, o3, o4) only support temperature=1
                 # Use minimal reasoning effort for lower latency
                 # max_completion_tokens for optimal output capacity
-                # callbacks=[] disables LangChain auto-tracing (we use @traceable)
                 return ChatOpenAI(
                     model=model_name,  # Deployment name
                     api_key=Config.AZURE_OPENAI_API_KEY,
@@ -225,11 +224,9 @@ class LLMFactory:
                     timeout=60,  # 60 second timeout for faster failure detection
                     max_retries=2,  # Reduced retries for faster failure
                     reasoning_effort="minimal",  # Minimal for lower latency
-                    callbacks=[],  # Disable LangChain auto-tracing
                 )
             else:
                 # Standard models (including gpt-5-chat) support temperature
-                # callbacks=[] disables LangChain auto-tracing (we use @traceable)
                 return ChatOpenAI(
                     model=model_name,  # Deployment name
                     api_key=Config.AZURE_OPENAI_API_KEY,
@@ -239,7 +236,6 @@ class LLMFactory:
                     streaming=True,  # Enable streaming by default
                     timeout=60,  # 60 second timeout for faster failure detection
                     max_retries=2,  # Reduced retries for faster failure
-                    callbacks=[],  # Disable LangChain auto-tracing
                 )
 
         # =====================================================================

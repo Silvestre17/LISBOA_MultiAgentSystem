@@ -1,6 +1,6 @@
 <p align="center">
    <a href="https://github.com/Silvestre17/Thesis2025-26_AFGS">
-        <img src="./docs/img/thesis_banner.png" alt="Thesis Project Banner" width="800">
+        <img src="./img/BannerLSIBOA_21-9.png" alt="Thesis Project Banner" style="width: 100%; height: 300px; object-fit: cover; object-position: center bottom;">
     </a>
 </p>
 
@@ -457,5 +457,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 </p>
 
 <p align="center">
-    <a href="https://www.novaims.unl.pt/"><img src="https://img.shields.io/badge/NOVA_IMS-003DA5?style=for-the-badge&logo=university&logoColor=white" alt="NOVA IMS"></a>
+    <a href="https://www.novaims.unl.pt/"><img src="https://img.shields.io/badge/NOVA_IMS-0ee071?style=for-the-badge&logo=university&logoColor=white" alt="NOVA IMS"></a>
 </p>

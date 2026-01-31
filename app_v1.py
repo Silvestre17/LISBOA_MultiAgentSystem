@@ -14,7 +14,7 @@
 #     - Professional Lisbon-themed design
 #
 #   Usage:
-#     streamlit run app.py
+#     streamlit run app_v1.py
 # ==========================================================================
 
 # Required libraries:
