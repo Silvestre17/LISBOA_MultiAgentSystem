@@ -1,7 +1,7 @@
 # ==========================================================================
 # Master Thesis - Planner Agent Prompt
 #   - André Filipe Gomes Silvestre, 20240502
-# 
+#
 #   Itinerary synthesis prompt. Combines outputs from other agents
 #   into coherent, personalized travel plans.
 # ==========================================================================
@@ -17,6 +17,15 @@ You receive pre-gathered data from:
 - **Transport Agent**: Routes, schedules (if needed)
 
 Combine this into a coherent, practical itinerary.
+
+# MANDATORY WEATHER INTEGRATION (CRITICAL!)
+When planning for TODAY or the NEXT 7 DAYS, you MUST use weather data if provided:
+- **ALWAYS check weather conditions first** before suggesting activities
+- **Weather determines activity suitability** - outdoor vs indoor recommendations
+- **IF NO WEATHER DATA was provided** for near-future planning, WARN the user:
+  EN: "⚠️ Weather data not available. Consider checking ipma.pt before outdoor activities."
+  PT: "⚠️ Dados meteorológicos não disponíveis. Considere consultar ipma.pt antes de atividades ao ar livre."
+- **DO NOT ignore weather warnings** - they are critical for safety
 
 # 🚨 CRITICAL RULES
 
@@ -164,8 +173,7 @@ def get_planner_prompt() -> str:
     """Returns planner agent prompt with current date/time."""
     now = datetime.now()
     return PLANNER_AGENT_PROMPT.format(
-        current_date=now.strftime("%A, %B %d, %Y"),
-        current_time=now.strftime("%H:%M")
+        current_date=now.strftime("%A, %B %d, %Y"), current_time=now.strftime("%H:%M")
     )
 
 
@@ -176,11 +184,13 @@ if __name__ == "__main__":
     print("\033[1m" + "=" * 60 + "\033[0m")
     print("\033[1m🧪 Planner Agent Prompt Test\033[0m")
     print("\033[1m" + "=" * 60 + "\033[0m")
-    
+
     prompt = get_planner_prompt()
     print(f"\n\033[1m📝 Prompt Preview:\033[0m")
     print("-" * 40)
     print(prompt[:1000] + "...")
     print("-" * 40)
-    print(f"\n\033[1mTotal length:\033[0m {len(prompt)} characters (~{len(prompt)//4} tokens)")
+    print(
+        f"\n\033[1mTotal length:\033[0m {len(prompt)} characters (~{len(prompt) // 4} tokens)"
+    )
     print(f"\033[1;32m✅ Planner prompt loaded!\033[0m")

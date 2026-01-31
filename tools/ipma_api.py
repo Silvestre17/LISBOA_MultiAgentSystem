@@ -200,23 +200,58 @@ PRECIPITATION_INTENSITY_CLASSES = {
 
 
 # ==========================================================================
-# Helper Functions
+# Helper Functions with Optimizations
 # ==========================================================================
 
-def fetch_json(url: str) -> Optional[Dict[str, Any]]:
+# Import optimization utilities for caching and connection pooling
+try:
+    from agent.utils.optimization import (
+        http_pool, 
+        TTLCache, 
+        weather_cache
+    )
+    OPTIMIZATION_AVAILABLE = True
+except ImportError:
+    OPTIMIZATION_AVAILABLE = False
+    weather_cache = None
+
+
+def fetch_json(url: str, use_cache: bool = True) -> Optional[Dict[str, Any]]:
     """
     Fetches JSON data from a URL with timeout handling.
+    Uses connection pooling and optional caching for performance.
     
     Args:
         url (str): URL to fetch from.
+        use_cache (bool): Whether to use cached results (default True).
         
     Returns:
         Optional[Dict]: JSON data if successful, None otherwise.
     """
+    # Check cache first (5 minute TTL for weather data)
+    if use_cache and OPTIMIZATION_AVAILABLE and weather_cache:
+        import hashlib
+        cache_key = hashlib.md5(url.encode()).hexdigest()
+        cached_result = weather_cache.get(cache_key)
+        if cached_result is not None:
+            logger.debug(f"Cache hit for {url}")
+            return cached_result
+    
     try:
-        response = requests.get(url, timeout=REQUEST_TIMEOUT)
+        # Use pooled connection if available
+        if OPTIMIZATION_AVAILABLE:
+            response = http_pool.get(url, timeout=REQUEST_TIMEOUT)
+        else:
+            response = requests.get(url, timeout=REQUEST_TIMEOUT)
+        
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        
+        # Cache the result
+        if use_cache and OPTIMIZATION_AVAILABLE and weather_cache:
+            weather_cache.set(cache_key, data, ttl=300)  # 5 minutes
+        
+        return data
     except requests.exceptions.Timeout:
         logger.error(f"Timeout fetching {url}")
         return None

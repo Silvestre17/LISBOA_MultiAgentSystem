@@ -43,7 +43,7 @@ class TransportAgent(BaseAgent):
         super().__init__("transport")
         self.system_prompt = get_transport_prompt()
 
-    @traceable(name="transport_agent", run_type="chain")
+    @traceable(name="transport_agent", run_type="chain", tags=["sub-agent", "transport"])
     def invoke(
         self, user_message: str, context: str = "", verbose: bool = False
     ) -> str:
@@ -140,47 +140,77 @@ class TransportAgent(BaseAgent):
                     return clean_response(last_tool_results[-1])
                 return "Sorry, I'm having difficulty processing your request. Please try again."
 
-            # Execute only non-duplicate tools
+            # Execute only non-duplicate tools - NOW IN PARALLEL
             tools_to_execute = (
                 new_calls if new_calls else response.tool_calls[:1]
             )  # Fallback to first
 
-            for tool_call in tools_to_execute:
-                tool_name = tool_call.get("name")
-                tool_args = tool_call.get("args", {})
-                tool_id = tool_call.get("id", f"call_{iteration}")
-
+            # Execute tools in parallel when there are multiple
+            if len(tools_to_execute) > 1:
                 if verbose:
-                    print(f"      [TOOL] Calling {tool_name} with args: {tool_args}")
+                    print(f"      [PARALLEL] Executing {len(tools_to_execute)} tools in parallel...")
+                
+                # Use parallel execution from base class
+                tool_results = self.execute_tools_parallel(tools_to_execute, max_workers=4)
+                
+                # Add all results as ToolMessages
+                for tool_call in tools_to_execute:
+                    tool_id = tool_call.get("id", f"call_{iteration}")
+                    tool_name = tool_call.get("name", "unknown")
+                    result = tool_results.get(tool_id, f"Tool '{tool_name}' execution failed.")
+                    
+                    # Store for fallback
+                    last_tool_results.append(str(result))
+                    
+                    if verbose:
+                        result_preview = (
+                            str(result)[:100] + "..."
+                            if len(str(result)) > 100
+                            else str(result)
+                        )
+                        print(f"      [TOOL] {tool_name} Result: {result_preview}")
+                    
+                    messages.append(
+                        ToolMessage(content=str(result), tool_call_id=tool_id)
+                    )
+            else:
+                # Single tool - execute sequentially as before
+                for tool_call in tools_to_execute:
+                    tool_name = tool_call.get("name")
+                    tool_args = tool_call.get("args", {})
+                    tool_id = tool_call.get("id", f"call_{iteration}")
 
-                # Find and execute the tool
-                tool_result = None
-                for tool in self.tools:
-                    if tool.name == tool_name:
-                        try:
-                            tool_result = tool.invoke(tool_args)
-                            # Store tool result for fallback
-                            last_tool_results.append(str(tool_result))
-                            if verbose:
-                                result_preview = (
-                                    str(tool_result)[:100] + "..."
-                                    if len(str(tool_result)) > 100
-                                    else str(tool_result)
-                                )
-                                print(f"      [TOOL] Result: {result_preview}")
-                        except Exception as e:
-                            tool_result = f"Error executing {tool_name}: {str(e)}"
-                            if verbose:
-                                print(f"      [TOOL] Error: {tool_result}")
-                        break
+                    if verbose:
+                        print(f"      [TOOL] Calling {tool_name} with args: {tool_args}")
 
-                if tool_result is None:
-                    tool_result = f"Tool '{tool_name}' not found."
+                    # Find and execute the tool
+                    tool_result = None
+                    for tool in self.tools:
+                        if tool.name == tool_name:
+                            try:
+                                tool_result = tool.invoke(tool_args)
+                                # Store tool result for fallback
+                                last_tool_results.append(str(tool_result))
+                                if verbose:
+                                    result_preview = (
+                                        str(tool_result)[:100] + "..."
+                                        if len(str(tool_result)) > 100
+                                        else str(tool_result)
+                                    )
+                                    print(f"      [TOOL] Result: {result_preview}")
+                            except Exception as e:
+                                tool_result = f"Error executing {tool_name}: {str(e)}"
+                                if verbose:
+                                    print(f"      [TOOL] Error: {tool_result}")
+                            break
 
-                # Add tool result as ToolMessage
-                messages.append(
-                    ToolMessage(content=str(tool_result), tool_call_id=tool_id)
-                )
+                    if tool_result is None:
+                        tool_result = f"Tool '{tool_name}' not found."
+
+                    # Add tool result as ToolMessage
+                    messages.append(
+                        ToolMessage(content=str(tool_result), tool_call_id=tool_id)
+                    )
 
             response = self.llm_with_tools.invoke(messages)
             iteration += 1

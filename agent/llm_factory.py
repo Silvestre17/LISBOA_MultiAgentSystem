@@ -8,10 +8,8 @@
 #
 #   Supported Providers:
 #     - LMStudio: Local server with OpenAI-compatible API (open-source models)
-#     - Ollama:   Local model execution (open-source models)
-#     - Groq:     High-speed inference API (qwen/llama models)
-#     - Google:   Google AI Studio (Gemini models)
 #     - OpenAI:   OpenAI API (GPT models)
+#     - Azure:    Azure OpenAI Service (enterprise cloud)
 #
 #   Design Pattern: Factory Pattern
 #     - Encapsulates object creation logic
@@ -21,11 +19,11 @@
 #   Usage:
 #     from agent.llm_factory import LLMFactory
 #     llm = LLMFactory.get_llm()                   # Uses default provider from config
-#     llm = LLMFactory.get_llm(provider="google")  # Override provider
+#     llm = LLMFactory.get_llm(provider="openai")  # Override provider
 # ==========================================================================
 
 # Required libraries:
-# pip install langchain-core langchain-groq langchain-google-genai langchain-openai langchain-ollama
+# pip install langchain-core langchain-openai
 
 import os
 import sys
@@ -49,10 +47,8 @@ class LLMFactory:
 
     Supported Providers:
         - lmstudio: Local OpenAI-compatible server (recommended for development)
-        - groq: High-speed cloud inference (recommended for production)
-        - google: Google's Gemini models via AI Studio
-        - openai: OpenAI's GPT models
-        - ollama: Local model execution (for offline use)
+        - openai: OpenAI API (GPT models)
+        - azure: Azure OpenAI Service (enterprise cloud)
 
     Attributes:
         None (all methods are static)
@@ -64,7 +60,7 @@ class LLMFactory:
         >>> llm = LLMFactory.get_llm()
         >>>
         >>> # Create LLM with specific provider
-        >>> llm = LLMFactory.get_llm(provider="google", temperature=0.7)
+        >>> llm = LLMFactory.get_llm(provider="openai", temperature=0.7)
         >>>
         >>> # Get model information
         >>> model_name = LLMFactory.get_model_info(llm)
@@ -87,10 +83,8 @@ class LLMFactory:
         Args:
             provider (str): The LLM provider to use. Options:
                 - 'lmstudio': Local LM Studio server (recommended for development)
-                - 'groq': Groq cloud API (fast inference, recommended for production)
-                - 'google': Google AI Studio (Gemini models)
                 - 'openai': OpenAI API (GPT models)
-                - 'ollama': Local Ollama server
+                - 'azure': Azure OpenAI Service (enterprise cloud)
                 Default: Config.MODEL_PROVIDER (from config.py)
 
             temperature (float): Controls randomness in responses.
@@ -141,72 +135,16 @@ class LLMFactory:
                 # Add penalties to prevent repetition (critical for small models)
                 frequency_penalty=0.5,
                 presence_penalty=0.3,
+                streaming=True,  # Enable streaming for faster first-token latency
             )
 
         # =====================================================================
-        # PROVIDER 2: GROQ (High-speed inference)
-        # =====================================================================
-        # Groq provides extremely fast inference for open-source models.
-        # Recommended for: Production use, real-time chat applications
-        # Models available: Qwen, Llama, Mixtral
-        # Free tier: 14,400 requests/day
-        elif provider == "groq":
-            # Validate API key exists
-            if not Config.GROQ_API_KEY:
-                raise ValueError(
-                    "\033[1;31m❌ GROQ_API_KEY not found in environment.\033[0m\n"
-                    "   To fix: Add GROQ_API_KEY to your .env file\n"
-                    "   Get your free key at: https://console.groq.com"
-                )
-
-            # Import Groq-specific LangChain integration
-            from langchain_groq import ChatGroq
-
-            model_name = model if model else Config.GROQ_MODEL_NAME
-
-            return ChatGroq(
-                model=model_name,  # e.g., "llama-3.3-70b-versatile"
-                temperature=temperature,
-                api_key=Config.GROQ_API_KEY,
-            )
-
-        # =====================================================================
-        # PROVIDER 3: GOOGLE (Gemini models)
-        # =====================================================================
-        # Google AI Studio provides access to Gemini models.
-        # Recommended for: Tasks requiring multimodal capabilities
-        # Models available: gemini-2.0-flash-exp, gemini-1.5-pro
-        # Free tier: 60 requests/minute
-        elif provider == "google":
-            # Validate API key exists
-            if not Config.GOOGLE_API_KEY:
-                raise ValueError(
-                    "\033[1;31m❌ GOOGLE_API_KEY not found in environment.\033[0m\n"
-                    "   To fix: Add GOOGLE_API_KEY to your .env file\n"
-                    "   Get your key at: https://aistudio.google.com/apikey"
-                )
-
-            # Import Google-specific LangChain integration
-            from langchain_google_genai import ChatGoogleGenerativeAI
-
-            model_name = model if model else Config.GOOGLE_MODEL_NAME
-
-            return ChatGoogleGenerativeAI(
-                model=model_name,  # e.g., "gemini-2.0-flash-exp"
-                temperature=temperature,
-                google_api_key=Config.GOOGLE_API_KEY,
-                # Gemini doesn't support system messages natively
-                # This flag converts them to human messages
-                convert_system_message_to_human=True,
-            )
-
-        # =====================================================================
-        # PROVIDER 4: OPENAI (GPT models)
+        # PROVIDER 2: OPENAI (GPT models)
         # =====================================================================
         # OpenAI API provides access to GPT models.
         # Recommended for: Tasks requiring highest quality outputs
-        # Models available: gpt-4o, gpt-4o-mini, gpt-4-turbo
-        # Pricing: Pay-per-use (no free tier for GPT-4)
+        # Models available: gpt-5.2, gpt-5.1, gpt-5, gpt-5-mini, gpt-5-nano
+        # Pricing: Pay-per-use
         elif provider == "openai":
             # Validate API key exists
             if not Config.OPENAI_API_KEY:
@@ -221,30 +159,88 @@ class LLMFactory:
 
             model_name = model if model else Config.OPENAI_MODEL_NAME
 
-            return ChatOpenAI(
-                model=model_name,  # e.g., "gpt-4o-mini"
-                temperature=temperature,
-                api_key=Config.OPENAI_API_KEY,
+            # Check if it's an o-series model (reasoning models that only support temp=1)
+            is_o_series = any(
+                x in model_name.lower() for x in ["o1", "o3", "gpt-5", "o-"]
             )
 
-        # =====================================================================
-        # PROVIDER 5: OLLAMA (Local model execution)
-        # =====================================================================
-        # Ollama runs models locally on your machine.
-        # Recommended for: Offline use, development, testing
-        # Setup: Install Ollama, pull model (ollama pull qwen2.5:7b), run server
-        # Server command: ollama serve
-        elif provider == "ollama":
-            # Import Ollama-specific LangChain integration
-            from langchain_ollama import ChatOllama
+            if is_o_series:
+                # o-series models only support temperature=1, omit the parameter
+                return ChatOpenAI(
+                    model=model_name,  # e.g., "gpt-5-nano"
+                    api_key=Config.OPENAI_API_KEY,
+                    streaming=True,  # Enable streaming for lower latency
+                )
+            else:
+                return ChatOpenAI(
+                    model=model_name,  # e.g., "gpt-5-nano"
+                    temperature=temperature,
+                    api_key=Config.OPENAI_API_KEY,
+                    streaming=True,  # Enable streaming for lower latency
+                )
 
-            model_name = model if model else Config.OLLAMA_MODEL_NAME
+        # =====================================================================
+        # PROVIDER 3: AZURE OPENAI (v1 API - uses /openai/v1/ endpoint)
+        # =====================================================================
+        # Azure OpenAI via new v1 API (August 2025+)
+        # Uses ChatOpenAI with base_url instead of AzureChatOpenAI
+        # Benefits: No api_version needed, faster updates, OpenAI-compatible
+        # Required env vars: AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT
+        # IMPORTANT: o-series models (gpt-5-nano, o1, o3) only support temperature=1
+        elif provider == "azure":
+            if not Config.AZURE_OPENAI_API_KEY:
+                raise ValueError("AZURE_OPENAI_API_KEY not found in .env file")
+            if not Config.AZURE_OPENAI_ENDPOINT:
+                raise ValueError("AZURE_OPENAI_ENDPOINT not found in .env file")
 
-            return ChatOllama(
-                model=model_name,  # e.g., "qwen2.5:7b"
-                temperature=temperature,
-                keep_alive="5m",  # Keep model loaded for 5 minutes after last request
+            from langchain_openai import ChatOpenAI
+
+            # Determine the model being used
+            model_name = model or Config.AZURE_OPENAI_DEPLOYMENT_NAME
+
+            # Build the v1 API base URL
+            # Format: https://YOUR-RESOURCE.openai.azure.com/openai/v1/
+            endpoint = Config.AZURE_OPENAI_ENDPOINT.rstrip("/")
+            base_url = f"{endpoint}/openai/v1/"
+
+            # Check if it's an o-series/reasoning model (only support temp=1)
+            # EXCEPTION: gpt-5-chat supports configurable temperature
+            is_reasoning_model = any(
+                x in model_name.lower() for x in ["o1", "o3", "o4", "o-"]
+            ) or (
+                "gpt-5" in model_name.lower() and "gpt-5-chat" not in model_name.lower()
             )
+
+            if is_reasoning_model:
+                # Reasoning models (gpt-5, o1, o3, o4) only support temperature=1
+                # Use minimal reasoning effort for lower latency
+                # max_completion_tokens for optimal output capacity
+                # callbacks=[] disables LangChain auto-tracing (we use @traceable)
+                return ChatOpenAI(
+                    model=model_name,  # Deployment name
+                    api_key=Config.AZURE_OPENAI_API_KEY,
+                    base_url=base_url,  # v1 API endpoint
+                    max_completion_tokens=16384,  # Optimal token limit
+                    streaming=True,  # Enable streaming by default
+                    timeout=60,  # 60 second timeout for faster failure detection
+                    max_retries=2,  # Reduced retries for faster failure
+                    reasoning_effort="minimal",  # Minimal for lower latency
+                    callbacks=[],  # Disable LangChain auto-tracing
+                )
+            else:
+                # Standard models (including gpt-5-chat) support temperature
+                # callbacks=[] disables LangChain auto-tracing (we use @traceable)
+                return ChatOpenAI(
+                    model=model_name,  # Deployment name
+                    api_key=Config.AZURE_OPENAI_API_KEY,
+                    base_url=base_url,  # v1 API endpoint
+                    temperature=temperature,
+                    max_completion_tokens=16384,  # Optimal token limit
+                    streaming=True,  # Enable streaming by default
+                    timeout=60,  # 60 second timeout for faster failure detection
+                    max_retries=2,  # Reduced retries for faster failure
+                    callbacks=[],  # Disable LangChain auto-tracing
+                )
 
         # =====================================================================
         # UNSUPPORTED PROVIDER
@@ -252,7 +248,7 @@ class LLMFactory:
         else:
             raise ValueError(
                 f"\033[1;31m❌ Unsupported provider: '{provider}'\033[0m\n"
-                f"   Supported providers: lmstudio, groq, google, openai, ollama\n"
+                f"   Supported providers: lmstudio, openai, azure\n"
                 f"   Default provider: {Config.MODEL_PROVIDER}"
             )
 
@@ -263,7 +259,7 @@ class LLMFactory:
 
         Returns a dictionary with all relevant configuration details including
         model name, temperature, penalty parameters, and provider-specific settings.
-        Handles various providers (OpenAI, Groq, Google, Ollama) dynamically.
+        Handles various providers (OpenAI, Azure, LM Studio) dynamically.
 
         Args:
             llm (BaseChatModel): The LLM instance to inspect.
@@ -321,30 +317,6 @@ class LLMFactory:
                 if k not in info and v is not None:
                     info[k] = v
 
-        # 3. Provider-Specific Extraction
-
-        # Google/Gemini specific
-        if "Google" in info["type"]:
-            # Check for generation_config
-            gen_config = getattr(llm, "generation_config", None)
-            if gen_config:
-                if isinstance(gen_config, dict):
-                    info.update({k: v for k, v in gen_config.items() if v is not None})
-                elif hasattr(gen_config, "__dict__"):
-                    try:
-                        info.update(
-                            {k: v for k, v in vars(gen_config).items() if v is not None}
-                        )
-                    except:
-                        pass
-
-        # Ollama specific
-        if "Ollama" in info["type"]:
-            if hasattr(llm, "keep_alive"):
-                info["keep_alive"] = llm.keep_alive
-            if hasattr(llm, "num_ctx"):
-                info["num_ctx"] = llm.num_ctx
-
         return info
 
     @staticmethod
@@ -367,7 +339,9 @@ class LLMFactory:
             >>> # Returns LLM configured with supervisor's provider/model
         """
         # Get agent-specific config or fallback to default
-        agent_config = Config.AGENT_MODELS.get(agent_name, Config.DEFAULT_AGENT_MODEL)
+        agent_config = Config.AGENT_MODELS().get(
+            agent_name, Config.DEFAULT_AGENT_MODEL()
+        )
 
         provider = agent_config.get("provider", Config.MODEL_PROVIDER)
         model = agent_config.get("model", None)  # Get specific model name
@@ -435,5 +409,5 @@ if __name__ == "__main__":
         print("\n\033[1m💡 Troubleshooting Tips:\033[0m")
         print("   1. Verify API keys are correctly set in .env file")
         print("   2. For LM Studio: Ensure server is running on port 1234")
-        print("   3. For Ollama: Run 'ollama serve' before testing")
+        print("   3. For Azure: Check your Azure OpenAI endpoint configuration")
         print("   4. Check internet connection for cloud providers")

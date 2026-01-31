@@ -17,7 +17,7 @@
 3. **[ARCHITECTURE_DIAGRAMS.md](architecture/ARCHITECTURE_DIAGRAMS.md)** - Visual system architecture and workflows
 
 ### API Reference
-4. **[tools_overview.md](tools_overview.md)** - Overview of all 29 tools with usage guide
+4. **[tools_overview.md](tools_overview.md)** - Overview of all 41 tools with usage guide
 
 ---
 
@@ -95,7 +95,7 @@ print(f"First event: {events[0]}")
 ### Code Base
 - **Python Modules**: 25+
 - **Lines of Code**: ~15,000+
-- **Tools Implemented**: 40
+- **Tools Implemented**: 41
 - **Specialized Agents**: 5
 - **Data Sources**: 6 APIs + 2 scraped sources
 
@@ -249,7 +249,6 @@ python agent/llm_factory.py
 pip install -r requirements.txt
 
 # Configure API keys (.env file)
-GROQ_API_KEY=your_key_here
 
 # Build vector store (first time only)
 python tools/vector_store.py
@@ -324,23 +323,22 @@ print(services)
 ## ⚠️ Important Notes
 
 ### API Keys Required
-- **Groq**: Free tier (14,400 requests/day)
-- **Google**: Free tier (60 requests/minute)
 - **OpenAI**: Pay-per-use
+- **Azure**: Enterprise deployment
 
 Get keys from:
-- Groq: https://console.groq.com
-- Google: https://aistudio.google.com/apikey
 - OpenAI: https://platform.openai.com/api-keys
+- Azure: https://portal.azure.com (OpenAI Service)
 
 ### Environment Setup
 
 **`.env` file**:
 ```bash
 # LLM Provider Keys
-GROQ_API_KEY=gsk_...
-GOOGLE_API_KEY=AIza...
 OPENAI_API_KEY=sk-...
+AZURE_OPENAI_API_KEY=your_key_here
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_OPENAI_API_VERSION=2024-12-01-preview
 
 # LangSmith (Optional - for tracing)
 LANGCHAIN_TRACING_V2=true
@@ -373,6 +371,11 @@ LANGCHAIN_PROJECT=thesis-project
 ## 🔄 Documentation Updates
 
 ### Version History
+- **v2.2** (Jan 30, 2026): Tool count audit and documentation sync
+  - Corrected tool count to **41 tools** total  
+  - Removed `initialize_cp_gtfs` from tools (utility function, not agent tool)
+  - Exported all agent-facing tools correctly
+  - Fixed Carris Metropolitana (7), Carris Urban (7), CP (5)
 - **v2.1** (Jan 28, 2026): Documentation sync with current code
   - Updated tool count to 40 tools total
   - Added Carris Urban GTFS-RT integration (7 tools)
@@ -418,4 +421,4 @@ LANGCHAIN_PROJECT=thesis-project
 
 *This index serves as the central navigation point for all project documentation.*
 
-**Last Updated**: January 28, 2026
+**Last Updated**: January 30, 2026

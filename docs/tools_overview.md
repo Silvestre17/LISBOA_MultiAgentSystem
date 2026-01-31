@@ -1,8 +1,8 @@
 # Tools API Overview
 
-This document provides an overview of all **40 available tools** in the Lisbon Urban Assistant project.
+This document provides an overview of all **41 available tools** in the Lisbon Urban Assistant project.
 
-**Last Updated**: January 28, 2026
+**Last Updated**: January 30, 2026
 
 ---
 
@@ -53,7 +53,7 @@ This document provides an overview of all **40 available tools** in the Lisbon U
 | `get_metro_frequency(line, day_type)` | Train frequency schedules | Timetable by period |
 | `get_all_metro_stations()` | List all 50 metro stations | Stations grouped by line |
 
-### Carris Metropolitana - Bus (6 tools)
+### Carris Metropolitana - Bus (7 tools)
 
 | Function | Description | Returns |
 |----------|-------------|---------|
@@ -62,7 +62,8 @@ This document provides an overview of all **40 available tools** in the Lisbon U
 | `search_carris_metropolitana_lines(query)` | Search bus lines by name/number | Matching line information |
 | `find_bus_routes(origin, destination)` | Find bus routes between locations | Direct and connecting routes |
 | `get_bus_realtime_locations(line_id)` | Real-time GPS bus tracking | Active buses on a line |
-| `get_bus_schedule(line_id)` | Bus route schedule and stops | Timetable and stop list |
+| `get_bus_next_departures(line_id, stop_id)` | Next scheduled departures | Timetable and ETAs |
+| `find_direct_bus_lines(origin, dest)` | Find direct bus line connections | Lines serving both locations |
 
 ### CP - Trains (5 tools)
 
@@ -70,9 +71,9 @@ This document provides an overview of all **40 available tools** in the Lisbon U
 |----------|-------------|---------|
 | `get_train_status()` | CP train delays (AML filtered) | Train status with delays |
 | `search_cp_stations(query)` | Search CP stations in AML region | Station list with codes |
-| `get_cp_train_schedule(station)` | Train schedule for a station | Upcoming departures |
-| `get_cp_line_info(line)` | Information about a CP line | Line details and stops |
-| `get_cp_realtime_arrivals(station)` | Real-time arrival info | Live train arrivals |
+| `get_train_schedule(station)` | Train schedule for a station | Upcoming departures |
+| `get_cp_routes()` | All CP train routes/lines | Line details and stops |
+| `plan_train_trip(origin, dest)` | Plan a train trip between stations | Trip details with times |
 
 ### Multi-modal (2 tools)
 
@@ -92,11 +93,11 @@ This document provides an overview of all **40 available tools** in the Lisbon U
 |----------|-------------|---------|
 | `carris_get_stops(query)` | Search urban bus/tram stops | Stop list with GPS coords and IDs |
 | `carris_get_routes(route_type, route_id)` | List bus/tram lines (28E, 15E, 732...) | Routes by type with names |
-| `carris_get_arrivals(stop_id, limit)` | **REAL-TIME** arrivals at a stop | Combined schedule + live GPS data |
-| `carris_get_stop_schedule(stop_id)` | Static GTFS schedule for a stop | Upcoming departures (no real-time) |
+| `carris_get_next_departures(stop_id)` | Get next departures at a stop | Schedule + real-time arrivals |
 | `carris_find_routes_between(origin, dest)` | GPS-based route finding | Direct routes + next departure times |
 | `carris_get_realtime_vehicles(route_id, type)` | Live vehicle positions (GTFS-RT) | Real-time bus/tram GPS + license plates |
-| `carris_vehicle_eta(route, stop_name)` | **REAL-TIME** ETA for a specific route | Estimated arrival time with delay info |
+| `carris_get_arrivals(stop_id, limit)` | Real-time arrivals combining schedule + tracking | Combined arrivals with delays |
+| `carris_vehicle_eta(route, stop)` | Calculate ETA for specific route at stop | Estimated arrival with delay info |
 
 **Key Features (NEW - GTFS-RT Integration)**:
 - **Real-Time Vehicle Tracking**: GPS positions of ~400 vehicles via Protocol Buffers feed
@@ -339,14 +340,14 @@ All tools implement:
 |----------|-------|
 | Weather Tools (IPMA) | 4 |
 | Transport - Metro | 6 |
-| Transport - Bus (Carris Metropolitana) | 6 |
+| Transport - Bus (Carris Metropolitana) | 7 |
 | Transport - Carris Urban (Buses & Trams) | 7 |
 | Transport - Train (CP) | 5 |
 | Transport - Multi-modal | 2 |
 | Open Data (Lisboa Aberta) | 4 |
 | VisitLisboa (Events & Places) | 5 |
 | Web Knowledge | 1 |
-| **Total Tools** | **40** |
+| **Total Tools** | **41** |
 
 ### Response Times
 
