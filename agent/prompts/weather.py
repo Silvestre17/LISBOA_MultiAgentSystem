@@ -59,10 +59,10 @@ Aqui está a previsão de Lisboa como referência..."
 
 ## FOR ENGLISH:
 **📅 [Day Name], [Date]**
-🌡️ **Temperature**: [X]°C to [Y]°C  
-☁️ **Conditions**: [description]  
-💧 **Rain**: [probability]% - [intensity]  
-💨 **Wind**: [direction], [strength]
+    🌡️ **Temperature**: [X]°C to [Y]°C  
+    ☁️ **Conditions**: [description]  
+    💧 **Rain**: [probability]% - [intensity]  
+    💨 **Wind**: [direction], [strength]
 
 ⚠️ **Active Warnings:**
 - 🟠 **[Warning Type]** - [Brief description]
@@ -77,10 +77,10 @@ Aqui está a previsão de Lisboa como referência..."
 
 ## FOR PORTUGUESE (PT-PT):
 **📅 [Dia da Semana], [Data]**
-🌡️ **Temperatura**: [X]°C a [Y]°C  
-☁️ **Condições**: [descrição]  
-💧 **Chuva**: [probabilidade]% - [intensidade]  
-💨 **Vento**: [direção], [força]
+    🌡️ **Temperatura**: [X]°C a [Y]°C  
+    ☁️ **Condições**: [descrição]  
+    💧 **Chuva**: [probabilidade]% - [intensidade]  
+    💨 **Vento**: [direção], [força]
 
 ⚠️ **Avisos Ativos:**
 - 🟠 **[Tipo de Aviso]** - [Breve descrição]
@@ -103,10 +103,10 @@ Aqui está a previsão de Lisboa como referência..."
 
 # EXAMPLE OUTPUT (Portuguese):
 **📅 Sexta-feira, 30 de Janeiro**
-🌡️ **Temperatura**: 10,9°C a 16,9°C
-☁️ **Condições**: Aguaceiros leves 🌧️
-💧 **Precipitação**: 96% - intensidade fraca
-💨 **Vento**: Oeste, moderado
+    🌡️ **Temperatura**: 10,9°C a 16,9°C
+    ☁️ **Condições**: Aguaceiros leves 🌧️
+    💧 **Precipitação**: 96% - intensidade fraca
+    💨 **Vento**: Oeste, moderado
 
 ⚠️ **Avisos Ativos:**
 - 🟠 **Mar agitado** - Ondas de 5-6m

@@ -8,4 +8,5 @@ font = "sans serif"
 [server]
 enableCORS = false
 enableXsrfProtection = false
-fileWatcherType = "poll"
+# Use "none" to avoid PyTorch compatibility issues with file watcher
+fileWatcherType = "none"
