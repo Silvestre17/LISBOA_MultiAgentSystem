@@ -82,6 +82,7 @@ def get_agent_tools(agent_name: str) -> List:
 
         # Carris Metropolitana (Suburban buses)
         from tools.carrismetropolitana_api import (
+            get_real_time_bus_positions,
             get_carris_metropolitana_alerts,
             get_carris_metropolitana_stop_info,
             search_carris_metropolitana_lines,
@@ -126,6 +127,7 @@ def get_agent_tools(agent_name: str) -> List:
             get_carris_metropolitana_stop_info,
             search_carris_metropolitana_lines,
             find_direct_bus_lines,
+            get_real_time_bus_positions,
             get_train_status,
             plan_train_trip,
             get_train_schedule,
@@ -507,6 +509,70 @@ class BaseAgent:
                     results[tool_id] = f"Execution error: {str(e)}"
         
         return results
+
+
+# ==========================================================================
+# Loop Detection Utilities (Shared across agents)
+# ==========================================================================
+
+
+def detect_tool_loop(messages: List, recent_tool_calls: List, lookback: int = 3) -> bool:
+    """
+    Detects if recent tool calls are duplicates (potential infinite loop).
+    
+    This utility is shared across weather_agent, transport_agent, and researcher_agent
+    to prevent the LLM from calling the same tool repeatedly with the same arguments.
+    
+    Args:
+        messages: Conversation history.
+        recent_tool_calls: Tool calls from the latest AI response.
+        lookback: Number of previous AI messages to check (default 3).
+        
+    Returns:
+        bool: True if loop detected (duplicate tool calls), False otherwise.
+        
+    Example:
+        >>> if detect_tool_loop(state["messages"], response.tool_calls):
+        >>>     # Force response generation instead of calling tools again
+        >>>     pass
+    """
+    import json
+    
+    if not recent_tool_calls:
+        return False
+    
+    # Get signatures of recent tool calls
+    def _get_signature(tool_call) -> str:
+        """Creates unique signature for a tool call."""
+        try:
+            args_str = json.dumps(tool_call.get("args", {}), sort_keys=True)
+        except (TypeError, AttributeError):
+            args_str = str(getattr(tool_call, "args", {}))
+        
+        name = (
+            tool_call.get("name", "")
+            if isinstance(tool_call, dict)
+            else getattr(tool_call, "name", "")
+        )
+        return f"{name}:{args_str}"
+    
+    # Get signatures of new tool calls
+    new_signatures = {_get_signature(tc) for tc in recent_tool_calls}
+    
+    # Get signatures of recent tool calls from history
+    recent_signatures = set()
+    ai_msg_count = 0
+    
+    for msg in reversed(messages):
+        if hasattr(msg, "tool_calls") and msg.tool_calls:
+            ai_msg_count += 1
+            for tc in msg.tool_calls:
+                recent_signatures.add(_get_signature(tc))
+            if ai_msg_count >= lookback:
+                break
+    
+    # If all new tool calls were already made recently, it's a loop
+    return bool(new_signatures) and new_signatures.issubset(recent_signatures)
 
 
 # ==========================================================================

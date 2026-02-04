@@ -68,6 +68,33 @@ class LLMFactory:
     """
 
     @staticmethod
+    def _is_reasoning_model(model_name: str) -> bool:
+        """
+        Checks if a model is a reasoning model that only supports temperature=1.
+        
+        Reasoning models (o1, o3, o4, gpt-5) use chain-of-thought and do not
+        support temperature configuration. Exception: gpt-5-chat supports
+        configurable temperature.
+        
+        Args:
+            model_name (str): The model name to check.
+            
+        Returns:
+            bool: True if this is a reasoning model, False otherwise.
+        """
+        model_lower = model_name.lower()
+        
+        # Check for o-series models (o1, o3, o4)
+        is_o_series = any(x in model_lower for x in ["o1", "o3", "o4", "o-"])
+        
+        # Check for gpt-5 (but NOT gpt-5-chat which supports temperature)
+        is_gpt5_reasoning = (
+            "gpt-5" in model_lower and "gpt-5-chat" not in model_lower
+        )
+        
+        return is_o_series or is_gpt5_reasoning
+
+    @staticmethod
     def get_llm(
         provider: str = Config.MODEL_PROVIDER,
         temperature: float = Config.TEMPERATURE,
@@ -159,13 +186,9 @@ class LLMFactory:
 
             model_name = model if model else Config.OPENAI_MODEL_NAME
 
-            # Check if it's an o-series model (reasoning models that only support temp=1)
-            is_o_series = any(
-                x in model_name.lower() for x in ["o1", "o3", "gpt-5", "o-"]
-            )
-
-            if is_o_series:
-                # o-series models only support temperature=1, omit the parameter
+            # Check if it's a reasoning model using helper function
+            if LLMFactory._is_reasoning_model(model_name):
+                # Reasoning models only support temperature=1, omit the parameter
                 return ChatOpenAI(
                     model=model_name,  # e.g., "gpt-5-nano"
                     api_key=Config.OPENAI_API_KEY,
@@ -203,15 +226,8 @@ class LLMFactory:
             endpoint = Config.AZURE_OPENAI_ENDPOINT.rstrip("/")
             base_url = f"{endpoint}/openai/v1/"
 
-            # Check if it's an o-series/reasoning model (only support temp=1)
-            # EXCEPTION: gpt-5-chat supports configurable temperature
-            is_reasoning_model = any(
-                x in model_name.lower() for x in ["o1", "o3", "o4", "o-"]
-            ) or (
-                "gpt-5" in model_name.lower() and "gpt-5-chat" not in model_name.lower()
-            )
-
-            if is_reasoning_model:
+            # Check if it's a reasoning model using helper function
+            if LLMFactory._is_reasoning_model(model_name):
                 # Reasoning models (gpt-5, o1, o3, o4) only support temperature=1
                 # Use minimal reasoning effort for lower latency
                 # max_completion_tokens for optimal output capacity

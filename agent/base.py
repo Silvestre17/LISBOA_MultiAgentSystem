@@ -34,6 +34,7 @@ from tools.carrismetropolitana_api import (
     get_bus_realtime_locations,
     get_bus_next_departures,
     find_bus_routes,
+    get_real_time_bus_positions,
 )
 
 # CP (Comboios de Portugal) - Trains
@@ -101,6 +102,7 @@ def get_tools():
         get_carris_metropolitana_alerts,
         get_carris_metropolitana_stop_info,
         search_carris_metropolitana_lines,
+        get_real_time_bus_positions,
         get_bus_realtime_locations,
         get_bus_next_departures,
         get_train_status,

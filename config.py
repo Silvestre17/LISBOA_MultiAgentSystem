@@ -118,9 +118,10 @@ class Config:
     # =========================================================================
 
     # OpenAI GPT model
-    # Options: gpt-5.2, gpt-5.1, gpt-5, gpt-5-mini
+    # Options: gpt-5.2, gpt-5.1, gpt-5, gpt-5-mini, gpt-5-nano
     # Can be set via environment variable OPENAI_MODEL_NAME
-    OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", "")
+    # Default is set to a valid model name to avoid runtime errors.
+    OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", "gpt-5-nano")
 
     # LM Studio model (Local server on port 1234)
     # Set to match the model loaded in your local LM Studio instance

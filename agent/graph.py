@@ -55,7 +55,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from agent.state import AgentState, create_initial_state
 from agent.prompts import get_system_prompt
 from agent.llm_factory import LLMFactory
-from agent.agents.base import clean_response
+from agent.agents.base import clean_response  # Shared response cleaning utility
 
 # Import tools
 from tools.ipma_api import (
@@ -77,18 +77,23 @@ from tools.metrolisboa_api import (
 
 # Carris Metropolitana (Suburban buses)
 from tools.carrismetropolitana_api import (
+    get_real_time_bus_positions,
     get_carris_metropolitana_alerts,
     get_carris_metropolitana_stop_info,
     search_carris_metropolitana_lines,
     find_bus_routes,  # Bus routing between locations
     get_bus_realtime_locations,  # Real-time bus GPS locations
     get_bus_next_departures,  # Bus route schedule/stops
+    find_direct_bus_lines,
 )
 
 # CP (Comboios de Portugal) - Trains
 from tools.cp_api import (
     get_train_status,
     search_cp_stations,  # CP train station search (AML)
+    get_train_schedule,
+    get_cp_routes,
+    plan_train_trip,
 )
 
 # Multi-modal transport routing
@@ -112,72 +117,35 @@ from tools.visitlisboa_api import (
 from tools.carris_api import (
     carris_get_stops,
     carris_get_routes,
+    carris_get_arrivals,
     carris_get_next_departures,
     carris_find_routes_between,
     carris_get_realtime_vehicles,
+    carris_vehicle_eta,
 )
 
-
-# ==========================================================================
-# Response Cleaning
-# ==========================================================================
-
-
-def _clean_response(content: str) -> str:
-    """
-    Cleans model-specific artifacts from the response before displaying to user.
-
-    Removes:
-        - <think>...</think> blocks (Qwen3 reasoning)
-        - <tool_call>...</tool_call> blocks (some models embed these in text)
-        - Embedded JSON tool call syntax
-        - <|im_start|>, <|im_end|> tokens (chat template artifacts)
-        - Leading/trailing whitespace
-
-    Args:
-        content: Raw response from the LLM.
-
-    Returns:
-        str: Cleaned response suitable for user display.
-    """
-    if not content:
-        return content
-
-    # Remove <think>...</think> blocks (Qwen3 reasoning) - handles multiline
-    content = re.sub(r"<think>.*?</think>\s*", "", content, flags=re.DOTALL)
-
-    # Remove <tool_call>...</tool_call> blocks that some models embed in text
-    content = re.sub(r"</?tool_call>\s*", "", content, flags=re.DOTALL)
-
-    # Remove embedded JSON tool call syntax (e.g., {"name": "...", "arguments": {...}})
-    content = re.sub(
-        r'\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{[^}]*\}\s*\}', "", content
-    )
-
-    # Remove chat template tokens that might leak through
-    content = re.sub(r"<\|im_start\|>.*?\n?", "", content)
-    content = re.sub(r"<\|im_end\|>\s*", "", content)
-
-    # Remove any other common model tokens
-    content = re.sub(r"<\|.*?\|>\s*", "", content)
-
-    # Clean up excess whitespace
-    content = content.strip()
-
-    return content
+# Web Knowledge (History, Culture, Real-time facts)
+from tools.web_knowledge import (
+    search_history_culture,
+)
 
 
 # ==========================================================================
 # Tool Configuration
 # ==========================================================================
+# Note: Response cleaning utility (_clean_response) is imported from
+# agent.agents.base to avoid code duplication
 
 
 def get_all_tools() -> List:
     """
     Returns all available tools for the agent.
+    
+    Total: 42 tools across the main categories (Weather, Transport, Open Data,
+        VisitLisboa, Carris Urban, Web Knowledge).
 
     Returns:
-        List: List of LangChain tools.
+        List: List of 42 LangChain tools.
     """
     return [
         # Weather Tools (IPMA)
@@ -185,40 +153,60 @@ def get_all_tools() -> List:
         get_weather_forecast,
         get_current_weather_summary,
         get_portugal_weather_overview,  # Weather for all Portugal
-        # Transport Tools
+
+        # Transport - Metro de Lisboa
         get_metro_status,
         get_metro_wait_time,  # Real-time metro wait times
         get_metro_line_wait_times,  # Wait times for entire line
         find_nearest_metro,  # Find nearest metro by GPS
         get_metro_frequency,  # Train frequency schedules
         get_all_metro_stations,  # List all metro stations
+
+        # Transport - Carris Metropolitana (Suburban buses)
+        get_real_time_bus_positions,
         get_carris_metropolitana_alerts,
         get_carris_metropolitana_stop_info,
         search_carris_metropolitana_lines,
-        get_train_status,
-        get_transport_summary,
-        get_route_between_stations,  # Metro routing assistance
         find_bus_routes,  # Bus routing between locations
         get_bus_realtime_locations,  # Real-time bus GPS locations
         get_bus_next_departures,  # Bus route schedule/stops
+        find_direct_bus_lines,
+
+        # Transport - CP (Comboios de Portugal)
+        get_train_status,
         search_cp_stations,  # CP train station search (AML)
+        get_train_schedule,
+        get_cp_routes,
+        plan_train_trip,
+
+        # Transport - Multi-modal
+        get_transport_summary,
+        get_route_between_stations,  # Multi-modal routing assistance
+
         # Open Data Tools (Lisboa Aberta)
         find_nearby_services,
         list_available_datasets,
         get_dataset_details,
         find_place_in_datasets,  # Search places by name
+
         # VisitLisboa Tools (Events & Places) - Semantic Search
         search_cultural_events,
         search_places_attractions,
         get_event_categories,
         get_place_categories,
         search_lisbon_knowledge,  # Comprehensive RAG search
-        # Carris Urban Tools (Lisbon city buses & trams)
+
+        # Transport - Carris Urban (Lisbon city buses & trams)
         carris_get_stops,  # Search Carris urban stops
         carris_get_routes,  # Get bus/tram routes (701, 15E, etc.)
         carris_get_next_departures,  # Schedule for a stop
         carris_find_routes_between,  # Find routes connecting two areas
         carris_get_realtime_vehicles,  # Real-time bus/tram positions
+        carris_get_arrivals,  # Real-time arrivals at a stop
+        carris_vehicle_eta,  # ETA calculation for specific route
+
+        # Web Knowledge
+        search_history_culture,
     ]
 
 
@@ -572,6 +560,7 @@ class LisbonAssistant:
 
         if hasattr(last_message, "content"):
             # Clean model-specific artifacts (thinking tags, chat tokens, etc.)
+            # Uses clean_response from agent.agents.base
             return clean_response(last_message.content)
 
         return clean_response(str(last_message))

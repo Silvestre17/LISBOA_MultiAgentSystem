@@ -2,7 +2,8 @@
 # Master Thesis - Dependencies
 #   - André Filipe Gomes Silvestre, 20240502
 #
-# LLM-Powered Urban Exploration: A Framework for Adaptive Tourist
+# LISBOA: LLM-Integrated System for Behavioral Orchestration and Agentic Architecture
+# A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon
 # and Mobility Itinerary Planning
 #
 # Installation: pip install -r requirements.txt

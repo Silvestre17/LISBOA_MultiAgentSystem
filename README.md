@@ -4,7 +4,7 @@
     </a>
 </p>
 
-# 🗺️ LLM-Powered Urban Exploration: Adaptive Tourist & Mobility Itinerary Planning 🤖
+# 🗺️ LISBOA: LLM-Integrated System for Behavioral Orchestration and Agentic Architecture 🤖
 
 <p align="center">
     <!-- Project Repository and App Badges -->
@@ -29,9 +29,10 @@ The system acts as an intelligent urban assistant, answering questions about cul
 
 This project is the **Master's Thesis** for the **[Master's in Data Science and Advanced Analytics](https://www.novaims.unl.pt/en/education/programs/postgraduate-programs-and-master-degree-programs/master-degree-program-in-data-science-and-advanced-analytics-with-a-specialization-in-data-science/)** program at **NOVA IMS**, developed during the **2025/2026 academic year**.
 
-**Thesis Title:** *LLM-Powered Urban Exploration: A Framework for Adaptive Tourist and Mobility Itinerary Planning*  
+**Thesis Title:** *LISBOA: LLM-Integrated System for Behavioral Orchestration and Agentic Architecture*  
+**Subtitle:** *A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon*  
 **Author:** André Filipe Gomes Silvestre (Student ID: 20240502)  
-**Supervisor:** TBD  
+**Supervisor:** Prof. Dr. Bruno Jardim  
 **Institution:** NOVA Information Management School (NOVA IMS)
 
 ## ✨ Objective
@@ -49,10 +50,7 @@ The primary objectives of this thesis are to:
 
 The system follows a **modular, tool-based architecture** powered by **LangGraph** for agent orchestration:
 
-<p align="center">
-    <img src="./docs/architecture/system_diagram.png" alt="System Architecture" width="800" style="background-color: white;">
-</p>
-<p align="center"><i><b>Figure 1:</b> High-Level System Architecture (see <a href="./docs/ARCHITECTURE_DIAGRAMS.md">ARCHITECTURE_DIAGRAMS.md</a> for detailed diagrams).</i></p>
+See the architecture overview in [`docs/02_SYSTEM_ARCHITECTURE.md`](./docs/02_SYSTEM_ARCHITECTURE.md).
 
 ### Core Components
 
@@ -62,7 +60,7 @@ The system follows a **modular, tool-based architecture** powered by **LangGraph
    - **Transport Agent**: Metro, bus, tram, and train information
    - **Researcher Agent**: RAG for places and events
    - **Planner Agent**: Itinerary synthesis
-   - **41 specialized tools** for different data sources
+    - **42 specialized tools** for different data sources
     - **Multi-provider LLM support** (OpenAI, Azure, LM Studio)
 
 2. **Vector Store (RAG)** 📚
@@ -164,10 +162,7 @@ The system follows a **modular, tool-based architecture** powered by **LangGraph
 
 ## 🚀 Project Workflow
 
-<p align="center">
-    <img src="./docs/architecture/workflow_diagram.png" alt="Workflow" width="800" style="background-color: white;">
-</p>
-<p align="center"><i><b>Figure 2:</b> End-to-End Data Flow and Agent Execution (see <a href="./docs/COMPLETE_DOCUMENTATION.md">COMPLETE_DOCUMENTATION.md</a> for details).</i></p>
+See automation and workflows in [`docs/OPERATIONS.md`](./docs/OPERATIONS.md).
 
 ### 1. Data Collection & Preparation 🔍
 
@@ -248,10 +243,10 @@ Thesis2025-26_AFGS/
 │   │   └── planner.py                  # Planner agent prompt
 │   └── __init__.py
 │
-├── tools/                              # Agent Tools (40 total)
+├── tools/                              # Agent Tools (42 total)
 │   ├── ipma_api.py                     # Weather tools (4 tools)
 │   ├── metrolisboa_api.py              # Metro de Lisboa (6 tools)
-│   ├── carrismetropolitana_api.py      # Suburban bus tools (6 tools)
+│   ├── carrismetropolitana_api.py      # Suburban bus tools (8 tools)
 │   ├── carris_api.py                   # Urban bus & tram tools (7 tools)
 │   ├── cp_api.py                       # CP train tools (5 tools)
 │   ├── transport_api.py                # Multi-modal routing (2 tools)
@@ -276,21 +271,21 @@ Thesis2025-26_AFGS/
 │       ├── chroma.sqlite3              # Database file
 │       └── [collection_folders]/       # Embedding collections
 │
-├── docs/                               # 📚 COMPREHENSIVE DOCUMENTATION
-│   ├── INDEX.md                        # Quick reference & navigation
-│   ├── README.md                       # Documentation overview
-│   ├── COMPLETE_DOCUMENTATION.md       # ⭐ Full technical reference (100+ pages)
-│   ├── architecture/
-│   │   └── ARCHITECTURE_DIAGRAMS.md    # 8 ASCII diagrams
-│   └── api/
-│       └── tools_overview.md           # All 18 tools reference
+├── docs/                               # 📚 Documentation (flat structure)
+│   ├── 00_INDEX.md                     # Navigation
+│   ├── 01_PROJECT_OVERVIEW.md          # Project overview
+│   ├── 02_SYSTEM_ARCHITECTURE.md       # System architecture
+│   ├── 03_TOOLS_REFERENCE.md           # Tools inventory and usage
+│   ├── 04_DATA_SOURCES_AND_SCHEMAS.md  # Datasets and schemas
+│   ├── 05_DEPLOYMENT_AND_OPERATIONS.md # Environment and operations
+│   └── 06_FUTURE_ENHANCEMENTS.md       # Planned enhancements
 │
 ├── .github/
 │   └── workflows/
-│       ├── daily_scraping.yml          # Daily 2 AM UTC scraping
-│       └── update_vector_db.yml        # Daily 3 AM UTC vector sync
+│       ├── data_pipeline.yml           # Daily scraping workflow
+│       └── sync_vector_db.yml          # Vector DB sync workflow
 │
-├── app.py                              # Streamlit application
+├── app_v1.py                           # Streamlit application
 ├── config.py                           # Configuration (API endpoints, IDs)
 ├── requirements.txt                    # Python dependencies
 ├── README.md                           # This file
@@ -301,16 +296,19 @@ Thesis2025-26_AFGS/
 
 **Complete documentation** is available in the [`docs/`](./docs/) folder:
 
-- **[INDEX.md](./docs/INDEX.md)** - Quick reference guide with navigation
-- **[COMPLETE_DOCUMENTATION.md](./docs/COMPLETE_DOCUMENTATION.md)** - ⭐ **START HERE** - Full technical reference (100+ pages)
-- **[ARCHITECTURE_DIAGRAMS.md](./docs/ARCHITECTURE_DIAGRAMS.md)** - 8 detailed system diagrams
-- **[tools_overview.md](./docs/tools_overview.md)** - API reference for all 41 tools
+- **[00_INDEX.md](./docs/00_INDEX.md)** - Start here, navigation
+- **[01_PROJECT_OVERVIEW.md](./docs/01_PROJECT_OVERVIEW.md)** - Project overview and stats
+- **[02_SYSTEM_ARCHITECTURE.md](./docs/02_SYSTEM_ARCHITECTURE.md)** - Multi-agent wiring and LLM providers
+- **[03_TOOLS_REFERENCE.md](./docs/03_TOOLS_REFERENCE.md)** - API reference for all 42 tools
+- **[04_DATA_SOURCES_AND_SCHEMAS.md](./docs/04_DATA_SOURCES_AND_SCHEMAS.md)** - Datasets, schemas, vector DB
+- **[05_DEPLOYMENT_AND_OPERATIONS.md](./docs/05_DEPLOYMENT_AND_OPERATIONS.md)** - Environment and operations
+- **[06_FUTURE_ENHANCEMENTS.md](./docs/06_FUTURE_ENHANCEMENTS.md)** - Planned enhancements
 
 ### Quick Links
 - **Installation & Setup**: See [Getting Started](#-getting-started) below
-- **Tool Usage Examples**: [COMPLETE_DOCUMENTATION.md §3](./docs/COMPLETE_DOCUMENTATION.md#3-tools-api-reference)
-- **Agent Architecture**: [ARCHITECTURE_DIAGRAMS.md §2](./docs/ARCHITECTURE_DIAGRAMS.md#2-multi-agent-workflow-langgraph)
-- **Dataset Schemas**: [COMPLETE_DOCUMENTATION.md §4](./docs/COMPLETE_DOCUMENTATION.md#4-dataset-documentation)
+- **Tool Usage Examples**: [`docs/03_TOOLS_REFERENCE.md`](./docs/03_TOOLS_REFERENCE.md)
+- **Agent Architecture**: [`docs/02_SYSTEM_ARCHITECTURE.md`](./docs/02_SYSTEM_ARCHITECTURE.md)
+- **Dataset Schemas**: [`docs/04_DATA_SOURCES_AND_SCHEMAS.md`](./docs/04_DATA_SOURCES_AND_SCHEMAS.md)
 
 ## 🚀 Getting Started
 
@@ -416,7 +414,7 @@ python agent/graph.py
 ## 📈 Project Statistics
 
 - **Python Modules**: 25+
-- **Agent Tools**: 41 (across 9 modules)
+- **Agent Tools**: 42 (across 9 modules)
 - **Specialized Agents**: 5 (Supervisor, Weather, Transport, Researcher, Planner)
 - **Data Sources**: 6 real-time APIs + 2 scraped sources
 - **Vector DB Documents**: ~1,400 chunks (PDF guide + events + places)
