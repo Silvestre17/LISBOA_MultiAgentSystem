@@ -22,6 +22,7 @@ from tools.metrolisboa_api import (
 
 # Carris Metropolitana (Suburban buses)
 from tools.carrismetropolitana_api import (
+    get_real_time_bus_positions,
     get_carris_metropolitana_alerts,
     get_carris_metropolitana_stop_info,
     search_carris_metropolitana_lines,
@@ -91,7 +92,8 @@ __all__ = [
     "get_metro_frequency",
     "get_all_metro_stations",
     
-    # Transport - Bus (Carris Metropolitana) - 7 tools
+    # Transport - Bus (Carris Metropolitana) - 8 tools
+    "get_real_time_bus_positions",
     "get_carris_metropolitana_alerts",
     "get_carris_metropolitana_stop_info",
     "search_carris_metropolitana_lines",

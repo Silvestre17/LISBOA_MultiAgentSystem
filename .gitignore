@@ -6,6 +6,7 @@ desktop.ini
 ThesisCode.md
 .github/copilot-instructions.md
 docs/UpdateMap.md
+system_architecture.svg
 
 # All files starting with "test_"
 test_*.py

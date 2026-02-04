@@ -155,7 +155,7 @@ TRANSLATIONS = {
         # Info Page
         "info_title": "About This Assistant",
         "info_objective": "Objective",
-        "info_objective_text": "This intelligent assistant was developed as part of a Master's Thesis in Data Science and Advanced Analytics at NOVA IMS (Universidade NOVA de Lisboa). The goal is to create an LLM-powered framework for adaptive tourist and mobility itinerary planning in Lisbon.",
+        "info_objective_text": "This intelligent assistant was developed as part of a Master's Thesis in Data Science and Advanced Analytics at NOVA IMS (Universidade NOVA de Lisboa). The system LISBOA (LLM-Integrated System for Behavioral Orchestration and Agentic Architecture) implements a multi-agent approach for personalized tourism and urban mobility in Lisbon.",
         "info_data_sources": "Data Sources",
         "info_data_sources_text": """The assistant uses multiple real-time and static data sources:
 
@@ -773,7 +773,7 @@ def initialize_session_state():
     defaults = {
         "messages": [],
         "assistant": None,
-        "provider": "openai",  # Default to OpenAI
+        "provider": Config.MODEL_PROVIDER,  # Default to config.py
         "initialized": False,
         "error": None,
         "language": "pt",
@@ -785,7 +785,7 @@ def initialize_session_state():
             "azure": {
                 "api_key": os.getenv("AZURE_OPENAI_API_KEY", ""),
                 "endpoint": os.getenv("AZURE_OPENAI_ENDPOINT", ""),
-                "model": os.getenv("AZURE_OPENAI_MODEL_NAME", "gpt-5-nano"),
+                "model": os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-5-nano"),
             },
             "lmstudio": {
                 "base_url": Config.LMSTUDIO_BASE_URL,
@@ -813,16 +813,32 @@ def set_credentials_env():
     creds = st.session_state.credentials
     provider = st.session_state.provider
 
-    if provider == "groq" and creds["groq"]["api_key"]:
-        os.environ["GROQ_API_KEY"] = creds["groq"]["api_key"]
-    elif provider == "openai" and creds["openai"]["api_key"]:
+    # Ensure the selected provider is used by the multi-agent configuration.
+    # Note: Config is loaded once at import time, so we also update the
+    # class attributes to reflect any UI changes.
+    Config.MODEL_PROVIDER = provider
+
+    if provider == "openai" and creds["openai"]["api_key"]:
         os.environ["OPENAI_API_KEY"] = creds["openai"]["api_key"]
+        Config.OPENAI_API_KEY = creds["openai"]["api_key"]
     elif provider == "azure" and creds["azure"]["api_key"]:
         os.environ["AZURE_OPENAI_API_KEY"] = creds["azure"]["api_key"]
+        Config.AZURE_OPENAI_API_KEY = creds["azure"]["api_key"]
         if creds["azure"]["endpoint"]:
             os.environ["AZURE_OPENAI_ENDPOINT"] = creds["azure"]["endpoint"]
+            Config.AZURE_OPENAI_ENDPOINT = creds["azure"]["endpoint"]
         if creds["azure"]["model"]:
-            os.environ["AZURE_OPENAI_MODEL_NAME"] = creds["azure"]["model"]
+            os.environ["AZURE_OPENAI_DEPLOYMENT_NAME"] = creds["azure"]["model"]
+            Config.AZURE_OPENAI_DEPLOYMENT_NAME = creds["azure"]["model"]
+    elif provider == "lmstudio":
+        # LM Studio does not require an API key, but base_url and model name
+        # must match the locally served OpenAI-compatible endpoint.
+        base_url = creds.get("lmstudio", {}).get("base_url")
+        model = creds.get("lmstudio", {}).get("model")
+        if base_url:
+            Config.LMSTUDIO_BASE_URL = base_url
+        if model:
+            Config.LMSTUDIO_MODEL_NAME = model
 
 
 @st.cache_resource
@@ -902,6 +918,23 @@ def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
                 agent_models = Config.AGENT_MODELS_OPENAI
             else:  # lmstudio
                 agent_models = Config.AGENT_MODELS_LMSTUDIO
+
+            # If a provider-level model was selected in the UI, apply it to
+            # all agents by default (can still be overridden per agent below).
+            if provider == "azure":
+                selected_model = st.session_state.credentials.get("azure", {}).get(
+                    "model"
+                )
+                if selected_model:
+                    for agent_name in agent_models:
+                        agent_models[agent_name]["model"] = selected_model
+            elif provider == "lmstudio":
+                selected_model = st.session_state.credentials.get("lmstudio", {}).get(
+                    "model"
+                )
+                if selected_model:
+                    for agent_name in agent_models:
+                        agent_models[agent_name]["model"] = selected_model
 
             # Apply overrides to the appropriate config
             if "agent_overrides" in st.session_state:
@@ -1353,7 +1386,7 @@ def render_about_section():
     st.markdown("""**Master Thesis Project**  
 NOVA IMS, 2025
 
-*LLM-Powered Urban Exploration*""")
+*LISBOA: LLM-Integrated System for Behavioral Orchestration and Agentic Architecture*""")
 
     learn_more_text = (
         "Saber Mais" if st.session_state.language == "pt" else "Learn More"
