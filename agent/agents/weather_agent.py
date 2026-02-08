@@ -164,6 +164,10 @@ class WeatherAgent(BaseAgent):
             response = self.llm_with_tools.invoke(messages)
             iteration += 1
 
+        json_tool_result = self.execute_tool_from_json(response.content, verbose=verbose)
+        if json_tool_result:
+            return clean_response(json_tool_result)
+
         return clean_response(response.content)
 
     def build_subgraph(self) -> "CompiledStateGraph":
