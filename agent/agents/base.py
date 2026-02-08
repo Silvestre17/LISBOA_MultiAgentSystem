@@ -452,6 +452,42 @@ class BaseAgent:
         """Cleans model artifacts from response."""
         return clean_response(content)
 
+    def execute_tool_from_json(self, content: str, verbose: bool = False) -> Optional[str]:
+        """
+        Execute a tool call if the model returns a JSON tool request in content.
+
+        Supports formats like:
+            {"tool_call_name": "get_metro_status", "tool_call_arguments": {}}
+            {"name": "get_metro_status", "arguments": {}}
+
+        Returns:
+            Tool result as string, or None if no tool call detected.
+        """
+        parsed = parse_json_response(content)
+        if not isinstance(parsed, dict):
+            return None
+
+        tool_name = parsed.get("tool_call_name") or parsed.get("name")
+        tool_args = (
+            parsed.get("tool_call_arguments")
+            or parsed.get("arguments")
+            or parsed.get("args")
+            or {}
+        )
+        if not tool_name:
+            return None
+
+        for tool in self.tools:
+            if tool.name == tool_name:
+                try:
+                    if verbose:
+                        print(f"      [TOOL] Calling {tool_name} with args: {tool_args}")
+                    return str(tool.invoke(tool_args))
+                except Exception as e:
+                    return f"Error executing {tool_name}: {str(e)}"
+
+        return f"Tool '{tool_name}' not found."
+
     def execute_tools_parallel(
         self,
         tool_calls: List[Dict],

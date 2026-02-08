@@ -774,6 +774,7 @@ def initialize_session_state():
         "messages": [],
         "assistant": None,
         "provider": Config.MODEL_PROVIDER,  # Default to config.py
+        "last_provider": Config.MODEL_PROVIDER,
         "initialized": False,
         "error": None,
         "language": "pt",
@@ -808,10 +809,9 @@ def initialize_session_state():
             st.session_state[key] = value
 
 
-def set_credentials_env():
+def set_credentials_env(provider: str):
     """Set environment variables from stored credentials."""
     creds = st.session_state.credentials
-    provider = st.session_state.provider
 
     # Ensure the selected provider is used by the multi-agent configuration.
     # Note: Config is loaded once at import time, so we also update the
@@ -898,7 +898,7 @@ def initialize_carris_database():
 def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
     """Initialize or reinitialize the LisbonAssistant."""
     try:
-        set_credentials_env()
+        set_credentials_env(provider)
 
         # Pre-warm vector store (cached)
         # Only needed if using Multi-Agent or Researcher (which uses tools)
@@ -1103,6 +1103,10 @@ def render_provider_credentials():
     selected_provider = provider_keys[provider_names.index(selected_display)]
     provider_type = provider_info[selected_provider][2]
 
+    if st.session_state.get("last_provider") != selected_provider:
+        st.session_state.agent_overrides = {}
+        st.session_state.last_provider = selected_provider
+
     st.caption(provider_info[selected_provider][1])
     st.markdown(f"#### {t('api_credentials')}")
 
@@ -1230,11 +1234,11 @@ def render_provider_credentials():
                 default_provider_models = Config.AGENT_MODELS_AZURE
                 st.caption(f"🌐 Provider: **Azure OpenAI** | Default: {default_provider_models['supervisor']['model']}")
                 available_models = [
-                    "gpt-5.2",
-                    "gpt-5.1",
-                    "gpt-5",
-                    "gpt-5-mini",
+                    'gpt-4o-mini',
                     "gpt-5-nano",
+                    "gpt-5-mini",
+                    "gpt-5",
+                    "DeepSeek-V3.2",
                 ]
             elif selected_provider == "openai":
                 default_provider_models = Config.AGENT_MODELS_OPENAI
@@ -1267,25 +1271,49 @@ def render_provider_credentials():
                 ]
 
             st.markdown("**Quick Presets:**")
-            preset_cols = st.columns(len(available_models))
-            for idx, model_name in enumerate(available_models):
-                with preset_cols[idx]:
-                    if st.button(
-                        model_name,
-                        key=f"preset_{model_name}_{selected_provider}",
-                        use_container_width=True,
-                    ):
-                        # Apply this model to all agents
-                        for agent in [
-                            "supervisor",
-                            "weather",
-                            "transport",
-                            "researcher",
-                            "planner",
-                        ]:
-                            st.session_state.agent_overrides[agent] = model_name
-                        credentials_changed = True
-                        st.rerun()
+            preset_key = f"preset_choice_{selected_provider}"
+            if selected_provider == "lmstudio":
+                default_preset = st.session_state.credentials.get("lmstudio", {}).get(
+                    "model", Config.LMSTUDIO_MODEL_NAME
+                )
+            elif selected_provider == "azure":
+                default_preset = st.session_state.credentials.get("azure", {}).get(
+                    "model", Config.AZURE_OPENAI_DEPLOYMENT_NAME
+                )
+            else:
+                default_preset = Config.OPENAI_MODEL_NAME
+
+            if default_preset and default_preset not in available_models:
+                available_models = [default_preset] + available_models
+
+            if (
+                preset_key not in st.session_state
+                or st.session_state.get(preset_key) not in available_models
+            ):
+                st.session_state[preset_key] = default_preset or available_models[0]
+            selected_preset = st.radio(
+                "Quick presets",
+                options=available_models,
+                horizontal=True,
+                key=preset_key,
+                label_visibility="collapsed",
+            )
+            last_applied_key = f"preset_last_applied_{selected_provider}"
+            if st.session_state.get(last_applied_key) is None:
+                st.session_state[last_applied_key] = selected_preset
+            if selected_preset != st.session_state.get(last_applied_key):
+                # Apply this model to all agents
+                for agent in [
+                    "supervisor",
+                    "weather",
+                    "transport",
+                    "researcher",
+                    "planner",
+                ]:
+                    st.session_state.agent_overrides[agent] = selected_preset
+                st.session_state[last_applied_key] = selected_preset
+                credentials_changed = True
+                st.rerun()
 
             st.divider()
             st.markdown("**Individual Agent Models:**")
@@ -1329,6 +1357,7 @@ def render_provider_credentials():
         if st.button(t("save_credentials"), use_container_width=True, type="primary"):
             with st.spinner("Connecting..."):
                 st.session_state.provider = selected_provider
+                Config.MODEL_PROVIDER = selected_provider
                 success, error = initialize_assistant(selected_provider)
                 if success:
                     st.success(t("assistant_ready"))
