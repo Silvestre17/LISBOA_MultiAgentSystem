@@ -7,6 +7,7 @@ ThesisCode.md
 .github/copilot-instructions.md
 docs/UpdateMap.md
 system_architecture.svg
+_AUDIT_REPORT_COMPREHENSIVE.md
 
 # All files starting with "test_"
 test_*.py
