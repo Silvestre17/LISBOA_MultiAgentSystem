@@ -16,15 +16,15 @@
 # pip install requests pandas langchain-core
 
 import json
-import math
-import time
 import logging
+import math
 import os
 import sys
-from typing import Optional, Dict, Any, List, Tuple
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
-import requests
 import pandas as pd
+import requests
 from langchain_core.tools import tool
 
 # Add parent directory to path for imports
@@ -43,6 +43,7 @@ BACKOFF_FACTOR = 2
 # ==========================================================================
 # Data Loading
 # ==========================================================================
+
 
 def load_metadata() -> pd.DataFrame:
     """
@@ -63,6 +64,7 @@ def load_metadata() -> pd.DataFrame:
     except Exception as e:
         logger.error(f"\033[1;31m❌ Error loading metadata: {e}\033[0m")
         return pd.DataFrame()
+
 
 # Load metadata once at module import
 DF_METADATA = load_metadata()
@@ -440,7 +442,7 @@ def find_nearby_services(
                 else:
                     return f"❌ Could not resolve location '{near_location_name}'. Tried Open Data and Geocoding service. Please provide coordinates."
             except ImportError:
-                 return f"❌ Could not resolve location '{near_location_name}' in Open Data. External geocoder unavailable."
+                return f"❌ Could not resolve location '{near_location_name}' in Open Data. External geocoder unavailable."
 
     # Search for matching datasets
     matches = search_datasets(service_type)
@@ -702,12 +704,12 @@ def _search_places_raw(query: str, max_results: int = 5) -> List[Dict]:
         'igreja': ['Arquitetura Religiosa', 'Localização e identificação das Casas Religiosas de Lisboa existentes em 2015'],
         'hotel': ['Capacidade de Alojamento', 'Alojamento'],
         'turismo': ['Postos de Turismo', 'Turismo Náutico'],
-        'wi-fi': ['Rede LoRa'], # Approximate
+        'wi-fi': ['Rede LoRa'],  # Approximate
         
         # Outdoors & Leisure
         'jardim': ['Jardins - Parques Urbanos', 'Grandes Parques e Jardins de Lisboa', 'Espaços Verdes'],
         'parque': ['Grandes Parques e Jardins de Lisboa', 'Jardins - Parques Urbanos', 'Parques Infantis', 'Parques de Merendas', 'Parques Caninos'],
-        'praia': [], # Not many open datasets for beaches in CML directly besides river ones
+        'praia': [],  # Not many open datasets for beaches in CML directly besides river ones
         'desporto': ['Instalações Desportivas', 'Centros Desportivos', 'Equipamentos de Fitness ao Ar Livre\u200b', 'Programa Desporto Mexe Comigo'],
         'piscina': ['Instalações Desportivas', 'Programa de Apoio à Natação Curricular'],
         
@@ -716,7 +718,7 @@ def _search_places_raw(query: str, max_results: int = 5) -> List[Dict]:
         'banheiro': ['Instalações Sanitárias', 'Instalações Sanitárias Públicas Automáticas'],
         'estacionamento': ['Parques de estacionamento na via pública', 'EMEL - Parques de estacionamento na via pública', 'Lugares de estacionamento na via pública para residentes ou público em geral', 'Zonas reguladas de estacionamento na via pública'],
         'embaixada': ['Embaixadas'],
-        'ctt': [], # Post offices
+        'ctt': [],  # Post offices
         'cemiterio': ['Cemitérios'],
         'loja cidadao': ['Loja do Cidadão'],
         'camara': ['CM Lisboa - Paços do Concelho', 'CM Lisboa - Atendimento', 'Juntas de Freguesia'],
@@ -727,7 +729,7 @@ def _search_places_raw(query: str, max_results: int = 5) -> List[Dict]:
         'avenida': ['Toponímia de Lisboa', 'Topónimos'],
         'praca': ['Toponímia de Lisboa', 'Topónimos'],
         'largo': ['Toponímia de Lisboa', 'Topónimos'],
-        'bairro': ['Bairros e Zonas de Intervenção Prioritária', 'Localização e identificação das Casas Religiosas de Lisboa existentes em 2015'], # Proxy
+        'bairro': ['Bairros e Zonas de Intervenção Prioritária', 'Localização e identificação das Casas Religiosas de Lisboa existentes em 2015'],  # Proxy
     }
 
     # Add matched datasets from mapping
@@ -807,7 +809,7 @@ def _search_places_raw(query: str, max_results: int = 5) -> List[Dict]:
                 
                 found_places.append({
                     'title': name,
-                    'category': title, # Use dataset title as category
+                    'category': title,  # Use dataset title as category
                     'location': address,
                     'lat': lat,
                     'lon': lon,
@@ -894,7 +896,7 @@ if __name__ == "__main__":
             else:
                 print(result)
             test_results["passed"] += 1
-            print(f"\n\033[1;32m✅ PASSED\033[0m")
+            print("\n\033[1;32m✅ PASSED\033[0m")
             return result
         except Exception as e:
             print(f"\n\033[1;31m❌ FAILED: {str(e)}\033[0m")
@@ -1159,8 +1161,8 @@ if __name__ == "__main__":
     print(f"\033[1;31m❌ Failed: {test_results['failed']}/{test_results['total']}\033[0m")
     
     if test_results['failed'] == 0:
-        print(f"\n\033[1;32m🎉 ALL TESTS PASSED! Dados Abertos system is working correctly.\033[0m")
+        print("\n\033[1;32m🎉 ALL TESTS PASSED! Dados Abertos system is working correctly.\033[0m")
     else:
-        print(f"\n\033[1;33m⚠️  Some tests failed. Check errors above.\033[0m")
+        print("\n\033[1;33m⚠️  Some tests failed. Check errors above.\033[0m")
     
     print("=" * 70 + "\n")

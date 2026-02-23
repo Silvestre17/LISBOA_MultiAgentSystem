@@ -346,7 +346,7 @@ class CPGTFSManager:
             metadata['content_length'] = content_length
             self._save_metadata(metadata)
             
-            logger.info(f"\033[1;32m✅ GTFS downloaded successfully\033[0m")
+            logger.info("\033[1;32m✅ GTFS downloaded successfully\033[0m")
             return True
             
         except requests.exceptions.Timeout:
@@ -965,7 +965,7 @@ def load_cp_aml_stations(force_reload: bool = False) -> Dict[str, Dict[str, Any]
                 
                 # Check if within AML bounding box
                 if (AML_BOUNDS['lat_min'] <= lat <= AML_BOUNDS['lat_max'] and
-                    AML_BOUNDS['lon_min'] <= lon <= AML_BOUNDS['lon_max']):
+                        AML_BOUNDS['lon_min'] <= lon <= AML_BOUNDS['lon_max']):
                     
                     code = station.get('code', '')
                     aml_stations[code] = {
@@ -1030,9 +1030,9 @@ def get_cp_aml_trains() -> List[Dict[str, Any]]:
             dest_code = train.get('destination', {}).get('code', '')
             last_station = train.get('lastStation', '')
             
-            if (origin_code in aml_codes or 
-                dest_code in aml_codes or 
-                last_station in aml_codes):
+            if (origin_code in aml_codes or
+                    dest_code in aml_codes or
+                    last_station in aml_codes):
                 aml_trains.append(train)
         
         logger.info(f"Filtered to {len(aml_trains)}/{len(all_trains)} trains serving AML")
@@ -1486,7 +1486,7 @@ def search_cp_stations(query: str) -> str:
         rt_matches = search_cp_station(query)
         if not rt_matches:
             return (f"❌ No CP stations found matching '{query}' in the AML region.\n\n"
-                   f"💡 Try searching for: Oriente, Rossio, Cais do Sodré, Cascais, Sintra, Entrecampos")
+                    "💡 Try searching for: Oriente, Rossio, Cais do Sodré, Cascais, Sintra, Entrecampos")
         
         response = f"🚉 **CP Stations matching '{query}'** ({len(rt_matches)} found)\n"
         response += "=" * 50 + "\n\n"
@@ -1548,7 +1548,7 @@ def get_train_schedule(station_name: str, limit: int = 10) -> str:
     
     if not stops:
         return (f"❌ Station '{station_name}' not found.\n\n"
-               f"💡 Try searching for: Oriente, Rossio, Cais do Sodré, Cascais, Sintra")
+                "💡 Try searching for: Oriente, Rossio, Cais do Sodré, Cascais, Sintra")
     
     # Use the first (best) match
     station = stops[0]
@@ -1560,10 +1560,10 @@ def get_train_schedule(station_name: str, limit: int = 10) -> str:
     
     if not departures:
         return (f"❌ No scheduled departures found for **{stop_name}** today.\n\n"
-               f"This may be due to:\n"
-               f"- No more trains today\n"
-               f"- Holiday schedule\n"
-               f"- GTFS data not yet available")
+                "This may be due to:\n"
+                "- No more trains today\n"
+                "- Holiday schedule\n"
+                "- GTFS data not yet available")
     
     now = datetime.now()
     response = f"🚆 **Departures from {stop_name}**\n"
@@ -1661,13 +1661,13 @@ def plan_train_trip(origin: str, destination: str) -> str:
     origin_stops = search_gtfs_stop(origin, limit=3)
     if not origin_stops:
         return (f"❌ Station '{origin}' not found.\n\n"
-               f"💡 Try: Oriente, Rossio, Entrecampos, Cais do Sodré, Cascais, Sintra")
+                "💡 Try: Oriente, Rossio, Entrecampos, Cais do Sodré, Cascais, Sintra")
     
     # Find destination station
     dest_stops = search_gtfs_stop(destination, limit=3)
     if not dest_stops:
         return (f"❌ Station '{destination}' not found.\n\n"
-               f"💡 Try: Oriente, Rossio, Entrecampos, Cais do Sodré, Cascais, Sintra")
+                "💡 Try: Oriente, Rossio, Entrecampos, Cais do Sodré, Cascais, Sintra")
     
     origin_station = origin_stops[0]
     dest_station = dest_stops[0]
@@ -1725,7 +1725,7 @@ def plan_train_trip(origin: str, destination: str) -> str:
             # Try without time constraint to see if route exists at all
             conn = manager.get_db_connection()
             cursor = conn.cursor()
-            cursor.execute(f"""
+            cursor.execute("""
                 SELECT COUNT(*) 
                 FROM stop_times st_origin
                 JOIN stop_times st_dest ON st_origin.trip_id = st_dest.trip_id
@@ -1739,12 +1739,12 @@ def plan_train_trip(origin: str, destination: str) -> str:
             
             if total_trips == 0:
                 return (f"❌ No direct train service found between **{origin_name}** and **{dest_name}**.\n\n"
-                       f"💡 These stations may be on different lines. Consider:\n"
-                       f"   • Transfer at a connecting station (e.g., Oriente, Entrecampos)\n"
-                       f"   • Use `search_cp_stations` to find line information")
+                        "💡 These stations may be on different lines. Consider:\n"
+                        "   • Transfer at a connecting station (e.g., Oriente, Entrecampos)\n"
+                        "   • Use `search_cp_stations` to find line information")
             else:
                 return (f"⏰ No more trains today from **{origin_name}** to **{dest_name}**.\n\n"
-                       f"There are {total_trips} trips on other days. Try again tomorrow or check schedules online.")
+                        f"There are {total_trips} trips on other days. Try again tomorrow or check schedules online.")
         
         # Calculate travel time from GTFS data
         def parse_gtfs_time(time_str: str) -> int:
@@ -1803,9 +1803,9 @@ def plan_train_trip(origin: str, destination: str) -> str:
                 max_delay = max(t['delay_mins'] for t in realtime_trains.values())
                 response += f"   📍 Estado: ⚠️ Alguns comboios com +{max_delay}min atraso\n"
             else:
-                response += f"   📍 Estado: ✅ Comboios a horas (tempo real)\n"
+                response += "   📍 Estado: ✅ Comboios a horas (tempo real)\n"
         else:
-            response += f"   📍 Estado: ℹ️ Sem dados em tempo real\n"
+            response += "   📍 Estado: ℹ️ Sem dados em tempo real\n"
         response += "\n"
         
         response += "-" * 50 + "\n"
@@ -1814,7 +1814,6 @@ def plan_train_trip(origin: str, destination: str) -> str:
         for i, trip in enumerate(trips[:8], 1):
             origin_dep = trip['origin_departure']
             dest_arr = trip['dest_arrival']
-            headsign = trip['trip_headsign'] or dest_name
             
             # Calculate travel time in minutes
             dep_mins = parse_gtfs_time(origin_dep)
@@ -1871,7 +1870,7 @@ def initialize_cp_gtfs(force_refresh: bool = False) -> str:
     if manager.db_path.exists() and not force_refresh:
         metadata = manager._load_metadata()
         last_download = metadata.get('last_download', 'Unknown')
-        response += f"📊 **Existing database found**\n"
+        response += "📊 **Existing database found**\n"
         response += f"   Last updated: {last_download}\n\n"
         
         if not manager.check_for_updates():
@@ -1889,7 +1888,7 @@ def initialize_cp_gtfs(force_refresh: bool = False) -> str:
                 trips_count = cursor.fetchone()[0]
                 conn.close()
                 
-                response += f"\n📈 **Database Stats:**\n"
+                response += "\n📈 **Database Stats:**\n"
                 response += f"   - Stops: {stops_count}\n"
                 response += f"   - Routes: {routes_count}\n"
                 response += f"   - Trips: {trips_count}\n"
@@ -1917,7 +1916,7 @@ def initialize_cp_gtfs(force_refresh: bool = False) -> str:
                 trips_count = cursor.fetchone()[0]
                 conn.close()
                 
-                response += f"📈 **Database Stats:**\n"
+                response += "📈 **Database Stats:**\n"
                 response += f"   - Stops: {stops_count}\n"
                 response += f"   - Routes: {routes_count}\n"
                 response += f"   - Trips: {trips_count}\n"

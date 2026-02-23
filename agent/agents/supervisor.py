@@ -160,7 +160,7 @@ class SupervisorAgent(BaseAgent):
         if any(loc in message_lower for loc in aml_keywords):
             # These are AML locations - use transport agent
             return {
-                "reasoning": f"Fallback: AML location detected - using transport agent",
+                "reasoning": "Fallback: AML location detected - using transport agent",
                 "agents": ["transport"],
                 "direct_response": None,
             }
@@ -402,7 +402,7 @@ if __name__ == "__main__":
             if decision["direct_response"]:
                 print(f"   \033[1mDirect:\033[0m {decision['direct_response']}")
 
-        print(f"\n\033[1;32m✅ Supervisor agent working!\033[0m")
+        print("\n\033[1;32m✅ Supervisor agent working!\033[0m")
 
     except Exception as e:
         print(f"\n\033[1;31m❌ Error:\033[0m {e}")

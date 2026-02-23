@@ -20,14 +20,14 @@
 # Required libraries:
 # pip install langchain-core langchain-chroma langchain-huggingface
 
-import os
-import sys
 import json
 import logging
 import math
+import os
+import sys
 import warnings
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # Suppress chromadb telemetry warnings
 os.environ["OTEL_SDK_DISABLED"] = "true"
@@ -425,7 +425,7 @@ def _get_vector_store():
         try:
             # Import here to avoid circular imports and slow startup
             from tools.vector_store import KnowledgeBase
-            
+
             # Initialize with CPU to avoid GPU memory issues in agent context
             _vector_store = KnowledgeBase(use_gpu=False)
             logger.info("✅ Vector store initialized for semantic search")
@@ -494,7 +494,15 @@ def _search_dados_abertos_hybrid(query: str, max_results: int = 5) -> List[Dict[
         List of place dictionaries compatible with VisitLisboa format.
     """
     try:
-        from tools.dados_abertos import _search_place_in_datasets_logic, DF_METADATA, search_datasets, fetch_geojson_with_retry, extract_name, extract_address, extract_coordinates
+        from tools.dados_abertos import (
+            DF_METADATA,
+            _search_place_in_datasets_logic,
+            extract_address,
+            extract_coordinates,
+            extract_name,
+            fetch_geojson_with_retry,
+            search_datasets,
+        )
         
         if DF_METADATA.empty:
             return []
@@ -634,6 +642,7 @@ def _load_places_json() -> List[Dict[str, Any]]:
 
 # Cached places data for enrichment lookup
 _places_cache: Optional[Dict[str, Dict]] = None
+
 
 def _get_place_by_url(url: str) -> Optional[Dict[str, Any]]:
     """
@@ -949,7 +958,6 @@ def search_cultural_events(
             loc = event.get('location', 'Lisbon')
             dates_str = format_event_dates(event)
             duration = event.get('_duration_days', get_event_duration_days(event))
-            relevance = event.get('_relevance_score', 50.0)
             
             # Duration label for clarity
             if duration == 1:
@@ -957,9 +965,9 @@ def search_cultural_events(
             elif duration <= 3:
                 duration_label = f"📆 {duration} days"
             elif duration <= 7:
-                duration_label = f"📅 ~1 week"
+                duration_label = "📅 ~1 week"
             elif duration <= 30:
-                duration_label = f"📅 ~1 month"
+                duration_label = "📅 ~1 month"
             else:
                 duration_label = f"🏛️ Long-running ({duration} days)"
             
@@ -1044,7 +1052,7 @@ def search_places_attractions(
         dados_abertos_results = []
         
         if search_dados_abertos and query:
-            logger.info(f"Hybrid mode: Query contains Dados Abertos keywords")
+            logger.info("Hybrid mode: Query contains Dados Abertos keywords")
             dados_abertos_results = _search_dados_abertos_hybrid(query, max_results=max_results // 2 + 1)
             logger.info(f"Dados Abertos returned {len(dados_abertos_results)} results")
         
@@ -1094,7 +1102,7 @@ def search_places_attractions(
                     
                     # 3. Reviews: Log10
                     reviews_val = int(metadata.get('reviews', 0))
-                    reviews_log = math.log10(reviews_val + 1) / 5.0 # Max typical ~5
+                    reviews_log = math.log10(reviews_val + 1) / 5.0  # Max typical ~5
                     
                     final_score = (relevance_val * 0.6) + (rating_norm * 0.3) + (reviews_log * 0.1)
                     
@@ -1121,7 +1129,7 @@ def search_places_attractions(
                         'short_description': doc.page_content[:200] if doc.page_content else '',
                         'url': metadata.get('url', ''),
                         'source': 'visitlisboa',
-                        'score': item['vector_score'], # Keep original for debug if needed
+                        'score': item['vector_score'],  # Keep original for debug if needed
                         'ranking_score': item['final_score']
                     })
                     
@@ -1174,7 +1182,7 @@ def search_places_attractions(
         if not all_results:
             # Last resort fallback
             if query:
-                logger.info(f"No results from hybrid search, trying direct Dados Abertos")
+                logger.info("No results from hybrid search, trying direct Dados Abertos")
                 from dados_abertos import _search_place_in_datasets_logic
                 open_data_results = _search_place_in_datasets_logic(query, max_results=max_results)
                 if open_data_results:
@@ -1415,7 +1423,7 @@ def search_lisbon_knowledge(
             elif 'event' in source:
                 events_results.append(doc)
         
-        output_parts = [f"🔍 **Lisbon Knowledge Search Results:**\n"]
+        output_parts = ["🔍 **Lisbon Knowledge Search Results:**\n"]
         output_parts.append(f"Query: \"{query}\"\n")
         
         if pdf_results:
@@ -1465,7 +1473,7 @@ if __name__ == "__main__":
             result = test_func(*args, **kwargs)
             print(result)
             test_results["passed"] += 1
-            print(f"\n\033[1;32m✅ PASSED\033[0m")
+            print("\n\033[1;32m✅ PASSED\033[0m")
             return result
         except Exception as e:
             print(f"\n\033[1;31m❌ FAILED: {str(e)}\033[0m")
@@ -1493,7 +1501,7 @@ if __name__ == "__main__":
     # CRITICAL: Verifying TEMPORAL RELEVANCE - ephemeral events should rank first!
     # =========================================================================
     # TEST 3: Search Events - Semantic Query (Music)
-    # NOTE: Should find concerts/music events via token matching + synonyms
+    # .NOTE: Should find concerts/music events via token matching + synonyms
     run_test(
         "Search Events - Semantic Query (Music) [TESTS TOKEN MATCHING]",
         search_cultural_events.invoke,
@@ -1501,7 +1509,7 @@ if __name__ == "__main__":
     )
     
     # TEST 4: Search Events - By Category (Exhibitions)
-    # NOTE: Even exhibitions should be sorted by temporal relevance
+    # .NOTE: Even exhibitions should be sorted by temporal relevance
     run_test(
         "Search Events - By Category (Exhibitions) [TESTS DURATION SORTING]",
         search_cultural_events.invoke,
@@ -1509,7 +1517,7 @@ if __name__ == "__main__":
     )
     
     # TEST 5: Search Events - This Week
-    # CRITICAL: Single-day events should appear BEFORE long exhibitions!
+    # .CRITICAL: Single-day events should appear BEFORE long exhibitions!
     run_test(
         "Search Events - This Week [TESTS TEMPORAL RELEVANCE]",
         search_cultural_events.invoke,
@@ -1563,7 +1571,7 @@ if __name__ == "__main__":
     )
     
     # TEST 12: HYBRID SEARCH - Hospital (VisitLisboa + Dados Abertos)
-    # NOTE: "hospital" keyword triggers hybrid mode, combining tourist data
+    # .NOTE: "hospital" keyword triggers hybrid mode, combining tourist data
     # with public infrastructure from Lisboa Aberta (GPS coords included)
     run_test(
         "HYBRID SEARCH - Hospital (VisitLisboa + Dados Abertos)",
@@ -1572,7 +1580,7 @@ if __name__ == "__main__":
     )
     
     # TEST 13: HYBRID SEARCH - University/Education
-    # NOTE: "universidade" keyword triggers Dados Abertos for public institutions
+    # .NOTE: "universidade" keyword triggers Dados Abertos for public institutions
     run_test(
         "HYBRID SEARCH - University (VisitLisboa + Dados Abertos)",
         search_places_attractions.invoke,
@@ -1580,7 +1588,7 @@ if __name__ == "__main__":
     )
     
     # TEST 14: Tourist Query (NO hybrid, VisitLisboa only)
-    # NOTE: "tower belem" is a tourist query, should NOT trigger Dados Abertos
+    # .NOTE: "tower belem" is a tourist query, should NOT trigger Dados Abertos
     run_test(
         "Tourist Query - Torre de Belém (VisitLisboa only)",
         search_places_attractions.invoke,
@@ -1647,8 +1655,8 @@ if __name__ == "__main__":
     print(f"\033[1;31m❌ Failed: {test_results['failed']}/{test_results['total']}\033[0m")
     
     if test_results['failed'] == 0:
-        print(f"\n\033[1;32m🎉 ALL TESTS PASSED! System is working correctly.\033[0m")
+        print("\n\033[1;32m🎉 ALL TESTS PASSED! System is working correctly.\033[0m")
     else:
-        print(f"\n\033[1;33m⚠️  Some tests failed. Check errors above.\033[0m")
+        print("\n\033[1;33m⚠️  Some tests failed. Check errors above.\033[0m")
     
     print("=" * 70 + "\n")

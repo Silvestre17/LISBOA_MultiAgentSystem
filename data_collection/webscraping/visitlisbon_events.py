@@ -34,6 +34,7 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36"
 ]
 
+
 def get_headers():
     """Generates headers with random User-Agent.
     
@@ -48,6 +49,7 @@ def get_headers():
         'Accept-Language': 'en-US,en;q=0.9',
         'Referer': 'https://www.google.com/'
     }
+
 
 def get_total_pages(session, base_url):
     """Determines total pages for events.
@@ -80,6 +82,7 @@ def get_total_pages(session, base_url):
         logging.error(f"Error determining pages: {e}")
         return 1
 
+
 def get_event_urls_from_page(session, page_number, base_url):
     """Fetches URLs from a specific page.
     
@@ -95,7 +98,7 @@ def get_event_urls_from_page(session, page_number, base_url):
     event_urls = []
     
     try:
-        time.sleep(random.uniform(2, 4)) # Stealth delay
+        time.sleep(random.uniform(2, 4))  # Stealth delay
         response = session.get(list_url, headers=get_headers(), timeout=30)
         response.raise_for_status()
         
@@ -106,13 +109,14 @@ def get_event_urls_from_page(session, page_number, base_url):
             if link_tag := card.find('a', attrs={'data-clickable-card-target': 'link'}):
                 if 'href' in link_tag.attrs:
                     # Construct absolute URL
-                    full_url = requests.compat.urljoin("https://www.visitlisboa.com", link_tag['href']) # type: ignore
+                    full_url = requests.compat.urljoin("https://www.visitlisboa.com", link_tag['href'])  # type: ignore
                     event_urls.append(full_url)
                     
     except Exception as e:
         logging.error(f"Error fetching page {page_number}: {e}")
         
     return event_urls
+
 
 def _extract_time_from_container(container):
     """
@@ -209,7 +213,7 @@ def scrape_event_details(session, event_url):
                 images = carousel.find_all('img')
                 for img in images:
                     if 'src' in img.attrs and img['src']:
-                        event_data['image_urls'].append(requests.compat.urljoin(base_domain, img['src'])) # type: ignore
+                        event_data['image_urls'].append(requests.compat.urljoin(base_domain, img['src']))  # type: ignore
 
             event_data['video_urls'] = []
             iframes = soup.find_all('iframe')
@@ -270,7 +274,7 @@ def scrape_event_details(session, event_url):
                         for existing in event_data['dates']:
                             if existing.get('type') == 'single':
                                 if (existing.get('date', {}).get('datetime_iso') == date_entry['date']['datetime_iso'] and
-                                    existing.get('date', {}).get('time') == date_entry['date']['time']):
+                                        existing.get('date', {}).get('time') == date_entry['date']['time']):
                                     is_duplicate = True
                                     break
                         
@@ -330,6 +334,7 @@ def scrape_event_details(session, event_url):
 
     logging.error(f"Failed to scrape {event_url}")
     return None
+
 
 def main():
     """Main function to orchestrate the scraping process for events.
@@ -430,6 +435,7 @@ def main():
     logging.info(f"  - Unchanged: {len(unchanged_urls)} events.")
     logging.info(f"  - Total events to be saved: {len(final_list)}")
     logging.info("Events synchronization complete.")
+
 
 if __name__ == "__main__":
     main()

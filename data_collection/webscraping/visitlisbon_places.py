@@ -34,6 +34,7 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36"
 ]
 
+
 def get_headers():
     """Generates headers with random User-Agent.
     
@@ -71,6 +72,7 @@ def _extract_social_name(link):
         pass
     return href
 
+
 def get_total_pages(session, base_url):
     """Determines total pages for places.
     
@@ -102,6 +104,7 @@ def get_total_pages(session, base_url):
         logging.error(f"Error determining pages: {e}")
         return 1
 
+
 def get_place_urls_from_page(session, page_number, base_url):
     """Fetches URLs from a specific page.
     
@@ -117,7 +120,7 @@ def get_place_urls_from_page(session, page_number, base_url):
     place_urls = []
     
     try:
-        time.sleep(random.uniform(2, 4)) # Stealth delay
+        time.sleep(random.uniform(2, 4))  # Stealth delay
         response = session.get(list_url, headers=get_headers(), timeout=30)
         response.raise_for_status()
         
@@ -128,13 +131,14 @@ def get_place_urls_from_page(session, page_number, base_url):
             if link_tag := card.find('a', attrs={'data-clickable-card-target': 'link'}):
                 if 'href' in link_tag.attrs:
                     # Construct absolute URL
-                    full_url = requests.compat.urljoin("https://www.visitlisboa.com", link_tag['href']) # type: ignore
+                    full_url = requests.compat.urljoin("https://www.visitlisboa.com", link_tag['href'])  # type: ignore
                     place_urls.append(full_url)
                     
     except Exception as e:
         logging.error(f"Error fetching page {page_number}: {e}")
         
     return place_urls
+
 
 def scrape_place_details(session, place_url):
     """
@@ -310,6 +314,7 @@ def scrape_place_details(session, place_url):
     logging.error(f"Failed to scrape {place_url}")
     return None
 
+
 def main():
     """
     Main function to orchestrate the scraping process for places.
@@ -409,6 +414,7 @@ def main():
     logging.info(f"  - Unchanged: {len(unchanged_urls)} places.")
     logging.info(f"  - Total places to be saved: {len(final_list)}")
     logging.info("Places synchronization complete.")
+
 
 if __name__ == "__main__":
     main()

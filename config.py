@@ -108,7 +108,7 @@ class Config:
     # Create Azure OpenAI resource at: https://portal.azure.com
     # Documentation: https://learn.microsoft.com/en-us/azure/ai-foundry/openai/api-version-lifecycle
     #
-    # NOTE: With v1 API (August 2025+), api_version is NOT required.
+    # .NOTE: With v1 API (August 2025+), api_version is NOT required.
     # The code uses /openai/v1/ endpoint which auto-updates automatically.
     AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
     AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
@@ -155,7 +155,7 @@ class Config:
 
     # Debug/Development Settings
     # Show raw markdown responses in terminal for debugging/copying
-    SHOW_MARDKOWN_RESPONSE_IN_TERMINAL = (
+    SHOW_MARKDOWN_RESPONSE_IN_TERMINAL = (
         True  # Set to True to print AI responses to terminal
     )
 
@@ -219,7 +219,7 @@ class Config:
     }
 
     # AZURE OPENAI CONFIGURATION (Cloud models)
-    # NOTE: o-series/reasoning models (gpt-5-nano, o1, o3, etc.) only support temperature=1
+    # .NOTE: o-series/reasoning models (gpt-5-nano, o1, o3, etc.) only support temperature=1
     AGENT_MODELS_AZURE = {
         "supervisor": {
             "provider": "azure",

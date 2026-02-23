@@ -27,7 +27,7 @@
 
 import os
 import sys
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -98,7 +98,7 @@ class LLMFactory:
     def get_llm(
         provider: str = Config.MODEL_PROVIDER,
         temperature: float = Config.TEMPERATURE,
-        model: str = None,  # Optional: override model from AGENT_MODELS
+        model: Optional[str] = None,  # Optional: override model from AGENT_MODELS
     ) -> BaseChatModel:
         """
         Creates and returns a configured LLM instance.
@@ -209,7 +209,7 @@ class LLMFactory:
         # Uses ChatOpenAI with base_url instead of AzureChatOpenAI
         # Benefits: No api_version needed, faster updates, OpenAI-compatible
         # Required env vars: AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT
-        # IMPORTANT: o-series models (gpt-5-nano, o1, o3) only support temperature=1
+        # .IMPORTANT: o-series models (gpt-5-nano, o1, o3) only support temperature=1
         elif provider == "azure":
             if not Config.AZURE_OPENAI_API_KEY:
                 raise ValueError("AZURE_OPENAI_API_KEY not found in .env file")
@@ -393,7 +393,7 @@ if __name__ == "__main__":
     try:
         # Get the current provider from configuration
         provider = Config.MODEL_PROVIDER
-        print(f"\n\033[1m🔄 Initializing LLM...\033[0m")
+        print("\n\033[1m🔄 Initializing LLM...\033[0m")
         print(f"   Provider: {provider}")
 
         # Create LLM instance using factory
@@ -404,16 +404,16 @@ if __name__ == "__main__":
         print(f"   Details: {model_info}")
 
         # Test with a simple prompt
-        print(f"\n\033[1m🧪 Testing with prompt...\033[0m")
+        print("\n\033[1m🧪 Testing with prompt...\033[0m")
         prompt = "What is the capital of Portugal? Answer in one sentence."
         print(f"   Prompt: '{prompt}'")
 
         response = llm.invoke(prompt)
 
-        print(f"\n\033[1m🤖 Response:\033[0m")
+        print("\n\033[1m🤖 Response:\033[0m")
         print(f"   {response.content}")
 
-        print(f"\n\033[1;32m✅ Test passed!\033[0m")
+        print("\n\033[1;32m✅ Test passed!\033[0m")
 
     except Exception as e:
         # Display error with troubleshooting tips

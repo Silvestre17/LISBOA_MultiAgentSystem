@@ -50,11 +50,32 @@ After getting tool results, format them beautifully:
 # 🛠️ REQUIRED TOOL CALLS
 
 | User Query Type | Tools to Call (IN ORDER) |
-|-----------------|--------------------------|
+|-----------------|--------------------------| 
 | Metro A→B route | 1. `get_route_between_stations(A, B)` → 2. `get_metro_wait_time(A)` |
-| Bus A→B route | 1. `find_bus_routes(A, B)` or `find_direct_bus_lines(A, B)` |
+| Bus (City) A→B  | `carris_find_routes_between(A, B)` — Carris Urbana (inner Lisbon) |
+| Bus (Metro Area) | `find_direct_bus_lines(A, B)` — Carris Metropolitana (suburban/inter-city) |
+| Bus (GPS-based) | `find_bus_routes(A, B)` — finds nearby stops + connecting routes |
 | Metro status | `get_metro_status()` |
 | Train trip | `plan_train_trip(origin, destination)` |
+| Multi-modal  | 1. `get_route_between_stations(A, B)` → 2. `find_bus_routes(A, B)` |
+| Transport overview | `get_transport_summary()` |
+
+## 🚌 BUS/TRAM ROUTING EXAMPLES
+
+**Example 1 – Urban Lisbon bus (Rossio → Belém):**
+- ✅ Call `carris_find_routes_between("Rossio", "Belém")` → gets Carris Urbana routes with real-time estimates
+- ✅ Alternative: Tram 15E from Praça da Figueira
+
+**Example 2 – Suburban bus (Oriente → Loures):**
+- ✅ Call `find_direct_bus_lines("Oriente", "Loures")` → finds Carris Metropolitana lines
+
+**Example 3 – GPS-based (any location → any location):**
+- ✅ Call `find_bus_routes("Torre de Belém", "Colombo")` → resolves locations, finds nearby stops, common routes
+
+**When to use which bus tool:**
+- 🚋 `carris_find_routes_between` → Best for **inner Lisbon** trips (uses Carris Urbana SQLite database)
+- 🚌 `find_direct_bus_lines` → Best for **suburban/metropolitan** area connections  
+- 🗺️ `find_bus_routes` → Best when you need **GPS-based stop resolution** for any location
 
 # 📋 RESPONSE TEMPLATE FOR METRO ROUTES
 
@@ -68,6 +89,7 @@ After calling tools, format like this:
    📍 **Embarque**: [Origin Station]
    🎯 **Desça em**: [Destination Station]
    🧭 **Direção**: [Terminal direction from tool]
+   ⏱️ **Tempo estimado**: [Travel time from tool] ([N] estações)
 
 ⏱️ **Próximos Metros** (tempo real)
 
@@ -106,11 +128,11 @@ if __name__ == "__main__":
     print("\033[1m" + "=" * 60 + "\033[0m")
 
     prompt = get_transport_prompt()
-    print(f"\n\033[1m📝 Prompt Preview:\033[0m")
+    print("\n\033[1m📝 Prompt Preview:\033[0m")
     print("-" * 40)
     print(prompt[:2000] + "...")
     print("-" * 40)
     print(
         f"\n\033[1mTotal length:\033[0m {len(prompt)} characters (~{len(prompt) // 4} tokens)"
     )
-    print(f"\033[1;32m✅ Transport prompt loaded!\033[0m")
+    print("\033[1;32m✅ Transport prompt loaded!\033[0m")

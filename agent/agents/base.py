@@ -3,16 +3,21 @@
 #   - André Filipe Gomes Silvestre, 20240502
 #
 #   Shared utilities for all specialized agents.
-#   Provides common functionality for tool binding, LLM creation, and
-#   response cleaning.
+#   Provides common functionality for:
+#     - Tool binding and LLM creation
+#     - Response cleaning (think tags, JSON artifacts, etc.)
+#     - ReAct loop execution (tool calls, parallel execution, loop detection)
+#     - Tool registry per agent type
 # ==========================================================================
 
+import json
 import os
 import sys
 import re
 from typing import List, Dict, Any, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 
 # Add parent directory to path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
@@ -358,7 +363,7 @@ def clean_response(content: str) -> str:
         return "Sorry, I'm having difficulty processing your request. Please try again."
 
     # Print markdown to terminal if debugging is enabled
-    if Config.SHOW_MARDKOWN_RESPONSE_IN_TERMINAL:
+    if Config.SHOW_MARKDOWN_RESPONSE_IN_TERMINAL:
         print("\n" + "=" * 80)
         print("📝 AI RESPONSE (Markdown)")
         print("=" * 80)
@@ -378,8 +383,6 @@ def parse_json_response(content: str) -> Optional[Dict[str, Any]]:
     Returns:
         Dict or None: Parsed JSON if found, None otherwise.
     """
-    import json
-
     if not content:
         return None
 
@@ -390,7 +393,7 @@ def parse_json_response(content: str) -> Optional[Dict[str, Any]]:
     json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
     if json_match:
         try:
-            return json.loads(json_match.group(1))
+            return json.loads(json_match.group(1))  # json imported at module top
         except json.JSONDecodeError:
             pass
 
@@ -546,6 +549,159 @@ class BaseAgent:
         
         return results
 
+    def execute_react_loop(
+        self,
+        messages: list,
+        verbose: bool = False,
+        max_iterations: int = 5,
+        tool_enforcement_msg: str = "",
+    ) -> str:
+        """
+        Executes the shared ReAct tool-calling loop.
+
+        Handles the full cycle of:
+            1. Initial LLM call with tool enforcement
+            2. Iterative tool execution (parallel when multiple)
+            3. Loop detection (duplicate tool call prevention)
+            4. JSON tool call fallback
+            5. Response cleaning
+
+        Args:
+            messages: Initial message list (system prompt + context + user query).
+            verbose: Whether to print debug information.
+            max_iterations: Maximum tool-calling iterations.
+            tool_enforcement_msg: Custom message to force tool usage if LLM
+                doesn't call any tools initially.
+
+        Returns:
+            str: Cleaned final response.
+        """
+        # First LLM call - may request tool use
+        response = self.llm_with_tools.invoke(messages)
+
+        # Tool enforcement: force tool usage if LLM doesn't call any tools
+        if tool_enforcement_msg and not (
+            hasattr(response, "tool_calls") and response.tool_calls
+        ):
+            if verbose:
+                print("      [DEBUG] No tools called initially. Forcing tool usage...")
+            messages.append(AIMessage(content=response.content))
+            messages.append(HumanMessage(content=tool_enforcement_msg))
+            response = self.llm_with_tools.invoke(messages)
+
+        iteration = 0
+        called_tools = set()        # Track tool signatures for loop detection
+        last_tool_results = []      # Store results for fallback
+
+        while (
+            hasattr(response, "tool_calls")
+            and response.tool_calls
+            and iteration < max_iterations
+        ):
+            messages.append(response)
+
+            # --- Loop Detection: Check for duplicate tool calls ---
+            new_calls = []
+            duplicate_detected = False
+            for tool_call in response.tool_calls:
+                tool_name = tool_call.get("name")
+                tool_args = tool_call.get("args", {})
+                try:
+                    args_str = json.dumps(tool_args, sort_keys=True)
+                except Exception:
+                    args_str = str(tool_args)
+                signature = f"{tool_name}:{args_str}"
+
+                if signature in called_tools:
+                    duplicate_detected = True
+                    if verbose:
+                        print(f"      [LOOP] Duplicate tool call detected: {tool_name}. Breaking loop.")
+                else:
+                    called_tools.add(signature)
+                    new_calls.append(tool_call)
+
+            # If all calls are duplicates, force response generation
+            if duplicate_detected and not new_calls:
+                if verbose:
+                    print("      [LOOP] All tool calls are duplicates. Forcing response.")
+                # Return last tool result if available
+                if last_tool_results:
+                    return clean_response(last_tool_results[-1])
+                # Otherwise force LLM to respond using existing data
+                messages.append(
+                    SystemMessage(
+                        content="STOP CALLING TOOLS. You already have the data. Respond to the user NOW."
+                    )
+                )
+                response = self.llm_with_tools.invoke(messages)
+                break
+
+            # --- Tool Execution (parallel when >1, sequential otherwise) ---
+            tools_to_execute = new_calls if new_calls else response.tool_calls[:1]
+
+            if len(tools_to_execute) > 1:
+                if verbose:
+                    print(f"      [PARALLEL] Executing {len(tools_to_execute)} tools in parallel...")
+
+                tool_results = self.execute_tools_parallel(tools_to_execute, max_workers=4)
+
+                for tool_call in tools_to_execute:
+                    tool_id = tool_call.get("id", f"call_{iteration}")
+                    tool_name = tool_call.get("name", "unknown")
+                    result = tool_results.get(tool_id, f"Tool '{tool_name}' execution failed.")
+                    last_tool_results.append(str(result))
+
+                    if verbose:
+                        preview = str(result)[:100] + "..." if len(str(result)) > 100 else str(result)
+                        print(f"      [TOOL] {tool_name} Result: {preview}")
+
+                    messages.append(ToolMessage(content=str(result), tool_call_id=tool_id))
+            else:
+                # Single tool - sequential execution
+                for tool_call in tools_to_execute:
+                    tool_name = tool_call.get("name")
+                    tool_args = tool_call.get("args", {})
+                    tool_id = tool_call.get("id", f"call_{iteration}")
+
+                    if verbose:
+                        print(f"      [TOOL] Calling {tool_name} with args: {tool_args}")
+
+                    tool_result = None
+                    for tool in self.tools:
+                        if tool.name == tool_name:
+                            try:
+                                tool_result = tool.invoke(tool_args)
+                                last_tool_results.append(str(tool_result))
+                                if verbose:
+                                    preview = (
+                                        str(tool_result)[:100] + "..."
+                                        if len(str(tool_result)) > 100
+                                        else str(tool_result)
+                                    )
+                                    print(f"      [TOOL] Result: {preview}")
+                            except Exception as e:
+                                tool_result = f"Error executing {tool_name}: {str(e)}"
+                                if verbose:
+                                    print(f"      [TOOL] Error: {tool_result}")
+                            break
+
+                    if tool_result is None:
+                        tool_result = f"Tool '{tool_name}' not found."
+
+                    messages.append(
+                        ToolMessage(content=str(tool_result), tool_call_id=tool_id)
+                    )
+
+            response = self.llm_with_tools.invoke(messages)
+            iteration += 1
+
+        # JSON tool call fallback (some models embed tool calls in text)
+        json_tool_result = self.execute_tool_from_json(response.content, verbose=verbose)
+        if json_tool_result:
+            return clean_response(json_tool_result)
+
+        return clean_response(response.content)
+
 
 # ==========================================================================
 # Loop Detection Utilities (Shared across agents)
@@ -572,8 +728,6 @@ def detect_tool_loop(messages: List, recent_tool_calls: List, lookback: int = 3)
         >>>     # Force response generation instead of calling tools again
         >>>     pass
     """
-    import json
-    
     if not recent_tool_calls:
         return False
     
@@ -627,4 +781,4 @@ if __name__ == "__main__":
             for t in tools:
                 print(f"   - {t.name}")
 
-    print(f"\n\033[1;32m✅ Base utilities loaded successfully!\033[0m")
+    print("\n\033[1;32m✅ Base utilities loaded successfully!\033[0m")

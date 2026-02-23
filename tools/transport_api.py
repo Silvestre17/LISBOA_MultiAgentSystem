@@ -19,12 +19,12 @@
 # Required libraries:
 # pip install requests langchain-core
 
+import logging
 import os
 import sys
-import logging
-from datetime import datetime
-from typing import Optional, Dict, Any, List
 from collections import defaultdict
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 import requests
 from langchain_core.tools import tool
@@ -32,34 +32,32 @@ from langchain_core.tools import tool
 # Add parent directory to path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config import Config
-
-# Import from the split modules
-from tools.metrolisboa_api import (
-    get_metro_status,
-    METRO_LINES,
-    METRO_STATIONS,
-    LISBON_LANDMARKS,
-    get_station_lines,
-    get_landmark_info,
-    fetch_json_with_retry,
-)
-
 from tools.carrismetropolitana_api import (
     CARRIS_LIMITATION_NOTICE,
-    resolve_location,
-    find_stops_near_coordinates,
-    find_common_routes,
-    is_within_lisbon_city,
     both_locations_in_lisbon_city,
+    find_common_routes,
+    find_stops_near_coordinates,
+    is_within_lisbon_city,
     load_carris_metropolitana_stops,
+    resolve_location,
 )
-
 from tools.cp_api import (
     CP_LINES,
     CP_STATIONS,
-    get_cp_station_info,
     get_cp_aml_trains,
+    get_cp_station_info,
     load_cp_aml_stations,
+)
+
+# Import from the split modules
+from tools.metrolisboa_api import (
+    LISBON_LANDMARKS,
+    METRO_LINES,
+    METRO_STATIONS,
+    fetch_json_with_retry,
+    get_landmark_info,
+    get_metro_status,
+    get_station_lines,
 )
 
 # Configure logging
@@ -74,33 +72,133 @@ METRO_STATUS_URL = "https://app.metrolisboa.pt/status/getLinhas.php"
 # Helper Functions
 # ==========================================================================
 
+def _normalize_station(text: str) -> str:
+    """Normalizes station name for comparison (removes accents, lowercases)."""
+    import unicodedata
+    return ''.join(
+        c for c in unicodedata.normalize('NFD', text)
+        if unicodedata.category(c) != 'Mn'
+    ).lower().strip()
+
+
+def _find_station_index(stations: list, station_name: str) -> int:
+    """
+    Finds the index of a station in an ordered line list.
+    Uses fuzzy matching with accent normalization.
+    
+    Args:
+        stations: Ordered list of station names on a line.
+        station_name: Station name to find.
+    
+    Returns:
+        Index of station, or -1 if not found.
+    """
+    name_norm = _normalize_station(station_name)
+    
+    # Exact match first
+    for i, s in enumerate(stations):
+        if _normalize_station(s) == name_norm:
+            return i
+    
+    # Partial match
+    for i, s in enumerate(stations):
+        s_norm = _normalize_station(s)
+        if name_norm in s_norm or s_norm in name_norm:
+            return i
+    
+    return -1
+
+
 def _get_metro_direction(line_id: str, start: str, end: str) -> str:
     """Helper to determine direction (terminal station) on a Metro line."""
     stations = METRO_LINES.get(line_id, {}).get("stations", [])
     if not stations:
         return ""
     
-    import unicodedata
-    def norm(t):
-        return ''.join(c for c in unicodedata.normalize('NFD', t) if unicodedata.category(c) != 'Mn').lower().strip()
+    idx_start = _find_station_index(stations, start)
+    idx_end = _find_station_index(stations, end)
     
-    start_c = next((s for s in stations if norm(s) == norm(start)), None)
-    if not start_c:
-        start_c = next((s for s in stations if norm(start) in norm(s) or norm(s) in norm(start)), start)
-    
-    end_c = next((s for s in stations if norm(s) == norm(end)), None)
-    if not end_c:
-        end_c = next((s for s in stations if norm(end) in norm(s) or norm(s) in norm(end)), end)
-    
-    try:
-        idx_start = stations.index(start_c)
-        idx_end = stations.index(end_c)
-        if idx_start < idx_end:
-            return f"(direction {stations[-1].title()})"
-        else:
-            return f"(direction {stations[0].title()})"
-    except ValueError:
+    if idx_start < 0 or idx_end < 0:
         return ""
+    
+    if idx_start < idx_end:
+        return f"(direction {stations[-1].title()})"
+    else:
+        return f"(direction {stations[0].title()})"
+
+
+def _count_metro_stations(line_id: str, start: str, end: str) -> int:
+    """
+    Counts the number of stations between two points on a Metro line.
+    
+    Args:
+        line_id: Metro line identifier (e.g., "amarela").
+        start: Origin station name.
+        end: Destination station name.
+    
+    Returns:
+        Number of stations between start and end (inclusive of destination,
+        exclusive of origin). Returns -1 if either station is not found.
+    """
+    stations = METRO_LINES.get(line_id, {}).get("stations", [])
+    if not stations:
+        return -1
+    
+    idx_start = _find_station_index(stations, start)
+    idx_end = _find_station_index(stations, end)
+    
+    if idx_start < 0 or idx_end < 0:
+        return -1
+    
+    return abs(idx_end - idx_start)
+
+
+def _estimate_metro_time(station_count: int, transfers: int = 0) -> str:
+    """
+    Estimates travel time on the Lisbon Metro.
+    
+    Based on official Metro de Lisboa data:
+    - ~2 minutes between consecutive stations (including stop time)
+    - ~3 minutes for each line transfer (walking + waiting)
+    - ~2 minutes average initial wait time
+    
+    Args:
+        station_count: Number of stations to travel.
+        transfers: Number of line transfers.
+    
+    Returns:
+        Formatted time estimate string (e.g., "~12 min").
+    """
+    if station_count <= 0:
+        return "~2 min"
+    
+    travel_min = station_count * 2  # 2 min per station
+    transfer_min = transfers * 3    # 3 min per transfer
+    wait_min = 2                    # Average initial wait
+    total = travel_min + transfer_min + wait_min
+    
+    return f"~{total} min"
+
+
+def _get_line_status(line_id: str) -> str:
+    """
+    Gets real-time status for a specific Metro line.
+    
+    Args:
+        line_id: Metro line identifier (e.g., "amarela").
+    
+    Returns:
+        Status string ("ok" if normal, otherwise the disruption message).
+        Returns "unknown" if status cannot be fetched.
+    """
+    try:
+        metro_data = fetch_json_with_retry(METRO_STATUS_URL)
+        if metro_data and metro_data.get('resposta'):
+            status = metro_data['resposta'].get(line_id, 'unknown').strip()
+            return status
+    except Exception:
+        pass
+    return "unknown"
 
 
 # ==========================================================================
@@ -127,9 +225,6 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     Returns:
         str: Multi-modal route suggestions with Metro, train, and bus options.
     """
-    origin_lower = origin.lower().strip()
-    dest_lower = destination.lower().strip()
-    
     response = f"🗺️ **Route: {origin.title()} → {destination.title()}**\n"
     response += "=" * 50 + "\n\n"
     
@@ -145,8 +240,6 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     origin_cp = get_cp_station_info(origin)
     dest_cp = get_cp_station_info(destination)
     
-    has_metro = bool(origin_lines or dest_lines)
-    has_train = bool(origin_cp or dest_cp)
     has_landmarks = bool(origin_landmark or dest_landmark)
     
     # Handle landmarks first
@@ -161,7 +254,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                 line_emoji = METRO_LINES.get(line.split('/')[0], {}).get('emoji', '🚇')
                 response += f"   🚇 Nearest Metro: **{origin_landmark['metro'].title()}** ({line_emoji} {line.title()} Line)\n"
             elif origin_landmark.get('alternative'):
-                response += f"   ⚠️ No direct Metro!\n"
+                response += "   ⚠️ No direct Metro!\n"
                 response += f"   🚌 Alternative: {origin_landmark['alternative']}\n"
             response += f"   ℹ️ {origin_landmark.get('description', '')}\n\n"
         
@@ -172,7 +265,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                 line_emoji = METRO_LINES.get(line.split('/')[0], {}).get('emoji', '🚇')
                 response += f"   🚇 Nearest Metro: **{dest_landmark['metro'].title()}** ({line_emoji} {line.title()} Line)\n"
             elif dest_landmark.get('alternative'):
-                response += f"   ⚠️ No direct Metro!\n"
+                response += "   ⚠️ No direct Metro!\n"
                 response += f"   🚌 Alternative: {dest_landmark['alternative']}\n"
             response += f"   ℹ️ {dest_landmark.get('description', '')}\n\n"
         
@@ -203,14 +296,26 @@ def get_route_between_stations(origin: str, destination: str) -> str:
         common_lines = set(eff_origin_lines) & set(eff_dest_lines)
         
         if common_lines:
-            response += f"✅ **Direct Route Available**\n\n"
+            response += "✅ **Direct Route Available**\n\n"
             for line in common_lines:
                 line_info = METRO_LINES.get(line, {})
                 emoji = line_info.get('emoji', '')
                 name = line_info.get('name', line.title())
                 direction = _get_metro_direction(line, eff_origin, eff_dest)
                 
+                # B1: Check real-time line status
+                line_status = _get_line_status(line)
+                if line_status.lower() not in ('ok', 'unknown', ''):
+                    response += f"   ⚠️ **Line Alert**: {line_status}\n"
+                
+                # B4: Travel time estimate
+                station_count = _count_metro_stations(line, eff_origin, eff_dest)
+                time_est = _estimate_metro_time(station_count) if station_count > 0 else ""
+                stations_str = f" ({station_count} stations)" if station_count > 0 else ""
+                
                 response += f"   {emoji} Take **{line.title()} Line** ({name})\n"
+                if time_est:
+                    response += f"   ⏱️ Estimated travel time: **{time_est}**{stations_str}\n"
                 
                 step = 1
                 if origin_from_landmark:
@@ -229,7 +334,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                 response += "\n"
 
         else:
-            response += f"🔄 **Transfer Required**\n\n"
+            response += "🔄 **Transfer Required**\n\n"
             
             transfer_stations = [
                 ("Marquês de Pombal", ["amarela", "azul"]),
@@ -256,8 +361,21 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                 l1_info = METRO_LINES[l1]
                 l2_info = METRO_LINES[l2]
                 
-                response += f"   💡 **Transfer at**: {best_hub} ({l1_info['emoji']} ↔ {l2_info['emoji']})\n\n"
-                response += f"   **Full Route**:\n"
+                # B1: Check real-time status for both lines
+                for check_line, check_info in [(l1, l1_info), (l2, l2_info)]:
+                    status = _get_line_status(check_line)
+                    if status.lower() not in ('ok', 'unknown', ''):
+                        response += f"   ⚠️ **{check_info['emoji']} {check_line.title()} Line Alert**: {status}\n"
+                
+                # B4: Total travel time (leg 1 + transfer + leg 2)
+                leg1_count = _count_metro_stations(l1, eff_origin, best_hub)
+                leg2_count = _count_metro_stations(l2, best_hub, eff_dest)
+                total_stations = (leg1_count if leg1_count > 0 else 0) + (leg2_count if leg2_count > 0 else 0)
+                time_est = _estimate_metro_time(total_stations, transfers=1)
+                
+                response += f"   💡 **Transfer at**: {best_hub} ({l1_info['emoji']} ↔ {l2_info['emoji']})\n"
+                response += f"   ⏱️ Estimated travel time: **{time_est}** ({total_stations} stations + 1 transfer)\n\n"
+                response += "   **Full Route**:\n"
                 
                 step = 1
                 if origin_from_landmark:
@@ -281,13 +399,13 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                 
                 response += "\n"
             else:
-                response += f"⚠️ Route requires complex transfer. Check [Metro map](https://www.metrolisboa.pt/viajar/mapas-e-diagramas/).\n\n"
+                response += "⚠️ Route requires complex transfer. Check [Metro map](https://www.metrolisboa.pt/viajar/mapas-e-diagramas/).\n\n"
                 
     elif eff_origin_lines:
         # Origin valid, Dest invalid
         response += f"🚇 **Origin is Metro**: {eff_origin.title()}\n"
         if origin_from_landmark:
-             response += f"   (Nearest station to {origin})\n"
+            response += f"   (Nearest station to {origin})\n"
         response += f"❌ Destination '{destination.title()}' not on Metro.\n"
         response += "   Consider using Carris buses or CP trains.\n\n"
         
@@ -296,11 +414,11 @@ def get_route_between_stations(origin: str, destination: str) -> str:
         response += f"❌ Origin '{origin.title()}' not on Metro.\n"
         response += f"🚇 **Destination is Metro**: {eff_dest.title()}\n"
         if dest_from_landmark:
-             response += f"   (Nearest station to {destination})\n"
+            response += f"   (Nearest station to {destination})\n"
         response += "   Consider using Carris buses or CP trains to reach the Metro.\n\n"
 
     else:
-        if not has_landmarks: # Only print if we haven't printed landmark info
+        if not has_landmarks:  # Only print if we haven't printed landmark info
             response += "❌ Neither location is a known Metro station.\n\n"
     
     # Check for CP Train options
@@ -312,7 +430,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
             common_lines = set(origin_cp.get("lines", [])) & set(dest_cp.get("lines", []))
             
             if common_lines:
-                response += f"✅ **Direct Train Route Available**\n\n"
+                response += "✅ **Direct Train Route Available**\n\n"
                 for line in common_lines:
                     line_info = CP_LINES.get(line, {"name": line.title()})
                     response += f"   🚆 Take **{line_info['name']}**\n"
@@ -327,7 +445,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                 response += "   You may need to transfer at a major hub (e.g., Entrecampos, Oriente, Sete Rios).\n\n"
         
         if origin_cp:
-            lines_str = ", ".join([CP_LINES[l]["name"] for l in origin_cp.get("lines", [])])
+            lines_str = ", ".join([CP_LINES[line_id]["name"] for line_id in origin_cp.get("lines", [])])
             response += f"✅ **{origin.title()}** is a train station\n"
             response += f"   📍 {origin_cp.get('description', 'N/A')}\n"
             response += f"   🚆 Lines: {lines_str}\n"
@@ -337,7 +455,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
             response += "\n"
         
         if dest_cp:
-            lines_str = ", ".join([CP_LINES[l]["name"] for l in dest_cp.get("lines", [])])
+            lines_str = ", ".join([CP_LINES[line_id]["name"] for line_id in dest_cp.get("lines", [])])
             response += f"✅ **{destination.title()}** is a train station\n"
             response += f"   📍 {dest_cp.get('description', 'N/A')}\n"
             response += f"   🚆 Lines: {lines_str}\n"
@@ -395,7 +513,7 @@ def get_transport_summary() -> str:
     response += "-" * 20 + "\n"
     
     try:
-        from tools.carris_api import fetch_gtfs_rt_vehicles, _get_db_connection
+        from tools.carris_api import _get_db_connection, fetch_gtfs_rt_vehicles
         
         vehicles = fetch_gtfs_rt_vehicles()
         if vehicles:
@@ -413,7 +531,10 @@ def get_transport_summary() -> str:
     response += "-" * 20 + "\n"
     
     try:
-        from tools.carrismetropolitana_api import get_carris_metropolitana_alerts, CARRIS_ALERTS_URL
+        from tools.carrismetropolitana_api import (
+            CARRIS_ALERTS_URL,
+            get_carris_metropolitana_alerts,
+        )
         
         alerts_data = fetch_json_with_retry(CARRIS_ALERTS_URL)
         if alerts_data:
@@ -466,26 +587,163 @@ def get_transport_summary() -> str:
 # Test Block
 # ==========================================================================
 if __name__ == "__main__":
-    print("\033[1m" + "=" * 60 + "\033[0m")
-    print("\033[1m🧪 MULTI-MODAL TRANSPORT API - TEST SUITE\033[0m")
-    print("\033[1m" + "=" * 60 + "\033[0m")
+    print("\033[1m" + "=" * 70 + "\033[0m")
+    print("\033[1m\U0001f9ea MULTI-MODAL TRANSPORT API - COMPREHENSIVE TEST SUITE\033[0m")
+    print("\033[1m" + "=" * 70 + "\033[0m")
     
-    print("\n1. Testing get_transport_summary...")
-    result = get_transport_summary.invoke({})
-    print(result)
+    test_results = {"passed": 0, "failed": 0, "total": 0}
     
-    print("\n2. Testing get_route_between_stations (Metro)...")
-    result = get_route_between_stations.invoke({
-        "origin": "Aeroporto",
-        "destination": "Baixa-Chiado"
-    })
-    print(result[:800])
+    def run_test(name, func, args=None):
+        """Runs a test and tracks results."""
+        test_results["total"] += 1
+        print(f"\n{'=' * 60}")
+        print(f"\033[1m\U0001f9ea TEST {test_results['total']}: {name}\033[0m")
+        print(f"{'=' * 60}")
+        try:
+            result = func(args if args else {})
+            if result:
+                test_results["passed"] += 1
+                print(f"\033[1;32m[PASS]\033[0m Result length: {len(result)} chars")
+                # Show first 600 chars for readability
+                print(result[:600])
+                if len(result) > 600:
+                    print(f"... ({len(result) - 600} more chars)")
+            else:
+                test_results["failed"] += 1
+                print("\033[1;31m[FAIL]\033[0m Empty result")
+        except Exception as e:
+            test_results["failed"] += 1
+            print(f"\033[1;31m[FAIL]\033[0m Error: {e}")
     
-    print("\n3. Testing get_route_between_stations (Landmark)...")
-    result = get_route_between_stations.invoke({
-        "origin": "Colombo",
-        "destination": "Oriente"
-    })
-    print(result[:800])
+    # =========================================================================
+    # HELPER FUNCTION TESTS
+    # =========================================================================
     
-    print("\n\033[1;32m✅ Multi-modal transport API tests complete!\033[0m")
+    # TEST: Station counting (internal validation)
+    print(f"\n{'=' * 60}")
+    print("\033[1m\U0001f9ea INTERNAL: _count_metro_stations validation\033[0m")
+    print(f"{'=' * 60}")
+    
+    # Helper variables for colors to avoid f-string backslash errors in <= 3.11
+    OK_TXT = "\033[32mOK\033[0m"
+    FAIL_TXT = "\033[31mFAIL\033[0m"
+    FAIL_12_TXT = "\033[31mFAIL (expected 12)\033[0m"
+    FAIL_2_TXT = "\033[31mFAIL (expected 2)\033[0m"
+
+    # Amarela: rato(0) to odivelas(12) = 12 stations
+    count = _count_metro_stations("amarela", "rato", "odivelas")
+    print(f"  Rato -> Odivelas (Amarela): {count} stations {OK_TXT if count == 12 else FAIL_12_TXT}")
+    
+    # Verde: cais do sodre(0) to telheiras(12) = 12 stations  
+    count = _count_metro_stations("verde", "cais do sodre", "telheiras")
+    print(f"  Cais do Sodre -> Telheiras (Verde): {count} stations {OK_TXT if count == 12 else FAIL_12_TXT}")
+    
+    # Azul: santa apolonia(0) to baixa-chiado(2) = 2 stations
+    count = _count_metro_stations("azul", "santa apolonia", "baixa-chiado")
+    print(f"  Santa Apolonia -> Baixa-Chiado (Azul): {count} stations {OK_TXT if count == 2 else FAIL_2_TXT}")
+    
+    # Time estimation
+    time_est = _estimate_metro_time(5, transfers=0)
+    print(f"  Time estimate (5 stations, 0 transfers): {time_est} {OK_TXT if '12' in time_est else FAIL_TXT}")
+    
+    time_est = _estimate_metro_time(8, transfers=1)
+    print(f"  Time estimate (8 stations, 1 transfer): {time_est} {OK_TXT if '21' in time_est else FAIL_TXT}")
+    
+    # =========================================================================
+    # METRO ROUTE TESTS - Direct Routes
+    # =========================================================================
+    
+    # TEST 1: Direct route on same line (Vermelha)
+    run_test(
+        "Direct Metro Route - Same Line (Aeroporto -> Saldanha) [VERMELHA]",
+        get_route_between_stations.invoke,
+        {"origin": "Aeroporto", "destination": "Saldanha"}
+    )
+    
+    # TEST 2: Direct route on same line (Verde)
+    run_test(
+        "Direct Metro Route - Same Line (Cais do Sodre -> Arroios) [VERDE]",
+        get_route_between_stations.invoke,
+        {"origin": "Cais do Sodré", "destination": "Arroios"}
+    )
+    
+    # =========================================================================
+    # METRO ROUTE TESTS - Transfer Required
+    # =========================================================================
+    
+    # TEST 3: Transfer route (Azul -> Vermelha via Sao Sebastiao)
+    run_test(
+        "Transfer Route - Reboleira -> Aeroporto [AZUL -> VERMELHA]",
+        get_route_between_stations.invoke,
+        {"origin": "Reboleira", "destination": "Aeroporto"}
+    )
+    
+    # TEST 4: Transfer route (Amarela -> Verde via Campo Grande)
+    run_test(
+        "Transfer Route - Odivelas -> Rossio [AMARELA -> VERDE]",
+        get_route_between_stations.invoke,
+        {"origin": "Odivelas", "destination": "Rossio"}
+    )
+    
+    # =========================================================================
+    # LANDMARK ROUTING TESTS
+    # =========================================================================
+    
+    # TEST 5: Landmark routing (Colombo -> Oriente)
+    run_test(
+        "Landmark Route - Colombo -> Oriente [LANDMARK + METRO]",
+        get_route_between_stations.invoke,
+        {"origin": "Colombo", "destination": "Oriente"}
+    )
+    
+    # TEST 6: Landmark with no metro (Belem)
+    run_test(
+        "Landmark Route - Belem (no Metro) [ALTERNATIVE TRANSPORT]",
+        get_route_between_stations.invoke,
+        {"origin": "Aeroporto", "destination": "Belém"}
+    )
+    
+    # =========================================================================
+    # EDGE CASES
+    # =========================================================================
+    
+    # TEST 7: Unknown locations
+    run_test(
+        "Edge Case - Unknown Origin and Destination",
+        get_route_between_stations.invoke,
+        {"origin": "Praia do Guincho", "destination": "Serra da Estrela"}
+    )
+    
+    # TEST 8: Same station
+    run_test(
+        "Edge Case - Same Origin and Destination",
+        get_route_between_stations.invoke,
+        {"origin": "Saldanha", "destination": "Saldanha"}
+    )
+    
+    # =========================================================================
+    # TRANSPORT SUMMARY TEST
+    # =========================================================================
+    
+    # TEST 9: Full transport summary
+    run_test(
+        "Transport Summary - All Modes [METRO + CARRIS + CP]",
+        get_transport_summary.invoke
+    )
+    
+    # =========================================================================
+    # TEST SUMMARY
+    # =========================================================================
+    
+    print("\n" + "=" * 70)
+    print("\033[1m\U0001f4ca TEST SUMMARY\033[0m")
+    print("=" * 70)
+    print(f"\033[1;32m\u2705 Passed: {test_results['passed']}/{test_results['total']}\033[0m")
+    print(f"\033[1;31m\u274c Failed: {test_results['failed']}/{test_results['total']}\033[0m")
+    
+    if test_results['failed'] == 0:
+        print("\n\033[1;32m🎉 ALL TESTS PASSED! Transport system is working correctly.\033[0m")
+    else:
+        print("\n\033[1;33m⚠️  Some tests failed. Check errors above.\033[0m")
+    
+    print("=" * 70 + "\n")

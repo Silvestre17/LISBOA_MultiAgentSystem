@@ -20,7 +20,7 @@
 # Required libraries:
 # pip install streamlit langchain langgraph langchain-openai python-dotenv
 
-# IMPORTANT: Load environment variables FIRST (before any LangChain imports)
+# .IMPORTANT: Load environment variables FIRST (before any LangChain imports)
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -43,22 +43,22 @@ except ImportError:
 except Exception as e:
     print(f"Failed to apply torch workaround: {e}")
 
-import streamlit as st
-import sys
-import os
-import traceback
 import base64
+import os
+import sys
+import traceback
 from datetime import datetime
-from typing import Optional, Dict, Any, Tuple
+from typing import Any, Dict, Optional, Tuple
+
+import streamlit as st
 
 # Add project root to path for imports
 sys.path.insert(0, ".")
 
-from agent.graph import create_assistant, LisbonAssistant, MultiAgentAssistant
+from agent.graph import LisbonAssistant, MultiAgentAssistant, create_assistant
 from config import Config
+from tools.carris_api import CARRIS_DB_PATH, CarrisGTFSManager
 from tools.visitlisboa_api import initialize_vector_store
-from tools.carris_api import CarrisGTFSManager, CARRIS_DB_PATH
-
 
 # ==========================================================================
 # TRANSLATIONS / INTERNATIONALIZATION
@@ -150,7 +150,7 @@ TRANSLATIONS = {
         "error_generic": "An error occurred while processing your request.",
         "thinking": "Analyzing and gathering information...",
         # Footer
-        "footer_version": "LISBOA v3.0",
+        "footer_version": "LISBOA v5.0",
         "footer_made": "André Filipe Gomes Silvestre | Master's Student\nNOVA IMS",
         # Info Page
         "info_title": "About This Assistant",
@@ -266,7 +266,7 @@ NOVA IMS - Universidade NOVA de Lisboa
         "error_generic": "Ocorreu um erro ao processar o seu pedido.",
         "thinking": "A analisar e recolher informação...",
         # Footer
-        "footer_version": "LISBOA v3.0",
+        "footer_version": "LISBOA v5.0",
         "footer_made": "André Filipe Gomes Silvestre | Mestrando\nNOVA IMS",
         # Info Page
         "info_title": "Sobre Este Assistente",
@@ -966,7 +966,7 @@ def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
                 
                 try:
                     # Simple ping
-                    response = test_llm.invoke("ping")
+                    test_llm.invoke("ping")
                 finally:
                     # Restore original tracing setting
                     if original_tracing:
@@ -975,7 +975,7 @@ def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
                         del os.environ["LANGCHAIN_TRACING_V2"]
                 # If we get here, connection is successful
                 connection_placeholder.success(
-                    f"✅ Connection successful! Model is ready."
+                    "✅ Connection successful! Model is ready."
                 )
                 import time
 
@@ -1239,16 +1239,6 @@ def render_provider_credentials():
                     "gpt-5-mini",
                     "gpt-5",
                     "DeepSeek-V3.2",
-                ]
-            elif selected_provider == "openai":
-                default_provider_models = Config.AGENT_MODELS_OPENAI
-                st.caption(f"🤖 Provider: **OpenAI** | Default: {default_provider_models['supervisor']['model']}")
-                available_models = [
-                    "gpt-5.2",
-                    "gpt-5.1",
-                    "gpt-5",
-                    "gpt-5-mini",
-                    "gpt-5-nano",
                 ]
             elif selected_provider == "openai":
                 default_provider_models = Config.AGENT_MODELS_OPENAI

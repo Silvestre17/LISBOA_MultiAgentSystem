@@ -134,11 +134,11 @@ if __name__ == "__main__":
     print("\033[1m" + "=" * 60 + "\033[0m")
 
     prompt = get_researcher_prompt()
-    print(f"\n\033[1m📝 Prompt Preview:\033[0m")
+    print("\n\033[1m📝 Prompt Preview:\033[0m")
     print("-" * 40)
     print(prompt)
     print("-" * 40)
     print(
         f"\n\033[1mTotal length:\033[0m {len(prompt)} characters (~{len(prompt) // 4} tokens)"
     )
-    print(f"\033[1;32m✅ Researcher prompt loaded!\033[0m")
+    print("\033[1;32m✅ Researcher prompt loaded!\033[0m")

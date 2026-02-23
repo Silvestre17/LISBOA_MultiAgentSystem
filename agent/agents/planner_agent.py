@@ -138,16 +138,16 @@ if __name__ == "__main__":
            📍 Belém | 🕐 11:00-19:00 | 💰 €9
         """
         
-        print(f"\n\033[1m📝 Testing with mock data:\033[0m")
+        print("\n\033[1m📝 Testing with mock data:\033[0m")
         response = agent.invoke(
             user_message="Plan my morning in Belém",
             weather_data=mock_weather,
             places_data=mock_places
         )
-        print(f"\n\033[1m🤖 Response:\033[0m")
+        print("\n\033[1m🤖 Response:\033[0m")
         print(response[:800] + "..." if len(response) > 800 else response)
         
-        print(f"\n\033[1;32m✅ Planner agent working!\033[0m")
+        print("\n\033[1;32m✅ Planner agent working!\033[0m")
         
     except Exception as e:
         print(f"\n\033[1;31m❌ Error:\033[0m {e}")
