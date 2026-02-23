@@ -60,6 +60,7 @@ See the architecture overview in [`docs/02_SYSTEM_ARCHITECTURE.md`](./docs/02_SY
    - **Transport Agent**: Metro, bus, tram, and train information
    - **Researcher Agent**: RAG for places and events
    - **Planner Agent**: Itinerary synthesis
+   - **BaseAgent**: Shared ReAct loop with tool enforcement, loop detection, and parallel execution
     - **42 specialized tools** for different data sources
     - **Multi-provider LLM support** (OpenAI, Azure, LM Studio)
 
@@ -242,6 +243,9 @@ Thesis2025-26_AFGS/
 │   │   ├── researcher.py               # Researcher agent prompt
 │   │   └── planner.py                  # Planner agent prompt
 │   └── __init__.py
+│   ├── utils/                          # Utility modules
+│   │   ├── response_formatter.py       # Markdown response formatting
+│   │   └── optimization.py             # Caching, HTTP pooling, latency tracking
 │
 ├── tools/                              # Agent Tools (42 total)
 │   ├── ipma_api.py                     # Weather tools (4 tools)
@@ -289,6 +293,14 @@ Thesis2025-26_AFGS/
 ├── config.py                           # Configuration (API endpoints, IDs)
 ├── requirements.txt                    # Python dependencies
 ├── README.md                           # This file
+│
+├── eval/                               # Evaluation Framework
+│   └── eval_framework.py              # 31 test queries, routing + quality metrics
+│
+├── tests/                              # Test Suites
+│   ├── test_audit_fixes.py            # Audit fix validation (24 tests)
+│   └── test_transport.py              # Transport tool tests (9 tests)
+│
 └── LICENSE
 ```
 
@@ -409,6 +421,12 @@ python tools/vector_store.py --test
 
 # Test agent
 python agent/graph.py
+
+# Run evaluation framework (self-test)
+python eval/eval_framework.py
+
+# Run syntax validation on all files
+python tests/syntax_check.py
 ```
 
 ## 📈 Project Statistics
@@ -420,6 +438,7 @@ python agent/graph.py
 - **Vector DB Documents**: ~1,400 chunks (PDF guide + events + places)
 - **Datasets**: 200+ events, 300+ places, 100+ open data GeoJSON
 - **Lines of Code**: ~15,000+
+- **Evaluation**: 31 test queries across 8 categories
 - **Documentation**: 150+ pages
 
 ## 🤝 Contributing

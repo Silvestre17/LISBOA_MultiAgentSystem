@@ -19,17 +19,17 @@
 # Required libraries:
 # pip install requests langchain-core
 
+import base64
+import logging
+import math
 import os
 import sys
-import logging
 import time
-import math
-import base64
-import urllib3
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
 
 import requests
+import urllib3
 from langchain_core.tools import tool
 
 # Suppress SSL warnings globally for Metro API
@@ -500,8 +500,9 @@ def fetch_json_with_retry(url: str, timeout: int = REQUEST_TIMEOUT, use_cache: b
     """
     # Import optimization utilities for caching and connection pooling
     try:
-        from agent.utils.optimization import http_pool, transport_cache
         import hashlib
+
+        from agent.utils.optimization import http_pool, transport_cache
         OPTIMIZATION_AVAILABLE = True
     except ImportError:
         OPTIMIZATION_AVAILABLE = False
@@ -1714,7 +1715,7 @@ def get_metro_frequency(line: str, day_type: str = "weekday") -> str:
             minutes = int(parts[0])
             seconds = int(parts[1]) if len(parts) > 1 else 0
             freq_str = f"{minutes}:{seconds:02d}" if seconds else f"{minutes} min"
-        except:
+        except Exception:
             freq_str = freq
 
         start_short = start[:5] if start else ""

@@ -6,8 +6,8 @@
 #   Uses TypedDict for type safety and clear state management.
 # ==========================================================================
 
-from typing import TypedDict, List, Optional, Annotated
 from datetime import datetime
+from typing import Annotated, List, Optional, TypedDict
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -248,14 +248,14 @@ if __name__ == "__main__":
     
     # Create initial state
     state = create_initial_state()
-    print(f"\n\033[1m📋 Initial State:\033[0m")
+    print("\n\033[1m📋 Initial State:\033[0m")
     print(f"   Session ID: {state['session_id']}")
     print(f"   Messages: {len(state['messages'])}")
     print(f"   User Context: {state['user_context']}")
     
     # Update location
     state = update_user_location(state, 38.7223, -9.1393)
-    print(f"\n\033[1m📍 After Location Update:\033[0m")
+    print("\n\033[1m📍 After Location Update:\033[0m")
     print(f"   User Context: {state['user_context']}")
     
     # Update weather
@@ -267,7 +267,7 @@ if __name__ == "__main__":
         weather_type="Partly cloudy",
         warnings=[]
     )
-    print(f"\n\033[1m🌤️ After Weather Update:\033[0m")
+    print("\n\033[1m🌤️ After Weather Update:\033[0m")
     print(f"   Weather: {state['weather_context']}")
     
-    print(f"\n\033[1;32m✅ State management working correctly!\033[0m")
+    print("\n\033[1;32m✅ State management working correctly!\033[0m")

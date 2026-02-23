@@ -18,13 +18,13 @@
 # Required libraries:
 # pip install requests langchain-core
 
+import logging
+import math
 import os
 import sys
-import logging
 import time
-import math
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
 
 import requests
 from langchain_core.tools import tool
@@ -682,7 +682,7 @@ def get_vehicles_near_location(
     if not vehicles:
         return []
 
-    line_map = {l["id"]: l for l in lines} if lines else {}
+    line_map = {line_data["id"]: line_data for line_data in lines} if lines else {}
 
     nearby_vehicles = []
     for vehicle in vehicles:
@@ -877,7 +877,7 @@ def find_common_routes(
     if not common_lines:
         return []
 
-    line_map = {l["id"]: l for l in lines}
+    line_map = {line_data["id"]: line_data for line_data in lines}
 
     route_options = []
     for line_id in common_lines:
@@ -1027,7 +1027,7 @@ def get_real_time_bus_positions(
     if not vehicles:
         return "❌ Failed to fetch real-time vehicle positions."
 
-    line_map = {l["id"]: l for l in lines} if lines else {}
+    line_map = {line_data["id"]: line_data for line_data in lines} if lines else {}
 
     # Filter vehicles
     filtered_vehicles = vehicles
@@ -1061,7 +1061,7 @@ def get_real_time_bus_positions(
         response = f"🚌 Real-Time Buses Near {location.title()}\n"
         response += f"📍 Radius: {radius_km}km | {len(filtered_vehicles)} buses found\n"
     else:
-        response = f"🚌 Real-Time Bus Positions - All Lines\n"
+        response = "🚌 Real-Time Bus Positions - All Lines\n"
         response += f"📊 {len(filtered_vehicles)} active vehicles\n"
 
     response += "=" * 50 + "\n\n"
@@ -1113,12 +1113,12 @@ def get_real_time_bus_positions(
         response += f"   📡 Last update: {time_str}\n"
 
         if status == "STOPPED_AT":
-            response += f"   🛑 Currently stopped"
+            response += "   🛑 Currently stopped"
             if door_status:
                 response += f" (Doors: {door_status})"
             response += "\n"
         elif status == "INCOMING_AT":
-            response += f"   🚏 Approaching next stop\n"
+            response += "   🚏 Approaching next stop\n"
 
         if "distance_km" in vehicle:
             response += (
@@ -1352,7 +1352,7 @@ def find_direct_bus_lines(origin: str, destination: str) -> str:
         response += "💡 **Sugestões:**\n"
         response += "   • Pode ser necessário fazer transbordo\n"
         response += "   • Considere combinar Metro + Autocarro\n"
-        response += f"   • Consulte carrismetropolitana.pt para mais opções\n"
+        response += "   • Consulte carrismetropolitana.pt para mais opções\n"
         return response
 
     # Fetch alerts to check if any affect these lines
@@ -1456,7 +1456,7 @@ def find_direct_bus_lines(origin: str, destination: str) -> str:
         response += "\n"
 
     if len(direct_lines) > 6:
-        other_lines = [l["short_name"] for l in direct_lines[6:]]
+        other_lines = [line_data["short_name"] for line_data in direct_lines[6:]]
         response += f"📋 Outras linhas: {', '.join(other_lines)}\n\n"
 
     response += "-" * 50 + "\n"
@@ -1473,7 +1473,7 @@ def search_carris_metropolitana_lines(query: str) -> str:
     """
     Searches for Carris Metropolitana (suburban) bus lines.
 
-    IMPORTANT: This searches SUBURBAN bus lines only. Urban Lisbon buses
+    .IMPORTANT: This searches SUBURBAN bus lines only. Urban Lisbon buses
     like lines 28E, 738, 732 are NOT included.
 
     Searches in:
@@ -1599,7 +1599,7 @@ def get_bus_realtime_locations(line_id: Optional[str] = None) -> str:
     """
     Gets real-time GPS locations of Carris Metropolitana buses.
 
-    IMPORTANT: Only works for suburban buses, not urban Lisbon.
+    .IMPORTANT: Only works for suburban buses, not urban Lisbon.
 
     Args:
         line_id: Filter by line ID (e.g., '1718', '3703').
@@ -1630,7 +1630,7 @@ def get_bus_realtime_locations(line_id: Optional[str] = None) -> str:
         response = f"🚌 **Real-Time Bus Locations - Line {line_id}**\n"
     else:
         buses = data
-        response = f"🚌 **Real-Time Bus Locations Overview**\n"
+        response = "🚌 **Real-Time Bus Locations Overview**\n"
 
     response += "=" * 50 + "\n"
     response += f"📊 Active buses: {len(buses)}\n"

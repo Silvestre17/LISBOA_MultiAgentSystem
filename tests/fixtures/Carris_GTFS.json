@@ -1,0 +1,121 @@
+[
+  {
+    "stmt": ".tables",
+    "header": [],
+    "rows": [
+      ["agency          calendar_dates  shapes          stops         \ncalendar        routes          stop_times      trips         "]
+    ]
+  },
+  {
+    "stmt": "SELECT * FROM agency LIMIT 10;",
+    "header": ["agency_id", "agency_name", "agency_url", "agency_timezone", "agency_lang", "agency_phone", "agency_fare_url", "agency_email"],
+    "rows": [
+      ["1", "Carris", "http://www.carris.pt", "Europe/Lisbon", "pt", "NULL", "NULL", "NULL"]
+    ]
+  },
+  {
+    "stmt": "SELECT * FROM calendar LIMIT 10;",
+    "header": ["service_id", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "start_date", "end_date"],
+    "rows": [
+      ["Inverno_Util_20260101", "1", "1", "1", "1", "1", "0", "0", "20260101", "20260605"],
+      ["Inverno_DomingoFeriado_20260101", "0", "0", "0", "0", "0", "0", "1", "20260101", "20260605"],
+      ["Inverno_Sabado_20260101", "0", "0", "0", "0", "0", "1", "0", "20260101", "20260605"]
+    ]
+  },
+  {
+    "stmt": "SELECT * FROM calendar_dates LIMIT 10;",
+    "header": ["service_id", "date", "exception_type"],
+    "rows": [
+      ["Inverno_Util_20260101", "20260604", "2"],
+      ["Ferias Escolares_Util_20260101", "20260408", "1"],
+      ["Inverno_Util_20260101", "20260407", "2"],
+      ["Feriados_Agosto_DomingoFeriado_20260101", "20260403", "1"],
+      ["Feriados_DomingoFeriado_20260101", "20260217", "1"],
+      ["Inverno_Util_20260101", "20260406", "2"],
+      ["Natal & Ano Novo_DomingoFeriado_20260101", "20260101", "1"],
+      ["Ferias Escolares_Util_20260101", "20260218", "1"],
+      ["Inverno_Util_20260101", "20260331", "2"],
+      ["Verao_Util_20260101", "20260102", "1"]
+    ]
+  },
+  {
+    "stmt": "SELECT * FROM routes LIMIT 10;",
+    "header": ["route_id", "agency_id", "route_short_name", "route_long_name", "route_desc", "route_type", "route_url", "route_color", "route_text_color"],
+    "rows": [
+      ["174_0", "1", "796", "Campo Grande (Metro) - Galinheiras", "NULL", "3", "NULL", "NULL", "NULL"],
+      ["146_1", "1", "702", "Serafina - Mq. Pombal - R. Joaquim A. Aguiar", "NULL", "3", "NULL", "NULL", "NULL"],
+      ["245_0", "1", "19B", "Campo Mártires Pátria / circulação S. Bento", "NULL", "3", "NULL", "NULL", "NULL"],
+      ["277_0", "1", "45B", "Alta Lisboa - Paço Lumiar", "NULL", "3", "NULL", "NULL", "NULL"],
+      ["167_0", "1", "753", "Pç. José Fontana - Centro Sul", "NULL", "3", "NULL", "NULL", "NULL"],
+      ["167_4", "1", "753", "Marquês Pombal - Viaduto Duarte Pacheco", "NULL", "3", "NULL", "NULL", "NULL"],
+      ["159_0", "1", "52E", "Ascensor Lavra", "NULL", "3", "NULL", "NULL", "NULL"],
+      ["145_0", "1", "793", "Marvila - Estação Roma-Areeiro", "NULL", "3", "NULL", "NULL", "NULL"],
+      ["78_0", "1", "18E", "Cais Sodré - Cemitério Ajuda", "NULL", "3", "NULL", "NULL", "NULL"],
+      ["236_0", "1", "22B", "Cais Sodré / circulação Príncipe Real", "NULL", "3", "NULL", "NULL", "NULL"]
+    ]
+  },
+  {
+    "stmt": "SELECT * FROM shapes LIMIT 10;",
+    "header": ["shape_id", "shape_pt_lat", "shape_pt_lon", "shape_pt_sequence", "shape_dist_traveled"],
+    "rows": [
+      ["62_0_ASC_shp", "38.7114982", "-9.1640731", "388", "NULL"],
+      ["226_0_CIRC_shp", "38.7263955", "-9.114161", "190", "NULL"],
+      ["226_0_CIRC_shp", "38.7260517", "-9.1135291", "191", "NULL"],
+      ["226_0_CIRC_shp", "38.7259625", "-9.1134735", "192", "NULL"],
+      ["226_0_CIRC_shp", "38.7259159", "-9.1134444", "193", "NULL"],
+      ["226_0_CIRC_shp", "38.7257244", "-9.1130873", "194", "NULL"],
+      ["226_0_CIRC_shp", "38.7257013", "-9.1129865", "195", "NULL"],
+      ["226_0_CIRC_shp", "38.7256668", "-9.1128756", "196", "NULL"],
+      ["226_0_CIRC_shp", "38.7256329", "-9.1128176", "197", "NULL"],
+      ["226_0_CIRC_shp", "38.7256933", "-9.1127596", "198", "NULL"]
+    ]
+  },
+  {
+    "stmt": "SELECT * FROM stop_times LIMIT 10;",
+    "header": ["trip_id", "arrival_time", "departure_time", "stop_id", "stop_sequence", "stop_headsign", "pickup_type", "drop_off_type", "shape_dist_traveled", "timepoint"],
+    "rows": [
+      ["18599_20260101_117_0_2", "07:19:45", "07:19:45", "13610", "33", "NULL", "NULL", "NULL", "11592.0", "NULL"],
+      ["3151_20260101_165_0_8", "14:45:27", "14:45:27", "2812", "4", "NULL", "NULL", "NULL", "877.0", "NULL"],
+      ["4759_20260101_104_0_2", "07:40:04", "07:40:04", "12928", "17", "NULL", "NULL", "NULL", "5037.0", "NULL"],
+      ["18879_20260101_102_0_1", "08:22:31", "08:22:31", "18709", "6", "NULL", "NULL", "NULL", "1222.0", "NULL"],
+      ["3876_20260101_170_0_9", "17:14:26", "17:14:26", "5913", "22", "NULL", "NULL", "NULL", "7526.0", "NULL"],
+      ["3930_20260101_105_0_23", "20:24:12", "20:24:12", "7010", "7", "NULL", "NULL", "NULL", "2416.0", "NULL"],
+      ["4441_20260101_103_0_2", "08:02:00", "08:02:00", "314", "50", "NULL", "NULL", "NULL", "15762.0", "NULL"],
+      ["3341_20260101_100_0_5", "13:30:03", "13:30:03", "8409", "19", "NULL", "NULL", "NULL", "7015.0", "NULL"],
+      ["5006_20260101_190_0_9", "16:20:44", "16:20:44", "13507", "27", "NULL", "NULL", "NULL", "10999.0", "NULL"],
+      ["5980_20260101_108_0_23", "19:11:00", "19:11:00", "10830", "15", "NULL", "NULL", "NULL", "4473.0", "NULL"]
+    ]
+  },
+  {
+    "stmt": "SELECT * FROM stops LIMIT 10;",
+    "header": ["stop_id", "stop_code", "stop_name", "stop_desc", "stop_lat", "stop_lon", "zone_id", "stop_url", "location_type", "parent_station", "stop_timezone", "wheelchair_boarding"],
+    "rows": [
+      ["50101", "50101", "R. F. Lopes Graça / R. Prof. A. Sousa", "NULL", "38.7696817", "-9.170419", "NULL", "NULL", "0", "NULL", "NULL", "NULL"],
+      ["50102", "50102", "Hosp. Forças Armadas", "NULL", "38.7690172", "-9.1750206", "NULL", "NULL", "0", "NULL", "NULL", "NULL"],
+      ["14723", "14723", "Av. Dr. Arlindo Vicente", "NULL", "38.7536287", "-9.1259328", "NULL", "NULL", "0", "NULL", "NULL", "NULL"],
+      ["14722", "14722", "Av. Dr. Arlindo Vicente", "NULL", "38.7525537", "-9.1262496", "NULL", "NULL", "0", "NULL", "NULL", "NULL"],
+      ["14721", "14721", "Av. Dr. Arlindo Vicente", "NULL", "38.7529027", "-9.1262678", "NULL", "NULL", "0", "NULL", "NULL", "NULL"],
+      ["14720", "14720", "Colégio Valsassina", "NULL", "38.7553797", "-9.1263748", "NULL", "NULL", "0", "NULL", "NULL", "NULL"],
+      ["14727", "14727", "B. Flamenga", "NULL", "38.7522807", "-9.1232038", "NULL", "NULL", "0", "NULL", "NULL", "NULL"],
+      ["14726", "14726", "Pq. Bela Vista", "NULL", "38.7510677", "-9.1245488", "NULL", "NULL", "0", "NULL", "NULL", "NULL"],
+      ["14725", "14725", "Pq. Bela Vista", "NULL", "38.7510447", "-9.1247988", "NULL", "NULL", "0", "NULL", "NULL", "NULL"],
+      ["14724", "14724", "Av. Dr. Arlindo Vicente", "NULL", "38.7537037", "-9.1260258", "NULL", "NULL", "0", "NULL", "NULL", "NULL"]
+    ]
+  },
+  {
+    "stmt": "SELECT * FROM trips LIMIT 10;",
+    "header": ["trip_id", "route_id", "service_id", "trip_headsign", "trip_short_name", "direction_id", "block_id", "shape_id", "wheelchair_accessible", "bikes_allowed"],
+    "rows": [
+      ["4968_20260101_198_0_19", "198_0", "Ferias Escolares_Util_20260101", "NULL", "NULL", "1", "NULL", "198_0_DESC_shp", "NULL", "NULL"],
+      ["4096_20260101_143_0_14", "143_0", "Ferias Escolares_Util_20260101", "NULL", "NULL", "1", "NULL", "143_0_DESC_shp", "NULL", "NULL"],
+      ["6457_20260101_109_0_10", "109_0", "Ferias Escolares_Util_20260101", "NULL", "NULL", "1", "NULL", "109_0_DESC_shp", "NULL", "NULL"],
+      ["19004_20260101_161_0_191", "161_0", "Ferias Escolares_Util_20260101", "NULL", "NULL", "1", "NULL", "161_0_DESC_shp", "NULL", "NULL"],
+      ["19004_20260101_161_0_181", "161_0", "Ferias Escolares_Util_20260101", "NULL", "NULL", "1", "NULL", "161_0_DESC_shp", "NULL", "NULL"],
+      ["39456_20260101_147_0_2", "147_0", "Natal & Ano Novo_DomingoFeriado_20260101", "NULL", "NULL", "0", "NULL", "147_0_ASC_shp", "NULL", "NULL"],
+      ["39536_20260101_200_0_8", "200_0", "Natal & Ano Novo_DomingoFeriado_20260101", "NULL", "NULL", "1", "NULL", "200_0_DESC_shp", "NULL", "NULL"],
+      ["3790_20260101_170_0_13", "170_0", "Verao_Util_20260101", "NULL", "NULL", "0", "NULL", "170_0_ASC_shp", "NULL", "NULL"],
+      ["51223_20260101_75_8_38", "75_8", "Natal & Ano Novo_DomingoFeriado_20260101", "NULL", "NULL", "0", "NULL", "75_8_ASC_shp", "NULL", "NULL"],
+      ["51223_20260101_75_8_28", "75_8", "Natal & Ano Novo_DomingoFeriado_20260101", "NULL", "NULL", "0", "NULL", "75_8_ASC_shp", "NULL", "NULL"]
+    ]
+  }
+]

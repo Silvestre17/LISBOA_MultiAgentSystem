@@ -138,4 +138,3 @@ __all__ = [
     # Web Knowledge (History, Culture) - 1 tool
     "search_history_culture",
 ]
-

@@ -477,7 +477,7 @@ def get_weather_forecast(days: int = 3) -> str:
     # Get update time
     update_time = data.get('dataUpdate', 'N/A')
     
-    response = f"🌤️ Weather Forecast for Lisbon\n"
+    response = "🌤️ Weather Forecast for Lisbon\n"
     response += f"{'=' * 40}\n"
     response += f"📅 Updated: {update_time}\n\n"
     
@@ -720,7 +720,7 @@ if __name__ == "__main__":
         print(f"   🕐 Last update: {data.get('dataUpdate', 'N/A')}")
         tests_passed += 1
     else:
-        print(f"\033[1;31m   ❌ Connection failed\033[0m")
+        print("\033[1;31m   ❌ Connection failed\033[0m")
         tests_failed += 1
     
     # =========================================================================
@@ -745,7 +745,7 @@ if __name__ == "__main__":
         print(f"   🏙️ Lisbon (LSB) entries: {len(lisbon_warnings)} total, {len(active_lisbon)} active")
         tests_passed += 1
     else:
-        print(f"\033[1;31m   ❌ Connection failed\033[0m")
+        print("\033[1;31m   ❌ Connection failed\033[0m")
         tests_failed += 1
     
     # =========================================================================
@@ -758,10 +758,10 @@ if __name__ == "__main__":
         result = get_weather_forecast.invoke({})
         print(result)
         if "❌" not in result:
-            print(f"\n\033[1;32m   ✅ Tool executed successfully\033[0m")
+            print("\n\033[1;32m   ✅ Tool executed successfully\033[0m")
             tests_passed += 1
         else:
-            print(f"\n\033[1;31m   ❌ Tool returned error\033[0m")
+            print("\n\033[1;31m   ❌ Tool returned error\033[0m")
             tests_failed += 1
     except Exception as e:
         print(f"\033[1;31m   ❌ Exception: {e}\033[0m")
@@ -777,10 +777,10 @@ if __name__ == "__main__":
         result = get_weather_forecast.invoke({"days": 5})
         print(result)
         if "❌" not in result:
-            print(f"\n\033[1;32m   ✅ Tool executed successfully\033[0m")
+            print("\n\033[1;32m   ✅ Tool executed successfully\033[0m")
             tests_passed += 1
         else:
-            print(f"\n\033[1;31m   ❌ Tool returned error\033[0m")
+            print("\n\033[1;31m   ❌ Tool returned error\033[0m")
             tests_failed += 1
     except Exception as e:
         print(f"\033[1;31m   ❌ Exception: {e}\033[0m")
@@ -796,10 +796,10 @@ if __name__ == "__main__":
         result = get_weather_warnings.invoke({"area": "LSB"})
         print(result)
         if "❌" not in result:
-            print(f"\n\033[1;32m   ✅ Tool executed successfully\033[0m")
+            print("\n\033[1;32m   ✅ Tool executed successfully\033[0m")
             tests_passed += 1
         else:
-            print(f"\n\033[1;31m   ❌ Tool returned error\033[0m")
+            print("\n\033[1;31m   ❌ Tool returned error\033[0m")
             tests_failed += 1
     except Exception as e:
         print(f"\033[1;31m   ❌ Exception: {e}\033[0m")
@@ -815,10 +815,10 @@ if __name__ == "__main__":
         result = get_weather_warnings.invoke({"area": "PTO"})
         print(result)
         if "❌" not in result:
-            print(f"\n\033[1;32m   ✅ Tool executed successfully\033[0m")
+            print("\n\033[1;32m   ✅ Tool executed successfully\033[0m")
             tests_passed += 1
         else:
-            print(f"\n\033[1;31m   ❌ Tool returned error\033[0m")
+            print("\n\033[1;31m   ❌ Tool returned error\033[0m")
             tests_failed += 1
     except Exception as e:
         print(f"\033[1;31m   ❌ Exception: {e}\033[0m")
@@ -834,10 +834,10 @@ if __name__ == "__main__":
         result = get_current_weather_summary.invoke({})
         print(result)
         if "❌" not in result or "Could not fetch" not in result:
-            print(f"\n\033[1;32m   ✅ Tool executed successfully\033[0m")
+            print("\n\033[1;32m   ✅ Tool executed successfully\033[0m")
             tests_passed += 1
         else:
-            print(f"\n\033[1;31m   ❌ Tool returned error\033[0m")
+            print("\n\033[1;31m   ❌ Tool returned error\033[0m")
             tests_failed += 1
     except Exception as e:
         print(f"\033[1;31m   ❌ Exception: {e}\033[0m")
@@ -866,7 +866,7 @@ if __name__ == "__main__":
         print(f"   ✅ get_weather_description(999) = '{desc}' (handles unknown)")
         helper_tests_passed += 1
     else:
-        print(f"   ❌ get_weather_description(999) should return 'Unknown'")
+        print("   ❌ get_weather_description(999) should return 'Unknown'")
     
     # Test wind speed description
     desc = get_wind_speed_description(2)
@@ -923,13 +923,13 @@ if __name__ == "__main__":
     print(f"   PRECIPITATION_INTENSITY_CLASSES: {len(PRECIPITATION_INTENSITY_CLASSES)} entries (IDs -99, 0-3)")
     
     # Validate counts
-    if (len(WEATHER_TYPES) >= 30 and len(WARNING_LEVELS) == 4 and 
-        len(WARNING_TYPES) == 8 and len(WIND_SPEED_CLASSES) == 5 and
-        len(PRECIPITATION_INTENSITY_CLASSES) == 5):
-        print(f"\n\033[1;32m   ✅ All dictionaries complete\033[0m")
+    if (len(WEATHER_TYPES) >= 30 and len(WARNING_LEVELS) == 4 and
+            len(WARNING_TYPES) == 8 and len(WIND_SPEED_CLASSES) == 5 and
+            len(PRECIPITATION_INTENSITY_CLASSES) == 5):
+        print("\n\033[1;32m   ✅ All dictionaries complete\033[0m")
         tests_passed += 1
     else:
-        print(f"\n\033[1;31m   ❌ Some dictionaries incomplete\033[0m")
+        print("\n\033[1;31m   ❌ Some dictionaries incomplete\033[0m")
         tests_failed += 1
     
     # =========================================================================

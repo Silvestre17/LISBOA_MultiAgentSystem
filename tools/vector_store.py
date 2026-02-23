@@ -33,9 +33,9 @@
 #     python tools/vector_store.py --test
 # ==========================================================================
 
-import sys
 import os
 import signal
+import sys
 
 # 🚀 CRITICAL: Force unbuffered output immediately to debug GitHub Actions hangs
 sys.stdout.reconfigure(line_buffering=True)
@@ -46,14 +46,15 @@ os.environ["OTEL_SDK_DISABLED"] = "true"
 os.environ["ANONYMIZED_TELEMETRY"] = "false"
 os.environ["CHROMA_TELEMETRY"] = "false"
 
-import json
-import hashlib
-import warnings
 import argparse
 import gc
+import hashlib
+import json
 import time
-from typing import List, Dict, Optional, Tuple, Any, TYPE_CHECKING
+import warnings
 from datetime import datetime
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
 from tqdm import tqdm
 
 # ==========================================================================
@@ -74,7 +75,7 @@ def _sigterm_handler(signum, frame):
 
 
 # Register handler for SIGTERM (signal 15)
-# NOTE: signal handlers can only be registered in the main thread.
+# .NOTE: signal handlers can only be registered in the main thread.
 # When imported from Streamlit or other multi-threaded contexts, skip registration.
 try:
     signal.signal(signal.SIGTERM, _sigterm_handler)
@@ -96,8 +97,8 @@ warnings.filterwarnings("ignore", category=ImportWarning)
 # Lazy imports for heavy libraries to prevent startup hangs
 if TYPE_CHECKING:
     from langchain_chroma import Chroma
-    from langchain_huggingface import HuggingFaceEmbeddings
     from langchain_core.documents import Document
+    from langchain_huggingface import HuggingFaceEmbeddings
 
 # ==========================================================================
 # Constants
@@ -150,7 +151,7 @@ class KnowledgeBase:
         Args:
             use_gpu (bool): Whether to attempt using GPU for embeddings. Defaults to True.
         """
-        print(f"\033[1m📥 Initializing KnowledgeBase...\033[0m", flush=True)
+        print("\033[1m📥 Initializing KnowledgeBase...\033[0m", flush=True)
 
         # Lazy import heavy libraries here
         print("   Importing AI libraries (this may take a moment)...", flush=True)
@@ -161,10 +162,10 @@ class KnowledgeBase:
             RecursiveCharacterTextSplitter, \
             PyPDFLoader
         from langchain_chroma import Chroma
-        from langchain_huggingface import HuggingFaceEmbeddings
-        from langchain_core.documents import Document
-        from langchain_text_splitters import RecursiveCharacterTextSplitter
         from langchain_community.document_loaders import PyPDFLoader
+        from langchain_core.documents import Document
+        from langchain_huggingface import HuggingFaceEmbeddings
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
 
         print(f"   Loading Embeddings: {Config.EMBEDDING_MODEL_NAME}...", flush=True)
 
@@ -418,7 +419,7 @@ class KnowledgeBase:
 
         print(f"   📊 Indexing {len(docs)} chunks...", flush=True)
 
-        vectorstore = Chroma.from_documents(
+        Chroma.from_documents(
             documents=docs,
             embedding=self.embeddings,
             collection_name=COLLECTION_PDF,
@@ -485,7 +486,7 @@ class KnowledgeBase:
         print(f"   \033[1;31m➖ Deleted:\033[0m {len(deleted_ids)}", flush=True)
 
         if not new_ids and not modified_ids and not deleted_ids:
-            print(f"   \033[1;32m✓ No changes detected.\033[0m", flush=True)
+            print("   \033[1;32m✓ No changes detected.\033[0m", flush=True)
             return {"status": "no_changes", "existing": len(existing_ids)}
 
         vectorstore = self._get_collection(collection_name)
@@ -946,7 +947,7 @@ Examples:
                             )
                         if not missing_fields and not empty_fields:
                             print(
-                                f"      \033[1;32m✓ All metadata fields valid\033[0m",
+                                "      \033[1;32m✓ All metadata fields valid\033[0m",
                                 flush=True,
                             )
 

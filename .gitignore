@@ -9,15 +9,11 @@ docs/UpdateMap.md
 system_architecture.svg
 _AUDIT_REPORT_COMPREHENSIVE.md
 
-# All files starting with "test_"
-test_*.py
-
 # Specific Folders
 _/
 .gemini/
 .kilocode/
 .ruff_cache/
-tests/
 
 # Created by .ignore support plugin
 # Byte-compiled / optimized / DLL files

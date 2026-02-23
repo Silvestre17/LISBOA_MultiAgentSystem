@@ -15,71 +15,63 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from langchain_core.tools import tool
 
-# Import tools from respective modules
-# Metro de Lisboa (Official API with OAuth2)
-from tools.metrolisboa_api import (
-    get_metro_status,
-    get_metro_wait_time,
-    get_metro_line_wait_times,
-    find_nearest_metro,
-    get_metro_frequency,
-    get_all_metro_stations,
+from tools.carris_api import (
+    carris_find_routes_between,
+    carris_get_arrivals,
+    carris_get_next_departures,
+    carris_get_realtime_vehicles,
+    carris_get_routes,
+    carris_get_stops,
+    carris_vehicle_eta,
 )
 
 # Carris Metropolitana (Suburban buses)
 from tools.carrismetropolitana_api import (
+    find_bus_routes,
+    get_bus_next_departures,
+    get_bus_realtime_locations,
     get_carris_metropolitana_alerts,
     get_carris_metropolitana_stop_info,
-    search_carris_metropolitana_lines,
-    get_bus_realtime_locations,
-    get_bus_next_departures,
-    find_bus_routes,
     get_real_time_bus_positions,
+    search_carris_metropolitana_lines,
 )
 
 # CP (Comboios de Portugal) - Trains
-from tools.cp_api import (
-    get_train_status,
-    search_cp_stations,
+from tools.cp_api import get_train_status, search_cp_stations
+from tools.dados_abertos import (
+    find_nearby_services,
+    find_place_in_datasets,
+    get_dataset_details,
+    list_available_datasets,
+)
+from tools.ipma_api import (
+    get_current_weather_summary,
+    get_portugal_weather_overview,
+    get_weather_forecast,
+    get_weather_warnings,
+)
+
+# Import tools from respective modules
+# Metro de Lisboa (Official API with OAuth2)
+from tools.metrolisboa_api import (
+    find_nearest_metro,
+    get_all_metro_stations,
+    get_metro_frequency,
+    get_metro_line_wait_times,
+    get_metro_status,
+    get_metro_wait_time,
 )
 
 # Multi-modal transport routing
-from tools.transport_api import (
-    get_route_between_stations,
-    get_transport_summary,
-)
-
-from tools.carris_api import (
-    carris_get_stops,
-    carris_get_routes,
-    carris_get_arrivals,
-    carris_get_next_departures,
-    carris_find_routes_between,
-    carris_get_realtime_vehicles,
-    carris_vehicle_eta
-)
-
-from tools.ipma_api import (
-    get_weather_warnings,
-    get_weather_forecast,
-    get_portugal_weather_overview,
-    get_current_weather_summary
-)
-
-from tools.dados_abertos import (
-    find_nearby_services,
-    list_available_datasets,
-    get_dataset_details,
-    find_place_in_datasets
-)
-
+from tools.transport_api import get_route_between_stations, get_transport_summary
 from tools.visitlisboa_api import (
-    search_cultural_events,
-    search_places_attractions,
     get_event_categories,
     get_place_categories,
-    search_lisbon_knowledge
+    search_cultural_events,
+    search_lisbon_knowledge,
+    search_places_attractions,
 )
+
 
 def get_tools():
     """
@@ -139,6 +131,7 @@ def get_tools():
         get_place_categories,
         search_lisbon_knowledge
     ]
+
 
 # ==========================================================================
 # Test Block

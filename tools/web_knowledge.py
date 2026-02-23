@@ -9,15 +9,15 @@
 #     3. Wikipedia (Encyclopedia fallback for history/facts)
 # ==========================================================================
 
-import os
 import logging
+import os
 from typing import Optional
 
 import wikipedia
-from langchain_core.tools import tool
 from langchain_community.tools import DuckDuckGoSearchRun
-from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
 from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
+from langchain_core.tools import tool
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -27,6 +27,7 @@ wikipedia.set_lang("pt")
 
 # Constants
 DEFAULT_SEARCH_RESULTS_TAVILY = 5  # Increased for completeness
+
 
 def _search_tavily(query: str) -> Optional[str]:
     """
@@ -67,6 +68,7 @@ def _search_tavily(query: str) -> Optional[str]:
         logger.error(f"Tavily search failed: {e}")
         return None
 
+
 def _search_duckduckgo(query: str) -> Optional[str]:
     """
     Execute search using DuckDuckGo.
@@ -95,6 +97,7 @@ def _search_duckduckgo(query: str) -> Optional[str]:
     except Exception as e:
         logger.warning(f"DuckDuckGo search failed: {e}")
         return None
+
 
 def _search_wikipedia(query: str, language: str = "pt") -> Optional[str]:
     """
@@ -139,6 +142,7 @@ def _search_wikipedia(query: str, language: str = "pt") -> Optional[str]:
 # ==========================================================================
 # Exported Tool
 # ==========================================================================
+
 
 @tool
 def search_history_culture(query: str, language: str = "pt") -> str:
@@ -187,6 +191,8 @@ def search_history_culture(query: str, language: str = "pt") -> str:
 # ==========================================================================
 # Test Block
 # ==========================================================================
+
+
 if __name__ == "__main__":
     print("\033[1m" + "=" * 60 + "\033[0m")
     print("\033[1m🧪 Web Knowledge Tool Test (No Truncation)\033[0m")

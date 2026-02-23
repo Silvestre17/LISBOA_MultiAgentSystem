@@ -12,16 +12,16 @@
 # Required libraries:
 # pip install langgraph langchain-core
 
-import os
-import sys
-import re
 import json
-from typing import List, Set, Tuple, Callable, Optional, Dict, Any
+import os
+import re
+import sys
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 # LangSmith tracing support (optional - graceful fallback if not available)
 try:
-    from langsmith.run_helpers import traceable, get_current_run_tree
     from langsmith import ContextThreadPoolExecutor
+    from langsmith.run_helpers import get_current_run_tree, traceable
     from langsmith.run_trees import RunTree
 
     LANGSMITH_AVAILABLE = True
@@ -42,93 +42,103 @@ except ImportError:
     from concurrent.futures import ThreadPoolExecutor as ContextThreadPoolExecutor
 
 # Always need as_completed for collecting parallel results
-from concurrent.futures import as_completed
 import time as time_module  # For latency tracking
+from concurrent.futures import as_completed
 
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
-from langgraph.graph import StateGraph, END
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
 
 # Add parent directory to path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from agent.state import AgentState, create_initial_state
-from agent.prompts import get_system_prompt
-from agent.llm_factory import LLMFactory
 from agent.agents.base import clean_response  # Shared response cleaning utility
+from agent.llm_factory import LLMFactory
+from agent.prompts import get_system_prompt
+from agent.state import AgentState, create_initial_state
 
-# Import tools
-from tools.ipma_api import (
-    get_weather_warnings,
-    get_weather_forecast,
-    get_current_weather_summary,
-    get_portugal_weather_overview,  # Weather for all Portugal locations
-)
-
-# Metro de Lisboa (Official API with OAuth2)
-from tools.metrolisboa_api import (
-    get_metro_status,
-    get_metro_wait_time,  # Real-time metro wait times
-    get_metro_line_wait_times,  # Wait times for entire line
-    find_nearest_metro,  # Find nearest metro station by GPS
-    get_metro_frequency,  # Train frequency schedules
-    get_all_metro_stations,  # List all metro stations
+# Response formatting for Streamlit rendering
+from agent.utils.response_formatter import format_response
+from config import Config  # For model info without extra LLM instantiation
+from tools.carris_api import (
+    carris_find_routes_between,
+    carris_get_arrivals,
+    carris_get_next_departures,
+    carris_get_realtime_vehicles,
+    carris_get_routes,
+    carris_get_stops,
+    carris_vehicle_eta,
 )
 
 # Carris Metropolitana (Suburban buses)
 from tools.carrismetropolitana_api import (
-    get_real_time_bus_positions,
+    find_bus_routes,  # Bus routing between locations
+)
+from tools.carrismetropolitana_api import (
+    get_bus_next_departures,  # Bus route schedule/stops
+)
+from tools.carrismetropolitana_api import (
+    get_bus_realtime_locations,  # Real-time bus GPS locations
+)
+from tools.carrismetropolitana_api import (
+    find_direct_bus_lines,
     get_carris_metropolitana_alerts,
     get_carris_metropolitana_stop_info,
+    get_real_time_bus_positions,
     search_carris_metropolitana_lines,
-    find_bus_routes,  # Bus routing between locations
-    get_bus_realtime_locations,  # Real-time bus GPS locations
-    get_bus_next_departures,  # Bus route schedule/stops
-    find_direct_bus_lines,
 )
 
 # CP (Comboios de Portugal) - Trains
+from tools.cp_api import search_cp_stations  # CP train station search (AML)
 from tools.cp_api import (
-    get_train_status,
-    search_cp_stations,  # CP train station search (AML)
-    get_train_schedule,
     get_cp_routes,
+    get_train_schedule,
+    get_train_status,
     plan_train_trip,
 )
-
-# Multi-modal transport routing
-from tools.transport_api import (
-    get_transport_summary,
-    get_route_between_stations,
+from tools.dados_abertos import (
+    find_place_in_datasets,  # Search places by name across datasets
 )
 from tools.dados_abertos import (
     find_nearby_services,
-    list_available_datasets,
     get_dataset_details,
-    find_place_in_datasets,  # Search places by name across datasets
+    list_available_datasets,
 )
+
+# Import tools
+from tools.ipma_api import (
+    get_portugal_weather_overview,  # Weather for all Portugal locations
+)
+from tools.ipma_api import (
+    get_current_weather_summary,
+    get_weather_forecast,
+    get_weather_warnings,
+)
+
+# Metro de Lisboa (Official API with OAuth2)
+from tools.metrolisboa_api import (
+    find_nearest_metro,  # Find nearest metro station by GPS
+)
+from tools.metrolisboa_api import get_all_metro_stations  # List all metro stations
+from tools.metrolisboa_api import get_metro_frequency  # Train frequency schedules
+from tools.metrolisboa_api import (
+    get_metro_line_wait_times,  # Wait times for entire line
+)
+from tools.metrolisboa_api import get_metro_wait_time  # Real-time metro wait times
+from tools.metrolisboa_api import get_metro_status
+
+# Multi-modal transport routing
+from tools.transport_api import get_route_between_stations, get_transport_summary
 from tools.visitlisboa_api import (
-    search_cultural_events,
-    search_places_attractions,
     get_event_categories,
     get_place_categories,
+    search_cultural_events,
     search_lisbon_knowledge,
-)
-from tools.carris_api import (
-    carris_get_stops,
-    carris_get_routes,
-    carris_get_arrivals,
-    carris_get_next_departures,
-    carris_find_routes_between,
-    carris_get_realtime_vehicles,
-    carris_vehicle_eta,
+    search_places_attractions,
 )
 
 # Web Knowledge (History, Culture, Real-time facts)
-from tools.web_knowledge import (
-    search_history_culture,
-)
-
+from tools.web_knowledge import search_history_culture
 
 # ==========================================================================
 # Tool Configuration
@@ -509,10 +519,14 @@ class LisbonAssistant:
         self.graph = build_agent_graph(provider)
         self.state = create_initial_state()
 
-        # Get model info for display
-        # Get model info for display
-        llm = LLMFactory.get_llm(provider) if provider else LLMFactory.get_llm()
-        self.model_info = LLMFactory.get_model_info(llm)
+        # Get model info for display - use Config directly instead of creating
+        # a third LLM instance (build_agent_graph already creates 2)
+        agent_models = Config.get_agent_models()
+        sv_config = agent_models.get("supervisor", Config.get_default_agent_model())
+        self.model_info = {
+            "provider": sv_config.get("provider", Config.MODEL_PROVIDER),
+            "model": sv_config.get("model", "Unknown"),
+        }
         self.model_name = self.model_info.get("model", "Unknown")
 
     def chat(
@@ -560,10 +574,10 @@ class LisbonAssistant:
 
         if hasattr(last_message, "content"):
             # Clean model-specific artifacts (thinking tags, chat tokens, etc.)
-            # Uses clean_response from agent.agents.base
-            return clean_response(last_message.content)
+            # Uses clean_response from agent.agents.base, then format for Streamlit
+            return format_response(clean_response(last_message.content))
 
-        return clean_response(str(last_message))
+        return format_response(clean_response(str(last_message)))
 
     def reset(self):
         """Resets the conversation state."""
@@ -636,11 +650,11 @@ class MultiAgentAssistant:
 
     def __init__(self):
         """Initializes the multi-agent assistant."""
-        from agent.agents.supervisor import SupervisorAgent
-        from agent.agents.weather_agent import WeatherAgent
-        from agent.agents.transport_agent import TransportAgent
-        from agent.agents.researcher_agent import ResearcherAgent
         from agent.agents.planner_agent import PlannerAgent
+        from agent.agents.researcher_agent import ResearcherAgent
+        from agent.agents.supervisor import SupervisorAgent
+        from agent.agents.transport_agent import TransportAgent
+        from agent.agents.weather_agent import WeatherAgent
         from agent.state import create_initial_state
 
         # Initialize agents
@@ -738,7 +752,7 @@ class MultiAgentAssistant:
         reasoning = routing.get("reasoning", "")
 
         if verbose:
-            print(f"\n   [ROUTING] Supervisor decision:")
+            print("\n   [ROUTING] Supervisor decision:")
             print(f"      Reasoning: {reasoning}")
             print(
                 f"      Agents: {agents_to_call if agents_to_call else 'None (direct response)'}"
@@ -812,7 +826,7 @@ class MultiAgentAssistant:
         # Step 2: Handle direct response (no agents needed)
         if direct_response and not agents_to_call:
             if verbose:
-                print(f"      Mode: DIRECT RESPONSE (no agents called)")
+                print("      Mode: DIRECT RESPONSE (no agents called)")
             return clean_response(direct_response)
 
         # Step 3: Execute agents (Parallelized with LangSmith context propagation)
@@ -833,8 +847,23 @@ class MultiAgentAssistant:
                 )
                 on_status_change(msg)
 
-            # Context for agents (include language instruction)
-            agent_context = f"User language: {language}. Respond in {language}."
+            # Context for agents: language instruction + recent conversation history (D2)
+            # Build recent conversation summary for multi-turn awareness
+            recent_context_parts = [f"User language: {language}. Respond in {'Portuguese (PT-PT)' if language == 'pt' else 'English'}."]
+            recent_msgs = self.state.get("messages", [])
+            # Include last 3 human/AI exchanges for context (skip current message)
+            history_pairs = []
+            for msg in recent_msgs[:-1]:  # Exclude the current HumanMessage
+                if hasattr(msg, "content") and msg.content:
+                    role = "User" if isinstance(msg, HumanMessage) else "Assistant"
+                    history_pairs.append(f"{role}: {msg.content[:200]}")
+            if history_pairs:
+                # Take last 6 messages (3 exchanges)
+                recent_history = history_pairs[-6:]
+                recent_context_parts.append(
+                    "Recent conversation context:\n" + "\n".join(recent_history)
+                )
+            agent_context = "\n\n".join(recent_context_parts)
 
             # Use ContextThreadPoolExecutor to propagate LangSmith tracing context
             with ContextThreadPoolExecutor(max_workers=len(workers)) as executor:
@@ -914,33 +943,69 @@ class MultiAgentAssistant:
         else:
             # Fallback: Use researcher for general queries
             if verbose:
-                print(f"\n   [FALLBACK] Using researcher agent")
+                print("\n   [FALLBACK] Using researcher agent")
             response = self.agents["researcher"].invoke(message, verbose=verbose)
 
-        return clean_response(response)
+        return format_response(clean_response(response))
 
     def _combine_outputs(self, agent_outputs: dict) -> str:
         """
-        Combines outputs from multiple agents into a single response.
+        Combines outputs from multiple agents into a single coherent response
+        using LLM synthesis (D3) instead of naive concatenation.
 
         Args:
             agent_outputs: Dict mapping agent names to their outputs.
 
         Returns:
-            str: Combined response.
+            str: Combined, coherent response.
         """
-        sections = []
+        # If only one agent responded, return its output directly
+        if len(agent_outputs) == 1:
+            return list(agent_outputs.values())[0]
 
-        if "weather" in agent_outputs:
-            sections.append(agent_outputs["weather"])
+        # Use LLM synthesis for multi-agent responses
+        try:
+            from langchain_core.messages import HumanMessage as HMsg
+            from langchain_core.messages import SystemMessage as SysMsg
 
-        if "researcher" in agent_outputs:
-            sections.append(agent_outputs["researcher"])
+            sections = []
+            for agent_name, output in agent_outputs.items():
+                label = {
+                    "weather": "Weather Information",
+                    "transport": "Transport Information",
+                    "researcher": "Places & Attractions",
+                }.get(agent_name, agent_name.title())
+                sections.append(f"## {label}\n{output}")
 
-        if "transport" in agent_outputs:
-            sections.append(agent_outputs["transport"])
+            combined_data = "\n\n---\n\n".join(sections)
 
-        return "\n\n---\n\n".join(sections)
+            synthesis_prompt = (
+                "You are a response synthesizer. Combine the following agent outputs "
+                "into a single, coherent, well-organized response. "
+                "Preserve ALL factual data from each source. "
+                "Use markdown formatting with ### headers and emojis. "
+                "Do NOT add information that isn't in the source data. "
+                "Make the response flow naturally as if from a single assistant."
+            )
+
+            messages = [
+                SysMsg(content=synthesis_prompt),
+                HMsg(content=f"Combine these agent outputs into one response:\n\n{combined_data}"),
+            ]
+
+            response = self.supervisor.llm.invoke(messages)
+            return clean_response(response.content)
+
+        except Exception:
+            # Fallback to simple concatenation if LLM fails
+            sections = []
+            if "weather" in agent_outputs:
+                sections.append(agent_outputs["weather"])
+            if "researcher" in agent_outputs:
+                sections.append(agent_outputs["researcher"])
+            if "transport" in agent_outputs:
+                sections.append(agent_outputs["transport"])
+            return "\n\n---\n\n".join(sections)
 
     def reset(self):
         """Resets the conversation state."""
@@ -967,10 +1032,9 @@ def create_multiagent_assistant() -> MultiAgentAssistant:
 # Test Block - Comprehensive Multi-Agent System Tests
 # ==========================================================================
 if __name__ == "__main__":
-    from config import Config
     import sys
 
-    # Fix Windows console encoding
+    # .Fix Windows console encoding
     if sys.platform == "win32":
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -1100,7 +1164,7 @@ if __name__ == "__main__":
                 # Run with verbose mode to show routing and agent usage
                 response = assistant.chat(query, verbose=True)
 
-                print(f"\n[RESPONSE]:")
+                print("\n[RESPONSE]:")
 
                 # # Truncate long responses
                 # if len(response) > 600:

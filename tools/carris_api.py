@@ -26,20 +26,20 @@
 # Required libraries:
 # pip install protobuf gtfs-realtime-bindings requests langchain-core
 
-import os
-import sys
+import argparse
 import csv
 import json
-import argparse
-import sqlite3
-import zipfile
 import logging
-import re
 import math
+import os
+import re
+import sqlite3
+import sys
 import time
-from io import BytesIO
+import zipfile
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List, Tuple
+from io import BytesIO
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from langchain_core.tools import tool
@@ -324,7 +324,7 @@ class CarrisGTFSManager:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
-            # IMPORTANT: Keep FKs OFF during import - real GTFS data often has
+            # .IMPORTANT: Keep FKs OFF during import - real GTFS data often has
             # orphan references (e.g., service_ids in calendar_dates not in calendar,
             # shape_ids in trips not in shapes). FKs are defined for documentation
             # but not enforced to avoid import failures.
@@ -1395,7 +1395,6 @@ def carris_get_next_departures(
             # Calculate Display Time
             scheduled_time = row["departure_time"][:5]
             display_time = scheduled_time
-            is_rt = False
 
             if trip_id in rt_by_trip:
                 vehicle = rt_by_trip[trip_id]
@@ -1413,7 +1412,6 @@ def carris_get_next_departures(
                         display_time = f"**{estimated_time}** ({abs(delay)}m early)"
                     else:
                         display_time = f"**{estimated_time}** (Live)"
-                    is_rt = True
 
             departures[group_key].append(display_time)
 
@@ -1426,7 +1424,7 @@ def carris_get_next_departures(
 
         response = f"🚌 **Next Departures from {stop_name}**\n"
         if has_realtime_data:
-            response += f"   (📡 Real-Time Data Active)\n"
+            response += "   (📡 Real-Time Data Active)\n"
         response += "-" * 50 + "\n"
 
         for (route, dest), times in departures.items():
@@ -1933,7 +1931,7 @@ if __name__ == "__main__":
             elif result is not None:
                 print(result)
             test_results["passed"] += 1
-            print(f"\n\033[1;32m✅ PASSED\033[0m")
+            print("\n\033[1;32m✅ PASSED\033[0m")
             return result
         except Exception as e:
             print(f"\n\033[1;31m❌ FAILED: {str(e)}\033[0m")
@@ -2151,5 +2149,5 @@ if __name__ == "__main__":
             f"\033[1;31m❌ Failed: {test_results['failed']}/{test_results['total']}\033[0m"
         )
     else:
-        print(f"\033[1;36m✨ All tests completed successfully.\033[0m")
+        print("\033[1;36m✨ All tests completed successfully.\033[0m")
     print("=" * 70 + "\n")

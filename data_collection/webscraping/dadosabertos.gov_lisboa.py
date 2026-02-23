@@ -35,6 +35,7 @@ logging.basicConfig(
     # ]
 )
 
+
 class LisbonOpenDataScraper:
     """
     A class to scrape dataset information from the Portuguese Open Data Portal (dados.gov.pt),
@@ -78,7 +79,7 @@ class LisbonOpenDataScraper:
             try:
                 response = self.session.get(url, timeout=30)
                 response.raise_for_status()
-                return BeautifulSoup(response.content, 'html.parser') # type: ignore
+                return BeautifulSoup(response.content, 'html.parser')  # type: ignore
             
             except requests.exceptions.RequestException as e:
                 wait_time = backoff_factor ** attempt
@@ -172,10 +173,10 @@ class LisbonOpenDataScraper:
 
         # Extract Metadata from fr-text classes (New structure found in debug)
         if details["last_updated"] == "N/A":
-             # Look for "Actualizado à"
-             update_p = soup.find(lambda tag: tag.name == "p" and "Actualizado à" in tag.get_text())
-             if update_p:
-                 details["last_updated"] = update_p.get_text(strip=True).replace("Actualizado à", "").strip()
+            # Look for "Actualizado à"
+            update_p = soup.find(lambda tag: tag.name == "p" and "Actualizado à" in tag.get_text())
+            if update_p:
+                details["last_updated"] = update_p.get_text(strip=True).replace("Actualizado à", "").strip()
 
         # Extract File Formats (Fallback to buttons if not found in metadata)
         if details["file_formats"] == "N/A":
@@ -308,13 +309,14 @@ class LisbonOpenDataScraper:
                     current_url = urljoin(self.base_url, next_relative)
                 
                 page_num += 1
-                time.sleep(1) # Delay between search pages
+                time.sleep(1)  # Delay between search pages
             else:
                 logging.info("No next page found. Finishing scraping.")
                 current_url = None
 
         logging.info(f"Extraction complete. Found {len(all_datasets)} eligible datasets.")
         return all_datasets
+
 
 def save_to_json(data: List[Dict[str, Any]], filename: str):
     """
@@ -330,6 +332,7 @@ def save_to_json(data: List[Dict[str, Any]], filename: str):
         logging.info(f"Data successfully saved to {filename}")
     except IOError as e:
         logging.error(f"Error saving file: {e}")
+
 
 def main():
     """
@@ -360,6 +363,7 @@ def main():
             print(f"\033[1m    Formats:\033[0m {item.get('file_formats', 'N/A')}")
             print(f"\033[1m    Updated:\033[0m {item.get('last_updated', 'N/A')}")
             print("-" * 40)
+
 
 if __name__ == "__main__":
     main()
