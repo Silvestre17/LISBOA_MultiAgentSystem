@@ -223,7 +223,7 @@ class Config:
     AGENT_MODELS_AZURE = {
         "supervisor": {
             "provider": "azure",
-            "model": "gpt-5-nano",
+            "model": "gpt-5-mini",
             "temperature": 1,
         },
         "weather": {
@@ -243,7 +243,7 @@ class Config:
         },
         "planner": {
             "provider": "azure",
-            "model": "gpt-5-nano",
+            "model": "gpt-5-mini",
             "temperature": 1,
         },
     }
@@ -252,7 +252,7 @@ class Config:
     AGENT_MODELS_OPENAI = {
         "supervisor": {
             "provider": "openai",
-            "model": "gpt-5-nano",
+            "model": "gpt-5-mini",
             "temperature": 0.1,
         },
         "weather": {
@@ -272,7 +272,7 @@ class Config:
         },
         "planner": {
             "provider": "openai",
-            "model": "gpt-5-nano",
+            "model": "gpt-5-mini",
             "temperature": 0.1,
         },
     }

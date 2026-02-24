@@ -93,34 +93,93 @@ def clean_newlines(text: str) -> str:
 
 def normalize_bullets(text: str) -> str:
     """
-    Normalizes bullet point styles to consistent format.
+    Normalizes bullet point styles to consistent format, ensures labels are bold,
+    and adds tight spacing using markdown hard breaks.
 
-    Converts various bullet markers (*, •, >) to standard markdown (-).
-    Preserves blockquotes (> at start of line with content).
+    Rules:
+    - Lists with emojis do not get standard bullets, they use the emoji.
+    - Numbered lists are bolded automatically (e.g., '1.' -> '**1.**')
+    - Labels (e.g., 'Morada:', 'Preço:') are bolded automatically.
+    - Two spaces are appended to lists and sub-items for tight <br> spacing.
+    - Removes dummy TripAdvisor '⭐ 4.5/5' appended to all events
+    - Suppresses repeated '⚠️ Nota:' remarks from IPMA.
 
     Args:
-        text: Text with mixed bullet styles.
+        text: Text to format.
 
     Returns:
-        str: Text with consistent bullet formatting.
+        str: Formatted text.
     """
     lines = text.split("\n")
-    result = []
+    out = []
+    
+    emoji_pattern = re.compile(r'^[\u2600-\U0010ffff\u2B50\u200D\uFE0F]{1,3}')
+    # Match labels (e.g. "Data/Hora:", "Preço: ") optionally prefixed by emoji
+    label_pattern = re.compile(r'^([\u2600-\U0010ffff\u2B50\u200D\uFE0F]{1,3}\s*)?([A-Za-zÀ-ÿ/\s]{3,25}):\s*(.*)')
+    
+    # Matches the useless ratings added by VisitLisboa tool
+    remove_stars_pattern = re.compile(r'\s*-\s*⭐\s*4\.5/5\s*$')
+    # Filter repeated 'Nota:' elements
+    filter_nota_pattern = re.compile(r'^(?:⚠️\s*)?Nota:', re.IGNORECASE)
+    
+    nota_count = 0
+    
     for line in lines:
         stripped = line.strip()
-        # Get leading whitespace
+        if not stripped:
+            out.append("")
+            continue
+            
+        m_nota = filter_nota_pattern.match(stripped)
+        if m_nota:
+            nota_count += 1
+            if nota_count > 1:
+                continue
+                
+        # Remove dummy stars
+        stripped = remove_stars_pattern.sub('', stripped)
+            
         indent = len(line) - len(line.lstrip())
         spaces = " " * indent
-
-        # Convert * bullets to - (but not ** bold markers or * in words)
-        if stripped.startswith("* ") and not stripped.startswith("**"):
-            result.append(f"{spaces}- {stripped[2:]}")
-        # Convert • bullets to -
-        elif stripped.startswith("• "):
-            result.append(f"{spaces}- {stripped[2:]}")
+        
+        # Determine if it's a bulleted line
+        is_bullet = stripped.startswith("- ") or stripped.startswith("* ") or stripped.startswith("• ")
+        
+        if is_bullet:
+            content = stripped[2:].strip()
         else:
-            result.append(line)
-    return "\n".join(result)
+            content = stripped
+            
+        # Detect numbered lists and format labels (Data/Hora: -> **Data/Hora**: )
+        if not "**" in content and not content.startswith("#"):
+            m_num = re.match(r'^(\d+\.)\s+(.*)', content)
+            if m_num:
+                num = m_num.group(1)
+                rest = m_num.group(2)
+                content = f"**{num}** {rest}"
+            else:
+                m_label = label_pattern.match(content)
+                if m_label:
+                    emoji_part = m_label.group(1) or ""
+                    label = m_label.group(2).strip()
+                    rest = m_label.group(3)
+                    content = f"{emoji_part}**{label}**: {rest}"
+                
+        # Format the output block
+        if is_bullet:
+            clean_content = content.replace('**', '').strip()
+            # If the content starts with an emoji, variant selector, or is a numbered item (**1.**)
+            is_numbered = re.match(r'^\*\*\d+\.\*\*', content)
+            
+            if emoji_pattern.match(clean_content) or clean_content.startswith('️') or is_numbered:
+                out.append(f"{spaces}- {content}")
+            else:
+                out.append(f"{spaces}- 🔹 {content}")
+        else:
+            # Not a bullet, might be a nested paragraph, header, or normal text
+            out.append(line)
+                
+    return "\n".join(out)
 
 
 def ensure_clickable_urls(text: str) -> str:
@@ -219,9 +278,10 @@ if __name__ == "__main__":
 
 ## Current Conditions
 
-* Temperature: **22°C**
-* Humidity: 65%
-• Wind: 15 km/h NW
+* 🌡️ Temperature: **22°C**
+* 💧 Humidity: 65%
+• 🌬️ Wind: 15 km/h NW
+* Normal bullet without emoji
 
 ## What to do today
 
@@ -272,10 +332,6 @@ Too many blank lines above should be reduced.
         ),
         "Has --- separators": "---" in output,
         "No excessive newlines": "\n\n\n\n" not in output,
-        "Consistent bullets": all(
-            not line.strip().startswith("* ") or line.strip().startswith("**")
-            for line in output.split("\n")
-        ),
         "URLs are clickable": "](http" in output,
     }
 

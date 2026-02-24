@@ -1,6 +1,6 @@
 # Lisbon Urban Assistant Documentation
 
-Master Thesis: LISBOA - LLM-Integrated System for Behavioral Orchestration and Agentic Architecture (NOVA IMS, 2025 to 2026)
+Master Thesis: LISBOA - Lisbon Itenerary System Based On AI (NOVA IMS, 2025 to 2026)
 
 This documentation uses a flat, English-only structure that matches the current repository state.
 

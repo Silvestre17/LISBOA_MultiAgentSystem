@@ -4,7 +4,7 @@
     </a>
 </p>
 
-# 🗺️ LISBOA: LLM-Integrated System for Behavioral Orchestration and Agentic Architecture 🤖
+# 🗺️ LISBOA: Lisbon Itenerary System Based On AI 🤖
 
 <p align="center">
     <!-- Project Repository and App Badges -->
@@ -29,7 +29,7 @@ The system acts as an intelligent urban assistant, answering questions about cul
 
 This project is the **Master's Thesis** for the **[Master's in Data Science and Advanced Analytics](https://www.novaims.unl.pt/en/education/programs/postgraduate-programs-and-master-degree-programs/master-degree-program-in-data-science-and-advanced-analytics-with-a-specialization-in-data-science/)** program at **NOVA IMS**, developed during the **2025/2026 academic year**.
 
-**Thesis Title:** *LISBOA: LLM-Integrated System for Behavioral Orchestration and Agentic Architecture*  
+**Thesis Title:** *LISBOA: Lisbon Itenerary System Based On AI*  
 **Subtitle:** *A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon*  
 **Author:** André Filipe Gomes Silvestre (Student ID: 20240502)  
 **Supervisor:** Prof. Dr. Bruno Jardim  

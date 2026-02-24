@@ -1,6 +1,6 @@
 # Project Documentation
 
-**Master Thesis - LISBOA: LLM-Integrated System for Behavioral Orchestration and Agentic Architecture**  
+**Master Thesis - LISBOA: Lisbon Itenerary System Based On AI**  
 **Subtitle: A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon**  
 **Author:** André Filipe Gomes Silvestre (20240502)  
 **Institution:** NOVA IMS - Master in Data Science and Advanced Analytics  

@@ -284,7 +284,7 @@ def clean_response(content: str) -> str:
     for pattern in wrong_question_patterns:
         if re.match(pattern, content, flags=re.DOTALL | re.IGNORECASE):
             # The entire response is internal reasoning - return error message
-            return "Sorry, I'm having difficulty processing your request. Please try again."
+            return "Ocorreu um erro ao processar. / An error occurred while processing."
 
     thinking_patterns = [
         # "How do I..." followed by step-by-step reasoning (different question hallucination)
@@ -358,9 +358,9 @@ def clean_response(content: str) -> str:
     # Clean up excess whitespace
     content = content.strip()
 
-    # Final check: If content is nearly empty after cleaning, return error
-    if len(content) < 20:
-        return "Sorry, I'm having difficulty processing your request. Please try again."
+    # Final check: If content is empty after cleaning, return error
+    if not content:
+        return "Desculpe, tive dificuldades em processar o pedido. / Sorry, I'm having difficulty processing your request."
 
     # Print markdown to terminal if debugging is enabled
     if Config.SHOW_MARKDOWN_RESPONSE_IN_TERMINAL:
