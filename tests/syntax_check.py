@@ -1,5 +1,5 @@
-import py_compile
 import os
+import py_compile
 import sys
 
 base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -12,7 +12,10 @@ files = [
     r"agent\agents\researcher_agent.py",
     r"agent\agents\supervisor.py",
     r"agent\agents\planner_agent.py",
+    r"agent\agents\qa_agent.py",
     r"agent\prompts\transport.py",
+    r"agent\prompts\qa.py",
+    r"agent\prompts\planner.py",
     r"agent\prompts\_system_prompt.py",
     r"agent\prompts\supervisor.py",
     r"agent\prompts\researcher.py",
@@ -21,7 +24,7 @@ files = [
     r"agent\graph.py",
     r"agent\state.py",
     r"config.py",
-    r"app_v1.py",
+    r"app.py",
     r"tools\transport_api.py",
     r"tools\ipma_api.py",
     r"tools\metrolisboa_api.py",
@@ -30,6 +33,8 @@ files = [
     r"tools\visitlisboa_api.py",
     "tools/dados_abertos.py",
     "tools/web_knowledge.py",
+    "tools/cp_api.py",
+    "tools/__init__.py",
     "eval/llm_judge.py",
     "eval/run_benchmark.py",
     "eval/run_ablation.py",

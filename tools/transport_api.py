@@ -122,9 +122,9 @@ def _get_metro_direction(line_id: str, start: str, end: str) -> str:
         return ""
     
     if idx_start < idx_end:
-        return f"(direction {stations[-1].title()})"
+        return f"→ direção **{stations[-1].title()}**"
     else:
-        return f"(direction {stations[0].title()})"
+        return f"→ direção **{stations[0].title()}**"
 
 
 def _count_metro_stations(line_id: str, start: str, end: str) -> int:
@@ -421,56 +421,34 @@ def get_route_between_stations(origin: str, destination: str) -> str:
         if not has_landmarks:  # Only print if we haven't printed landmark info
             response += "❌ Neither location is a known Metro station.\n\n"
     
-    # Check for CP Train options
-    if origin_cp or dest_cp:
+    # Check for CP Train options (only when BOTH ends are CP stations)
+    # If only one end is a CP station, the metro route above is sufficient.
+    if origin_cp and dest_cp:
         response += "🚆 **CP TRAINS**\n"
         response += "-" * 30 + "\n"
         
-        if origin_cp and dest_cp:
-            common_lines = set(origin_cp.get("lines", [])) & set(dest_cp.get("lines", []))
-            
-            if common_lines:
-                response += "✅ **Direct Train Route Available**\n\n"
-                for line in common_lines:
-                    line_info = CP_LINES.get(line, {"name": line.title()})
-                    response += f"   🚆 Take **{line_info['name']}**\n"
-                    response += f"   📍 Board at: {origin.title()}\n"
-                    response += f"   📍 Exit at: {destination.title()}\n"
-                    if line_info.get("frequency"):
-                        response += f"   🕒 Frequency: {line_info['frequency']}\n"
-                    response += "\n"
-                return response
-            else:
-                response += f"⚠️ No direct train line linking {origin.title()} and {destination.title()}.\n"
-                response += "   You may need to transfer at a major hub (e.g., Entrecampos, Oriente, Sete Rios).\n\n"
+        common_lines = set(origin_cp.get("lines", [])) & set(dest_cp.get("lines", []))
         
-        if origin_cp:
-            lines_str = ", ".join([CP_LINES[line_id]["name"] for line_id in origin_cp.get("lines", [])])
-            response += f"✅ **{origin.title()}** is a train station\n"
-            response += f"   📍 {origin_cp.get('description', 'N/A')}\n"
-            response += f"   🚆 Lines: {lines_str}\n"
-            if origin_cp.get("metro"):
-                metro_line = METRO_LINES.get(origin_cp["metro"], {})
-                response += f"   🚇 Metro connection: {metro_line.get('emoji', '')} {origin_cp['metro'].title()}\n"
-            response += "\n"
-        
-        if dest_cp:
-            lines_str = ", ".join([CP_LINES[line_id]["name"] for line_id in dest_cp.get("lines", [])])
-            response += f"✅ **{destination.title()}** is a train station\n"
-            response += f"   📍 {dest_cp.get('description', 'N/A')}\n"
-            response += f"   🚆 Lines: {lines_str}\n"
-            if dest_cp.get("metro"):
-                metro_line = METRO_LINES.get(dest_cp["metro"], {})
-                response += f"   🚇 Metro connection: {metro_line.get('emoji', '')} {dest_cp['metro'].title()}\n"
-            response += "\n"
+        if common_lines:
+            response += "✅ **Direct Train Route Available**\n\n"
+            for line in common_lines:
+                line_info = CP_LINES.get(line, {"name": line.title()})
+                response += f"   🚆 Take **{line_info['name']}**\n"
+                response += f"   📍 Board at: {origin.title()}\n"
+                response += f"   📍 Exit at: {destination.title()}\n"
+                if line_info.get("frequency"):
+                    response += f"   🕒 Frequency: {line_info['frequency']}\n"
+                response += "\n"
+            return response
+        else:
+            response += f"⚠️ No direct train line linking {origin.title()} and {destination.title()}.\n"
+            response += "   You may need to transfer at a major hub (e.g., Entrecampos, Oriente, Sete Rios).\n\n"
     
-    # Add suggestion to check official sources
+    # Source attribution
+    from datetime import datetime as _dt
+    _now = _dt.now().strftime('%H:%M')
     response += "-" * 30 + "\n"
-    response += "💡 **More information:**\n"
-    response += "   • [Metro de Lisboa](https://www.metrolisboa.pt)\n"
-    response += "   • [Carris (Lisbon)](https://www.carris.pt)\n"
-    response += "   • [Carris Metropolitana](https://www.carrismetropolitana.pt)\n"
-    response += "   • [CP Trains](https://www.cp.pt)\n"
+    response += f"📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) **| Atualizado:** {_now}\n"
     
     return response
 
@@ -484,12 +462,11 @@ def get_transport_summary() -> str:
     Returns:
         str: Combined transport status summary.
     """
-    response = "🚇 Lisbon Transport Summary\n"
-    response += "=" * 40 + "\n\n"
+    now_str = datetime.now().strftime('%H:%M')
+    response = f"🚇 🚌 🚆 **Situação dos Transportes de Lisboa** — Atualizado: {now_str}\n\n"
     
     # 1. Metro Status
-    response += "🚇 METRO DE LISBOA\n"
-    response += "-" * 20 + "\n"
+    response += "🚇 **Metro de Lisboa**\n"
     
     metro_data = fetch_json_with_retry(METRO_STATUS_URL)
     if metro_data and metro_data.get('resposta'):
@@ -499,36 +476,34 @@ def get_transport_summary() -> str:
             status = resp.get(line_key, 'Unknown').strip()
             if status.lower() != 'ok':
                 all_ok = False
-                response += f"   {line_info['emoji']} {line_key.title()}: ⚠️ {status}\n"
+                response += f"   {line_info['emoji']} **{line_key.title()}**: ⚠️ {status}\n"
         
         if all_ok:
-            response += "   ✅ All lines operating normally\n"
+            response += "   🟢 **Estado**: Circulação normal em todas as linhas\n"
     else:
-        response += "   ❌ Status unavailable\n"
+        response += "   ❌ **Estado**: Indisponível\n"
     
     response += "\n"
     
     # 2. Carris (Urban Lisbon)
-    response += "🚋 CARRIS (LISBON URBAN)\n"
-    response += "-" * 20 + "\n"
+    response += "🚋 **Carris (Urbano)**\n"
     
     try:
         from tools.carris_api import _get_db_connection, fetch_gtfs_rt_vehicles
         
         vehicles = fetch_gtfs_rt_vehicles()
         if vehicles:
-            response += f"   ✅ {len(vehicles)} vehicles tracked\n"
+            response += f"   🟢 **Veículos em serviço**: {len(vehicles)} veículos\n"
         else:
-            response += "   ⚠️ Real-time data unavailable\n"
+            response += "   ⚠️ **Estado**: Dados em tempo real indisponíveis\n"
     except Exception as e:
         logger.warning(f"Carris Urban data failed: {e}")
-        response += "   ⚠️ Urban data unavailable\n"
+        response += "   ⚠️ **Estado**: Dados indisponíveis\n"
     
     response += "\n"
     
     # 3. Carris Metropolitana (Suburban)
-    response += "🚌 CARRIS METROPOLITANA (SUBURBAN)\n"
-    response += "-" * 20 + "\n"
+    response += "🚌 **Carris Metropolitana (Suburbano)**\n"
     
     try:
         from tools.carrismetropolitana_api import (
@@ -541,20 +516,19 @@ def get_transport_summary() -> str:
             # API returns a list directly, not a dict with 'entity' key
             alerts = alerts_data if isinstance(alerts_data, list) else alerts_data.get('entity', [])
             if alerts:
-                response += f"   ⚠️ {len(alerts)} active alert(s)\n"
+                response += f"   ⚠️ **Alertas ativos**: {len(alerts)} alertas\n"
             else:
-                response += "   ✅ No active alerts\n"
+                response += "   🟢 **Estado**: Sem alertas ativos\n"
         else:
-            response += "   ⚠️ Alert data unavailable\n"
+            response += "   ⚠️ **Estado**: Dados de alertas indisponíveis\n"
     except Exception as e:
         logger.warning(f"Carris Metropolitana alerts failed: {e}")
-        response += "   ⚠️ Suburban data unavailable\n"
+        response += "   ⚠️ **Estado**: Dados indisponíveis\n"
     
     response += "\n"
     
     # 4. CP Trains (AML)
-    response += "🚆 CP TRAINS (AML)\n"
-    response += "-" * 20 + "\n"
+    response += "🚆 **CP Comboios (AML)**\n"
     
     try:
         aml_trains = get_cp_aml_trains()
@@ -562,23 +536,21 @@ def get_transport_summary() -> str:
             total = len(aml_trains)
             delayed = sum(1 for t in aml_trains if (t.get('delay') or 0) > 60)
             
-            response += f"   📊 {total} trains serving AML\n"
+            response += f"   📊 **Comboios a circular na AML**: {total} comboios\n"
             if delayed > 0:
-                response += f"   ⚠️ {delayed} train(s) with delays > 1 min\n"
+                response += f"   ⚠️ **Comboios com atrasos > 1 min**: {delayed} comboios\n"
             else:
-                response += "   ✅ Trains operating normally\n"
+                response += "   🟢 **Estado**: Comboios a operar normalmente\n"
         else:
-            response += "   ⚠️ Train data unavailable\n"
+            response += "   ⚠️ **Estado**: Dados indisponíveis\n"
     except Exception as e:
         logger.warning(f"CP train data failed: {e}")
-        response += "   ⚠️ Train data unavailable\n"
+        response += "   ⚠️ **Estado**: Dados indisponíveis\n"
     
     response += "\n"
     
-    # Footer
-    response += "-" * 40 + "\n"
-    response += f"📅 Updated: {datetime.now().strftime('%H:%M:%S')}\n"
-    response += "💡 Use specific tools for detailed info.\n"
+    # Footer with proper italic source links
+    response += f"📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt), [*Carris*](https://www.carris.pt), [*Carris Metropolitana*](https://www.carrismetropolitana.pt) e [*CP*](https://www.cp.pt) **| Atualizado:** {now_str}\n"
     
     return response
 

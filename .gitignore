@@ -1,5 +1,6 @@
 # Carris Metropolitana data directory (exceeds 100MB)
 /data/carris/
+/data/cp/
 
 # Specific Files
 desktop.ini

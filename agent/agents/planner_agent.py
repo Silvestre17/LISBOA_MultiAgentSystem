@@ -8,9 +8,9 @@
 
 import os
 import sys
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 # Add parent directory to path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -82,8 +82,8 @@ class PlannerAgent(BaseAgent):
             HumanMessage(content=f"Based on the data above, create an itinerary for: {user_message}")
         ]
         
-        # Planner has no tools - direct LLM call
-        response = self.llm.invoke(messages)
+        # Planner has no tools - LLM call with retry for Azure content filter
+        response = self._safe_llm_invoke(self.llm, messages)
         return clean_response(response.content)
     
     def synthesize(self, user_message: str, agent_outputs: Dict[str, str]) -> str:

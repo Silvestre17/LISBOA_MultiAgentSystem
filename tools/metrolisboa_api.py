@@ -1287,9 +1287,9 @@ def _get_metro_direction(line_id: str, start: str, end: str) -> str:
         idx_start = stations.index(start_c)
         idx_end = stations.index(end_c)
         if idx_start < idx_end:
-            return f"(direction {stations[-1].title()})"
+            return f"→ direção **{stations[-1].title()}**"
         else:
-            return f"(direction {stations[0].title()})"
+            return f"→ direção **{stations[0].title()}**"
     except ValueError:
         return ""
 

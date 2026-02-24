@@ -33,7 +33,8 @@ from agent.prompts import (
     WEATHER_AGENT_PROMPT, get_weather_prompt,
     TRANSPORT_AGENT_PROMPT, get_transport_prompt,
     RESEARCHER_AGENT_PROMPT, get_researcher_prompt,
-    PLANNER_AGENT_PROMPT, get_planner_prompt
+    PLANNER_AGENT_PROMPT, get_planner_prompt,
+    QA_AGENT_PROMPT_EN, QA_AGENT_PROMPT_PT, get_qa_prompt
 )
 
 from agent.llm_factory import LLMFactory
@@ -70,6 +71,7 @@ __all__ = [
     "TRANSPORT_AGENT_PROMPT", "get_transport_prompt",
     "RESEARCHER_AGENT_PROMPT", "get_researcher_prompt",
     "PLANNER_AGENT_PROMPT", "get_planner_prompt",
+    "QA_AGENT_PROMPT_EN", "QA_AGENT_PROMPT_PT", "get_qa_prompt",
     
     # LLM
     "LLMFactory"

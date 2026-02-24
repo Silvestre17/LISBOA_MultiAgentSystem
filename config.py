@@ -20,6 +20,7 @@
 
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 # Load environment variables from .env file (if present)
@@ -216,6 +217,11 @@ class Config:
             "model": "qwen/qwen3-4b-2507",
             "temperature": 0.1,
         },
+        "qa": {
+            "provider": "lmstudio",
+            "model": "qwen/qwen3-4b-2507",
+            "temperature": 0,
+        },
     }
 
     # AZURE OPENAI CONFIGURATION (Cloud models)
@@ -246,6 +252,11 @@ class Config:
             "model": "gpt-5-mini",
             "temperature": 1,
         },
+        "qa": {
+            "provider": "azure",
+            "model": "gpt-5-nano",
+            "temperature": 1,
+        },
     }
 
     # OPENAI CONFIGURATION (Direct API)
@@ -274,6 +285,11 @@ class Config:
             "provider": "openai",
             "model": "gpt-5-mini",
             "temperature": 0.1,
+        },
+        "qa": {
+            "provider": "openai",
+            "model": "gpt-5-nano",
+            "temperature": 0,
         },
     }
 

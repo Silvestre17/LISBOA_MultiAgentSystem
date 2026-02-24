@@ -7,11 +7,12 @@
 # ==========================================================================
 
 from agent.agents.base import BaseAgent, get_agent_tools
-from agent.agents.supervisor import SupervisorAgent
-from agent.agents.weather_agent import WeatherAgent
-from agent.agents.transport_agent import TransportAgent
-from agent.agents.researcher_agent import ResearcherAgent
 from agent.agents.planner_agent import PlannerAgent
+from agent.agents.qa_agent import QualityAssuranceAgent
+from agent.agents.researcher_agent import ResearcherAgent
+from agent.agents.supervisor import SupervisorAgent
+from agent.agents.transport_agent import TransportAgent
+from agent.agents.weather_agent import WeatherAgent
 
 __all__ = [
     "BaseAgent",
@@ -21,4 +22,5 @@ __all__ = [
     "TransportAgent",
     "ResearcherAgent",
     "PlannerAgent",
+    "QualityAssuranceAgent",
 ]

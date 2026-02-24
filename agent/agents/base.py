@@ -12,12 +12,14 @@
 
 import json
 import os
-import sys
 import re
-from typing import List, Dict, Any, Optional, Tuple
+import sys
+import time as time_module
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Dict, List, Optional, Tuple
+
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 # Add parent directory to path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
@@ -61,10 +63,10 @@ def get_agent_tools(agent_name: str) -> List:
     """
     if agent_name == "weather":
         from tools.ipma_api import (
-            get_weather_warnings,
-            get_weather_forecast,
             get_current_weather_summary,
             get_portugal_weather_overview,
+            get_weather_forecast,
+            get_weather_warnings,
         )
 
         return [
@@ -76,49 +78,51 @@ def get_agent_tools(agent_name: str) -> List:
 
     elif agent_name == "transport":
         # Metro de Lisboa (Official API with OAuth2)
-        from tools.metrolisboa_api import (
-            get_metro_status,
-            get_metro_wait_time,
-            get_metro_line_wait_times,
-            find_nearest_metro,
-            get_metro_frequency,
-            get_all_metro_stations,
+        from tools.carris_api import (
+            carris_find_routes_between,
+            carris_get_arrivals,
+            carris_get_next_departures,
+            carris_get_realtime_vehicles,
+            carris_get_routes,
+            carris_get_service_frequency,
+            carris_get_stops,
+            carris_vehicle_eta,
         )
 
         # Carris Metropolitana (Suburban buses)
         from tools.carrismetropolitana_api import (
-            get_real_time_bus_positions,
-            get_carris_metropolitana_alerts,
-            get_carris_metropolitana_stop_info,
-            search_carris_metropolitana_lines,
             find_bus_routes,
             find_direct_bus_lines,
-            get_bus_realtime_locations,
             get_bus_next_departures,
+            get_bus_realtime_locations,
+            get_carris_metropolitana_alerts,
+            get_carris_metropolitana_stop_info,
+            get_real_time_bus_positions,
+            search_carris_metropolitana_lines,
         )
 
         # CP (Comboios de Portugal) - Trains
         from tools.cp_api import (
-            get_train_status,
-            search_cp_stations,
-            plan_train_trip,
-            get_train_schedule,
             get_cp_routes,
+            get_train_frequency,
+            get_train_schedule,
+            get_train_status,
+            plan_train_trip,
+            search_cp_stations,
+        )
+        from tools.metrolisboa_api import (
+            find_nearest_metro,
+            get_all_metro_stations,
+            get_metro_frequency,
+            get_metro_line_wait_times,
+            get_metro_status,
+            get_metro_wait_time,
         )
 
         # Multi-modal transport routing
         from tools.transport_api import (
-            get_transport_summary,
             get_route_between_stations,
-        )
-        from tools.carris_api import (
-            carris_get_stops,
-            carris_get_routes,
-            carris_get_next_departures,
-            carris_find_routes_between,
-            carris_get_realtime_vehicles,
-            carris_get_arrivals,
-            carris_vehicle_eta,
+            get_transport_summary,
         )
 
         return [
@@ -137,6 +141,7 @@ def get_agent_tools(agent_name: str) -> List:
             plan_train_trip,
             get_train_schedule,
             get_cp_routes,
+            get_train_frequency,
             get_transport_summary,
             get_route_between_stations,
             find_bus_routes,
@@ -150,21 +155,23 @@ def get_agent_tools(agent_name: str) -> List:
             carris_get_realtime_vehicles,
             carris_get_arrivals,
             carris_vehicle_eta,
+            carris_get_service_frequency,
         ]
 
     elif agent_name == "researcher":
-        from tools.visitlisboa_api import (
-            search_cultural_events,
-            search_places_attractions,
-            get_event_categories,
-            get_place_categories,
-            search_lisbon_knowledge,
-        )
         from tools.dados_abertos import (
             find_nearby_services,
-            list_available_datasets,
-            get_dataset_details,
             find_place_in_datasets,
+            get_dataset_details,
+            list_available_datasets,
+            list_service_categories,
+        )
+        from tools.visitlisboa_api import (
+            get_event_categories,
+            get_place_categories,
+            search_cultural_events,
+            search_lisbon_knowledge,
+            search_places_attractions,
         )
         from tools.web_knowledge import search_history_culture
 
@@ -178,6 +185,7 @@ def get_agent_tools(agent_name: str) -> List:
             list_available_datasets,
             get_dataset_details,
             find_place_in_datasets,
+            list_service_categories,
             search_history_culture,
         ]
 
@@ -187,6 +195,10 @@ def get_agent_tools(agent_name: str) -> List:
 
     elif agent_name == "supervisor":
         # Supervisor has no tools - it only routes to other agents
+        return []
+
+    elif agent_name == "qa":
+        # QA agent has no tools - it only validates agent outputs
         return []
 
     else:
@@ -221,7 +233,7 @@ def get_agent_llm(agent_name: str) -> BaseChatModel:
 # ==========================================================================
 
 
-def clean_response(content: str) -> str:
+def clean_response(content: str, _print: bool = True) -> str:
     """
     Cleans model-specific artifacts from the response.
 
@@ -235,6 +247,9 @@ def clean_response(content: str) -> str:
 
     Args:
         content: Raw response from the LLM.
+        _print: Whether to print the markdown to terminal (default True).
+            Set to False when called from parse_json_response to avoid
+            duplicate prints.
 
     Returns:
         str: Cleaned response suitable for user display.
@@ -363,7 +378,7 @@ def clean_response(content: str) -> str:
         return "Desculpe, tive dificuldades em processar o pedido. / Sorry, I'm having difficulty processing your request."
 
     # Print markdown to terminal if debugging is enabled
-    if Config.SHOW_MARKDOWN_RESPONSE_IN_TERMINAL:
+    if _print and Config.SHOW_MARKDOWN_RESPONSE_IN_TERMINAL:
         print("\n" + "=" * 80)
         print("📝 AI RESPONSE (Markdown)")
         print("=" * 80)
@@ -386,8 +401,8 @@ def parse_json_response(content: str) -> Optional[Dict[str, Any]]:
     if not content:
         return None
 
-    # Clean first
-    content = clean_response(content)
+    # Clean first (suppress print to avoid duplicate terminal output)
+    content = clean_response(content, _print=False)
 
     # Try to find JSON in code blocks
     json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
@@ -440,6 +455,35 @@ class BaseAgent:
         self.llm = get_agent_llm(agent_name)
 
         # Bind tools if this agent has any
+        if self.tools:
+            self.llm_with_tools = self.llm.bind_tools(self.tools)
+        else:
+            self.llm_with_tools = self.llm
+
+    def init_llm(
+        self,
+        provider: str = "azure",
+        model: str = None,
+        temperature: float = 0.0,
+    ) -> None:
+        """
+        Re-initializes the agent's LLM with custom provider/model settings.
+
+        Useful for benchmarking and evaluation where per-run model configuration
+        is needed. Rebinds tools automatically.
+
+        Args:
+            provider: LLM provider name (e.g. "azure", "lmstudio", "openai").
+            model: Model name override (uses provider default if None).
+            temperature: Sampling temperature.
+        """
+        from agent.llm_factory import LLMFactory
+
+        self.llm = LLMFactory.get_llm(
+            provider=provider,
+            model=model,
+            temperature=temperature,
+        )
         if self.tools:
             self.llm_with_tools = self.llm.bind_tools(self.tools)
         else:
@@ -549,6 +593,50 @@ class BaseAgent:
         
         return results
 
+    def _safe_llm_invoke(self, llm, messages: list, retries: int = 2, verbose: bool = False):
+        """
+        Invokes the LLM with retry logic for Azure content filter false positives.
+
+        Azure OpenAI may probabilistically flag benign prompts as "jailbreak".
+        This method retries the call with exponential backoff since the same
+        request often succeeds on a second attempt.
+
+        Args:
+            llm: The LLM instance (with or without tools bound).
+            messages: The messages to send.
+            retries: Maximum number of retry attempts.
+            verbose: Whether to print debug information.
+
+        Returns:
+            The LLM response object.
+
+        Raises:
+            The original exception if all retries fail and it's not a
+            content filter issue, or re-raises after exhausting retries.
+        """
+        last_exception = None
+        for attempt in range(retries + 1):
+            try:
+                return llm.invoke(messages)
+            except Exception as e:
+                error_str = str(e).lower()
+                is_content_filter = (
+                    "content_filter" in error_str
+                    or "responsibleaipolicyviolation" in error_str
+                    or "jailbreak" in error_str
+                )
+                if is_content_filter and attempt < retries:
+                    wait = 1.5 * (attempt + 1)
+                    if verbose:
+                        print(f"      [RETRY] Azure content filter triggered (attempt {attempt + 1}/{retries + 1}). Retrying in {wait}s...")
+                    time_module.sleep(wait)
+                    last_exception = e
+                    continue
+                raise
+        if last_exception is not None:
+            raise last_exception
+        raise RuntimeError("LLM invoke failed after all retries")
+
     def execute_react_loop(
         self,
         messages: list,
@@ -576,8 +664,8 @@ class BaseAgent:
         Returns:
             str: Cleaned final response.
         """
-        # First LLM call - may request tool use
-        response = self.llm_with_tools.invoke(messages)
+        # First LLM call - may request tool use (with retry for Azure content filter)
+        response = self._safe_llm_invoke(self.llm_with_tools, messages, verbose=verbose)
 
         # Tool enforcement: force tool usage if LLM doesn't call any tools
         if tool_enforcement_msg and not (
@@ -587,7 +675,7 @@ class BaseAgent:
                 print("      [DEBUG] No tools called initially. Forcing tool usage...")
             messages.append(AIMessage(content=response.content))
             messages.append(HumanMessage(content=tool_enforcement_msg))
-            response = self.llm_with_tools.invoke(messages)
+            response = self._safe_llm_invoke(self.llm_with_tools, messages, verbose=verbose)
 
         iteration = 0
         called_tools = set()        # Track tool signatures for loop detection
@@ -633,7 +721,7 @@ class BaseAgent:
                         content="STOP CALLING TOOLS. You already have the data. Respond to the user NOW."
                     )
                 )
-                response = self.llm_with_tools.invoke(messages)
+                response = self._safe_llm_invoke(self.llm_with_tools, messages, verbose=verbose)
                 break
 
             # --- Tool Execution (parallel when >1, sequential otherwise) ---
@@ -692,7 +780,7 @@ class BaseAgent:
                         ToolMessage(content=str(tool_result), tool_call_id=tool_id)
                     )
 
-            response = self.llm_with_tools.invoke(messages)
+            response = self._safe_llm_invoke(self.llm_with_tools, messages, verbose=verbose)
             iteration += 1
 
         # JSON tool call fallback (some models embed tool calls in text)
