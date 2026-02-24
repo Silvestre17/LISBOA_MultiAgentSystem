@@ -66,22 +66,17 @@ from tools.carris_api import (
     carris_get_next_departures,
     carris_get_realtime_vehicles,
     carris_get_routes,
+    carris_get_service_frequency,
     carris_get_stops,
     carris_vehicle_eta,
 )
 
 # Carris Metropolitana (Suburban buses)
 from tools.carrismetropolitana_api import (
-    find_bus_routes,  # Bus routing between locations
-)
-from tools.carrismetropolitana_api import (
-    get_bus_next_departures,  # Bus route schedule/stops
-)
-from tools.carrismetropolitana_api import (
-    get_bus_realtime_locations,  # Real-time bus GPS locations
-)
-from tools.carrismetropolitana_api import (
+    find_bus_routes,
     find_direct_bus_lines,
+    get_bus_next_departures,
+    get_bus_realtime_locations,
     get_carris_metropolitana_alerts,
     get_carris_metropolitana_stop_info,
     get_real_time_bus_positions,
@@ -89,43 +84,39 @@ from tools.carrismetropolitana_api import (
 )
 
 # CP (Comboios de Portugal) - Trains
-from tools.cp_api import search_cp_stations  # CP train station search (AML)
 from tools.cp_api import (
     get_cp_routes,
+    get_train_frequency,
     get_train_schedule,
     get_train_status,
     plan_train_trip,
-)
-from tools.dados_abertos import (
-    find_place_in_datasets,  # Search places by name across datasets
+    search_cp_stations,
 )
 from tools.dados_abertos import (
     find_nearby_services,
+    find_place_in_datasets,
     get_dataset_details,
     list_available_datasets,
+    list_service_categories,
 )
 
 # Import tools
 from tools.ipma_api import (
-    get_portugal_weather_overview,  # Weather for all Portugal locations
-)
-from tools.ipma_api import (
     get_current_weather_summary,
+    get_portugal_weather_overview,
     get_weather_forecast,
     get_weather_warnings,
 )
 
 # Metro de Lisboa (Official API with OAuth2)
 from tools.metrolisboa_api import (
-    find_nearest_metro,  # Find nearest metro station by GPS
+    find_nearest_metro,
+    get_all_metro_stations,
+    get_metro_frequency,
+    get_metro_line_wait_times,
+    get_metro_status,
+    get_metro_wait_time,
 )
-from tools.metrolisboa_api import get_all_metro_stations  # List all metro stations
-from tools.metrolisboa_api import get_metro_frequency  # Train frequency schedules
-from tools.metrolisboa_api import (
-    get_metro_line_wait_times,  # Wait times for entire line
-)
-from tools.metrolisboa_api import get_metro_wait_time  # Real-time metro wait times
-from tools.metrolisboa_api import get_metro_status
 
 # Multi-modal transport routing
 from tools.transport_api import get_route_between_stations, get_transport_summary
@@ -150,72 +141,75 @@ from tools.web_knowledge import search_history_culture
 def get_all_tools() -> List:
     """
     Returns all available tools for the agent.
-    
-    Total: 42 tools across the main categories (Weather, Transport, Open Data,
+
+    Total: 45 tools across the main categories (Weather, Transport, Open Data,
         VisitLisboa, Carris Urban, Web Knowledge).
 
     Returns:
-        List: List of 42 LangChain tools.
+        List: List of 45 LangChain tools.
     """
     return [
-        # Weather Tools (IPMA)
+        # Weather Tools (IPMA) - 4 tools
         get_weather_warnings,
         get_weather_forecast,
         get_current_weather_summary,
-        get_portugal_weather_overview,  # Weather for all Portugal
+        get_portugal_weather_overview,
 
-        # Transport - Metro de Lisboa
+        # Transport - Metro de Lisboa - 6 tools
         get_metro_status,
-        get_metro_wait_time,  # Real-time metro wait times
-        get_metro_line_wait_times,  # Wait times for entire line
-        find_nearest_metro,  # Find nearest metro by GPS
-        get_metro_frequency,  # Train frequency schedules
-        get_all_metro_stations,  # List all metro stations
+        get_metro_wait_time,
+        get_metro_line_wait_times,
+        find_nearest_metro,
+        get_metro_frequency,
+        get_all_metro_stations,
 
-        # Transport - Carris Metropolitana (Suburban buses)
-        get_real_time_bus_positions,
+        # Transport - Carris Metropolitana (Suburban buses) - 8 tools
         get_carris_metropolitana_alerts,
         get_carris_metropolitana_stop_info,
         search_carris_metropolitana_lines,
-        find_bus_routes,  # Bus routing between locations
-        get_bus_realtime_locations,  # Real-time bus GPS locations
-        get_bus_next_departures,  # Bus route schedule/stops
+        find_bus_routes,
+        get_real_time_bus_positions,
+        get_bus_realtime_locations,
+        get_bus_next_departures,
         find_direct_bus_lines,
 
-        # Transport - CP (Comboios de Portugal)
+        # Transport - Carris Urban (Lisbon city buses & trams) - 8 tools
+        carris_get_stops,
+        carris_get_routes,
+        carris_get_next_departures,
+        carris_find_routes_between,
+        carris_get_realtime_vehicles,
+        carris_get_arrivals,
+        carris_vehicle_eta,
+        carris_get_service_frequency,
+
+        # Transport - CP (Comboios de Portugal) - 6 tools
         get_train_status,
-        search_cp_stations,  # CP train station search (AML)
+        search_cp_stations,
         get_train_schedule,
         get_cp_routes,
         plan_train_trip,
+        get_train_frequency,
 
-        # Transport - Multi-modal
+        # Transport - Multi-modal - 2 tools
         get_transport_summary,
-        get_route_between_stations,  # Multi-modal routing assistance
+        get_route_between_stations,
 
-        # Open Data Tools (Lisboa Aberta)
+        # Open Data Tools (Lisboa Aberta) - 5 tools
         find_nearby_services,
         list_available_datasets,
         get_dataset_details,
-        find_place_in_datasets,  # Search places by name
+        find_place_in_datasets,
+        list_service_categories,
 
-        # VisitLisboa Tools (Events & Places) - Semantic Search
+        # VisitLisboa Tools (Events & Places) - 5 tools
         search_cultural_events,
         search_places_attractions,
         get_event_categories,
         get_place_categories,
-        search_lisbon_knowledge,  # Comprehensive RAG search
+        search_lisbon_knowledge,
 
-        # Transport - Carris Urban (Lisbon city buses & trams)
-        carris_get_stops,  # Search Carris urban stops
-        carris_get_routes,  # Get bus/tram routes (701, 15E, etc.)
-        carris_get_next_departures,  # Schedule for a stop
-        carris_find_routes_between,  # Find routes connecting two areas
-        carris_get_realtime_vehicles,  # Real-time bus/tram positions
-        carris_get_arrivals,  # Real-time arrivals at a stop
-        carris_vehicle_eta,  # ETA calculation for specific route
-
-        # Web Knowledge
+        # Web Knowledge - 1 tool
         search_history_culture,
     ]
 
@@ -468,8 +462,8 @@ def build_agent_graph(provider: str = None):
     # Initialize LLM
     llm = LLMFactory.get_llm(provider) if provider else LLMFactory.get_llm()
 
-    # Create a base LLM without tools for fallback responses
-    llm_base = LLMFactory.get_llm(provider) if provider else LLMFactory.get_llm()
+    # Reuse the same LLM instance for fallback (without tools binding)
+    llm_base = llm
 
     # Get tools and bind to LLM
     tools = get_all_tools()
@@ -651,6 +645,7 @@ class MultiAgentAssistant:
     def __init__(self):
         """Initializes the multi-agent assistant."""
         from agent.agents.planner_agent import PlannerAgent
+        from agent.agents.qa_agent import QualityAssuranceAgent
         from agent.agents.researcher_agent import ResearcherAgent
         from agent.agents.supervisor import SupervisorAgent
         from agent.agents.transport_agent import TransportAgent
@@ -659,6 +654,7 @@ class MultiAgentAssistant:
 
         # Initialize agents
         self.supervisor = SupervisorAgent()
+        self.qa_agent = QualityAssuranceAgent()
         self.agents = {
             "weather": WeatherAgent(),
             "transport": TransportAgent(),
@@ -671,6 +667,7 @@ class MultiAgentAssistant:
 
         self.model_info = {
             "supervisor": self.supervisor.get_model_info(),
+            "qa": self.qa_agent.get_model_info(),
             **{name: agent.get_model_info() for name, agent in self.agents.items()},
         }
 
@@ -745,8 +742,14 @@ class MultiAgentAssistant:
             )
             on_status_change(status_msg)
 
-        # Step 1: Route the query
-        routing = self.supervisor.route(message, language=language)
+        # Step 1: Route the query (with conversation history for follow-up awareness)
+        # Exclude the current message (last) from history
+        history_for_routing = self.state["messages"][:-1] if len(self.state["messages"]) > 1 else None
+        routing = self.supervisor.route(
+            message,
+            language=language,
+            conversation_history=history_for_routing,
+        )
         agents_to_call = routing.get("agents", [])
         direct_response = routing.get("direct_response")
         reasoning = routing.get("reasoning", "")
@@ -799,15 +802,23 @@ class MultiAgentAssistant:
             except Exception:
                 pass  # Silently ignore metadata errors
 
+        # Map internal agent names to user-friendly display names
+        name_map_pt = {
+            "weather": "Meteorologia 🌤️",
+            "transport": "Transportes 🚇",
+            "researcher": "Pesquisa Local 🔎",
+            "planner": "Planeador 📅",
+        }
+        name_map_en = {
+            "weather": "Weather 🌤️",
+            "transport": "Transport 🚇",
+            "researcher": "Local Search 🔎",
+            "planner": "Planner 📅",
+        }
+        name_map = name_map_pt if language == "pt" else name_map_en
+
         # Notify status: Agents selected
         if agents_to_call:
-            # Map internal names to friendly PT names
-            name_map = {
-                "weather": "Meteorologia 🌤️",
-                "transport": "Transportes 🚇",
-                "researcher": "Pesquisa Local 🔎",
-                "planner": "Planeador 📅",
-            }
             # Filter out planner from the "Consulting" list as it runs last
             consulting: list[str] = [
                 str(name_map.get(a, a or ""))
@@ -827,7 +838,7 @@ class MultiAgentAssistant:
         if direct_response and not agents_to_call:
             if verbose:
                 print("      Mode: DIRECT RESPONSE (no agents called)")
-            return clean_response(direct_response)
+            return format_response(clean_response(direct_response))
 
         # Step 3: Execute agents (Parallelized with LangSmith context propagation)
         agent_outputs = {}
@@ -840,30 +851,26 @@ class MultiAgentAssistant:
                 print(f"      [PARALLEL] Executing {len(workers)} agents: {workers}")
 
             if on_status_change:
+                friendly_workers = [name_map.get(w, w) for w in workers]
                 msg = (
-                    f"⏳ A aguardar respostas de: {', '.join(workers)}..."
+                    f"⏳ A aguardar respostas de: {', '.join(friendly_workers)}..."
                     if language == "pt"
-                    else f"⏳ Waiting for: {', '.join(workers)}..."
+                    else f"⏳ Waiting for: {', '.join(friendly_workers)}..."
                 )
                 on_status_change(msg)
 
-            # Context for agents: language instruction + recent conversation history (D2)
-            # Build recent conversation summary for multi-turn awareness
-            recent_context_parts = [f"User language: {language}. Respond in {'Portuguese (PT-PT)' if language == 'pt' else 'English'}."]
+            # Context for agents: language instruction + minimal follow-up context
+            # Workers should focus on the CURRENT query, not be biased by history
+            agent_context = f"User language: {language}. Respond in {'Portuguese (PT-PT)' if language == 'pt' else 'English'}."
+
+            # Only add last user message for follow-up context (e.g., "E amanhã?")
             recent_msgs = self.state.get("messages", [])
-            # Include last 3 human/AI exchanges for context (skip current message)
-            history_pairs = []
-            for msg in recent_msgs[:-1]:  # Exclude the current HumanMessage
-                if hasattr(msg, "content") and msg.content:
-                    role = "User" if isinstance(msg, HumanMessage) else "Assistant"
-                    history_pairs.append(f"{role}: {msg.content[:200]}")
-            if history_pairs:
-                # Take last 6 messages (3 exchanges)
-                recent_history = history_pairs[-6:]
-                recent_context_parts.append(
-                    "Recent conversation context:\n" + "\n".join(recent_history)
-                )
-            agent_context = "\n\n".join(recent_context_parts)
+            if len(recent_msgs) > 1:
+                # Find the previous user message for reference
+                for msg in reversed(recent_msgs[:-1]):
+                    if isinstance(msg, HumanMessage) and msg.content:
+                        agent_context += f"\nPrevious user question (for context only): {msg.content[:150]}"
+                        break
 
             # Use ContextThreadPoolExecutor to propagate LangSmith tracing context
             with ContextThreadPoolExecutor(max_workers=len(workers)) as executor:
@@ -926,7 +933,96 @@ class MultiAgentAssistant:
                         if verbose:
                             print(f"   [AGENT: {agent_name.upper()}] Failed: {str(e)}")
 
-        # Step 4: If Planner was requested, synthesize final response
+        # Step 4: QA Validation (single retry if incomplete)
+        if agent_outputs and len(workers) > 0:
+            if verbose:
+                print("\n   [QA] Validating completeness...")
+
+            if on_status_change:
+                msg = (
+                    "🔍 A validar completude dos dados..."
+                    if language == "pt"
+                    else "🔍 Validating data completeness..."
+                )
+                on_status_change(msg)
+
+            qa_result = self.qa_agent.validate(
+                user_query=message,
+                agent_outputs=agent_outputs,
+                agents_called=workers,
+                language=language,
+            )
+
+            if verbose:
+                print(f"   [QA] Complete: {qa_result['complete']}")
+                if qa_result['missing_data']:
+                    print(f"   [QA] Missing: {qa_result['missing_data']}")
+                if qa_result['required_agents']:
+                    print(f"   [QA] Need agents: {qa_result['required_agents']}")
+
+            # Single retry: call missing agents if QA says incomplete
+            if not qa_result["complete"] and qa_result["required_agents"]:
+                retry_agents = [
+                    a for a in qa_result["required_agents"]
+                    if a in self.agents and a != "planner" and a not in workers
+                ]
+
+                if retry_agents:
+                    if verbose:
+                        print(f"   [QA RETRY] Calling additional agents: {retry_agents}")
+
+                    if on_status_change:
+                        friendly_retry = [name_map.get(a, a) for a in retry_agents]
+                        msg = (
+                            f"🔄 A recolher dados adicionais: {', '.join(friendly_retry)}..."
+                            if language == "pt"
+                            else f"🔄 Gathering additional data: {', '.join(friendly_retry)}..."
+                        )
+                        on_status_change(msg)
+
+                    # Execute retry agents in parallel
+                    with ContextThreadPoolExecutor(max_workers=len(retry_agents)) as executor:
+                        retry_futures = {}
+                        for agent_name in retry_agents:
+                            retry_futures[
+                                executor.submit(
+                                    self.agents[agent_name].invoke,
+                                    message,
+                                    agent_context,
+                                    verbose,
+                                )
+                            ] = agent_name
+
+                        for future in as_completed(retry_futures):
+                            agent_name = retry_futures[future]
+                            try:
+                                output = future.result()
+                                agent_outputs[agent_name] = output
+                                if verbose:
+                                    print(f"   [QA RETRY: {agent_name.upper()}] Finished ({len(output)} chars)")
+                            except Exception as e:
+                                agent_outputs[agent_name] = f"Error: {str(e)}"
+                                if verbose:
+                                    print(f"   [QA RETRY: {agent_name.upper()}] Failed: {str(e)}")
+
+            # Pass QA disclaimers as context for synthesis (internal key, filtered from output)
+            if qa_result.get("disclaimers"):
+                agent_outputs["_qa_disclaimers"] = qa_result["disclaimers"]
+                if verbose:
+                    for d in qa_result["disclaimers"]:
+                        print(f"   [QA] Disclaimer: {d}")
+
+        # Step 5: Filter out failed agent outputs (errors must never reach user)
+        clean_outputs = {}
+        for aname, aoutput in agent_outputs.items():
+            if isinstance(aoutput, str) and aoutput.startswith("Error:"):
+                if verbose:
+                    print(f"   [FILTER] Removing failed agent output: {aname}")
+                continue
+            clean_outputs[aname] = aoutput
+        agent_outputs = clean_outputs
+
+        # Step 6: If Planner was requested, synthesize final response
         if "planner" in agents_to_call:
             if verbose:
                 print(
@@ -959,9 +1055,15 @@ class MultiAgentAssistant:
         Returns:
             str: Combined, coherent response.
         """
+        # Filter out internal keys (QA metadata, etc.) - never expose to user
+        filtered = {k: v for k, v in agent_outputs.items() if not k.startswith("_")}
+
+        if not filtered:
+            return ""
+
         # If only one agent responded, return its output directly
-        if len(agent_outputs) == 1:
-            return list(agent_outputs.values())[0]
+        if len(filtered) == 1:
+            return list(filtered.values())[0]
 
         # Use LLM synthesis for multi-agent responses
         try:
@@ -969,7 +1071,7 @@ class MultiAgentAssistant:
             from langchain_core.messages import SystemMessage as SysMsg
 
             sections = []
-            for agent_name, output in agent_outputs.items():
+            for agent_name, output in filtered.items():
                 label = {
                     "weather": "Weather Information",
                     "transport": "Transport Information",
@@ -979,13 +1081,35 @@ class MultiAgentAssistant:
 
             combined_data = "\n\n---\n\n".join(sections)
 
+            # Add QA disclaimers as context for synthesis (if any)
+            qa_disclaimers = agent_outputs.get("_qa_disclaimers", [])
+            if qa_disclaimers:
+                combined_data += "\n\n## Data Limitations\n" + "\n".join(f"- {d}" for d in qa_disclaimers)
+
             synthesis_prompt = (
                 "You are a response synthesizer. Combine the following agent outputs "
                 "into a single, coherent, well-organized response. "
                 "Preserve ALL factual data from each source. "
                 "Use markdown formatting with ### headers and emojis. "
+                "Use **bold** for all important information (names, dates, prices, labels, statuses). "
                 "Do NOT add information that isn't in the source data. "
-                "Make the response flow naturally as if from a single assistant."
+                "Make the response flow naturally as if from a single assistant. "
+                "Do not mention internal agent names, tool names, quality checks, "
+                "disclaimers sections, or any internal system details. "
+                "\n\n"
+                "RULES:\n"
+                "1. MATCH THE USER'S LANGUAGE: Portuguese query = Portuguese response, English query = English response.\n"
+                "2. Do not suggest features that don't exist: no 'reservar bilhetes', 'book tickets', "
+                "'send reminders', 'set alerts', 'save favorites'. The system cannot do these.\n"
+                "3. Do not write closing sections like 'Se quiser, eu posso:' or 'I can also:' offering additional services.\n"
+                "4. Do not use ambiguous labels like 'seleção top 5' or 'best picks' unless the user asked for a ranking.\n"
+                "5. End with ONE source attribution line. Format: '📌 **Fonte:** [*Name*](url) **| Atualizado:** HH:MM'. Do not duplicate source lines.\n"
+                "6. Use **bold** formatting extensively - ALL section headers, operator names, labels, and key values must be bold.\n"
+                "7. Every list item must start with an emoji.\n"
+                "8. Source names in 📌 **Fonte** lines must use italic markdown: [*Name*](url), not plain text.\n"
+                "9. Do NOT count stops between stations or claim stop positions (e.g., '1ª paragem após X'). Report only origin, destination, and line.\n"
+                "10. Do NOT add data not present in the source outputs. If information is missing, omit it rather than inventing it.\n"
+                "11. If 'Data Limitations' are listed, mention them naturally (e.g., 'opening hours may vary, check the official website').\n"
             )
 
             messages = [
@@ -993,18 +1117,19 @@ class MultiAgentAssistant:
                 HMsg(content=f"Combine these agent outputs into one response:\n\n{combined_data}"),
             ]
 
-            response = self.supervisor.llm.invoke(messages)
+            response = self.supervisor._safe_llm_invoke(self.supervisor.llm, messages)
+            # Return raw cleaned text - format_response is called by chat()
             return clean_response(response.content)
 
         except Exception:
             # Fallback to simple concatenation if LLM fails
             sections = []
-            if "weather" in agent_outputs:
-                sections.append(agent_outputs["weather"])
-            if "researcher" in agent_outputs:
-                sections.append(agent_outputs["researcher"])
-            if "transport" in agent_outputs:
-                sections.append(agent_outputs["transport"])
+            if "weather" in filtered:
+                sections.append(filtered["weather"])
+            if "researcher" in filtered:
+                sections.append(filtered["researcher"])
+            if "transport" in filtered:
+                sections.append(filtered["transport"])
             return "\n\n---\n\n".join(sections)
 
     def reset(self):

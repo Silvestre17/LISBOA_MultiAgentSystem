@@ -13,7 +13,7 @@ pip install -r requirements.txt
 Run the Streamlit UI:
 
 ```bash
-streamlit run app_v1.py
+streamlit run app.py
 ```
 
 Rebuild or test the vector store (optional):

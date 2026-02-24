@@ -8,8 +8,9 @@ from langchain_core.messages import HumanMessage, ToolMessage
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from app import MultiAgentAssistant  # For the LISBOA full pipeline comparison
+
 from agent.llm_factory import LLMFactory
-from app_v1 import MultiAgentAssistant  # For the LISBOA full pipeline comparison
 from eval.llm_judge import LLMJudge
 
 

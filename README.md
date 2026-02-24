@@ -289,7 +289,7 @@ Thesis2025-26_AFGS/
 │       ├── data_pipeline.yml           # Daily scraping workflow
 │       └── sync_vector_db.yml          # Vector DB sync workflow
 │
-├── app_v1.py                           # Streamlit application
+├── app.py                           # Streamlit application
 ├── config.py                           # Configuration (API endpoints, IDs)
 ├── requirements.txt                    # Python dependencies
 ├── README.md                           # This file

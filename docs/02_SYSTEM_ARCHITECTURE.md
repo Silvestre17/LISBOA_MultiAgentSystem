@@ -4,7 +4,7 @@ This document describes the repository architecture and how the multi-agent syst
 
 ## High-level view
 
-- UI entrypoint: `app_v1.py` (Streamlit)
+- UI entrypoint: `app.py` (Streamlit)
 - Multi-agent graph: `agent/graph.py`
 - State schema: `agent/state.py`
 - Tools layer: `tools/` and the exports in `tools/__init__.py`

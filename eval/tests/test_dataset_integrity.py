@@ -47,6 +47,7 @@ VALID_TOOL_NAMES = {
     "get_train_schedule",
     "get_cp_routes",
     "plan_train_trip",
+    "get_train_frequency",
     # Transport - Multi-modal
     "get_transport_summary",
     "get_route_between_stations",
@@ -55,6 +56,7 @@ VALID_TOOL_NAMES = {
     "list_available_datasets",
     "get_dataset_details",
     "find_place_in_datasets",
+    "list_service_categories",
     # VisitLisboa (Events & Places)
     "search_cultural_events",
     "search_places_attractions",
@@ -69,6 +71,7 @@ VALID_TOOL_NAMES = {
     "carris_get_realtime_vehicles",
     "carris_get_arrivals",
     "carris_vehicle_eta",
+    "carris_get_service_frequency",
     # Web Knowledge
     "search_history_culture",
 }

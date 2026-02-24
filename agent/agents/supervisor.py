@@ -9,14 +9,14 @@
 import os
 import re
 import sys
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 # Add parent directory to path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from agent.agents.base import BaseAgent, parse_json_response, clean_response, traceable
+from agent.agents.base import BaseAgent, clean_response, parse_json_response, traceable
 from agent.prompts.supervisor import get_supervisor_prompt
 
 
@@ -37,13 +37,19 @@ class SupervisorAgent(BaseAgent):
         # System prompt is now dynamic per request
 
     @traceable(name="supervisor_agent", run_type="chain", tags=["sub-agent", "supervisor"])
-    def route(self, user_message: str, language: str = "en") -> Dict[str, Any]:
+    def route(
+        self,
+        user_message: str,
+        language: str = "en",
+        conversation_history: Optional[List] = None,
+    ) -> Dict[str, Any]:
         """
         Analyzes user message and returns routing decision.
 
         Args:
             user_message: The user's query.
             language: Language code ('en' or 'pt').
+            conversation_history: Recent conversation messages for follow-up context.
 
         Returns:
             Dict with:
@@ -53,14 +59,33 @@ class SupervisorAgent(BaseAgent):
         """
         system_prompt = get_supervisor_prompt(language)
 
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_message),
-        ]
+        messages = [SystemMessage(content=system_prompt)]
 
-        # Get routing decision from LLM
-        response = self.llm.invoke(messages)
-        content = clean_response(response.content)
+        # Inject minimal follow-up context (NOT raw messages - that confuses routing)
+        if conversation_history:
+            # Extract ONLY the last user query for follow-up detection
+            last_user_queries = []
+            for msg in reversed(conversation_history):
+                if isinstance(msg, HumanMessage) and msg.content:
+                    last_user_queries.append(msg.content[:150])
+                    if len(last_user_queries) >= 2:
+                        break
+            last_user_queries.reverse()
+
+            if last_user_queries:
+                context_note = (
+                    "FOLLOW-UP CONTEXT (for reference ONLY - do NOT add extra agents because of this):\n"
+                    f"Previous user question(s): {' | '.join(last_user_queries)}\n"
+                    "Use this ONLY to understand references like 'E amanhã?', 'E de autocarro?' etc. "
+                    "Route the CURRENT query based on its OWN content. Do NOT add agents from previous topics."
+                )
+                messages.append(SystemMessage(content=context_note))
+
+        messages.append(HumanMessage(content=user_message))
+
+        # Get routing decision from LLM (with retry for Azure content filter)
+        response = self._safe_llm_invoke(self.llm, messages)
+        content = clean_response(response.content, _print=False)
 
         # Parse JSON response
         decision = parse_json_response(content)
@@ -96,7 +121,38 @@ class SupervisorAgent(BaseAgent):
             # Enforce rejection for out of scope queries even if LLM tries to answer
             reasoning_lower = reasoning.lower()
             if not agents and any(k in reasoning_lower for k in ["matemática", "math", "fora de âmbito", "out of scope", "trivia", "trivialidade"]):
-                decision["direct_response"] = "Sou um assistente especializado na Área Metropolitana de Lisboa, focado apenas em transportes, meteorologia e locais da capital. Não posso ajudar-te com essa questão! 🏙️" if language == "pt" else "I am a specialized assistant for the Lisbon Metropolitan Area, focused only on transports, weather, and local places. I cannot help you with that query! 🏙️"
+                # Only override if LLM didn't provide a direct_response
+                if not decision.get("direct_response"):
+                    if language == "pt":
+                        decision["direct_response"] = (
+                            "Ups, isso fica um pouco fora da minha especialidade! 😄 "
+                            "Sou o teu **Assistente Urbano de Lisboa** e estou aqui para te ajudar "
+                            "a aproveitar ao máximo a Área Metropolitana de Lisboa 🏙️\n\n"
+                            "Olha o que posso fazer por ti:\n"
+                            "🌤️ Previsões meteorológicas e avisos em tempo real\n"
+                            "🚇 Informação de transportes (Metro, autocarros, comboios, elétricos)\n"
+                            "🎭 Eventos culturais e atividades\n"
+                            "📍 Locais para visitar, restaurantes e atrações\n"
+                            "🗺️ Planeamento de itinerários à medida\n"
+                            "🏥 Serviços próximos (farmácias, hospitais, parques)\n"
+                            "📚 História e cultura de Lisboa\n\n"
+                            "Pergunta-me o que quiseres sobre Lisboa! 🧭"
+                        )
+                    else:
+                        decision["direct_response"] = (
+                            "Oops, that's a bit outside my expertise! 😄 "
+                            "I'm your **Lisbon Urban Assistant** and I'm here to help you "
+                            "make the most of the Lisbon Metropolitan Area 🏙️\n\n"
+                            "Here's what I can do for you:\n"
+                            "🌤️ Weather forecasts & real-time warnings\n"
+                            "🚇 Transport info (Metro, buses, trains, trams)\n"
+                            "🎭 Cultural events & activities\n"
+                            "📍 Places to visit, restaurants & attractions\n"
+                            "🗺️ Custom itinerary planning\n"
+                            "🏥 Nearby services (pharmacies, hospitals, parks)\n"
+                            "📚 Lisbon history & culture\n\n"
+                            "Go ahead, ask me anything about Lisbon! 🧭"
+                        )
 
             return {
                 "reasoning": reasoning,
@@ -123,24 +179,41 @@ class SupervisorAgent(BaseAgent):
 
         # 1. Check for Out-of-Scope keywords (Locations outside AML)
         # Note: AML includes Sintra, Cascais, Montijo, Setúbal, etc. - these are IN SCOPE!
-        forbidden_keywords = [
-            "porto",
-            "aveiro",
-            "braga",
-            "coimbra",
-            "faro",
-            "algarve",
-            "évora",
-            "madrid",
-            "paris",
-            "london",
-            "barcelona",
+        # CRITICAL: Use word boundaries to avoid false positives
+        # e.g. "porto" must NOT match "aeroporto", "transporte", etc.
+        forbidden_patterns = [
+            r"\bporto\b",
+            r"\baveiro\b",
+            r"\bbraga\b",
+            r"\bcoimbra\b",
+            r"\bfaro\b",
+            r"\balgarve\b",
+            r"\bévora\b",
+            r"\bmadrid\b",
+            r"\bparis\b",
+            r"\blondon\b",
+            r"\bbarcelona\b",
+            r"\bnew york\b",
+            r"\btokyo\b",
+            r"\broma\b",
+            r"\brome\b",
         ]
-        if any(city in message_lower for city in forbidden_keywords):
+        if any(re.search(pat, message_lower) for pat in forbidden_patterns):
             return {
                 "reasoning": "Fallback: Detected out-of-scope location (outside AML)",
                 "agents": [],
-                "direct_response": "Sou especializado na Área Metropolitana de Lisboa! Posso ajudar-te com transportes, locais ou eventos na região da capital? 🏙️",
+                "direct_response": (
+                    "Isso fica um pouco fora da minha área! 😊 "
+                    "Sou o teu guia para a **Área Metropolitana de Lisboa** 🏙️\n\n"
+                    "Mas olha tudo o que te posso ajudar:\n"
+                    "🌤️ Previsão meteorológica e avisos\n"
+                    "🚇 Transportes em tempo real (Metro, autocarros, comboios)\n"
+                    "🎭 Eventos e atividades culturais\n"
+                    "📍 Locais, museus e atrações\n"
+                    "🗺️ Planeamento personalizado de itinerários\n"
+                    "🏥 Serviços essenciais (farmácias, hospitais, escolas)\n\n"
+                    "Queres explorar Lisboa? Pergunta-me! 🧭"
+                ),
             }
 
         # 2. AML locations that ARE in scope - should trigger transport agent
@@ -202,6 +275,12 @@ class SupervisorAgent(BaseAgent):
             "barco",
             "fertagus",
             "cp",
+            "frequência",
+            "frequency",
+            "headway",
+            "intervalo",
+            "de quanto em quanto",
+            "how often",
         ]
 
         # Places/Events keywords
@@ -221,6 +300,40 @@ class SupervisorAgent(BaseAgent):
             "what to do",
             "o que fazer",
             "places",
+        ]
+
+        # Resident services keywords (always → researcher)
+        service_keywords = [
+            "farmácia",
+            "pharmacy",
+            "hospital",
+            "escola",
+            "school",
+            "biblioteca",
+            "library",
+            "bombeiros",
+            "fire",
+            "polícia",
+            "police",
+            "junta",
+            "embaixada",
+            "embassy",
+            "cemitério",
+            "wc",
+            "sanitário",
+            "toilet",
+            "mercado",
+            "market",
+            "piscina",
+            "desporto",
+            "sports",
+            "jardim",
+            "garden",
+            "creche",
+            "estacionamento",
+            "parking",
+            "serviço",
+            "service",
         ]
 
         # Itinerary keywords
@@ -245,6 +358,9 @@ class SupervisorAgent(BaseAgent):
             agents.append("transport")
         if any(kw in message_lower for kw in places_keywords):
             agents.append("researcher")
+        if any(kw in message_lower for kw in service_keywords):
+            if "researcher" not in agents:
+                agents.append("researcher")
         if any(kw in message_lower for kw in itinerary_keywords):
             # Itinerary needs weather + researcher + planner
             if "weather" not in agents:
@@ -269,10 +385,15 @@ class SupervisorAgent(BaseAgent):
         ]
 
         if not agents and any(kw in message_lower for kw in greeting_keywords):
+            greeting_response = (
+                "Olá! 👋 Sou o teu Assistente Urbano de Lisboa. "
+                "Em que te posso ajudar hoje? Posso sugerir locais, ver o tempo, "
+                "transportes ou planear o teu dia! 🏙️"
+            )
             return {
                 "reasoning": "Simple greeting/general query",
                 "agents": [],
-                "direct_response": "Hello! 👋 I'm the Lisbon Urban Assistant. How can I help you explore Lisbon today?",
+                "direct_response": greeting_response,
             }
 
         # If still no agents and not a greeting, default to researcher
@@ -377,9 +498,18 @@ class SupervisorAgent(BaseAgent):
 # Test Block
 # ==========================================================================
 if __name__ == "__main__":
+    import sys
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except AttributeError:
+        pass
+
     print("\033[1m" + "=" * 60 + "\033[0m")
     print("\033[1m🧪 Supervisor Agent Test\033[0m")
     print("\033[1m" + "=" * 60 + "\033[0m")
+
+    passed = 0
+    failed = 0
 
     try:
         supervisor = SupervisorAgent()
@@ -387,7 +517,12 @@ if __name__ == "__main__":
             f"\n\033[1m✅ Supervisor initialized:\033[0m {supervisor.get_model_info()}"
         )
 
-        # Test queries
+        # =================================================================
+        # ORIGINAL ROUTING TESTS
+        # =================================================================
+        print("\n\033[1m📋 Section 1: General Routing\033[0m")
+        print("-" * 50)
+
         test_queries = [
             "Hello!",
             "What's the weather like?",
@@ -407,7 +542,100 @@ if __name__ == "__main__":
             if decision["direct_response"]:
                 print(f"   \033[1mDirect:\033[0m {decision['direct_response']}")
 
+        # =================================================================
+        # SERVICE KEYWORD ROUTING TESTS
+        # =================================================================
+        print("\n\033[1m📋 Section 2: Resident Service Routing\033[0m")
+        print("-" * 50)
+
+        service_tests = [
+            ("Onde fica a farmácia mais próxima?", "researcher", "pharmacy → researcher"),
+            ("Where is the nearest hospital?", "researcher", "hospital → researcher"),
+            ("Há alguma biblioteca perto de mim?", "researcher", "library → researcher"),
+            ("I need a police station nearby", "researcher", "police → researcher"),
+            ("Onde posso estacionar perto do Rossio?", "researcher", "parking → researcher"),
+            ("Preciso de encontrar uma escola para o meu filho", "researcher", "school → researcher"),
+            ("Where is the nearest WC?", "researcher", "wc/toilet → researcher"),
+            ("Quero encontrar um mercado", "researcher", "market → researcher"),
+            ("Onde ficam os bombeiros?", "researcher", "fire station → researcher"),
+            ("Há piscinas municipais abertas?", "researcher", "sports/pool → researcher"),
+        ]
+
+        for query, expected_agent, description in service_tests:
+            decision = supervisor._fallback_routing(query, "")
+            agents = decision["agents"]
+            if expected_agent in agents:
+                passed += 1
+                print(f"  \033[1;32m✅ PASS\033[0m: {description}")
+                print(f"      Query: {query}")
+                print(f"      Agents: {agents}")
+            else:
+                failed += 1
+                print(f"  \033[1;31m❌ FAIL\033[0m: {description}")
+                print(f"      Query: {query}")
+                print(f"      Expected '{expected_agent}' in {agents}")
+
+        # =================================================================
+        # FREQUENCY KEYWORD ROUTING TESTS
+        # =================================================================
+        print("\n\033[1m📋 Section 3: Frequency/Headway Routing\033[0m")
+        print("-" * 50)
+
+        frequency_tests = [
+            ("How often does the metro come?", "transport", "frequency EN → transport"),
+            ("De quanto em quanto tempo passa o 28E?", "transport", "frequency PT → transport"),
+            ("What's the headway on the Sintra line?", "transport", "headway → transport"),
+            ("Qual a frequência do comboio para Cascais?", "transport", "frequência → transport"),
+            ("What's the interval between buses?", "transport", "intervalo → transport"),
+        ]
+
+        for query, expected_agent, description in frequency_tests:
+            decision = supervisor._fallback_routing(query, "")
+            agents = decision["agents"]
+            if expected_agent in agents:
+                passed += 1
+                print(f"  \033[1;32m✅ PASS\033[0m: {description}")
+                print(f"      Agents: {agents}")
+            else:
+                failed += 1
+                print(f"  \033[1;31m❌ FAIL\033[0m: {description}")
+                print(f"      Expected '{expected_agent}' in {agents}")
+
+        # =================================================================
+        # OUT-OF-SCOPE FALLBACK TESTS
+        # =================================================================
+        print("\n\033[1m📋 Section 4: Out-of-Scope Fallback\033[0m")
+        print("-" * 50)
+
+        oos_tests = [
+            ("What is the capital of Japan?", "General OOS query"),
+            ("Como se diz obrigado em mandarim?", "Language/trivia OOS"),
+            ("Bom dia!", "Greeting"),
+        ]
+
+        for query, description in oos_tests:
+            decision = supervisor._fallback_routing(query, "")
+            agents = decision["agents"]
+            print(f"  \033[1m📝\033[0m {description}: \"{query[:40]}\"")
+            print(f"      Agents: {agents} | Direct: {'Yes' if decision['direct_response'] else 'No'}")
+
+        # =================================================================
+        # SUMMARY
+        # =================================================================
+        total = passed + failed
+        print("\n" + "=" * 60)
+        print("\033[1m📊 SUPERVISOR TEST SUMMARY\033[0m")
+        print("=" * 60)
+        print(f"\033[1;32m✅ Passed: {passed}/{total}\033[0m")
+        if failed > 0:
+            print(f"\033[1;31m❌ Failed: {failed}/{total}\033[0m")
+        else:
+            print("\033[1;32m🎉 ALL FALLBACK ROUTING TESTS PASSED!\033[0m")
+        print("=" * 60)
+
         print("\n\033[1;32m✅ Supervisor agent working!\033[0m")
 
     except Exception as e:
         print(f"\n\033[1;31m❌ Error:\033[0m {e}")
+        import traceback
+        traceback.print_exc()

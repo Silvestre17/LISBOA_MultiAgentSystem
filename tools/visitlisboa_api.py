@@ -1310,7 +1310,7 @@ def get_event_categories() -> str:
             output_parts.append(f"  • {cat}: {count} events")
         
         output_parts.append(f"\n📊 **Total events:** {len(events_data)}")
-        output_parts.append("\n💡 Use search_cultural_events(query='your interest') for semantic search.")
+        output_parts.append("\n💡 Podes perguntar-me sobre um tipo de evento específico para pesquisa detalhada.")
         
         return "\n".join(output_parts)
     
@@ -1355,7 +1355,7 @@ def get_place_categories() -> str:
             output_parts.append(f"  ... and {len(sorted_categories) - 20} more categories")
         
         output_parts.append(f"\n📊 **Total places:** {len(places_data)}")
-        output_parts.append("\n💡 Use search_places_attractions(query='your interest') for semantic search.")
+        output_parts.append("\n💡 Podes perguntar-me sobre um tipo de local específico para pesquisa detalhada.")
         
         return "\n".join(output_parts)
     

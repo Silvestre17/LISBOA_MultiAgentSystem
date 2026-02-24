@@ -27,6 +27,11 @@ def normalize_headers(text: str) -> str:
     Returns:
         str: Text with normalized header levels.
     """
+    # First: convert setext-style headers (underline with === or ---) to ATX style
+    # "Title\n=====" -> "# Title"  and  "Title\n-----" -> "## Title"
+    text = re.sub(r'^(.+)\n={3,}\s*$', r'### \1', text, flags=re.MULTILINE)
+    text = re.sub(r'^(.+)\n-{3,}\s*$', r'### \1', text, flags=re.MULTILINE)
+
     lines = text.split("\n")
     result = []
     for line in lines:
@@ -79,16 +84,16 @@ def add_section_separators(text: str) -> str:
 
 def clean_newlines(text: str) -> str:
     """
-    Removes excessive consecutive blank lines (max 2).
+    Removes excessive consecutive blank lines (max 1 blank line between content).
 
     Args:
         text: Text with potentially excessive newlines.
 
     Returns:
-        str: Text with at most 2 consecutive blank lines.
+        str: Text with at most 2 consecutive newlines (1 blank line).
     """
-    # Replace 3+ consecutive newlines with 2
-    return re.sub(r"\n{4,}", "\n\n\n", text)
+    # Replace 3+ consecutive newlines with 2 (single blank line)
+    return re.sub(r"\n{3,}", "\n\n", text)
 
 
 def normalize_bullets(text: str) -> str:
@@ -151,7 +156,7 @@ def normalize_bullets(text: str) -> str:
             content = stripped
             
         # Detect numbered lists and format labels (Data/Hora: -> **Data/Hora**: )
-        if not "**" in content and not content.startswith("#"):
+        if "**" not in content and not content.startswith("#"):
             m_num = re.match(r'^(\d+\.)\s+(.*)', content)
             if m_num:
                 num = m_num.group(1)
@@ -174,10 +179,14 @@ def normalize_bullets(text: str) -> str:
             if emoji_pattern.match(clean_content) or clean_content.startswith('️') or is_numbered:
                 out.append(f"{spaces}- {content}")
             else:
-                out.append(f"{spaces}- 🔹 {content}")
+                out.append(f"{spaces}- {content}")
         else:
-            # Not a bullet, might be a nested paragraph, header, or normal text
-            out.append(line)
+            # Non-bullet line: use modified content (with auto-bolded labels/numbers)
+            # if content was changed, rebuild the line preserving indentation
+            if content != stripped:
+                out.append(f"{spaces}{content}")
+            else:
+                out.append(line)
                 
     return "\n".join(out)
 
@@ -195,14 +204,13 @@ def ensure_clickable_urls(text: str) -> str:
     Returns:
         str: Text with all URLs made clickable.
     """
-    # Match bare URLs not already in markdown format
-    # Negative lookbehind: not preceded by ]( or ](
-    # Negative lookbehind: not preceded by ` (code)
-    url_pattern = r'(?<!\]\()(?<!\`)(?<!\[)(https?://[^\s\)]+)'
+    # Match bare URLs not preceded by ]( (already a markdown link target)
+    url_pattern = re.compile(r'(?<!\]\()(https?://[^\s\)\]]+)')
+    # Pattern for existing markdown links: [text](url)
+    md_link_pattern = re.compile(r'\[[^\]]*\]\([^)]+\)')
 
     def replace_url(match):
         url = match.group(1)
-        # Extract domain for display
         try:
             domain = urlparse(url).netloc
             if domain.startswith("www."):
@@ -211,8 +219,6 @@ def ensure_clickable_urls(text: str) -> str:
         except Exception:
             return f"[Link]({url})"
 
-    # Only replace URLs that aren't already in markdown link format
-    # Check if URL is preceded by [...]( pattern
     lines = text.split("\n")
     result = []
     in_code_block = False
@@ -228,13 +234,143 @@ def ensure_clickable_urls(text: str) -> str:
             result.append(line)
             continue
 
-        # Check if line already has markdown links
-        if "](http" in line or "](" in line:
-            result.append(line)
+        # Find existing markdown links in the line and protect their URLs
+        # Replace bare URLs only outside of markdown link constructs
+        existing_links = [(m.start(), m.end()) for m in md_link_pattern.finditer(line)]
+
+        if not existing_links:
+            # No existing links - safe to replace all bare URLs
+            result.append(url_pattern.sub(replace_url, line))
+        else:
+            # Has existing links - only replace URLs outside of them
+            new_line = []
+            last_end = 0
+            for start, end in existing_links:
+                # Process text before the markdown link (may have bare URLs)
+                segment = line[last_end:start]
+                new_line.append(url_pattern.sub(replace_url, segment))
+                # Keep the markdown link as-is
+                new_line.append(line[start:end])
+                last_end = end
+            # Process remaining text after last markdown link
+            segment = line[last_end:]
+            new_line.append(url_pattern.sub(replace_url, segment))
+            result.append("".join(new_line))
+
+    return "\n".join(result)
+
+
+def strip_internal_sections(text: str) -> str:
+    """
+    Removes sections that expose internal system details (QA, disclaimers, etc.)
+    that should never appear in user-facing responses.
+
+    Matches header-based sections like:
+        - ### Observações e disclaimers
+        - ### Checklist de Completude
+        - ### Quality Check
+        - ### QA Results / Data Validation
+        - ### Fonte & Observações (when it contains QA content)
+
+    Args:
+        text: Formatted markdown text.
+
+    Returns:
+        str: Text with internal sections removed.
+    """
+    # Patterns for internal section headers (case-insensitive)
+    internal_patterns = [
+        r'observa[çc][õo]es\s+e\s+disclaimers',
+        r'checklist\s+de\s+completude',
+        r'quality\s+(check|assurance)',
+        r'qa[\s_]+(results?|validation|disclaimers?)',
+        r'data\s+validation',
+        r'completeness\s+check',
+        r'disclaimers?\s*$',
+        r'notas?\s+de\s+qualidade',
+        r'controlo\s+de\s+qualidade',
+    ]
+    combined = '|'.join(internal_patterns)
+    # Match headers (any level) containing these patterns
+    header_re = re.compile(
+        r'^(#{1,6})\s+.*?(' + combined + r').*$',
+        re.IGNORECASE | re.MULTILINE
+    )
+
+    lines = text.split('\n')
+    result = []
+    skip_until_next_header = False
+    skip_header_level = 0
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Check if this is a header
+        header_match = re.match(r'^(#{1,6})\s+', stripped)
+
+        if header_match:
+            level = len(header_match.group(1))
+
+            if skip_until_next_header:
+                # Found a new header - check if same or higher level (stop skipping)
+                if level <= skip_header_level:
+                    skip_until_next_header = False
+                else:
+                    # Sub-header of the skipped section, continue skipping
+                    continue
+
+            # Check if this header matches an internal pattern
+            if header_re.match(stripped):
+                skip_until_next_header = True
+                skip_header_level = level
+                continue
+
+        if skip_until_next_header:
             continue
 
-        # Replace bare URLs
-        result.append(re.sub(url_pattern, replace_url, line))
+        result.append(line)
+
+    return '\n'.join(result)
+
+
+def add_section_spacing(text: str) -> str:
+    """
+    Ensures blank lines before section-like markers so content blocks
+    are visually separated (e.g. Avisos, Dicas, Fonte, Nota, headers).
+
+    This prevents different content blocks from appearing 'cramped'
+    together without any breathing room.
+
+    Args:
+        text: Markdown text to process.
+
+    Returns:
+        str: Text with proper spacing before section markers.
+    """
+    # Patterns that should always have a blank line before them
+    section_markers = [
+        r"^#{1,4}\s",                     # Any markdown header
+        r"^(?:⚠️|⚠)\s*\*\*(?:Avisos|Aviso|Warnings?|Nota|Note)",
+        r"^💡\s*\*\*(?:Dicas?|Tips?|Sugest)",
+        r"^📌\s*\*\*(?:Fonte|Source)",
+        r"^🌡️",                           # Weather emoji section
+        r"^🌤️",
+        r"^🌧️",
+        r"^---\s*$",                       # Horizontal rules
+    ]
+    combined = "|".join(f"(?:{p})" for p in section_markers)
+    section_re = re.compile(combined)
+
+    lines = text.split("\n")
+    result = []
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if i > 0 and section_re.match(stripped):
+            # Check if previous line is already blank
+            prev = result[-1].strip() if result else ""
+            if prev != "":
+                result.append("")
+        result.append(line)
 
     return "\n".join(result)
 
@@ -244,11 +380,17 @@ def format_response(text: str) -> str:
     Main formatting pipeline for LLM responses.
 
     Applies all formatting transformations in order:
-        1. Normalize headers (avoid h1/h2, use h3+)
-        2. Add section separators
+        1. Strip internal/QA sections that should never reach the user
+        2. Normalize headers (avoid h1/h2, use h3+)
         3. Clean excessive newlines
-        4. Normalize bullet styles
-        5. Ensure URLs are clickable
+        4. Add spacing between distinct content sections
+        5. Normalize bullet styles
+        6. Ensure URLs are clickable
+
+    Note:
+        Section separators (---) are NOT injected automatically.
+        They create excessive visual spacing in Streamlit. Agents can
+        include them explicitly when needed.
 
     Args:
         text: Raw LLM response text.
@@ -259,9 +401,10 @@ def format_response(text: str) -> str:
     if not text or not isinstance(text, str):
         return text or ""
 
+    text = strip_internal_sections(text)
     text = normalize_headers(text)
-    text = add_section_separators(text)
     text = clean_newlines(text)
+    text = add_section_spacing(text)
     text = normalize_bullets(text)
     text = ensure_clickable_urls(text)
 
@@ -330,8 +473,7 @@ Too many blank lines above should be reduced.
             (line.startswith("## ") and not line.startswith("### "))
             for line in output.split("\n")
         ),
-        "Has --- separators": "---" in output,
-        "No excessive newlines": "\n\n\n\n" not in output,
+        "No excessive newlines": "\n\n\n" not in output,
         "URLs are clickable": "](http" in output,
     }
 

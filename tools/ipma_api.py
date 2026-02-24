@@ -431,7 +431,7 @@ def get_weather_warnings(area: str = "LSB") -> str:
             response += f"   📝 {text}\n"
         response += "\n"
     
-    response += "💡 Check IPMA.pt for detailed information."
+    response += "� Fonte: [IPMA](https://www.ipma.pt) - Instituto Português do Mar e da Atmosfera"
     
     return response
 

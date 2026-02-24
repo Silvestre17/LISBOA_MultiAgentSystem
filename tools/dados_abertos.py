@@ -334,6 +334,102 @@ CATEGORY_SYNONYMS = {
 }
 
 
+# ==========================================================================
+# Category Taxonomy (structured grouping of 168 datasets)
+# ==========================================================================
+
+CATEGORY_TAXONOMY = {
+    "saúde": {
+        "en": "Health",
+        "keywords": ["hospital", "farmácia", "centro de saúde", "clínica", "prestação de cuidados", "saúde"],
+        "description": "Hospitais, farmácias, centros de saúde, clínicas"
+    },
+    "educação": {
+        "en": "Education",
+        "keywords": ["escola", "universidade", "faculdade", "ensino", "agrupamento", "creche", "instituto", "formação", "educação"],
+        "description": "Escolas, universidades, institutos, creches"
+    },
+    "segurança": {
+        "en": "Safety & Emergency",
+        "keywords": ["polícia", "bombeiros", "proteção civil", "emergência", "segurança", "defesa", "gnr"],
+        "description": "Polícia, bombeiros, proteção civil, emergências"
+    },
+    "cultura": {
+        "en": "Culture & Heritage",
+        "keywords": ["museu", "biblioteca", "teatro", "cinema", "galeria", "monumento", "património", "cultura", "arquivo"],
+        "description": "Museus, bibliotecas, teatros, cinemas, monumentos"
+    },
+    "ambiente": {
+        "en": "Environment & Green Spaces",
+        "keywords": ["jardim", "parque", "espaço verde", "árvore", "reciclagem", "ecoponto", "ambiente", "floresta"],
+        "description": "Jardins, parques, espaços verdes, reciclagem"
+    },
+    "transportes": {
+        "en": "Transport & Mobility",
+        "keywords": ["metro", "autocarro", "comboio", "estacionamento", "bicicleta", "mobilidade", "gira", "transporte"],
+        "description": "Estacionamento, bicicletas, mobilidade urbana"
+    },
+    "turismo": {
+        "en": "Tourism & Accommodation",
+        "keywords": ["hotel", "alojamento", "miradouro", "posto de turismo", "turismo"],
+        "description": "Hotéis, alojamento, miradouros, postos de turismo"
+    },
+    "comércio": {
+        "en": "Commerce & Markets",
+        "keywords": ["mercado", "feira", "loja", "centro comercial", "quiosque", "comércio"],
+        "description": "Mercados, feiras, centros comerciais, lojas"
+    },
+    "serviços": {
+        "en": "Public Services",
+        "keywords": ["junta", "câmara", "loja do cidadão", "embaixada", "cemitério", "instalações sanitárias", "wc"],
+        "description": "Juntas de freguesia, câmara municipal, embaixadas, WC públicos"
+    },
+    "desporto": {
+        "en": "Sports & Leisure",
+        "keywords": ["desporto", "piscina", "fitness", "instalações desportivas", "recreation"],
+        "description": "Instalações desportivas, piscinas, fitness ao ar livre"
+    },
+}
+
+
+def get_datasets_for_category(category: str) -> pd.DataFrame:
+    """
+    Returns datasets matching a taxonomy category.
+    
+    Args:
+        category: Category key (e.g., 'saúde', 'educação') or English name.
+        
+    Returns:
+        pd.DataFrame: Matching datasets.
+    """
+    if DF_METADATA.empty:
+        return pd.DataFrame()
+    
+    category_lower = category.lower().strip()
+    
+    # Find matching taxonomy entry
+    keywords = []
+    for cat_key, cat_info in CATEGORY_TAXONOMY.items():
+        if cat_key == category_lower or cat_info["en"].lower() == category_lower:
+            keywords = cat_info["keywords"]
+            break
+    
+    if not keywords:
+        # Fallback to search_datasets
+        return search_datasets(category)
+    
+    # Search using all category keywords
+    combined_mask = pd.Series([False] * len(DF_METADATA))
+    for kw in keywords:
+        mask = (
+            DF_METADATA['title'].str.lower().str.contains(kw, na=False) |
+            DF_METADATA['description'].str.lower().str.contains(kw, na=False)
+        )
+        combined_mask = combined_mask | mask
+    
+    return DF_METADATA[combined_mask]
+
+
 def expand_search_terms(query: str) -> List[str]:
     """
     Expands a search query with semantic synonyms.
@@ -389,12 +485,53 @@ def search_datasets(query: str) -> pd.DataFrame:
 # ==========================================================================
 
 @tool
+def list_service_categories() -> str:
+    """
+    Lists all available service categories from Lisboa Aberta open data.
+    Useful when the user asks "what services can you find?" or needs to browse categories.
+
+    Returns:
+        str: Formatted list of categories with descriptions and dataset counts.
+        
+    Examples:
+        >>> list_service_categories()
+    """
+    if DF_METADATA.empty:
+        return "❌ Error: Metadata not loaded."
+    
+    response = "📂 **Categorias de Serviços Disponíveis (Lisboa Aberta)**\n"
+    response += "=" * 55 + "\n\n"
+    
+    for cat_key, cat_info in CATEGORY_TAXONOMY.items():
+        # Count matching datasets
+        matches = get_datasets_for_category(cat_key)
+        count = len(matches)
+        
+        emoji_map = {
+            "saúde": "🏥", "educação": "🎓", "segurança": "🚔",
+            "cultura": "🏛️", "ambiente": "🌳", "transportes": "🚇",
+            "turismo": "🏨", "comércio": "🛒", "serviços": "🏢",
+            "desporto": "⚽",
+        }
+        emoji = emoji_map.get(cat_key, "📁")
+        
+        response += f"{emoji} **{cat_key.capitalize()}** ({cat_info['en']}) - {count} datasets\n"
+        response += f"   {cat_info['description']}\n\n"
+    
+    response += "💡 Podes perguntar por uma categoria específica para resultados mais detalhados.\n"
+    response += f"📊 Total: {len(DF_METADATA)} datasets available.\n"
+    
+    return response
+
+
+@tool
 def find_nearby_services(
     service_type: str,
     user_lat: Optional[float] = None,
     user_lon: Optional[float] = None,
     near_location_name: Optional[str] = None,
-    max_results: int = 5
+    max_results: int = 5,
+    category: Optional[str] = None
 ) -> str:
     """
     Search for public services in Lisbon (pharmacies, hospitals, schools, etc.) 
@@ -408,6 +545,8 @@ def find_nearby_services(
         near_location_name (str, optional): Name of a place to filter by proximity (e.g., "Martim Moniz").
                                            Used if user_lat/lon are not provided.
         max_results (int): Maximum number of results to return (default: 5).
+        category (str, optional): Filter by taxonomy category (e.g., 'saúde', 'educação', 'cultura').
+                                 Use list_service_categories() to see all categories.
 
     Returns:
         str: Formatted list of services with names, addresses, and distances.
@@ -415,6 +554,7 @@ def find_nearby_services(
     Examples:
         >>> find_nearby_services("farmácias", user_lat=38.7223, user_lon=-9.1393)
         >>> find_nearby_services("hospitais", near_location_name="Martim Moniz")
+        >>> find_nearby_services("museu", category="cultura")
     """
     if DF_METADATA.empty:
         return "❌ Error: Metadata not loaded. Check if lisbon_datasets_clean.json exists."
@@ -444,8 +584,28 @@ def find_nearby_services(
             except ImportError:
                 return f"❌ Could not resolve location '{near_location_name}' in Open Data. External geocoder unavailable."
 
-    # Search for matching datasets
-    matches = search_datasets(service_type)
+    # Search for matching datasets (with optional category filtering)
+    if category:
+        # Filter within the specified taxonomy category first
+        category_datasets = get_datasets_for_category(category)
+        if not category_datasets.empty:
+            # Search within category datasets
+            search_terms = expand_search_terms(service_type)
+            combined_mask = pd.Series([False] * len(category_datasets), index=category_datasets.index)
+            for term in search_terms:
+                mask = (
+                    category_datasets['title'].str.lower().str.contains(term, na=False) |
+                    category_datasets['description'].str.lower().str.contains(term, na=False)
+                )
+                combined_mask = combined_mask | mask
+            matches = category_datasets[combined_mask]
+            if matches.empty:
+                # If no match within category, use all category datasets
+                matches = category_datasets
+        else:
+            matches = search_datasets(service_type)
+    else:
+        matches = search_datasets(service_type)
     
     if matches.empty:
         # Try alternative search terms
@@ -588,7 +748,7 @@ def list_available_datasets(category: Optional[str] = None) -> str:
     
     if len(df) > 20:
         response += f"... and {len(df) - 20} more datasets.\n"
-        response += "💡 Use a category filter to narrow results."
+        response += "💡 Filtra por categoria para resultados mais específicos."
     
     return response
 
@@ -876,6 +1036,12 @@ def find_place_in_datasets(query: str, max_results: int = 5) -> str:
 # Test Block
 # ==========================================================================
 if __name__ == "__main__":
+    import sys
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except AttributeError:
+        pass
+
     print("\n" + "=" * 70)
     print("\033[1m🧪 COMPREHENSIVE TEST: Dados Abertos Lisboa Tools\033[0m")
     print("=" * 70)
@@ -1136,7 +1302,7 @@ if __name__ == "__main__":
         {"service_type": "estacionamento", "max_results": 3}
     )
     
-    # TEST 28: Find Services - Fontanários (Fountains)
+    # TEST 28: Find Services - Bibliotecas (Libraries)
     run_test(
         "Find Services - Bibliotecas (Libraries)",
         find_nearby_services.invoke,
@@ -1148,6 +1314,169 @@ if __name__ == "__main__":
         "Find Services - Miradouros (Viewpoints)",
         find_nearby_services.invoke,
         {"service_type": "miradouros", "max_results": 3}
+    )
+    
+    # =========================================================================
+    # CATEGORY TAXONOMY TESTS
+    # =========================================================================
+    
+    # TEST 30: Validate CATEGORY_TAXONOMY structure
+    def _test_taxonomy_structure():
+        errors = []
+        if not isinstance(CATEGORY_TAXONOMY, dict):
+            raise AssertionError("CATEGORY_TAXONOMY is not a dict")
+        
+        expected_categories = [
+            "saúde", "educação", "segurança", "cultura", "ambiente",
+            "transportes", "turismo", "comércio", "serviços", "desporto"
+        ]
+        
+        for cat in expected_categories:
+            if cat not in CATEGORY_TAXONOMY:
+                errors.append(f"Missing category: {cat}")
+            else:
+                info = CATEGORY_TAXONOMY[cat]
+                if "en" not in info:
+                    errors.append(f"{cat}: missing 'en' key")
+                if "keywords" not in info:
+                    errors.append(f"{cat}: missing 'keywords' key")
+                elif not isinstance(info["keywords"], list) or len(info["keywords"]) == 0:
+                    errors.append(f"{cat}: 'keywords' must be non-empty list")
+                if "description" not in info:
+                    errors.append(f"{cat}: missing 'description' key")
+        
+        if errors:
+            raise AssertionError("\n".join(errors))
+        
+        return f"✅ {len(CATEGORY_TAXONOMY)} categories validated\n" + \
+               "\n".join(f"   {k}: {v['en']} ({len(v['keywords'])} keywords)" 
+                         for k, v in CATEGORY_TAXONOMY.items())
+    
+    run_test("CATEGORY_TAXONOMY Structure Validation", _test_taxonomy_structure)
+    
+    # TEST 31: get_datasets_for_category() - saúde
+    def _test_get_datasets_saude():
+        df = get_datasets_for_category("saúde")
+        if df.empty:
+            raise AssertionError("No datasets found for 'saúde'")
+        result = f"Found {len(df)} datasets for 'saúde':\n"
+        result += "\n".join(f"   - {t}" for t in df['title'].head(5).tolist())
+        return result
+    
+    run_test("get_datasets_for_category('saúde')", _test_get_datasets_saude)
+    
+    # TEST 32: get_datasets_for_category() - English name
+    def _test_get_datasets_english():
+        df = get_datasets_for_category("Health")
+        if df.empty:
+            raise AssertionError("No datasets found for 'Health' (English)")
+        return f"Found {len(df)} datasets for 'Health' (English lookup)"
+    
+    run_test("get_datasets_for_category('Health') - English Name", _test_get_datasets_english)
+    
+    # TEST 33: get_datasets_for_category() - educação
+    def _test_get_datasets_educacao():
+        df = get_datasets_for_category("educação")
+        if df.empty:
+            raise AssertionError("No datasets found for 'educação'")
+        return f"Found {len(df)} datasets for 'educação'"
+    
+    run_test("get_datasets_for_category('educação')", _test_get_datasets_educacao)
+    
+    # TEST 34: get_datasets_for_category() - unknown category fallback
+    def _test_get_datasets_unknown():
+        df = get_datasets_for_category("nonexistent_xyz")
+        return f"Fallback search returned {len(df)} datasets (expected: 0 or small)"
+    
+    run_test("get_datasets_for_category('nonexistent_xyz') - Fallback", _test_get_datasets_unknown)
+    
+    # TEST 35: list_service_categories tool
+    run_test(
+        "list_service_categories Tool Output",
+        list_service_categories.invoke,
+        {}
+    )
+    
+    # TEST 36: list_service_categories validates content
+    def _test_categories_content():
+        result = list_service_categories.invoke({})
+        checks = {
+            "saúde": "Saúde" in result or "Health" in result,
+            "educação": "Educação" in result or "Education" in result,
+            "segurança": "Segurança" in result or "Safety" in result,
+            "cultura": "Cultura" in result or "Culture" in result,
+            "desporto": "Desporto" in result or "Sports" in result,
+            "has_counts": "dataset" in result.lower(),
+        }
+        errors = [k for k, v in checks.items() if not v]
+        if errors:
+            raise AssertionError(f"Missing in output: {errors}")
+        return f"✅ All expected categories present in output ({len(result)} chars)"
+    
+    run_test("list_service_categories Content Validation", _test_categories_content)
+    
+    # TEST 37: find_nearby_services WITH category='saúde'
+    run_test(
+        "find_nearby_services + category='saúde' (Pharmacies near Rossio)",
+        find_nearby_services.invoke,
+        {
+            "service_type": "farmácias",
+            "user_lat": LISBON_CENTER_LAT,
+            "user_lon": LISBON_CENTER_LON,
+            "max_results": 3,
+            "category": "saúde"
+        }
+    )
+    
+    # TEST 38: find_nearby_services WITH category='cultura' 
+    run_test(
+        "find_nearby_services + category='cultura' (Museums/Libraries)",
+        find_nearby_services.invoke,
+        {
+            "service_type": "bibliotecas",
+            "user_lat": LISBON_CENTER_LAT,
+            "user_lon": LISBON_CENTER_LON,
+            "max_results": 3,
+            "category": "cultura"
+        }
+    )
+    
+    # TEST 39: find_nearby_services WITH category='ambiente' (Parks/Gardens)
+    run_test(
+        "find_nearby_services + category='ambiente' (Parks/Gardens)",
+        find_nearby_services.invoke,
+        {
+            "service_type": "jardins",
+            "user_lat": LISBON_CENTER_LAT,
+            "user_lon": LISBON_CENTER_LON,
+            "max_results": 3,
+            "category": "ambiente"
+        }
+    )
+    
+    # TEST 40: find_nearby_services with non-matching category (should still work)
+    run_test(
+        "find_nearby_services + category='desporto' + service='farmácias' (Cross-category)",
+        find_nearby_services.invoke,
+        {
+            "service_type": "farmácias",
+            "max_results": 3,
+            "category": "desporto"
+        }
+    )
+    
+    # =========================================================================
+    # NEAR LOCATION NAME TESTS
+    # =========================================================================
+    # TEST 41: find_nearby_services with near_location_name
+    run_test(
+        "find_nearby_services near 'Praça do Comércio'",
+        find_nearby_services.invoke,
+        {
+            "service_type": "farmácias",
+            "near_location_name": "Praça do Comércio",
+            "max_results": 3
+        }
     )
     
     # =========================================================================

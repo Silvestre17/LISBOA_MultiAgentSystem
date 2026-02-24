@@ -178,12 +178,12 @@ def test_no_import_json_in_loops(results: TestResults):
 # ==========================================================================
 
 def test_no_duplicate_openai_block(results: TestResults):
-    """Tests that app_v1.py has no duplicate OpenAI provider block."""
-    print("\n\033[1m📋 A3: No Duplicate OpenAI Block in app_v1.py\033[0m")
+    """Tests that app.py has no duplicate OpenAI provider block."""
+    print("\n\033[1m📋 A3: No Duplicate OpenAI Block in app.py\033[0m")
     print("-" * 50)
     
     try:
-        app_path = os.path.join(os.path.dirname(__file__), '..', 'app_v1.py')
+        app_path = os.path.join(os.path.dirname(__file__), '..', 'app.py')
         with open(app_path, 'r', encoding='utf-8') as f:
             content = f.read()
         
@@ -191,14 +191,14 @@ def test_no_duplicate_openai_block(results: TestResults):
         count = content.count('elif selected_provider == "openai":')
         
         if count == 1:
-            results.add_pass(f"app_v1.py: exactly 1 OpenAI elif block (found {count})")
+            results.add_pass(f"app.py: exactly 1 OpenAI elif block (found {count})")
         elif count == 0:
-            results.add_fail("app_v1.py OpenAI block", "No OpenAI elif block found (expected 1)")
+            results.add_fail("app.py OpenAI block", "No OpenAI elif block found (expected 1)")
         else:
-            results.add_fail("app_v1.py OpenAI block", f"Found {count} OpenAI elif blocks (expected 1)")
+            results.add_fail("app.py OpenAI block", f"Found {count} OpenAI elif blocks (expected 1)")
             
     except Exception as e:
-        results.add_fail("app_v1.py check", str(e))
+        results.add_fail("app.py check", str(e))
 
 
 # ==========================================================================

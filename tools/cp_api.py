@@ -1196,6 +1196,11 @@ def get_stop_departures(
             WHERE st.stop_id = ?
             AND t.service_id IN ({placeholders})
             AND st.departure_time >= ?
+            AND st.stop_sequence < (
+                SELECT MAX(st2.stop_sequence)
+                FROM stop_times st2
+                WHERE st2.trip_id = st.trip_id
+            )
             ORDER BY st.departure_time
             LIMIT ?
         """
@@ -1456,7 +1461,7 @@ def get_train_status() -> str:
     response += "\n" + "-" * 50 + "\n"
     response += f"📍 **AML Coverage**: {len(aml_stations)} stations\n"
     response += "🔗 Lines: Cascais, Sintra, Azambuja, Fertagus\n"
-    response += "💡 Use `search_cp_stations` to find specific stations.\n"
+    response += "💡 Podes perguntar por uma estação específica para mais detalhes.\n"
     
     return response
 
@@ -1518,8 +1523,11 @@ def search_cp_stations(query: str) -> str:
         # Get routes at this stop
         routes = get_routes_at_stop(stop_id)
         if routes:
-            route_names = [r.get('route_short_name') or r.get('route_long_name') for r in routes[:5]]
-            response += f"   🚆 Routes: {', '.join(filter(None, route_names))}\n"
+            route_names = list(dict.fromkeys(
+                r.get('route_short_name') or r.get('route_long_name') for r in routes
+            ))
+            route_names = [n for n in route_names if n]
+            response += f"   🚆 Routes: {', '.join(route_names[:8])}\n"
         
         response += "\n"
     
@@ -1590,7 +1598,7 @@ def get_train_schedule(station_name: str, limit: int = 10) -> str:
         response += "\n"
     
     response += "-" * 50 + "\n"
-    response += "💡 Use `get_train_status` for real-time delays.\n"
+    response += "💡 Podes perguntar por atrasos em tempo real de um comboio específico.\n"
     
     return response
 
@@ -1620,10 +1628,19 @@ def get_cp_routes() -> str:
     response = "🚆 **CP Routes from GTFS Data**\n"
     response += "=" * 50 + "\n\n"
     
+    # Deduplicate routes by short name (GTFS has multiple entries per route)
+    seen = set()
+    unique_routes = []
+    for route in routes:
+        key = route['route_short_name'] or route['route_id']
+        if key not in seen:
+            seen.add(key)
+            unique_routes.append(route)
+    
     # Group by route type
     rail_types = {0: 'Tram', 1: 'Metro', 2: 'Rail', 3: 'Bus', 7: 'Funicular', 11: 'Trolleybus', 12: 'Monorail'}
     
-    for route in routes:
+    for route in unique_routes:
         route_type = rail_types.get(route['route_type'], 'Other')
         name = route['route_short_name'] or route['route_long_name'] or route['route_id']
         long_name = route['route_long_name'] or ''
@@ -1693,7 +1710,8 @@ def plan_train_trip(origin: str, destination: str) -> str:
         cursor = conn.cursor()
         placeholders = ','.join(['?' for _ in active_services])
         
-        # Find trips that go from origin to destination (origin stop before dest stop)
+        # Find ALL trips that go from origin to destination (no LIMIT)
+        # We need all results to show accurate remaining count
         query = f"""
             SELECT 
                 st_origin.trip_id,
@@ -1714,7 +1732,6 @@ def plan_train_trip(origin: str, destination: str) -> str:
             AND t.service_id IN ({placeholders})
             AND st_origin.departure_time >= ?
             ORDER BY st_origin.departure_time
-            LIMIT 10
         """
         
         cursor.execute(query, [origin_id, dest_id] + active_services + [current_time])
@@ -1741,7 +1758,7 @@ def plan_train_trip(origin: str, destination: str) -> str:
                 return (f"❌ No direct train service found between **{origin_name}** and **{dest_name}**.\n\n"
                         "💡 These stations may be on different lines. Consider:\n"
                         "   • Transfer at a connecting station (e.g., Oriente, Entrecampos)\n"
-                        "   • Use `search_cp_stations` to find line information")
+                        "   • Podes perguntar por informação sobre uma estação específica")
             else:
                 return (f"⏰ No more trains today from **{origin_name}** to **{dest_name}**.\n\n"
                         f"There are {total_trips} trips on other days. Try again tomorrow or check schedules online.")
@@ -1758,23 +1775,36 @@ def plan_train_trip(origin: str, destination: str) -> str:
             hour = int(parts[0]) % 24
             return f"{hour:02d}:{parts[1]}"
         
-        # Calculate travel time from first trip for summary
-        first_trip = trips[0]
-        first_dep_mins = parse_gtfs_time(first_trip['origin_departure'])
-        first_arr_mins = parse_gtfs_time(first_trip['dest_arrival'])
-        travel_time = first_arr_mins - first_dep_mins
-        if travel_time < 0:
-            travel_time += 24 * 60
+        # Calculate travel times for ALL trips to find min/max range
+        def calc_trip_travel(trip) -> int:
+            dep_m = parse_gtfs_time(trip['origin_departure'])
+            arr_m = parse_gtfs_time(trip['dest_arrival'])
+            diff = arr_m - dep_m
+            return diff + 24 * 60 if diff < 0 else diff
         
-        # Get route name from first trip
-        route_name = first_trip['route_short_name'] or first_trip['route_long_name'] or 'CP'
+        trip_durations = [calc_trip_travel(t) for t in trips]
+        min_duration = min(trip_durations)
+        max_duration = max(trip_durations)
+        
+        # Get route name: use the MOST COMMON route across all trips
+        # (e.g., Oriente->Sintra has 68 trips on "Linha de Sintra" and 14 on
+        # "Linha da Azambuja" - we should show "Linha de Sintra")
+        from collections import Counter
+        route_counts = Counter(
+            (t['route_short_name'] or t['route_long_name'] or 'CP') for t in trips
+        )
+        route_name = route_counts.most_common(1)[0][0]
+        distinct_routes = list(route_counts.keys())
+        multi_route = len(distinct_routes) > 1
         
         # Get real-time delay info
         aml_trains = get_cp_aml_trains()
         
-        # Build map of real-time train info (keyed by departure time or headsign)
+        # Build map of real-time trains heading to destination, keyed by departure time
+        # for matching with GTFS scheduled departures
         realtime_trains = {}
         route_has_delays = False
+        route_delay_mins = 0
         for train in aml_trains:
             train_headsign = train.get('destination', {}).get('designation', '')
             if dest_name.lower() in train_headsign.lower() or train_headsign.lower() in dest_name.lower():
@@ -1788,51 +1818,61 @@ def plan_train_trip(origin: str, destination: str) -> str:
                 }
                 if delay_mins > 0:
                     route_has_delays = True
+                    route_delay_mins = max(route_delay_mins, delay_mins)
         
-        # Build response - Clean formatting without technical jargon
+        # Build response
         response = f"🚆 **Comboio: {origin_name} → {dest_name}**\n"
         response += "=" * 50 + "\n\n"
         
         # Summary box at top
         response += "📊 **RESUMO DA VIAGEM**\n"
-        response += f"   🚆 Linha: **{route_name}**\n"
-        response += f"   ⏱️ Duração: **{travel_time} minutos**\n"
+        if multi_route:
+            routes_str = ", ".join(distinct_routes)
+            response += f"   🚆 Linhas: **{routes_str}**\n"
+        else:
+            response += f"   🚆 Linha: **{route_name}**\n"
+        # Show duration range if trips vary, otherwise single value
+        if min_duration == max_duration:
+            response += f"   ⏱️ Duração: **{min_duration} minutos**\n"
+        else:
+            response += f"   ⏱️ Duração: **{min_duration}-{max_duration} minutos**\n"
         # Only show delay status if we have real-time info
         if realtime_trains:
             if route_has_delays:
-                max_delay = max(t['delay_mins'] for t in realtime_trains.values())
-                response += f"   📍 Estado: ⚠️ Alguns comboios com +{max_delay}min atraso\n"
+                response += f"   📍 Estado: ⚠️ Alguns comboios com +{route_delay_mins}min atraso\n"
             else:
                 response += "   📍 Estado: ✅ Comboios a horas (tempo real)\n"
         else:
             response += "   📍 Estado: ℹ️ Sem dados em tempo real\n"
+        response += f"   📊 Partidas restantes hoje: **{len(trips)}**\n"
         response += "\n"
         
         response += "-" * 50 + "\n"
-        response += "📋 **Próximas Partidas:**\n\n"
+        
+        # Show up to 8 departures
+        display_count = min(8, len(trips))
+        response += f"📋 **Próximas {display_count} Partidas:**\n\n"
         
         for i, trip in enumerate(trips[:8], 1):
             origin_dep = trip['origin_departure']
             dest_arr = trip['dest_arrival']
+            trip_route = trip['route_short_name'] or trip['route_long_name'] or 'CP'
             
-            # Calculate travel time in minutes
-            dep_mins = parse_gtfs_time(origin_dep)
-            arr_mins = parse_gtfs_time(dest_arr)
-            trip_travel_mins = arr_mins - dep_mins
-            if trip_travel_mins < 0:
-                trip_travel_mins += 24 * 60
+            # Calculate travel time in minutes from GTFS departure→arrival
+            trip_travel_mins = calc_trip_travel(trip)
             
             # Format display times
             dep_display = format_time(origin_dep)
             arr_display = format_time(dest_arr)
             
-            # Only show real-time indicators if we have actual data for this departure
-            # We don't have train numbers in GTFS, so we can't match specific departures
-            # Just show scheduled times without false confirmations
-            response += f"   🕐 **{dep_display}** → {arr_display} ({trip_travel_mins}min)\n"
+            response += f"   🕐 **{dep_display}** → {arr_display} ({trip_travel_mins}min)"
+            # Show route label per departure if multiple routes
+            if multi_route:
+                response += f" [{trip_route}]"
+            response += "\n"
         
         if len(trips) > 8:
-            response += f"\n   ... e mais {len(trips) - 8} partidas hoje.\n"
+            response += f"\n   ... e mais {len(trips) - 8} partidas restantes hoje.\n"
         
         response += "\n" + "-" * 50 + "\n"
         response += f"📅 {now.strftime('%A, %d %B %Y')} | {now.strftime('%H:%M')}\n"
@@ -1933,43 +1973,327 @@ def initialize_cp_gtfs(force_refresh: bool = False) -> str:
         return response
 
 
+@tool
+def get_train_frequency(
+    route_name: str,
+    station_name: Optional[str] = None,
+) -> str:
+    """
+    Estimates train service frequency (headway) for a CP train line.
+    Calculates average time between departures by time window.
+    Uses GTFS stop_times data since frequencies.txt is not available.
+
+    Args:
+        route_name: Train line/route name (e.g., 'Sintra', 'Cascais', 'Azambuja', 'Sado').
+        station_name: Optional station name to check frequency at.
+                     If not provided, uses the main origin station of the line.
+
+    Returns:
+        str: Formatted frequency information by time window.
+        
+    Examples:
+        >>> get_train_frequency("Sintra")
+        >>> get_train_frequency("Cascais", station_name="Cais do Sodré")
+    """
+    manager = CPGTFSManager()
+    conn = manager.get_db_connection()
+    if not conn:
+        return "CP GTFS database unavailable."
+
+    try:
+        cursor = conn.cursor()
+
+        # Find route matching name
+        cursor.execute(
+            "SELECT route_id, route_short_name, route_long_name FROM routes WHERE route_long_name LIKE ? OR route_short_name LIKE ?",
+            (f"%{route_name}%", f"%{route_name}%"),
+        )
+        route = cursor.fetchone()
+        if not route:
+            conn.close()
+            return f"Route '{route_name}' not found in CP data. Try: Sintra, Cascais, Azambuja, Sado"
+
+        route_id = route["route_id"]
+        route_display = route["route_long_name"] or route["route_short_name"]
+
+        # Get active services for today
+        active_services = manager.get_active_services()
+        if not active_services:
+            conn.close()
+            return "No active train services found for today."
+
+        ph_s = ",".join(["?" for _ in active_services])
+
+        # Determine which station to analyze
+        if station_name:
+            cursor.execute(
+                "SELECT stop_id, stop_name FROM stops WHERE stop_name LIKE ? LIMIT 1",
+                (f"%{station_name}%",),
+            )
+            stop_row = cursor.fetchone()
+            if not stop_row:
+                conn.close()
+                return f"Station '{station_name}' not found."
+            stop_id = stop_row["stop_id"]
+            stop_display = stop_row["stop_name"]
+        else:
+            # Use first station on the route
+            cursor.execute(
+                f"""
+                SELECT st.stop_id, s.stop_name
+                FROM stop_times st
+                JOIN trips t ON st.trip_id = t.trip_id
+                JOIN stops s ON st.stop_id = s.stop_id
+                WHERE t.route_id = ? AND t.service_id IN ({ph_s})
+                ORDER BY st.stop_sequence ASC
+                LIMIT 1
+                """,
+                [route_id] + active_services,
+            )
+            stop_row = cursor.fetchone()
+            if not stop_row:
+                conn.close()
+                return f"No scheduled trips found for '{route_name}' today."
+            stop_id = stop_row["stop_id"]
+            stop_display = stop_row["stop_name"]
+
+        # Get all departure times at this station for this route today
+        cursor.execute(
+            f"""
+            SELECT st.departure_time
+            FROM stop_times st
+            JOIN trips t ON st.trip_id = t.trip_id
+            WHERE t.route_id = ? AND st.stop_id = ? AND t.service_id IN ({ph_s})
+            ORDER BY st.departure_time ASC
+            """,
+            [route_id, stop_id] + active_services,
+        )
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        if not rows:
+            return f"No departures found for '{route_name}' at '{stop_display}' today."
+
+        # Parse times into minutes since midnight
+        departures = []
+        for row in rows:
+            time_str = row["departure_time"]
+            parts = time_str.split(":")
+            if len(parts) >= 2:
+                h, m = int(parts[0]), int(parts[1])
+                departures.append(h * 60 + m)
+
+        departures = sorted(set(departures))
+
+        # Define time windows
+        windows = [
+            ("🌅 Morning (06:00-09:59)", 360, 600),
+            ("☀️ Midday (10:00-13:59)", 600, 840),
+            ("🌤️ Afternoon (14:00-17:59)", 840, 1080),
+            ("🌙 Evening (18:00-22:59)", 1080, 1380),
+            ("🌃 Night (23:00-01:59)", 1380, 1560),
+        ]
+
+        response = f"🚆 **Frequência: {route_display}**\n"
+        response += f"📍 Estação: {stop_display}\n"
+        response += "=" * 50 + "\n\n"
+        response += f"📊 Total de comboios hoje: {len(departures)}\n\n"
+
+        for window_name, start_min, end_min in windows:
+            window_deps = [d for d in departures if start_min <= d < end_min]
+
+            if len(window_deps) < 2:
+                if len(window_deps) == 1:
+                    t = window_deps[0]
+                    response += f"{window_name}: 1 comboio ({t // 60:02d}:{t % 60:02d})\n"
+                else:
+                    response += f"{window_name}: Sem serviço\n"
+                continue
+
+            # Calculate headways between consecutive departures
+            headways = [window_deps[i + 1] - window_deps[i] for i in range(len(window_deps) - 1)]
+            avg_headway = sum(headways) / len(headways)
+            min_headway = min(headways)
+            max_headway = max(headways)
+
+            first_dep = window_deps[0]
+            last_dep = window_deps[-1]
+
+            response += f"{window_name}\n"
+            response += f"   ⏱️ Frequência média: **{avg_headway:.0f} min**\n"
+            response += f"   📏 Min/Max: {min_headway}-{max_headway} min\n"
+            response += f"   🕒 Primeiro: {first_dep // 60:02d}:{first_dep % 60:02d} | Último: {last_dep // 60:02d}:{last_dep % 60:02d}\n"
+            response += f"   📈 Comboios: {len(window_deps)}\n\n"
+
+        response += "📌 **Fonte:** Dados GTFS CP (horários programados)\n"
+        response += "⚠️ Consulte cp.pt para informação em tempo real.\n"
+
+        return response
+
+    except Exception as e:
+        logger.error(f"Error calculating train frequency: {e}")
+        return f"Error calculating train frequency: {e}"
+
+
 # ==========================================================================
 # Test Block
 # ==========================================================================
 
 if __name__ == "__main__":
-    print("\033[1m" + "=" * 60 + "\033[0m")
-    print("\033[1m🧪 CP TRAINS API - TEST SUITE (with GTFS)\033[0m")
-    print("\033[1m" + "=" * 60 + "\033[0m")
-    
-    # Test 1: Initialize GTFS
-    print("\n1. Testing GTFS initialization...")
-    result = initialize_cp_gtfs.invoke({"force_refresh": False})
-    print(result[:800])
-    
-    # Test 2: Load AML stations
-    print("\n2. Testing load_cp_aml_stations...")
-    stations = load_cp_aml_stations()
-    print(f"   ✅ Loaded {len(stations)} AML stations from real-time API")
-    
-    # Test 3: Search stations
-    print("\n3. Testing search_cp_stations...")
-    result = search_cp_stations.invoke({"query": "Oriente"})
-    print(result[:600])
-    
-    # Test 4: Get train status
-    print("\n4. Testing get_train_status...")
-    result = get_train_status.invoke({})
-    print(result[:800])
-    
-    # Test 5: Get schedule
-    print("\n5. Testing get_train_schedule...")
-    result = get_train_schedule.invoke({"station_name": "Lisboa", "limit": 5})
-    print(result[:600])
-    
-    # Test 6: Get routes
-    print("\n6. Testing get_cp_routes...")
-    result = get_cp_routes.invoke({})
-    print(result[:600])
-    
-    print("\n\033[1;32m✅ CP Trains API tests complete!\033[0m")
+    import sys
+
+    # Fix Windows console encoding for emojis
+    if sys.platform == "win32":
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except AttributeError:
+            pass
+
+    print("\n" + "=" * 70)
+    print("\033[1m🧪 COMPREHENSIVE TEST: CP Trains API Tools\033[0m")
+    print("=" * 70)
+    print(f"📅 Test Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 70)
+
+    test_results = {"passed": 0, "failed": 0, "total": 0}
+
+    def run_test(test_name: str, test_func, *args, **kwargs):
+        """Helper to run tests with error handling."""
+        test_results["total"] += 1
+        print(f"\n\033[1m{'─' * 70}\033[0m")
+        print(f"\033[1;36m🔬 TEST {test_results['total']}: {test_name}\033[0m")
+        print(f"{'─' * 70}")
+        try:
+            result = test_func(*args, **kwargs)
+            if isinstance(result, str) and len(result) > 800:
+                print(result[:800] + "\n\n... (truncated for readability)")
+            elif result is not None:
+                print(result)
+            test_results["passed"] += 1
+            print("\n\033[1;32m✅ PASSED\033[0m")
+            return result
+        except Exception as e:
+            print(f"\n\033[1;31m❌ FAILED: {e}\033[0m")
+            test_results["failed"] += 1
+            return None
+
+    # =========================================================================
+    # GTFS INITIALIZATION
+    # =========================================================================
+    # TEST 1: Initialize GTFS data
+    def _test_gtfs_init():
+        return initialize_cp_gtfs(force_refresh=False)
+
+    run_test("GTFS Initialization", _test_gtfs_init)
+
+    # TEST 2: Load AML stations
+    def _test_aml_stations():
+        stations = load_cp_aml_stations()
+        if not stations:
+            raise AssertionError("No AML stations loaded")
+        return f"Loaded {len(stations)} AML stations from real-time API"
+
+    run_test("Load AML Stations", _test_aml_stations)
+
+    # =========================================================================
+    # STATION & SCHEDULE TOOLS
+    # =========================================================================
+    # TEST 3: Search stations
+    run_test(
+        "search_cp_stations('Oriente')",
+        search_cp_stations.invoke,
+        {"query": "Oriente"},
+    )
+
+    # TEST 4: Get train status (real-time)
+    run_test(
+        "get_train_status (Real-Time)",
+        get_train_status.invoke,
+        {},
+    )
+
+    # TEST 5: Get schedule at a station
+    run_test(
+        "get_train_schedule('Lisboa', limit=5)",
+        get_train_schedule.invoke,
+        {"station_name": "Lisboa", "limit": 5},
+    )
+
+    # TEST 6: Get CP routes
+    run_test(
+        "get_cp_routes (All AML Lines)",
+        get_cp_routes.invoke,
+        {},
+    )
+
+    # =========================================================================
+    # FREQUENCY TOOL TESTS
+    # =========================================================================
+    # TEST 7: Train frequency - Sintra line
+    run_test(
+        "get_train_frequency('Sintra')",
+        get_train_frequency.invoke,
+        {"route_name": "Sintra"},
+    )
+
+    # TEST 8: Train frequency - Cascais line
+    run_test(
+        "get_train_frequency('Cascais')",
+        get_train_frequency.invoke,
+        {"route_name": "Cascais"},
+    )
+
+    # TEST 9: Train frequency with specific station
+    run_test(
+        "get_train_frequency('Sintra', station='Amadora')",
+        get_train_frequency.invoke,
+        {"route_name": "Sintra", "station_name": "Amadora"},
+    )
+
+    # TEST 10: Frequency output format validation
+    def _test_cp_frequency_format():
+        result = get_train_frequency.invoke({"route_name": "Sintra"})
+        checks = {
+            "has_line_name": "Sintra" in result,
+            "has_morning": "Morning" in result or "morning" in result.lower(),
+            "has_frequency": "min" in result.lower(),
+            "has_train_count": "Comboios" in result or "comboios" in result.lower(),
+        }
+        errors = [k for k, v in checks.items() if not v]
+        if errors:
+            raise AssertionError(f"Missing in frequency output: {errors}")
+        return f"Frequency output format valid (checks: {list(checks.keys())})"
+
+    run_test("Frequency Output Format Validation", _test_cp_frequency_format)
+
+    # TEST 11: Frequency - unknown line (edge case)
+    run_test(
+        "get_train_frequency('XYZLine') - Invalid Route",
+        get_train_frequency.invoke,
+        {"route_name": "XYZLine"},
+    )
+
+    # =========================================================================
+    # TRIP PLANNING TESTS
+    # =========================================================================
+    # TEST 12: Plan a train trip
+    run_test(
+        "plan_train_trip: Oriente → Sintra",
+        plan_train_trip.invoke,
+        {"origin": "Oriente", "destination": "Sintra"},
+    )
+
+    # =========================================================================
+    # SUMMARY
+    # =========================================================================
+    print("\n" + "=" * 70)
+    print("\033[1m📊 TEST SUMMARY\033[0m")
+    print("=" * 70)
+    print(f"\033[1;32m✅ Passed: {test_results['passed']}/{test_results['total']}\033[0m")
+    if test_results["failed"] > 0:
+        print(f"\033[1;31m❌ Failed: {test_results['failed']}/{test_results['total']}\033[0m")
+    else:
+        print("\033[1;32m🎉 ALL TESTS PASSED!\033[0m")
+    print("=" * 70)

@@ -1588,8 +1588,7 @@ def search_carris_metropolitana_lines(query: str) -> str:
         response += f"... and {len(matches) - 15} more lines.\n"
 
     response += "\n" + "-" * 40 + "\n"
-    response += "💡 Use `find_bus_routes(origin, destination)` to find direct routes between two places.\n"
-    response += "💡 Use `get_bus_next_departures(line_id)` for schedule details.\n"
+    response += "💡 Podes perguntar por rotas diretas entre dois locais ou horários de uma linha específica.\n"
 
     return response
 
@@ -1679,7 +1678,7 @@ def get_bus_realtime_locations(line_id: Optional[str] = None) -> str:
 
     response += "\n" + "-" * 40 + "\n"
     response += (
-        "💡 Use `get_bus_realtime_locations('LINE_ID')` for detailed tracking.\n"
+        "💡 Podes perguntar pela localização em tempo real de uma linha específica.\n"
     )
 
     return response
@@ -1714,7 +1713,7 @@ def get_bus_next_departures(
     if not line_info:
         return (
             f"❌ Line '{line_id}' not found.\n\n"
-            f"💡 Use `search_carris_metropolitana_lines` to find the correct line ID."
+            f"💡 Verifica o identificador da linha. Podes perguntar-me pelas linhas disponíveis."
         )
 
     patterns = line_info.get("patterns", [])

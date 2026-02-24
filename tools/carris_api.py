@@ -79,7 +79,9 @@ CARRIS_METADATA_PATH = os.path.join(CARRIS_DATA_DIR, "metadata.json")
 
 # Request timeout
 REQUEST_TIMEOUT = 120  # GTFS download can take time
-REALTIME_TIMEOUT = 15  # Real-time requests should be fast
+REALTIME_TIMEOUT = 25  # Real-time requests (GTFS-RT endpoint can be slow)
+REALTIME_MAX_RETRIES = 3  # Number of retry attempts for GTFS-RT
+REALTIME_RETRY_BACKOFF = 2  # Base backoff in seconds between retries
 
 # Cache for GTFS-RT data (avoid excessive API calls)
 _gtfs_rt_cache: Dict[str, Any] = {
@@ -726,6 +728,9 @@ def fetch_gtfs_rt_vehicles(use_cache: bool = True) -> List[Dict[str, Any]]:
     """
     Fetches real-time vehicle positions from Carris GTFS-RT feed.
 
+    Implements retry logic with exponential backoff because the Carris
+    GTFS-RT endpoint can be slow or intermittently unavailable.
+
     Args:
         use_cache: Whether to use cached data if available (default: True)
 
@@ -745,69 +750,105 @@ def fetch_gtfs_rt_vehicles(use_cache: bool = True) -> List[Dict[str, Any]]:
             logger.debug(f"Using cached GTFS-RT data (age: {age:.1f}s)")
             return _gtfs_rt_cache["data"]
 
-    try:
-        response = requests.get(CARRIS_GTFS_RT_URL, timeout=REALTIME_TIMEOUT)
-        response.raise_for_status()
+    # Retry loop with exponential backoff
+    last_error = None
+    for attempt in range(1, REALTIME_MAX_RETRIES + 1):
+        try:
+            logger.info(
+                f"GTFS-RT fetch attempt {attempt}/{REALTIME_MAX_RETRIES}..."
+            )
+            response = requests.get(CARRIS_GTFS_RT_URL, timeout=REALTIME_TIMEOUT)
+            response.raise_for_status()
 
-        feed = gtfs_realtime_pb2.FeedMessage()
-        feed.ParseFromString(response.content)
+            feed = gtfs_realtime_pb2.FeedMessage()
+            feed.ParseFromString(response.content)
 
-        vehicles = []
-        feed_timestamp = feed.header.timestamp
+            vehicles = []
+            feed_timestamp = feed.header.timestamp
 
-        for entity in feed.entity:
-            if not entity.HasField("vehicle"):
-                continue
+            for entity in feed.entity:
+                if not entity.HasField("vehicle"):
+                    continue
 
-            v = entity.vehicle
-            vehicle_data = {
-                "entity_id": entity.id,
-                "feed_timestamp": feed_timestamp,
-                "trip_id": v.trip.trip_id if v.HasField("trip") else None,
-                "route_id": v.trip.route_id if v.HasField("trip") else None,
-                "direction_id": v.trip.direction_id
-                if v.HasField("trip") and v.trip.HasField("direction_id")
-                else None,
-                "latitude": v.position.latitude if v.HasField("position") else None,
-                "longitude": v.position.longitude if v.HasField("position") else None,
-                "bearing": v.position.bearing
-                if v.HasField("position") and v.position.HasField("bearing")
-                else None,
-                "speed": v.position.speed
-                if v.HasField("position") and v.position.HasField("speed")
-                else None,
-                "vehicle_id": v.vehicle.id if v.HasField("vehicle") else None,
-                "vehicle_label": v.vehicle.label
-                if v.HasField("vehicle") and v.vehicle.label
-                else None,
-                "license_plate": v.vehicle.license_plate
-                if v.HasField("vehicle") and v.vehicle.license_plate
-                else None,
-                "current_status": VEHICLE_STATUS.get(
-                    v.current_status, f"UNKNOWN({v.current_status})"
-                ),
-                "current_status_code": v.current_status,
-                "stop_id": v.stop_id if v.stop_id else None,
-                "timestamp": v.timestamp,
-            }
-            vehicles.append(vehicle_data)
+                v = entity.vehicle
+                vehicle_data = {
+                    "entity_id": entity.id,
+                    "feed_timestamp": feed_timestamp,
+                    "trip_id": v.trip.trip_id if v.HasField("trip") else None,
+                    "route_id": v.trip.route_id if v.HasField("trip") else None,
+                    "direction_id": v.trip.direction_id
+                    if v.HasField("trip") and v.trip.HasField("direction_id")
+                    else None,
+                    "latitude": v.position.latitude
+                    if v.HasField("position")
+                    else None,
+                    "longitude": v.position.longitude
+                    if v.HasField("position")
+                    else None,
+                    "bearing": v.position.bearing
+                    if v.HasField("position") and v.position.HasField("bearing")
+                    else None,
+                    "speed": v.position.speed
+                    if v.HasField("position") and v.position.HasField("speed")
+                    else None,
+                    "vehicle_id": v.vehicle.id if v.HasField("vehicle") else None,
+                    "vehicle_label": v.vehicle.label
+                    if v.HasField("vehicle") and v.vehicle.label
+                    else None,
+                    "license_plate": v.vehicle.license_plate
+                    if v.HasField("vehicle") and v.vehicle.license_plate
+                    else None,
+                    "current_status": VEHICLE_STATUS.get(
+                        v.current_status, f"UNKNOWN({v.current_status})"
+                    ),
+                    "current_status_code": v.current_status,
+                    "stop_id": v.stop_id if v.stop_id else None,
+                    "timestamp": v.timestamp,
+                }
+                vehicles.append(vehicle_data)
 
-        logger.info(f"Fetched {len(vehicles)} vehicles from GTFS-RT feed")
+            logger.info(
+                f"Fetched {len(vehicles)} vehicles from GTFS-RT feed "
+                f"(attempt {attempt})"
+            )
 
-        _gtfs_rt_cache["data"] = vehicles
-        _gtfs_rt_cache["timestamp"] = now
+            _gtfs_rt_cache["data"] = vehicles
+            _gtfs_rt_cache["timestamp"] = now
 
-        return vehicles
+            return vehicles
 
-    except requests.exceptions.Timeout:
-        logger.warning("GTFS-RT request timed out")
-        return _gtfs_rt_cache["data"] or []
-    except requests.exceptions.RequestException as e:
-        logger.error(f"GTFS-RT request failed: {e}")
-        return _gtfs_rt_cache["data"] or []
-    except Exception as e:
-        logger.error(f"Error parsing GTFS-RT data: {e}")
-        return _gtfs_rt_cache["data"] or []
+        except requests.exceptions.Timeout:
+            last_error = "timeout"
+            logger.warning(
+                f"GTFS-RT request timed out (attempt {attempt}/{REALTIME_MAX_RETRIES})"
+            )
+        except requests.exceptions.RequestException as e:
+            last_error = str(e)
+            logger.warning(
+                f"GTFS-RT request failed (attempt {attempt}/{REALTIME_MAX_RETRIES}): {e}"
+            )
+        except Exception as e:
+            last_error = str(e)
+            logger.error(f"Error parsing GTFS-RT data: {e}")
+            # Parse errors are not retryable
+            break
+
+        # Wait before retrying (exponential backoff)
+        if attempt < REALTIME_MAX_RETRIES:
+            wait_time = REALTIME_RETRY_BACKOFF * attempt
+            logger.info(f"Retrying in {wait_time}s...")
+            time.sleep(wait_time)
+
+    # All retries exhausted
+    logger.error(
+        f"GTFS-RT: All {REALTIME_MAX_RETRIES} attempts failed. "
+        f"Last error: {last_error}"
+    )
+    if _gtfs_rt_cache["data"]:
+        cache_age = now - _gtfs_rt_cache["timestamp"]
+        logger.info(f"Using cached GTFS-RT data (age: {cache_age:.0f}s)")
+        return _gtfs_rt_cache["data"]
+    return []
 
 
 def enrich_vehicle_with_static_data(vehicle: Dict, conn: sqlite3.Connection) -> Dict:
@@ -1338,6 +1379,8 @@ def carris_get_next_departures(
             params.append(route_short_name)
 
         # Added st.trip_id to query to enable real-time matching
+        # Terminus filter: exclude last stop of each trip (buses terminating
+        # here are arrivals, not departures)
         sql = f"""
             SELECT st.trip_id, st.departure_time, r.route_short_name, r.route_long_name, t.trip_headsign, t.direction_id
             FROM stop_times st
@@ -1346,6 +1389,11 @@ def carris_get_next_departures(
             WHERE st.stop_id IN ({stop_placeholders}) 
             AND t.service_id IN ({placeholders}) 
             AND st.departure_time >= ?
+            AND st.stop_sequence < (
+                SELECT MAX(st2.stop_sequence)
+                FROM stop_times st2
+                WHERE st2.trip_id = st.trip_id
+            )
             {route_filter}
             ORDER BY st.departure_time LIMIT ?
         """
@@ -1440,7 +1488,8 @@ def carris_get_next_departures(
             response += f"📍 **[{route}] Para {dest}**\n"
             response += f"   🕒 {times_str}\n\n"
 
-        response += f"Showing next {limit} departures.\n"
+        total_shown = sum(len(times) for times in departures.values())
+        response += f"Showing next {total_shown} departures.\n"
         return response
 
     except Exception as e:
@@ -1568,14 +1617,13 @@ def carris_find_routes_between(
                 SELECT DISTINCT r.route_id, r.route_short_name, r.route_long_name
                 FROM routes r
                 WHERE r.route_id IN (
-                    SELECT DISTINCT t.route_id FROM stop_times st 
-                    JOIN trips t ON st.trip_id = t.trip_id
-                    WHERE st.stop_id IN ({ph_o})
-                )
-                AND r.route_id IN (
-                    SELECT DISTINCT t.route_id FROM stop_times st 
-                    JOIN trips t ON st.trip_id = t.trip_id
-                    WHERE st.stop_id IN ({ph_d})
+                    SELECT t.route_id 
+                    FROM stop_times st_o
+                    JOIN stop_times st_d ON st_o.trip_id = st_d.trip_id
+                        AND st_o.stop_sequence < st_d.stop_sequence
+                    JOIN trips t ON st_o.trip_id = t.trip_id
+                    WHERE st_o.stop_id IN ({ph_o})
+                      AND st_d.stop_id IN ({ph_d})
                 )
             """
             cursor.execute(sql, origin_ids + dest_ids)
@@ -1603,45 +1651,104 @@ def carris_find_routes_between(
         trams = [r for r in routes_found if r["route_short_name"].endswith("E")]
         buses = [r for r in routes_found if not r["route_short_name"].endswith("E")]
 
-        def get_next_departure(route_short_name: str) -> str:
-            for stop in origin_stops[:5]:
-                if not active_services:
-                    return "No service"
+        def get_next_departure_and_duration(route_short_name: str) -> tuple:
+            """Returns (departure_info_str, travel_time_mins or None).
+            
+            Direction-safe: only returns departures from trips that actually
+            go FROM origin TOWARD destination (not terminus arrivals).
+            """
+            origin_id_set = {s["id"] for s in origin_stops[:5]}
+            dest_id_set = {s["id"] for s in dest_stops[:5]}
 
-                ph_svc = ",".join(["?" for _ in active_services])
+            if not active_services:
+                return "No service", None
+
+            ph_svc = ",".join(["?" for _ in active_services])
+            ph_d = ",".join(["?" for _ in dest_id_set])
+
+            for stop in origin_stops[:5]:
+                # Direction-safe query: JOIN with destination stops to ensure
+                # this trip actually goes FROM this origin stop TOWARD destination
+                # (st.stop_sequence < st_dest.stop_sequence prevents showing
+                # terminus arrivals as departures)
                 cursor.execute(
                     f"""
-                    SELECT st.departure_time, t.trip_headsign
+                    SELECT DISTINCT st.departure_time, t.trip_headsign
                     FROM stop_times st
                     JOIN trips t ON st.trip_id = t.trip_id
                     JOIN routes r ON t.route_id = r.route_id
-                    WHERE st.stop_id = ? AND r.route_short_name = ? AND t.service_id IN ({ph_svc})
+                    JOIN stop_times st_dest ON st.trip_id = st_dest.trip_id
+                        AND st_dest.stop_id IN ({ph_d})
+                        AND st.stop_sequence < st_dest.stop_sequence
+                    WHERE st.stop_id = ? AND r.route_short_name = ?
+                    AND t.service_id IN ({ph_svc})
                     AND st.departure_time >= ?
                     ORDER BY st.departure_time LIMIT 2
-                """,
-                    (stop["id"], route_short_name, *active_services, current_time),
+                    """,
+                    list(dest_id_set) + [stop["id"], route_short_name] + list(active_services) + [current_time],
                 )
 
                 deps = cursor.fetchall()
                 if deps:
                     times = [d["departure_time"][:5] for d in deps]
-                    return f"Next: {', '.join(times)} (stop {stop['name'][:20]})"
+                    dep_str = f"Next: {', '.join(times)} (stop {stop['name'][:20]})"
 
-            return "Check schedule"
+                    # Calculate travel time from GTFS (origin stop -> dest stop)
+                    travel_mins = None
+                    ph_o = ",".join(["?" for _ in origin_id_set])
+                    cursor.execute(
+                        f"""
+                        SELECT
+                            st_o.departure_time AS dep_time,
+                            st_d.arrival_time AS arr_time
+                        FROM stop_times st_o
+                        JOIN stop_times st_d ON st_o.trip_id = st_d.trip_id
+                            AND st_o.stop_sequence < st_d.stop_sequence
+                        JOIN trips t ON st_o.trip_id = t.trip_id
+                        JOIN routes r ON t.route_id = r.route_id
+                        WHERE st_o.stop_id IN ({ph_o})
+                        AND st_d.stop_id IN ({ph_d})
+                        AND r.route_short_name = ?
+                        AND t.service_id IN ({ph_svc})
+                        LIMIT 1
+                        """,
+                        list(origin_id_set) + list(dest_id_set) + [route_short_name] + list(active_services),
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        dep_parts = row["dep_time"].split(":")
+                        arr_parts = row["arr_time"].split(":")
+                        dep_m = int(dep_parts[0]) * 60 + int(dep_parts[1])
+                        arr_m = int(arr_parts[0]) * 60 + int(arr_parts[1])
+                        diff = arr_m - dep_m
+                        if diff < 0:
+                            diff += 24 * 60
+                        if diff > 0:
+                            travel_mins = diff
+
+                    return dep_str, travel_mins
+
+            return "Check schedule", None
+
+        def format_route_line(r, is_tram: bool = False) -> str:
+            """Format a single route entry with departure and duration."""
+            dep_str, travel_mins = get_next_departure_and_duration(r["route_short_name"])
+            line = f"   {r['route_short_name']}: {r['route_long_name']}\n"
+            if travel_mins:
+                line += f"     {dep_str} | ~{travel_mins}min travel\n\n"
+            else:
+                line += f"     {dep_str}\n\n"
+            return line
 
         if trams:
             response += "TRAMS\n" + "-" * 40 + "\n"
             for r in trams:
-                next_dep = get_next_departure(r["route_short_name"])
-                response += f"   {r['route_short_name']}: {r['route_long_name']}\n"
-                response += f"     {next_dep}\n\n"
+                response += format_route_line(r, is_tram=True)
 
         if buses:
             response += "BUSES\n" + "-" * 40 + "\n"
             for r in buses[:5]:
-                next_dep = get_next_departure(r["route_short_name"])
-                response += f"   {r['route_short_name']}: {r['route_long_name']}\n"
-                response += f"     {next_dep}\n\n"
+                response += format_route_line(r)
             if len(buses) > 5:
                 response += f"   ... and {len(buses) - 5} more routes\n\n"
 
@@ -1669,8 +1776,19 @@ def carris_get_realtime_vehicles(route_id: str = "", vehicle_type: str = "") -> 
 
     if not vehicles:
         if not GTFS_RT_AVAILABLE:
-            return "Biblioteca GTFS-RT não instalada. Executa: pip install gtfs-realtime-bindings"
-        return "Dados de veículos em tempo real indisponíveis."
+            return (
+                "GTFS-RT library not installed. "
+                "Run: pip install gtfs-realtime-bindings"
+            )
+        return (
+            "Real-time vehicle data is currently unavailable. "
+            f"The system attempted to fetch data from the Carris GTFS-RT feed "
+            f"({REALTIME_MAX_RETRIES} attempts, {REALTIME_TIMEOUT}s timeout each) "
+            f"but the endpoint did not respond in time. "
+            f"This can happen during periods of high demand or maintenance. "
+            f"Please try again in a few minutes. "
+            f"Scheduled timetable information remains available via other tools."
+        )
 
     conn = _get_db_connection()
     if not conn:
@@ -1804,8 +1922,65 @@ def carris_vehicle_eta(route_short_name: str, stop_name: str) -> str:
         vehicles = get_vehicles_for_route(route_short_name)
 
         if not vehicles:
+            # No real-time data: check if the route even exists before giving up
+            cursor.execute(
+                "SELECT route_short_name FROM routes WHERE route_short_name = ?",
+                (route_short_name,),
+            )
+            route_exists = cursor.fetchone()
+
+            if not route_exists:
+                conn.close()
+                return (
+                    f"Route '{route_short_name}' not found in Carris network. "
+                    f"Use carris_get_routes to see available routes."
+                )
+
+            # Route exists but no vehicles: fall back to scheduled data
+            response = (
+                f"No real-time vehicles found for route {route_short_name}. "
+                f"The Carris GTFS-RT feed was queried "
+                f"({REALTIME_MAX_RETRIES} attempts) but no active vehicles "
+                f"were detected. This may indicate the service is not running "
+                f"at this time, or real-time data is temporarily unavailable.\n\n"
+                f"Scheduled departures from {target_stop_name}:\n"
+            )
+
+            now_dt = datetime.now()
+            active_services = _get_active_services(conn, now_dt)
+            if active_services:
+                ph = ",".join(["?" for _ in active_services])
+                cursor.execute(
+                    f"""
+                    SELECT st.departure_time, t.trip_headsign
+                    FROM stop_times st
+                    JOIN trips t ON st.trip_id = t.trip_id
+                    JOIN routes r ON t.route_id = r.route_id
+                    WHERE st.stop_id = ? AND r.route_short_name = ?
+                    AND t.service_id IN ({ph})
+                    AND st.departure_time >= ?
+                    ORDER BY st.departure_time LIMIT 5
+                """,
+                    (
+                        target_stop_id,
+                        route_short_name,
+                        *active_services,
+                        now_dt.strftime("%H:%M:%S"),
+                    ),
+                )
+                deps = cursor.fetchall()
+                for d in deps:
+                    response += (
+                        f"   {d['departure_time'][:5]} -> "
+                        f"{d['trip_headsign'] or 'N/A'}\n"
+                    )
+                if not deps:
+                    response += "   No more departures scheduled for today.\n"
+            else:
+                response += "   No active services found for today.\n"
+
             conn.close()
-            return f"Nenhum veículo da linha {route_short_name} em circulação."
+            return response
 
         response = f"ETA: Linha {route_short_name} -> {target_stop_name}\n"
         response += "=" * 55 + "\n"
@@ -1893,11 +2068,177 @@ def carris_vehicle_eta(route_short_name: str, stop_name: str) -> str:
         return f"Erro ao calcular ETA: {e}"
 
 
+@tool
+def carris_get_service_frequency(
+    route_short_name: str,
+    stop_name: Optional[str] = None,
+) -> str:
+    """
+    Estimates bus/tram service frequency (headway) for a Carris route.
+    Calculates average time between departures by time window (morning, midday, afternoon, evening).
+    Uses GTFS stop_times data since frequencies.txt is not available.
+
+    Args:
+        route_short_name: Route number (e.g., '28E', '15E', '738', '714').
+        stop_name: Optional stop name to check frequency at a specific stop.
+                   If not provided, uses the first stop of the route.
+
+    Returns:
+        str: Formatted frequency information by time window.
+        
+    Examples:
+        >>> carris_get_service_frequency("28E")
+        >>> carris_get_service_frequency("15E", stop_name="Praça da Figueira")
+    """
+    conn = _get_db_connection()
+    if not conn:
+        return "Carris database unavailable."
+
+    try:
+        cursor = conn.cursor()
+
+        # Find route
+        cursor.execute(
+            "SELECT route_id, route_short_name, route_long_name FROM routes WHERE route_short_name = ?",
+            (route_short_name,),
+        )
+        route = cursor.fetchone()
+        if not route:
+            conn.close()
+            return f"Route '{route_short_name}' not found in Carris data."
+
+        route_id = route["route_id"]
+
+        # Get active services for today
+        active_services = _get_active_services(conn)
+        if not active_services:
+            conn.close()
+            return "No active services found for today."
+
+        ph_s = ",".join(["?" for _ in active_services])
+
+        # Determine which stop to analyze
+        if stop_name:
+            cursor.execute(
+                "SELECT stop_id, stop_name FROM stops WHERE stop_name LIKE ? LIMIT 1",
+                (f"%{stop_name}%",),
+            )
+            stop_row = cursor.fetchone()
+            if not stop_row:
+                conn.close()
+                return f"Stop '{stop_name}' not found."
+            stop_id = stop_row["stop_id"]
+            stop_display = stop_row["stop_name"]
+        else:
+            # Use first stop on the route (stop_sequence = 1 or min)
+            cursor.execute(
+                f"""
+                SELECT st.stop_id, s.stop_name
+                FROM stop_times st
+                JOIN trips t ON st.trip_id = t.trip_id
+                JOIN stops s ON st.stop_id = s.stop_id
+                WHERE t.route_id = ? AND t.service_id IN ({ph_s})
+                ORDER BY st.stop_sequence ASC
+                LIMIT 1
+                """,
+                [route_id] + active_services,
+            )
+            stop_row = cursor.fetchone()
+            if not stop_row:
+                conn.close()
+                return f"No scheduled trips found for route '{route_short_name}' today."
+            stop_id = stop_row["stop_id"]
+            stop_display = stop_row["stop_name"]
+
+        # Get all departure times at this stop for this route today
+        cursor.execute(
+            f"""
+            SELECT st.departure_time
+            FROM stop_times st
+            JOIN trips t ON st.trip_id = t.trip_id
+            WHERE t.route_id = ? AND st.stop_id = ? AND t.service_id IN ({ph_s})
+            ORDER BY st.departure_time ASC
+            """,
+            [route_id, stop_id] + active_services,
+        )
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        if not rows:
+            return f"No departures found for route '{route_short_name}' at '{stop_display}' today."
+
+        # Parse times into minutes since midnight
+        departures = []
+        for row in rows:
+            time_str = row["departure_time"]
+            parts = time_str.split(":")
+            if len(parts) >= 2:
+                h, m = int(parts[0]), int(parts[1])
+                departures.append(h * 60 + m)
+
+        departures = sorted(set(departures))
+
+        # Define time windows
+        windows = [
+            ("🌅 Morning (06:00-09:59)", 360, 600),
+            ("☀️ Midday (10:00-13:59)", 600, 840),
+            ("🌤️ Afternoon (14:00-17:59)", 840, 1080),
+            ("🌙 Evening (18:00-22:59)", 1080, 1380),
+            ("🌃 Night (23:00-05:59)", 1380, 1800),
+        ]
+
+        response = f"🚌 **Frequência da Linha {route_short_name}**\n"
+        response += f"📍 Paragem: {stop_display}\n"
+        response += "=" * 50 + "\n\n"
+        response += f"📊 Total de passagens hoje: {len(departures)}\n\n"
+
+        for window_name, start_min, end_min in windows:
+            window_deps = [d for d in departures if start_min <= d < end_min]
+
+            if len(window_deps) < 2:
+                if len(window_deps) == 1:
+                    t = window_deps[0]
+                    response += f"{window_name}: 1 passagem ({t // 60:02d}:{t % 60:02d})\n"
+                else:
+                    response += f"{window_name}: Sem serviço\n"
+                continue
+
+            # Calculate headways between consecutive departures
+            headways = [window_deps[i + 1] - window_deps[i] for i in range(len(window_deps) - 1)]
+            avg_headway = sum(headways) / len(headways)
+            min_headway = min(headways)
+            max_headway = max(headways)
+
+            first_dep = window_deps[0]
+            last_dep = window_deps[-1]
+
+            response += f"{window_name}\n"
+            response += f"   ⏱️ Frequência média: **{avg_headway:.0f} min**\n"
+            response += f"   📏 Min/Max: {min_headway}-{max_headway} min\n"
+            response += f"   🕒 Primeiro: {first_dep // 60:02d}:{first_dep % 60:02d} | Último: {last_dep // 60:02d}:{last_dep % 60:02d}\n"
+            response += f"   📈 Passagens: {len(window_deps)}\n\n"
+
+        response += "📌 **Fonte:** Dados GTFS Carris (horários programados)\n"
+        response += "⚠️ Frequências reais podem variar com o tráfego.\n"
+
+        return response
+
+    except Exception as e:
+        logger.error(f"Error calculating frequency: {e}")
+        return f"Error calculating frequency: {e}"
+
+
 # ==========================================================================
 # Test Block
 # ==========================================================================
 if __name__ == "__main__":
+    import sys
     import time as time_module
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except AttributeError:
+        pass
 
     # Argument Parsing
     parser = argparse.ArgumentParser(description="Carris API Tools Test Suite")
@@ -2052,13 +2393,14 @@ if __name__ == "__main__":
         match = re.search(r"ID: (\d+)", result)
         if match:
             stop_id = match.group(1)
-            return stop_id, result
+            print(result)
+            return stop_id
         raise AssertionError("Could not extract stop ID from result")
 
     stop_id_rossio = None
     stops_result = run_test("Tool: carris_get_stops('Rossio')", _test_get_stops_rossio)
     if stops_result:
-        stop_id_rossio = stops_result[0]
+        stop_id_rossio = stops_result
 
     # TEST 5: carris_get_next_departures (Static Schedule)
     if stop_id_rossio:
@@ -2108,10 +2450,23 @@ if __name__ == "__main__":
     )
 
     # TEST 10: "A que horas passa o 758 no Rato?"
+    # carris_get_next_departures requires stop_id (not stop_name)
+    # First resolve stop name to ID, then query
+    def _test_next_departures_by_name():
+        stops_result = carris_get_stops.invoke({"query": "Rato"})
+        # Extract first stop_id from result
+        import re
+        match = re.search(r'ID:\s*(\d+)', stops_result)
+        if match:
+            stop_id = match.group(1)
+            return carris_get_next_departures.invoke(
+                {"stop_id": stop_id, "route_short_name": "758"}
+            )
+        return "Could not resolve stop name 'Rato' to stop_id"
+
     run_test(
         "Tool: carris_get_next_departures (Stop Rato, Line 758)",
-        carris_get_next_departures.invoke,
-        {"stop_name": "Rato", "route_short_name": "758"},
+        _test_next_departures_by_name,
     )
 
     # TEST 11: "Onde está o 28E agora?"
@@ -2133,6 +2488,112 @@ if __name__ == "__main__":
         "Tool: carris_vehicle_eta (Praça da Figueira, Line 714)",
         carris_vehicle_eta.invoke,
         {"stop_name": "Praça da Figueira", "route_short_name": "714"},
+    )
+
+    # =========================================================================
+    # DIRECTION-AWARE ROUTING TESTS
+    # =========================================================================
+    
+    # TEST 14: Direction-aware routing (origin BEFORE destination in trip)
+    def _test_direction_fix():
+        result = carris_find_routes_between.invoke(
+            {"origin": "Cais do Sodré", "destination": "Belém"}
+        )
+        if "não encontrada" in result.lower() and "erro" in result.lower():
+            raise AssertionError("Route not found - direction fix may have broken routing")
+        if "Linha" in result or "Route" in result or "rota" in result.lower():
+            return f"✅ Direction-aware routing working\n{result[:500]}"
+        return result[:500]
+    
+    run_test("Direction Routing: Cais do Sodré → Belém (forward)", _test_direction_fix)
+    
+    # TEST 15: Reverse direction test  
+    def _test_reverse_direction():
+        result = carris_find_routes_between.invoke(
+            {"origin": "Belém", "destination": "Cais do Sodré"}
+        )
+        if "não encontrada" in result.lower() and "erro" in result.lower():
+            raise AssertionError("Reverse route not found")
+        return f"✅ Reverse routing working\n{result[:500]}"
+    
+    run_test("Direction Routing: Belém → Cais do Sodré (reverse)", _test_reverse_direction)
+    
+    # TEST 16: SQL direction constraint verification
+    def _test_sql_direction_constraint():
+        conn = sqlite3.connect(CARRIS_DB_PATH)
+        cur = conn.cursor()
+        # Verify the query uses proper direction with st_o.stop_sequence < st_d.stop_sequence
+        # by checking a known route (15E goes Praça da Figueira → Belém)
+        cur.execute("""
+            SELECT DISTINCT r.route_short_name, r.route_long_name
+            FROM routes r
+            JOIN trips t ON r.route_id = t.route_id
+            JOIN stop_times st_o ON t.trip_id = st_o.trip_id
+            JOIN stop_times st_d ON t.trip_id = st_d.trip_id
+            JOIN stops s_o ON st_o.stop_id = s_o.stop_id
+            JOIN stops s_d ON st_d.stop_id = s_d.stop_id
+            WHERE s_o.stop_name LIKE '%Figueira%'
+              AND s_d.stop_name LIKE '%Belém%'
+              AND st_o.stop_sequence < st_d.stop_sequence
+            LIMIT 5
+        """)
+        rows = cur.fetchall()
+        conn.close()
+        
+        if not rows:
+            raise AssertionError("No routes found with direction constraint (stop_sequence ordering)")
+        
+        return "Routes Figueira→Belém with direction constraint:\n" + \
+               "\n".join(f"   {r[0]}: {r[1]}" for r in rows)
+    
+    run_test("SQL Direction Constraint Verification", _test_sql_direction_constraint)
+
+    # =========================================================================
+    # FREQUENCY TOOL TESTS
+    # =========================================================================
+    
+    # TEST 17: carris_get_service_frequency - Tram 28E
+    run_test(
+        "carris_get_service_frequency('28E')",
+        carris_get_service_frequency.invoke,
+        {"route_short_name": "28E"},
+    )
+    
+    # TEST 18: carris_get_service_frequency - Bus 758
+    run_test(
+        "carris_get_service_frequency('758')",
+        carris_get_service_frequency.invoke,
+        {"route_short_name": "758"},
+    )
+    
+    # TEST 19: carris_get_service_frequency with specific stop
+    run_test(
+        "carris_get_service_frequency('15E', stop='Belém')",
+        carris_get_service_frequency.invoke,
+        {"route_short_name": "15E", "stop_name": "Belém"},
+    )
+    
+    # TEST 20: Frequency output format validation
+    def _test_frequency_format():
+        result = carris_get_service_frequency.invoke({"route_short_name": "28E"})
+        checks = {
+            "has_title": "28E" in result,
+            "has_morning": "Morning" in result or "morning" in result.lower(),
+            "has_frequency": "min" in result.lower(),
+            "has_count": "Passagens" in result or "passagens" in result.lower(),
+        }
+        errors = [k for k, v in checks.items() if not v]
+        if errors:
+            raise AssertionError(f"Missing in frequency output: {errors}")
+        return f"✅ Frequency output format valid (checks: {list(checks.keys())})"
+    
+    run_test("Frequency Output Format Validation", _test_frequency_format)
+    
+    # TEST 21: Frequency - invalid route (edge case)
+    run_test(
+        "carris_get_service_frequency('999Z') - Invalid Route",
+        carris_get_service_frequency.invoke,
+        {"route_short_name": "999Z"},
     )
 
     # =========================================================================

@@ -26,7 +26,7 @@ python -c "import chromadb; import langchain; import streamlit; print('✅ All d
 1. Install dependencies: `pip install -r requirements.txt`
 2. Configure environment variables in a local `.env` file (see `docs/OPERATIONS.md`)
 3. Build or update the vector store (first time): `python tools/vector_store.py`
-4. Run the Streamlit UI: `streamlit run app_v1.py`
+4. Run the Streamlit UI: `streamlit run app.py`
 
 ## Documentation map
 
