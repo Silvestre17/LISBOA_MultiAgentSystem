@@ -190,13 +190,13 @@ class LLMFactory:
             if LLMFactory._is_reasoning_model(model_name):
                 # Reasoning models only support temperature=1, omit the parameter
                 return ChatOpenAI(
-                    model=model_name,  # e.g., "gpt-5-nano"
+                    model=model_name,
                     api_key=Config.OPENAI_API_KEY,
                     streaming=True,  # Enable streaming for lower latency
                 )
             else:
                 return ChatOpenAI(
-                    model=model_name,  # e.g., "gpt-5-nano"
+                    model=model_name,
                     temperature=temperature,
                     api_key=Config.OPENAI_API_KEY,
                     streaming=True,  # Enable streaming for lower latency

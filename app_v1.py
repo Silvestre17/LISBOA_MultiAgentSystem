@@ -155,7 +155,7 @@ TRANSLATIONS = {
         # Info Page
         "info_title": "About This Assistant",
         "info_objective": "Objective",
-        "info_objective_text": "This intelligent assistant was developed as part of a Master's Thesis in Data Science and Advanced Analytics at NOVA IMS (Universidade NOVA de Lisboa). The system LISBOA (LLM-Integrated System for Behavioral Orchestration and Agentic Architecture) implements a multi-agent approach for personalized tourism and urban mobility in Lisbon.",
+        "info_objective_text": "This intelligent assistant was developed as part of a Master's Thesis in Data Science and Advanced Analytics at NOVA IMS (Universidade NOVA de Lisboa). The system LISBOA (Lisbon Itenerary System Based On AI) implements a multi-agent approach for personalized tourism and urban mobility in Lisbon.",
         "info_data_sources": "Data Sources",
         "info_data_sources_text": """The assistant uses multiple real-time and static data sources:
 
@@ -501,6 +501,58 @@ section[data-testid="stSidebar"] button[kind="primary"]:hover {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
+/* Chat text improvements */
+[data-testid="stChatMessage"] p {
+    margin-bottom: 0.6rem;
+    line-height: 1.5;
+}
+
+[data-testid="stChatMessage"] strong {
+    color: var(--gray-900);
+    font-weight: 700;
+}
+
+[data-testid="stChatMessage"] a {
+    color: var(--lisbon-yellow-dark);
+    text-decoration: none;
+    font-weight: 600;
+    padding: 0 0.1rem;
+    border-radius: 4px;
+    background: transparent;
+    border-bottom: 2px solid rgba(246, 218, 0, 0.4);
+    transition: all 0.2s ease;
+    display: inline-block;
+}
+
+[data-testid="stChatMessage"] a:hover {
+    color: var(--gray-900);
+    background: var(--lisbon-yellow);
+    border-bottom-color: var(--lisbon-yellow-dark);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(246, 218, 0, 0.2);
+}
+
+[data-testid="stChatMessage"] ul {
+    list-style-type: none; /* Hide default bullets to allow clean emojis */
+    padding-left: 1.5rem; /* Manter a lista chegada à frente */
+    line-height: 1.4;
+}
+
+[data-testid="stChatMessage"] ul li {
+    margin-bottom: 0.8rem;
+    position: relative;
+    text-indent: -1.4rem; /* Puxar apenas o emoji para trás, alinhando o texto */
+}
+
+[data-testid="stChatMessage"] ul li::before {
+    content: "▪"; /* Default subtle bullet for non-emoji items */
+    color: var(--lisbon-yellow-dark);
+    position: absolute;
+    left: -1rem;
+    top: 0;
+    opacity: 0; /* Hidden by default unless we specifically want it (handled by text) */
+}
+
 /* Chat input */
 [data-testid="stChatInput"] > div {
     border-radius: 14px !important;
@@ -786,7 +838,7 @@ def initialize_session_state():
             "azure": {
                 "api_key": os.getenv("AZURE_OPENAI_API_KEY", ""),
                 "endpoint": os.getenv("AZURE_OPENAI_ENDPOINT", ""),
-                "model": os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-5-nano"),
+                "model": os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", ""),
             },
             "lmstudio": {
                 "base_url": Config.LMSTUDIO_BASE_URL,
@@ -799,7 +851,7 @@ def initialize_session_state():
             "openai": "",
             "azure_api_key": "",
             "azure_endpoint": "",
-            "azure_model": "gpt-5-nano",
+            "azure_model": "",
         },
         "agent_overrides": {},  # Store custom model selection per agent
     }
@@ -958,21 +1010,30 @@ def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
             try:
                 # access the supervisor LLM directly
                 test_llm = st.session_state.assistant.supervisor.llm
+                # We bypass tracing by abandoning the OpenAI SDK entirely for the ping.
+                # LangSmith auto-instruments the openai.* module, so we must use a raw HTTP request.
+                import requests
+
+                # Safely extract configuration
+                base_url = getattr(test_llm, "openai_api_base", getattr(test_llm, "base_url", "https://api.openai.com/v1/"))
+                if not isinstance(base_url, str):
+                    base_url = str(base_url)
+                    
+                api_key_obj = getattr(test_llm, "openai_api_key", getattr(test_llm, "api_key", getattr(test_llm, "_api_key", "")))
+                api_key = api_key_obj.get_secret_value() if hasattr(api_key_obj, "get_secret_value") else str(api_key_obj)
                 
-                # Temporarily disable LangSmith tracing during ping test
-                # to avoid polluting the LangSmith dashboard with "human: ping" traces
-                original_tracing = os.environ.get("LANGCHAIN_TRACING_V2", "")
-                os.environ["LANGCHAIN_TRACING_V2"] = "false"
+                # Provider-agnostic ping (works for OpenAI, Azure, LMStudio)
+                endpoint = f"{base_url.rstrip('/')}/models"
+                headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
                 
                 try:
-                    # Simple ping
-                    test_llm.invoke("ping")
-                finally:
-                    # Restore original tracing setting
-                    if original_tracing:
-                        os.environ["LANGCHAIN_TRACING_V2"] = original_tracing
-                    elif "LANGCHAIN_TRACING_V2" in os.environ:
-                        del os.environ["LANGCHAIN_TRACING_V2"]
+                    # 3 second timeout for ping speed - this purely tests network reachability
+                    response = requests.get(endpoint, headers=headers, timeout=3)
+                    response.raise_for_status()
+                except Exception:
+                    # Fallback to invoke if /models isn't supported by the provider
+                    test_llm.invoke("ping", config={"callbacks": []})
+
                 # If we get here, connection is successful
                 connection_placeholder.success(
                     "✅ Connection successful! Model is ready."
@@ -1201,7 +1262,7 @@ def render_provider_credentials():
         )
         # Azure OpenAI: Model/Deployment Name
         current_azure_model_ui = st.session_state.ui_api_key_values.get(
-            "azure_model", "gpt-5-nano"
+            "azure_model", ""
         )
         model = st.text_input(
             "Deployment Name",
@@ -1405,7 +1466,7 @@ def render_about_section():
     st.markdown("""**Master Thesis Project**  
 NOVA IMS, 2025
 
-*LISBOA: LLM-Integrated System for Behavioral Orchestration and Agentic Architecture*""")
+*LISBOA: Lisbon Itenerary System Based On AI*""")
 
     learn_more_text = (
         "Saber Mais" if st.session_state.language == "pt" else "Learn More"

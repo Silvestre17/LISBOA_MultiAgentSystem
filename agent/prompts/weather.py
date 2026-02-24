@@ -59,10 +59,10 @@ Aqui está a previsão de Lisboa como referência..."
 
 ## FOR ENGLISH:
 **📅 [Day Name], [Date]**
-    🌡️ **Temperature**: [X]°C to [Y]°C  
-    ☁️ **Conditions**: [description]  
-    💧 **Rain**: [probability]% - [intensity]  
-    💨 **Wind**: [direction], [strength]
+- 🌡️ **Temperature**: [X]°C to [Y]°C  
+- ☁️ **Conditions**: [description]  
+- 💧 **Rain**: [probability]% - [intensity]  
+- 💨 **Wind**: [direction], [strength]
 
 ⚠️ **Active Warnings:**
 - 🟠 **[Warning Type]** - [Brief description]
@@ -73,14 +73,12 @@ Aqui está a previsão de Lisboa como referência..."
 - [Tip 2 with emoji]
 - [Tip 3 with emoji]
 
-⚠️ **Note**: Data provided by IPMA. For official and updated information, always check [IPMA](https://www.ipma.pt/en/)
-
 ## FOR PORTUGUESE (PT-PT):
 **📅 [Dia da Semana], [Data]**
-    🌡️ **Temperatura**: [X]°C a [Y]°C  
-    ☁️ **Condições**: [descrição]  
-    💧 **Chuva**: [probabilidade]% - [intensidade]  
-    💨 **Vento**: [direção], [força]
+- 🌡️ **Temperatura**: [X]°C a [Y]°C  
+- ☁️ **Condições**: [descrição]  
+- 💧 **Chuva**: [probabilidade]% - [intensidade]  
+- 💨 **Vento**: [direção], [força]
 
 ⚠️ **Avisos Ativos:**
 - 🟠 **[Tipo de Aviso]** - [Breve descrição]
@@ -91,22 +89,22 @@ Aqui está a previsão de Lisboa como referência..."
 - [Dica 2 com emoji]
 - [Dica 3 com emoji]
 
-⚠️ **Nota**: Dados fornecidos pelo IPMA. Para informação oficial e atualizada, consulta sempre [IPMA](https://www.ipma.pt)
-
 # ✅ FORMATTING RULES (MANDATORY)
 1. **ALWAYS use bold** (**) for: Temperatures, dates, warnings, section headers
 2. **ALWAYS use emojis** at the start of each line
 3. **ALWAYS use bullet points** (dash -) for lists
-4. **ALWAYS end with source**: 📌 *Fonte: [IPMA](https://www.ipma.pt)* (PT) or 📌 *Source: [IPMA](https://www.ipma.pt/en/)* (EN)
+4. **ALWAYS end with ONE SINGLE source line**. Use EXACTLY this format with bold and italics:
+   - PT: `📌 **Fonte**: [*IPMA*](https://www.ipma.pt)`
+   - EN: `📌 **Source**: [*IPMA*](https://www.ipma.pt/en/)`
 5. **NEVER invent future features** like reminders, notifications, etc.
 6. **NEVER use bare text** - everything must be formatted with emojis and bold
 
 # EXAMPLE OUTPUT (Portuguese):
 **📅 Sexta-feira, 30 de Janeiro**
-    🌡️ **Temperatura**: 10,9°C a 16,9°C
-    ☁️ **Condições**: Aguaceiros leves 🌧️
-    💧 **Precipitação**: 96% - intensidade fraca
-    💨 **Vento**: Oeste, moderado
+- 🌡️ **Temperatura**: 10,9°C a 16,9°C
+- ☁️ **Condições**: Aguaceiros leves 🌧️
+- 💧 **Precipitação**: 96% - intensidade fraca
+- 💨 **Vento**: Oeste, moderado
 
 ⚠️ **Avisos Ativos:**
 - 🟠 **Mar agitado** - Ondas de 5-6m
@@ -117,7 +115,7 @@ Aqui está a previsão de Lisboa como referência..."
 - 🧥 Use agasalho
 - ⛵ Evite atividades marítimas
 
-⚠️ **Nota**: Dados fornecidos pelo IPMA. Para informação oficial e atualizada, consulta sempre [IPMA](https://www.ipma.pt)
+📌 **Fonte**: [*IPMA*](https://www.ipma.pt)
 
 # CORRECT DAY NAMES
 Today is {current_date}. Count forward correctly when naming days!

@@ -93,6 +93,11 @@ class SupervisorAgent(BaseAgent):
                     agents.append("weather")
                     reasoning += " (Added weather agent: planning for near-future date)"
 
+            # Enforce rejection for out of scope queries even if LLM tries to answer
+            reasoning_lower = reasoning.lower()
+            if not agents and any(k in reasoning_lower for k in ["matemática", "math", "fora de âmbito", "out of scope", "trivia", "trivialidade"]):
+                decision["direct_response"] = "Sou um assistente especializado na Área Metropolitana de Lisboa, focado apenas em transportes, meteorologia e locais da capital. Não posso ajudar-te com essa questão! 🏙️" if language == "pt" else "I am a specialized assistant for the Lisbon Metropolitan Area, focused only on transports, weather, and local places. I cannot help you with that query! 🏙️"
+
             return {
                 "reasoning": reasoning,
                 "agents": agents,

@@ -2,7 +2,7 @@
 # Master Thesis - Dependencies
 #   - André Filipe Gomes Silvestre, 20240502
 #
-# LISBOA: LLM-Integrated System for Behavioral Orchestration and Agentic Architecture
+# LISBOA: Lisbon Itenerary System Based On AI
 # A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon
 # and Mobility Itinerary Planning
 #
