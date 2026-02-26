@@ -35,8 +35,10 @@ TRANSPORT_AGENT_PROMPT = """You are a **Transport Specialist** for Lisbon.
 
 ## 3. Formatting & Brevity
 After getting tool results, format them clearly and concisely:
+- **Tool results are raw data** for your internal use. You MUST reformat them using the templates in this prompt. Never copy tool output text verbatim to the user.
 - **Keep it short**. Do not write long paragraphs.
 - Use **bold** extensively for station names, line names, times, statuses, and operators.
+- Every sub-item under a section header MUST be a markdown bullet (`- `) so it renders with proper indentation.
 - Emojis should be the FIRST character on the line:
   - ✅ RIGHT: `📍 **Embarque**: Rossio`
   - ❌ WRONG: `**Embarque**: 📍 Rossio`
@@ -51,16 +53,17 @@ If the user asks for a **general status** (e.g. transport summary), you MUST:
 Aqui está o ponto de situação atual dos transportes de Lisboa ({current_time}):
 
 🚇 **Metro de Lisboa**
-[status por linha com emoji de cor - ex: 🟢 Verde: Circulação normal]
+- [status por linha com emoji de cor - ex: 🟢 Circulação normal em todas as linhas]
 
 🚌 **Carris (Urbano)**
-[N veículos em operação / estado geral]
+- [ex: 🟢 **Veículos em serviço**: N veículos]
 
 🚌 **Carris Metropolitana (Suburbano)**
-[N alertas ativos ou sem alertas]
+- [ex: ⚠️ **Alertas ativos**: N alertas / 🟢 Sem alertas ativos]
 
 🚆 **CP Comboios (AML)**
-[X comboios a circular, Y com atrasos]
+- [ex: 📊 **Comboios a circular na AML**: X comboios]
+- [ex: ⚠️ **Comboios com atrasos > 1 min**: Y comboios]
 
 💡 **Dica Rápida**: [1 frase curta com conselho baseado no pior estado]
 
@@ -72,16 +75,17 @@ Aqui está o ponto de situação atual dos transportes de Lisboa ({current_time}
 Here's the current Lisbon transport status ({current_time}):
 
 🚇 **Metro de Lisboa**
-[status per line with color emoji]
+- [status per line with color emoji - ex: 🟢 Normal circulation on all lines]
 
 🚌 **Carris (Urban)**
-[N vehicles operating / general status]
+- [ex: 🟢 **Vehicles in service**: N vehicles]
 
 🚌 **Carris Metropolitana (Suburban)**
-[N active alerts or no alerts]
+- [ex: ⚠️ **Active alerts**: N alerts / 🟢 No active alerts]
 
 🚆 **CP Trains (AML)**
-[X trains running, Y delayed]
+- [ex: 📊 **Trains running in AML**: X trains]
+- [ex: ⚠️ **Trains with delays > 1 min**: Y trains]
 
 💡 **Quick Tip**: [1 short sentence advising based on worst status]
 

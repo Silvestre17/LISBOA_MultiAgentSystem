@@ -375,22 +375,50 @@ def add_section_spacing(text: str) -> str:
     return "\n".join(result)
 
 
+def clean_decorative_separators(text: str) -> str:
+    """
+    Removes decorative separator lines that are not valid markdown.
+
+    Lines consisting only of repeated '=' or '-' characters (5 or more)
+    are removed. Valid markdown horizontal rules ('---' exactly 3 dashes
+    on a line) are preserved.
+
+    This acts as a safety net for tool outputs that use decorative
+    separators like '=' * 50 or '-' * 30 which render as plain text
+    in Streamlit rather than as visual dividers.
+
+    Args:
+        text: Text potentially containing decorative separators.
+
+    Returns:
+        str: Text with decorative separators removed.
+    """
+    # Remove lines of 5+ repeated = or - characters (but preserve --- which is valid markdown)
+    # Also preserve lines with mixed content (e.g., '--- some text')
+    lines = text.split("\n")
+    result = []
+    for line in lines:
+        stripped = line.strip()
+        # Skip lines that are ONLY repeated = or - (5+ chars), these are decorative
+        if len(stripped) >= 5 and all(c in '=-' for c in stripped):
+            continue
+        result.append(line)
+    return "\n".join(result)
+
+
 def format_response(text: str) -> str:
     """
     Main formatting pipeline for LLM responses.
 
     Applies all formatting transformations in order:
         1. Strip internal/QA sections that should never reach the user
-        2. Normalize headers (avoid h1/h2, use h3+)
-        3. Clean excessive newlines
+        2. Clean decorative separators (e.g., '=' * 50, '-' * 30)
+        3. Normalize headers (avoid h1/h2, use h3+)
         4. Add spacing between distinct content sections
-        5. Normalize bullet styles
-        6. Ensure URLs are clickable
-
-    Note:
-        Section separators (---) are NOT injected automatically.
-        They create excessive visual spacing in Streamlit. Agents can
-        include them explicitly when needed.
+        5. Add section separators (---) before ### headers
+        6. Clean excessive newlines (after all spacing steps)
+        7. Normalize bullet styles
+        8. Ensure URLs are clickable
 
     Args:
         text: Raw LLM response text.
@@ -402,9 +430,11 @@ def format_response(text: str) -> str:
         return text or ""
 
     text = strip_internal_sections(text)
+    text = clean_decorative_separators(text)
     text = normalize_headers(text)
-    text = clean_newlines(text)
     text = add_section_spacing(text)
+    text = add_section_separators(text)
+    text = clean_newlines(text)
     text = normalize_bullets(text)
     text = ensure_clickable_urls(text)
 

@@ -225,8 +225,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     Returns:
         str: Multi-modal route suggestions with Metro, train, and bus options.
     """
-    response = f"🗺️ **Route: {origin.title()} → {destination.title()}**\n"
-    response += "=" * 50 + "\n\n"
+    response = f"🗺️ **Route: {origin.title()} → {destination.title()}**\n\n"
     
     # Check if origin or destination is a known landmark
     origin_landmark = get_landmark_info(origin)
@@ -245,7 +244,6 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     # Handle landmarks first
     if has_landmarks:
         response += "📍 **LOCATION INFORMATION**\n"
-        response += "-" * 30 + "\n"
         
         if origin_landmark:
             response += f"**{origin_landmark['name']}**\n"
@@ -291,7 +289,6 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     # Calculate Metro Route
     if eff_origin_lines and eff_dest_lines:
         response += "🚇 **METRO ROUTE**\n"
-        response += "-" * 30 + "\n"
         
         common_lines = set(eff_origin_lines) & set(eff_dest_lines)
         
@@ -425,7 +422,6 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     # If only one end is a CP station, the metro route above is sufficient.
     if origin_cp and dest_cp:
         response += "🚆 **CP TRAINS**\n"
-        response += "-" * 30 + "\n"
         
         common_lines = set(origin_cp.get("lines", [])) & set(dest_cp.get("lines", []))
         
@@ -447,8 +443,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     # Source attribution
     from datetime import datetime as _dt
     _now = _dt.now().strftime('%H:%M')
-    response += "-" * 30 + "\n"
-    response += f"📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) **| Atualizado:** {_now}\n"
+    response += f"\n📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) **| Atualizado:** {_now}\n"
     
     return response
 
@@ -476,12 +471,12 @@ def get_transport_summary() -> str:
             status = resp.get(line_key, 'Unknown').strip()
             if status.lower() != 'ok':
                 all_ok = False
-                response += f"   {line_info['emoji']} **{line_key.title()}**: ⚠️ {status}\n"
+                response += f"- {line_info['emoji']} **{line_key.title()}**: ⚠️ {status}\n"
         
         if all_ok:
-            response += "   🟢 **Estado**: Circulação normal em todas as linhas\n"
+            response += "- 🟢 **Estado**: Circulação normal em todas as linhas\n"
     else:
-        response += "   ❌ **Estado**: Indisponível\n"
+        response += "- ❌ **Estado**: Indisponível\n"
     
     response += "\n"
     
@@ -493,12 +488,12 @@ def get_transport_summary() -> str:
         
         vehicles = fetch_gtfs_rt_vehicles()
         if vehicles:
-            response += f"   🟢 **Veículos em serviço**: {len(vehicles)} veículos\n"
+            response += f"- 🟢 **Veículos em serviço**: {len(vehicles)} veículos\n"
         else:
-            response += "   ⚠️ **Estado**: Dados em tempo real indisponíveis\n"
+            response += "- ⚠️ **Estado**: Dados em tempo real indisponíveis\n"
     except Exception as e:
         logger.warning(f"Carris Urban data failed: {e}")
-        response += "   ⚠️ **Estado**: Dados indisponíveis\n"
+        response += "- ⚠️ **Estado**: Dados indisponíveis\n"
     
     response += "\n"
     
@@ -516,14 +511,14 @@ def get_transport_summary() -> str:
             # API returns a list directly, not a dict with 'entity' key
             alerts = alerts_data if isinstance(alerts_data, list) else alerts_data.get('entity', [])
             if alerts:
-                response += f"   ⚠️ **Alertas ativos**: {len(alerts)} alertas\n"
+                response += f"- ⚠️ **Alertas ativos**: {len(alerts)} alertas\n"
             else:
-                response += "   🟢 **Estado**: Sem alertas ativos\n"
+                response += "- 🟢 **Estado**: Sem alertas ativos\n"
         else:
-            response += "   ⚠️ **Estado**: Dados de alertas indisponíveis\n"
+            response += "- ⚠️ **Estado**: Dados de alertas indisponíveis\n"
     except Exception as e:
         logger.warning(f"Carris Metropolitana alerts failed: {e}")
-        response += "   ⚠️ **Estado**: Dados indisponíveis\n"
+        response += "- ⚠️ **Estado**: Dados indisponíveis\n"
     
     response += "\n"
     
@@ -536,16 +531,16 @@ def get_transport_summary() -> str:
             total = len(aml_trains)
             delayed = sum(1 for t in aml_trains if (t.get('delay') or 0) > 60)
             
-            response += f"   📊 **Comboios a circular na AML**: {total} comboios\n"
+            response += f"- 📊 **Comboios a circular na AML**: {total} comboios\n"
             if delayed > 0:
-                response += f"   ⚠️ **Comboios com atrasos > 1 min**: {delayed} comboios\n"
+                response += f"- ⚠️ **Comboios com atrasos > 1 min**: {delayed} comboios\n"
             else:
-                response += "   🟢 **Estado**: Comboios a operar normalmente\n"
+                response += "- 🟢 **Estado**: Comboios a operar normalmente\n"
         else:
-            response += "   ⚠️ **Estado**: Dados indisponíveis\n"
+            response += "- ⚠️ **Estado**: Dados indisponíveis\n"
     except Exception as e:
         logger.warning(f"CP train data failed: {e}")
-        response += "   ⚠️ **Estado**: Dados indisponíveis\n"
+        response += "- ⚠️ **Estado**: Dados indisponíveis\n"
     
     response += "\n"
     
