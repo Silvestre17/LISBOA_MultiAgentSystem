@@ -1105,11 +1105,14 @@ class MultiAgentAssistant:
                 "4. Do not use ambiguous labels like 'seleção top 5' or 'best picks' unless the user asked for a ranking.\n"
                 "5. End with ONE source attribution line. Format: '📌 **Fonte:** [*Name*](url) **| Atualizado:** HH:MM'. Do not duplicate source lines.\n"
                 "6. Use **bold** formatting extensively - ALL section headers, operator names, labels, and key values must be bold.\n"
-                "7. Every list item must start with an emoji.\n"
+                "7. Every list item must start with `- ` followed by an emoji.\n"
                 "8. Source names in 📌 **Fonte** lines must use italic markdown: [*Name*](url), not plain text.\n"
                 "9. Do NOT count stops between stations or claim stop positions (e.g., '1ª paragem após X'). Report only origin, destination, and line.\n"
                 "10. Do NOT add data not present in the source outputs. If information is missing, omit it rather than inventing it.\n"
                 "11. If 'Data Limitations' are listed, mention them naturally (e.g., 'opening hours may vary, check the official website').\n"
+                "12. Use `---` horizontal rules ONLY to separate distinct topic sections (e.g., weather from transport from places). Never use them within the same topic.\n"
+                "13. Format transport data with correct emoji patterns: 🚇 Metro, 🚌 buses, 🚆 trains, 🚋 trams. Sub-items under each operator MUST be `- ` bullets.\n"
+                "14. Preserve the visual hierarchy: operator name with emoji as header, then `- ` bullet items with status emojis (🟢, ⚠️, ❌) and **bold** labels.\n"
             )
 
             messages = [

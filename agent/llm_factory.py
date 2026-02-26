@@ -163,6 +163,7 @@ class LLMFactory:
                 frequency_penalty=0.5,
                 presence_penalty=0.3,
                 streaming=True,  # Enable streaming for faster first-token latency
+                stream_usage=True,  # Report token usage for LangSmith cost tracking
             )
 
         # =====================================================================
@@ -193,6 +194,7 @@ class LLMFactory:
                     model=model_name,
                     api_key=Config.OPENAI_API_KEY,
                     streaming=True,  # Enable streaming for lower latency
+                    stream_usage=True,  # Report token usage for LangSmith cost tracking
                 )
             else:
                 return ChatOpenAI(
@@ -200,6 +202,7 @@ class LLMFactory:
                     temperature=temperature,
                     api_key=Config.OPENAI_API_KEY,
                     streaming=True,  # Enable streaming for lower latency
+                    stream_usage=True,  # Report token usage for LangSmith cost tracking
                 )
 
         # =====================================================================
@@ -237,6 +240,7 @@ class LLMFactory:
                     base_url=base_url,  # v1 API endpoint
                     max_completion_tokens=16384,  # Optimal token limit
                     streaming=True,  # Enable streaming by default
+                    stream_usage=True,  # Report token usage for LangSmith cost tracking
                     timeout=60,  # 60 second timeout for faster failure detection
                     max_retries=2,  # Reduced retries for faster failure
                     reasoning_effort="minimal",  # Minimal for lower latency
@@ -250,6 +254,7 @@ class LLMFactory:
                     temperature=temperature,
                     max_completion_tokens=16384,  # Optimal token limit
                     streaming=True,  # Enable streaming by default
+                    stream_usage=True,  # Report token usage for LangSmith cost tracking
                     timeout=60,  # 60 second timeout for faster failure detection
                     max_retries=2,  # Reduced retries for faster failure
                 )
