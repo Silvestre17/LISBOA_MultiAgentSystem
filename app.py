@@ -543,10 +543,10 @@ section[data-testid="stSidebar"] button[kind="primary"]:hover {
 }
 
 [data-testid="stChatMessage"] a:hover {
-    color: var(--lisbon-orange);
-    background: rgba(246, 218, 0, 0.18);
+    color: var(--lisbon-yellow-dark);
+    background: rgba(246, 218, 0, 0.20);
     border-bottom-color: var(--lisbon-yellow-dark);
-    box-shadow: 0 1px 4px rgba(246, 218, 0, 0.25);
+    box-shadow: 0 1px 4px rgba(246, 218, 0, 0.3);
 }
 
 [data-testid="stChatMessage"] ul {
