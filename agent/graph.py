@@ -13,53 +13,43 @@
 # pip install langgraph langchain-core
 
 import json
-import os
-import re
-import sys
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
-
-# LangSmith tracing support (optional - graceful fallback if not available)
-try:
-    from langsmith import ContextThreadPoolExecutor
-    from langsmith.run_helpers import get_current_run_tree, traceable
-    from langsmith.run_trees import RunTree
-
-    LANGSMITH_AVAILABLE = True
-except ImportError:
-    LANGSMITH_AVAILABLE = False
-
-    # Fallback: no-op decorator and standard ThreadPoolExecutor
-    def traceable(*args, **kwargs):
-        def decorator(func):
-            return func
-
-        return decorator
-
-    def get_current_run_tree():
-        return None
-
-    RunTree = None
-    from concurrent.futures import ThreadPoolExecutor as ContextThreadPoolExecutor
 
 # Always need as_completed for collecting parallel results
 import time as time_module  # For latency tracking
 from concurrent.futures import as_completed
+from typing import Callable, Dict, List, Optional, Set
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, StateGraph
-from langgraph.prebuilt import ToolNode
-
-# Add parent directory to path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from agent.agents.base import clean_response  # Shared response cleaning utility
 from agent.llm_factory import LLMFactory
 from agent.prompts import get_system_prompt
 from agent.state import AgentState, create_initial_state
+from agent.utils.langgraph_compat import ToolNode
+from agent.utils.langsmith_tracing import (
+    LANGSMITH_AVAILABLE,
+    ContextThreadPoolExecutor,
+    RunTree,
+    get_current_run_tree,
+    traceable,
+)
 
 # Response formatting for Streamlit rendering
-from agent.utils.response_formatter import format_response
-from config import Config  # For model info without extra LLM instantiation
+from agent.utils.response_formatter import (
+    ensure_response_title,
+    format_response,
+    generate_response_title,
+)
+
+try:
+    from config import Config  # For model info without extra LLM instantiation
+except ModuleNotFoundError:
+    import os
+    import sys
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    from config import Config
+
 from tools.carris_api import (
     carris_find_routes_between,
     carris_get_arrivals,
@@ -131,10 +121,15 @@ from tools.visitlisboa_api import (
 # Web Knowledge (History, Culture, Real-time facts)
 from tools.web_knowledge import search_history_culture
 
+# Number of previous messages included in QA conversation_history context
+_QA_HISTORY_WINDOW = 6
+# Max characters per message used in QA history preview
+_QA_MSG_PREVIEW_LEN = 200
+
 # ==========================================================================
 # Tool Configuration
 # ==========================================================================
-# Note: Response cleaning utility (_clean_response) is imported from
+# Note: Response cleaning utility (clean_response) is imported from
 # agent.agents.base to avoid code duplication
 
 
@@ -677,6 +672,8 @@ class MultiAgentAssistant:
         sv_info = self.model_info.get("supervisor", {})
         if isinstance(sv_info, dict):
             sv_model = sv_info.get("model", "Unknown")
+        else:
+            sv_model = str(sv_info) if sv_info else "Unknown"
         return f"Multi-Agent ({sv_model})"
 
     @traceable(
@@ -946,11 +943,22 @@ class MultiAgentAssistant:
                 )
                 on_status_change(msg)
 
+            messages_list = self.state.get("messages", [])
+            qa_history = (
+                [
+                    f"{'User' if isinstance(m, HumanMessage) else 'Assistant'}: "
+                    f"{m.content[:_QA_MSG_PREVIEW_LEN]}"
+                    for m in messages_list[:-1][-_QA_HISTORY_WINDOW:]
+                ]
+                if len(messages_list) > 1 else None
+            )
             qa_result = self.qa_agent.validate(
                 user_query=message,
                 agent_outputs=agent_outputs,
                 agents_called=workers,
                 language=language,
+                user_context=self.state.get("user_context"),
+                conversation_history=qa_history,
             )
 
             if verbose:
@@ -959,12 +967,17 @@ class MultiAgentAssistant:
                     print(f"   [QA] Missing: {qa_result['missing_data']}")
                 if qa_result['required_agents']:
                     print(f"   [QA] Need agents: {qa_result['required_agents']}")
+                if qa_result.get('fact_check'):
+                    fc = qa_result['fact_check']
+                    if fc.get('disclaimers'):
+                        for d in fc['disclaimers']:
+                            print(f"   [QA FACT-CHECK] {d}")
 
-            # Single retry: call missing agents if QA says incomplete
+            # Single retry: call missing agents or agents needing refinement if QA says incomplete
             if not qa_result["complete"] and qa_result["required_agents"]:
                 retry_agents = [
                     a for a in qa_result["required_agents"]
-                    if a in self.agents and a != "planner" and a not in workers
+                    if a in self.agents and a != "planner"
                 ]
 
                 if retry_agents:
@@ -980,15 +993,28 @@ class MultiAgentAssistant:
                         )
                         on_status_change(msg)
 
+                    # Construct feedback context
+                    feedback_context = agent_context
+                    if qa_result.get("missing_data"):
+                        feedback_context += (
+                            f"\n\nIMPORTANT QA FEEDBACK: Your previous search missed the following required data: "
+                            f"{', '.join(qa_result['missing_data'])}. "
+                        )
+                        if qa_result.get("reasoning"):
+                            feedback_context += f"Reasoning: {qa_result['reasoning']}. "
+                        feedback_context += "Please specifically search for and provide this missing information."
+
                     # Execute retry agents in parallel
                     with ContextThreadPoolExecutor(max_workers=len(retry_agents)) as executor:
                         retry_futures = {}
                         for agent_name in retry_agents:
+                            # Use feedback context if agent was already called
+                            ctx = feedback_context if agent_name in workers else agent_context
                             retry_futures[
                                 executor.submit(
                                     self.agents[agent_name].invoke,
                                     message,
-                                    agent_context,
+                                    ctx,
                                     verbose,
                                 )
                             ] = agent_name
@@ -997,20 +1023,63 @@ class MultiAgentAssistant:
                             agent_name = retry_futures[future]
                             try:
                                 output = future.result()
-                                agent_outputs[agent_name] = output
+                                if agent_name in workers and agent_name in agent_outputs:
+                                    # Overwrite with the newer, more complete response from QA retry
+                                    agent_outputs[agent_name] = output
+                                else:
+                                    agent_outputs[agent_name] = output
+                                    
                                 if verbose:
                                     print(f"   [QA RETRY: {agent_name.upper()}] Finished ({len(output)} chars)")
                             except Exception as e:
-                                agent_outputs[agent_name] = f"Error: {str(e)}"
+                                if agent_name not in workers:
+                                    agent_outputs[agent_name] = f"Error: {str(e)}"
                                 if verbose:
                                     print(f"   [QA RETRY: {agent_name.upper()}] Failed: {str(e)}")
 
+                    # Post-retry re-validation (lightweight, no further retries)
+                    if verbose:
+                        print("   [QA] Post-retry re-validation...")
+
+                    qa_result_2 = self.qa_agent.validate(
+                        user_query=message,
+                        agent_outputs=agent_outputs,
+                        agents_called=workers + retry_agents,
+                        language=language,
+                        user_context=self.state.get("user_context"),
+                        conversation_history=qa_history,
+                    )
+
+                    if verbose:
+                        print(f"   [QA] Post-retry complete: {qa_result_2['complete']}")
+
+                    # Merge disclaimers from both QA passes
+                    all_disclaimers = list(set(
+                        qa_result.get("disclaimers", []) +
+                        qa_result_2.get("disclaimers", [])
+                    ))
+                    # Merge fact_check warnings
+                    fc1 = qa_result.get("fact_check", {})
+                    fc2 = qa_result_2.get("fact_check", {})
+                    merged_fc_disclaimers = list(set(
+                        fc1.get("disclaimers", []) + fc2.get("disclaimers", [])
+                    ))
+
+                    qa_result = qa_result_2
+                    qa_result["disclaimers"] = all_disclaimers
+                    if qa_result.get("fact_check"):
+                        qa_result["fact_check"]["disclaimers"] = merged_fc_disclaimers
+
             # Pass QA disclaimers as context for synthesis (internal key, filtered from output)
-            if qa_result.get("disclaimers"):
-                agent_outputs["_qa_disclaimers"] = qa_result["disclaimers"]
+            all_qa_warnings = qa_result.get("disclaimers", [])
+            fc_warns = qa_result.get("fact_check", {})
+            if isinstance(fc_warns, dict):
+                all_qa_warnings = list(set(all_qa_warnings + fc_warns.get("disclaimers", [])))
+            if all_qa_warnings:
+                agent_outputs["_qa_disclaimers"] = all_qa_warnings
                 if verbose:
-                    for d in qa_result["disclaimers"]:
-                        print(f"   [QA] Disclaimer: {d}")
+                    for d in all_qa_warnings:
+                        print(f"   [QA] Warning: {d}")
 
         # Step 5: Filter out failed agent outputs (errors must never reach user)
         clean_outputs = {}
@@ -1042,7 +1111,9 @@ class MultiAgentAssistant:
                 print("\n   [FALLBACK] Using researcher agent")
             response = self.agents["researcher"].invoke(message, verbose=verbose)
 
-        return format_response(clean_response(response))
+        formatted = format_response(clean_response(response))
+        title = generate_response_title(agents_to_call, message, language)
+        return ensure_response_title(formatted, title)
 
     def _combine_outputs(self, agent_outputs: dict) -> str:
         """
@@ -1113,6 +1184,8 @@ class MultiAgentAssistant:
                 "12. Use `---` horizontal rules ONLY to separate distinct topic sections (e.g., weather from transport from places). Never use them within the same topic.\n"
                 "13. Format transport data with correct emoji patterns: 🚇 Metro, 🚌 buses, 🚆 trains, 🚋 trams. Sub-items under each operator MUST be `- ` bullets.\n"
                 "14. Preserve the visual hierarchy: operator name with emoji as header, then `- ` bullet items with status emojis (🟢, ⚠️, ❌) and **bold** labels.\n"
+                "15. **User Constraints:** Explicitly acknowledge any user constraints (budget, time, accessibility, transport preferences) in the intro paragraph and confirm how the itinerary/response meets them.\n"
+                "16. **Tables:** Use clean Markdown tables to display structured data like schedules, itineraries, or cost breakdowns whenever possible to improve readability.\n"
             )
 
             messages = [
@@ -1140,6 +1213,54 @@ class MultiAgentAssistant:
         from agent.state import create_initial_state
 
         self.state = create_initial_state()
+
+    def reset_llm_usage_tracking(self) -> None:
+        """Resets LLM usage tracking across supervisor, QA, and worker agents."""
+        self.supervisor.reset_llm_usage_tracking()
+        self.qa_agent.reset_llm_usage_tracking()
+        for agent in self.agents.values():
+            agent.reset_llm_usage_tracking()
+
+    def get_llm_usage_snapshot(self) -> Dict[str, Dict]:
+        """Returns per-agent LLM usage summaries for the latest interaction batch."""
+        return {
+            "supervisor": self.supervisor.get_llm_usage_summary(),
+            "qa": self.qa_agent.get_llm_usage_summary(),
+            **{
+                agent_name: agent.get_llm_usage_summary()
+                for agent_name, agent in self.agents.items()
+            },
+        }
+
+    def get_llm_usage_summary(self) -> Dict[str, object]:
+        """
+        Returns an aggregated LLM usage summary across the multi-agent system.
+
+        Returns:
+            Dict[str, object]: System-wide totals plus per-agent breakdowns.
+        """
+        by_agent = self.get_llm_usage_snapshot()
+        totals = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        }
+        breakdown = []
+
+        for agent_name, summary in by_agent.items():
+            tokens = summary.get("tokens", {})
+            totals["input_tokens"] += int(tokens.get("input_tokens", 0) or 0)
+            totals["output_tokens"] += int(tokens.get("output_tokens", 0) or 0)
+            totals["total_tokens"] += int(tokens.get("total_tokens", 0) or 0)
+            breakdown.extend(summary.get("llm_usage_breakdown", []))
+
+        return {
+            "call_count": sum(int(summary.get("call_count", 0) or 0) for summary in by_agent.values()),
+            "usage_available": any(bool(summary.get("usage_available", False)) for summary in by_agent.values()),
+            "tokens": totals,
+            "llm_usage_breakdown": breakdown,
+            "by_agent": by_agent,
+        }
 
     def get_history(self) -> List:
         """Returns the conversation history."""
@@ -1293,12 +1414,6 @@ if __name__ == "__main__":
                 response = assistant.chat(query, verbose=True)
 
                 print("\n[RESPONSE]:")
-
-                # # Truncate long responses
-                # if len(response) > 600:
-                #     print(response[:600] + "\n   [...truncated...]")
-                # else:
-                #     print(response)~
 
                 # Print full response
                 print(response)

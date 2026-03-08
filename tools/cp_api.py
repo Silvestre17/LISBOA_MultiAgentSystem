@@ -22,7 +22,6 @@ import json
 import logging
 import os
 import sqlite3
-import sys
 import time
 import zipfile
 from collections import defaultdict
@@ -33,13 +32,19 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import requests
 from langchain_core.tools import tool
 
-# Add parent directory to path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from config import Config
+try:
+    from config import Config
+except ModuleNotFoundError:
+    import sys
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    from config import Config
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+try:
+    from tools.utils import fetch_json_with_retry
+except ImportError:
+    from utils import fetch_json_with_retry
 
 
 # ==========================================================================
@@ -887,37 +892,6 @@ def _is_cache_valid(last_load: Optional[datetime]) -> bool:
         return False
     hours_elapsed = (datetime.now() - last_load).total_seconds() / 3600
     return hours_elapsed < CACHE_EXPIRATION_HOURS
-
-
-def fetch_json_with_retry(url: str, timeout: int = REQUEST_TIMEOUT) -> Optional[Any]:
-    """
-    Fetches JSON data from a URL with retry logic.
-    
-    Args:
-        url: URL to fetch from.
-        timeout: Request timeout in seconds.
-        
-    Returns:
-        JSON data if successful, None otherwise.
-    """
-    for attempt in range(MAX_RETRIES):
-        try:
-            response = requests.get(url, timeout=timeout)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.Timeout:
-            wait_time = BACKOFF_FACTOR ** attempt
-            logger.warning(f"Timeout. Retrying in {wait_time}s...")
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(wait_time)
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"Request error: {e}")
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(BACKOFF_FACTOR ** attempt)
-        except ValueError:
-            logger.error("Invalid JSON response")
-            return None
-    return None
 
 
 # ==========================================================================

@@ -6,15 +6,10 @@
 #   agents to invoke. Only calls agents when necessary.
 # ==========================================================================
 
-import os
 import re
-import sys
 from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-
-# Add parent directory to path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from agent.agents.base import BaseAgent, clean_response, parse_json_response, traceable
 from agent.prompts.supervisor import get_supervisor_prompt
@@ -128,14 +123,14 @@ class SupervisorAgent(BaseAgent):
                             "Ups, isso fica um pouco fora da minha especialidade! 😄 "
                             "Sou o teu **Assistente Urbano de Lisboa** e estou aqui para te ajudar "
                             "a aproveitar ao máximo a Área Metropolitana de Lisboa 🏙️\n\n"
-                            "Olha o que posso fazer por ti:\n"
-                            "🌤️ Previsões meteorológicas e avisos em tempo real\n"
-                            "🚇 Informação de transportes (Metro, autocarros, comboios, elétricos)\n"
-                            "🎭 Eventos culturais e atividades\n"
-                            "📍 Locais para visitar, restaurantes e atrações\n"
-                            "🗺️ Planeamento de itinerários à medida\n"
-                            "🏥 Serviços próximos (farmácias, hospitais, parques)\n"
-                            "📚 História e cultura de Lisboa\n\n"
+                            "Olha o que posso fazer por ti:\n\n"
+                            "- 🌤️ Previsões meteorológicas e avisos em tempo real\n"
+                            "- 🚇 Informação de transportes (Metro, autocarros, comboios, elétricos)\n"
+                            "- 🎭 Eventos culturais e atividades\n"
+                            "- 📍 Locais para visitar, restaurantes e atrações\n"
+                            "- 🗺️ Planeamento de itinerários à medida\n"
+                            "- 🏥 Serviços próximos (farmácias, hospitais, parques)\n"
+                            "- 📚 História e cultura de Lisboa\n\n"
                             "Pergunta-me o que quiseres sobre Lisboa! 🧭"
                         )
                     else:
@@ -143,14 +138,14 @@ class SupervisorAgent(BaseAgent):
                             "Oops, that's a bit outside my expertise! 😄 "
                             "I'm your **Lisbon Urban Assistant** and I'm here to help you "
                             "make the most of the Lisbon Metropolitan Area 🏙️\n\n"
-                            "Here's what I can do for you:\n"
-                            "🌤️ Weather forecasts & real-time warnings\n"
-                            "🚇 Transport info (Metro, buses, trains, trams)\n"
-                            "🎭 Cultural events & activities\n"
-                            "📍 Places to visit, restaurants & attractions\n"
-                            "🗺️ Custom itinerary planning\n"
-                            "🏥 Nearby services (pharmacies, hospitals, parks)\n"
-                            "📚 Lisbon history & culture\n\n"
+                            "Here's what I can do for you:\n\n"
+                            "- 🌤️ Weather forecasts & real-time warnings\n"
+                            "- 🚇 Transport info (Metro, buses, trains, trams)\n"
+                            "- 🎭 Cultural events & activities\n"
+                            "- 📍 Places to visit, restaurants & attractions\n"
+                            "- 🗺️ Custom itinerary planning\n"
+                            "- 🏥 Nearby services (pharmacies, hospitals, parks)\n"
+                            "- 📚 Lisbon history & culture\n\n"
                             "Go ahead, ask me anything about Lisbon! 🧭"
                         )
 
@@ -161,9 +156,9 @@ class SupervisorAgent(BaseAgent):
             }
 
         # Fallback: If JSON parsing fails, try to extract intent heuristically
-        return self._fallback_routing(user_message, content)
+        return self._fallback_routing(user_message, content, language)
 
-    def _fallback_routing(self, user_message: str, llm_response: str) -> Dict[str, Any]:
+    def _fallback_routing(self, user_message: str, llm_response: str, language: str = "pt") -> Dict[str, Any]:
         """
         Fallback routing when JSON parsing fails.
         Uses simple keyword matching as backup.
@@ -171,6 +166,7 @@ class SupervisorAgent(BaseAgent):
         Args:
             user_message: Original user query.
             llm_response: Raw LLM response that failed to parse.
+            language: User language code ("pt" or "en"). Defaults to "pt".
 
         Returns:
             Dict with routing decision.
@@ -199,21 +195,36 @@ class SupervisorAgent(BaseAgent):
             r"\brome\b",
         ]
         if any(re.search(pat, message_lower) for pat in forbidden_patterns):
+            if language == "en":
+                oos_msg = (
+                    "That's a bit outside my area! 😊 "
+                    "I'm your guide for the **Lisbon Metropolitan Area** 🏙️\n\n"
+                    "But here's everything I can help you with:\n\n"
+                    "- 🌤️ Weather forecasts and warnings\n"
+                    "- 🚇 Real-time transport (Metro, buses, trains)\n"
+                    "- 🎭 Cultural events and activities\n"
+                    "- 📍 Places, museums and attractions\n"
+                    "- 🗺️ Personalized itinerary planning\n"
+                    "- 🏥 Essential services (pharmacies, hospitals, schools)\n\n"
+                    "Want to explore Lisbon? Just ask! 🧭"
+                )
+            else:
+                oos_msg = (
+                    "Isso fica um pouco fora da minha área! 😊 "
+                    "Sou o teu guia para a **Área Metropolitana de Lisboa** 🏙️\n\n"
+                    "Mas olha tudo o que te posso ajudar:\n\n"
+                    "- 🌤️ Previsão meteorológica e avisos\n"
+                    "- 🚇 Transportes em tempo real (Metro, autocarros, comboios)\n"
+                    "- 🎭 Eventos e atividades culturais\n"
+                    "- 📍 Locais, museus e atrações\n"
+                    "- 🗺️ Planeamento personalizado de itinerários\n"
+                    "- 🏥 Serviços essenciais (farmácias, hospitais, escolas)\n\n"
+                    "Queres explorar Lisboa? Pergunta-me! 🧭"
+                )
             return {
                 "reasoning": "Fallback: Detected out-of-scope location (outside AML)",
                 "agents": [],
-                "direct_response": (
-                    "Isso fica um pouco fora da minha área! 😊 "
-                    "Sou o teu guia para a **Área Metropolitana de Lisboa** 🏙️\n\n"
-                    "Mas olha tudo o que te posso ajudar:\n"
-                    "🌤️ Previsão meteorológica e avisos\n"
-                    "🚇 Transportes em tempo real (Metro, autocarros, comboios)\n"
-                    "🎭 Eventos e atividades culturais\n"
-                    "📍 Locais, museus e atrações\n"
-                    "🗺️ Planeamento personalizado de itinerários\n"
-                    "🏥 Serviços essenciais (farmácias, hospitais, escolas)\n\n"
-                    "Queres explorar Lisboa? Pergunta-me! 🧭"
-                ),
+                "direct_response": oos_msg,
             }
 
         # 2. AML locations that ARE in scope - should trigger transport agent
@@ -385,11 +396,18 @@ class SupervisorAgent(BaseAgent):
         ]
 
         if not agents and any(kw in message_lower for kw in greeting_keywords):
-            greeting_response = (
-                "Olá! 👋 Sou o teu Assistente Urbano de Lisboa. "
-                "Em que te posso ajudar hoje? Posso sugerir locais, ver o tempo, "
-                "transportes ou planear o teu dia! 🏙️"
-            )
+            if language == "en":
+                greeting_response = (
+                    "Hello! 👋 I'm your Lisbon Urban Assistant. "
+                    "How can I help you today? I can suggest places, check the weather, "
+                    "transport options or plan your day! 🏙️"
+                )
+            else:
+                greeting_response = (
+                    "Olá! 👋 Sou o teu Assistente Urbano de Lisboa. "
+                    "Em que te posso ajudar hoje? Posso sugerir locais, ver o tempo, "
+                    "transportes ou planear o teu dia! 🏙️"
+                )
             return {
                 "reasoning": "Simple greeting/general query",
                 "agents": [],

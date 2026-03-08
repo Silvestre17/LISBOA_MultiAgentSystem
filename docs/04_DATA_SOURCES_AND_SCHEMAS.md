@@ -1,148 +1,153 @@
-# Data collections
+# 🌐 Data Sources and Schemas
 
-This document describes how datasets are collected, stored, and updated.
+This page documents what is live, what is periodically refreshed, and what is stored locally for LISBOA.
 
-## VisitLisboa scraping outputs
+## 🧾 Source Summary
 
-Scripts:
+| Source | Type | Access pattern | Refresh model | Main consumers |
+|--------|------|----------------|---------------|----------------|
+| IPMA | live API | direct runtime call | live on request | `WeatherAgent` |
+| Metro de Lisboa | live API + public fallback | direct runtime call | live on request | `TransportAgent` |
+| Carris Metropolitana | live REST API | direct runtime call | live on request | `TransportAgent` |
+| Carris Urban | GTFS + GTFS-RT | local SQLite + live feed | live plus cached static support data | `TransportAgent` |
+| CP / Comboios.live | live API + GTFS support data | direct runtime call plus local support files | live on request | `TransportAgent` |
+| VisitLisboa places | scraped JSON + vector store | local JSON + semantic retrieval | weekly on Mondays by workflow | `ResearcherAgent`, `PlannerAgent` |
+| VisitLisboa events | scraped JSON + vector store | local JSON + semantic retrieval | daily by workflow | `ResearcherAgent`, `PlannerAgent` |
+| Official Lisbon guide PDF | static document + vector store | local file + semantic retrieval | rebuilt on demand | `ResearcherAgent`, `PlannerAgent` |
+| Lisboa Aberta | open GeoJSON datasets | local metadata + on-demand dataset fetch | metadata refreshed by collection scripts, datasets fetched live | `ResearcherAgent` |
+| Web knowledge | web search fallback | runtime lookup | on request | `ResearcherAgent` |
 
-- Events scraper: `data_collection/webscraping/visitlisbon_events.py`
-- Places scraper: `data_collection/webscraping/visitlisbon_places.py`
+## ⏱️ Refresh and Staleness Model
 
-Outputs:
+> [!NOTE]
+> Not all LISBOA data layers age in the same way. Some are live on request, some are refreshed daily or weekly into repository artefacts, and some are generated locally to speed up transport support workflows.
 
-- `data_collection/webscraping/events.json`
-- `data_collection/webscraping/places.json`
+### Live on Request
 
-Incremental update behavior:
+These sources are queried at runtime and are not versioned as scraped repository snapshots:
 
-- Both scrapers implement delta logic: they load the existing JSON, scrape the current URL list, add new items, update changed items, and keep unchanged items.
-- If the scraper finds zero URLs, it aborts without overwriting the local JSON (safety guard).
+- IPMA
+- Metro de Lisboa
+- Carris Metropolitana
+- Carris GTFS-RT
+- Comboios.live
+- Lisboa Aberta dataset contents when a specific dataset is fetched on demand
 
-### events.json schema (high level)
+### Scheduled Repository Refresh
 
-Each event is a dictionary with fields such as:
+| Workflow | Schedule or trigger | What it updates |
+|----------|---------------------|-----------------|
+| `data_pipeline.yml` | daily at **04:00 UTC** | VisitLisboa event JSON every day and place JSON on Mondays |
+| `sync_vector_db.yml` | `workflow_run` after successful data update, plus manual trigger | incremental ChromaDB sync for changed collections |
 
-- `url`
-- `title`
-- `category`
-- `short_description`
-- `full_description`
-- `image_urls` (list)
-- `video_urls` (list)
-- `dates` (list)
-- `price` (optional)
-- `venue_name` (optional)
-- `location` (optional)
-- `buy_tickets_url` (optional)
-- `information_links` (dict of label to URL)
+In practice:
 
-Dates are normalized as a list of entries. Examples:
+- VisitLisboa **events** are scraped daily
+- VisitLisboa **places** are scraped weekly on Mondays, unless manually triggered
+- vector collections are then updated incrementally instead of being rebuilt from scratch every time
 
-- Single date: `{ "type": "single", "date": {"datetime_iso": "YYYY-MM-DD", "display_text": "...", "time": "HH:MM" or null} }`
-- Range: `{ "type": "range", "start": {...}, "end": {...} }`
+## 🗂️ Scraped JSON Artefacts
 
-**Complete Example:**
+### 🎭 *VisitLisboa* Events
 
-```json
-{
-  "url": "https://www.visitlisboa.com/pt-pt/eventos/festa-santo-antonio-2026",
-  "title": "Festa de Santo António 2026",
-  "category": "Festas e Romarias",
-  "short_description": "Celebração anual do Santo Padroeiro de Lisboa",
-  "full_description": "A Festa de Santo António é a maior celebração popular de Lisboa, com marchas, sardinhas assadas, e arraiais por toda a cidade. As festividades começam na véspera (12 de junho) e prolongam-se pela madrugada do dia 13.",
-  "image_urls": [
-    "https://www.visitlisboa.com/sites/default/files/santo_antonio_2026.jpg"
-  ],
-  "video_urls": [],
-  "dates": [
-    {
-      "type": "range",
-      "start": {
-        "datetime_iso": "2026-06-12",
-        "display_text": "12 Jun 2026",
-        "time": "21:00"
-      },
-      "end": {
-        "datetime_iso": "2026-06-13",
-        "display_text": "13 Jun 2026",
-        "time": "02:00"
-      }
-    }
-  ],
-  "price": "Gratuito",
-  "venue_name": "Bairro de Alfama",
-  "location": "Alfama, Lisboa",
-  "buy_tickets_url": null,
-  "information_links": {
-    "Programa Oficial": "https://www.visitlisboa.com/festas-lisboa"
-  }
-}
-```
+| Item | Value |
+|------|-------|
+| Script | `data_collection/webscraping/visitlisbon_events.py` |
+| Output | `data_collection/webscraping/events.json` |
+| Used by | vector sync, `ResearcherAgent`, `PlannerAgent` |
 
-### places.json schema (high level)
-
-Each place is a dictionary with fields such as:
+Common fields include:
 
 - `url`
 - `title`
 - `category`
 - `short_description`
 - `full_description`
-- `image_urls` (list)
-- `video_urls` (list)
-- `features` (list)
-- `location` (optional)
-- `contact_info` (dict, may include `phone`, `email`, `website`, `tickets_url`)
-- `social_media` (dict)
-- `schedules` (list of schedule entries)
-- `tickets_offers` (optional)
-- `tripadvisor` (optional)
+- `image_urls`
+- `video_urls`
+- `dates`
+- `price`
+- `venue_name`
+- `location`
+- `buy_tickets_url`
+- `information_links`
 
-Schedules support multiple blocks (for example summer and winter schedules), and may include `today`, a `date_range`, and an `hours` dictionary.
+### 🏛️ *VisitLisboa* Places
 
-Local run:
+| Item | Value |
+|------|-------|
+| Script | `data_collection/webscraping/visitlisbon_places.py` |
+| Output | `data_collection/webscraping/places.json` |
+| Used by | vector sync, `ResearcherAgent`, `PlannerAgent` |
+
+Common fields include:
+
+- `url`
+- `title`
+- `category`
+- `short_description`
+- `full_description`
+- `image_urls`
+- `video_urls`
+- `features`
+- `location`
+- `contact_info`
+- `social_media`
+- `schedules`
+- `tickets_offers`
+- `tripadvisor`
+
+## 🏥 *Lisboa Aberta* Metadata Layer
+
+| Item | Value |
+|------|-------|
+| Metadata file | `data_collection/webscraping/lisbon_datasets_clean.json` |
+| Retrieval model | structured local metadata + on-demand GeoJSON fetch |
+| Used by | dataset discovery, category browsing, keyword search, detail lookup |
+
+The system does **not** embed every Lisboa Aberta dataset into the vector store. Instead, it keeps metadata locally and fetches relevant datasets on demand.
+
+## 🚍 Local Transport Support Data
+
+These artefacts support faster local lookups and reduce repeated parsing of static transport files.
+
+| Layer | Local artefacts | Purpose |
+|-------|------------------|---------|
+| Carris Urban | `data/carris/carris.db`, `data/carris/metadata.json` | runtime stop, route, and GTFS support |
+| CP | `data/cp/cp_gtfs.db`, `data/cp/metadata.json`, `data/cp/gtfs.zip` | local schedule support and reproducible reference data |
+
+## 🧠 Vector Database
+
+### Storage and Collections
+
+| Item | Value |
+|------|-------|
+| Storage directory | `data/vector_db/` |
+| Embedding model | `BAAI/bge-m3` |
+| Collections | `lisbon_pdf`, `lisbon_places`, `lisbon_events` |
+| Language support | multilingual, with Portuguese and English retrieval |
+
+### Sync Semantics
+
+The vector-store update flow is incremental:
+
+- documents receive stable identifiers
+- metadata stores a SHA-256 content hash
+- new content is inserted
+- changed content is updated
+- removed content is deleted from the affected collection
+
+This allows the GitHub Actions sync workflow to process updates in batches instead of rebuilding the full store every time.
+
+To inspect the current collection state locally:
 
 ```bash
-python data_collection/webscraping/visitlisbon_events.py
-python data_collection/webscraping/visitlisbon_places.py
+python tools/vector_store.py --stats
 ```
 
-## Lisboa Aberta metadata
+## 📌 Operational Boundaries
 
-- `data_collection/webscraping/lisbon_datasets_clean.json`
-
-This metadata file is used by the Lisboa Aberta tools to:
-
-- list datasets by category or keyword
-- fetch GeoJSON on demand
-- inspect dataset fields and sample records
-
-## Transport reference data
-
-Carris Urban:
-
-- `data/carris/carris.db`
-- `data/carris/metadata.json`
-
-CP:
-
-- `data/cp/metadata.json`
-
-## Vector database
-
-Persistent Chroma directory:
-
-- `data/vector_db/`
-
-Collections:
-
-- `lisbon_pdf`
-- `lisbon_places`
-- `lisbon_events`
-
-Build or update:
-
-```bash
-python tools/vector_store.py
-```
+- Exported runtime tools are counted from `tools/__init__.py`
+- `tools/vector_store.py` is operational infrastructure, not an exported runtime tool
+- VisitLisboa semantic retrieval depends on both local JSON artefacts and the vector store
+- Lisboa Aberta service discovery is intentionally handled through structured on-demand fetches rather than bulk embedding

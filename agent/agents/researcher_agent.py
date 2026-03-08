@@ -7,30 +7,25 @@
 #   Uses BaseAgent.execute_react_loop() for tool execution.
 # ==========================================================================
 
-import os
-import sys
-
-from langchain_core.messages import SystemMessage, HumanMessage
-from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolNode
 from typing import TYPE_CHECKING
+
+from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.graph import END, StateGraph
 
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
-# Add parent directory to path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-
 from agent.agents.base import BaseAgent, traceable
 from agent.prompts.researcher import get_researcher_prompt
 from agent.state import AgentState
+from agent.utils.langgraph_compat import ToolNode
 
 
 class ResearcherAgent(BaseAgent):
     """
     RAG researcher agent for places, events, and local knowledge.
 
-    Uses semantic search tools (loaded via get_agent_tools):
+    Uses 11 retrieval tools loaded via get_agent_tools:
         - search_places_attractions
         - search_cultural_events
         - search_lisbon_knowledge
@@ -38,6 +33,12 @@ class ResearcherAgent(BaseAgent):
         - get_event_categories / get_place_categories
         - search_history_culture (web search for history/facts)
         - list_available_datasets / get_dataset_details / find_place_in_datasets
+        - list_service_categories
+
+    Notes:
+        This agent combines semantic retrieval over the vector store, on-demand
+        open-data lookup, and web fallback search. It is the main worker for
+        places, events, essential services, and Lisbon knowledge queries.
     """
 
     def __init__(self):
@@ -102,7 +103,7 @@ class ResearcherAgent(BaseAgent):
             if not messages or not isinstance(messages[0], SystemMessage):
                 messages = [SystemMessage(content=self.system_prompt)] + messages
 
-            response = self.llm_with_tools.invoke(messages)
+            response = self._safe_llm_invoke(self.llm_with_tools, messages)
             return {"messages": [response]}
 
         def should_continue(state: AgentState) -> str:

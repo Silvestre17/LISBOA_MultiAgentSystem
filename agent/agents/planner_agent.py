@@ -6,14 +6,9 @@
 #   into coherent travel plans.
 # ==========================================================================
 
-import os
-import sys
-from typing import Any, Dict, List
+from typing import Dict, List
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-
-# Add parent directory to path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent.agents.base import BaseAgent, clean_response, traceable
 from agent.prompts.planner import get_planner_prompt
@@ -29,7 +24,11 @@ class PlannerAgent(BaseAgent):
         - Generate coherent, practical itineraries
     
     Note:
-        This agent has NO tools - it only synthesizes data from other agents.
+        This agent has NO tools. It only synthesizes data gathered by worker
+        agents and can surface QA disclaimers in the final planning response.
+        In the default runtime, it is invoked only when the supervisor route
+        includes the planner. Direct and simple single-domain queries can
+        return without using this agent.
     """
     
     def __init__(self):
@@ -44,7 +43,8 @@ class PlannerAgent(BaseAgent):
         weather_data: str = "",
         transport_data: str = "",
         places_data: str = "",
-        events_data: str = ""
+        events_data: str = "",
+        qa_disclaimers: list[str] | None = None,
     ) -> str:
         """
         Creates an itinerary from gathered data.
@@ -55,6 +55,7 @@ class PlannerAgent(BaseAgent):
             transport_data: Output from transport agent.
             places_data: Output from researcher agent (places).
             events_data: Output from researcher agent (events).
+            qa_disclaimers: Optional list of QA-flagged data limitations.
             
         Returns:
             str: Formatted itinerary.
@@ -74,6 +75,14 @@ class PlannerAgent(BaseAgent):
         if transport_data:
             context_parts.append(f"## 🚇 Transport Info\n{transport_data}")
         
+        # Inject QA disclaimers so the planner transparently communicates limitations
+        if qa_disclaimers:
+            disclaimer_text = "\n".join(f"- ⚠️ {d}" for d in qa_disclaimers)
+            context_parts.append(
+                f"## ⚠️ Data Limitations (from QA validation)\n"
+                f"Include these caveats in your response where relevant:\n{disclaimer_text}"
+            )
+        
         context = "\n\n---\n\n".join(context_parts) if context_parts else "No additional data provided."
         
         messages = [
@@ -90,19 +99,30 @@ class PlannerAgent(BaseAgent):
         """
         Synthesizes outputs from multiple agents into a response.
         
+        Extracts QA disclaimers from internal keys and passes them
+        to the planner so data limitations are surfaced to the user.
+        
         Args:
             user_message: Original user query.
             agent_outputs: Dict mapping agent names to their outputs.
+                May contain '_qa_disclaimers' (list) from QA validation.
             
         Returns:
             str: Synthesized response.
         """
+        # Extract QA disclaimers before passing to invoke
+        qa_disclaimers = agent_outputs.get("_qa_disclaimers")
+        if isinstance(qa_disclaimers, str):
+            # Safety: if it was stored as a string, wrap in list
+            qa_disclaimers = [qa_disclaimers]
+
         return self.invoke(
             user_message=user_message,
             weather_data=agent_outputs.get("weather", ""),
             transport_data=agent_outputs.get("transport", ""),
             places_data=agent_outputs.get("researcher", ""),
-            events_data=""  # Events come from researcher too
+            events_data="",  # Events come from researcher too
+            qa_disclaimers=qa_disclaimers,
         )
 
 
@@ -110,6 +130,9 @@ class PlannerAgent(BaseAgent):
 # Test Block
 # ==========================================================================
 if __name__ == "__main__":
+    import io
+    import sys
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     print("\033[1m" + "=" * 60 + "\033[0m")
     print("\033[1m🧪 Planner Agent Test\033[0m")
     print("\033[1m" + "=" * 60 + "\033[0m")

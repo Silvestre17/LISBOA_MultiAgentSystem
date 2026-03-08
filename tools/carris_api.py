@@ -34,7 +34,6 @@ import math
 import os
 import re
 import sqlite3
-import sys
 import time
 import zipfile
 from datetime import datetime, timedelta
@@ -53,12 +52,12 @@ except ImportError:
     GTFS_RT_AVAILABLE = False
     gtfs_realtime_pb2 = None
 
-# Add parent directory to path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+try:
+    from tools.utils import haversine_distance
+except ImportError:
+    from utils import haversine_distance
 
 # ==========================================================================
 # Configuration
@@ -113,28 +112,6 @@ NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 # ==========================================================================
 # Utility Functions
 # ==========================================================================
-
-
-def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """
-    Calculate distance in km between two GPS coordinates using Haversine formula.
-
-    Args:
-        lat1, lon1: First point coordinates
-        lat2, lon2: Second point coordinates
-
-    Returns:
-        Distance in kilometers
-    """
-    R = 6371  # Earth's radius in km
-    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = (
-        math.sin(dlat / 2) ** 2
-        + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
-    )
-    return 2 * R * math.asin(math.sqrt(a))
 
 
 def geocode_location(

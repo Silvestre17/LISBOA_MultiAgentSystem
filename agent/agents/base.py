@@ -13,34 +13,22 @@
 import json
 import os
 import re
-import sys
 import time as time_module
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from copy import deepcopy
 from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-# Add parent directory to path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-from config import Config
+from agent.utils.langsmith_tracing import traceable
 
-# ==========================================================================
-# LangSmith Tracing Support
-# ==========================================================================
 try:
-    from langsmith.run_helpers import traceable
-
-    LANGSMITH_AVAILABLE = True
-except ImportError:
-    LANGSMITH_AVAILABLE = False
-
-    # Fallback: no-op decorator
-    def traceable(*args, **kwargs):
-        def decorator(func):
-            return func
-
-        return decorator
+    from config import Config
+except ModuleNotFoundError:
+    import sys
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+    from config import Config
 
 
 # ==========================================================================
@@ -56,10 +44,13 @@ def get_agent_tools(agent_name: str) -> List:
     and only loads what's needed for each agent.
 
     Args:
-        agent_name (str): Name of the agent ('weather', 'transport', 'researcher', 'planner')
+        agent_name (str): Name of the agent. Supported values are
+            `weather`, `transport`, `researcher`, `planner`, `supervisor`,
+            and `qa`.
 
     Returns:
-        List: List of LangChain tools for the specified agent.
+        List: List of LangChain tools for the specified agent. Tool-less agents
+            such as planner, supervisor, and qa return an empty list by design.
     """
     if agent_name == "weather":
         from tools.ipma_api import (
@@ -440,7 +431,13 @@ class BaseAgent:
         - LLM initialization with agent-specific config
         - Tool binding
         - Response cleaning
-        - State management
+        - Shared ReAct loop execution
+        - Optional parallel tool execution
+        - Safe LLM invocation with Azure content-filter retry handling
+
+    Tool-less agents:
+        Planner, Supervisor, and QA intentionally skip tool binding and use the
+        base LLM directly.
     """
 
     def __init__(self, agent_name: str):
@@ -452,7 +449,15 @@ class BaseAgent:
         """
         self.agent_name = agent_name
         self.tools = get_agent_tools(agent_name)
+        agent_config = Config.AGENT_MODELS().get(
+            agent_name, Config.DEFAULT_AGENT_MODEL()
+        )
+        self.llm_provider = agent_config.get("provider", Config.MODEL_PROVIDER)
+        self.llm_model_name = agent_config.get("model", "Unknown")
+        self.llm_temperature = agent_config.get("temperature", Config.TEMPERATURE)
         self.llm = get_agent_llm(agent_name)
+        self._llm_usage_events: List[Dict[str, Any]] = []
+        self._llm_usage_call_index = 0
 
         # Bind tools if this agent has any
         if self.tools:
@@ -484,10 +489,85 @@ class BaseAgent:
             model=model,
             temperature=temperature,
         )
+        model_info = LLMFactory.get_model_info(self.llm)
+        self.llm_provider = provider
+        self.llm_model_name = model_info.get("model", model or self.llm_model_name)
+        self.llm_temperature = temperature
         if self.tools:
             self.llm_with_tools = self.llm.bind_tools(self.tools)
         else:
             self.llm_with_tools = self.llm
+
+    def reset_llm_usage_tracking(self) -> None:
+        """Resets the in-memory LLM usage tracker for this agent."""
+        self._llm_usage_events = []
+        self._llm_usage_call_index = 0
+
+    def get_llm_usage_events(self) -> List[Dict[str, Any]]:
+        """Returns a defensive copy of the raw LLM usage events."""
+        return deepcopy(self._llm_usage_events)
+
+    def get_llm_usage_summary(self) -> Dict[str, Any]:
+        """
+        Returns an aggregated view of tracked LLM token usage for this agent.
+
+        Returns:
+            Dict[str, Any]: Summary with total tokens, call count, and the raw
+            per-call breakdown.
+        """
+        totals = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        }
+
+        for event in self._llm_usage_events:
+            tokens = event.get("tokens", {})
+            totals["input_tokens"] += int(tokens.get("input_tokens", 0) or 0)
+            totals["output_tokens"] += int(tokens.get("output_tokens", 0) or 0)
+            totals["total_tokens"] += int(tokens.get("total_tokens", 0) or 0)
+
+        return {
+            "agent_name": self.agent_name,
+            "provider": self.llm_provider,
+            "model": self.llm_model_name,
+            "model_id": f"{self.llm_provider}::{self.llm_model_name}",
+            "call_count": len(self._llm_usage_events),
+            "usage_available": any(event.get("usage_available", False) for event in self._llm_usage_events),
+            "tokens": totals,
+            "llm_usage_breakdown": self.get_llm_usage_events(),
+        }
+
+    def _record_llm_usage(self, llm: Any, response: Any) -> None:
+        """
+        Records token usage for a single LLM invocation.
+
+        Args:
+            llm: LLM instance used for the call.
+            response: Raw LLM response object.
+        """
+        from agent.llm_factory import LLMFactory
+
+        usage = LLMFactory.extract_usage_metadata(response)
+        model_info = LLMFactory.get_model_info(llm)
+        model_name = model_info.get("model", self.llm_model_name)
+
+        self._llm_usage_call_index += 1
+        self._llm_usage_events.append(
+            {
+                "call_index": self._llm_usage_call_index,
+                "agent_name": self.agent_name,
+                "provider": self.llm_provider,
+                "model": model_name,
+                "model_id": f"{self.llm_provider}::{model_name}",
+                "tokens": {
+                    "input_tokens": int(usage.get("input_tokens", 0) or 0),
+                    "output_tokens": int(usage.get("output_tokens", 0) or 0),
+                    "total_tokens": int(usage.get("total_tokens", 0) or 0),
+                },
+                "usage_available": bool(usage.get("usage_available", False)),
+            }
+        )
 
     def get_model_info(self) -> Dict[str, Any]:
         """Returns the model info dictionary."""
@@ -547,10 +627,16 @@ class BaseAgent:
         Args:
             tool_calls: List of tool call dicts with 'name', 'args', 'id' keys.
             max_workers: Maximum concurrent workers.
-            timeout: Maximum wait time for all tools.
+            timeout: Maximum wait time passed to `as_completed()` while waiting
+                for the batch to finish.
         
         Returns:
             Dict mapping tool call IDs to results.
+
+        Notes:
+            If the overall wait exceeds `timeout`, `as_completed()` may raise a
+            timeout-related exception to the caller. Individual tool execution
+            errors are captured and returned as error strings.
         """
         if not tool_calls:
             return {}
@@ -595,7 +681,7 @@ class BaseAgent:
 
     def _safe_llm_invoke(self, llm, messages: list, retries: int = 2, verbose: bool = False):
         """
-        Invokes the LLM with retry logic for Azure content filter false positives.
+        Invokes the LLM with targeted retry logic for Azure content-filter false positives.
 
         Azure OpenAI may probabilistically flag benign prompts as "jailbreak".
         This method retries the call with exponential backoff since the same
@@ -604,7 +690,8 @@ class BaseAgent:
         Args:
             llm: The LLM instance (with or without tools bound).
             messages: The messages to send.
-            retries: Maximum number of retry attempts.
+            retries: Maximum number of retry attempts for the specific content-
+                filter patterns handled here.
             verbose: Whether to print debug information.
 
         Returns:
@@ -617,7 +704,9 @@ class BaseAgent:
         last_exception = None
         for attempt in range(retries + 1):
             try:
-                return llm.invoke(messages)
+                response = llm.invoke(messages)
+                self._record_llm_usage(llm, response)
+                return response
             except Exception as e:
                 error_str = str(e).lower()
                 is_content_filter = (
@@ -652,7 +741,8 @@ class BaseAgent:
             2. Iterative tool execution (parallel when multiple)
             3. Loop detection (duplicate tool call prevention)
             4. JSON tool call fallback
-            5. Response cleaning
+            5. Forced response generation when loops are detected
+            6. Response cleaning
 
         Args:
             messages: Initial message list (system prompt + context + user query).
@@ -662,7 +752,8 @@ class BaseAgent:
                 doesn't call any tools initially.
 
         Returns:
-            str: Cleaned final response.
+            str: Cleaned final response or, in certain loop-break cases, the
+            latest available tool result converted into user-facing text.
         """
         # First LLM call - may request tool use (with retry for Azure content filter)
         response = self._safe_llm_invoke(self.llm_with_tools, messages, verbose=verbose)

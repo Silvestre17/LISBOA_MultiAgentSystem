@@ -1,9 +1,10 @@
 # ==========================================================================
 # Master Thesis - Lisbon Urban Assistant (Streamlit App)
-#   - Andre Filipe Gomes Silvestre, 20240502
+#   - André Filipe Gomes Silvestre, 20240502
 #
-#   Main Streamlit application for the intelligent tourist assistant.
-#   Provides a modern, intuitive chat interface for exploring Lisbon.
+#   Supported Streamlit entrypoint for LISBOA.
+#   Provides the main user-facing interface for the repository and
+#   defaults to the multi-agent runtime defined in agent/graph.py.
 #
 #   Features:
 #     - Real-time chat with LLM-powered assistant
@@ -36,8 +37,10 @@ warnings.filterwarnings("ignore", category=UserWarning, module="torch")
 try:
     import torch
 
-    if not hasattr(torch.classes, "__path__"):
-        torch.classes.__path__ = []
+    class _StreamlitTorchPath:
+        _path = []
+
+    torch.classes.__path__ = _StreamlitTorchPath()
 except ImportError:
     pass
 except Exception as e:
@@ -56,6 +59,7 @@ import streamlit as st
 sys.path.insert(0, ".")
 
 from agent.graph import LisbonAssistant, MultiAgentAssistant, create_assistant
+from agent.utils.langsmith_tracing import get_langsmith_display_state
 from config import Config
 from tools.carris_api import CARRIS_DB_PATH, CarrisGTFSManager
 from tools.visitlisboa_api import initialize_vector_store
@@ -101,6 +105,10 @@ TRANSLATIONS = {
         "tracing": "Tracing",
         "tracing_active": "LangSmith Active",
         "tracing_disabled": "LangSmith Disabled",
+        "tracing_auto_disabled": "LangSmith Auto-disabled",
+        "tracing_auto_disabled_invalid_credentials": "LangSmith Auto-disabled (invalid credentials)",
+        "tracing_auto_disabled_invalid_configuration": "LangSmith Auto-disabled (invalid configuration)",
+        "tracing_reason": "Reason",
         "project": "Project",
         # Main Content
         "welcome_title": "Welcome to Lisbon!",
@@ -155,7 +163,7 @@ TRANSLATIONS = {
         # Info Page
         "info_title": "About This Assistant",
         "info_objective": "Objective",
-        "info_objective_text": "This intelligent assistant was developed as part of a Master's Thesis in Data Science and Advanced Analytics at NOVA IMS (Universidade NOVA de Lisboa). The system LISBOA (Lisbon Itenerary System Based On AI) implements a multi-agent approach for personalized tourism and urban mobility in Lisbon.",
+        "info_objective_text": "This intelligent assistant was developed as part of a Master's Thesis in Data Science and Advanced Analytics at NOVA IMS (Universidade NOVA de Lisboa). The system LISBOA (Lisbon Itinerary System Based On AI) implements a multi-agent approach for personalized tourism and urban mobility in Lisbon.",
         "info_data_sources": "Data Sources",
         "info_data_sources_text": """The assistant uses multiple real-time and static data sources:
 
@@ -176,10 +184,10 @@ TRANSLATIONS = {
 - No conversation data is stored permanently on any server
 - LangSmith tracing (if enabled) is for development purposes only""",
         "info_author": "Author",
-        "info_author_text": """**Andre Filipe Gomes Silvestre**
+        "info_author_text": """**André Filipe Gomes Silvestre**
 Master's Student in Data Science and Advanced Analytics
 NOVA IMS - Universidade NOVA de Lisboa
-2024/2025""",
+2025/2026""",
     },
     "pt": {
         # Header
@@ -217,6 +225,10 @@ NOVA IMS - Universidade NOVA de Lisboa
         "tracing": "Rastreamento",
         "tracing_active": "LangSmith Ativo",
         "tracing_disabled": "LangSmith Desativado",
+        "tracing_auto_disabled": "LangSmith Desativado Automaticamente",
+        "tracing_auto_disabled_invalid_credentials": "LangSmith Desativado Automaticamente (credenciais inválidas)",
+        "tracing_auto_disabled_invalid_configuration": "LangSmith Desativado Automaticamente (configuração inválida)",
+        "tracing_reason": "Motivo",
         "project": "Projeto",
         # Main Content
         "welcome_title": "Bem-vindo a Lisboa!",
@@ -293,9 +305,9 @@ NOVA IMS - Universidade NOVA de Lisboa
 - O rastreamento LangSmith (se ativado) é apenas para fins de desenvolvimento""",
         "info_author": "Autor",
         "info_author_text": """**André Filipe Gomes Silvestre**
-Mestrando em Data Science e Advanced Analytics
-NOVA IMS - Universidade NOVA de Lisboa
-2024/2025""",
+    Mestrando em Data Science e Advanced Analytics
+    NOVA IMS - Universidade NOVA de Lisboa
+    2025/2026""",
     },
 }
 
@@ -512,11 +524,16 @@ section[data-testid="stSidebar"] button[kind="primary"]:hover {
     font-weight: 700;
 }
 
-/* Headers inside chat messages - tighter spacing */
+/* Headers inside chat messages - proportional to body text */
 [data-testid="stChatMessage"] h3 {
-    margin-top: 0.8rem;
-    margin-bottom: 0.3rem;
-    font-size: 1.05rem;
+    margin-bottom: 0.1rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+/* Response title (first h3) - no extra top margin */
+[data-testid="stChatMessage"] > div > h3:first-of-type {
+    margin-top: 0.1rem;
 }
 
 [data-testid="stChatMessage"] h4 {
@@ -845,7 +862,7 @@ st.set_page_config(
         # Lisbon Urban Assistant
         
         **Master Thesis Project**  
-        Andre Filipe Gomes Silvestre, 2025
+        André Filipe Gomes Silvestre, 2025
         
         An intelligent assistant for tourists and locals in Lisbon.
         """,
@@ -1035,80 +1052,155 @@ def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
             st.session_state.assistant = MultiAgentAssistant()
 
             # =========================================================
-            # CONNECTION TEST
+            # CONNECTION TEST (actual inference, not just server ping)
             # =========================================================
-            # Verify if the configured model is actually reachable
+            # Uses raw HTTP requests to bypass LangSmith tracing entirely.
+            # This avoids wasting the LangSmith trace quota on health checks.
             connection_placeholder = st.empty()
+            model_display = st.session_state.assistant.model_name
             connection_placeholder.info(
-                f"🔄 Testing connection to supervisor model: {st.session_state.assistant.model_name}..."
+                f"🔄 Testing model inference: {model_display}..."
             )
 
             try:
-                # access the supervisor LLM directly
+                import requests as _req
+
+                # Access the supervisor LLM directly
                 test_llm = st.session_state.assistant.supervisor.llm
-                # We bypass tracing by abandoning the OpenAI SDK entirely for the ping.
-                # LangSmith auto-instruments the openai.* module, so we must use a raw HTTP request.
-                import requests
 
-                # Safely extract configuration
-                base_url = getattr(test_llm, "openai_api_base", getattr(test_llm, "base_url", "https://api.openai.com/v1/"))
-                if not isinstance(base_url, str):
-                    base_url = str(base_url)
-                    
-                api_key_obj = getattr(test_llm, "openai_api_key", getattr(test_llm, "api_key", getattr(test_llm, "_api_key", "")))
-                api_key = api_key_obj.get_secret_value() if hasattr(api_key_obj, "get_secret_value") else str(api_key_obj)
-                
-                # Provider-agnostic ping (works for OpenAI, Azure, LMStudio)
-                endpoint = f"{base_url.rstrip('/')}/models"
-                headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-                
-                try:
-                    # 3 second timeout for ping speed - this purely tests network reachability
-                    response = requests.get(endpoint, headers=headers, timeout=3)
-                    response.raise_for_status()
-                except Exception:
-                    # Fallback to invoke if /models isn't supported by the provider
-                    test_llm.invoke("ping", config={"callbacks": []})
+                # Extract base_url from LLM object
+                raw_base = getattr(
+                    test_llm, "openai_api_base",
+                    getattr(test_llm, "base_url", "https://api.openai.com/v1/"),
+                )
+                base_url = str(raw_base) if not isinstance(raw_base, str) else raw_base
 
-                # If we get here, connection is successful
+                # Extract API key (SecretStr or plain string)
+                api_key_obj = getattr(
+                    test_llm, "openai_api_key",
+                    getattr(test_llm, "api_key", getattr(test_llm, "_api_key", "")),
+                )
+                api_key = (
+                    api_key_obj.get_secret_value()
+                    if hasattr(api_key_obj, "get_secret_value")
+                    else str(api_key_obj)
+                )
+
+                # Extract model identifier
+                model_id = getattr(
+                    test_llm, "model_name",
+                    getattr(test_llm, "model", model_display),
+                )
+
+                # Build headers (Bearer works for OpenAI, Azure v1, and LM Studio)
+                headers = {"Content-Type": "application/json"}
+                if api_key:
+                    headers["Authorization"] = f"Bearer {api_key}"
+
+                # Minimal chat completion payload (1 token to minimize cost)
+                from agent.llm_factory import LLMFactory
+
+                endpoint = f"{base_url.rstrip('/')}/chat/completions"
+                is_reasoning = LLMFactory._is_reasoning_model(model_id)
+
+                payload = {
+                    "model": model_id,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+
+                # Reasoning models (o-series, gpt-5) require max_completion_tokens
+                # and do NOT support temperature or max_tokens.
+                # They also need enough tokens for internal chain-of-thought
+                # before producing visible output (~50-100 reasoning tokens).
+                if is_reasoning:
+                    payload["max_completion_tokens"] = 100
+                else:
+                    payload["max_tokens"] = 1
+                    payload["temperature"] = 0
+
+                # Timeout: 15s for local models that may need warm-up,
+                # cloud providers typically respond in < 3s
+                resp = _req.post(endpoint, headers=headers, json=payload, timeout=15)
+                resp.raise_for_status()
+
+                # Verify we actually got a completion back
+                data = resp.json()
+                choices = data.get("choices", [])
+                if not choices:
+                    raise RuntimeError(
+                        "Server responded but returned no completions. "
+                        "The model may still be loading."
+                    )
+
+                # Model is truly ready
                 connection_placeholder.success(
-                    "✅ Connection successful! Model is ready."
+                    f"✅ Model ready! ({model_display})"
                 )
                 import time
 
-                time.sleep(1.0)  # Show success briefly
+                time.sleep(1.0)
                 connection_placeholder.empty()
 
             except Exception as e:
                 connection_placeholder.empty()
-                # Get the actual supervisor model name for clearer error message
+                # Gather context for the error message
                 sv_info = st.session_state.assistant.model_info.get("supervisor", {})
                 actual_model = (
                     sv_info.get("model", "Unknown")
                     if isinstance(sv_info, dict)
                     else str(sv_info)
                 )
-                base_url = (
-                    st.session_state.assistant.agents.get("supervisor", {}).base_url
-                    if hasattr(
-                        st.session_state.assistant.agents.get("supervisor", {}),
-                        "base_url",
-                    )
-                    else "http://localhost:1234/v1"
+
+                # Provider-specific error guidance
+                if provider == "lmstudio":
+                    fixes = f"""**Common fixes:**
+1. **Model not loaded** - Open LM Studio and load `{actual_model}` (wait until fully loaded)
+2. **LM Studio not running** - Start the local server (port 1234)
+3. **Model still loading** - Wait for LM Studio to finish loading, then try again
+4. **Wrong port** - Check if server is on port 1234 (settings > local server)
+5. **Firewall** - Allow LM Studio through your firewall"""
+
+                elif provider == "azure":
+                    fixes = f"""**Common fixes:**
+1. **Deployment not found** - Verify that `{actual_model}` is deployed in your Azure OpenAI resource
+2. **Wrong endpoint** - Confirm the Azure OpenAI endpoint URL is correct
+3. **Invalid API key** - Regenerate the key in the Azure portal
+4. **Quota exceeded** - Check your Azure OpenAI quota and rate limits
+5. **Region mismatch** - Ensure the model is available in your Azure region"""
+
+                elif provider == "openai":
+                    fixes = f"""**Common fixes:**
+1. **Invalid API key** - Verify your OpenAI API key at platform.openai.com
+2. **Model not available** - Ensure `{actual_model}` is accessible on your plan
+3. **Quota/billing** - Check your OpenAI usage limits and billing status
+4. **Rate limited** - Wait a moment and try again
+5. **Network issue** - Check your internet connection"""
+
+                else:
+                    fixes = f"**Check provider configuration for `{provider}`.**"
+
+                # Sanitize error string: redact URLs and API keys
+                import re as _re
+
+                raw_err = str(e)
+                sanitized_err = _re.sub(
+                    r"https?://[^\s'\"]+", "[REDACTED_URL]", raw_err
+                )
+                sanitized_err = _re.sub(
+                    r"(sk-[A-Za-z0-9]{6})[A-Za-z0-9]+", r"\1...[REDACTED]", sanitized_err
+                )
+                sanitized_err = _re.sub(
+                    r"(Bearer\s+)[^\s'\"]+", r"\1[REDACTED]", sanitized_err
                 )
 
-                error_msg = f"""❌ **Connection Failed**
+                error_msg = f"""❌ **Model Inference Test Failed**
 
+**Provider:** `{provider}`
 **Model:** `{actual_model}`
-**Server:** `{base_url}`
 
-**Common fixes:**
-1. **LM Studio not running** - Open LM Studio and start the local server (port 1234)
-2. **Model not loaded** - Load the model `{actual_model}` in LM Studio
-3. **Wrong port** - Check if server is on port 1234 (settings > local server)
-4. **Firewall** - Allow LM Studio through your firewall
+{fixes}
 
-**Error details:** {str(e)}"""
+**Error details:** {sanitized_err}"""
                 st.session_state.assistant = None  # Rollback
                 return False, error_msg
 
@@ -1118,7 +1210,7 @@ def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
             return True, None
 
         else:
-            # Single-Agent Mode (Legacy)
+            # Single-Agent Mode
             st.session_state.assistant = create_assistant(provider)
             st.session_state.initialized = True
             st.session_state.provider = provider
@@ -1502,7 +1594,7 @@ def render_about_section():
     st.markdown("""**Master Thesis Project**  
 NOVA IMS, 2025
 
-*LISBOA: Lisbon Itenerary System Based On AI*""")
+*LISBOA: Lisbon Itinerary System Based On AI*""")
 
     learn_more_text = (
         "Saber Mais" if st.session_state.language == "pt" else "Learn More"
@@ -1518,14 +1610,25 @@ def render_tracing_info():
     """Render LangSmith tracing information."""
     st.markdown(f"## {t('tracing')}")
 
-    langsmith_enabled = os.getenv("LANGCHAIN_TRACING_V2", "false").lower() == "true"
+    tracing_display = get_langsmith_display_state()
     langsmith_project = os.getenv("LANGCHAIN_PROJECT", "default")
 
-    if langsmith_enabled:
+    if tracing_display["state"] == "active":
         st.success(t("tracing_active"))
         st.caption(f"{t('project')}: {langsmith_project}")
+        return
+
+    if tracing_display["state"] == "auto_disabled_invalid_credentials":
+        st.warning(t("tracing_auto_disabled_invalid_credentials"))
+    elif tracing_display["state"] == "auto_disabled_invalid_configuration":
+        st.warning(t("tracing_auto_disabled_invalid_configuration"))
+    elif tracing_display["state"].startswith("auto_disabled"):
+        st.warning(t("tracing_auto_disabled"))
     else:
         st.warning(t("tracing_disabled"))
+
+    if tracing_display["state"].startswith("auto_disabled") and tracing_display.get("reason"):
+        st.caption(f"{t('tracing_reason')}: {tracing_display['reason']}")
 
 
 def render_sidebar() -> Tuple[str, Optional[str]]:
@@ -1696,12 +1799,12 @@ def process_user_input(user_input: str):
 
                     # Mark as complete
                     status.update(
-                        label="✅ Resposta pronta!", state="complete", expanded=False
+                        label="✅ " + ("Resposta pronta!" if st.session_state.get("language", "en") == "pt" else "Response ready!"), state="complete", expanded=False
                     )
 
                 except Exception as e:
                     status.update(
-                        label="❌ Erro no processamento", state="error", expanded=True
+                        label="❌ " + ("Erro no processamento" if st.session_state.get("language", "en") == "pt" else "Processing error"), state="error", expanded=True
                     )
                     raise e  # Re-raise to be caught by the outer except block
 

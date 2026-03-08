@@ -1,0 +1,128 @@
+# ==========================================================================
+# Master Thesis - Project Configuration
+#   - André Filipe Gomes Silvestre, 20240502
+#
+# LISBOA: Lisbon Itinerary System Based On AI
+# A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon
+#
+# Enables editable install ("pip install -e .") so all project modules are
+# importable from anywhere (REPL, tests, eval scripts) without sys.path hacks.
+# ==========================================================================
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lisboa"
+version = "1.0.0"
+description = "LISBOA: LLM-Integrated System for Behavioral Orchestration and Agentic Architecture - Multi-Agent AI for Personalized Tourism and Urban Mobility in Lisbon"
+authors = [
+    { name = "André Filipe Gomes Silvestre", email = "20240502@novaims.unl.pt" },
+]
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+keywords = ["multi-agent", "LLM", "tourism", "Lisbon", "LangGraph", "RAG"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "langchain==1.2.0",
+    "langchain-core==0.3.83",
+    "langgraph==1.0.5",
+    "langchain-openai==0.3.35",
+    "langchain-chroma==0.2.6",
+    "langchain-huggingface==0.3.1",
+    "langchain-community==0.3.31",
+    "langchain-text-splitters==0.3.11",
+    "chromadb==1.4.1",
+    "sentence-transformers==5.1.2",
+    "streamlit==1.45.1",
+    "requests==2.32.5",
+    "python-dotenv==1.1.1",
+    "langsmith==0.5.0",
+    "pandas==2.1.4",
+    "tqdm==4.67.1",
+    "pypdf==6.4.2",
+    "wikipedia==1.4.0",
+    "duckduckgo-search==8.1.1",
+    "protobuf==6.33.4",
+    "gtfs-realtime-bindings==2.0.0",
+    "urllib3==2.3.0",
+    "certifi==2025.11.12",
+    "pydantic==2.12.4",
+]
+
+[project.optional-dependencies]
+eval = [
+    "pandas==2.1.4",
+    "numpy==1.26.4",
+]
+scraping = [
+    "beautifulsoup4==4.12.3",
+    "lxml==5.3.0",
+    "tqdm==4.67.1",
+]
+transport = [
+    "protobuf==6.33.4",
+    "gtfs-realtime-bindings==2.0.0",
+    "urllib3==2.3.0",
+    "certifi==2025.11.12",
+]
+docs = [
+    "pypdf==6.4.2",
+]
+search = [
+    "wikipedia==1.4.0",
+    "duckduckgo-search==8.1.1",
+]
+dev = [
+    "pytest==8.3.4",
+    "black==24.10.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agent*", "tools*", "data_collection*", "eval*"]
+exclude = ["tests*", "data*", "docs*", "_*", "__pycache__*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.yaml", "*.yml", "*.md", "*.pem"]
+
+# ==========================================================================
+# Ruff Linting Configuration
+# ==========================================================================
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]  # Line too long - handled by formatter
+
+[tool.ruff.lint.isort]
+known-first-party = ["agent", "tools", "config", "eval"]
+
+# ==========================================================================
+# Pytest Configuration
+# ==========================================================================
+[tool.pytest.ini_options]
+testpaths = ["tests", "eval/tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short -ra"
+markers = [
+    "fast: deterministic tests with no live API or LLM dependency",
+    "smoke: lightweight end-to-end sanity checks",
+    "live: tests that require real credentials and external services",
+    "coverage: exhaustive prompt or tool coverage suites",
+    "eval: evaluation-framework specific tests",
+]

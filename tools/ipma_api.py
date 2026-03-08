@@ -14,21 +14,21 @@
 # Required libraries:
 # pip install requests langchain-core
 
-import os
-import sys
 import logging
+import os
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
 
 import requests
 from langchain_core.tools import tool
 
-# Add parent directory to path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from config import Config
+try:
+    from config import Config
+except ModuleNotFoundError:
+    import sys
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    from config import Config
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Request configuration
@@ -205,11 +205,7 @@ PRECIPITATION_INTENSITY_CLASSES = {
 
 # Import optimization utilities for caching and connection pooling
 try:
-    from agent.utils.optimization import (
-        http_pool, 
-        TTLCache, 
-        weather_cache
-    )
+    from agent.utils.optimization import TTLCache, http_pool, weather_cache
     OPTIMIZATION_AVAILABLE = True
 except ImportError:
     OPTIMIZATION_AVAILABLE = False

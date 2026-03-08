@@ -11,16 +11,16 @@
 # -----------------------------------------------------------------------------
 # HTTP & Web Scraping
 # -----------------------------------------------------------------------------
-requests                          # HTTP requests
-beautifulsoup4                    # HTML parsing
-lxml                              # Fast XML/HTML parser (BS4 backend)
+requests==2.32.5                 # HTTP requests
+beautifulsoup4==4.12.3           # HTML parsing
+lxml==5.3.0                      # Fast XML/HTML parser (BS4 backend)
 
 # -----------------------------------------------------------------------------
 # Data Processing
 # -----------------------------------------------------------------------------
-pandas                            # Data manipulation
+pandas==2.1.4                    # Data manipulation
 
 # -----------------------------------------------------------------------------
 # Utilities
 # -----------------------------------------------------------------------------
-tqdm                              # Progress bars
+tqdm==4.67.1                     # Progress bars

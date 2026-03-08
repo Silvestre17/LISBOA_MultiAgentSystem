@@ -14,6 +14,9 @@ import os
 import re
 import sys
 import time
+from typing import Generator
+
+import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -24,6 +27,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 class TestResults:
     """Tracks test results with pass/fail counts."""
+
+    __test__ = False
     
     def __init__(self):
         self.passed = 0
@@ -60,6 +65,17 @@ class TestResults:
         
         print("=" * 70 + "\n")
         return self.failed
+
+
+@pytest.fixture
+def results() -> Generator[TestResults, None, None]:
+    """Provide a per-test result tracker that fails the pytest test when needed."""
+    tracker = TestResults()
+    yield tracker
+    if tracker.failed:
+        pytest.fail(
+            "Audit validation checks failed:\n- " + "\n- ".join(tracker.errors)
+        )
 
 
 # ==========================================================================
@@ -131,7 +147,7 @@ def test_base_agent_typo_fix(results: TestResults):
 # ==========================================================================
 
 def test_no_import_json_in_loops(results: TestResults):
-    """Tests that 'import json' is NOT inside while loops."""
+    """Tests that any json import stays at top level and never inside loops."""
     print("\n\033[1m📋 A7: No import json inside loops\033[0m")
     print("-" * 50)
     
@@ -146,16 +162,27 @@ def test_no_import_json_in_loops(results: TestResults):
             with open(full_path, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
             
-            # Check if 'import json' appears at top-level (within first 20 lines)
-            top_level_json = any(
-                line.strip() == 'import json' 
-                for line in lines[:20]
-            )
-            
-            if top_level_json:
-                results.add_pass(f"{name}: import json at top level")
+            json_import_lines = [
+                i
+                for i, line in enumerate(lines, start=1)
+                if line.strip() == 'import json'
+            ]
+
+            if not json_import_lines:
+                results.add_pass(f"{name}: json import not needed")
             else:
-                results.add_fail(f"{name}: import json", "Not found at file top level")
+                top_level_json = any(
+                    line.strip() == 'import json' and not line.startswith((' ', '\t'))
+                    for line in lines[:40]
+                )
+
+                if top_level_json:
+                    results.add_pass(f"{name}: import json at top level")
+                else:
+                    results.add_fail(
+                        f"{name}: import json",
+                        "Found import json, but not at file top level",
+                    )
             
             # Check no 'import json' inside indented blocks (loop bodies)
             inside_loop_import = False
@@ -351,21 +378,108 @@ def test_transport_prompt(results: TestResults):
         prompt = get_transport_prompt()
         
         checks = [
-            ("carris_find_routes_between", "Carris Urbana tool"),
-            ("find_direct_bus_lines", "Carris Metropolitana tool"),
-            ("find_bus_routes", "GPS-based bus tool"),
-            ("get_transport_summary", "Transport summary tool"),
-            ("Tempo estimado", "Travel time in template"),
+            (("carris_find_routes_between",), "Carris Urbana tool"),
+            (("find_direct_bus_lines",), "Carris Metropolitana tool"),
+            (("find_bus_routes",), "GPS-based bus tool"),
+            (("get_transport_summary",), "Transport summary tool"),
+            (("Tempo total estimado", "Tempo estimado"), "Travel time in template"),
         ]
         
-        for term, description in checks:
-            if term in prompt:
+        for terms, description in checks:
+            if any(term in prompt for term in terms):
                 results.add_pass(f"Prompt includes {description}")
             else:
-                results.add_fail("Prompt missing", f"'{term}' ({description})")
+                results.add_fail(
+                    "Prompt missing",
+                    f"one of {terms} ({description})",
+                )
                 
     except Exception as e:
         results.add_fail("Transport prompt", str(e))
+
+
+# ==========================================================================
+# TLS: Metro secure CA bundle default
+# ==========================================================================
+
+def _check_metro_ssl_secure_default(results: TestResults, monkeypatch: pytest.MonkeyPatch):
+    """Shared regression check for Metro TLS secure defaults."""
+    print("\n\033[1m📋 TLS: Metro Secure CA Bundle Default\033[0m")
+    print("-" * 50)
+
+    try:
+        import importlib
+        from pathlib import Path
+        from unittest.mock import patch
+
+        import requests
+
+        monkeypatch.delenv("METRO_CA_BUNDLE", raising=False)
+        monkeypatch.delenv("METRO_SSL_VERIFY", raising=False)
+
+        module_name = "tools.metrolisboa_api"
+        if module_name in sys.modules:
+            metro_api = importlib.reload(sys.modules[module_name])
+        else:
+            metro_api = importlib.import_module(module_name)
+
+        verify_value = metro_api.METRO_SSL_VERIFY
+        if isinstance(verify_value, str) and verify_value.endswith(".pem") and os.path.isfile(verify_value):
+            results.add_pass(f"METRO_SSL_VERIFY defaults to PEM bundle ({verify_value})")
+        else:
+            results.add_fail("Metro SSL default", f"Expected PEM bundle path, got {verify_value!r}")
+            return
+
+        intermediate_path = Path(metro_api.DEFAULT_METRO_INTERMEDIATE_PEM)
+        if intermediate_path.exists():
+            results.add_pass("Bundled Metro intermediate certificate exists")
+        else:
+            results.add_fail("Metro intermediate certificate", f"Missing file: {intermediate_path}")
+            return
+
+        bundle_text = Path(verify_value).read_text(encoding="utf-8")
+        intermediate_text = intermediate_path.read_text(encoding="ascii").strip()
+        certifi_text = Path(metro_api.certifi.where()).read_text(encoding="utf-8").strip()
+
+        if intermediate_text in bundle_text:
+            results.add_pass("Runtime Metro CA bundle includes bundled intermediate")
+        else:
+            results.add_fail("Runtime Metro CA bundle", "Bundled intermediate certificate missing")
+
+        if certifi_text in bundle_text:
+            results.add_pass("Runtime Metro CA bundle includes certifi trust store")
+        else:
+            results.add_fail("Runtime Metro CA bundle", "certifi trust store missing from runtime bundle")
+
+        captured = {}
+
+        def fake_request(method, url, verify=None, **kwargs):
+            captured["method"] = method
+            captured["url"] = url
+            captured["verify"] = verify
+            response = requests.Response()
+            response.status_code = 200
+            response._content = b"{}"
+            return response
+
+        with patch.object(metro_api.requests, "request", side_effect=fake_request):
+            metro_api._metro_request("get", "https://api.metrolisboa.pt:8243/estadoServicoML/1.0.1/test")
+
+        if captured.get("verify") == verify_value:
+            results.add_pass("_metro_request uses secure CA bundle by default")
+        else:
+            results.add_fail(
+                "_metro_request verify parameter",
+                f"Expected {verify_value!r}, got {captured.get('verify')!r}",
+            )
+
+    except Exception as e:
+        results.add_fail("Metro SSL secure default", str(e))
+
+
+def test_metro_ssl_secure_default(results: TestResults, monkeypatch: pytest.MonkeyPatch):
+    """Tests that the Metro API defaults to a secure CA bundle rather than verify=False."""
+    _check_metro_ssl_secure_default(results, monkeypatch)
 
 
 # ==========================================================================
@@ -388,6 +502,8 @@ def main():
     test_no_extra_llm_instance(results)
     test_transport_improvements(results)
     test_transport_prompt(results)
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _check_metro_ssl_secure_default(results, monkeypatch)
     
     return results.summary()
 

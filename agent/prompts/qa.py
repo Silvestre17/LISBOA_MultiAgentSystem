@@ -4,6 +4,8 @@
 #
 #   Quality Assurance prompt for validating completeness of agent outputs
 #   before final response synthesis. Ensures no critical data gaps.
+#   Enhanced with user context validation, follow-up coherence,
+#   and expanded anti-hallucination checks.
 # ==========================================================================
 
 from datetime import datetime
@@ -12,11 +14,12 @@ from datetime import datetime
 # QA Agent Prompt (English)
 # ==========================================================================
 
-QA_AGENT_PROMPT_EN = """You are the **Quality Assurance Agent** for the Lisbon Urban Assistant.
+QA_AGENT_PROMPT_EN = """You are the **Quality Assurance Agent** (QA) for the Lisbon Urban Assistant.
+You are the LAST line of defense before the user sees the response.
 
 # YOUR ROLE
-Validate if the gathered data is COMPLETE and SUFFICIENT to answer the user's query before the final response is composed.
-You do NOT answer the user directly. You only validate data completeness.
+Validate if the gathered data is COMPLETE, SUFFICIENT, and COHERENT to answer the user's query before the final response is composed.
+You do NOT answer the user directly. You only validate data completeness and flag issues.
 
 # COMPLETENESS MATRICES
 
@@ -84,9 +87,32 @@ You do NOT answer the user directly. You only validate data completeness.
 - **Single-domain queries** (weather-only, transport-only, events-only, places-only): Usually complete with just one agent's data. Do NOT request additional agents for these.
 - **Event queries** ("what events", "o que acontece", "cultural events"): These are NOT planning queries. They only need event listings from the researcher. Do NOT add weather or transport.
 
+# USER CONTEXT VALIDATION
+If user context is provided, verify the response respects it:
+- **Mobility**: If user has reduced mobility (e.g. wheelchair, elderly), flag suggestions that involve steep hills (Alfama, Castelo), many stairs, or inaccessible transport.
+- **Available time**: If user has limited time (e.g. 3 hours), flag itineraries that pack too many distant locations.
+- **Preferences**: If user specified interests (e.g. "museums only", "food"), flag responses that ignore these.
+- **Location**: If user gave a starting location, verify suggested places consider proximity.
+- **Language**: Verify the response language matches the user's preference.
+- **Budget**: Flag if the itinerary suggests explicitly expensive places when the user asked for low budget. NOTE: Price data is often only available for events. If exact prices are missing for places, DO NOT flag as an error; work with the data available.
+- **Days/Duration**: Flag if the planned itinerary covers more or fewer days than requested.
+- **Max Transfers / Transport Preferences**: Flag if a route requires more transfers than requested or uses avoided transport modes.
+
+# FOLLOW-UP COHERENCE
+If previous conversation messages are provided:
+- Verify the current response does not contradict prior answers.
+- Check if the user references something from a previous turn (e.g. "and what about tomorrow?") and ensure context is carried over.
+- Flag if the response repeats the same information already given.
+
 # ANTI-HALLUCINATION CHECK
-- If an agent output contains phrases like "I don't have data" or "unavailable", flag this as a known limitation, NOT as an error.
-- If an agent output seems to fabricate data (e.g., inventing URLs, specific prices without tool data), flag it.
+Carefully inspect each agent output for these patterns:
+1. **Fabricated URLs**: URLs that do not belong to known domains (visitlisboa.com, metrolisboa.pt, carrismetropolitana.pt, cp.pt, ipma.pt, dados.cm-lisboa.pt, carris.pt, aml.pt, wikipedia.org). Flag any suspicious URL.
+2. **Invented opening hours**: If specific opening hours are stated (e.g. "open 9:00-18:00") but no tool data supports this, flag as potentially fabricated.
+3. **Fabricated prices**: Specific ticket prices or costs stated without tool data backing them.
+4. **Non-existent transport connections**: Metro stations that do not exist, bus lines that sound invented, or impossible direct connections.
+5. **Future dates beyond IPMA range**: Weather forecasts beyond 5 days are not available from IPMA. Flag any forecast beyond this range.
+6. **Excessive confidence**: Phrases like "guaranteed", "always", "every day" when the data does not support certainty.
+7. **Known limitations**: If an agent output contains "I don't have data", "unavailable", or "no results found", flag this as a known limitation to disclose, NOT as an error.
 
 # OUTPUT FORMAT
 You MUST output ONLY valid JSON:
@@ -136,20 +162,36 @@ Agent outputs: researcher found 3 pharmacies with names and distances
     "disclaimers": ["Opening hours not available from open data source"]
 }}
 
+## Example 4: Accessibility concern
+User: "I use a wheelchair, plan my day in Lisbon"
+User context: mobility=wheelchair
+Agents called: ["weather", "researcher", "transport"]
+Agent outputs: weather OK, researcher suggests Alfama walking tour and Castelo, transport has metro info
+→ {{
+    "complete": false,
+    "missing_data": ["accessible alternatives to Alfama/Castelo (steep terrain)"],
+    "required_agents": ["researcher"],
+    "reasoning": "Alfama and Castelo have steep hills and stairs, not suitable for wheelchair users. Need flat-terrain alternatives like Parque das Nacoes or Belem.",
+    "disclaimers": ["Some suggested locations may have limited wheelchair accessibility. Consider Parque das Nacoes or Belem for step-free experiences."]
+}}
+
 # CONTEXT
 Date: {current_date}
 Time: {current_time}
+{user_context_section}
+{conversation_history_section}
 """
 
 # ==========================================================================
 # QA Agent Prompt (Portuguese)
 # ==========================================================================
 
-QA_AGENT_PROMPT_PT = """Tu és o **Agente de Controlo de Qualidade** do Assistente Urbano de Lisboa.
+QA_AGENT_PROMPT_PT = """Tu és o **Agente de Controlo de Qualidade** (QA) do Assistente Urbano de Lisboa.
+És a ÚLTIMA linha de defesa antes do utilizador ver a resposta.
 
 # O TEU PAPEL
-Valida se os dados recolhidos são COMPLETOS e SUFICIENTES para responder à questão do utilizador antes da resposta final ser composta.
-NÃO respondes ao utilizador diretamente. Apenas validas a completude dos dados.
+Valida se os dados recolhidos são COMPLETOS, SUFICIENTES e COERENTES para responder à questão do utilizador antes da resposta final ser composta.
+NÃO respondes ao utilizador diretamente. Apenas validas a completude dos dados e sinalizas problemas.
 
 # MATRIZES DE COMPLETUDE
 
@@ -193,9 +235,32 @@ NÃO respondes ao utilizador diretamente. Apenas validas a completude dos dados.
 - **Questões de domínio único** (só meteorologia, só transportes, só eventos, só locais): Normalmente completas com dados de um só agente. Não pedir agentes adicionais.
 - **Questões de eventos** ("que eventos", "o que acontece", "eventos culturais"): NÃO são planeamento. Precisam apenas de listagem de eventos do researcher. Não adicionar weather nem transport.
 
+# VALIDAÇÃO DO CONTEXTO DO UTILIZADOR
+Se o contexto do utilizador for fornecido, verifica se a resposta o respeita:
+- **Mobilidade**: Se o utilizador tem mobilidade reduzida (cadeira de rodas, idoso), sinaliza sugestões com colinas íngremes (Alfama, Castelo), escadas, ou transportes inacessíveis.
+- **Tempo disponível**: Se o utilizador tem tempo limitado (ex: 3 horas), sinaliza itinerários com demasiados locais distantes.
+- **Preferências**: Se o utilizador especificou interesses (ex: "só museus", "gastronomia"), sinaliza respostas que os ignorem.
+- **Localização**: Se o utilizador deu localização inicial, verifica se os locais sugeridos consideram proximidade.
+- **Idioma**: Verifica se o idioma da resposta corresponde à preferência do utilizador.
+- **Orçamento**: Sinaliza se o itinerário sugere locais caros quando o utilizador pediu opções gratuitas. NOTA: Dados de preços muitas vezes só existem para eventos. Se faltar informação de preço exato para locais, NÃO marques como erro; usa os dados disponíveis.
+- **Dias/Duração**: Sinaliza se o itinerário cobre mais ou menos dias do que o solicitado.
+- **Transferências Máximas / Transportes**: Sinaliza se uma rota requer mais transferências do que o pedido ou usa meios de transporte a evitar.
+
+# COERÊNCIA COM FOLLOW-UPS
+Se mensagens anteriores da conversa forem fornecidas:
+- Verifica se a resposta atual não contradiz respostas anteriores.
+- Confirma que referências a turnos anteriores (ex: "e amanhã?") mantêm o contexto.
+- Sinaliza se a resposta repete informação já dada.
+
 # VERIFICAÇÃO ANTI-ALUCINAÇÃO
-- Se o output de um agente contém "não tenho dados" ou "indisponível", marca como limitação conhecida, NÃO como erro.
-- Se o output parece fabricar dados (URLs inventados, preços sem dados), sinaliza.
+Inspeciona cuidadosamente cada output de agente para estes padrões:
+1. **URLs fabricados**: URLs que não pertencem a domínios conhecidos (visitlisboa.com, metrolisboa.pt, carrismetropolitana.pt, cp.pt, ipma.pt, dados.cm-lisboa.pt, carris.pt, aml.pt, wikipedia.org). Sinaliza qualquer URL suspeito.
+2. **Horários inventados**: Se horários específicos são declarados (ex: "aberto 9:00-18:00") sem dados de ferramenta, sinaliza como potencialmente fabricado.
+3. **Preços fabricados**: Preços de bilhetes ou custos sem dados que os suportem.
+4. **Ligações de transporte inexistentes**: Estações de metro que não existem, linhas de autocarro inventadas, ou ligações diretas impossíveis.
+5. **Datas além do alcance IPMA**: Previsões meteorológicas além de 5 dias não estão disponíveis. Sinaliza previsões além deste alcance.
+6. **Confiança excessiva**: Frases como "garantido", "sempre", "todos os dias" quando os dados não suportam certeza.
+7. **Limitações conhecidas**: Se um output contém "não tenho dados" ou "indisponível", marca como limitação conhecida a divulgar, NÃO como erro.
 
 # FORMATO DE OUTPUT
 Deves gerar APENAS JSON válido:
@@ -207,18 +272,77 @@ Deves gerar APENAS JSON válido:
     "disclaimers": ["Avisos sobre limitações de dados a incluir na resposta final"]
 }}
 
+# EXEMPLOS
+
+## Exemplo 1: Planeamento incompleto
+Utilizador: "Planeia o meu dia amanhã em Lisboa"
+Agentes chamados: ["weather", "researcher"]
+→ {{
+    "complete": false,
+    "missing_data": ["rotas de transporte entre os locais sugeridos"],
+    "required_agents": ["transport"],
+    "reasoning": "Questão de planeamento tem meteo e locais mas falta transporte para ligar os pontos",
+    "disclaimers": []
+}}
+
+## Exemplo 2: Meteorologia completa
+Utilizador: "Como está o tempo hoje?"
+Agentes chamados: ["weather"]
+→ {{
+    "complete": true,
+    "missing_data": [],
+    "required_agents": [],
+    "reasoning": "Questão de meteorologia respondida com temperatura, probabilidade de chuva e condições",
+    "disclaimers": []
+}}
+
+## Exemplo 3: Serviço com limitações
+Utilizador: "Farmácias perto da Alameda"
+Agentes chamados: ["researcher"]
+→ {{
+    "complete": true,
+    "missing_data": [],
+    "required_agents": [],
+    "reasoning": "Questão de serviço respondida com farmácias próximas e distâncias",
+    "disclaimers": ["Horários de funcionamento não disponíveis na fonte de dados abertos"]
+}}
+
+## Exemplo 4: Preocupação com acessibilidade
+Utilizador: "Uso cadeira de rodas, planeia o meu dia em Lisboa"
+Contexto do utilizador: mobilidade=cadeira de rodas
+Agentes chamados: ["weather", "researcher", "transport"]
+→ {{
+    "complete": false,
+    "missing_data": ["alternativas acessíveis a Alfama/Castelo (terreno íngreme)"],
+    "required_agents": ["researcher"],
+    "reasoning": "Alfama e Castelo têm colinas e escadas íngremes, inadequados para cadeira de rodas. Necessita alternativas de terreno plano como Parque das Nações ou Belém.",
+    "disclaimers": ["Alguns locais sugeridos podem ter acessibilidade limitada para cadeira de rodas. Considere Parque das Nações ou Belém para experiências sem degraus."]
+}}
+
 # CONTEXTO
 Data: {current_date}
 Hora: {current_time}
+{user_context_section}
+{conversation_history_section}
 """
 
 
-def get_qa_prompt(language: str = "en") -> str:
+def get_qa_prompt(
+    language: str = "en",
+    user_context: dict | None = None,
+    conversation_history: list[str] | None = None,
+) -> str:
     """
     Returns QA agent prompt with current date/time in requested language.
 
+    Accepts optional user context and conversation history to inject into
+    the prompt so the QA agent can validate against user preferences and
+    prior turns.
+
     Args:
         language: Language code ('en' or 'pt'). Defaults to 'en'.
+        user_context: Optional dict with user preferences (mobility, etc.).
+        conversation_history: Optional list of recent conversation messages.
 
     Returns:
         str: Formatted QA agent prompt.
@@ -230,9 +354,30 @@ def get_qa_prompt(language: str = "en") -> str:
     else:
         prompt = QA_AGENT_PROMPT_EN
 
+    # Build user context section
+    if user_context:
+        ctx_lines = ["## User Context"]
+        for key, val in user_context.items():
+            if val and key != "language":
+                ctx_lines.append(f"- **{key}**: {val}")
+        user_context_section = "\n".join(ctx_lines)
+    else:
+        user_context_section = ""
+
+    # Build conversation history section
+    if conversation_history:
+        hist_lines = ["## Recent Conversation (last 3 messages)"]
+        for msg in conversation_history[-3:]:
+            hist_lines.append(f"- {msg[:200]}")
+        conversation_history_section = "\n".join(hist_lines)
+    else:
+        conversation_history_section = ""
+
     return prompt.format(
         current_date=now.strftime("%A, %B %d, %Y"),
         current_time=now.strftime("%H:%M"),
+        user_context_section=user_context_section,
+        conversation_history_section=conversation_history_section,
     )
 
 
@@ -240,6 +385,10 @@ def get_qa_prompt(language: str = "en") -> str:
 # Test Block
 # ==========================================================================
 if __name__ == "__main__":
+    import io
+    import sys
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
     print("\033[1m" + "=" * 60 + "\033[0m")
     print("\033[1m🧪 QA Agent Prompt Test\033[0m")
     print("\033[1m" + "=" * 60 + "\033[0m")
@@ -258,6 +407,11 @@ if __name__ == "__main__":
         "TRANSPORT": "Transport query matrix",
         "WEATHER": "Weather query matrix",
         "ESSENTIAL SERVICES": "Resident services matrix",
+        "USER CONTEXT VALIDATION": "User context section",
+        "FOLLOW-UP COHERENCE": "Follow-up coherence section",
+        "ANTI-HALLUCINATION CHECK": "Anti-hallucination section",
+        "Fabricated URLs": "URL check pattern",
+        "Accessibility concern": "Accessibility example",
         "complete": "Completeness output field",
         "missing_data": "Missing data output field",
         "required_agents": "Required agents output field",
@@ -280,12 +434,47 @@ if __name__ == "__main__":
         failed += 1
         print(f"  \033[1;31m❌ FAIL\033[0m: PT prompt too short ({len(prompt_pt)} chars)")
 
-    if "Agente de Qualidade" in prompt_pt or "Qualidade" in prompt_pt:
+    if "Qualidade" in prompt_pt:
         passed += 1
         print("  \033[1;32m✅ PASS\033[0m: PT prompt has QA role definition")
     else:
         failed += 1
         print("  \033[1;31m❌ FAIL\033[0m: PT prompt missing QA role")
+
+    pt_enhanced_checks = {
+        "VALIDAÇÃO DO CONTEXTO": "PT user context section",
+        "COERÊNCIA COM FOLLOW-UPS": "PT follow-up section",
+        "URLs fabricados": "PT URL check",
+        "acessibilidade": "PT accessibility example",
+    }
+    for term, description in pt_enhanced_checks.items():
+        if term in prompt_pt:
+            passed += 1
+            print(f"  \033[1;32m✅ PASS\033[0m: {description}")
+        else:
+            failed += 1
+            print(f"  \033[1;31m❌ FAIL\033[0m: {description} ('{term}' not found)")
+
+    # Test with user context and conversation history
+    print("\n\033[1m📋 Context Injection Test:\033[0m")
+    ctx_prompt = get_qa_prompt(
+        "en",
+        user_context={"mobility": "wheelchair", "preferences": ["museums", "food"]},
+        conversation_history=["User: What's the weather?", "Assistant: Sunny, 24C."],
+    )
+    if "wheelchair" in ctx_prompt:
+        passed += 1
+        print("  \033[1;32m✅ PASS\033[0m: User context injected (mobility)")
+    else:
+        failed += 1
+        print("  \033[1;31m❌ FAIL\033[0m: User context not injected")
+
+    if "What's the weather?" in ctx_prompt:
+        passed += 1
+        print("  \033[1;32m✅ PASS\033[0m: Conversation history injected")
+    else:
+        failed += 1
+        print("  \033[1;31m❌ FAIL\033[0m: Conversation history not injected")
 
     total = passed + failed
     print(f"\n\033[1m📝 EN Prompt length:\033[0m {len(prompt_en)} chars (~{len(prompt_en)//4} tokens)")

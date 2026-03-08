@@ -21,7 +21,6 @@
 
 import logging
 import os
-import sys
 from collections import defaultdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -29,9 +28,13 @@ from typing import Any, Dict, List, Optional
 import requests
 from langchain_core.tools import tool
 
-# Add parent directory to path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from config import Config
+try:
+    from config import Config
+except ModuleNotFoundError:
+    import sys
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    from config import Config
+
 from tools.carrismetropolitana_api import (
     CARRIS_LIMITATION_NOTICE,
     both_locations_in_lisbon_city,
@@ -60,8 +63,6 @@ from tools.metrolisboa_api import (
     get_station_lines,
 )
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Metro fallback URL

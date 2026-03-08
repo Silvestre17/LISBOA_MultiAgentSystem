@@ -12,15 +12,10 @@
 # Import from original system prompt module (renamed to _system_prompt.py)
 # This maintains backward compatibility with existing code
 from agent.prompts._system_prompt import (
-    API_ERROR_RESPONSE,
     COMPACT_SYSTEM_PROMPT_EN,
     COMPACT_SYSTEM_PROMPT_PT,
-    ITINERARY_PLANNING_PROMPT,
-    NO_DATA_RESPONSE,
     SYSTEM_PROMPT_EN,
     SYSTEM_PROMPT_PT,
-    TRANSPORT_ANALYSIS_PROMPT,
-    WEATHER_ANALYSIS_PROMPT,
     get_system_prompt,
 )
 from agent.prompts.planner import PLANNER_AGENT_PROMPT, get_planner_prompt
@@ -42,11 +37,6 @@ __all__ = [
     "SYSTEM_PROMPT_PT",
     "COMPACT_SYSTEM_PROMPT_EN",
     "COMPACT_SYSTEM_PROMPT_PT",
-    "ITINERARY_PLANNING_PROMPT",
-    "WEATHER_ANALYSIS_PROMPT",
-    "TRANSPORT_ANALYSIS_PROMPT",
-    "API_ERROR_RESPONSE",
-    "NO_DATA_RESPONSE",
     "get_system_prompt",
     
     # Multi-agent specialized prompts

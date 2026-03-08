@@ -1,130 +1,105 @@
-# Project Documentation
+# 📍 LISBOA Project Overview
 
-**Master Thesis - LISBOA: Lisbon Itenerary System Based On AI**  
-**Subtitle: A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon**  
-**Author:** André Filipe Gomes Silvestre (20240502)  
-**Institution:** NOVA IMS - Master in Data Science and Advanced Analytics  
-**Year:** 2025-2026
+LISBOA is a Master's thesis project for the Lisbon Metropolitan Area that combines multi-agent orchestration, live public APIs, municipal open data, and semantic retrieval. The documented public entrypoint is `app.py`, and the default runtime is the multi-agent system enabled by `Config.USE_MULTI_AGENT = True`.
 
----
+## 👥 Who LISBOA Serves
 
-## Documentation Structure
+| Audience | Typical questions | Main data layers |
+|----------|-------------------|------------------|
+| Tourists | itineraries, museums, attractions, weather, events, transport between landmarks | VisitLisboa, IPMA, Metro, Carris, CP, multimodal routing |
+| Residents | daily mobility, nearby services, local events, urban information | Lisboa Aberta, Metro, Carris Metropolitana, Carris Urban, CP, IPMA |
 
-This documentation provides comprehensive information about the Lisbon Urban Assistant project, including code architecture, API references, data schemas, and implementation details.
+## 🎓 Thesis Context
 
-The documentation is now being consolidated into a flat set of grouped Markdown files:
+| Item | Value |
+|------|-------|
+| Project name | **LISBOA** |
+| Thesis title used in repository docs | *LISBOA: Lisbon Itinerary System Based On AI* |
+| Subtitle | *A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon* |
+| Author | André Filipe Gomes Silvestre, 20240502 |
+| Supervisor | Prof. Dr. Bruno Jardim |
+| Institution | NOVA IMS |
+| Academic year | 2025/2026 |
 
-- `docs/00_INDEX.md` (entrypoint)
-- `docs/01_PROJECT_OVERVIEW.md`
-- `docs/02_SYSTEM_ARCHITECTURE.md`
-- `docs/03_TOOLS_REFERENCE.md`
-- `docs/04_DATA_SOURCES_AND_SCHEMAS.md`
-- `docs/05_DEPLOYMENT_AND_OPERATIONS.md`
-- `docs/06_FUTURE_ENHANCEMENTS.md`
+## 📊 Current System Snapshot
 
-Legacy documents remain during migration to avoid information loss.
+| Category | Current implementation |
+|----------|------------------------|
+| Supported Streamlit entrypoint | `app.py` |
+| Runtime mode | Multi-agent by default |
+| Specialized agents | Supervisor, Weather, Transport, Researcher, Planner, QA |
+| Exported tools | 45 |
+| Worker-agent tool assignment | Weather 4, Transport 30, Researcher 11 |
+| Knowledge base | ChromaDB with `BAAI/bge-m3` embeddings |
+| Indexed collections | `lisbon_pdf`, `lisbon_places`, `lisbon_events` |
+| Evaluation corpus | 72 benchmark queries across 6 domains |
+| Evaluation artefacts | benchmark, ablation, coverage, and calibration outputs under `eval/results/` |
+| Automation | daily scraping plus workflow-triggered vector sync |
 
----
+## ✨ Core Capabilities
 
-## Quick start
+### 🌦️ Weather and Alerts
 
-Start here: `docs/00_INDEX.md`.
+- current weather summaries
+- five-day forecasts
+- Portugal-wide weather overview
+- active meteorological warning retrieval
 
----
+### 🚇 Mobility
 
-## Key components
+- Metro de Lisboa status, wait times, frequencies, and nearest stations
+- Carris Metropolitana alerts, routes, live locations, and departures
+- Carris Urban buses and trams through GTFS and GTFS-RT
+- CP schedules, routes, trip planning, and frequency support
+- multimodal summaries and routing across providers
 
-### 1. Multi-Agent System
-- **Supervisor Agent**: Routes queries to specialized agents
-- **Weather Agent**: IPMA weather data and forecasts
-- **Transport Agent**: Metro, bus, tram, and train information
-- **Researcher Agent**: RAG for places and events
-- **Planner Agent**: Itinerary synthesis
-- **42 specialized tools** for different data sources
-- **Multi-provider**: Supports LM Studio (default), OpenAI, Azure
+### 📚 Knowledge and Local Services
 
-### 2. Data Sources
-- **IPMA**: Weather forecasts and warnings
-- **Metro de Lisboa**: Official API - Line status, wait times, frequencies
-- **Carris Urban**: GTFS data for city buses and trams (28E, 15E, 732...)
-- **Carris Metropolitana**: Suburban bus alerts, stops, routes, real-time tracking
-- **CP (Comboios de Portugal)**: Train status, delays, AML stations
-- **Lisboa Aberta**: Open government data (GeoJSON)
-- **VisitLisboa**: Cultural events and tourist attractions
+- semantic search over VisitLisboa places, events, and tourism knowledge
+- on-demand Lisboa Aberta service discovery
+- web fallback for history and culture queries
 
-### 3. Vector Store (RAG)
-- **ChromaDB**: Persistent vector database
-- **Embeddings**: BAAI/bge-m3 multilingual model
-- **Collections**: PDF guide, places, events
-- **Incremental Sync**: Efficient updates
+### 🧭 Planning and Synthesis
 
-### 4. Web Scraping
-- **VisitLisboa Events**: Automated daily scraping
-- **VisitLisboa Places**: Automated weekly scraping
-- **Dados.gov**: Metadata extraction for open datasets
+- constraint-aware itinerary synthesis
+- integration of weather, transport, and local knowledge
+- user-context support for interests, mobility, location, and available time
 
----
+### 🧪 Evaluation and Research Support
 
-## Documentation conventions
+- benchmark and ablation runners under `eval/`
+- strict live coverage for the exported tool registry
+- calibration support for human-vs-judge comparison
+- reproducibility metadata and optional cost accounting
 
-- Documentation is English-only.
-- The root docs are flat, grouped by topic.
-- Examples aim to be runnable, but should be treated as illustrative unless explicitly marked as tested.
+## 🤖 Why the System is Multi-Agent
 
----
+LISBOA is no longer documented as a single monolithic ReAct agent. The supported runtime separates responsibilities into clearer layers:
 
-## Research context
+- **Supervisor** for routing and direct handling of simple cases
+- **Worker agents** for weather, transport, and research retrieval
+- **QA validation** for completeness and factual safeguards
+- **Planner synthesis** for itinerary-style responses
 
-This project is part of a Master's thesis exploring:
-- **Multi-agent orchestration** for urban navigation and tourism in smart cities
-- **Multi-agent systems** for tourism and mobility
-- **RAG (Retrieval-Augmented Generation)** for local knowledge
-- **Real-time data integration** with LLMs
-- **Adaptive itinerary planning** based on conditions
+This reduces tool overload per worker, keeps domain prompts narrower, and makes final response assembly easier to control and evaluate.
 
----
+## 🧱 Repository Highlights
 
-## Statistics
+| Path | Role |
+|------|------|
+| `app.py` | supported Streamlit UI entrypoint |
+| `app_vprod.py` | alternative UI variant present in the repository, but not part of the public setup path |
+| `agent/` | orchestration, prompts, state, and shared agent utilities |
+| `tools/` | exported tool registry plus vector-store internals |
+| `data_collection/` | scrapers and source-acquisition scripts |
+| `data/` | vector store and local transport support data |
+| `eval/` | benchmarking, ablation, validators, and calibration assets |
+| `tests/` | smoke checks, QA integration tests, and coverage validation |
+| `_/` | auxiliary thesis notes, prompts, and one-off utilities, not part of runtime execution |
+| `.github/workflows/` | scheduled scraping and vector synchronization |
 
-### Code Base
-- **Python Modules**: 25+
-- **Tools Implemented**: 42
-- **Specialized Agents**: 5
-- **Data Sources**: 6 APIs + 2 scraped sources
-- **Vector DB Documents**: ~1,400 chunks
+## 📌 Documentation Boundary
 
-### Datasets
-- **Events**: 200+ cultural events
-- **Places**: 300+ attractions and services
-- **Open Data**: 100+ GeoJSON datasets
-- **PDF Guide**: 100+ pages indexed
-
----
-
-## Getting started
-
-For a complete project setup, see the main [README.md](../README.md) in the project root.
-
-For specific documentation, navigate to the appropriate section above.
-
----
-
-## Contributing to documentation
-
-When updating code:
-1. Update corresponding API documentation
-2. Add examples if behavior changes
-3. Update architecture diagrams if structure changes
-4. Document error handling strategies
-
----
-
-## 📧 Contact
-
-**André Filipe Gomes Silvestre**  
-Student ID: 20240502  
-NOVA IMS - Master in Data Science and Advanced Analytics
-
----
-
-*Last Updated: February 4, 2026*
+> [!NOTE]
+> This overview intentionally documents the supported application path around `app.py` and the current runtime architecture.
+> Alternative UI files or auxiliary thesis materials may exist in the repository, but they are not treated as the public operating path unless explicitly stated.

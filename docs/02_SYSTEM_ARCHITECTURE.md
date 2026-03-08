@@ -1,166 +1,150 @@
-# Architecture
+# 🏗️ LISBOA System Architecture
 
-This document describes the repository architecture and how the multi-agent system is wired.
+This document describes the runtime architecture implemented in the repository today. The supported default path is the multi-agent flow inside `MultiAgentAssistant` in `agent/graph.py`.
 
-## High-level view
+> [!IMPORTANT]
+> The repository still contains the single-agent `LisbonAssistant` for compatibility, but the documented default runtime is the multi-agent system.
 
-- UI entrypoint: `app.py` (Streamlit)
-- Multi-agent graph: `agent/graph.py`
-- State schema: `agent/state.py`
-- Tools layer: `tools/` and the exports in `tools/__init__.py`
+## 🧩 High-Level Components
 
-Key config:
+| Layer | Main files | Responsibility |
+|------|------------|----------------|
+| UI | `app.py` | Streamlit chat interface, provider selection, session state, quick actions |
+| Orchestration | `agent/graph.py` | routing, parallel worker execution, QA pass, final response assembly |
+| State | `agent/state.py` | shared `AgentState` and user-context schema |
+| LLM provider factory | `agent/llm_factory.py` | provider-specific model creation and binding |
+| Specialized agents | `agent/agents/` | domain routing, retrieval, validation, synthesis |
+| Tool and data layer | `tools/` | live APIs, open data access, vector search, support utilities |
 
-- Global settings: `config.py`
-- LLM instantiation: `agent/llm_factory.py`
+## 🧱 Architecture Layers
 
-## Multi-agent system (LangGraph)
+### 🎨 UI Layer
 
-Roles:
+- Streamlit chat experience through `app.py`
+- runtime provider and model selection
+- session state, quick actions, info pages, and status updates
+- pre-warming of the vector store and Carris support database at startup
 
-- Supervisor: routes tasks to workers and synthesizes final responses.
-- Weather agent: IPMA tools.
-- Transport agent: Metro, bus, train tools.
-- Researcher agent: semantic search, open data lookup.
-- Planner agent: itinerary synthesis.
+### 🤖 Orchestration Layer
 
-Mermaid overview:
+- `SupervisorAgent` classifies the query and decides which workers to call
+- worker agents execute domain-specific retrieval
+- `QualityAssuranceAgent` validates completeness and factual consistency
+- `PlannerAgent` synthesizes itinerary-style answers when planning is required
+
+### 🔌 Tool and Data Layer
+
+- live APIs for weather and transport
+- VisitLisboa semantic retrieval over ChromaDB
+- Lisboa Aberta on-demand geospatial discovery
+- web fallback for history and culture
+
+## 🔁 End-to-End Runtime Flow
 
 ```mermaid
 graph TD
-  User([User]) --> UI[Streamlit UI]
-  UI --> Sup[Supervisor Agent]
+  User([User]) --> UI[app.py]
+  UI --> Supervisor[SupervisorAgent]
 
-  subgraph Agents
-    Sup --> W[Weather Agent]
-    Sup --> T[Transport Agent]
-    Sup --> R[Researcher Agent]
-    Sup --> P[Planner Agent]
-  end
+  Supervisor -->|direct response| UI
+  Supervisor -->|weather| Weather[WeatherAgent]
+  Supervisor -->|transport| Transport[TransportAgent]
+  Supervisor -->|research| Researcher[ResearcherAgent]
 
-  W --> IPMA[IPMA]
-  T --> Metro[Metro de Lisboa]
-  T --> CM[Carris Metropolitana]
-  T --> Carris[Carris Urban]
-  T --> CP[CP Trains]
-  R --> OpenData[Lisboa Aberta]
-  R --> VS[Vector Store]
-  P --> Sup
-  R --> Sup
-  T --> Sup
-  W --> Sup
-  Sup --> UI
+  Weather --> QA[QualityAssuranceAgent]
+  Transport --> QA
+  Researcher --> QA
+
+  QA -->|planning query| Planner[PlannerAgent]
+  QA -->|single or combined response| UI
+  Planner --> UI
 ```
 
-Notes:
+### What this means in practice
 
-- The tool count is **42** (see `tools/__init__.py`).
-- Carris Urban provides 7 tools for city buses and historic trams (28E, 15E, etc.)
-- The vector store is an internal component used by semantic search, not a LangChain tool export.
+1. The user sends a request through `app.py`.
+2. `SupervisorAgent.route()` decides whether the answer can be returned directly or whether worker agents are needed.
+3. Weather, transport, and research workers can run in parallel.
+4. `QualityAssuranceAgent.validate()` checks completeness, disclaimers, and retry needs.
+5. If the route includes planning, `PlannerAgent.synthesize()` writes the final itinerary.
+6. Otherwise, the system returns a direct or combined response without invoking the planner.
 
-## LLM providers and model selection
+## 🤝 Agent Roles and Tool Assignments
 
-The project uses a factory pattern (`agent/llm_factory.py`) to create LLM clients.
+| Agent | Primary role | Assigned tools | Notes |
+|------|--------------|---------------:|------|
+| `SupervisorAgent` | query routing and direct handling | 0 | returns direct responses for greetings and out-of-scope cases |
+| `WeatherAgent` | weather retrieval | 4 | IPMA only |
+| `TransportAgent` | transport retrieval | 30 | Metro, Carris Metropolitana, Carris Urban, CP, and multimodal tools |
+| `ResearcherAgent` | tourism, services, and knowledge retrieval | 11 | VisitLisboa, Lisboa Aberta, and web fallback |
+| `QualityAssuranceAgent` | validation and retry guidance | 0 | validates outputs, adds disclaimers, and can trigger one retry path |
+| `PlannerAgent` | final planning synthesis | 0 | only used when the route explicitly includes the planner |
 
-Providers:
+## 🎯 Final Response Semantics
 
-- LM Studio: local OpenAI-compatible server (`Config.LMSTUDIO_BASE_URL`)
-- OpenAI: API key via `OPENAI_API_KEY`
-- Azure OpenAI: v1-style endpoint (`AZURE_OPENAI_ENDPOINT` with `/openai/v1/` appended)
+One of the most important architectural details is that the planner is **not** always the final responder.
 
-Multi-agent per-role models:
+- **Planning queries:** the final answer is synthesized by `PlannerAgent.synthesize()`.
+- **Greetings or out-of-scope requests:** the response can be returned directly by the supervisor.
+- **Simple single-domain requests:** the response can come from one specialist worker or from combined worker outputs, without using the planner.
 
-- Each agent uses `LLMFactory.get_agent_llm(agent_name)`.
-- The per-agent provider and model are configured in `config.py` under `AGENT_MODELS_AZURE`, `AGENT_MODELS_OPENAI`, and `AGENT_MODELS_LMSTUDIO`.
+This behavior is implemented in `MultiAgentAssistant.chat()` in `agent/graph.py`.
 
-## Tool binding by agent
+## ✅ QA in the Real Runtime
 
-Each agent receives a curated tool set in `agent/agents/base.py` via `get_agent_tools(agent_name)`.
+`QualityAssuranceAgent` is not a general conversational front-end. Its runtime role is to:
 
-Examples:
+- inspect worker outputs
+- detect missing critical data
+- attach disclaimers about data limitations
+- guide a single retry path when worker outputs are incomplete
+- perform deterministic validation for certain factual checks
 
-- Weather agent: IPMA tools only
-- Transport agent: Metro, Carris (urban and metropolitana), CP, and multimodal routing
-- Researcher agent: VisitLisboa semantic search, Lisboa Aberta open data, and web knowledge
+The QA step happens **after** worker execution and **before** final synthesis or response combination.
 
-## Tracing (optional)
+## 🛠️ Tool Mapping by Worker
 
-If LangSmith is installed and enabled, multi-agent execution can emit traces.
+| Worker | Composition |
+|--------|-------------|
+| `WeatherAgent` | IPMA, 4 tools |
+| `TransportAgent` | Metro 6 + Carris Metropolitana 8 + Carris Urban 8 + CP 6 + multimodal 2 |
+| `ResearcherAgent` | VisitLisboa 5 + Lisboa Aberta 5 + web knowledge 1 |
 
-- Tracing support is detected dynamically (graceful fallback when not installed).
-- Enable via environment variables documented in `docs/OPERATIONS.md`.
+## 🧠 State Management
 
-## State and prompts
+`agent/state.py` defines `AgentState`, which carries:
 
-- Typed state is defined in `agent/state.py`.
-- Prompt templates are stored under `agent/prompts/`.
+| State field | Purpose |
+|-------------|---------|
+| `messages` | conversation history |
+| `user_context` | language, location, mobility, preferences, available time |
+| `weather_context` | cached weather context when available |
+| `transport_context` | cached transport context when available |
+| `current_plan` | current itinerary structure |
+| `candidate_pois` | retrieved places under consideration |
+| `events_data` | retrieved event records for planning |
+| `agents_to_call` | supervisor routing decision |
+| `agent_outputs` | collected worker outputs |
+| `iteration_count` | loop-prevention and execution-tracking metadata |
 
-### AgentState Schema (Detailed)
+## ⚙️ Provider and Model Selection
 
-The `AgentState` TypedDict defines the complete state managed by LangGraph during agent execution.
+`agent/llm_factory.py` supports the following provider families:
 
-**Core Fields:**
-- **`messages`**: `List[BaseMessage]` with `add_messages` reducer
-  - Conversation history (SystemMessage, HumanMessage, AIMessage, ToolMessage)
-  - Automatically appends new messages without duplication
-  
-- **`session_id`**: `str`  
-  - Unique identifier for this conversation session
-  
-**User Context:**
-- **`user_context`**: `Optional[UserContext]`
-  - `latitude`, `longitude`: GPS coordinates
-  - `preferences`: List of interests (e.g., ["museums", "food"])
-  - `language`: Language code ("en" or "pt")
-  - `available_time`: Available hours for activities
-  - `mobility`: Accessibility level ("full", "limited", "wheelchair")
+- **LM Studio**
+- **OpenAI**
+- **Azure OpenAI**
 
-**Cached Data:**
-- **`weather_context`**: `Optional[WeatherContext]`
-  - IPMA forecast data (temperatures, precipitation, warnings)
-  - Cached to avoid redundant API calls
-  
-- **`transport_context`**: `Optional[TransportContext]`
-  - Metro/bus/train status snapshot
-  - Updated when transport tools are called
+Per-agent model selection is controlled in `config.py` through `AGENT_MODELS_LMSTUDIO`, `AGENT_MODELS_OPENAI`, and `AGENT_MODELS_AZURE`. The Streamlit sidebar in `app.py` can override provider-level and per-agent model choices at runtime.
 
-**Multi-Agent Orchestration:**
-- **`agents_to_call`**: `Optional[List[str]]`
-  - Queue of agent names from supervisor routing
-  - Example: `["weather", "researcher", "planner"]`
-  
-- **`agent_outputs`**: `Optional[Dict[str, str]]`
-  - Collected outputs from specialized agents
-  - Keys: agent names, Values: their responses
-  
-- **`iteration_count`**: `Optional[int]`
-  - Loop prevention counter (max 10 iterations)
+## 🛡️ Reliability and Control Mechanisms
 
-**Planning State:**
-- **`current_plan`**: `Optional[List[dict]]`
-  - Active itinerary items being built
-  
-- **`candidate_pois`**: `Optional[List[dict]]`
-  - RAG search results for places/attractions
-  
-- **`events_data`**: `Optional[List[dict]]`
-  - RAG search results for cultural events
+The implemented architecture includes:
 
-**Implementation:**
-- Location: `agent/state.py`
-- Helper: `create_initial_state(session_id=None)` returns empty state
-- Updaters: `update_weather_context()`, `update_user_location()`
-
-## Data flow
-
-1. Scrape VisitLisboa to JSON (events daily, places weekly).
-2. Sync the vector database incrementally when JSON changes.
-3. Agents query tools and (when relevant) semantic search.
-
-## Performance
-
-Optional optimization utilities exist under `agent/utils/optimization.py`:
-
-- HTTP session pooling (requests reuse)
-- TTL caches for expensive API calls
-- Parallel tool execution helpers
+- loop detection for repeated tool calls
+- safe LLM invocation with Azure content-filter retry handling
+- parallel worker execution with context propagation
+- a single QA-guided retry path when required
+- response cleanup and formatting before Streamlit rendering
+- deterministic validation in the QA stage
+- per-agent usage and latency tracking hooks
