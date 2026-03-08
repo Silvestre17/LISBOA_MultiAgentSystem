@@ -1,6 +1,6 @@
 # ==========================================================================
 # Master Thesis - LLM Judge Unit Tests
-#   - Andre Filipe Gomes Silvestre, 20240502
+#   - André Filipe Gomes Silvestre, 20240502
 #
 #   Mock-based tests for LLMJudge to validate scoring pipeline
 #   without making actual API calls.
@@ -8,15 +8,16 @@
 #   Run: python -m pytest eval/tests/test_llm_judge.py -v
 # ==========================================================================
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-import pytest
 from unittest.mock import MagicMock, patch
-from eval.llm_judge import LLMJudgeScore, LLMJudge
 
+import pytest
+
+from eval.llm_judge import LLMJudge, LLMJudgeScore
 
 # ==========================================================================
 # Tests for LLMJudgeScore model
@@ -128,7 +129,65 @@ class TestLLMJudgeEvaluate:
         assert "response_quality" in result
         assert "composite_score" in result
         assert "reasoning" in result
+        assert "evaluation_usage" in result
+        assert "evaluation_cost_usd" in result
         assert result["composite_score"] == (4 + 5 + 4 + 5 + 4) / 5.0
+
+    @patch("eval.llm_judge.LLMFactory")
+    def test_evaluate_tracks_tokens_and_cost(self, mock_factory):
+        """Judge should expose evaluation token usage and cost when raw usage is available."""
+        mock_llm = MagicMock()
+        mock_structured = MagicMock()
+        raw_response = MagicMock()
+        raw_response.usage_metadata = {
+            "input_tokens": 120,
+            "output_tokens": 30,
+            "total_tokens": 150,
+        }
+        mock_factory.extract_usage_metadata.return_value = {
+            "input_tokens": 120,
+            "output_tokens": 30,
+            "total_tokens": 150,
+            "usage_available": True,
+        }
+        mock_structured.invoke.return_value = {
+            "parsed": LLMJudgeScore(
+                factual_accuracy=4,
+                tool_usage=4,
+                completeness=4,
+                relevance=4,
+                response_quality=4,
+                reasoning="Consistent and well-grounded response.",
+            ),
+            "raw": raw_response,
+            "parsing_error": None,
+        }
+        mock_llm.with_structured_output.return_value = mock_structured
+        mock_factory.get_llm.return_value = mock_llm
+
+        judge = LLMJudge()
+        result = judge.evaluate(
+            query="What's the weather?",
+            expected_facts=["Current temperature"],
+            expected_tools=["get_current_weather_summary"],
+            actual_tools=["get_current_weather_summary"],
+            retrieved_context="{'temp': 15, 'condition': 'Sunny'}",
+            response="The temperature is 15 degrees Celsius and it's sunny.",
+            pricing_by_model={
+                "azure::gpt-5-mini": {
+                    "input": 0.25,
+                    "output": 2.0,
+                }
+            },
+        )
+
+        assert result["evaluation_usage"]["tokens"]["input_tokens"] == 120
+        assert result["evaluation_usage"]["tokens"]["output_tokens"] == 30
+        assert result["evaluation_usage"]["tokens"]["total_tokens"] == 150
+        assert result["evaluation_cost_usd"]["pricing_complete"]
+        assert result["evaluation_cost_usd"]["input_cost_usd"] == pytest.approx(0.00003)
+        assert result["evaluation_cost_usd"]["output_cost_usd"] == pytest.approx(0.00006)
+        assert result["evaluation_cost_usd"]["total_cost_usd"] == pytest.approx(0.00009)
 
     @patch("eval.llm_judge.LLMFactory")
     def test_evaluate_handles_llm_error(self, mock_factory):

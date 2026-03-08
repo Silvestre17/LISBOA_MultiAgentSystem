@@ -1,0 +1,11 @@
+arm_label,domain_label,avg_composite_score,avg_tool_f1,avg_latency_s,heuristics_pass_rate
+Zero-shot,Greeting,4.8,1.0,0.546,1.0
+Zero-shot,Weather,2.6,0.0,3.54,1.0
+Zero-shot,Transport,3.0,0.0,1.433,1.0
+Zero-shot,Researcher,3.8,0.0,6.471,0.0
+Zero-shot,Multi-agent,3.2,0.0,14.15,0.0
+LISBOA,Greeting,5.0,1.0,0.938,1.0
+LISBOA,Weather,5.0,1.0,14.295,1.0
+LISBOA,Transport,4.0,0.0,14.698,1.0
+LISBOA,Researcher,3.6,1.0,17.792,1.0
+LISBOA,Multi-agent,3.2,0.571,34.087,1.0

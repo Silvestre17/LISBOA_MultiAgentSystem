@@ -1,99 +1,99 @@
 # ==========================================================================
 # Master Thesis - Dataset Integrity Tests
-#   - Andre Filipe Gomes Silvestre, 20240502
+#   - André Filipe Gomes Silvestre, 20240502
 #
-#   Validates that dataset.json is well-formed with correct tool names,
+#   Validates that evaluation_groundtruth_queries.json is well-formed with correct tool names,
 #   unique IDs, valid domains, and complete expected_facts.
 #
 #   Run: python -m pytest eval/tests/test_dataset_integrity.py -v
 # ==========================================================================
 
-import sys
-import os
 import json
+import os
+import sys
+from collections import Counter
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 import pytest
 
-DATASET_PATH = os.path.join(os.path.dirname(__file__), "..", "dataset.json")
+from agent.agents.base import get_agent_tools
+from agent.graph import get_all_tools
+from tools import __all__ as EXPORTED_TOOL_NAMES
 
-# All valid tool names from tools/__init__.py
-VALID_TOOL_NAMES = {
-    # Weather (IPMA)
-    "get_weather_warnings",
-    "get_weather_forecast",
-    "get_current_weather_summary",
-    "get_portugal_weather_overview",
-    # Transport - Metro
-    "get_metro_status",
-    "get_metro_wait_time",
-    "get_metro_line_wait_times",
-    "find_nearest_metro",
-    "get_metro_frequency",
-    "get_all_metro_stations",
-    # Transport - Bus (Carris Metropolitana)
-    "get_real_time_bus_positions",
-    "get_carris_metropolitana_alerts",
-    "get_carris_metropolitana_stop_info",
-    "search_carris_metropolitana_lines",
-    "find_bus_routes",
-    "get_bus_realtime_locations",
-    "get_bus_next_departures",
-    "find_direct_bus_lines",
-    # Transport - Train (CP)
-    "get_train_status",
-    "search_cp_stations",
-    "get_train_schedule",
-    "get_cp_routes",
-    "plan_train_trip",
-    "get_train_frequency",
-    # Transport - Multi-modal
-    "get_transport_summary",
-    "get_route_between_stations",
-    # Open Data (Lisboa Aberta)
-    "find_nearby_services",
-    "list_available_datasets",
-    "get_dataset_details",
-    "find_place_in_datasets",
-    "list_service_categories",
-    # VisitLisboa (Events & Places)
-    "search_cultural_events",
-    "search_places_attractions",
-    "get_event_categories",
-    "get_place_categories",
-    "search_lisbon_knowledge",
-    # Transport - Carris Urban (Buses & Trams)
-    "carris_get_stops",
-    "carris_get_routes",
-    "carris_get_next_departures",
-    "carris_find_routes_between",
-    "carris_get_realtime_vehicles",
-    "carris_get_arrivals",
-    "carris_vehicle_eta",
-    "carris_get_service_frequency",
-    # Web Knowledge
-    "search_history_culture",
-}
+GROUNDTRUTH_QUERIES_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "evaluation_groundtruth_queries.json",
+)
 
-VALID_DOMAINS = {"weather", "transport", "researcher"}
+VALID_TOOL_NAMES = set(EXPORTED_TOOL_NAMES)
+EXPECTED_TOOL_COUNT = 45
+
+VALID_DOMAINS = {"weather", "transport", "researcher", "multi_agent", "greeting", "out_of_scope"}
 VALID_LANGUAGES = {"en", "pt", "fr", "de", "mixed"}
+VALID_EDGE_TYPES = {
+    "temporal_out_of_bounds",
+    "geographic_out_of_bounds",
+    "missing_data_field",
+    "implicit_constraint",
+    "climatology_vs_meteorology",
+    "hallucinated_locations",
+    "invalid_entity",
+    "gps_coordinates",
+    "unsupported_provider",
+    "cross_lingual_query",
+    "adversarial_hallucination_request",
+    "unsupported_action",
+    "out_of_scope_topic",
+    "out_of_scope_task",
+}
 
 
 @pytest.fixture
 def dataset():
-    """Load dataset.json."""
-    with open(DATASET_PATH, "r", encoding="utf-8") as f:
+    """Load the shared evaluation ground-truth query corpus."""
+    with open(GROUNDTRUTH_QUERIES_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
+def _agent_tool_union() -> set[str]:
+    """Return the union of worker-agent tool registries."""
+    worker_domains = ("weather", "transport", "researcher")
+    return {
+        tool.name
+        for domain in worker_domains
+        for tool in get_agent_tools(domain)
+    }
+
+
+def _graph_tool_names() -> set[str]:
+    """Return the full graph-level tool registry."""
+    return {tool.name for tool in get_all_tools()}
+
+
 class TestDatasetIntegrity:
-    """Validates structure and correctness of dataset.json."""
+    """Validates structure and correctness of evaluation_groundtruth_queries.json."""
 
     def test_dataset_loads_and_is_list(self, dataset):
         """Dataset should load as a non-empty list."""
         assert isinstance(dataset, list)
         assert len(dataset) > 0
+
+    def test_exported_tool_registry_size(self):
+        """The authoritative exported tool registry must remain stable."""
+        assert len(VALID_TOOL_NAMES) == EXPECTED_TOOL_COUNT, (
+            f"Expected {EXPECTED_TOOL_COUNT} exported tools, found {len(VALID_TOOL_NAMES)}"
+        )
+
+    def test_tool_registries_are_in_sync(self):
+        """tools.__all__, graph registry, and worker registries must match."""
+        graph_tool_names = _graph_tool_names()
+        agent_tool_names = _agent_tool_union()
+        assert VALID_TOOL_NAMES == graph_tool_names == agent_tool_names, (
+            "Tool registries are out of sync across tools.__all__, agent.graph.get_all_tools(), "
+            "and agent.agents.base.get_agent_tools()"
+        )
 
     def test_all_entries_have_required_fields(self, dataset):
         """Every entry must have id, query, domain, expected_tools, expected_facts."""
@@ -134,14 +134,40 @@ class TestDatasetIntegrity:
                 missing_type.append(item["id"])
         assert not missing_type, f"Edge cases without edge_type: {missing_type}"
 
+    def test_edge_types_are_valid(self, dataset):
+        """All edge_type values must be from the recognized set."""
+        invalid = []
+        for item in dataset:
+            etype = item.get("edge_type")
+            if etype is not None and etype not in VALID_EDGE_TYPES:
+                invalid.append(f"{item['id']}: {etype}")
+        assert not invalid, (
+            "Invalid edge_type values found:\n" + "\n".join(invalid)
+        )
+
+    def test_edge_cases_have_expected_behavior(self, dataset):
+        """Every edge case entry must have an expected_behavior string."""
+        for item in dataset:
+            if item.get("edge_case", False):
+                assert "expected_behavior" in item, (
+                    f"{item['id']}: edge_case=true but missing expected_behavior field"
+                )
+                assert isinstance(item["expected_behavior"], str), (
+                    f"{item['id']}: expected_behavior must be a string"
+                )
+                assert len(item["expected_behavior"]) > 10, (
+                    f"{item['id']}: expected_behavior too short"
+                )
+
     def test_minimum_queries_per_domain(self, dataset):
-        """Each domain should have at least 8 queries for meaningful evaluation."""
-        from collections import Counter
+        """Core domains need >= 8 queries; auxiliary domains need >= 1."""
+        core_domains = {"weather", "transport", "researcher"}
         domain_counts = Counter(item["domain"] for item in dataset)
         for domain in VALID_DOMAINS:
             count = domain_counts.get(domain, 0)
-            assert count >= 8, (
-                f"Domain '{domain}' only has {count} queries (need >= 8)"
+            minimum = 8 if domain in core_domains else 1
+            assert count >= minimum, (
+                f"Domain '{domain}' only has {count} queries (need >= {minimum})"
             )
 
     def test_languages_are_valid(self, dataset):
@@ -159,6 +185,18 @@ class TestDatasetIntegrity:
                 empty_facts.append(item["id"])
         assert not empty_facts, f"Non-edge entries with empty expected_facts: {empty_facts}"
 
+    def test_dataset_covers_all_exported_tools(self, dataset):
+        """The benchmark dataset must reference every exported tool at least once."""
+        covered_tools = {
+            tool_name
+            for item in dataset
+            for tool_name in item.get("expected_tools", [])
+        }
+        missing_tools = sorted(VALID_TOOL_NAMES - covered_tools)
+        assert not missing_tools, (
+            "Dataset does not cover all exported tools:\n" + "\n".join(missing_tools)
+        )
+
     def test_total_dataset_size(self, dataset):
-        """Dataset should have a reasonable number of queries (>= 30)."""
-        assert len(dataset) >= 30, f"Dataset only has {len(dataset)} queries, expected >= 30"
+        """Dataset should have a reasonable number of queries (>= 70)."""
+        assert len(dataset) >= 70, f"Dataset only has {len(dataset)} queries, expected >= 70"

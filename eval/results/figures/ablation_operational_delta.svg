@@ -1,0 +1,569 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="1284.437043pt" height="492.519692pt" viewBox="0 0 1284.437043 492.519692" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-03-07T22:05:39.261661</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.0, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 492.519692 
+L 1284.437043 492.519692 
+L 1284.437043 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 58.59675 419.148711 
+L 522.856841 419.148711 
+L 522.856841 57.954 
+L 58.59675 57.954 
+z
+" style="fill: #ffffff"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="text_1">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; fill: #2f2f2f" transform="translate(85.572412 449.381108) rotate(-18)">Greeting</text>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="text_2">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; fill: #2f2f2f" transform="translate(179.18821 448.884773) rotate(-18)">Weather</text>
+     </g>
+    </g>
+    <g id="xtick_3">
+     <g id="text_3">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; fill: #2f2f2f" transform="translate(269.534343 450.513196) rotate(-18)">Transport</text>
+     </g>
+    </g>
+    <g id="xtick_4">
+     <g id="text_4">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; fill: #2f2f2f" transform="translate(358.970025 452.733266) rotate(-18)">Researcher</text>
+     </g>
+    </g>
+    <g id="xtick_5">
+     <g id="text_5">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; fill: #2f2f2f" transform="translate(451.094151 453.206279) rotate(-18)">Multi-agent</text>
+     </g>
+    </g>
+    <g id="text_6">
+     <text style="font-weight: 700; font-size: 12px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; fill: #2f2f2f" transform="translate(290.726795 468.674192)"/>
+     <text style="font-weight: 700; font-size: 12px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; fill: #2f2f2f" transform="translate(267.878983 482.439692)">Domain</text>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2">
+    <g id="ytick_1">
+     <g id="line2d_1">
+      <path d="M 58.59675 419.148711 
+L 522.856841 419.148711 
+" clip-path="url(#p2e63ae063d)" style="fill: none; stroke-dasharray: 3.7,1.6; stroke-dashoffset: 0; stroke: #d3d3d3; stroke-opacity: 0.7"/>
+     </g>
+     <g id="text_7">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #2f2f2f" x="49.09675" y="423.117383" transform="rotate(-0 49.09675 423.117383)">0</text>
+     </g>
+    </g>
+    <g id="ytick_2">
+     <g id="line2d_2">
+      <path d="M 58.59675 371.84398 
+L 522.856841 371.84398 
+" clip-path="url(#p2e63ae063d)" style="fill: none; stroke-dasharray: 3.7,1.6; stroke-dashoffset: 0; stroke: #d3d3d3; stroke-opacity: 0.7"/>
+     </g>
+     <g id="text_8">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #2f2f2f" x="49.09675" y="375.812651" transform="rotate(-0 49.09675 375.812651)">5</text>
+     </g>
+    </g>
+    <g id="ytick_3">
+     <g id="line2d_3">
+      <path d="M 58.59675 324.539248 
+L 522.856841 324.539248 
+" clip-path="url(#p2e63ae063d)" style="fill: none; stroke-dasharray: 3.7,1.6; stroke-dashoffset: 0; stroke: #d3d3d3; stroke-opacity: 0.7"/>
+     </g>
+     <g id="text_9">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #2f2f2f" x="49.09675" y="328.50792" transform="rotate(-0 49.09675 328.50792)">10</text>
+     </g>
+    </g>
+    <g id="ytick_4">
+     <g id="line2d_4">
+      <path d="M 58.59675 277.234516 
+L 522.856841 277.234516 
+" clip-path="url(#p2e63ae063d)" style="fill: none; stroke-dasharray: 3.7,1.6; stroke-dashoffset: 0; stroke: #d3d3d3; stroke-opacity: 0.7"/>
+     </g>
+     <g id="text_10">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #2f2f2f" x="49.09675" y="281.203188" transform="rotate(-0 49.09675 281.203188)">15</text>
+     </g>
+    </g>
+    <g id="ytick_5">
+     <g id="line2d_5">
+      <path d="M 58.59675 229.929784 
+L 522.856841 229.929784 
+" clip-path="url(#p2e63ae063d)" style="fill: none; stroke-dasharray: 3.7,1.6; stroke-dashoffset: 0; stroke: #d3d3d3; stroke-opacity: 0.7"/>
+     </g>
+     <g id="text_11">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #2f2f2f" x="49.09675" y="233.898456" transform="rotate(-0 49.09675 233.898456)">20</text>
+     </g>
+    </g>
+    <g id="ytick_6">
+     <g id="line2d_6">
+      <path d="M 58.59675 182.625053 
+L 522.856841 182.625053 
+" clip-path="url(#p2e63ae063d)" style="fill: none; stroke-dasharray: 3.7,1.6; stroke-dashoffset: 0; stroke: #d3d3d3; stroke-opacity: 0.7"/>
+     </g>
+     <g id="text_12">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #2f2f2f" x="49.09675" y="186.593725" transform="rotate(-0 49.09675 186.593725)">25</text>
+     </g>
+    </g>
+    <g id="ytick_7">
+     <g id="line2d_7">
+      <path d="M 58.59675 135.320321 
+L 522.856841 135.320321 
+" clip-path="url(#p2e63ae063d)" style="fill: none; stroke-dasharray: 3.7,1.6; stroke-dashoffset: 0; stroke: #d3d3d3; stroke-opacity: 0.7"/>
+     </g>
+     <g id="text_13">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #2f2f2f" x="49.09675" y="139.288993" transform="rotate(-0 49.09675 139.288993)">30</text>
+     </g>
+    </g>
+    <g id="ytick_8">
+     <g id="line2d_8">
+      <path d="M 58.59675 88.015589 
+L 522.856841 88.015589 
+" clip-path="url(#p2e63ae063d)" style="fill: none; stroke-dasharray: 3.7,1.6; stroke-dashoffset: 0; stroke: #d3d3d3; stroke-opacity: 0.7"/>
+     </g>
+     <g id="text_14">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #2f2f2f" x="49.09675" y="91.984261" transform="rotate(-0 49.09675 91.984261)">35</text>
+     </g>
+    </g>
+    <g id="text_15">
+     <text style="font-weight: 700; font-size: 12px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; fill: #2f2f2f" transform="translate(16.27125 269.462606) rotate(-90)">Latency (s)</text>
+     <text style="font-weight: 700; font-size: 12px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; fill: #2f2f2f" transform="translate(30.03675 238.551356) rotate(-90)"/>
+    </g>
+   </g>
+   <g id="patch_3">
+    <path d="M 67.881952 419.148711 
+L 105.022759 419.148711 
+L 105.022759 413.983035 
+L 67.881952 413.983035 
+z
+" clip-path="url(#p2e63ae063d)" style="fill: #7a7a7a; stroke: #000000; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 160.73397 419.148711 
+L 197.874777 419.148711 
+L 197.874777 385.656961 
+L 160.73397 385.656961 
+z
+" clip-path="url(#p2e63ae063d)" style="fill: #7a7a7a; stroke: #000000; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 253.585988 419.148711 
+L 290.726795 419.148711 
+L 290.726795 405.591175 
+L 253.585988 405.591175 
+z
+" clip-path="url(#p2e63ae063d)" style="fill: #7a7a7a; stroke: #000000; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 346.438006 419.148711 
+L 383.578814 419.148711 
+L 383.578814 357.926927 
+L 346.438006 357.926927 
+z
+" clip-path="url(#p2e63ae063d)" style="fill: #7a7a7a; stroke: #000000; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 439.290025 419.148711 
+L 476.430832 419.148711 
+L 476.430832 285.276321 
+L 439.290025 285.276321 
+z
+" clip-path="url(#p2e63ae063d)" style="fill: #7a7a7a; stroke: #000000; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 105.022759 419.148711 
+L 142.163566 419.148711 
+L 142.163566 410.274344 
+L 105.022759 410.274344 
+z
+" clip-path="url(#p2e63ae063d)" style="fill: #e1522f; stroke: #000000; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 197.874777 419.148711 
+L 235.015585 419.148711 
+L 235.015585 283.904483 
+L 197.874777 283.904483 
+z
+" clip-path="url(#p2e63ae063d)" style="fill: #e1522f; stroke: #000000; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 290.726795 419.148711 
+L 327.867603 419.148711 
+L 327.867603 280.091722 
+L 290.726795 280.091722 
+z
+" clip-path="url(#p2e63ae063d)" style="fill: #e1522f; stroke: #000000; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 383.578814 419.148711 
+L 420.719621 419.148711 
+L 420.719621 250.819554 
+L 383.578814 250.819554 
+z
+" clip-path="url(#p2e63ae063d)" style="fill: #e1522f; stroke: #000000; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_12">
+    <path d="M 476.430832 419.148711 
+L 513.571639 419.148711 
+L 513.571639 96.653433 
+L 476.430832 96.653433 
+z
+" clip-path="url(#p2e63ae063d)" style="fill: #e1522f; stroke: #000000; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_13">
+    <path d="M 105.022759 419.148711 
+L 105.022759 419.148711 
+L 105.022759 419.148711 
+L 105.022759 419.148711 
+z
+" clip-path="url(#p2e63ae063d)" style="fill: #7a7a7a; stroke: #000000; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_14">
+    <path d="M 105.022759 419.148711 
+L 105.022759 419.148711 
+L 105.022759 419.148711 
+L 105.022759 419.148711 
+z
+" clip-path="url(#p2e63ae063d)" style="fill: #e1522f; stroke: #000000; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="line2d_9">
+    <path clip-path="url(#p2e63ae063d)" style="fill: none; stroke: #424242; stroke-width: 2.25; stroke-linecap: round"/>
+   </g>
+   <g id="line2d_10">
+    <path clip-path="url(#p2e63ae063d)" style="fill: none; stroke: #424242; stroke-width: 2.25; stroke-linecap: round"/>
+   </g>
+   <g id="line2d_11">
+    <path clip-path="url(#p2e63ae063d)" style="fill: none; stroke: #424242; stroke-width: 2.25; stroke-linecap: round"/>
+   </g>
+   <g id="line2d_12">
+    <path clip-path="url(#p2e63ae063d)" style="fill: none; stroke: #424242; stroke-width: 2.25; stroke-linecap: round"/>
+   </g>
+   <g id="line2d_13">
+    <path clip-path="url(#p2e63ae063d)" style="fill: none; stroke: #424242; stroke-width: 2.25; stroke-linecap: round"/>
+   </g>
+   <g id="line2d_14">
+    <path clip-path="url(#p2e63ae063d)" style="fill: none; stroke: #424242; stroke-width: 2.25; stroke-linecap: round"/>
+   </g>
+   <g id="line2d_15">
+    <path clip-path="url(#p2e63ae063d)" style="fill: none; stroke: #424242; stroke-width: 2.25; stroke-linecap: round"/>
+   </g>
+   <g id="line2d_16">
+    <path clip-path="url(#p2e63ae063d)" style="fill: none; stroke: #424242; stroke-width: 2.25; stroke-linecap: round"/>
+   </g>
+   <g id="line2d_17">
+    <path clip-path="url(#p2e63ae063d)" style="fill: none; stroke: #424242; stroke-width: 2.25; stroke-linecap: round"/>
+   </g>
+   <g id="line2d_18">
+    <path clip-path="url(#p2e63ae063d)" style="fill: none; stroke: #424242; stroke-width: 2.25; stroke-linecap: round"/>
+   </g>
+   <g id="text_16">
+    <text style="font-weight: 700; font-size: 16px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; fill: #2f2f2f" transform="translate(161.544295 19.6)">Ablation Latency Across Domains</text>
+    <text style="font-weight: 700; font-size: 16px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; fill: #2f2f2f" transform="translate(211.551795 37.954)">Zero-shot vs LISBOA</text>
+   </g>
+   <g id="legend_1">
+    <g id="patch_15">
+     <path d="M 539.142043 110.832125 
+L 617.47173 110.832125 
+Q 619.47173 110.832125 619.47173 108.832125 
+L 619.47173 64.954 
+Q 619.47173 62.954 617.47173 62.954 
+L 539.142043 62.954 
+Q 537.142043 62.954 537.142043 64.954 
+L 537.142043 108.832125 
+Q 537.142043 110.832125 539.142043 110.832125 
+z
+" style="fill: #ffffff; opacity: 0.98; stroke: #d0d0d0; stroke-width: 0.8; stroke-linejoin: miter"/>
+    </g>
+    <g id="text_17">
+     <text style="font-weight: 700; font-size: 10px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #2f2f2f" x="541.142043" y="74.513375" transform="rotate(-0 541.142043 74.513375)">Evaluation Arm</text>
+    </g>
+    <g id="patch_16">
+     <path d="M 542.356886 89.47275 
+L 562.356886 89.47275 
+L 562.356886 82.47275 
+L 542.356886 82.47275 
+z
+" style="fill: #7a7a7a; stroke: #000000; stroke-width: 1.3; stroke-linejoin: miter"/>
+    </g>
+    <g id="text_18">
+     <text style="font-size: 10px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #2f2f2f" x="570.356886" y="89.47275" transform="rotate(-0 570.356886 89.47275)">Zero-shot</text>
+    </g>
+    <g id="patch_17">
+     <path d="M 542.356886 104.432125 
+L 562.356886 104.432125 
+L 562.356886 97.432125 
+L 542.356886 97.432125 
+z
+" style="fill: #e1522f; stroke: #000000; stroke-width: 1.3; stroke-linejoin: miter"/>
+    </g>
+    <g id="text_19">
+     <text style="font-size: 10px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #2f2f2f" x="570.356886" y="104.432125" transform="rotate(-0 570.356886 104.432125)">LISBOA</text>
+    </g>
+   </g>
+  </g>
+  <g id="axes_2">
+   <g id="patch_18">
+    <path d="M 686.49175 419.148711 
+L 1150.751841 419.148711 
+L 1150.751841 57.954 
+L 686.49175 57.954 
+z
+" style="fill: #ffffff"/>
+   </g>
+   <g id="matplotlib.axis_3">
+    <g id="xtick_6">
+     <g id="line2d_19">
+      <path d="M 737.092923 419.148711 
+L 737.092923 57.954 
+" clip-path="url(#p7c52fe8fc9)" style="fill: none; stroke: #cccccc; stroke-linecap: round"/>
+     </g>
+     <g id="text_20">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2f2f2f" x="737.092923" y="436.586055" transform="rotate(-0 737.092923 436.586055)">W01</text>
+     </g>
+    </g>
+    <g id="xtick_7">
+     <g id="line2d_20">
+      <path d="M 827.857359 419.148711 
+L 827.857359 57.954 
+" clip-path="url(#p7c52fe8fc9)" style="fill: none; stroke: #cccccc; stroke-linecap: round"/>
+     </g>
+     <g id="text_21">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2f2f2f" x="827.857359" y="436.586055" transform="rotate(-0 827.857359 436.586055)">T01</text>
+     </g>
+    </g>
+    <g id="xtick_8">
+     <g id="line2d_21">
+      <path d="M 918.621795 419.148711 
+L 918.621795 57.954 
+" clip-path="url(#p7c52fe8fc9)" style="fill: none; stroke: #cccccc; stroke-linecap: round"/>
+     </g>
+     <g id="text_22">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2f2f2f" x="918.621795" y="436.586055" transform="rotate(-0 918.621795 436.586055)">G01</text>
+     </g>
+    </g>
+    <g id="xtick_9">
+     <g id="line2d_22">
+      <path d="M 1009.386232 419.148711 
+L 1009.386232 57.954 
+" clip-path="url(#p7c52fe8fc9)" style="fill: none; stroke: #cccccc; stroke-linecap: round"/>
+     </g>
+     <g id="text_23">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2f2f2f" x="1009.386232" y="436.586055" transform="rotate(-0 1009.386232 436.586055)">M01</text>
+     </g>
+    </g>
+    <g id="xtick_10">
+     <g id="line2d_23">
+      <path d="M 1100.150668 419.148711 
+L 1100.150668 57.954 
+" clip-path="url(#p7c52fe8fc9)" style="fill: none; stroke: #cccccc; stroke-linecap: round"/>
+     </g>
+     <g id="text_24">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2f2f2f" x="1100.150668" y="436.586055" transform="rotate(-0 1100.150668 436.586055)">R01</text>
+     </g>
+    </g>
+    <g id="text_25">
+     <text style="font-weight: 700; font-size: 12px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; fill: #2f2f2f" transform="translate(918.621795 452.177305)"/>
+     <text style="font-weight: 700; font-size: 12px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; fill: #2f2f2f" transform="translate(892.389608 465.942805)">Query ID</text>
+    </g>
+   </g>
+   <g id="matplotlib.axis_4">
+    <g id="ytick_9">
+     <g id="line2d_24">
+      <path d="M 686.49175 377.472398 
+L 1150.751841 377.472398 
+" clip-path="url(#p7c52fe8fc9)" style="fill: none; stroke-dasharray: 3.7,1.6; stroke-dashoffset: 0; stroke: #d3d3d3; stroke-opacity: 0.7"/>
+     </g>
+     <g id="text_26">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #2f2f2f" x="676.99175" y="381.44107" transform="rotate(-0 676.99175 381.44107)">0.0</text>
+     </g>
+    </g>
+    <g id="ytick_10">
+     <g id="line2d_25">
+      <path d="M 686.49175 314.32647 
+L 1150.751841 314.32647 
+" clip-path="url(#p7c52fe8fc9)" style="fill: none; stroke-dasharray: 3.7,1.6; stroke-dashoffset: 0; stroke: #d3d3d3; stroke-opacity: 0.7"/>
+     </g>
+     <g id="text_27">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #2f2f2f" x="676.99175" y="318.295142" transform="rotate(-0 676.99175 318.295142)">0.5</text>
+     </g>
+    </g>
+    <g id="ytick_11">
+     <g id="line2d_26">
+      <path d="M 686.49175 251.180541 
+L 1150.751841 251.180541 
+" clip-path="url(#p7c52fe8fc9)" style="fill: none; stroke-dasharray: 3.7,1.6; stroke-dashoffset: 0; stroke: #d3d3d3; stroke-opacity: 0.7"/>
+     </g>
+     <g id="text_28">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #2f2f2f" x="676.99175" y="255.149213" transform="rotate(-0 676.99175 255.149213)">1.0</text>
+     </g>
+    </g>
+    <g id="ytick_12">
+     <g id="line2d_27">
+      <path d="M 686.49175 188.034613 
+L 1150.751841 188.034613 
+" clip-path="url(#p7c52fe8fc9)" style="fill: none; stroke-dasharray: 3.7,1.6; stroke-dashoffset: 0; stroke: #d3d3d3; stroke-opacity: 0.7"/>
+     </g>
+     <g id="text_29">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #2f2f2f" x="676.99175" y="192.003285" transform="rotate(-0 676.99175 192.003285)">1.5</text>
+     </g>
+    </g>
+    <g id="ytick_13">
+     <g id="line2d_28">
+      <path d="M 686.49175 124.888684 
+L 1150.751841 124.888684 
+" clip-path="url(#p7c52fe8fc9)" style="fill: none; stroke-dasharray: 3.7,1.6; stroke-dashoffset: 0; stroke: #d3d3d3; stroke-opacity: 0.7"/>
+     </g>
+     <g id="text_30">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #2f2f2f" x="676.99175" y="128.857356" transform="rotate(-0 676.99175 128.857356)">2.0</text>
+     </g>
+    </g>
+    <g id="ytick_14">
+     <g id="line2d_29">
+      <path d="M 686.49175 61.742756 
+L 1150.751841 61.742756 
+" clip-path="url(#p7c52fe8fc9)" style="fill: none; stroke-dasharray: 3.7,1.6; stroke-dashoffset: 0; stroke: #d3d3d3; stroke-opacity: 0.7"/>
+     </g>
+     <g id="text_31">
+      <text style="font-size: 10.5px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #2f2f2f" x="676.99175" y="65.711428" transform="rotate(-0 676.99175 65.711428)">2.5</text>
+     </g>
+    </g>
+    <g id="text_32">
+     <text style="font-weight: 700; font-size: 12px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; fill: #2f2f2f" transform="translate(641.43625 271.993856) rotate(-90)">Score Delta</text>
+     <text style="font-weight: 700; font-size: 12px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; fill: #2f2f2f" transform="translate(655.20175 238.551356) rotate(-90)"/>
+    </g>
+   </g>
+   <g id="patch_19">
+    <path d="M 707.594481 377.472398 
+L 766.591365 377.472398 
+L 766.591365 74.371941 
+L 707.594481 74.371941 
+z
+" clip-path="url(#p7c52fe8fc9)" style="fill: #ff4011; stroke: #000000; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_20">
+    <path d="M 798.358918 377.472398 
+L 857.355801 377.472398 
+L 857.355801 251.180541 
+L 798.358918 251.180541 
+z
+" clip-path="url(#p7c52fe8fc9)" style="fill: #ff4011; stroke: #000000; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_21">
+    <path d="M 889.123354 377.472398 
+L 948.120237 377.472398 
+L 948.120237 352.214027 
+L 889.123354 352.214027 
+z
+" clip-path="url(#p7c52fe8fc9)" style="fill: #ff4011; stroke: #000000; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_22">
+    <path d="M 979.88779 377.472398 
+L 1038.884673 377.472398 
+L 1038.884673 377.472398 
+L 979.88779 377.472398 
+z
+" clip-path="url(#p7c52fe8fc9)" style="fill: #f6da00; stroke: #000000; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_23">
+    <path d="M 1070.652226 377.472398 
+L 1129.64911 377.472398 
+L 1129.64911 402.73077 
+L 1070.652226 402.73077 
+z
+" clip-path="url(#p7c52fe8fc9)" style="fill: #7a7a7a; stroke: #000000; stroke-linejoin: miter"/>
+   </g>
+   <g id="line2d_30">
+    <path d="M 686.49175 377.472398 
+L 1150.751841 377.472398 
+" clip-path="url(#p7c52fe8fc9)" style="fill: none; stroke-dasharray: 4.44,1.92; stroke-dashoffset: 0; stroke: #000000; stroke-width: 1.2"/>
+   </g>
+   <g id="text_33">
+    <text style="font-weight: 700; font-size: 16px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; fill: #2f2f2f" transform="translate(725.176795 19.6)">Per-query Improvement of LISBOA over Zero-shot</text>
+    <text style="font-weight: 700; font-size: 16px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; fill: #2f2f2f" transform="translate(829.815545 37.954)">Composite Score Delta</text>
+   </g>
+   <g id="legend_2">
+    <g id="patch_24">
+     <path d="M 1167.037043 125.7915 
+L 1275.237043 125.7915 
+Q 1277.237043 125.7915 1277.237043 123.7915 
+L 1277.237043 64.954 
+Q 1277.237043 62.954 1275.237043 62.954 
+L 1167.037043 62.954 
+Q 1165.037043 62.954 1165.037043 64.954 
+L 1165.037043 123.7915 
+Q 1165.037043 125.7915 1167.037043 125.7915 
+z
+" style="fill: #ffffff; opacity: 0.98; stroke: #d0d0d0; stroke-width: 0.8; stroke-linejoin: miter"/>
+    </g>
+    <g id="text_34">
+     <text style="font-weight: 700; font-size: 10px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #2f2f2f" x="1185.498761" y="74.513375" transform="rotate(-0 1185.498761 74.513375)">Delta meaning</text>
+    </g>
+    <g id="patch_25">
+     <path d="M 1169.037043 89.47275 
+L 1189.037043 89.47275 
+L 1189.037043 82.47275 
+L 1169.037043 82.47275 
+z
+" style="fill: #ff4011; stroke: #000000; stroke-linejoin: miter"/>
+    </g>
+    <g id="text_35">
+     <text style="font-size: 10px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #2f2f2f" x="1197.037043" y="89.47275" transform="rotate(-0 1197.037043 89.47275)">LISBOA higher</text>
+    </g>
+    <g id="patch_26">
+     <path d="M 1169.037043 104.432125 
+L 1189.037043 104.432125 
+L 1189.037043 97.432125 
+L 1169.037043 97.432125 
+z
+" style="fill: #f6da00; stroke: #000000; stroke-linejoin: miter"/>
+    </g>
+    <g id="text_36">
+     <text style="font-size: 10px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #2f2f2f" x="1197.037043" y="104.432125" transform="rotate(-0 1197.037043 104.432125)">No change</text>
+    </g>
+    <g id="patch_27">
+     <path d="M 1169.037043 119.3915 
+L 1189.037043 119.3915 
+L 1189.037043 112.3915 
+L 1169.037043 112.3915 
+z
+" style="fill: #7a7a7a; stroke: #000000; stroke-linejoin: miter"/>
+    </g>
+    <g id="text_37">
+     <text style="font-size: 10px; font-family: 'Avenir Next LT Pro', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #2f2f2f" x="1197.037043" y="119.3915" transform="rotate(-0 1197.037043 119.3915)">Zero-shot higher</text>
+    </g>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p2e63ae063d">
+   <rect x="58.59675" y="57.954" width="464.260091" height="361.194711"/>
+  </clipPath>
+  <clipPath id="p7c52fe8fc9">
+   <rect x="686.49175" y="57.954" width="464.260091" height="361.194711"/>
+  </clipPath>
+ </defs>
+</svg>

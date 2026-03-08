@@ -1,0 +1,7 @@
+response_model_label,domain_label,avg_composite_score,avg_tool_f1,avg_latency_s,heuristics_pass_rate,sla_compliance
+GPT-5 Mini,Weather,5.0,0.8335,4.3100000000000005,1.0,1.0
+GPT-5 Mini,Transport,4.8,0.3335,6.085,1.0,1.0
+GPT-5 Mini,Researcher,4.0,1.0,18.86,1.0,1.0
+GPT-5 Nano,Weather,3.6,0.5,2.2249999999999996,1.0,1.0
+GPT-5 Nano,Transport,3.1999999999999997,0.3335,3.1350000000000002,1.0,1.0
+GPT-5 Nano,Researcher,3.4,0.0,4.58,1.0,1.0
