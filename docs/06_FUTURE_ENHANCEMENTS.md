@@ -1,64 +1,89 @@
-# Roadmap
+# 🔭 Future Enhancements
 
-This document captures planned enhancements.
+This document captures likely next steps for LISBOA without presenting them as already implemented.
 
-## Multimodal capabilities (maps and images)
+> [!NOTE]
+> Everything below is prospective. If a capability is not documented elsewhere as implemented, treat it as a roadmap item only.
 
-Goal: include map-friendly artifacts and optional images in itinerary outputs.
+## 🧭 Roadmap Themes
 
-### Image integration
+| Theme | Why it matters |
+|------|----------------|
+| richer UX artefacts | improve readability and planning usefulness for end users |
+| stronger agent coordination | make follow-up interactions and constraints more reliable |
+| better retrieval quality | improve grounding, filtering, and fallback behavior |
+| broader transport intelligence | support more providers and better disruption handling |
+| stronger evaluation depth | make thesis claims more robust and reproducible |
+| tighter operational hygiene | reduce documentation drift and recurring maintenance overhead |
 
-Potential approach:
+## 🎨 Product and UX
 
-- Extend VisitLisboa search tool outputs to include image URLs when available.
-- Ensure the planner agent propagates those links into the final itinerary.
-- Render as Markdown images or links depending on the UI.
+Potential next steps:
 
-Implementation notes:
+- optional place images in itinerary responses
+- lightweight static route maps for complex multimodal plans
+- richer place cards for attractions, services, and events
+- clearer mobile-first presentation patterns in the Streamlit UI
 
-- VisitLisboa scraping already collects `image_urls` for events and places.
-- The semantic search layer can expose image URLs via metadata.
-- Preferred output format for the UI is Markdown images: `![Title](url)`.
+### Single Supported UI Evolution
 
-Concrete steps:
+The public documentation already treats `app.py` as the supported Streamlit entrypoint. Future UI work should continue consolidating improvements into that single documented entrypoint instead of expanding the number of public-facing application variants.
 
-- Tool output: extend `tools/visitlisboa_api.py` tool responses to include a representative image URL when available (as a Markdown image or a link).
-- Planning: ensure the planner agent propagates image links into the final itinerary in a controlled way (images should remain optional and limited in count).
-- UI: Streamlit Markdown rendering already supports images, so this should not require UI changes beyond layout tuning.
+## 🤖 Agent and Orchestration Improvements
 
-### Map generation
+Potential next steps:
 
-Potential approach:
+- stronger memory handling for follow-up planning sessions
+- richer planner constraints such as budget envelopes or tighter accessibility preferences
+- more explicit source-citation policies in final answers
+- broader deterministic QA coverage across non-transport domains
+- clearer retry policies when QA detects partial worker outputs
 
-- Add a map rendering tool that can output a static PNG for a route.
-- Integrate it optionally when routes are complex.
+## 📚 Retrieval and Knowledge Improvements
 
-Library candidates:
+Potential next steps:
 
-- `staticmap` (generate a PNG image from OSM tiles)
-- `folium` (interactive HTML maps, best when the UI can render HTML)
+- richer metadata filters for event date, region, and venue
+- improved hybrid retrieval strategies where dense retrieval is complemented by lexical signals
+- clearer fallback behavior when semantic retrieval returns sparse results
+- more structured image and schedule metadata in the vector store
+- better differentiation between tourism content and resident-oriented service discovery
 
-MVP idea:
+## 🚇 Transport Improvements
 
-- Add a new tool (for example `tools/map_renderer.py`) that accepts coordinates and optional waypoints.
-- Save route images under a local folder and return a file path or URL that the UI can render.
+Potential next steps:
 
-Design notes:
+- additional operator coverage within the AML ecosystem
+- better disruption-aware itinerary replanning
+- route-map artefacts generated from multimodal outputs
+- stronger ETA reasoning for live vehicle tracking outputs
+- clearer confidence or freshness cues in transport-heavy answers
 
-- Prefer static PNG output for robustness in chat style UIs.
-- For an MVP, a straight line between origin and destination is acceptable, but a later iteration should use route polylines from a routing backend.
+## 🧪 Evaluation Improvements
 
-Integration point:
+Potential next steps:
 
-- The multimodal routing tool (`get_route_between_stations`) can optionally trigger map generation for complex routes and append the resulting image path or URL.
+- larger benchmark sets beyond the current 72-query dataset
+- broader human calibration and inter-rater agreement analysis
+- longitudinal evaluation across seasons or service disruptions
+- stronger domain-specific validators outside transport
+- more systematic export and visualization workflows for result comparison
 
-Example (target UX):
+## ⚙️ Operations and Maintainability
 
-- A route answer can include both steps and a rendered artifact, for example:
-	- Steps: "Take metro to Rossio, then walk 10 minutes..."
-	- Map: `![Route map](path-or-url)`
-	- Place card: `![Place image](image-url)`
+Potential next steps:
 
-Notes:
+- more compact documentation around recurring operations
+- changelog-style tracking for tool inventory changes
+- stronger CI verification for documentation drift
+- automated checks for stale counts and workflow times in Markdown files
+- clearer runbooks for regenerating evaluation artefacts and local transport support files
 
-- Keep the map layer optional so the core itinerary planner remains fast and robust.
+## ✅ Guardrails for Future Work
+
+As the project evolves, a few principles should stay fixed:
+
+- keep grounded data access explicit and visible in the architecture
+- avoid documenting aspirational features as if they already exist
+- update tests and documentation when tool inventory or workflows change
+- prefer one clearly supported operating path over multiple loosely documented variants

@@ -1,3 +1,12 @@
+"""Repository syntax smoke check.
+
+Compiles a curated list of Python files to catch syntax regressions quickly,
+including core runtime modules, prompts, tools, and evaluation scripts.
+
+This script is intentionally lightweight and complements, rather than replaces,
+the fuller pytest suites.
+"""
+
 import os
 import py_compile
 import sys
@@ -38,8 +47,6 @@ files = [
     "eval/llm_judge.py",
     "eval/run_benchmark.py",
     "eval/run_ablation.py",
-    "eval/eval_framework.py",
-    "eval/tests/test_eval_metrics.py",
     "eval/tests/test_llm_judge.py",
     "eval/tests/test_dataset_integrity.py",
 ]

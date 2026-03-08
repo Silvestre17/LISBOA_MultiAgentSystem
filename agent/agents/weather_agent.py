@@ -6,23 +6,18 @@
 #   Uses BaseAgent.execute_react_loop() for tool execution.
 # ==========================================================================
 
-import os
-import sys
-
-from langchain_core.messages import SystemMessage, HumanMessage
-from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolNode
 from typing import TYPE_CHECKING
+
+from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.graph import END, StateGraph
 
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
-# Add parent directory to path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-
 from agent.agents.base import BaseAgent, traceable
 from agent.prompts.weather import get_weather_prompt
 from agent.state import AgentState
+from agent.utils.langgraph_compat import ToolNode
 
 
 class WeatherAgent(BaseAgent):
@@ -33,6 +28,12 @@ class WeatherAgent(BaseAgent):
         - get_weather_warnings
         - get_weather_forecast
         - get_current_weather_summary
+        - get_portugal_weather_overview
+
+    Notes:
+        This worker is used for weather-specific retrieval. The optional
+        `context` argument is injected by the orchestrator in multi-agent
+        scenarios to preserve language and follow-up hints.
     """
 
     def __init__(self):
@@ -90,7 +91,7 @@ class WeatherAgent(BaseAgent):
             if not messages or not isinstance(messages[0], SystemMessage):
                 messages = [SystemMessage(content=self.system_prompt)] + messages
 
-            response = self.llm_with_tools.invoke(messages)
+            response = self._safe_llm_invoke(self.llm_with_tools, messages)
             return {"messages": [response]}
 
         def should_continue(state: AgentState) -> str:

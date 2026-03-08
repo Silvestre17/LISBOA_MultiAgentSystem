@@ -86,9 +86,12 @@ except ValueError:
     # This is expected when running under Streamlit or other threaded contexts
     pass
 
-# Add parent directory to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from config import Config
+try:
+    from config import Config
+except ModuleNotFoundError:
+    import sys
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    from config import Config
 
 # Suppress warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)

@@ -1,8 +1,8 @@
 # ==========================================================================
-# Master Thesis - Weather Agent Prompt (ENHANCED)
+# Master Thesis - Weather Agent Prompt
 #   - André Filipe Gomes Silvestre, 20240502
 #
-#   Enhanced prompt with strict formatting rules and examples.
+#   Prompt with strict formatting rules and examples.
 #   Designed to force consistent markdown output across all LLM providers.
 # ==========================================================================
 

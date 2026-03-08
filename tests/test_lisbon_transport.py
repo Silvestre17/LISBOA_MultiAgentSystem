@@ -19,12 +19,14 @@
 # Required libraries:
 # pip install requests langchain-core
 
+import logging
 import os
 import sys
 import time
-import logging
 from datetime import datetime
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Any, Dict, Generator, List, Optional, Tuple
+
+import pytest
 
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -43,6 +45,8 @@ logger = logging.getLogger(__name__)
 
 class TestResults:
     """Tracks test results with pass/fail counts."""
+
+    __test__ = False
     
     def __init__(self):
         self.passed = 0
@@ -98,6 +102,17 @@ class TestResults:
         return result
 
 
+@pytest.fixture
+def results() -> Generator[TestResults, None, None]:
+    """Provide a per-test result tracker that fails the pytest test when needed."""
+    tracker = TestResults()
+    yield tracker
+    if tracker.failed:
+        pytest.fail(
+            "Transport validation checks failed:\n- " + "\n- ".join(tracker.errors)
+        )
+
+
 # ==========================================================================
 # Test Functions
 # ==========================================================================
@@ -110,14 +125,14 @@ def test_metro_api(results: TestResults) -> None:
     
     try:
         from tools.metrolisboa_api import (
-            get_metro_status,
-            get_all_metro_stations,
-            get_metro_wait_time,
-            find_nearest_metro,
             METRO_LINES,
-            METRO_STATIONS
+            METRO_STATIONS,
+            find_nearest_metro,
+            get_all_metro_stations,
+            get_metro_status,
+            get_metro_wait_time,
         )
-        
+
         # Test 1: Line definitions
         if len(METRO_LINES) == 4:
             results.add_pass("Metro has 4 lines defined (amarela, azul, verde, vermelha)")
@@ -172,14 +187,14 @@ def test_carris_api(results: TestResults) -> None:
     
     try:
         from tools.carris_api import (
-            carris_get_stops,
-            carris_get_routes,
-            carris_get_next_departures,
+            CarrisGTFSManager,
             carris_find_routes_between,
+            carris_get_next_departures,
             carris_get_realtime_vehicles,
-            CarrisGTFSManager
+            carris_get_routes,
+            carris_get_stops,
         )
-        
+
         # Test 1: GTFS Manager exists
         manager = CarrisGTFSManager()
         import pathlib
@@ -255,14 +270,14 @@ def test_carris_metropolitana_api(results: TestResults) -> None:
     
     try:
         from tools.carrismetropolitana_api import (
+            find_bus_routes,
+            geocode_location,
+            get_bus_realtime_locations,
             get_carris_metropolitana_alerts,
             get_carris_metropolitana_stop_info,
             search_carris_metropolitana_lines,
-            find_bus_routes,
-            get_bus_realtime_locations,
-            geocode_location
         )
-        
+
         # Test 1: Get alerts (API changed to return list)
         alerts = get_carris_metropolitana_alerts.invoke({})
         if alerts and ("alert" in alerts.lower() or "no active" in alerts.lower()):
@@ -309,16 +324,16 @@ def test_cp_api(results: TestResults) -> None:
     
     try:
         from tools.cp_api import (
-            get_train_status,
-            search_cp_stations,
-            get_train_schedule,
-            get_cp_routes,
-            initialize_cp_gtfs,
-            CP_LINES,
             CP_KEY_STATIONS,
-            CPGTFSManager
+            CP_LINES,
+            CPGTFSManager,
+            get_cp_routes,
+            get_train_schedule,
+            get_train_status,
+            initialize_cp_gtfs,
+            search_cp_stations,
         )
-        
+
         # Test 1: Line definitions
         if len(CP_LINES) >= 5:
             results.add_pass(f"CP has {len(CP_LINES)} lines defined (cascais, sintra, azambuja, norte, fertagus, sado)")
@@ -401,13 +416,13 @@ def test_ipma_api(results: TestResults) -> None:
     print("-" * 70)
     
     try:
+        from config import Config
         from tools.ipma_api import (
+            get_current_weather_summary,
             get_weather_forecast,
             get_weather_warnings,
-            get_current_weather_summary,
         )
-        from config import Config
-        
+
         # Test 1: Lisbon ID configured
         if Config.LISBON_GLOBAL_ID == 1110600:
             results.add_pass("Lisbon Global ID configured correctly (1110600)")
@@ -449,17 +464,18 @@ def test_transport_integration(results: TestResults) -> None:
     
     try:
         from tools.transport_api import (
+            get_route_between_stations,
             get_transport_summary,
-            get_route_between_stations
         )
-        
+
         # Test 1: Get transport summary (all modes)
         summary = get_transport_summary.invoke({})
         if summary:
+            summary_lower = summary.lower()
             checks = [
-                ("METRO" in summary, "Metro included"),
-                ("CARRIS" in summary, "Carris included"),
-                ("CP" in summary or "TRAINS" in summary, "CP Trains included"),
+                ("metro de lisboa" in summary_lower, "Metro included"),
+                ("carris (urbano)" in summary_lower or "carris" in summary_lower, "Carris included"),
+                ("cp comboios" in summary_lower or "cp trains" in summary_lower or "trains" in summary_lower, "CP Trains included"),
             ]
             
             for check, name in checks:
@@ -526,9 +542,9 @@ def test_data_consistency(results: TestResults) -> None:
     print("-" * 70)
     
     try:
-        from tools.metrolisboa_api import METRO_STATIONS, METRO_LINES, LISBON_LANDMARKS
-        from tools.cp_api import CP_LINES, CP_KEY_STATIONS
-        
+        from tools.cp_api import CP_KEY_STATIONS, CP_LINES
+        from tools.metrolisboa_api import LISBON_LANDMARKS, METRO_LINES, METRO_STATIONS
+
         # Test 1: Metro stations have valid line references
         # METRO_STATIONS format: {"station_name": ["line1", "line2"], ...}
         valid_lines = set(METRO_LINES.keys())

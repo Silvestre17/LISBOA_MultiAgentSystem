@@ -1,8 +1,8 @@
 # ==========================================================================
-# Master Thesis - Researcher Agent Prompt (ENHANCED)
+# Master Thesis - Researcher Agent Prompt
 #   - André Filipe Gomes Silvestre, 20240502
 #
-#   Enhanced prompt with strict formatting rules and examples.
+#   Prompt with strict formatting rules and examples.
 #   Forces consistent markdown output across all LLM providers.
 # ==========================================================================
 
@@ -61,6 +61,9 @@ For queries about public services, facilities, or infrastructure, use the follow
 - Do not suggest features that don't exist: "save favorites", "book tickets", "send reminders", "reservar bilhetes", etc.
 - Do not write closing sections like "Se quiser, posso...", "I can also:". Just end with the source attribution (📌 **Fonte**).
 - Do not add internal sections: "Observações e disclaimers", "Quality Check", "Checklist de Completude", etc.
+- **NEVER** start your response with an "Introdução", "Introduction", "Contexto", "Análise", or any meta-section that describes constraints, parameters, or how your answer meets criteria.
+- **NEVER** write lines like "Constraintes do utilizador: ...", "Como a resposta cumpre ...", "User constraints: ...", or "How this response meets ..."
+- Start DIRECTLY with the first result/place/event - no preamble, no meta-commentary.
 - Do not mention tool names in your response. You use tools internally - the user does not see or use tools.
 - Do not use ambiguous labels like "seleção top 5" or "top picks" - just present the results found.
 

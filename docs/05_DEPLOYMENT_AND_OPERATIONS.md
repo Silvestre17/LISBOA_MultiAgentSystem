@@ -1,205 +1,225 @@
-# Operations
+# ⚙️ Deployment and Operations
 
-This document describes environment configuration and automation.
+This guide covers local setup, environment configuration, runtime workflows, CI automation, validation, evaluation artefacts, and troubleshooting.
 
-## Run locally
+> [!IMPORTANT]
+> The supported Streamlit launch command is `streamlit run app.py`.
 
-Install dependencies:
+## ✅ Setup Checklist
+
+| Requirement | Needed for | Notes |
+|-------------|------------|-------|
+| Python 3.10+ | all local workflows | required by the repository and GitHub Actions |
+| Git | cloning and updating the repository | standard prerequisite |
+| One configured LLM provider | runtime assistant and evaluation | Azure OpenAI, OpenAI, or LM Studio |
+| Metro credentials | full official Metro realtime experience | optional for basic fallback status checks |
+| Tavily API key | web fallback and strict live coverage | optional for casual local use, required for strict live tests |
+
+## 🔐 Environment Configuration
+
+Start from the template:
 
 ```bash
-pip install -r requirements.txt
+copy .env.example .env
 ```
 
-Run the Streamlit UI:
+Then fill in only the providers and services you plan to use.
 
-```bash
-streamlit run app.py
-```
+### Provider Selection Guide
 
-Rebuild or test the vector store (optional):
+| Provider | What you need | Best fit | Notes |
+|----------|---------------|----------|-------|
+| Azure OpenAI | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT_NAME` | default documented path | `config.py` currently defaults to Azure |
+| OpenAI | `OPENAI_API_KEY`, optionally `OPENAI_MODEL_NAME` | simpler cloud setup | direct OpenAI API path |
+| LM Studio | local server URL and model name | offline or low-cost local experimentation | no API key required |
 
-```bash
-python tools/vector_store.py --test
-```
+### Runtime Environment Variables
 
-## Environment variables
+#### LLM Providers
 
-Environment variables are loaded from a local `.env` file.
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL_NAME`
+- `AZURE_OPENAI_API_KEY`
+- `AZURE_OPENAI_ENDPOINT`
+- `AZURE_OPENAI_DEPLOYMENT_NAME`
 
-LLM providers:
-
-- `OPENAI_API_KEY` (OpenAI)
-- `OPENAI_MODEL_NAME` (optional)
-- `AZURE_OPENAI_API_KEY` (Azure OpenAI)
-- `AZURE_OPENAI_ENDPOINT` (Azure OpenAI)
-- `AZURE_OPENAI_DEPLOYMENT_NAME` (optional, defaults to `gpt-5-nano`)
-
-Notes:
-
-- Multi-agent LLMs are configured in `config.py` under `AGENT_MODELS_*`.
-- The Streamlit sidebar provider selection updates the active provider at runtime (used by the multi-agent system).
-- LM Studio uses `Config.LMSTUDIO_BASE_URL` and `Config.LMSTUDIO_MODEL_NAME` from `config.py`.
-
-Metro official API:
+#### Metro Official API
 
 - `METRO_CONSUMER_KEY`
 - `METRO_CONSUMER_SECRET`
 
-Web knowledge:
+Optional Metro TLS overrides from `.env.example`:
 
-- `TAVILY_API_KEY` (optional)
+- `METRO_CA_BUNDLE`
+- `METRO_SSL_VERIFY`
 
-LangSmith tracing (optional):
+#### Optional Services and Observability
 
-- `LANGCHAIN_TRACING_V2` (set to `true` to enable)
+- `TAVILY_API_KEY`
+- `LANGCHAIN_TRACING_V2`
 - `LANGCHAIN_API_KEY`
-- `LANGCHAIN_PROJECT` (optional)
+- `LANGCHAIN_PROJECT`
+- `LANGCHAIN_ENDPOINT`
 
-## GitHub Actions
+### Provider Behavior Notes
 
-### 1. Update Lisbon Data
+- The default runtime mode is multi-agent.
+- Per-agent model mappings are configured in `config.py` through `AGENT_MODELS_AZURE`, `AGENT_MODELS_OPENAI`, and `AGENT_MODELS_LMSTUDIO`.
+- The Streamlit sidebar in `app.py` can override the active provider and per-agent model selection at runtime.
 
-Workflow: `.github/workflows/data_pipeline.yml`
+## 🚀 First Run
 
-- Schedule: daily at 04:00 UTC
-- Runs events scraper every day
-- Runs places scraper on Mondays, or on manual trigger
-- Commits `data_collection/webscraping/*.json` if changed
-
-High level automation flow:
-
-```mermaid
-graph TD
-	Schedule[Scheduled or manual run] --> Scrape[Update Lisbon Data\n.github/workflows/data_pipeline.yml]
-	Scrape -->|commits events/places JSON| Repo[Repository]
-	Repo -->|workflow_run trigger| Sync[Sync Vector Database\n.github/workflows/sync_vector_db.yml]
-	Sync -->|commits data/vector_db| Repo
+```bash
+pip install -r requirements.txt
+python tools/vector_store.py
+streamlit run app.py
 ```
 
-### 2. Sync Vector Database
+When `app.py` starts, it also:
 
-Workflow: `.github/workflows/sync_vector_db.yml`
+- pre-warms the vector store
+- initializes or refreshes the Carris support database when needed
+- loads environment values from `.env`
 
-- Trigger: `workflow_run` after Update Lisbon Data completes successfully
-- Uses CPU-only PyTorch
-- Caches pip and HuggingFace model downloads
-- Runs `python tools/vector_store.py --no-gpu --max-docs N` in a loop
+## 🧰 Vector-Store Operations
 
-Exit code protocol:
+Useful commands:
 
-- `0`: complete
-- `2`: more work pending
-- `143`: SIGTERM (runner terminated process). The workflow treats this as a graceful stop and still commits partial progress.
+```bash
+python tools/vector_store.py --stats
+python tools/vector_store.py --test
+python tools/vector_store.py --rebuild-events
+python tools/vector_store.py --rebuild-places
+python tools/vector_store.py --rebuild-pdf
+python tools/vector_store.py --rebuild-all
+python tools/vector_store.py --no-gpu --max-docs 200
+```
 
-Batch sizing rationale:
+## ✅ Validation Ladder
 
-- `--max-docs` limits the number of documents processed per iteration to stay within CI time limits.
-- If sync repeatedly times out, reduce `max_docs` (for example 100 to 150).
+### 1. Syntax and fast deterministic checks
 
-Monitoring tips:
+Use this layer before slower runs:
 
-- In GitHub Actions logs, look for per-iteration counts (added, updated, deleted) and whether the process exits with code `0` (done) or `2` (pending).
-- If the workflow reaches its maximum iterations, rerun the workflow to continue processing remaining pending documents.
+```bash
+python tests/syntax_check.py
+python -m pytest eval/tests/test_benchmark_utils.py eval/tests/test_cost_accounting.py eval/tests/test_llm_judge.py eval/tests/test_validators.py -v
+```
 
-Expected runtime notes:
+### 2. Runtime-facing regression subset
 
-- Runtime depends on whether embeddings are computed and on runner performance.
-- Places updates are typically the slowest because the collection is larger.
+This subset exercises QA, prompt, and transport-facing paths:
 
-## Performance and latency
+```bash
+python -m pytest tests/test_qa_agent.py tests/test_qa_integration.py tests/test_prompts.py tests/test_lisbon_transport.py -s -W "error::langgraph.warnings.LangGraphDeprecatedSinceV10"
+```
 
-Implemented optimization areas (see `agent/utils/optimization.py`):
+### 3. Strict live coverage
 
-- Parallel agent execution
-- Parallel tool execution within an agent step
-- HTTP session pooling
-- TTL caching (weather, transport, and static)
-- Per-provider timeouts and retry limits
+This suite is intentionally loud about missing prerequisites:
 
-Defaults:
+```bash
+python -m pytest tests/test_tool_prompt_coverage.py -m "live and coverage" -v
+```
 
-- HTTP timeouts use separate connect and read timeouts (connect is kept low to fail fast).
-- TTL caches are tuned for common usage: weather is 5 minutes, transport is 60 seconds, static is 1 hour.
+Strict live coverage currently validates that the following are available:
 
-Concrete defaults (current implementation):
+- active provider credentials for the configured LLM backend
+- `METRO_CONSUMER_KEY`
+- `METRO_CONSUMER_SECRET`
+- `TAVILY_API_KEY`
+- `data/vector_db/`
+- `data_collection/webscraping/events.json`
+- `data_collection/webscraping/places.json`
+- `data/carris/carris.db`
+- `data/cp/cp_gtfs.db`
 
-- HTTP session pool: `pool_connections=10`, `pool_maxsize=20`, `max_retries=2`.
-- Parallel tool execution within agents: `max_workers=4` and a 30 second overall wait timeout.
-- Azure OpenAI (v1 compatible): LLM client timeout is 60 seconds with `max_retries=2`.
+### 4. Benchmark and ablation runs
 
-## Troubleshooting
+```bash
+python eval/run_benchmark.py --mode run_test
+python eval/run_benchmark.py --mode full
+python eval/run_benchmark.py --limit 5
+python eval/run_ablation.py --mode run_test
+python eval/run_ablation.py --mode full
+```
+
+For the evaluation model, refer to `eval/README.md` for judge-specific details and output schema notes.
+
+## 📦 Evaluation Artefacts and Notebook Exports
+
+| Artefact family | Default location | Notes |
+|-----------------|------------------|-------|
+| benchmark JSON outputs | `eval/results/benchmark/` | produced by `eval/run_benchmark.py` |
+| ablation JSON outputs | `eval/results/ablation/` | produced by `eval/run_ablation.py` |
+| strict live coverage JSON outputs | `eval/results/coverage/` | produced by live coverage runs |
+| calibration JSON outputs | `eval/results/calibration/` | produced by `eval/human_calibration/run_calibration.py` |
+
+The analysis notebook `eval/benchmark_ablation_analysis.ipynb` also exports latest CSV summaries through `flatten_benchmark_results()` and `flatten_ablation_results()`:
+
+- `eval/results/benchmark/benchmark_flat_latest.csv`
+- `eval/results/benchmark/benchmark_summary_latest.csv`
+- `eval/results/ablation/ablation_flat_latest.csv`
+- `eval/results/ablation/ablation_summary_latest.csv`
+
+## 🔄 GitHub Actions Automation
+
+| Workflow | Trigger | Purpose | Main outputs |
+|----------|---------|---------|--------------|
+| `data_pipeline.yml` | daily at **04:00 UTC**, plus manual trigger | scrape VisitLisboa events daily and places weekly on Mondays | updated JSON artefacts under `data_collection/webscraping/` |
+| `sync_vector_db.yml` | `workflow_run` after `Update Lisbon Data`, plus manual trigger | incrementally sync ChromaDB collections and commit vector DB updates | updated artefacts under `data/vector_db/` |
+
+### Exit-code protocol used by the Sync Workflow
+
+| Exit code | Meaning |
+|----------:|---------|
+| `0` | sync complete |
+| `2` | more work pending, safe to continue in another iteration |
+| `143` | runner terminated the process, treated as a graceful partial stop |
+
+## 🚦 Performance and Batching Notes
+
+- `sync_vector_db.yml` uses batched vector-store updates to avoid CI timeouts.
+- `--max-docs` limits the number of documents processed per collection in a single sync pass.
+- Lower `max_docs` values reduce per-run pressure when the collection changes are large.
+- The repository caches pip dependencies and Hugging Face model downloads during CI.
+
+## 🩺 Troubleshooting
 
 ### ChromaDB Database Locked
 
-**Symptom:**
-```
+**Typical symptom:**
+
+```text
 sqlite3.OperationalError: database is locked
 ```
 
-**Cause:** Multiple processes accessing `data/vector_db/chroma.sqlite3` simultaneously.
+**Typical response:**
 
-**Solution:**
-1. Stop all Python processes accessing the vector store:
-   ```bash
-   # Windows
-   taskkill /F /IM python.exe /FI "WINDOWTITLE eq *vector_store*"
-   
-   # Linux/macOS
-   pkill -f "python.*vector_store"
-   ```
+1. stop concurrent Python processes using the vector store
+2. remove stale SQLite WAL and SHM lock files if they exist
+3. rerun the vector-store command once the database is free
 
-2. Remove SQLite lock files:
-   ```bash
-   # Windows
-   del data\vector_db\chroma.sqlite3-wal
-   del data\vector_db\chroma.sqlite3-shm
-   
-   # Linux/macOS
-   rm data/vector_db/chroma.sqlite3-wal
-   rm data/vector_db/chroma.sqlite3-shm
-   ```
+### Missing Metro Credentials
 
-3. Restart the sync process:
-   ```bash
-   python tools/vector_store.py
-   ```
+If `METRO_CONSUMER_KEY` and `METRO_CONSUMER_SECRET` are missing, the system can still use the public fallback for some metro functionality, but the full official API experience is not available.
 
-**Prevention:** Only run one vector store operation at a time.
+### Strict Live Coverage Fails Immediately
 
-### GitHub Actions Vector Sync Timeout
+If the live suite fails before any meaningful execution, inspect the environment and the local artefacts listed in `tests/conftest.py`. The suite is designed to fail loudly rather than silently skip missing prerequisites.
 
-**Symptom:** Workflow exceeds 6-hour limit and terminates incomplete.
+### CI Sync Taking Too Long
 
-**Cause:** Large number of documents to process in a single run.
+If vector synchronization repeatedly times out in GitHub Actions:
 
-**Solution:**
-1. Reduce batch size in `.github/workflows/sync_vector_db.yml`:
-   ```yaml
-   # Change from:
-   --max-docs 200
-   
-   # To:
-   --max-docs 100
-   ```
+- reduce `max_docs`
+- rerun the workflow manually if the previous run exited with `2`
+- inspect whether the workflow reached the iteration cap before completion
 
-2. Enable manual workflow dispatch to run multiple smaller batches:
-   - Go to Actions → Sync Vector Database
-   - Click "Run workflow"
-   - Repeat until exit code is `0` (complete)
+### Local Model Connectivity
 
-3. Monitor progress in workflow logs for iteration counts.
+If using LM Studio:
 
-### Metro API Credentials Missing
-
-**Symptom:** Metro tools return limited data or status only.
-
-**Solution:** The system automatically falls back to the public endpoint (`https://app.metrolisboa.pt/status/getLinhas.php`). For full API access:
-1. Register at https://api.metrolisboa.pt/store/
-2. Add credentials to `.env`:
-   ```
-   METRO_CONSUMER_KEY=your_key
-   METRO_CONSUMER_SECRET=your_secret
-   ```
-
-- If vector sync times out, reduce `max_docs`.
-- If Metro credentials are missing, status falls back to the public endpoint.
+- ensure the local server is running
+- confirm the base URL matches `Config.LMSTUDIO_BASE_URL`
+- confirm the loaded model matches the model name expected by the runtime

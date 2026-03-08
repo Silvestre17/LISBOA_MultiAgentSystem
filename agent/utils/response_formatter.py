@@ -3,13 +3,83 @@
 #   - André Filipe Gomes Silvestre, 20240502
 #
 #   Post-processing pipeline to ensure LLM responses render cleanly
-#   in Streamlit's st.markdown(). Normalizes headers, spacing,
-#   bullet styles, and URL formatting for consistent visual quality.
+#   in Streamlit's st.markdown(). Includes link normalization,
+#   metro terminology cleanup, header and bullet normalization,
+#   response-title helpers, and final formatting for consistent visual quality.
 # ==========================================================================
 
 import re
 from typing import Optional
 from urllib.parse import urlparse
+
+
+def normalize_source_links(text: str) -> str:
+    """
+    Normalizes malformed HTML anchor tags and bare Metro de Lisboa source text
+    into standard markdown links that Streamlit renders correctly.
+
+    Args:
+        text: Raw LLM response text.
+
+    Returns:
+        str: Text with standardized Metro de Lisboa source links.
+    """
+    if not text:
+        return text
+
+    # Convert malformed/HTML anchors for Metro de Lisboa to markdown.
+    text = re.sub(
+        r'<a\s+href="?(?:https?://)?metrolisboa\.pt"?[^>]*>\s*Metro de Lisboa\s*</a>',
+        r'[*Metro de Lisboa*](https://www.metrolisboa.pt)',
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r'<a\s+href="?https?://www\.metrolisboa\.pt"?[^>]*>\s*Metro de Lisboa\s*</a>',
+        r'[*Metro de Lisboa*](https://www.metrolisboa.pt)',
+        text,
+        flags=re.IGNORECASE,
+    )
+    return text
+
+
+def normalize_metro_terminology(text: str) -> str:
+    """
+    Fixes incorrect rail terminology when the response is clearly about
+    Metro de Lisboa routes.
+
+    Args:
+        text: Raw LLM response text.
+
+    Returns:
+        str: Text with metro terminology normalized.
+    """
+    if not text:
+        return text
+
+    metro_context = re.search(
+        r'(O seu Trajeto de Metro|Próximos Metros|Metro de Lisboa|Linha Azul|Linha Verde|Linha Amarela|Linha Vermelha)',
+        text,
+        re.IGNORECASE,
+    )
+    cp_context = re.search(r'\bCP\b|Comboios de Portugal|CP Trains', text, re.IGNORECASE)
+
+    if metro_context and not cp_context:
+        replacements = [
+            (r'\bcomboios\b', 'metros'),
+            (r'\bComboios\b', 'Metros'),
+            (r'\bcomboio\b', 'metro'),
+            (r'\bComboio\b', 'Metro'),
+            (r'\btrems\b', 'metros'),
+            (r'\bTrems\b', 'Metros'),
+            (r'\btrem\b', 'metro'),
+            (r'\bTrem\b', 'Metro'),
+            (r'transferência provável', 'transferência'),
+        ]
+        for pattern, replacement in replacements:
+            text = re.sub(pattern, replacement, text)
+
+    return text
 
 
 def normalize_headers(text: str) -> str:
@@ -118,7 +188,6 @@ def normalize_bullets(text: str) -> str:
     lines = text.split("\n")
     out = []
     
-    emoji_pattern = re.compile(r'^[\u2600-\U0010ffff\u2B50\u200D\uFE0F]{1,3}')
     # Match labels (e.g. "Data/Hora:", "Preço: ") optionally prefixed by emoji
     label_pattern = re.compile(r'^([\u2600-\U0010ffff\u2B50\u200D\uFE0F]{1,3}\s*)?([A-Za-zÀ-ÿ/\s]{3,25}):\s*(.*)')
     
@@ -172,14 +241,8 @@ def normalize_bullets(text: str) -> str:
                 
         # Format the output block
         if is_bullet:
-            clean_content = content.replace('**', '').strip()
-            # If the content starts with an emoji, variant selector, or is a numbered item (**1.**)
-            is_numbered = re.match(r'^\*\*\d+\.\*\*', content)
-            
-            if emoji_pattern.match(clean_content) or clean_content.startswith('️') or is_numbered:
-                out.append(f"{spaces}- {content}")
-            else:
-                out.append(f"{spaces}- {content}")
+            # Normalize all bullet variants to standard Markdown "- "
+            out.append(f"{spaces}- {content}")
         else:
             # Non-bullet line: use modified content (with auto-bolded labels/numbers)
             # if content was changed, rebuild the line preserving indentation
@@ -406,6 +469,222 @@ def clean_decorative_separators(text: str) -> str:
     return "\n".join(result)
 
 
+def generate_response_title(
+    agents_called: list,
+    user_query: str,
+    language: str = "en",
+) -> Optional[str]:
+    """
+    Generates a contextual ### (h3) title for the response based on routing.
+
+    Returns None for direct responses (no agents), planner responses,
+    or greetings, so they remain untitled.
+
+    Args:
+        agents_called: List of agent names invoked (e.g., ["weather"]).
+        user_query: The original user query.
+        language: Language code ('en' or 'pt').
+
+    Returns:
+        Optional[str]: A markdown ### title string, or None.
+    """
+    if not agents_called:
+        return None  # Direct response (OOS, greeting) - no title
+
+    if "planner" in agents_called:
+        return None  # Planner generates its own header
+
+    query_lower = user_query.lower()
+
+    # --- Single agent responses ---
+    if len(agents_called) == 1:
+        agent = agents_called[0]
+
+        if agent == "weather":
+            return (
+                "### \U0001f324\ufe0f Previsão Meteorológica"
+                if language == "pt"
+                else "### \U0001f324\ufe0f Weather Forecast"
+            )
+
+        elif agent == "transport":
+            return (
+                "### \U0001f687 Informação de Transportes"
+                if language == "pt"
+                else "### \U0001f687 Transport Information"
+            )
+
+        elif agent == "researcher":
+            # Keyword-based subcategorization
+            event_kw = [
+                "evento", "event", "concerto", "concert", "festival",
+                "espetáculo", "show", "teatro", "theatre", "theater",
+                "ópera", "opera", "dança", "dance", "exposição", "exhibition",
+            ]
+            place_kw = [
+                "museu", "museum", "monumento", "monument", "castelo", "castle",
+                "igreja", "church", "torre", "tower", "praça", "square",
+                "bairro", "neighborhood", "miradouro", "viewpoint", "jardim",
+                "garden", "parque", "park",
+            ]
+            food_kw = [
+                "restaurante", "restaurant", "comida", "food", "comer", "eat",
+                "café", "coffee", "bar", "pastelaria", "bakery",
+                "gastronomia", "gastronomy", "nightlife", "vida noturna",
+            ]
+            service_kw = [
+                "farmácia", "pharmacy", "hospital", "escola", "school",
+                "biblioteca", "library", "polícia", "police", "bombeiros",
+                "fire", "wc", "sanitário", "mercado", "market", "creche",
+                "estacionamento", "parking", "feira", "marketplace",
+            ]
+            history_kw = [
+                "história", "history", "cultura", "culture", "origem", "origin",
+                "fundação", "founded", "tradição", "tradition",
+            ]
+
+            if any(kw in query_lower for kw in event_kw):
+                return (
+                    "### \U0001f3ad Eventos Culturais"
+                    if language == "pt"
+                    else "### \U0001f3ad Cultural Events"
+                )
+            elif any(kw in query_lower for kw in place_kw):
+                return (
+                    "### \U0001f4cd Locais e Atrações"
+                    if language == "pt"
+                    else "### \U0001f4cd Places & Attractions"
+                )
+            elif any(kw in query_lower for kw in food_kw):
+                return (
+                    "### \U0001f37d\ufe0f Gastronomia"
+                    if language == "pt"
+                    else "### \U0001f37d\ufe0f Food & Dining"
+                )
+            elif any(kw in query_lower for kw in service_kw):
+                return (
+                    "### \U0001f3e5 Serviços Essenciais"
+                    if language == "pt"
+                    else "### \U0001f3e5 Essential Services"
+                )
+            elif any(kw in query_lower for kw in history_kw):
+                return (
+                    "### \U0001f4da História e Cultura"
+                    if language == "pt"
+                    else "### \U0001f4da History & Culture"
+                )
+            else:
+                return (
+                    "### \U0001f4cb Informação Local"
+                    if language == "pt"
+                    else "### \U0001f4cb Local Information"
+                )
+
+    # --- Multi-agent (without planner) - combined titles ---
+    if "weather" in agents_called and "transport" in agents_called:
+        return (
+            "### \U0001f324\ufe0f\U0001f687 Meteorologia e Transportes"
+            if language == "pt"
+            else "### \U0001f324\ufe0f\U0001f687 Weather & Transport"
+        )
+    elif "weather" in agents_called:
+        return (
+            "### \U0001f324\ufe0f Previsão Meteorológica"
+            if language == "pt"
+            else "### \U0001f324\ufe0f Weather Forecast"
+        )
+    elif "transport" in agents_called:
+        return (
+            "### \U0001f687 Informação de Transportes"
+            if language == "pt"
+            else "### \U0001f687 Transport Information"
+        )
+    else:
+        return (
+            "### \U0001f4cb Informação Local"
+            if language == "pt"
+            else "### \U0001f4cb Local Information"
+        )
+
+
+def ensure_response_title(text: str, title: Optional[str]) -> str:
+    """
+    Prepends a contextual title to the response if it doesn't already have one.
+
+    Skips prepending if:
+        - title is None or empty
+        - response already starts with a markdown header (###, ##, #)
+        - response already starts with a bold title (**Title**)
+
+    Args:
+        text: Formatted response text.
+        title: The ### title to prepend, or None.
+
+    Returns:
+        str: Response with title prepended (or unchanged).
+    """
+    if not title or not text:
+        return text or ""
+
+    # Check if response already starts with a header or bold title
+    first_line = text.strip().split("\n")[0].strip()
+    if first_line.startswith("### ") or first_line.startswith("## ") or first_line.startswith("# "):
+        return text  # Already has a header
+    if re.match(r"^\*\*[^*]+\*\*\s*$", first_line):
+        return text  # Already has a bold title line
+
+    return f"{title}\n\n{text}"
+
+
+
+def strip_hallucinations(text: str) -> str:
+    if not text:
+        return ""
+
+    lines = text.split("\n")
+    clean_lines = []
+    for line in lines:
+        if re.match(r"^(?:\s*|-\s*|\*\s*|\**|\[|\]|\*|#|>)*\s*(Introdu[cç][aã]o|Introduction)\b", line, re.IGNORECASE):
+            continue
+        if re.match(r"^(?:\s*|-\s*|\*\s*|\**|\[|\]|\*|#|>)*\s*(Contrainte do utilizador|Restri[cç][õo]es do utilizador|How the response meets|Acessibilidade/Tempo/Budget|Accessibility/Time/Budget)\b", line, re.IGNORECASE):
+            continue
+        if re.match(r"^(?:\s*|-\s*|\*\s*|\**|\[|\]|\*|#|>)*\s*(Observa[cç][aã]o|Observa[cç][õo]es|Nota|Notes?):?", line, re.IGNORECASE):
+            continue
+        if re.match(r"^(?:\s*|-\s*|\*\s*|\**|\[|\]|\*|#|>)*\s*(Diga se|Se quiser|Se quiseres|Se preferir|Posso ajudar|Posso detalhar|I can also|I can help|Let me know):?", line, re.IGNORECASE):
+            continue
+        if re.match(r"^(?:\s*|-\s*|\*\s*|\**|\[|\]|\*|#|>)*\s*(⭐\s*Rating:\s*(Sem avaliação de rating|No rating available))\s*$", line, re.IGNORECASE):
+            continue
+        if "Não listado o Opposto" in line or "opposite direction" in line.lower():
+            continue
+        clean_lines.append(line)
+    text = "\n".join(clean_lines)
+
+    # Normalize source emphasis before truncating.
+    text = re.sub(r"Fonte:\s*📌\s*Fonte:\s*", "📌 **Fonte:** ", text, flags=re.IGNORECASE)
+    text = re.sub(r"^Fonte:\s*", "📌 **Fonte:** ", text, flags=re.MULTILINE)
+    text = re.sub(r"📌\s*Fonte:", "📌 **Fonte:**", text)
+    text = re.sub(r"\|\s*Atualizado:", "| **Atualizado:**", text)
+    text = re.sub(r"\|\s*Updated:", "| **Updated:**", text)
+    text = re.sub(r"\*\*\|\s*\*\*(Atualizado|Updated):\*+", r"| **\1:**", text)
+    text = text.replace("**| **Atualizado:****", "| **Atualizado:**")
+    text = text.replace("**| **Updated:****", "| **Updated:**")
+
+    # Hard truncate after the first valid source line.
+    match = re.search(r"^(📌\s*\*\*Fonte:\*\*.*?(?:Atualizado|Updated):\s*\d{2}:\d{2}).*$", text, re.MULTILINE)
+    if match:
+        text = (text[:match.start()] + match.group(1)).rstrip()
+    else:
+        match2 = re.search(r"^(📌\s*Fonte:.*?(?:Atualizado|Updated):\s*\d{2}:\d{2}).*$", text, re.MULTILINE)
+        if match2:
+            text = (text[:match2.start()] + match2.group(1)).rstrip()
+        else:
+            match3 = re.search(r"^(📌\s*\*\*Fonte:\*\*.*)$", text, re.MULTILINE)
+            if match3:
+                text = (text[:match3.start()] + match3.group(1)).rstrip()
+
+    return text
+
+
 def format_response(text: str) -> str:
     """
     Main formatting pipeline for LLM responses.
@@ -429,6 +708,9 @@ def format_response(text: str) -> str:
     if not text or not isinstance(text, str):
         return text or ""
 
+    text = normalize_source_links(text)
+    text = normalize_metro_terminology(text)
+    text = strip_hallucinations(text)
     text = strip_internal_sections(text)
     text = clean_decorative_separators(text)
     text = normalize_headers(text)
@@ -509,13 +791,73 @@ Too many blank lines above should be reduced.
 
     print("\n✅ Checks:")
     all_pass = True
-    for check, passed in checks.items():
-        status = "✅" if passed else "❌"
+    for check, result in checks.items():
+        status = "✅" if result else "❌"
         print(f"  {status} {check}")
-        if not passed:
+        if not result:
             all_pass = False
 
+    # --- generate_response_title() tests ---
+    print("\n\033[1m🔤 generate_response_title() Tests:\033[0m")
+    # Signature: (agents_called: list, user_query: str, language: str) -> Optional[str]
+    title_cases = [
+        (["weather"], "weather forecast lisbon", "en", "### "),
+        (["weather"], "tempo em lisboa amanhã", "pt", "### "),
+        (["transport"], "próximo metro rossio", "pt", "### "),
+        (["transport"], "bus schedule to Cascais", "en", "### "),
+        (["researcher"], "exposição no museu", "pt", "### "),
+        (["researcher"], "museum near alfama", "en", "### "),
+        (["researcher"], "jantar no bairro alto", "pt", "### "),
+        (["researcher"], "restaurant recommendations", "en", "### "),
+        (["planner"], "plan my full day in lisbon", "en", None),
+        ([], "olá bom dia", "pt", None),
+    ]
+    title_pass = 0
+    for agents, query, lang, expected in title_cases:
+        title = generate_response_title(agents, query, language=lang)
+        if expected is None:
+            ok = title is None
+        else:
+            ok = title is not None and title.startswith(expected)
+        status = "✅" if ok else "❌"
+        print(f"  {status} [{lang}] agents={agents} '{query}' → {title!r}")
+        if ok:
+            title_pass += 1
+        else:
+            all_pass = False
+    print(f"  → {title_pass}/{len(title_cases)} title tests passed")
+
+    # --- ensure_response_title() tests ---
+    print("\n\033[1m📌 ensure_response_title() Tests:\033[0m")
+    # Signature: (text: str, title: Optional[str]) -> str
+    ensure_cases = [
+        ("Some content without a header.", "### 🌤️ Weather in Lisbon", True),
+        ("### Existing Header\nContent", "### 🚇 Transport", False),
+        ("**Bold Title**\nContent", "### 🎭 Events", False),
+        ("Some content", None, False),
+        ("", "### 🎭 Events", False),
+    ]
+    ensure_pass = 0
+    for text_in, title_in, expect_injected in ensure_cases:
+        result = ensure_response_title(text_in, title_in)
+        if expect_injected:
+            ok = result.lstrip().startswith("### ") and str(title_in) in result
+        elif text_in == "":
+            ok = result == ""
+        elif title_in is None:
+            ok = result == text_in
+        else:
+            ok = result == text_in
+        status = "✅" if ok else "❌"
+        label = "(injected)" if expect_injected else "(unchanged)"
+        print(f"  {status} {label}: title={str(title_in)[:25]!r} → {result[:50]!r}...")
+        if ok:
+            ensure_pass += 1
+        else:
+            all_pass = False
+    print(f"  → {ensure_pass}/{len(ensure_cases)} ensure tests passed")
+
     if all_pass:
-        print("\n🎉 ALL CHECKS PASSED")
+        print("\n\033[1;32m🎉 ALL CHECKS PASSED\033[0m")
     else:
-        print("\n❌ SOME CHECKS FAILED")
+        print("\n\033[1;31m❌ SOME CHECKS FAILED\033[0m")

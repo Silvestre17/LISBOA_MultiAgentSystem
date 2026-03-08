@@ -23,24 +23,29 @@ import base64
 import logging
 import math
 import os
-import sys
+import tempfile
 import time
+import warnings
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+import certifi
 import requests
 import urllib3
 from langchain_core.tools import tool
 
-# Suppress SSL warnings globally for Metro API
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+try:
+    from config import Config
+except ModuleNotFoundError:
+    import sys
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    from config import Config
 
-# Add parent directory to path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from config import Config
+try:
+    from tools.utils import haversine_distance
+except ImportError:
+    from utils import haversine_distance
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Request configuration
@@ -57,6 +62,14 @@ METRO_API_BASE = "https://api.metrolisboa.pt:8243/estadoServicoML/1.0.1"
 METRO_TOKEN_URL = "https://api.metrolisboa.pt:8243/token"
 METRO_CONSUMER_KEY = os.getenv("METRO_CONSUMER_KEY", "")
 METRO_CONSUMER_SECRET = os.getenv("METRO_CONSUMER_SECRET", "")
+METRO_CA_BUNDLE = os.getenv("METRO_CA_BUNDLE", "").strip()
+_METRO_SSL_VERIFY_RAW = os.getenv("METRO_SSL_VERIFY", "").strip().lower()
+_METRO_INSECURE_WARNING_PATTERN = (
+    r"Unverified HTTPS request is being made to host 'api\.metrolisboa\.pt'.*"
+)
+DEFAULT_METRO_INTERMEDIATE_PEM = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "certs", "metro_sectigo_intermediate.pem")
+)
 
 # Metro de Lisboa - Fallback (unofficial, no auth required)
 METRO_STATUS_URL = "https://app.metrolisboa.pt/status/getLinhas.php"
@@ -75,6 +88,7 @@ _metro_access_token: Optional[str] = None
 _metro_token_expiry: Optional[datetime] = None
 _metro_stations_cache: Optional[List[Dict[str, Any]]] = None
 _metro_stations_last_load: Optional[datetime] = None
+_metro_runtime_ca_bundle: Optional[str] = None
 
 # ==========================================================================
 # Metro Line Configuration
@@ -453,36 +467,107 @@ LISBON_LANDMARKS = {
 # ==========================================================================
 
 
-def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """
-    Calculates the great-circle distance between two points on Earth.
-
-    Args:
-        lat1, lon1: First point coordinates in degrees.
-        lat2, lon2: Second point coordinates in degrees.
-
-    Returns:
-        float: Distance in kilometers.
-    """
-    R = 6371  # Earth radius in kilometers
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = (
-        math.sin(dlat / 2) ** 2
-        + math.cos(math.radians(lat1))
-        * math.cos(math.radians(lat2))
-        * math.sin(dlon / 2) ** 2
-    )
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c
-
-
 def _is_cache_valid(last_load: Optional[datetime]) -> bool:
     """Checks if the cache is still valid (not expired)."""
     if last_load is None:
         return False
     hours_elapsed = (datetime.now() - last_load).total_seconds() / 3600
     return hours_elapsed < CACHE_EXPIRATION_HOURS
+
+
+def _build_runtime_metro_ca_bundle() -> Optional[str]:
+    """Build a runtime CA bundle with certifi roots plus Metro's missing intermediate.
+
+    The Metro API currently omits the Sectigo intermediate certificate from the
+    server-side chain. Merging the missing intermediate into the standard
+    certifi trust store enables full TLS verification without disabling SSL.
+    """
+    global _metro_runtime_ca_bundle
+
+    if _metro_runtime_ca_bundle and os.path.isfile(_metro_runtime_ca_bundle):
+        return _metro_runtime_ca_bundle
+
+    if not os.path.isfile(DEFAULT_METRO_INTERMEDIATE_PEM):
+        return None
+
+    try:
+        certifi_bundle_path = certifi.where()
+        bundle_path = os.path.join(tempfile.gettempdir(), "lisboa_metro_ca_bundle.pem")
+
+        with open(certifi_bundle_path, "r", encoding="utf-8") as file:
+            certifi_bundle = file.read().rstrip()
+
+        with open(DEFAULT_METRO_INTERMEDIATE_PEM, "r", encoding="ascii") as file:
+            metro_intermediate = file.read().strip()
+
+        combined_bundle = f"{certifi_bundle}\n{metro_intermediate}\n"
+
+        if os.path.isfile(bundle_path):
+            with open(bundle_path, "r", encoding="utf-8") as file:
+                existing_bundle = file.read()
+        else:
+            existing_bundle = None
+
+        if existing_bundle != combined_bundle:
+            with open(bundle_path, "w", encoding="utf-8", newline="\n") as file:
+                file.write(combined_bundle)
+
+        _metro_runtime_ca_bundle = bundle_path
+        return bundle_path
+    except Exception as e:
+        logger.warning("Failed to build Metro CA bundle from certifi: %s", e)
+        return None
+
+
+def _resolve_metro_ssl_verify() -> bool | str:
+    """Resolve SSL verification mode for the Metro API.
+
+    Preferred secure path:
+        - Set METRO_CA_BUNDLE to a PEM bundle for api.metrolisboa.pt
+        - Or set METRO_SSL_VERIFY=true if the system CA store is sufficient
+        - By default, use certifi + the bundled missing Sectigo intermediate
+
+    Fallback behavior:
+        - Disable verification only for api.metrolisboa.pt because the API
+          currently fails certificate-chain validation in this environment.
+    """
+    if METRO_CA_BUNDLE:
+        if os.path.isfile(METRO_CA_BUNDLE):
+            return METRO_CA_BUNDLE
+        logger.warning(
+            "METRO_CA_BUNDLE does not exist: %s. Falling back to disabled SSL verification.",
+            METRO_CA_BUNDLE,
+        )
+
+    if _METRO_SSL_VERIFY_RAW in {"1", "true", "yes"}:
+        return True
+    if _METRO_SSL_VERIFY_RAW in {"0", "false", "no"}:
+        return False
+
+    runtime_bundle = _build_runtime_metro_ca_bundle()
+    if runtime_bundle:
+        return runtime_bundle
+
+    return False
+
+
+METRO_SSL_VERIFY = _resolve_metro_ssl_verify()
+
+
+def _metro_request(method: str, url: str, **kwargs) -> requests.Response:
+    """Perform a Metro API request with narrow SSL warning handling."""
+    verify = kwargs.pop("verify", METRO_SSL_VERIFY)
+
+    if verify is False:
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=_METRO_INSECURE_WARNING_PATTERN,
+                category=urllib3.exceptions.InsecureRequestWarning,
+            )
+            return requests.request(method, url, verify=False, **kwargs)
+
+    return requests.request(method, url, verify=verify, **kwargs)
 
 
 def fetch_json_with_retry(url: str, timeout: int = REQUEST_TIMEOUT, use_cache: bool = True) -> Optional[Any]:
@@ -636,12 +721,12 @@ def _get_metro_access_token(force_refresh: bool = False) -> Optional[str]:
 
         data = {"grant_type": "client_credentials"}
 
-        response = requests.post(
+        response = _metro_request(
+            "post",
             METRO_TOKEN_URL,
             headers=headers,
             data=data,
             timeout=REQUEST_TIMEOUT,
-            verify=False,
         )
 
         if response.status_code != 200:
@@ -686,8 +771,12 @@ def _metro_api_request(
     headers = {"accept": "application/json", "Authorization": f"Bearer {token}"}
 
     try:
-        response = requests.get(
-            url, headers=headers, params=params, timeout=REQUEST_TIMEOUT, verify=False
+        response = _metro_request(
+            "get",
+            url,
+            headers=headers,
+            params=params,
+            timeout=REQUEST_TIMEOUT,
         )
 
         if response.status_code == 401:
@@ -695,12 +784,12 @@ def _metro_api_request(
             token = _get_metro_access_token(force_refresh=True)
             if token:
                 headers["Authorization"] = f"Bearer {token}"
-                response = requests.get(
+                response = _metro_request(
+                    "get",
                     url,
                     headers=headers,
                     params=params,
                     timeout=REQUEST_TIMEOUT,
-                    verify=False,
                 )
 
         if response.status_code != 200:

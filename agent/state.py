@@ -86,12 +86,12 @@ class AgentState(TypedDict):
         last_tool_result (str): Result from the last tool call.
         
         Multi-Agent Orchestration:
-        next_agent (str): Name of the next agent to execute.
-        agents_to_call (List[str]): Queue of agents to invoke.
-        candidate_pois (List[dict]): Places/attractions from RAG search.
-        events_data (List[dict]): Events data from RAG search.
+        next_agent (str): Name of the next agent to execute, when applicable.
+        agents_to_call (List[str]): Queue or routing decision from the supervisor.
+        candidate_pois (List[dict]): Candidate places from retrieval.
+        events_data (List[dict]): Candidate event records from retrieval.
         agent_outputs (dict): Collected outputs from specialized agents.
-        iteration_count (int): Loop prevention counter.
+        iteration_count (int): Loop-prevention and execution-tracking counter.
     """
     # Conversation history (uses add_messages reducer for proper appending)
     messages: Annotated[List[BaseMessage], add_messages]
@@ -109,12 +109,12 @@ class AgentState(TypedDict):
     last_tool_result: Optional[str]
     
     # Multi-Agent orchestration fields
-    next_agent: Optional[str]              # Current agent being executed
-    agents_to_call: Optional[List[str]]    # Queue of agents to invoke
-    candidate_pois: Optional[List[dict]]   # RAG places/attractions results
-    events_data: Optional[List[dict]]      # RAG events results
+    next_agent: Optional[str]              # Current agent being executed, if tracked
+    agents_to_call: Optional[List[str]]    # Supervisor routing decision
+    candidate_pois: Optional[List[dict]]   # Retrieved places/attractions considered for planning
+    events_data: Optional[List[dict]]      # Retrieved event records considered for planning
     agent_outputs: Optional[dict]          # Outputs from each agent {agent_name: output}
-    iteration_count: Optional[int]         # Prevent infinite loops (max ~10)
+    iteration_count: Optional[int]         # Execution-tracking metadata for loop prevention
 
 
 class PlanItem(TypedDict):
@@ -128,7 +128,7 @@ class PlanItem(TypedDict):
         name (str): Name of the place/activity.
         category (str): Category (e.g., 'museum', 'restaurant', 'transport').
         location (str): Address or location description.
-        coordinates (tuple): (latitude, longitude).
+        coordinates (tuple): `(latitude, longitude)` in WGS84 order.
         notes (str): Additional notes or context.
         transport_to_next (str): How to get to the next item.
     """

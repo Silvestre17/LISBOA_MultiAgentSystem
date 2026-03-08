@@ -21,7 +21,6 @@
 import logging
 import math
 import os
-import sys
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -29,13 +28,19 @@ from typing import Any, Dict, List, Optional
 import requests
 from langchain_core.tools import tool
 
-# Add parent directory to path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from config import Config
+try:
+    from config import Config
+except ModuleNotFoundError:
+    import sys
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    from config import Config
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+try:
+    from tools.utils import fetch_json_with_retry, haversine_distance
+except ImportError:
+    from utils import fetch_json_with_retry, haversine_distance
 
 # Request configuration
 REQUEST_TIMEOUT = 15  # seconds
@@ -104,30 +109,6 @@ CARRIS_LIMITATION_NOTICE = """
 # ==========================================================================
 
 
-def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """
-    Calculates the great-circle distance between two points on Earth.
-
-    Args:
-        lat1, lon1: First point coordinates in degrees.
-        lat2, lon2: Second point coordinates in degrees.
-
-    Returns:
-        float: Distance in kilometers.
-    """
-    R = 6371  # Earth radius in kilometers
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = (
-        math.sin(dlat / 2) ** 2
-        + math.cos(math.radians(lat1))
-        * math.cos(math.radians(lat2))
-        * math.sin(dlon / 2) ** 2
-    )
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c
-
-
 def _is_cache_valid(last_load: Optional[datetime]) -> bool:
     """Checks if the cache is still valid (not expired)."""
     if last_load is None:
@@ -142,37 +123,6 @@ def _is_vehicle_cache_valid(last_load: Optional[datetime]) -> bool:
         return False
     seconds_elapsed = (datetime.now() - last_load).total_seconds()
     return seconds_elapsed < _VEHICLE_CACHE_TTL_SECONDS
-
-
-def fetch_json_with_retry(url: str, timeout: int = REQUEST_TIMEOUT) -> Optional[Any]:
-    """
-    Fetches JSON data from a URL with retry logic.
-
-    Args:
-        url: URL to fetch from.
-        timeout: Request timeout in seconds.
-
-    Returns:
-        JSON data if successful, None otherwise.
-    """
-    for attempt in range(MAX_RETRIES):
-        try:
-            response = requests.get(url, timeout=timeout)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.Timeout:
-            wait_time = BACKOFF_FACTOR**attempt
-            logger.warning(f"Timeout. Retrying in {wait_time}s...")
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(wait_time)
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"Request error: {e}")
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(BACKOFF_FACTOR**attempt)
-        except ValueError:
-            logger.error("Invalid JSON response")
-            return None
-    return None
 
 
 def format_timestamp(ts: int) -> str:

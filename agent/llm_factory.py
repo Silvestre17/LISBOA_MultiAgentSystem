@@ -25,16 +25,17 @@
 # Required libraries:
 # pip install langchain-core langchain-openai
 
-import os
-import sys
 from typing import Any, Dict, Optional
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-# Add parent directory to path for imports
-# This allows importing from the project root when running as a script
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from config import Config
+try:
+    from config import Config
+except ModuleNotFoundError:
+    import os
+    import sys
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    from config import Config
 
 
 class LLMFactory:
@@ -71,10 +72,10 @@ class LLMFactory:
     def _is_reasoning_model(model_name: str) -> bool:
         """
         Checks if a model is a reasoning model that only supports temperature=1.
-        
-        Reasoning models (o1, o3, o4, gpt-5) use chain-of-thought and do not
-        support temperature configuration. Exception: gpt-5-chat supports
-        configurable temperature.
+
+        The current heuristic treats o-series models and most `gpt-5` family
+        deployments as reasoning-style models. Explicit chat variants such as
+        `gpt-5-chat` are excluded from that rule.
         
         Args:
             model_name (str): The model name to check.
@@ -187,7 +188,7 @@ class LLMFactory:
 
             model_name = model if model else Config.OPENAI_MODEL_NAME
 
-            # Check if it's a reasoning model using helper function
+            # Check if it's a reasoning-style deployment using helper function
             if LLMFactory._is_reasoning_model(model_name):
                 # Reasoning models only support temperature=1, omit the parameter
                 return ChatOpenAI(
@@ -229,9 +230,9 @@ class LLMFactory:
             endpoint = Config.AZURE_OPENAI_ENDPOINT.rstrip("/")
             base_url = f"{endpoint}/openai/v1/"
 
-            # Check if it's a reasoning model using helper function
+            # Check if it's a reasoning-style deployment using helper function
             if LLMFactory._is_reasoning_model(model_name):
-                # Reasoning models (gpt-5, o1, o3, o4) only support temperature=1
+                # Reasoning-style models are configured without temperature here
                 # Use minimal reasoning effort for lower latency
                 # max_completion_tokens for optimal output capacity
                 return ChatOpenAI(
@@ -335,6 +336,85 @@ class LLMFactory:
                     info[k] = v
 
         return info
+
+    @staticmethod
+    def extract_usage_metadata(response: Any) -> Dict[str, Any]:
+        """
+        Extracts normalized token usage metadata from a model response.
+
+        Supports raw LangChain AIMessage responses, structured-output wrappers
+        with ``include_raw=True``, and provider-specific token usage fields such
+        as ``prompt_tokens`` / ``completion_tokens``.
+
+        Args:
+            response: Raw model response or structured-output wrapper.
+
+        Returns:
+            Dict[str, Any]: Normalized usage payload with ``input_tokens``,
+            ``output_tokens``, ``total_tokens``, and ``usage_available``.
+        """
+        raw_response = response.get("raw") if isinstance(response, dict) else response
+
+        usage_candidates = []
+        if hasattr(raw_response, "usage_metadata") and raw_response.usage_metadata:
+            usage_candidates.append(raw_response.usage_metadata)
+
+        response_metadata = getattr(raw_response, "response_metadata", None)
+        if isinstance(response_metadata, dict):
+            for key in ("token_usage", "usage", "usage_metadata"):
+                candidate = response_metadata.get(key)
+                if isinstance(candidate, dict):
+                    usage_candidates.append(candidate)
+
+        input_tokens = 0
+        output_tokens = 0
+        total_tokens = 0
+        usage_available = False
+
+        def _coerce_int(value: Any) -> int:
+            """Coerces token counts to integers safely."""
+            try:
+                return int(value or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        for candidate in usage_candidates:
+            if not isinstance(candidate, dict):
+                continue
+
+            usage_available = True
+            input_tokens = max(
+                input_tokens,
+                _coerce_int(
+                    candidate.get("input_tokens", candidate.get("prompt_tokens", candidate.get("input_token_count")))
+                ),
+            )
+            output_tokens = max(
+                output_tokens,
+                _coerce_int(
+                    candidate.get(
+                        "output_tokens",
+                        candidate.get("completion_tokens", candidate.get("output_token_count")),
+                    )
+                ),
+            )
+            total_tokens = max(
+                total_tokens,
+                _coerce_int(candidate.get("total_tokens", candidate.get("total_token_count"))),
+            )
+
+        if total_tokens == 0:
+            total_tokens = input_tokens + output_tokens
+
+        if input_tokens or output_tokens or total_tokens:
+            usage_available = True
+
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "usage_available": usage_available,
+        }
 
     @staticmethod
     def get_agent_llm(agent_name: str) -> BaseChatModel:

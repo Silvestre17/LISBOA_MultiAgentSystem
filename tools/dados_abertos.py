@@ -19,7 +19,6 @@ import json
 import logging
 import math
 import os
-import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -27,13 +26,19 @@ import pandas as pd
 import requests
 from langchain_core.tools import tool
 
-# Add parent directory to path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from config import Config
+try:
+    from config import Config
+except ModuleNotFoundError:
+    import sys
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    from config import Config
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+try:
+    from tools.utils import haversine_distance
+except ImportError:
+    from utils import haversine_distance
 
 # Request configuration
 REQUEST_TIMEOUT = 15  # seconds
@@ -151,31 +156,6 @@ def fetch_geojson_with_retry(url: str) -> Optional[Dict[str, Any]]:
             return None
     
     return None
-
-
-def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """
-    Calculates the great-circle distance between two points on Earth.
-    
-    Args:
-        lat1 (float): Latitude of point 1.
-        lon1 (float): Longitude of point 1.
-        lat2 (float): Latitude of point 2.
-        lon2 (float): Longitude of point 2.
-        
-    Returns:
-        float: Distance in kilometers.
-    """
-    R = 6371  # Earth radius in km
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = (
-        math.sin(dlat / 2) ** 2 +
-        math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
-        math.sin(dlon / 2) ** 2
-    )
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c
 
 
 def extract_coordinates(geometry: Dict) -> Optional[Tuple[float, float]]:

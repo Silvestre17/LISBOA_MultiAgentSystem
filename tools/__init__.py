@@ -1,6 +1,10 @@
 # ==========================================================================
 # Master Thesis - Tools Package
 #   - André Filipe Gomes Silvestre, 20240502
+#
+#   Authoritative export registry for the runtime tool layer.
+#   The `__all__` list below defines the 45 exported LangChain tools that
+#   public documentation and coverage manifests should count.
 # ==========================================================================
 
 from tools.carris_api import carris_get_arrivals  # Real-time arrivals at a stop

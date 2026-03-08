@@ -24,7 +24,6 @@ import json
 import logging
 import math
 import os
-import sys
 import warnings
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -38,12 +37,13 @@ warnings.filterwarnings("ignore", category=ImportWarning)
 
 from langchain_core.tools import tool
 
-# Add parent directory to path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from config import Config
+try:
+    from config import Config
+except ModuleNotFoundError:
+    import sys
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    from config import Config
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Collection names (must match vector_store.py)
@@ -1183,7 +1183,7 @@ def search_places_attractions(
             # Last resort fallback
             if query:
                 logger.info("No results from hybrid search, trying direct Dados Abertos")
-                from dados_abertos import _search_place_in_datasets_logic
+                from tools.dados_abertos import _search_place_in_datasets_logic
                 open_data_results = _search_place_in_datasets_logic(query, max_results=max_results)
                 if open_data_results:
                     return open_data_results
