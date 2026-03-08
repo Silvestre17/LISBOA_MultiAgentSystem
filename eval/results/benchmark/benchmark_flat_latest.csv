@@ -1,0 +1,11 @@
+id,domain,query,response_model,evaluation_model,latency_s,composite_score,factual_accuracy,tool_usage,completeness,relevance,response_quality,tool_precision,tool_recall,tool_f1,heuristics_pass,sla_met,error_type,response_model_label,evaluation_model_label,domain_label
+W01,weather,What's the weather like in Lisbon today?,azure::gpt-5-mini,azure::gpt-5-mini,4.4,5.0,5,5,5,5,5,1.0,1.0,1.0,True,True,,GPT-5 Mini,GPT-5 Mini,Weather
+T01,transport,Is the metro working correctly right now?,azure::gpt-5-mini,azure::gpt-5-mini,5.5,4.8,5,4,5,5,5,0.0,0.0,0.0,True,True,,GPT-5 Mini,GPT-5 Mini,Transport
+R01,researcher,What are the best museums in Lisbon?,azure::gpt-5-mini,azure::gpt-5-mini,18.86,4.0,4,5,3,4,4,1.0,1.0,1.0,True,True,,GPT-5 Mini,GPT-5 Mini,Researcher
+W02,weather,Vai chover amanhã em Lisboa?,azure::gpt-5-mini,azure::gpt-5-mini,4.22,5.0,5,5,5,5,5,0.5,1.0,0.667,True,True,,GPT-5 Mini,GPT-5 Mini,Weather
+T02,transport,How do I get from Baixa-Chiado to Aeroporto?,azure::gpt-5-mini,azure::gpt-5-mini,6.67,4.8,5,5,4,5,5,0.5,1.0,0.667,True,True,,GPT-5 Mini,GPT-5 Mini,Transport
+W01,weather,What's the weather like in Lisbon today?,azure::gpt-5-nano,azure::gpt-5-mini,2.78,5.0,5,5,5,5,5,1.0,1.0,1.0,True,True,,GPT-5 Nano,GPT-5 Mini,Weather
+T01,transport,Is the metro working correctly right now?,azure::gpt-5-nano,azure::gpt-5-mini,1.61,1.8,1,1,1,3,3,1.0,0.0,0.0,True,True,,GPT-5 Nano,GPT-5 Mini,Transport
+R01,researcher,What are the best museums in Lisbon?,azure::gpt-5-nano,azure::gpt-5-mini,4.58,3.4,3,1,4,5,4,1.0,0.0,0.0,True,True,,GPT-5 Nano,GPT-5 Mini,Researcher
+W02,weather,Vai chover amanhã em Lisboa?,azure::gpt-5-nano,azure::gpt-5-mini,1.67,2.2,1,1,2,4,3,1.0,0.0,0.0,True,True,,GPT-5 Nano,GPT-5 Mini,Weather
+T02,transport,How do I get from Baixa-Chiado to Aeroporto?,azure::gpt-5-nano,azure::gpt-5-mini,4.66,4.6,4,5,5,5,4,0.5,1.0,0.667,True,True,,GPT-5 Nano,GPT-5 Mini,Transport

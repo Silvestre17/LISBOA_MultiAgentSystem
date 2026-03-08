@@ -1,0 +1,1127 @@
+{
+  "ablation_metadata": {
+    "groundtruth_queries_path": "C:\\Users\\andre\\OneDrive - NOVAIMS\\[MDSAA-DS]_Thesis\\Thesis2025-26_AFGS\\eval\\evaluation_groundtruth_queries.json",
+    "groundtruth_queries_count": 5,
+    "groundtruth_queries_fingerprint": "1092c4ec876c2002d99d4ffe18efead5de82dddbc881508dca92ec65175d9556",
+    "total_queries": 5,
+    "tool_registry_count": 45,
+    "tool_registry_fingerprint": "e0a23b55c2dfdc8d328162e28dfbbf4e6770e989ae90bbabc5525229ab157666",
+    "response_models": {
+      "zero_shot": "azure::gpt-5-mini",
+      "lisboa": "Multi-Agent (gpt-5-mini)"
+    },
+    "evaluation_model": "azure::gpt-5-mini",
+    "response_model_configs": {
+      "zero_shot": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 0.0
+      },
+      "lisboa": {
+        "kind": "multi_agent",
+        "display_model": "Multi-Agent (gpt-5-mini)",
+        "agent_models": {
+          "supervisor": {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 1,
+            "type": "ChatOpenAI"
+          },
+          "qa": {
+            "model_id": "azure::gpt-5-nano",
+            "provider": "azure",
+            "model": "gpt-5-nano",
+            "temperature": 1,
+            "type": "ChatOpenAI"
+          },
+          "weather": {
+            "model_id": "azure::gpt-5-nano",
+            "provider": "azure",
+            "model": "gpt-5-nano",
+            "temperature": 1,
+            "type": "ChatOpenAI"
+          },
+          "transport": {
+            "model_id": "azure::gpt-5-nano",
+            "provider": "azure",
+            "model": "gpt-5-nano",
+            "temperature": 1,
+            "type": "ChatOpenAI"
+          },
+          "researcher": {
+            "model_id": "azure::gpt-5-nano",
+            "provider": "azure",
+            "model": "gpt-5-nano",
+            "temperature": 1,
+            "type": "ChatOpenAI"
+          },
+          "planner": {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 1,
+            "type": "ChatOpenAI"
+          }
+        }
+      }
+    },
+    "evaluation_model_config": {
+      "model_id": "azure::gpt-5-mini",
+      "provider": "azure",
+      "model": "gpt-5-mini",
+      "temperature": 0.0
+    },
+    "timestamp": "2026-03-07T21:23:09.785494",
+    "comparison": "zero_shot_vs_lisboa",
+    "real_services": true,
+    "output_directory": "C:\\Users\\andre\\OneDrive - NOVAIMS\\[MDSAA-DS]_Thesis\\Thesis2025-26_AFGS\\eval\\results\\ablation"
+  },
+  "summary": {
+    "total_queries": 5,
+    "zero_shot_avg": 3.48,
+    "lisboa_avg": 4.16,
+    "zero_shot_avg_tool_f1": 0.2,
+    "lisboa_avg_tool_f1": 0.714,
+    "lisboa_improvement": 0.68,
+    "zero_shot_heuristics_pass_rate": 0.6,
+    "lisboa_heuristics_pass_rate": 1.0,
+    "per_domain": {
+      "greeting": {
+        "count": 1,
+        "zero_shot_avg": 4.8,
+        "lisboa_avg": 5.0,
+        "zero_shot_avg_tool_f1": 1.0,
+        "lisboa_avg_tool_f1": 1.0
+      },
+      "multi_agent": {
+        "count": 1,
+        "zero_shot_avg": 3.2,
+        "lisboa_avg": 3.2,
+        "zero_shot_avg_tool_f1": 0.0,
+        "lisboa_avg_tool_f1": 0.571
+      },
+      "researcher": {
+        "count": 1,
+        "zero_shot_avg": 3.8,
+        "lisboa_avg": 3.6,
+        "zero_shot_avg_tool_f1": 0.0,
+        "lisboa_avg_tool_f1": 1.0
+      },
+      "transport": {
+        "count": 1,
+        "zero_shot_avg": 3.0,
+        "lisboa_avg": 4.0,
+        "zero_shot_avg_tool_f1": 0.0,
+        "lisboa_avg_tool_f1": 0.0
+      },
+      "weather": {
+        "count": 1,
+        "zero_shot_avg": 2.6,
+        "lisboa_avg": 5.0,
+        "zero_shot_avg_tool_f1": 0.0,
+        "lisboa_avg_tool_f1": 1.0
+      }
+    },
+    "error_categories": {
+      "zero_shot": {},
+      "lisboa": {}
+    }
+  },
+  "ablation_results": [
+    {
+      "id": "W01",
+      "query": "What's the weather like in Lisbon today?",
+      "domain": "weather",
+      "language": "en",
+      "edge_case": false,
+      "edge_type": null,
+      "expected_behavior": null,
+      "expected_facts": [
+        "Current temperature",
+        "Current condition (e.g., sunny, raining)"
+      ],
+      "expected_tools": [
+        "get_current_weather_summary"
+      ],
+      "metrics": {
+        "zero_shot": {
+          "response_model": "azure::gpt-5-mini",
+          "response_model_config": {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 0.0
+          },
+          "evaluation_model": "azure::gpt-5-mini",
+          "evaluation_model_config": {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 0.0
+          },
+          "scores": {
+            "factual_accuracy": 2,
+            "tool_usage": 1,
+            "completeness": 2,
+            "relevance": 4,
+            "response_quality": 4,
+            "composite_score": 2.6,
+            "reasoning": "The agent correctly acknowledged it lacks live weather access and did not invent any weather facts, which is appropriate given no tools were used and no context retrieved. However, it failed to use the expected get_current_weather_summary tool (none used) and did not provide the requested current temperature or condition, so factual accuracy is limited by omission rather than fabrication. The response is relevant and concise, offering useful next steps (how to check weather, typical climate, help interpreting a report), but it did not directly answer the user's question with current data. Overall the reply is clear and well-structured but incomplete with respect to the explicit expected facts and expected tool usage."
+          },
+          "response": "I don’t have live weather access. I can’t look up current conditions for Lisbon right now.\n\nIf you’d like, I can:\n- Tell you how to quickly check the current weather (websites, apps, or a command for your device).\n- Explain typical March climate for Lisbon (average temps, rain chances).\n- Help you interpret a weather report if you paste it here.\n\nWhich would you prefer?",
+          "latency": 3.54,
+          "error": null,
+          "error_type": null,
+          "tool_metrics": {
+            "tool_precision": 1.0,
+            "tool_recall": 0.0,
+            "tool_f1": 0.0
+          },
+          "heuristics": {
+            "tool_leaks": {
+              "leaked": false,
+              "leaked_items": []
+            },
+            "response_length": {
+              "acceptable": true,
+              "char_count": 372,
+              "word_count": 66,
+              "issues": []
+            },
+            "language_compliance": {
+              "compliant": true,
+              "detected_indicators": {
+                "en": 4,
+                "pt": 1,
+                "fr": 0
+              },
+              "expected_language": "en"
+            },
+            "hallucinated_features": {
+              "hallucinated": false,
+              "flagged_claims": []
+            },
+            "emoji_density": {
+              "acceptable": true,
+              "emoji_count": 0,
+              "ratio": 0.0
+            },
+            "overall_pass": true,
+            "critical_failures": []
+          }
+        },
+        "lisboa": {
+          "response_model": "Multi-Agent (gpt-5-mini)",
+          "response_model_config": {
+            "kind": "multi_agent",
+            "display_model": "Multi-Agent (gpt-5-mini)",
+            "agent_models": {
+              "supervisor": {
+                "model_id": "azure::gpt-5-mini",
+                "provider": "azure",
+                "model": "gpt-5-mini",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "qa": {
+                "model_id": "azure::gpt-5-nano",
+                "provider": "azure",
+                "model": "gpt-5-nano",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "weather": {
+                "model_id": "azure::gpt-5-nano",
+                "provider": "azure",
+                "model": "gpt-5-nano",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "transport": {
+                "model_id": "azure::gpt-5-nano",
+                "provider": "azure",
+                "model": "gpt-5-nano",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "researcher": {
+                "model_id": "azure::gpt-5-nano",
+                "provider": "azure",
+                "model": "gpt-5-nano",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "planner": {
+                "model_id": "azure::gpt-5-mini",
+                "provider": "azure",
+                "model": "gpt-5-mini",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              }
+            }
+          },
+          "evaluation_model": "azure::gpt-5-mini",
+          "evaluation_model_config": {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 0.0
+          },
+          "scores": {
+            "factual_accuracy": 5,
+            "tool_usage": 5,
+            "completeness": 5,
+            "relevance": 5,
+            "response_quality": 5,
+            "composite_score": 5.0,
+            "reasoning": "The agent's response closely matches the retrieved context: it reports the temperature range (9.0°C to 17.7°C), condition as partly cloudy (parcialmente nublado), 0% rain probability, moderate northwest wind, and notes no active weather warnings — all present in the tool output. The expected tool (get_current_weather_summary) was used. The reply adds reasonable practical tips and cites IPMA; these tips are acceptable and not hallucinated. Overall the response is concise, clear, and fully supported by the retrieved context."
+          },
+          "response": "### 🌤️ Weather Forecast\n\n⚠️ **Avisos Meteorológicos:**\n✅ Sem avisos meteorológicos ativos para Lisboa.\n\n---\n\n**📅 Sábado, 7 de Março de 2026**\n- 🌡️ **Temperatura**: 9.0°C a 17.7°C\n- ☁️ **Condições**: Parcialmente nublado\n- 💧 **Chuva**: 0% - sem precipitação\n- 💨 **Vento**: Noroeste, moderado\n\n---\n\n💡 **Dicas Práticas**:\n- 🧥 Leve um agasalho para começar o dia com temperaturas mais frias.\n- 🌤️ Pode estar mais quente ao meio-dia, ideal para atividades ao ar livre entre o período da manhã e tarde.\n\n📌 **Fonte:** Dados do [*IPMA*](https://www.ipma.pt). Para informação oficial, consulta [ipma.pt](https://www.ipma.pt)",
+          "tools_used": [
+            "get_current_weather_summary"
+          ],
+          "retrieved_context": "[get_current_weather_summary] returned:\n🌤️ Lisbon Weather Summary\n========================================\n\n📅 Today (2026-03-07):\n   🌡️ Temperature: 9.0°C to 17.7°C\n   🌤️ Conditions: Partly cloudy\n   💧 Rain probability: 0.0%\n   💨 Wind: Northwest (Moderate)\n\n✅ No active weather warnings.\n",
+          "latency": 14.295,
+          "error": null,
+          "error_type": null,
+          "tool_metrics": {
+            "tool_precision": 1.0,
+            "tool_recall": 1.0,
+            "tool_f1": 1.0
+          },
+          "heuristics": {
+            "tool_leaks": {
+              "leaked": false,
+              "leaked_items": []
+            },
+            "response_length": {
+              "acceptable": true,
+              "char_count": 615,
+              "word_count": 93,
+              "issues": []
+            },
+            "language_compliance": {
+              "compliant": false,
+              "detected_indicators": {
+                "en": 0,
+                "pt": 7,
+                "fr": 1
+              },
+              "expected_language": "en"
+            },
+            "hallucinated_features": {
+              "hallucinated": false,
+              "flagged_claims": []
+            },
+            "emoji_density": {
+              "acceptable": true,
+              "emoji_count": 16,
+              "ratio": 0.026
+            },
+            "overall_pass": true,
+            "critical_failures": []
+          }
+        }
+      }
+    },
+    {
+      "id": "T01",
+      "query": "Is the metro working correctly right now?",
+      "domain": "transport",
+      "language": "en",
+      "edge_case": false,
+      "edge_type": null,
+      "expected_behavior": null,
+      "expected_facts": [
+        "Status of Amarela, Azul, Verde, Vermelha lines (Normal/Disrupted)"
+      ],
+      "expected_tools": [
+        "get_metro_status"
+      ],
+      "metrics": {
+        "zero_shot": {
+          "response_model": "azure::gpt-5-mini",
+          "response_model_config": {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 0.0
+          },
+          "evaluation_model": "azure::gpt-5-mini",
+          "evaluation_model_config": {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 0.0
+          },
+          "scores": {
+            "factual_accuracy": 4,
+            "tool_usage": 1,
+            "completeness": 2,
+            "relevance": 4,
+            "response_quality": 4,
+            "composite_score": 3.0,
+            "reasoning": "The agent correctly acknowledged lack of live access and asked clarifying questions, but failed to use the expected get_metro_status tool or provide any status for Lisbon metro lines (Amarela, Azul, Verde, Vermelha). The response offered useful next steps (how to check status, sources of delays, request for city/line) which is relevant and concise, but it does not answer the user's question about current metro operation. No factual claims about metro status were made, so there are no hallucinations, but the critical expected tool was not used. Overall the reply is clear and helpful as guidance but does not fulfill the primary task of reporting current line statuses."
+          },
+          "response": "I don’t have live access to transport systems or real-time feeds. Tell me which city/metro system you mean (and, if helpful, which station or line), and I can:\n\n- Show how to check current service status (official site, apps, social media, live maps).\n- Explain common sources of delays and how to get alerts.\n- Help you find real-time info links for that system.\n\nIf you give the city/line, I can look up the official status page and provide the direct link and what to check there.",
+          "latency": 1.433,
+          "error": null,
+          "error_type": null,
+          "tool_metrics": {
+            "tool_precision": 1.0,
+            "tool_recall": 0.0,
+            "tool_f1": 0.0
+          },
+          "heuristics": {
+            "tool_leaks": {
+              "leaked": false,
+              "leaked_items": []
+            },
+            "response_length": {
+              "acceptable": true,
+              "char_count": 483,
+              "word_count": 87,
+              "issues": []
+            },
+            "language_compliance": {
+              "compliant": true,
+              "detected_indicators": {
+                "en": 5,
+                "pt": 0,
+                "fr": 0
+              },
+              "expected_language": "en"
+            },
+            "hallucinated_features": {
+              "hallucinated": false,
+              "flagged_claims": []
+            },
+            "emoji_density": {
+              "acceptable": true,
+              "emoji_count": 0,
+              "ratio": 0.0
+            },
+            "overall_pass": true,
+            "critical_failures": []
+          }
+        },
+        "lisboa": {
+          "response_model": "Multi-Agent (gpt-5-mini)",
+          "response_model_config": {
+            "kind": "multi_agent",
+            "display_model": "Multi-Agent (gpt-5-mini)",
+            "agent_models": {
+              "supervisor": {
+                "model_id": "azure::gpt-5-mini",
+                "provider": "azure",
+                "model": "gpt-5-mini",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "qa": {
+                "model_id": "azure::gpt-5-nano",
+                "provider": "azure",
+                "model": "gpt-5-nano",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "weather": {
+                "model_id": "azure::gpt-5-nano",
+                "provider": "azure",
+                "model": "gpt-5-nano",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "transport": {
+                "model_id": "azure::gpt-5-nano",
+                "provider": "azure",
+                "model": "gpt-5-nano",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "researcher": {
+                "model_id": "azure::gpt-5-nano",
+                "provider": "azure",
+                "model": "gpt-5-nano",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "planner": {
+                "model_id": "azure::gpt-5-mini",
+                "provider": "azure",
+                "model": "gpt-5-mini",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              }
+            }
+          },
+          "evaluation_model": "azure::gpt-5-mini",
+          "evaluation_model_config": {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 0.0
+          },
+          "scores": {
+            "factual_accuracy": 4,
+            "tool_usage": 4,
+            "completeness": 3,
+            "relevance": 5,
+            "response_quality": 4,
+            "composite_score": 4.0,
+            "reasoning": "The agent correctly reports that the Metro de Lisboa is operating normally and mirrors the retrieved context’s timestamp and details. The GENERATED RESPONSE states “Circulação normal em todas as linhas,” which is directly supported by the get_transport_summary outputs; it does not invent statuses for individual lines (Amarela, Azul, Verde, Vermelha) but correctly conveys the overall status. The expected tool was get_metro_status, but the agent used get_transport_summary twice — these summaries contained the necessary metro status, so tool usage is acceptable though not the exact expected tool. The response is concise, clear, and includes a helpful tip and source attribution with no hallucinations."
+          },
+          "response": "### 🚇 Transport Information\n\nAqui está o ponto de situação atual dos transportes de Lisboa (21:21):\n\n🚇 **Metro de Lisboa**\n- 🟢 **Estado**: Circulação normal em todas as linhas\n\n🚌 **Carris (Urbano)**\n- 🟢 **Veículos em serviço**: 168 veículos\n\n🚌 **Carris Metropolitana (Suburbano)**\n- ⚠️ **Alertas ativos**: 93 alertas\n\n🚆 **CP Comboios (AML)**\n- 📊 **Comboios a circular na AML**: 23 comboios\n- ⚠️ **Comboios com atrasos > 1 min**: 16 comboios\n\n💡 **Dica rápida**: Mesmo com muitos alertas na Carris Metropolitana, o Metro está a circular sem interrupções. Valide horários próximos antes de sair.\n\n📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt), [*Carris*](https://www.carris.pt), [*Carris Metropolitana*](https://www.carrismetropolitana.pt) e [*CP*](https://www.cp.pt)",
+          "tools_used": [
+            "get_transport_summary",
+            "get_transport_summary"
+          ],
+          "retrieved_context": "[get_transport_summary] returned:\n🚇 🚌 🚆 **Situação dos Transportes de Lisboa** — Atualizado: 21:21\n\n🚇 **Metro de Lisboa**\n- 🟢 **Estado**: Circulação normal em todas as linhas\n\n🚋 **Carris (Urbano)**\n- 🟢 **Veículos em serviço**: 168 veículos\n\n🚌 **Carris Metropolitana (Suburbano)**\n- ⚠️ **Alertas ativos**: 93 alertas\n\n🚆 **CP Comboios (AML)**\n- 📊 **Comboios a circular na AML**: 22 comboios\n- ⚠️ **Comboios com atrasos > 1 min**: 16 comboios\n\n📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt), [*Carris*](https://www.carris.pt), [*Carris Metropolitana*](https://www.carrismetropolitana.pt) e [*CP*](https://www.cp.pt) **| Atualizado:** 21:21\n\n---\n[get_transport_summary] returned:\n🚇 🚌 🚆 **Situação dos Transportes de Lisboa** — Atualizado: 21:21\n\n🚇 **Metro de Lisboa**\n- 🟢 **Estado**: Circulação normal em todas as linhas\n\n🚋 **Carris (Urbano)**\n- 🟢 **Veículos em serviço**: 168 veículos\n\n🚌 **Carris Metropolitana (Suburbano)**\n- ⚠️ **Alertas ativos**: 93 alertas\n\n🚆 **CP Comboios (AML)**\n- 📊 **Comboios a circular na AML**: 23 comboios\n- ⚠️ **Comboios com atrasos > 1 min**: 16 comboios\n\n📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt), [*Carris*](https://www.carris.pt), [*Carris Metropolitana*](https://www.carrismetropolitana.pt) e [*CP*](https://www.cp.pt) **| Atualizado:** 21:21\n",
+          "latency": 14.698,
+          "error": null,
+          "error_type": null,
+          "tool_metrics": {
+            "tool_precision": 0.0,
+            "tool_recall": 0.0,
+            "tool_f1": 0.0
+          },
+          "heuristics": {
+            "tool_leaks": {
+              "leaked": false,
+              "leaked_items": []
+            },
+            "response_length": {
+              "acceptable": true,
+              "char_count": 779,
+              "word_count": 105,
+              "issues": []
+            },
+            "language_compliance": {
+              "compliant": false,
+              "detected_indicators": {
+                "en": 0,
+                "pt": 5,
+                "fr": 1
+              },
+              "expected_language": "en"
+            },
+            "hallucinated_features": {
+              "hallucinated": false,
+              "flagged_claims": []
+            },
+            "emoji_density": {
+              "acceptable": true,
+              "emoji_count": 12,
+              "ratio": 0.0154
+            },
+            "overall_pass": true,
+            "critical_failures": []
+          }
+        }
+      }
+    },
+    {
+      "id": "R01",
+      "query": "What are the best museums in Lisbon?",
+      "domain": "researcher",
+      "language": "en",
+      "edge_case": false,
+      "edge_type": null,
+      "expected_behavior": null,
+      "expected_facts": [
+        "List of top museums (e.g., Gulbenkian, MAAT, Museu Nacional do Azulejo)"
+      ],
+      "expected_tools": [
+        "search_places_attractions"
+      ],
+      "metrics": {
+        "zero_shot": {
+          "response_model": "azure::gpt-5-mini",
+          "response_model_config": {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 0.0
+          },
+          "evaluation_model": "azure::gpt-5-mini",
+          "evaluation_model_config": {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 0.0
+          },
+          "scores": {
+            "factual_accuracy": 3,
+            "tool_usage": 1,
+            "completeness": 5,
+            "relevance": 5,
+            "response_quality": 5,
+            "composite_score": 3.8,
+            "reasoning": "The agent provided a comprehensive list of major Lisbon museums matching expected items (Gulbenkian, MAAT, Museu Nacional do Azulejo) and included other well-known institutions (Berardo, MNAA, Museu do Oriente, Museu do Fado, MUDE, Pavilhão do Conhecimento, Museu Nacional dos Coches, Museu da Marioneta, Museu de Lisboa). However, no tools were used despite EXPECTED TOOLS listing search_places_attractions; the RETRIEVED CONTEXT was empty so facts cannot be cross-verified against tool output. The content is accurate in broad strokes and concise, but because it was generated without retrieved context there is some risk of unsupported details (e.g., exact highlights or operational tips) that are not grounded in the provided context. Overall it is relevant, well-structured, and complete for the user question, but tool-usage omission and lack of retrievable sources reduce the factual-assurance score."
+          },
+          "response": "Lisbon has a rich museum scene covering art, history, maritime heritage, science and decorative arts. Here are the top picks, with a brief note on what makes each special so you can choose by interest:\n\n1. Museu Nacional do Azulejo (National Tile Museum)\n- Focus: Decorative arts, Portugal’s iconic ceramic tile tradition (azulejos).\n- Highlights: A 17th‑century convent with an outstanding permanent collection and a spectacular 23-meter tile panel depicting Lisbon before the 1755 earthquake.\n\n2. Museu Nacional de Arte Antiga (National Museum of Ancient Art)\n- Focus: Old master paintings, sculpture, decorative arts from Portugal and Europe.\n- Highlights: Works by Portuguese and European artists, a strong collection of religious art and decorative objects in a grand palace setting.\n\n3. Museu Coleção Berardo (Berardo Collection Museum)\n- Focus: Modern and contemporary art.\n- Highlights: Strong holdings of 20th‑century masters (Picasso, Warhol, Dali, Bacon, etc.). Located in Belém with rotating temporary shows.\n\n4. Museu Calouste Gulbenkian\n- Focus: Wide-ranging, encyclopedic collection spanning ancient to early 20th‑century art.\n- Highlights: Exceptional collection of European paintings, decorative arts, Islamic and Oriental art; peaceful gardens and very accessible layout.\n\n5. Museu do Oriente\n- Focus: Asian art and the maritime connections between Portugal and Asia.\n- Highlights: Exhibits covering Portuguese colonial and trading history with Asia, including art, costumes and religious artifacts.\n\n6. Museu da Marioneta (Puppet Museum)\n- Focus: Puppetry from Portugal and around the world.\n- Highlights: Charming, family-friendly displays and workshops; intimate, quirky collection.\n\n7. Museu do Fado\n- Focus: Fado music and Portuguese popular culture.\n- Highlights: Interactive exhibits, historic recordings, instruments and the story of Lisbon’s signature music.\n\n8. Museu de Lisboa (several sites)\n- Focus: Lisbon’s urban history.\n- Highlights: Multiple venues (Pimenta Palace, Casa dos Bicos, etc.) that together tell the story of the city’s development and daily life.\n\n9. MUDE – Museu do Design e da Moda (Design & Fashion Museum)\n- Focus: International design and fashion.\n- Highlights: Rotating exhibitions showcasing 20th–21st century designers and iconic industrial design pieces.\n\n10. Pavilhão do Conhecimento — Ciência Viva (Science Museum)\n- Focus: Hands‑on science and technology.\n- Highlights: Great for families and kids, interactive exhibits and temporary science shows.\n\nBonus/historic-specialty:\n- Museu Nacional dos Coches (National Coach Museum, in Belém) — one of the world’s finest collections of historic carriages.\n- MAAT (Museum of Art, Architecture and Technology) — striking contemporary building on the riverfront with architecture and contemporary art/programming.\n\nTips:\n- If pressed for time, choose 2–3 by theme: for classical art pick Gulbenkian + MNAA; for contemporary art go to Berardo + MAAT; for traditional Portuguese culture pick Azulejo + Fado + Coaches.\n- Many museums are closed one weekday (check opening days/hours) and offer discounted or free entry on certain days.\n- Buy tickets online for popular sites in Belém (MAAT, Berardo, Coaches) to avoid lines.\n\nIf you tell me your interests (art period, history, family/kids, architecture, or how much time you have), I can suggest a tailored half‑day or full‑day museum itinerary.",
+          "latency": 6.471,
+          "error": null,
+          "error_type": null,
+          "tool_metrics": {
+            "tool_precision": 1.0,
+            "tool_recall": 0.0,
+            "tool_f1": 0.0
+          },
+          "heuristics": {
+            "tool_leaks": {
+              "leaked": false,
+              "leaked_items": []
+            },
+            "response_length": {
+              "acceptable": true,
+              "char_count": 3395,
+              "word_count": 500,
+              "issues": []
+            },
+            "language_compliance": {
+              "compliant": true,
+              "detected_indicators": {
+                "en": 8,
+                "pt": 4,
+                "fr": 1
+              },
+              "expected_language": "en"
+            },
+            "hallucinated_features": {
+              "hallucinated": true,
+              "flagged_claims": [
+                "Purchase/order capability"
+              ]
+            },
+            "emoji_density": {
+              "acceptable": true,
+              "emoji_count": 0,
+              "ratio": 0.0
+            },
+            "overall_pass": false,
+            "critical_failures": [
+              "hallucinated_features"
+            ]
+          }
+        },
+        "lisboa": {
+          "response_model": "Multi-Agent (gpt-5-mini)",
+          "response_model_config": {
+            "kind": "multi_agent",
+            "display_model": "Multi-Agent (gpt-5-mini)",
+            "agent_models": {
+              "supervisor": {
+                "model_id": "azure::gpt-5-mini",
+                "provider": "azure",
+                "model": "gpt-5-mini",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "qa": {
+                "model_id": "azure::gpt-5-nano",
+                "provider": "azure",
+                "model": "gpt-5-nano",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "weather": {
+                "model_id": "azure::gpt-5-nano",
+                "provider": "azure",
+                "model": "gpt-5-nano",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "transport": {
+                "model_id": "azure::gpt-5-nano",
+                "provider": "azure",
+                "model": "gpt-5-nano",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "researcher": {
+                "model_id": "azure::gpt-5-nano",
+                "provider": "azure",
+                "model": "gpt-5-nano",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "planner": {
+                "model_id": "azure::gpt-5-mini",
+                "provider": "azure",
+                "model": "gpt-5-mini",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              }
+            }
+          },
+          "evaluation_model": "azure::gpt-5-mini",
+          "evaluation_model_config": {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 0.0
+          },
+          "scores": {
+            "factual_accuracy": 4,
+            "tool_usage": 5,
+            "completeness": 2,
+            "relevance": 3,
+            "response_quality": 4,
+            "composite_score": 3.6,
+            "reasoning": "The agent used the expected tool (search_places_attractions) and its response closely mirrors the retrieved context: the five listed places and their ratings, brief descriptions, links, and notes (free admission, Lisboa Card discount, closed status) match the tool output. However, the user asked for “best museums in Lisbon” and the returned list includes a theatre and a cultural centre (Teatro Municipal S. Luiz) and omits prominent museums from the EXPECTED FACTS (e.g., Gulbenkian, MAAT, Museu Nacional do Azulejo). No fabricated facts appear—the agent stuck to the tool data—but the selection is incomplete and not fully aligned with the user intent to list top museums. Tool usage was correct and complete."
+          },
+          "response": "### 📍 Places & Attractions\n\n**1.** 🏛️ **Museum of the Lisbon Geographical Society** - ⭐ 4.6/5\n- 📝 **Brief description**: Explore geography-inspired exhibits in Lisbon’s Geographical Society’s museum.\n- 📍 **Address**: Lisbon\n- 🕒 **Hours**: Check official website\n- 💡 **Tip**: Free admission\n- 🌐 **[Official page](https://www.visitlisboa.com/en/places/museum-of-the-lisbon-geographical-society)**\n\n**2.** 🏛️ **National Museum of Natural History and Science** - ⭐ 3.5/5\n- 📝 **Brief description**: Fascinating natural history and science collections in Lisbon.\n- 📍 **Address**: Lisbon\n- 🕒 **Hours**: Check official website\n- 💡 **Tip**: 10% Lisboa Card discount\n- 🌐 **[Official page](https://www.visitlisboa.com/en/places/national-museum-of-natural-history-and-science)**\n\n**3.** 🏛️ **Museum of Lisbon – Pimenta Palace** - ⭐ 3.9/5\n- 📝 **Brief description**: Chronicles the diverse lives of Lisbon through centuries of history.\n- 📍 **Address**: Lisbon\n- 🕒 **Hours**: Today: Closed\n- 💡 **Tip**: Check hours in advance\n- 🌐 **[Official page](https://www.visitlisboa.com/en/places/museum-of-lisbon-pimenta-palace)**\n\n**4.** 🏛️ **National Military Museum** - ⭐ 4.3/5\n- 📝 **Brief description**: Large collection of artillery and military artifacts.\n- 📍 **Address**: Lisbon\n- 🕒 **Hours**: Today: Closed\n- 💡 **Tip**: Great for history and weaponry enthusiasts\n- 🌐 **[Official page](https://www.visitlisboa.com/en/places/national-military-museum)**\n\n**5.** 🏛️ **Teatro Municipal S. Luiz** - ⭐ 3.3/5\n- 📝 **Brief description**: One of Lisbon’s most beautiful theatres, housed in a historic building.\n- 📍 **Address**: Lisbon\n- 🕒 **Hours**: Check official website\n- 🌐 **[Official page](https://www.visitlisboa.com/en/places/teatro-municipal-s-luiz)**\n\n📌 **Fonte:** [*VisitLisboa*](https://www.visitlisboa.com/en/places)",
+          "tools_used": [
+            "search_places_attractions"
+          ],
+          "retrieved_context": "[search_places_attractions] returned:\n🏛️ **Found 5 Places/Attractions in Lisbon:**\n\n\n1. 🏛️ **Museum of the Lisbon Geographical Society**\n   📂 Category: Museums\n   Name: Museum of the Lisbon Geographical Society\nUrl: https://www.visitlisboa.com/en/places/museum-of-the-lisbon-geographical-society\nCategory: Museums\nShort Description: Be a 21st-century explorer and\n   📍 Lisbon\n   💰 Price: Free\n   ⭐ TripAdvisor: 4.6/5 (18 reviews)\n   📞 351213425401\n   🔗 https://www.visitlisboa.com/en/places/museum-of-the-lisbon-geographical-society\n\n2. 🏛️ **National Museum of Natural History and Science**\n   📂 Category: Museums & Monuments\n   🎫 10% with Lisboa Card\n   Name: National Museum of Natural History and Science\nUrl: https://www.visitlisboa.com/en/places/national-museum-of-natural-history-and-science\nCategory: Museums & Monuments\nShort Description: When vis\n   📍 Lisbon\n   ⭐ TripAdvisor: 3.5/5 (399 reviews)\n   📞 351213921800\n   🔗 https://www.visitlisboa.com/en/places/national-museum-of-natural-history-and-science\n\n3. 🏛️ **Museum of Lisbon – Pimenta Palace**\n   📂 Category: Museums\n   Name: Museum of Lisbon – Pimenta Palace\nUrl: https://www.visitlisboa.com/en/places/museum-of-lisbon-pimenta-palace\nCategory: Museums\nShort Description: Discover the various lives of the city of Lisbon\n   📍 Lisbon\n   🕐 Today: Closed\n   ⭐ TripAdvisor: 3.9/5 (83 reviews)\n   📞 351217513200\n   🔗 https://www.visitlisboa.com/en/places/museum-of-lisbon-pimenta-palace\n\n4. 🏛️ **National Military Museum**\n   📂 Category: Museums\n   Name: National Military Museum\nUrl: https://www.visitlisboa.com/en/places/national-military-museum\nCategory: Museums\nShort Description: It has large collection of artillery and war-related pieces\nLisb\n   📍 Lisbon\n   🕐 Today: Closed\n   ⭐ TripAdvisor: 4.3/5 (270 reviews)\n   📞 +351218842569\n   🔗 https://www.visitlisboa.com/en/places/national-military-museum\n\n5. 🏛️ **Teatro Municipal S. Luiz**\n   📂 Category: Cultural Centres\n   Name: Teatro Municipal S. Luiz\nUrl: https://www.visitlisboa.com/en/places/teatro-municipal-s-luiz\nCategory: Cultural Centres\nShort Description: One of the prettiest theatres in Lisbon, set between sho\n   📍 Lisbon\n   ⭐ TripAdvisor: 3.3/5 (15 reviews)\n   📞 351213257650\n   🔗 https://www.visitlisboa.com/en/places/teatro-municipal-s-luiz\n\n\n📊 **Sources:** 5 from VisitLisboa, 0 from Lisboa Aberta\n💡 Try more specific queries for better results.",
+          "latency": 17.792,
+          "error": null,
+          "error_type": null,
+          "tool_metrics": {
+            "tool_precision": 1.0,
+            "tool_recall": 1.0,
+            "tool_f1": 1.0
+          },
+          "heuristics": {
+            "tool_leaks": {
+              "leaked": false,
+              "leaked_items": []
+            },
+            "response_length": {
+              "acceptable": true,
+              "char_count": 1800,
+              "word_count": 219,
+              "issues": []
+            },
+            "language_compliance": {
+              "compliant": true,
+              "detected_indicators": {
+                "en": 2,
+                "pt": 2,
+                "fr": 0
+              },
+              "expected_language": "en"
+            },
+            "hallucinated_features": {
+              "hallucinated": false,
+              "flagged_claims": []
+            },
+            "emoji_density": {
+              "acceptable": true,
+              "emoji_count": 41,
+              "ratio": 0.0228
+            },
+            "overall_pass": true,
+            "critical_failures": []
+          }
+        }
+      }
+    },
+    {
+      "id": "M01",
+      "query": "Plan a full day in Lisbon for tomorrow. I want to visit museums and use public transport.",
+      "domain": "multi_agent",
+      "language": "en",
+      "edge_case": false,
+      "edge_type": null,
+      "expected_behavior": null,
+      "expected_facts": [
+        "Weather forecast for tomorrow",
+        "Museum recommendations",
+        "Transport route suggestions"
+      ],
+      "expected_tools": [
+        "get_weather_forecast",
+        "search_places_attractions",
+        "get_metro_status",
+        "get_route_between_stations"
+      ],
+      "metrics": {
+        "zero_shot": {
+          "response_model": "azure::gpt-5-mini",
+          "response_model_config": {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 0.0
+          },
+          "evaluation_model": "azure::gpt-5-mini",
+          "evaluation_model_config": {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 0.0
+          },
+          "scores": {
+            "factual_accuracy": 3,
+            "tool_usage": 1,
+            "completeness": 3,
+            "relevance": 5,
+            "response_quality": 4,
+            "composite_score": 3.2,
+            "reasoning": "The agent produced a coherent full-day museum itinerary with timings, museum suggestions, and transport options, but it did so without calling any tools or providing a weather forecast — a required EXPECTED FACT. Several transport suggestions (specific lines like 15E and general metro routing) are plausible for Lisbon but cannot be verified against RETRIEVED CONTEXT because no tools were used; thus some details may be unsupported. The response covered museum recommendations and transport route suggestions in reasonable detail, but missed the explicit weather forecast and did not use any of the EXPECTED_TOOLS (get_weather_forecast, search_places_attractions, get_metro_status, get_route_between_stations). Overall it is useful and well-structured but incomplete relative to the required facts and tools."
+          },
+          "response": "Great — I’ll plan a full day in Lisbon focused on museums and using public transport. I’ll assume tomorrow is a weekday; if it’s a specific date (weekend or holiday) tell me and I’ll adjust. I’ll include timings, transit directions, approximate travel times, and quick tips (tickets, closures, cafés). If you prefer more or fewer museums or a different pace, tell me.\n\nOverview (one-day museum-focused plan)\n- Start: 09:00 — Breakfast near your accommodation (adjust as needed)\n- Morning: 09:45–13:00 — Belém museum cluster (MAAT and Museu Nacional de Arte Antiga or Jerónimos area)\n- Lunch: 13:00–14:00 — Belém or riverside café\n- Afternoon: 14:30–17:30 — Museu Calouste Gulbenkian and/or Museu Nacional do Azulejo (choose one as they are in different directions)\n- Early evening: 18:00–19:00 — Praça do Comércio riverside stroll or Chiado brief walk\n- Optional evening: 19:30 — Dinner in Bairro Alto/Chiado\n\nDetailed schedule with transport\n\nBefore you leave\n- Buy a 24-hour public transport ticket (Viva Viagem card) at any metro station or Carris kiosks. It covers metro, trams, many buses, and suburban trains inside the city zones — good value for a full day of travel.\n- Bring a printed or phone copy of museum opening times/tickets; many sites accept walk-ins but prebooking skips lines.\n- Wear comfortable shoes; Lisbon is hilly.\n\n09:00 — Breakfast\n- Have breakfast near your accommodation. If you’re staying central (Baixa/Chiado), try a pastel de nata and coffee at a local pastelaria.\n\n09:30 — Head to Belém\n- From central Lisbon (Baixa/Chiado), take tram 15E or the Vimeca/CP Cascais train from Cais do Sodré to Belém (train is faster; tram is scenic).\n- Travel time: 20–30 minutes depending on option.\n\n09:50–11:20 — MAAT (Museum of Art, Architecture and Technology)\n- Modern riverside museum with striking architecture and rooftop views over the Tagus.\n- Plan 60–75 minutes to see the main exhibits + rooftop.\n- Tip: Buy tickets online (sometimes time slots); café on site for a quick coffee.\n\n11:30–13:00 — Museu Nacional de Arte Antiga OR Museu Coleção Berardo (modern/contemporary)\n- Option A: Museu Nacional de Arte Antiga (MNAA) — Portugal’s national art collection; reachable by a short tram/taxi ride from Belém or a 20-min walk. If you’re interested in old masters and Portuguese painting, choose this.\n- Option B: Museu Coleção Berardo — modern and contemporary art located in the cultural center in Belém (Cultural Center of Belém, CCB). If you prefer modern art, choose Berardo (also near MAAT).\n- Time: 60–90 minutes.\n\n13:00–14:00 — Lunch in Belém\n- Cafés near the river or around the Jerónimos area. Try Pastéis de Belém (expect a queue but it’s the classic); otherwise many riverside cafés offer salads, sandwiches, and seafood.\n\n14:00 — Travel to central/east Lisbon museums\n- Two good afternoon alternatives (pick one based on your interest):\n\nOption 1 — Calouste Gulbenkian (classical & modern fine arts)\n- From Belém: take tram 15E back to Praça da Figueira/Cais do Sodré then metro (Green line) to Alameda and change to the Yellow line to São Sebastião, or take a taxi (faster, ~15–20 min).\n- Travel time: 30–45 min by public transport.\n- 14:45–17:15 — Museu Calouste Gulbenkian\n  - Superb collection spanning Europe, Egypt, Islamic art, and Impressionists; set in landscaped gardens.\n  - Plan 1.5–2 hours. Don’t miss the garden for a quiet break.\n  - Tip: late-afternoon visits are pleasant and less crowded.\n\nOption 2 — Museu Nacional do Azulejo (National Tile Museum)\n- From Belém: take tram 15E or bus back to central stations and then tram/bus east toward Santa Apolónia or Alcântara; alternatively take train/metro combinations. A simpler route: take tram 15E to Cais do Sodré, then train to Oriente and a short bus or taxi; total 35–50 min.\n- 14:30–17:00 — Museu Nacional do Azulejo\n  - Housed in a former convent with beautiful tile panels tracing tile history up to modern times. The chapel and the cloister are highlights.\n  - Plan 1.5–2 hours.\n  - Tip: there’s a café with river views on the terrace (seasonal).\n\nIf you prefer to minimize transfers, choose Gulbenkian (central-west) or Azulejo (east) depending on where you want to end.\n\n17:15–18:00 — Return toward city center and short stroll\n- Head to Chiado/Bairro Alto or Praça do Comércio for an early evening riverside walk.\n- From Gulbenkian: take metro to Baixa-Chiado (about 15–20 min).\n- From Azulejo (near Santa Apolónia): take tram or train to Baixa/Chiado (20–30 min).\n\n18:00–19:00 — Explore Praça do Comércio and Baixa\n- Walk along the riverfront, admire the Arco da Rua Augusta, take photos.\n- Stop for a quick drink in a café in Baixa or a rooftop bar in Chiado for views.\n\n19:30 — Dinner in Chiado/Bairro Alto\n- Plenty of options: traditional Portuguese (bacalhau, seafood), modern tapas-style, or international. If you want a relaxed end, choose a restaurant in Chiado with a balcony or a small taberna in Bairro Alto.\n\nPractical tips and museum info\n- Opening times (typical): Many museums open ~10:00 and close between 17:00–19:00. Check each museum’s website for tomorrow’s specific hours and book any timed tickets.\n- Transport passes: Viva Viagem card — load 24 hours or zapping credit. Single tickets are also available.\n- Accessibility: Some older sites have limited accessibility — check ahead if needed.\n- Security and belongings: Lisbon is generally safe but watch for pickpockets in busy transport and tourist spots.\n- Weather: Lisbon can be sunny and breezy near the river; bring a light layer.\n\nIf you tell me:\n- where you’re staying (neighborhood) I can adjust the start/end and give exact tram/bus directions;\n- which museum types you prefer (classic art, contemporary, history, tiles, design) I’ll pick the best afternoon choice;\n- whether you’d like fewer transfers or more walking I’ll tailor the route.\n\nWould you like me to:\n- Book tickets (I can give direct links and step-by-step how to buy)? \n- Give exact tram/bus numbers and step-by-step turn-by-turn for your specific accommodation?",
+          "latency": 14.15,
+          "error": null,
+          "error_type": null,
+          "tool_metrics": {
+            "tool_precision": 1.0,
+            "tool_recall": 0.0,
+            "tool_f1": 0.0
+          },
+          "heuristics": {
+            "tool_leaks": {
+              "leaked": false,
+              "leaked_items": []
+            },
+            "response_length": {
+              "acceptable": false,
+              "char_count": 6022,
+              "word_count": 986,
+              "issues": [
+                "Too long: 6022 chars (max: 5000)"
+              ]
+            },
+            "language_compliance": {
+              "compliant": true,
+              "detected_indicators": {
+                "en": 9,
+                "pt": 4,
+                "fr": 1
+              },
+              "expected_language": "en"
+            },
+            "hallucinated_features": {
+              "hallucinated": true,
+              "flagged_claims": [
+                "Purchase/order capability"
+              ]
+            },
+            "emoji_density": {
+              "acceptable": true,
+              "emoji_count": 0,
+              "ratio": 0.0
+            },
+            "overall_pass": false,
+            "critical_failures": [
+              "response_length",
+              "hallucinated_features"
+            ]
+          }
+        },
+        "lisboa": {
+          "response_model": "Multi-Agent (gpt-5-mini)",
+          "response_model_config": {
+            "kind": "multi_agent",
+            "display_model": "Multi-Agent (gpt-5-mini)",
+            "agent_models": {
+              "supervisor": {
+                "model_id": "azure::gpt-5-mini",
+                "provider": "azure",
+                "model": "gpt-5-mini",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "qa": {
+                "model_id": "azure::gpt-5-nano",
+                "provider": "azure",
+                "model": "gpt-5-nano",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "weather": {
+                "model_id": "azure::gpt-5-nano",
+                "provider": "azure",
+                "model": "gpt-5-nano",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "transport": {
+                "model_id": "azure::gpt-5-nano",
+                "provider": "azure",
+                "model": "gpt-5-nano",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "researcher": {
+                "model_id": "azure::gpt-5-nano",
+                "provider": "azure",
+                "model": "gpt-5-nano",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "planner": {
+                "model_id": "azure::gpt-5-mini",
+                "provider": "azure",
+                "model": "gpt-5-mini",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              }
+            }
+          },
+          "evaluation_model": "azure::gpt-5-mini",
+          "evaluation_model_config": {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 0.0
+          },
+          "scores": {
+            "factual_accuracy": 3,
+            "tool_usage": 2,
+            "completeness": 3,
+            "relevance": 4,
+            "response_quality": 4,
+            "composite_score": 3.2,
+            "reasoning": "The agent's itinerary uses the retrieved attractions and notes closures from the context (Water Museum and National Military Museum marked closed), and recommends museums found by search_places_attractions. However, it failed to provide a weather forecast even though weather was an expected fact — it only noted data unavailable and suggested IPMA. Tool usage omitted get_weather_forecast and get_metro_status and duplicated get_route_between_stations; the actual tools used included find_nearby_services (irrelevant) and two identical route calls that returned failures. Transport suggestions are general rather than specific routes despite route tool availability. Overall accurate on museum listings and cautious about closures, but incomplete on weather and concrete transit directions."
+          },
+          "response": "📅 **Itinerary for Sunday, March 08, 2026**\n\n🌤️ **Conditions**: ⚠️ Weather data not available. Consider checking [ipma.pt](https://www.ipma.pt) before outdoor activities. Because forecast is unknown, I prioritized museums and indoor options; if the weather is good you can add a short riverside walk in Belém or Alfama.\n\n---\n🕐 **09:30** - **National Museum of Natural History and Science**\n📍 University of Lisbon, Campo Grande, 1749-016 Lisbon\n💡 Start the day at this engaging museum — arrive near opening to avoid crowds and spend ~1.5–2 hours exploring natural history and science exhibits.\n🚇 **For transport**: For exact metro directions from your location, please provide your starting station. For general info about metro, check [metrolisboa.pt](https://www.metrolisboa.pt)\n**Horários de funcionamento**: consultar website oficial\n**Preços**: verificar no local ou website\n\n---\n🕐 **11:30** - **Travel to central museum cluster / change of area (buffer time)**\n💡 Allow ~30–45 min for transit + a short coffee/snack break en route. This buffer covers metro/tram/bus transfers and walking between stops.\n\n---\n🕐 **12:15** - **Water Museum – Barbadinhos Steam Pumping Station (exterior visit if interiors closed)**\n📍 Av. Dom João II, 1990-087 Lisbon\n💡 Data shows the Water Museum is closed today; if still closed tomorrow, enjoy the exterior and nearby points of interest. If it’s open, plan ~1 hour for the visit.\n🚇 **Transport note**: Use metro toward Alameda/Oriente and then a short surface transfer if needed.\n**Horários de funcionamento**: consultar website oficial\n**Preços**: verificar no local ou website\n\n---\n🕐 **13:30** - **Lunch break (central area)**\n📍 Choose a nearby café or restaurant in the city centre.\n💡 **For more dining options**: thefork.pt or zomato.pt\n🚇 **Transport to next museum**: allow 15–30 min\n\n---\n🕐 **15:00** - **National Military Museum**\n📍 Rua do Padre Cruz (verify exact address before travel)\n💡 Data indicates this museum was closed today; verify tomorrow’s opening hours. If open, allocate 1–1.5 hours to view the collections. If still closed, replace with the Museum of the Lisbon Geographical Society (compact and central).\n**Horários de funcionamento**: consultar website oficial\n**Preços**: verificar no local ou website\n\n---\n🕐 **16:45** - **Optional: Museum of the Lisbon Geographical Society (short visit)**\n📍 Central Lisbon (confirm exact address)\n💡 A compact, often quiet museum with maps and geographic displays — good 30–45 minute visit if you’d like a lighter stop or if another museum is closed.\n**Horários de funcionamento**: consultar website oficial\n**Preços**: verificar no local ou website\n\n---\n🕐 **18:00** - **Head to Belém for evening museums or riverside option**\n📍 Belém (MAAT, Museu dos Coches, Pastéis de Belém area)\n💡 If energy and transport time allow, travel to Belém for MAAT or Museu dos Coches — both are excellent indoor options. Note: Belém is best reached by tram 15E, bus, or the Cais do Sodré → Belém train (CP); I don’t have exact route data from your origin. Allow ~45–60 min travel from central Lisbon.\n**Horários de funcionamento**: consultar website oficial\n**Preços**: verificar no local ou website\n\n---\n🕐 **20:00** - **Dinner / Evening cultural wind-down**\n📍 Alfama or Chiado for Fado houses or central dining\n💡 If you prefer to stay museum-focused, have dinner near your last museum stop. If you want live culture, an evening Fado show in Alfama can be a memorable finish (check availability and schedules).\n\n---\n✨ **Final Tips**:\n- **Travel card**: Get a Viva Viagem card for metro, tram and bus; consider a Lisboa Card for museum discounts if you plan several paid entries.\n- **Timing**: Allow 15–30 min buffer between visits for walking and queues.\n- **Transport details**: For exact metro/tram routes and step-by-step directions from your starting address, please ask separately or check real-time info at [metrolisboa.pt](https://www.metrolisboa.pt) and [carris.pt](https://www.carris.pt)\n- Verify opening hours and closures for each museum on their official websites before you go — some museums were marked closed in the provided data.\n- If you want a revised schedule with precise metro/tram lines and walking times, give me your starting metro station or hotel address and I’ll refine it.\n\n📌 Source: VisitLisboa ([visitlisboa.com](https://www.visitlisboa.com)) | IPMA ([ipma.pt](https://www.ipma.pt)) | Metro de Lisboa ([metrolisboa.pt](https://www.metrolisboa.pt)) | **Updated:** 21:21",
+          "tools_used": [
+            "search_places_attractions",
+            "find_nearby_services",
+            "get_route_between_stations",
+            "get_route_between_stations"
+          ],
+          "retrieved_context": "[search_places_attractions] returned:\n🏛️ **Found 5 Places/Attractions in Lisbon:**\n\n\n1. 🏛️ **National Museum of Natural History and Science**\n   📂 Category: Museums & Monuments\n   🎫 10% with Lisboa Card\n   Name: National Museum of Natural History and Science\nUrl: https://www.visitlisboa.com/en/places/national-museum-of-natural-history-and-science\nCategory: Museums & Monuments\nShort Description: When vis\n   📍 Lisbon\n   ⭐ TripAdvisor: 3.5/5 (399 reviews)\n   📞 351213921800\n   🔗 https://www.visitlisboa.com/en/places/national-museum-of-natural-history-and-science\n\n2. 🏛️ **Museum of the Lisbon Geographical Society**\n   📂 Category: Museums\n   Name: Museum of the Lisbon Geographical Society\nUrl: https://www.visitlisboa.com/en/places/museum-of-the-lisbon-geographical-society\nCategory: Museums\nShort Description: Be a 21st-century explorer and\n   📍 Lisbon\n   💰 Price: Free\n   ⭐ TripAdvisor: 4.6/5 (18 reviews)\n   📞 351213425401\n   🔗 https://www.visitlisboa.com/en/places/museum-of-the-lisbon-geographical-society\n\n3. 🏛️ **National Museum of Sport**\n   📂 Category: Museums & Monuments\n   Name: National Museum of Sport\nUrl: https://www.visitlisboa.com/en/places/national-museum-of-sport\nCategory: Museums & Monuments\nShort Description: Take your mark, get set, go… to the Museu Nacional d\n   📍 Lisbon\n   ⭐ TripAdvisor: 2.9/5 (14 reviews)\n   📞 351210540340\n   🔗 https://www.visitlisboa.com/en/places/national-museum-of-sport\n\n4. 🏛️ **Water Museum - Barbadinhos Steam Pumping Station**\n   📂 Category: Monuments\n   🎫 50% with Lisboa Card\n   Name: Water Museum - Barbadinhos Steam Pumping Station\nUrl: https://www.visitlisboa.com/en/places/water-museum-barbadinhos-steam-pumping-station\nCategory: Monuments\nShort Description: The Water Museum\n   📍 Lisbon\n   🕐 Today: Closed\n   ⭐ TripAdvisor: 3.8/5 (61 reviews)\n   📞 351218100215\n   🔗 https://www.visitlisboa.com/en/places/water-museum-barbadinhos-steam-pumping-station\n\n5. 🏛️ **National Military Museum**\n   📂 Category: Museums\n   Name: National Military Museum\nUrl: https://www.visitlisboa.com/en/places/national-military-museum\nCategory: Museums\nShort Description: It has large collection of artillery and war-related pieces\nLisb\n   📍 Lisbon\n   🕐 Today: Closed\n   ⭐ TripAdvisor: 4.3/5 (270 reviews)\n   📞 +351218842569\n   🔗 https://www.visitlisboa.com/en/places/national-military-museum\n\n\n📊 **Sources:** 5 from VisitLisboa, 0 from Lisboa Aberta\n💡 Try more specific queries for better results.\n---\n[find_nearby_services] returned:\n📍 Found 5 results from 'Sistema de Videovigilância Bairro Alto (sorted by distance)':\n\n1. CV02\n   📍  \n   📏 0.93 km away\n   🗺️ (38.715142, -9.144778)\n\n2. CV09\n   📍  \n   📏 0.99 km away\n   🗺️ (38.714331, -9.144262)\n\n3. CV01\n   📍  \n   📏 0.99 km away\n   🗺️ (38.715118, -9.146087)\n\n4. CV04\n   📍  \n   📏 1.02 km away\n   🗺️ (38.714391, -9.145321)\n\n5. CV08\n   📍  \n   📏 1.03 km away\n   🗺️ (38.713975, -9.144503)\n\n\n---\n[get_route_between_stations] returned:\n🗺️ **Route: Starting Point → Museums In Central Lisbon**\n\n❌ Neither location is a known Metro station.\n\n\n📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) **| Atualizado:** 21:22\n\n---\n[get_route_between_stations] returned:\n🗺️ **Route: Origin → Museum Cluster Lisbon**\n\n❌ Neither location is a known Metro station.\n\n\n📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) **| Atualizado:** 21:22\n",
+          "latency": 34.087,
+          "error": null,
+          "error_type": null,
+          "tool_metrics": {
+            "tool_precision": 0.667,
+            "tool_recall": 0.5,
+            "tool_f1": 0.571
+          },
+          "heuristics": {
+            "tool_leaks": {
+              "leaked": false,
+              "leaked_items": []
+            },
+            "response_length": {
+              "acceptable": true,
+              "char_count": 4474,
+              "word_count": 679,
+              "issues": []
+            },
+            "language_compliance": {
+              "compliant": true,
+              "detected_indicators": {
+                "en": 9,
+                "pt": 4,
+                "fr": 1
+              },
+              "expected_language": "en"
+            },
+            "hallucinated_features": {
+              "hallucinated": false,
+              "flagged_claims": []
+            },
+            "emoji_density": {
+              "acceptable": true,
+              "emoji_count": 33,
+              "ratio": 0.0074
+            },
+            "overall_pass": true,
+            "critical_failures": []
+          }
+        }
+      }
+    },
+    {
+      "id": "G01",
+      "query": "Hello!",
+      "domain": "greeting",
+      "language": "en",
+      "edge_case": false,
+      "edge_type": null,
+      "expected_behavior": null,
+      "expected_facts": [
+        "Friendly greeting",
+        "Brief description of system capabilities"
+      ],
+      "expected_tools": [],
+      "metrics": {
+        "zero_shot": {
+          "response_model": "azure::gpt-5-mini",
+          "response_model_config": {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 0.0
+          },
+          "evaluation_model": "azure::gpt-5-mini",
+          "evaluation_model_config": {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 0.0
+          },
+          "scores": {
+            "factual_accuracy": 5,
+            "tool_usage": 5,
+            "completeness": 4,
+            "relevance": 5,
+            "response_quality": 5,
+            "composite_score": 4.8,
+            "reasoning": "The agent response is a simple, appropriate greeting that matches the user's \"Hello!\" and invites further interaction. It is concise and friendly but does not include a description of system capabilities as listed in the EXPECTED FACTS; however, the instructions allowed brief description but did not require it for a greeting to be acceptable. No tools were expected or used, which is correct. The response is relevant, high-quality, and contains no fabricated facts."
+          },
+          "response": "Hello! How can I help you today?",
+          "latency": 0.546,
+          "error": null,
+          "error_type": null,
+          "tool_metrics": {
+            "tool_precision": 1.0,
+            "tool_recall": 1.0,
+            "tool_f1": 1.0
+          },
+          "heuristics": {
+            "tool_leaks": {
+              "leaked": false,
+              "leaked_items": []
+            },
+            "response_length": {
+              "acceptable": true,
+              "char_count": 32,
+              "word_count": 7,
+              "issues": []
+            },
+            "language_compliance": {
+              "compliant": true,
+              "detected_indicators": {
+                "en": 2,
+                "pt": 0,
+                "fr": 0
+              },
+              "expected_language": "en"
+            },
+            "hallucinated_features": {
+              "hallucinated": false,
+              "flagged_claims": []
+            },
+            "emoji_density": {
+              "acceptable": true,
+              "emoji_count": 0,
+              "ratio": 0.0
+            },
+            "overall_pass": true,
+            "critical_failures": []
+          }
+        },
+        "lisboa": {
+          "response_model": "Multi-Agent (gpt-5-mini)",
+          "response_model_config": {
+            "kind": "multi_agent",
+            "display_model": "Multi-Agent (gpt-5-mini)",
+            "agent_models": {
+              "supervisor": {
+                "model_id": "azure::gpt-5-mini",
+                "provider": "azure",
+                "model": "gpt-5-mini",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "qa": {
+                "model_id": "azure::gpt-5-nano",
+                "provider": "azure",
+                "model": "gpt-5-nano",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "weather": {
+                "model_id": "azure::gpt-5-nano",
+                "provider": "azure",
+                "model": "gpt-5-nano",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "transport": {
+                "model_id": "azure::gpt-5-nano",
+                "provider": "azure",
+                "model": "gpt-5-nano",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "researcher": {
+                "model_id": "azure::gpt-5-nano",
+                "provider": "azure",
+                "model": "gpt-5-nano",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              },
+              "planner": {
+                "model_id": "azure::gpt-5-mini",
+                "provider": "azure",
+                "model": "gpt-5-mini",
+                "temperature": 1,
+                "type": "ChatOpenAI"
+              }
+            }
+          },
+          "evaluation_model": "azure::gpt-5-mini",
+          "evaluation_model_config": {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 0.0
+          },
+          "scores": {
+            "factual_accuracy": 5,
+            "tool_usage": 5,
+            "completeness": 5,
+            "relevance": 5,
+            "response_quality": 5,
+            "composite_score": 5.0,
+            "reasoning": "The response provides a friendly greeting and a concise description of system capabilities, matching the EXPECTED FACTS. No external facts were asserted, so there are no hallucinations; the assistant stayed within scope. No tools were expected or used, which aligns with the ACTUAL TOOLS USED. The message is brief, relevant, and clear, fulfilling the user's simple greeting appropriately."
+          },
+          "response": "Hello! 👋 I'm your Lisbon Urban Assistant. How can I help you explore the Lisbon Metropolitan Area today? You can ask about weather, transport, museums, restaurants, events, itineraries, or nearby services.",
+          "tools_used": [],
+          "retrieved_context": "",
+          "latency": 0.938,
+          "error": null,
+          "error_type": null,
+          "tool_metrics": {
+            "tool_precision": 1.0,
+            "tool_recall": 1.0,
+            "tool_f1": 1.0
+          },
+          "heuristics": {
+            "tool_leaks": {
+              "leaked": false,
+              "leaked_items": []
+            },
+            "response_length": {
+              "acceptable": true,
+              "char_count": 205,
+              "word_count": 31,
+              "issues": []
+            },
+            "language_compliance": {
+              "compliant": true,
+              "detected_indicators": {
+                "en": 3,
+                "pt": 0,
+                "fr": 0
+              },
+              "expected_language": "en"
+            },
+            "hallucinated_features": {
+              "hallucinated": false,
+              "flagged_claims": []
+            },
+            "emoji_density": {
+              "acceptable": true,
+              "emoji_count": 1,
+              "ratio": 0.0049
+            },
+            "overall_pass": true,
+            "critical_failures": []
+          }
+        }
+      }
+    }
+  ]
+}
