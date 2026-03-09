@@ -13,6 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from agent.agents.base import BaseAgent, clean_response, parse_json_response, traceable
 from agent.prompts.supervisor import get_supervisor_prompt
+from agent.utils.response_formatter import strip_unsupported_closing_offers
 
 
 class SupervisorAgent(BaseAgent):
@@ -30,6 +31,214 @@ class SupervisorAgent(BaseAgent):
         """Initializes the supervisor agent."""
         super().__init__("supervisor")
         # System prompt is now dynamic per request
+
+    @staticmethod
+    def _normalize_query(user_message: str) -> str:
+        """Normalizes user text for lightweight routing heuristics."""
+        return re.sub(r"[!?.,;:]+", "", (user_message or "").strip().lower())
+
+    @classmethod
+    def _is_greeting_only(cls, user_message: str) -> bool:
+        """Detects greeting-only messages that should bypass the LLM."""
+        normalized = cls._normalize_query(user_message)
+        return normalized in {
+            "hello",
+            "hi",
+            "hey",
+            "good morning",
+            "good afternoon",
+            "good evening",
+            "olá",
+            "ola",
+            "bom dia",
+            "boa tarde",
+            "boa noite",
+            "thanks",
+            "thank you",
+            "obrigado",
+            "obrigada",
+        }
+
+    @staticmethod
+    def _has_lisbon_context(message_lower: str) -> bool:
+        """Returns whether the query clearly references Lisbon/AML topics."""
+        lisbon_keywords = [
+            "lisbon",
+            "lisboa",
+            "aml",
+            "metro",
+            "bus",
+            "autocarro",
+            "comboio",
+            "transport",
+            "transporte",
+            "weather",
+            "tempo",
+            "forecast",
+            "previsão",
+            "museum",
+            "museu",
+            "event",
+            "evento",
+            "restaurant",
+            "restaurante",
+            "pharmacy",
+            "farmácia",
+            "hospital",
+            "route",
+            "rota",
+            "belém",
+            "belem",
+            "chiado",
+            "alfama",
+            "bairro alto",
+            "rossio",
+            "oriente",
+            "sintra",
+            "cascais",
+        ]
+        return any(keyword in message_lower for keyword in lisbon_keywords)
+
+    @staticmethod
+    def _looks_like_weather_query(message_lower: str) -> bool:
+        """Detects weather queries without over-matching generic PT words like `tempo`."""
+        weather_patterns = [
+            r"\bweather\b",
+            r"\brain\b",
+            r"\btemperature\b",
+            r"\bforecast\b",
+            r"\bmeteo\b",
+            r"\bchover\b",
+            r"\bprevis[aã]o\b",
+            r"\bchuva\b",
+            r"\btemperatura\b",
+            r"\bsol\b",
+            r"\bcomo est[aá] o tempo\b",
+            r"\bqual (?:é|e) o tempo\b",
+            r"\btempo em\b",
+        ]
+        return any(re.search(pattern, message_lower) for pattern in weather_patterns)
+
+    @classmethod
+    def _is_obvious_out_of_scope(cls, user_message: str) -> bool:
+        """Detects clearly out-of-scope trivia, math, coding, or translation queries."""
+        message_lower = (user_message or "").lower()
+        if cls._has_lisbon_context(message_lower):
+            return False
+
+        out_of_scope_patterns = [
+            r"\b\d+\s*[-+*/x]\s*\d+\b",
+            r"\bcapital of\b",
+            r"\bpresident of\b",
+            r"\bwho won\b",
+            r"\bhow do you say\b",
+            r"\btranslate\b",
+            r"\bcomo se diz\b",
+            r"\btradu[zç][aã]o\b",
+            r"\bwrite code\b",
+            r"\bcoding\b",
+            r"\bprogramming\b",
+            r"\bpython\b",
+            r"\bjavascript\b",
+            r"\bsql\b",
+            r"\bmandarim\b",
+            r"\bjapan\b",
+            r"\bjap[aã]o\b",
+        ]
+        return any(re.search(pattern, message_lower) for pattern in out_of_scope_patterns)
+
+    @staticmethod
+    def _build_greeting_response(language: str) -> str:
+        """Builds a lightweight greeting response."""
+        if language == "en":
+            return (
+                "Hello! 👋 I'm your Lisbon Urban Assistant. "
+                "How can I help you today? I can help with weather, transport, places, events, and itineraries around Lisbon."
+            )
+        return (
+            "Olá! 👋 Sou o teu Assistente Urbano de Lisboa. "
+            "Em que te posso ajudar hoje? Posso ajudar com meteorologia, transportes, locais, eventos e itinerários em Lisboa."
+        )
+
+    @staticmethod
+    def _build_out_of_scope_response(language: str) -> str:
+        """Builds a friendly out-of-scope redirection response."""
+        if language == "en":
+            return (
+                "Oops, that's outside my area of expertise! 😄 "
+                "I'm your **Lisbon Urban Assistant** and I focus on the Lisbon Metropolitan Area 🏙️\n\n"
+                "Here's what I can help you with:\n\n"
+                "- 🌤️ Weather forecasts and real-time warnings\n"
+                "- 🚇 Transport information (Metro, buses, trains, trams)\n"
+                "- 🎭 Cultural events and activities\n"
+                "- 📍 Places to visit, restaurants, and attractions\n"
+                "- 🗺️ Custom itinerary planning\n"
+                "- 🏥 Nearby services such as pharmacies and hospitals\n"
+                "- 📚 Lisbon history and culture\n\n"
+                "Ask me anything about Lisbon and I'll jump in. 🧭"
+            )
+        return (
+            "Ups, isso fica fora da minha especialidade! 😄 "
+            "Sou o teu **Assistente Urbano de Lisboa** e foco-me na Área Metropolitana de Lisboa 🏙️\n\n"
+            "Posso ajudar-te com:\n\n"
+            "- 🌤️ Previsões meteorológicas e avisos em tempo real\n"
+            "- 🚇 Informação de transportes (Metro, autocarros, comboios, elétricos)\n"
+            "- 🎭 Eventos culturais e atividades\n"
+            "- 📍 Locais para visitar, restaurantes e atrações\n"
+            "- 🗺️ Planeamento de itinerários à medida\n"
+            "- 🏥 Serviços próximos, como farmácias e hospitais\n"
+            "- 📚 História e cultura de Lisboa\n\n"
+            "Pergunta-me o que quiseres sobre Lisboa e eu trato disso. 🧭"
+        )
+
+    def _direct_routing_override(self, user_message: str, language: str) -> Optional[Dict[str, Any]]:
+        """Handles trivial direct responses before invoking the supervisor LLM."""
+        if self._is_greeting_only(user_message):
+            return {
+                "reasoning": "Direct greeting override",
+                "agents": [],
+                "direct_response": self._sanitize_direct_response(self._build_greeting_response(language)),
+            }
+
+        if self._is_obvious_out_of_scope(user_message):
+            return {
+                "reasoning": "Direct out-of-scope override",
+                "agents": [],
+                "direct_response": self._sanitize_direct_response(self._build_out_of_scope_response(language)),
+            }
+
+        return None
+
+    @staticmethod
+    def _sanitize_direct_response(text: Optional[str]) -> Optional[str]:
+        """Removes unsupported closing offers from direct supervisor responses."""
+        if not text:
+            return text
+        return strip_unsupported_closing_offers(text).strip()
+
+    @staticmethod
+    def _is_planning_query(user_message: str) -> bool:
+        """Detects itinerary/planning intent without over-matching words like `today`."""
+        message_lower = user_message.lower()
+        planning_patterns = [
+            r"\bplan\b",
+            r"\bplan my day\b",
+            r"\bday plan\b",
+            r"\bitinerary\b",
+            r"\broteiro\b",
+            r"\bplano\b",
+            r"\bagenda\b",
+            r"\bschedule\b",
+            r"\bday trip\b",
+            r"\bpasseio\b",
+            r"\bvisitar\b",
+            r"\bvisitando\b",
+            r"\bplane(?:ar|ia|ie)\b",
+            r"\borganiza(?:r)?\b",
+            r"\bir a vários? locais\b",
+            r"\bvisit multiple\b",
+        ]
+        return any(re.search(pattern, message_lower) for pattern in planning_patterns)
 
     @traceable(name="supervisor_agent", run_type="chain", tags=["sub-agent", "supervisor"])
     def route(
@@ -52,6 +261,10 @@ class SupervisorAgent(BaseAgent):
                 - agents: List of agent names to call (can be empty)
                 - direct_response: Response if no agents needed (or None)
         """
+        direct_override = self._direct_routing_override(user_message, language)
+        if direct_override:
+            return direct_override
+
         system_prompt = get_supervisor_prompt(language)
 
         messages = [SystemMessage(content=system_prompt)]
@@ -90,22 +303,7 @@ class SupervisorAgent(BaseAgent):
             reasoning = decision.get("reasoning", "")
 
             # Check if this is a planning query that requires weather
-            planning_keywords = [
-                "plan",
-                "itinerary",
-                "roteiro",
-                "plano",
-                "day",
-                "dia",
-                "schedule",
-                "agenda",
-                "day trip",
-                "passeio",
-                "visita",
-            ]
-            is_planning_query = any(
-                kw in user_message.lower() for kw in planning_keywords
-            )
+            is_planning_query = self._is_planning_query(user_message)
 
             # Force weather agent for near-future planning
             if is_planning_query and self._requires_weather_for_planning(user_message):
@@ -152,7 +350,7 @@ class SupervisorAgent(BaseAgent):
             return {
                 "reasoning": reasoning,
                 "agents": agents,
-                "direct_response": decision.get("direct_response"),
+                "direct_response": self._sanitize_direct_response(decision.get("direct_response")),
             }
 
         # Fallback: If JSON parsing fails, try to extract intent heuristically
@@ -171,6 +369,10 @@ class SupervisorAgent(BaseAgent):
         Returns:
             Dict with routing decision.
         """
+        direct_override = self._direct_routing_override(user_message, language)
+        if direct_override:
+            return direct_override
+
         message_lower = user_message.lower()
 
         # 1. Check for Out-of-Scope keywords (Locations outside AML)
@@ -224,7 +426,7 @@ class SupervisorAgent(BaseAgent):
             return {
                 "reasoning": "Fallback: Detected out-of-scope location (outside AML)",
                 "agents": [],
-                "direct_response": oos_msg,
+                "direct_response": self._sanitize_direct_response(oos_msg),
             }
 
         # 2. AML locations that ARE in scope - should trigger transport agent
@@ -255,20 +457,6 @@ class SupervisorAgent(BaseAgent):
             }
 
         # Weather keywords
-        weather_keywords = [
-            "weather",
-            "rain",
-            "temperature",
-            "chover",
-            "tempo",
-            "meteo",
-            "previsão",
-            "sol",
-            "chuva",
-            "temperatura",
-            "forecast",
-        ]
-
         # Transport keywords
         transport_keywords = [
             "metro",
@@ -347,23 +535,10 @@ class SupervisorAgent(BaseAgent):
             "service",
         ]
 
-        # Itinerary keywords
-        itinerary_keywords = [
-            "plan",
-            "plano",
-            "itinerary",
-            "itinerário",
-            "day",
-            "dia",
-            "schedule",
-            "agenda",
-            "roteiro",
-        ]
-
         agents = []
 
         # Check for keywords
-        if any(kw in message_lower for kw in weather_keywords):
+        if self._looks_like_weather_query(message_lower):
             agents.append("weather")
         if any(kw in message_lower for kw in transport_keywords):
             agents.append("transport")
@@ -372,47 +547,13 @@ class SupervisorAgent(BaseAgent):
         if any(kw in message_lower for kw in service_keywords):
             if "researcher" not in agents:
                 agents.append("researcher")
-        if any(kw in message_lower for kw in itinerary_keywords):
+        if self._is_planning_query(message_lower):
             # Itinerary needs weather + researcher + planner
             if "weather" not in agents:
                 agents.append("weather")
             if "researcher" not in agents:
                 agents.append("researcher")
             agents.append("planner")
-
-        # If no specific keywords, check if it's a greeting/simple question
-        greeting_keywords = [
-            "hello",
-            "hi",
-            "olá",
-            "ola",
-            "bom dia",
-            "boa tarde",
-            "boa noite",
-            "obrigado",
-            "thanks",
-            "help",
-            "ajuda",
-        ]
-
-        if not agents and any(kw in message_lower for kw in greeting_keywords):
-            if language == "en":
-                greeting_response = (
-                    "Hello! 👋 I'm your Lisbon Urban Assistant. "
-                    "How can I help you today? I can suggest places, check the weather, "
-                    "transport options or plan your day! 🏙️"
-                )
-            else:
-                greeting_response = (
-                    "Olá! 👋 Sou o teu Assistente Urbano de Lisboa. "
-                    "Em que te posso ajudar hoje? Posso sugerir locais, ver o tempo, "
-                    "transportes ou planear o teu dia! 🏙️"
-                )
-            return {
-                "reasoning": "Simple greeting/general query",
-                "agents": [],
-                "direct_response": greeting_response,
-            }
 
         # If still no agents and not a greeting, default to researcher
         if not agents:

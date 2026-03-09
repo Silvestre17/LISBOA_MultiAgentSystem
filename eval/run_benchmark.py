@@ -18,8 +18,6 @@ from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 
-from langchain_core.messages import ToolMessage
-
 from agent.agents.researcher_agent import ResearcherAgent
 from agent.agents.transport_agent import TransportAgent
 from agent.agents.weather_agent import WeatherAgent
@@ -130,29 +128,34 @@ def run_isolated_agent(domain: str, query: str, config: dict):
     error = None
     agent.reset_llm_usage_tracking()
 
+    original_tool_invokes = []
     try:
-        # BaseAgent.invoke() returns just the string response.
-        # However, to get the actual tools used, we might need a workaround or
-        # BaseAgent doesn't return state dict directly from `invoke`.
-        # Let's run the state graph directly using `execute_react_loop` or `build_subgraph().invoke()`
-        
-        graph = agent.build_subgraph()
-        result = graph.invoke({"messages": [("user", query)]})
+        for tool in getattr(agent, "tools", []):
+            original_invoke = getattr(tool, "invoke", None)
+            if not callable(original_invoke):
+                continue
 
-        for msg in result.get("messages", []):
-            if hasattr(msg, "tool_calls") and msg.tool_calls:
-                for tc in msg.tool_calls:
-                    tools_called.append(tc["name"])
-            elif isinstance(msg, ToolMessage):
-                tool_name = msg.name if hasattr(msg, "name") and msg.name else "unknown_tool"
-                retrieved_context_blocks.append(f"[{tool_name}] returned:\n{msg.content}")
-        
-        final_msg = result.get("messages", [])[-1]
-        final_response = getattr(final_msg, "content", "")
+            tool_name = getattr(tool, "name", "unknown_tool")
 
+            def _make_invoke_wrapper(name, invoke_fn):
+                def _wrapped(tool_input):
+                    result = invoke_fn(tool_input)
+                    tools_called.append(name)
+                    retrieved_context_blocks.append(f"[{name}] returned:\n{result}")
+                    return result
+
+                return _wrapped
+
+            original_tool_invokes.append((tool, original_invoke))
+            object.__setattr__(tool, "invoke", _make_invoke_wrapper(tool_name, original_invoke))
+
+        final_response = str(agent.invoke(query))
     except Exception as e:
         error = str(e)
         final_response = f"Execution Error: {error}"
+    finally:
+        for tool, original_invoke in original_tool_invokes:
+            object.__setattr__(tool, "invoke", original_invoke)
 
     latency = time.time() - start_time
     retrieved_context_str = "\n---\n".join(retrieved_context_blocks)

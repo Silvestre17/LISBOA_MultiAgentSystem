@@ -35,11 +35,11 @@ except Exception:
 
 sys.path.insert(0, ".")
 
-from agent.graph import MultiAgentAssistant, create_assistant
-from agent.utils.langsmith_tracing import get_langsmith_display_state
+from agent.utils.langsmith_tracing import (
+    get_langsmith_display_state,
+    get_langsmith_project_name,
+)
 from config import Config
-from tools.carris_api import CARRIS_DB_PATH, CarrisGTFSManager
-from tools.visitlisboa_api import initialize_vector_store
 
 # ==========================================================================
 # TRANSLATIONS / INTERNATIONALIZATION
@@ -280,6 +280,7 @@ def md_to_html(text: str) -> str:
 # ==========================================================================
 
 
+@st.cache_data(show_spinner=False)
 def get_base64_image(image_path):
     try:
         with open(image_path, "rb") as img_file:
@@ -313,8 +314,8 @@ CSS = f"""
     --light-bg: #ffffff;
     --text-main: #2b2b2b;
     --text-muted: #5e5e5e;
-    --shadow-sm: 0px 4px 15px rgba(0, 0, 0, 0.05);
-    --shadow-md: 0px 8px 25px rgba(255, 64, 17, 0.15);
+    --shadow-sm: 0 10px 28px rgba(15, 23, 42, 0.07);
+    --shadow-md: 0 18px 44px rgba(255, 64, 17, 0.16);
 }}
 
 /* Base Fonts */
@@ -377,17 +378,16 @@ footer {{ visibility: hidden; }}
 .top-banner-container h1 {{
     color: white;
     margin: 0;
-    font-size: 2.4rem;
+    font-size: 4.8rem;
     font-weight: 700;
     text-shadow: 0 2px 4px rgba(0,0,0,0.2);
-    letter-spacing: -0.02em;
+    letter-spacing: -0.04em;
     position: relative;
     z-index: 1;
 }}
 
 .top-banner-container p {{
     color: rgba(255,255,255,0.95);
-    margin: 0.75rem 0 0 0;
     font-size: 1.15rem;
     font-weight: 400;
     position: relative;
@@ -404,6 +404,7 @@ footer {{ visibility: hidden; }}
     display: flex;
     justify-content: center;
     margin-bottom: 20px;
+    margin-top: -3rem;
     padding: 1rem;
 }}
 .sidebar-logo img {{
@@ -459,22 +460,40 @@ button[kind="secondary"]:hover {{
 
 /* Chat Messages */
 [data-testid="stChatMessage"] {{
-    padding: 1.5rem !important;
-    border-radius: 16px !important;
-    margin-bottom: 1.5rem !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin-bottom: 1rem !important;
+    gap: 0.85rem !important;
+    align-items: flex-start !important;
+}}
+
+[data-testid="stChatMessageContent"],
+[data-testid="stChatMessage"] > div:last-child {{
+    max-width: 940px;
+    width: 100%;
+    padding: 1.1rem 1.25rem !important;
+    border-radius: 18px !important;
+    border: 1px solid rgba(15, 23, 42, 0.08);
     box-shadow: var(--shadow-sm);
 }}
 
 /* User Message */
-[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {{
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) [data-testid="stChatMessageContent"],
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) > div:last-child {{
     background: linear-gradient(120deg, #fffcf0 0%, #f6da0011 100%) !important;
     border-left: 5px solid var(--primary-yellow) !important;
+    max-width: 760px;
+    margin-left: auto !important;
 }}
 
 /* AI Message */
-[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) {{
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) [data-testid="stChatMessageContent"],
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) > div:last-child {{
     background: #ffffff !important;
     border-left: 5px solid var(--primary-red) !important;
+    margin-right: auto !important;
 }}
 
 /* Chat text spacing */
@@ -493,15 +512,29 @@ button[kind="secondary"]:hover {{
 [data-testid="stChatMessage"] h3 {{
     color: var(--text-main);
     font-weight: 700;
-    margin-top: 0.3rem;
-    margin-bottom: 0.3rem;
+    margin-top: 0.1rem;
+    margin-bottom: 0.45rem;
     font-size: 1.2rem;
-    line-height: 1.1;
+    line-height: 1.2;
 }}
 [data-testid="stChatMessage"] h4 {{
     margin-top: 0.5rem;
     margin-bottom: 0.2rem;
     font-size: 0.95rem;
+}}
+
+/* Hide Streamlit heading anchors inside chat response titles */
+[data-testid="stChatMessage"] h1 a,
+[data-testid="stChatMessage"] h2 a,
+[data-testid="stChatMessage"] h3 a,
+[data-testid="stChatMessage"] h4 a,
+[data-testid="stChatMessage"] h5 a,
+[data-testid="stChatMessage"] h6 a {{
+    display: none !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
 }}
 
 /* Horizontal rules - compact */
@@ -510,7 +543,9 @@ button[kind="secondary"]:hover {{
 }}
 
 /* Links - pill-style with accent background */
-[data-testid="stChatMessage"] a {{
+[data-testid="stChatMessage"] p a,
+[data-testid="stChatMessage"] li a,
+[data-testid="stChatMessage"] td a {{
     color: var(--primary-red);
     text-decoration: none;
     font-weight: 600;
@@ -521,7 +556,9 @@ button[kind="secondary"]:hover {{
     transition: all 0.25s ease;
     display: inline;
 }}
-[data-testid="stChatMessage"] a:hover {{
+[data-testid="stChatMessage"] p a:hover,
+[data-testid="stChatMessage"] li a:hover,
+[data-testid="stChatMessage"] td a:hover {{
     color: var(--primary-red);
     background: rgba(255, 64, 17, 0.16);
     border-bottom-color: var(--primary-red);
@@ -753,6 +790,8 @@ def init_system_state():
 def pre_warm_vector_store() -> bool:
     """Load the vector store once per server process."""
     try:
+        from tools.visitlisboa_api import initialize_vector_store
+
         initialize_vector_store()
         return True
     except Exception:
@@ -763,6 +802,8 @@ def pre_warm_vector_store() -> bool:
 def prepare_transport_database() -> Tuple[bool, str]:
     """Prepare Carris GTFS database once per server process."""
     try:
+        from tools.carris_api import CARRIS_DB_PATH, CarrisGTFSManager
+
         manager = CarrisGTFSManager()
         db_valid = False
         if os.path.exists(CARRIS_DB_PATH):
@@ -879,6 +920,7 @@ def test_assistant_connection(provider: str) -> Tuple[bool, Optional[str]]:
     """Run a minimal inference request to confirm the selected model is ready."""
     lang = st.session_state.get("language", "pt")
     placeholder = st.empty()
+    from agent.utils.model_connection_probe import perform_raw_model_connection_probe
 
     if Config.USE_MULTI_AGENT:
         test_llm = st.session_state.assistant.supervisor.llm
@@ -896,60 +938,17 @@ def test_assistant_connection(provider: str) -> Tuple[bool, Optional[str]]:
     )
 
     try:
-        import requests as _requests
-
-        from agent.llm_factory import LLMFactory
-
-        raw_base = getattr(
-            test_llm,
-            "openai_api_base",
-            getattr(test_llm, "base_url", "https://api.openai.com/v1/"),
+        perform_raw_model_connection_probe(
+            test_llm=test_llm,
+            provider=provider,
+            model_display=model_display,
         )
-        base_url = str(raw_base) if not isinstance(raw_base, str) else raw_base
-
-        api_key_obj = getattr(
-            test_llm,
-            "openai_api_key",
-            getattr(test_llm, "api_key", getattr(test_llm, "_api_key", "")),
-        )
-        api_key = (
-            api_key_obj.get_secret_value()
-            if hasattr(api_key_obj, "get_secret_value")
-            else str(api_key_obj)
-        )
-        model_id = getattr(test_llm, "model_name", getattr(test_llm, "model", model_display))
-
-        endpoint = f"{base_url.rstrip('/')}/chat/completions"
-        headers = {"Content-Type": "application/json"}
-        if api_key and api_key != "None":
-            headers["Authorization"] = f"Bearer {api_key}"
-
-        payload = {
-            "model": model_id,
-            "messages": [{"role": "user", "content": "hi"}],
-        }
-        if LLMFactory._is_reasoning_model(model_id):
-            payload["max_completion_tokens"] = 100
-        else:
-            payload["max_tokens"] = 1
-            payload["temperature"] = 0
-
-        response = _requests.post(
-            endpoint,
-            headers=headers,
-            json=payload,
-            timeout=15 if provider == "lmstudio" else 10,
-        )
-        response.raise_for_status()
-        if not response.json().get("choices"):
-            raise RuntimeError("The server responded without a completion.")
 
         placeholder.success(
             f"✅ Modelo pronto! ({model_display})"
             if lang == "pt"
             else f"✅ Model ready! ({model_display})"
         )
-        time.sleep(0.8)
         placeholder.empty()
         return True, None
     except Exception as exc:
@@ -1002,6 +1001,8 @@ def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
         return False, credentials_error
 
     try:
+        from agent.graph import MultiAgentAssistant, create_assistant
+
         set_credentials_env(provider)
 
         with st.spinner(
@@ -1062,14 +1063,14 @@ def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
 # ==========================================================================
 
 if logo_path:
-    st.logo(logo_path, icon_image=logo_path)
+    st.logo("img/t.png", icon_image=logo_path, size="small")
 
 
 def display_banner():
     st.markdown(
         f"""
         <div class="top-banner-container">
-            <h1>🏛️ {t("app_title")}</h1>
+            <h1>{t("app_title")}</h1>
             <p>{t("app_subtitle")}</p>
         </div>
     """,
@@ -1082,7 +1083,7 @@ def render_tracing_panel() -> None:
     st.markdown(f"#### 🧭 {t('tracing')}")
 
     tracing_display = get_langsmith_display_state()
-    langsmith_project = os.getenv("LANGCHAIN_PROJECT", "default")
+    langsmith_project = get_langsmith_project_name()
 
     if tracing_display["state"] == "active":
         st.success(t("tracing_active"))
@@ -1271,7 +1272,6 @@ def build_sidebar():
                     success, error = initialize_assistant(selected_provider)
                 if success:
                     st.success(t("assistant_ready"))
-                    time.sleep(0.5)
                     st.rerun()
                 else:
                     st.error(error or t("initialization_failed"))
@@ -1472,13 +1472,26 @@ def run_interaction(user_input: str):
     with st.chat_message("assistant"):
         try:
             with st.status("🔍 " + t("thinking"), expanded=False) as status:
+                last_status = {"label": "", "ts": 0.0}
 
                 def on_status(msg: str):
-                    status.update(label="⚡ " + msg, state="running")
+                    normalized = str(msg or "").strip()
+                    if not normalized:
+                        return
+
+                    now = time.perf_counter()
+                    if normalized == last_status["label"]:
+                        return
+                    if last_status["label"] and (now - last_status["ts"]) < 0.12:
+                        return
+
+                    last_status["label"] = normalized
+                    last_status["ts"] = now
+                    status.update(label="⚡ " + normalized, state="running")
 
                 resp = st.session_state.assistant.chat(
                     user_input,
-                    verbose=True,
+                    verbose=False,
                     on_status_change=on_status,
                     language=st.session_state.language,
                 )
@@ -1489,13 +1502,8 @@ def run_interaction(user_input: str):
                     state="complete",
                 )
 
-            box = st.empty()
-            full = ""
-            for piece in handle_chat_stream(resp):
-                full += piece
-                box.markdown(full + " ▌")
-            sanitized = clean_response_for_display(full)
-            box.markdown(sanitized)
+            sanitized = clean_response_for_display(resp)
+            st.markdown(sanitized)
             st.session_state.messages.append(
                 {"role": "assistant", "content": sanitized}
             )

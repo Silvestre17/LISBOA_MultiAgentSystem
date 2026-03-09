@@ -238,15 +238,16 @@ if __name__ == "__main__":
     checks = {
         "carris_get_service_frequency": "Carris frequency tool reference",
         "get_train_frequency": "CP frequency tool reference",
-        "FREQUENCY / HEADWAY": "Frequency guidance section",
+        "frequency / headway": "Frequency guidance section",
         "carris_find_routes_between": "Routing tool reference",
         "find_direct_bus_lines": "Carris Metropolitana tool",
-        "Tempo total estimado": "Travel time template",
+        "tempo total estimado": "Travel time template",
     }
 
     print("\n\033[1m📋 Content Validation:\033[0m")
+    prompt_lower = prompt.lower()
     for term, description in checks.items():
-        if term in prompt:
+        if term in prompt_lower:
             passed += 1
             print(f"  \033[1;32m✅ PASS\033[0m: {description} ('{term}')")
         else:

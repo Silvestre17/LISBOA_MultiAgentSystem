@@ -18,7 +18,11 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
-from typing import Any, Callable, Dict, MutableMapping, Optional
+from typing import Any, Callable, Dict, MutableMapping, Optional, Sequence
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -84,12 +88,39 @@ def _disable_tracing_env(env: MutableMapping[str, str]) -> None:
     env["LANGSMITH_TRACING"] = "false"
 
 
+def _enable_tracing_env(
+    env: MutableMapping[str, str],
+    *,
+    api_key: str,
+    endpoint: str,
+    project_name: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+) -> None:
+    """Synchronize canonical and legacy tracing env vars for downstream SDKs."""
+    env["LANGSMITH_TRACING"] = "true"
+    env["LANGCHAIN_TRACING_V2"] = "true"
+    env["LANGSMITH_API_KEY"] = api_key
+    env["LANGCHAIN_API_KEY"] = api_key
+    env["LANGSMITH_ENDPOINT"] = endpoint
+    env["LANGCHAIN_ENDPOINT"] = endpoint
+
+    if project_name:
+        env["LANGSMITH_PROJECT"] = project_name
+        env["LANGCHAIN_PROJECT"] = project_name
+
+    if workspace_id:
+        env["LANGSMITH_WORKSPACE_ID"] = workspace_id
+
+
 def _disabled_status(reason: str, requested: bool) -> Dict[str, Any]:
     """Build the standard disabled tracing payload."""
     return {
         "enabled": False,
         "requested": requested,
         "reason": reason,
+        "project_name": None,
+        "endpoint": None,
+        "workspace_id": None,
         "traceable": _noop_traceable,
         "get_current_run_tree": _noop_get_current_run_tree,
         "RunTree": None,
@@ -119,15 +150,20 @@ def _probe_langsmith_access(
     client_cls: Any,
     endpoint: str,
     api_key: str,
+    workspace_id: Optional[str] = None,
 ) -> tuple[bool, str]:
     """Validate LangSmith credentials with a short, read-only API probe."""
     try:
-        client = client_cls(
-            api_url=endpoint,
-            api_key=api_key,
-            timeout_ms=(1000, 2500),
-            auto_batch_tracing=False,
-        )
+        client_kwargs = {
+            "api_url": endpoint,
+            "api_key": api_key,
+            "timeout_ms": (1500, 5000),
+            "auto_batch_tracing": False,
+        }
+        if workspace_id:
+            client_kwargs["workspace_id"] = workspace_id
+
+        client = client_cls(**client_kwargs)
         next(iter(client.list_projects(limit=1)), None)
         return True, "LangSmith tracing enabled"
     except Exception as exc:
@@ -137,6 +173,10 @@ def _probe_langsmith_access(
             return False, "LangSmith tracing disabled: API key is forbidden for this endpoint"
         if "401" in lowered or "unauthorized" in lowered:
             return False, "LangSmith tracing disabled: API key is unauthorized"
+        if any(token in lowered for token in ("workspace", "tenant", "multiple workspaces")):
+            if workspace_id:
+                return False, "LangSmith tracing disabled: workspace is invalid or inaccessible"
+            return False, "LangSmith tracing disabled: API key requires LANGSMITH_WORKSPACE_ID"
         return False, f"LangSmith tracing disabled: preflight check failed ({exc.__class__.__name__})"
 
 
@@ -156,7 +196,7 @@ def resolve_langsmith_tracing_status(
         Dict[str, Any]: Tracing status plus the correct tracing primitives.
     """
     runtime_env = env if env is not None else os.environ
-    tracing_requested = _env_flag(runtime_env, "LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING")
+    tracing_requested = _env_flag(runtime_env, "LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2")
 
     if not tracing_requested:
         _disable_tracing_env(runtime_env)
@@ -180,6 +220,12 @@ def resolve_langsmith_tracing_status(
         "LANGSMITH_ENDPOINT",
         "LANGCHAIN_ENDPOINT",
     ) or _DEFAULT_LANGSMITH_ENDPOINT
+    project_name = _get_env_value(
+        runtime_env,
+        "LANGSMITH_PROJECT",
+        "LANGCHAIN_PROJECT",
+    )
+    workspace_id = _get_env_value(runtime_env, "LANGSMITH_WORKSPACE_ID")
 
     if _looks_like_placeholder(endpoint):
         _disable_tracing_env(runtime_env)
@@ -189,16 +235,31 @@ def resolve_langsmith_tracing_status(
         )
 
     auth_probe = probe or _probe_langsmith_access
-    is_valid, reason = auth_probe(symbols["Client"], endpoint, api_key)
+    try:
+        is_valid, reason = auth_probe(symbols["Client"], endpoint, api_key, workspace_id)
+    except TypeError:
+        is_valid, reason = auth_probe(symbols["Client"], endpoint, api_key)
+
     if not is_valid:
         _disable_tracing_env(runtime_env)
         logger.warning(reason)
         return _disabled_status(reason, requested=True)
 
+    _enable_tracing_env(
+        runtime_env,
+        api_key=api_key,
+        endpoint=endpoint,
+        project_name=project_name,
+        workspace_id=workspace_id,
+    )
+
     return {
         "enabled": True,
         "requested": True,
         "reason": reason,
+        "project_name": project_name or "default",
+        "endpoint": endpoint,
+        "workspace_id": workspace_id,
         "traceable": symbols["traceable"],
         "get_current_run_tree": symbols["get_current_run_tree"],
         "RunTree": symbols["RunTree"],
@@ -245,6 +306,61 @@ def get_langsmith_display_state(
     return {"state": "auto_disabled", "reason": reason}
 
 
+def get_langsmith_project_name(
+    status: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Return the resolved LangSmith project name using canonical env aliases."""
+    resolved = status or get_langsmith_tracing_status()
+    project_name = resolved.get("project_name")
+    if isinstance(project_name, str) and project_name.strip():
+        return project_name.strip()
+
+    return (
+        _get_env_value(os.environ, "LANGSMITH_PROJECT", "LANGCHAIN_PROJECT")
+        or "default"
+    )
+
+
+def annotate_current_run(
+    *,
+    metadata: Optional[Dict[str, Any]] = None,
+    tags: Optional[Sequence[str]] = None,
+) -> bool:
+    """Safely attach metadata and tags to the active LangSmith run."""
+    try:
+        run_tree = get_current_run_tree()
+    except Exception as exc:
+        logger.debug("Could not access current LangSmith run tree", exc_info=exc)
+        return False
+
+    if not run_tree:
+        return False
+
+    try:
+        if metadata:
+            current_metadata = getattr(run_tree, "metadata", None)
+            if not isinstance(current_metadata, dict):
+                current_metadata = dict(current_metadata or {})
+                run_tree.metadata = current_metadata
+
+            for key, value in metadata.items():
+                if value is not None:
+                    current_metadata[key] = value
+
+        if tags:
+            current_tags = list(getattr(run_tree, "tags", []) or [])
+            for tag in tags:
+                normalized_tag = str(tag).strip()
+                if normalized_tag and normalized_tag not in current_tags:
+                    current_tags.append(normalized_tag)
+            run_tree.tags = current_tags
+
+        return True
+    except Exception as exc:
+        logger.debug("Failed to annotate current LangSmith run", exc_info=exc)
+        return False
+
+
 LANGSMITH_STATUS = get_langsmith_tracing_status()
 LANGSMITH_AVAILABLE = bool(LANGSMITH_STATUS["enabled"])
 traceable = LANGSMITH_STATUS["traceable"]
@@ -254,12 +370,14 @@ ContextThreadPoolExecutor = LANGSMITH_STATUS["ContextThreadPoolExecutor"]
 
 
 __all__ = [
+    "annotate_current_run",
     "ContextThreadPoolExecutor",
     "LANGSMITH_AVAILABLE",
     "LANGSMITH_STATUS",
     "RunTree",
     "get_current_run_tree",
     "get_langsmith_display_state",
+    "get_langsmith_project_name",
     "get_langsmith_tracing_status",
     "resolve_langsmith_tracing_status",
     "traceable",

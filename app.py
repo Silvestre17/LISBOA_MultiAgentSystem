@@ -59,7 +59,11 @@ import streamlit as st
 sys.path.insert(0, ".")
 
 from agent.graph import LisbonAssistant, MultiAgentAssistant, create_assistant
-from agent.utils.langsmith_tracing import get_langsmith_display_state
+from agent.utils.langsmith_tracing import (
+    get_langsmith_display_state,
+    get_langsmith_project_name,
+)
+from agent.utils.model_connection_probe import perform_raw_model_connection_probe
 from config import Config
 from tools.carris_api import CARRIS_DB_PATH, CarrisGTFSManager
 from tools.visitlisboa_api import initialize_vector_store
@@ -1063,74 +1067,13 @@ def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
             )
 
             try:
-                import requests as _req
-
                 # Access the supervisor LLM directly
                 test_llm = st.session_state.assistant.supervisor.llm
-
-                # Extract base_url from LLM object
-                raw_base = getattr(
-                    test_llm, "openai_api_base",
-                    getattr(test_llm, "base_url", "https://api.openai.com/v1/"),
+                perform_raw_model_connection_probe(
+                    test_llm=test_llm,
+                    provider=provider,
+                    model_display=model_display,
                 )
-                base_url = str(raw_base) if not isinstance(raw_base, str) else raw_base
-
-                # Extract API key (SecretStr or plain string)
-                api_key_obj = getattr(
-                    test_llm, "openai_api_key",
-                    getattr(test_llm, "api_key", getattr(test_llm, "_api_key", "")),
-                )
-                api_key = (
-                    api_key_obj.get_secret_value()
-                    if hasattr(api_key_obj, "get_secret_value")
-                    else str(api_key_obj)
-                )
-
-                # Extract model identifier
-                model_id = getattr(
-                    test_llm, "model_name",
-                    getattr(test_llm, "model", model_display),
-                )
-
-                # Build headers (Bearer works for OpenAI, Azure v1, and LM Studio)
-                headers = {"Content-Type": "application/json"}
-                if api_key:
-                    headers["Authorization"] = f"Bearer {api_key}"
-
-                # Minimal chat completion payload (1 token to minimize cost)
-                from agent.llm_factory import LLMFactory
-
-                endpoint = f"{base_url.rstrip('/')}/chat/completions"
-                is_reasoning = LLMFactory._is_reasoning_model(model_id)
-
-                payload = {
-                    "model": model_id,
-                    "messages": [{"role": "user", "content": "hi"}],
-                }
-
-                # Reasoning models (o-series, gpt-5) require max_completion_tokens
-                # and do NOT support temperature or max_tokens.
-                # They also need enough tokens for internal chain-of-thought
-                # before producing visible output (~50-100 reasoning tokens).
-                if is_reasoning:
-                    payload["max_completion_tokens"] = 100
-                else:
-                    payload["max_tokens"] = 1
-                    payload["temperature"] = 0
-
-                # Timeout: 15s for local models that may need warm-up,
-                # cloud providers typically respond in < 3s
-                resp = _req.post(endpoint, headers=headers, json=payload, timeout=15)
-                resp.raise_for_status()
-
-                # Verify we actually got a completion back
-                data = resp.json()
-                choices = data.get("choices", [])
-                if not choices:
-                    raise RuntimeError(
-                        "Server responded but returned no completions. "
-                        "The model may still be loading."
-                    )
 
                 # Model is truly ready
                 connection_placeholder.success(
@@ -1611,7 +1554,7 @@ def render_tracing_info():
     st.markdown(f"## {t('tracing')}")
 
     tracing_display = get_langsmith_display_state()
-    langsmith_project = os.getenv("LANGCHAIN_PROJECT", "default")
+    langsmith_project = get_langsmith_project_name()
 
     if tracing_display["state"] == "active":
         st.success(t("tracing_active"))

@@ -427,7 +427,7 @@ def get_weather_warnings(area: str = "LSB") -> str:
             response += f"   📝 {text}\n"
         response += "\n"
     
-    response += "� Fonte: [IPMA](https://www.ipma.pt) - Instituto Português do Mar e da Atmosfera"
+    response += "📌 Fonte: [IPMA](https://www.ipma.pt) - Instituto Português do Mar e da Atmosfera"
     
     return response
 
@@ -632,6 +632,7 @@ def get_current_weather_summary() -> str:
     # Today's forecast
     if forecast_data and forecast_data.get('data'):
         today = forecast_data['data'][0]
+        update_time = forecast_data.get('dataUpdate', 'N/A')
         t_min = today.get('tMin', 'N/A')
         t_max = today.get('tMax', 'N/A')
         weather_type = today.get('idWeatherType', 0)
@@ -645,6 +646,7 @@ def get_current_weather_summary() -> str:
         wind_speed_desc = get_wind_speed_description(wind_speed_class)
         precip_intensity_desc = get_precipitation_intensity_description(precip_intensity_class)
         
+        response += f"📅 Updated: {update_time}\n"
         response += f"📅 Today ({today.get('forecastDate', 'N/A')}):\n"
         response += f"   🌡️ Temperature: {t_min}°C to {t_max}°C\n"
         response += f"   🌤️ Conditions: {weather_desc}\n"

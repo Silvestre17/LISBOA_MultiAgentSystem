@@ -6,9 +6,11 @@
 #   Uses BaseAgent.execute_react_loop() for tool execution.
 # ==========================================================================
 
-from typing import TYPE_CHECKING
+import re
+import uuid
+from typing import TYPE_CHECKING, Optional
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 
 if TYPE_CHECKING:
@@ -18,6 +20,10 @@ from agent.agents.base import BaseAgent, traceable
 from agent.prompts.weather import get_weather_prompt
 from agent.state import AgentState
 from agent.utils.langgraph_compat import ToolNode
+from agent.utils.response_formatter import (
+    finalize_worker_response,
+    infer_response_language,
+)
 
 
 class WeatherAgent(BaseAgent):
@@ -41,6 +47,193 @@ class WeatherAgent(BaseAgent):
         super().__init__("weather")
         self.system_prompt = get_weather_prompt()
 
+    @staticmethod
+    def _is_content_filter_error(error: Exception) -> bool:
+        """Returns whether an exception is an Azure content-filter false positive."""
+        error_str = str(error).lower()
+        return (
+            "content_filter" in error_str
+            or "responsibleaipolicyviolation" in error_str
+            or "jailbreak" in error_str
+        )
+
+    @staticmethod
+    def _build_messages(system_prompt: str, user_message: str, context: str = "") -> list:
+        """Builds the message list for a weather invocation."""
+        language = infer_response_language(user_query=user_message, default="en")
+        language_instruction = (
+            "Respond ENTIRELY in Portuguese (PT-PT)."
+            if language == "pt"
+            else "Respond ENTIRELY in English."
+        )
+
+        messages = [
+            SystemMessage(content=system_prompt),
+            SystemMessage(content=language_instruction),
+        ]
+
+        if context:
+            messages.append(SystemMessage(content=f"Context from other agents:\n{context}"))
+
+        messages.append(HumanMessage(content=user_message))
+        return messages
+
+    def _get_tool_by_name(self, tool_name: str):
+        """Returns a loaded tool by name, or None if not found."""
+        for tool in self.tools:
+            if getattr(tool, "name", "") == tool_name:
+                return tool
+        return None
+
+    @staticmethod
+    def _has_english_language_drift(response: str, language: str) -> bool:
+        """Detects when an English weather answer still leaks obvious PT-PT content."""
+        if language != "en" or not response:
+            return False
+
+        drift_patterns = [
+            r"\bsegunda-feira\b",
+            r"\bterça-feira\b",
+            r"\bquarta-feira\b",
+            r"\bquinta-feira\b",
+            r"\bsexta-feira\b",
+            r"\bsábado\b",
+            r"\bdomingo\b",
+            r"\bchuva\b",
+            r"\baguaceiros\b",
+            r"\bfraca\b",
+            r"\bnoroeste\b",
+            r"\bvista casaco\b",
+            r"\bguarda-chuva\b",
+        ]
+        matches = sum(1 for pattern in drift_patterns if re.search(pattern, response, re.IGNORECASE))
+        return matches >= 2
+
+    @staticmethod
+    def _is_current_weather_query(user_message: str) -> bool:
+        """Detects simple current-weather queries that should use the summary tool directly."""
+        query = (user_message or "").lower()
+        return bool(
+            "right now" in query
+            or "current weather summary" in query
+            or "current temperature" in query
+            or "agora" in query
+            or re.search(r"\b(weather|tempo)\b.*\b(today|hoje|now|agora)\b", query)
+            or re.search(r"\b(today|hoje)\b.*\b(weather|tempo)\b", query)
+        )
+
+    @staticmethod
+    def _extract_requested_forecast_days(user_message: str) -> Optional[int]:
+        """Extracts the requested forecast window from simple weather queries."""
+        query = (user_message or "").lower()
+
+        explicit_days = re.search(r"\b([1-5])\s*(?:-|\s)?\s*(?:day|days|dia|dias)\b", query)
+        if explicit_days:
+            return max(1, min(int(explicit_days.group(1)), 5))
+
+        if any(term in query for term in ["tomorrow", "amanhã", "amanha"]):
+            return 2
+
+        if any(term in query for term in ["week", "semana", "weekend", "fim de semana"]):
+            return 5
+
+        if any(term in query for term in ["forecast", "previsão", "previsao", "next days", "próximos dias", "proximos dias"]):
+            return 3
+
+        return None
+
+    @classmethod
+    def _is_simple_forecast_query(cls, user_message: str) -> bool:
+        """Detects standalone forecast/warnings queries that can skip free-form synthesis."""
+        query = (user_message or "").lower()
+        planning_terms = [
+            "plan", "itinerary", "roteiro", "plano", "activity", "activities",
+            "visit", "visitar", "museum", "museu", "restaurant", "restaurante",
+        ]
+
+        if any(term in query for term in planning_terms):
+            return False
+
+        return bool(
+            cls._extract_requested_forecast_days(user_message)
+            or any(term in query for term in ["warning", "warnings", "aviso", "avisos"])
+        )
+
+    def _run_direct_tool_fallback(self, user_message: str) -> str:
+        """
+        Runs a deterministic tool-only fallback when Azure blocks weather prompt
+        attempts. This preserves real data access without relying on another
+        model call.
+        """
+        query = user_message.lower()
+        requested_forecast_days = self._extract_requested_forecast_days(user_message)
+        wants_warnings = any(term in query for term in ["warning", "warnings", "aviso", "avisos"])
+        wants_forecast = requested_forecast_days is not None
+        wants_current = any(term in query for term in ["today", "current", "now", "hoje", "agora"]) or (
+            any(term in query for term in ["weather", "tempo"]) and not wants_warnings and not wants_forecast
+        )
+
+        sections = []
+
+        if (wants_warnings or (wants_forecast and not wants_current)) and not wants_current:
+            warnings_tool = self._get_tool_by_name("get_weather_warnings")
+            if warnings_tool:
+                sections.append(warnings_tool.invoke({"area": "LSB"}))
+
+        if wants_current:
+            current_tool = self._get_tool_by_name("get_current_weather_summary")
+            if current_tool:
+                sections.append(current_tool.invoke({}))
+
+        forecast_tool = self._get_tool_by_name("get_weather_forecast")
+        if forecast_tool and wants_forecast and requested_forecast_days:
+            sections.append(forecast_tool.invoke({"days": requested_forecast_days}))
+
+        if not sections:
+            current_tool = self._get_tool_by_name("get_current_weather_summary")
+            if current_tool:
+                sections.append(current_tool.invoke({}))
+
+        if not sections:
+            return "Unable to retrieve weather data at the moment."
+
+        return "\n\n---\n\n".join(section for section in sections if section).strip()
+
+    @staticmethod
+    def _build_tool_call(name: str, args: dict) -> AIMessage:
+        """Creates a deterministic tool call message for the subgraph."""
+        return AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": name,
+                    "args": args,
+                    "id": f"auto_{uuid.uuid4().hex}",
+                    "type": "tool_call",
+                }
+            ],
+        )
+
+    @classmethod
+    def _build_deterministic_subgraph_tool_call(cls, user_message: str) -> Optional[AIMessage]:
+        """Routes obvious weather queries to their canonical tool in the subgraph."""
+        query = user_message.lower().strip()
+
+        if "portugal-wide" in query or "portugal wide" in query or "portugal-wide weather overview" in query:
+            return cls._build_tool_call("get_portugal_weather_overview", {"day": 0})
+
+        if "warning" in query or "warnings" in query or "avisos" in query:
+            return cls._build_tool_call("get_weather_warnings", {"area": "LSB"})
+
+        forecast_days = cls._extract_requested_forecast_days(user_message)
+        if forecast_days:
+            return cls._build_tool_call("get_weather_forecast", {"days": forecast_days})
+
+        if "current weather summary" in query or "right now" in query or ("weather" in query and "today" in query):
+            return cls._build_tool_call("get_current_weather_summary", {})
+
+        return None
+
     @traceable(name="weather_agent", run_type="chain", tags=["sub-agent", "weather"])
     def invoke(
         self, user_message: str, context: str = "", verbose: bool = False
@@ -56,23 +249,67 @@ class WeatherAgent(BaseAgent):
         Returns:
             str: Weather information response.
         """
-        messages = [SystemMessage(content=self.system_prompt)]
+        language = infer_response_language(user_query=user_message, default="en")
+        messages = self._build_messages(self.system_prompt, user_message, context)
+        tool_enforcement_msg = (
+            "You MUST use a tool (like get_current_weather_summary) to get real data. "
+            "Do NOT answer from your knowledge base. Call the tool now."
+        )
 
-        if context:
-            messages.append(
-                SystemMessage(content=f"Context from other agents:\n{context}")
+        if self._is_current_weather_query(user_message) or self._is_simple_forecast_query(user_message):
+            response = self._run_direct_tool_fallback(user_message)
+            return finalize_worker_response(
+                response,
+                agent_name="weather",
+                user_query=user_message,
+                language=language,
             )
 
-        messages.append(HumanMessage(content=user_message))
+        try:
+            response = self.execute_react_loop(
+                messages=messages,
+                verbose=verbose,
+                max_iterations=5,
+                tool_enforcement_msg=tool_enforcement_msg,
+            )
+        except Exception as e:
+            if not self._is_content_filter_error(e):
+                raise
 
-        return self.execute_react_loop(
-            messages=messages,
-            verbose=verbose,
-            max_iterations=5,
-            tool_enforcement_msg=(
-                "You MUST use a tool (like get_current_weather_summary) to get real data. "
-                "Do NOT answer from your knowledge base. Call the tool now."
-            ),
+            if verbose:
+                print("      [WEATHER] Retrying with safe prompt variant after content filter...")
+
+            safe_messages = self._build_messages(
+                get_weather_prompt(safe_mode=True),
+                user_message,
+                context,
+            )
+            try:
+                response = self.execute_react_loop(
+                    messages=safe_messages,
+                    verbose=verbose,
+                    max_iterations=5,
+                    tool_enforcement_msg=tool_enforcement_msg,
+                )
+            except Exception as safe_error:
+                if not self._is_content_filter_error(safe_error):
+                    raise
+
+                if verbose:
+                    print("      [WEATHER] Falling back to direct tool invocation after repeated content-filter blocks...")
+
+                response = self._run_direct_tool_fallback(user_message)
+
+        if self._has_english_language_drift(response, language):
+            if verbose:
+                print("      [WEATHER] Detected language drift in EN response, switching to deterministic tool output...")
+            response = self._run_direct_tool_fallback(user_message)
+
+        return finalize_worker_response(
+            response,
+            agent_name="weather",
+            user_query=user_message,
+            language=language,
         )
 
     def build_subgraph(self) -> "CompiledStateGraph":
@@ -86,6 +323,22 @@ class WeatherAgent(BaseAgent):
         def agent_node(state: AgentState) -> dict:
             """Weather agent decision node."""
             messages = list(state["messages"])
+
+            last_message = messages[-1] if messages else None
+            if isinstance(last_message, ToolMessage):
+                response = self._safe_llm_invoke(self.llm_with_tools, messages)
+                return {"messages": [response]}
+
+            user_message = None
+            for message in reversed(messages):
+                if isinstance(message, HumanMessage) and message.content:
+                    user_message = str(message.content)
+                    break
+
+            if user_message:
+                deterministic_call = self._build_deterministic_subgraph_tool_call(user_message)
+                if deterministic_call is not None:
+                    return {"messages": [deterministic_call]}
 
             # Add system prompt if not present
             if not messages or not isinstance(messages[0], SystemMessage):

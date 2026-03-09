@@ -10,19 +10,22 @@
 #     - Request Timeouts
 # ==========================================================================
 
-import time
 import hashlib
 import json
-from typing import Dict, Any, List, Optional, Callable, Tuple
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+from concurrent.futures import as_completed
 from functools import wraps
 from threading import Lock
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
 import requests
 
+from agent.utils.langsmith_tracing import ContextThreadPoolExecutor
 
 # ==========================================================================
 # HTTP Session Pooling
 # ==========================================================================
+
 
 class HTTPSessionPool:
     """
@@ -238,7 +241,7 @@ def execute_tools_parallel(
     # Limit workers to number of tools
     num_workers = min(max_workers, len(tools_to_call))
     
-    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+    with ContextThreadPoolExecutor(max_workers=num_workers) as executor:
         future_to_tool = {
             executor.submit(execute_single_tool, tc): tc
             for tc in tools_to_call

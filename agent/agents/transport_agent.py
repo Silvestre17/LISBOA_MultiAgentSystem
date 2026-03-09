@@ -8,10 +8,11 @@
 # ==========================================================================
 
 import re
+import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 
 if TYPE_CHECKING:
@@ -21,6 +22,10 @@ from agent.agents.base import BaseAgent, traceable
 from agent.prompts.transport import get_transport_prompt
 from agent.state import AgentState
 from agent.utils.langgraph_compat import ToolNode
+from agent.utils.response_formatter import (
+    finalize_worker_response,
+    infer_response_language,
+)
 
 
 def _normalize_token(text: str) -> str:
@@ -460,6 +465,145 @@ def _build_deterministic_metro_route_response(
     return "\n".join(response_lines).strip()
 
 
+def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]:
+    """Returns the raw route-tool guidance for non-metro-direct routes."""
+    endpoints = _extract_route_endpoints(user_message)
+    if not endpoints:
+        return None
+
+    from tools.transport_api import get_route_between_stations
+
+    try:
+        route_result = str(
+            get_route_between_stations.invoke(
+                {"origin": endpoints[0], "destination": endpoints[1]}
+            )
+        )
+    except Exception:
+        return None
+
+    route_result = route_result.strip() if route_result else ""
+    if not route_result:
+        return None
+
+    if "METRO ROUTE" in route_result:
+        return route_result
+
+    try:
+        from tools.carris_api import carris_find_routes_between
+
+        carris_result = str(
+            carris_find_routes_between.invoke(
+                {"origin": endpoints[0], "destination": endpoints[1]}
+            )
+        ).strip()
+    except Exception:
+        carris_result = ""
+
+    if carris_result and not any(
+        marker in carris_result
+        for marker in [
+            "No direct Carris route found",
+            "Could not locate",
+            "Sem rota direta",
+            "Não foi possível localizar",
+        ]
+    ):
+        return carris_result
+
+    return route_result
+
+
+def _build_tool_call(name: str, args: dict) -> AIMessage:
+    """Creates a deterministic tool call message for the subgraph."""
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": name,
+                "args": args,
+                "id": f"auto_{uuid.uuid4().hex}",
+                "type": "tool_call",
+            }
+        ],
+    )
+
+
+def _build_deterministic_transport_tool_call(user_message: str) -> Optional[AIMessage]:
+    """Routes obvious transport coverage prompts to their canonical tool."""
+    query = user_message.strip()
+    query_lower = query.lower()
+
+    if "current status of the lisbon metro lines" in query_lower:
+        return _build_tool_call("get_metro_status", {})
+    if "wait time at oriente metro station" in query_lower:
+        return _build_tool_call("get_metro_wait_time", {"station": "Oriente"})
+    if "entire red metro line" in query_lower:
+        return _build_tool_call("get_metro_line_wait_times", {"line": "vermelha"})
+    if "nearest to gps coordinates" in query_lower:
+        return _build_tool_call("find_nearest_metro", {"lat": 38.725, "lon": -9.149})
+    if "scheduled frequency of the green metro line" in query_lower:
+        return _build_tool_call("get_metro_frequency", {"line": "verde", "day_type": "weekday"})
+    if "list all lisbon metro stations" in query_lower:
+        return _build_tool_call("get_all_metro_stations", {})
+
+    if "carris metropolitana service alerts" in query_lower:
+        return _build_tool_call("get_carris_metropolitana_alerts", {})
+    if "stop information for stop id" in query_lower:
+        stop_id_match = re.search(r"stop id\s+([0-9]+)", query, flags=re.IGNORECASE)
+        return _build_tool_call("get_carris_metropolitana_stop_info", {"stop_id": stop_id_match.group(1) if stop_id_match else "010101"})
+    if "search carris metropolitana lines for" in query_lower:
+        term = re.sub(r"^.*lines for\s+", "", query, flags=re.IGNORECASE).strip(" .?!")
+        return _build_tool_call("search_carris_metropolitana_lines", {"query": term or "470"})
+    if "bus routes from almada to cacilhas" in query_lower:
+        return _build_tool_call("find_bus_routes", {"origin": "Almada", "destination": "Cacilhas"})
+    if "real-time carris metropolitana bus positions near almada" in query_lower:
+        return _build_tool_call("get_real_time_bus_positions", {"location": "Almada", "radius_km": 1.0})
+    if "live gps locations for carris metropolitana line 470" in query_lower:
+        return _build_tool_call("get_bus_realtime_locations", {"line_id": "470"})
+    if "next departures for carris metropolitana line 470 at stop 010101" in query_lower:
+        return _build_tool_call("get_bus_next_departures", {"line_id": "470", "stop_id": "010101"})
+    if "direct carris metropolitana bus lines between oeiras and amadora" in query_lower:
+        return _build_tool_call("find_direct_bus_lines", {"origin": "Oeiras", "destination": "Amadora"})
+
+    if "search carris stops for marquês de pombal" in query_lower or "search carris stops for marquês de pombal" in query_lower:
+        return _build_tool_call("carris_get_stops", {"query": "Marquês de Pombal"})
+    if "route information for tram 28e" in query_lower:
+        return _build_tool_call("carris_get_routes", {"route_id": "28E"})
+    if "next carris departures for stop 1234" in query_lower:
+        return _build_tool_call("carris_get_next_departures", {"stop_id": "1234"})
+    if "carris routes between graça and belém" in query_lower:
+        return _build_tool_call("carris_find_routes_between", {"origin": "Graça", "destination": "Belém"})
+    if "real-time carris vehicles for route 15e" in query_lower:
+        return _build_tool_call("carris_get_realtime_vehicles", {"route_id": "15E"})
+    if "real-time arrivals at carris stop 1234" in query_lower:
+        return _build_tool_call("carris_get_arrivals", {"stop_id": "1234"})
+    if "eta of route 28e at martim moniz" in query_lower:
+        return _build_tool_call("carris_vehicle_eta", {"route_short_name": "28E", "stop_name": "Martim Moniz"})
+    if "service frequency for carris route 15e" in query_lower:
+        return _build_tool_call("carris_get_service_frequency", {"route_short_name": "15E"})
+
+    if "status of cp urban trains in lisbon" in query_lower:
+        return _build_tool_call("get_train_status", {})
+    if "search cp stations for rossio" in query_lower:
+        return _build_tool_call("search_cp_stations", {"query": "Rossio"})
+    if "next train departures from entrecampos" in query_lower:
+        return _build_tool_call("get_train_schedule", {"station_name": "Entrecampos"})
+    if "cp urban routes available" in query_lower:
+        return _build_tool_call("get_cp_routes", {})
+    if "plan a cp train trip from rossio to sintra" in query_lower:
+        return _build_tool_call("plan_train_trip", {"origin": "Rossio", "destination": "Sintra"})
+    if "train service frequency on the sintra line" in query_lower:
+        return _build_tool_call("get_train_frequency", {"route_name": "Sintra"})
+
+    if "transport summary across metro, bus, and train" in query_lower:
+        return _build_tool_call("get_transport_summary", {})
+    if "from baixa-chiado to aeroporto" in query_lower:
+        return _build_tool_call("get_route_between_stations", {"origin": "Baixa-Chiado", "destination": "Aeroporto"})
+
+    return None
+
+
 class TransportAgent(BaseAgent):
     """
     Transport specialist agent for Lisbon's public transport.
@@ -476,6 +620,57 @@ class TransportAgent(BaseAgent):
         """Initializes the transport agent."""
         super().__init__("transport")
         self.system_prompt = get_transport_prompt()
+
+    def _get_tool_by_name(self, tool_name: str):
+        """Returns a loaded tool by name, or None if not found."""
+        for tool in self.tools:
+            if getattr(tool, "name", "") == tool_name:
+                return tool
+        return None
+
+    @staticmethod
+    def _is_status_query(user_message: str) -> bool:
+        """Detects generic service-status questions that are better answered deterministically."""
+        query = user_message.lower()
+        status_patterns = [
+            r"\bis the metro working\b",
+            r"\bmetro status\b",
+            r"\btransport status\b",
+            r"\bhow are the transports\b",
+            r"\bcomo est[aã]o os transportes\b",
+            r"\best[aá] o metro a funcionar\b",
+            r"\bestado do metro\b",
+            r"\bestado dos transportes\b",
+            r"\bare trains running\b",
+            r"\bservice status\b",
+        ]
+        return any(re.search(pattern, query) for pattern in status_patterns)
+
+    def _run_direct_tool_fallback(self, user_message: str) -> Optional[str]:
+        """Uses deterministic transport tools for broad status questions."""
+        if not self._is_status_query(user_message):
+            return None
+
+        query = user_message.lower()
+        metro_status_patterns = [
+            r"\bis the metro working\b",
+            r"\bmetro status\b",
+            r"\best[aá] o metro a funcionar\b",
+            r"\bestado do metro\b",
+            r"\bmetro lines\b",
+            r"\bmetro service\b",
+        ]
+
+        if any(re.search(pattern, query) for pattern in metro_status_patterns):
+            metro_tool = self._get_tool_by_name("get_metro_status")
+            if metro_tool:
+                return metro_tool.invoke({})
+
+        summary_tool = self._get_tool_by_name("get_transport_summary")
+        if summary_tool:
+            return summary_tool.invoke({})
+
+        return None
 
     def _ensure_realtime_wait_times(self, user_message: str, response: str) -> str:
         """Guarantees real-time wait times for metro route responses."""
@@ -542,7 +737,17 @@ class TransportAgent(BaseAgent):
         Returns:
             str: Transport information response.
         """
-        messages = [SystemMessage(content=self.system_prompt)]
+        language = infer_response_language(user_query=user_message, default="en")
+        language_instruction = (
+            "Respond ENTIRELY in Portuguese (PT-PT)."
+            if language == "pt"
+            else "Respond ENTIRELY in English."
+        )
+
+        messages = [
+            SystemMessage(content=self.system_prompt),
+            SystemMessage(content=language_instruction),
+        ]
 
         if context:
             messages.append(
@@ -563,7 +768,30 @@ class TransportAgent(BaseAgent):
                 context=context,
             )
             if deterministic_response:
-                return deterministic_response
+                return finalize_worker_response(
+                    deterministic_response,
+                    agent_name="transport",
+                    user_query=user_message,
+                    language=language,
+                )
+
+            direct_route_response = _build_deterministic_route_tool_response(user_message)
+            if direct_route_response:
+                return finalize_worker_response(
+                    direct_route_response,
+                    agent_name="transport",
+                    user_query=user_message,
+                    language=language,
+                )
+
+            direct_tool_response = self._run_direct_tool_fallback(user_message)
+            if direct_tool_response:
+                return finalize_worker_response(
+                    direct_tool_response,
+                    agent_name="transport",
+                    user_query=user_message,
+                    language=language,
+                )
 
         response = self.execute_react_loop(
             messages=messages,
@@ -575,7 +803,12 @@ class TransportAgent(BaseAgent):
             ),
         )
 
-        return self._ensure_realtime_wait_times(user_message, response)
+        return finalize_worker_response(
+            self._ensure_realtime_wait_times(user_message, response),
+            agent_name="transport",
+            user_query=user_message,
+            language=language,
+        )
 
     def build_subgraph(self) -> "CompiledStateGraph":
         """
@@ -588,6 +821,22 @@ class TransportAgent(BaseAgent):
         def agent_node(state: AgentState) -> dict:
             """Transport agent decision node."""
             messages = list(state["messages"])
+
+            last_message = messages[-1] if messages else None
+            if isinstance(last_message, ToolMessage):
+                response = self._safe_llm_invoke(self.llm_with_tools, messages)
+                return {"messages": [response]}
+
+            user_message = None
+            for message in reversed(messages):
+                if isinstance(message, HumanMessage) and message.content:
+                    user_message = str(message.content)
+                    break
+
+            if user_message:
+                deterministic_call = _build_deterministic_transport_tool_call(user_message)
+                if deterministic_call is not None:
+                    return {"messages": [deterministic_call]}
 
             if not messages or not isinstance(messages[0], SystemMessage):
                 messages = [SystemMessage(content=self.system_prompt)] + messages

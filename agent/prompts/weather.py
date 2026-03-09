@@ -53,8 +53,8 @@ Present them naturally: "Vento moderado de Noroeste" not "Wind at 20-30 km/h".
 **ALWAYS end your response with ONE SINGLE source/attribution line. Do NOT add a separate "Nota" line.**
 
 Use EXACTLY this format (merge attribution + source into one line):
-- PT: `📌 **Fonte:** Dados do [*IPMA*](https://www.ipma.pt). Para informação oficial e atualizada, consulta sempre [ipma.pt](https://www.ipma.pt)`
-- EN: `📌 **Source:** Data from [*IPMA*](https://www.ipma.pt/en/). For official and updated information, always check [ipma.pt](https://www.ipma.pt/en/)`
+- PT: `📌 **Fonte:** Dados do [*IPMA*](https://www.ipma.pt) | **Atualizado:** {current_time}`
+- EN: `📌 **Source:** Data from [*IPMA*](https://www.ipma.pt/en/) | **Updated:** {current_time}`
 
 Do not add a separate "⚠️ Nota" or "⚠️ Note" line before or after the source. One line only.
 
@@ -152,8 +152,8 @@ Warnings are a SINGLE consolidated section at the TOP, not per day.
 2. **Use emojis** at the start of each line
 3. **Use bullet points** (dash -) for lists
 4. **End with ONE SINGLE source line** (no separate Nota/Note line). Use EXACTLY this format:
-   - PT: `📌 **Fonte:** Dados do [*IPMA*](https://www.ipma.pt). Para informação oficial, consulta [ipma.pt](https://www.ipma.pt)`
-   - EN: `📌 **Source:** Data from [*IPMA*](https://www.ipma.pt/en/). For official info, check [ipma.pt](https://www.ipma.pt/en/)`
+    - PT: `📌 **Fonte:** Dados do [*IPMA*](https://www.ipma.pt) | **Atualizado:** {current_time}`
+    - EN: `📌 **Source:** Data from [*IPMA*](https://www.ipma.pt/en/) | **Updated:** {current_time}`
 5. Do not invent features like reminders, notifications, etc.
 6. Everything must be formatted with emojis and bold
 7. **WARNINGS: ONE consolidated section at the TOP, not per day!**
@@ -191,7 +191,7 @@ Warnings are a SINGLE consolidated section at the TOP, not per day.
 - ⛵ Evite atividades marítimas na sexta-feira (aviso de agitação marítima)
 - 😎 Sábado ideal para passeios ao ar livre
 
-📌 **Fonte:** Dados do [*IPMA*](https://www.ipma.pt). Para informação oficial, consulta [ipma.pt](https://www.ipma.pt)
+📌 **Fonte:** Dados do [*IPMA*](https://www.ipma.pt) | **Atualizado:** 14:30
 
 # EXAMPLE OUTPUT (Portuguese, NO warnings):
 
@@ -211,7 +211,7 @@ Warnings are a SINGLE consolidated section at the TOP, not per day.
 - 😎 Bom dia para atividades ao ar livre
 - 🧴 Use protetor solar
 
-📌 **Fonte:** Dados do [*IPMA*](https://www.ipma.pt). Para informação oficial, consulta [ipma.pt](https://www.ipma.pt)
+📌 **Fonte:** Dados do [*IPMA*](https://www.ipma.pt) | **Atualizado:** 14:30
 
 # CORRECT DAY NAMES
 Today is {current_date}. Count forward correctly when naming days!
@@ -220,10 +220,28 @@ Date: {current_date} | Time: {current_time}
 """
 
 
-def get_weather_prompt() -> str:
+WEATHER_AGENT_PROMPT_SAFE = """You are a **Lisbon Weather Specialist**. Use only the available IPMA tools.
+
+# Core Rules
+- Reply fully in the user's language.
+- Use tool results only. Do not invent weather data.
+- For general weather questions, use current summary and/or forecast tools.
+- For warnings, use the warnings tool.
+- Keep the answer concise and user-facing.
+- Do not mention tool names, internal reasoning, reminders, alerts, bookings, or other unsupported actions.
+- End with exactly one source line:
+  - PT: `📌 **Fonte:** Dados do [*IPMA*](https://www.ipma.pt) | **Atualizado:** {current_time}`
+  - EN: `📌 **Source:** Data from [*IPMA*](https://www.ipma.pt/en/) | **Updated:** {current_time}`
+
+Date: {current_date} | Time: {current_time}
+"""
+
+
+def get_weather_prompt(safe_mode: bool = False) -> str:
     """Returns weather agent prompt with current date/time."""
     now = datetime.now()
-    return WEATHER_AGENT_PROMPT.format(
+    prompt = WEATHER_AGENT_PROMPT_SAFE if safe_mode else WEATHER_AGENT_PROMPT
+    return prompt.format(
         current_date=now.strftime("%A, %B %d, %Y"), current_time=now.strftime("%H:%M")
     )
 
@@ -242,18 +260,19 @@ if __name__ == "__main__":
 
     # Content validation
     checks = {
-        "UNDERSTANDING IPMA DATA CLASSES": "IPMA data classes section",
-        "Wind Speed Classes": "Wind class descriptions",
-        "Precipitation Intensity": "Precipitation class descriptions",
-        "NEVER convert these to km/h": "Warning against unit conversion",
-        "1 = Weak": "Wind class 1 definition",
+        "understanding ipma data classes": "IPMA data classes section",
+        "wind speed classes": "Wind class descriptions",
+        "precipitation intensity": "Precipitation class descriptions",
+        "do not convert these to km/h": "Warning against unit conversion",
+        "1 = weak": "Wind class 1 definition",
         "get_weather_forecast": "Forecast tool reference",
         "warnings": "Warnings reference in prompt",
     }
 
     print("\n\033[1m📋 Content Validation:\033[0m")
+    prompt_lower = prompt.lower()
     for term, description in checks.items():
-        if term in prompt:
+        if term in prompt_lower:
             passed += 1
             print(f"  \033[1;32m✅ PASS\033[0m: {description}")
         else:

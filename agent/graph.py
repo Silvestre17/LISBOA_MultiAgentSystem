@@ -30,7 +30,7 @@ from agent.utils.langgraph_compat import ToolNode
 from agent.utils.langsmith_tracing import (
     LANGSMITH_AVAILABLE,
     ContextThreadPoolExecutor,
-    RunTree,
+    annotate_current_run,
     get_current_run_tree,
     traceable,
 )
@@ -518,6 +518,11 @@ class LisbonAssistant:
         }
         self.model_name = self.model_info.get("model", "Unknown")
 
+    @traceable(
+        name="single_agent_chat",
+        run_type="chain",
+        tags=["single-agent", "user-query"],
+    )
     def chat(
         self,
         message: str,
@@ -550,6 +555,15 @@ class LisbonAssistant:
             self.state["user_context"] = user_ctx
         else:
             user_ctx["language"] = language
+
+        if LANGSMITH_AVAILABLE:
+            annotate_current_run(
+                metadata={
+                    "assistant_mode": "single-agent",
+                    "language": language,
+                    "request_source": "user_chat",
+                }
+            )
 
         # Run the graph with recursion limit to prevent infinite loops
         # Default LangGraph limit is 25, increased for smaller models with tool calling
@@ -677,7 +691,7 @@ class MultiAgentAssistant:
         return f"Multi-Agent ({sv_model})"
 
     @traceable(
-        name="multi_agent_chat",
+        name="LISBOA Chat",
         run_type="chain",
         tags=["multi-agent", "user-query"],
     )
@@ -730,6 +744,15 @@ class MultiAgentAssistant:
         else:
             user_ctx["language"] = language
 
+        if LANGSMITH_AVAILABLE:
+            annotate_current_run(
+                metadata={
+                    "assistant_mode": "multi-agent",
+                    "language": language,
+                    "request_source": "user_chat",
+                }
+            )
+
         # Notify status: Routing
         if on_status_change:
             status_msg = (
@@ -759,45 +782,28 @@ class MultiAgentAssistant:
             )
 
         # Inject LangSmith metadata and tags based on routing decision
-        if LANGSMITH_AVAILABLE and agents_to_call:
-            try:
-                run_tree = get_current_run_tree()
-                if run_tree:
-                    # Ensure metadata structure exists
-                    if not hasattr(run_tree, "extra") or run_tree.extra is None:
-                        run_tree.extra = {}
-                    if "metadata" not in run_tree.extra:
-                        run_tree.extra["metadata"] = {}
+        if LANGSMITH_AVAILABLE:
+            query_tags: list[str] = []
+            if "weather" in agents_to_call:
+                query_tags.append("weather")
+            if "transport" in agents_to_call:
+                query_tags.append("transport")
+            if "researcher" in agents_to_call:
+                query_tags.append("research")
+            if "planner" in agents_to_call:
+                query_tags.append("itinerary")
+            if not agents_to_call:
+                query_tags.append("direct_response")
 
-                    # Add routing metadata
-                    run_tree.extra["metadata"]["agents_called"] = agents_to_call
-                    run_tree.extra["metadata"]["num_agents"] = len(agents_to_call)
-                    run_tree.extra["metadata"]["supervisor_reasoning"] = reasoning[
-                        :200
-                    ]  # Truncate
-
-                    # Determine query type tags
-                    query_tags = []
-                    if "weather" in agents_to_call:
-                        query_tags.append("weather")
-                    if "transport" in agents_to_call:
-                        query_tags.append("transport")
-                    if "researcher" in agents_to_call:
-                        query_tags.append("research")
-                    if "planner" in agents_to_call:
-                        query_tags.append("itinerary")
-                    if not agents_to_call:
-                        query_tags.append("direct_response")
-
-                    run_tree.extra["metadata"]["query_tags"] = query_tags
-
-                    # Add tags to run_tree if supported
-                    if hasattr(run_tree, "tags") and run_tree.tags is not None:
-                        run_tree.tags.extend(query_tags)
-                    elif hasattr(run_tree, "tags"):
-                        run_tree.tags = query_tags
-            except Exception:
-                pass  # Silently ignore metadata errors
+            annotate_current_run(
+                metadata={
+                    "agents_called": agents_to_call,
+                    "num_agents": len(agents_to_call),
+                    "supervisor_reasoning": reasoning[:200] if reasoning else None,
+                    "query_tags": query_tags,
+                },
+                tags=query_tags,
+            )
 
         # Map internal agent names to user-friendly display names
         name_map_pt = {
@@ -901,24 +907,12 @@ class MultiAgentAssistant:
 
                         # Log latency to LangSmith metadata if available
                         if LANGSMITH_AVAILABLE:
-                            try:
-                                run_tree = get_current_run_tree()
-                                if run_tree:
-                                    if (
-                                        not hasattr(run_tree, "extra")
-                                        or run_tree.extra is None
-                                    ):
-                                        run_tree.extra = {}
-                                    if "metadata" not in run_tree.extra:
-                                        run_tree.extra["metadata"] = {}
-                                    run_tree.extra["metadata"][
-                                        f"agent_{agent_name}_latency_ms"
-                                    ] = int(agent_latency * 1000)
-                                    run_tree.extra["metadata"][
-                                        f"agent_{agent_name}_output_chars"
-                                    ] = len(output)
-                            except Exception:
-                                pass  # Silently ignore metadata errors
+                            annotate_current_run(
+                                metadata={
+                                    f"agent_{agent_name}_latency_ms": int(agent_latency * 1000),
+                                    f"agent_{agent_name}_output_chars": len(output),
+                                }
+                            )
 
                         if verbose:
                             print(
@@ -931,7 +925,20 @@ class MultiAgentAssistant:
                             print(f"   [AGENT: {agent_name.upper()}] Failed: {str(e)}")
 
         # Step 4: QA Validation (single retry if incomplete)
-        if agent_outputs and len(workers) > 0:
+        skip_qa_for_simple_weather = (
+            workers == ["weather"]
+            and "planner" not in agents_to_call
+            and (
+                self.agents["weather"]._is_current_weather_query(message)
+                or self.agents["weather"]._is_simple_forecast_query(message)
+            )
+        )
+
+        if skip_qa_for_simple_weather:
+            if verbose:
+                print("\n   [QA] Skipped for simple deterministic weather query")
+
+        if agent_outputs and len(workers) > 0 and not skip_qa_for_simple_weather:
             if verbose:
                 print("\n   [QA] Validating completeness...")
 
@@ -1184,8 +1191,8 @@ class MultiAgentAssistant:
                 "12. Use `---` horizontal rules ONLY to separate distinct topic sections (e.g., weather from transport from places). Never use them within the same topic.\n"
                 "13. Format transport data with correct emoji patterns: 🚇 Metro, 🚌 buses, 🚆 trains, 🚋 trams. Sub-items under each operator MUST be `- ` bullets.\n"
                 "14. Preserve the visual hierarchy: operator name with emoji as header, then `- ` bullet items with status emojis (🟢, ⚠️, ❌) and **bold** labels.\n"
-                "15. **User Constraints:** Explicitly acknowledge any user constraints (budget, time, accessibility, transport preferences) in the intro paragraph and confirm how the itinerary/response meets them.\n"
-                "16. **Tables:** Use clean Markdown tables to display structured data like schedules, itineraries, or cost breakdowns whenever possible to improve readability.\n"
+                "15. Keep the answer user-facing. Do not add meta commentary about constraints, evaluation, or how the response was produced.\n"
+                "16. Do not add closing offers such as 'Se quiser...' or 'I can also...'. End naturally after the useful content and source attribution.\n"
             )
 
             messages = [

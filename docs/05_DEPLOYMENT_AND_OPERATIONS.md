@@ -56,16 +56,27 @@ Optional Metro TLS overrides from `.env.example`:
 #### Optional Services and Observability
 
 - `TAVILY_API_KEY`
-- `LANGCHAIN_TRACING_V2`
-- `LANGCHAIN_API_KEY`
-- `LANGCHAIN_PROJECT`
-- `LANGCHAIN_ENDPOINT`
+- `LANGSMITH_TRACING`
+- `LANGSMITH_API_KEY`
+- `LANGSMITH_PROJECT`
+- `LANGSMITH_ENDPOINT`
+- `LANGSMITH_WORKSPACE_ID` when the LangSmith API key is linked to multiple workspaces
+
+Legacy `LANGCHAIN_*` tracing aliases are still accepted by the runtime for backward compatibility, but the canonical `LANGSMITH_*` names above should be preferred for new setups.
 
 ### Provider Behavior Notes
 
 - The default runtime mode is multi-agent.
 - Per-agent model mappings are configured in `config.py` through `AGENT_MODELS_AZURE`, `AGENT_MODELS_OPENAI`, and `AGENT_MODELS_LMSTUDIO`.
 - The Streamlit sidebar in `app.py` can override the active provider and per-agent model selection at runtime.
+- The UI provider connection tests intentionally use raw HTTP requests instead of LangChain or LangGraph invocation paths, so these health checks do not create LangSmith traces.
+
+### LangSmith Tracing Notes
+
+- A real user request should produce exactly one top-level LangSmith trace.
+- Nested spans then capture the supervisor, worker agents, LangChain model calls, and tool executions used to answer that request.
+- The connection-validation flow behind `Save & Connect` in `app.py` and `Connect System` in `app_vprod.py` is intentionally excluded from tracing to avoid wasting the free-tier trace quota.
+- If your LangSmith API key is linked to multiple workspaces, set `LANGSMITH_WORKSPACE_ID` or the tracing preflight check may auto-disable tracing.
 
 ## 🚀 First Run
 

@@ -157,7 +157,7 @@ class Config:
     # Debug/Development Settings
     # Show raw markdown responses in terminal for debugging/copying
     SHOW_MARKDOWN_RESPONSE_IN_TERMINAL = (
-        False  # Set to True to print AI responses to terminal
+        True  # Set to True to print AI responses to terminal
     )
 
     # =========================================================================
