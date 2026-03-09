@@ -29,6 +29,8 @@ from typing import Any, Dict, Optional
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from agent.utils.langsmith_tracing import LANGSMITH_STATUS  # noqa: F401
+
 try:
     from config import Config
 except ModuleNotFoundError:
@@ -153,7 +155,7 @@ class LLMFactory:
             from langchain_openai import ChatOpenAI
 
             # Use provided model or fall back to default
-            model_name = model if model else Config.LMSTUDIO_MODEL_NAME
+            model_name = model or Config.LMSTUDIO_MODEL_NAME or Config.get_default_agent_model().get("model")
 
             return ChatOpenAI(
                 model=model_name,  # e.g., "qwen/qwen3-4b-2507"
@@ -186,7 +188,7 @@ class LLMFactory:
             # Import OpenAI-specific LangChain integration
             from langchain_openai import ChatOpenAI
 
-            model_name = model if model else Config.OPENAI_MODEL_NAME
+            model_name = model or Config.OPENAI_MODEL_NAME or Config.get_default_agent_model().get("model")
 
             # Check if it's a reasoning-style deployment using helper function
             if LLMFactory._is_reasoning_model(model_name):
@@ -223,7 +225,11 @@ class LLMFactory:
             from langchain_openai import ChatOpenAI
 
             # Determine the model being used
-            model_name = model or Config.AZURE_OPENAI_DEPLOYMENT_NAME
+            model_name = (
+                model
+                or Config.AZURE_OPENAI_DEPLOYMENT_NAME
+                or Config.get_default_agent_model().get("model")
+            )
 
             # Build the v1 API base URL
             # Format: https://YOUR-RESOURCE.openai.azure.com/openai/v1/
@@ -482,7 +488,8 @@ if __name__ == "__main__":
         print(f"   Provider: {provider}")
 
         # Create LLM instance using factory
-        llm = LLMFactory.get_llm()
+        default_model = Config.get_default_agent_model().get("model")
+        llm = LLMFactory.get_llm(provider=provider, model=default_model)
         model_info = LLMFactory.get_model_info(llm)
 
         print(f"\n\033[1;32m✅ LLM Ready:\033[0m {model_info['model']}")

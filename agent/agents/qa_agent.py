@@ -330,14 +330,21 @@ class QualityAssuranceAgent(BaseAgent):
         # Uses METRO_STATIONS from metrolisboa_api as the authoritative source.
         checks.append("metro_stations")
         station_text_patterns = [
-            r"esta[çc][aã]o\s+(?:de\s+|do\s+)?([A-Za-zÀ-ú\s\-\.]+?)(?:\s*[\(\),\.]|\s+(?:da|na|para|line|linha))",
+            r"esta[çc][aã]o\s+(?:de\s+|do\s+)?([A-Za-zÀ-ú\s\-\.]+?)(?:\s*[\(\),\.]|\s+(?:da|na|para|line|linha|on|to|from))",
             r"station\s+([A-Za-zÀ-ú\s\-\.]+?)(?:\s*[\(\),\.]|\s+(?:on|to|from|line))",
         ]
         mentioned_stations: set = set()
         for pattern in station_text_patterns:
             for match in re.findall(pattern, output_lower, re.IGNORECASE):
                 name = match.strip().lower().rstrip(".")
-                if len(name) > 2:
+                word_count = len(name.split())
+                if (
+                    len(name) > 2
+                    and word_count <= 4
+                    and "metropolitano de lisboa" not in name
+                    and "reconhecida" not in name
+                    and "recognized" not in name
+                ):
                     mentioned_stations.add(name)
 
         valid_metro_set = _METRO_CANONICAL_STATIONS

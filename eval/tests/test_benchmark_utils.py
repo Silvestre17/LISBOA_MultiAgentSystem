@@ -11,11 +11,13 @@
 
 import os
 import sys
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 import pytest
 
+import eval.run_benchmark as benchmark_module
 from eval.run_benchmark import SLA_THRESHOLDS, _build_summary, compute_tool_metrics
 
 # ==========================================================================
@@ -245,3 +247,53 @@ class TestBenchmarkSummaryCostAccounting:
         assert summary["overall"]["combined_cost_usd"]["total_cost_usd"] == pytest.approx(0.000135)
         assert summary["per_domain"]["weather"]["combined_cost_usd"]["total_cost_usd"] == pytest.approx(0.000135)
         assert summary["per_response_model"]["azure::gpt-5-mini"]["combined_usage"]["tokens"]["total_tokens"] == 225
+
+
+class TestRunIsolatedAgent:
+    """Ensures the benchmark runner measures the real worker invoke path."""
+
+    def test_run_isolated_agent_tracks_tool_calls_from_invoke(self, monkeypatch):
+        """Tool usage should be captured even when the worker calls tools directly in invoke()."""
+
+        class DummyTool:
+            def __init__(self, name: str):
+                self.name = name
+
+            def invoke(self, payload):
+                return f"tool-output:{payload['query']}"
+
+        class DummyTransportAgent:
+            def __init__(self):
+                self.tools = [DummyTool("get_metro_status")]
+
+            def init_llm(self, provider, model, temperature):
+                self.llm_config = {
+                    "provider": provider,
+                    "model": model,
+                    "temperature": temperature,
+                }
+
+            def reset_llm_usage_tracking(self):
+                return None
+
+            def get_llm_usage_summary(self):
+                return {}
+
+            def invoke(self, query: str):
+                tool_result = self.tools[0].invoke({"query": query})
+                return f"final-response:{tool_result}"
+
+        monkeypatch.setattr(benchmark_module, "TransportAgent", DummyTransportAgent)
+
+        response, tools, retrieved_context, latency, error, usage = benchmark_module.run_isolated_agent(
+            domain="transport",
+            query="Is the metro working correctly right now?",
+            config={"provider": "azure", "model": "gpt-5-nano", "temperature": 0.0},
+        )
+
+        assert error is None
+        assert response == "final-response:tool-output:Is the metro working correctly right now?"
+        assert tools == ["get_metro_status"]
+        assert "[get_metro_status] returned:\ntool-output:Is the metro working correctly right now?" in retrieved_context
+        assert latency >= 0
+        assert usage["model_id"] == "azure::gpt-5-nano"

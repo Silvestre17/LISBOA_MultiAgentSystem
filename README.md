@@ -307,9 +307,16 @@ Common entries:
 - or `OPENAI_API_KEY`, `OPENAI_MODEL_NAME`
 - `METRO_CONSUMER_KEY`, `METRO_CONSUMER_SECRET` for official Metro realtime data
 - `TAVILY_API_KEY` for web search
-- `LANGCHAIN_TRACING_V2`, `LANGCHAIN_API_KEY`, `LANGCHAIN_PROJECT` for optional LangSmith tracing
+- `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, `LANGSMITH_ENDPOINT` for optional LangSmith tracing
+- optionally `LANGSMITH_WORKSPACE_ID` if the LangSmith API key is linked to multiple workspaces
 
 LM Studio can also be used locally with no API key, as documented in [`.env.example`](./.env.example) and [`config.py`](./config.py).
+
+Notes for tracing:
+
+- the code still accepts legacy `LANGCHAIN_*` tracing aliases for backward compatibility, but `LANGSMITH_*` is now the recommended setup
+- each real user message should produce exactly one top-level LangSmith trace, with supervisor, worker agents, and tool spans nested inside it
+- the `Save & Connect` or provider health-check flows use raw HTTP requests on purpose and do **not** create LangSmith traces, so they do not consume the free-tier tracing quota
 
 ### First Run
 

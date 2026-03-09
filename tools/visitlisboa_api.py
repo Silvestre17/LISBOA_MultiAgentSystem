@@ -24,6 +24,8 @@ import json
 import logging
 import math
 import os
+import re
+import unicodedata
 import warnings
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -750,6 +752,181 @@ def _extract_place_from_doc(doc) -> str:
     return "\n".join(parts)
 
 
+_PLACE_CATEGORY_ALIASES = {
+    "museums & monuments": {
+        "museums & monuments", "museum", "museums", "monument", "monuments",
+        "museu", "museus", "monumento", "monumentos", "monastery", "castle",
+        "palace", "church",
+    },
+    "restaurants": {"restaurant", "restaurants", "restaurante", "restaurantes", "food", "dining", "gastronomy", "gastronomia"},
+    "hotels": {"hotel", "hotels", "guest house", "guest houses", "apartments", "accommodation", "alojamento"},
+    "view points": {"view point", "view points", "viewpoint", "viewpoints", "miradouro", "miradouros"},
+    "parks & gardens": {"park", "parks", "garden", "gardens", "parque", "parques", "jardim", "jardins", "nature"},
+    "tours": {"tour", "tours", "trip", "trips"},
+}
+
+_GENERIC_PLACE_QUERY_TOKENS = {
+    "best", "good", "top", "lisbon", "lisboa", "place", "places", "attraction",
+    "attractions", "nearby", "today", "see", "visit", "thing", "things", "related",
+    "wheelchair", "accessible", "accessibility", "stepfree", "step", "mobility",
+    "what", "where", "which", "when", "are", "the", "and", "for", "with",
+    "from", "that", "this", "these", "those", "into", "about", "around",
+    "museum", "museums", "museu", "museus", "monument", "monuments",
+    "monumento", "monumentos", "open", "opened", "closed", "like",
+}
+_KNOWN_PLACE_LOCATION_HINTS = {
+    "belem", "alfama", "chiado", "baixa", "rossio", "oriente", "expo",
+    "ajuda", "alcantara", "estrela", "graca", "mouraria", "restelo",
+    "beato", "cascais", "sintra", "campo", "sodre",
+}
+_EXPLICIT_MUSEUM_MARKERS = {
+    "museum", "museu", "maat", "mude", "gulbenkian", "berardo", "mac/ccb", "macccb",
+}
+_NON_MUSEUM_MONUMENT_MARKERS = {
+    "monument", "monastery", "castle", "palace", "church", "tower", "cemetery", "aqueduct",
+    "monumento", "mosteiro", "castelo", "palacio", "igreja", "torre", "cemiterio", "aqueduto",
+}
+
+
+def _normalize_place_hint_text(text: Optional[str]) -> str:
+    """Normalizes text for location-hint comparisons."""
+    normalized = unicodedata.normalize("NFKD", text or "")
+    normalized = "".join(c for c in normalized if not unicodedata.combining(c))
+    return normalized.lower()
+
+
+def _extract_place_location_hints(query: Optional[str]) -> List[str]:
+    """Extracts known Lisbon area hints from the user query."""
+    normalized_query = _normalize_place_hint_text(query)
+    tokens = re.findall(r"[a-z0-9]+", normalized_query)
+    return [token for token in tokens if token in _KNOWN_PLACE_LOCATION_HINTS]
+
+
+def _matches_place_location_hints(text: str, location_hints: List[str]) -> bool:
+    """Checks whether candidate text matches requested neighborhood/location hints."""
+    if not location_hints:
+        return True
+
+    normalized_text = _normalize_place_hint_text(text)
+    return any(hint in normalized_text for hint in location_hints)
+
+
+def _query_requests_ranked_places(query: Optional[str]) -> bool:
+    """Detects broad ranking intents such as 'best museums' or 'top places'."""
+    normalized_query = _normalize_place_hint_text(query)
+    return any(token in normalized_query for token in ["best", "top", "recommended", "recommend", "must-see", "must see"])
+
+
+def _is_explicit_museum_candidate(title: str, url: str = "", extra_text: str = "") -> bool:
+    """Returns whether a candidate is explicitly museum-like rather than just monument-like."""
+    extra_text_clean = re.sub(r"category\s*:\s*[^\n]+", " ", extra_text or "", flags=re.IGNORECASE)
+    extra_text_clean = re.sub(r"museums?\s*&\s*monuments?", " ", extra_text_clean, flags=re.IGNORECASE)
+    haystack = _normalize_place_hint_text(" ".join([title or "", url or "", extra_text_clean]))
+    compact_haystack = haystack.replace(" ", "")
+
+    if any(marker in haystack for marker in _EXPLICIT_MUSEUM_MARKERS):
+        return True
+    if any(marker in compact_haystack for marker in {"mac/ccb", "macccb"}):
+        return True
+    if any(marker in haystack for marker in _NON_MUSEUM_MONUMENT_MARKERS):
+        return False
+    return False
+
+
+def _normalize_place_category_filter(category: Optional[str]) -> Optional[str]:
+    """Normalizes user-facing category filters to a canonical key."""
+    if not category:
+        return None
+
+    normalized = str(category).strip().lower()
+    for canonical, aliases in _PLACE_CATEGORY_ALIASES.items():
+        if normalized == canonical or normalized in aliases:
+            return canonical
+    return normalized
+
+
+def _place_category_matches(item_category: str, requested_category: Optional[str]) -> bool:
+    """Returns whether a place category matches the requested user filter."""
+    if not requested_category:
+        return True
+
+    normalized_requested = _normalize_place_category_filter(requested_category)
+    item_category_lower = (item_category or "").lower()
+    if not normalized_requested:
+        return True
+
+    aliases = _PLACE_CATEGORY_ALIASES.get(normalized_requested, {normalized_requested})
+    return any(alias in item_category_lower for alias in aliases)
+
+
+def _extract_place_query_tokens(query: Optional[str]) -> List[str]:
+    """Extracts meaningful query tokens for post-retrieval reranking."""
+    if not query:
+        return []
+
+    tokens = re.findall(r"[A-Za-zÀ-ÿ0-9]+", query.lower())
+    return [
+        token for token in tokens
+        if len(token) >= 3 and token not in _GENERIC_PLACE_QUERY_TOKENS
+    ]
+
+
+def _is_service_like_place_category(item_category: str) -> bool:
+    """Detects accommodation/info-desk categories that should not dominate museum queries."""
+    category_lower = (item_category or "").lower()
+    service_like_terms = [
+        "hotel", "tourist office", "guest house", "apartments",
+        "accommodation", "local & rural accommodation",
+    ]
+    return any(term in category_lower for term in service_like_terms)
+
+
+def _infer_place_query_intent(query: Optional[str], category: Optional[str]) -> Optional[str]:
+    """Infers broad place-search intent for lightweight category exclusions."""
+    normalized_category = _normalize_place_category_filter(category)
+    query_lower = (query or "").lower()
+    museum_terms = ["museum", "museu", "museums", "museus"]
+    monument_terms = ["monument", "monumento", "monuments", "monumentos", "monastery", "castle", "palace", "church"]
+
+    museum_requested = any(term in query_lower for term in museum_terms)
+    monument_requested = any(term in query_lower for term in monument_terms)
+
+    if normalized_category == "museums & monuments" and museum_requested and not monument_requested:
+        return "museum_only"
+    if normalized_category == "museums & monuments":
+        return "museum_monument"
+    if museum_requested and not monument_requested:
+        return "museum_only"
+    if monument_requested and not museum_requested:
+        return "monument_only"
+    if museum_requested or monument_requested:
+        return "museum_monument"
+    if any(term in query_lower for term in ["restaurant", "restaurante", "food", "dinner", "lunch", "brunch", "gastronomy"]):
+        return "food"
+    if any(term in query_lower for term in ["hotel", "stay", "accommodation", "guest house"]):
+        return "accommodation"
+    return None
+
+
+def _matches_place_query_intent(item_category: str, searchable_text: str, query_intent: Optional[str]) -> bool:
+    """Applies lightweight intent filtering to remove obvious false positives."""
+    if not query_intent:
+        return True
+
+    haystack = f"{item_category or ''} {searchable_text or ''}".lower()
+    museum_markers = ["museum", "museu", "museums"]
+    monument_markers = ["monument", "monumento", "monastery", "castle", "palace", "church"]
+
+    if query_intent == "museum_only":
+        return any(marker in haystack for marker in museum_markers)
+    if query_intent == "monument_only":
+        return any(marker in haystack for marker in monument_markers)
+    if query_intent == "museum_monument":
+        return any(marker in haystack for marker in museum_markers + monument_markers)
+
+    return True
+
+
 def _fallback_search(query: str, category: str, data: List[Dict], max_results: int) -> List[Dict]:
     """
     Fallback text search when vector store is unavailable.
@@ -765,25 +942,42 @@ def _fallback_search(query: str, category: str, data: List[Dict], max_results: i
     """
     results = []
     query_lower = query.lower() if query else None
-    category_lower = category.lower() if category else None
+    query_tokens = _extract_place_query_tokens(query)
+    query_intent = _infer_place_query_intent(query, category)
+    location_hints = _extract_place_location_hints(query)
     
     for item in data:
         # Category filter
-        if category_lower:
-            item_cat = item.get('category', '').lower()
-            if category_lower not in item_cat:
-                continue
+        if category and not _place_category_matches(item.get('category', ''), category):
+            continue
         
+        searchable = " ".join([
+            item.get('title', ''),
+            item.get('full_description', ''),
+            item.get('short_description', ''),
+            item.get('category', ''),
+            item.get('location', '')
+        ]).lower()
+
+        if not _matches_place_location_hints(searchable, location_hints):
+            continue
+
+        if query_intent == "museum_only" and not _is_explicit_museum_candidate(
+            item.get('title', ''),
+            item.get('url', ''),
+            searchable,
+        ):
+            continue
+
+        if not _matches_place_query_intent(item.get('category', ''), item.get('title', ''), query_intent):
+            continue
+
         # Query filter
         if query_lower:
-            searchable = " ".join([
-                item.get('title', ''),
-                item.get('full_description', ''),
-                item.get('short_description', ''),
-                item.get('category', ''),
-                item.get('location', '')
-            ]).lower()
-            if query_lower not in searchable:
+            if query_tokens:
+                if not any(token in searchable for token in query_tokens):
+                    continue
+            elif query_lower not in searchable:
                 continue
         
         results.append(item)
@@ -1064,9 +1258,18 @@ def search_places_attractions(
         
         if kb:
             try:
+                query_intent = _infer_place_query_intent(query, category)
+                requested_category = _normalize_place_category_filter(category)
                 search_query = query or "places and attractions in Lisbon"
                 if category:
-                    search_query = f"{category} {search_query}"
+                    category_prefix = category
+                    if requested_category == "museums & monuments" and query_intent == "museum_only":
+                        category_prefix = "Museums"
+                    search_query = f"{category_prefix} {search_query}"
+
+                query_tokens = _extract_place_query_tokens(query or search_query)
+                location_hints = _extract_place_location_hints(query or search_query)
+                ranking_requested = _query_requests_ranked_places(query or search_query)
                 
                 logger.info(f"search_places_attractions: searching VisitLisboa for '{search_query}'")
                 
@@ -1086,6 +1289,36 @@ def search_places_attractions(
                 
                 for doc, vector_score in candidate_pool:
                     metadata = doc.metadata
+                    item_category = metadata.get('category', 'General')
+
+                    if requested_category and not _place_category_matches(item_category, requested_category):
+                        continue
+
+                    if query_intent == "museum_monument" and _is_service_like_place_category(item_category):
+                        continue
+
+                    title_lower = metadata.get('title', '').lower()
+                    searchable = f"{metadata.get('title', '')} {item_category} {doc.page_content}".lower()
+                    location_text = f"{metadata.get('title', '')} {metadata.get('url', '')} {doc.page_content}".lower()
+
+                    if not _matches_place_location_hints(location_text, location_hints):
+                        continue
+
+                    if query_intent == "museum_only" and not _is_explicit_museum_candidate(
+                        metadata.get('title', ''),
+                        metadata.get('url', ''),
+                        searchable,
+                    ):
+                        continue
+
+                    if not _matches_place_query_intent(item_category, metadata.get('title', ''), query_intent):
+                        continue
+
+                    token_hits = sum(1 for token in query_tokens if token in searchable)
+                    title_hits = sum(1 for token in query_tokens if token in title_lower)
+
+                    if query_tokens and token_hits == 0 and vector_score > 1.25:
+                        continue
                     
                     # Calculate Rank Score
                     # Formula: (relevance * 0.6) + (rating * 0.3) + (log(reviews) * 0.1)
@@ -1103,8 +1336,32 @@ def search_places_attractions(
                     # 3. Reviews: Log10
                     reviews_val = int(metadata.get('reviews', 0))
                     reviews_log = math.log10(reviews_val + 1) / 5.0  # Max typical ~5
+
+                    if ranking_requested:
+                        relevance_weight, rating_weight, reviews_weight = 0.25, 0.45, 0.30
+                    else:
+                        relevance_weight, rating_weight, reviews_weight = 0.60, 0.30, 0.10
                     
-                    final_score = (relevance_val * 0.6) + (rating_norm * 0.3) + (reviews_log * 0.1)
+                    category_bonus = 0.22 if requested_category and _place_category_matches(item_category, requested_category) else 0.0
+                    title_bonus = min(0.18, title_hits * 0.09)
+                    token_bonus = min(0.15, token_hits * 0.05)
+                    service_penalty = 0.25 if query_tokens and _is_service_like_place_category(item_category) and query_intent != "accommodation" else 0.0
+                    museum_specific_bonus = 0.10 if query_intent == "museum_only" and _is_explicit_museum_candidate(
+                        metadata.get('title', ''),
+                        metadata.get('url', ''),
+                        searchable,
+                    ) else 0.0
+
+                    final_score = (
+                        (relevance_val * relevance_weight)
+                        + (rating_norm * rating_weight)
+                        + (reviews_log * reviews_weight)
+                        + category_bonus
+                        + title_bonus
+                        + token_bonus
+                        + museum_specific_bonus
+                        - service_penalty
+                    )
                     
                     scored_candidates.append({
                         'doc': doc,

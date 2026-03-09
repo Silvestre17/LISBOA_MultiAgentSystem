@@ -9,8 +9,645 @@
 # ==========================================================================
 
 import re
+from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse
+
+_SOURCE_LINE_RE = re.compile(r'^(?:[-*•]\s*)?(?:📌\s*)?(?:\*\*)?(?:Fonte|Source)(?:\*\*)?:.*$', re.IGNORECASE)
+_PT_LANGUAGE_HINTS_RE = re.compile(
+    r"\b(olá|ola|bom dia|boa tarde|boa noite|como|quero|preciso|museu|museus|evento|eventos|hoje|amanhã|amanha|previsão|tempo|locais|morada|fonte|autocarro|comboio|bairro)\b",
+    re.IGNORECASE,
+)
+_EVENT_HINTS_RE = re.compile(
+    r"\b(event|events|evento|eventos|concert|concerto|festival|exhibition|exposição|exposicao|show|espetáculo|espetaculo|what's on|o que há|o que ha)\b",
+    re.IGNORECASE,
+)
+_PLACE_HINTS_RE = re.compile(
+    r"\b(place|places|museum|museums|museu|museus|attraction|attractions|atração|atrações|atracao|atracoes|restaurant|restaurants|restaurante|restaurantes|monument|monuments|local|locais)\b",
+    re.IGNORECASE,
+)
+_ACCESSIBILITY_QUERY_RE = re.compile(
+    r"\b(wheelchair|accessible|accessibility|step[- ]?free|reduced mobility|cadeira de rodas|acess[ií]vel|mobilidade reduzida)\b",
+    re.IGNORECASE,
+)
+_ACCESSIBILITY_CLAIM_RE = re.compile(
+    r"\b(wheelchair|accessible|accessibility|step[- ]?free|elevator|lift|ramp|adapted toilet|accessible restroom|cadeira de rodas|acess[ií]vel|elevador|rampa|wc adaptado)\b",
+    re.IGNORECASE,
+)
+_INLINE_OFFER_RE = re.compile(
+    r"(?:\s+|^)(?:If you want(?:,)?|If you['’]d like(?:,)?|Would you like me to|Let me know if|I can also|I can help(?: you)?|I can bring|I can fetch|I can filter|I can get updated|Se quiser(?:es)?(?:,)?|Se preferir(?:,)?|Posso também|Posso tambem|Posso detalhar|Posso filtrar|Posso trazer|Posso ver|Posso verificar|Posso procurar|Quer que eu)\b.*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def infer_response_language(
+    user_query: str = "",
+    context_text: str = "",
+    default: str = "en",
+) -> str:
+    """
+    Infers the preferred response language from the user query first and the
+    existing text second.
+
+    Args:
+        user_query: Original user query, if available.
+        context_text: Response text or context hints.
+        default: Fallback language code.
+
+    Returns:
+        str: `pt` or `en`.
+    """
+    if user_query:
+        return "pt" if _PT_LANGUAGE_HINTS_RE.search(user_query) else (default if default in {"pt", "en"} else "en")
+
+    combined = context_text.strip()
+    if not combined:
+        return default if default in {"pt", "en"} else "en"
+
+    if _PT_LANGUAGE_HINTS_RE.search(combined):
+        return "pt"
+
+    return default if default in {"pt", "en"} else "en"
+
+
+def has_source_line(text: str) -> bool:
+    """Returns whether the text already contains a source line."""
+    return bool(text and _SOURCE_LINE_RE.search(text))
+
+
+def strip_unsupported_closing_offers(text: str) -> str:
+    """
+    Removes closing notes or offers that imply capabilities the system does not
+    support, such as filtering extra data, fetching updated prices, reminders,
+    or other post-answer actions.
+
+    Args:
+        text: Raw model response text.
+
+    Returns:
+        str: Text without unsupported closing offers.
+    """
+    if not text:
+        return text
+
+    prefix = r'^(?:[-*•]\s*)?(?:[⚠️💡📌🌤️🌧️🚇🎭📍]\s*)?(?:\*\*\s*)?'
+
+    offer_patterns = [
+        re.compile(prefix + r'(?:observa(?:ç|c)ão|observacao|observation|nota|note)(?:\s*\*\*)?\s*:', re.IGNORECASE),
+        re.compile(
+            prefix + r"(?:if you want(?:,)?|if you['’]d like(?:,)?|would you like me to|let me know if|i can also|i can help(?: you)?|i can bring|i can fetch|i can filter|i can get updated|se quiser(?:es)?(?:,)?|se preferir(?:,)?|posso também|posso tambem|posso detalhar|posso filtrar|posso trazer|posso ver|posso verificar|posso procurar|quer que eu)(?:\b|:)",
+            re.IGNORECASE,
+        ),
+    ]
+
+    cleaned_lines = []
+    skipping_offer_block = False
+    for line in text.splitlines():
+        stripped = line.strip()
+
+        if skipping_offer_block:
+            if not stripped:
+                skipping_offer_block = False
+                continue
+            if _SOURCE_LINE_RE.match(stripped):
+                skipping_offer_block = False
+            elif stripped.startswith(("-", "*", "•")):
+                continue
+            else:
+                skipping_offer_block = False
+
+        if any(pattern.match(stripped) for pattern in offer_patterns):
+            skipping_offer_block = True
+            continue
+
+        cleaned_lines.append(line)
+
+    cleaned = "\n".join(cleaned_lines).strip()
+    cleaned = _INLINE_OFFER_RE.sub("", cleaned)
+    return clean_newlines(cleaned).strip()
+
+
+def _replace_source_line(
+    text: str,
+    replacement: str,
+    predicate=None,
+) -> str:
+    """
+    Replaces matching source lines or appends a new one if none match.
+
+    Args:
+        text: Existing response text.
+        replacement: Canonical source line.
+        predicate: Callable that decides whether an existing line should be
+            replaced. Defaults to matching any source line.
+
+    Returns:
+        str: Updated response text.
+    """
+    if not text:
+        return replacement.strip()
+
+    matcher = predicate or (lambda line: bool(_SOURCE_LINE_RE.match(line.strip())))
+    lines = text.splitlines()
+    result = []
+    replaced = False
+
+    for line in lines:
+        if matcher(line):
+            if not replaced:
+                result.append(replacement)
+                replaced = True
+            continue
+        result.append(line)
+
+    while result and not result[-1].strip():
+        result.pop()
+
+    if not replaced:
+        if result:
+            result.append("")
+        result.append(replacement)
+
+    return "\n".join(result).strip()
+
+
+def extract_update_time(text: str) -> Optional[str]:
+    """Extracts an HH:MM update timestamp from tool text when available."""
+    if not text:
+        return None
+
+    patterns = [
+        r"(?:📅|🔄)?\s*(?:\*\*)?(?:Updated|Atualizado)(?:\*\*)?\s*:\s*(\d{2}:\d{2})\b",
+        r"(?:📅|🔄)?\s*(?:\*\*)?(?:Updated|Atualizado)(?:\*\*)?\s*:\s*\d{4}-\d{2}-\d{2}[T ](\d{2}:\d{2})(?::\d{2})?\b",
+        r"\bdataUpdate\s*[:=]\s*['\"]?\d{4}-\d{2}-\d{2}[T ](\d{2}:\d{2})(?::\d{2})?",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+    return None
+
+
+def strip_weather_update_lines(text: str) -> str:
+    """Removes raw weather update lines once the timestamp has been captured."""
+    if not text:
+        return text
+
+    lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if re.match(r"^(?:📅|🔄)?\s*(?:\*\*)?(?:Updated|Atualizado)(?:\*\*)?\s*:", stripped, flags=re.IGNORECASE):
+            continue
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
+def canonicalize_weather_source_line(
+    text: str,
+    language: str = "en",
+    timestamp: Optional[str] = None,
+) -> str:
+    """
+    Ensures a single canonical IPMA source line with the same structure used by
+    the transport responses.
+
+    Args:
+        text: Existing response text.
+        language: Preferred response language.
+        timestamp: Optional HH:MM override.
+
+    Returns:
+        str: Updated response with a canonical weather source line.
+    """
+    now = timestamp or extract_update_time(text) or datetime.now().strftime("%H:%M")
+    if language == "pt":
+        replacement = (
+            f"📌 **Fonte:** Dados do [*IPMA*](https://www.ipma.pt) | **Atualizado:** {now}"
+        )
+    else:
+        replacement = (
+            f"📌 **Source:** Data from [*IPMA*](https://www.ipma.pt/en/) | **Updated:** {now}"
+        )
+
+    return _replace_source_line(text, replacement)
+
+
+def canonicalize_weather_terms(text: str, language: str = "en") -> str:
+    """Normalizes common weather labels to the requested display language."""
+    if not text or language not in {"en", "pt"}:
+        return text
+
+    if language == "en":
+        replacements = [
+            (r"\*\*Avisos Meteorológicos:\*\*", "**Active Warnings:**"),
+            (r"\*\*Dicas Práticas\*\*", "**Practical Tips**"),
+            (r"\*\*Temperatura\*\*:", "**Temperature**:"),
+            (r"\*\*Condições\*\*:", "**Conditions**:"),
+            (r"\*\*(?:Precipitação|Chuva)\*\*:", "**Rain**:"),
+            (r"\*\*Vento\*\*:", "**Wind**:"),
+            (r"\*\*Agitação Marítima\*\*", "**Rough Sea**"),
+            (r"\bPeríodo:", "Period:"),
+            (r"\bOndas de\b", "Waves of"),
+            (r"\bsem precipitação\b", "no precipitation"),
+            (r"\bsem avisos meteorológicos ativos\b", "no active weather warnings"),
+            (r"\bNoroeste\b", "Northwest"),
+            (r"\bNordeste\b", "Northeast"),
+            (r"\bSudoeste\b", "Southwest"),
+            (r"\bSudeste\b", "Southeast"),
+            (r"\bNorte\b", "North"),
+            (r"\bSul\b", "South"),
+            (r"\bOeste\b", "West"),
+            (r"\bLeste\b", "East"),
+            (r"\bmoderado\b", "moderate"),
+            (r"\bfraco\b", "light"),
+            (r"\bforte\b", "strong"),
+            (r"\bBom dia para atividades ao ar livre\b", "Good conditions for outdoor activities"),
+        ]
+    else:
+        replacements = [
+            (r"Active Weather Warnings", "Avisos Meteorológicos"),
+            (r"Weather Forecast for Lisbon", "Previsão do Tempo para Lisboa"),
+            (r"\*\*Level\*\*:", "**Nível**:"),
+            (r"\bBe aware\b", "Tenha atenção"),
+            (r"\bPeriod\b", "Período"),
+            (r"\bRough sea\b", "Agitação marítima"),
+            (r"\bMonday\b", "Segunda-feira"),
+            (r"\bTuesday\b", "Terça-feira"),
+            (r"\bWednesday\b", "Quarta-feira"),
+            (r"\bThursday\b", "Quinta-feira"),
+            (r"\bFriday\b", "Sexta-feira"),
+            (r"\bSaturday\b", "Sábado"),
+            (r"\bSunday\b", "Domingo"),
+            (r"\bLight rain\b", "Aguaceiros leves"),
+            (r"\bLight showers/rain\b", "Chuviscos/chuva fraca"),
+            (r"\bPartly cloudy\b", "Parcialmente nublado"),
+            (r"\bVery likely\b", "Muito provável"),
+            (r"\bPossible\b", "Possível"),
+            (r"\bNo rain expected\b", "sem precipitação"),
+            (r"\*\*Temperature\*\*:", "**Temperatura**:"),
+            (r"\*\*Conditions\*\*:", "**Condições**:"),
+            (r"\*\*Rain\*\*:", "**Chuva**:"),
+            (r"\*\*Wind\*\*:", "**Vento**:"),
+            (r"(\d+(?:\.\d+)?°C)\s+to\s+(\d+(?:\.\d+)?°C)", r"\1 a \2"),
+            (r"\bIntensity(?=\s*:)\b", "intensidade"),
+            (r"\bNorthwest\b", "Noroeste"),
+            (r"\bNortheast\b", "Nordeste"),
+            (r"\bSouthwest\b", "Sudoeste"),
+            (r"\bSoutheast\b", "Sudeste"),
+            (r"\bNorth\b", "Norte"),
+            (r"\bSouth\b", "Sul"),
+            (r"\bWest\b", "Oeste"),
+            (r"\bEast\b", "Leste"),
+            (r"\bWeak\b", "fraca"),
+            (r"\bModerate\b", "moderado"),
+            (r"\bStrong\b", "forte"),
+        ]
+
+    normalized = text
+    for pattern, replacement in replacements:
+        normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+    return normalized
+
+
+def canonicalize_transport_terms(text: str, language: str = "en") -> str:
+    """Normalizes common transport-summary labels to English when needed."""
+    if not text or language != "en":
+        return text
+
+    replacements = [
+        (r"Situação dos Transportes de Lisboa", "Lisbon Transport Status"),
+        (r"\bAtualizado:\b", "Updated:"),
+        (r"\bAtualizado às\b", "Updated at"),
+        (r"\*\*Estado\*\*:", "**Status**:"),
+        (r"\*\*Estado das Linhas:\*\*", "**Line Status:**"),
+        (r"Circulação normal em todas as linhas", "Normal service on all lines"),
+        (r"\*\*Veículos em serviço\*\*:", "**Vehicles in service**:"),
+        (r"\*\*Alertas ativos\*\*:", "**Active alerts**:"),
+        (r"\*\*Comboios a circular na AML\*\*:", "**Trains running in AML**:"),
+        (r"\*\*Comboios com atrasos > 1 min\*\*:", "**Trains with delays > 1 min**:"),
+        (r"\*\*Tempo total estimado:\*\*", "**Estimated total time:**"),
+        (r"\*\*O seu Trajeto de Metro:\*\*", "**Your Metro Route:**"),
+        (r"\*\*Próximos Metros\*\* \(tempo real\)", "**Next Metros** (real time)"),
+        (r"\*\*Próximo Metro em:\*\*", "**Next Metro in:**"),
+        (r"\*\*Fonte:\*\*", "**Source:**"),
+        (r"\bEmbarque na estação\b", "Board at"),
+        (r"\bTransferência em\b", "Transfer at"),
+        (r"\bSaia na estação\b", "Exit at"),
+        (r"\bSiga a pé para\b", "Walk to"),
+        (r"\bDireção\b", "Direction"),
+        (r"\bSem dados em tempo real\b", "No real-time data available"),
+        (r"\bveículos\b", "vehicles"),
+        (r"\balertas\b", "alerts"),
+        (r"\bcomboios\b", "trains"),
+        (r"\*\*Fonte:\*\*", "**Source:**"),
+    ]
+
+    normalized = text
+    for pattern, replacement in replacements:
+        normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+    return normalized
+
+
+def canonicalize_local_information_terms(text: str, language: str = "en") -> str:
+    """Normalizes common PT-PT labels frequently leaked into EN local-information outputs."""
+    if not text or language != "en":
+        return text
+
+    replacements = [
+        (r"\*\*Breve descri(?:ç|c)[aã]o\*\*:", "**Brief description**:"),
+        (r"\*\*Morada\*\*:", "**Address**:"),
+        (r"\*\*Localiza(?:ç|c)[aã]o\*\*:", "**Location**:"),
+        (r"\*\*Hor[aá]rio\*\*:", "**Opening hours**:"),
+        (r"\*\*Hor[aá]rios de funcionamento\*\*:", "**Opening hours**:"),
+        (r"\*\*Dica r[aá]pida\*\*:", "**Quick tip**:"),
+        (r"\*\*Dica\*\*:", "**Tip**:"),
+        (r"\*\*Pre(?:ç|c)o\*\*:", "**Price**:"),
+        (r"\*\*Pre(?:ç|c)os\*\*:", "**Prices**:"),
+        (r"\*\*Comprar bilhetes(?:/mais info)?\*\*:", "**Buy tickets**:"),
+        (r"\*\*Site Oficial\*\*", "**Official page**"),
+        (r"\bHor[aá]rios de funcionamento:\s*consultar website oficial\.?", "Opening hours: check the official website."),
+        (r"\bPre(?:ç|c)os?:\s*verificar no local ou website(?: oficial)?\.?", "Prices: check on site or on the official website."),
+        (r"\bverificar no local ou website(?: oficial)?\b", "check on site or on the official website"),
+        (r"\bconsultar website oficial\b", "check the official website"),
+        (r"\bHoje\b", "Today"),
+        (r"\bFechado\b", "Closed"),
+        (r"\bN[aã]o especificado\b", "Not specified"),
+        (r"\*\*Atualizado\*\*:", "**Updated**:"),
+        (r"\*\*Atualizado:\*\*", "**Updated:**"),
+        (r"\*\*Fonte\*\*:", "**Source**:"),
+        (r"\*\*Fonte:\*\*", "**Source:**"),
+    ]
+
+    normalized = text
+    for pattern, replacement in replacements:
+        normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+    return normalized
+
+
+def clean_researcher_tool_artifacts(text: str) -> str:
+    """Removes raw tool-only summary blocks and duplicated metadata labels."""
+    if not text:
+        return text
+
+    artifact_patterns = [
+        re.compile(r"^(?:[^A-Za-z0-9#]*\s*)?\*\*Found .*\*\*:?$", re.IGNORECASE),
+        re.compile(r"^(?:[^A-Za-z0-9#]*\s*)?\*\*Date range:\*\*.*$", re.IGNORECASE),
+        re.compile(r"^(?:[^A-Za-z0-9#]*\s*)?\*\*Today is:\*\*.*$", re.IGNORECASE),
+        re.compile(r"^(?:[^A-Za-z0-9#]*\s*)?\*\*(?:Total|Sources):\*\*.*$", re.IGNORECASE),
+        re.compile(r"^(?:[^A-Za-z0-9#]*\s*)?\*\*Hybrid search:\*\*.*$", re.IGNORECASE),
+        re.compile(r"^(?:[^A-Za-z0-9#]*\s*)?(?:Try more specific queries.*|Showing top .*|Podes perguntar-me.*)$", re.IGNORECASE),
+        re.compile(r"^\*\*(?:Name|Url|Category|Short Description|Brief description)\*\*:.*$", re.IGNORECASE),
+    ]
+
+    cleaned_lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if any(pattern.match(stripped) for pattern in artifact_patterns):
+            continue
+        cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines).strip()
+
+
+def strip_unconfirmed_accessibility_claims(text: str, language: str = "en") -> str:
+    """Removes unsupported accessibility claims and replaces them with a verification note."""
+    if not text:
+        return text
+
+    kept_lines = []
+    removed_claim = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if _ACCESSIBILITY_CLAIM_RE.search(stripped):
+            if re.search(r"\b(check|verify|confirm|not confirmed|n[aã]o confirmado|n[aã]o confirmadas?)\b", stripped, re.IGNORECASE):
+                kept_lines.append(line)
+            else:
+                removed_claim = True
+            continue
+        kept_lines.append(line)
+
+    cleaned = "\n".join(kept_lines).strip()
+    if not removed_claim:
+        return cleaned
+
+    note = (
+        "⚠️ Accessibility details are not confirmed in the available data, so please verify them on the official venue or operator page."
+        if language == "en"
+        else "⚠️ Os detalhes de acessibilidade não estão confirmados nos dados disponíveis, por isso confirme-os na página oficial do local ou operador."
+    )
+
+    if note in cleaned:
+        return cleaned
+
+    lines = cleaned.splitlines() if cleaned else []
+    inserted = False
+    result = []
+    for line in lines:
+        if not inserted and _SOURCE_LINE_RE.match(line.strip()):
+            result.append(note)
+            result.append("")
+            inserted = True
+        result.append(line)
+
+    if not inserted:
+        if result:
+            result.append("")
+        result.append(note)
+
+    return "\n".join(result).strip()
+
+
+def infer_researcher_source_kind(user_query: str = "", text: str = "") -> Optional[str]:
+    """
+    Infers whether a researcher response is primarily about places or events.
+
+    Args:
+        user_query: Original user query.
+        text: Current response text.
+
+    Returns:
+        Optional[str]: `events`, `places`, or None.
+    """
+    user_query_lower = (user_query or "").lower()
+    text_lower = (text or "").lower()
+
+    if user_query_lower:
+        if _EVENT_HINTS_RE.search(user_query_lower):
+            return "events"
+        if _PLACE_HINTS_RE.search(user_query_lower):
+            return "places"
+
+    combined = "\n".join(part for part in [user_query_lower, text_lower] if part)
+    if not combined:
+        return None
+
+    if "/eventos" in combined or "/events" in combined or _EVENT_HINTS_RE.search(combined):
+        return "events"
+    if "/locais" in combined or "/places" in combined or _PLACE_HINTS_RE.search(combined):
+        return "places"
+    return None
+
+
+def canonicalize_visitlisboa_source_line(
+    text: str,
+    user_query: str = "",
+    language: str = "en",
+) -> str:
+    """
+    Normalizes VisitLisboa source labels so they reflect whether the answer is
+    about places or events, in the correct user-facing language.
+
+    Args:
+        text: Existing response text.
+        user_query: Original user query.
+        language: Preferred response language.
+
+    Returns:
+        str: Updated response text.
+    """
+    if not text:
+        return text
+
+    lower_text = text.lower()
+    kind = infer_researcher_source_kind(user_query=user_query, text=text)
+    has_visitlisboa = "visitlisboa" in lower_text
+    visitlisboa_source_exists = any(
+        _SOURCE_LINE_RE.match(line.strip()) and "visitlisboa" in line.lower()
+        for line in text.splitlines()
+    )
+
+    if not kind:
+        return text
+
+    if not has_visitlisboa and not visitlisboa_source_exists:
+        return text
+
+    if kind == "events":
+        if language == "pt":
+            replacement = "📌 **Fonte:** [*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos)"
+        else:
+            replacement = "📌 **Source:** [*VisitLisboa Events*](https://www.visitlisboa.com/en/events)"
+    else:
+        if language == "pt":
+            replacement = "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais)"
+        else:
+            replacement = "📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places)"
+
+    return _replace_source_line(
+        text,
+        replacement,
+        predicate=lambda line: bool(_SOURCE_LINE_RE.match(line.strip())) and "visitlisboa" in line.lower(),
+    )
+
+
+def canonicalize_planner_source_line(text: str, language: str = "en") -> str:
+    """Normalizes planner source lines into a clean multi-source format."""
+    if not text:
+        return text
+
+    lower_text = text.lower()
+    sources = []
+    if "visitlisboa" in lower_text:
+        sources.append("[*VisitLisboa*](https://www.visitlisboa.com)")
+    if "ipma" in lower_text:
+        sources.append("[*IPMA*](https://www.ipma.pt)")
+    if "metrolisboa" in lower_text:
+        sources.append("[*Metro de Lisboa*](https://www.metrolisboa.pt)")
+    if "carris.pt" in lower_text or " carris" in lower_text:
+        sources.append("[*Carris*](https://www.carris.pt)")
+    if "cp.pt" in lower_text or "comboios" in lower_text:
+        sources.append("[*CP*](https://www.cp.pt)")
+
+    if not sources:
+        return text
+
+    deduped_sources = []
+    for source in sources:
+        if source not in deduped_sources:
+            deduped_sources.append(source)
+
+    timestamp = extract_update_time(text) or datetime.now().strftime("%H:%M")
+    if language == "pt":
+        replacement = f"📌 **Fonte:** {' | '.join(deduped_sources)} | **Atualizado:** {timestamp}"
+    else:
+        replacement = f"📌 **Source:** {' | '.join(deduped_sources)} | **Updated:** {timestamp}"
+
+    return _replace_source_line(text, replacement)
+
+
+def finalize_worker_response(
+    text: str,
+    agent_name: str,
+    user_query: str = "",
+    language: Optional[str] = None,
+) -> str:
+    """
+    Applies deterministic post-processing to direct worker outputs so they are
+    as safe and polished as the multi-agent final formatter.
+
+    Args:
+        text: Worker response text.
+        agent_name: Worker name (`weather`, `researcher`, `planner`, etc.).
+        user_query: Original user query.
+        language: Optional explicit language code.
+
+    Returns:
+        str: Finalized worker response.
+    """
+    if not text or not isinstance(text, str):
+        return text or ""
+
+    preferred_language = language or infer_response_language(
+        user_query=user_query,
+        context_text=text,
+        default="en",
+    )
+
+    weather_timestamp = None
+    text_for_formatting = text
+    if agent_name == "weather":
+        weather_timestamp = extract_update_time(text)
+        text_for_formatting = "\n".join(
+            line for line in text.splitlines()
+            if not _SOURCE_LINE_RE.match(line.strip())
+        ).strip()
+
+    finalized = strip_unsupported_closing_offers(text_for_formatting)
+    finalized = format_response(finalized)
+
+    if agent_name == "weather":
+        weather_timestamp = weather_timestamp or extract_update_time(finalized)
+        finalized = canonicalize_weather_terms(finalized, language=preferred_language)
+        finalized = strip_weather_update_lines(finalized)
+        finalized = canonicalize_weather_source_line(
+            finalized,
+            language=preferred_language,
+            timestamp=weather_timestamp,
+        )
+    elif agent_name == "researcher":
+        finalized = clean_researcher_tool_artifacts(finalized)
+        if _ACCESSIBILITY_QUERY_RE.search(user_query or ""):
+            finalized = strip_unconfirmed_accessibility_claims(
+                finalized,
+                language=preferred_language,
+            )
+        finalized = canonicalize_local_information_terms(finalized, language=preferred_language)
+        finalized = canonicalize_visitlisboa_source_line(
+            finalized,
+            user_query=user_query,
+            language=preferred_language,
+        )
+    elif agent_name in {"planner", "transport"}:
+        finalized = strip_unsupported_closing_offers(finalized)
+        finalized = canonicalize_local_information_terms(finalized, language=preferred_language)
+        if agent_name == "transport":
+            finalized = canonicalize_transport_terms(finalized, language=preferred_language)
+        else:
+            finalized = canonicalize_planner_source_line(finalized, language=preferred_language)
+
+    return clean_newlines(finalized).strip()
 
 
 def normalize_source_links(text: str) -> str:
@@ -237,7 +874,11 @@ def normalize_bullets(text: str) -> str:
                     emoji_part = m_label.group(1) or ""
                     label = m_label.group(2).strip()
                     rest = m_label.group(3)
-                    content = f"{emoji_part}**{label}**: {rest}"
+                    lowered_label = label.lower()
+                    lowered_rest = rest.lower()
+                    looks_like_url_prefix = lowered_label in {"http", "https"} or lowered_rest.startswith("//")
+                    if not looks_like_url_prefix:
+                        content = f"{emoji_part}**{label}**: {rest}"
                 
         # Format the output block
         if is_bullet:
@@ -648,9 +1289,15 @@ def strip_hallucinations(text: str) -> str:
             continue
         if re.match(r"^(?:\s*|-\s*|\*\s*|\**|\[|\]|\*|#|>)*\s*(Contrainte do utilizador|Restri[cç][õo]es do utilizador|How the response meets|Acessibilidade/Tempo/Budget|Accessibility/Time/Budget)\b", line, re.IGNORECASE):
             continue
-        if re.match(r"^(?:\s*|-\s*|\*\s*|\**|\[|\]|\*|#|>)*\s*(Observa[cç][aã]o|Observa[cç][õo]es|Nota|Notes?):?", line, re.IGNORECASE):
+        if re.match(r"^(?:\s*|-\s*|\*\s*|\**|\[|\]|\*|#|>|⚠️\s*)*\s*(?:\*\*\s*)?(Observa[cç][aã]o|Observa[cç][õo]es|Observation|Nota|Note|Notes?)(?:\s*\*\*)?:?", line, re.IGNORECASE):
             continue
-        if re.match(r"^(?:\s*|-\s*|\*\s*|\**|\[|\]|\*|#|>)*\s*(Diga se|Se quiser|Se quiseres|Se preferir|Posso ajudar|Posso detalhar|I can also|I can help|Let me know):?", line, re.IGNORECASE):
+        if re.match(r"^(?:\s*|-\s*|\*\s*|\**|\[|\]|\*|#|>|⚠️\s*)*\s*(?:\*\*\s*)?(Diga se|Se quiser|Se quiseres|Se preferir|Quer que eu|Posso ajudar|Posso detalhar|Posso filtrar|Posso trazer|Posso verificar|I can also|I can help|I can filter|I can fetch|I can bring|If you want, I can|If you['’]d like|Would you like me to|Let me know):?", line, re.IGNORECASE):
+            continue
+        if re.match(r"^\s*\*\*Source\*\*:\s*VisitLisboa\s+(Places|Events)\s*$", line, re.IGNORECASE):
+            continue
+        if re.match(r"^\s*\*\*Fonte\*\*:\s*VisitLisboa\s+(Locais|Eventos)\s*$", line, re.IGNORECASE):
+            continue
+        if re.match(r"^\s*🗓️\s*\[.*weather note.*\]\s*$", line, re.IGNORECASE):
             continue
         if re.match(r"^(?:\s*|-\s*|\*\s*|\**|\[|\]|\*|#|>)*\s*(⭐\s*Rating:\s*(Sem avaliação de rating|No rating available))\s*$", line, re.IGNORECASE):
             continue

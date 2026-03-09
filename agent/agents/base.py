@@ -14,14 +14,14 @@ import json
 import os
 import re
 import time as time_module
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from agent.utils.langsmith_tracing import traceable
+from agent.utils.langsmith_tracing import ContextThreadPoolExecutor, traceable
 
 try:
     from config import Config
@@ -662,7 +662,7 @@ class BaseAgent:
         # Limit workers to number of tools
         num_workers = min(max_workers, len(tool_calls))
         
-        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        with ContextThreadPoolExecutor(max_workers=num_workers) as executor:
             future_to_tool = {
                 executor.submit(execute_single_tool, tc): tc
                 for tc in tool_calls

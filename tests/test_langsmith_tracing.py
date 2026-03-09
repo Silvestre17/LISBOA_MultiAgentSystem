@@ -15,8 +15,11 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+import agent.utils.langsmith_tracing as langsmith_tracing
 from agent.utils.langsmith_tracing import (
+    annotate_current_run,
     get_langsmith_display_state,
+    get_langsmith_project_name,
     resolve_langsmith_tracing_status,
 )
 
@@ -120,6 +123,7 @@ def test_tracing_enables_after_successful_preflight() -> None:
         "LANGCHAIN_TRACING_V2": "true",
         "LANGCHAIN_API_KEY": "lsv2-real-looking-key",
         "LANGCHAIN_ENDPOINT": "https://eu.api.smith.langchain.com",
+        "LANGCHAIN_PROJECT": "legacy-project",
     }
 
     status = resolve_langsmith_tracing_status(
@@ -130,9 +134,41 @@ def test_tracing_enables_after_successful_preflight() -> None:
 
     assert status["enabled"] is True
     assert status["requested"] is True
+    assert status["project_name"] == "legacy-project"
     assert status["traceable"] is symbols["traceable"]
     assert status["ContextThreadPoolExecutor"] is symbols["ContextThreadPoolExecutor"]
     assert env["LANGCHAIN_TRACING_V2"] == "true"
+    assert env["LANGSMITH_TRACING"] == "true"
+    assert env["LANGSMITH_API_KEY"] == "lsv2-real-looking-key"
+    assert env["LANGSMITH_ENDPOINT"] == "https://eu.api.smith.langchain.com"
+    assert env["LANGSMITH_PROJECT"] == "legacy-project"
+
+
+def test_tracing_passes_workspace_id_to_preflight() -> None:
+    """Workspace ids should be forwarded to the LangSmith preflight probe."""
+    captured: Dict[str, Any] = {}
+
+    def probe(client_cls, endpoint, api_key, workspace_id):
+        captured["client_cls"] = client_cls
+        captured["endpoint"] = endpoint
+        captured["api_key"] = api_key
+        captured["workspace_id"] = workspace_id
+        return True, "LangSmith tracing enabled"
+
+    status = resolve_langsmith_tracing_status(
+        env={
+            "LANGSMITH_TRACING": "true",
+            "LANGSMITH_API_KEY": "lsv2-real-looking-key",
+            "LANGSMITH_ENDPOINT": "https://api.smith.langchain.com",
+            "LANGSMITH_WORKSPACE_ID": "ws_12345",
+        },
+        imported_symbols=_fake_symbols(),
+        probe=probe,
+    )
+
+    assert status["enabled"] is True
+    assert status["workspace_id"] == "ws_12345"
+    assert captured["workspace_id"] == "ws_12345"
 
 
 def test_display_state_classifies_active_tracing() -> None:
@@ -189,3 +225,37 @@ def test_display_state_classifies_env_disabled() -> None:
     )
 
     assert display["state"] == "disabled"
+
+
+def test_get_langsmith_project_name_prefers_status_then_default(monkeypatch) -> None:
+    """Project helper should prefer resolved status and otherwise fall back to default."""
+    monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
+    monkeypatch.delenv("LANGCHAIN_PROJECT", raising=False)
+
+    assert get_langsmith_project_name({"project_name": "thesis-traces"}) == "thesis-traces"
+    assert get_langsmith_project_name({"project_name": None}) == "default"
+
+
+def test_annotate_current_run_updates_metadata_and_tags(monkeypatch) -> None:
+    """Metadata and tags should be attached through the RunTree API, not extra payloads."""
+
+    class FakeRunTree:
+        def __init__(self) -> None:
+            self.metadata = {"existing": "value"}
+            self.tags = ["baseline"]
+
+    fake_run_tree = FakeRunTree()
+    monkeypatch.setattr(langsmith_tracing, "get_current_run_tree", lambda: fake_run_tree)
+
+    updated = annotate_current_run(
+        metadata={"assistant_mode": "multi-agent", "language": "pt"},
+        tags=["weather", "baseline", "transport"],
+    )
+
+    assert updated is True
+    assert fake_run_tree.metadata == {
+        "existing": "value",
+        "assistant_mode": "multi-agent",
+        "language": "pt",
+    }
+    assert fake_run_tree.tags == ["baseline", "weather", "transport"]
