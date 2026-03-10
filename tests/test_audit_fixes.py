@@ -399,6 +399,7 @@ def test_transport_prompt(results: TestResults):
             (("Tempo total estimado", "Tempo estimado"), "Travel time in template"),
             (("temporarily unavailable",), "Missing-data guardrail"),
             (("Carris Urban", "Carris Metropolitana (Suburban)"), "Operator labeling guidance"),
+            (("Carris Urban-only",), "Carris Metropolitana scope nuance"),
         ]
         
         for terms, description in checks:
@@ -762,7 +763,8 @@ def test_carris_metropolitana_realtime_response_includes_scope_and_freshness() -
 
     assert "Data freshness" in result
     assert "missing_coordinates" not in result
-    assert "Scope: Carris Metropolitana covers suburban AML buses" in result
+    assert "Scope: Carris Metropolitana covers AML metropolitan / intermunicipal buses" in result
+    assert "entering Lisbon municipality" in result
     assert "Carris Urban" in result
 
 

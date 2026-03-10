@@ -142,6 +142,67 @@ Level: Be aware
     assert "Vento" in output
 
 
+def test_weather_worker_finalization_localizes_summary_labels_for_pt() -> None:
+    """Portuguese weather summaries should not leak common English IPMA labels in the UI."""
+    raw = """🌤️ Lisbon Weather Summary
+
+📅 Updated: 2026-03-10T14:31:02
+📅 Today (2026-03-10):
+   🌡️ Temperature: 8.4°C to 15.5°C
+   🌤️ Conditions: Sunny intervals
+   💧 Rain probability: 60.0%
+   💨 Wind: North (Moderate)
+
+✅ No active weather warnings."""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="weather",
+        user_query="Qual é a previsão detalhada para Lisboa hoje? Existem avisos ativos?",
+        language="pt",
+    )
+
+    assert "Resumo Meteorológico de Lisboa" in output
+    assert "- **📅 Hoje (2026-03-10)**" in output
+    assert "  - 🌡️ **Temperatura**: 8.4°C a 15.5°C" in output
+    assert "Períodos de céu limpo" in output
+    assert "Probabilidade de chuva" in output
+    assert "- ✅ Sem avisos meteorológicos ativos." in output
+    assert "Sunny intervals" not in output
+    assert "Rain probability" not in output
+    assert "No active weather warnings" not in output
+
+
+def test_weather_worker_finalization_localizes_follow_up_warning_summary_for_pt() -> None:
+    """Portuguese weather follow-ups should fully localize the warnings summary lines."""
+    raw = """✅ No active weather warnings for area 'LSB'.
+
+🌤️ Weather conditions are normal.
+
+---
+
+🌤️ Weather Forecast for Lisbon
+📅 Updated: 2026-03-10T14:31:02
+☀️ Wednesday, Mar 11
+   🌡️ 9.0°C to 19.7°C
+   🌤️ Partly cloudy
+   💧 Rain: No rain expected (0.0%)
+   💨 Wind: North (Moderate)"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="weather",
+        user_query="E amanhã?",
+        language="pt",
+    )
+
+    assert "Sem avisos meteorológicos ativos para a área 'LSB'." in output
+    assert "As condições meteorológicas são normais" in output
+    assert "- **☀️ Quarta-feira, Mar 11**" in output
+    assert "Weather conditions are normal" not in output
+    assert "for area 'LSB'" not in output
+
+
 def test_supervisor_frequency_query_does_not_trigger_weather() -> None:
     """Generic PT frequency queries with the word `tempo` should stay transport-only."""
     with patch.object(SupervisorAgent, "__init__", lambda self: None):
@@ -168,6 +229,25 @@ def test_supervisor_events_today_query_does_not_force_planner_weather() -> None:
         )
 
         decision = agent.route("Are there any events today?", language="en")
+
+        assert decision["agents"] == ["researcher"]
+
+
+def test_supervisor_events_this_week_query_stays_research_only_in_pt() -> None:
+    """Portuguese event-discovery queries for this week should stay in the researcher domain."""
+    with patch.object(SupervisorAgent, "__init__", lambda self: None):
+        agent = SupervisorAgent()
+        agent.llm = object()
+        agent._safe_llm_invoke = MagicMock(
+            return_value=MagicMock(
+                content='{"reasoning": "Consulta de eventos culturais na AML", "agents": ["researcher"], "direct_response": null}'
+            )
+        )
+
+        decision = agent.route(
+            "Quero explorar a cultura local. Que grandes eventos temos esta semana?",
+            language="pt",
+        )
 
         assert decision["agents"] == ["researcher"]
 

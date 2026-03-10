@@ -186,6 +186,38 @@ class TestValidateIncomplete:
         assert "planner" not in result["required_agents"]
         assert "nonexistent_agent" not in result["required_agents"]
 
+    def test_event_only_query_does_not_escalate_to_weather_or_transport(self):
+        """Events-only discovery queries must not be expanded into weather/transport retries by QA."""
+        qa_json = _default_qa_json(
+            complete=False,
+            missing_data=[
+                "weather forecast for this week",
+                "transport routes between venues",
+            ],
+            required_agents=["weather", "transport"],
+            reasoning="Useful weekly event answer should also include weather and transport context.",
+            disclaimers=[
+                "Dados de meteorologia não fornecidos na saída do researcher; necessidade de previsão para a semana para tornar o planeamento útil.",
+                "Sem rota/ligação entre os eventos sugeridos; sem indicar meios e transferências entre locais.",
+            ],
+        )
+        self.agent._safe_llm_invoke = MagicMock(return_value=_make_llm_response(qa_json))
+
+        result = self.agent.validate(
+            user_query="Quero explorar a cultura local. Que grandes eventos temos esta semana?",
+            agent_outputs={
+                "researcher": "1. Concerto A\n- Data: 12 Mar\n- Local: Lisboa"
+            },
+            agents_called=["researcher"],
+            language="pt",
+        )
+
+        assert result["complete"] is True
+        assert result["required_agents"] == []
+        assert result["missing_data"] == []
+        assert not any("meteorolog" in item.lower() for item in result["disclaimers"])
+        assert not any("rota" in item.lower() or "transport" in item.lower() for item in result["disclaimers"])
+
 
 class TestValidateWithFactCheck:
     """Test that Phase 2 deterministic checks merge into Phase 1 results."""

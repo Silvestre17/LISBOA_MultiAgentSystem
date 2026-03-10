@@ -136,6 +136,152 @@ class QualityAssuranceAgent(BaseAgent):
         """Initializes the QA agent."""
         super().__init__("qa")
 
+    @staticmethod
+    def _normalize_query(user_query: str) -> str:
+        """Returns a normalized lower-case query string for lightweight intent guards."""
+        return (user_query or "").strip().lower()
+
+    @classmethod
+    def _is_event_listing_query(cls, user_query: str) -> bool:
+        """Detects event-discovery queries that should stay within the researcher domain."""
+        query = cls._normalize_query(user_query)
+        if not query:
+            return False
+
+        event_patterns = [
+            r"\bevents?\b",
+            r"\beventos?\b",
+            r"\bconcerts?\b",
+            r"\bconcertos?\b",
+            r"\bexhibitions?\b",
+            r"\bexposi(?:ç|c)[aã]o(?:es)?\b",
+            r"\bwhat'?s on\b",
+            r"\bo que acontece\b",
+            r"\bcultura\b",
+            r"\bcultural\b",
+            r"\bfestival(?:es)?\b",
+        ]
+        planning_patterns = [
+            r"\bplan\b",
+            r"\bplanning\b",
+            r"\bitinerary\b",
+            r"\broteiro\b",
+            r"\bitiner[aá]rio\b",
+            r"\bplane(?:ia|ar|ie)\b",
+            r"\bcria(?:r)? um itiner[aá]rio\b",
+            r"\borganiza(?:r)?\b",
+            r"\bwhat to do\b",
+            r"\bo que fazer\b",
+        ]
+        weather_patterns = [
+            r"\bweather\b",
+            r"\bforecast\b",
+            r"\bmeteorolog",
+            r"\bprevis[aã]o\b",
+            r"\brain\b",
+            r"\bchuva\b",
+            r"\btemperatura\b",
+            r"\btemperature\b",
+            r"\btempo em\b",
+            r"\bqual (?:é|e) o tempo\b",
+        ]
+        transport_patterns = [
+            r"\btransport\b",
+            r"\btransporte\b",
+            r"\bmetro\b",
+            r"\bbus\b",
+            r"\bautocarro\b",
+            r"\bcomboio\b",
+            r"\btrain\b",
+            r"\broute\b",
+            r"\brota\b",
+            r"\bliga[cç][aã]o\b",
+            r"\bconnection\b",
+            r"\bhow to get\b",
+            r"\bcomo chegar\b",
+        ]
+
+        has_event_intent = any(re.search(pattern, query) for pattern in event_patterns)
+        has_planning_intent = any(re.search(pattern, query) for pattern in planning_patterns)
+        has_weather_intent = any(re.search(pattern, query) for pattern in weather_patterns)
+        has_transport_intent = any(re.search(pattern, query) for pattern in transport_patterns)
+
+        return has_event_intent and not has_planning_intent and not has_weather_intent and not has_transport_intent
+
+    @staticmethod
+    def _is_cross_domain_event_requirement(text: str) -> bool:
+        """Returns whether a QA gap/disclaimer incorrectly asks for weather/transport in an events-only query."""
+        lower = (text or "").lower()
+        cross_domain_patterns = [
+            r"\bweather\b",
+            r"\bmeteorolog",
+            r"\bforecast\b",
+            r"\bprevis[aã]o\b",
+            r"\brain\b",
+            r"\bchuva\b",
+            r"\btemperature\b",
+            r"\btemperatura\b",
+            r"\btransport\b",
+            r"\btransporte\b",
+            r"\bmetro\b",
+            r"\bcarris\b",
+            r"\bcp\b",
+            r"\broute\b",
+            r"\brota\b",
+            r"\bliga[cç][aã]o\b",
+            r"\bconnection\b",
+            r"\btransfer\b",
+            r"\bcomo chegar\b",
+            r"\bhow to get\b",
+        ]
+        return any(re.search(pattern, lower) for pattern in cross_domain_patterns)
+
+    @classmethod
+    def _normalize_event_query_validation(
+        cls,
+        user_query: str,
+        agents_called: List[str],
+        llm_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Prevents event-only queries from being expanded into weather/transport retries by QA."""
+        if not cls._is_event_listing_query(user_query):
+            return llm_result
+
+        called_workers = {agent for agent in agents_called if agent}
+        if called_workers and not called_workers.issubset({"researcher"}):
+            return llm_result
+
+        filtered_required_agents = [
+            agent for agent in llm_result.get("required_agents", [])
+            if agent == "researcher"
+        ]
+        filtered_missing_data = [
+            item for item in llm_result.get("missing_data", [])
+            if not cls._is_cross_domain_event_requirement(item)
+        ]
+        filtered_disclaimers = [
+            item for item in llm_result.get("disclaimers", [])
+            if not cls._is_cross_domain_event_requirement(item)
+        ]
+
+        llm_result["required_agents"] = filtered_required_agents
+        llm_result["missing_data"] = filtered_missing_data
+        llm_result["disclaimers"] = filtered_disclaimers
+
+        if not filtered_required_agents and not filtered_missing_data:
+            llm_result["complete"] = True
+
+        normalization_note = (
+            "Normalized QA for event-only query: weather and transport are optional and must not trigger retries."
+        )
+        reasoning = llm_result.get("reasoning", "")
+        if normalization_note not in reasoning:
+            llm_result["reasoning"] = (
+                f"{reasoning} | {normalization_note}".strip(" |")
+            )
+
+        return llm_result
+
     @traceable(name="qa_agent", run_type="chain", tags=["sub-agent", "qa"])
     def validate(
         self,
@@ -258,6 +404,11 @@ class QualityAssuranceAgent(BaseAgent):
                 "reasoning": result.get("reasoning", ""),
                 "disclaimers": result.get("disclaimers", []),
             }
+            llm_result = self._normalize_event_query_validation(
+                user_query=user_query,
+                agents_called=agents_called,
+                llm_result=llm_result,
+            )
         else:
             # Fallback: if JSON parsing still fails, pass with disclaimer
             logger.warning("QA: JSON parse failed after retry; passing with disclaimer.")

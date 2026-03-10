@@ -13,7 +13,7 @@ import re
 import sys
 import time
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -779,6 +779,9 @@ def init_system_state():
             "azure_endpoint": "",
             "azure_model": "",
         },
+        "startup_resources_attempted": False,
+        "startup_resources_ok": None,
+        "startup_resources_status": {},
         "transport_db_status": None,
     }
     for k, v in defaults.items():
@@ -816,6 +819,66 @@ def prepare_transport_database() -> Tuple[bool, str]:
         return True, f"Base de dados pronta ({db_size_mb:.0f} MB)"
     except Exception:
         return False, "Não foi possível preparar a base de dados de transportes"
+
+
+def _run_startup_preload(language: str = "pt") -> Dict[str, Any]:
+    """Load one-time shared resources needed by the production app."""
+    transport_ok, transport_status = prepare_transport_database()
+    kb_ok = True
+    kb_status: Optional[str] = None
+
+    if Config.USE_MULTI_AGENT:
+        kb_ok = pre_warm_vector_store()
+        kb_status = (
+            "Base de conhecimento pronta."
+            if kb_ok and language == "pt"
+            else "Knowledge base ready."
+            if kb_ok
+            else "Não foi possível carregar a base de conhecimento."
+            if language == "pt"
+            else "Could not load the knowledge base."
+        )
+
+    return {
+        "transport_ok": transport_ok,
+        "transport_status": transport_status,
+        "kb_ok": kb_ok,
+        "kb_status": kb_status,
+        "ok": transport_ok and kb_ok,
+    }
+
+
+def ensure_startup_resources(
+    show_spinner: bool = True,
+    force_retry: bool = False,
+) -> Tuple[bool, Dict[str, Any]]:
+    """Ensure one-time shared resources are loaded during app startup."""
+    attempted = bool(st.session_state.get("startup_resources_attempted", False))
+    cached_ok = st.session_state.get("startup_resources_ok")
+    cached_status = st.session_state.get("startup_resources_status") or {}
+
+    if attempted and cached_ok is not None and not force_retry:
+        return bool(cached_ok), cached_status
+
+    language = st.session_state.get("language", "pt")
+    spinner_text = (
+        "🚀 A preparar conhecimento e dados de mobilidade..."
+        if language == "pt"
+        else "🚀 Preparing knowledge base and mobility data..."
+    )
+
+    def _load() -> Tuple[bool, Dict[str, Any]]:
+        preload_status = _run_startup_preload(language)
+        st.session_state.startup_resources_attempted = True
+        st.session_state.startup_resources_ok = preload_status.get("ok")
+        st.session_state.startup_resources_status = preload_status
+        st.session_state.transport_db_status = preload_status.get("transport_status")
+        return bool(preload_status.get("ok")), preload_status
+
+    if show_spinner:
+        with st.spinner(spinner_text):
+            return _load()
+    return _load()
 
 
 def set_credentials_env(provider: str) -> None:
@@ -1005,32 +1068,40 @@ def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
 
         set_credentials_env(provider)
 
-        with st.spinner(
-            "🚌 A mapear autocarros, metros e comboios..."
-            if lang == "pt"
-            else "🚌 Mapping buses, metros and trains..."
-        ):
-            transport_ok, transport_status = prepare_transport_database()
-            st.session_state.transport_db_status = transport_status
+        startup_ok, startup_status = ensure_startup_resources(
+            show_spinner=False,
+            force_retry=bool(st.session_state.get("startup_resources_attempted"))
+            and not bool(st.session_state.get("startup_resources_ok")),
+        )
+        transport_ok = bool(startup_status.get("transport_ok", False))
+        transport_status = str(
+            startup_status.get("transport_status")
+            or st.session_state.get("transport_db_status")
+            or ""
+        )
+        st.session_state.transport_db_status = transport_status
 
-        if Config.USE_MULTI_AGENT:
-            with st.spinner(
-                "📚 A carregar o conhecimento sobre Lisboa... (só na primeira vez!)"
-                if lang == "pt"
-                else "📚 Loading Lisbon knowledge base... (first time only!)"
-            ):
-                kb_ready = pre_warm_vector_store()
-            if not kb_ready:
-                st.session_state.initialized = False
-                return (
-                    False,
+        if Config.USE_MULTI_AGENT and not bool(startup_status.get("kb_ok", False)):
+            st.session_state.initialized = False
+            return (
+                False,
+                startup_status.get("kb_status")
+                or (
                     "Não foi possível carregar a base de conhecimento."
                     if lang == "pt"
-                    else "Could not load the knowledge base.",
-                )
-            st.session_state.assistant = MultiAgentAssistant()
-        else:
-            st.session_state.assistant = create_assistant(provider)
+                    else "Could not load the knowledge base."
+                ),
+            )
+
+        with st.spinner(
+            "🤖 A iniciar o assistente..."
+            if lang == "pt"
+            else "🤖 Initializing assistant..."
+        ):
+            if Config.USE_MULTI_AGENT:
+                st.session_state.assistant = MultiAgentAssistant()
+            else:
+                st.session_state.assistant = create_assistant(provider)
 
         connection_ok, connection_error = test_assistant_connection(provider)
         if not connection_ok:
@@ -1613,6 +1684,10 @@ def run_info_page():
 def main():
     st.markdown(CSS, unsafe_allow_html=True)
     init_system_state()
+
+    ensure_startup_resources(
+        show_spinner=not bool(st.session_state.get("startup_resources_attempted", False))
+    )
 
     display_banner()
     selected_provider, q_act = build_sidebar()
