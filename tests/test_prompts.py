@@ -10,6 +10,17 @@
 #   python tests/test_prompts.py --suite smoke              # Runs end-to-end sanity prompts through the full MultiAgentAssistant
 #   python tests/test_prompts.py --suite coverage           # Runs strict worker-agent coverage prompts and checks expected tool calls
 #   python tests/test_prompts.py --suite coverage --limit 5 # Runs only the first 5 coverage prompts for a quick spot-check
+# Parameters:
+#   --suite {smoke,coverage}   choose the prompt suite
+#   --limit N                  run only the first N selected prompts
+#   --offset N                 skip the first N selected prompts
+#   --category NAME            filter by smoke category or coverage domain
+#   --quiet                    hide intermediate reasoning/previews
+# Notes:
+#   - Run this script from the repository root using the relative path above.
+#   - Avoid absolute pytest-style paths in this workspace on Windows because
+#     the folder name contains `[` and `]`, which pytest can interpret as glob
+#     characters.
 # ===========================================================================
 
 import argparse

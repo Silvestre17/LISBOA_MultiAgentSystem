@@ -8,7 +8,17 @@
 #     - JSON parsing resilience
 #     - User context and conversation history injection
 #
-#   Run: python -m pytest tests/test_qa_agent.py -v
+#   Run from the repository root with a relative path:
+#     python -m pytest tests/test_qa_agent.py -q
+#   Useful parameters:
+#     -vv         verbose mode
+#     -k prompt   focus on prompt-generation checks
+#     -x          stop on first failure
+#     --tb=short  shorter tracebacks
+#   Notes:
+#     - Prefer relative paths in this workspace. Absolute pytest paths may be
+#       treated as glob patterns on Windows because the folder name includes
+#       `[` and `]`.
 # ==========================================================================
 
 import os

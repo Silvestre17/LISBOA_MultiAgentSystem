@@ -844,7 +844,26 @@ if __name__ == "__main__":
     # =========================================================================
     # Test 8: Helper Functions Validation
     # =========================================================================
-    print("\n\033[1m🔧 Test 8: Helper Functions Validation\033[0m")
+    print("\n\033[1m🌍 Test 8: Portugal Weather Overview Tool\033[0m")
+    print("-" * 50)
+
+    try:
+        result = get_portugal_weather_overview.invoke({})
+        print(result[:1200])
+        if "❌" not in result:
+            print("\n\033[1;32m   ✅ Tool executed successfully\033[0m")
+            tests_passed += 1
+        else:
+            print("\n\033[1;31m   ❌ Tool returned error\033[0m")
+            tests_failed += 1
+    except Exception as e:
+        print(f"\033[1;31m   ❌ Exception: {e}\033[0m")
+        tests_failed += 1
+
+    # =========================================================================
+    # Test 9: Helper Functions Validation
+    # =========================================================================
+    print("\n\033[1m🔧 Test 9: Helper Functions Validation\033[0m")
     print("-" * 50)
     
     helper_tests_passed = 0
@@ -908,9 +927,9 @@ if __name__ == "__main__":
         tests_failed += 1
     
     # =========================================================================
-    # Test 9: Dictionary Completeness Check
+    # Test 10: Dictionary Completeness Check
     # =========================================================================
-    print("\n\033[1m📚 Test 9: Dictionary Completeness Check\033[0m")
+    print("\n\033[1m📚 Test 10: Dictionary Completeness Check\033[0m")
     print("-" * 50)
     
     print(f"   WEATHER_TYPES: {len(WEATHER_TYPES)} entries (IDs -99 to 30)")

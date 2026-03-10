@@ -5,6 +5,17 @@ including core runtime modules, prompts, tools, and evaluation scripts.
 
 This script is intentionally lightweight and complements, rather than replaces,
 the fuller pytest suites.
+
+Run from the repository root with a relative path:
+        python tests/syntax_check.py
+
+Notes:
+        - This script takes no custom parameters.
+        - For functional regressions, prefer `python -m pytest ...` on relative
+            paths such as `tests/test_langsmith_tracing.py`.
+        - Avoid absolute pytest paths in this workspace on Windows because the
+            OneDrive folder name contains `[` and `]`, which pytest can interpret as
+            glob characters.
 """
 
 import os

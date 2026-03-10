@@ -13,10 +13,12 @@
 # pip install langgraph langchain-core
 
 import json
+import re
 
 # Always need as_completed for collecting parallel results
 import time as time_module  # For latency tracking
 from concurrent.futures import as_completed
+from datetime import datetime
 from typing import Callable, Dict, List, Optional, Set
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -1111,7 +1113,7 @@ class MultiAgentAssistant:
             response = self.agents["planner"].synthesize(message, agent_outputs)
         elif agent_outputs:
             # Combine agent outputs if no planner
-            response = self._combine_outputs(agent_outputs)
+            response = self._combine_outputs(agent_outputs, language=language)
         else:
             # Fallback: Use researcher for general queries
             if verbose:
@@ -1122,90 +1124,130 @@ class MultiAgentAssistant:
         title = generate_response_title(agents_to_call, message, language)
         return ensure_response_title(formatted, title)
 
-    def _combine_outputs(self, agent_outputs: dict) -> str:
+    @staticmethod
+    def _extract_structured_section_parts(text: str) -> tuple[str, List[str], Optional[str]]:
+        """Removes per-section source lines while collecting links and timestamps for a combined footer."""
+        source_line_re = re.compile(
+            r"^(?:[-*•]\s*)?(?:📌\s*)?(?:\*\*)?(?:Fonte|Source)(?:\*\*)?:.*$",
+            re.IGNORECASE,
+        )
+        timestamp_re = re.compile(r"(?:Atualizado|Updated):\s*(\d{2}:\d{2})", re.IGNORECASE)
+
+        links: List[str] = []
+        timestamps: List[str] = []
+        body_lines: List[str] = []
+
+        for line in (text or "").splitlines():
+            stripped = line.strip()
+            if source_line_re.match(stripped):
+                links.extend(re.findall(r"\[[^\]]+\]\([^)]+\)", stripped))
+                timestamps.extend(timestamp_re.findall(stripped))
+                continue
+            body_lines.append(line)
+
+        while body_lines and not body_lines[-1].strip():
+            body_lines.pop()
+
+        timestamp = max(timestamps) if timestamps else None
+        deduped_links: List[str] = []
+        for link in links:
+            if link not in deduped_links:
+                deduped_links.append(link)
+
+        return "\n".join(body_lines).strip(), deduped_links, timestamp
+
+    def _render_structured_hybrid_response(self, agent_outputs: dict, language: str) -> str:
+        """Builds a deterministic multi-section response for hybrid multi-agent answers."""
+        filtered = {k: v for k, v in agent_outputs.items() if not k.startswith("_")}
+        if not filtered:
+            return ""
+        if len(filtered) == 1:
+            return list(filtered.values())[0]
+
+        section_order = ["weather", "transport", "researcher"]
+        section_labels = {
+            "pt": {
+                "weather": "### 🌤️ Meteorologia",
+                "transport": "### 🚇 Transportes",
+                "researcher": "### 📍 Informação Local",
+                "notes": "### ⚠️ Notas",
+                "source": "📌 **Fonte:**",
+                "updated": "**Atualizado:**",
+            },
+            "en": {
+                "weather": "### 🌤️ Weather",
+                "transport": "### 🚇 Transport",
+                "researcher": "### 📍 Local Information",
+                "notes": "### ⚠️ Notes",
+                "source": "📌 **Source:**",
+                "updated": "**Updated:**",
+            },
+        }
+        labels = section_labels["pt" if language == "pt" else "en"]
+
+        sections: List[str] = []
+        collected_links: List[str] = []
+        collected_timestamps: List[str] = []
+
+        ordered_agents = [name for name in section_order if name in filtered] + [
+            name for name in filtered if name not in section_order
+        ]
+
+        for agent_name in ordered_agents:
+            body, links, timestamp = self._extract_structured_section_parts(str(filtered[agent_name]))
+            if not body:
+                continue
+            if links:
+                for link in links:
+                    if link not in collected_links:
+                        collected_links.append(link)
+            if timestamp:
+                collected_timestamps.append(timestamp)
+
+            title = labels.get(agent_name, f"### {agent_name.title()}")
+            sections.append(f"{title}\n\n{body}")
+
+        qa_disclaimers = agent_outputs.get("_qa_disclaimers", [])
+        if qa_disclaimers:
+            notes = "\n".join(f"- {warning}" for warning in qa_disclaimers)
+            sections.append(f"{labels['notes']}\n\n{notes}")
+
+        response = "\n\n---\n\n".join(section for section in sections if section.strip())
+        if not response:
+            return ""
+
+        if collected_links:
+            timestamp = max(collected_timestamps) if collected_timestamps else datetime.now().strftime("%H:%M")
+            response += (
+                f"\n\n{labels['source']} {' | '.join(collected_links)} | "
+                f"{labels['updated']} {timestamp}"
+            )
+
+        return response.strip()
+
+    def _combine_outputs(self, agent_outputs: dict, language: str = "en") -> str:
         """
-        Combines outputs from multiple agents into a single coherent response
-        using LLM synthesis (D3) instead of naive concatenation.
+        Combines outputs from multiple agents into a structured response.
 
         Args:
             agent_outputs: Dict mapping agent names to their outputs.
+            language: Language code (`en` or `pt`).
 
         Returns:
             str: Combined, coherent response.
         """
-        # Filter out internal keys (QA metadata, etc.) - never expose to user
-        filtered = {k: v for k, v in agent_outputs.items() if not k.startswith("_")}
-
-        if not filtered:
-            return ""
-
-        # If only one agent responded, return its output directly
-        if len(filtered) == 1:
-            return list(filtered.values())[0]
-
-        # Use LLM synthesis for multi-agent responses
         try:
-            from langchain_core.messages import HumanMessage as HMsg
-            from langchain_core.messages import SystemMessage as SysMsg
-
-            sections = []
-            for agent_name, output in filtered.items():
-                label = {
-                    "weather": "Weather Information",
-                    "transport": "Transport Information",
-                    "researcher": "Places & Attractions",
-                }.get(agent_name, agent_name.title())
-                sections.append(f"## {label}\n{output}")
-
-            combined_data = "\n\n---\n\n".join(sections)
-
-            # Add QA disclaimers as context for synthesis (if any)
-            qa_disclaimers = agent_outputs.get("_qa_disclaimers", [])
-            if qa_disclaimers:
-                combined_data += "\n\n## Data Limitations\n" + "\n".join(f"- {d}" for d in qa_disclaimers)
-
-            synthesis_prompt = (
-                "You are a response synthesizer. Combine the following agent outputs "
-                "into a single, coherent, well-organized response. "
-                "Preserve ALL factual data from each source. "
-                "Use markdown formatting with ### headers and emojis. "
-                "Use **bold** for all important information (names, dates, prices, labels, statuses). "
-                "Do NOT add information that isn't in the source data. "
-                "Make the response flow naturally as if from a single assistant. "
-                "Do not mention internal agent names, tool names, quality checks, "
-                "disclaimers sections, or any internal system details. "
-                "\n\n"
-                "RULES:\n"
-                "1. MATCH THE USER'S LANGUAGE: Portuguese query = Portuguese response, English query = English response.\n"
-                "2. Do not suggest features that don't exist: no 'reservar bilhetes', 'book tickets', "
-                "'send reminders', 'set alerts', 'save favorites'. The system cannot do these.\n"
-                "3. Do not write closing sections like 'Se quiser, eu posso:' or 'I can also:' offering additional services.\n"
-                "4. Do not use ambiguous labels like 'seleção top 5' or 'best picks' unless the user asked for a ranking.\n"
-                "5. End with ONE source attribution line. Format: '📌 **Fonte:** [*Name*](url) **| Atualizado:** HH:MM'. Do not duplicate source lines.\n"
-                "6. Use **bold** formatting extensively - ALL section headers, operator names, labels, and key values must be bold.\n"
-                "7. Every list item must start with `- ` followed by an emoji.\n"
-                "8. Source names in 📌 **Fonte** lines must use italic markdown: [*Name*](url), not plain text.\n"
-                "9. Do NOT count stops between stations or claim stop positions (e.g., '1ª paragem após X'). Report only origin, destination, and line.\n"
-                "10. Do NOT add data not present in the source outputs. If information is missing, omit it rather than inventing it.\n"
-                "11. If 'Data Limitations' are listed, mention them naturally (e.g., 'opening hours may vary, check the official website').\n"
-                "12. Use `---` horizontal rules ONLY to separate distinct topic sections (e.g., weather from transport from places). Never use them within the same topic.\n"
-                "13. Format transport data with correct emoji patterns: 🚇 Metro, 🚌 buses, 🚆 trains, 🚋 trams. Sub-items under each operator MUST be `- ` bullets.\n"
-                "14. Preserve the visual hierarchy: operator name with emoji as header, then `- ` bullet items with status emojis (🟢, ⚠️, ❌) and **bold** labels.\n"
-                "15. Keep the answer user-facing. Do not add meta commentary about constraints, evaluation, or how the response was produced.\n"
-                "16. Do not add closing offers such as 'Se quiser...' or 'I can also...'. End naturally after the useful content and source attribution.\n"
-            )
-
-            messages = [
-                SysMsg(content=synthesis_prompt),
-                HMsg(content=f"Combine these agent outputs into one response:\n\n{combined_data}"),
-            ]
-
-            response = self.supervisor._safe_llm_invoke(self.supervisor.llm, messages)
-            # Return raw cleaned text - format_response is called by chat()
-            return clean_response(response.content)
+            structured = self._render_structured_hybrid_response(agent_outputs, language)
+            if structured:
+                return structured
+            filtered = {k: v for k, v in agent_outputs.items() if not k.startswith("_")}
+            if len(filtered) == 1:
+                return list(filtered.values())[0]
+            return "\n\n---\n\n".join(filtered.values())
 
         except Exception:
             # Fallback to simple concatenation if LLM fails
+            filtered = {k: v for k, v in agent_outputs.items() if not k.startswith("_")}
             sections = []
             if "weather" in filtered:
                 sections.append(filtered["weather"])
@@ -1359,6 +1401,22 @@ if __name__ == "__main__":
                 "queries": [
                     ("Is the metro working?", "Metro status - transport only"),
                     ("How do I get from Rossio to Belem?", "Routing - transport only"),
+                    (
+                        "When is the next metro at Saldanha towards Odivelas?",
+                        "Metro wait-time fast path - transport only",
+                    ),
+                    (
+                        "What are the next departures for 732 at Rossio?",
+                        "Carris urban stop/line fast path - transport only",
+                    ),
+                    (
+                        "How do I get from Rossio to Sintra by train?",
+                        "CP fast path - transport only",
+                    ),
+                    (
+                        "Show real-time Carris Metropolitana buses near Almada",
+                        "Carris Metropolitana fast path - transport only",
+                    ),
                 ],
             },
             # ---------------------------------------------------------
@@ -1393,6 +1451,10 @@ if __name__ == "__main__":
                     (
                         "Suggest outdoor activities for today based on weather",
                         "Needs weather + researcher + planner",
+                    ),
+                    (
+                        "Plan my afternoon in Belém, tell me how to get there from Rossio, and consider the weather",
+                        "Needs researcher + transport + weather + planner",
                     ),
                 ],
             },

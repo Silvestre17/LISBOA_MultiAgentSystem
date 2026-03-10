@@ -6,7 +6,17 @@
 #   compute_tool_metrics() and SLA_THRESHOLDS configuration.
 #   No LLM, network, or agent calls required.
 #
-#   Run: python -m pytest eval/tests/test_benchmark_utils.py -v
+#   Run from the repository root with a relative path:
+#     python -m pytest eval/tests/test_benchmark_utils.py -q
+#   Useful parameters:
+#     -vv         verbose mode
+#     -k summary  focus on summary-building checks
+#     -x          stop on first failure
+#     --tb=short  shorter tracebacks
+#   Notes:
+#     - Prefer relative paths in this workspace. Absolute pytest paths may be
+#       treated as glob patterns on Windows because the folder name includes
+#       `[` and `]`.
 # ==========================================================================
 
 import os

@@ -21,7 +21,9 @@
 import logging
 import math
 import os
+import re
 import time
+import unicodedata
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -83,6 +85,14 @@ _carris_metropolitana_routes_last_load: Optional[datetime] = None
 _vehicle_positions_cache: Optional[List[Dict[str, Any]]] = None
 _vehicle_positions_last_load: Optional[datetime] = None
 _VEHICLE_CACHE_TTL_SECONDS = 30  # Vehicle positions update every 30 seconds
+_vehicle_feed_meta: Dict[str, Any] = {
+    "source": "uninitialized",
+    "generated_at": None,
+    "data_age_seconds": None,
+    "last_error": None,
+    "missing_coordinates": 0,
+    "vehicle_count": 0,
+}
 
 # ==========================================================================
 # Carris Urban vs Metropolitan Limitation Notice
@@ -102,6 +112,142 @@ CARRIS_LIMITATION_NOTICE = """
 
 💡 TIP: For central Lisbon destinations, the Metro is usually faster!
 """
+
+
+def _update_vehicle_feed_meta(
+    *,
+    source: str,
+    generated_at: Optional[datetime] = None,
+    data_age_seconds: Optional[float] = None,
+    last_error: Optional[str] = None,
+    missing_coordinates: int = 0,
+    vehicle_count: int = 0,
+) -> None:
+    """Stores the latest metadata about the realtime vehicle feed."""
+    _vehicle_feed_meta.update(
+        {
+            "source": source,
+            "generated_at": generated_at.isoformat() if isinstance(generated_at, datetime) else None,
+            "data_age_seconds": data_age_seconds,
+            "last_error": last_error,
+            "missing_coordinates": missing_coordinates,
+            "vehicle_count": vehicle_count,
+        }
+    )
+
+
+def _build_vehicle_freshness_note() -> str:
+    """Formats a short freshness note for realtime vehicle responses."""
+    source = _vehicle_feed_meta.get("source")
+    age = _vehicle_feed_meta.get("data_age_seconds")
+    last_error = _vehicle_feed_meta.get("last_error")
+    missing_coordinates = int(_vehicle_feed_meta.get("missing_coordinates", 0) or 0)
+
+    lines = []
+
+    if source == "live":
+        lines.append("📡 Data freshness: live Carris Metropolitana vehicle snapshot.")
+    elif source == "cache":
+        age_text = f"{int(age)}s" if age is not None else "unknown age"
+        lines.append(f"📡 Data freshness: cached Carris Metropolitana vehicle snapshot ({age_text} old).")
+    elif source == "stale_cache":
+        age_text = f"{int(age)}s" if age is not None else "unknown age"
+        lines.append(
+            f"⚠️ Data freshness: using cached vehicle data ({age_text} old) because the live Carris Metropolitana endpoint is temporarily unavailable."
+        )
+    elif source == "unavailable":
+        lines.append("⚠️ Data freshness: live Carris Metropolitana vehicle data is temporarily unavailable.")
+
+    if missing_coordinates:
+        lines.append(
+            f"ℹ️ {missing_coordinates} vehicle(s) were omitted because the API response did not include usable GPS coordinates."
+        )
+
+    if last_error and source in {"stale_cache", "unavailable"}:
+        lines.append(f"ℹ️ Last realtime feed issue: {last_error}")
+
+    return "\n".join(lines)
+
+
+def _append_carris_scope_footer(response: str, include_freshness: bool = False) -> str:
+    """Appends a compact scope note for Carris Metropolitana outputs."""
+    parts = []
+    if include_freshness:
+        freshness_note = _build_vehicle_freshness_note()
+        if freshness_note:
+            parts.append(freshness_note)
+
+    parts.append(
+        "⚠️ Scope: Carris Metropolitana covers suburban AML buses (Sintra, Cascais, Oeiras, Loures, Odivelas, etc.), not Carris Urban routes such as 28E, 15E, 732 or 738."
+    )
+    parts.append(
+        "💡 For central Lisbon-only bus or tram trips, cross-check Carris Urban or Metro data."
+    )
+
+    cleaned_parts = [part for part in parts if part]
+    if not cleaned_parts:
+        return response
+
+    return response.rstrip() + "\n\n" + "\n".join(cleaned_parts) + "\n"
+
+
+def _format_vehicle_relative_time(ts: Any) -> tuple[Optional[str], bool]:
+    """Formats a vehicle timestamp into a relative age and flags stale upstream values."""
+    last_update = _parse_unix_timestamp(ts)
+    if last_update is None:
+        return None, False
+
+    time_ago = (datetime.now() - last_update).total_seconds()
+
+    # Negative values beyond a small skew and very old values are usually upstream issues.
+    if time_ago < -120 or time_ago > 6 * 3600:
+        return None, True
+
+    time_ago = max(0, time_ago)
+    if time_ago < 60:
+        return f"{int(time_ago)}s ago", False
+    return f"{int(time_ago / 60)}m ago", False
+
+
+def _normalize_carris_display_value(text: str) -> str:
+    """Normalizes noisy upstream display values for deduplication only."""
+    normalized = unicodedata.normalize("NFKD", text or "")
+    normalized = "".join(c for c in normalized if not unicodedata.combining(c))
+    normalized = normalized.lower()
+    normalized = re.sub(r"[^a-z0-9\s-]", " ", normalized)
+    normalized = re.sub(r"([a-z])\1+", r"\1", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
+def _clean_carris_display_list(
+    values: List[Any],
+    *,
+    max_items: Optional[int] = None,
+    drop_numeric_only: bool = True,
+) -> List[str]:
+    """Removes empty, numeric-only, and duplicate upstream values while preserving order."""
+    cleaned: List[str] = []
+    seen: set[str] = set()
+
+    for raw_value in values:
+        value = str(raw_value or "").strip()
+        if not value:
+            continue
+        if drop_numeric_only and re.fullmatch(r"[0-9\s,.-]+", value):
+            continue
+
+        key = _normalize_carris_display_value(value)
+        if not key or key in seen:
+            continue
+
+        seen.add(key)
+        cleaned.append(value)
+
+        if max_items is not None and len(cleaned) >= max_items:
+            break
+
+    return cleaned
 
 
 # ==========================================================================
@@ -125,21 +271,38 @@ def _is_vehicle_cache_valid(last_load: Optional[datetime]) -> bool:
     return seconds_elapsed < _VEHICLE_CACHE_TTL_SECONDS
 
 
+def _parse_unix_timestamp(ts: Any) -> Optional[datetime]:
+    """Parses Unix timestamps that may arrive in seconds or milliseconds."""
+    try:
+        timestamp = float(ts)
+    except (TypeError, ValueError):
+        return None
+
+    if timestamp <= 0:
+        return None
+
+    # Heuristic: timestamps above 1e11 are almost certainly milliseconds.
+    if timestamp >= 100_000_000_000:
+        timestamp /= 1000.0
+
+    try:
+        return datetime.fromtimestamp(timestamp)
+    except (ValueError, TypeError, OSError, OverflowError):
+        return None
+
+
 def format_timestamp(ts: int) -> str:
     """
-    Converts Unix timestamp (milliseconds) to readable format.
+    Converts Unix timestamp (seconds or milliseconds) to readable format.
 
     Args:
-        ts: Unix timestamp in milliseconds.
+        ts: Unix timestamp in seconds or milliseconds.
 
     Returns:
         Formatted datetime string.
     """
-    try:
-        dt = datetime.fromtimestamp(ts / 1000)
-        return dt.strftime("%H:%M:%S")
-    except (ValueError, TypeError, OSError):
-        return "N/A"
+    dt = _parse_unix_timestamp(ts)
+    return dt.strftime("%H:%M:%S") if dt else "N/A"
 
 
 def is_within_lisbon_city(lat: Optional[float], lon: Optional[float]) -> bool:
@@ -539,6 +702,14 @@ def load_carris_metropolitana_vehicles(
         logger.info(
             f"Using cached vehicle positions ({len(_vehicle_positions_cache)} vehicles, age: {age:.1f}s)"
         )
+        _update_vehicle_feed_meta(
+            source="cache",
+            generated_at=_vehicle_positions_last_load,
+            data_age_seconds=age,
+            last_error=None,
+            missing_coordinates=int(_vehicle_feed_meta.get("missing_coordinates", 0) or 0),
+            vehicle_count=len(_vehicle_positions_cache),
+        )
         return _vehicle_positions_cache
 
     logger.info("Fetching real-time vehicle positions from Carris Metropolitana API...")
@@ -555,12 +726,14 @@ def load_carris_metropolitana_vehicles(
             return _vehicle_positions_cache or []
 
         processed_vehicles = []
+        missing_coordinates = 0
         for vehicle in vehicles:
             # Process only if vehicle has position data
             lat = vehicle.get("lat")
             lon = vehicle.get("lon")
 
             if lat is None or lon is None:
+                missing_coordinates += 1
                 continue
 
             processed_vehicle = {
@@ -594,6 +767,14 @@ def load_carris_metropolitana_vehicles(
 
         _vehicle_positions_cache = processed_vehicles
         _vehicle_positions_last_load = datetime.now()
+        _update_vehicle_feed_meta(
+            source="live",
+            generated_at=_vehicle_positions_last_load,
+            data_age_seconds=0,
+            last_error=None,
+            missing_coordinates=missing_coordinates,
+            vehicle_count=len(processed_vehicles),
+        )
 
         logger.info(
             f"\033[1;32m✅ Loaded {len(processed_vehicles)} real-time vehicle positions\033[0m"
@@ -602,12 +783,51 @@ def load_carris_metropolitana_vehicles(
 
     except requests.exceptions.Timeout:
         logger.error("Timeout loading vehicle positions (15s)")
+        cache_age = (
+            (datetime.now() - _vehicle_positions_last_load).total_seconds()
+            if _vehicle_positions_last_load
+            else None
+        )
+        _update_vehicle_feed_meta(
+            source="stale_cache" if _vehicle_positions_cache else "unavailable",
+            generated_at=_vehicle_positions_last_load,
+            data_age_seconds=cache_age,
+            last_error="request timeout",
+            missing_coordinates=int(_vehicle_feed_meta.get("missing_coordinates", 0) or 0),
+            vehicle_count=len(_vehicle_positions_cache or []),
+        )
         return _vehicle_positions_cache or []
     except requests.exceptions.RequestException as e:
         logger.error(f"Error loading vehicle positions: {e}")
+        cache_age = (
+            (datetime.now() - _vehicle_positions_last_load).total_seconds()
+            if _vehicle_positions_last_load
+            else None
+        )
+        _update_vehicle_feed_meta(
+            source="stale_cache" if _vehicle_positions_cache else "unavailable",
+            generated_at=_vehicle_positions_last_load,
+            data_age_seconds=cache_age,
+            last_error=str(e),
+            missing_coordinates=int(_vehicle_feed_meta.get("missing_coordinates", 0) or 0),
+            vehicle_count=len(_vehicle_positions_cache or []),
+        )
         return _vehicle_positions_cache or []
     except Exception as e:
         logger.error(f"Unexpected error loading vehicle positions: {e}")
+        cache_age = (
+            (datetime.now() - _vehicle_positions_last_load).total_seconds()
+            if _vehicle_positions_last_load
+            else None
+        )
+        _update_vehicle_feed_meta(
+            source="stale_cache" if _vehicle_positions_cache else "unavailable",
+            generated_at=_vehicle_positions_last_load,
+            data_age_seconds=cache_age,
+            last_error=str(e),
+            missing_coordinates=int(_vehicle_feed_meta.get("missing_coordinates", 0) or 0),
+            vehicle_count=len(_vehicle_positions_cache or []),
+        )
         return _vehicle_positions_cache or []
 
 
@@ -975,7 +1195,10 @@ def get_real_time_bus_positions(
     lines = load_carris_metropolitana_lines()
 
     if not vehicles:
-        return "❌ Failed to fetch real-time vehicle positions."
+        return _append_carris_scope_footer(
+            "❌ Live Carris Metropolitana vehicle data is temporarily unavailable.",
+            include_freshness=True,
+        )
 
     line_map = {line_data["id"]: line_data for line_data in lines} if lines else {}
 
@@ -1015,13 +1238,17 @@ def get_real_time_bus_positions(
         response += f"📊 {len(filtered_vehicles)} active vehicles\n"
 
     response += "=" * 50 + "\n\n"
+    freshness_note = _build_vehicle_freshness_note()
+    if freshness_note:
+        response += freshness_note + "\n\n"
 
     if not filtered_vehicles:
         response += "ℹ️ No vehicles currently active.\n"
-        return response
+        return _append_carris_scope_footer(response)
 
     # Status icons
     status_icons = {"INCOMING_AT": "🚏", "STOPPED_AT": "🛑", "IN_TRANSIT_TO": "🚌"}
+    stale_vehicle_timestamps = 0
 
     # Show vehicles
     for i, vehicle in enumerate(filtered_vehicles[:10], 1):
@@ -1042,15 +1269,9 @@ def get_real_time_bus_positions(
 
         # Format timestamp
         timestamp = vehicle.get("timestamp", 0)
-        if timestamp:
-            last_update = datetime.fromtimestamp(timestamp / 1000)
-            time_ago = (datetime.now() - last_update).total_seconds()
-            if time_ago < 60:
-                time_str = f"{int(time_ago)}s ago"
-            else:
-                time_str = f"{int(time_ago / 60)}m ago"
-        else:
-            time_str = "N/A"
+        time_str, timestamp_stale = _format_vehicle_relative_time(timestamp)
+        if timestamp_stale:
+            stale_vehicle_timestamps += 1
 
         response += f"{i}. {status_icon} Line {line_short}\n"
         response += f"   🚗 {license_plate}"
@@ -1060,7 +1281,8 @@ def get_real_time_bus_positions(
         response += f"   📍 GPS: {lat:.5f}, {lon:.5f}\n"
         if speed is not None:
             response += f"   💨 Speed: {speed} km/h | Bearing: {bearing}°\n"
-        response += f"   📡 Last update: {time_str}\n"
+        if time_str:
+            response += f"   📡 Last update: {time_str}\n"
 
         if status == "STOPPED_AT":
             response += "   🛑 Currently stopped"
@@ -1080,7 +1302,12 @@ def get_real_time_bus_positions(
     if len(filtered_vehicles) > 10:
         response += f"... and {len(filtered_vehicles) - 10} more vehicles.\n"
 
-    return response
+    if stale_vehicle_timestamps:
+        response += (
+            f"\n⚠️ Vehicle-level timestamp note: {stale_vehicle_timestamps} shown vehicle(s) reported stale timestamps in the upstream API, so exact per-vehicle age could not be trusted.\n"
+        )
+
+    return _append_carris_scope_footer(response)
 
 
 @tool
@@ -1303,7 +1530,7 @@ def find_direct_bus_lines(origin: str, destination: str) -> str:
         response += "   • Pode ser necessário fazer transbordo\n"
         response += "   • Considere combinar Metro + Autocarro\n"
         response += "   • Consulte carrismetropolitana.pt para mais opções\n"
-        return response
+        return _append_carris_scope_footer(response)
 
     # Fetch alerts to check if any affect these lines
     alerts_data = fetch_json_with_retry(CARRIS_ALERTS_URL)
@@ -1373,9 +1600,10 @@ def find_direct_bus_lines(origin: str, destination: str) -> str:
 
         # Show localities if available, ordered from origin to destination when possible
         if localities:
+            cleaned_localities = _clean_carris_display_list(localities, max_items=6)
             origin_idx = -1
             dest_idx = -1
-            for idx, loc in enumerate(localities):
+            for idx, loc in enumerate(cleaned_localities):
                 loc_norm = normalize(loc)
                 if origin_idx < 0 and (
                     origin_norm in loc_norm or loc_norm in origin_norm
@@ -1386,9 +1614,9 @@ def find_direct_bus_lines(origin: str, destination: str) -> str:
 
             if origin_idx >= 0 and dest_idx >= 0:
                 if origin_idx < dest_idx:
-                    key_stops = localities[origin_idx : dest_idx + 1]
+                    key_stops = cleaned_localities[origin_idx : dest_idx + 1]
                 else:
-                    key_stops = localities[dest_idx : origin_idx + 1][::-1]
+                    key_stops = cleaned_localities[dest_idx : origin_idx + 1][::-1]
 
                 if len(key_stops) > 6:
                     display_stops = key_stops[:6]
@@ -1398,10 +1626,10 @@ def find_direct_bus_lines(origin: str, destination: str) -> str:
                 else:
                     response += f"   🚏 {' → '.join(key_stops)}\n"
             else:
-                key_stops = localities[:6]
+                key_stops = cleaned_localities[:6]
                 response += f"   🚏 Passa por: {', '.join(key_stops)}"
-                if len(localities) > 6:
-                    response += f" (+{len(localities) - 6})"
+                if len(cleaned_localities) > 6:
+                    response += f" (+{len(cleaned_localities) - 6})"
                 response += "\n"
         response += "\n"
 
@@ -1415,7 +1643,7 @@ def find_direct_bus_lines(origin: str, destination: str) -> str:
     response += f"   • Verifique a direção do autocarro ({origin.title()} → {destination.title()})\n"
     response += "   • Horários e paragens: carrismetropolitana.pt\n"
 
-    return response
+    return _append_carris_scope_footer(response)
 
 
 @tool
@@ -1520,18 +1748,23 @@ def search_carris_metropolitana_lines(query: str) -> str:
     for i, line in enumerate(matches[:15], 1):
         short_name = line.get("short_name", "N/A")
         long_name = line.get("long_name") or "N/A"
-        municipalities = line.get("municipalities") or []
-        localities = line.get("localities") or []
+        municipalities = _clean_carris_display_list(
+            line.get("municipalities") or [],
+            max_items=4,
+            drop_numeric_only=True,
+        )
+        localities = _clean_carris_display_list(
+            line.get("localities") or [],
+            max_items=8,
+            drop_numeric_only=True,
+        )
 
         response += f"{i}. **Line {short_name}**\n"
         response += f"   📍 {long_name}\n"
         if municipalities:
-            muni_list = [m for m in municipalities[:4] if m]
-            response += f"   🏘️ Municipalities: {', '.join(muni_list)}\n"
+            response += f"   🏘️ Municipalities: {', '.join(municipalities)}\n"
         if localities:
-            # Show key localities that might match the query
-            key_localities = [loc for loc in localities[:8] if loc]
-            response += f"   📌 Localities: {', '.join(key_localities)}\n"
+            response += f"   📌 Localities: {', '.join(localities)}\n"
         response += "\n"
 
     if len(matches) > 15:
@@ -1540,7 +1773,7 @@ def search_carris_metropolitana_lines(query: str) -> str:
     response += "\n" + "-" * 40 + "\n"
     response += "💡 Podes perguntar por rotas diretas entre dois locais ou horários de uma linha específica.\n"
 
-    return response
+    return _append_carris_scope_footer(response)
 
 
 @tool
@@ -1557,23 +1790,20 @@ def get_bus_realtime_locations(line_id: Optional[str] = None) -> str:
     Returns:
         str: Real-time locations with speed, status, and next stop.
     """
-    data = fetch_json_with_retry(CARRIS_VEHICLES_URL)
+    data = load_carris_metropolitana_vehicles()
 
     if not data:
-        return "❌ Failed to fetch real-time bus locations."
-
-    if not isinstance(data, list):
-        return "❌ Unexpected response format from vehicles API."
-
-    if not data:
-        return "ℹ️ No active buses reported at this time."
+        return _append_carris_scope_footer(
+            "❌ Live Carris Metropolitana bus locations are temporarily unavailable.",
+            include_freshness=True,
+        )
 
     if line_id:
         filtered = [v for v in data if v.get("line_id") == line_id]
         if not filtered:
-            return (
+            return _append_carris_scope_footer(
                 f"ℹ️ No active buses found on line {line_id} at this time.\n\n"
-                f"💡 The line may not be operating right now."
+                f"💡 The line may not be operating right now.",
             )
         buses = filtered
         response = f"🚌 **Real-Time Bus Locations - Line {line_id}**\n"
@@ -1585,6 +1815,9 @@ def get_bus_realtime_locations(line_id: Optional[str] = None) -> str:
     response += f"📊 Active buses: {len(buses)}\n"
     response += f"🕐 Updated: {datetime.now().strftime('%H:%M:%S')}\n"
     response += "=" * 50 + "\n\n"
+    freshness_note = _build_vehicle_freshness_note()
+    if freshness_note:
+        response += freshness_note + "\n\n"
 
     if line_id:
         for i, bus in enumerate(buses[:15], 1):
@@ -1631,7 +1864,7 @@ def get_bus_realtime_locations(line_id: Optional[str] = None) -> str:
         "💡 Podes perguntar pela localização em tempo real de uma linha específica.\n"
     )
 
-    return response
+    return _append_carris_scope_footer(response)
 
 
 @tool
@@ -1758,7 +1991,7 @@ def get_bus_next_departures(
     else:
         response += f"ℹ️ Line not operating today ({today}).\n"
 
-    return response
+    return _append_carris_scope_footer(response)
 
 
 @tool
@@ -2056,6 +2289,26 @@ if __name__ == "__main__":
 
     print("\n4. Testing find_bus_routes...")
     result = find_bus_routes.invoke({"origin": "Colombo", "destination": "Oriente"})
+    print(result[:800])
+
+    print("\n5. Testing get_carris_metropolitana_stop_info...")
+    result = get_carris_metropolitana_stop_info.invoke({"stop_id": "010101"})
+    print(result[:500])
+
+    print("\n6. Testing find_direct_bus_lines...")
+    result = find_direct_bus_lines.invoke({"origin": "Oeiras", "destination": "Amadora"})
+    print(result[:800])
+
+    print("\n7. Testing get_real_time_bus_positions near Almada...")
+    result = get_real_time_bus_positions.invoke({"location": "Almada", "radius_km": 1.0})
+    print(result[:800])
+
+    print("\n8. Testing get_bus_realtime_locations for line 470...")
+    result = get_bus_realtime_locations.invoke({"line_id": "470"})
+    print(result[:800])
+
+    print("\n9. Testing get_bus_next_departures for line 470 at stop 010101...")
+    result = get_bus_next_departures.invoke({"line_id": "470", "stop_id": "010101"})
     print(result[:800])
 
     print("\n\033[1;32m✅ Carris Metropolitana API tests complete!\033[0m")

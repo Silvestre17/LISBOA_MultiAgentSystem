@@ -13,7 +13,16 @@
 #   - CP Comboios de Portugal (Trains via GTFS + Real-time)
 #   - IPMA (Weather data)
 #
-# Run: python tests/test_lisbon_transport.py
+# Run from the repository root with a relative path:
+#   python -m pytest tests/test_lisbon_transport.py -s -v
+# Useful parameters:
+#   -k metro|carris|cp|ipma   focus on a provider subset
+#   -x                        stop on first failure
+#   --tb=short                shorter tracebacks
+# Notes:
+#   - Prefer relative paths in this workspace. Absolute pytest paths may be
+#     treated as glob patterns on Windows because the folder name includes
+#     `[` and `]`.
 # ==========================================================================
 
 # Required libraries:

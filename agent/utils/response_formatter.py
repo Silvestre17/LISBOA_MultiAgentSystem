@@ -322,6 +322,12 @@ def canonicalize_transport_terms(text: str, language: str = "en") -> str:
         (r"\bAtualizado às\b", "Updated at"),
         (r"\*\*Estado\*\*:", "**Status**:"),
         (r"\*\*Estado das Linhas:\*\*", "**Line Status:**"),
+        (r"\*\*Comboio:", "**Train:"),
+        (r"\*\*RESUMO DA VIAGEM\*\*", "**TRIP SUMMARY**"),
+        (r"Linha:", "Line:"),
+        (r"Dura[cç][aã]o:", "Duration:"),
+        (r"\*\*Pr[oó]ximas\s+(\d+)\s+Partidas:\*\*", r"**Next \1 Departures:**"),
+        (r"\bOutras linhas\b", "Other lines"),
         (r"Circulação normal em todas as linhas", "Normal service on all lines"),
         (r"\*\*Veículos em serviço\*\*:", "**Vehicles in service**:"),
         (r"\*\*Alertas ativos\*\*:", "**Active alerts**:"),
@@ -338,6 +344,51 @@ def canonicalize_transport_terms(text: str, language: str = "en") -> str:
         (r"\bSiga a pé para\b", "Walk to"),
         (r"\bDireção\b", "Direction"),
         (r"\bSem dados em tempo real\b", "No real-time data available"),
+        (r"Próximas Chegadas", "Next Arrivals"),
+        (r"Paragens Carris", "Carris Stops"),
+        (r"\bParagem\b", "Stop"),
+        (r"\bHora:\b", "Time:"),
+        (r"\*\*Hora\*\*:", "**Time**:"),
+        (r"\bA mostrar\b", "Showing"),
+        (r"Usa o ID da paragem com carris_get_arrivals para ver chegadas em tempo real\.", "Use the stop ID to check real-time arrivals."),
+        (r"\bAutocarro\b", "Bus"),
+        (r"\bElétrico\b", "Tram"),
+        (r"\bEletrico\b", "Tram"),
+        (r"\bPróxima paragem:\b", "Next stop:"),
+        (r"\*\*Próxima paragem\*\*:", "**Next stop**:"),
+        (r"\bMatrícula:\b", "Plate:"),
+        (r"\*\*Matrícula\*\*:", "**Plate**:"),
+        (r"\bFaltam\s+(\d+)\s+paragens\b", r"\1 stops remaining"),
+        (r"\bVeículos? a caminho\b", "vehicles on the way"),
+        (r"\bTempo viagem estimado:\b", "Estimated travel time:"),
+        (r"\badiantado\s+(\d+)\s+min\b", r"\1 min early"),
+        (r"\batrasado \+(\d+)\s+min\b", r"\1 min late"),
+        (r"\bDados de:\b", "Feed timestamp:"),
+        (r"\bFrequência da Linha\b", "Route Frequency"),
+        (r"\bAutocarros\b", "Buses"),
+        (r"\bTerminais\b", "Terminals"),
+        (r"\*\*Terminais\*\*:", "**Terminals**:"),
+        (r"\*\*Como usar:\*\*", "**How to use it:**"),
+        (r"Procure pelo n[uú]mero da linha \(ex: \*\*([^*]+)\*\*\) na (?:paragem|Stop)", r"Look for the line number (e.g. **\1**) at the stop"),
+        (r"Verifique a (?:dire[cç][aã]o|Direction) do (?:autocarro|Bus)", "Check the bus direction"),
+        (r"Hor[aá]rios e paragens", "Schedules and stops"),
+        (r"\*\*Hor[aá]rios\*\*:", "**Schedules**:"),
+        (r"Bilhetes:", "Tickets:"),
+        (r"\*\*(\d+) linha\(s\) direta\(s\) encontrada\(s\):\*\*", r"**\1 direct line(s) found:**"),
+        (r"Alguns\s+comboios\s+com\s*\+(\d+)min atraso", r"Some trains are delayed by \1 min"),
+        (r"Alguns\s+t*trains?\s+com\s*\+(\d+)min atraso", r"Some trains are delayed by \1 min"),
+        (r"ou estação", "or station"),
+        (r"Partidas restantes Today", "Remaining departures today"),
+        (r"\bHoje\b", "Today"),
+        (r"\bParagem:\b", "Stop:"),
+        (r"\bTotal de passagens hoje:\b", "Total departures today:"),
+        (r"\bpassagem\b", "departure"),
+        (r"\bpassagens\b", "departures"),
+        (r"\bPara\b", "To"),
+        (r"(\*\*\[[^\]]+\]\*\*\s+)Para\b", r"\1To"),
+        (r"->\s+([^\n]+?)\s*/\s*circula[cç][aã]o", r"-> \1 / circular service"),
+        (r"Restauradoures", "Restauradores"),
+        (r":\s*para\s+", ": to "),
         (r"\bveículos\b", "vehicles"),
         (r"\balertas\b", "alerts"),
         (r"\bcomboios\b", "trains"),
@@ -513,6 +564,12 @@ def canonicalize_visitlisboa_source_line(
     lower_text = text.lower()
     kind = infer_researcher_source_kind(user_query=user_query, text=text)
     has_visitlisboa = "visitlisboa" in lower_text
+    has_lisboa_aberta = (
+        "lisboa aberta" in lower_text
+        or "open data:" in lower_text
+        or "dados abertos" in lower_text
+        or "dados.cm-lisboa.pt" in lower_text
+    )
     visitlisboa_source_exists = any(
         _SOURCE_LINE_RE.match(line.strip()) and "visitlisboa" in line.lower()
         for line in text.splitlines()
@@ -534,6 +591,12 @@ def canonicalize_visitlisboa_source_line(
             replacement = "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais)"
         else:
             replacement = "📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places)"
+
+        if has_lisboa_aberta:
+            if language == "pt":
+                replacement += " | [*Lisboa Aberta*](https://dados.cm-lisboa.pt/)"
+            else:
+                replacement += " | [*Lisboa Aberta*](https://dados.cm-lisboa.pt/)"
 
     return _replace_source_line(
         text,
@@ -1273,6 +1336,10 @@ def ensure_response_title(text: str, title: Optional[str]) -> str:
         return text  # Already has a header
     if re.match(r"^\*\*[^*]+\*\*\s*$", first_line):
         return text  # Already has a bold title line
+    if re.match(r"^(?:[🚇🚌🚆🚋🌤️🗺️📚🎭📍]\s+)?\*\*[^*]+\*\*(?:\s*(?::|→|-).*)?$", first_line):
+        return text  # Already has a strong emoji/bold title line
+    if re.match(r"^[🚇🚌🚆🚋🌤️🗺️📚🎭📍]\s+.+$", first_line):
+        return text  # Already starts with an emoji title
 
     return f"{title}\n\n{text}"
 

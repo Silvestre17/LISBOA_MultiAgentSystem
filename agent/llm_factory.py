@@ -29,7 +29,7 @@ from typing import Any, Dict, Optional
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from agent.utils.langsmith_tracing import LANGSMITH_STATUS  # noqa: F401
+from agent.utils.langsmith_tracing import LANGSMITH_STATUS
 
 try:
     from config import Config

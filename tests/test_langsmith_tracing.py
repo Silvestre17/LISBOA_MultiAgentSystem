@@ -6,6 +6,18 @@
 # ensure tracing only activates when explicitly requested and preflight
 # validation succeeds, and that it fails closed for placeholder or forbidden
 # credentials without leaking runtime errors.
+#
+# Run from the repository root with a relative path:
+#   python -m pytest tests/test_langsmith_tracing.py -q
+# Useful parameters:
+#   -vv             verbose mode
+#   -k preflight    run only the preflight-related checks
+#   -x              stop on first failure
+#   --tb=short      shorter tracebacks
+# Notes:
+#   - Prefer relative paths in this workspace. Absolute pytest paths may be
+#     treated as glob patterns on Windows because the folder name includes
+#     `[` and `]`.
 # ===========================================================================
 
 # Required libraries:

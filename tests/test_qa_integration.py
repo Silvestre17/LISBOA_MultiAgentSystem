@@ -6,7 +6,17 @@
 #   Mocks the LLM to test the full two-phase validation flow without
 #   requiring network access or API keys.
 #
-#   Run: python -m pytest tests/test_qa_integration.py -v --tb=short
+#   Run from the repository root with a relative path:
+#     python -m pytest tests/test_qa_integration.py -q
+#   Useful parameters:
+#     -vv                            verbose mode
+#     -k complete or -k incomplete   focus on one validation branch
+#     -x                             stop on first failure
+#     --tb=short                     shorter tracebacks
+#   Notes:
+#     - Prefer relative paths in this workspace. Absolute pytest paths may be
+#       treated as glob patterns on Windows because the folder name includes
+#       `[` and `]`.
 # ==========================================================================
 
 import json

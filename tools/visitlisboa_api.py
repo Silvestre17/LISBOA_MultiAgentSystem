@@ -407,6 +407,58 @@ def format_event_dates(event: Dict) -> str:
     return " | ".join(formatted) if formatted else "Date TBA"
 
 
+_EVENT_GENERIC_QUERY_TERMS = {
+    'event', 'events', 'evento', 'eventos',
+    'cultura', 'cultural', 'culture', 'culturais',
+    'lisbon', 'lisboa', 'portugal', 'city', 'cidade'
+}
+
+_EVENT_QUERY_SYNONYMS = {
+    'music': ['concert', 'concerto', 'live', 'band', 'artist', 'musical', 'fado', 'jazz', 'rock', 'pop'],
+    'concert': ['music', 'live', 'performance', 'show', 'gig'],
+    'concerts': ['music', 'live', 'performance', 'show', 'gig'],
+    'art': ['exhibition', 'gallery', 'museum', 'painting', 'sculpture', 'artwork'],
+    'exhibition': ['art', 'gallery', 'museum', 'display', 'expo'],
+    'theater': ['theatre', 'play', 'drama', 'stage', 'performance'],
+    'theatre': ['theater', 'play', 'drama', 'stage', 'performance'],
+    'dance': ['ballet', 'dancing', 'choreography', 'performance'],
+    'family': ['children', 'kids', 'child', 'families'],
+    'food': ['gastronomy', 'culinary', 'wine', 'taste', 'restaurant'],
+}
+
+
+def _expand_event_query_tokens(query: Optional[str]) -> List[str]:
+    """Builds a small expanded token set for event text matching."""
+    if not query:
+        return []
+
+    original_tokens = [t.strip().lower() for t in query.split() if len(t.strip()) >= 3]
+    query_tokens = [t for t in original_tokens if t not in _EVENT_GENERIC_QUERY_TERMS]
+
+    if not query_tokens:
+        return []
+
+    expanded_tokens = set(query_tokens)
+    for token in query_tokens:
+        expanded_tokens.update(_EVENT_QUERY_SYNONYMS.get(token, []))
+
+    return sorted(expanded_tokens)
+
+
+def _event_matches_query(event: Dict[str, Any], expanded_tokens: List[str]) -> bool:
+    """Returns whether an event matches the expanded query tokens."""
+    if not expanded_tokens:
+        return True
+
+    searchable = " ".join([
+        event.get('title', ''),
+        event.get('full_description', ''),
+        event.get('short_description', ''),
+        event.get('category', ''),
+    ]).lower()
+    return any(token in searchable for token in expanded_tokens)
+
+
 # ==========================================================================
 # Vector Store Connection (Lazy Loading)
 # ==========================================================================
@@ -484,6 +536,36 @@ def _should_search_dados_abertos(query: Optional[str]) -> bool:
     return any(keyword in query_lower for keyword in DADOS_ABERTOS_KEYWORDS)
 
 
+def _score_open_data_place_match(query: str, name: str, address: str = "") -> float:
+    """Scores open-data matches so exact named facilities outrank generic early matches."""
+    normalized_query = _normalize_place_hint_text(query)
+    name_text = _normalize_place_hint_text(name)
+    address_text = _normalize_place_hint_text(address)
+    combined_text = f"{name_text} {address_text}".strip()
+
+    tokens = [
+        token
+        for token in re.findall(r"[a-z0-9]+", normalized_query)
+        if len(token) >= 3 and token not in _GENERIC_PLACE_QUERY_TOKENS
+    ]
+
+    score = 0.0
+    if normalized_query and normalized_query in name_text:
+        score += 12.0
+    elif normalized_query and normalized_query in combined_text:
+        score += 8.0
+
+    for token in tokens:
+        if token in name_text:
+            score += 3.0
+        elif token in address_text:
+            score += 1.5
+        elif token in combined_text:
+            score += 1.0
+
+    return score
+
+
 def _search_dados_abertos_hybrid(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
     """
     Searches Dados Abertos and returns structured results for merging.
@@ -510,6 +592,8 @@ def _search_dados_abertos_hybrid(query: str, max_results: int = 5) -> List[Dict[
             return []
         
         query_lower = query.lower()
+        normalized_query = _normalize_place_hint_text(query)
+        query_tokens = [t for t in re.findall(r"[a-z0-9]+", normalized_query) if len(t) >= 3]
         found_places = []
         
         # Keyword mapping (simplified from dados_abertos.py)
@@ -577,7 +661,7 @@ def _search_dados_abertos_hybrid(query: str, max_results: int = 5) -> List[Dict[
                 continue
             
             features = data.get('features', [])
-            for feature in features[:100]:  # Limit per dataset
+            for feature in features[:200]:  # Limit per dataset while allowing better ranking
                 properties = feature.get('properties', {})
                 name = extract_name(properties)
                 
@@ -585,9 +669,10 @@ def _search_dados_abertos_hybrid(query: str, max_results: int = 5) -> List[Dict[
                     continue
                 
                 # Check match
-                name_lower = name.lower()
-                if any(t in name_lower for t in tokens) or query_lower in name_lower:
-                    address = extract_address(properties)
+                address = extract_address(properties)
+                match_score = _score_open_data_place_match(query, name, address)
+
+                if match_score > 0 or any(t in _normalize_place_hint_text(name) for t in query_tokens):
                     coords = extract_coordinates(feature.get('geometry', {}))
                     
                     found_places.append({
@@ -598,22 +683,23 @@ def _search_dados_abertos_hybrid(query: str, max_results: int = 5) -> List[Dict[
                         'url': None,
                         'lat': coords[0] if coords else None,
                         'lon': coords[1] if coords else None,
-                        'source': 'dados_abertos'
+                        'source': 'dados_abertos',
+                        '_match_score': match_score,
                     })
-                    
-                    if len(found_places) >= max_results:
-                        break
-            
-            if len(found_places) >= max_results:
-                break
         
-        # Deduplicate by title
+        # Rank and deduplicate by title, keeping the strongest match
+        found_places.sort(key=lambda item: item.get('_match_score', 0), reverse=True)
         unique = {}
         for p in found_places:
-            if p['title'] not in unique:
+            existing = unique.get(p['title'])
+            if existing is None or p.get('_match_score', 0) > existing.get('_match_score', 0):
                 unique[p['title']] = p
         
-        return list(unique.values())[:max_results]
+        ranked_results = list(unique.values())[:max_results]
+        for item in ranked_results:
+            item.pop('_match_score', None)
+
+        return ranked_results
     
     except Exception as e:
         logger.warning(f"Dados Abertos hybrid search failed: {e}")
@@ -786,6 +872,26 @@ _NON_MUSEUM_MONUMENT_MARKERS = {
     "monument", "monastery", "castle", "palace", "church", "tower", "cemetery", "aqueduct",
     "monumento", "mosteiro", "castelo", "palacio", "igreja", "torre", "cemiterio", "aqueduto",
 }
+_PUBLIC_SERVICE_FOCUS_TERMS = {
+    "hospital": {"hospital", "hospitals", "urgencia", "urgencias", "urgência", "urgências"},
+    "pharmacy": {"pharmacy", "pharmacies", "farmacia", "farmacias", "farmácia", "farmácias", "parafarmacia", "parafarmácia"},
+    "school": {"school", "schools", "escola", "escolas", "college", "colegio", "colégio"},
+    "university": {"university", "universities", "universidade", "universidades", "faculty", "faculdade", "instituto", "institute"},
+    "library": {"library", "libraries", "biblioteca", "bibliotecas"},
+    "police": {"police", "policia", "polícia"},
+    "firefighters": {"fire", "firefighters", "firefighter", "bombeiro", "bombeiros"},
+    "parking": {"parking", "estacionamento", "parque de estacionamento", "car park"},
+    "market": {"market", "markets", "mercado", "mercados", "feira", "feiras"},
+    "garden": {"garden", "gardens", "jardim", "jardins", "park", "parks", "parque", "parques"},
+    "wc": {"wc", "toilet", "toilets", "sanitario", "sanitários", "sanitario", "sanitário", "restroom"},
+    "embassy": {"embassy", "embassies", "embaixada", "embaixadas"},
+}
+_OUTSIDE_LISBON_CITY_MARKERS = {
+    "cascais", "sintra", "almada", "setubal", "setúbal", "oeiras", "amadora",
+    "loures", "odivelas", "montijo", "seixal", "sesimbra", "barreiro", "mafra",
+    "alcochete", "moita", "palmela", "vila franca", "vila franca de xira",
+    "santa iria", "azóia", "azoia",
+}
 
 
 def _normalize_place_hint_text(text: Optional[str]) -> str:
@@ -864,11 +970,128 @@ def _extract_place_query_tokens(query: Optional[str]) -> List[str]:
     if not query:
         return []
 
-    tokens = re.findall(r"[A-Za-zÀ-ÿ0-9]+", query.lower())
+    tokens = re.findall(r"[a-z0-9]+", _normalize_place_hint_text(query))
     return [
         token for token in tokens
         if len(token) >= 3 and token not in _GENERIC_PLACE_QUERY_TOKENS
     ]
+
+
+def _clean_place_description_text(text: Optional[str], fallback_title: str = "") -> str:
+    """Removes raw metadata scaffolding from place descriptions."""
+    if not text:
+        return ""
+
+    cleaned_parts: List[str] = []
+    for raw_line in str(text).splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        lower_line = line.lower()
+        if any(lower_line.startswith(prefix) for prefix in ["name:", "url:", "category:", "address:", "location:"]):
+            continue
+        if lower_line.startswith("short description:"):
+            line = line.split(":", 1)[1].strip()
+        if fallback_title and _normalize_place_hint_text(line) == _normalize_place_hint_text(fallback_title):
+            continue
+        cleaned_parts.append(line)
+
+    cleaned = re.sub(r"\s+", " ", " ".join(cleaned_parts)).strip(" -")
+    return cleaned
+
+
+def _extract_required_service_term_groups(query: Optional[str]) -> List[set[str]]:
+    """Extracts critical service-intent term groups that must remain present in results."""
+    normalized_query = _normalize_place_hint_text(query)
+    query_tokens = set(re.findall(r"[a-z0-9]+", normalized_query))
+    required_groups: List[set[str]] = []
+    for variants in _PUBLIC_SERVICE_FOCUS_TERMS.values():
+        if any(
+            (_normalize_place_hint_text(term) in normalized_query if " " in term else _normalize_place_hint_text(term) in query_tokens)
+            for term in variants
+        ):
+            required_groups.append(variants)
+    return required_groups
+
+
+def _matches_required_service_terms(searchable_text: str, required_groups: List[set[str]]) -> bool:
+    """Checks whether candidate text preserves the critical service intent from the query."""
+    if not required_groups:
+        return True
+
+    normalized_text = _normalize_place_hint_text(searchable_text)
+    text_tokens = set(re.findall(r"[a-z0-9]+", normalized_text))
+    return any(
+        any(
+            (_normalize_place_hint_text(term) in normalized_text if " " in term else _normalize_place_hint_text(term) in text_tokens)
+            for term in variants
+        )
+        for variants in required_groups
+    )
+
+
+def _query_explicitly_mentions_outside_lisbon(query: Optional[str]) -> bool:
+    """Returns whether the user explicitly asked for an area outside Lisbon city."""
+    normalized_query = _normalize_place_hint_text(query)
+    return any(marker in normalized_query for marker in _OUTSIDE_LISBON_CITY_MARKERS)
+
+
+def _place_within_requested_geography(location_text: str, query: Optional[str]) -> bool:
+    """Keeps Lisbon-city queries focused on Lisbon unless the user explicitly asked otherwise."""
+    if not location_text:
+        return True
+    if _query_explicitly_mentions_outside_lisbon(query):
+        return True
+
+    normalized_location = _normalize_place_hint_text(location_text)
+    return not any(marker in normalized_location for marker in _OUTSIDE_LISBON_CITY_MARKERS)
+
+
+def _normalize_place_result_key(place: Dict[str, Any]) -> str:
+    """Builds a robust deduplication key for place results."""
+    url = place.get("url") or ""
+    if url:
+        return _normalize_place_hint_text(url.rsplit("/", 1)[-1])
+
+    title = _normalize_place_hint_text(place.get("title", ""))
+    location = _normalize_place_hint_text(place.get("location", ""))
+    return f"{title}|{location}"
+
+
+def _append_unique_place_results(
+    target_results: List[Dict[str, Any]],
+    new_results: List[Dict[str, Any]],
+    seen_keys: set[str],
+    limit: Optional[int] = None,
+) -> None:
+    """Appends place results while deduplicating by URL/title-location signature."""
+    for result in new_results:
+        key = _normalize_place_result_key(result)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        target_results.append(result)
+        if limit is not None and len(target_results) >= limit:
+            break
+
+
+def _convert_raw_place_to_result(place: Dict[str, Any], source: str = "visitlisboa") -> Dict[str, Any]:
+    """Converts a raw VisitLisboa place record into the common result shape."""
+    location = place.get("address") or place.get("location") or "Lisbon"
+    description = _clean_place_description_text(
+        place.get("short_description") or place.get("full_description") or "",
+        place.get("title", ""),
+    )
+
+    return {
+        "title": place.get("title", "Unknown"),
+        "category": place.get("category", "General"),
+        "location": location,
+        "short_description": description,
+        "url": place.get("url", ""),
+        "source": source,
+    }
 
 
 def _is_service_like_place_category(item_category: str) -> bool:
@@ -945,6 +1168,7 @@ def _fallback_search(query: str, category: str, data: List[Dict], max_results: i
     query_tokens = _extract_place_query_tokens(query)
     query_intent = _infer_place_query_intent(query, category)
     location_hints = _extract_place_location_hints(query)
+    required_service_terms = _extract_required_service_term_groups(query)
     
     for item in data:
         # Category filter
@@ -958,6 +1182,19 @@ def _fallback_search(query: str, category: str, data: List[Dict], max_results: i
             item.get('category', ''),
             item.get('location', '')
         ]).lower()
+        normalized_searchable = _normalize_place_hint_text(searchable)
+        service_anchor_text = " ".join([
+            item.get('title', ''),
+            item.get('category', ''),
+            item.get('location', ''),
+            item.get('short_description', ''),
+        ])
+
+        if not _place_within_requested_geography(item.get('location', ''), query):
+            continue
+
+        if not _matches_required_service_terms(service_anchor_text, required_service_terms):
+            continue
 
         if not _matches_place_location_hints(searchable, location_hints):
             continue
@@ -975,7 +1212,7 @@ def _fallback_search(query: str, category: str, data: List[Dict], max_results: i
         # Query filter
         if query_lower:
             if query_tokens:
-                if not any(token in searchable for token in query_tokens):
+                if not any(token in normalized_searchable for token in query_tokens):
                     continue
             elif query_lower not in searchable:
                 continue
@@ -1048,10 +1285,13 @@ def search_cultural_events(
         logger.info(f"search_cultural_events: query='{query}', category='{category}', dates={date_info}, max={max_results}")
         
         # ALWAYS load JSON for date filtering (vector store doesn't filter by date)
-        events_data = _load_events_json()
+        all_events_data = _load_events_json()
+        events_data = list(all_events_data)
         
         if not events_data:
             return "❌ Events data not available."
+
+        undated_candidates = [event for event in all_events_data if not get_event_dates(event)]
         
         # Step 1: Filter by date FIRST (most important)
         if start_date or end_date:
@@ -1067,66 +1307,29 @@ def search_cultural_events(
         if category:
             category_lower = category.lower()
             events_data = [e for e in events_data if category_lower in e.get('category', '').lower()]
+            undated_candidates = [e for e in undated_candidates if category_lower in e.get('category', '').lower()]
             logger.info(f"After category filter: {len(events_data)} events")
         
         # Step 3: Filter by query (TOKEN-BASED matching for better recall)
         if query:
-            # Tokenize query into individual words for flexible matching
-            original_tokens = [t.strip().lower() for t in query.split() if len(t.strip()) >= 3]
-            
-            # FILTER OUT GENERIC TERMS that would cause false negatives
-            # Example: "eventos culturais" shouldn't filter out a music concert just because it lacks those words
-            generic_terms = {
-                'event', 'events', 'evento', 'eventos', 
-                'cultura', 'cultural', 'culture', 'culturais', 
-                'lisbon', 'lisboa', 'portugal', 'city', 'cidade'
-            }
-            
-            # Only keep tokens that are NOT generic terms
-            query_tokens = [t for t in original_tokens if t not in generic_terms]
-            
+            expanded_tokens = _expand_event_query_tokens(query)
+
             # If we have meaningful tokens left, apply the filter
-            if query_tokens:
-                # Also create synonyms/related terms for common queries
-                query_synonyms = {
-                    'music': ['concert', 'concerto', 'live', 'band', 'artist', 'musical', 'fado', 'jazz', 'rock', 'pop'],
-                    'concert': ['music', 'live', 'performance', 'show', 'gig'],
-                    'concerts': ['music', 'live', 'performance', 'show', 'gig'],
-                    'art': ['exhibition', 'gallery', 'museum', 'painting', 'sculpture', 'artwork'],
-                    'exhibition': ['art', 'gallery', 'museum', 'display', 'expo'],
-                    'theater': ['theatre', 'play', 'drama', 'stage', 'performance'],
-                    'theatre': ['theater', 'play', 'drama', 'stage', 'performance'],
-                    'dance': ['ballet', 'dancing', 'choreography', 'performance'],
-                    'family': ['children', 'kids', 'child', 'families'],
-                    'food': ['gastronomy', 'culinary', 'wine', 'taste', 'restaurant'],
-                }
-                
-                # Expand query tokens with synonyms
-                expanded_tokens = set(query_tokens)
-                for token in query_tokens:
-                    if token in query_synonyms:
-                        expanded_tokens.update(query_synonyms[token])
-                
-                filtered = []
-                for event in events_data:
-                    searchable = " ".join([
-                        event.get('title', ''),
-                        event.get('full_description', ''),
-                        event.get('short_description', ''),
-                        event.get('category', ''),
-                    ]).lower()
-                    
-                    # Match if ANY expanded token is found
-                    if any(token in searchable for token in expanded_tokens):
-                        filtered.append(event)
-                
-                events_data = filtered
-                logger.info(f"After query filter: {len(events_data)} events (tokens: {list(expanded_tokens)[:5]}...)")
+            if expanded_tokens:
+                events_data = [event for event in events_data if _event_matches_query(event, expanded_tokens)]
+                undated_candidates = [event for event in undated_candidates if _event_matches_query(event, expanded_tokens)]
+                logger.info(f"After query filter: {len(events_data)} events (tokens: {expanded_tokens[:5]}...)")
             else:
                 logger.info(f"Query '{query}' contained only generic terms, skipping text filter.")
         
         if not events_data:
-            return f"No events found matching: '{query or 'all'}' in date range {date_info}\n\n💡 Try broader terms like 'music', 'art', or 'festival'."
+            message = f"No events found matching: '{query or 'all'}' in date range {date_info}\n\n💡 Try broader terms like 'music', 'art', or 'festival'."
+            if undated_candidates:
+                message += "\n\n⚠️ Source completeness note: some matching VisitLisboa events do not include confirmed dates, so they cannot be safely placed inside this time window."
+                for event in undated_candidates[:3]:
+                    title = event.get('title', 'Unknown event')
+                    message += f"\n- {title} (date not confirmed in source)"
+            return message
         
         # Step 4: SORT BY TEMPORAL RELEVANCE (CRITICAL!)
         # Ephemeral events (single-day concerts) should rank ABOVE long exhibitions
@@ -1192,6 +1395,18 @@ def search_cultural_events(
         output_parts.append(f"📊 **Total matching events:** {len(events_data)}")
         if len(events_data) > max_results:
             output_parts.append(f"💡 Showing top {max_results}. Use a more specific query to narrow results.")
+        if undated_candidates:
+            output_parts.append(
+                f"⚠️ **Source completeness note:** {len(undated_candidates)} matching event(s) in VisitLisboa do not include confirmed dates, so they were excluded from the '{date_filter}' date window."
+            )
+            for event in undated_candidates[:3]:
+                title = event.get('title', 'Unknown event')
+                url = event.get('url')
+                bullet = f"- {title}"
+                if url:
+                    bullet += f" — {url}"
+                bullet += " (date not confirmed in source)"
+                output_parts.append(bullet)
         
         return "\n".join(output_parts)
     
@@ -1240,6 +1455,7 @@ def search_places_attractions(
             max_results = 10
         
         logger.info(f"search_places_attractions: query='{query}', category='{category}', max={max_results}")
+        required_service_terms = _extract_required_service_term_groups(query)
         
         # Check if we should also search Dados Abertos (hybrid mode)
         search_dados_abertos = _should_search_dados_abertos(query)
@@ -1297,9 +1513,25 @@ def search_places_attractions(
                     if query_intent == "museum_monument" and _is_service_like_place_category(item_category):
                         continue
 
-                    title_lower = metadata.get('title', '').lower()
+                    cleaned_doc_description = _clean_place_description_text(doc.page_content, metadata.get('title', ''))
                     searchable = f"{metadata.get('title', '')} {item_category} {doc.page_content}".lower()
-                    location_text = f"{metadata.get('title', '')} {metadata.get('url', '')} {doc.page_content}".lower()
+                    normalized_title = _normalize_place_hint_text(metadata.get('title', ''))
+                    normalized_searchable = _normalize_place_hint_text(searchable)
+                    raw_location = metadata.get('address') or metadata.get('location') or ''
+                    location_text = f"{metadata.get('title', '')} {metadata.get('url', '')} {raw_location} {doc.page_content}".lower()
+                    service_anchor_text = " ".join([
+                        metadata.get('title', ''),
+                        item_category,
+                        metadata.get('url', ''),
+                        raw_location,
+                        cleaned_doc_description,
+                    ])
+
+                    if not _place_within_requested_geography(raw_location, query):
+                        continue
+
+                    if not _matches_required_service_terms(service_anchor_text, required_service_terms):
+                        continue
 
                     if not _matches_place_location_hints(location_text, location_hints):
                         continue
@@ -1314,8 +1546,8 @@ def search_places_attractions(
                     if not _matches_place_query_intent(item_category, metadata.get('title', ''), query_intent):
                         continue
 
-                    token_hits = sum(1 for token in query_tokens if token in searchable)
-                    title_hits = sum(1 for token in query_tokens if token in title_lower)
+                    token_hits = sum(1 for token in query_tokens if token in normalized_searchable)
+                    title_hits = sum(1 for token in query_tokens if token in normalized_title)
 
                     if query_tokens and token_hits == 0 and vector_score > 1.25:
                         continue
@@ -1383,7 +1615,7 @@ def search_places_attractions(
                         'title': metadata.get('title', 'Unknown'),
                         'category': metadata.get('category', 'General'),
                         'location': real_location,
-                        'short_description': doc.page_content[:200] if doc.page_content else '',
+                        'short_description': cleaned_doc_description,
                         'url': metadata.get('url', ''),
                         'source': 'visitlisboa',
                         'score': item['vector_score'],  # Keep original for debug if needed
@@ -1392,6 +1624,39 @@ def search_places_attractions(
                     
             except Exception as e:
                 logger.warning(f"Vector search failed: {e}")
+
+        # JSON fallback to improve recall when vector search under-recovers
+        if query and len(visitlisboa_results) < max_results:
+            fallback_items = _fallback_search(
+                query=query,
+                category=category,
+                data=_load_places_json(),
+                max_results=max_results * 2,
+            )
+            fallback_results = [_convert_raw_place_to_result(item) for item in fallback_items]
+            combined_visitlisboa: List[Dict[str, Any]] = []
+            seen_visitlisboa_keys: set[str] = set()
+            _append_unique_place_results(combined_visitlisboa, visitlisboa_results, seen_visitlisboa_keys)
+            _append_unique_place_results(combined_visitlisboa, fallback_results, seen_visitlisboa_keys, limit=max_results)
+            visitlisboa_results = combined_visitlisboa
+
+        if required_service_terms:
+            visitlisboa_results = [
+                result
+                for result in visitlisboa_results
+                if _matches_required_service_terms(
+                    " ".join(
+                        [
+                            result.get('title', ''),
+                            result.get('category', ''),
+                            result.get('url', ''),
+                            result.get('location', ''),
+                            result.get('short_description', ''),
+                        ]
+                    ),
+                    required_service_terms,
+                )
+            ]
         
         # =====================================================================
         # STEP 2: Merge Results (VisitLisboa + Dados Abertos)
@@ -1401,7 +1666,7 @@ def search_places_attractions(
         # For queries matching Dados Abertos keywords, prioritize those results
         # since the user is likely looking for public infrastructure
         all_results = []
-        existing_titles = set()
+        existing_keys: set[str] = set()
         
         if search_dados_abertos and dados_abertos_results:
             # User searched for infrastructure -> prioritize Dados Abertos
@@ -1410,27 +1675,16 @@ def search_places_attractions(
             vl_quota = max_results - da_quota + 1
             
             # Add Dados Abertos first (more relevant for infrastructure queries)
-            for r in dados_abertos_results[:da_quota]:
-                if r['title'].lower() not in existing_titles:
-                    all_results.append(r)
-                    existing_titles.add(r['title'].lower())
+            _append_unique_place_results(all_results, dados_abertos_results[:da_quota], existing_keys)
             
             # Then add VisitLisboa (tourist-focused, but may have relevant results)
-            for r in visitlisboa_results[:vl_quota]:
-                if r['title'].lower() not in existing_titles:
-                    all_results.append(r)
-                    existing_titles.add(r['title'].lower())
+            _append_unique_place_results(all_results, visitlisboa_results[:vl_quota], existing_keys)
         else:
             # Standard tourist query -> prioritize VisitLisboa
-            for r in visitlisboa_results:
-                all_results.append(r)
-                existing_titles.add(r['title'].lower())
+            _append_unique_place_results(all_results, visitlisboa_results, existing_keys)
             
             # Add any Dados Abertos results that don't duplicate
-            for r in dados_abertos_results:
-                if r['title'].lower() not in existing_titles:
-                    all_results.append(r)
-                    existing_titles.add(r['title'].lower())
+            _append_unique_place_results(all_results, dados_abertos_results, existing_keys)
         
         # =====================================================================
         # STEP 3: Format Output
@@ -1439,6 +1693,11 @@ def search_places_attractions(
         if not all_results:
             # Last resort fallback
             if query:
+                fallback_items = _fallback_search(query, category, _load_places_json(), max_results=max_results)
+                if fallback_items:
+                    all_results = [_convert_raw_place_to_result(item) for item in fallback_items]
+
+            if not all_results and query:
                 logger.info("No results from hybrid search, trying direct Dados Abertos")
                 from tools.dados_abertos import _search_place_in_datasets_logic
                 open_data_results = _search_place_in_datasets_logic(query, max_results=max_results)
@@ -1479,9 +1738,13 @@ def search_places_attractions(
             if full_data and full_data.get('lisboa_card_discount'):
                 output_parts.append(f"   🎫 {full_data['lisboa_card_discount']}")
             
-            if place.get('short_description'):
-                desc = place['short_description'][:200]
-                if len(place['short_description']) > 200:
+            description_text = _clean_place_description_text(
+                (full_data.get('short_description') if full_data else None) or place.get('short_description'),
+                title,
+            )
+            if description_text:
+                desc = description_text[:200]
+                if len(description_text) > 200:
                     desc += "..."
                 output_parts.append(f"   {desc}")
             

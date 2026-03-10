@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from functools import lru_cache
 from typing import Any, Callable, Dict, MutableMapping, Optional, Sequence
 
@@ -50,6 +51,12 @@ def _noop_traceable(*args, **kwargs):
 def _noop_get_current_run_tree() -> None:
     """Return None when LangSmith tracing is disabled."""
     return None
+
+
+@contextmanager
+def _noop_tracing_context(**_kwargs):
+    """Provide a no-op tracing context manager when LangSmith is unavailable."""
+    yield
 
 
 def _get_env_value(env: MutableMapping[str, str], *names: str) -> Optional[str]:
@@ -122,6 +129,7 @@ def _disabled_status(reason: str, requested: bool) -> Dict[str, Any]:
         "endpoint": None,
         "workspace_id": None,
         "traceable": _noop_traceable,
+        "tracing_context": _noop_tracing_context,
         "get_current_run_tree": _noop_get_current_run_tree,
         "RunTree": None,
         "ContextThreadPoolExecutor": ThreadPoolExecutor,
@@ -132,12 +140,17 @@ def _load_langsmith_symbols() -> Optional[Dict[str, Any]]:
     """Import LangSmith runtime symbols only when tracing is actually requested."""
     try:
         from langsmith import Client, ContextThreadPoolExecutor
-        from langsmith.run_helpers import get_current_run_tree, traceable
+        from langsmith.run_helpers import (
+            get_current_run_tree,
+            traceable,
+            tracing_context,
+        )
         from langsmith.run_trees import RunTree
 
         return {
             "Client": Client,
             "traceable": traceable,
+            "tracing_context": tracing_context,
             "get_current_run_tree": get_current_run_tree,
             "RunTree": RunTree,
             "ContextThreadPoolExecutor": ContextThreadPoolExecutor,
@@ -261,6 +274,7 @@ def resolve_langsmith_tracing_status(
         "endpoint": endpoint,
         "workspace_id": workspace_id,
         "traceable": symbols["traceable"],
+        "tracing_context": symbols.get("tracing_context", _noop_tracing_context),
         "get_current_run_tree": symbols["get_current_run_tree"],
         "RunTree": symbols["RunTree"],
         "ContextThreadPoolExecutor": symbols["ContextThreadPoolExecutor"],
@@ -338,22 +352,41 @@ def annotate_current_run(
 
     try:
         if metadata:
-            current_metadata = getattr(run_tree, "metadata", None)
-            if not isinstance(current_metadata, dict):
-                current_metadata = dict(current_metadata or {})
-                run_tree.metadata = current_metadata
-
-            for key, value in metadata.items():
-                if value is not None:
-                    current_metadata[key] = value
+            filtered_metadata = {
+                key: value
+                for key, value in metadata.items()
+                if value is not None
+            }
+            if filtered_metadata:
+                add_metadata = getattr(run_tree, "add_metadata", None)
+                if callable(add_metadata):
+                    add_metadata(filtered_metadata)
+                else:
+                    current_metadata = getattr(run_tree, "metadata", None)
+                    if not isinstance(current_metadata, dict):
+                        current_metadata = dict(current_metadata or {})
+                        run_tree.metadata = current_metadata
+                    current_metadata.update(filtered_metadata)
 
         if tags:
-            current_tags = list(getattr(run_tree, "tags", []) or [])
-            for tag in tags:
-                normalized_tag = str(tag).strip()
-                if normalized_tag and normalized_tag not in current_tags:
-                    current_tags.append(normalized_tag)
-            run_tree.tags = current_tags
+            normalized_tags = [
+                normalized_tag
+                for tag in tags
+                if (normalized_tag := str(tag).strip())
+            ]
+            if normalized_tags:
+                add_tags = getattr(run_tree, "add_tags", None)
+                if callable(add_tags):
+                    existing_tags = list(getattr(run_tree, "tags", []) or [])
+                    missing_tags = [tag for tag in normalized_tags if tag not in existing_tags]
+                    if missing_tags:
+                        add_tags(missing_tags)
+                else:
+                    current_tags = list(getattr(run_tree, "tags", []) or [])
+                    for normalized_tag in normalized_tags:
+                        if normalized_tag not in current_tags:
+                            current_tags.append(normalized_tag)
+                    run_tree.tags = current_tags
 
         return True
     except Exception as exc:
@@ -367,6 +400,7 @@ traceable = LANGSMITH_STATUS["traceable"]
 get_current_run_tree = LANGSMITH_STATUS["get_current_run_tree"]
 RunTree = LANGSMITH_STATUS["RunTree"]
 ContextThreadPoolExecutor = LANGSMITH_STATUS["ContextThreadPoolExecutor"]
+tracing_context = LANGSMITH_STATUS["tracing_context"]
 
 
 __all__ = [
@@ -381,4 +415,5 @@ __all__ = [
     "get_langsmith_tracing_status",
     "resolve_langsmith_tracing_status",
     "traceable",
+    "tracing_context",
 ]

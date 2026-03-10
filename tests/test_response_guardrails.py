@@ -4,6 +4,18 @@
 #
 #   Regression tests for worker-level response finalization, content-filter
 #   fallback, and supervisor direct-routing guardrails.
+#
+#   Run from the repository root with a relative path:
+#     python -m pytest tests/test_response_guardrails.py -q
+#   Useful parameters:
+#     -vv                           verbose mode
+#     -k weather or -k supervisor   focus on one guardrail family
+#     -x                            stop on first failure
+#     --tb=short                    shorter tracebacks
+#   Notes:
+#     - Prefer relative paths in this workspace. Absolute pytest paths may be
+#       treated as glob patterns on Windows because the folder name includes
+#       `[` and `]`.
 # ===========================================================================
 
 import os
