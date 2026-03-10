@@ -243,6 +243,7 @@ def canonicalize_weather_terms(text: str, language: str = "en") -> str:
         replacements = [
             (r"\*\*Avisos Meteorológicos:\*\*", "**Active Warnings:**"),
             (r"\*\*Dicas Práticas\*\*", "**Practical Tips**"),
+            (r"\bAs condições meteorológicas são normais\b", "Weather conditions are normal"),
             (r"\*\*Temperatura\*\*:", "**Temperature**:"),
             (r"\*\*Condições\*\*:", "**Conditions**:"),
             (r"\*\*(?:Precipitação|Chuva)\*\*:", "**Rain**:"),
@@ -267,8 +268,16 @@ def canonicalize_weather_terms(text: str, language: str = "en") -> str:
         ]
     else:
         replacements = [
+            (r"Lisbon Weather Summary", "Resumo Meteorológico de Lisboa"),
+            (r"\bNo active weather warnings for area '([^']+)'\.", r"Sem avisos meteorológicos ativos para a área '\1'."),
+            (r"\bNo active weather warnings\b", "Sem avisos meteorológicos ativos"),
+            (r"\bNo Avisos Meteorológicos\b", "Sem avisos meteorológicos ativos"),
+            (r"\bWeather conditions are normal\b", "As condições meteorológicas são normais"),
             (r"Active Weather Warnings", "Avisos Meteorológicos"),
             (r"Weather Forecast for Lisbon", "Previsão do Tempo para Lisboa"),
+            (r"\bRain probability\b", "Probabilidade de chuva"),
+            (r"\bUpdated\b", "Atualizado"),
+            (r"\bToday\b", "Hoje"),
             (r"\*\*Level\*\*:", "**Nível**:"),
             (r"\bBe aware\b", "Tenha atenção"),
             (r"\bPeriod\b", "Período"),
@@ -280,11 +289,25 @@ def canonicalize_weather_terms(text: str, language: str = "en") -> str:
             (r"\bFriday\b", "Sexta-feira"),
             (r"\bSaturday\b", "Sábado"),
             (r"\bSunday\b", "Domingo"),
+            (r"\bClear sky\b", "Céu limpo"),
+            (r"\bSunny intervals\b", "Períodos de céu limpo"),
             (r"\bLight rain\b", "Aguaceiros leves"),
             (r"\bLight showers/rain\b", "Chuviscos/chuva fraca"),
+            (r"\bHeavy showers/rain\b", "Aguaceiros/chuva forte"),
+            (r"\bShowers/rain\b", "Aguaceiros/chuva"),
+            (r"\bRain/showers\b", "Chuva/aguaceiros"),
+            (r"\bIntermittent rain\b", "Chuva intermitente"),
+            (r"\bIntermittent light rain\b", "Chuva fraca intermitente"),
+            (r"\bIntermittent heavy rain\b", "Chuva forte intermitente"),
+            (r"\bDrizzle\b", "Chuvisco"),
+            (r"\bMist\b", "Bruma"),
+            (r"\bFog\b", "Nevoeiro"),
             (r"\bPartly cloudy\b", "Parcialmente nublado"),
             (r"\bVery likely\b", "Muito provável"),
+            (r"\bVery unlikely\b", "Muito improvável"),
             (r"\bPossible\b", "Possível"),
+            (r"\bLikely\b", "Provável"),
+            (r"\bUnlikely\b", "Improvável"),
             (r"\bNo rain expected\b", "sem precipitação"),
             (r"\*\*Temperature\*\*:", "**Temperatura**:"),
             (r"\*\*Conditions\*\*:", "**Condições**:"),
@@ -309,6 +332,124 @@ def canonicalize_weather_terms(text: str, language: str = "en") -> str:
     for pattern, replacement in replacements:
         normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
     return normalized
+
+
+def structure_weather_markdown(text: str) -> str:
+    """Converts flat weather tool text into nested markdown lists for cleaner rendering."""
+    if not text:
+        return text
+
+    weekday_tokens = (
+        "segunda-feira",
+        "terça-feira",
+        "quarta-feira",
+        "quinta-feira",
+        "sexta-feira",
+        "sábado",
+        "domingo",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+    )
+    detail_prefixes = ("🌡️", "🌤️", "💧", "💨", "📝", "Level:", "Nível:")
+    day_emojis = ("☀️", "☁️", "🌧️", "⛈️", "🌫️", "❄️", "🌦️")
+    section_markers = (
+        "Resumo Meteorológico de Lisboa",
+        "Lisbon Weather Summary",
+        "Previsão do Tempo para Lisboa",
+        "Weather Forecast for Lisbon",
+        "Avisos Meteorológicos",
+        "Active Weather Warnings",
+    )
+
+    def _is_section_line(line: str) -> bool:
+        stripped = line.strip().rstrip(":")
+        return any(marker.lower() in stripped.lower() for marker in section_markers)
+
+    def _is_day_line(line: str) -> bool:
+        stripped = line.strip().rstrip(":")
+        if stripped.startswith("📅 "):
+            return True
+        lowered = stripped.lower()
+        return stripped.startswith(day_emojis) and any(token in lowered for token in weekday_tokens)
+
+    def _is_detail_line(line: str) -> bool:
+        stripped = line.strip()
+        return stripped.startswith(detail_prefixes)
+
+    def _is_status_line(line: str) -> bool:
+        stripped = line.strip()
+        return stripped.startswith(("✅", "⚠️", "🟡", "🟠", "🔴", "🌊"))
+
+    def _unwrap_full_line_bold(line: str) -> str:
+        stripped = line.strip()
+        match = re.match(r"^\*\*(.+)\*\*$", stripped)
+        return match.group(1).strip() if match else stripped
+
+    structured_lines: list[str] = []
+    inside_day_block = False
+
+    for raw_line in text.splitlines():
+        stripped = _unwrap_full_line_bold(raw_line)
+        if not stripped:
+            continue
+
+        if _SOURCE_LINE_RE.match(stripped):
+            if structured_lines and structured_lines[-1] != "":
+                structured_lines.append("")
+            structured_lines.append(stripped)
+            inside_day_block = False
+            continue
+
+        if stripped == "---":
+            if structured_lines and structured_lines[-1] != "":
+                structured_lines.append("")
+            structured_lines.extend(["---", ""])
+            inside_day_block = False
+            continue
+
+        if _is_section_line(stripped):
+            if structured_lines and structured_lines[-1] != "":
+                structured_lines.append("")
+            structured_lines.extend([f"**{stripped.rstrip(':')}**", ""])
+            inside_day_block = False
+            continue
+
+        if _is_day_line(stripped):
+            structured_lines.append(f"- **{stripped.rstrip(':')}**")
+            inside_day_block = True
+            continue
+
+        if _is_detail_line(stripped):
+            prefix = "  - " if inside_day_block else "- "
+            structured_lines.append(f"{prefix}{stripped}")
+            continue
+
+        if _is_status_line(stripped):
+            prefix = "  - " if inside_day_block else "- "
+            structured_lines.append(f"{prefix}{stripped}")
+            inside_day_block = False
+            continue
+
+        structured_lines.append(stripped)
+        inside_day_block = False
+
+    structured = clean_newlines("\n".join(structured_lines)).strip()
+    structured = re.sub(
+        r"(?m)^\*\*([✅⚠️🟡🟠🔴🌊][^*]+)\*\*$",
+        r"- \1",
+        structured,
+    )
+    structured = re.sub(
+        r"(?m)^\*\*(🌤️\s+(?:As condições meteorológicas são normais|Weather conditions are normal)\.?)\*\*$",
+        r"- \1",
+        structured,
+    )
+    return structured.strip()
 
 
 def canonicalize_transport_terms(text: str, language: str = "en") -> str:
@@ -684,6 +825,7 @@ def finalize_worker_response(
         weather_timestamp = weather_timestamp or extract_update_time(finalized)
         finalized = canonicalize_weather_terms(finalized, language=preferred_language)
         finalized = strip_weather_update_lines(finalized)
+        finalized = structure_weather_markdown(finalized)
         finalized = canonicalize_weather_source_line(
             finalized,
             language=preferred_language,

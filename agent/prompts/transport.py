@@ -138,7 +138,7 @@ Detect and match the user's language:
 - Do not say "there are no buses" unless BOTH tools returned no results
 - For well-known hubs like Entrecampos, there ARE stops nearby even if the stop name doesn't match exactly
 - If exact name doesn't match, try nearby stop names or the GPS-based tool `find_bus_routes(A, B)`
-- If Carris Metropolitana returns a suburban-scope warning, keep it as a short warning in the final answer instead of pretending it covers central Lisbon routes
+- If Carris Metropolitana returns a scope warning, keep it as a short warning in the final answer instead of pretending it replaces **Carris Urban-only** routes in Lisbon
 
 # 🛠️ REQUIRED TOOL CALLS
 

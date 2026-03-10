@@ -99,18 +99,18 @@ _vehicle_feed_meta: Dict[str, Any] = {
 # ==========================================================================
 
 CARRIS_LIMITATION_NOTICE = """
-⚠️ **IMPORTANT: Urban Lisbon Bus Limitation**
+⚠️ **IMPORTANT: Carris Metropolitana Scope Note**
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-**Carris Metropolitana API** (this search) covers SUBURBAN buses only:
-• Municipalities: Sintra, Cascais, Oeiras, Amadora, Loures, Odivelas, etc.
-• Great for: Traveling TO/FROM Lisbon suburbs
+**Carris Metropolitana API** (this search) covers AML metropolitan / intermunicipal buses:
+• It serves municipalities such as Sintra, Cascais, Oeiras, Amadora, Loures, Odivelas, Almada, Seixal, Montijo and others
+• Many lines also enter **Lisbon municipality** and hubs such as Colégio Militar, Marquês de Pombal, Belém or Oriente
 
-**Carris (Urban Lisbon)** buses are NOT included:
-• Routes like 28E (tram), 738, 732, 15E are managed by Carris
-• For trips WITHIN central Lisbon, please check carris.pt
+**Carris (Urban Lisbon)** routes are still separate:
+• Urban-only routes like 28E (tram), 15E, 732 or 738 are managed by Carris
+• For Lisbon city-only trips, always cross-check Carris Urban when relevant
 
-💡 TIP: For central Lisbon destinations, the Metro is usually faster!
+💡 TIP: For mixed Lisbon + suburb trips, compare Carris Metropolitana, Carris Urban, Metro and CP.
 """
 
 
@@ -178,10 +178,10 @@ def _append_carris_scope_footer(response: str, include_freshness: bool = False) 
             parts.append(freshness_note)
 
     parts.append(
-        "⚠️ Scope: Carris Metropolitana covers suburban AML buses (Sintra, Cascais, Oeiras, Loures, Odivelas, etc.), not Carris Urban routes such as 28E, 15E, 732 or 738."
+        "⚠️ Scope: Carris Metropolitana covers AML metropolitan / intermunicipal buses and many lines entering Lisbon municipality, but not Carris Urban-only routes such as 28E, 15E, 732 or 738."
     )
     parts.append(
-        "💡 For central Lisbon-only bus or tram trips, cross-check Carris Urban or Metro data."
+        "💡 For Lisbon city-only bus or tram trips, cross-check Carris Urban or Metro data."
     )
 
     cleaned_parts = [part for part in parts if part]
@@ -2082,9 +2082,9 @@ def find_bus_routes(
         if origin_loc and is_within_lisbon_city(
             origin_loc.get("lat"), origin_loc.get("lon")
         ):
-            response += f"\n📍 **'{origin}' is in central Lisbon**\n"
+            response += f"\n📍 **'{origin}' is inside Lisbon city**\n"
             response += (
-                "   🚋 Try using **Carris Urbana** (carris.pt) for urban routes.\n\n"
+                "   🚋 No nearby Carris Metropolitana stops were found here, so this point may be better served by **Carris Urbana** (carris.pt).\n\n"
             )
         else:
             response += f"\n❌ **No bus stops found near '{origin}'**\n"
@@ -2144,9 +2144,9 @@ def find_bus_routes(
     if not dest_stops:
         dest_loc = dest_resolved.get("location")
         if dest_loc and is_within_lisbon_city(dest_loc.get("lat"), dest_loc.get("lon")):
-            response += f"\n📍 **'{destination}' is in central Lisbon**\n"
+            response += f"\n📍 **'{destination}' is inside Lisbon city**\n"
             response += (
-                "   🚋 Try using **Carris Urbana** (carris.pt) for urban routes.\n\n"
+                "   🚋 No nearby Carris Metropolitana stops were found here, so this point may be better served by **Carris Urbana** (carris.pt).\n\n"
             )
         else:
             response += f"\n❌ **No bus stops found near '{destination}'**\n"
