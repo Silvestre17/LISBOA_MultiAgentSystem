@@ -23,8 +23,10 @@ import base64
 import logging
 import math
 import os
+import re
 import tempfile
 import time
+import unicodedata
 import warnings
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -89,6 +91,12 @@ _metro_token_expiry: Optional[datetime] = None
 _metro_stations_cache: Optional[List[Dict[str, Any]]] = None
 _metro_stations_last_load: Optional[datetime] = None
 _metro_runtime_ca_bundle: Optional[str] = None
+_metro_runtime_state: Dict[str, Optional[str]] = {
+    "token_status": "unknown",
+    "token_error": None,
+    "request_status": "unknown",
+    "request_error": None,
+}
 
 # ==========================================================================
 # Metro Line Configuration
@@ -681,6 +689,58 @@ def get_landmark_info(location: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _get_metro_runtime_issue_kind() -> Optional[str]:
+    """Summarizes the current official Metro API issue, if any."""
+    if not METRO_CONSUMER_KEY or not METRO_CONSUMER_SECRET:
+        return "missing_credentials"
+
+    token_status = _metro_runtime_state.get("token_status")
+    request_status = _metro_runtime_state.get("request_status")
+
+    for status in (request_status, token_status):
+        if status and status not in {"ok", "unknown", "token_unavailable"}:
+            return status
+
+    if token_status == "token_unavailable":
+        return "unavailable"
+
+    return None
+
+
+def _build_metro_fallback_notice() -> str:
+    """Builds a user-facing note when the official Metro API is unavailable."""
+    issue_kind = _get_metro_runtime_issue_kind()
+    if issue_kind == "missing_credentials":
+        return (
+            "ℹ️ Official Metro de Lisboa real-time API credentials are not configured in this environment. "
+            "Showing line status from the public fallback endpoint instead.\n\n"
+        )
+
+    if issue_kind:
+        return (
+            "ℹ️ Official Metro de Lisboa real-time API is currently unavailable or timing out. "
+            "Showing line status from the public fallback endpoint instead.\n\n"
+        )
+
+    return ""
+
+
+def _build_metro_realtime_unavailable_message(subject: str) -> str:
+    """Builds a clear user-facing message for unavailable official Metro real-time data."""
+    issue_kind = _get_metro_runtime_issue_kind()
+    if issue_kind == "missing_credentials":
+        return (
+            f"❌ {subject} temporarily unavailable because official Metro API credentials are not configured.\n"
+            "Configure METRO_CONSUMER_KEY and METRO_CONSUMER_SECRET in .env\n"
+            "Register at: https://api.metrolisboa.pt/store/"
+        )
+
+    return (
+        f"❌ {subject} temporarily unavailable because the official Metro de Lisboa API is not responding right now.\n"
+        "The public fallback endpoint still provides line status, but not live wait-time or frequency data."
+    )
+
+
 # ==========================================================================
 # OAuth2 Authentication
 # ==========================================================================
@@ -701,6 +761,8 @@ def _get_metro_access_token(force_refresh: bool = False) -> Optional[str]:
     global _metro_access_token, _metro_token_expiry
 
     if not METRO_CONSUMER_KEY or not METRO_CONSUMER_SECRET:
+        _metro_runtime_state["token_status"] = "missing_credentials"
+        _metro_runtime_state["token_error"] = "missing credentials"
         logger.warning(
             "Metro API credentials not configured. Set METRO_CONSUMER_KEY and METRO_CONSUMER_SECRET in .env"
         )
@@ -739,11 +801,25 @@ def _get_metro_access_token(force_refresh: bool = False) -> Optional[str]:
         _metro_access_token = token_data.get("access_token")
         expires_in = token_data.get("expires_in", 3600)
         _metro_token_expiry = datetime.now() + timedelta(seconds=expires_in)
+        _metro_runtime_state["token_status"] = "ok"
+        _metro_runtime_state["token_error"] = None
 
         logger.info(f"Got new Metro access token (expires in {expires_in}s)")
         return _metro_access_token
 
+    except requests.exceptions.Timeout as e:
+        _metro_runtime_state["token_status"] = "timeout"
+        _metro_runtime_state["token_error"] = str(e)
+        logger.error(f"Error getting Metro token: {e}")
+        return None
+    except requests.exceptions.RequestException as e:
+        _metro_runtime_state["token_status"] = "request_error"
+        _metro_runtime_state["token_error"] = str(e)
+        logger.error(f"Error getting Metro token: {e}")
+        return None
     except Exception as e:
+        _metro_runtime_state["token_status"] = "unavailable"
+        _metro_runtime_state["token_error"] = str(e)
         logger.error(f"Error getting Metro token: {e}")
         return None
 
@@ -764,6 +840,8 @@ def _metro_api_request(
     token = _get_metro_access_token()
 
     if not token:
+        _metro_runtime_state["request_status"] = "token_unavailable"
+        _metro_runtime_state["request_error"] = _metro_runtime_state.get("token_error")
         logger.warning("No Metro API token available")
         return None
 
@@ -793,12 +871,28 @@ def _metro_api_request(
                 )
 
         if response.status_code != 200:
+            _metro_runtime_state["request_status"] = "http_error"
+            _metro_runtime_state["request_error"] = f"HTTP {response.status_code}"
             logger.error(f"Metro API error: HTTP {response.status_code} for {endpoint}")
             return None
 
+        _metro_runtime_state["request_status"] = "ok"
+        _metro_runtime_state["request_error"] = None
         return response.json()
 
+    except requests.exceptions.Timeout as e:
+        _metro_runtime_state["request_status"] = "timeout"
+        _metro_runtime_state["request_error"] = str(e)
+        logger.error(f"Error calling Metro API {endpoint}: {e}")
+        return None
+    except requests.exceptions.RequestException as e:
+        _metro_runtime_state["request_status"] = "request_error"
+        _metro_runtime_state["request_error"] = str(e)
+        logger.error(f"Error calling Metro API {endpoint}: {e}")
+        return None
     except Exception as e:
+        _metro_runtime_state["request_status"] = "unavailable"
+        _metro_runtime_state["request_error"] = str(e)
         logger.error(f"Error calling Metro API {endpoint}: {e}")
         return None
 
@@ -1340,6 +1434,87 @@ def _format_wait_time(seconds: int) -> str:
         return f"{minutes} min"
 
 
+def _normalize_metro_text(text: str) -> str:
+    """Normalizes metro station/direction text for robust comparisons."""
+    normalized = unicodedata.normalize("NFKD", text or "")
+    normalized = "".join(c for c in normalized if not unicodedata.combining(c))
+    normalized = normalized.lower().strip()
+    normalized = normalized.replace("s. ", "sao ")
+    normalized = re.sub(r"[^a-z0-9\s/-]", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
+def _find_station_index_on_line(line_id: str, station_name: str) -> Optional[int]:
+    """Returns the normalized station index on a line, if available."""
+    stations = METRO_LINES.get(line_id, {}).get("stations", [])
+    target = _normalize_metro_text(station_name)
+    for idx, station in enumerate(stations):
+        normalized_station = _normalize_metro_text(station)
+        if target == normalized_station or target in normalized_station or normalized_station in target:
+            return idx
+    return None
+
+
+def _infer_line_from_station_and_direction(station_name: str, direction: str) -> Optional[str]:
+    """Infers the relevant line for a station+direction pair."""
+    station_lines = get_station_lines(station_name)
+    direction_normalized = _normalize_metro_text(direction)
+
+    for line_id in station_lines:
+        if any(direction_normalized == _normalize_metro_text(station) for station in METRO_LINES.get(line_id, {}).get("stations", [])):
+            return line_id
+
+    return station_lines[0] if len(station_lines) == 1 else None
+
+
+def _resolve_requested_direction(
+    station_name: str,
+    requested_direction: str,
+    available_destinations: List[str],
+) -> tuple[Optional[str], Optional[str]]:
+    """Resolves a requested direction to the best matching API destination label.
+
+    Returns:
+        Tuple of (resolved_destination_label, fallback_note).
+    """
+    if not requested_direction:
+        return None, None
+
+    requested_norm = _normalize_metro_text(requested_direction)
+    for destination in available_destinations:
+        destination_norm = _normalize_metro_text(destination)
+        if requested_norm == destination_norm or requested_norm in destination_norm or destination_norm in requested_norm:
+            return destination, None
+
+    line_id = _infer_line_from_station_and_direction(station_name, requested_direction)
+    if not line_id:
+        return None, None
+
+    station_idx = _find_station_index_on_line(line_id, station_name)
+    requested_idx = _find_station_index_on_line(line_id, requested_direction)
+    if station_idx is None or requested_idx is None or station_idx == requested_idx:
+        return None, None
+
+    matching_side = []
+    for destination in available_destinations:
+        dest_idx = _find_station_index_on_line(line_id, destination)
+        if dest_idx is None:
+            continue
+        if requested_idx > station_idx and dest_idx > station_idx:
+            matching_side.append((abs(dest_idx - requested_idx), destination))
+        elif requested_idx < station_idx and dest_idx < station_idx:
+            matching_side.append((abs(dest_idx - requested_idx), destination))
+
+    if not matching_side:
+        return None, None
+
+    matching_side.sort(key=lambda item: item[0])
+    resolved = matching_side[0][1]
+    note = f"Platform indicator currently shows {resolved}."
+    return resolved, note
+
+
 def _get_metro_direction(line_id: str, start: str, end: str) -> str:
     """Helper to determine direction (terminal station) on a Metro line."""
     stations = METRO_LINES.get(line_id, {}).get("stations", [])
@@ -1447,6 +1622,7 @@ def get_metro_status() -> str:
 
     response = "🚇 Metro de Lisboa Status\n"
     response += "=" * 40 + "\n\n"
+    response += _build_metro_fallback_notice()
 
     all_ok = True
 
@@ -1475,22 +1651,19 @@ def get_metro_status() -> str:
 
 
 @tool
-def get_metro_wait_time(station: str) -> str:
+def get_metro_wait_time(station: str, direction: Optional[str] = None) -> str:
     """
     Gets real-time waiting times for the next metro trains at a specific station.
 
     Args:
         station: Station name (e.g., 'Campo Grande', 'Aeroporto', 'Baixa-Chiado').
+        direction: Optional requested direction/terminal to filter to one platform only.
 
     Returns:
         str: Formatted waiting times for all platforms at the station.
     """
     if not _is_metro_api_available():
-        return (
-            "❌ Metro wait times require API credentials.\n"
-            "Configure METRO_CONSUMER_KEY and METRO_CONSUMER_SECRET in .env\n"
-            "Register at: https://api.metrolisboa.pt/store/"
-        )
+        return _build_metro_realtime_unavailable_message("Metro wait times are")
 
     station_id = get_station_id(station)
 
@@ -1512,7 +1685,10 @@ def get_metro_wait_time(station: str) -> str:
     data = _metro_api_request(f"/tempoEspera/Estacao/{station_id}")
 
     if not data or data.get("codigo") != "200":
-        return f"❌ Failed to fetch wait times for station {station}. Please try again."
+        return (
+            _build_metro_realtime_unavailable_message("Metro wait times are")
+            + f"\n\nStation requested: {station}."
+        )
 
     wait_data = data.get("resposta", [])
 
@@ -1520,6 +1696,18 @@ def get_metro_wait_time(station: str) -> str:
         return f"❌ No waiting time data available for {station}."
 
     station_name = METRO_STATION_NAMES.get(station_id, station.title())
+    available_destinations = [
+        METRO_DESTINATIONS.get(entry.get("destino", ""), f"Destination {entry.get('destino', '')}")
+        for entry in wait_data
+    ]
+    resolved_direction = None
+    direction_note = None
+    if direction:
+        resolved_direction, direction_note = _resolve_requested_direction(
+            station_name=station_name,
+            requested_direction=direction,
+            available_destinations=available_destinations,
+        )
 
     response = f"🚇 Metro Wait Times at {station_name}\n"
     response += "=" * 50 + "\n\n"
@@ -1529,6 +1717,9 @@ def get_metro_wait_time(station: str) -> str:
     for entry in wait_data:
         dest_id = entry.get("destino", "")
         dest_name = METRO_DESTINATIONS.get(dest_id, f"Destination {dest_id}")
+
+        if resolved_direction and _normalize_metro_text(dest_name) != _normalize_metro_text(resolved_direction):
+            continue
 
         try:
             wait1 = int(entry.get("tempoChegada1", "0"))
@@ -1558,7 +1749,10 @@ def get_metro_wait_time(station: str) -> str:
         if dest_name not in destinations_seen:
             destinations_seen[dest_name] = True
 
-            response += f"{line_emoji} Direction: {dest_name}\n"
+            display_direction = direction if direction else dest_name
+            response += f"{line_emoji} Direction: {display_direction}\n"
+            if direction_note:
+                response += f"   ℹ️ {direction_note}\n"
             response += f"   ⏱️ Next train: {time1}\n"
             response += f"   ⏳ Following: {time2}, {time3}\n\n"
 
@@ -1583,10 +1777,7 @@ def get_metro_line_wait_times(line: str) -> str:
         str: Formatted waiting times for all stations on the line.
     """
     if not _is_metro_api_available():
-        return (
-            "❌ Metro wait times require API credentials.\n"
-            "Configure METRO_CONSUMER_KEY and METRO_CONSUMER_SECRET in .env"
-        )
+        return _build_metro_realtime_unavailable_message("Metro line wait times are")
 
     line_map = {
         "amarela": "Amarela",
@@ -1616,7 +1807,10 @@ def get_metro_line_wait_times(line: str) -> str:
     data = _metro_api_request(f"/tempoEspera/Linha/{line_normalized}")
 
     if not data or data.get("codigo") != "200":
-        return f"❌ Failed to fetch wait times for {line_normalized} line."
+        return (
+            _build_metro_realtime_unavailable_message("Metro line wait times are")
+            + f"\n\nLine requested: {line_normalized}."
+        )
 
     wait_data = data.get("resposta", [])
 
@@ -1749,10 +1943,7 @@ def get_metro_frequency(line: str, day_type: str = "weekday") -> str:
         str: Formatted frequency schedule for the line.
     """
     if not _is_metro_api_available():
-        return (
-            "❌ Metro frequency info requires API credentials.\n"
-            "Configure METRO_CONSUMER_KEY and METRO_CONSUMER_SECRET in .env"
-        )
+        return _build_metro_realtime_unavailable_message("Metro frequency data is")
 
     line_map = {
         "amarela": "amarela",
@@ -1778,7 +1969,10 @@ def get_metro_frequency(line: str, day_type: str = "weekday") -> str:
     data = _metro_api_request(f"/infoIntervalos/{line_normalized}/{day_code}")
 
     if not data or data.get("codigo") != "200":
-        return f"❌ Failed to fetch frequency data for {line_normalized} line."
+        return (
+            _build_metro_realtime_unavailable_message("Metro frequency data is")
+            + f"\n\nLine requested: {line_normalized}."
+        )
 
     intervals = data.get("resposta", [])
 
@@ -1883,7 +2077,19 @@ if __name__ == "__main__":
         result = get_metro_wait_time.invoke({"station": "Campo Grande"})
         print(result[:500])
 
-        print("\n4. Testing find_nearest_metro...")
+        print("\n4. Testing get_metro_wait_time with explicit direction (Saldanha -> Odivelas)...")
+        result = get_metro_wait_time.invoke({"station": "Saldanha", "direction": "Odivelas"})
+        print(result[:500])
+
+        print("\n5. Testing get_metro_line_wait_times...")
+        result = get_metro_line_wait_times.invoke({"line": "amarela"})
+        print(result[:500])
+
+        print("\n6. Testing get_metro_frequency...")
+        result = get_metro_frequency.invoke({"line": "verde", "day_type": "weekday"})
+        print(result[:500])
+
+        print("\n7. Testing find_nearest_metro...")
         result = find_nearest_metro.invoke({"latitude": 38.7548, "longitude": -9.1867})
         print(result[:500])
     else:

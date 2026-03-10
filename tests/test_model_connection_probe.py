@@ -6,6 +6,18 @@
 # Streamlit configuration flows. These helpers must never rely on LangChain
 # model invocation paths, otherwise the UI health checks would consume
 # unnecessary LangSmith traces.
+#
+# Run from the repository root with a relative path:
+#   python -m pytest tests/test_model_connection_probe.py -q
+# Useful parameters:
+#   -vv         verbose mode
+#   -k raw      focus on the raw probe tests
+#   -x          stop on first failure
+#   --tb=short  shorter tracebacks
+# Notes:
+#   - Prefer relative paths in this workspace. Absolute pytest paths may be
+#     treated as glob patterns on Windows because the folder name includes
+#     `[` and `]`.
 # ===========================================================================
 
 # Required libraries:

@@ -5,7 +5,17 @@
 #   Deterministic unit tests for token usage normalization, dynamic pricing
 #   lookup, and cost aggregation utilities used by benchmark/ablation runs.
 #
-#   Run: python -m pytest eval/tests/test_cost_accounting.py -v
+#   Run from the repository root with a relative path:
+#     python -m pytest eval/tests/test_cost_accounting.py -q
+#   Useful parameters:
+#     -vv         verbose mode
+#     -k pricing  focus on pricing checks
+#     -x          stop on first failure
+#     --tb=short  shorter tracebacks
+#   Notes:
+#     - Prefer relative paths in this workspace. Absolute pytest paths may be
+#       treated as glob patterns on Windows because the folder name includes
+#       `[` and `]`.
 # ==========================================================================
 
 import os

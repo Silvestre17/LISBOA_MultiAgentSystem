@@ -35,6 +35,7 @@ import os
 import re
 import sqlite3
 import time
+import unicodedata
 import zipfile
 from datetime import datetime, timedelta
 from io import BytesIO
@@ -87,6 +88,13 @@ _gtfs_rt_cache: Dict[str, Any] = {
     "data": None,
     "timestamp": 0,
     "ttl": 30,  # Cache for 30 seconds
+}
+_gtfs_rt_feed_meta: Dict[str, Any] = {
+    "source": "uninitialized",
+    "generated_at": None,
+    "data_age_seconds": None,
+    "last_error": None,
+    "vehicle_count": 0,
 }
 
 # Route type mapping (GTFS standard: 0=Tram, 3=Bus)
@@ -179,6 +187,170 @@ def minutes_to_time_str(minutes: int) -> str:
     hours = minutes // 60
     mins = minutes % 60
     return f"{hours:02d}:{mins:02d}"
+
+
+def _normalize_carris_text(text: str) -> str:
+    """Normalizes Carris stop/headsign text for accent-insensitive comparisons."""
+    normalized = unicodedata.normalize("NFKD", text or "")
+    normalized = "".join(c for c in normalized if not unicodedata.combining(c))
+    normalized = normalized.lower()
+    normalized = re.sub(r"[^a-z0-9\s/-]", " ", normalized)
+    replacements = {
+        r"\bpca\b": "praca",
+        r"\bpc\b": "praca",
+        r"\bpr\b": "praca",
+        r"\blg\b": "largo",
+        r"\bcalc\b": "calcada",
+        r"\bcc\b": "calcada",
+        r"\bav\b": "avenida",
+        r"\br\b": "rua",
+        r"\bhosp\b": "hospital",
+        r"\best\b": "estacao",
+    }
+    for pattern, replacement in replacements.items():
+        normalized = re.sub(pattern, replacement, normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
+def _clean_carris_headsign(text: Optional[str]) -> str:
+    """Cleans raw Carris headsign/route text for user-facing output."""
+    cleaned = str(text or "").strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    cleaned = re.sub(r"\s+[-/]\s*$", "", cleaned)
+    cleaned = re.sub(r"\($", "", cleaned).strip()
+    if cleaned.count("(") > cleaned.count(")"):
+        cleaned = cleaned.rstrip("(").strip()
+    return cleaned
+
+
+def _truncate_display_text(text: str, max_length: int = 42) -> str:
+    """Truncates user-facing text without leaving dangling punctuation or parentheses."""
+    cleaned = _clean_carris_headsign(text)
+    if len(cleaned) <= max_length:
+        return cleaned
+    trimmed = cleaned[: max_length - 1].rstrip(" -/(")
+    return f"{trimmed}…"
+
+
+def _resolve_carris_headsign(
+    trip_headsign: Optional[str],
+    route_long_name: Optional[str],
+    direction_id: Optional[int],
+) -> str:
+    """Resolves the best user-facing destination label for a Carris trip."""
+    cleaned_trip_headsign = _clean_carris_headsign(trip_headsign)
+    cleaned_route_long_name = _clean_carris_headsign(route_long_name)
+
+    if cleaned_trip_headsign and " - " not in cleaned_trip_headsign:
+        return cleaned_trip_headsign
+
+    parts = [part.strip() for part in cleaned_route_long_name.split(" - ") if part.strip()]
+    if len(parts) == 2 and direction_id in {0, 1}:
+        return parts[1] if direction_id == 0 else parts[0]
+
+    return cleaned_trip_headsign or cleaned_route_long_name or "Unknown"
+
+
+def _update_gtfs_rt_feed_meta(
+    *,
+    source: str,
+    generated_at: Optional[datetime] = None,
+    data_age_seconds: Optional[float] = None,
+    last_error: Optional[str] = None,
+    vehicle_count: int = 0,
+) -> None:
+    """Stores runtime metadata about the Carris GTFS-RT vehicle feed."""
+    _gtfs_rt_feed_meta.update(
+        {
+            "source": source,
+            "generated_at": generated_at.isoformat() if isinstance(generated_at, datetime) else None,
+            "data_age_seconds": data_age_seconds,
+            "last_error": last_error,
+            "vehicle_count": vehicle_count,
+        }
+    )
+
+
+def _build_gtfs_rt_freshness_note() -> str:
+    """Builds a short freshness note for Carris GTFS-RT powered outputs."""
+    source = _gtfs_rt_feed_meta.get("source")
+    age = _gtfs_rt_feed_meta.get("data_age_seconds")
+    last_error = _gtfs_rt_feed_meta.get("last_error")
+
+    if source == "live":
+        line = "📡 Carris GTFS-RT: live vehicle feed active."
+    elif source == "cache":
+        age_text = f"{int(age)}s" if age is not None else "unknown age"
+        line = f"📡 Carris GTFS-RT: cached live snapshot in use ({age_text} old)."
+    elif source == "stale_cache":
+        age_text = f"{int(age)}s" if age is not None else "unknown age"
+        line = f"⚠️ Carris GTFS-RT: using stale cached vehicle data ({age_text} old) because the live feed is temporarily unavailable."
+    elif source == "unavailable":
+        line = "⚠️ Carris GTFS-RT: live vehicle data is temporarily unavailable."
+    else:
+        line = ""
+
+    if last_error and source in {"stale_cache", "unavailable"}:
+        line = f"{line} Last feed issue: {last_error}".strip()
+
+    return line.strip()
+
+
+def _search_stop_rows(
+    conn: sqlite3.Connection,
+    query: str,
+    limit: int = 10,
+) -> List[sqlite3.Row]:
+    """Searches Carris stops with SQL first and accent-insensitive fallback second."""
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT stop_id, stop_name, stop_lat, stop_lon, stop_code FROM stops WHERE stop_name LIKE ? ORDER BY stop_name LIMIT ?",
+        (f"%{query}%", limit),
+    )
+    rows = cursor.fetchall()
+    if rows:
+        return rows
+
+    normalized_query = _normalize_carris_text(query)
+    if not normalized_query:
+        return []
+
+    stopwords = {"de", "da", "do", "das", "dos", "e"}
+    query_tokens = [token for token in normalized_query.split() if token not in stopwords]
+    cursor.execute(
+        "SELECT stop_id, stop_name, stop_lat, stop_lon, stop_code FROM stops"
+    )
+
+    scored_rows: List[Tuple[int, sqlite3.Row]] = []
+    for row in cursor.fetchall():
+        normalized_name = _normalize_carris_text(row["stop_name"])
+        if not normalized_name:
+            continue
+
+        score = 0
+        if normalized_query == normalized_name:
+            score = 100
+        elif normalized_query in normalized_name:
+            score = 80
+        elif query_tokens and all(token in normalized_name for token in query_tokens):
+            score = 60 + len(query_tokens)
+        else:
+            continue
+
+        scored_rows.append((score, row))
+
+    scored_rows.sort(key=lambda item: (-item[0], item[1]["stop_name"]))
+    return [row for _, row in scored_rows[:limit]]
+
+
+def _format_delay_label(delay_mins: int) -> str:
+    """Formats a delay indicator for live departure displays."""
+    if delay_mins > 2:
+        return f"({delay_mins}m late)"
+    if delay_mins < -2:
+        return f"({abs(delay_mins)}m early)"
+    return "(Live)"
 
 
 # ==========================================================================
@@ -725,6 +897,19 @@ def fetch_gtfs_rt_vehicles(use_cache: bool = True) -> List[Dict[str, Any]]:
         age = now - _gtfs_rt_cache["timestamp"]
         if age < _gtfs_rt_cache["ttl"]:
             logger.debug(f"Using cached GTFS-RT data (age: {age:.1f}s)")
+            generated_at = None
+            if _gtfs_rt_feed_meta.get("generated_at"):
+                try:
+                    generated_at = datetime.fromisoformat(_gtfs_rt_feed_meta["generated_at"])
+                except ValueError:
+                    generated_at = None
+            _update_gtfs_rt_feed_meta(
+                source="cache",
+                generated_at=generated_at,
+                data_age_seconds=age,
+                last_error=None,
+                vehicle_count=len(_gtfs_rt_cache["data"] or []),
+            )
             return _gtfs_rt_cache["data"]
 
     # Retry loop with exponential backoff
@@ -742,6 +927,11 @@ def fetch_gtfs_rt_vehicles(use_cache: bool = True) -> List[Dict[str, Any]]:
 
             vehicles = []
             feed_timestamp = feed.header.timestamp
+            generated_at = (
+                datetime.fromtimestamp(feed_timestamp)
+                if feed_timestamp
+                else datetime.now()
+            )
 
             for entity in feed.entity:
                 if not entity.HasField("vehicle"):
@@ -790,7 +980,14 @@ def fetch_gtfs_rt_vehicles(use_cache: bool = True) -> List[Dict[str, Any]]:
             )
 
             _gtfs_rt_cache["data"] = vehicles
-            _gtfs_rt_cache["timestamp"] = now
+            _gtfs_rt_cache["timestamp"] = time.time()
+            _update_gtfs_rt_feed_meta(
+                source="live",
+                generated_at=generated_at,
+                data_age_seconds=max(0.0, time.time() - feed_timestamp) if feed_timestamp else 0.0,
+                last_error=None,
+                vehicle_count=len(vehicles),
+            )
 
             return vehicles
 
@@ -824,7 +1021,27 @@ def fetch_gtfs_rt_vehicles(use_cache: bool = True) -> List[Dict[str, Any]]:
     if _gtfs_rt_cache["data"]:
         cache_age = now - _gtfs_rt_cache["timestamp"]
         logger.info(f"Using cached GTFS-RT data (age: {cache_age:.0f}s)")
+        generated_at = None
+        if _gtfs_rt_feed_meta.get("generated_at"):
+            try:
+                generated_at = datetime.fromisoformat(_gtfs_rt_feed_meta["generated_at"])
+            except ValueError:
+                generated_at = None
+        _update_gtfs_rt_feed_meta(
+            source="stale_cache",
+            generated_at=generated_at,
+            data_age_seconds=cache_age,
+            last_error=last_error,
+            vehicle_count=len(_gtfs_rt_cache["data"] or []),
+        )
         return _gtfs_rt_cache["data"]
+    _update_gtfs_rt_feed_meta(
+        source="unavailable",
+        generated_at=None,
+        data_age_seconds=None,
+        last_error=last_error,
+        vehicle_count=0,
+    )
     return []
 
 
@@ -837,7 +1054,7 @@ def enrich_vehicle_with_static_data(vehicle: Dict, conn: sqlite3.Connection) -> 
         route_info = _get_route_info_by_id(conn, vehicle["route_id"])
         if route_info:
             enriched["route_short_name"] = route_info["route_short_name"]
-            enriched["route_long_name"] = route_info["route_long_name"]
+            enriched["route_long_name"] = _clean_carris_headsign(route_info["route_long_name"])
             enriched["is_tram"] = route_info["route_short_name"].endswith("E")
 
     # Get stop name
@@ -851,13 +1068,15 @@ def enrich_vehicle_with_static_data(vehicle: Dict, conn: sqlite3.Connection) -> 
         trip_info = _get_trip_info_by_id(conn, vehicle["trip_id"])
         if trip_info:
             # Use trip_headsign if available, otherwise fall back to route_long_name
-            enriched["trip_headsign"] = trip_info["trip_headsign"] or trip_info.get(
-                "route_long_name"
+            enriched["trip_headsign"] = _resolve_carris_headsign(
+                trip_info.get("trip_headsign"),
+                trip_info.get("route_long_name"),
+                trip_info.get("direction_id"),
             )
 
     # Final fallback: if trip_headsign is still None, use route_long_name
     if not enriched.get("trip_headsign") and enriched.get("route_long_name"):
-        enriched["trip_headsign"] = enriched["route_long_name"]
+        enriched["trip_headsign"] = _clean_carris_headsign(enriched["route_long_name"])
 
     return enriched
 
@@ -1046,6 +1265,105 @@ def get_next_arrivals_at_stop(stop_id: str, limit: int = 10) -> List[Dict]:
         return []
 
 
+def _get_directional_departures_for_route(
+    conn: sqlite3.Connection,
+    origin_stops: List[Dict[str, Any]],
+    dest_stops: List[Dict[str, Any]],
+    route_short_name: str,
+    active_services: List[str],
+    current_time: str,
+    limit: int = 4,
+) -> List[Dict[str, Any]]:
+    """Returns next direction-safe departures for a route from origin toward destination."""
+    if not active_services or not origin_stops or not dest_stops:
+        return []
+
+    cursor = conn.cursor()
+    rt_vehicles = fetch_gtfs_rt_vehicles()
+    rt_by_trip = {v["trip_id"]: v for v in rt_vehicles if v.get("trip_id")}
+
+    origin_ids = [s["id"] for s in origin_stops[:12]]
+    dest_ids = [s["id"] for s in dest_stops[:12]]
+    ph_o = ",".join(["?" for _ in origin_ids])
+    ph_d = ",".join(["?" for _ in dest_ids])
+    ph_s = ",".join(["?" for _ in active_services])
+
+    cursor.execute(
+        f"""
+        SELECT st.trip_id,
+               st.stop_id AS origin_stop_id,
+               s.stop_name AS origin_stop_name,
+               st.departure_time,
+               t.trip_headsign,
+               t.direction_id,
+               r.route_long_name,
+               MIN(st_d.arrival_time) AS target_arrival_time
+        FROM stop_times st
+        JOIN trips t ON st.trip_id = t.trip_id
+        JOIN routes r ON t.route_id = r.route_id
+        JOIN stops s ON st.stop_id = s.stop_id
+        JOIN stop_times st_d ON st.trip_id = st_d.trip_id
+            AND st_d.stop_id IN ({ph_d})
+            AND st.stop_sequence < st_d.stop_sequence
+        WHERE st.stop_id IN ({ph_o})
+          AND r.route_short_name = ?
+          AND t.service_id IN ({ph_s})
+          AND st.departure_time >= ?
+        GROUP BY st.trip_id, st.stop_id, s.stop_name, st.departure_time, t.trip_headsign, t.direction_id, r.route_long_name
+        ORDER BY st.departure_time
+        LIMIT ?
+        """,
+        dest_ids + origin_ids + [route_short_name] + active_services + [current_time, limit],
+    )
+
+    departures: List[Dict[str, Any]] = []
+    for row in cursor.fetchall():
+        headsign = _resolve_carris_headsign(
+            row["trip_headsign"],
+            row["route_long_name"],
+            row["direction_id"],
+        )
+        scheduled_departure = row["departure_time"][:5]
+        estimated_departure = scheduled_departure
+        delay_mins = 0
+        is_realtime = False
+
+        vehicle = rt_by_trip.get(row["trip_id"])
+        if vehicle:
+            eta_info = get_vehicle_eta_at_stop(vehicle, row["origin_stop_id"], conn)
+            if eta_info:
+                estimated_departure = eta_info["estimated_arrival"]
+                delay_mins = eta_info["current_delay_mins"]
+                is_realtime = True
+
+        travel_mins = None
+        if row["target_arrival_time"]:
+            dep_mins = time_str_to_minutes(row["departure_time"])
+            arr_mins = time_str_to_minutes(row["target_arrival_time"])
+            diff = arr_mins - dep_mins
+            if diff < 0:
+                diff += 24 * 60
+            if diff > 0:
+                travel_mins = diff
+
+        departures.append(
+            {
+                "trip_id": row["trip_id"],
+                "origin_stop_id": row["origin_stop_id"],
+                "origin_stop_name": row["origin_stop_name"],
+                "headsign": headsign,
+                "scheduled_departure": scheduled_departure,
+                "estimated_departure": estimated_departure,
+                "delay_mins": delay_mins,
+                "is_realtime": is_realtime,
+                "travel_mins": travel_mins,
+            }
+        )
+
+    departures.sort(key=lambda item: time_str_to_minutes(item["estimated_departure"]))
+    return departures
+
+
 # ==========================================================================
 # Tool Functions
 # ==========================================================================
@@ -1079,19 +1397,14 @@ def carris_get_stops(query: str = "", limit: Optional[int] = None) -> str:
             effective_limit = limit
 
         if query:
-            sql = """
-                SELECT stop_id, stop_name, stop_lat, stop_lon, stop_code
-                FROM stops WHERE stop_name LIKE ? ORDER BY stop_name LIMIT ?
-            """
-            cursor.execute(sql, (f"%{query}%", effective_limit))
+            rows = _search_stop_rows(conn, query, effective_limit)
         else:
             sql = """
                 SELECT stop_id, stop_name, stop_lat, stop_lon, stop_code
                 FROM stops ORDER BY stop_name LIMIT ?
             """
             cursor.execute(sql, (effective_limit,))
-
-        rows = cursor.fetchall()
+            rows = cursor.fetchall()
         conn.close()
 
         if not rows:
@@ -1241,6 +1554,9 @@ def carris_get_arrivals(stop_id: str, limit: int = 10) -> str:
             f"   ID: {stop_id} | Atualizado: {datetime.now().strftime('%H:%M')}\n"
         )
         response += "=" * 55 + "\n\n"
+        freshness_note = _build_gtfs_rt_freshness_note()
+        if freshness_note:
+            response += freshness_note + "\n\n"
 
         for arr in arrivals:
             vehicle_type = "Elétrico" if arr["is_tram"] else "Autocarro"
@@ -1450,6 +1766,9 @@ def carris_get_next_departures(
         response = f"🚌 **Next Departures from {stop_name}**\n"
         if has_realtime_data:
             response += "   (📡 Real-Time Data Active)\n"
+        freshness_note = _build_gtfs_rt_freshness_note() if not is_future_query else ""
+        if freshness_note:
+            response += f"   {freshness_note}\n"
         response += "-" * 50 + "\n"
 
         for (route, dest), times in departures.items():
@@ -1507,11 +1826,8 @@ def carris_find_routes_between(
         dest_lat, dest_lon, dest_name = geocode_location(destination)
 
         if origin_lat is None:
-            cursor.execute(
-                "SELECT stop_lat, stop_lon, stop_name FROM stops WHERE stop_name LIKE ? LIMIT 1",
-                (f"%{origin}%",),
-            )
-            row = cursor.fetchone()
+            fallback_origin_rows = _search_stop_rows(conn, origin, limit=1)
+            row = fallback_origin_rows[0] if fallback_origin_rows else None
             if row:
                 origin_lat, origin_lon, origin_name = (
                     row["stop_lat"],
@@ -1523,11 +1839,8 @@ def carris_find_routes_between(
                 return f"Could not locate '{origin}'."
 
         if dest_lat is None:
-            cursor.execute(
-                "SELECT stop_lat, stop_lon, stop_name FROM stops WHERE stop_name LIKE ? LIMIT 1",
-                (f"%{destination}%",),
-            )
-            row = cursor.fetchone()
+            fallback_dest_rows = _search_stop_rows(conn, destination, limit=1)
+            row = fallback_dest_rows[0] if fallback_dest_rows else None
             if row:
                 dest_lat, dest_lon, dest_name = (
                     row["stop_lat"],
@@ -1619,108 +1932,58 @@ def carris_find_routes_between(
             )
             return response
 
-        response += f"Found {len(routes_found)} direct routes!\n\n"
+        unique_routes: Dict[str, Dict[str, Any]] = {}
+        for route in routes_found:
+            unique_routes.setdefault(route["route_short_name"], dict(route))
+
+        response += f"Found {len(unique_routes)} direct routes!\n\n"
 
         now = datetime.now()
         current_time = now.strftime("%H:%M:%S")
         active_services = _get_active_services(conn, now)
+        freshness_note = _build_gtfs_rt_freshness_note()
+        if freshness_note:
+            response += freshness_note + "\n\n"
 
-        trams = [r for r in routes_found if r["route_short_name"].endswith("E")]
-        buses = [r for r in routes_found if not r["route_short_name"].endswith("E")]
+        trams = [r for r in unique_routes.values() if r["route_short_name"].endswith("E")]
+        buses = [r for r in unique_routes.values() if not r["route_short_name"].endswith("E")]
 
-        def get_next_departure_and_duration(route_short_name: str) -> tuple:
-            """Returns (departure_info_str, travel_time_mins or None).
-            
-            Direction-safe: only returns departures from trips that actually
-            go FROM origin TOWARD destination (not terminus arrivals).
-            """
-            origin_id_set = {s["id"] for s in origin_stops[:5]}
-            dest_id_set = {s["id"] for s in dest_stops[:5]}
+        def format_route_line(r: Dict[str, Any]) -> str:
+            """Format a single route entry with direction-safe departures and RT hints."""
+            departures = _get_directional_departures_for_route(
+                conn=conn,
+                origin_stops=origin_stops,
+                dest_stops=dest_stops,
+                route_short_name=r["route_short_name"],
+                active_services=active_services,
+                current_time=current_time,
+                limit=4,
+            )
 
-            if not active_services:
-                return "No service", None
+            if not departures:
+                line = f"   {r['route_short_name']}: {r['route_long_name']}\n"
+                line += "     Check schedule\n\n"
+                return line
 
-            ph_svc = ",".join(["?" for _ in active_services])
-            ph_d = ",".join(["?" for _ in dest_id_set])
+            first_dep = departures[0]
+            line = f"   {r['route_short_name']}: para {first_dep['headsign']}\n"
+            shown_times = []
+            for dep in departures[:3]:
+                time_text = dep["estimated_departure"] if dep["is_realtime"] else dep["scheduled_departure"]
+                if dep["is_realtime"]:
+                    time_text = f"{time_text} {_format_delay_label(dep['delay_mins'])}"
+                shown_times.append(time_text)
 
-            for stop in origin_stops[:5]:
-                # Direction-safe query: JOIN with destination stops to ensure
-                # this trip actually goes FROM this origin stop TOWARD destination
-                # (st.stop_sequence < st_dest.stop_sequence prevents showing
-                # terminus arrivals as departures)
-                cursor.execute(
-                    f"""
-                    SELECT DISTINCT st.departure_time, t.trip_headsign
-                    FROM stop_times st
-                    JOIN trips t ON st.trip_id = t.trip_id
-                    JOIN routes r ON t.route_id = r.route_id
-                    JOIN stop_times st_dest ON st.trip_id = st_dest.trip_id
-                        AND st_dest.stop_id IN ({ph_d})
-                        AND st.stop_sequence < st_dest.stop_sequence
-                    WHERE st.stop_id = ? AND r.route_short_name = ?
-                    AND t.service_id IN ({ph_svc})
-                    AND st.departure_time >= ?
-                    ORDER BY st.departure_time LIMIT 2
-                    """,
-                    list(dest_id_set) + [stop["id"], route_short_name] + list(active_services) + [current_time],
-                )
-
-                deps = cursor.fetchall()
-                if deps:
-                    times = [d["departure_time"][:5] for d in deps]
-                    dep_str = f"Next: {', '.join(times)} (stop {stop['name'][:20]})"
-
-                    # Calculate travel time from GTFS (origin stop -> dest stop)
-                    travel_mins = None
-                    ph_o = ",".join(["?" for _ in origin_id_set])
-                    cursor.execute(
-                        f"""
-                        SELECT
-                            st_o.departure_time AS dep_time,
-                            st_d.arrival_time AS arr_time
-                        FROM stop_times st_o
-                        JOIN stop_times st_d ON st_o.trip_id = st_d.trip_id
-                            AND st_o.stop_sequence < st_d.stop_sequence
-                        JOIN trips t ON st_o.trip_id = t.trip_id
-                        JOIN routes r ON t.route_id = r.route_id
-                        WHERE st_o.stop_id IN ({ph_o})
-                        AND st_d.stop_id IN ({ph_d})
-                        AND r.route_short_name = ?
-                        AND t.service_id IN ({ph_svc})
-                        LIMIT 1
-                        """,
-                        list(origin_id_set) + list(dest_id_set) + [route_short_name] + list(active_services),
-                    )
-                    row = cursor.fetchone()
-                    if row:
-                        dep_parts = row["dep_time"].split(":")
-                        arr_parts = row["arr_time"].split(":")
-                        dep_m = int(dep_parts[0]) * 60 + int(dep_parts[1])
-                        arr_m = int(arr_parts[0]) * 60 + int(arr_parts[1])
-                        diff = arr_m - dep_m
-                        if diff < 0:
-                            diff += 24 * 60
-                        if diff > 0:
-                            travel_mins = diff
-
-                    return dep_str, travel_mins
-
-            return "Check schedule", None
-
-        def format_route_line(r, is_tram: bool = False) -> str:
-            """Format a single route entry with departure and duration."""
-            dep_str, travel_mins = get_next_departure_and_duration(r["route_short_name"])
-            line = f"   {r['route_short_name']}: {r['route_long_name']}\n"
-            if travel_mins:
-                line += f"     {dep_str} | ~{travel_mins}min travel\n\n"
-            else:
-                line += f"     {dep_str}\n\n"
+            line += f"     Next: {', '.join(shown_times)} (stop {first_dep['origin_stop_name'][:28]})\n"
+            if first_dep.get("travel_mins"):
+                line += f"     ~{first_dep['travel_mins']}min travel\n"
+            line += "\n"
             return line
 
         if trams:
             response += "TRAMS\n" + "-" * 40 + "\n"
             for r in trams:
-                response += format_route_line(r, is_tram=True)
+                response += format_route_line(r)
 
         if buses:
             response += "BUSES\n" + "-" * 40 + "\n"
@@ -1738,12 +2001,17 @@ def carris_find_routes_between(
 
 
 @tool
-def carris_get_realtime_vehicles(route_id: str = "", vehicle_type: str = "") -> str:
+def carris_get_realtime_vehicles(
+    route_id: str = "",
+    route_short_name: str = "",
+    vehicle_type: str = "",
+) -> str:
     """
     Gets real-time Carris vehicle positions from official GTFS-RT feed.
 
     Args:
-        route_id: Filter by route (e.g., "28E", "15E", "732") - optional
+        route_id: Filter by route short name (e.g., "28E", "15E", "732") - optional
+        route_short_name: Alias for route_id, kept for compatibility with existing callers/tests.
         vehicle_type: Filter by "tram" or "bus" - optional
 
     Returns:
@@ -1777,8 +2045,9 @@ def carris_get_realtime_vehicles(route_id: str = "", vehicle_type: str = "") -> 
 
         filtered = enriched
 
-        if route_id:
-            route_upper = route_id.upper()
+        selected_route = route_short_name or route_id
+        if selected_route:
+            route_upper = selected_route.upper()
             filtered = [
                 v
                 for v in filtered
@@ -1794,8 +2063,8 @@ def carris_get_realtime_vehicles(route_id: str = "", vehicle_type: str = "") -> 
 
         if not filtered:
             filter_msg = ""
-            if route_id:
-                filter_msg += f" rota={route_id}"
+            if selected_route:
+                filter_msg += f" rota={selected_route}"
             if vehicle_type:
                 filter_msg += f" tipo={vehicle_type}"
             return f"Nenhum veículo encontrado com filtros:{filter_msg}"
@@ -1806,6 +2075,9 @@ def carris_get_realtime_vehicles(route_id: str = "", vehicle_type: str = "") -> 
         feed_time = filtered[0].get("feed_timestamp", 0)
         if feed_time:
             response += f"Dados de: {datetime.fromtimestamp(feed_time).strftime('%H:%M:%S')}\n\n"
+        freshness_note = _build_gtfs_rt_freshness_note()
+        if freshness_note:
+            response += freshness_note + "\n\n"
 
         trams = [v for v in filtered if v.get("is_tram", False)]
         buses = [v for v in filtered if not v.get("is_tram", False)]
@@ -1813,7 +2085,7 @@ def carris_get_realtime_vehicles(route_id: str = "", vehicle_type: str = "") -> 
         def format_vehicle(v: Dict) -> str:
             route = v.get("route_short_name", "N/A")
             # Proper fallback chain: trip_headsign -> route_long_name -> 'N/A'
-            headsign = v.get("trip_headsign") or v.get("route_long_name") or "N/A"
+            headsign = _clean_carris_headsign(v.get("trip_headsign") or v.get("route_long_name") or "N/A")
             lat = v.get("latitude", 0)
             lon = v.get("longitude", 0)
             stop = v.get("stop_name", "Em trânsito")
@@ -1828,10 +2100,10 @@ def carris_get_realtime_vehicles(route_id: str = "", vehicle_type: str = "") -> 
                 else "A chegar"
             )
 
-            line = f"{route} -> {headsign[:30]} [{status_text}]\n"
+            line = f"{route} -> {_truncate_display_text(headsign, 34)} [{status_text}]\n"
             line += f"   GPS: {lat:.5f}, {lon:.5f}"
             if stop and stop != "Em trânsito":
-                line += f" | Próxima paragem: {stop[:25]}"
+                line += f" | Próxima paragem: {_truncate_display_text(stop, 28)}"
             if plate:
                 line += f"\n   Matrícula: {plate}"
             return line + "\n"
@@ -1882,12 +2154,7 @@ def carris_vehicle_eta(route_short_name: str, stop_name: str) -> str:
     try:
         cursor = conn.cursor()
 
-        cursor.execute(
-            "SELECT stop_id, stop_name, stop_lat, stop_lon FROM stops WHERE stop_name LIKE ? LIMIT 5",
-            (f"%{stop_name}%",),
-        )
-
-        stops = cursor.fetchall()
+        stops = _search_stop_rows(conn, stop_name, limit=5)
         if not stops:
             conn.close()
             return f"Paragem '{stop_name}' não encontrada."
@@ -1962,6 +2229,9 @@ def carris_vehicle_eta(route_short_name: str, stop_name: str) -> str:
         response = f"ETA: Linha {route_short_name} -> {target_stop_name}\n"
         response += "=" * 55 + "\n"
         response += f"Hora atual: {datetime.now().strftime('%H:%M')}\n\n"
+        freshness_note = _build_gtfs_rt_freshness_note()
+        if freshness_note:
+            response += freshness_note + "\n\n"
 
         etas = []
         for v in vehicles:
@@ -2571,6 +2841,41 @@ if __name__ == "__main__":
         "carris_get_service_frequency('999Z') - Invalid Route",
         carris_get_service_frequency.invoke,
         {"route_short_name": "999Z"},
+    )
+    
+    # TEST 22: Direction-safe Rossio departures for line 732
+    if stop_id_rossio:
+        run_test(
+            "Regression: carris_get_next_departures (Rossio, line 732)",
+            carris_get_next_departures.invoke,
+            {"stop_id": stop_id_rossio, "route_short_name": "732", "limit": 8},
+        )
+
+        run_test(
+            "Regression: carris_get_arrivals (Rossio)",
+            carris_get_arrivals.invoke,
+            {"stop_id": stop_id_rossio, "limit": 8},
+        )
+
+    # TEST 24: Accent-insensitive ETA lookup
+    run_test(
+        "Regression: carris_vehicle_eta (Praca da Figueira, line 714)",
+        carris_vehicle_eta.invoke,
+        {"stop_name": "Praca da Figueira", "route_short_name": "714"},
+    )
+
+    # TEST 25: route_short_name realtime vehicle lookup
+    run_test(
+        "Regression: carris_get_realtime_vehicles (route_short_name='15E')",
+        carris_get_realtime_vehicles.invoke,
+        {"route_short_name": "15E"},
+    )
+
+    # TEST 26: Rossio -> Belém urban route query
+    run_test(
+        "Regression: carris_find_routes_between (Rossio -> Belém)",
+        carris_find_routes_between.invoke,
+        {"origin": "Rossio", "destination": "Belém"},
     )
 
     # =========================================================================

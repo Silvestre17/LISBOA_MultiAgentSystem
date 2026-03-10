@@ -214,6 +214,34 @@ class WeatherAgent(BaseAgent):
             ],
         )
 
+    @staticmethod
+    def _build_language_instruction(language: str) -> str:
+        """Builds a compact language instruction for subgraph LLM steps."""
+        return (
+            "Respond ENTIRELY in Portuguese (PT-PT)."
+            if language == "pt"
+            else "Respond ENTIRELY in English."
+        )
+
+    def _ensure_subgraph_messages(self, messages: list, language: str) -> list:
+        """Ensures weather subgraph LLM calls receive system and language instructions."""
+        updated_messages = list(messages)
+        if not updated_messages or not isinstance(updated_messages[0], SystemMessage):
+            updated_messages = [SystemMessage(content=self.system_prompt)] + updated_messages
+
+        if not any(
+            isinstance(message, SystemMessage)
+            and "Respond ENTIRELY" in str(message.content)
+            for message in updated_messages[:3]
+        ):
+            updated_messages = [
+                updated_messages[0],
+                SystemMessage(content=self._build_language_instruction(language)),
+                *updated_messages[1:],
+            ]
+
+        return updated_messages
+
     @classmethod
     def _build_deterministic_subgraph_tool_call(cls, user_message: str) -> Optional[AIMessage]:
         """Routes obvious weather queries to their canonical tool in the subgraph."""
@@ -324,27 +352,31 @@ class WeatherAgent(BaseAgent):
             """Weather agent decision node."""
             messages = list(state["messages"])
 
-            last_message = messages[-1] if messages else None
-            if isinstance(last_message, ToolMessage):
-                response = self._safe_llm_invoke(self.llm_with_tools, messages)
-                return {"messages": [response]}
-
             user_message = None
             for message in reversed(messages):
                 if isinstance(message, HumanMessage) and message.content:
                     user_message = str(message.content)
                     break
 
+            language = infer_response_language(user_query=user_message or "", default="en")
+
+            last_message = messages[-1] if messages else None
+            if isinstance(last_message, ToolMessage):
+                response = self._safe_llm_invoke(
+                    self.llm_with_tools,
+                    self._ensure_subgraph_messages(messages, language),
+                )
+                return {"messages": [response]}
+
             if user_message:
                 deterministic_call = self._build_deterministic_subgraph_tool_call(user_message)
                 if deterministic_call is not None:
                     return {"messages": [deterministic_call]}
 
-            # Add system prompt if not present
-            if not messages or not isinstance(messages[0], SystemMessage):
-                messages = [SystemMessage(content=self.system_prompt)] + messages
-
-            response = self._safe_llm_invoke(self.llm_with_tools, messages)
+            response = self._safe_llm_invoke(
+                self.llm_with_tools,
+                self._ensure_subgraph_messages(messages, language),
+            )
             return {"messages": [response]}
 
         def should_continue(state: AgentState) -> str:

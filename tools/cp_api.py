@@ -2259,6 +2259,20 @@ if __name__ == "__main__":
         {"origin": "Oriente", "destination": "Sintra"},
     )
 
+    # TEST 13: Plan a train trip (Rossio -> Sintra)
+    run_test(
+        "plan_train_trip: Rossio → Sintra",
+        plan_train_trip.invoke,
+        {"origin": "Rossio", "destination": "Sintra"},
+    )
+
+    # TEST 14: Station schedule regression (Entrecampos)
+    run_test(
+        "get_train_schedule('Entrecampos', limit=5)",
+        get_train_schedule.invoke,
+        {"station_name": "Entrecampos", "limit": 5},
+    )
+
     # =========================================================================
     # SUMMARY
     # =========================================================================

@@ -5,7 +5,17 @@
 #   Mock-based tests for LLMJudge to validate scoring pipeline
 #   without making actual API calls.
 #
-#   Run: python -m pytest eval/tests/test_llm_judge.py -v
+#   Run from the repository root with a relative path:
+#     python -m pytest eval/tests/test_llm_judge.py -q
+#   Useful parameters:
+#     -vv                           verbose mode
+#     -k composite or -k evaluate   focus on one judge section
+#     -x                            stop on first failure
+#     --tb=short                    shorter tracebacks
+#   Notes:
+#     - Prefer relative paths in this workspace. Absolute pytest paths may be
+#       treated as glob patterns on Windows because the folder name includes
+#       `[` and `]`.
 # ==========================================================================
 
 import os

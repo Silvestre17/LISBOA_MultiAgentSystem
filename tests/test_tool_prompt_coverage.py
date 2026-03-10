@@ -4,6 +4,19 @@
 #
 # Exhaustive live prompt coverage for all exported worker-agent tools.
 # This suite is intentionally slow and should remain isolated from fast tests.
+#
+# Run from the repository root with a relative path:
+#   python -m pytest tests/test_tool_prompt_coverage.py -q -m "live and coverage"
+# Useful parameters:
+#   -s              show live tool/log output
+#   -vv             verbose mode
+#   -x              stop on first failure
+#   --tb=short      shorter tracebacks
+# Notes:
+#   - This suite is slow and uses real services.
+#   - Prefer relative paths in this workspace. Absolute pytest paths may be
+#     treated as glob patterns on Windows because the folder name includes
+#     `[` and `]`.
 # ===========================================================================
 
 from __future__ import annotations

@@ -202,6 +202,22 @@ def _get_line_status(line_id: str) -> str:
     return "unknown"
 
 
+def _build_route_source_line(sources: List[str]) -> str:
+    """Builds a deduplicated source line for route answers."""
+    deduped_sources: List[str] = []
+    seen = set()
+    for source in sources:
+        if source and source not in seen:
+            seen.add(source)
+            deduped_sources.append(source)
+
+    if not deduped_sources:
+        deduped_sources.append("[*Metro de Lisboa*](https://www.metrolisboa.pt)")
+
+    updated = datetime.now().strftime('%H:%M')
+    return f"\n📌 **Fonte:** {' e '.join(deduped_sources)} **| Atualizado:** {updated}\n"
+
+
 # ==========================================================================
 # LangChain Tools
 # ==========================================================================
@@ -227,6 +243,12 @@ def get_route_between_stations(origin: str, destination: str) -> str:
         str: Multi-modal route suggestions with Metro, train, and bus options.
     """
     response = f"🗺️ **Route: {origin.title()} → {destination.title()}**\n\n"
+    sources_used: List[str] = []
+
+    if _normalize_station(origin) == _normalize_station(destination):
+        response += "✅ **You are already at the destination.**\n"
+        response += "💡 No public transport leg is needed for this route.\n"
+        return response + _build_route_source_line([])
     
     # Check if origin or destination is a known landmark
     origin_landmark = get_landmark_info(origin)
@@ -289,6 +311,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
 
     # Calculate Metro Route
     if eff_origin_lines and eff_dest_lines:
+        sources_used.append("[*Metro de Lisboa*](https://www.metrolisboa.pt)")
         response += "🚇 **METRO ROUTE**\n"
         
         common_lines = set(eff_origin_lines) & set(eff_dest_lines)
@@ -423,6 +446,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     # If only one end is a CP station, the metro route above is sufficient.
     if origin_cp and dest_cp:
         response += "🚆 **CP TRAINS**\n"
+        sources_used.append("[*CP*](https://www.cp.pt)")
         
         common_lines = set(origin_cp.get("lines", [])) & set(dest_cp.get("lines", []))
         
@@ -436,17 +460,12 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                 if line_info.get("frequency"):
                     response += f"   🕒 Frequency: {line_info['frequency']}\n"
                 response += "\n"
-            return response
+            return response + _build_route_source_line(sources_used)
         else:
             response += f"⚠️ No direct train line linking {origin.title()} and {destination.title()}.\n"
             response += "   You may need to transfer at a major hub (e.g., Entrecampos, Oriente, Sete Rios).\n\n"
     
-    # Source attribution
-    from datetime import datetime as _dt
-    _now = _dt.now().strftime('%H:%M')
-    response += f"\n📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) **| Atualizado:** {_now}\n"
-    
-    return response
+    return response + _build_route_source_line(sources_used)
 
 
 @tool
@@ -697,6 +716,27 @@ if __name__ == "__main__":
     run_test(
         "Transport Summary - All Modes [METRO + CARRIS + CP]",
         get_transport_summary.invoke
+    )
+    
+    # TEST 10: Same-origin short circuit
+    run_test(
+        "Regression - Same Location Short-Circuit (Saldanha -> Saldanha)",
+        get_route_between_stations.invoke,
+        {"origin": "Saldanha", "destination": "Saldanha"}
+    )
+
+    # TEST 11: CP direct route preservation
+    run_test(
+        "Regression - CP Direct Route (Rossio -> Sintra)",
+        get_route_between_stations.invoke,
+        {"origin": "Rossio", "destination": "Sintra"}
+    )
+
+    # TEST 12: Metro direct route used by transport-agent fast path
+    run_test(
+        "Regression - Metro Route (Saldanha -> Odivelas)",
+        get_route_between_stations.invoke,
+        {"origin": "Saldanha", "destination": "Odivelas"}
     )
     
     # =========================================================================

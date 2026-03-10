@@ -117,11 +117,99 @@ class ResearcherAgent(BaseAgent):
             args["category"] = "Museums & Monuments"
 
         result = tool.invoke(args)
-        source_line = (
-            "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais)"
-            if language == "pt"
-            else "📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places)"
-        )
+        source_line = self._build_places_source_line(result, language)
+        return f"{result}\n\n{source_line}".strip()
+
+    @staticmethod
+    def _build_places_source_line(result: str, language: str) -> str:
+        """Builds the right source line for direct place lookups, including hybrid open-data results."""
+        if "Lisboa Aberta" in result or "Open Data:" in result:
+            if language == "pt":
+                return "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) e [*Lisboa Aberta*](https://dados.cm-lisboa.pt/)"
+            return "📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places) and [*Lisboa Aberta*](https://dados.cm-lisboa.pt/)"
+
+        if language == "pt":
+            return "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais)"
+        return "📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places)"
+
+    @staticmethod
+    def _is_direct_place_lookup_query(user_message: str) -> bool:
+        """Detects straightforward place and service lookups that are safer to answer directly from tools."""
+        query = (user_message or "").lower()
+        history_keywords = ["history", "história", "historia", "culture", "cultura"]
+        event_keywords = [
+            "event", "events", "evento", "eventos", "concert", "concerto",
+            "festival", "exhibition", "exposição", "exposicao", "show",
+        ]
+        place_keywords = [
+            "museum", "museu", "monument", "monumento", "restaurant", "restaurante",
+            "hotel", "viewpoint", "miradouro", "beach", "praia", "garden", "jardim",
+            "park", "parque", "hospital", "pharmacy", "farmácia", "farmacia", "school",
+            "escola", "library", "biblioteca", "police", "polícia", "policia",
+            "attraction", "attractions", "place", "places", "where is", "onde fica",
+            "belém", "belem",
+        ]
+        service_keywords = [
+            "hospital", "pharmacy", "farmácia", "farmacia", "school", "escola",
+            "library", "biblioteca", "police", "polícia", "policia",
+        ]
+        specific_lookup_markers = [
+            "where is", "onde fica", "near ", "perto ", "belém", "belem", "alfama",
+            "chiado", "baixa", "rossio", "oriente", "ajuda", "bairro alto", "cais do sodré",
+            "cais do sodre", "campo grande", "colombo", "gulbenkian",
+        ]
+        if any(keyword in query for keyword in history_keywords + event_keywords):
+            return False
+        if any(keyword in query for keyword in service_keywords):
+            return True
+        return any(keyword in query for keyword in place_keywords) and any(marker in query for marker in specific_lookup_markers)
+
+    @staticmethod
+    def _extract_near_location_name(user_message: str) -> Optional[str]:
+        """Extracts a nearby-location target from simple PT/EN service phrasings."""
+        patterns = [
+            r"\bnear\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
+            r"\bnear the\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
+            r"\bperto de\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
+            r"\bperto do\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
+            r"\bperto da\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, user_message, flags=re.IGNORECASE)
+            if match:
+                return match.group("location").strip(" .?!,")
+        return None
+
+    def _run_direct_place_lookup(self, user_message: str, language: str) -> str:
+        """Runs a deterministic tool path for simple place and service lookups."""
+        message_lower = user_message.lower()
+        places_tool = self._get_tool_by_name("search_places_attractions")
+        nearby_tool = self._get_tool_by_name("find_nearby_services")
+
+        service_keywords = [
+            "pharmacy", "farmácia", "farmacia", "hospital", "school", "escola",
+            "library", "biblioteca", "park", "garden", "jardim", "police", "polícia", "policia",
+        ]
+        if nearby_tool and any(keyword in message_lower for keyword in service_keywords):
+            nearby_location = self._extract_near_location_name(user_message)
+            if nearby_location:
+                return nearby_tool.invoke(
+                    {
+                        "service_type": self._extract_service_type(user_message),
+                        "near_location_name": nearby_location,
+                        "max_results": 5,
+                    }
+                )
+
+        if not places_tool:
+            return self._run_direct_tool_fallback(user_message, language)
+
+        args = {"query": user_message, "max_results": 5}
+        if any(term in message_lower for term in ["museum", "museu", "monument", "monumento"]):
+            args["category"] = "Museums & Monuments"
+
+        result = places_tool.invoke(args)
+        source_line = self._build_places_source_line(result, language)
         return f"{result}\n\n{source_line}".strip()
 
     @staticmethod
@@ -202,11 +290,7 @@ class ResearcherAgent(BaseAgent):
         tool = self._get_tool_by_name("search_places_attractions")
         if tool:
             result = tool.invoke({"query": user_message, "max_results": 5})
-            source_line = (
-                "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais)"
-                if language == "pt"
-                else "📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places)"
-            )
+            source_line = self._build_places_source_line(result, language)
             return f"{result}\n\n{source_line}".strip()
 
         fallback_text = (
@@ -230,6 +314,34 @@ class ResearcherAgent(BaseAgent):
                 }
             ],
         )
+
+    @staticmethod
+    def _build_language_instruction(language: str) -> str:
+        """Builds a compact language instruction for subgraph LLM steps."""
+        return (
+            "Respond ENTIRELY in Portuguese (PT-PT)."
+            if language == "pt"
+            else "Respond ENTIRELY in English."
+        )
+
+    def _ensure_subgraph_messages(self, messages: list, language: str) -> list:
+        """Ensures researcher subgraph LLM calls receive system and language instructions."""
+        updated_messages = list(messages)
+        if not updated_messages or not isinstance(updated_messages[0], SystemMessage):
+            updated_messages = [SystemMessage(content=self.system_prompt)] + updated_messages
+
+        if not any(
+            isinstance(message, SystemMessage)
+            and "Respond ENTIRELY" in str(message.content)
+            for message in updated_messages[:3]
+        ):
+            updated_messages = [
+                updated_messages[0],
+                SystemMessage(content=self._build_language_instruction(language)),
+                *updated_messages[1:],
+            ]
+
+        return updated_messages
 
     @classmethod
     def _build_deterministic_subgraph_tool_call(cls, user_message: str) -> Optional[AIMessage]:
@@ -280,6 +392,18 @@ class ResearcherAgent(BaseAgent):
             search_query = re.sub(r"^.*attractions related to\s+", "", query, flags=re.IGNORECASE).strip(" .?!")
             return cls._build_tool_call("search_places_attractions", {"query": search_query or query, "max_results": 5})
 
+        place_keywords = [
+            "museum", "museu", "monument", "monumento", "restaurant", "restaurante",
+            "hotel", "viewpoint", "miradouro", "beach", "praia", "garden", "jardim",
+            "park", "parque", "hospital", "pharmacy", "farmácia", "farmacia", "school",
+            "escola", "library", "biblioteca", "police", "polícia", "policia", "belém", "belem",
+        ]
+        if any(keyword in query_lower for keyword in place_keywords):
+            args = {"query": query, "max_results": 5}
+            if any(term in query_lower for term in ["museum", "museu", "monument", "monumento"]):
+                args["category"] = "Museums & Monuments"
+            return cls._build_tool_call("search_places_attractions", args)
+
         return None
 
     @traceable(name="researcher_agent", run_type="chain", tags=["sub-agent", "researcher"])
@@ -316,6 +440,18 @@ class ResearcherAgent(BaseAgent):
                 print("      [RESEARCHER] Using deterministic place lookup for accessibility-focused query...")
 
             response = self._run_accessibility_place_lookup(user_message, language)
+            return finalize_worker_response(
+                response,
+                agent_name="researcher",
+                user_query=user_message,
+                language=language,
+            )
+
+        if not is_greeting and hasattr(self, "tools") and self._is_direct_place_lookup_query(user_message):
+            if verbose:
+                print("      [RESEARCHER] Using deterministic direct place lookup...")
+
+            response = self._run_direct_place_lookup(user_message, language)
             return finalize_worker_response(
                 response,
                 agent_name="researcher",
@@ -377,26 +513,31 @@ class ResearcherAgent(BaseAgent):
             """Researcher agent decision node."""
             messages = list(state["messages"])
 
-            last_message = messages[-1] if messages else None
-            if isinstance(last_message, ToolMessage):
-                response = self._safe_llm_invoke(self.llm_with_tools, messages)
-                return {"messages": [response]}
-
             user_message = None
             for message in reversed(messages):
                 if isinstance(message, HumanMessage) and message.content:
                     user_message = str(message.content)
                     break
 
+            language = infer_response_language(user_query=user_message or "", default="en")
+
+            last_message = messages[-1] if messages else None
+            if isinstance(last_message, ToolMessage):
+                response = self._safe_llm_invoke(
+                    self.llm_with_tools,
+                    self._ensure_subgraph_messages(messages, language),
+                )
+                return {"messages": [response]}
+
             if user_message:
                 deterministic_call = self._build_deterministic_subgraph_tool_call(user_message)
                 if deterministic_call is not None:
                     return {"messages": [deterministic_call]}
 
-            if not messages or not isinstance(messages[0], SystemMessage):
-                messages = [SystemMessage(content=self.system_prompt)] + messages
-
-            response = self._safe_llm_invoke(self.llm_with_tools, messages)
+            response = self._safe_llm_invoke(
+                self.llm_with_tools,
+                self._ensure_subgraph_messages(messages, language),
+            )
             return {"messages": [response]}
 
         def should_continue(state: AgentState) -> str:

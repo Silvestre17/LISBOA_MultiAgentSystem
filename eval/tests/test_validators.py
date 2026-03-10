@@ -5,7 +5,17 @@
 #   Pytest coverage for transport_validator.py and response_heuristics.py.
 #   All tests are deterministic and require no LLM or network calls.
 #
-#   Run: python -m pytest eval/tests/test_validators.py -v
+#   Run from the repository root with a relative path:
+#     python -m pytest eval/tests/test_validators.py -q
+#   Useful parameters:
+#     -vv                         verbose mode
+#     -k metro or -k heuristics   focus on one validator family
+#     -x                          stop on first failure
+#     --tb=short                  shorter tracebacks
+#   Notes:
+#     - Prefer relative paths in this workspace. Absolute pytest paths may be
+#       treated as glob patterns on Windows because the folder name includes
+#       `[` and `]`.
 # ==========================================================================
 
 import os

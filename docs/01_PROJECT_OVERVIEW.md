@@ -21,7 +21,7 @@ LISBOA is a Master's thesis project for the Lisbon Metropolitan Area that combin
 | Institution | NOVA IMS |
 | Academic year | 2025/2026 |
 
-## 📊 Current System Snapshot
+## 📊 Repository Snapshot (as of 2026-03)
 
 | Category | Current implementation |
 |----------|------------------------|

@@ -5,7 +5,17 @@
 #   Validates that evaluation_groundtruth_queries.json is well-formed with correct tool names,
 #   unique IDs, valid domains, and complete expected_facts.
 #
-#   Run: python -m pytest eval/tests/test_dataset_integrity.py -v
+#   Run from the repository root with a relative path:
+#     python -m pytest eval/tests/test_dataset_integrity.py -q
+#   Useful parameters:
+#     -vv                    verbose mode
+#     -k tool or -k domain   focus on one integrity slice
+#     -x                     stop on first failure
+#     --tb=short             shorter tracebacks
+#   Notes:
+#     - Prefer relative paths in this workspace. Absolute pytest paths may be
+#       treated as glob patterns on Windows because the folder name includes
+#       `[` and `]`.
 # ==========================================================================
 
 import json
