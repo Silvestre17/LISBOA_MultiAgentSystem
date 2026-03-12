@@ -8,6 +8,7 @@
 
 import re
 import uuid
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -48,6 +49,27 @@ class WeatherAgent(BaseAgent):
         self.system_prompt = get_weather_prompt()
 
     @staticmethod
+    def _infer_weather_query_language(user_message: str) -> str:
+        """Adds a small PT-PT heuristic for short follow-ups where generic language inference is weak."""
+        query = (user_message or "").lower()
+        pt_markers = [
+            "amanhã",
+            "amanha",
+            "daqui",
+            "semana",
+            "previsão",
+            "previsao",
+            "avisos",
+            "hoje",
+            "tempo",
+            "próxim",
+            "proxim",
+        ]
+        if any(marker in query for marker in pt_markers) or re.search(r"[ãõáéíóúç]", query):
+            return "pt"
+        return infer_response_language(user_query=user_message, default="en")
+
+    @staticmethod
     def _is_content_filter_error(error: Exception) -> bool:
         """Returns whether an exception is an Azure content-filter false positive."""
         error_str = str(error).lower()
@@ -60,7 +82,7 @@ class WeatherAgent(BaseAgent):
     @staticmethod
     def _build_messages(system_prompt: str, user_message: str, context: str = "") -> list:
         """Builds the message list for a weather invocation."""
-        language = infer_response_language(user_query=user_message, default="en")
+        language = WeatherAgent._infer_weather_query_language(user_message)
         language_instruction = (
             "Respond ENTIRELY in Portuguese (PT-PT)."
             if language == "pt"
@@ -142,6 +164,64 @@ class WeatherAgent(BaseAgent):
 
         return None
 
+    @staticmethod
+    def _extract_explicit_forecast_date(user_message: str) -> Optional[datetime]:
+        """Extracts an explicit forecast date from common ISO or DD/MM/YYYY forms."""
+        query = user_message or ""
+        for pattern, fmt in (
+            (r"\b(\d{4}-\d{2}-\d{2})\b", "%Y-%m-%d"),
+            (r"\b(\d{2}/\d{2}/\d{4})\b", "%d/%m/%Y"),
+        ):
+            match = re.search(pattern, query)
+            if not match:
+                continue
+            try:
+                return datetime.strptime(match.group(1), fmt)
+            except ValueError:
+                continue
+        return None
+
+    @classmethod
+    def _is_beyond_forecast_horizon_query(cls, user_message: str) -> bool:
+        """Returns whether the query clearly asks for weather beyond IPMA's 5-day horizon."""
+        query = (user_message or "").lower()
+
+        if re.search(r"\b([6-9]|\d{2,})\s*(?:-|\s)?\s*(?:day|days|dia|dias)\b", query):
+            return True
+
+        beyond_horizon_patterns = [
+            r"\bin\s+(?:a|one)\s+week\b",
+            r"\ba\s+week\s+from\s+now\b",
+            r"\bnext\s+week\b",
+            r"\bdaqui\s+a\s+uma\s+semana\b",
+            r"\bpr[oó]xima\s+semana\b",
+            r"\bpr[oó]ximos?\s+7\s+dias\b",
+        ]
+        if any(re.search(pattern, query) for pattern in beyond_horizon_patterns):
+            return True
+
+        explicit_date = cls._extract_explicit_forecast_date(user_message)
+        if explicit_date is not None:
+            delta_days = (explicit_date.date() - datetime.now().date()).days
+            if delta_days > 4:
+                return True
+
+        return False
+
+    @staticmethod
+    def _build_forecast_horizon_limit_message(language: str) -> str:
+        """Builds a localized message when the user asks beyond the 5-day forecast horizon."""
+        max_supported_date = (datetime.now() + timedelta(days=4)).strftime("%Y-%m-%d")
+        if language == "pt":
+            return (
+                "⚠️ Só tenho previsão meteorológica fiável do IPMA para Lisboa para os próximos 5 dias, "
+                f"por isso não consigo confirmar o tempo para esse horizonte. O limite atual vai até {max_supported_date}."
+            )
+        return (
+            "⚠️ I only have reliable IPMA weather forecast data for Lisbon for the next 5 days, "
+            f"so I can't confirm the weather for that time horizon. The current reliable limit runs through {max_supported_date}."
+        )
+
     @classmethod
     def _is_simple_forecast_query(cls, user_message: str) -> bool:
         """Detects standalone forecast/warnings queries that can skip free-form synthesis."""
@@ -165,6 +245,10 @@ class WeatherAgent(BaseAgent):
         attempts. This preserves real data access without relying on another
         model call.
         """
+        language = self._infer_weather_query_language(user_message)
+        if self._is_beyond_forecast_horizon_query(user_message):
+            return self._build_forecast_horizon_limit_message(language)
+
         query = user_message.lower()
         requested_forecast_days = self._extract_requested_forecast_days(user_message)
         wants_warnings = any(term in query for term in ["warning", "warnings", "aviso", "avisos"])
@@ -277,7 +361,15 @@ class WeatherAgent(BaseAgent):
         Returns:
             str: Weather information response.
         """
-        language = infer_response_language(user_query=user_message, default="en")
+        language = self._infer_weather_query_language(user_message)
+        if self._is_beyond_forecast_horizon_query(user_message):
+            return finalize_worker_response(
+                self._build_forecast_horizon_limit_message(language),
+                agent_name="weather",
+                user_query=user_message,
+                language=language,
+            )
+
         messages = self._build_messages(self.system_prompt, user_message, context)
         tool_enforcement_msg = (
             "You MUST use a tool (like get_current_weather_summary) to get real data. "
@@ -358,7 +450,16 @@ class WeatherAgent(BaseAgent):
                     user_message = str(message.content)
                     break
 
-            language = infer_response_language(user_query=user_message or "", default="en")
+            language = self._infer_weather_query_language(user_message or "")
+
+            if user_message and self._is_beyond_forecast_horizon_query(user_message):
+                return {
+                    "messages": [
+                        AIMessage(
+                            content=self._build_forecast_horizon_limit_message(language)
+                        )
+                    ]
+                }
 
             last_message = messages[-1] if messages else None
             if isinstance(last_message, ToolMessage):

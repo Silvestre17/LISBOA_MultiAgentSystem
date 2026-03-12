@@ -16,7 +16,7 @@
 
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -343,6 +343,14 @@ def precipitation_to_text(prob: str) -> str:
         return "Unknown"
 
 
+def _resolve_warning_area_label(area: str) -> Optional[str]:
+    """Converts internal IPMA warning area codes into user-facing location labels when known."""
+    normalized = (area or "").strip().upper()
+    if normalized == Config.LISBON_AREA_AVISO:
+        return "Lisbon"
+    return None
+
+
 # ==========================================================================
 # LangChain Tools
 # ==========================================================================
@@ -376,6 +384,7 @@ def get_weather_warnings(area: str = "LSB") -> str:
     
     # Filter warnings for requested area and non-green levels
     active_warnings = []
+    area_label = _resolve_warning_area_label(area)
     for warning in data:
         warning_area = warning.get('idAreaAviso', '')
         level = warning.get('awarenessLevelID', 'green').lower()
@@ -387,7 +396,8 @@ def get_weather_warnings(area: str = "LSB") -> str:
         active_warnings.append(warning)
     
     if not active_warnings:
-        return f"✅ No active weather warnings for area '{area}'.\n\n🌤️ Weather conditions are normal."
+        suffix = f" for {area_label}" if area_label else ""
+        return f"✅ No active weather warnings{suffix}.\n\n🌤️ Weather conditions are normal."
     
     # Sort by severity (red > orange > yellow), then by start time
     active_warnings.sort(
@@ -398,7 +408,10 @@ def get_weather_warnings(area: str = "LSB") -> str:
     )
     
     # Format response
-    response = f"⚠️ Active Weather Warnings ({area}):\n"
+    response = "⚠️ Active Weather Warnings"
+    if area_label:
+        response += f" for {area_label}"
+    response += ":\n"
     response += "=" * 40 + "\n\n"
     
     for warning in active_warnings:
@@ -454,6 +467,13 @@ def get_weather_forecast(days: int = 3) -> str:
         >>> get_weather_forecast()
         >>> get_weather_forecast(5)
     """
+
+    if days > 5:
+        max_supported_date = (datetime.now() + timedelta(days=4)).strftime("%Y-%m-%d")
+        return (
+            "⚠️ Lisbon weather forecast from IPMA is only available for the next 5 days. "
+            f"I can't confirm conditions beyond {max_supported_date}."
+        )
 
     url = IPMA_FORECAST_URL.format(global_id=Config.LISBON_GLOBAL_ID)
     data = fetch_json(url)

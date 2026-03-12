@@ -51,6 +51,7 @@ protobuf==6.33.5              # Protocol Buffers for data serialization
 gtfs-realtime-bindings==2.0.0 # GTFS real-time protocol bindings
 urllib3==2.6.3                # Explicit transport dependency used by Metro tool
 certifi==2026.1.4             # SSL certificate bundle used by Metro tool
+cryptography==44.0.1          # X.509 parsing for dynamic Metro TLS chain completion
 
 # -----------------------------------------------------------------------------
 # Document Processing (for RAG ingestion)

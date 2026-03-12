@@ -6,7 +6,7 @@
 # This suite is intentionally slow and should remain isolated from fast tests.
 #
 # Run from the repository root with a relative path:
-#   python -m pytest tests/test_tool_prompt_coverage.py -q -m "live and coverage"
+#   python -m pytest tests/test_tool_prompt_coverage.py -q --run-live -m "live and coverage"
 # Useful parameters:
 #   -s              show live tool/log output
 #   -vv             verbose mode

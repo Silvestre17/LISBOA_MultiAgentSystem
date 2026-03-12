@@ -10,6 +10,9 @@
 # catalogue of transport queries so scripted test scenarios and regression
 # checks can be reviewed quickly during development. It is intentionally kept
 # outside the formal evaluation framework in `eval/`.
+# 
+# Run from the repository root with a relative path:
+#   python scripts/run_transport_verification.py --limit 4
 # ==========================================================================
 
 # Required libraries:
@@ -19,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from dataclasses import asdict, dataclass
@@ -40,6 +44,10 @@ from agent.agents.transport_agent import (  # noqa: E402
 )
 from agent.graph import MultiAgentAssistant  # noqa: E402
 from agent.state import create_initial_state  # noqa: E402
+from agent.utils.langsmith_tracing import (  # noqa: E402
+    is_langsmith_tracing_opted_in,
+    tracing_disabled_unless_opted_in,
+)
 from agent.utils.response_formatter import (  # noqa: E402
     finalize_worker_response,
     infer_response_language,
@@ -282,37 +290,38 @@ def run_transport_verification(
     include_multiagent: bool = False,
 ) -> List[TransportAuditRecord]:
     """Runs the transport verification harness across the selected execution paths."""
-    agent = TransportAgent()
-    records: List[TransportAuditRecord] = []
+    with tracing_disabled_unless_opted_in("LISBOA_ENABLE_CLI_LANGSMITH"):
+        agent = TransportAgent()
+        records: List[TransportAuditRecord] = []
 
-    for item in queries:
-        language = infer_response_language(user_query=item.query, default="en")
-        reference = build_reference_result(agent, item.query)
-        reference_output = str(reference.get("final_output", ""))
+        for item in queries:
+            language = infer_response_language(user_query=item.query, default="en")
+            reference = build_reference_result(agent, item.query)
+            reference_output = str(reference.get("final_output", ""))
 
-        invoke_result = _attach_similarity(reference_output, run_transport_invoke(agent, item.query))
-        subgraph_result = _attach_similarity(reference_output, run_transport_subgraph(agent, item.query))
-        multiagent_result = None
-        if include_multiagent:
-            multiagent_result = _attach_similarity(reference_output, run_multiagent_chat(item.query))
+            invoke_result = _attach_similarity(reference_output, run_transport_invoke(agent, item.query))
+            subgraph_result = _attach_similarity(reference_output, run_transport_subgraph(agent, item.query))
+            multiagent_result = None
+            if include_multiagent:
+                multiagent_result = _attach_similarity(reference_output, run_multiagent_chat(item.query))
 
-        records.append(
-            TransportAuditRecord(
-                category=item.category,
-                query=item.query,
-                language=language,
-                expected_path=item.expected_path,
-                reference_kind=str(reference.get("kind", "none")),
-                reference_path=reference.get("path"),
-                reference_args=reference.get("args"),
-                reference_output=reference_output,
-                invoke=invoke_result,
-                subgraph=subgraph_result,
-                multiagent=multiagent_result,
+            records.append(
+                TransportAuditRecord(
+                    category=item.category,
+                    query=item.query,
+                    language=language,
+                    expected_path=item.expected_path,
+                    reference_kind=str(reference.get("kind", "none")),
+                    reference_path=reference.get("path"),
+                    reference_args=reference.get("args"),
+                    reference_output=reference_output,
+                    invoke=invoke_result,
+                    subgraph=subgraph_result,
+                    multiagent=multiagent_result,
+                )
             )
-        )
 
-    return records
+        return records
 
 
 run_transport_audit = run_transport_verification
@@ -484,7 +493,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output-dir",
-        default=str(PROJECT_ROOT / "tests" / "results" / "transport_verification"),
+        default=str(PROJECT_ROOT / "eval" / "results" / "transport_verification"),
         help="Directory where JSON and Markdown verification reports will be stored.",
     )
     return parser.parse_args()
@@ -493,6 +502,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     """Runs the transport verification harness from the command line."""
     args = parse_args()
+    if not is_langsmith_tracing_opted_in("LISBOA_ENABLE_CLI_LANGSMITH"):
+        print("[LangSmith] CLI tracing disabled by default. Set LISBOA_ENABLE_CLI_LANGSMITH=true to opt in.")
+
     queries = list(DEFAULT_AUDIT_QUERIES)
     if args.limit and args.limit > 0:
         queries = queries[: args.limit]

@@ -110,6 +110,7 @@ TRANSLATIONS = {
         "ex_query_food": "Find traditional Portuguese cuisine in Alfama.",
         "ex_query_planning": "Plan a 2-day walking tour for architecture lovers.",
         "error_generic": "Service temporarily unavailable. Please try again later.",
+        "history_window_notice": "Showing the last {count} messages to keep the interface responsive. The full conversation is still kept for the assistant.",
         "thinking": "Analyzing live city data...",
         "footer_version": "LISBOA System",
         "footer_made": "André Filipe Gomes Silvestre • NOVA IMS",
@@ -218,6 +219,7 @@ NOVA IMS - Universidade NOVA de Lisboa
         "ex_query_food": "Onde posso comer pratos tradicionais em Alfama?",
         "ex_query_planning": "Planeia 2 dias a pé para amantes de arquitetura.",
         "error_generic": "Serviço temporariamente indisponível. Tente novamente mais tarde.",
+        "history_window_notice": "A mostrar apenas as últimas {count} mensagens para manter a interface fluida. A conversa completa continua disponível para o assistente.",
         "thinking": "A processar dados urbanos...",
         "footer_version": "Sistema LISBOA",
         "footer_made": "André Filipe Gomes Silvestre • NOVA IMS",
@@ -328,8 +330,9 @@ h1, h2, h3, h4, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {{
 
 /* Container width & layout */
 .main .block-container {{
-    max-width: 1000px;
-    padding: 1.5rem;
+    max-width: none;
+    width: 100%;
+    padding: 1.5rem 2.25rem 2rem 2.25rem;
 }}
 
 /* Hide standard Streamlit header & footer for production */
@@ -456,44 +459,6 @@ button[kind="secondary"]:hover {{
 [data-testid="stChatInput"] > div:focus-within {{
     border-color: var(--primary-red) !important;
     box-shadow: 0 0 0 4px rgba(255, 64, 17, 0.1) !important;
-}}
-
-/* Chat Messages */
-[data-testid="stChatMessage"] {{
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    padding: 0 !important;
-    margin-bottom: 1rem !important;
-    gap: 0.85rem !important;
-    align-items: flex-start !important;
-}}
-
-[data-testid="stChatMessageContent"],
-[data-testid="stChatMessage"] > div:last-child {{
-    max-width: 940px;
-    width: 100%;
-    padding: 1.1rem 1.25rem !important;
-    border-radius: 18px !important;
-    border: 1px solid rgba(15, 23, 42, 0.08);
-    box-shadow: var(--shadow-sm);
-}}
-
-/* User Message */
-[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) [data-testid="stChatMessageContent"],
-[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) > div:last-child {{
-    background: linear-gradient(120deg, #fffcf0 0%, #f6da0011 100%) !important;
-    border-left: 5px solid var(--primary-yellow) !important;
-    max-width: 760px;
-    margin-left: auto !important;
-}}
-
-/* AI Message */
-[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) [data-testid="stChatMessageContent"],
-[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) > div:last-child {{
-    background: #ffffff !important;
-    border-left: 5px solid var(--primary-red) !important;
-    margin-right: auto !important;
 }}
 
 /* Chat text spacing */
@@ -1497,6 +1462,15 @@ def handle_chat_stream(text: str):
                 time.sleep(0.02)
 
 
+def render_assistant_markdown(text: str) -> str:
+    """Render assistant markdown progressively using Streamlit's native chat streaming."""
+    if not text:
+        st.markdown("")
+        return ""
+    rendered = st.write_stream(handle_chat_stream(text))
+    return rendered if isinstance(rendered, str) else text
+
+
 def clean_response_for_display(text: str) -> str:
     """Remove obvious citation artefacts before rendering the final response."""
     cleaned = re.sub(r"【.*?】", "", text or "")
@@ -1574,9 +1548,9 @@ def run_interaction(user_input: str):
                 )
 
             sanitized = clean_response_for_display(resp)
-            st.markdown(sanitized)
+            rendered_response = render_assistant_markdown(sanitized)
             st.session_state.messages.append(
-                {"role": "assistant", "content": sanitized}
+                {"role": "assistant", "content": rendered_response}
             )
 
         except Exception as error:
@@ -1722,7 +1696,6 @@ def main():
                 st.error(error or t("initialization_failed"))
                 return
         run_interaction(req)
-        st.rerun()
 
     if not st.session_state.initialized:
         credentials_ready, _ = provider_has_required_credentials(selected_provider)

@@ -36,6 +36,7 @@ _PLACEHOLDER_TOKENS = (
     "replace_me",
 )
 _DEFAULT_LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
+_DEFAULT_NONINTERACTIVE_TRACING_OPT_IN_ENV = "LISBOA_ENABLE_CLI_LANGSMITH"
 _TRUTHY_VALUES = {"1", "true", "yes", "on"}
 
 
@@ -335,6 +336,146 @@ def get_langsmith_project_name(
     )
 
 
+def get_langsmith_scoped_project_name(
+    scope_label: str,
+    *,
+    env_name: Optional[str] = None,
+    env: Optional[MutableMapping[str, str]] = None,
+) -> str:
+    """Return a dedicated LangSmith project name for a non-chat workload.
+
+    Args:
+        scope_label: Human-friendly scope label such as ``Benchmark`` or
+            ``Ablation``.
+        env_name: Optional environment variable that explicitly overrides the
+            derived project name.
+        env: Optional environment mapping for tests or dependency injection.
+
+    Returns:
+        str: A project name distinct from the base interactive project.
+    """
+    runtime_env = env if env is not None else os.environ
+    env_names = [env_name] if env_name else []
+    explicit_project = _get_env_value(runtime_env, *env_names)
+    if explicit_project:
+        return explicit_project
+
+    base_project = (
+        _get_env_value(runtime_env, "LANGSMITH_PROJECT", "LANGCHAIN_PROJECT")
+        or "default"
+    )
+    normalized_scope = str(scope_label or "").strip()
+    if not normalized_scope:
+        return base_project
+
+    if base_project == "default":
+        return f"LISBOA {normalized_scope}"
+
+    normalized_base = base_project.strip()
+    lowered_base = normalized_base.lower()
+    lowered_scope = normalized_scope.lower()
+    if lowered_base == lowered_scope or lowered_base.endswith(f"- {lowered_scope}"):
+        return normalized_base
+
+    return f"{normalized_base} - {normalized_scope}"
+
+
+def is_langsmith_tracing_opted_in(
+    *names: str,
+    env: Optional[MutableMapping[str, str]] = None,
+    default: bool = False,
+) -> bool:
+    """Return whether tracing was explicitly opted into for a non-interactive workload.
+
+    Args:
+        *names: Optional environment-variable names to check.
+        env: Optional environment mapping for tests or dependency injection.
+        default: Default value when none of the environment variables are set.
+
+    Returns:
+        bool: ``True`` only when one of the opt-in flags is truthy.
+    """
+    runtime_env = env if env is not None else os.environ
+    env_names = names or (_DEFAULT_NONINTERACTIVE_TRACING_OPT_IN_ENV,)
+    return _env_flag(runtime_env, *env_names, default=default)
+
+
+@contextmanager
+def tracing_disabled_unless_opted_in(
+    *enable_env_names: str,
+    env: Optional[MutableMapping[str, str]] = None,
+    default: bool = False,
+):
+    """Disable LangSmith tracing unless a specific opt-in environment flag is set.
+
+    This is intended for offline or low-signal workloads such as tests,
+    benchmarks, and verification harnesses. Interactive app traffic can keep
+    using the normal tracing configuration, while these batch paths fail closed
+    unless the caller explicitly re-enables tracing.
+
+    Args:
+        *enable_env_names: Optional environment-variable names that re-enable
+            tracing for the wrapped scope.
+        env: Optional environment mapping for tests or dependency injection.
+        default: Default value when none of the environment variables are set.
+    """
+    runtime_env = env if env is not None else os.environ
+    if is_langsmith_tracing_opted_in(
+        *enable_env_names,
+        env=runtime_env,
+        default=default,
+    ):
+        yield
+        return
+
+    with tracing_context(enabled=False):
+        yield
+
+
+@contextmanager
+def tracing_project_override(
+    project_name: Optional[str],
+    *,
+    env: Optional[MutableMapping[str, str]] = None,
+):
+    """Temporarily route traces into a dedicated LangSmith project.
+
+    This is useful for keeping benchmark, ablation, and other offline studies
+    separate from the main interactive chat project while preserving the same
+    LangSmith workspace and credentials.
+
+    Args:
+        project_name: The project name to apply for the wrapped scope.
+        env: Optional environment mapping for tests or dependency injection.
+    """
+    normalized_project = str(project_name or "").strip()
+    if not normalized_project:
+        yield
+        return
+
+    runtime_env = env if env is not None else os.environ
+    had_langsmith_project = "LANGSMITH_PROJECT" in runtime_env
+    had_langchain_project = "LANGCHAIN_PROJECT" in runtime_env
+    previous_langsmith_project = runtime_env.get("LANGSMITH_PROJECT")
+    previous_langchain_project = runtime_env.get("LANGCHAIN_PROJECT")
+
+    runtime_env["LANGSMITH_PROJECT"] = normalized_project
+    runtime_env["LANGCHAIN_PROJECT"] = normalized_project
+    try:
+        with tracing_context(project_name=normalized_project):
+            yield
+    finally:
+        if had_langsmith_project and previous_langsmith_project is not None:
+            runtime_env["LANGSMITH_PROJECT"] = previous_langsmith_project
+        else:
+            runtime_env.pop("LANGSMITH_PROJECT", None)
+
+        if had_langchain_project and previous_langchain_project is not None:
+            runtime_env["LANGCHAIN_PROJECT"] = previous_langchain_project
+        else:
+            runtime_env.pop("LANGCHAIN_PROJECT", None)
+
+
 def annotate_current_run(
     *,
     metadata: Optional[Dict[str, Any]] = None,
@@ -412,8 +553,12 @@ __all__ = [
     "get_current_run_tree",
     "get_langsmith_display_state",
     "get_langsmith_project_name",
+    "get_langsmith_scoped_project_name",
     "get_langsmith_tracing_status",
+    "is_langsmith_tracing_opted_in",
     "resolve_langsmith_tracing_status",
     "traceable",
+    "tracing_disabled_unless_opted_in",
+    "tracing_project_override",
     "tracing_context",
 ]

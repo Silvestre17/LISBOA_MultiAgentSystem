@@ -10,13 +10,49 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+import pytest
+
+_TRUTHY_VALUES = {"1", "true", "yes", "on"}
+_ENABLE_TEST_LANGSMITH = (
+    os.getenv("LISBOA_ENABLE_TEST_LANGSMITH", "").strip().lower()
+    in _TRUTHY_VALUES
+)
+
+if not _ENABLE_TEST_LANGSMITH:
+    os.environ["LANGSMITH_TRACING"] = "false"
+    os.environ["LANGCHAIN_TRACING_V2"] = "false"
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 _ALLOWED_TEST_ROOTS = (
     PROJECT_ROOT / "tests",
     PROJECT_ROOT / "eval" / "tests",
 )
+
+
+def pytest_addoption(parser) -> None:  # type: ignore[no-untyped-def]
+    """Register opt-in flags for expensive integration suites."""
+    parser.addoption(
+        "--run-live",
+        action="store_true",
+        default=False,
+        help="Run tests marked as live and allowed to hit external services.",
+    )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _disable_langsmith_tracing_for_pytest() -> None:  # type: ignore[no-untyped-def]
+    """Disable LangSmith tracing across pytest unless explicitly re-enabled."""
+    if _ENABLE_TEST_LANGSMITH:
+        yield    # type: ignore[unreachable]
+        return
+
+    from agent.utils.langsmith_tracing import tracing_context
+
+    with tracing_context(enabled=False):
+        yield    # type: ignore[unreachable]
 
 
 def _is_same_or_relative_to(path: Path, candidate_root: Path) -> bool:
@@ -52,3 +88,14 @@ def pytest_ignore_collect(collection_path, config) -> bool:  # type: ignore[no-u
         or _is_same_or_ancestor_of(path, allowed_root)
         for allowed_root in _ALLOWED_TEST_ROOTS
     )
+
+
+def pytest_collection_modifyitems(config, items) -> None:  # type: ignore[no-untyped-def]
+    """Skip live tests unless the user explicitly opts in."""
+    if config.getoption("--run-live"):
+        return
+
+    skip_live = pytest.mark.skip(reason="Live test skipped. Re-run with --run-live to exercise external services.")
+    for item in items:
+        if "live" in item.keywords:
+            item.add_marker(skip_live)

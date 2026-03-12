@@ -199,7 +199,7 @@ The companion evaluation guide also documents optional coverage and calibration 
 
 | Layer | Purpose | Main entrypoints | Output location |
 |------|---------|------------------|-----------------|
-| Fast deterministic checks | validate datasets, utilities, validators, and judge helpers | `eval/tests/`, `tests/test_tool_coverage_manifest.py` | test output only |
+| Fast deterministic checks | validate datasets, utilities, validators, judge helpers, and the coverage manifest | `eval/tests/`, especially `eval/tests/test_dataset_integrity.py` | test output only |
 | Benchmark | evaluate isolated worker agents | `eval/run_benchmark.py` | `eval/results/benchmark/` |
 | Ablation | compare zero-shot vs LISBOA pipeline | `eval/run_ablation.py` | `eval/results/ablation/` |
 | Strict live coverage | verify real use of the exported tool registry | `tests/test_tool_prompt_coverage.py` | `eval/results/coverage/` |
@@ -337,9 +337,10 @@ More operational detail is available in [`docs/05_DEPLOYMENT_AND_OPERATIONS.md`]
 ### Fast Validation
 
 ```bash
-python tests/syntax_check.py
-python -m pytest eval/tests/test_benchmark_utils.py eval/tests/test_cost_accounting.py eval/tests/test_llm_judge.py eval/tests/test_validators.py -v
-python -m pytest tests/test_qa_agent.py tests/test_qa_integration.py tests/test_prompts.py tests/test_lisbon_transport.py -s -W "error::langgraph.warnings.LangGraphDeprecatedSinceV10"
+python scripts/syntax_check.py
+python -m pytest eval/tests/test_dataset_integrity.py eval/tests/test_benchmark_utils.py eval/tests/test_cost_accounting.py eval/tests/test_llm_judge.py eval/tests/test_validators.py -v
+python -m pytest tests/test_qa_agent.py tests/test_audit_fixes.py tests/test_response_guardrails.py tests/test_transport_parity_and_rendering.py tests/test_langsmith_tracing.py tests/test_metro_api_fallback_messaging.py -q
+python scripts/run_prompts.py --suite smoke
 ```
 
 ### Main Evaluation Commands
@@ -350,7 +351,7 @@ python eval/run_benchmark.py --mode full
 python eval/run_benchmark.py --limit 5
 python eval/run_ablation.py --mode run_test
 python eval/run_ablation.py --mode full
-python -m pytest tests/test_tool_prompt_coverage.py -m "live and coverage" -v
+python -m pytest tests/test_tool_prompt_coverage.py --run-live -m "live and coverage" -v
 ```
 
 ### Artefact Locations

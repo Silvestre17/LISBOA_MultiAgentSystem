@@ -126,30 +126,30 @@ def geocode_location(
     place_name: str,
 ) -> Tuple[Optional[float], Optional[float], Optional[str]]:
     """
-    Geocode a place name to GPS coordinates using Nominatim (OpenStreetMap).
+    Geocodes a place name using the shared Lisbon/AML resolver.
 
     Args:
-        place_name: Place name to geocode (e.g., "Rossio, Lisboa")
+        place_name: Place name to geocode.
 
     Returns:
-        Tuple of (latitude, longitude, display_name) or (None, None, None) on error
+        Tuple of (latitude, longitude, display_name) or (None, None, None) on error.
     """
     try:
-        params = {
-            "q": f"{place_name}, Lisboa, Portugal",
-            "format": "json",
-            "limit": 1,
-            "addressdetails": 1,
-        }
-        headers = {"User-Agent": "LisbonUrbanAssistant/1.0 (Thesis Project)"}
-        resp = requests.get(NOMINATIM_URL, params=params, headers=headers, timeout=10)
+        from tools.location_resolver import geocode_location_name
+    except ImportError:
+        from location_resolver import geocode_location_name
 
-        if resp.status_code == 200 and resp.json():
-            data = resp.json()[0]
+    try:
+        geocoded = geocode_location_name(
+            place_name,
+            prefer_city=True,
+            allow_aml=True,
+        )
+        if geocoded:
             return (
-                float(data["lat"]),
-                float(data["lon"]),
-                data.get("display_name", place_name),
+                geocoded["lat"],
+                geocoded["lon"],
+                geocoded["display_name"],
             )
     except Exception as e:
         logger.warning(f"Geocoding failed for '{place_name}': {e}")

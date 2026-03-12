@@ -7,7 +7,7 @@ This script is intentionally lightweight and complements, rather than replaces,
 the fuller pytest suites.
 
 Run from the repository root with a relative path:
-        python tests/syntax_check.py
+        python scripts/syntax_check.py
 
 Notes:
         - This script takes no custom parameters.

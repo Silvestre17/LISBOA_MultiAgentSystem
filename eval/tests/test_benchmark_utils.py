@@ -27,8 +27,16 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 import pytest
 
+import eval.run_ablation as ablation_module
 import eval.run_benchmark as benchmark_module
-from eval.run_benchmark import SLA_THRESHOLDS, _build_summary, compute_tool_metrics
+from config import Config
+from eval.run_benchmark import (
+    SLA_THRESHOLDS,
+    _build_summary,
+    compute_tool_metrics,
+    parse_response_model_spec,
+    resolve_response_models,
+)
 
 # ==========================================================================
 # Tests for compute_tool_metrics()
@@ -183,6 +191,83 @@ class TestSLAThresholds:
     def test_transport_sla_greater_than_weather(self):
         """Transport (28 tools) inherently takes longer than weather (4 tools)."""
         assert SLA_THRESHOLDS["transport"] >= SLA_THRESHOLDS["weather"]
+
+
+class TestBenchmarkModelSelection:
+    """Validate CLI-friendly benchmark model selection helpers."""
+
+    def test_parse_response_model_spec_accepts_double_colon(self):
+        """The preferred provider::model format should parse cleanly."""
+        parsed = parse_response_model_spec("azure::gpt-5-mini", temperature=0.25)
+
+        assert parsed == {
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 0.25,
+        }
+
+    def test_parse_response_model_spec_accepts_single_colon(self):
+        """A single-colon shorthand should remain supported for convenience."""
+        parsed = parse_response_model_spec("openai:gpt-5-nano")
+
+        assert parsed == {
+            "provider": "openai",
+            "model": "gpt-5-nano",
+            "temperature": 0.0,
+        }
+
+    def test_parse_response_model_spec_rejects_invalid_format(self):
+        """Malformed model specs should fail loudly instead of silently guessing."""
+        with pytest.raises(ValueError, match="provider::model|provider:model"):
+            parse_response_model_spec("gpt-5-mini")
+
+    def test_resolve_response_models_returns_deepcopied_defaults(self):
+        """Default benchmark matrix should be copied so CLI overrides do not mutate module constants."""
+        resolved = resolve_response_models()
+
+        assert resolved == benchmark_module.MODELS_TO_TEST
+        assert resolved is not benchmark_module.MODELS_TO_TEST
+
+    def test_resolve_response_models_deduplicates_custom_specs(self):
+        """Repeated model specs should collapse to one effective benchmark entry."""
+        resolved = resolve_response_models(
+            ["azure::gpt-5-mini", "azure::gpt-5-mini", "openai:gpt-5-nano"],
+            temperature=0.1,
+        )
+
+        assert resolved == [
+            {"provider": "azure", "model": "gpt-5-mini", "temperature": 0.1},
+            {"provider": "openai", "model": "gpt-5-nano", "temperature": 0.1},
+        ]
+
+
+class TestAblationProviderOverrides:
+    """Validate temporary provider overrides used by the ablation runner."""
+
+    def test_normalize_model_provider_accepts_supported_values(self):
+        """Supported providers should normalize to lowercase strings."""
+        assert ablation_module.normalize_model_provider("Azure") == "azure"
+        assert ablation_module.normalize_model_provider("openai") == "openai"
+        assert ablation_module.normalize_model_provider(None) is None
+
+    def test_normalize_model_provider_rejects_unknown_values(self):
+        """Unknown providers should fail fast."""
+        with pytest.raises(ValueError, match="Unsupported provider"):
+            ablation_module.normalize_model_provider("anthropic")
+
+    def test_temporary_lisboa_provider_restores_original_config(self):
+        """The ablation runner must not leave global provider selection mutated after the run."""
+        original_provider = Config.MODEL_PROVIDER
+        Config.MODEL_PROVIDER = "azure"
+
+        try:
+            with ablation_module.temporary_lisboa_provider("openai") as active_provider:
+                assert active_provider == "openai"
+                assert Config.MODEL_PROVIDER == "openai"
+
+            assert Config.MODEL_PROVIDER == "azure"
+        finally:
+            Config.MODEL_PROVIDER = original_provider
 
 
 class TestBenchmarkSummaryCostAccounting:

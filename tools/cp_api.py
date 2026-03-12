@@ -23,6 +23,7 @@ import logging
 import os
 import sqlite3
 import time
+import unicodedata
 import zipfile
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -171,7 +172,15 @@ def get_cp_station_info(station_name: str) -> Optional[Dict[str, Any]]:
     Returns:
         Station information or None if not found.
     """
-    station_lower = station_name.lower().strip()
+    def normalize_station(text: str) -> str:
+        normalized = unicodedata.normalize("NFKD", text or "")
+        normalized = "".join(
+            char for char in normalized if not unicodedata.combining(char)
+        )
+        normalized = normalized.lower().strip()
+        return normalized
+
+    station_lower = normalize_station(station_name)
     
     # Try direct match first
     if station_lower in CP_KEY_STATIONS:
@@ -179,11 +188,30 @@ def get_cp_station_info(station_name: str) -> Optional[Dict[str, Any]]:
     
     # Try partial match
     for key, info in CP_KEY_STATIONS.items():
-        if station_lower in info['name'].lower() or info['name'].lower() in station_lower:
+        info_name = normalize_station(info['name'])
+        normalized_key = normalize_station(key)
+        if station_lower in info_name or info_name in station_lower:
             return info
-        # Also check without accents
-        if station_lower.replace('ó', 'o').replace('ã', 'a') in key:
+        if station_lower in normalized_key or normalized_key in station_lower:
             return info
+
+    aml_stations = load_cp_aml_stations()
+    for station in aml_stations.values():
+        candidate_name = str(station.get("name") or "").strip()
+        normalized_candidate = normalize_station(candidate_name)
+        if not normalized_candidate:
+            continue
+        if (
+            station_lower == normalized_candidate
+            or station_lower in normalized_candidate
+            or normalized_candidate in station_lower
+        ):
+            return {
+                "name": candidate_name,
+                "lines": list(station.get("railways", [])),
+                "lat": station.get("lat"),
+                "lon": station.get("lon"),
+            }
     
     return None
 

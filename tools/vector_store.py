@@ -37,7 +37,7 @@ import os
 import signal
 import sys
 
-# 🚀 CRITICAL: Force unbuffered output immediately to debug GitHub Actions hangs
+# CRITICAL: Force unbuffered output immediately to debug GitHub Actions hangs
 sys.stdout.reconfigure(line_buffering=True)
 
 # Set environment variables BEFORE any heavy imports

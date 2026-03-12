@@ -24,16 +24,21 @@ import logging
 import math
 import os
 import re
+import socket
+import ssl
 import tempfile
 import time
 import unicodedata
 import warnings
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 import certifi
 import requests
 import urllib3
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.x509.oid import AuthorityInformationAccessOID, ExtensionOID
 from langchain_core.tools import tool
 
 try:
@@ -66,12 +71,15 @@ METRO_CONSUMER_KEY = os.getenv("METRO_CONSUMER_KEY", "")
 METRO_CONSUMER_SECRET = os.getenv("METRO_CONSUMER_SECRET", "")
 METRO_CA_BUNDLE = os.getenv("METRO_CA_BUNDLE", "").strip()
 _METRO_SSL_VERIFY_RAW = os.getenv("METRO_SSL_VERIFY", "").strip().lower()
+_METRO_SSL_ALLOW_INSECURE_FALLBACK = (
+    os.getenv("METRO_SSL_ALLOW_INSECURE_FALLBACK", "").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
 _METRO_INSECURE_WARNING_PATTERN = (
     r"Unverified HTTPS request is being made to host 'api\.metrolisboa\.pt'.*"
 )
-DEFAULT_METRO_INTERMEDIATE_PEM = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "certs", "metro_sectigo_intermediate.pem")
-)
+METRO_API_HOST = "api.metrolisboa.pt"
+METRO_API_PORT = 8243
 
 # Metro de Lisboa - Fallback (unofficial, no auth required)
 METRO_STATUS_URL = "https://app.metrolisboa.pt/status/getLinhas.php"
@@ -91,6 +99,7 @@ _metro_token_expiry: Optional[datetime] = None
 _metro_stations_cache: Optional[List[Dict[str, Any]]] = None
 _metro_stations_last_load: Optional[datetime] = None
 _metro_runtime_ca_bundle: Optional[str] = None
+_metro_runtime_ca_bundle_leaf_fingerprint: Optional[str] = None
 _metro_runtime_state: Dict[str, Optional[str]] = {
     "token_status": "unknown",
     "token_error": None,
@@ -455,17 +464,257 @@ LISBON_LANDMARKS = {
         "alternative": "Tram 28E crosses Alfama",
         "description": "Lisbon's oldest historic neighborhood",
     },
+    "jardim da estrela": {
+        "name": "Jardim da Estrela",
+        "short_name": "Jardim da Estrela",
+        "display_name": "Jardim da Estrela",
+        "metro": "rato",
+        "line": "amarela",
+        "description": "Historic garden in Estrela, near the Basilica and Campo de Ourique",
+        "walking_hint_pt": "ao jardim",
+        "walking_hint_en": "to the garden",
+        "metro_walk_minutes": 9,
+        "train_station": "Santos",
+        "train_walk_minutes": 12,
+    },
+    "biblioteca nacional": {
+        "name": "Biblioteca Nacional de Portugal",
+        "short_name": "Biblioteca Nacional",
+        "display_name": "Biblioteca Nacional de Portugal",
+        "metro": "entre campos",
+        "line": "amarela",
+        "description": "Portugal's national library in the Campo Grande university area",
+        "walking_hint_pt": "à biblioteca",
+        "walking_hint_en": "to the library",
+        "metro_walk_minutes": 6,
+        "train_station": "Entrecampos",
+        "train_walk_minutes": 9,
+    },
+    "biblioteca nacional de portugal": {
+        "name": "Biblioteca Nacional de Portugal",
+        "short_name": "Biblioteca Nacional",
+        "display_name": "Biblioteca Nacional de Portugal",
+        "metro": "entre campos",
+        "line": "amarela",
+        "description": "Portugal's national library in the Campo Grande university area",
+        "walking_hint_pt": "à biblioteca",
+        "walking_hint_en": "to the library",
+        "metro_walk_minutes": 6,
+        "train_station": "Entrecampos",
+        "train_walk_minutes": 9,
+    },
+    "faculdade de ciências": {
+        "name": "Faculdade de Ciências da Universidade de Lisboa (FCUL)",
+        "short_name": "Faculdade de Ciências",
+        "display_name": "Faculdade de Ciências da Universidade de Lisboa (FCUL)",
+        "metro": "campo grande",
+        "line": "amarela/verde",
+        "description": "Science faculty of the University of Lisbon in Campo Grande",
+        "walking_hint_pt": "à faculdade",
+        "walking_hint_en": "to the faculty",
+        "metro_walk_minutes": 4,
+    },
+    "faculdade de ciencias": {
+        "name": "Faculdade de Ciências da Universidade de Lisboa (FCUL)",
+        "short_name": "Faculdade de Ciências",
+        "display_name": "Faculdade de Ciências da Universidade de Lisboa (FCUL)",
+        "metro": "campo grande",
+        "line": "amarela/verde",
+        "description": "Science faculty of the University of Lisbon in Campo Grande",
+        "walking_hint_pt": "à faculdade",
+        "walking_hint_en": "to the faculty",
+        "metro_walk_minutes": 4,
+    },
+    "faculdade de ciências da universidade de lisboa": {
+        "name": "Faculdade de Ciências da Universidade de Lisboa (FCUL)",
+        "short_name": "Faculdade de Ciências",
+        "display_name": "Faculdade de Ciências da Universidade de Lisboa (FCUL)",
+        "metro": "campo grande",
+        "line": "amarela/verde",
+        "description": "Science faculty of the University of Lisbon in Campo Grande",
+        "walking_hint_pt": "à faculdade",
+        "walking_hint_en": "to the faculty",
+        "metro_walk_minutes": 4,
+    },
+    "faculdade de ciencias da universidade de lisboa": {
+        "name": "Faculdade de Ciências da Universidade de Lisboa (FCUL)",
+        "short_name": "Faculdade de Ciências",
+        "display_name": "Faculdade de Ciências da Universidade de Lisboa (FCUL)",
+        "metro": "campo grande",
+        "line": "amarela/verde",
+        "description": "Science faculty of the University of Lisbon in Campo Grande",
+        "walking_hint_pt": "à faculdade",
+        "walking_hint_en": "to the faculty",
+        "metro_walk_minutes": 4,
+    },
+    "fcul": {
+        "name": "Faculdade de Ciências da Universidade de Lisboa (FCUL)",
+        "short_name": "FCUL",
+        "display_name": "Faculdade de Ciências da Universidade de Lisboa (FCUL)",
+        "metro": "campo grande",
+        "line": "amarela/verde",
+        "description": "Science faculty of the University of Lisbon in Campo Grande",
+        "walking_hint_pt": "à faculdade",
+        "walking_hint_en": "to the faculty",
+        "metro_walk_minutes": 4,
+    },
+    "campo de ourique": {
+        "name": "Campo de Ourique",
+        "short_name": "Campo de Ourique",
+        "display_name": "Campo de Ourique",
+        "metro": "rato",
+        "line": "amarela",
+        "description": "Residential neighborhood west of Estrela and Amoreiras",
+        "walking_hint_pt": "ao bairro",
+        "walking_hint_en": "to the neighbourhood",
+        "metro_walk_minutes": 14,
+        "train_station": "Alcantara - Terra",
+        "train_walk_minutes": 12,
+    },
+    "ajuda": {
+        "name": "Ajuda",
+        "short_name": "Ajuda",
+        "display_name": "Ajuda",
+        "metro": None,
+        "alternative": "CP Train to Belém plus Carris connections uphill to Ajuda",
+        "description": "Historic hillside district near Ajuda Palace, Belém, and the university campus",
+        "train_station": "Belem",
+        "train_walk_minutes": 12,
+    },
+    "oeiras": {
+        "name": "Oeiras",
+        "short_name": "Oeiras",
+        "display_name": "Oeiras",
+        "metro": None,
+        "alternative": "CP Train via Oeiras on the Cascais Line",
+        "description": "Municipality west of Lisbon served directly by CP suburban trains",
+        "train_station": "Oeiras",
+        "train_walk_minutes": 3,
+    },
     "nova ims": {
-        "name": "NOVA IMS (Campus de Campolide)",
+        "name": "NOVA IMS - Information Management School",
+        "short_name": "NOVA IMS",
+        "display_name": "NOVA IMS - Information Management School",
         "metro": "são sebastião",
         "line": "azul/vermelha",
-        "description": "NOVA Information Management School",
+        "description": "Information Management School at Universidade NOVA de Lisboa's Campolide campus",
+        "walking_hint_pt": "ao campus de Campolide",
+        "walking_hint_en": "to the Campolide campus",
+        "metro_walk_minutes": 6,
+        "train_station": "Campolide",
+        "train_walk_minutes": 9,
     },
     "campus de campolide": {
-        "name": "Campus de Campolide (UNL)",
+        "name": "Campus de Campolide da Universidade NOVA de Lisboa",
+        "short_name": "Campus de Campolide",
+        "display_name": "Campus de Campolide da Universidade NOVA de Lisboa",
         "metro": "são sebastião",
         "line": "azul/vermelha",
-        "description": "Universidade NOVA de Lisboa Campus",
+        "description": "Main Universidade NOVA de Lisboa campus in Campolide",
+        "walking_hint_pt": "ao campus",
+        "walking_hint_en": "to the campus",
+        "metro_walk_minutes": 6,
+        "train_station": "Campolide",
+        "train_walk_minutes": 9,
+    },
+    "hospital santa maria": {
+        "name": "Hospital de Santa Maria",
+        "short_name": "Hospital Santa Maria",
+        "display_name": "Hospital de Santa Maria",
+        "metro": "cidade universitária",
+        "line": "amarela",
+        "description": "Major Lisbon central hospital near Cidade Universitária",
+        "walking_hint_pt": "ao hospital",
+        "walking_hint_en": "to the hospital",
+        "metro_walk_minutes": 8,
+    },
+    "instituto superior tecnico": {
+        "name": "Instituto Superior Técnico",
+        "short_name": "Instituto Superior Técnico",
+        "display_name": "Instituto Superior Técnico",
+        "metro": "alameda",
+        "line": "verde/vermelha",
+        "description": "Main Técnico campus near Alameda",
+        "walking_hint_pt": "ao campus",
+        "walking_hint_en": "to the campus",
+        "metro_walk_minutes": 6,
+    },
+    "ist": {
+        "name": "Instituto Superior Técnico",
+        "short_name": "Instituto Superior Técnico",
+        "display_name": "Instituto Superior Técnico",
+        "metro": "alameda",
+        "line": "verde/vermelha",
+        "description": "Main Técnico campus near Alameda",
+        "walking_hint_pt": "ao campus",
+        "walking_hint_en": "to the campus",
+        "metro_walk_minutes": 6,
+    },
+    "estádio da luz": {
+        "name": "Estádio da Luz",
+        "short_name": "Estádio da Luz",
+        "display_name": "Estádio da Luz",
+        "metro": "colégio militar/luz",
+        "line": "azul",
+        "description": "Sport Lisboa e Benfica stadium",
+        "walking_hint_pt": "ao estádio",
+        "walking_hint_en": "to the stadium",
+        "metro_walk_minutes": 5,
+    },
+    "estadio da luz": {
+        "name": "Estádio da Luz",
+        "short_name": "Estádio da Luz",
+        "display_name": "Estádio da Luz",
+        "metro": "colégio militar/luz",
+        "line": "azul",
+        "description": "Sport Lisboa e Benfica stadium",
+        "walking_hint_pt": "ao estádio",
+        "walking_hint_en": "to the stadium",
+        "metro_walk_minutes": 5,
+    },
+    "estádio josé alvalade": {
+        "name": "Estádio José Alvalade",
+        "short_name": "Estádio José Alvalade",
+        "display_name": "Estádio José Alvalade",
+        "metro": "campo grande",
+        "line": "amarela/verde",
+        "description": "Sporting Clube de Portugal stadium",
+        "walking_hint_pt": "ao estádio",
+        "walking_hint_en": "to the stadium",
+        "metro_walk_minutes": 6,
+    },
+    "estadio jose alvalade": {
+        "name": "Estádio José Alvalade",
+        "short_name": "Estádio José Alvalade",
+        "display_name": "Estádio José Alvalade",
+        "metro": "campo grande",
+        "line": "amarela/verde",
+        "description": "Sporting Clube de Portugal stadium",
+        "walking_hint_pt": "ao estádio",
+        "walking_hint_en": "to the stadium",
+        "metro_walk_minutes": 6,
+    },
+    "meo arena": {
+        "name": "MEO Arena",
+        "short_name": "MEO Arena",
+        "display_name": "MEO Arena",
+        "metro": "oriente",
+        "line": "vermelha",
+        "description": "Major arena at Parque das Nações",
+        "walking_hint_pt": "à arena",
+        "walking_hint_en": "to the arena",
+        "metro_walk_minutes": 7,
+    },
+    "altice arena": {
+        "name": "Altice Arena",
+        "short_name": "Altice Arena",
+        "display_name": "Altice Arena",
+        "metro": "oriente",
+        "line": "vermelha",
+        "description": "Major arena at Parque das Nações",
+        "walking_hint_pt": "à arena",
+        "walking_hint_en": "to the arena",
+        "metro_walk_minutes": 7,
     },
 }
 
@@ -483,47 +732,160 @@ def _is_cache_valid(last_load: Optional[datetime]) -> bool:
     return hours_elapsed < CACHE_EXPIRATION_HOURS
 
 
-def _build_runtime_metro_ca_bundle() -> Optional[str]:
-    """Build a runtime CA bundle with certifi roots plus Metro's missing intermediate.
-
-    The Metro API currently omits the Sectigo intermediate certificate from the
-    server-side chain. Merging the missing intermediate into the standard
-    certifi trust store enables full TLS verification without disabling SSL.
-    """
-    global _metro_runtime_ca_bundle
-
-    if _metro_runtime_ca_bundle and os.path.isfile(_metro_runtime_ca_bundle):
-        return _metro_runtime_ca_bundle
-
-    if not os.path.isfile(DEFAULT_METRO_INTERMEDIATE_PEM):
+def _load_x509_certificate_from_bytes(certificate_bytes: bytes) -> Optional[x509.Certificate]:
+    """Loads a PEM or DER X.509 certificate from raw bytes."""
+    if not certificate_bytes:
         return None
 
     try:
-        certifi_bundle_path = certifi.where()
-        bundle_path = os.path.join(tempfile.gettempdir(), "lisboa_metro_ca_bundle.pem")
+        return x509.load_pem_x509_certificate(certificate_bytes)
+    except ValueError:
+        try:
+            return x509.load_der_x509_certificate(certificate_bytes)
+        except ValueError:
+            return None
 
-        with open(certifi_bundle_path, "r", encoding="utf-8") as file:
+
+def _fetch_metro_leaf_certificate() -> Optional[x509.Certificate]:
+    """Fetches the Metro API leaf certificate without relying on CA validation.
+
+    This is used only to inspect the Authority Information Access extension so
+    the missing intermediate certificates can be completed dynamically.
+    """
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+
+    with socket.create_connection((METRO_API_HOST, METRO_API_PORT), timeout=REQUEST_TIMEOUT) as sock:
+        with context.wrap_socket(sock, server_hostname=METRO_API_HOST) as secure_socket:
+            certificate_der = secure_socket.getpeercert(binary_form=True)
+
+    if not certificate_der:
+        return None
+
+    return x509.load_der_x509_certificate(certificate_der)
+
+
+def _extract_ca_issuer_urls(certificate: Optional[x509.Certificate]) -> List[str]:
+    """Returns CA issuer URLs from the certificate AIA extension."""
+    if certificate is None:
+        return []
+
+    try:
+        access_descriptions = cast(
+            Any,
+            certificate.extensions.get_extension_for_oid(
+                ExtensionOID.AUTHORITY_INFORMATION_ACCESS
+            ).value,
+        )
+    except Exception:
+        return []
+
+    issuer_urls: List[str] = []
+    for description in access_descriptions:
+        if description.access_method != AuthorityInformationAccessOID.CA_ISSUERS:
+            continue
+        url = getattr(description.access_location, "value", "")
+        if isinstance(url, str) and url.startswith(("http://", "https://")):
+            issuer_urls.append(url)
+
+    return issuer_urls
+
+
+def _download_certificate_from_url(url: str) -> Optional[x509.Certificate]:
+    """Downloads an issuer certificate from an AIA URL."""
+    try:
+        response = requests.get(url, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        logger.info("Unable to download Metro issuer certificate from %s: %s", url, exc)
+        return None
+
+    return _load_x509_certificate_from_bytes(response.content)
+
+
+def _build_runtime_metro_ca_bundle(force_refresh: bool = False) -> Optional[str]:
+    """Builds a runtime CA bundle using certifi plus dynamically discovered issuers.
+
+    The Metro gateway currently serves an incomplete TLS chain. Instead of
+    pinning a repository PEM that can go stale, inspect the live leaf
+    certificate, follow its AIA issuer links, and cache the resulting bundle in
+    the system temp directory.
+    """
+    global _metro_runtime_ca_bundle, _metro_runtime_ca_bundle_leaf_fingerprint
+
+    try:
+        leaf_certificate = _fetch_metro_leaf_certificate()
+        if leaf_certificate is None:
+            return None
+
+        leaf_fingerprint = leaf_certificate.fingerprint(hashes.SHA256()).hex()[:16]
+        if (
+            not force_refresh
+            and _metro_runtime_ca_bundle
+            and _metro_runtime_ca_bundle_leaf_fingerprint == leaf_fingerprint
+            and os.path.isfile(_metro_runtime_ca_bundle)
+        ):
+            return _metro_runtime_ca_bundle
+
+        issuer_certificates: List[x509.Certificate] = []
+        seen_fingerprints = {leaf_certificate.fingerprint(hashes.SHA256()).hex()}
+        current_certificate = leaf_certificate
+
+        for _ in range(3):
+            next_certificate = None
+            for issuer_url in _extract_ca_issuer_urls(current_certificate):
+                candidate = _download_certificate_from_url(issuer_url)
+                if candidate is None:
+                    continue
+
+                candidate_fingerprint = candidate.fingerprint(hashes.SHA256()).hex()
+                if candidate_fingerprint in seen_fingerprints:
+                    continue
+                if candidate.subject != current_certificate.issuer:
+                    continue
+
+                seen_fingerprints.add(candidate_fingerprint)
+                issuer_certificates.append(candidate)
+                next_certificate = candidate
+                break
+
+            if next_certificate is None or next_certificate.issuer == next_certificate.subject:
+                break
+
+            current_certificate = next_certificate
+
+        if not issuer_certificates:
+            return None
+
+        bundle_path = os.path.join(
+            tempfile.gettempdir(),
+            f"lisboa_metro_ca_bundle_{leaf_fingerprint}.pem",
+        )
+
+        with open(certifi.where(), "r", encoding="utf-8") as file:
             certifi_bundle = file.read().rstrip()
 
-        with open(DEFAULT_METRO_INTERMEDIATE_PEM, "r", encoding="ascii") as file:
-            metro_intermediate = file.read().strip()
+        issuer_bundle = "\n".join(
+            cert.public_bytes(serialization.Encoding.PEM).decode("ascii").strip()
+            for cert in issuer_certificates
+        )
+        combined_bundle = f"{certifi_bundle}\n{issuer_bundle}\n"
 
-        combined_bundle = f"{certifi_bundle}\n{metro_intermediate}\n"
-
+        existing_bundle = None
         if os.path.isfile(bundle_path):
             with open(bundle_path, "r", encoding="utf-8") as file:
                 existing_bundle = file.read()
-        else:
-            existing_bundle = None
 
         if existing_bundle != combined_bundle:
             with open(bundle_path, "w", encoding="utf-8", newline="\n") as file:
                 file.write(combined_bundle)
 
         _metro_runtime_ca_bundle = bundle_path
+        _metro_runtime_ca_bundle_leaf_fingerprint = leaf_fingerprint
         return bundle_path
     except Exception as e:
-        logger.warning("Failed to build Metro CA bundle from certifi: %s", e)
+        logger.info("Unable to build dynamic Metro CA bundle: %s", e)
         return None
 
 
@@ -532,18 +894,18 @@ def _resolve_metro_ssl_verify() -> bool | str:
 
     Preferred secure path:
         - Set METRO_CA_BUNDLE to a PEM bundle for api.metrolisboa.pt
-        - Or set METRO_SSL_VERIFY=true if the system CA store is sufficient
-        - By default, use certifi + the bundled missing Sectigo intermediate
+        - Or set METRO_SSL_VERIFY=true to use the standard trust store only
+        - By default, use standard certificate verification and dynamically
+          complete any missing intermediate certificates when needed
 
-    Fallback behavior:
-        - Disable verification only for api.metrolisboa.pt because the API
-          currently fails certificate-chain validation in this environment.
+    Explicit insecure fallback:
+        - Set METRO_SSL_ALLOW_INSECURE_FALLBACK=true only as a last resort.
     """
     if METRO_CA_BUNDLE:
         if os.path.isfile(METRO_CA_BUNDLE):
             return METRO_CA_BUNDLE
         logger.warning(
-            "METRO_CA_BUNDLE does not exist: %s. Falling back to disabled SSL verification.",
+            "METRO_CA_BUNDLE does not exist: %s. Falling back to standard certificate verification.",
             METRO_CA_BUNDLE,
         )
 
@@ -552,30 +914,57 @@ def _resolve_metro_ssl_verify() -> bool | str:
     if _METRO_SSL_VERIFY_RAW in {"0", "false", "no"}:
         return False
 
-    runtime_bundle = _build_runtime_metro_ca_bundle()
-    if runtime_bundle:
-        return runtime_bundle
-
-    return False
+    return True
 
 
 METRO_SSL_VERIFY = _resolve_metro_ssl_verify()
 
 
 def _metro_request(method: str, url: str, **kwargs) -> requests.Response:
-    """Perform a Metro API request with narrow SSL warning handling."""
+    """Perform a Metro API request with narrow SSL warning handling.
+
+    If certificate verification fails against the Metro host, first try to
+    complete the missing issuer chain dynamically from the leaf certificate's
+    AIA metadata. Only retry insecurely when the caller explicitly opted into
+    METRO_SSL_ALLOW_INSECURE_FALLBACK.
+    """
     verify = kwargs.pop("verify", METRO_SSL_VERIFY)
 
-    if verify is False:
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore",
-                message=_METRO_INSECURE_WARNING_PATTERN,
-                category=urllib3.exceptions.InsecureRequestWarning,
-            )
-            return requests.request(method, url, verify=False, **kwargs)
+    def _perform_request(verify_mode: bool | str) -> requests.Response:
+        if verify_mode is False:
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=_METRO_INSECURE_WARNING_PATTERN,
+                    category=urllib3.exceptions.InsecureRequestWarning,
+                )
+                return requests.request(method, url, verify=False, **kwargs)
 
-    return requests.request(method, url, verify=verify, **kwargs)
+        return requests.request(method, url, verify=verify_mode, **kwargs)
+
+    try:
+        return _perform_request(verify)
+    except requests.exceptions.SSLError as exc:
+        if "api.metrolisboa.pt" not in url.lower():
+            raise
+
+        if verify is not False:
+            dynamic_bundle = _build_runtime_metro_ca_bundle(force_refresh=True)
+            if dynamic_bundle and dynamic_bundle != verify:
+                try:
+                    return _perform_request(dynamic_bundle)
+                except requests.exceptions.SSLError as dynamic_exc:
+                    exc = dynamic_exc
+
+        if verify is False or not _METRO_SSL_ALLOW_INSECURE_FALLBACK:
+            raise
+
+        logger.warning(
+            "Metro API SSL verification could not be completed securely for %s. Retrying insecurely because METRO_SSL_ALLOW_INSECURE_FALLBACK is enabled: %s",
+            url,
+            exc,
+        )
+        return _perform_request(False)
 
 
 def fetch_json_with_retry(url: str, timeout: int = REQUEST_TIMEOUT, use_cache: bool = True) -> Optional[Any]:
@@ -657,7 +1046,7 @@ def get_station_lines(station_name: str) -> List[str]:
 
 def get_landmark_info(location: str) -> Optional[Dict[str, Any]]:
     """
-    Returns transport information for a known Lisbon landmark.
+    Returns transport information for a known or dynamically resolved Lisbon place.
 
     Args:
         location: Location name (case-insensitive).
@@ -665,26 +1054,38 @@ def get_landmark_info(location: str) -> Optional[Dict[str, Any]]:
     Returns:
         Landmark info with nearest metro or alternative transport.
     """
-    import unicodedata
-
-    def normalize_text(text: str) -> str:
-        normalized = unicodedata.normalize("NFKD", text)
-        return (
-            "".join(c for c in normalized if not unicodedata.combining(c))
-            .lower()
-            .strip()
+    try:
+        from tools.location_resolver import (
+            build_dynamic_landmark_info,
+            normalize_location_text,
+        )
+    except ImportError:
+        from location_resolver import (
+            build_dynamic_landmark_info,
+            normalize_location_text,
         )
 
-    location_norm = normalize_text(location)
+    location_norm = normalize_location_text(location)
 
     for key, info in LISBON_LANDMARKS.items():
-        if normalize_text(key) == location_norm:
+        if normalize_location_text(key) == location_norm:
             return info
 
     for key, info in LISBON_LANDMARKS.items():
-        key_norm = normalize_text(key)
+        key_norm = normalize_location_text(key)
         if key_norm in location_norm or location_norm in key_norm:
             return info
+
+    try:
+        dynamic_info = build_dynamic_landmark_info(
+            location,
+            prefer_city=True,
+            allow_aml=True,
+        )
+        if dynamic_info:
+            return dynamic_info
+    except Exception as exc:
+        logger.debug("Dynamic landmark resolution failed for '%s': %s", location, exc)
 
     return None
 
