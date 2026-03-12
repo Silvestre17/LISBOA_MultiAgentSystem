@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime
 from difflib import SequenceMatcher
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, StateGraph
@@ -50,7 +50,19 @@ def _clean_query_fragment(part: str) -> str:
 
     part = part.strip(" .?!,;:")
     part = re.sub(
-        r"\b(agora|pfv|por favor|sff|please|now|right now|já|ja|mesmo|pff)\b.*$",
+        r"\b(agora|pfv|por favor|sff|please|now|right now|já|ja|mesmo|pff|only|just|apenas|s[oó])\b.*$",
+        "",
+        part,
+        flags=re.IGNORECASE,
+    )
+    part = re.sub(
+        r"\b(without(?:\s+taking)?\s+(?:a\s+)?(?:bus|buses|tram|trams)|sem\s+(?:autocarro|autocarros|eletrico|el[eé]trico|eletricos|el[eé]tricos)|(?:bus|tram)\s+only|s[oó]\s+de\s+(?:autocarro|autocarros|eletrico|el[eé]trico|eletricos|el[eé]tricos))\b.*$",
+        "",
+        part,
+        flags=re.IGNORECASE,
+    )
+    part = re.sub(
+        r"\b(?:sem\s+complica(?:[çc](?:ão|ao|ões|oes))|qual(?:\s+[ée])?\s+a?\s*melhor\s+(?:forma|rota|caminho)|what(?:'s| is)\s+the\s+best\s+(?:way|route)|best\s+(?:way|route)|o\s+metro\s+serve\s+bem|serve\s+bem)\b.*$",
         "",
         part,
         flags=re.IGNORECASE,
@@ -62,11 +74,18 @@ def _clean_query_fragment(part: str) -> str:
         flags=re.IGNORECASE,
     )
     part = re.sub(
+        r"^(?:metro|bus|tram|train|comboio|autocarro|el[eé]trico)\s+de\s+",
+        "",
+        part,
+        flags=re.IGNORECASE,
+    )
+    part = re.sub(
         r"\b(metro station|station|esta[cç][aã]o|stop|paragem|terminal)\b",
         "",
         part,
         flags=re.IGNORECASE,
     )
+    part = re.sub(r"\b(at[eé]|ate)\s*$", "", part, flags=re.IGNORECASE)
     part = re.sub(r"^(o|a|os|as|the)\s+", "", part, flags=re.IGNORECASE)
     part = part.strip(" .?!,;:")
     normalized = _normalize_token(part)
@@ -177,13 +196,18 @@ def _resolve_metro_station_name(fragment: str) -> str:
 @lru_cache(maxsize=1)
 def _get_cp_station_name_map() -> Dict[str, str]:
     """Builds a normalized alias map for CP AML station names."""
-    from tools.cp_api import CP_KEY_STATIONS
+    from tools.cp_api import CP_KEY_STATIONS, load_cp_aml_stations
 
     alias_map: Dict[str, str] = {}
     for key, info in CP_KEY_STATIONS.items():
         canonical = str(info.get("name") or key.replace("_", " ").title()).strip()
         alias_map[_normalize_token(canonical)] = canonical
         alias_map[_normalize_token(key.replace("_", " "))] = canonical
+
+    for station in load_cp_aml_stations().values():
+        canonical = str(station.get("name") or "").strip()
+        if canonical:
+            alias_map[_normalize_token(canonical)] = canonical
 
     extra_aliases = {
         "cais do sodre": "Cais do Sodré",
@@ -477,6 +501,7 @@ def _build_metro_wait_lines(targets: List[Tuple[str, str]], language: str) -> Li
     next_label = "⏱️ Próximo Metro em:" if language == "pt" else "⏱️ Next Metro in:"
 
     realtime_lines: List[str] = []
+    official_api_temporarily_unavailable = False
     for station, direction in targets[:2]:
         try:
             wait_result = str(
@@ -486,6 +511,21 @@ def _build_metro_wait_lines(targets: List[Tuple[str, str]], language: str) -> Li
             )
         except Exception:
             wait_result = ""
+
+        wait_result_normalized = _normalize_token(wait_result)
+        if wait_result.strip().startswith("❌") and any(
+            marker in wait_result_normalized
+            for marker in [
+                "temporarily unavailable",
+                "temporariamente indisponivel",
+                "not responding right now",
+                "official metro",
+                "oficial metro",
+                "fallback endpoint still provides line status",
+            ]
+        ):
+            official_api_temporarily_unavailable = True
+            continue
 
         block = _extract_wait_block_for_direction(wait_result, direction)
         if not block:
@@ -502,9 +542,25 @@ def _build_metro_wait_lines(targets: List[Tuple[str, str]], language: str) -> Li
             realtime_lines.append(f"  ℹ️ {note}")
 
     if not realtime_lines:
-        realtime_lines.append(
-            "- Sem dados em tempo real" if language == "pt" else "- No real-time data available"
-        )
+        if official_api_temporarily_unavailable:
+            if language == "pt":
+                realtime_lines.extend(
+                    [
+                        "- Dados oficiais do Metro em tempo real estão temporariamente indisponíveis.",
+                        "  ℹ️ O estado das linhas continua disponível, mas os tempos de espera não puderam ser confirmados agora.",
+                    ]
+                )
+            else:
+                realtime_lines.extend(
+                    [
+                        "- Official Metro real-time data is temporarily unavailable.",
+                        "  ℹ️ Line status is still available, but live wait times could not be confirmed right now.",
+                    ]
+                )
+        else:
+            realtime_lines.append(
+                "- Sem dados em tempo real" if language == "pt" else "- No real-time data available"
+            )
 
     return realtime_lines
 
@@ -512,7 +568,14 @@ def _build_metro_wait_lines(targets: List[Tuple[str, str]], language: str) -> Li
 def _extract_route_endpoints(user_message: str) -> Optional[Tuple[str, str]]:
     """Extracts route endpoints from common PT/EN route phrasings."""
     patterns = [
+        r"\b(?:quero|preciso|tenho)\s+(?:de\s+)?ir\s+(?:para|ao|a|à)\s+(?P<destination>.+?)\s+a\s+partir\s+d(?:o|a)\s+(?P<origin>.+?)(?:[\?\!\.,;]|$)",
+        r"\b(?:a\s+partir\s+d(?:o|a)|desde)\s+(?P<origin>.+?)\s+(?:para|ao|a|à)\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
+        r"\b(?:tou|estou)\s+n(?:o|a)\s+(?P<origin>.+?)\s+(?:e\s+)?(?:preciso|quero|tenho)\s+(?:de\s+)?ir\s+(?:para|ao|a|à)\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
+        r"\b(?:need|want)\s+to\s+go\s+to\s+(?P<destination>.+?)\s+from\s+(?P<origin>.+?)(?:[\?\!\.,;]|$)",
+        r"\b(?:i'?m|i am)\s+(?:at|in)\s+(?P<origin>.+?)\s+and\s+(?:i\s+)?(?:need|want)\s+to\s+go\s+to\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
+        r"\bde\s+metro\s+de\s+(?P<origin>.+?)\s+at[eé]\s+(?:a|ao|à)?\s*(?P<destination>.+?)(?:[\?\!\.,;]|$)",
         r"\bde\s+metro\s+de\s+(?P<origin>.+?)\s+para\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
+        r"\bde\s+(?P<origin>.+?)\s+at[eé]\s+(?:a|ao|à)?\s*(?P<destination>.+?)(?:[\?\!\.,;]|$)",
         r"\bde\s+(?P<origin>.+?)\s+para\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
         r"\bdo\s+(?P<origin>.+?)\s+ao\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
         r"\bda\s+(?P<origin>.+?)\s+à\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
@@ -534,31 +597,515 @@ def _extract_route_endpoints(user_message: str) -> Optional[Tuple[str, str]]:
     return None
 
 
-def _parse_wait_targets_from_route(route_result: str) -> List[Tuple[str, str]]:
-    """Parses the stations and directions needed for live metro wait times."""
-    targets: List[Tuple[str, str]] = []
+def _parse_route_mode_preferences(user_message: str) -> Dict[str, bool]:
+    """Parses explicit route-mode constraints such as bus-only or without-bus requests."""
+    normalized = _normalize_token(user_message)
 
-    board_match = re.search(
-        r"Board at\s+\*\*(?P<station>[^*]+)\*\*.*?direção\s+\*\*(?P<direction>[^*]+)\*\*",
-        route_result,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    if board_match:
-        targets.append(
-            (
-                board_match.group("station").strip(),
-                board_match.group("direction").strip(),
-            )
+    bus_only_phrases = [
+        "bus only",
+        "only bus",
+        "only buses",
+        "by bus only",
+        "only by bus",
+        "so autocarro",
+        "so autocarros",
+        "só autocarro",
+        "só autocarros",
+        "so de autocarro",
+        "só de autocarro",
+        "so de autocarros",
+        "só de autocarros",
+        "apenas autocarro",
+        "apenas autocarros",
+        "apenas de autocarro",
+        "apenas de autocarros",
+    ]
+    tram_only_phrases = [
+        "tram only",
+        "only tram",
+        "only trams",
+        "by tram only",
+        "only by tram",
+        "so eletrico",
+        "so eletricos",
+        "so electrico",
+        "só eletrico",
+        "só elétrico",
+        "só eletricos",
+        "só elétricos",
+        "so de eletrico",
+        "só de elétrico",
+        "so de eletricos",
+        "só de elétricos",
+        "apenas eletrico",
+        "apenas elétrico",
+        "apenas eletricos",
+        "apenas elétricos",
+        "apenas de eletrico",
+        "apenas de elétrico",
+    ]
+    metro_only_phrases = [
+        "metro only",
+        "only metro",
+        "only by metro",
+        "by metro only",
+        "so metro",
+        "só metro",
+        "so de metro",
+        "só de metro",
+        "apenas metro",
+        "apenas de metro",
+    ]
+    exclude_bus_phrases = [
+        "without bus",
+        "without buses",
+        "without taking a bus",
+        "without taking buses",
+        "without using a bus",
+        "without using buses",
+        "no bus",
+        "no buses",
+        "not by bus",
+        "dont want bus",
+        "do not want bus",
+        "sem autocarro",
+        "sem autocarros",
+        "nao quero autocarro",
+        "não quero autocarro",
+        "nao quero autocarros",
+        "não quero autocarros",
+    ]
+    exclude_tram_phrases = [
+        "without tram",
+        "without trams",
+        "without taking a tram",
+        "without taking trams",
+        "no tram",
+        "no trams",
+        "not by tram",
+        "sem eletrico",
+        "sem elétrico",
+        "sem eletricos",
+        "sem elétricos",
+        "sem electrico",
+        "nao quero eletrico",
+        "não quero elétrico",
+        "nao quero eletricos",
+        "não quero elétricos",
+    ]
+    exclude_metro_phrases = [
+        "without metro",
+        "without taking the metro",
+        "without taking metro",
+        "without using the metro",
+        "no metro",
+        "not by metro",
+        "avoid metro",
+        "sem metro",
+        "nao quero metro",
+        "não quero metro",
+        "nao usar metro",
+        "não usar metro",
+    ]
+
+    bus_only = any(phrase in normalized for phrase in bus_only_phrases)
+    tram_only = any(phrase in normalized for phrase in tram_only_phrases)
+    metro_only = any(phrase in normalized for phrase in metro_only_phrases)
+    exclude_bus = any(phrase in normalized for phrase in exclude_bus_phrases)
+    exclude_tram = any(phrase in normalized for phrase in exclude_tram_phrases)
+    exclude_metro = any(phrase in normalized for phrase in exclude_metro_phrases)
+
+    bus_only = bus_only or bool(
+        re.search(
+            r"\b(?:only|just|apenas|s[oó])\b(?:\s+de)?\s+(?:bus|buses|autocarro|autocarros)\b",
+            normalized,
         )
+    )
+    tram_only = tram_only or bool(
+        re.search(
+            r"\b(?:only|just|apenas|s[oó])\b(?:\s+de)?\s+(?:tram|trams|eletrico|eletricos|electrico|electricos)\b",
+            normalized,
+        )
+    )
+    metro_only = metro_only or bool(
+        re.search(
+            r"\b(?:only|just|apenas|s[oó])\b(?:\s+de)?\s+metro\b",
+            normalized,
+        )
+    )
 
-    transfer_match = re.search(
-        r"Transfer at\*\*:\s*(?P<station>[^\n\(]+)",
-        route_result,
+    if exclude_tram and re.search(r"\b(bus|buses|autocarro|autocarros)\b", normalized):
+        bus_only = True
+    if exclude_bus and re.search(r"\b(tram|trams|eletrico|eletricos|electrico|electricos)\b", normalized):
+        tram_only = True
+    if exclude_metro and re.search(r"\b(bus|buses|autocarro|autocarros)\b", normalized):
+        bus_only = True
+    if exclude_metro and re.search(r"\b(tram|trams|eletrico|eletricos|electrico|electricos)\b", normalized):
+        tram_only = True
+
+    return {
+        "bus_only": bus_only,
+        "tram_only": tram_only,
+        "metro_only": metro_only,
+        "exclude_bus": exclude_bus,
+        "exclude_tram": exclude_tram,
+        "exclude_metro": exclude_metro,
+    }
+
+
+def _query_has_route_mode_constraints(user_message: str) -> bool:
+    """Returns whether the user explicitly constrained the allowed transport modes for a route."""
+    preferences = _parse_route_mode_preferences(user_message)
+    return any(preferences.values())
+
+
+def _tool_result_indicates_no_match(result: str) -> bool:
+    """Detects tool outputs that mean no valid route or line was found."""
+    normalized = _normalize_token(result or "")
+    negative_markers = [
+        "no direct carris route found",
+        "could not locate",
+        "sem linhas diretas",
+        "sem linha direta",
+        "no direct bus routes found",
+        "no direct buses",
+        "nao consegui",
+        "não consegui",
+        "not found",
+        "no bus stops found",
+    ]
+    return any(marker in normalized for marker in negative_markers)
+
+
+def _extract_carris_mode_section(route_result: str, section_name: str) -> str:
+    """Extracts the requested BUSES or TRAMS section from Carris Urban route output."""
+    lines = (route_result or "").splitlines()
+    target = section_name.upper().strip()
+    collecting = False
+    section_lines: List[str] = []
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped in {"TRAMS", "BUSES"}:
+            if collecting and stripped != target:
+                break
+            collecting = stripped == target
+            if collecting:
+                section_lines.append(line)
+            continue
+
+        if collecting:
+            section_lines.append(line)
+
+    while section_lines and not section_lines[-1].strip():
+        section_lines.pop()
+
+    return "\n".join(section_lines).strip()
+
+
+def _carris_section_has_routes(section: str) -> bool:
+    """Returns whether a Carris section contains at least one concrete route line."""
+    return bool(re.search(r"^\s*\d{1,4}[A-Z]?\s*:", section or "", flags=re.MULTILINE))
+
+
+def _parse_carris_route_entries(section: str) -> List[Dict[str, Any]]:
+    """Parses a Carris route section into route entries with summary and detail lines."""
+    entries: List[Dict[str, Any]] = []
+    current: Optional[Dict[str, Any]] = None
+
+    for raw_line in (section or "").splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped in {"BUSES", "TRAMS"} or re.fullmatch(r"[-=]{3,}", stripped):
+            continue
+
+        route_match = re.match(r"^(\d{1,4}[A-Z]?)\s*:\s*(.+)$", stripped)
+        if route_match:
+            if current:
+                entries.append(current)
+            current = {
+                "route": route_match.group(1),
+                "summary": route_match.group(2).strip(),
+                "details": [],
+            }
+            continue
+
+        if current:
+            current["details"].append(stripped)
+
+    if current:
+        entries.append(current)
+
+    return entries
+
+
+def _localize_period_label(label: str, language: str) -> str:
+    """Localizes Carris service-period labels."""
+    mapping = {
+        "morning": ("manhã", "morning"),
+        "midday": ("meio do dia", "midday"),
+        "afternoon": ("tarde", "afternoon"),
+        "evening": ("fim do dia", "evening"),
+        "night": ("noite", "night"),
+    }
+    normalized = _normalize_token(label)
+    if normalized in mapping:
+        return mapping[normalized][0 if language == "pt" else 1]
+    return label.strip()
+
+
+def _minutes_from_clock(clock_text: str) -> Optional[int]:
+    """Converts HH:MM clock text into minutes since midnight."""
+    match = re.match(r"^(\d{2}):(\d{2})$", clock_text.strip())
+    if not match:
+        return None
+    return int(match.group(1)) * 60 + int(match.group(2))
+
+
+def _summarize_carris_frequency_result(
+    frequency_result: str,
+    language: str,
+) -> List[str]:
+    """Builds concise user-facing bullets from the Carris frequency tool output."""
+    if not frequency_result:
+        return []
+
+    no_service_match = re.search(
+        r"No scheduled trips found for route '?(?P<route>[^']+)'? today",
+        frequency_result,
         flags=re.IGNORECASE,
     )
-    directions = re.findall(r"direção\s+\*\*([^*]+)\*\*", route_result, flags=re.IGNORECASE)
-    if transfer_match and len(directions) >= 2:
-        targets.append((transfer_match.group("station").strip(), directions[1].strip()))
+    if no_service_match:
+        if language == "pt":
+            return [
+                "  - **Serviço programado hoje:** não foram encontradas partidas na base GTFS.",
+                "  - **Como confirmar:** peça-me as próximas partidas numa paragem específica desta linha ou confirme em carris.pt.",
+            ]
+        return [
+            "  - **Scheduled service today:** no departures were found in the GTFS timetable.",
+            "  - **How to confirm:** ask me for departures at a specific stop on this line or check carris.pt.",
+        ]
+
+    total_match = re.search(r"Total de passagens hoje:\s*(\d+)", frequency_result, flags=re.IGNORECASE)
+    lines = frequency_result.splitlines()
+    now_minutes = datetime.now().hour * 60 + datetime.now().minute
+    selected_summary: Optional[str] = None
+
+    index = 0
+    while index < len(lines):
+        stripped = lines[index].strip()
+        period_match = re.match(
+            r"^[🌅☀️🌤️🌙🌃]\s*([A-Za-zÀ-ÿ ]+)\s*\((\d{2}:\d{2})-(\d{2}:\d{2})\)(?::\s*(.+))?$",
+            stripped,
+        )
+        if not period_match:
+            index += 1
+            continue
+
+        label = _localize_period_label(period_match.group(1), language)
+        start_clock = period_match.group(2)
+        end_clock = period_match.group(3)
+        inline_summary = (period_match.group(4) or "").strip()
+        start_minutes = _minutes_from_clock(start_clock)
+        end_minutes = _minutes_from_clock(end_clock)
+        is_current_period = (
+            start_minutes is not None
+            and end_minutes is not None
+            and start_minutes <= now_minutes <= end_minutes
+        )
+
+        candidate_summary: Optional[str] = None
+        if inline_summary and "sem serviço" not in _normalize_token(inline_summary):
+            if language == "pt":
+                candidate_summary = f"**Serviço programado:** {label}, {inline_summary}."
+            else:
+                candidate_summary = f"**Scheduled service:** {label}, {inline_summary}."
+        else:
+            window_lines: List[str] = []
+            look_ahead = index + 1
+            while look_ahead < len(lines):
+                next_line = lines[look_ahead].strip()
+                if re.match(r"^[🌅☀️🌤️🌙🌃]", next_line):
+                    break
+                if next_line:
+                    window_lines.append(next_line)
+                look_ahead += 1
+
+            avg_match = next(
+                (
+                    re.search(r"Frequência média:\s*\*\*(.+?)\*\*", line, flags=re.IGNORECASE)
+                    for line in window_lines
+                    if "Frequência média" in line
+                ),
+                None,
+            )
+            first_last_match = next(
+                (
+                    re.search(r"Primeiro:\s*([^|]+)\|\s*Último:\s*(.+)$", line, flags=re.IGNORECASE)
+                    for line in window_lines
+                    if "Primeiro:" in line and "Último:" in line
+                ),
+                None,
+            )
+
+            if avg_match:
+                avg_value = avg_match.group(1).strip()
+                first_last_text = ""
+                if first_last_match:
+                    first_trip = first_last_match.group(1).strip()
+                    last_trip = first_last_match.group(2).strip()
+                    if language == "pt":
+                        first_last_text = f" entre {first_trip} e {last_trip}"
+                    else:
+                        first_last_text = f" between {first_trip} and {last_trip}"
+                if language == "pt":
+                    candidate_summary = f"**Frequência programada:** {label}, média de {avg_value}{first_last_text}."
+                else:
+                    candidate_summary = f"**Scheduled frequency:** {label}, about {avg_value}{first_last_text}."
+
+            index = look_ahead - 1
+
+        if not candidate_summary:
+            index += 1
+            continue
+
+        if is_current_period:
+            selected_summary = candidate_summary
+            break
+        if selected_summary is None:
+            selected_summary = candidate_summary
+
+        index += 1
+
+    summary_lines: List[str] = []
+    if total_match:
+        total = total_match.group(1)
+        if language == "pt":
+            summary_lines.append(f"  - **Passagens programadas hoje:** {total}")
+        else:
+            summary_lines.append(f"  - **Scheduled departures today:** {total}")
+    if selected_summary:
+        summary_lines.append(f"  - {selected_summary}")
+
+    return summary_lines
+
+
+def _format_carris_route_detail(
+    detail: str,
+    language: str,
+    route: Optional[str] = None,
+    frequency_lookup: Optional[Callable[[str], str]] = None,
+) -> List[str]:
+    """Formats a single Carris route detail line into nested markdown bullets."""
+    stripped = (detail or "").strip()
+    if not stripped:
+        return []
+
+    if re.fullmatch(r"check schedule\.?", stripped, re.IGNORECASE):
+        frequency_result = frequency_lookup(route) if frequency_lookup and route else ""
+        frequency_summary = _summarize_carris_frequency_result(frequency_result, language)
+        if frequency_summary:
+            return frequency_summary
+        if language == "pt":
+            return [
+                "  - **Horário detalhado:** esta rota não devolveu uma paragem específica para calcular partidas exatas.",
+                "  - **Como confirmar:** peça-me horários numa paragem concreta desta linha.",
+            ]
+        return [
+            "  - **Detailed timetable:** this route result did not include a specific stop for exact departures.",
+            "  - **How to confirm:** ask me for departures at a specific stop on this line.",
+        ]
+
+    next_match = re.match(r"^(?:\*\*)?Next(?:\*\*)?:\s*(.+)$", stripped, re.IGNORECASE)
+    if next_match:
+        detail_text = next_match.group(1).strip()
+        stop_match = re.search(r"\(stop\s+([^)]+)\)", detail_text, re.IGNORECASE)
+        stop_name = stop_match.group(1).strip() if stop_match else ""
+        times_text = re.sub(r"\(stop\s+([^)]+)\)", "", detail_text, flags=re.IGNORECASE).strip()
+        lines: List[str] = []
+        if times_text:
+            if language == "pt":
+                lines.append(f"  - **Próximas partidas:** {times_text}")
+            else:
+                lines.append(f"  - **Next departures:** {times_text}")
+        if stop_name:
+            if language == "pt":
+                lines.append(f"  - **Paragem:** {stop_name}")
+            else:
+                lines.append(f"  - **Stop:** {stop_name}")
+        return lines
+
+    travel_match = re.match(r"^~\s*(\d+)\s*min(?:\s*travel)?$", stripped, re.IGNORECASE)
+    if travel_match:
+        travel_text = f"~{travel_match.group(1)} min"
+        if language == "pt":
+            return [f"  - **Tempo estimado:** {travel_text}"]
+        return [f"  - **Estimated travel time:** {travel_text}"]
+
+    return [f"  - {stripped}"]
+
+
+def _format_carris_mode_section_markdown(
+    section: str,
+    language: str,
+    frequency_lookup: Optional[Callable[[str], str]] = None,
+) -> str:
+    """Formats a Carris BUSES/TRAMS section into clean markdown bullets."""
+    entries = _parse_carris_route_entries(section)
+    if not entries:
+        return ""
+
+    blocks: List[str] = []
+    for entry in entries:
+        block_lines = [f"- **{entry['route']}**: {entry['summary']}"]
+        for detail in entry.get("details", []):
+            block_lines.extend(
+                _format_carris_route_detail(
+                    detail,
+                    language,
+                    route=entry.get("route"),
+                    frequency_lookup=frequency_lookup,
+                )
+            )
+        blocks.append("\n".join(block_lines))
+
+    return "\n\n".join(blocks).strip()
+
+
+def _clean_metropolitana_direct_bus_block(text: str) -> str:
+    """Removes wrapper lines from Carris Metropolitana direct-bus output for embedding in summaries."""
+    cleaned_lines: List[str] = []
+    for raw_line in (text or "").splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        if re.fullmatch(r"[-=]{3,}", stripped):
+            continue
+        if stripped.startswith("🚌 **Autocarros:") or stripped.startswith("🚌 **Buses:"):
+            continue
+        if "linha(s) direta(s) encontrada(s):" in stripped or "direct line(s) found:" in stripped:
+            continue
+        if stripped.startswith("💡 **Como usar:") or stripped.startswith("💡 **How to use"):
+            break
+        if stripped.startswith("📌 **Fonte:") or stripped.startswith("📌 **Source:"):
+            continue
+        if stripped.startswith("⚠️ Scope:") or stripped.startswith("💡 For Lisbon city-only"):
+            continue
+        cleaned_lines.append(raw_line)
+
+    return "\n".join(cleaned_lines).strip()
+
+
+def _parse_wait_targets_from_route(route_result: str) -> List[Tuple[str, str]]:
+    """Parses the stations and directions needed for live metro wait times."""
+    details = _parse_route_details(route_result)
+    directions = details.get("directions", [])
+    targets: List[Tuple[str, str]] = []
+
+    if details.get("board_station") and directions:
+        targets.append((details["board_station"], directions[0]))
+
+    if details.get("transfer_station") and len(directions) >= 2:
+        targets.append((details["transfer_station"], directions[1]))
 
     deduped: List[Tuple[str, str]] = []
     seen = set()
@@ -699,6 +1246,50 @@ def _line_display_name(line_id: str, language: str) -> str:
     return (names_pt if language == "pt" else names_en).get(line_id, line_id.title())
 
 
+def _looks_like_acronym_label(text: str) -> bool:
+    """Returns whether the label looks like an acronym that should keep its casing."""
+    stripped = (text or "").strip()
+    return bool(re.fullmatch(r"(?:[A-Z0-9]{2,}(?:[\s/-][A-Z0-9]{2,})*)", stripped))
+
+
+def _get_transport_display_name(location: Optional[str], detailed: bool = False) -> str:
+    """Returns a user-facing location label while preserving landmark branding like NOVA IMS."""
+    from tools.location_resolver import get_location_display_name
+    from tools.metrolisboa_api import get_landmark_info
+
+    raw = str(location or "").strip()
+    if not raw:
+        return raw
+
+    landmark = get_landmark_info(raw)
+    if landmark:
+        if detailed:
+            return str(
+                landmark.get("display_name")
+                or landmark.get("name")
+                or landmark.get("short_name")
+                or raw
+            ).strip()
+        return str(
+            landmark.get("short_name")
+            or landmark.get("name")
+            or landmark.get("display_name")
+            or raw
+        ).strip()
+
+    if _looks_like_acronym_label(raw):
+        return raw
+
+    try:
+        resolved_label = get_location_display_name(raw, detailed=detailed)
+        if resolved_label:
+            return resolved_label
+    except Exception:
+        pass
+
+    return raw.title()
+
+
 def _localize_wait_times(wait_times: str, language: str) -> str:
     """Localizes small wait-time labels for display."""
     return wait_times.replace("arriving", "a chegar") if language == "pt" else wait_times
@@ -743,12 +1334,40 @@ def _build_practical_tip(
     second_line_id: Optional[str],
     final_station: Optional[str],
     walk_target: Optional[str],
+    walk_target_display: Optional[str] = None,
+    destination_display: Optional[str] = None,
+    destination_landmark: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Builds a short, practical, non-generic travel tip."""
     if walk_target and final_station and _normalize_token(walk_target) != _normalize_token(final_station):
+        walking_hint_pt = (destination_landmark or {}).get("walking_hint_pt")
+        walking_hint_en = (destination_landmark or {}).get("walking_hint_en")
+        metro_walk_minutes = (destination_landmark or {}).get("metro_walk_minutes")
+        destination_label = destination_display or walk_target_display or walk_target
+
         if language == "pt":
-            return f"Da estação {final_station} até {walk_target} a caminhada é curta."
-        return f"From {final_station} to {walk_target}, the final walk is short."
+            if walking_hint_pt:
+                if metro_walk_minutes:
+                    return (
+                        f"Se o destino é {destination_label}, saia em {final_station} "
+                        f"e conte com cerca de {metro_walk_minutes} min a pé até {walking_hint_pt}."
+                    )
+                return (
+                    f"Se o destino é {destination_label}, saia em {final_station} "
+                    f"e conte com uma caminhada final curta até {walking_hint_pt}."
+                )
+            return f"Da estação {final_station} até {destination_label} a caminhada final é curta."
+        if walking_hint_en:
+            if metro_walk_minutes:
+                return (
+                    f"If you're heading to {destination_label}, exit at {final_station} "
+                    f"and expect about {metro_walk_minutes} minutes on foot {walking_hint_en}."
+                )
+            return (
+                f"If you're heading to {destination_label}, exit at {final_station} "
+                f"and expect a short final walk {walking_hint_en}."
+            )
+        return f"From {final_station} to {destination_label}, the final walk is short."
 
     if transfer_station and second_line_id:
         second_line_name = _line_display_name(second_line_id, language)
@@ -762,6 +1381,247 @@ def _build_practical_tip(
         return f"Confirm the {first_direction} direction on the platform before boarding."
 
     return ""
+
+
+def _query_mentions_specific_route_mode(user_message: str) -> bool:
+    """Returns whether the user explicitly constrained the route to a transport mode."""
+    normalized = _normalize_token(user_message)
+    return bool(
+        re.search(
+            r"\b(metro|subway|underground|comboio|comboios|train|trains|cp|autocarro|autocarros|bus|buses|tram|trams|eletrico|eletricos|electrico|electricos)\b",
+            normalized,
+        )
+    )
+
+
+def _minutes_until_clock_time(clock_text: Optional[str]) -> Optional[int]:
+    """Returns minutes from now until the next HH:MM clock occurrence."""
+    if not clock_text:
+        return None
+
+    target_minutes = _minutes_from_clock(clock_text)
+    if target_minutes is None:
+        return None
+
+    now = datetime.now()
+    current_minutes = now.hour * 60 + now.minute
+    diff = target_minutes - current_minutes
+    if diff < 0:
+        diff += 24 * 60
+    return diff
+
+
+def _build_train_landmark_option(
+    origin: str,
+    destination: str,
+    language: str,
+) -> Optional[Tuple[int, str]]:
+    """Builds a concise CP alternative for generic route questions when a landmark is near a rail station."""
+    from tools.cp_api import get_cp_station_info, plan_train_trip
+    from tools.metrolisboa_api import get_landmark_info
+
+    origin_landmark = get_landmark_info(origin)
+    destination_landmark = get_landmark_info(destination)
+    if not destination_landmark:
+        return None
+
+    origin_cp = get_cp_station_info(origin)
+    origin_train_station = None
+    if origin_landmark and origin_landmark.get("train_station"):
+        origin_train_station = str(origin_landmark["train_station"]).strip()
+    elif origin_cp:
+        origin_train_station = str(origin_cp.get("name") or origin).strip()
+
+    destination_train_station = str(destination_landmark.get("train_station") or "").strip()
+    if not origin_train_station or not destination_train_station:
+        return None
+    if _normalize_token(origin_train_station) == _normalize_token(destination_train_station):
+        return None
+
+    try:
+        train_result = str(
+            plan_train_trip.invoke(
+                {"origin": origin_train_station, "destination": destination_train_station}
+            )
+        )
+    except Exception:
+        return None
+
+    normalized_result = _normalize_token(train_result)
+    if train_result.strip().startswith("❌") or any(
+        marker in normalized_result
+        for marker in [
+            "no direct train service",
+            "no more trains today",
+            "station not found",
+            "error planning trip",
+        ]
+    ):
+        return None
+
+    departure_match = re.search(
+        r"🕐\s*\*\*(?P<departure>\d{2}:\d{2})\*\*\s*→\s*(?P<arrival>\d{2}:\d{2})\s*\((?P<travel>\d+)min\)",
+        train_result,
+    )
+    duration_match = re.search(
+        r"Dura[cç][aã]o:\s*\*\*(?P<duration>\d+(?:-\d+)?)\s*minutos\*\*",
+        train_result,
+        flags=re.IGNORECASE,
+    )
+
+    departure_clock = departure_match.group("departure") if departure_match else None
+    travel_minutes = None
+    if departure_match:
+        travel_minutes = int(departure_match.group("travel"))
+    elif duration_match:
+        travel_minutes = int(duration_match.group("duration").split("-", 1)[0])
+
+    walk_minutes = int(destination_landmark.get("train_walk_minutes") or 0)
+    wait_minutes = _minutes_until_clock_time(departure_clock)
+    score = (wait_minutes or 0) + (travel_minutes or 999) + walk_minutes
+
+    destination_label = _get_transport_display_name(destination)
+    if language == "pt":
+        summary = f"- 🚆 **Comboio via {destination_train_station}**: "
+        if departure_clock:
+            summary += f"próxima saída às {departure_clock} desde {origin_train_station}, "
+        elif origin_train_station:
+            summary += f"saída desde {origin_train_station}, "
+        if travel_minutes:
+            summary += f"~{travel_minutes} min de viagem"
+        else:
+            summary += "viagem curta"
+        if walk_minutes:
+            summary += f" + ~{walk_minutes} min a pé até {destination_label}"
+        summary += "."
+    else:
+        summary = f"- 🚆 **Train via {destination_train_station}**: "
+        if departure_clock:
+            summary += f"next departure at {departure_clock} from {origin_train_station}, "
+        elif origin_train_station:
+            summary += f"departing from {origin_train_station}, "
+        if travel_minutes:
+            summary += f"about {travel_minutes} minutes on board"
+        else:
+            summary += "a short rail ride"
+        if walk_minutes:
+            summary += f" + about {walk_minutes} minutes on foot to {destination_label}"
+        summary += "."
+
+    return score, summary
+
+
+def _build_carris_direct_option(
+    origin: str,
+    destination: str,
+    language: str,
+) -> Optional[Tuple[int, str]]:
+    """Builds a concise direct Carris alternative when one exists."""
+    from tools.carris_api import carris_find_routes_between
+
+    try:
+        carris_result = str(
+            carris_find_routes_between.invoke(
+                {"origin": origin, "destination": destination}
+            )
+        )
+    except Exception:
+        return None
+
+    normalized_result = _normalize_token(carris_result)
+    if any(
+        marker in normalized_result
+        for marker in [
+            "no direct carris route found",
+            "could not locate",
+            "carris database unavailable",
+            "erro ao encontrar rotas",
+        ]
+    ):
+        return None
+
+    buses_match = re.search(
+        r"BUSES\n-+\n(?P<section>.+?)(?:\n\n[A-Z]+\n-+|\Z)",
+        carris_result,
+        flags=re.DOTALL,
+    )
+    if not buses_match:
+        return None
+
+    bus_section = buses_match.group("section")
+    route_match = re.search(r"^\s*(?P<route>\d{1,4}[A-Z]?): para (?P<headsign>[^\n]+)", bus_section, flags=re.MULTILINE)
+    next_match = re.search(r"^\s*Next: (?P<times>[^\n]+?) \(stop (?P<stop>[^\)]+)\)", bus_section, flags=re.MULTILINE)
+    travel_match = re.search(r"^\s*~(?P<travel>\d+)min travel", bus_section, flags=re.MULTILINE)
+    if not route_match:
+        return None
+
+    route_code = route_match.group("route").strip()
+    headsign = route_match.group("headsign").strip()
+    stop_name = next_match.group("stop").strip() if next_match else None
+    departure_clock = None
+    if next_match:
+        clock_match = re.search(r"(\d{2}:\d{2})", next_match.group("times"))
+        if clock_match:
+            departure_clock = clock_match.group(1)
+    travel_minutes = int(travel_match.group("travel")) if travel_match else None
+    wait_minutes = _minutes_until_clock_time(departure_clock)
+    score = (wait_minutes or 0) + (travel_minutes or 999)
+
+    if language == "pt":
+        summary = f"- 🚌 **Autocarro {route_code}**: "
+        if departure_clock:
+            summary += f"próxima saída às {departure_clock}"
+        else:
+            summary += "rota direta disponível"
+        if stop_name:
+            summary += f" na paragem {stop_name}"
+        if travel_minutes:
+            summary += f", ~{travel_minutes} min de viagem"
+        summary += f" em direção a {headsign}."
+    else:
+        summary = f"- 🚌 **Bus {route_code}**: "
+        if departure_clock:
+            summary += f"next departure at {departure_clock}"
+        else:
+            summary += "direct route available"
+        if stop_name:
+            summary += f" from stop {stop_name}"
+        if travel_minutes:
+            summary += f", about {travel_minutes} minutes travel"
+        summary += f" toward {headsign}."
+
+    return score, summary
+
+
+def _build_additional_route_options(
+    user_message: str,
+    origin: str,
+    destination: str,
+    language: str,
+) -> List[str]:
+    """Builds concise alternative-mode bullets for open-ended route questions."""
+    if _query_mentions_specific_route_mode(user_message):
+        return []
+
+    options: List[Tuple[int, str]] = []
+    train_option = _build_train_landmark_option(origin, destination, language)
+    if train_option:
+        options.append(train_option)
+
+    bus_option = _build_carris_direct_option(origin, destination, language)
+    if bus_option:
+        options.append(bus_option)
+
+    if not options:
+        return []
+
+    title = (
+        "🔁 **Outras opções que também fazem sentido:**"
+        if language == "pt"
+        else "🔁 **Other sensible options:**"
+    )
+    sorted_options = [summary for _, summary in sorted(options, key=lambda item: item[0])]
+    return ["", title, *sorted_options, ""]
 
 
 def _parse_metro_wait_request(user_message: str) -> Optional[Dict[str, Any]]:
@@ -1211,7 +2071,7 @@ def _build_deterministic_metro_route_response(
 
     language = _infer_language(user_message, context)
 
-    from tools.metrolisboa_api import METRO_LINES
+    from tools.metrolisboa_api import METRO_LINES, get_landmark_info
     from tools.transport_api import get_route_between_stations
 
     try:
@@ -1235,6 +2095,13 @@ def _build_deterministic_metro_route_response(
     second_direction = directions[1] if len(directions) > 1 else None
     estimated_time = details["estimated_time"] or "~-- min"
     walk_target = details["walk_target"]
+    origin_display = _get_transport_display_name(endpoints[0])
+    destination_display = _get_transport_display_name(endpoints[1])
+    destination_detailed_display = _get_transport_display_name(endpoints[1], detailed=True)
+    walk_target_display = _get_transport_display_name(walk_target) if walk_target else None
+    destination_landmark = get_landmark_info(endpoints[1]) or (
+        get_landmark_info(walk_target) if walk_target else None
+    )
 
     if not final_station:
         return None
@@ -1245,10 +2112,15 @@ def _build_deterministic_metro_route_response(
 
     state_lines = _build_route_state_lines(line_ids, language)
 
-    realtime_lines = _build_metro_wait_lines(
-        _parse_wait_targets_from_route(route_result),
-        language,
-    )
+    wait_targets: List[Tuple[str, str]] = []
+    if board_station and first_direction:
+        wait_targets.append((board_station, first_direction))
+    if transfer_station and second_direction:
+        wait_targets.append((transfer_station, second_direction))
+    if not wait_targets:
+        wait_targets = _parse_wait_targets_from_route(route_result)
+
+    realtime_lines = _build_metro_wait_lines(wait_targets, language)
 
     tip = _build_practical_tip(
         language=language,
@@ -1257,9 +2129,18 @@ def _build_deterministic_metro_route_response(
         second_line_id=second_line_id,
         final_station=final_station,
         walk_target=walk_target,
+        walk_target_display=walk_target_display,
+        destination_display=destination_detailed_display,
+        destination_landmark=destination_landmark,
+    )
+    additional_options = _build_additional_route_options(
+        user_message=user_message,
+        origin=endpoints[0],
+        destination=endpoints[1],
+        language=language,
     )
 
-    route_title = f"🚇 **{endpoints[0].title()}** → **{endpoints[1].title()}**"
+    route_title = f"🚇 **{origin_display}** → **{destination_display}**"
     state_title = "⚠️ **Estado das Linhas:**" if language == "pt" else "⚠️ **Line Status:**"
     time_title = "⏳ **Tempo total estimado:**" if language == "pt" else "⏳ **Estimated total time:**"
     route_section = "🗺️ **O seu Trajeto de Metro:**" if language == "pt" else "🗺️ **Your Metro Route:**"
@@ -1275,6 +2156,7 @@ def _build_deterministic_metro_route_response(
 
     response_lines = [
         route_title,
+        "",
         state_title,
         *state_lines,
         "",
@@ -1299,7 +2181,7 @@ def _build_deterministic_metro_route_response(
     response_lines.append(f"{exit_text} {final_station}**")
 
     if walk_target and _normalize_token(walk_target) != _normalize_token(final_station):
-        response_lines.append(f"{walk_text} {walk_target}**")
+        response_lines.append(f"{walk_text} {walk_target_display or walk_target}**")
 
     response_lines.extend([
         "",
@@ -1311,6 +2193,9 @@ def _build_deterministic_metro_route_response(
     if tip:
         response_lines.append(f"{tip_title} {tip}")
         response_lines.append("")
+
+    if additional_options:
+        response_lines.extend(additional_options)
 
     response_lines.append(
         f"{source_label} [*Metro de Lisboa*](https://www.metrolisboa.pt) | {updated_label} {datetime.now().strftime('%H:%M')}"
@@ -1389,6 +2274,9 @@ def _build_tool_call(name: str, args: dict) -> AIMessage:
 def _build_deterministic_transport_tool_call(user_message: str) -> Optional[AIMessage]:
     """Routes obvious transport coverage prompts to their canonical tool."""
     query = user_message.strip()
+    if _query_has_route_mode_constraints(query):
+        return None
+
     for spec_builder in (
         _build_cp_tool_spec,
         _build_carris_metropolitana_tool_spec,
@@ -1457,6 +2345,271 @@ class TransportAgent(BaseAgent):
 
         return None
 
+    @staticmethod
+    def _build_transport_source_line(language: str, source_links: List[str]) -> str:
+        """Builds a localized transport source line for combined deterministic answers."""
+        deduped_sources: List[str] = []
+        for source in source_links:
+            if source and source not in deduped_sources:
+                deduped_sources.append(source)
+
+        timestamp = datetime.now().strftime("%H:%M")
+        if language == "pt":
+            return f"📌 **Fonte:** {' | '.join(deduped_sources)} | **Atualizado:** {timestamp}"
+        return f"📌 **Source:** {' | '.join(deduped_sources)} | **Updated:** {timestamp}"
+
+    def _build_mode_constrained_route_response(
+        self,
+        user_message: str,
+        context: str = "",
+        language: str = "en",
+    ) -> Optional[str]:
+        """Builds deterministic responses for route queries with explicit mode constraints."""
+        endpoints = _extract_route_endpoints(user_message)
+        if not endpoints:
+            return None
+
+        preferences = _parse_route_mode_preferences(user_message)
+        if not any(preferences.values()):
+            return None
+
+        origin, destination = endpoints
+        language = language or infer_response_language(user_query=user_message, default="en")
+
+        if preferences["metro_only"] or (
+            preferences["exclude_bus"]
+            and not preferences["tram_only"]
+            and not preferences["exclude_metro"]
+        ):
+            metro_response = _build_deterministic_metro_route_response(
+                user_message=user_message,
+                context=context,
+            )
+            if metro_response:
+                return metro_response
+
+        urban_tool = self._get_tool_by_name("carris_find_routes_between")
+        frequency_tool = self._get_tool_by_name("carris_get_service_frequency")
+        urban_result = (
+            str(urban_tool.invoke({"origin": origin, "destination": destination})).strip()
+            if urban_tool
+            else ""
+        )
+
+        def frequency_lookup(route_short_name: str) -> str:
+            if not frequency_tool or not route_short_name:
+                return ""
+            try:
+                return str(
+                    frequency_tool.invoke({"route_short_name": route_short_name})
+                ).strip()
+            except Exception:
+                return ""
+
+        if preferences["bus_only"] or preferences["exclude_tram"]:
+            urban_bus_block = _extract_carris_mode_section(urban_result, "BUSES")
+            urban_tram_block = _extract_carris_mode_section(urban_result, "TRAMS")
+            metropolitan_tool = self._get_tool_by_name("find_direct_bus_lines")
+            metropolitan_result = (
+                str(metropolitan_tool.invoke({"origin": origin, "destination": destination})).strip()
+                if metropolitan_tool
+                else ""
+            )
+            urban_bus_markdown = _format_carris_mode_section_markdown(
+                urban_bus_block,
+                language,
+                frequency_lookup=frequency_lookup,
+            )
+            metropolitan_block = _clean_metropolitana_direct_bus_block(metropolitan_result)
+
+            sections: List[str] = []
+            notes: List[str] = []
+
+            if urban_bus_markdown:
+                sections.append(f"#### 🚌 Carris Urban\n\n{urban_bus_markdown}")
+            elif _carris_section_has_routes(urban_tram_block):
+                notes.append(
+                    "- **Carris Urban:** only tram options were found for this trip, not bus-only ones."
+                    if language != "pt"
+                    else "- **Carris Urban:** só apareceram opções de elétrico nesta ligação, não opções apenas de autocarro."
+                )
+            elif urban_result and not _tool_result_indicates_no_match(urban_result):
+                notes.append(
+                    "- **Carris Urban:** no bus-only route could be isolated from the available urban result."
+                    if language != "pt"
+                    else "- **Carris Urban:** não foi possível isolar uma rota apenas de autocarro no resultado urbano disponível."
+                )
+
+            if metropolitan_result and not _tool_result_indicates_no_match(metropolitan_result):
+                if metropolitan_block:
+                    sections.append(
+                        f"#### 🚌 Carris Metropolitana\n\n{metropolitan_block}"
+                    )
+            else:
+                notes.append(
+                    "- **Carris Metropolitana:** no direct suburban bus line was confirmed for this trip."
+                    if language != "pt"
+                    else "- **Carris Metropolitana:** não foi confirmada nenhuma linha suburbana direta para esta ligação."
+                )
+
+            if not sections:
+                if language == "pt":
+                    message = (
+                        f"❌ Não consegui confirmar uma rota apenas de autocarro entre {origin} e {destination} com os dados disponíveis da Carris Urban e da Carris Metropolitana."
+                    )
+                else:
+                    message = (
+                        f"❌ I couldn't confirm a bus-only route between {origin} and {destination} with the available Carris Urban and Carris Metropolitana data."
+                    )
+                if notes:
+                    notes_title = "#### ℹ️ Coverage notes" if language != "pt" else "#### ℹ️ Notas de cobertura"
+                    message += "\n\n" + notes_title + "\n" + "\n".join(notes)
+                message += "\n\n" + self._build_transport_source_line(
+                    language,
+                    [
+                        "[*Carris*](https://www.carris.pt)",
+                        "[*Carris Metropolitana*](https://www.carrismetropolitana.pt)",
+                    ],
+                )
+                return message
+
+            intro = (
+                f"### 🚌 Bus-only options for {origin} → {destination}"
+                if language != "pt"
+                else f"### 🚌 Opções apenas de autocarro para {origin} → {destination}"
+            )
+            response_parts = [intro, "", *sections]
+            if notes:
+                notes_title = "#### ℹ️ Coverage notes" if language != "pt" else "#### ℹ️ Notas de cobertura"
+                response_parts.extend(["", notes_title, *notes])
+            response_parts.extend(
+                [
+                    "",
+                    self._build_transport_source_line(
+                        language,
+                        [
+                            "[*Carris*](https://www.carris.pt)",
+                            "[*Carris Metropolitana*](https://www.carrismetropolitana.pt)",
+                        ],
+                    ),
+                ]
+            )
+            return "\n".join(response_parts).strip()
+
+        if preferences["exclude_metro"]:
+            urban_bus_block = _extract_carris_mode_section(urban_result, "BUSES")
+            urban_tram_block = _extract_carris_mode_section(urban_result, "TRAMS")
+            metropolitan_tool = self._get_tool_by_name("find_direct_bus_lines")
+            metropolitan_result = (
+                str(metropolitan_tool.invoke({"origin": origin, "destination": destination})).strip()
+                if metropolitan_tool
+                else ""
+            )
+
+            urban_bus_markdown = _format_carris_mode_section_markdown(
+                urban_bus_block,
+                language,
+                frequency_lookup=frequency_lookup,
+            )
+            urban_tram_markdown = _format_carris_mode_section_markdown(
+                urban_tram_block,
+                language,
+                frequency_lookup=frequency_lookup,
+            )
+            metropolitan_block = _clean_metropolitana_direct_bus_block(metropolitan_result)
+
+            sections: List[str] = []
+            if urban_bus_markdown:
+                sections.append(f"#### 🚌 Carris Urban\n\n{urban_bus_markdown}")
+            if urban_tram_markdown:
+                sections.append(f"#### 🚋 Carris Urban\n\n{urban_tram_markdown}")
+            if metropolitan_result and not _tool_result_indicates_no_match(metropolitan_result) and metropolitan_block:
+                sections.append(f"#### 🚌 Carris Metropolitana\n\n{metropolitan_block}")
+
+            if not sections:
+                if language == "pt":
+                    return (
+                        f"❌ Não consegui confirmar uma rota sem metro entre {origin} e {destination} com os dados de superfície disponíveis.\n\n"
+                        + self._build_transport_source_line(
+                            language,
+                            [
+                                "[*Carris*](https://www.carris.pt)",
+                                "[*Carris Metropolitana*](https://www.carrismetropolitana.pt)",
+                            ],
+                        )
+                    )
+                return (
+                    f"❌ I couldn't confirm a non-metro surface route between {origin} and {destination} with the available data.\n\n"
+                    + self._build_transport_source_line(
+                        language,
+                        [
+                            "[*Carris*](https://www.carris.pt)",
+                            "[*Carris Metropolitana*](https://www.carrismetropolitana.pt)",
+                        ],
+                    )
+                )
+
+            intro = (
+                f"### 🚌🚋 Surface options without metro for {origin} → {destination}"
+                if language != "pt"
+                else f"### 🚌🚋 Opções de superfície sem metro para {origin} → {destination}"
+            )
+            return "\n".join(
+                [
+                    intro,
+                    "",
+                    *sections,
+                    "",
+                    self._build_transport_source_line(
+                        language,
+                        [
+                            "[*Carris*](https://www.carris.pt)",
+                            "[*Carris Metropolitana*](https://www.carrismetropolitana.pt)",
+                        ],
+                    ),
+                ]
+            ).strip()
+
+        if preferences["tram_only"] or preferences["exclude_bus"]:
+            urban_tram_block = _extract_carris_mode_section(urban_result, "TRAMS")
+            if _carris_section_has_routes(urban_tram_block):
+                urban_tram_markdown = _format_carris_mode_section_markdown(
+                    urban_tram_block,
+                    language,
+                    frequency_lookup=frequency_lookup,
+                )
+                intro = (
+                    f"### 🚋 Tram-only options for {origin} → {destination}"
+                    if language != "pt"
+                    else f"### 🚋 Opções apenas de elétrico para {origin} → {destination}"
+                )
+                return "\n".join(
+                    [
+                        intro,
+                        "",
+                        "#### 🚋 Carris Urban",
+                        "",
+                        urban_tram_markdown or urban_tram_block,
+                        "",
+                        self._build_transport_source_line(
+                            language,
+                            ["[*Carris*](https://www.carris.pt)"],
+                        ),
+                    ]
+                ).strip()
+
+            if language == "pt":
+                return (
+                    f"❌ Não consegui confirmar uma rota sem autocarro entre {origin} e {destination} com os dados disponíveis.\n\n"
+                    f"📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | [*Carris*](https://www.carris.pt) | **Atualizado:** {datetime.now().strftime('%H:%M')}"
+                )
+            return (
+                f"❌ I couldn't confirm a non-bus route between {origin} and {destination} with the available data.\n\n"
+                f"📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | [*Carris*](https://www.carris.pt) | **Updated:** {datetime.now().strftime('%H:%M')}"
+            )
+
+        return None
+
     def _resolve_deterministic_response(
         self,
         user_message: str,
@@ -1465,6 +2618,19 @@ class TransportAgent(BaseAgent):
     ) -> Optional[str]:
         """Resolves deterministic direct-response fast paths shared by invoke() and build_subgraph()."""
         resolved_language = language or infer_response_language(user_query=user_message, default="en")
+
+        constrained_route_response = self._build_mode_constrained_route_response(
+            user_message=user_message,
+            context=context,
+            language=resolved_language,
+        )
+        if constrained_route_response:
+            return finalize_worker_response(
+                constrained_route_response,
+                agent_name="transport",
+                user_query=user_message,
+                language=resolved_language,
+            )
 
         deterministic_response = _build_deterministic_metro_route_response(
             user_message=user_message,

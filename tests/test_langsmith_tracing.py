@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import Any, Dict
 
 import agent.utils.langsmith_tracing as langsmith_tracing
@@ -32,7 +33,11 @@ from agent.utils.langsmith_tracing import (
     annotate_current_run,
     get_langsmith_display_state,
     get_langsmith_project_name,
+    get_langsmith_scoped_project_name,
+    is_langsmith_tracing_opted_in,
     resolve_langsmith_tracing_status,
+    tracing_disabled_unless_opted_in,
+    tracing_project_override,
 )
 
 
@@ -246,6 +251,106 @@ def test_get_langsmith_project_name_prefers_status_then_default(monkeypatch) -> 
 
     assert get_langsmith_project_name({"project_name": "thesis-traces"}) == "thesis-traces"
     assert get_langsmith_project_name({"project_name": None}) == "default"
+
+
+def test_is_langsmith_tracing_opted_in_uses_truthy_custom_env_flag() -> None:
+    """Non-interactive tracing should require an explicit truthy opt-in flag."""
+    assert is_langsmith_tracing_opted_in(
+        "LISBOA_ENABLE_CLI_LANGSMITH",
+        env={"LISBOA_ENABLE_CLI_LANGSMITH": "true"},
+    ) is True
+    assert is_langsmith_tracing_opted_in(
+        "LISBOA_ENABLE_CLI_LANGSMITH",
+        env={"LISBOA_ENABLE_CLI_LANGSMITH": "false"},
+    ) is False
+
+
+def test_get_langsmith_scoped_project_name_derives_benchmark_project_from_base_env() -> None:
+    """Offline analysis runs should get a project distinct from the base chat project."""
+    project_name = get_langsmith_scoped_project_name(
+        "Benchmark",
+        env={"LANGSMITH_PROJECT": "LISBOA Chat"},
+    )
+
+    assert project_name == "LISBOA Chat - Benchmark"
+
+
+def test_get_langsmith_scoped_project_name_prefers_explicit_override() -> None:
+    """Runner-specific project overrides should win over the derived suffix."""
+    project_name = get_langsmith_scoped_project_name(
+        "Ablation",
+        env_name="LISBOA_LANGSMITH_ABLATION_PROJECT",
+        env={
+            "LANGSMITH_PROJECT": "LISBOA Chat",
+            "LISBOA_LANGSMITH_ABLATION_PROJECT": "LISBOA Ablation Study",
+        },
+    )
+
+    assert project_name == "LISBOA Ablation Study"
+
+
+def test_tracing_disabled_unless_opted_in_uses_disabled_context(monkeypatch) -> None:
+    """Offline workloads should enter a disabled tracing context unless explicitly opted in."""
+    calls = []
+
+    @contextmanager
+    def fake_tracing_context(**kwargs):
+        calls.append(kwargs)
+        yield
+
+    monkeypatch.setattr(langsmith_tracing, "tracing_context", fake_tracing_context)
+
+    with tracing_disabled_unless_opted_in(env={}):
+        pass
+
+    assert calls == [{"enabled": False}]
+
+
+def test_tracing_disabled_unless_opted_in_skips_override_when_enabled() -> None:
+    """Explicit opt-in flags should leave the tracing context untouched."""
+    calls = []
+
+    @contextmanager
+    def fake_tracing_context(**kwargs):
+        calls.append(kwargs)
+        yield
+
+    original_tracing_context = langsmith_tracing.tracing_context
+    langsmith_tracing.tracing_context = fake_tracing_context
+    try:
+        with tracing_disabled_unless_opted_in(
+            "LISBOA_ENABLE_CLI_LANGSMITH",
+            env={"LISBOA_ENABLE_CLI_LANGSMITH": "1"},
+        ):
+            pass
+    finally:
+        langsmith_tracing.tracing_context = original_tracing_context
+
+    assert calls == []
+
+
+def test_tracing_project_override_sets_and_restores_project_env(monkeypatch) -> None:
+    """Dedicated offline runs should override the LangSmith project only inside the wrapped scope."""
+    calls = []
+
+    @contextmanager
+    def fake_tracing_context(**kwargs):
+        calls.append(kwargs)
+        yield
+
+    env = {
+        "LANGSMITH_PROJECT": "LISBOA Chat",
+        "LANGCHAIN_PROJECT": "LISBOA Chat",
+    }
+    monkeypatch.setattr(langsmith_tracing, "tracing_context", fake_tracing_context)
+
+    with tracing_project_override("LISBOA Chat - Benchmark", env=env):
+        assert env["LANGSMITH_PROJECT"] == "LISBOA Chat - Benchmark"
+        assert env["LANGCHAIN_PROJECT"] == "LISBOA Chat - Benchmark"
+
+    assert env["LANGSMITH_PROJECT"] == "LISBOA Chat"
+    assert env["LANGCHAIN_PROJECT"] == "LISBOA Chat"
+    assert calls == [{"project_name": "LISBOA Chat - Benchmark"}]
 
 
 def test_annotate_current_run_updates_metadata_and_tags(monkeypatch) -> None:

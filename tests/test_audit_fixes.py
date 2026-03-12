@@ -487,7 +487,7 @@ def test_search_history_culture_live_query_filters_stale_web_results() -> None:
 
 
 def test_search_cultural_events_reports_matching_undated_candidates() -> None:
-    """Date-filtered event queries should disclose matching undated events instead of hiding them silently."""
+    """Date-filtered event queries should disclose undated matches without leaking placeholder event rows."""
     from datetime import datetime
 
     from tools import visitlisboa_api
@@ -523,8 +523,45 @@ def test_search_cultural_events_reports_matching_undated_candidates() -> None:
             {"query": "fado", "date_filter": "today", "max_results": 5}
         )
 
-    assert "Fado Mystery Session" in result
-    assert "date not confirmed in source" in result.lower()
+    assert "Fado Mystery Session" not in result
+    assert "source completeness note" in result.lower()
+    assert "excluded because the source does not confirm their dates yet" in result.lower()
+
+
+def test_search_cultural_events_sanitizes_slug_like_title_suffixes() -> None:
+    """Slug-derived titles should not leak numeric suffixes like 0326 into the final tool output."""
+    from datetime import datetime
+
+    from tools import visitlisboa_api
+
+    today_iso = datetime.now().strftime("%Y-%m-%d")
+    fake_events = [
+        {
+            "url": "https://www.visitlisboa.com/en/events/michael-lives-forever-0326",
+            "category": "Music",
+            "dates": [
+                {
+                    "type": "single",
+                    "date": {
+                        "datetime_iso": today_iso,
+                        "display_text": "Today",
+                        "time": "21:00",
+                    },
+                }
+            ],
+            "full_description": "The show includes classic songs such as Billie Jean and Thriller.",
+            "location": "Campo Pequeno, Lisboa",
+        }
+    ]
+
+    with patch.object(visitlisboa_api, "_load_events_json", return_value=fake_events):
+        result = visitlisboa_api.search_cultural_events.invoke(
+            {"date_filter": "today", "max_results": 5, "language": "pt"}
+        )
+
+    assert "Michael Lives Forever 0326" not in result
+    assert "Michael Lives Forever" in result
+    assert "**Descrição:**" in result
 
 
 def test_search_places_attractions_uses_json_fallback_for_location_queries() -> None:
@@ -979,7 +1016,7 @@ def _check_metro_ssl_secure_default(results: TestResults, monkeypatch: pytest.Mo
 
     try:
         import importlib
-        from pathlib import Path
+        import tempfile
         from unittest.mock import patch
 
         import requests
@@ -994,53 +1031,52 @@ def _check_metro_ssl_secure_default(results: TestResults, monkeypatch: pytest.Mo
             metro_api = importlib.import_module(module_name)
 
         verify_value = metro_api.METRO_SSL_VERIFY
-        if isinstance(verify_value, str) and verify_value.endswith(".pem") and os.path.isfile(verify_value):
-            results.add_pass(f"METRO_SSL_VERIFY defaults to PEM bundle ({verify_value})")
+        if verify_value is True:
+            results.add_pass("METRO_SSL_VERIFY defaults to standard secure verification")
         else:
-            results.add_fail("Metro SSL default", f"Expected PEM bundle path, got {verify_value!r}")
+            results.add_fail("Metro SSL default", f"Expected True, got {verify_value!r}")
             return
 
-        intermediate_path = Path(metro_api.DEFAULT_METRO_INTERMEDIATE_PEM)
-        if intermediate_path.exists():
-            results.add_pass("Bundled Metro intermediate certificate exists")
-        else:
-            results.add_fail("Metro intermediate certificate", f"Missing file: {intermediate_path}")
-            return
+        dynamic_bundle_path = os.path.join(
+            tempfile.gettempdir(),
+            "metro_audit_dynamic_bundle.pem",
+        )
+        with open(dynamic_bundle_path, "w", encoding="utf-8") as file:
+            file.write("dummy bundle")
 
-        bundle_text = Path(verify_value).read_text(encoding="utf-8")
-        intermediate_text = intermediate_path.read_text(encoding="ascii").strip()
-        certifi_text = Path(metro_api.certifi.where()).read_text(encoding="utf-8").strip()
-
-        if intermediate_text in bundle_text:
-            results.add_pass("Runtime Metro CA bundle includes bundled intermediate")
-        else:
-            results.add_fail("Runtime Metro CA bundle", "Bundled intermediate certificate missing")
-
-        if certifi_text in bundle_text:
-            results.add_pass("Runtime Metro CA bundle includes certifi trust store")
-        else:
-            results.add_fail("Runtime Metro CA bundle", "certifi trust store missing from runtime bundle")
-
-        captured = {}
+        captured = {"verify_calls": []}
 
         def fake_request(method, url, verify=None, **kwargs):
             captured["method"] = method
             captured["url"] = url
-            captured["verify"] = verify
+            captured["verify_calls"].append(verify)
+            if len(captured["verify_calls"]) == 1:
+                raise requests.exceptions.SSLError("certificate verify failed")
             response = requests.Response()
             response.status_code = 200
             response._content = b"{}"
             return response
 
-        with patch.object(metro_api.requests, "request", side_effect=fake_request):
-            metro_api._metro_request("get", "https://api.metrolisboa.pt:8243/estadoServicoML/1.0.1/test")
+        with patch.object(
+            metro_api,
+            "_build_runtime_metro_ca_bundle",
+            return_value=dynamic_bundle_path,
+        ), patch.object(
+            metro_api,
+            "_METRO_SSL_ALLOW_INSECURE_FALLBACK",
+            False,
+        ), patch.object(metro_api.requests, "request", side_effect=fake_request):
+            metro_api._metro_request(
+                "get",
+                "https://api.metrolisboa.pt:8243/estadoServicoML/1.0.1/test",
+            )
 
-        if captured.get("verify") == verify_value:
-            results.add_pass("_metro_request uses secure CA bundle by default")
+        if captured.get("verify_calls") == [True, dynamic_bundle_path]:
+            results.add_pass("_metro_request upgrades to a dynamic CA bundle after SSL failure")
         else:
             results.add_fail(
-                "_metro_request verify parameter",
-                f"Expected {verify_value!r}, got {captured.get('verify')!r}",
+                "_metro_request verify sequence",
+                f"Expected [True, {dynamic_bundle_path!r}], got {captured.get('verify_calls')!r}",
             )
 
     except Exception as e:
@@ -1050,34 +1086,3 @@ def _check_metro_ssl_secure_default(results: TestResults, monkeypatch: pytest.Mo
 def test_metro_ssl_secure_default(results: TestResults, monkeypatch: pytest.MonkeyPatch):
     """Tests that the Metro API defaults to a secure CA bundle rather than verify=False."""
     _check_metro_ssl_secure_default(results, monkeypatch)
-
-
-# ==========================================================================
-# Main Execution
-# ==========================================================================
-
-def main():
-    print("\033[1m" + "=" * 70 + "\033[0m")
-    print("\033[1m🧪 AUDIT FIX VALIDATION - COMPREHENSIVE TEST SUITE\033[0m")
-    print("\033[1m" + "=" * 70 + "\033[0m")
-    
-    results = TestResults()
-    
-    # Run all test groups
-    test_config_typo_fix(results)
-    test_base_agent_typo_fix(results)
-    test_no_import_json_in_loops(results)
-    test_no_duplicate_openai_block(results)
-    test_researcher_tools(results)
-    test_no_extra_llm_instance(results)
-    test_transport_improvements(results)
-    test_transport_prompt(results)
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        _check_metro_ssl_secure_default(results, monkeypatch)
-    
-    return results.summary()
-
-
-if __name__ == "__main__":
-    exit_code = main()
-    sys.exit(exit_code)

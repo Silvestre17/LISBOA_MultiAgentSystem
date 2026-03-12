@@ -216,6 +216,87 @@ class SupervisorAgent(BaseAgent):
             return text
         return strip_unsupported_closing_offers(text).strip()
 
+    @classmethod
+    def _looks_like_follow_up(cls, user_message: str) -> bool:
+        """Detects short anaphoric follow-ups that truly need previous-turn context."""
+        normalized = cls._normalize_query(user_message)
+        if not normalized:
+            return False
+
+        follow_up_prefixes = [
+            "e ",
+            "and ",
+            "what about",
+            "how about",
+            "same ",
+            "also ",
+            "agora ",
+            "tomorrow",
+            "amanha",
+            "amanhã",
+        ]
+        if any(normalized.startswith(prefix) for prefix in follow_up_prefixes):
+            return True
+
+        tokens = normalized.split()
+        anaphoric_tokens = {"it", "that", "those", "there", "same", "isso", "isto", "essa", "esse", "aquela", "aquele"}
+        return len(tokens) <= 6 and any(token in anaphoric_tokens for token in tokens)
+
+    @classmethod
+    def _single_domain_override(cls, user_message: str) -> Optional[Dict[str, Any]]:
+        """Routes obvious standalone single-domain queries without letting history or the LLM over-expand them."""
+        if cls._looks_like_follow_up(user_message) or cls._is_planning_query(user_message):
+            return None
+
+        message_lower = (user_message or "").lower()
+        weather_hit = cls._looks_like_weather_query(message_lower)
+        transport_terms = [
+            "metro", "bus", "autocarro", "comboio", "train", "carris",
+            "route", "rota", "station", "estação", "paragem", "departures", "wait time",
+        ]
+        event_terms = [
+            "event", "events", "evento", "eventos", "concert", "concerto",
+            "festival", "exhibition", "exposição", "exposicao", "music", "música", "musica",
+            "what's on", "o que há", "o que ha",
+        ]
+        place_terms = [
+            "attraction", "attractions", "atração", "atrações", "atracao", "atracoes",
+            "museum", "museu", "monument", "monumento", "miradouro", "places", "locais",
+            "restaurant", "restaurante", "what to visit", "o que visitar",
+        ]
+        service_terms = [
+            "pharmacy", "farmácia", "farmacia", "hospital", "school", "escola",
+            "library", "biblioteca", "police", "polícia", "policia",
+        ]
+
+        transport_hit = any(term in message_lower for term in transport_terms)
+        event_hit = any(term in message_lower for term in event_terms)
+        place_hit = any(term in message_lower for term in place_terms)
+        service_hit = any(term in message_lower for term in service_terms)
+
+        if weather_hit and not any([transport_hit, event_hit, place_hit, service_hit]):
+            return {
+                "reasoning": "Direct standalone weather override",
+                "agents": ["weather"],
+                "direct_response": None,
+            }
+
+        if transport_hit and not any([weather_hit, event_hit, place_hit, service_hit]):
+            return {
+                "reasoning": "Direct standalone transport override",
+                "agents": ["transport"],
+                "direct_response": None,
+            }
+
+        if (event_hit or place_hit or service_hit) and not any([weather_hit, transport_hit]):
+            return {
+                "reasoning": "Direct standalone researcher override",
+                "agents": ["researcher"],
+                "direct_response": None,
+            }
+
+        return None
+
     @staticmethod
     def _is_planning_query(user_message: str) -> bool:
         """Detects itinerary/planning intent without over-matching words like `today`."""
@@ -265,12 +346,16 @@ class SupervisorAgent(BaseAgent):
         if direct_override:
             return direct_override
 
+        single_domain_override = self._single_domain_override(user_message)
+        if single_domain_override:
+            return single_domain_override
+
         system_prompt = get_supervisor_prompt(language)
 
         messages = [SystemMessage(content=system_prompt)]
 
         # Inject minimal follow-up context (NOT raw messages - that confuses routing)
-        if conversation_history:
+        if conversation_history and self._looks_like_follow_up(user_message):
             # Extract ONLY the last user query for follow-up detection
             last_user_queries = []
             for msg in reversed(conversation_history):

@@ -21,6 +21,7 @@
 #       `[` and `]`.
 # ==========================================================================
 
+import json
 import os
 import sys
 from datetime import datetime, timedelta
@@ -30,6 +31,26 @@ import pytest
 
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+
+def _make_llm_response(qa_json: dict) -> MagicMock:
+    """Create a mock LLM response carrying a serialized QA payload."""
+    mock_response = MagicMock()
+    mock_response.content = json.dumps(qa_json)
+    return mock_response
+
+
+def _default_validation_payload(**overrides) -> dict:
+    """Return a compact baseline payload for validate() integration tests."""
+    payload = {
+        "complete": True,
+        "missing_data": [],
+        "required_agents": [],
+        "reasoning": "All data present.",
+        "disclaimers": [],
+    }
+    payload.update(overrides)
+    return payload
 
 
 # ---------------------------------------------------------------
@@ -360,5 +381,208 @@ class TestStaticData:
         )
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v", "--tb=short"])
+class TestValidatePipeline:
+    """Focused integration tests for QualityAssuranceAgent.validate()."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        from agent.agents.qa_agent import QualityAssuranceAgent
+
+        with patch.object(QualityAssuranceAgent, "__init__", lambda self: None):
+            self.agent = QualityAssuranceAgent()
+            self.agent.agent_name = "qa"
+            self.agent.tools = []
+            self.agent.llm = MagicMock()
+            self.agent.llm_with_tools = None
+
+    def test_validate_complete_weather_response(self):
+        """A clean weather answer should pass the full QA pipeline."""
+        self.agent._safe_llm_invoke = MagicMock(
+            return_value=_make_llm_response(_default_validation_payload())
+        )
+
+        result = self.agent.validate(
+            user_query="What's the weather today?",
+            agent_outputs={"weather": "Lisbon today: 25C, sunny. No warnings active."},
+            agents_called=["weather"],
+            language="en",
+        )
+
+        assert result["complete"] is True
+        assert result["required_agents"] == []
+        assert "fact_check" in result
+
+    def test_validate_requests_worker_retry_when_data_is_missing(self):
+        """QA should preserve a legitimate missing-data retry request from the LLM layer."""
+        self.agent._safe_llm_invoke = MagicMock(
+            return_value=_make_llm_response(
+                _default_validation_payload(
+                    complete=False,
+                    missing_data=["temperature", "precipitation"],
+                    required_agents=["weather"],
+                    reasoning="Weather output lacks temperature and precipitation data.",
+                )
+            )
+        )
+
+        result = self.agent.validate(
+            user_query="Will it rain tomorrow?",
+            agent_outputs={"weather": "Tomorrow: some clouds expected."},
+            agents_called=["weather"],
+            language="en",
+        )
+
+        assert result["complete"] is False
+        assert result["required_agents"] == ["weather"]
+        assert "temperature" in result["missing_data"]
+
+    def test_validate_event_only_query_stays_research_only(self):
+        """Pure event discovery should not be expanded into weather or transport retries by QA."""
+        self.agent._safe_llm_invoke = MagicMock(
+            return_value=_make_llm_response(
+                _default_validation_payload(
+                    complete=False,
+                    missing_data=["weather forecast for this week", "transport routes between venues"],
+                    required_agents=["weather", "transport"],
+                    reasoning="Useful weekly event answer should also include weather and transport context.",
+                    disclaimers=[
+                        "Dados de meteorologia não fornecidos na saída do researcher.",
+                        "Sem rota ou ligação entre os eventos sugeridos.",
+                    ],
+                )
+            )
+        )
+
+        result = self.agent.validate(
+            user_query="Quero explorar a cultura local. Que grandes eventos temos esta semana?",
+            agent_outputs={"researcher": "1. Concerto A\n- Data: 12 Mar\n- Local: Lisboa"},
+            agents_called=["researcher"],
+            language="pt",
+        )
+
+        assert result["complete"] is True
+        assert result["required_agents"] == []
+        assert result["missing_data"] == []
+        assert not any(
+            marker in disclaimer.lower()
+            for disclaimer in result["disclaimers"]
+            for marker in ("meteorolog", "transport", "rota")
+        )
+
+    def test_validate_merges_deterministic_fact_check_disclaimer(self):
+        """Deterministic fact checks should still warn even if the LLM says the answer is complete."""
+        self.agent._safe_llm_invoke = MagicMock(
+            return_value=_make_llm_response(_default_validation_payload())
+        )
+
+        result = self.agent.validate(
+            user_query="How do I get to Benfica by metro?",
+            agent_outputs={"transport": "Take metro to estação de Benfica on the metro Azul line."},
+            agents_called=["transport"],
+            language="en",
+        )
+
+        assert result["complete"] is True
+        assert any("benfica" in warning.lower() for warning in result["disclaimers"])
+
+    def test_validate_marks_repairable_output_hygiene_issue(self):
+        """Technical transport metadata leaks should mark the worker output for repair."""
+        self.agent._safe_llm_invoke = MagicMock(
+            return_value=_make_llm_response(_default_validation_payload())
+        )
+
+        result = self.agent.validate(
+            user_query="Show me the live buses right now.",
+            agent_outputs={
+                "transport": (
+                    "🚌 Live buses\n"
+                    "- 📍 GPS: 38.72410, -9.14820\n"
+                    "- 🚏 Next stop ID: 060001\n"
+                    "- **Plate**: 12-AB-34"
+                )
+            },
+            agents_called=["transport"],
+            language="en",
+        )
+
+        assert result["complete"] is True
+        assert result["needs_repair"] is True
+        assert "transport" in result["repairable_agents"]
+        assert result["fact_check"]["per_agent"]["transport"]["critical_issues"]
+
+    def test_validate_retries_after_invalid_json(self):
+        """One malformed LLM reply should trigger a retry instead of an immediate fallback."""
+        bad_response = MagicMock()
+        bad_response.content = "This is not JSON at all."
+        good_response = _make_llm_response(
+            _default_validation_payload(reasoning="Retry successful.")
+        )
+        self.agent._safe_llm_invoke = MagicMock(side_effect=[bad_response, good_response])
+
+        result = self.agent.validate(
+            user_query="Test query",
+            agent_outputs={"weather": "Sunny, 22C."},
+            agents_called=["weather"],
+            language="en",
+        )
+
+        assert result["complete"] is True
+        assert "Retry successful" in result["reasoning"]
+        assert self.agent._safe_llm_invoke.call_count == 2
+
+    def test_validate_falls_back_after_double_json_failure(self):
+        """Two malformed replies should degrade gracefully with a safe fallback result."""
+        bad_response = MagicMock()
+        bad_response.content = "Not JSON"
+        self.agent._safe_llm_invoke = MagicMock(return_value=bad_response)
+
+        result = self.agent.validate(
+            user_query="Test query",
+            agent_outputs={"weather": "Sunny, 22C."},
+            agents_called=["weather"],
+            language="en",
+        )
+
+        assert result["complete"] is True
+        assert any("limited" in disclaimer.lower() for disclaimer in result["disclaimers"])
+        assert "fact_check" in result
+
+    def test_validate_includes_context_and_skips_internal_keys(self):
+        """User context and history should reach the validation prompt, but internal keys should stay hidden."""
+        captured_messages = []
+
+        def capture_invoke(_llm, messages, **_kwargs):
+            captured_messages.extend(messages)
+            return _make_llm_response(_default_validation_payload())
+
+        self.agent._safe_llm_invoke = capture_invoke
+
+        self.agent.validate(
+            user_query="And what about the trains?",
+            agent_outputs={
+                "transport": "CP trains run hourly to Sintra.",
+                "_qa_disclaimers": ["This should stay hidden"],
+            },
+            agents_called=["transport"],
+            language="en",
+            user_context={
+                "preferences": ["history", "architecture"],
+                "available_time": 6,
+            },
+            conversation_history=[
+                "What's the weather today?",
+                "Plan a day in Sintra",
+                "And what about the trains?",
+            ],
+        )
+
+        human_messages = [
+            message for message in captured_messages
+            if hasattr(message, "content") and "VALIDATION TASK" in message.content
+        ]
+        assert human_messages
+        content = human_messages[0].content
+        assert "history" in content
+        assert "architecture" in content
+        assert "Sintra" in content
+        assert "_qa_disclaimers" not in content

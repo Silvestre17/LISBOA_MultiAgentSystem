@@ -282,6 +282,159 @@ class QualityAssuranceAgent(BaseAgent):
 
         return llm_result
 
+    @classmethod
+    def _is_place_listing_query(cls, user_query: str) -> bool:
+        """Detects standalone place/attraction discovery queries that should stay inside researcher scope."""
+        query = cls._normalize_query(user_query)
+        if not query:
+            return False
+
+        place_patterns = [
+            r"\battractions?\b",
+            r"\batra(?:ç|c)[aã]o(?:es)?\b",
+            r"\bplaces?\b",
+            r"\blocais?\b",
+            r"\bmuseums?\b",
+            r"\bmuseus?\b",
+            r"\bmonuments?\b",
+            r"\bmonumentos?\b",
+            r"\bwhat to visit\b",
+            r"\bo que visitar\b",
+            r"\bimperd[ií]veis\b",
+            r"\bfirst time\b",
+            r"\bprimeira vez\b",
+        ]
+        planning_patterns = [
+            r"\bplan\b",
+            r"\bplanning\b",
+            r"\bitinerary\b",
+            r"\broteiro\b",
+            r"\bitiner[aá]rio\b",
+            r"\bplane(?:ia|ar|ie)\b",
+            r"\borganiza(?:r)?\b",
+            r"\bo que fazer\b",
+        ]
+        weather_patterns = [
+            r"\bweather\b",
+            r"\bforecast\b",
+            r"\bmeteorolog",
+            r"\bprevis[aã]o\b",
+            r"\brain\b",
+            r"\bchuva\b",
+            r"\btemperatura\b",
+            r"\btemperature\b",
+        ]
+        transport_patterns = [
+            r"\btransport\b",
+            r"\btransporte\b",
+            r"\bmetro\b",
+            r"\bbus\b",
+            r"\bautocarro\b",
+            r"\bcomboio\b",
+            r"\btrain\b",
+            r"\broute\b",
+            r"\brota\b",
+            r"\bhow to get\b",
+            r"\bcomo chegar\b",
+        ]
+
+        has_place_intent = any(re.search(pattern, query) for pattern in place_patterns)
+        has_planning_intent = any(re.search(pattern, query) for pattern in planning_patterns)
+        has_weather_intent = any(re.search(pattern, query) for pattern in weather_patterns)
+        has_transport_intent = any(re.search(pattern, query) for pattern in transport_patterns)
+
+        return has_place_intent and not has_planning_intent and not has_weather_intent and not has_transport_intent
+
+    @classmethod
+    def _normalize_place_query_validation(
+        cls,
+        user_query: str,
+        agents_called: List[str],
+        llm_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Prevents standalone place-listing queries from being expanded into weather/transport retries by QA."""
+        if not cls._is_place_listing_query(user_query):
+            return llm_result
+
+        called_workers = {agent for agent in agents_called if agent}
+        if called_workers and not called_workers.issubset({"researcher"}):
+            return llm_result
+
+        filtered_required_agents = [
+            agent for agent in llm_result.get("required_agents", [])
+            if agent == "researcher"
+        ]
+        filtered_missing_data = [
+            item for item in llm_result.get("missing_data", [])
+            if not cls._is_cross_domain_event_requirement(item)
+        ]
+        filtered_disclaimers = [
+            item for item in llm_result.get("disclaimers", [])
+            if not cls._is_cross_domain_event_requirement(item)
+        ]
+
+        llm_result["required_agents"] = filtered_required_agents
+        llm_result["missing_data"] = filtered_missing_data
+        llm_result["disclaimers"] = filtered_disclaimers
+
+        if not filtered_required_agents and not filtered_missing_data:
+            llm_result["complete"] = True
+
+        normalization_note = (
+            "Normalized QA for place-only query: weather and transport are optional and must not trigger retries."
+        )
+        reasoning = llm_result.get("reasoning", "")
+        if normalization_note not in reasoning:
+            llm_result["reasoning"] = (
+                f"{reasoning} | {normalization_note}".strip(" |")
+            )
+
+        return llm_result
+
+    @staticmethod
+    def _dedupe_preserve_order(items: List[str]) -> List[str]:
+        """Removes duplicates while preserving the original order."""
+        deduped: List[str] = []
+        for item in items:
+            if item and item not in deduped:
+                deduped.append(item)
+        return deduped
+
+    @classmethod
+    def _merge_fact_check_results(
+        cls,
+        combined_fact_check: Dict[str, Any],
+        per_agent_fact_checks: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Merges combined and per-agent deterministic fact-check results."""
+        disclaimers: List[str] = []
+        critical_issues: List[str] = []
+        checks_performed: List[str] = []
+        repairable_agents: List[str] = []
+
+        for fact_check in [combined_fact_check, *per_agent_fact_checks.values()]:
+            disclaimers.extend(fact_check.get("disclaimers", []))
+            critical_issues.extend(fact_check.get("critical_issues", []))
+            checks_performed.extend(fact_check.get("checks_performed", []))
+
+        for agent_name, fact_check in per_agent_fact_checks.items():
+            if fact_check.get("critical_issues"):
+                repairable_agents.append(agent_name)
+
+        merged_disclaimers = cls._dedupe_preserve_order(disclaimers)
+        merged_critical = cls._dedupe_preserve_order(critical_issues)
+        merged_checks = cls._dedupe_preserve_order(checks_performed)
+        merged_repairable_agents = cls._dedupe_preserve_order(repairable_agents)
+
+        return {
+            "valid": len(merged_critical) == 0,
+            "disclaimers": merged_disclaimers,
+            "critical_issues": merged_critical,
+            "checks_performed": merged_checks,
+            "repairable_agents": merged_repairable_agents,
+            "per_agent": per_agent_fact_checks,
+        }
+
     @traceable(name="qa_agent", run_type="chain", tags=["sub-agent", "qa"])
     def validate(
         self,
@@ -313,11 +466,14 @@ class QualityAssuranceAgent(BaseAgent):
             Dict with validation result:
                 - complete (bool): True if data is sufficient
                 - missing_data (List[str]): List of missing data fields
-                                - required_agents (List[str]): Agents the orchestrator may call
-                                    for missing data
+                - required_agents (List[str]): Agents the orchestrator may call
+                    for missing data
                 - reasoning (str): Explanation of the assessment
                 - disclaimers (List[str]): Warnings about data limitations
                 - fact_check (Dict): Results from deterministic verification
+                - critical_issues (List[str]): Deterministic issues that require correction
+                - repairable_agents (List[str]): Worker agents whose outputs should be revised
+                - needs_repair (bool): Whether the final response should be repaired
         """
         # ── Phase 1: LLM-based structural completeness ──────────────
         system_prompt = get_qa_prompt(
@@ -409,6 +565,11 @@ class QualityAssuranceAgent(BaseAgent):
                 agents_called=agents_called,
                 llm_result=llm_result,
             )
+            llm_result = self._normalize_place_query_validation(
+                user_query=user_query,
+                agents_called=agents_called,
+                llm_result=llm_result,
+            )
         else:
             # Fallback: if JSON parsing still fails, pass with disclaimer
             logger.warning("QA: JSON parse failed after retry; passing with disclaimer.")
@@ -425,20 +586,144 @@ class QualityAssuranceAgent(BaseAgent):
             str(v) for k, v in agent_outputs.items()
             if not k.startswith("_") and isinstance(v, str)
         )
-        fact_check = self._verify_facts(combined_output, user_query, user_context)
+
+        per_agent_fact_checks: Dict[str, Dict[str, Any]] = {}
+        for agent_name, output in agent_outputs.items():
+            if agent_name.startswith("_") or not isinstance(output, str):
+                continue
+            per_agent_fact_checks[agent_name] = self._verify_facts(
+                output,
+                user_query,
+                user_context,
+            )
+
+        combined_fact_check = self._verify_facts(combined_output, user_query, user_context)
+        fact_check = self._merge_fact_check_results(
+            combined_fact_check=combined_fact_check,
+            per_agent_fact_checks=per_agent_fact_checks,
+        )
 
         # Merge fact-check disclaimers into LLM result
         if fact_check.get("disclaimers"):
-            llm_result["disclaimers"] = list(set(
+            llm_result["disclaimers"] = self._dedupe_preserve_order(
                 llm_result.get("disclaimers", []) + fact_check["disclaimers"]
-            ))
+            )
 
         # If fact-check found critical issues, flag as incomplete
         if fact_check.get("critical_issues"):
             llm_result["reasoning"] += f" | Fact-check: {'; '.join(fact_check['critical_issues'])}"
 
+        llm_result["critical_issues"] = fact_check.get("critical_issues", [])
+        llm_result["repairable_agents"] = fact_check.get("repairable_agents", [])
+        llm_result["needs_repair"] = bool(fact_check.get("critical_issues"))
         llm_result["fact_check"] = fact_check
         return llm_result
+
+    @traceable(name="qa_repair_pass", run_type="chain", tags=["sub-agent", "qa", "repair"])
+    def repair_final_response(
+        self,
+        user_query: str,
+        draft_response: str,
+        agent_outputs: Dict[str, str],
+        qa_result: Dict[str, Any],
+        language: str = "en",
+    ) -> str:
+        """Repairs a draft final response using QA findings and grounded worker outputs.
+
+        This pass is intentionally conservative: it may rewrite phrasing,
+        remove unsupported claims, and surface missing-data caveats, but it must
+        stay strictly grounded in the provided worker outputs.
+        """
+        if not draft_response:
+            return draft_response
+
+        fact_check = qa_result.get("fact_check", {}) if isinstance(qa_result, dict) else {}
+        critical_issues = self._dedupe_preserve_order(
+            list(qa_result.get("critical_issues", []))
+            + list(fact_check.get("critical_issues", []))
+        )
+        disclaimers = self._dedupe_preserve_order(
+            list(qa_result.get("disclaimers", []))
+            + list(fact_check.get("disclaimers", []))
+        )
+
+        if not critical_issues and not disclaimers:
+            return draft_response
+
+        if language == "pt":
+            system_prompt = (
+                "És a etapa final de reparação de qualidade da resposta. "
+                "Receberás um rascunho de resposta, os outputs dos agentes worker e os achados do QA. "
+                "Reescreve APENAS o necessário para corrigir problemas factuais, remover alegações não confirmadas, "
+                "manter a resposta completa e preservar uma apresentação natural com markdown, emojis e linhas de fonte corretas.\n\n"
+                "REGRAS:\n"
+                "- Usa apenas factos presentes no rascunho e nos outputs dos agentes.\n"
+                "- Nunca inventes locais, horários, preços, acessibilidade, estações, ligações, ou URLs.\n"
+                "- Se algo não estiver confirmado, diz explicitamente que deve ser verificado.\n"
+                "- Remove referências internas a QA, validação, fact-checking, reasoning, ou agentes.\n"
+                "- Preserva a mesma língua do utilizador, o estilo visual, os emojis úteis e a estrutura markdown.\n"
+                "- Mantém ou melhora a linha de fonte final se ela já existir.\n"
+                "- Devolve apenas a resposta final reparada, sem prefácio nem explicações."
+            )
+            task_prefix = "# TAREFA DE REPARAÇÃO FINAL"
+            critical_label = "Problemas críticos"
+            disclaimer_label = "Notas e limitações"
+            worker_label = "Outputs dos workers"
+            draft_label = "Rascunho atual"
+        else:
+            system_prompt = (
+                "You are the final response-quality repair pass. "
+                "You will receive a draft answer, the worker-agent outputs, and QA findings. "
+                "Rewrite only what is necessary to fix factual issues, remove unsupported claims, "
+                "keep the answer complete, and preserve a natural markdown response with useful emojis and a correct source line.\n\n"
+                "RULES:\n"
+                "- Use only facts present in the draft and worker outputs.\n"
+                "- Never invent venues, times, prices, accessibility claims, stations, links, or URLs.\n"
+                "- If something is not confirmed, say it should be verified.\n"
+                "- Remove any references to QA, validation, fact-checking, reasoning, or internal agents.\n"
+                "- Preserve the user's language, visual style, helpful emojis, and markdown structure.\n"
+                "- Keep or improve the final source line if one already exists.\n"
+                "- Return only the repaired final answer, with no preface or explanation."
+            )
+            task_prefix = "# FINAL REPAIR TASK"
+            critical_label = "Critical issues"
+            disclaimer_label = "Warnings and limitations"
+            worker_label = "Worker outputs"
+            draft_label = "Current draft"
+
+        worker_context_parts = []
+        for agent_name, output in agent_outputs.items():
+            if agent_name.startswith("_") or not isinstance(output, str):
+                continue
+            truncated = output[:_TRUNCATION_LIMIT] if len(output) > _TRUNCATION_LIMIT else output
+            worker_context_parts.append(f"## {agent_name.upper()}\n{truncated}")
+
+        worker_context = "\n\n".join(worker_context_parts) if worker_context_parts else ""
+        critical_block = "\n".join(f"- {item}" for item in critical_issues) or "- None"
+        disclaimer_block = "\n".join(f"- {item}" for item in disclaimers) or "- None"
+
+        human_content = (
+            f"{task_prefix}\n\n"
+            f"**User query:** {user_query}\n\n"
+            f"## {critical_label}\n{critical_block}\n\n"
+            f"## {disclaimer_label}\n{disclaimer_block}\n\n"
+            f"## {draft_label}\n{draft_response[:_TRUNCATION_LIMIT]}\n\n"
+            f"## {worker_label}\n{worker_context}"
+        )
+
+        try:
+            response = self._safe_llm_invoke(
+                self.llm,
+                [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=human_content),
+                ],
+            )
+            repaired = clean_response(response.content, _print=False).strip()
+            return repaired or draft_response
+        except Exception as exc:
+            logger.warning("QA final repair pass failed, keeping draft response: %s", exc)
+            return draft_response
 
     def _verify_facts(
         self,
@@ -704,6 +989,29 @@ class QualityAssuranceAgent(BaseAgent):
             disclaimers.append(
                 "Carris bus route numbers and schedules should be verified at carris.pt, "
                 "as GTFS data may not reflect the most recent changes."
+            )
+
+        # ── Check 10: User-facing output hygiene ───────────────────────
+        # Flags backend-oriented fields that should never reach the final UI.
+        checks.append("output_hygiene")
+        if re.search(r"(?im)^\s*(?:[-*•]\s*)?(?:🗺️\s*)?GPS\s*:", combined_output):
+            critical_issues.append(
+                "Raw GPS coordinates leaked into user-facing output."
+            )
+        if re.search(
+            r"(?im)^\s*(?:[-*•]\s*)?(?:🚏\s*)?(?:next\s+)?stop(?:_id|\s+id)\s*[:=]|\b(?:line_id|stop_id|route_id|pattern_id|trip_id)\b",
+            combined_output,
+        ):
+            critical_issues.append(
+                "Technical transport identifiers leaked into user-facing output."
+            )
+        if re.search(
+            r"\b(?:Unknown event|Evento sem nome|Unknown place|Local sem nome|Unknown station|Estação sem nome)\b",
+            combined_output,
+            re.IGNORECASE,
+        ):
+            critical_issues.append(
+                "Unnamed placeholder content leaked into user-facing output."
             )
 
         result = {

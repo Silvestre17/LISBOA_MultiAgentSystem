@@ -87,10 +87,19 @@ tests/
 ├── conftest.py                      # Strict live prerequisite enforcement
 ├── fixtures/
 │   └── tool_coverage_manifest.json  # 45-tool prompt coverage manifest
-├── test_tool_coverage_manifest.py   # Fast manifest integrity checks
-├── test_tool_prompt_coverage.py     # Strict live worker-agent coverage suite
-└── test_prompts.py                  # Smoke and manual coverage runner
+└── test_tool_prompt_coverage.py     # Strict live worker-agent coverage suite
 ```
+
+Manual repository runners now live under `scripts/`:
+
+```text
+scripts/
+├── run_prompts.py                   # Manual smoke and coverage runner
+├── run_transport_verification.py    # Transport verification harness
+└── syntax_check.py                  # Syntax smoke checker
+```
+
+The fast manifest-integrity checks now live in `eval/tests/test_dataset_integrity.py`.
 
 ## 🧪 Shared evaluation corpus
 
@@ -278,10 +287,10 @@ python eval/run_ablation.py --mode full
 ### Coverage and prompt-driven checks
 
 ```bash
-python tests/test_prompts.py --suite smoke
-python tests/test_prompts.py --suite coverage
-python tests/test_prompts.py --suite coverage --limit 5
-python -m pytest tests/test_tool_prompt_coverage.py -m "live and coverage" -v
+python scripts/run_prompts.py --suite smoke
+python scripts/run_prompts.py --suite coverage
+python scripts/run_prompts.py --suite coverage --limit 5
+python -m pytest tests/test_tool_prompt_coverage.py --run-live -m "live and coverage" -v
 ```
 
 ### Calibration

@@ -138,14 +138,9 @@ Do not use non-existent URLs:
    - Adapt to available time
 
 # Transport Geography
-**Metro de Lisboa só existe DENTRO da cidade de Lisboa!**
-
-## Áreas sem Metro (só comboio/autocarro):
-- **Belém** → Comboio CP (Cais do Sodré → Belém, 5 min) ou Elétrico 15E ou Autocarros 728, 714, 727
-- **Cascais** → Comboio CP (Cais do Sodré → Cascais, 40 min)
-- **Sintra** → Comboio CP (Rossio → Sintra, 40 min)
-- **Costa da Caparica** → Autocarro/Ferry
-- **Almada** → Ferry + Metro Sul do Tejo (diferente do Metro de Lisboa!)
+- Treat **Lisbon city as the default scope**, but accept valid **AML** destinations when the user or transport data explicitly point there.
+- Trust the structured output from the Transport layer over broad heuristics.
+- Keep only hard constraints that are factually stable, especially nonexistent station names.
 
 ## Metro stations that do not exist (do not mention):
 ❌ "Estação Belém" - does not exist
@@ -162,6 +157,11 @@ Do not use non-existent URLs:
 🔵 Linha Azul: Santa Apolónia ↔ Reboleira (inclui Colégio Militar/Luz para Colombo)
 🟢 Linha Verde: Cais do Sodré ↔ Telheiras (inclui Rossio, Baixa-Chiado)
 🔴 Linha Vermelha: São Sebastião ↔ Aeroporto (inclui Alameda, Oriente)
+
+## Practical reminders
+- **Belém** has no Lisbon Metro station. Prefer CP, Carris Urban, or walking guidance only if the provided transport data confirms it.
+- **Cascais** and **Sintra** are typically rail-led trips, but use the transport output exactly instead of hardcoding a full route yourself.
+- Do not transform a nearby Metro/CP suggestion into a fake station name for the destination.
 
 ## BAD WEATHER RULE
 - If you need indoor alternatives, use only venues explicitly present in the provided data.

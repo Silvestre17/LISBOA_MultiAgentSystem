@@ -52,6 +52,16 @@ Optional Metro TLS overrides from `.env.example`:
 
 - `METRO_CA_BUNDLE`
 - `METRO_SSL_VERIFY`
+- `METRO_SSL_ALLOW_INSECURE_FALLBACK`
+
+Metro TLS note:
+
+- By default, the runtime keeps certificate verification enabled.
+- If the Metro gateway serves an incomplete TLS chain, the code now builds a temporary CA bundle dynamically from the live certificate's AIA issuer chain and retries securely.
+- No repository PEM file is required for this default path.
+- `METRO_CA_BUNDLE` is only for explicit custom trust bundles.
+- `METRO_SSL_VERIFY=false` disables verification outright and should be limited to local diagnosis.
+- `METRO_SSL_ALLOW_INSECURE_FALLBACK=true` allows one insecure retry only after secure validation and dynamic chain completion both fail. This is not recommended for deployed environments.
 
 #### Optional Services and Observability
 
@@ -113,8 +123,8 @@ python tools/vector_store.py --no-gpu --max-docs 200
 Use this layer before slower runs:
 
 ```bash
-python tests/syntax_check.py
-python -m pytest eval/tests/test_benchmark_utils.py eval/tests/test_cost_accounting.py eval/tests/test_llm_judge.py eval/tests/test_validators.py -v
+python scripts/syntax_check.py
+python -m pytest eval/tests/test_dataset_integrity.py eval/tests/test_benchmark_utils.py eval/tests/test_cost_accounting.py eval/tests/test_llm_judge.py eval/tests/test_validators.py -v
 ```
 
 ### 2. Runtime-facing regression subset
@@ -122,7 +132,8 @@ python -m pytest eval/tests/test_benchmark_utils.py eval/tests/test_cost_account
 This subset exercises QA, prompt, and transport-facing paths:
 
 ```bash
-python -m pytest tests/test_qa_agent.py tests/test_qa_integration.py tests/test_prompts.py tests/test_lisbon_transport.py -s -W "error::langgraph.warnings.LangGraphDeprecatedSinceV10"
+python -m pytest tests/test_qa_agent.py tests/test_audit_fixes.py tests/test_response_guardrails.py tests/test_transport_parity_and_rendering.py tests/test_langsmith_tracing.py tests/test_metro_api_fallback_messaging.py -q
+python scripts/run_prompts.py --suite smoke
 ```
 
 ### 3. Strict live coverage
@@ -130,7 +141,7 @@ python -m pytest tests/test_qa_agent.py tests/test_qa_integration.py tests/test_
 This suite is intentionally loud about missing prerequisites:
 
 ```bash
-python -m pytest tests/test_tool_prompt_coverage.py -m "live and coverage" -v
+python -m pytest tests/test_tool_prompt_coverage.py --run-live -m "live and coverage" -v
 ```
 
 Strict live coverage currently validates that the following are available:
@@ -214,6 +225,16 @@ sqlite3.OperationalError: database is locked
 ### Missing Metro Credentials
 
 If `METRO_CONSUMER_KEY` and `METRO_CONSUMER_SECRET` are missing, the system can still use the public fallback for some metro functionality, but the full official API experience is not available.
+
+### Metro TLS Chain Fails Even With Valid Credentials
+
+As of 2026-03, the preferred behavior is:
+
+1. normal certificate verification
+2. automatic dynamic completion of missing issuer certificates
+3. optional insecure retry only when `METRO_SSL_ALLOW_INSECURE_FALLBACK=true`
+
+If a deployed environment still fails after step 2, first keep `METRO_SSL_VERIFY=true` and inspect outbound network policy or TLS interception. Only use insecure fallback as a temporary diagnostic measure.
 
 ### Strict Live Coverage Fails Immediately
 

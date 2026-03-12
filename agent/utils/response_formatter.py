@@ -13,6 +13,44 @@ from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse
 
+_PT_CATEGORY_VALUE_MAP = {
+    "music": "Música",
+    "monuments": "Monumentos",
+    "museum": "Museu",
+    "museums": "Museus",
+    "museum & monument": "Museus e Monumentos",
+    "museums & monuments": "Museus e Monumentos",
+    "view point": "Miradouro",
+    "view points": "Miradouros",
+    "viewpoint": "Miradouro",
+    "viewpoints": "Miradouros",
+    "tours": "Visitas guiadas",
+    "tour": "Visita guiada",
+    "family & kids": "Família e Crianças",
+    "family and kids": "Família e Crianças",
+    "gardens & parks": "Jardins e Parques",
+    "gardens and parks": "Jardins e Parques",
+    "nightlife": "Vida noturna",
+    "restaurants": "Restaurantes",
+    "restaurant": "Restaurante",
+    "architecture": "Arquitetura",
+    "art": "Arte",
+    "history": "História",
+    "culture": "Cultura",
+    "shopping": "Compras",
+}
+
+_PT_DURATION_VALUE_MAP = {
+    "single day": "Um só dia",
+    "one day": "Um só dia",
+    "multiple days": "Vários dias",
+    "multi-day": "Vários dias",
+    "ongoing": "A decorrer",
+    "long term": "Longa duração",
+    "temporary": "Temporário",
+    "permanent": "Permanente",
+}
+
 _SOURCE_LINE_RE = re.compile(r'^(?:[-*•]\s*)?(?:📌\s*)?(?:\*\*)?(?:Fonte|Source)(?:\*\*)?:.*$', re.IGNORECASE)
 _PT_LANGUAGE_HINTS_RE = re.compile(
     r"\b(olá|ola|bom dia|boa tarde|boa noite|como|quero|preciso|museu|museus|evento|eventos|hoje|amanhã|amanha|previsão|tempo|locais|morada|fonte|autocarro|comboio|bairro)\b",
@@ -242,6 +280,10 @@ def canonicalize_weather_terms(text: str, language: str = "en") -> str:
     if language == "en":
         replacements = [
             (r"\*\*Avisos Meteorológicos:\*\*", "**Active Warnings:**"),
+            (r"Active Weather Warnings \(LSB\)", "Active Weather Warnings for Lisbon"),
+            (r"Active Weather Warnings \([A-Z]{3}\)", "Active Weather Warnings"),
+            (r"\bSem avisos meteorológicos ativos para Lisboa\.\b", "No active weather warnings for Lisbon."),
+            (r"\bSem avisos meteorológicos ativos para a área 'LSB'\.\b", "No active weather warnings for Lisbon."),
             (r"\*\*Dicas Práticas\*\*", "**Practical Tips**"),
             (r"\bAs condições meteorológicas são normais\b", "Weather conditions are normal"),
             (r"\*\*Temperatura\*\*:", "**Temperature**:"),
@@ -269,7 +311,12 @@ def canonicalize_weather_terms(text: str, language: str = "en") -> str:
     else:
         replacements = [
             (r"Lisbon Weather Summary", "Resumo Meteorológico de Lisboa"),
-            (r"\bNo active weather warnings for area '([^']+)'\.", r"Sem avisos meteorológicos ativos para a área '\1'."),
+            (r"Active Weather Warnings for Lisbon", "Avisos Meteorológicos para Lisboa"),
+            (r"Active Weather Warnings \(LSB\)", "Avisos Meteorológicos para Lisboa"),
+            (r"Active Weather Warnings \([A-Z]{3}\)", "Avisos Meteorológicos"),
+            (r"\bNo active weather warnings for Lisbon\.", "Sem avisos meteorológicos ativos para Lisboa."),
+            (r"\bNo active weather warnings for area 'LSB'\.", "Sem avisos meteorológicos ativos para Lisboa."),
+            (r"\bNo active weather warnings for area '[A-Z]{3}'\.", "Sem avisos meteorológicos ativos."),
             (r"\bNo active weather warnings\b", "Sem avisos meteorológicos ativos"),
             (r"\bNo Avisos Meteorológicos\b", "Sem avisos meteorológicos ativos"),
             (r"\bWeather conditions are normal\b", "As condições meteorológicas são normais"),
@@ -544,38 +591,340 @@ def canonicalize_transport_terms(text: str, language: str = "en") -> str:
 
 def canonicalize_local_information_terms(text: str, language: str = "en") -> str:
     """Normalizes common PT-PT labels frequently leaked into EN local-information outputs."""
-    if not text or language != "en":
+    if not text:
         return text
 
-    replacements = [
-        (r"\*\*Breve descri(?:ç|c)[aã]o\*\*:", "**Brief description**:"),
-        (r"\*\*Morada\*\*:", "**Address**:"),
-        (r"\*\*Localiza(?:ç|c)[aã]o\*\*:", "**Location**:"),
-        (r"\*\*Hor[aá]rio\*\*:", "**Opening hours**:"),
-        (r"\*\*Hor[aá]rios de funcionamento\*\*:", "**Opening hours**:"),
-        (r"\*\*Dica r[aá]pida\*\*:", "**Quick tip**:"),
-        (r"\*\*Dica\*\*:", "**Tip**:"),
-        (r"\*\*Pre(?:ç|c)o\*\*:", "**Price**:"),
-        (r"\*\*Pre(?:ç|c)os\*\*:", "**Prices**:"),
-        (r"\*\*Comprar bilhetes(?:/mais info)?\*\*:", "**Buy tickets**:"),
-        (r"\*\*Site Oficial\*\*", "**Official page**"),
-        (r"\bHor[aá]rios de funcionamento:\s*consultar website oficial\.?", "Opening hours: check the official website."),
-        (r"\bPre(?:ç|c)os?:\s*verificar no local ou website(?: oficial)?\.?", "Prices: check on site or on the official website."),
-        (r"\bverificar no local ou website(?: oficial)?\b", "check on site or on the official website"),
-        (r"\bconsultar website oficial\b", "check the official website"),
-        (r"\bHoje\b", "Today"),
-        (r"\bFechado\b", "Closed"),
-        (r"\bN[aã]o especificado\b", "Not specified"),
-        (r"\*\*Atualizado\*\*:", "**Updated**:"),
-        (r"\*\*Atualizado:\*\*", "**Updated:**"),
-        (r"\*\*Fonte\*\*:", "**Source**:"),
-        (r"\*\*Fonte:\*\*", "**Source:**"),
-    ]
+    if language == "en":
+        replacements = [
+            (r"\*\*Breve descri(?:ç|c)[aã]o\*\*:", "**Brief description**:"),
+            (r"\*\*Morada\*\*:", "**Address**:"),
+            (r"\*\*Localiza(?:ç|c)[aã]o\*\*:", "**Location**:"),
+            (r"\*\*Hor[aá]rio\*\*:", "**Opening hours**:"),
+            (r"\*\*Hor[aá]rios de funcionamento\*\*:", "**Opening hours**:"),
+            (r"\*\*Dica r[aá]pida\*\*:", "**Quick tip**:"),
+            (r"\*\*Dica\*\*:", "**Tip**:"),
+            (r"\*\*Pre(?:ç|c)o\*\*:", "**Price**:"),
+            (r"\*\*Pre(?:ç|c)os\*\*:", "**Prices**:"),
+            (r"\*\*Comprar bilhetes(?:/mais info)?\*\*:", "**Buy tickets**:"),
+            (r"\*\*Site Oficial\*\*", "**Official page**"),
+            (r"\*\*Categoria\*\*:", "**Category**:"),
+            (r"\*\*Categoria:\*\*", "**Category:**"),
+            (r"\*\*Quando\*\*:", "**When**:"),
+            (r"\*\*Quando:\*\*", "**When:**"),
+            (r"\*\*Dura(?:ç|c)[aã]o\*\*:", "**Duration**:"),
+            (r"\*\*Dura(?:ç|c)[aã]o:\*\*", "**Duration:**"),
+            (r"\*\*Bilhetes\*\*:", "**Buy tickets**:"),
+            (r"\*\*Bilhetes:\*\*", "**Buy tickets:**"),
+            (r"\*\*Local\*\*:", "**Location**:"),
+            (r"\*\*Local:\*\*", "**Location:**"),
+            (r"\bHor[aá]rios de funcionamento:\s*consultar website oficial\.?", "Opening hours: check the official website."),
+            (r"\bPre(?:ç|c)os?:\s*verificar no local ou website(?: oficial)?\.?", "Prices: check on site or on the official website."),
+            (r"\bverificar no local ou website(?: oficial)?\b", "check on site or on the official website"),
+            (r"\bconsultar website oficial\b", "check the official website"),
+            (r"\bHoje\b", "Today"),
+            (r"\bFechado\b", "Closed"),
+            (r"\bN[aã]o especificado\b", "Not specified"),
+            (r"\*\*Atualizado\*\*:", "**Updated**:"),
+            (r"\*\*Atualizado:\*\*", "**Updated:**"),
+            (r"\*\*Fonte\*\*:", "**Source**:"),
+            (r"\*\*Fonte:\*\*", "**Source:**"),
+        ]
+    else:
+        replacements = [
+            (r"\*\*Brief description\*\*:", "**Breve descrição**:"),
+            (r"\*\*Address\*\*:", "**Morada**:"),
+            (r"\*\*Location\*\*:", "**Localização**:"),
+            (r"\*\*Opening hours\*\*:", "**Horário**:"),
+            (r"\*\*Quick tip\*\*:", "**Dica rápida**:"),
+            (r"\*\*Tip\*\*:", "**Dica**:"),
+            (r"\*\*Price\*\*:", "**Preço**:"),
+            (r"\*\*Prices\*\*:", "**Preços**:"),
+            (r"\*\*Buy tickets\*\*:", "**Comprar bilhetes**:"),
+            (r"\*\*Official page\*\*", "**Site Oficial**"),
+            (r"\*\*Category\*\*:", "**Categoria**:"),
+            (r"\*\*Category:\*\*", "**Categoria:**"),
+            (r"\*\*When\*\*:", "**Quando**:"),
+            (r"\*\*When:\*\*", "**Quando:**"),
+            (r"\*\*Duration\*\*:", "**Duração**:"),
+            (r"\*\*Duration:\*\*", "**Duração:**"),
+            (r"\*\*Local\*\*:", "**Local**:"),
+            (r"\*\*Local:\*\*", "**Local:**"),
+            (r"\bOpening hours:\s*check the official website\.?", "Horários de funcionamento: consultar website oficial."),
+            (r"\bPrices:\s*check on site or on the official website\.?", "Preços: verificar no local ou website oficial."),
+            (r"\bcheck on site or on the official website\b", "verificar no local ou website oficial"),
+            (r"\bcheck the official website\b", "consultar website oficial"),
+            (r"\bToday\b", "Hoje"),
+            (r"\bClosed\b", "Fechado"),
+            (r"\bNot specified\b", "Não especificado"),
+            (r"\*\*Updated\*\*:", "**Atualizado**:"),
+            (r"\*\*Updated:\*\*", "**Atualizado:**"),
+            (r"\*\*Source\*\*:", "**Fonte**:"),
+            (r"\*\*Source:\*\*", "**Fonte:**"),
+        ]
 
     normalized = text
     for pattern, replacement in replacements:
         normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+
+    if language == "pt":
+        normalized = localize_local_information_values(normalized, language=language)
+
     return normalized
+
+
+def _translate_pt_category_value(value: str) -> str:
+    """Translates common VisitLisboa category values into PT-PT without touching titles."""
+    normalized_value = re.sub(r"\s+", " ", (value or "").strip().lower())
+    return _PT_CATEGORY_VALUE_MAP.get(normalized_value, value.strip())
+
+
+def _translate_pt_duration_value(value: str) -> str:
+    """Translates common event duration values into PT-PT while preserving leading emojis."""
+    raw_value = (value or "").strip()
+    prefix_match = re.match(r"^([\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D\s]+)?(.+?)$", raw_value)
+    if not prefix_match:
+        return raw_value
+
+    prefix = (prefix_match.group(1) or "").strip()
+    core = (prefix_match.group(2) or "").strip()
+    mapped = _PT_DURATION_VALUE_MAP.get(re.sub(r"\s+", " ", core.lower()), core)
+    if prefix:
+        return f"{prefix} {mapped}".strip()
+    return mapped
+
+
+def localize_local_information_values(text: str, language: str = "en") -> str:
+    """Localizes common metadata values that remain in English inside PT-PT researcher/planner outputs."""
+    if not text or language != "pt":
+        return text
+
+    localized_lines: list[str] = []
+    for line in text.splitlines():
+        updated_line = line
+
+        updated_line = re.sub(
+            r"(\*\*(?:Categoria|Category)\*\*:\s*)(.+)$",
+            lambda match: f"{match.group(1)}{_translate_pt_category_value(match.group(2))}",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+        updated_line = re.sub(
+            r"(\*\*(?:Categoria|Category):\*\*\s*)(.+)$",
+            lambda match: f"{match.group(1)}{_translate_pt_category_value(match.group(2))}",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+        updated_line = re.sub(
+            r"\*\*Description\*\*:",
+            "**Descrição**:",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+        updated_line = re.sub(
+            r"\*\*Description:\*\*",
+            "**Descrição:**",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+        updated_line = re.sub(
+            r"\*\*Filter used\*\*:",
+            "**Filtro aplicado**:",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+        updated_line = re.sub(
+            r"\*\*Filter used:\*\*",
+            "**Filtro aplicado:**",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+        updated_line = re.sub(
+            r"\*\*Result count\*\*:",
+            "**Resultado do filtro**:",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+        updated_line = re.sub(
+            r"\*\*Result count:\*\*",
+            "**Resultado do filtro:**",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+        updated_line = re.sub(
+            r"\*\*Highlights shown\*\*:",
+            "**Destaques mostrados**:",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+        updated_line = re.sub(
+            r"\*\*Highlights shown:\*\*",
+            "**Destaques mostrados:**",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+        updated_line = re.sub(
+            r"(\*\*(?:Duração|Duration)\*\*:\s*|\*\*(?:Duração|Duration):\*\*\s*)(.+)$",
+            lambda match: f"{match.group(1)}{_translate_pt_duration_value(match.group(2))}",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+
+        if "Preço" in updated_line or "Price" in updated_line:
+            updated_line = re.sub(
+                r"\bFrom\s+(€?\d+(?:[\.,]\d+)?)\s+to\s+(€?\d+(?:[\.,]\d+)?)\b",
+                r"de \1 a \2",
+                updated_line,
+                flags=re.IGNORECASE,
+            )
+            updated_line = re.sub(
+                r"\bFrom\s+(€?\d+(?:[\.,]\d+)?)\b",
+                r"desde \1",
+                updated_line,
+                flags=re.IGNORECASE,
+            )
+            updated_line = re.sub(r"\bFree\b", "Gratuito", updated_line, flags=re.IGNORECASE)
+            updated_line = re.sub(r"\bOn request\b", "Sob consulta", updated_line, flags=re.IGNORECASE)
+            updated_line = re.sub(r"\bSold out\b", "Esgotado", updated_line, flags=re.IGNORECASE)
+
+        if "TripAdvisor" in updated_line:
+            updated_line = re.sub(
+                r"\(([0-9\.,]+)\s+reviews?\)",
+                r"(\1 avaliações)",
+                updated_line,
+                flags=re.IGNORECASE,
+            )
+
+        if "Quando" in updated_line or "When" in updated_line:
+            updated_line = re.sub(r"\bat\s+(\d{1,2}:\d{2})\b", r"às \1", updated_line)
+
+        if "📍" in updated_line or "**Local" in updated_line or "**Location" in updated_line:
+            updated_line = re.sub(r"\bLisbon\b", "Lisboa", updated_line)
+
+        updated_line = re.sub(
+            r"\*\*Total matching events:\*\*",
+            "**Total de eventos encontrados:**",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+        updated_line = re.sub(
+            r"\*\*Source completeness note:\*\*",
+            "**Nota sobre a completude da fonte:**",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+        updated_line = re.sub(
+            r"([0-9]+)\s+matching event\(s\) in VisitLisboa do not include confirmed dates, so they were excluded from the '([^']+)' date window\.",
+            r"\1 evento(s) no VisitLisboa não incluem datas confirmadas, por isso foram excluídos da janela temporal '\2'.",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+        updated_line = re.sub(
+            r"([0-9]+)\s+additional matching record\(s\) were excluded because the source does not confirm their dates yet\.",
+            r"\1 registo(s) adicional(is) compatíveis foram excluídos porque a fonte ainda não confirma a respetiva data.",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+        updated_line = re.sub(
+            r"([0-9]+)\s+confirmed-date event\(s\) match this filter\.",
+            r"\1 evento(s) com data confirmada correspondem a este filtro.",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+        updated_line = re.sub(
+            r"([0-9]+)\s+most relevant result\(s\)\.",
+            r"\1 resultado(s) mais relevantes.",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+        updated_line = re.sub(
+            r"\ball categories\b",
+            "todas as categorias",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+        updated_line = re.sub(r"\bthis week\b", "esta semana", updated_line, flags=re.IGNORECASE)
+        updated_line = re.sub(r"\bthis weekend\b", "este fim de semana", updated_line, flags=re.IGNORECASE)
+        updated_line = re.sub(r"\bnext week\b", "próxima semana", updated_line, flags=re.IGNORECASE)
+        updated_line = re.sub(r"\bthis month\b", "este mês", updated_line, flags=re.IGNORECASE)
+        updated_line = re.sub(r"\bnext month\b", "próximo mês", updated_line, flags=re.IGNORECASE)
+        updated_line = re.sub(
+            r"(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})",
+            r"\1 a \2",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+        updated_line = re.sub(
+            r"\bbroad event discovery\b",
+            "pesquisa geral de eventos",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+        updated_line = re.sub(
+            r"\(date not confirmed in source\)",
+            "(data não confirmada na fonte)",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+
+        localized_lines.append(updated_line)
+
+    return "\n".join(localized_lines)
+
+
+def strip_technical_output_artifacts(text: str) -> str:
+    """Removes backend-oriented metadata that should not appear in final user answers."""
+    if not text:
+        return text
+
+    cleaned_lines: list[str] = []
+    technical_patterns = [
+        re.compile(r"^\s*(?:[-*•]\s*)?(?:🗺️\s*)?GPS\s*:", re.IGNORECASE),
+        re.compile(r"^\s*(?:[-*•]\s*)?(?:🚏\s*)?(?:next\s+)?stop(?:_id|\s+id)\s*[:=]", re.IGNORECASE),
+        re.compile(r"^\s*(?:[-*•]\s*)?(?:line|route|pattern|trip)(?:_id|\s+id)\s*[:=]", re.IGNORECASE),
+        re.compile(r"^\s*(?:[-*•]\s*)?(?:\*\*(?:Plate|Matrícula|Matricula)\*\*|(?:Plate|Matrícula|Matricula))\s*:", re.IGNORECASE),
+    ]
+    placeholder_line = re.compile(
+        r"\b(?:Unknown event|Evento sem nome|Unknown place|Local sem nome|Unknown station|Estação sem nome)\b",
+        re.IGNORECASE,
+    )
+    empty_value_line = re.compile(
+        r"^\s*(?:[-*•]\s*)?(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]\s*)?(?:\*\*[^*]+\*\*\s*:?\s*)?(?:N/?A|Unknown|UNKNOWN|Não disponível|Nao disponivel|Not available)\s*$",
+        re.IGNORECASE,
+    )
+
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if any(pattern.match(stripped) for pattern in technical_patterns):
+            continue
+        if placeholder_line.search(stripped):
+            continue
+        if empty_value_line.match(stripped):
+            continue
+        cleaned_lines.append(raw_line)
+
+    return "\n".join(cleaned_lines).strip()
+
+
+def sanitize_event_title_suffixes(text: str) -> str:
+    """Drops slug-like numeric suffixes from event titles when they leak into the UI."""
+    if not text:
+        return text
+
+    updated_lines: list[str] = []
+    title_pattern = re.compile(
+        r"^(\s*(?:[-*•]\s*)?(?:\d+\.\s*)?📅\s+\*\*[^*]+?)\s+(0\d{2,3}|\d{2,4})(\*\*)(.*)$"
+    )
+
+    for raw_line in text.splitlines():
+        match = title_pattern.match(raw_line)
+        if match:
+            raw_title = re.sub(r"\*\*", "", match.group(1)).strip()
+            title_word_count = len(raw_title.split())
+            if title_word_count >= 2:
+                raw_line = f"{match.group(1)}{match.group(3)}{match.group(4)}"
+        updated_lines.append(raw_line)
+
+    return "\n".join(updated_lines)
 
 
 def clean_researcher_tool_artifacts(text: str) -> str:
@@ -601,6 +950,67 @@ def clean_researcher_tool_artifacts(text: str) -> str:
         cleaned_lines.append(line)
 
     return "\n".join(cleaned_lines).strip()
+
+
+def structure_ranked_research_results(text: str) -> str:
+    """Converts flat numbered researcher results into nested markdown lists."""
+    if not text:
+        return text
+
+    entry_re = re.compile(r"^\s*(\d+)\.\s+(.+)$")
+    summary_re = re.compile(r"^(?:📊|⚠️|💡|📌|###|##|#)")
+    structured_lines: list[str] = []
+    inside_ranked_item = False
+    last_nested_index: Optional[int] = None
+
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+
+        if not stripped:
+            if structured_lines and structured_lines[-1] != "":
+                structured_lines.append("")
+            inside_ranked_item = False
+            last_nested_index = None
+            continue
+
+        entry_match = entry_re.match(stripped)
+        if entry_match:
+            structured_lines.append(f"- {entry_match.group(2).strip()}")
+            inside_ranked_item = True
+            last_nested_index = None
+            continue
+
+        if inside_ranked_item:
+            if summary_re.match(stripped):
+                if structured_lines and structured_lines[-1] != "":
+                    structured_lines.append("")
+                structured_lines.append(stripped)
+                inside_ranked_item = False
+                last_nested_index = None
+                continue
+
+            if stripped.startswith(("- ", "* ", "• ")):
+                normalized_bullet = stripped.replace("• ", "- ", 1)
+                structured_lines.append(f"  {normalized_bullet}")
+                last_nested_index = len(structured_lines) - 1
+                continue
+
+            if (
+                last_nested_index is not None
+                and "**" not in structured_lines[last_nested_index]
+                and not re.match(r"^[🗓️⏱️📂📍💰🎟️⭐📞🌐🔗🗺️🕐🚇🚆🚌🏛️🎭]\s", stripped)
+            ):
+                structured_lines[last_nested_index] = f"{structured_lines[last_nested_index]} {stripped}"
+                continue
+
+            structured_lines.append(f"  - {stripped}")
+            last_nested_index = len(structured_lines) - 1
+            continue
+
+        structured_lines.append(stripped)
+        last_nested_index = None
+
+    return clean_newlines("\n".join(structured_lines)).strip()
 
 
 def strip_unconfirmed_accessibility_claims(text: str, language: str = "en") -> str:
@@ -833,6 +1243,7 @@ def finalize_worker_response(
         )
     elif agent_name == "researcher":
         finalized = clean_researcher_tool_artifacts(finalized)
+        finalized = structure_ranked_research_results(finalized)
         if _ACCESSIBILITY_QUERY_RE.search(user_query or ""):
             finalized = strip_unconfirmed_accessibility_claims(
                 finalized,
@@ -904,7 +1315,11 @@ def normalize_metro_terminology(text: str) -> str:
         text,
         re.IGNORECASE,
     )
-    cp_context = re.search(r'\bCP\b|Comboios de Portugal|CP Trains', text, re.IGNORECASE)
+    cp_context = re.search(
+        r'\bCP\b|Comboios de Portugal|CP Trains|\bcomboios?\s+via\b|\btrain\s+via\b',
+        text,
+        re.IGNORECASE,
+    )
 
     if metro_context and not cp_context:
         replacements = [
@@ -1567,6 +1982,8 @@ def format_response(text: str) -> str:
     text = normalize_source_links(text)
     text = normalize_metro_terminology(text)
     text = strip_hallucinations(text)
+    text = strip_technical_output_artifacts(text)
+    text = sanitize_event_title_suffixes(text)
     text = strip_internal_sections(text)
     text = clean_decorative_separators(text)
     text = normalize_headers(text)

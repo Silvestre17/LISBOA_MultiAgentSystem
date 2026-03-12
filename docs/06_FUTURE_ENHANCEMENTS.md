@@ -1,89 +1,85 @@
 # 🔭 Future Enhancements
 
-This document captures likely next steps for LISBOA without presenting them as already implemented.
+This document captures only the shortlist of enhancements that remain realistically feasible with the current repository architecture as of 2026-03.
 
 > [!NOTE]
 > Everything below is prospective. If a capability is not documented elsewhere as implemented, treat it as a roadmap item only.
 
-## 🧭 Roadmap Themes
+## ✅ Prioritized Shortlist
 
-| Theme | Why it matters |
-|------|----------------|
-| richer UX artefacts | improve readability and planning usefulness for end users |
-| stronger agent coordination | make follow-up interactions and constraints more reliable |
-| better retrieval quality | improve grounding, filtering, and fallback behavior |
-| broader transport intelligence | support more providers and better disruption handling |
-| stronger evaluation depth | make thesis claims more robust and reproducible |
-| tighter operational hygiene | reduce documentation drift and recurring maintenance overhead |
+| Priority | Enhancement | User value | Difficulty | Why it is viable now |
+|---------:|-------------|------------|------------|----------------------|
+| 1 | iCalendar export for itineraries | users can add a generated plan to Google Calendar or Apple Calendar in one step | Low | itinerary responses already contain structured time blocks that can be converted into `.ics` events without new external services |
+| 2 | Interactive itinerary map MVP | users can see ordered stops and the rough flow of the day instead of reading only text | Medium | the project already stores or retrieves many place coordinates, and a lightweight map layer can be added in Streamlit without a full routing engine |
+| 3 | Downloadable itinerary pack | users can export a clean PDF or Markdown summary to keep offline during the trip | Low to Medium | the final answers are already Markdown-first, so export can reuse the existing response structure rather than inventing a new content pipeline |
 
-## 🎨 Product and UX
+## 1. iCalendar Export for Itineraries
 
-Potential next steps:
+### What it would do
 
-- optional place images in itinerary responses
-- lightweight static route maps for complex multimodal plans
-- richer place cards for attractions, services, and events
-- clearer mobile-first presentation patterns in the Streamlit UI
+- generate a `.ics` file from a finalized itinerary
+- create one calendar entry per confirmed itinerary block
+- work with Google Calendar, Apple Calendar, and Outlook through file import
 
-### Single Supported UI Evolution
+### Why it is a strong next step
 
-The public documentation already treats `app.py` as the supported Streamlit entrypoint. Future UI work should continue consolidating improvements into that single documented entrypoint instead of expanding the number of public-facing application variants.
+- it is immediately useful for both tourists and residents
+- it does not require OAuth, background jobs, or third-party write permissions
+- it keeps the system grounded because only confirmed itinerary items should be exported
 
-## 🤖 Agent and Orchestration Improvements
+### Implementation notes
 
-Potential next steps:
+- map planner time blocks into calendar events
+- include title, start time, end time, place, and short notes when present
+- skip blocks that do not have a reliable time window
 
-- stronger memory handling for follow-up planning sessions
-- richer planner constraints such as budget envelopes or tighter accessibility preferences
-- more explicit source-citation policies in final answers
-- broader deterministic QA coverage across non-transport domains
-- clearer retry policies when QA detects partial worker outputs
+## 2. Interactive Itinerary Map MVP
 
-## 📚 Retrieval and Knowledge Improvements
+### What it would do
 
-Potential next steps:
+- plot itinerary stops as ordered pins
+- show a simple visual sequence for the day
+- optionally group segments by mode, for example walking, metro, bus, or train
 
-- richer metadata filters for event date, region, and venue
-- improved hybrid retrieval strategies where dense retrieval is complemented by lexical signals
-- clearer fallback behavior when semantic retrieval returns sparse results
-- more structured image and schedule metadata in the vector store
-- better differentiation between tourism content and resident-oriented service discovery
+### Why it is viable
 
-## 🚇 Transport Improvements
+- the repository already works with coordinates from VisitLisboa, Lisboa Aberta, Metro, Carris, and Carris Metropolitana contexts
+- a first useful version can be built with a lightweight map component instead of a full navigation engine
+- it improves readability without changing the agent architecture
 
-Potential next steps:
+### Scope guardrails
 
-- additional operator coverage within the AML ecosystem
-- better disruption-aware itinerary replanning
-- route-map artefacts generated from multimodal outputs
-- stronger ETA reasoning for live vehicle tracking outputs
-- clearer confidence or freshness cues in transport-heavy answers
+- this should be an MVP map, not a professional routing engine
+- do not promise turn-by-turn navigation
+- do not block the feature on perfect coordinates for every single stop
 
-## 🧪 Evaluation Improvements
+## 3. Downloadable Itinerary Pack
 
-Potential next steps:
+### What it would do
 
-- larger benchmark sets beyond the current 72-query dataset
-- broader human calibration and inter-rater agreement analysis
-- longitudinal evaluation across seasons or service disruptions
-- stronger domain-specific validators outside transport
-- more systematic export and visualization workflows for result comparison
+- let the user download the final itinerary as PDF or Markdown
+- preserve sections like timetable, transport notes, weather caveats, and source attribution
+- support offline use during the visit
 
-## ⚙️ Operations and Maintainability
+### Why it is viable
 
-Potential next steps:
+- the app already renders structured Markdown responses
+- export can reuse the final planner output after formatting
+- the implementation does not depend on new APIs or provider-side features
 
-- more compact documentation around recurring operations
-- changelog-style tracking for tool inventory changes
-- stronger CI verification for documentation drift
-- automated checks for stale counts and workflow times in Markdown files
-- clearer runbooks for regenerating evaluation artefacts and local transport support files
+## 🚫 Not Prioritized in This Shortlist
 
-## ✅ Guardrails for Future Work
+The following ideas were intentionally left out of the shortlist because they push effort or maintenance too far beyond the requested low or medium range:
 
-As the project evolves, a few principles should stay fixed:
+- direct calendar write integrations through OAuth
+- a full-featured professional map with advanced routing and live replanning engine behavior
+- large new transport-provider integrations that would expand operational scope more than user value in the short term
 
-- keep grounded data access explicit and visible in the architecture
-- avoid documenting aspirational features as if they already exist
-- update tests and documentation when tool inventory or workflows change
-- prefer one clearly supported operating path over multiple loosely documented variants
+## 📌 Decision Rule for New Roadmap Items
+
+Any new enhancement should pass all four checks before being added here:
+
+1. it must provide immediate user value
+2. it must be implementable with the current architecture or with a small extension
+3. it must stay in the low or medium difficulty range
+4. it must not create major documentation or operational drift around the supported `app_vprod.py` path

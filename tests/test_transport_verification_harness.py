@@ -28,7 +28,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from tests.run_transport_verification import (
+from scripts.run_transport_verification import (
     AuditExecutionResult,
     TransportAuditRecord,
     build_reference_result,
@@ -78,7 +78,7 @@ def test_build_reference_result_invokes_tool_when_needed() -> None:
     tool.invoke.return_value = "🚆 **Departures from Entrecampos**\n🕐 **20:30** → Sintra"
     agent._get_tool_by_name.return_value = tool
 
-    with patch("tests.run_transport_verification._build_deterministic_transport_tool_call", return_value=fake_message):
+    with patch("scripts.run_transport_verification._build_deterministic_transport_tool_call", return_value=fake_message):
         result = build_reference_result(agent, "When are the next trains from Entrecampos?")
 
     assert result["kind"] == "tool_call"

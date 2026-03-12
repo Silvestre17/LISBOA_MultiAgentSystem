@@ -65,9 +65,31 @@ class ResearcherAgent(BaseAgent):
         )
 
     @staticmethod
+    def _infer_research_query_language(user_message: str) -> str:
+        """Adds a light PT-PT heuristic for broad local-discovery prompts."""
+        query = (user_message or "").lower()
+        query_tokens = set(re.findall(r"[a-zà-ÿ]+", query))
+        pt_token_markers = {
+            "quero", "lista", "atrações", "atracoes", "imperdíveis", "imperdiveis",
+            "hoje", "amanhã", "amanha", "eventos", "locais", "monumentos",
+            "miradouro", "museu", "museus",
+        }
+        en_token_markers = {
+            "what", "where", "best", "museum", "museums", "events", "attractions",
+            "wheelchair", "accessible", "history", "places", "nearby",
+        }
+        if any(token in query_tokens for token in pt_token_markers) or "esta semana" in query or re.search(r"[ãõáéíóúç]", query):
+            return "pt"
+        if any(token in query_tokens for token in en_token_markers) or any(
+            phrase in query for phrase in ["first time", "must see", "must-see", "in lisbon", "in belem", "in belém", "near "]
+        ):
+            return "en"
+        return infer_response_language(user_query=user_message, default="en")
+
+    @staticmethod
     def _build_messages(system_prompt: str, user_message: str, context: str = "") -> list:
         """Builds the message list for a researcher invocation."""
-        language = infer_response_language(user_query=user_message, default="en")
+        language = ResearcherAgent._infer_research_query_language(user_message)
         language_instruction = (
             "Respond ENTIRELY in Portuguese (PT-PT)."
             if language == "pt"
@@ -123,7 +145,7 @@ class ResearcherAgent(BaseAgent):
     @staticmethod
     def _build_places_source_line(result: str, language: str) -> str:
         """Builds the right source line for direct place lookups, including hybrid open-data results."""
-        if "Lisboa Aberta" in result or "Open Data:" in result:
+        if "Open Data:" in result or re.search(r"\b[1-9]\d*\s+from Lisboa Aberta\b", result or ""):
             if language == "pt":
                 return "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) e [*Lisboa Aberta*](https://dados.cm-lisboa.pt/)"
             return "📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places) and [*Lisboa Aberta*](https://dados.cm-lisboa.pt/)"
@@ -131,6 +153,102 @@ class ResearcherAgent(BaseAgent):
         if language == "pt":
             return "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais)"
         return "📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places)"
+
+    @staticmethod
+    def _build_events_source_line(language: str) -> str:
+        """Builds the right source line for direct event lookups."""
+        if language == "pt":
+            return "📌 **Fonte:** [*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos)"
+        return "📌 **Source:** [*VisitLisboa Events*](https://www.visitlisboa.com/en/events)"
+
+    @staticmethod
+    def _is_broad_attractions_query(user_message: str) -> bool:
+        """Detects broad attraction-list queries that should bypass free-form synthesis."""
+        query = (user_message or "").lower()
+        attraction_phrases = [
+            "atrações imperdíveis",
+            "atracoes imperdiveis",
+            "atrações",
+            "atracoes",
+            "must-see",
+            "must see",
+            "first time",
+            "primeira vez",
+            "top attractions",
+            "highly recommended attractions",
+            "main attractions",
+            "o que visitar",
+            "what should i visit",
+        ]
+        planning_terms = ["itinerary", "roteiro", "plan", "plano", "schedule", "agenda"]
+        return any(phrase in query for phrase in attraction_phrases) and not any(
+            term in query for term in planning_terms
+        )
+
+    @staticmethod
+    def _is_direct_event_lookup_query(user_message: str) -> bool:
+        """Detects event-discovery queries that are safer to answer directly from tools."""
+        query = (user_message or "").lower()
+        planning_terms = [
+            "plan", "plano", "roteiro", "itinerary", "agenda",
+            "combine", "combinar", "day plan", "plan my day",
+        ]
+        event_terms = [
+            "event", "events", "evento", "eventos", "concert", "concerto",
+            "festival", "festivals", "exhibition", "exposição", "exposicao",
+            "music", "música", "musica", "show", "theatre", "teatro",
+            "dance", "dança", "danca", "cinema", "what's on", "o que há", "o que ha",
+        ]
+        return any(term in query for term in event_terms) and not any(
+            term in query for term in planning_terms
+        )
+
+    @staticmethod
+    def _extract_event_date_filter(user_message: str) -> Optional[str]:
+        """Extracts a lightweight date filter for direct event tool lookups."""
+        query = (user_message or "").lower()
+        mappings = [
+            (["this weekend", "este fim de semana", "fim de semana"], "this weekend"),
+            (["next week", "próxima semana", "proxima semana"], "next week"),
+            (["this week", "esta semana"], "this week"),
+            (["tomorrow", "amanhã", "amanha"], "tomorrow"),
+            (["today", "hoje"], "today"),
+            (["next month", "próximo mês", "proximo mes"], "next month"),
+            (["this month", "este mês", "este mes"], "this month"),
+        ]
+        for terms, date_filter in mappings:
+            if any(term in query for term in terms):
+                return date_filter
+        return None
+
+    @staticmethod
+    def _extract_event_focus_query(user_message: str) -> Optional[str]:
+        """Drops generic event phrasing so broad date-based event searches keep high recall."""
+        query = (user_message or "").lower()
+        specific_interest_terms = [
+            "music", "música", "musica", "concert", "concerto", "concertos", "fado",
+            "jazz", "rock", "pop", "festival", "festivais", "exhibition", "exposição",
+            "exposicao", "theatre", "teatro", "dance", "dança", "danca", "cinema",
+            "art", "arte", "family", "família", "familia", "kids", "children",
+            "child", "miúdos", "miudos", "crianças", "criancas", "night",
+            "nightlife", "evening", "noite", "food", "gastronomia",
+            "sports", "desporto", "desportos", "market", "mercado", "fair", "feira",
+        ]
+        if not any(term in query for term in specific_interest_terms):
+            return None
+
+        generic_terms = {
+            "que", "quais", "what", "which", "major", "great", "grandes", "large",
+            "event", "events", "evento", "eventos", "this", "week", "esta", "semana",
+            "este",
+            "today", "hoje", "tomorrow", "amanhã", "amanha", "next", "weekend",
+            "fim", "de", "semana", "local", "locais", "culture", "cultura", "cultural",
+            "explore", "explorar", "lisbon", "lisboa", "temos", "there", "happening", "have",
+            "algo", "interessante", "fazer", "para", "perto", "near", "around", "theres",
+        }
+        tokens = [token for token in re.findall(r"[a-zA-ZÀ-ÿ0-9]+", query) if len(token) >= 3]
+        meaningful_tokens = [token for token in tokens if token not in generic_terms]
+        return " ".join(dict.fromkeys(meaningful_tokens)) if meaningful_tokens else None
 
     @staticmethod
     def _is_direct_place_lookup_query(user_message: str) -> bool:
@@ -204,12 +322,43 @@ class ResearcherAgent(BaseAgent):
         if not places_tool:
             return self._run_direct_tool_fallback(user_message, language)
 
-        args = {"query": user_message, "max_results": 5}
-        if any(term in message_lower for term in ["museum", "museu", "monument", "monumento"]):
+        query_text = user_message
+        max_results = 5
+        if self._is_broad_attractions_query(user_message):
+            query_text = f"{user_message} iconic monuments museums palaces castles historic sites"
+            max_results = 6
+
+        args = {"query": query_text, "max_results": max_results}
+        if self._is_broad_attractions_query(user_message):
+            args["category"] = "Museums & Monuments"
+        elif any(term in message_lower for term in ["museum", "museu", "monument", "monumento"]):
             args["category"] = "Museums & Monuments"
 
         result = places_tool.invoke(args)
         source_line = self._build_places_source_line(result, language)
+        return f"{result}\n\n{source_line}".strip()
+
+    def _run_direct_event_lookup(self, user_message: str, language: str) -> str:
+        """Runs a deterministic VisitLisboa event lookup with explicit date parsing."""
+        events_tool = self._get_tool_by_name("search_cultural_events")
+        if not events_tool:
+            return (
+                "Não consegui aceder à pesquisa de eventos neste momento."
+                if language == "pt"
+                else "I couldn't access the event search tool right now."
+            )
+
+        args = {"max_results": 5, "language": language}
+        date_filter = self._extract_event_date_filter(user_message)
+        focus_query = self._extract_event_focus_query(user_message)
+
+        if date_filter:
+            args["date_filter"] = date_filter
+        if focus_query:
+            args["query"] = focus_query
+
+        result = events_tool.invoke(args)
+        source_line = self._build_events_source_line(language)
         return f"{result}\n\n{source_line}".strip()
 
     @staticmethod
@@ -277,15 +426,7 @@ class ResearcherAgent(BaseAgent):
                 return tool.invoke({"query": user_message, "language": language})
 
         if any(keyword in message_lower for keyword in event_keywords):
-            tool = self._get_tool_by_name("search_cultural_events")
-            if tool:
-                result = tool.invoke({"query": user_message, "max_results": 5})
-                source_line = (
-                    "📌 **Fonte:** [*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos)"
-                    if language == "pt"
-                    else "📌 **Source:** [*VisitLisboa Events*](https://www.visitlisboa.com/en/events)"
-                )
-                return f"{result}\n\n{source_line}".strip()
+            return self._run_direct_event_lookup(user_message, language)
 
         tool = self._get_tool_by_name("search_places_attractions")
         if tool:
@@ -421,7 +562,7 @@ class ResearcherAgent(BaseAgent):
         Returns:
             str: Places/events information response.
         """
-        language = infer_response_language(user_query=user_message, default="en")
+        language = self._infer_research_query_language(user_message)
         messages = self._build_messages(self.system_prompt, user_message, context)
 
         # Skip tool enforcement for greetings/thanks
@@ -447,7 +588,22 @@ class ResearcherAgent(BaseAgent):
                 language=language,
             )
 
-        if not is_greeting and hasattr(self, "tools") and self._is_direct_place_lookup_query(user_message):
+        if not is_greeting and self._is_direct_event_lookup_query(user_message):
+            if verbose:
+                print("      [RESEARCHER] Using deterministic direct event lookup...")
+
+            response = self._run_direct_event_lookup(user_message, language)
+            return finalize_worker_response(
+                response,
+                agent_name="researcher",
+                user_query=user_message,
+                language=language,
+            )
+
+        if not is_greeting and hasattr(self, "tools") and (
+            self._is_direct_place_lookup_query(user_message)
+            or self._is_broad_attractions_query(user_message)
+        ):
             if verbose:
                 print("      [RESEARCHER] Using deterministic direct place lookup...")
 

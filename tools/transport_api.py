@@ -21,6 +21,7 @@
 
 import logging
 import os
+import re
 from collections import defaultdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -51,6 +52,7 @@ from tools.cp_api import (
     get_cp_station_info,
     load_cp_aml_stations,
 )
+from tools.location_resolver import get_location_display_name, normalize_location_text
 
 # Import from the split modules
 from tools.metrolisboa_api import (
@@ -74,12 +76,43 @@ METRO_STATUS_URL = "https://app.metrolisboa.pt/status/getLinhas.php"
 # ==========================================================================
 
 def _normalize_station(text: str) -> str:
-    """Normalizes station name for comparison (removes accents, lowercases)."""
-    import unicodedata
-    return ''.join(
-        c for c in unicodedata.normalize('NFD', text)
-        if unicodedata.category(c) != 'Mn'
-    ).lower().strip()
+    """Normalizes station or place text for comparison."""
+    return normalize_location_text(text)
+
+
+def _format_location_display_name(location: str, detailed: bool = False) -> str:
+    """Formats route endpoints and landmark labels without breaking acronyms like NOVA IMS."""
+    raw = str(location or "").strip()
+    if not raw:
+        return raw
+
+    landmark = get_landmark_info(raw)
+    if landmark:
+        if detailed:
+            return str(
+                landmark.get("display_name")
+                or landmark.get("name")
+                or landmark.get("short_name")
+                or raw
+            ).strip()
+        return str(
+            landmark.get("short_name")
+            or landmark.get("name")
+            or landmark.get("display_name")
+            or raw
+        ).strip()
+
+    if re.fullmatch(r"(?:[A-Z0-9]{2,}(?:[\s/-][A-Z0-9]{2,})*)", raw):
+        return raw
+
+    try:
+        resolved_label = get_location_display_name(raw, detailed=detailed)
+        if resolved_label:
+            return resolved_label
+    except Exception as exc:
+        logger.debug("Display-name resolution failed for '%s': %s", raw, exc)
+
+    return raw.title()
 
 
 def _find_station_index(stations: list, station_name: str) -> int:
@@ -181,6 +214,64 @@ def _estimate_metro_time(station_count: int, transfers: int = 0) -> str:
     return f"~{total} min"
 
 
+def _find_best_transfer_route(
+    origin_lines: List[str],
+    destination_lines: List[str],
+    origin_station: str,
+    destination_station: str,
+) -> Optional[Dict[str, Any]]:
+    """Finds the shortest valid metro transfer option between two stations."""
+    transfer_stations = [
+        ("Marquês de Pombal", ["amarela", "azul"]),
+        ("Saldanha", ["amarela", "vermelha"]),
+        ("Alameda", ["verde", "vermelha"]),
+        ("Baixa-Chiado", ["azul", "verde"]),
+        ("Campo Grande", ["amarela", "verde"]),
+        ("São Sebastião", ["vermelha", "azul"]),
+    ]
+
+    candidates: List[Dict[str, Any]] = []
+    for transfer_station, hub_lines in transfer_stations:
+        origin_candidates = [line for line in origin_lines if line in hub_lines]
+        destination_candidates = [line for line in destination_lines if line in hub_lines]
+
+        for first_line in origin_candidates:
+            for second_line in destination_candidates:
+                if first_line == second_line:
+                    continue
+
+                leg1_count = _count_metro_stations(first_line, origin_station, transfer_station)
+                leg2_count = _count_metro_stations(second_line, transfer_station, destination_station)
+                if leg1_count < 0 or leg2_count < 0:
+                    continue
+
+                total_stations = leg1_count + leg2_count
+                estimated_minutes = total_stations * 2 + 3 + 2
+                candidates.append(
+                    {
+                        "station": transfer_station,
+                        "first_line": first_line,
+                        "second_line": second_line,
+                        "leg1_count": leg1_count,
+                        "leg2_count": leg2_count,
+                        "total_stations": total_stations,
+                        "estimated_minutes": estimated_minutes,
+                    }
+                )
+
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda item: (
+            item["estimated_minutes"],
+            item["total_stations"],
+            item["station"],
+        )
+    )
+    return candidates[0]
+
+
 def _get_line_status(line_id: str) -> str:
     """
     Gets real-time status for a specific Metro line.
@@ -242,7 +333,9 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     Returns:
         str: Multi-modal route suggestions with Metro, train, and bus options.
     """
-    response = f"🗺️ **Route: {origin.title()} → {destination.title()}**\n\n"
+    origin_display = _format_location_display_name(origin)
+    destination_display = _format_location_display_name(destination)
+    response = f"🗺️ **Route: {origin_display} → {destination_display}**\n\n"
     sources_used: List[str] = []
 
     if _normalize_station(origin) == _normalize_station(destination):
@@ -269,7 +362,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
         response += "📍 **LOCATION INFORMATION**\n"
         
         if origin_landmark:
-            response += f"**{origin_landmark['name']}**\n"
+            response += f"**{_format_location_display_name(origin, detailed=True)}**\n"
             if origin_landmark.get('metro'):
                 line = origin_landmark.get('line', '')
                 line_emoji = METRO_LINES.get(line.split('/')[0], {}).get('emoji', '🚇')
@@ -280,7 +373,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
             response += f"   ℹ️ {origin_landmark.get('description', '')}\n\n"
         
         if dest_landmark:
-            response += f"**{dest_landmark['name']}**\n"
+            response += f"**{_format_location_display_name(destination, detailed=True)}**\n"
             if dest_landmark.get('metro'):
                 line = dest_landmark.get('line', '')
                 line_emoji = METRO_LINES.get(line.split('/')[0], {}).get('emoji', '🚇')
@@ -308,6 +401,19 @@ def get_route_between_stations(origin: str, destination: str) -> str:
         eff_dest = dest_landmark['metro']
         eff_dest_lines = get_station_lines(eff_dest)
         dest_from_landmark = True
+
+    eff_origin_cp = origin_cp
+    eff_dest_cp = dest_cp
+    origin_train_station = origin.title()
+    dest_train_station = destination.title()
+
+    if not eff_origin_cp and origin_landmark and origin_landmark.get("train_station"):
+        origin_train_station = str(origin_landmark["train_station"]).strip()
+        eff_origin_cp = get_cp_station_info(origin_train_station)
+
+    if not eff_dest_cp and dest_landmark and dest_landmark.get("train_station"):
+        dest_train_station = str(dest_landmark["train_station"]).strip()
+        eff_dest_cp = get_cp_station_info(dest_train_station)
 
     # Calculate Metro Route
     if eff_origin_lines and eff_dest_lines:
@@ -340,7 +446,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                 
                 step = 1
                 if origin_from_landmark:
-                    response += f"   {step}. Walk from {origin.title()} to **{eff_origin.title()}**\n"
+                    response += f"   {step}. Walk from {origin_display} to **{eff_origin.title()}**\n"
                     step += 1
                     
                 response += f"   {step}. Board at **{eff_origin.title()}** {direction}\n"
@@ -350,35 +456,23 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                 
                 if dest_from_landmark:
                     step += 1
-                    response += f"   {step}. Walk to {destination.title()}\n"
+                    response += f"   {step}. Walk to {destination_display}\n"
                 
                 response += "\n"
 
         else:
             response += "🔄 **Transfer Required**\n\n"
-            
-            transfer_stations = [
-                ("Marquês de Pombal", ["amarela", "azul"]),
-                ("Saldanha", ["amarela", "vermelha"]),
-                ("Alameda", ["verde", "vermelha"]),
-                ("Baixa-Chiado", ["azul", "verde"]),
-                ("Campo Grande", ["amarela", "verde"]),
-                ("São Sebastião", ["vermelha", "azul"]),
-            ]
-            
-            best_hub = None
-            common_hub_lines = None
-            
-            for station, lines in transfer_stations:
-                if set(eff_origin_lines) & set(lines) and set(eff_dest_lines) & set(lines):
-                    best_hub = station
-                    l1 = list(set(eff_origin_lines) & set(lines))[0]
-                    l2 = list(set(eff_dest_lines) & set(lines))[0]
-                    common_hub_lines = (l1, l2)
-                    break
-            
-            if best_hub and common_hub_lines:
-                l1, l2 = common_hub_lines
+            best_transfer = _find_best_transfer_route(
+                origin_lines=eff_origin_lines,
+                destination_lines=eff_dest_lines,
+                origin_station=eff_origin,
+                destination_station=eff_dest,
+            )
+
+            if best_transfer:
+                best_hub = best_transfer["station"]
+                l1 = best_transfer["first_line"]
+                l2 = best_transfer["second_line"]
                 l1_info = METRO_LINES[l1]
                 l2_info = METRO_LINES[l2]
                 
@@ -389,9 +483,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                         response += f"   ⚠️ **{check_info['emoji']} {check_line.title()} Line Alert**: {status}\n"
                 
                 # B4: Total travel time (leg 1 + transfer + leg 2)
-                leg1_count = _count_metro_stations(l1, eff_origin, best_hub)
-                leg2_count = _count_metro_stations(l2, best_hub, eff_dest)
-                total_stations = (leg1_count if leg1_count > 0 else 0) + (leg2_count if leg2_count > 0 else 0)
+                total_stations = best_transfer["total_stations"]
                 time_est = _estimate_metro_time(total_stations, transfers=1)
                 
                 response += f"   💡 **Transfer at**: {best_hub} ({l1_info['emoji']} ↔ {l2_info['emoji']})\n"
@@ -400,7 +492,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                 
                 step = 1
                 if origin_from_landmark:
-                    response += f"   {step}. Walk from {origin.title()} to **{eff_origin.title()}**\n"
+                    response += f"   {step}. Walk from {origin_display} to **{eff_origin.title()}**\n"
                     step += 1
 
                 dir1 = _get_metro_direction(l1, eff_origin, best_hub)
@@ -416,7 +508,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
 
                 if dest_from_landmark:
                     step += 1
-                    response += f"   {step}. Walk to {destination.title()}\n"
+                    response += f"   {step}. Walk to {destination_display}\n"
                 
                 response += "\n"
             else:
@@ -427,12 +519,12 @@ def get_route_between_stations(origin: str, destination: str) -> str:
         response += f"🚇 **Origin is Metro**: {eff_origin.title()}\n"
         if origin_from_landmark:
             response += f"   (Nearest station to {origin})\n"
-        response += f"❌ Destination '{destination.title()}' not on Metro.\n"
+        response += f"❌ Destination '{destination_display}' not on Metro.\n"
         response += "   Consider using Carris buses or CP trains.\n\n"
         
     elif eff_dest_lines:
         # Dest valid, Origin invalid
-        response += f"❌ Origin '{origin.title()}' not on Metro.\n"
+        response += f"❌ Origin '{origin_display}' not on Metro.\n"
         response += f"🚇 **Destination is Metro**: {eff_dest.title()}\n"
         if dest_from_landmark:
             response += f"   (Nearest station to {destination})\n"
@@ -444,25 +536,33 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     
     # Check for CP Train options (only when BOTH ends are CP stations)
     # If only one end is a CP station, the metro route above is sufficient.
-    if origin_cp and dest_cp:
+    if eff_origin_cp and eff_dest_cp:
         response += "🚆 **CP TRAINS**\n"
         sources_used.append("[*CP*](https://www.cp.pt)")
         
-        common_lines = set(origin_cp.get("lines", [])) & set(dest_cp.get("lines", []))
+        common_lines = set(eff_origin_cp.get("lines", [])) & set(eff_dest_cp.get("lines", []))
         
         if common_lines:
             response += "✅ **Direct Train Route Available**\n\n"
             for line in common_lines:
                 line_info = CP_LINES.get(line, {"name": line.title()})
                 response += f"   🚆 Take **{line_info['name']}**\n"
-                response += f"   📍 Board at: {origin.title()}\n"
-                response += f"   📍 Exit at: {destination.title()}\n"
+                step = 1
+                if origin_landmark and origin_train_station.lower() != origin.lower():
+                    response += f"   {step}. Walk from {origin_display} to **{origin_train_station}**\n"
+                    step += 1
+                response += f"   {step}. 📍 Board at: **{origin_train_station}**\n"
+                step += 1
+                response += f"   {step}. 📍 Exit at: **{dest_train_station}**\n"
+                if dest_landmark and dest_train_station.lower() != destination.lower():
+                    step += 1
+                    response += f"   {step}. Walk to {destination_display}\n"
                 if line_info.get("frequency"):
                     response += f"   🕒 Frequency: {line_info['frequency']}\n"
                 response += "\n"
             return response + _build_route_source_line(sources_used)
         else:
-            response += f"⚠️ No direct train line linking {origin.title()} and {destination.title()}.\n"
+            response += f"⚠️ No direct train line linking {origin_train_station} and {dest_train_station}.\n"
             response += "   You may need to transfer at a major hub (e.g., Entrecampos, Oriente, Sete Rios).\n\n"
     
     return response + _build_route_source_line(sources_used)

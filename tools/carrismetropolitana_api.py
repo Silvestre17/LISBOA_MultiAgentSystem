@@ -342,91 +342,40 @@ def both_locations_in_lisbon_city(
 
 def geocode_location(location_name: str) -> Optional[Dict[str, Any]]:
     """
-    Geocodes a location name to GPS coordinates using OpenStreetMap/Nominatim.
-
-    Tries multiple query variations to find the best match within the
-    Lisbon metropolitan area.
+    Geocodes a location name to GPS coordinates using the shared resolver.
 
     Args:
         location_name: Name of the location (e.g., 'Colombo', 'Torre de Belém').
 
     Returns:
         Dict with name, lat, lon, type, address or None if not found.
-
-    Example:
-        >>> geocode_location("Colombo")
-        {'name': 'Centro Comercial Colombo', 'lat': 38.7515, 'lon': -9.1882, ...}
     """
-    clean_name = location_name.strip()
+    try:
+        from tools.location_resolver import geocode_location_name
+    except ImportError:
+        from location_resolver import geocode_location_name
 
-    search_queries = [
-        f"{clean_name}, Lisboa, Portugal",
-        f"{clean_name}, Lisbon, Portugal",
-        f"{clean_name}, Portugal",
-    ]
+    geocoded = geocode_location_name(
+        location_name,
+        prefer_city=False,
+        allow_aml=True,
+    )
+    if not geocoded:
+        logger.warning("Could not geocode '%s'", location_name)
+        return None
 
-    headers = {"User-Agent": "LisbonUrbanAssistant/1.0 (research@novaims.pt)"}
-
-    for query in search_queries:
-        try:
-            params = {"q": query, "format": "json", "limit": 5, "addressdetails": 1}
-
-            response = requests.get(
-                NOMINATIM_URL, params=params, headers=headers, timeout=10
-            )
-            response.raise_for_status()
-            results = response.json()
-
-            if not results:
-                continue
-
-            # Filter results to Lisbon metropolitan area
-            lisbon_results = []
-            for r in results:
-                lat = float(r.get("lat", 0))
-                lon = float(r.get("lon", 0))
-
-                if 38.4 <= lat <= 39.1 and -9.6 <= lon <= -8.7:
-                    lisbon_results.append(r)
-
-            if lisbon_results:
-                best = lisbon_results[0]
-                address = best.get("address", {})
-
-                result = {
-                    "name": best.get("display_name", location_name),
-                    "lat": float(best.get("lat")),
-                    "lon": float(best.get("lon")),
-                    "type": best.get("type", "unknown"),
-                    "class": best.get("class", "unknown"),
-                    "importance": float(best.get("importance", 0)),
-                    "address": {
-                        "road": address.get("road", ""),
-                        "suburb": address.get("suburb", ""),
-                        "city": address.get("city", address.get("town", "")),
-                        "municipality": address.get("municipality", ""),
-                        "postcode": address.get("postcode", ""),
-                    },
-                    "query_used": query,
-                }
-
-                logger.info(
-                    f"Geocoded '{location_name}' → ({result['lat']:.4f}, {result['lon']:.4f})"
-                )
-                return result
-
-        except requests.exceptions.Timeout:
-            logger.warning(f"Timeout geocoding '{query}'")
-            continue
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"Error geocoding '{query}': {e}")
-            continue
-        except Exception as e:
-            logger.error(f"Unexpected error geocoding '{query}': {e}")
-            continue
-
-    logger.warning(f"Could not geocode '{location_name}'")
-    return None
+    return {
+        "name": geocoded["display_name"],
+        "lat": geocoded["lat"],
+        "lon": geocoded["lon"],
+        "type": geocoded.get("type", "unknown"),
+        "class": geocoded.get("class", "unknown"),
+        "importance": float(geocoded.get("importance", 0.0)),
+        "address": geocoded.get("address", {}),
+        "query_used": geocoded.get("query_used", location_name),
+        "scope": geocoded.get("scope", "unknown"),
+        "confidence": geocoded.get("confidence", 0.0),
+    }
 
 
 # ==========================================================================

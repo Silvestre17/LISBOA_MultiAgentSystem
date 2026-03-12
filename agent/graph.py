@@ -692,6 +692,97 @@ class MultiAgentAssistant:
             sv_model = str(sv_info) if sv_info else "Unknown"
         return f"Multi-Agent ({sv_model})"
 
+    @staticmethod
+    def _dedupe_preserve_order(items: List[str]) -> List[str]:
+        """Removes duplicates while preserving order."""
+        deduped: List[str] = []
+        for item in items:
+            if item and item not in deduped:
+                deduped.append(item)
+        return deduped
+
+    @classmethod
+    def _get_agent_specific_qa_feedback(
+        cls,
+        qa_result: Optional[Dict[str, object]],
+        agent_name: str,
+    ) -> List[str]:
+        """Extracts agent-specific QA issues and warnings from per-agent fact checks."""
+        if not qa_result:
+            return []
+
+        fact_check = qa_result.get("fact_check", {})
+        if not isinstance(fact_check, dict):
+            return []
+
+        per_agent = fact_check.get("per_agent", {})
+        if not isinstance(per_agent, dict):
+            return []
+
+        agent_fact_check = per_agent.get(agent_name, {})
+        if not isinstance(agent_fact_check, dict):
+            return []
+
+        return cls._dedupe_preserve_order(
+            list(agent_fact_check.get("critical_issues", []))
+            + list(agent_fact_check.get("disclaimers", []))
+        )
+
+    @classmethod
+    def _build_qa_retry_context(
+        cls,
+        base_context: str,
+        qa_result: Optional[Dict[str, object]],
+        agent_name: str,
+    ) -> str:
+        """Builds targeted retry context for a worker agent after QA review."""
+        context = base_context
+        if not qa_result:
+            return context
+
+        missing_data = list(qa_result.get("missing_data", []))
+        reasoning = str(qa_result.get("reasoning", "") or "").strip()
+        if missing_data:
+            context += (
+                "\n\nIMPORTANT QA FEEDBACK: Your previous answer missed required data: "
+                + ", ".join(missing_data)
+                + "."
+            )
+            if reasoning:
+                context += f" Reasoning: {reasoning}."
+            context += " Please search specifically for the missing information and return a corrected answer."
+
+        agent_specific_feedback = cls._get_agent_specific_qa_feedback(qa_result, agent_name)
+        if agent_specific_feedback:
+            context += (
+                "\n\nIMPORTANT QA REPAIR FEEDBACK FOR THIS AGENT: "
+                "Revise your previous answer so the issues below are corrected. "
+                "Keep the same user language, stay strictly grounded in the tool data, "
+                "and do not mention QA, validation, or internal checks.\n- "
+                + "\n- ".join(agent_specific_feedback)
+            )
+
+        return context
+
+    @staticmethod
+    def _should_run_final_qa_repair(
+        agents_to_call: List[str],
+        qa_result: Optional[Dict[str, object]],
+    ) -> bool:
+        """Returns whether a final QA repair pass is worth running."""
+        if not qa_result:
+            return False
+        if "planner" in agents_to_call:
+            return True
+        if qa_result.get("needs_repair"):
+            return True
+
+        fact_check = qa_result.get("fact_check", {})
+        if isinstance(fact_check, dict) and fact_check.get("critical_issues"):
+            return True
+
+        return False
+
     @traceable(
         name="LISBOA Chat",
         run_type="chain",
@@ -847,6 +938,7 @@ class MultiAgentAssistant:
 
         # Step 3: Execute agents (Parallelized with LangSmith context propagation)
         agent_outputs = {}
+        qa_result = None
 
         # Identify worker agents (exclude planner which runs last)
         workers = [a for a in agents_to_call if a != "planner" and a in self.agents]
@@ -982,12 +1074,19 @@ class MultiAgentAssistant:
                         for d in fc['disclaimers']:
                             print(f"   [QA FACT-CHECK] {d}")
 
-            # Single retry: call missing agents or agents needing refinement if QA says incomplete
-            if not qa_result["complete"] and qa_result["required_agents"]:
-                retry_agents = [
-                    a for a in qa_result["required_agents"]
+            # Single retry: call missing agents or re-run workers with deterministic QA repair feedback
+            retry_agents = self._dedupe_preserve_order(
+                [
+                    a for a in qa_result.get("required_agents", [])
                     if a in self.agents and a != "planner"
                 ]
+                + [
+                    a for a in qa_result.get("repairable_agents", [])
+                    if a in self.agents and a != "planner"
+                ]
+            )
+
+            if retry_agents and (not qa_result["complete"] or qa_result.get("needs_repair")):
 
                 if retry_agents:
                     if verbose:
@@ -1002,23 +1101,16 @@ class MultiAgentAssistant:
                         )
                         on_status_change(msg)
 
-                    # Construct feedback context
-                    feedback_context = agent_context
-                    if qa_result.get("missing_data"):
-                        feedback_context += (
-                            f"\n\nIMPORTANT QA FEEDBACK: Your previous search missed the following required data: "
-                            f"{', '.join(qa_result['missing_data'])}. "
-                        )
-                        if qa_result.get("reasoning"):
-                            feedback_context += f"Reasoning: {qa_result['reasoning']}. "
-                        feedback_context += "Please specifically search for and provide this missing information."
-
                     # Execute retry agents in parallel
                     with ContextThreadPoolExecutor(max_workers=len(retry_agents)) as executor:
                         retry_futures = {}
                         for agent_name in retry_agents:
-                            # Use feedback context if agent was already called
-                            ctx = feedback_context if agent_name in workers else agent_context
+                            # Use targeted feedback context when the agent is being retried after QA
+                            ctx = self._build_qa_retry_context(
+                                base_context=agent_context,
+                                qa_result=qa_result,
+                                agent_name=agent_name,
+                            )
                             retry_futures[
                                 executor.submit(
                                     self.agents[agent_name].invoke,
@@ -1070,20 +1162,37 @@ class MultiAgentAssistant:
                     # Merge fact_check warnings
                     fc1 = qa_result.get("fact_check", {})
                     fc2 = qa_result_2.get("fact_check", {})
-                    merged_fc_disclaimers = list(set(
-                        fc1.get("disclaimers", []) + fc2.get("disclaimers", [])
-                    ))
+                    merged_fc_disclaimers = self._dedupe_preserve_order(
+                        list(fc1.get("disclaimers", [])) + list(fc2.get("disclaimers", []))
+                    )
+                    current_fc_critical = self._dedupe_preserve_order(
+                        list(fc2.get("critical_issues", []))
+                    )
+                    current_repairable_agents = self._dedupe_preserve_order(
+                        list(fc2.get("repairable_agents", []))
+                    )
+                    current_per_agent = fc2.get("per_agent", {}) if isinstance(fc2, dict) else {}
 
                     qa_result = qa_result_2
                     qa_result["disclaimers"] = all_disclaimers
+                    qa_result["critical_issues"] = self._dedupe_preserve_order(
+                        list(qa_result.get("critical_issues", []))
+                    )
+                    qa_result["repairable_agents"] = current_repairable_agents
+                    qa_result["needs_repair"] = bool(qa_result["critical_issues"])
                     if qa_result.get("fact_check"):
                         qa_result["fact_check"]["disclaimers"] = merged_fc_disclaimers
+                        qa_result["fact_check"]["critical_issues"] = current_fc_critical
+                        qa_result["fact_check"]["repairable_agents"] = current_repairable_agents
+                        qa_result["fact_check"]["per_agent"] = current_per_agent
 
             # Pass QA disclaimers as context for synthesis (internal key, filtered from output)
             all_qa_warnings = qa_result.get("disclaimers", [])
             fc_warns = qa_result.get("fact_check", {})
             if isinstance(fc_warns, dict):
-                all_qa_warnings = list(set(all_qa_warnings + fc_warns.get("disclaimers", [])))
+                all_qa_warnings = self._dedupe_preserve_order(
+                    list(all_qa_warnings) + list(fc_warns.get("disclaimers", []))
+                )
             if all_qa_warnings:
                 agent_outputs["_qa_disclaimers"] = all_qa_warnings
                 if verbose:
@@ -1119,6 +1228,17 @@ class MultiAgentAssistant:
             if verbose:
                 print("\n   [FALLBACK] Using researcher agent")
             response = self.agents["researcher"].invoke(message, verbose=verbose)
+
+        if self._should_run_final_qa_repair(agents_to_call, qa_result):
+            if verbose:
+                print("\n   [QA] Running final repair pass on the drafted response...")
+            response = self.qa_agent.repair_final_response(
+                user_query=message,
+                draft_response=response,
+                agent_outputs=agent_outputs,
+                qa_result=qa_result,
+                language=language,
+            )
 
         formatted = format_response(clean_response(response))
         title = generate_response_title(agents_to_call, message, language)

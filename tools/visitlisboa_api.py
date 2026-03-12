@@ -20,6 +20,7 @@
 # Required libraries:
 # pip install langchain-core langchain-chroma langchain-huggingface
 
+import io
 import json
 import logging
 import math
@@ -27,6 +28,7 @@ import os
 import re
 import unicodedata
 import warnings
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -378,11 +380,11 @@ def calculate_temporal_relevance_score(
     return max(0.0, min(100.0, score))
 
 
-def format_event_dates(event: Dict) -> str:
+def format_event_dates(event: Dict, language: str = "en") -> str:
     """Formats event dates for display."""
     dates = event.get('dates', [])
     if not dates:
-        return "Date TBA"
+        return "Data a confirmar" if language == "pt" else "Date TBA"
     
     formatted = []
     for date_entry in dates[:3]:  # Show max 3 dates
@@ -392,25 +394,308 @@ def format_event_dates(event: Dict) -> str:
             time = date_info.get('time', '')
             if display:
                 if time:
-                    formatted.append(f"{display} at {time}")
+                    connector = "às" if language == "pt" else "at"
+                    formatted.append(f"{display} {connector} {time}")
                 else:
                     formatted.append(display)
         elif date_entry.get('type') == 'range':
             start = date_entry.get('start', {}).get('display_text', '')
             end = date_entry.get('end', {}).get('display_text', '')
             if start and end:
-                formatted.append(f"{start} to {end}")
+                connector = "a" if language == "pt" else "to"
+                formatted.append(f"{start} {connector} {end}")
     
     if len(dates) > 3:
-        formatted.append(f"(+{len(dates) - 3} more dates)")
+        if language == "pt":
+            formatted.append(f"(+{len(dates) - 3} datas)")
+        else:
+            formatted.append(f"(+{len(dates) - 3} more dates)")
     
-    return " | ".join(formatted) if formatted else "Date TBA"
+    if formatted:
+        return " | ".join(formatted)
+    return "Data a confirmar" if language == "pt" else "Date TBA"
+
+
+def _infer_visitlisboa_output_language(query: Optional[str], language: Optional[str] = None) -> str:
+    """Infers whether the tool should render PT-PT or English output."""
+    if language in {"pt", "en"}:
+        return language
+
+    query_lower = (query or "").lower()
+    pt_markers = [
+        "que ", "quais", "esta semana", "hoje", "amanhã", "amanha",
+        "próxima semana", "proxima semana", "concerto", "concertos",
+        "eventos", "música", "musica", "teatro", "exposição", "exposicao",
+    ]
+    if any(marker in query_lower for marker in pt_markers) or re.search(r"[ãõáéíóúç]", query_lower):
+        return "pt"
+    return "en"
+
+
+def _humanize_visitlisboa_slug(url: str) -> str:
+    """Converts a VisitLisboa URL slug into a cleaner user-facing title."""
+    slug = (url or "").rstrip("/").split("/")[-1]
+    slug = slug.replace("_", " ").replace("-", " ")
+    slug = re.sub(r"\s+", " ", slug).strip()
+
+    numeric_suffix_match = re.match(r"^(.*?)(?:\s+(0\d{2,3}|\d{2,4}))$", slug)
+    if numeric_suffix_match and len(numeric_suffix_match.group(1).split()) >= 2:
+        slug = numeric_suffix_match.group(1).strip()
+
+    if not slug:
+        return ""
+
+    normalized = slug.title()
+    normalized = re.sub(r"\bDe\b", "de", normalized)
+    normalized = re.sub(r"\bDa\b", "da", normalized)
+    normalized = re.sub(r"\bDo\b", "do", normalized)
+    normalized = re.sub(r"\bDos\b", "dos", normalized)
+    return normalized.strip()
+
+
+def _clean_event_title(title: Optional[str], url: str = "") -> str:
+    """Returns a clean event title without technical slug suffixes."""
+    raw_title = (title or "").strip()
+    if raw_title and raw_title.lower() not in {"unknown event", "unknown", "n/a"}:
+        cleaned = re.sub(r"\s+", " ", raw_title).strip()
+        suffix_match = re.match(r"^(.*?)(?:\s+(0\d{2,3}|\d{2,4}))$", cleaned)
+        if suffix_match and len(suffix_match.group(1).split()) >= 2:
+            cleaned = suffix_match.group(1).strip()
+        return cleaned
+
+    humanized = _humanize_visitlisboa_slug(url)
+    if humanized:
+        return humanized
+
+    return "Untitled event"
+
+
+def _localize_event_price(price: Optional[str], language: str = "en") -> str:
+    """Localizes common VisitLisboa price snippets."""
+    raw = (price or "").strip()
+    if not raw:
+        return ""
+
+    if language == "pt":
+        localized = re.sub(r"\bFrom\s+(€?\d+(?:[\.,]\d+)?)\s+to\s+(€?\d+(?:[\.,]\d+)?)\b", r"de \1 a \2", raw, flags=re.IGNORECASE)
+        localized = re.sub(r"\bFrom\s+", "desde ", localized, flags=re.IGNORECASE)
+        localized = re.sub(r"\bFree Entry\b", "Entrada gratuita", localized, flags=re.IGNORECASE)
+        localized = re.sub(r"\bPaid\b", "Pago", localized, flags=re.IGNORECASE)
+        return localized
+
+    return raw
+
+
+def _localize_event_category(category: Optional[str], language: str = "en") -> str:
+    """Localizes common VisitLisboa event categories."""
+    raw = (category or "").strip()
+    if not raw:
+        return ""
+    if language != "pt":
+        return raw
+
+    mapping = {
+        "Main Events": "Principais eventos",
+        "Exhibitions": "Exposições",
+        "Music": "Música",
+        "Theater Opera & Dance": "Teatro, Ópera e Dança",
+        "Cinema": "Cinema",
+        "Sports": "Desporto",
+        "Fairs": "Feiras",
+        "Festivals": "Festivais",
+        "Gastronomy": "Gastronomia",
+        "Others": "Outros",
+        "General": "Geral",
+    }
+    return mapping.get(raw, raw)
+
+
+def _localize_event_date_filter(date_filter: Optional[str], language: str = "en") -> str:
+    """Localizes common date-filter labels for user-facing summaries."""
+    raw = (date_filter or "upcoming").strip()
+    if language != "pt":
+        return raw
+
+    mapping = {
+        "today": "hoje",
+        "tomorrow": "amanhã",
+        "this week": "esta semana",
+        "next week": "próxima semana",
+        "this weekend": "este fim de semana",
+        "this month": "este mês",
+        "next month": "próximo mês",
+        "upcoming": "próximos dias",
+    }
+    return mapping.get(raw.lower(), raw)
+
+
+def _compress_event_sentence(sentence: str, max_chars: int = 210) -> str:
+    """Compresses very long event sentences into a concise summary."""
+    cleaned = re.sub(r"\s+", " ", sentence).strip()
+    if not cleaned:
+        return ""
+
+    cleaned = re.sub(r"^With\s+[^,]+,\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(
+        r",\s*having played various styles.*$",
+        ", with a long career spanning multiple styles.",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r",\s*later crossing over.*$",
+        ", spanning several musical styles.",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+
+    if len(cleaned) <= max_chars:
+        return cleaned
+
+    split_candidates = [
+        cleaned.rfind(",", 0, max_chars),
+        cleaned.rfind(";", 0, max_chars),
+        cleaned.rfind(":", 0, max_chars),
+    ]
+    split_at = max(split_candidates)
+    if split_at >= 80:
+        trimmed = cleaned[:split_at].strip(" ,;:")
+        if trimmed.endswith(('.', '!', '?')):
+            return trimmed
+        return trimmed + "."
+
+    word_trimmed = cleaned[:max_chars].rsplit(" ", 1)[0].strip()
+    if word_trimmed:
+        return word_trimmed + "…"
+    return cleaned[:max_chars].strip() + "…"
+
+
+def _summarize_event_description(text: Optional[str], max_chars: int = 210) -> str:
+    """Builds a concise user-facing event description from long raw source text."""
+    if not text:
+        return ""
+
+    meaningful_lines: List[str] = []
+    for raw_line in str(text).splitlines():
+        line = re.sub(r"\s+", " ", raw_line).strip()
+        if not line:
+            continue
+
+        lower_line = line.lower()
+        if lower_line.startswith((
+            "dates and schedules", "tickets:", "ticket:", "all at ",
+            "(metro)", "(bus)", "(tram)", "(train)", "(ferry)",
+            "wednesday", "thursday", "friday", "saturday", "sunday",
+            "monday", "tuesday", "until ", "from ", "daily", "free entry",
+            "free admission", "paid", "tickets available", "more info",
+        )):
+            continue
+        if re.match(r"^(?:www\.|https?://)", lower_line):
+            continue
+        meaningful_lines.append(line)
+
+    cleaned_text = " ".join(meaningful_lines)
+    cleaned_text = re.sub(r"\[[^\]]+\]", " ", cleaned_text)
+    cleaned_text = re.sub(r"https?://\S+", " ", cleaned_text)
+    cleaned_text = re.sub(r"\s+", " ", cleaned_text).strip()
+    if not cleaned_text:
+        return ""
+
+    sentences = re.split(r"(?<=[.!?])\s+", cleaned_text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    if not sentences:
+        return _compress_event_sentence(cleaned_text, max_chars=max_chars)
+
+    selected = _compress_event_sentence(sentences[0], max_chars=max_chars)
+    if len(selected) < 110 and len(sentences) > 1:
+        candidate = f"{selected} {_compress_event_sentence(sentences[1], max_chars=max_chars)}".strip()
+        if len(candidate) <= max_chars + 30:
+            selected = candidate
+
+    return selected.strip()
+
+
+def _format_event_duration_label(duration: int, language: str = "en") -> str:
+    """Formats event duration in a user-friendly way."""
+    if language == "pt":
+        if duration == 1:
+            return "🎯 Um só dia"
+        if duration <= 3:
+            return f"📆 {duration} dias"
+        if duration <= 7:
+            return "📅 Cerca de 1 semana"
+        if duration <= 30:
+            return "📅 Cerca de 1 mês"
+        return f"🏛️ Longa duração ({duration} dias)"
+
+    if duration == 1:
+        return "🎯 Single day"
+    if duration <= 3:
+        return f"📆 {duration} days"
+    if duration <= 7:
+        return "📅 About 1 week"
+    if duration <= 30:
+        return "📅 About 1 month"
+    return f"🏛️ Long-running ({duration} days)"
+
+
+def _format_event_filter_summary(
+    query: Optional[str],
+    category: Optional[str],
+    date_filter: Optional[str],
+    start_date: Optional[datetime],
+    end_date: Optional[datetime],
+    total_results: int,
+    shown_results: int,
+    language: str = "en",
+) -> List[str]:
+    """Builds a contextual summary for the event filter and result count."""
+    if start_date and end_date:
+        connector = "a" if language == "pt" else "to"
+        date_window = f"{start_date.strftime('%Y-%m-%d')} {connector} {(end_date - timedelta(days=1)).strftime('%Y-%m-%d')}"
+    elif start_date:
+        date_window = start_date.strftime('%Y-%m-%d')
+    else:
+        date_window = "open range"
+
+    normalized_query = (query or "").strip()
+    normalized_category = (category or "").strip()
+    normalized_filter = _localize_event_date_filter(date_filter, language=language)
+    normalized_category = _localize_event_category(normalized_category, language=language)
+
+    if language == "pt":
+        scope_parts = [f"{normalized_filter} ({date_window})"]
+        scope_parts.append(normalized_category if normalized_category else "todas as categorias")
+        if normalized_query:
+            scope_parts.append(f"foco temático: {normalized_query}")
+        else:
+            scope_parts.append("pesquisa geral de eventos")
+        return [
+            f"🧭 **Filtro aplicado:** {', '.join(scope_parts)}.",
+            f"📊 **Resultado do filtro:** {total_results} evento(s) com data confirmada correspondem a este filtro.",
+            f"✨ **Destaques mostrados:** {shown_results} resultado(s) mais relevantes.",
+        ]
+
+    scope_parts = [f"{normalized_filter} ({date_window})"]
+    scope_parts.append(normalized_category if normalized_category else "all categories")
+    if normalized_query:
+        scope_parts.append(f"theme focus: {normalized_query}")
+    else:
+        scope_parts.append("broad event discovery")
+    return [
+        f"🧭 **Filter used:** {', '.join(scope_parts)}.",
+        f"📊 **Result count:** {total_results} confirmed-date event(s) match this filter.",
+        f"✨ **Highlights shown:** {shown_results} most relevant result(s).",
+    ]
 
 
 _EVENT_GENERIC_QUERY_TERMS = {
     'event', 'events', 'evento', 'eventos',
     'cultura', 'cultural', 'culture', 'culturais',
-    'lisbon', 'lisboa', 'portugal', 'city', 'cidade'
+    'lisbon', 'lisboa', 'portugal', 'city', 'cidade',
+    'great', 'major', 'grandes', 'explorar', 'explore',
+    'this', 'week', 'esta', 'semana', 'what', 'which', 'que', 'quais',
+    'there', 'happening', 'temos', 'have', 'local', 'locais',
 }
 
 _EVENT_QUERY_SYNONYMS = {
@@ -423,6 +708,15 @@ _EVENT_QUERY_SYNONYMS = {
     'theatre': ['theater', 'play', 'drama', 'stage', 'performance'],
     'dance': ['ballet', 'dancing', 'choreography', 'performance'],
     'family': ['children', 'kids', 'child', 'families'],
+    'children': ['family', 'kids', 'child', 'families'],
+    'kids': ['children', 'family', 'child', 'families'],
+    'crianças': ['children', 'kids', 'family', 'families'],
+    'criancas': ['children', 'kids', 'family', 'families'],
+    'miúdos': ['children', 'kids', 'family', 'families'],
+    'miudos': ['children', 'kids', 'family', 'families'],
+    'night': ['nightlife', 'evening', 'live', 'late'],
+    'nightlife': ['night', 'evening', 'live', 'bar'],
+    'noite': ['night', 'nightlife', 'evening', 'live'],
     'food': ['gastronomy', 'culinary', 'wine', 'taste', 'restaurant'],
 }
 
@@ -481,7 +775,8 @@ def _get_vector_store():
             from tools.vector_store import KnowledgeBase
 
             # Initialize with CPU to avoid GPU memory issues in agent context
-            _vector_store = KnowledgeBase(use_gpu=False)
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                _vector_store = KnowledgeBase(use_gpu=False)
             logger.info("✅ Vector store initialized for semantic search")
         except Exception as e:
             logger.warning(f"⚠️ Vector store unavailable: {e}")
@@ -859,6 +1154,8 @@ _GENERIC_PLACE_QUERY_TOKENS = {
     "from", "that", "this", "these", "those", "into", "about", "around",
     "museum", "museums", "museu", "museus", "monument", "monuments",
     "monumento", "monumentos", "open", "opened", "closed", "like",
+    "imperdiveis", "imperdíveis", "primeira", "first", "time", "trip",
+    "visitor", "visitors", "visita", "visiting", "must", "mustsee",
 }
 _KNOWN_PLACE_LOCATION_HINTS = {
     "belem", "alfama", "chiado", "baixa", "rossio", "oriente", "expo",
@@ -1104,15 +1401,48 @@ def _is_service_like_place_category(item_category: str) -> bool:
     return any(term in category_lower for term in service_like_terms)
 
 
+def _is_non_attraction_category(item_category: str) -> bool:
+    """Detects categories that should not dominate broad first-time attraction lists."""
+    category_lower = (item_category or "").lower()
+    excluded_terms = [
+        "tour", "tours", "hotel", "guest house", "accommodation",
+        "tourist office", "apartments", "nightlife",
+    ]
+    return any(term in category_lower for term in excluded_terms)
+
+
+def _top_attraction_category_bonus(item_category: str) -> float:
+    """Scores iconic sightseeing categories higher for broad attraction queries."""
+    category_lower = (item_category or "").lower()
+    if any(term in category_lower for term in ["museum", "monument", "monastery", "castle", "palace", "church"]):
+        return 0.35
+    if any(term in category_lower for term in ["view point", "viewpoint", "miradouro"]):
+        return 0.24
+    if any(term in category_lower for term in ["park", "garden", "jardim", "parque"]):
+        return 0.10
+    if any(term in category_lower for term in ["family", "kids"]):
+        return 0.04
+    return 0.0
+
+
 def _infer_place_query_intent(query: Optional[str], category: Optional[str]) -> Optional[str]:
     """Infers broad place-search intent for lightweight category exclusions."""
     normalized_category = _normalize_place_category_filter(category)
     query_lower = (query or "").lower()
     museum_terms = ["museum", "museu", "museums", "museus"]
     monument_terms = ["monument", "monumento", "monuments", "monumentos", "monastery", "castle", "palace", "church"]
+    top_attraction_terms = [
+        "atrações imperdíveis", "atracoes imperdiveis", "must-see", "must see",
+        "first time", "primeira vez", "top attractions", "main attractions",
+        "highly recommended attractions", "o que visitar",
+    ]
 
     museum_requested = any(term in query_lower for term in museum_terms)
     monument_requested = any(term in query_lower for term in monument_terms)
+    top_attractions_requested = any(term in query_lower for term in top_attraction_terms)
+
+    if top_attractions_requested:
+        return "top_attractions"
 
     if normalized_category == "museums & monuments" and museum_requested and not monument_requested:
         return "museum_only"
@@ -1146,6 +1476,8 @@ def _matches_place_query_intent(item_category: str, searchable_text: str, query_
         return any(marker in haystack for marker in monument_markers)
     if query_intent == "museum_monument":
         return any(marker in haystack for marker in museum_markers + monument_markers)
+    if query_intent == "top_attractions":
+        return not _is_non_attraction_category(item_category)
 
     return True
 
@@ -1233,7 +1565,8 @@ def search_cultural_events(
     query: Optional[str] = None,
     category: Optional[str] = None,
     date_filter: Optional[str] = None,
-    max_results: int = 10
+    max_results: int = 10,
+    language: Optional[str] = None,
 ) -> str:
     """
     Search for cultural events in Lisbon with DATE FILTERING.
@@ -1274,6 +1607,8 @@ def search_cultural_events(
         if not isinstance(max_results, int) or max_results <= 0:
             max_results = 10
         
+        render_language = _infer_visitlisboa_output_language(query, language)
+
         # Parse date range (CRITICAL: defaults to upcoming 30 days if not specified)
         if not date_filter:
             date_filter = 'upcoming'  # Default to next 30 days
@@ -1301,7 +1636,19 @@ def search_cultural_events(
         if not events_data:
             # No events in date range
             today = datetime.now()
-            return f"❌ No events found for '{date_filter}'.\nDate range: {date_info}\nToday is: {today.strftime('%Y-%m-%d')}\n\n💡 Try a broader date range like 'this month' or 'next month'."
+            if render_language == "pt":
+                return (
+                    f"❌ Não encontrei eventos com data confirmada para o filtro '{date_filter}'.\n"
+                    f"🧭 **Filtro aplicado:** {date_filter} ({date_info}).\n"
+                    f"📅 **Data de referência:** {today.strftime('%Y-%m-%d')}\n\n"
+                    "💡 Experimente uma janela temporal mais alargada, como 'este mês' ou 'próximo mês'."
+                )
+            return (
+                f"❌ No confirmed-date events found for the '{date_filter}' filter.\n"
+                f"🧭 **Filter used:** {date_filter} ({date_info}).\n"
+                f"📅 **Reference date:** {today.strftime('%Y-%m-%d')}\n\n"
+                "💡 Try a broader date window such as 'this month' or 'next month'."
+            )
         
         # Step 2: Filter by category
         if category:
@@ -1323,12 +1670,33 @@ def search_cultural_events(
                 logger.info(f"Query '{query}' contained only generic terms, skipping text filter.")
         
         if not events_data:
-            message = f"No events found matching: '{query or 'all'}' in date range {date_info}\n\n💡 Try broader terms like 'music', 'art', or 'festival'."
+            if render_language == "pt":
+                message = (
+                    "❌ Não encontrei eventos com data confirmada que correspondam ao filtro pedido.\n\n"
+                    f"🧭 **Filtro aplicado:** {date_filter} ({date_info}), {category or 'todas as categorias'}"
+                )
+                if query:
+                    message += f", foco temático: {query}"
+                message += ".\n\n💡 Experimente termos mais abrangentes, como 'música', 'arte' ou 'festival'."
+            else:
+                message = (
+                    "❌ No confirmed-date events matched the requested filter.\n\n"
+                    f"🧭 **Filter used:** {date_filter} ({date_info}), {category or 'all categories'}"
+                )
+                if query:
+                    message += f", theme focus: {query}"
+                message += ".\n\n💡 Try broader terms such as 'music', 'art', or 'festival'."
             if undated_candidates:
-                message += "\n\n⚠️ Source completeness note: some matching VisitLisboa events do not include confirmed dates, so they cannot be safely placed inside this time window."
-                for event in undated_candidates[:3]:
-                    title = event.get('title', 'Unknown event')
-                    message += f"\n- {title} (date not confirmed in source)"
+                if render_language == "pt":
+                    message += (
+                        "\n\n⚠️ **Nota sobre a completude da fonte:** "
+                        f"{len(undated_candidates)} registo(s) adicional(is) compatíveis foram excluídos porque a fonte ainda não confirma a respetiva data."
+                    )
+                else:
+                    message += (
+                        "\n\n⚠️ **Source completeness note:** "
+                        f"{len(undated_candidates)} additional matching record(s) were excluded because the source does not confirm their dates yet."
+                    )
             return message
         
         # Step 4: SORT BY TEMPORAL RELEVANCE (CRITICAL!)
@@ -1343,70 +1711,86 @@ def search_cultural_events(
         # Limit results
         results = events_data[:max_results]
         
-        # Format output with DATES prominently displayed
-        today = datetime.now()
-        output_parts = [f"🎭 **Found {len(results)} Cultural Events in Lisbon:**"]
-        output_parts.append(f"📅 **Date range:** {date_filter} ({date_info})")
-        output_parts.append(f"📆 **Today is:** {today.strftime('%A, %d %B %Y')}\n")
+        # Format output with contextual filter summary and concise descriptions
+        output_parts = _format_event_filter_summary(
+            query=query,
+            category=category,
+            date_filter=date_filter,
+            start_date=start_date,
+            end_date=end_date,
+            total_results=len(events_data),
+            shown_results=len(results),
+            language=render_language,
+        )
+        output_parts.append("")
         
         for i, event in enumerate(results, 1):
-            title = event.get('title', event.get('url', 'Unknown').split('/')[-1].replace('-', ' ').title())
-            cat = event.get('category', 'General')
+            title = _clean_event_title(event.get('title'), event.get('url', ''))
+            cat = _localize_event_category(event.get('category', 'General'), language=render_language)
             loc = event.get('location', 'Lisbon')
-            dates_str = format_event_dates(event)
+            dates_str = format_event_dates(event, language=render_language)
             duration = event.get('_duration_days', get_event_duration_days(event))
-            
-            # Duration label for clarity
-            if duration == 1:
-                duration_label = "🎯 Single day"
-            elif duration <= 3:
-                duration_label = f"📆 {duration} days"
-            elif duration <= 7:
-                duration_label = "📅 ~1 week"
-            elif duration <= 30:
-                duration_label = "📅 ~1 month"
-            else:
-                duration_label = f"🏛️ Long-running ({duration} days)"
+            duration_label = _format_event_duration_label(duration, language=render_language)
+            description_summary = _summarize_event_description(event.get('full_description'))
+            price_text = _localize_event_price(event.get('price'), language=render_language)
             
             output_parts.append(f"{i}. 📅 **{title}**")
-            output_parts.append(f"   🗓️ **When:** {dates_str}")
-            output_parts.append(f"   ⏱️ **Duration:** {duration_label}")
-            output_parts.append(f"   📂 Category: {cat}")
-            
-            if event.get('full_description'):
-                desc = event['full_description'][:150] + "..." if len(event.get('full_description', '')) > 150 else event.get('full_description', '')
-                output_parts.append(f"   {desc}")
+            if render_language == "pt":
+                output_parts.append(f"   🗓️ **Quando:** {dates_str}")
+                output_parts.append(f"   ⏱️ **Duração:** {duration_label}")
+                output_parts.append(f"   📂 **Categoria:** {cat}")
+            else:
+                output_parts.append(f"   🗓️ **When:** {dates_str}")
+                output_parts.append(f"   ⏱️ **Duration:** {duration_label}")
+                output_parts.append(f"   📂 **Category:** {cat}")
+
+            if description_summary:
+                if render_language == "pt":
+                    output_parts.append(f"   📝 **Descrição:** {description_summary}")
+                else:
+                    output_parts.append(f"   📝 **Description:** {description_summary}")
             
             output_parts.append(f"   📍 {loc}")
             
             # Show price information if available
-            if event.get('price'):
-                output_parts.append(f"   💰 Preço: {event['price']}")
+            if price_text:
+                if render_language == "pt":
+                    output_parts.append(f"   💰 **Preço:** {price_text}")
+                else:
+                    output_parts.append(f"   💰 **Price:** {price_text}")
             
             if event.get('url'):
                 output_parts.append(f"   🔗 {event['url']}")
             
             # Show buy tickets link if available
             if event.get('buy_tickets_url'):
-                output_parts.append(f"   🎟️ Comprar bilhetes: {event['buy_tickets_url']}")
+                if render_language == "pt":
+                    output_parts.append(f"   🎟️ **Comprar bilhetes:** {event['buy_tickets_url']}")
+                else:
+                    output_parts.append(f"   🎟️ **Buy tickets:** {event['buy_tickets_url']}")
             
             output_parts.append("")  # Empty line between events
-        
-        output_parts.append(f"📊 **Total matching events:** {len(events_data)}")
+
         if len(events_data) > max_results:
-            output_parts.append(f"💡 Showing top {max_results}. Use a more specific query to narrow results.")
+            if render_language == "pt":
+                output_parts.append(
+                    f"💡 A lista mostra {len(results)} destaque(s). Se quiser, posso refinar a pesquisa com uma categoria, bairro ou data mais específica."
+                )
+            else:
+                output_parts.append(
+                    f"💡 This list shows {len(results)} highlights. Narrow the search by category, area, or date for a tighter selection."
+                )
         if undated_candidates:
-            output_parts.append(
-                f"⚠️ **Source completeness note:** {len(undated_candidates)} matching event(s) in VisitLisboa do not include confirmed dates, so they were excluded from the '{date_filter}' date window."
-            )
-            for event in undated_candidates[:3]:
-                title = event.get('title', 'Unknown event')
-                url = event.get('url')
-                bullet = f"- {title}"
-                if url:
-                    bullet += f" — {url}"
-                bullet += " (date not confirmed in source)"
-                output_parts.append(bullet)
+            if render_language == "pt":
+                output_parts.append(
+                    "⚠️ **Nota sobre a completude da fonte:** "
+                    f"{len(undated_candidates)} registo(s) adicional(is) compatíveis foram excluídos porque a fonte ainda não confirma a respetiva data."
+                )
+            else:
+                output_parts.append(
+                    "⚠️ **Source completeness note:** "
+                    f"{len(undated_candidates)} additional matching record(s) were excluded because the source does not confirm their dates yet."
+                )
         
         return "\n".join(output_parts)
     
@@ -1477,6 +1861,8 @@ def search_places_attractions(
                 query_intent = _infer_place_query_intent(query, category)
                 requested_category = _normalize_place_category_filter(category)
                 search_query = query or "places and attractions in Lisbon"
+                if query_intent == "top_attractions":
+                    search_query = f"iconic attractions monuments viewpoints historic sites {search_query}"
                 if category:
                     category_prefix = category
                     if requested_category == "museums & monuments" and query_intent == "museum_only":
@@ -1485,7 +1871,7 @@ def search_places_attractions(
 
                 query_tokens = _extract_place_query_tokens(query or search_query)
                 location_hints = _extract_place_location_hints(query or search_query)
-                ranking_requested = _query_requests_ranked_places(query or search_query)
+                ranking_requested = _query_requests_ranked_places(query or search_query) or query_intent == "top_attractions"
                 
                 logger.info(f"search_places_attractions: searching VisitLisboa for '{search_query}'")
                 
@@ -1583,6 +1969,15 @@ def search_places_attractions(
                         metadata.get('url', ''),
                         searchable,
                     ) else 0.0
+                    top_attraction_bonus = _top_attraction_category_bonus(item_category) if query_intent == "top_attractions" else 0.0
+                    iconic_title_bonus = 0.0
+                    if query_intent == "top_attractions":
+                        iconic_markers = [
+                            "belem", "jeronimos", "castelo", "sao jorge", "santa justa",
+                            "oceanario", "miradouro", "gulbenkian", "maat", "alfama",
+                        ]
+                        if any(marker in normalized_title for marker in iconic_markers):
+                            iconic_title_bonus = 0.08
 
                     final_score = (
                         (relevance_val * relevance_weight)
@@ -1592,6 +1987,8 @@ def search_places_attractions(
                         + title_bonus
                         + token_bonus
                         + museum_specific_bonus
+                        + top_attraction_bonus
+                        + iconic_title_bonus
                         - service_penalty
                     )
                     
@@ -1599,7 +1996,8 @@ def search_places_attractions(
                         'doc': doc,
                         'vector_score': vector_score,
                         'final_score': final_score,
-                        'metadata': metadata
+                        'metadata': metadata,
+                        'cleaned_doc_description': cleaned_doc_description,
                     })
                 
                 # Sort by FINAL SCORE descending
@@ -1607,7 +2005,6 @@ def search_places_attractions(
                 
                 # Convert to standard format
                 for item in scored_candidates[:max_results]:
-                    doc = item['doc']
                     metadata = item['metadata']
                     # Attempt to get real address/location
                     real_location = metadata.get('address') or metadata.get('location') or 'Lisbon'
@@ -1615,7 +2012,7 @@ def search_places_attractions(
                         'title': metadata.get('title', 'Unknown'),
                         'category': metadata.get('category', 'General'),
                         'location': real_location,
-                        'short_description': cleaned_doc_description,
+                        'short_description': item['cleaned_doc_description'],
                         'url': metadata.get('url', ''),
                         'source': 'visitlisboa',
                         'score': item['vector_score'],  # Keep original for debug if needed
