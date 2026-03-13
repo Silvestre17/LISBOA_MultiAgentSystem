@@ -158,7 +158,7 @@ class LLMFactory:
             model_name = model or Config.LMSTUDIO_MODEL_NAME or Config.get_default_agent_model().get("model")
 
             return ChatOpenAI(
-                model=model_name,  # e.g., "qwen/qwen3-4b-2507"
+                model=model_name,  # e.g., "qwen/qwen3.5-9b"
                 temperature=temperature,
                 base_url=Config.LMSTUDIO_BASE_URL,  # e.g., "http://localhost:1234/v1"
                 api_key="lm-studio",  # LM Studio ignores API key, any string works

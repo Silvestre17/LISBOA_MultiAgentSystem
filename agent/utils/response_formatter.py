@@ -497,6 +497,102 @@ def structure_weather_markdown(text: str) -> str:
         structured,
     )
     return structured.strip()
+ 
+ 
+def structure_planner_markdown(text: str) -> str:
+    """
+    Enforces the premium card layout for itineraries by transforming 
+    flat text into a visual card structure with horizontal rules.
+    """
+    if not text:
+        return text
+
+    lines = text.splitlines()
+    structured = []
+    
+    # Track sectional state to avoid double separators
+    last_was_separator = False
+    
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+            
+        # 1. Promote activity titles to H3 cards
+        # Matches: "1. 14:00 - Visit", "### 14:00 - Visit", "🕐 14:00: Visit", etc.
+        # This regex is now more flexible to handle leading emojis or bullet markers.
+        activity_match = re.search(r"^(?:[🕐⏱️🗓️#\d\.\s*-]+)?(\d{1,2}:\d{2})\s*[-–—:]\s*(.+)$", stripped)
+        if activity_match:
+            time, title = activity_match.groups()
+            title = title.replace("**", "").strip()  # Remove redundant bolding
+            
+            if structured and not last_was_separator:
+                structured.append("---")
+            
+            structured.append(f"### 🏛️ **[{time}]** - **{title}**")
+            last_was_separator = False
+            continue
+
+        # 2. Iconize standard section headers
+        if stripped.startswith("### "):
+            header_content = stripped.replace("###", "").strip().lower()
+            if "itinerário" in header_content or "itinerary" in header_content:
+                structured.append(f"### 📅 **{stripped.replace('###', '').strip()}**")
+            elif "condições" in header_content or "meteorol" in header_content or "weather" in header_content:
+                structured.append(f"### ⛅ **{stripped.replace('###', '').strip()}**")
+            elif "dicas" in header_content or "tips" in header_content:
+                if structured and not last_was_separator:
+                    structured.append("---")
+                structured.append(f"### ✨ **{stripped.replace('###', '').strip()}**")
+            else:
+                structured.append(stripped)
+            last_was_separator = False
+            continue
+
+        # 3. Handle source line
+        if _SOURCE_LINE_RE.match(stripped):
+            if structured and not last_was_separator:
+                structured.append("---")
+            structured.append(stripped)
+            last_was_separator = False
+            continue
+
+        # 4. Handle existing separators
+        if stripped == "---":
+            if not last_was_separator:
+                structured.append("---")
+                last_was_separator = True
+            continue
+
+        structured.append(line)
+        last_was_separator = False
+
+    return "\n".join(structured).strip()
+
+
+def structure_transport_markdown(text: str) -> str:
+    """
+    Cleans up transport agent text, normalizing placeholders and improving 
+    list readability for stop schedules.
+    """
+    if not text:
+        return text
+    
+    # Remove common ugly placeholders inherited from raw tool output or prompt mentions
+    placeholder_patterns = [
+        r"\[Check schedule\]", r"\(Check schedule\)", r'["\']?Check schedule["\']?',
+        r"\[Tempo \d+\]", r"\[Time \d+\]",
+        r"\[Nº Linha\]", r"\[Destino\]", r"\[Tempos\]",
+        r"\[Origin\]", r"\[Destination\]", r"\[Station\]", r"\[Direction\]",
+        r"\[Transfer Station\]", r"\[Landmark\]", r"\[Name\]"
+    ]
+    for pattern in placeholder_patterns:
+        text = re.sub(pattern, "(Sem informação em tempo real)", text, flags=re.IGNORECASE)
+    
+    # Ensure bus line headers are bolded if the LLM forgot
+    text = re.sub(r"^(?:\s*-\s*)?([0-9A-Z]{2,4})\s*-\s*", r"- 🚌 **\1** - ", text, flags=re.MULTILINE)
+    
+    return text.strip()
 
 
 def canonicalize_transport_terms(text: str, language: str = "en") -> str:
@@ -1260,7 +1356,9 @@ def finalize_worker_response(
         finalized = canonicalize_local_information_terms(finalized, language=preferred_language)
         if agent_name == "transport":
             finalized = canonicalize_transport_terms(finalized, language=preferred_language)
+            finalized = structure_transport_markdown(finalized)
         else:
+            finalized = structure_planner_markdown(finalized)
             finalized = canonicalize_planner_source_line(finalized, language=preferred_language)
 
     return clean_newlines(finalized).strip()

@@ -168,27 +168,31 @@ Do not use non-existent URLs:
 - Do not pull extra examples from memory or from this prompt.
 
 # OUTPUT FORMAT
-```
-📅 **Itinerário para [Date]**
+You MUST follow this premium visual structure EXACTLY. Use horizontal rules (`---`) to separate cards.
 
-🌤️ **Condições**: [Weather summary + advice]
+### 📅 **[Itinerário para Data]**
 
----
-🕐 **[Time]** - **[Activity Name]**
-📍 [Location]
-💡 [Quick tip]
-🚇 [Transport to next] (X min)
+#### ⛅ **Condições Meteorológicas**
+- [Sumário curto e conselhos práticos com emojis: 🌡️, 🌤️, 💧, 💨]
 
 ---
-🕐 **[Time]** - **[Next Activity]**
+
+### 🏛️ **[14:00] - [Nome da Atividade]**
+- 📍 **Localização**: [Nome do local]
+- 💡 **Dica**: [Dica curta e útil]
+- 🚌 **Transporte**: [Instrução breve se houver dados]
+
+---
+
+### 🏛️ **[15:30] - [Próxima Atividade]**
 ...
 
 ---
-✨ **Dicas Finais**:
-- [Practical reminders]
+
+### ✨ **Dicas de Especialista**
+- [Conselhos práticos sobre filas, reservas ou logística]
 
 📌 **Fonte:** [*VisitLisboa*](https://www.visitlisboa.com) **|** [*IPMA*](https://www.ipma.pt) **|** [*Metro de Lisboa*](https://www.metrolisboa.pt) **| Atualizado:** {current_time}
-```
 
 Date: {current_date} | Time: {current_time}
 """

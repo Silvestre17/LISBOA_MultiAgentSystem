@@ -710,7 +710,9 @@ st.set_page_config(
 
 def normalized_value(value: Optional[str]) -> str:
     """Normalize optional text values loaded from env or UI."""
-    return (value or "").strip()
+    if not isinstance(value, str):
+        return str(value).strip() if value is not None else ""
+    return value.strip()
 
 
 def init_system_state():
@@ -1098,8 +1100,8 @@ def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
 # UI COMPONENTS
 # ==========================================================================
 
-if logo_path:
-    st.logo("img/t.png", icon_image=logo_path, size="small")
+# if logo_path:
+#     st.logo("img/t.png", icon_image=logo_path, size="small")
 
 
 def display_banner():
@@ -1370,7 +1372,7 @@ def build_sidebar():
         if st.session_state.messages:
             if st.button("🗑️ " + t("clear_conversation"), use_container_width=True):
                 st.session_state.messages = []
-                if st.session_state.assistant:
+                if st.session_state.assistant and hasattr(st.session_state.assistant, "reset"):
                     st.session_state.assistant.reset()
                 st.rerun()
 
@@ -1440,6 +1442,8 @@ def handle_chat_stream(text: str):
     renders correctly during streaming (no broken bold/links mid-line).
     Falls back to word chunks for very long paragraphs.
     """
+    if not text:
+        return
     lines = text.split("\n")
     for i, line in enumerate(lines):
         suffix = "\n" if i < len(lines) - 1 else ""
@@ -1594,49 +1598,49 @@ def run_info_page():
     """, unsafe_allow_html=True)
 
     html_content = f"""
-    <div class="info-main-container">
-        <div class="info-header">
-            <h2>{t("info_title")}</h2>
-            <h4>{t("info_subtitle")}</h4>
-            <p>{t("info_intro")}</p>
-        </div>
+<div class="info-main-container">
+    <div class="info-header">
+        <h2>{t("info_title")}</h2>
+        <h4>{t("info_subtitle")}</h4>
+        <p>{t("info_intro")}</p>
+    </div>
 
-        <div class="info-grid">
-            <div class="info-card">
-                <div class="info-card-icon">🏛️</div>
-                <div class="info-card-title">{t("info_f1_title")}</div>
-                <div class="info-card-desc">{t("info_f1_desc")}</div>
-            </div>
-            <div class="info-card">
-                <div class="info-card-icon">🚇</div>
-                <div class="info-card-title">{t("info_f2_title")}</div>
-                <div class="info-card-desc">{t("info_f2_desc")}</div>
-            </div>
-            <div class="info-card">
-                <div class="info-card-icon">🌤️</div>
-                <div class="info-card-title">{t("info_f3_title")}</div>
-                <div class="info-card-desc">{t("info_f3_desc")}</div>
-            </div>
-            <div class="info-card">
-                <div class="info-card-icon">🏥</div>
-                <div class="info-card-title">{t("info_f4_title")}</div>
-                <div class="info-card-desc">{t("info_f4_desc")}</div>
-            </div>
+    <div class="info-grid">
+        <div class="info-card">
+            <div class="info-card-icon">🏛️</div>
+            <div class="info-card-title">{t("info_f1_title")}</div>
+            <div class="info-card-desc">{t("info_f1_desc")}</div>
         </div>
-
-        <div class="info-architecture">
-            <div class="info-arch-title">⚙️ {t("info_architecture_title")}</div>
-            <div class="info-arch-desc">{t("info_architecture_desc")}</div>
+        <div class="info-card">
+            <div class="info-card-icon">🚇</div>
+            <div class="info-card-title">{t("info_f2_title")}</div>
+            <div class="info-card-desc">{t("info_f2_desc")}</div>
         </div>
-
-        <div class="info-footer">
-            <div class="info-author-box">
-                <span class="info-author-label">🎓 {t("info_author")}</span>
-                <div class="info-author-text">{t("info_author_text")}</div>
-            </div>
+        <div class="info-card">
+            <div class="info-card-icon">🌤️</div>
+            <div class="info-card-title">{t("info_f3_title")}</div>
+            <div class="info-card-desc">{t("info_f3_desc")}</div>
+        </div>
+        <div class="info-card">
+            <div class="info-card-icon">🏥</div>
+            <div class="info-card-title">{t("info_f4_title")}</div>
+            <div class="info-card-desc">{t("info_f4_desc")}</div>
         </div>
     </div>
-    """
+
+    <div class="info-architecture">
+        <div class="info-arch-title">⚙️ {t("info_architecture_title")}</div>
+        <div class="info-arch-desc">{t("info_architecture_desc")}</div>
+    </div>
+
+    <div class="info-footer">
+        <div class="info-author-box">
+            <span class="info-author-label">🎓 {t("info_author")}</span>
+            <div class="info-author-text">{t("info_author_text")}</div>
+        </div>
+    </div>
+</div>
+"""
     
     st.markdown(html_content, unsafe_allow_html=True)
 

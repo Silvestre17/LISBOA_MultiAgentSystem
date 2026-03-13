@@ -58,7 +58,7 @@ SUPPORTED_MODEL_PROVIDERS = {"azure", "openai", "lmstudio"}
 # 2 open-source + 2 proprietary matrix described in Section 3.6.1.
 MODELS_TO_TEST = [
     # TEST: open-source model 1
-    # {"provider": "lmstudio", "model": "qwen/qwen3-4b-2507", "temperature": 0.0},
+    # {"provider": "lmstudio", "model": "qwen/qwen3.5-9b", "temperature": 0.0},
     # TEST: open-source model 2
     # {"provider": "lmstudio", "model": "qwen/qwen3-8b", "temperature": 0.0},
     # TEST: proprietary model 1

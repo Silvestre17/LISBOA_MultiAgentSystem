@@ -16,7 +16,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "lisboa"
 version = "1.0.0"
-description = "LISBOA: LLM-Integrated System for Behavioral Orchestration and Agentic Architecture - Multi-Agent AI for Personalized Tourism and Urban Mobility in Lisbon"
+description = "LISBOA: Lisbon Itenerary System Based On AI - Multi-Agent AI for Personalized Tourism and Urban Mobility in Lisbon"
 authors = [
     { name = "André Filipe Gomes Silvestre", email = "20240502@novaims.unl.pt" },
 ]

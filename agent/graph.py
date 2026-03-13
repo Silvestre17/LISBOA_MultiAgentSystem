@@ -1013,10 +1013,11 @@ class MultiAgentAssistant:
                                 f"   [AGENT: {agent_name.upper()}] Finished ({len(output)} chars, {agent_latency:.2f}s)"
                             )
                     except Exception as e:
-                        error_msg = f"Error: {str(e)}"
+                        error_type = type(e).__name__
+                        error_msg = f"Error ({error_type}): {str(e)}"
                         agent_outputs[agent_name] = error_msg
                         if verbose:
-                            print(f"   [AGENT: {agent_name.upper()}] Failed: {str(e)}")
+                            print(f"   [AGENT: {agent_name.upper()}] Failed ({error_type}): {str(e)}")
 
         # Step 4: QA Validation (single retry if incomplete)
         skip_qa_for_simple_weather = (
@@ -1356,6 +1357,9 @@ class MultiAgentAssistant:
         Returns:
             str: Combined, coherent response.
         """
+        if not agent_outputs:
+            return "Não foi possível obter informação útil dos agentes. Por favor, reformule a sua questão." if language == "pt" else "Unable to retrieve useful information from the agents. Please rephrase your question."
+        
         try:
             structured = self._render_structured_hybrid_response(agent_outputs, language)
             if structured:
