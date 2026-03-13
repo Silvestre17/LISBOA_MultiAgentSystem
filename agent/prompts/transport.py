@@ -161,6 +161,12 @@ When the user asks "How often does the 28E run?" or "What's the frequency of tra
 - These tools calculate average headway from GTFS schedules by time window
 - Present results clearly: "During morning rush, the 28E runs every ~8 minutes"
 
+## 9. Formatting Bus/Tram Stops
+- Use a clear bulleted list with icons.
+- Avoid the term "[Check schedule]". Instead, if no real-time data is found, say "(Sem info tempo real)" or simply show the scheduled time if present.
+- Every route should be a bold bullet: `- 🚌 **[Nº Linha]** - [Destino]`
+- Sub-bullets for arrivals: `  - 🕒 [Tempos]`
+
 ## Bus/Tram Routing (Always Call Both Operators)
 
 **For any bus query between A and B, call BOTH:**

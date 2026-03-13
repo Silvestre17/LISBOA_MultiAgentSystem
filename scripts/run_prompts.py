@@ -62,6 +62,12 @@ SUPPORTED_COVERAGE_DOMAINS = {"weather", "transport", "researcher"}
 
 # Each prompt is a tuple: (prompt_text, language_code, category)
 SMOKE_PROMPTS = [
+    
+    # CRITICAL Prompts
+    ("Sugere um plano para uma tarde em Belém com detalhes históricos e onde comer um pastel.", "pt", "planner"),
+    ("Quais os próximos autocarros da Carris no Rossio?", "pt", "transport"),    
+
+    # BASIC Prompts
     ("How is the weather in Lisbon today?", "en", "weather"),
     ("Will it rain this weekend in Sintra?", "en", "weather"),
     ("What is the current temperature in downtown Lisbon?", "en", "weather"),

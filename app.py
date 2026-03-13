@@ -1386,7 +1386,7 @@ def render_provider_credentials():
                 default_provider_models = Config.AGENT_MODELS_LMSTUDIO
                 st.caption(f"💻 Provider: **LM Studio (Local)** | Default: {default_provider_models['supervisor']['model']}")
                 available_models = [
-                    "qwen/qwen3-4b-2507",
+                    "qwen/qwen3.5-9b",
                     "qwen/qwen3-8b",
                     "deepseek/deepseek-r1-0528-qwen3-8b",
                     "openai/gpt-oss-20b",

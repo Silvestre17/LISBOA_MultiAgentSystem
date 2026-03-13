@@ -27,6 +27,8 @@ from dotenv import load_dotenv
 # This allows secure storage of API keys outside the codebase
 load_dotenv()
 
+__all__ = ["Config"]
+
 # Base directory: the root folder of this project
 BASE_DIR = Path(__file__).parent.resolve()
 
@@ -127,7 +129,7 @@ class Config:
     # LM Studio model (Local server on port 1234)
     # Set to match the model loaded in your local LM Studio instance
     # LMSTUDIO_MODEL_NAME = 'openai/gpt-oss-20b'
-    LMSTUDIO_MODEL_NAME = "qwen/qwen3-4b-2507"
+    LMSTUDIO_MODEL_NAME = "qwen/qwen3.5-9b"
     # LMSTUDIO_MODEL_NAME = "deepseek/deepseek-r1-0528-qwen3-8b"
     # LMSTUDIO_MODEL_NAME = "qwen/qwen3-8b"
     LMSTUDIO_BASE_URL = "http://localhost:1234/v1"
@@ -194,32 +196,32 @@ class Config:
     AGENT_MODELS_LMSTUDIO = {
         "supervisor": {
             "provider": "lmstudio",
-            "model": "qwen/qwen3-4b-2507",
+            "model": "qwen/qwen3.5-9b",
             "temperature": 0.1,
         },
         "weather": {
             "provider": "lmstudio",
-            "model": "qwen/qwen3-4b-2507",
+            "model": "qwen/qwen3.5-9b",
             "temperature": 0,
         },
         "transport": {
             "provider": "lmstudio",
-            "model": "qwen/qwen3-4b-2507",
+            "model": "qwen/qwen3.5-9b",
             "temperature": 0,
         },
         "researcher": {
             "provider": "lmstudio",
-            "model": "qwen/qwen3-4b-2507",
+            "model": "qwen/qwen3.5-9b",
             "temperature": 0,
         },
         "planner": {
             "provider": "lmstudio",
-            "model": "qwen/qwen3-4b-2507",
+            "model": "qwen/qwen3.5-9b",
             "temperature": 0.1,
         },
         "qa": {
             "provider": "lmstudio",
-            "model": "qwen/qwen3-4b-2507",
+            "model": "qwen/qwen3.5-9b",
             "temperature": 0,
         },
     }
@@ -321,7 +323,7 @@ class Config:
         else:  # lmstudio or default
             return {
                 "provider": "lmstudio",
-                "model": "qwen/qwen3-4b-2507",
+                "model": "qwen/qwen3.5-9b",
                 "temperature": 0,
             }
 

@@ -1762,14 +1762,13 @@ def carris_get_next_departures(
         has_realtime_data = any(
             any(t.startswith("**") for t in times) for times in departures.values()
         )
-
-        response = f"🚌 **Next Departures from {stop_name}**\n"
+        response = f"🚌 **Next Departures from {stop_name}**  \n"
         if has_realtime_data:
-            response += "   (📡 Real-Time Data Active)\n"
+            response += "   (📡 Real-Time Data Active)  \n"
         freshness_note = _build_gtfs_rt_freshness_note() if not is_future_query else ""
         if freshness_note:
-            response += f"   {freshness_note}\n"
-        response += "-" * 50 + "\n"
+            response += f"   {freshness_note}  \n"
+        response += "---  \n"
 
         for (route, dest), times in departures.items():
             # Show top 5 times per destination
@@ -1781,11 +1780,11 @@ def carris_get_next_departures(
                 times_str += f" (+{remaining} more)"
 
             # USER REQUEST: "DIZER O NOME DA ROTA"
-            response += f"📍 **[{route}] Para {dest}**\n"
-            response += f"   🕒 {times_str}\n\n"
+            response += f"📍 **[{route}] Para {dest}**  \n"
+            response += f"   🕒 {times_str}  \n\n"
 
         total_shown = sum(len(times) for times in departures.values())
-        response += f"Showing next {total_shown} departures.\n"
+        response += f"Showing next {total_shown} departures.  \n"
         return response
 
     except Exception as e:
@@ -1962,7 +1961,7 @@ def carris_find_routes_between(
 
             if not departures:
                 line = f"   {r['route_short_name']}: {r['route_long_name']}\n"
-                line += "     Check schedule\n\n"
+                line += "     (Sem informação em tempo real nesta paragem)\n\n"
                 return line
 
             first_dep = departures[0]
