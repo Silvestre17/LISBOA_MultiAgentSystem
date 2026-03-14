@@ -88,7 +88,6 @@ This reduces tool overload per worker, keeps domain prompts narrower, and makes 
 | Path | Role |
 |------|------|
 | `app.py` | supported Streamlit UI entrypoint |
-| `app_vprod.py` | alternative UI variant present in the repository, but not part of the public setup path |
 | `agent/` | orchestration, prompts, state, and shared agent utilities |
 | `tools/` | exported tool registry plus vector-store internals |
 | `data_collection/` | scrapers and source-acquisition scripts |
@@ -102,4 +101,4 @@ This reduces tool overload per worker, keeps domain prompts narrower, and makes 
 
 > [!NOTE]
 > This overview intentionally documents the supported application path around `app.py` and the current runtime architecture.
-> Alternative UI files or auxiliary thesis materials may exist in the repository, but they are not treated as the public operating path unless explicitly stated.
+> Auxiliary thesis materials may exist in the repository, but they are not treated as the public operating path unless explicitly stated.

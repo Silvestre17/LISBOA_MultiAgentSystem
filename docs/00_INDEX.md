@@ -4,7 +4,6 @@ This documentation set describes the repository as it exists in code today. It h
 
 > [!IMPORTANT]
 > Public setup, runtime, and validation instructions support `app.py` as the documented entrypoint.
-> The repository also contains `app_vprod.py` as an alternative UI variant, but it is outside the supported public documentation path.
 
 ## 🔎 At a Glance
 
@@ -63,4 +62,4 @@ The following files are treated as the source of truth when counts, roles, or wo
 
 - Some tool outputs and upstream payloads can contain Portuguese text because several Lisbon public sources publish in Portuguese.
 - `tools/vector_store.py` is operational infrastructure and CLI support. It is important, but it is not counted as one of the 45 exported runtime tools.
-- The `docs/` set intentionally focuses on the supported public application path. Auxiliary thesis material and alternative UI variants present in the repository are mentioned only when they help avoid confusion.
+- The `docs/` set intentionally focuses on the supported public application path centered on `app.py`. Auxiliary thesis material may still exist in the repository, but it is not part of the public operating path unless explicitly stated.
