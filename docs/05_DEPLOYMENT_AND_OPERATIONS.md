@@ -85,7 +85,7 @@ Legacy `LANGCHAIN_*` tracing aliases are still accepted by the runtime for backw
 
 - A real user request should produce exactly one top-level LangSmith trace.
 - Nested spans then capture the supervisor, worker agents, LangChain model calls, and tool executions used to answer that request.
-- The connection-validation flow behind `Save & Connect` in `app.py` and `Connect System` in `app_vprod.py` is intentionally excluded from tracing to avoid wasting the free-tier trace quota.
+- The connection-validation flow behind `Save & Connect` in `app.py` is intentionally excluded from tracing to avoid wasting the free-tier trace quota.
 - If your LangSmith API key is linked to multiple workspaces, set `LANGSMITH_WORKSPACE_ID` or the tracing preflight check may auto-disable tracing.
 
 ## 🚀 First Run

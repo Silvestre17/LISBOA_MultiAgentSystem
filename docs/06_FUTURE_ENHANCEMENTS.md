@@ -82,4 +82,4 @@ Any new enhancement should pass all four checks before being added here:
 1. it must provide immediate user value
 2. it must be implementable with the current architecture or with a small extension
 3. it must stay in the low or medium difficulty range
-4. it must not create major documentation or operational drift around the supported `app_vprod.py` path
+4. it must not create major documentation or operational drift around the supported `app.py` path
