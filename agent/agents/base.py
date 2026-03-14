@@ -368,14 +368,6 @@ def clean_response(content: str, _print: bool = True) -> str:
     if not content:
         return "Desculpe, tive dificuldades em processar o pedido. / Sorry, I'm having difficulty processing your request."
 
-    # Print markdown to terminal if debugging is enabled
-    if _print and Config.SHOW_MARKDOWN_RESPONSE_IN_TERMINAL:
-        print("\n" + "=" * 80)
-        print("📝 AI RESPONSE (Markdown)")
-        print("=" * 80)
-        print(content)
-        print("=" * 80 + "\n")
-
     return content
 
 
@@ -458,6 +450,7 @@ class BaseAgent:
         self.llm = get_agent_llm(agent_name)
         self._llm_usage_events: List[Dict[str, Any]] = []
         self._llm_usage_call_index = 0
+        self._tool_calls_log: List[Dict[str, Any]] = []
 
         # Bind tools if this agent has any
         if self.tools:
@@ -499,13 +492,25 @@ class BaseAgent:
             self.llm_with_tools = self.llm
 
     def reset_llm_usage_tracking(self) -> None:
-        """Resets the in-memory LLM usage tracker for this agent."""
+        """Resets the in-memory LLM and Tool usage tracker for this agent."""
         self._llm_usage_events = []
         self._llm_usage_call_index = 0
+        self._tool_calls_log = []
 
     def get_llm_usage_events(self) -> List[Dict[str, Any]]:
         """Returns a defensive copy of the raw LLM usage events."""
         return deepcopy(self._llm_usage_events)
+        
+    def get_tool_calls_log(self) -> List[Dict[str, Any]]:
+        """Returns a defensive copy of the logged tool calls."""
+        return deepcopy(self._tool_calls_log)
+
+    def _record_tool_call(self, tool_name: str, args: dict) -> None:
+        """Records a tool call to the agent's internal log."""
+        self._tool_calls_log.append({
+            "tool_name": tool_name,
+            "args": deepcopy(args)
+        })
 
     def get_llm_usage_summary(self) -> Dict[str, Any]:
         """
@@ -607,6 +612,7 @@ class BaseAgent:
         for tool in self.tools:
             if tool.name == tool_name:
                 try:
+                    self._record_tool_call(tool_name, tool_args)
                     if verbose:
                         print(f"      [TOOL] Calling {tool_name} with args: {tool_args}")
                     return str(tool.invoke(tool_args))
@@ -654,6 +660,7 @@ class BaseAgent:
                 return (tool_id, f"Tool '{tool_name}' not found.")
             
             try:
+                self._record_tool_call(tool_name, tool_args)
                 result = tool_map[tool_name].invoke(tool_args)
                 return (tool_id, str(result))
             except Exception as e:
@@ -716,8 +723,7 @@ class BaseAgent:
                 )
                 if is_content_filter and attempt < retries:
                     wait = 1.5 * (attempt + 1)
-                    if verbose:
-                        print(f"      [RETRY] Azure content filter triggered (attempt {attempt + 1}/{retries + 1}). Retrying in {wait}s...")
+                    print(f"      [RETRY] Azure content filter triggered (attempt {attempt + 1}/{retries + 1}). Retrying in {wait}s...")
                     time_module.sleep(wait)
                     last_exception = e
                     continue
@@ -830,6 +836,9 @@ class BaseAgent:
                     result = tool_results.get(tool_id, f"Tool '{tool_name}' execution failed.")
                     last_tool_results.append(str(result))
 
+                    if "error" in str(result).lower() or "failed" in str(result).lower():
+                        print(f"      [ERROR] Tool {tool_name} failed: {str(result)[:150]}...")
+
                     if verbose:
                         preview = str(result)[:100] + "..." if len(str(result)) > 100 else str(result)
                         print(f"      [TOOL] {tool_name} Result: {preview}")
@@ -845,6 +854,7 @@ class BaseAgent:
                     if verbose:
                         print(f"      [TOOL] Calling {tool_name} with args: {tool_args}")
 
+                    self._record_tool_call(tool_name, tool_args)
                     tool_result = None
                     for tool in self.tools:
                         if tool.name == tool_name:
@@ -860,8 +870,7 @@ class BaseAgent:
                                     print(f"      [TOOL] Result: {preview}")
                             except Exception as e:
                                 tool_result = f"Error executing {tool_name}: {str(e)}"
-                                if verbose:
-                                    print(f"      [TOOL] Error: {tool_result}")
+                                print(f"      [ERROR] Tool {tool_name} failed: {str(e)[:150]}")
                             break
 
                     if tool_result is None:

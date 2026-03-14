@@ -519,10 +519,9 @@ def structure_planner_markdown(text: str) -> str:
             continue
             
         # 1. Promote activity titles to H3 cards
-        # Matches: "1. 14:00 - Visit", "### 14:00 - Visit", "🕐 14:00: Visit", etc.
-        # This regex is now more flexible to handle leading emojis or bullet markers.
-        activity_match = re.search(r"^(?:[🕐⏱️🗓️#\d\.\s*-]+)?(\d{1,2}:\d{2})\s*[-–—:]\s*(.+)$", stripped)
-        if activity_match:
+        # Matches: "1. 14:00 - Visit", "### 14:00 - Visit", "🕐 14:00: Visit", "14:00 — Passeio", etc.
+        activity_match = re.search(r"^(?:###\s*)?(?:[🕐⏱️🗓️#\d\.\s*-]+)?(\d{1,2}:\d{2})\s*[-–—:]\s*(.+)$", stripped)
+        if activity_match and "atualizado" not in stripped.lower() and "updated" not in stripped.lower():
             time, title = activity_match.groups()
             title = title.replace("**", "").strip()  # Remove redundant bolding
             
@@ -534,35 +533,114 @@ def structure_planner_markdown(text: str) -> str:
             continue
 
         # 2. Iconize standard section headers
+        # Convert full-bold lines without a colon to headers if they match section keywords
+        is_bold_header = re.match(r"^\*\*(.+)\*\*$", stripped)
+        header_text = stripped
         if stripped.startswith("### "):
-            header_content = stripped.replace("###", "").strip().lower()
-            if "itinerário" in header_content or "itinerary" in header_content:
-                structured.append(f"### 📅 **{stripped.replace('###', '').strip()}**")
-            elif "condições" in header_content or "meteorol" in header_content or "weather" in header_content:
-                structured.append(f"### ⛅ **{stripped.replace('###', '').strip()}**")
-            elif "dicas" in header_content or "tips" in header_content:
+            header_text = stripped.replace("###", "").strip()
+        elif is_bold_header and ":" not in stripped:
+            header_text = is_bold_header.group(1).strip()
+            
+        if stripped.startswith("### ") or (is_bold_header and ":" not in stripped):
+            header_content = header_text.lower()
+            
+            # Clean up existing emojis so we don't double them
+            clean_text = re.sub(r"^[🌥️⛅🌤️📅🗓️✨💡⚠️📌]+", "", header_text).strip()
+            
+            if "itinerário" in header_content or "itinerary" in header_content or "plano" in header_content:
+                structured.append(f"### 📅 **{clean_text}**")
+            elif "condiç" in header_content or "meteorol" in header_content or "weather" in header_content:
+                structured.append(f"### ⛅ **{clean_text}**")
+            elif "dica" in header_content or "tip" in header_content or "prática" in header_content:
                 if structured and not last_was_separator:
                     structured.append("---")
-                structured.append(f"### ✨ **{stripped.replace('###', '').strip()}**")
+                structured.append(f"### ✨ **{clean_text}**")
             else:
-                structured.append(stripped)
+                structured.append(f"### **{clean_text}**" if clean_text else stripped)
+                
             last_was_separator = False
             continue
 
-        # 3. Handle source line
-        if _SOURCE_LINE_RE.match(stripped):
+        # 3. Standardize and iconize labels generically
+        # Catches any label up to ~4 words followed by a colon, optionally prefixed by an emoji
+        label_pattern = r"^(?:[-*•]\s*)?(?:[^\w\s*]+\s*)?\**\s*([A-Za-zÀ-ú][A-Za-zÀ-ú\s]{2,40}?)\s*\**\s*:\s*\**\s*(.*)$"
+        detail_match = re.search(label_pattern, stripped)
+        if detail_match and "fonte" not in stripped.lower() and "source" not in stripped.lower():
+            label, content = detail_match.groups()
+            label_lower = label.lower()
+            
+            # Default icon
+            icon = "🔹"
+            
+            if "local" in label_lower or "morada" in label_lower or "onde" in label_lower or "address" in label_lower:
+                icon = "📍"
+                label = "Localização" if "local" in label_lower or "morada" in label_lower else label
+            elif "fazer" in label_lower or "what" in label_lower or "sugestão" in label_lower or "suggestion" in label_lower:
+                icon = "💡"
+            elif "dica" in label_lower or "tip" in label_lower or "nota" in label_lower:
+                icon = "✨"
+            elif "histór" in label_lower or "contexto" in label_lower:
+                icon = "📚"
+            elif "opç" in label_lower or "option" in label_lower or "comer" in label_lower:
+                icon = "🍽️"
+            elif "temp" in label_lower:
+                icon = "🌡️"
+            elif "condi" in label_lower:
+                icon = "🌤️"
+            elif "chuva" in label_lower or "rain" in label_lower or "precipitaç" in label_lower:
+                icon = "💧"
+            elif "aviso" in label_lower or "warning" in label_lower or "alerta" in label_lower:
+                icon = "⚠️"
+            elif "horár" in label_lower or "schedule" in label_lower or "quando" in label_lower or "tempo" in label_lower:
+                icon = "🕒"
+            elif "preço" in label_lower or "price" in label_lower or "bilhete" in label_lower or "ticket" in label_lower:
+                icon = "💰"
+            elif "categ" in label_lower:
+                icon = "🎭"
+            elif "duraç" in label_lower or "dura" in label_lower:
+                icon = "⏳"
+            elif "acess" in label_lower or "mobilidade" in label_lower:
+                icon = "♿"
+            elif "metro" in label_lower or "carris" in label_lower or "cp" in label_lower or "transport" in label_lower:
+                icon = "🚇"
+                
+            # Content should not be bolded arbitrarily
+            content = content.replace("**", "").strip()
+                
+            structured.append(f"- {icon} **{label.strip().capitalize()}**: {content}")
+            last_was_separator = False
+            continue
+
+        # 4. Handle source line / references
+        is_source_line = (
+            _SOURCE_LINE_RE.match(stripped) 
+            or stripped.lower().startswith("fontes")
+            or stripped.lower().startswith("sources")
+        )
+        if is_source_line:
             if structured and not last_was_separator:
                 structured.append("---")
-            structured.append(stripped)
+                
+            current_time = datetime.now().strftime("%H:%M")
+            if "fonte" in stripped.lower() or "português" in stripped.lower() or "pt" in stripped.lower() or "informações" in stripped.lower():
+                structured.append(f"📌 **Fonte:** [*VisitLisboa*](https://www.visitlisboa.com) **|** [*IPMA*](https://www.ipma.pt) **|** [*Transportes*](https://www.metrolisboa.pt) **| Atualizado:** {current_time}")
+            else:
+                structured.append(f"📌 **Source:** [*VisitLisboa*](https://www.visitlisboa.com) **|** [*IPMA*](https://www.ipma.pt) **|** [*Transports*](https://www.metrolisboa.pt) **| Updated:** {current_time}")
             last_was_separator = False
             continue
 
-        # 4. Handle existing separators
+        # 5. Handle separators
         if stripped == "---":
             if not last_was_separator:
                 structured.append("---")
                 last_was_separator = True
             continue
+
+        # 6. Apply generic bullet to long loose lines inside a card
+        if not stripped.startswith(("-", "*", "#")) and len(stripped) > 20 and not last_was_separator:
+            if structured and structured[-1].startswith("- "):
+                structured.append(f"  - {stripped}")
+                continue
 
         structured.append(line)
         last_was_separator = False
@@ -895,6 +973,36 @@ def localize_local_information_values(text: str, language: str = "en") -> str:
 
         if "📍" in updated_line or "**Local" in updated_line or "**Location" in updated_line:
             updated_line = re.sub(r"\bLisbon\b", "Lisboa", updated_line)
+
+        # Handle english days and schedules returned by the APIs directly
+        updated_line = re.sub(r"\bToday:", "Hoje:", updated_line, flags=re.IGNORECASE)
+        updated_line = re.sub(r"\bTomorrow:", "Amanhã:", updated_line, flags=re.IGNORECASE)
+        updated_line = re.sub(r"\bMonday:", "Segunda-feira:", updated_line, flags=re.IGNORECASE)
+        updated_line = re.sub(r"\bTuesday:", "Terça-feira:", updated_line, flags=re.IGNORECASE)
+        updated_line = re.sub(r"\bWednesday:", "Quarta-feira:", updated_line, flags=re.IGNORECASE)
+        updated_line = re.sub(r"\bThursday:", "Quinta-feira:", updated_line, flags=re.IGNORECASE)
+        updated_line = re.sub(r"\bFriday:", "Sexta-feira:", updated_line, flags=re.IGNORECASE)
+        updated_line = re.sub(r"\bSaturday:", "Sábado:", updated_line, flags=re.IGNORECASE)
+        updated_line = re.sub(r"\bSunday:", "Domingo:", updated_line, flags=re.IGNORECASE)
+
+        # Handle English labels from VisitLisboa / Researcher outputs by targeting words directly
+        # preserving entirely the surrounding bold (**), emojis, spaces, or colons used by the LLM
+        updated_line = re.sub(r"(?i)\bBrief\s+description\b", "Descrição", updated_line)
+        updated_line = re.sub(r"(?i)\bDescription\b", "Descrição", updated_line)
+        updated_line = re.sub(r"(?i)\bAddress\b", "Morada", updated_line)
+        updated_line = re.sub(r"(?i)\bLocation\b", "Localização", updated_line)
+        updated_line = re.sub(r"(?i)\bOpening\s+hours\b", "Horário", updated_line)
+        updated_line = re.sub(r"(?i)\bSchedule\b", "Horário", updated_line)
+        updated_line = re.sub(r"(?i)\bTip\b", "Dica", updated_line)
+        updated_line = re.sub(r"(?i)\bPrice\b", "Preço", updated_line)
+        updated_line = re.sub(r"(?i)\bAccessibility\b", "Acessibilidade", updated_line)
+        updated_line = re.sub(r"(?i)\bParking\b", "Estacionamento", updated_line)
+        updated_line = re.sub(r"(?i)\bPublic\s+transport\s+access\b", "Acessos por transportes públicos", updated_line)
+        updated_line = re.sub(r"(?i)\bContact\b", "Contacto", updated_line)
+        updated_line = re.sub(r"(?i)\bTemporary\s+requirements\b", "Exigências temporárias", updated_line)
+        updated_line = re.sub(r"(?i)\bReservations\b", "reservas", updated_line)
+        updated_line = re.sub(r"(?i)\bEducational\s+programs\b", "Programas educativos", updated_line)
+        updated_line = re.sub(r"(?i)\bGuided\s+tours\b", "visitas guiadas", updated_line)
 
         updated_line = re.sub(
             r"\*\*Total matching events:\*\*",

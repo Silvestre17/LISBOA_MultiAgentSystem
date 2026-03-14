@@ -2,10 +2,16 @@
 # LISBOA - Lisbon Itinerary System Based On AI
 # ==========================================================================
 
+import logging
 import warnings
 
 warnings.filterwarnings("ignore", message=".*torch.classes.*")
 warnings.filterwarnings("ignore", category=UserWarning, module="torch")
+
+# Suppress noisy LangSmith rate-limit/retry warnings that flood the terminal
+# These are non-critical as LangSmith is optional tracing infrastructure
+for _ls_logger_name in ("langsmith.client", "langsmith.utils", "langsmith"):
+    logging.getLogger(_ls_logger_name).setLevel(logging.ERROR)
 
 import base64
 import os
@@ -733,7 +739,7 @@ def init_system_state():
                 "endpoint": normalized_value(os.getenv("AZURE_OPENAI_ENDPOINT", "")),
                 "model": normalized_value(os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", ""))
                 or normalized_value(Config.AZURE_OPENAI_DEPLOYMENT_NAME)
-                or "gpt-5-nano",
+                or "gpt-5-mini",
             },
             "lmstudio": {
                 "base_url": normalized_value(Config.LMSTUDIO_BASE_URL),
@@ -859,7 +865,7 @@ def set_credentials_env(provider: str) -> None:
     azure_model = (
         normalized_value(creds["azure"].get("model"))
         or normalized_value(Config.AZURE_OPENAI_DEPLOYMENT_NAME)
-        or "gpt-5-nano"
+        or "gpt-5-mini"
     )
     lmstudio_url = normalized_value(creds["lmstudio"].get("base_url"))
     lmstudio_model = normalized_value(creds["lmstudio"].get("model"))
@@ -889,7 +895,7 @@ def provider_has_required_credentials(provider: str) -> Tuple[bool, Optional[str
     azure_model = (
         normalized_value(creds["azure"].get("model"))
         or normalized_value(Config.AZURE_OPENAI_DEPLOYMENT_NAME)
-        or "gpt-5-nano"
+        or "gpt-5-mini"
     )
     lmstudio_url = normalized_value(st.session_state.credentials["lmstudio"].get("base_url"))
     lmstudio_model = normalized_value(st.session_state.credentials["lmstudio"].get("model"))
@@ -1100,8 +1106,8 @@ def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
 # UI COMPONENTS
 # ==========================================================================
 
-# if logo_path:
-#     st.logo("img/t.png", icon_image=logo_path, size="small")
+if logo_path:
+    st.logo("img/t.png", icon_image=logo_path, size="small")
 
 
 def display_banner():
@@ -1229,7 +1235,7 @@ def build_sidebar():
                 effective_azure_model = (
                     normalized_value(st.session_state.credentials["azure"].get("model"))
                     or normalized_value(Config.AZURE_OPENAI_DEPLOYMENT_NAME)
-                    or "gpt-5-nano"
+                    or "gpt-5-mini"
                 )
                 if effective_azure_model:
                     configured_items.append("Deployment")
@@ -1558,6 +1564,17 @@ def run_interaction(user_input: str):
             )
 
         except Exception as error:
+            # Log the FULL traceback to the terminal for debugging
+            import traceback
+            print(f"\n{'='*70}")
+            print("ERROR during chat interaction:")
+            print(f"  Query: {user_input}")
+            print(f"  Error type: {type(error).__name__}")
+            print(f"  Error message: {error}")
+            print(f"{'='*70}")
+            traceback.print_exc()
+            print(f"{'='*70}\n")
+
             friendly_message = build_user_error_message(error)
             st.error(f"⚠️ {friendly_message}")
             st.session_state.messages.append(
