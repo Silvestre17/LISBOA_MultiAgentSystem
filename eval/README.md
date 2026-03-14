@@ -185,7 +185,6 @@ pricing_by_model = {
     "pricing_updated_at": "2026-03-05",
     "models": {
         "azure::gpt-5-mini": {"input": 0.25, "output": 2.0},
-        "azure::gpt-5-nano": {"input": 0.05, "output": 0.4},
     },
 }
 ```

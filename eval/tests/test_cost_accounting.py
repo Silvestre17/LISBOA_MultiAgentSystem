@@ -63,7 +63,7 @@ class TestUsagePayloads:
         )
         second = build_usage_payload(
             {"input_tokens": 50, "output_tokens": 10, "total_tokens": 60},
-            model_id="azure::gpt-5-nano",
+            model_id="azure::gpt-5-mini",
             call_count=2,
         )
 
@@ -152,7 +152,7 @@ class TestCostPayloads:
                     {
                         "call_index": 2,
                         "agent_name": "weather",
-                        "model_id": "azure::gpt-5-nano",
+                        "model_id": "azure::gpt-5-mini",
                         "tokens": {"input_tokens": 200, "output_tokens": 50, "total_tokens": 250},
                         "usage_available": True,
                     },
@@ -161,7 +161,7 @@ class TestCostPayloads:
         )
         pricing = {
             "azure::gpt-5-mini": {"input": 0.25, "output": 2.0},
-            "azure::gpt-5-nano": {"input": 0.05, "output": 0.4},
+            "azure::gpt-5-mini": {"input": 0.05, "output": 0.4},
         }
 
         cost = build_cost_payload(usage, pricing)

@@ -562,7 +562,14 @@ class ResearcherAgent(BaseAgent):
         Returns:
             str: Places/events information response.
         """
-        language = self._infer_research_query_language(user_message)
+        # Extract explicit language preference from context if provided
+        import re
+        language_match = re.search(r"User language:\s*(en|pt)", context, re.IGNORECASE)
+        if language_match:
+            language = language_match.group(1).lower()
+        else:
+            language = self._infer_research_query_language(user_message)
+            
         messages = self._build_messages(self.system_prompt, user_message, context)
 
         # Skip tool enforcement for greetings/thanks

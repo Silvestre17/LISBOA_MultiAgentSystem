@@ -140,6 +140,11 @@ def _disabled_status(reason: str, requested: bool) -> Dict[str, Any]:
 def _load_langsmith_symbols() -> Optional[Dict[str, Any]]:
     """Import LangSmith runtime symbols only when tracing is actually requested."""
     try:
+        import logging
+        # Suppress LangSmith's noisy error logs about quotas/connection failures
+        logging.getLogger("langsmith").setLevel(logging.CRITICAL)
+        logging.getLogger("langsmith.client").setLevel(logging.CRITICAL)
+        
         from langsmith import Client, ContextThreadPoolExecutor
         from langsmith.run_helpers import (
             get_current_run_tree,

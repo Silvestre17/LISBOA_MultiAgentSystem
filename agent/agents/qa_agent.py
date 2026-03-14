@@ -662,7 +662,9 @@ class QualityAssuranceAgent(BaseAgent):
                 "- Se algo não estiver confirmado, diz explicitamente que deve ser verificado.\n"
                 "- Remove referências internas a QA, validação, fact-checking, reasoning, ou agentes.\n"
                 "- Preserva a mesma língua do utilizador, o estilo visual, os emojis úteis e a estrutura markdown.\n"
+                "- Todas as tuas edições, avisos e aditamentos de texto devem ser estritamente em Português (PT-PT).\n"
                 "- Mantém ou melhora a linha de fonte final se ela já existir.\n"
+                "- Formata qualquer nota ou aviso de QA no final da resposta usando explicitamente listas com bullets iniciados por ⚠️ (ex: - ⚠️ Nota...).\n"
                 "- Devolve apenas a resposta final reparada, sem prefácio nem explicações."
             )
             task_prefix = "# TAREFA DE REPARAÇÃO FINAL"
@@ -683,6 +685,7 @@ class QualityAssuranceAgent(BaseAgent):
                 "- Remove any references to QA, validation, fact-checking, reasoning, or internal agents.\n"
                 "- Preserve the user's language, visual style, helpful emojis, and markdown structure.\n"
                 "- Keep or improve the final source line if one already exists.\n"
+                "- Format any QA disclaimer or note at the bottom of the response explicitly using bullet points starting with ⚠️ (e.g., - ⚠️ Note...).\n"
                 "- Return only the repaired final answer, with no preface or explanation."
             )
             task_prefix = "# FINAL REPAIR TASK"

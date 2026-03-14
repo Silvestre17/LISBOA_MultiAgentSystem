@@ -775,8 +775,7 @@ def _get_vector_store():
             from tools.vector_store import KnowledgeBase
 
             # Initialize with CPU to avoid GPU memory issues in agent context
-            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-                _vector_store = KnowledgeBase(use_gpu=False)
+            _vector_store = KnowledgeBase(use_gpu=False)
             logger.info("✅ Vector store initialized for semantic search")
         except Exception as e:
             logger.warning(f"⚠️ Vector store unavailable: {e}")

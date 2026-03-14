@@ -361,7 +361,13 @@ class WeatherAgent(BaseAgent):
         Returns:
             str: Weather information response.
         """
-        language = self._infer_weather_query_language(user_message)
+        # Extract explicit language preference from context if provided
+        import re
+        language_match = re.search(r"User language:\s*(en|pt)", context, re.IGNORECASE)
+        if language_match:
+            language = language_match.group(1).lower()
+        else:
+            language = self._infer_weather_query_language(user_message)
         if self._is_beyond_forecast_horizon_query(user_message):
             return finalize_worker_response(
                 self._build_forecast_horizon_limit_message(language),

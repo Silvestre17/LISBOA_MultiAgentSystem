@@ -58,13 +58,9 @@ SUPPORTED_MODEL_PROVIDERS = {"azure", "openai", "lmstudio"}
 # 2 open-source + 2 proprietary matrix described in Section 3.6.1.
 MODELS_TO_TEST = [
     # TEST: open-source model 1
-    # {"provider": "lmstudio", "model": "qwen/qwen3.5-9b", "temperature": 0.0},
-    # TEST: open-source model 2
-    # {"provider": "lmstudio", "model": "qwen/qwen3-8b", "temperature": 0.0},
+    {"provider": "lmstudio", "model": "qwen/qwen3.5-9b", "temperature": 0.0},
     # TEST: proprietary model 1
     {"provider": "azure", "model": "gpt-5-mini", "temperature": 0.0},
-    # TEST: proprietary model 2
-    {"provider": "azure", "model": "gpt-5-nano", "temperature": 0.0},
 ]
 
 # Latency SLA thresholds (seconds) per domain

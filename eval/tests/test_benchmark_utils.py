@@ -208,11 +208,11 @@ class TestBenchmarkModelSelection:
 
     def test_parse_response_model_spec_accepts_single_colon(self):
         """A single-colon shorthand should remain supported for convenience."""
-        parsed = parse_response_model_spec("openai:gpt-5-nano")
+        parsed = parse_response_model_spec("openai:gpt-5-mini")
 
         assert parsed == {
             "provider": "openai",
-            "model": "gpt-5-nano",
+            "model": "gpt-5-mini",
             "temperature": 0.0,
         }
 
@@ -231,13 +231,13 @@ class TestBenchmarkModelSelection:
     def test_resolve_response_models_deduplicates_custom_specs(self):
         """Repeated model specs should collapse to one effective benchmark entry."""
         resolved = resolve_response_models(
-            ["azure::gpt-5-mini", "azure::gpt-5-mini", "openai:gpt-5-nano"],
+            ["azure::gpt-5-mini", "azure::gpt-5-mini", "openai:gpt-5-mini"],
             temperature=0.1,
         )
 
         assert resolved == [
             {"provider": "azure", "model": "gpt-5-mini", "temperature": 0.1},
-            {"provider": "openai", "model": "gpt-5-nano", "temperature": 0.1},
+            {"provider": "openai", "model": "gpt-5-mini", "temperature": 0.1},
         ]
 
 
@@ -383,7 +383,7 @@ class TestRunIsolatedAgent:
         response, tools, retrieved_context, latency, error, usage = benchmark_module.run_isolated_agent(
             domain="transport",
             query="Is the metro working correctly right now?",
-            config={"provider": "azure", "model": "gpt-5-nano", "temperature": 0.0},
+            config={"provider": "azure", "model": "gpt-5-mini", "temperature": 0.0},
         )
 
         assert error is None
@@ -391,4 +391,4 @@ class TestRunIsolatedAgent:
         assert tools == ["get_metro_status"]
         assert "[get_metro_status] returned:\ntool-output:Is the metro working correctly right now?" in retrieved_context
         assert latency >= 0
-        assert usage["model_id"] == "azure::gpt-5-nano"
+        assert usage["model_id"] == "azure::gpt-5-mini"

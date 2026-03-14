@@ -174,7 +174,7 @@ class LLMFactory:
         # =====================================================================
         # OpenAI API provides access to GPT models.
         # Recommended for: Tasks requiring highest quality outputs
-        # Models available: gpt-5.2, gpt-5.1, gpt-5, gpt-5-mini, gpt-5-nano
+        # Models available: gpt-5.2, gpt-5.1, gpt-5, gpt-5-mini
         # Pricing: Pay-per-use
         elif provider == "openai":
             # Validate API key exists
@@ -215,7 +215,7 @@ class LLMFactory:
         # Uses ChatOpenAI with base_url instead of AzureChatOpenAI
         # Benefits: No api_version needed, faster updates, OpenAI-compatible
         # Required env vars: AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT
-        # .IMPORTANT: o-series models (gpt-5-nano, o1, o3) only support temperature=1
+        # .IMPORTANT: o-series models (gpt-5-mini, o1, o3) only support temperature=1
         elif provider == "azure":
             if not Config.AZURE_OPENAI_API_KEY:
                 raise ValueError("AZURE_OPENAI_API_KEY not found in .env file")

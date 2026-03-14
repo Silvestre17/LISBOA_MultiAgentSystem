@@ -823,8 +823,16 @@ class MultiAgentAssistant:
         """
         # Add to conversation history
         from langchain_core.messages import HumanMessage
+        import time
 
         self.state["messages"].append(HumanMessage(content=message))
+        start_time = time.time()
+
+        # Reset tracking for all sub-agents to capture metrics strictly for this request
+        self.supervisor.reset_llm_usage_tracking()
+        self.qa_agent.reset_llm_usage_tracking()
+        for _, agent in self.agents.items():
+            agent.reset_llm_usage_tracking()
 
         # Update user language preference in state
         user_ctx = self.state.get("user_context")
@@ -985,8 +993,8 @@ class MultiAgentAssistant:
                         executor.submit(
                             self.agents[agent_name].invoke,
                             message,
-                            agent_context,  # context with language
-                            verbose,  # verbose flag
+                            agent_context,  # Context with language
+                            verbose,        # Verbose flag
                         )
                     ] = agent_name
 
@@ -1228,7 +1236,11 @@ class MultiAgentAssistant:
             # Fallback: Use researcher for general queries
             if verbose:
                 print("\n   [FALLBACK] Using researcher agent")
-            response = self.agents["researcher"].invoke(message, verbose=verbose)
+            response = self.agents["researcher"].invoke(
+                message, 
+                context=f"User language: {language}", 
+                verbose=verbose
+            )
 
         if self._should_run_final_qa_repair(agents_to_call, qa_result):
             if verbose:
@@ -1240,10 +1252,125 @@ class MultiAgentAssistant:
                 qa_result=qa_result,
                 language=language,
             )
+            # Re-apply strict formatting because the QA LLM might destroy visual structure
+            if "planner" in agents_to_call:
+                from agent.utils.response_formatter import finalize_worker_response
+                response = finalize_worker_response(response, "planner", message, language)
+            elif len(agents_to_call) == 1 and agents_to_call[0] in {"weather", "researcher", "transport"}:
+                from agent.utils.response_formatter import finalize_worker_response
+                response = finalize_worker_response(response, agents_to_call[0], message, language)
+            else:
+                # Hybrid multi-agent response: unconditionally enforce PT translation of labels
+                from agent.utils.response_formatter import canonicalize_local_information_terms
+                response = canonicalize_local_information_terms(response, language)
 
         formatted = format_response(clean_response(response))
         title = generate_response_title(agents_to_call, message, language)
-        return ensure_response_title(formatted, title)
+        final_output = ensure_response_title(formatted, title)
+
+        # ---------------------------------------------------------------------
+        # ANALYTICAL SUMMARY (Terminal ONLY)
+        # ---------------------------------------------------------------------
+        elapsed_time = time.time() - start_time
+        
+        all_agents_used = []
+        agent_model_map = {}
+        models_used = set()
+        total_tokens = 0
+        total_input_tokens = 0
+        total_output_tokens = 0
+        total_llm_calls = 0
+        
+        # 1. Supervisor metrics
+        sup_usage = self.supervisor.get_llm_usage_summary()
+        if sup_usage["call_count"] > 0:
+            all_agents_used.append("supervisor")
+            agent_model_map["supervisor"] = sup_usage["model_id"]
+            models_used.add(sup_usage["model_id"])
+            total_tokens += sup_usage["tokens"]["total_tokens"]
+            total_input_tokens += sup_usage["tokens"]["input_tokens"]
+            total_output_tokens += sup_usage["tokens"]["output_tokens"]
+            total_llm_calls += sup_usage["call_count"]
+            
+        # 2. Worker metrics and Tool calls
+        agents_tool_logs = {}
+        for a_name, a_obj in self.agents.items():
+            u = a_obj.get_llm_usage_summary()
+            tools_used = getattr(a_obj, "get_tool_calls_log", lambda: [])()
+            
+            if u["call_count"] > 0 or tools_used:
+                if a_name not in all_agents_used:
+                    all_agents_used.append(a_name)
+                    
+                if u["call_count"] > 0:
+                    agent_model_map[a_name] = u["model_id"]
+                    models_used.add(u["model_id"])
+                    total_tokens += u["tokens"]["total_tokens"]
+                    total_input_tokens += u["tokens"]["input_tokens"]
+                    total_output_tokens += u["tokens"]["output_tokens"]
+                    total_llm_calls += u["call_count"]
+                    
+                if tools_used:
+                    agents_tool_logs[a_name] = tools_used
+
+        # 3. QA Agent metrics
+        qa_usage = self.qa_agent.get_llm_usage_summary()
+        if qa_usage["call_count"] > 0:
+            all_agents_used.append("qa")
+            agent_model_map["qa"] = qa_usage["model_id"]
+            models_used.add(qa_usage["model_id"])
+            total_tokens += qa_usage["tokens"]["total_tokens"]
+            total_input_tokens += qa_usage["tokens"]["input_tokens"]
+            total_output_tokens += qa_usage["tokens"]["output_tokens"]
+            total_llm_calls += qa_usage["call_count"]
+
+        # Print Analytical Breakdown
+        print("\n" + "=" * 80)
+        print("📊 EXECUTION SUMMARY")
+        print("=" * 80)
+        print(f"⏱️   Time taken: {elapsed_time:.2f}s")
+        print(f"🧠  Global Models: {', '.join(models_used) if models_used else 'Unknown'}")
+        
+        formatted_agents = []
+        for a in all_agents_used:
+            model_info = f" [{agent_model_map[a]}]" if a in agent_model_map else ""
+            formatted_a_name = "QA" if a.lower() == "qa" else a.title()
+            formatted_agents.append(f"{formatted_a_name}{model_info}")
+            
+        print(f"🤖  Agents Used: {', '.join(formatted_agents) if formatted_agents else 'None'}")
+        
+        if agents_tool_logs:
+            print("🔧  Tools Called:")
+            total_t_calls = 0
+            for a_name, t_log in agents_tool_logs.items():
+                formatted_a_name = "QA" if a_name.lower() == "qa" else a_name.title()
+                print(f"    │ {formatted_a_name} [{len(t_log)} call(s)]")
+                for item in t_log:
+                    total_t_calls += 1
+                    try:
+                        import json
+                        args_str = json.dumps(item['args'], ensure_ascii=False)
+                    except Exception:
+                        args_str = str(item['args'])
+                    if len(args_str) > 150:
+                        args_str = args_str[:147] + "..."
+                    print(f"    ├──> {item['tool_name']}({args_str})")
+            print(f"    ╰── Total Tool Invocations: {total_t_calls}")
+        else:
+            print("🔧  Tools Called: 0")
+
+        print(f"📈  LLM Calls: {total_llm_calls}")
+        print(f"🪙   Total Tokens: {total_tokens} (Input: {total_input_tokens} | Output: {total_output_tokens})")
+        
+        # Print markdown to terminal if debugging is enabled
+        if Config.SHOW_MARKDOWN_RESPONSE_IN_TERMINAL:
+            print("=" * 80)
+            print("📝 FINAL RESPONSE (Markdown)")
+            print("=" * 80)
+            print(final_output)
+            print("=" * 80 + "\n")
+
+        return final_output
 
     @staticmethod
     def _extract_structured_section_parts(text: str) -> tuple[str, List[str], Optional[str]]:
@@ -1330,7 +1457,7 @@ class MultiAgentAssistant:
 
         qa_disclaimers = agent_outputs.get("_qa_disclaimers", [])
         if qa_disclaimers:
-            notes = "\n".join(f"- {warning}" for warning in qa_disclaimers)
+            notes = "\n".join(f"- ⚠️ {warning}" for warning in qa_disclaimers)
             sections.append(f"{labels['notes']}\n\n{notes}")
 
         response = "\n\n---\n\n".join(section for section in sections if section.strip())
