@@ -5,6 +5,9 @@ This documentation set describes the repository as it exists in code today. It h
 > [!IMPORTANT]
 > Public setup, runtime, and validation instructions support `app.py` as the documented entrypoint.
 
+> [!NOTE]
+> The latest conceptual thesis/framework figure stored in the repository is [`../img/LISBOA_Framework_fev2026.png`](../img/LISBOA_Framework_fev2026.png).
+
 ## 🔎 At a Glance
 
 | Item | Current value |

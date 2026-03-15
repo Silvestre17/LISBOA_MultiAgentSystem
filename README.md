@@ -42,12 +42,15 @@ The supported user-facing entrypoint is `app.py`. The current runtime is multi-a
 
 > Start here for the guided repo tour: [`docs/00_INDEX.md`](./docs/00_INDEX.md)
 
+> Conceptual thesis/framework figure: [`img/LISBOA_Framework_fev2026.png`](./img/LISBOA_Framework_fev2026.png)
+
 <a id="quick-links"></a>
 ## 🔗 Quick Links
 
 - [👥 Who the System Serves](#who-the-system-serves)
 - [📊 Current System Snapshot](#current-system-snapshot)
 - [🏗️ System Architecture](#system-architecture)
+- [🖼️ Framework Figure](./img/LISBOA_Framework_fev2026.png)
 - [🌐 Data Sources and Tool Inventory](#data-sources-and-tool-inventory)
 - [🧪 Evaluation and Research Workflow](#evaluation-and-research-workflow)
 - [📚 Documentation Hub](#documentation-hub)

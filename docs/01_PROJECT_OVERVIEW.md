@@ -1,21 +1,21 @@
 # 📍 LISBOA Project Overview
 
-LISBOA is a Master's thesis project for the Lisbon Metropolitan Area that combines multi-agent orchestration, live public APIs, municipal open data, and semantic retrieval. The documented public entrypoint is `app.py`, and the default runtime is the multi-agent system enabled by `Config.USE_MULTI_AGENT = True`.
+LISBOA is a Master's thesis project for the Lisbon Metropolitan Area that combines multi-agent orchestration, live public APIs, municipal open data, and semantic retrieval. The documented public entrypoint is `app.py`.
 
 ## 👥 Who LISBOA Serves
 
 | Audience | Typical questions | Main data layers |
 |----------|-------------------|------------------|
-| Tourists | itineraries, museums, attractions, weather, events, transport between landmarks | VisitLisboa, IPMA, Metro, Carris, CP, multimodal routing |
-| Residents | daily mobility, nearby services, local events, urban information | Lisboa Aberta, Metro, Carris Metropolitana, Carris Urban, CP, IPMA |
+| **🧳 Tourists** | itineraries, museums, attractions, weather, events, transport between landmarks | VisitLisboa, IPMA, Metro, Carris, CP, multimodal routing |
+| **🏠 Residents** | daily mobility, nearby services, local events, urban information | Lisboa Aberta, Metro, Carris Metropolitana, Carris Urban, CP, IPMA |
 
 ## 🎓 Thesis Context
 
 | Item | Value |
 |------|-------|
 | Project name | **LISBOA** |
-| Thesis title used in repository docs | *LISBOA: Lisbon Itinerary System Based On AI* |
-| Subtitle | *A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon* |
+| Thesis Title | *LISBOA: Lisbon Itinerary System Based On AI* |
+| Thesis Subtitle | *A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon* |
 | Author | André Filipe Gomes Silvestre, 20240502 |
 | Supervisor | Prof. Dr. Bruno Jardim |
 | Institution | NOVA IMS |
@@ -29,7 +29,7 @@ LISBOA is a Master's thesis project for the Lisbon Metropolitan Area that combin
 | Runtime mode | Multi-agent by default |
 | Specialized agents | Supervisor, Weather, Transport, Researcher, Planner, QA |
 | Exported tools | 45 |
-| Worker-agent tool assignment | Weather 4, Transport 30, Researcher 11 |
+| Worker-agent tool assignment | Weather $4$, Transport $30$, Researcher $11$ |
 | Knowledge base | ChromaDB with `BAAI/bge-m3` embeddings |
 | Indexed collections | `lisbon_pdf`, `lisbon_places`, `lisbon_events` |
 | Evaluation corpus | 72 benchmark queries across 6 domains |
@@ -41,7 +41,7 @@ LISBOA is a Master's thesis project for the Lisbon Metropolitan Area that combin
 ### 🌦️ Weather and Alerts
 
 - current weather summaries
-- five-day forecasts
+- 5-day forecasts
 - Portugal-wide weather overview
 - active meteorological warning retrieval
 
@@ -74,7 +74,7 @@ LISBOA is a Master's thesis project for the Lisbon Metropolitan Area that combin
 
 ## 🤖 Why the System is Multi-Agent
 
-LISBOA is no longer documented as a single monolithic ReAct agent. The supported runtime separates responsibilities into clearer layers:
+*LISBOA* is no longer documented as a single monolithic ReAct agent. The supported runtime separates responsibilities into clearer layers:
 
 - **Supervisor** for routing and direct handling of simple cases
 - **Worker agents** for weather, transport, and research retrieval
@@ -94,8 +94,6 @@ This reduces tool overload per worker, keeps domain prompts narrower, and makes 
 | `data/` | vector store and local transport support data |
 | `eval/` | benchmarking, ablation, validators, and calibration assets |
 | `tests/` | smoke checks, QA integration tests, and coverage validation |
-| `_/` | auxiliary thesis notes, prompts, and one-off utilities, not part of runtime execution |
-| `.github/workflows/` | scheduled scraping and vector synchronization |
 
 ## 📌 Documentation Boundary
 

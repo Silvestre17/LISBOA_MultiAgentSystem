@@ -19,7 +19,7 @@ import re
 import time as time_module  # For latency tracking
 from concurrent.futures import as_completed
 from datetime import datetime
-from typing import Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, StateGraph
@@ -693,6 +693,63 @@ class MultiAgentAssistant:
         return f"Multi-Agent ({sv_model})"
 
     @staticmethod
+    def _safe_metric_int(value: object) -> int:
+        """Safely coerces simple numeric metrics while defaulting mocks to zero."""
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            try:
+                return int(value)
+            except ValueError:
+                return 0
+        return 0
+
+    @classmethod
+    def _normalize_usage_summary(cls, summary: object) -> Dict[str, Any]:
+        """Returns a defensive usage-summary shape for partially mocked agents in tests."""
+        if not isinstance(summary, dict):
+            return {
+                "call_count": 0,
+                "usage_available": False,
+                "model_id": "Unknown",
+                "tokens": {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "total_tokens": 0,
+                },
+                "llm_usage_breakdown": [],
+            }
+
+        tokens = summary.get("tokens", {})
+        if not isinstance(tokens, dict):
+            tokens = {}
+
+        breakdown = summary.get("llm_usage_breakdown", [])
+        if not isinstance(breakdown, list):
+            breakdown = []
+
+        return {
+            "call_count": cls._safe_metric_int(summary.get("call_count", 0)),
+            "usage_available": bool(summary.get("usage_available", False)),
+            "model_id": str(summary.get("model_id") or "Unknown"),
+            "tokens": {
+                "input_tokens": cls._safe_metric_int(tokens.get("input_tokens", 0)),
+                "output_tokens": cls._safe_metric_int(tokens.get("output_tokens", 0)),
+                "total_tokens": cls._safe_metric_int(tokens.get("total_tokens", 0)),
+            },
+            "llm_usage_breakdown": breakdown,
+        }
+
+    @staticmethod
+    def _normalize_tool_calls_log(tool_log: object) -> List[Dict[str, Any]]:
+        """Returns a list-shaped tool log even when tests inject plain mocks."""
+        return list(tool_log) if isinstance(tool_log, list) else []
+
+    @staticmethod
     def _dedupe_preserve_order(items: List[str]) -> List[str]:
         """Removes duplicates while preserving order."""
         deduped: List[str] = []
@@ -822,8 +879,8 @@ class MultiAgentAssistant:
             str: Assistant response.
         """
         # Add to conversation history
-        from langchain_core.messages import HumanMessage
         import time
+        from langchain_core.messages import HumanMessage
 
         self.state["messages"].append(HumanMessage(content=message))
         start_time = time.time()
@@ -1261,12 +1318,23 @@ class MultiAgentAssistant:
                 response = finalize_worker_response(response, agents_to_call[0], message, language)
             else:
                 # Hybrid multi-agent response: unconditionally enforce PT translation of labels
-                from agent.utils.response_formatter import canonicalize_local_information_terms
+                from agent.utils.response_formatter import (
+                    canonicalize_local_information_terms,
+                )
                 response = canonicalize_local_information_terms(response, language)
 
-        formatted = format_response(clean_response(response))
+        from agent.utils.response_formatter import strip_technical_output_artifacts
+
+        sanitized_response = clean_response(response)
+        if "transport" in agents_to_call:
+            sanitized_response = strip_technical_output_artifacts(sanitized_response)
+        formatted = format_response(sanitized_response)
+        if "transport" in agents_to_call:
+            formatted = strip_technical_output_artifacts(formatted)
         title = generate_response_title(agents_to_call, message, language)
         final_output = ensure_response_title(formatted, title)
+        if "transport" in agents_to_call:
+            final_output = strip_technical_output_artifacts(final_output)
 
         # ---------------------------------------------------------------------
         # ANALYTICAL SUMMARY (Terminal ONLY)
@@ -1282,7 +1350,9 @@ class MultiAgentAssistant:
         total_llm_calls = 0
         
         # 1. Supervisor metrics
-        sup_usage = self.supervisor.get_llm_usage_summary()
+        sup_usage = self._normalize_usage_summary(
+            getattr(self.supervisor, "get_llm_usage_summary", lambda: {})()
+        )
         if sup_usage["call_count"] > 0:
             all_agents_used.append("supervisor")
             agent_model_map["supervisor"] = sup_usage["model_id"]
@@ -1295,8 +1365,12 @@ class MultiAgentAssistant:
         # 2. Worker metrics and Tool calls
         agents_tool_logs = {}
         for a_name, a_obj in self.agents.items():
-            u = a_obj.get_llm_usage_summary()
-            tools_used = getattr(a_obj, "get_tool_calls_log", lambda: [])()
+            u = self._normalize_usage_summary(
+                getattr(a_obj, "get_llm_usage_summary", lambda: {})()
+            )
+            tools_used = self._normalize_tool_calls_log(
+                getattr(a_obj, "get_tool_calls_log", lambda: [])()
+            )
             
             if u["call_count"] > 0 or tools_used:
                 if a_name not in all_agents_used:
@@ -1314,7 +1388,9 @@ class MultiAgentAssistant:
                     agents_tool_logs[a_name] = tools_used
 
         # 3. QA Agent metrics
-        qa_usage = self.qa_agent.get_llm_usage_summary()
+        qa_usage = self._normalize_usage_summary(
+            getattr(self.qa_agent, "get_llm_usage_summary", lambda: {})()
+        )
         if qa_usage["call_count"] > 0:
             all_agents_used.append("qa")
             agent_model_map["qa"] = qa_usage["model_id"]

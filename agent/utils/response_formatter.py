@@ -497,6 +497,90 @@ def structure_weather_markdown(text: str) -> str:
         structured,
     )
     return structured.strip()
+
+
+def _strip_markdown_formatting(text: str) -> str:
+    """Remove lightweight markdown emphasis tokens from a text fragment."""
+    return re.sub(r"\*\*(.*?)\*\*", r"\1", text or "").strip()
+
+
+def _normalize_planner_line(text: str) -> str:
+    """Remove planner-specific markdown noise before structural parsing."""
+    cleaned = _strip_markdown_formatting(text)
+    cleaned = re.sub(r"^(?:###\s*)?(?:[-*•]\s*)?", "", cleaned).strip()
+    return cleaned
+
+
+def _planner_section_icon(label: str) -> str:
+    """Pick a user-facing icon for non-timed planner sections."""
+    lowered = _strip_markdown_formatting(label).lower()
+    if any(keyword in lowered for keyword in ("antes de sair", "before you go", "weather", "meteorolog")):
+        return "⛅"
+    if any(keyword in lowered for keyword in ("dica", "tip", "nota", "note")):
+        return "✨"
+    if any(keyword in lowered for keyword in ("transport", "metro", "carris", "cp", "autocarro", "bus")):
+        return "🚇"
+    return "📝"
+
+
+def _planner_activity_icon(title: str, emoji: str = "") -> str:
+    """Pick an icon for itinerary activities, preserving any existing emoji when possible."""
+    if emoji and emoji.strip():
+        return emoji.strip()
+
+    lowered = _strip_markdown_formatting(title).lower()
+    if any(keyword in lowered for keyword in ("pastel", "nata", "bakery", "pastry")):
+        return "🥐"
+    if any(keyword in lowered for keyword in ("café", "cafe", "coffee", "aperitivo", "aperitif", "esplanada", "drink")):
+        return "☕"
+    if any(keyword in lowered for keyword in ("mosteiro", "monastery", "igreja", "church")):
+        return "⛪"
+    if any(keyword in lowered for keyword in ("museu", "museum", "galeria", "gallery", "arqueologia", "archaeology")):
+        return "🏛️"
+    if any(keyword in lowered for keyword in ("torre", "tower", "castelo", "castle")):
+        return "🏰"
+    if any(keyword in lowered for keyword in ("padrão", "padrao", "monument", "descobrimentos", "discoveries")):
+        return "🗿"
+    if any(keyword in lowered for keyword in ("jardim", "garden", "praça", "praca", "passeio", "walk", "marginal", "tejo", "river")):
+        return "🌿"
+    if any(keyword in lowered for keyword in ("almoço", "almoco", "lunch", "jantar", "dinner", "restaurant", "restaurante", "comer", "meal")):
+        return "🍽️"
+    if any(keyword in lowered for keyword in ("transport", "transporte", "metro", "autocarro", "bus")):
+        return "🚇"
+    return "📍"
+
+
+_PLANNER_CLOCK_EMOJI_TO_TIME = {
+    "🕐": (1, 0),
+    "🕜": (1, 30),
+    "🕑": (2, 0),
+    "🕝": (2, 30),
+    "🕒": (3, 0),
+    "🕞": (3, 30),
+    "🕓": (4, 0),
+    "🕟": (4, 30),
+    "🕔": (5, 0),
+    "🕠": (5, 30),
+    "🕕": (6, 0),
+    "🕖": (7, 0),
+    "🕗": (8, 0),
+    "🕘": (9, 0),
+    "🕙": (10, 0),
+    "🕚": (11, 0),
+    "🕛": (12, 0),
+}
+
+
+def _planner_clock_to_time(clock_emoji: str, afternoon_context: bool) -> Optional[str]:
+    """Convert a clock-face emoji into a readable HH:MM slot when possible."""
+    clock_value = _PLANNER_CLOCK_EMOJI_TO_TIME.get(clock_emoji)
+    if not clock_value:
+        return None
+
+    hour, minute = clock_value
+    if afternoon_context and 1 <= hour <= 6:
+        hour += 12
+    return f"{hour:02d}:{minute:02d}"
  
  
 def structure_planner_markdown(text: str) -> str:
@@ -507,145 +591,380 @@ def structure_planner_markdown(text: str) -> str:
     if not text:
         return text
 
-    lines = text.splitlines()
-    structured = []
-    
-    # Track sectional state to avoid double separators
-    last_was_separator = False
-    
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
-            
-        # 1. Promote activity titles to H3 cards
-        # Matches: "1. 14:00 - Visit", "### 14:00 - Visit", "🕐 14:00: Visit", "14:00 — Passeio", etc.
-        activity_match = re.search(r"^(?:###\s*)?(?:[🕐⏱️🗓️#\d\.\s*-]+)?(\d{1,2}:\d{2})\s*[-–—:]\s*(.+)$", stripped)
-        if activity_match and "atualizado" not in stripped.lower() and "updated" not in stripped.lower():
-            time, title = activity_match.groups()
-            title = title.replace("**", "").strip()  # Remove redundant bolding
-            
-            if structured and not last_was_separator:
-                structured.append("---")
-            
-            structured.append(f"### 🏛️ **[{time}]** - **{title}**")
-            last_was_separator = False
+    structured: list[str] = []
+    current_block: Optional[str] = None
+    overall_title_rendered = False
+    afternoon_context = bool(re.search(r"\b(tarde|afternoon)\b", text, re.IGNORECASE))
+
+    def append_separator() -> None:
+        if not structured:
+            return
+        while structured and not structured[-1].strip():
+            structured.pop()
+        if structured and structured[-1] != "---":
+            structured.extend(["", "---", ""])
+
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped == "---":
             continue
 
-        # 2. Iconize standard section headers
-        # Convert full-bold lines without a colon to headers if they match section keywords
-        is_bold_header = re.match(r"^\*\*(.+)\*\*$", stripped)
-        header_text = stripped
-        if stripped.startswith("### "):
-            header_text = stripped.replace("###", "").strip()
-        elif is_bold_header and ":" not in stripped:
-            header_text = is_bold_header.group(1).strip()
-            
-        if stripped.startswith("### ") or (is_bold_header and ":" not in stripped):
-            header_content = header_text.lower()
-            
-            # Clean up existing emojis so we don't double them
-            clean_text = re.sub(r"^[🌥️⛅🌤️📅🗓️✨💡⚠️📌]+", "", header_text).strip()
-            
-            if "itinerário" in header_content or "itinerary" in header_content or "plano" in header_content:
-                structured.append(f"### 📅 **{clean_text}**")
-            elif "condiç" in header_content or "meteorol" in header_content or "weather" in header_content:
-                structured.append(f"### ⛅ **{clean_text}**")
-            elif "dica" in header_content or "tip" in header_content or "prática" in header_content:
-                if structured and not last_was_separator:
-                    structured.append("---")
-                structured.append(f"### ✨ **{clean_text}**")
-            else:
-                structured.append(f"### **{clean_text}**" if clean_text else stripped)
-                
-            last_was_separator = False
+        lowered_stripped = stripped.lower()
+        if lowered_stripped.startswith(("**fontes citadas**", "fontes citadas", "**sources cited**", "sources cited")):
             continue
 
-        # 3. Standardize and iconize labels generically
-        # Catches any label up to ~4 words followed by a colon, optionally prefixed by an emoji
-        label_pattern = r"^(?:[-*•]\s*)?(?:[^\w\s*]+\s*)?\**\s*([A-Za-zÀ-ú][A-Za-zÀ-ú\s]{2,40}?)\s*\**\s*:\s*\**\s*(.*)$"
-        detail_match = re.search(label_pattern, stripped)
-        if detail_match and "fonte" not in stripped.lower() and "source" not in stripped.lower():
-            label, content = detail_match.groups()
-            label_lower = label.lower()
-            
-            # Default icon
-            icon = "🔹"
-            
-            if "local" in label_lower or "morada" in label_lower or "onde" in label_lower or "address" in label_lower:
-                icon = "📍"
-                label = "Localização" if "local" in label_lower or "morada" in label_lower else label
-            elif "fazer" in label_lower or "what" in label_lower or "sugestão" in label_lower or "suggestion" in label_lower:
-                icon = "💡"
-            elif "dica" in label_lower or "tip" in label_lower or "nota" in label_lower:
-                icon = "✨"
-            elif "histór" in label_lower or "contexto" in label_lower:
-                icon = "📚"
-            elif "opç" in label_lower or "option" in label_lower or "comer" in label_lower:
-                icon = "🍽️"
-            elif "temp" in label_lower:
-                icon = "🌡️"
-            elif "condi" in label_lower:
-                icon = "🌤️"
-            elif "chuva" in label_lower or "rain" in label_lower or "precipitaç" in label_lower:
-                icon = "💧"
-            elif "aviso" in label_lower or "warning" in label_lower or "alerta" in label_lower:
-                icon = "⚠️"
-            elif "horár" in label_lower or "schedule" in label_lower or "quando" in label_lower or "tempo" in label_lower:
-                icon = "🕒"
-            elif "preço" in label_lower or "price" in label_lower or "bilhete" in label_lower or "ticket" in label_lower:
-                icon = "💰"
-            elif "categ" in label_lower:
-                icon = "🎭"
-            elif "duraç" in label_lower or "dura" in label_lower:
-                icon = "⏳"
-            elif "acess" in label_lower or "mobilidade" in label_lower:
-                icon = "♿"
-            elif "metro" in label_lower or "carris" in label_lower or "cp" in label_lower or "transport" in label_lower:
-                icon = "🚇"
-                
-            # Content should not be bolded arbitrarily
-            content = content.replace("**", "").strip()
-                
-            structured.append(f"- {icon} **{label.strip().capitalize()}**: {content}")
-            last_was_separator = False
+        if _SOURCE_LINE_RE.match(stripped):
+            append_separator()
+            structured.append(stripped)
+            current_block = None
             continue
 
-        # 4. Handle source line / references
-        is_source_line = (
-            _SOURCE_LINE_RE.match(stripped) 
-            or stripped.lower().startswith("fontes")
-            or stripped.lower().startswith("sources")
+        normalized = _normalize_planner_line(stripped)
+        lowered = normalized.lower()
+        if not normalized:
+            continue
+
+        title_window_match = re.search(r"(\d{1,2}:\d{2}\s*[→-]\s*\d{1,2}:\d{2})", normalized)
+
+        if re.search(r"\b(como chegar|deslocar-se|how to get there|get around)\b", lowered) and ":" not in normalized:
+            append_separator()
+            structured.append(f"### 🚇 {normalized.rstrip(':')}")
+            current_block = "section"
+            continue
+
+        if re.search(r"\b(fontes|verificaç|verification|sources?)\b", lowered) and ":" not in normalized:
+            append_separator()
+            structured.append(f"### 🔎 {normalized.rstrip(':')}")
+            current_block = "section"
+            continue
+
+        activity_match = re.match(
+            r"^(?P<emoji>[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+)?\s*(?P<time>\d{1,2}:\d{2})\s*[-–—:]\s*(?P<title>.+)$",
+            normalized,
         )
-        if is_source_line:
-            if structured and not last_was_separator:
-                structured.append("---")
-                
-            current_time = datetime.now().strftime("%H:%M")
-            if "fonte" in stripped.lower() or "português" in stripped.lower() or "pt" in stripped.lower() or "informações" in stripped.lower():
-                structured.append(f"📌 **Fonte:** [*VisitLisboa*](https://www.visitlisboa.com) **|** [*IPMA*](https://www.ipma.pt) **|** [*Transportes*](https://www.metrolisboa.pt) **| Atualizado:** {current_time}")
-            else:
-                structured.append(f"📌 **Source:** [*VisitLisboa*](https://www.visitlisboa.com) **|** [*IPMA*](https://www.ipma.pt) **|** [*Transports*](https://www.metrolisboa.pt) **| Updated:** {current_time}")
-            last_was_separator = False
+        if activity_match and "atualizado" not in lowered and "updated" not in lowered:
+            append_separator()
+            title = activity_match.group("title").strip(" -–—")
+            icon = _planner_activity_icon(title, activity_match.group("emoji") or "")
+            structured.append(f"### {icon} {activity_match.group('time')} · {title}")
+            current_block = "activity"
             continue
 
-        # 5. Handle separators
-        if stripped == "---":
-            if not last_was_separator:
-                structured.append("---")
-                last_was_separator = True
-            continue
-
-        # 6. Apply generic bullet to long loose lines inside a card
-        if not stripped.startswith(("-", "*", "#")) and len(stripped) > 20 and not last_was_separator:
-            if structured and structured[-1].startswith("- "):
-                structured.append(f"  - {stripped}")
+        clock_activity_match = re.match(
+            r"^(?P<clock>[🕐🕜🕑🕝🕒🕞🕓🕟🕔🕠🕕🕖🕗🕘🕙🕚🕛])\s*(?P<title>.+)$",
+            normalized,
+        )
+        if clock_activity_match:
+            derived_time = _planner_clock_to_time(
+                clock_activity_match.group("clock"),
+                afternoon_context=afternoon_context,
+            )
+            if derived_time:
+                append_separator()
+                title = clock_activity_match.group("title").strip(" -–—")
+                icon = _planner_activity_icon(title)
+                structured.append(f"### {icon} {derived_time} · {title}")
+                current_block = "activity"
                 continue
 
-        structured.append(line)
-        last_was_separator = False
+        if (
+            not overall_title_rendered
+            and re.search(r"\b(itinerário|itinerary|plano|roteiro)\b", lowered)
+        ):
+            clean_title = re.sub(
+                r"^[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s*",
+                "",
+                normalized,
+            ).rstrip(":")
+            if title_window_match:
+                clean_title = re.sub(r"\s*\([^)]*\d{1,2}:\d{2}[^)]*\)", "", clean_title).strip()
+            structured.append(f"### 📅 {clean_title}")
+            if title_window_match:
+                structured.append(
+                    f"- ⏰ **Janela sugerida**: {title_window_match.group(1)}"
+                )
+            overall_title_rendered = True
+            current_block = "section"
+            continue
 
-    return "\n".join(structured).strip()
+        preface_match = re.match(
+            r"^(?P<label>Antes de sair|Before you go)\s*,\s*(?P<content>.+)$",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if preface_match:
+            append_separator()
+            label = preface_match.group("label")
+            structured.append(f"### {_planner_section_icon(label)} {label}")
+            structured.append(f"- {preface_match.group('content').strip()}")
+            current_block = "section"
+            continue
+
+        if re.search(r"\b(dicas? práticas?|practical tips|important notes|notas importantes|final notes)\b", lowered) and ":" not in normalized:
+            append_separator()
+            structured.append(f"### ✨ {normalized.rstrip(':')}")
+            current_block = "section"
+            continue
+
+        section_match = re.match(
+            r"^(?P<emoji>[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+)?\s*(?P<label>[^:]{2,60})\s*:\s*(?P<content>.+)$",
+            normalized,
+        )
+        if section_match:
+            label = section_match.group("label").strip().rstrip("-–—")
+            content = section_match.group("content").strip().rstrip(",;")
+            label_lower = label.lower()
+            is_major_section = any(
+                keyword in label_lower
+                for keyword in (
+                    "antes de sair",
+                    "before you go",
+                    "dicas práticas",
+                    "practical tips",
+                    "important notes",
+                    "notas importantes",
+                )
+            )
+            if is_major_section:
+                append_separator()
+                structured.append(f"### {_planner_section_icon(label)} {label}")
+                if content:
+                    structured.append(f"- {content}")
+                current_block = "section"
+                continue
+
+            bullet_icon = (section_match.group("emoji") or "").strip() or "🔹"
+            structured.append(f"- {bullet_icon} **{label}**: {content}")
+            current_block = current_block or "section"
+            continue
+
+        bullet_content = re.sub(r"^(?:[-*•]\s*)", "", normalized).strip()
+        if current_block:
+            structured.append(f"- {bullet_content}")
+        else:
+            structured.append(bullet_content)
+
+    return clean_newlines("\n".join(structured)).strip()
+
+
+def _looks_like_pt_transport_text(text: str) -> bool:
+    """Infer whether a transport response is primarily in PT-PT."""
+    return bool(
+        re.search(
+            r"\b(pr[oó]xim(?:as|os)|chegadas|destino|paragens|hor[aá]rio|atualizado|fonte|dica|autocarros?)\b",
+            text or "",
+            re.IGNORECASE,
+        )
+    )
+
+
+def _clean_transport_arrival_title(title: str, is_pt: bool) -> str:
+    """Normalize Carris arrival titles into a concise H3 heading."""
+    plain = _strip_markdown_formatting(title)
+    plain = re.sub(r"\((?:paragem|stop).*?\)", "", plain, flags=re.IGNORECASE).strip()
+    plain = re.sub(r"^(?:🚌|🚋|🚇|🚆)\s*", "", plain).strip()
+
+    if re.match(r"^Pr[oó]ximas\s+Chegadas\s*:\s*", plain, flags=re.IGNORECASE):
+        stop_name = re.sub(r"^Pr[oó]ximas\s+Chegadas\s*:\s*", "", plain, flags=re.IGNORECASE).strip()
+        return f"### 🚌 {stop_name} · Próximas chegadas"
+
+    if re.match(r"^Next\s+Arrivals?\s*:\s*", plain, flags=re.IGNORECASE):
+        stop_name = re.sub(r"^Next\s+Arrivals?\s*:\s*", "", plain, flags=re.IGNORECASE).strip()
+        return f"### 🚌 {stop_name} · Next arrivals"
+
+    if "→" in plain:
+        plain = re.sub(r"\s*→\s*(Pr[oó]ximas\s+chegadas|Next\s+Arrivals?)", lambda match: f" · {match.group(1)}", plain, flags=re.IGNORECASE)
+
+    return f"### 🚌 {plain}" if plain else ("### 🚌 Próximas chegadas" if is_pt else "### 🚌 Next arrivals")
+
+
+def _build_carris_source_line(is_pt: bool, timestamp: Optional[str]) -> Optional[str]:
+    """Build a canonical Carris source line when only a timestamp is available."""
+    if not timestamp:
+        return None
+    if is_pt:
+        return f"📌 **Fonte:** [*Carris*](https://www.carris.pt) | **Atualizado:** {timestamp}"
+    return f"📌 **Source:** [*Carris*](https://www.carris.pt) | **Updated:** {timestamp}"
+
+
+def _compact_transport_arrivals_markdown(text: str) -> Optional[str]:
+    """Compact Carris arrival summaries into grouped real-time and scheduled sections."""
+    if not text:
+        return None
+
+    is_pt = _looks_like_pt_transport_text(text)
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return None
+
+    entry_header_re = re.compile(
+        r"^(?:[-*•]\s*)?(?P<emoji>[🚌🚋🚇🚆])\s*(?:\*\*)?(?P<line>[0-9A-Z]{1,5})(?:\*\*)?\s*[-–—]\s*(?:(?:\*\*)?(?:Destino|Destination)(?:\*\*)?\s*:\s*)?(?P<destination>.+)$",
+        re.IGNORECASE,
+    )
+    alternate_header_re = re.compile(
+        r"^\[(?P<status>REAL-TIME|Hor[áa]rio|Scheduled)\]\s+(?P<mode>Autocarro|Bus|El[eé]trico|Tram)\s+(?P<line>[0-9A-Z]{1,5})\s*->\s*(?P<destination>.+)$",
+        re.IGNORECASE,
+    )
+
+    title_line: Optional[str] = None
+    source_line: Optional[str] = None
+    source_timestamp: Optional[str] = None
+    notes: list[str] = []
+    entries: list[dict[str, object]] = []
+    current_entry: Optional[dict[str, object]] = None
+
+    for line in lines:
+        if _SOURCE_LINE_RE.match(line):
+            source_line = line
+            source_timestamp = extract_update_time(line) or source_timestamp
+            current_entry = None
+            continue
+
+        timestamp_from_line = extract_update_time(line)
+        if timestamp_from_line:
+            source_timestamp = timestamp_from_line
+            current_entry = None
+            continue
+
+        if "GTFS-RT" in line or "cached live snapshot" in line.lower():
+            current_entry = None
+            continue
+
+        plain_line = _strip_markdown_formatting(line)
+        if plain_line.startswith(("💡", "ℹ️")) or re.match(r"^(?:Quick tip|Dica rápida)", plain_line, flags=re.IGNORECASE):
+            if re.search(r"ve[ií]culos? identificados?|vehicle ids?|matr[íi]culas?", plain_line, flags=re.IGNORECASE):
+                notes.append(
+                    "💡 **Dica rápida:** Os tempos assinalados como em tempo real usam dados GPS recentes da Carris."
+                    if is_pt
+                    else "💡 **Quick tip:** Real-time labels use recent Carris GPS data."
+                )
+            else:
+                notes.append(plain_line)
+            current_entry = None
+            continue
+
+        if re.match(r"^\[(?:REAL-TIME|Hor[áa]rio|Scheduled)\]\s*=", plain_line, flags=re.IGNORECASE):
+            notes.append(
+                "💡 **Dica rápida:** “Em tempo real” usa dados GPS recentes; os restantes horários são programados."
+                if is_pt
+                else "💡 **Quick tip:** “Real time” uses recent GPS data, while the remaining times are scheduled."
+            )
+            current_entry = None
+            continue
+
+        header_match = entry_header_re.match(plain_line)
+        if header_match:
+            current_entry = {
+                "emoji": header_match.group("emoji"),
+                "line": header_match.group("line"),
+                "destination": header_match.group("destination").strip(),
+                "time": "",
+                "live": False,
+                "scheduled": False,
+                "extras": [],
+            }
+            entries.append(current_entry)
+            continue
+
+        alternate_match = alternate_header_re.match(plain_line)
+        if alternate_match:
+            mode = alternate_match.group("mode").lower()
+            status = alternate_match.group("status").lower()
+            current_entry = {
+                "emoji": "🚋" if any(token in mode for token in ("elétrico", "eletrico", "tram")) else "🚌",
+                "line": alternate_match.group("line"),
+                "destination": alternate_match.group("destination").strip(),
+                "time": "",
+                "live": "real-time" in status,
+                "scheduled": "hor" in status or "scheduled" in status,
+                "extras": [],
+            }
+            entries.append(current_entry)
+            continue
+
+        if title_line is None and not entries:
+            title_line = line
+            continue
+
+        if current_entry is None:
+            continue
+
+        time_match = re.search(r"(?P<time>\d{1,2}:\d{2})", plain_line)
+        if time_match:
+            current_entry["time"] = time_match.group("time")
+
+        if re.search(r"em tempo real|real[- ]time", plain_line, flags=re.IGNORECASE):
+            current_entry["live"] = True
+        if re.search(r"hor[áa]rio|scheduled", plain_line, flags=re.IGNORECASE):
+            current_entry["scheduled"] = True
+
+        extras = plain_line
+        extras = re.sub(r"^[🕒⏱️\s-]+", "", extras)
+        extras = re.sub(r"^(?:Hora|Time)\s*:\s*", "", extras, flags=re.IGNORECASE)
+        if time_match:
+            extras = extras.replace(time_match.group("time"), "", 1)
+        extras = re.sub(
+            r"[—-]?\s*(Em tempo real(?:\s*\([^)]*\))?|Real[- ]time(?:\s*\([^)]*\))?|Hor[áa]rio(?: programado)?|Scheduled(?:\s+times?)?)",
+            "",
+            extras,
+            flags=re.IGNORECASE,
+        )
+        if is_pt:
+            extras = re.sub(r"(\d+)\s+min\s+late", r"atraso \1 min", extras, flags=re.IGNORECASE)
+            extras = re.sub(r"(\d+)\s+stops?\s+remaining", r"\1 paragens restantes", extras, flags=re.IGNORECASE)
+        extras = extras.strip(" ()—-·;,")
+        extras = re.sub(r"[ \t]{2,}", " ", extras)
+        if extras:
+            extras_list = current_entry.get("extras")
+            if not isinstance(extras_list, list):
+                extras_list = []
+                current_entry["extras"] = extras_list
+            if extras not in extras_list:
+                extras_list.append(extras)
+
+    if not entries:
+        return None
+
+    def format_entry(entry: dict[str, object]) -> str:
+        parts = [
+            f"- {entry['emoji']} **{entry['line']}** → {entry['destination']}",
+        ]
+        if entry.get("time"):
+            parts.append(f"**{entry['time']}**")
+        raw_extras = entry.get("extras", [])
+        extras = raw_extras if isinstance(raw_extras, list) else []
+        parts.extend(str(item) for item in extras if item)
+        return " · ".join(parts)
+
+    realtime_entries = [entry for entry in entries if entry.get("live") and not entry.get("scheduled")]
+    scheduled_entries = [entry for entry in entries if entry not in realtime_entries]
+
+    output_lines = [
+        _clean_transport_arrival_title(title_line or "", is_pt),
+    ]
+
+    if realtime_entries:
+        output_lines.extend([
+            "",
+            "**Em tempo real**" if is_pt else "**Real time**",
+            *[format_entry(entry) for entry in realtime_entries],
+        ])
+
+    if scheduled_entries:
+        output_lines.extend([
+            "",
+            "**Horários programados**" if is_pt else "**Scheduled times**",
+            *[format_entry(entry) for entry in scheduled_entries],
+        ])
+
+    if notes:
+        output_lines.extend(["", *notes])
+
+    source_line = source_line or _build_carris_source_line(is_pt, source_timestamp)
+    if source_line:
+        output_lines.extend(["", source_line])
+
+    return clean_newlines("\n".join(output_lines)).strip()
 
 
 def structure_transport_markdown(text: str) -> str:
@@ -666,11 +985,16 @@ def structure_transport_markdown(text: str) -> str:
     ]
     for pattern in placeholder_patterns:
         text = re.sub(pattern, "(Sem informação em tempo real)", text, flags=re.IGNORECASE)
+
+    compacted = _compact_transport_arrivals_markdown(text)
+    if compacted:
+        return compacted.strip()
     
     # Ensure bus line headers are bolded if the LLM forgot
     text = re.sub(r"^(?:\s*-\s*)?([0-9A-Z]{2,4})\s*-\s*", r"- 🚌 **\1** - ", text, flags=re.MULTILINE)
+    text = re.sub(r"\bHorario\b", "Horário", text, flags=re.IGNORECASE)
     
-    return text.strip()
+    return clean_newlines(text).strip()
 
 
 def canonicalize_transport_terms(text: str, language: str = "en") -> str:
@@ -1084,7 +1408,9 @@ def strip_technical_output_artifacts(text: str) -> str:
     technical_patterns = [
         re.compile(r"^\s*(?:[-*•]\s*)?(?:🗺️\s*)?GPS\s*:", re.IGNORECASE),
         re.compile(r"^\s*(?:[-*•]\s*)?(?:🚏\s*)?(?:next\s+)?stop(?:_id|\s+id)\s*[:=]", re.IGNORECASE),
+        re.compile(r"^\s*(?:[-*•]\s*)?(?:🚏\s*)?(?:\*\*(?:next\s+)?stop(?:_id|\s+id)\*\*)\s*[:=]", re.IGNORECASE),
         re.compile(r"^\s*(?:[-*•]\s*)?(?:line|route|pattern|trip)(?:_id|\s+id)\s*[:=]", re.IGNORECASE),
+        re.compile(r"^\s*(?:[-*•]\s*)?(?:\*\*(?:Vehicle|Ve[ií]culo)\*\*|(?:Vehicle|Ve[ií]culo))\s*:", re.IGNORECASE),
         re.compile(r"^\s*(?:[-*•]\s*)?(?:\*\*(?:Plate|Matrícula|Matricula)\*\*|(?:Plate|Matrícula|Matricula))\s*:", re.IGNORECASE),
     ]
     placeholder_line = re.compile(
@@ -1106,7 +1432,47 @@ def strip_technical_output_artifacts(text: str) -> str:
             continue
         cleaned_lines.append(raw_line)
 
-    return "\n".join(cleaned_lines).strip()
+    cleaned = "\n".join(cleaned_lines).strip()
+    inline_replacements = [
+        (r"\s*-\s*(?:📍\s*)?GPS\s*:\s*[^\n]+?(?=(?:\s+-\s+|\s+📌|$))", ""),
+        (r"\s*-\s*(?:🚏\s*)?(?:next\s+)?stop(?:_id|\s+id)\s*[:=]\s*[^\n]+?(?=(?:\s+-\s+|\s+📌|$))", ""),
+        (r"\s*-\s*(?:\*\*(?:Plate|Matrícula|Matricula)\*\*|(?:Plate|Matrícula|Matricula))\s*:\s*[^\n]+?(?=(?:\s+-\s+|\s+📌|$))", ""),
+        (r"GPS\s*:\s*\**-?\d{1,2}\.\d+\**\s*,\s*\**-?\d{1,3}\.\d+\**", ""),
+        (r"\*\*GPS\*\*\s*:\s*\**-?\d{1,2}\.\d+\**\s*,\s*\**-?\d{1,3}\.\d+\**", ""),
+        (r"(?:\|\s*)?ve[ií]culo\s*:\s*\**[A-Za-z0-9_-]+\**(?:\s*\(m[áa]tr[ií]cula\s*\**[A-Za-z0-9-]+\**\))?", ""),
+        (r"(?:\|\s*)?\*\*Ve[ií]culo\*\*\s*:\s*\**[A-Za-z0-9_-]+\**(?:\s*\(Matr[íi]c\w*\s*\**[A-Za-z0-9-]+\**\))?", ""),
+        (r"(?:\|\s*)?Matr[íi]c\w*\s*:\s*\**[A-Za-z0-9-]+\**", ""),
+        (r"\*\*Ve[ií]culo\s+\**[A-Za-z0-9_-]+\**(?:\s*\(m[áa]tr[ií]c\w*\s*\**[A-Za-z0-9-]+\**\))?\*\*", ""),
+        (r"Ve[ií]culo\s+\**[A-Za-z0-9_-]+\**(?:\s*\(m[áa]tr[ií]c\w*\s*\**[A-Za-z0-9-]+\**\))?", ""),
+        (r"(?:\|\s*)?vehicle\s*:\s*\**[A-Za-z0-9_-]+\**(?:\s*\(plate\s*\**[A-Za-z0-9-]+\**\))?", ""),
+        (r"(?:\|\s*)?\*\*Vehicle\*\*\s*:\s*\**[A-Za-z0-9_-]+\**(?:\s*\(Plate\s*\**[A-Za-z0-9-]+\**\))?", ""),
+        (r"\*\*Vehicle\s+\**[A-Za-z0-9_-]+\**(?:\s*\(plate\s*\**[A-Za-z0-9-]+\**\))?\*\*", ""),
+        (r"Vehicle\s+\**[A-Za-z0-9_-]+\**(?:\s*\(plate\s*\**[A-Za-z0-9-]+\**\))?", ""),
+        (r"\s*\((?:paragem|stop)\s+id\s*[:#]?\s*\**\d+\**\)", ""),
+        (r"\s*[—-]?\s*(?:paragem|stop)\s+id\s*[:#]?\s*\**\d+\**", ""),
+        (r"\bID\s*:\s*\**\d+\**", ""),
+        (r"\s*\((?:id)\s*[:#]?\s*\d+\)", ""),
+        (r"[;,]\s*viatura\s+\**[A-Za-z0-9_-]+\**(?:\s*,\s*m[áa]tr[ií]cula\s+\**[A-Za-z0-9_-]+\**)?", ""),
+        (r"[;,]\s*vehicle\s+\**[A-Za-z0-9_-]+\**(?:\s*,\s*plate\s+\**[A-Za-z0-9_-]+\**)?", ""),
+        (r"\(\s*vehicle\s+[A-Za-z0-9_-]+\s*,\s*([^)]+)\)", r"(\1)"),
+        (r"\(\s*ve[ií]culo\s+[A-Za-z0-9_-]+\s*,\s*([^)]+)\)", r"(\1)"),
+        (r"\(\s*vehicle\s+[A-Za-z0-9_-]+\s*\)", ""),
+        (r"\(\s*ve[ií]culo\s+[A-Za-z0-9_-]+\s*\)", ""),
+    ]
+    for pattern, replacement in inline_replacements:
+        cleaned = re.sub(pattern, replacement, cleaned, flags=re.IGNORECASE)
+
+    cleaned = re.sub(r"\bHorario\b", "Horário", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\(\s*([^()]*?)\s*[;,]\s*\)", r"(\1)", cleaned)
+    cleaned = re.sub(r";\s*;", ";", cleaned)
+    cleaned = re.sub(r"\(\s*,\s*", "(", cleaned)
+    cleaned = re.sub(r"\(\s*;\s*", "(", cleaned)
+    cleaned = re.sub(r"(?i)valide\s+a\s+entrada\s+na\s+paragem\s+com\s+o\s+id\s+se\s+estiver\s+noutro\s+abrigo\.?", "", cleaned)
+    cleaned = re.sub(r"\|\s*\|", "|", cleaned)
+    cleaned = re.sub(r"—\s*—", "—", cleaned)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"\n\s+\n", "\n\n", cleaned)
+    return cleaned.strip()
 
 
 def sanitize_event_title_suffixes(text: str) -> str:
@@ -1433,9 +1799,9 @@ def finalize_worker_response(
         ).strip()
 
     finalized = strip_unsupported_closing_offers(text_for_formatting)
-    finalized = format_response(finalized)
 
     if agent_name == "weather":
+        finalized = format_response(finalized)
         weather_timestamp = weather_timestamp or extract_update_time(finalized)
         finalized = canonicalize_weather_terms(finalized, language=preferred_language)
         finalized = strip_weather_update_lines(finalized)
@@ -1446,6 +1812,7 @@ def finalize_worker_response(
             timestamp=weather_timestamp,
         )
     elif agent_name == "researcher":
+        finalized = format_response(finalized)
         finalized = clean_researcher_tool_artifacts(finalized)
         finalized = structure_ranked_research_results(finalized)
         if _ACCESSIBILITY_QUERY_RE.search(user_query or ""):
@@ -1464,9 +1831,12 @@ def finalize_worker_response(
         finalized = canonicalize_local_information_terms(finalized, language=preferred_language)
         if agent_name == "transport":
             finalized = canonicalize_transport_terms(finalized, language=preferred_language)
+            finalized = strip_technical_output_artifacts(finalized)
             finalized = structure_transport_markdown(finalized)
+            finalized = format_response(finalized)
         else:
             finalized = structure_planner_markdown(finalized)
+            finalized = format_response(finalized)
             finalized = canonicalize_planner_source_line(finalized, language=preferred_language)
 
     return clean_newlines(finalized).strip()
@@ -2188,7 +2558,6 @@ def format_response(text: str) -> str:
     text = normalize_source_links(text)
     text = normalize_metro_terminology(text)
     text = strip_hallucinations(text)
-    text = strip_technical_output_artifacts(text)
     text = sanitize_event_title_suffixes(text)
     text = strip_internal_sections(text)
     text = clean_decorative_separators(text)
