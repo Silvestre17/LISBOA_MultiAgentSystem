@@ -41,6 +41,7 @@ import time
 from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 # Fix Windows console encoding for emojis without replacing pytest's capture streams.
 for _stream_name in ("stdout", "stderr"):
@@ -160,10 +161,23 @@ def _resolve_custom_prompt(args) -> str | None:
     return prompt or None
 
 
-def _resolve_coverage_model_config(args, domain: str) -> dict:
+def _clone_model_config(raw_config: object, label: str) -> dict[str, Any]:
+    """Return a deep-copied model config dict or raise a clear configuration error."""
+    if not isinstance(raw_config, dict):
+        raise TypeError(
+            f"Invalid model configuration for '{label}'. Expected a dict, got {type(raw_config).__name__}."
+        )
+    return deepcopy(raw_config)
+
+
+def _resolve_coverage_model_config(args, domain: str) -> dict[str, Any]:
     """Build the worker model config for coverage runs, applying CLI overrides when provided."""
     provider_models = _get_agent_models_for_provider(args.provider) if args.provider else Config.get_agent_models()
-    model_config = deepcopy(provider_models.get(domain, Config.get_default_agent_model()))
+    raw_model_config = provider_models.get(domain)
+    if raw_model_config is None:
+        model_config = _clone_model_config(Config.get_default_agent_model(), "default")
+    else:
+        model_config = _clone_model_config(raw_model_config, domain)
 
     if args.provider:
         model_config["provider"] = args.provider
@@ -173,6 +187,11 @@ def _resolve_coverage_model_config(args, domain: str) -> dict:
         model_config["temperature"] = args.temperature
 
     return model_config
+
+
+def _should_echo_final_smoke_response() -> bool:
+    """Return whether the smoke runner should print an extra final-response block."""
+    return not bool(getattr(Config, "SHOW_MARKDOWN_RESPONSE_IN_TERMINAL", False))
 
 
 def _run_custom_prompt(args) -> int:
@@ -242,8 +261,9 @@ def _run_custom_prompt(args) -> int:
             elapsed = time.time() - start_time
             if not args.quiet:
                 _print_smoke_tool_trace(assistant.state.get("messages", []), response, elapsed)
-            print(f"🤖 FINAL RESPONSE ({elapsed:.2f}s):", flush=True)
-            print(response, flush=True)
+            if _should_echo_final_smoke_response():
+                print(f"🤖 FINAL RESPONSE ({elapsed:.2f}s):", flush=True)
+                print(response, flush=True)
             return 0
         except Exception as exc:
             print(f"❌ ERROR: {exc}", flush=True)
@@ -339,9 +359,10 @@ def _run_smoke_suite(args) -> int:
                     if not args.quiet:
                         _print_smoke_tool_trace(assistant.state.get("messages", []), response, elapsed)
 
-                    print("-" * 60, flush=True)
-                    print(f"🤖 \033[1mFINAL AI RESPONSE\033[0m ({elapsed:.2f}s):", flush=True)
-                    print(response, flush=True)
+                    if _should_echo_final_smoke_response():
+                        print("-" * 60, flush=True)
+                        print(f"🤖 \033[1mFINAL AI RESPONSE\033[0m ({elapsed:.2f}s):", flush=True)
+                        print(response, flush=True)
                     print("=" * 60, flush=True)
                 except Exception as exc:
                     results["error"] += 1

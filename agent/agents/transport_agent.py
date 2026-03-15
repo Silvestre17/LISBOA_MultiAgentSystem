@@ -1711,6 +1711,20 @@ def _parse_carris_line_stop_query(user_message: str) -> Optional[Dict[str, Optio
             "stop_id": stop_id_match.group("stop_id"),
         }
 
+    stop_name_arrival_patterns = [
+        r"(?:quais\s+)?(?:os\s+)?pr[oó]xim(?:os|as)\s+(?:autocarros?|el[eé]tricos?|autocarros?\s+da\s+carris|ve[ií]culos?\s+da\s+carris|partidas|chegadas)\s+(?:da\s+carris\s+)?(?:at|em|na|no)\s+(?P<stop>.+?)(?:[\?\!\.,;]|$)",
+        r"(?:next\s+)?(?:buses?|trams?|arrivals|departures)\s+(?:for\s+carris\s+)?(?:at|in)\s+(?P<stop>.+?)(?:[\?\!\.,;]|$)",
+    ]
+    for pattern in stop_name_arrival_patterns:
+        match = re.search(pattern, query, flags=re.IGNORECASE)
+        if match:
+            return {
+                "kind": "arrivals",
+                "line": None,
+                "stop_name": _clean_query_fragment(match.group("stop")),
+                "stop_id": stop_id_match.group("stop_id") if stop_id_match else None,
+            }
+
     stop_match = re.search(r"\b(?:at|em|na|no)\s+(?P<stop>[^\?\!\.,;]+)", query, flags=re.IGNORECASE)
     if line_match and stop_match:
         return {

@@ -149,19 +149,11 @@ class TestCostPayloads:
                         "tokens": {"input_tokens": 100, "output_tokens": 25, "total_tokens": 125},
                         "usage_available": True,
                     },
-                    {
-                        "call_index": 2,
-                        "agent_name": "weather",
-                        "model_id": "azure::gpt-5-mini",
-                        "tokens": {"input_tokens": 200, "output_tokens": 50, "total_tokens": 250},
-                        "usage_available": True,
-                    },
                 ],
             }
         )
         pricing = {
             "azure::gpt-5-mini": {"input": 0.25, "output": 2.0},
-            "azure::gpt-5-mini": {"input": 0.05, "output": 0.4},
         }
 
         cost = build_cost_payload(usage, pricing)

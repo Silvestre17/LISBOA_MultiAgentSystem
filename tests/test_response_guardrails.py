@@ -596,6 +596,129 @@ def test_transport_worker_finalization_localizes_summary_counts_for_en() -> None
     assert "comboios" not in output
 
 
+def test_transport_worker_finalization_strips_embedded_stop_and_vehicle_ids_from_arrivals() -> None:
+    """Transport finalization should remove embedded stop IDs and vehicle IDs from Carris arrival summaries."""
+    raw = """🚌 **Rossio → Próximas chegadas (paragem ID 908)**
+
+- 🚌 **732** - **Destino:** Hosp. Egas Moniz / Restauradores
+    - 🕒 **10:27** (vehicle 6045, 2 paragens restantes) — **Em tempo real**
+
+- 🚌 **711** - **Destino:** Sul e Sueste / Alto Damaia
+    - 🕒 **10:32** — (em trânsito, 2 paragens restantes; viatura **2784**, matrícula **AI-09-BT**)
+
+- 🚋 **51E** - **Destino:** Glória / Restauradores (Elétrico)
+    - 🕒 **10:33** — **Horario**
+
+📌 **Fonte:** [*Carris*](https://www.carris.pt) | **Atualizado:** 10:22"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="transport",
+        user_query="Quais os próximos autocarros da Carris no Rossio?",
+        language="pt",
+    )
+
+    assert "paragem ID 908" not in output
+    assert "vehicle 6045" not in output.lower()
+    assert "viatura **2784**" not in output.lower()
+    assert "matrícula **ai-09-bt**" not in output.lower()
+    assert "2 paragens restantes" in output
+    assert "Horário" in output
+
+
+def test_planner_worker_finalization_rebuilds_timed_sections_cleanly() -> None:
+    """Planner finalization should convert malformed pseudo-headers into clean timed activity sections."""
+    raw = """📅 Itinerário sugerido para uma tarde em Belém
+
+### - 🔹 **Antes de sair**: verifique a previsão meteorológica atualizada.
+🏛️ 14:00 — Chegada a Belém (Praça do Império)
+- Comece pela praça para contextualizar os monumentos.
+
+### - Observe a arquitetura manuelina do exterior.
+🏛️ 14:15 — Mosteiro dos Jerónimos
+
+Dicas práticas e notas importantes
+- 🚇 **Transporte**: confirme tempos e rotas antes de sair.
+
+📌 **Fonte:** [*VisitLisboa*](https://www.visitlisboa.com) | [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Atualizado:** 10:22"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="planner",
+        user_query="Sugere um plano para uma tarde em Belém com detalhes históricos e onde comer um pastel.",
+        language="pt",
+    )
+
+    assert "### - " not in output
+    assert "### ⛅ Antes de sair" in output
+    assert "### 🏛️ 14:00 · Chegada a Belém (Praça do Império)" in output
+    assert "### 🏛️ 14:15 · Mosteiro dos Jerónimos" in output
+    assert "- Observe a arquitetura manuelina do exterior." in output
+    assert "### ✨ Dicas práticas e notas importantes" in output
+
+
+def test_transport_worker_finalization_groups_live_and_scheduled_arrivals() -> None:
+    """Carris arrival summaries should group real-time and scheduled items instead of repeating the schedule label per line."""
+    raw = """🚌 **Rossio → Próximas chegadas (paragem ID 908)**
+
+- 🚌 **732** - **Destino:** Hosp. Egas Moniz / Restauradores
+    - 🕒 **10:27** (vehicle 6045, 2 paragens restantes) — **Em tempo real**
+
+- 🚌 **711** - **Destino:** Sul e Sueste / Alto Damaia
+    - 🕒 **10:32** (vehicle 2784, 5 paragens restantes) — **Em tempo real**
+
+- 🚋 **51E** - **Destino:** Glória / Restauradores (Elétrico)
+    - 🕒 **10:33** — **Horario**
+
+- 🚌 **759** - **Destino:** Restauradores / Estação Oriente
+    - 🕒 **10:34** — **Horario**
+
+💡 **Dica rápida:** Os tempos em “Em tempo real” usam GPS — aparecem veículos identificados.
+
+📌 **Fonte:** [*Carris*](https://www.carris.pt) | **Atualizado:** 10:22"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="transport",
+        user_query="Quais os próximos autocarros da Carris no Rossio?",
+        language="pt",
+    )
+
+    assert "### 🚌 Rossio · Próximas chegadas" in output
+    assert "**Em tempo real**" in output
+    assert "**Horários programados**" in output
+    assert "vehicle 6045" not in output.lower()
+    assert "veículos identificados" not in output.lower()
+    assert "- 🚌 **732** → Hosp. Egas Moniz / Restauradores · **10:27** · 2 paragens restantes" in output
+    assert "- 🚋 **51E** → Glória / Restauradores (Elétrico) · **10:33**" in output
+
+
+def test_transport_worker_finalization_strips_inline_gps_vehicle_and_plate_metadata_in_pt() -> None:
+    """PT transport answers should hide inline GPS coordinates, vehicle IDs, and license plates."""
+    raw = """### 🚇 Informação de Transportes
+
+- 🚌 **Paragem: Rossio** — paragem ID: **908** — GPS: **38.71331, -9.13962** (dados atualizados às **10:33**)
+- 🕒 **Próxima chegada:** **11:03** — **em tempo real: +5 min (atraso)** | veículo: **2685** (matrícula **93-XA-46**)
+- 🕒 **Seguinte:** **11:23** — **Veículo 22685 (matrícula 99-XE-555)**
+
+📌 **Fonte:** [*Carris*](https://www.carris.pt) | **Atualizado:** 10:33"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="transport",
+        user_query="Quais os próximos autocarros da Carris no Rossio?",
+        language="pt",
+    )
+
+    assert "908" not in output
+    assert "38.71331" not in output
+    assert "2685" not in output
+    assert "93-XA-46" not in output
+    assert "22685" not in output
+    assert "99-XE-555" not in output
+    assert "dados atualizados" in output.lower()
+
+
 def test_strip_unsupported_closing_offers_removes_inline_offer_clause() -> None:
     """Inline follow-up offers should be removed, not just standalone offer lines."""
     raw = (
@@ -1005,6 +1128,40 @@ def test_transport_direct_status_fallback_prefers_metro_tool() -> None:
         summary_tool.invoke.assert_not_called()
 
 
+def test_transport_stop_name_arrivals_query_uses_deterministic_carris_tool() -> None:
+    """Carris stop-name arrival queries should bypass the free-form LLM path."""
+    with patch.object(TransportAgent, "__init__", lambda self: None):
+        agent = TransportAgent()
+        agent.system_prompt = "TRANSPORT PROMPT"
+        agent.execute_react_loop = MagicMock(side_effect=AssertionError("LLM path should be skipped"))
+        agent.tools = []
+        arrivals_tool = MagicMock()
+        arrivals_tool.invoke = MagicMock(
+            return_value=(
+                "Próximas Chegadas: Rossio\n"
+                "ID: 908 | Atualizado: 10:44\n"
+                "[REAL-TIME] Autocarro 711 -> Alto Damaia\n"
+                "Hora: 10:58 (6 min late)\n"
+                "Vehicle: 2685 | Plate: 93-XA-46"
+            )
+        )
+
+        with patch(
+            "agent.agents.transport_agent._resolve_carris_stop",
+            return_value=("908", "Rossio"),
+        ), patch(
+            "tools.carris_api.carris_get_arrivals",
+            new=arrivals_tool,
+        ):
+            output = agent.invoke("Quais os próximos autocarros da Carris no Rossio?", context="", verbose=False)
+
+        arrivals_tool.invoke.assert_called_once_with({"stop_id": "908", "limit": 8})
+        assert "908" not in output
+        assert "2685" not in output
+        assert "93-XA-46" not in output
+        assert "Rossio" in output
+
+
 def test_multiagent_skips_qa_for_simple_weather_queries() -> None:
     """Simple deterministic weather queries should not pay the extra QA latency."""
     assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
@@ -1180,7 +1337,8 @@ def test_multiagent_runs_final_qa_repair_for_planner_responses() -> None:
 
     planner_agent.synthesize.assert_called_once()
     assistant.qa_agent.repair_final_response.assert_called_once()
-    assert output == "🗓️ Repaired itinerary"
+    assert output.startswith("### 📅")
+    assert output.endswith("Repaired itinerary")
 
 
 def test_search_places_attractions_respects_category_and_excludes_service_like_results() -> None:

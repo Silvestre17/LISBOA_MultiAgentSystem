@@ -281,6 +281,23 @@ def resolve_model_pricing(
     return None
 
 
+def resolve_usage_model_id(
+    usage_entry: dict[str, Any],
+    default_model_id: str | None = None,
+) -> str | None:
+    """Resolves the most specific model identifier available for a usage entry."""
+    model_id = usage_entry.get("model_id")
+    if model_id:
+        return str(model_id)
+
+    provider = usage_entry.get("provider")
+    model = usage_entry.get("model")
+    if provider and model:
+        return build_model_id(str(provider), str(model))
+
+    return default_model_id
+
+
 def _build_single_model_cost_payload(
     tokens: dict[str, int],
     pricing_by_model: Optional[dict[str, Any]],
@@ -340,7 +357,10 @@ def build_cost_payload(
 
         for entry in breakdown:
             entry_tokens = normalize_token_usage(entry.get("tokens", entry))
-            entry_model_id = entry.get("model_id") or usage_payload.get("model_id")
+            entry_model_id = resolve_usage_model_id(
+                entry,
+                usage_payload.get("model_id"),
+            )
             event_cost = _build_single_model_cost_payload(
                 entry_tokens,
                 pricing_by_model,

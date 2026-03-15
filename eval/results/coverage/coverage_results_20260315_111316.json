@@ -1,0 +1,1417 @@
+{
+  "coverage_metadata": {
+    "manifest_path": "C:\\Users\\andre\\OneDrive - NOVAIMS\\[MDSAA-DS]_Thesis\\Thesis2025-26_AFGS\\tests\\fixtures\\tool_coverage_manifest.json",
+    "manifest_count": 45,
+    "manifest_fingerprint": "57b4856e8378bbe58cf52d23313d5ffce6a1af91eccc65dd0cca6b42d57dad24",
+    "tool_registry_count": 45,
+    "tool_registry_fingerprint": "e0a23b55c2dfdc8d328162e28dfbbf4e6770e989ae90bbabc5525229ab157666",
+    "response_models": {
+      "researcher": "azure::gpt-5-mini",
+      "weather": "azure::gpt-5-mini",
+      "transport": "azure::gpt-5-mini"
+    },
+    "response_model_configs": {
+      "researcher": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "weather": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "transport": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      }
+    },
+    "evaluation_model": null,
+    "environment_validation": {
+      "provider": "azure",
+      "required_env": [
+        "AZURE_OPENAI_API_KEY",
+        "AZURE_OPENAI_ENDPOINT",
+        "METRO_CONSUMER_KEY",
+        "METRO_CONSUMER_SECRET",
+        "TAVILY_API_KEY"
+      ],
+      "validated_paths": [
+        "C:\\Users\\andre\\OneDrive - NOVAIMS\\[MDSAA-DS]_Thesis\\Thesis2025-26_AFGS\\data\\vector_db",
+        "C:\\Users\\andre\\OneDrive - NOVAIMS\\[MDSAA-DS]_Thesis\\Thesis2025-26_AFGS\\data_collection\\webscraping\\events.json",
+        "C:\\Users\\andre\\OneDrive - NOVAIMS\\[MDSAA-DS]_Thesis\\Thesis2025-26_AFGS\\data_collection\\webscraping\\places.json",
+        "C:\\Users\\andre\\OneDrive - NOVAIMS\\[MDSAA-DS]_Thesis\\Thesis2025-26_AFGS\\data\\carris\\carris.db",
+        "C:\\Users\\andre\\OneDrive - NOVAIMS\\[MDSAA-DS]_Thesis\\Thesis2025-26_AFGS\\data\\cp\\cp_gtfs.db"
+      ]
+    },
+    "timestamp": "2026-03-15T11:15:54.210553",
+    "real_services": true,
+    "output_directory": "C:\\Users\\andre\\OneDrive - NOVAIMS\\[MDSAA-DS]_Thesis\\Thesis2025-26_AFGS\\eval\\results\\coverage"
+  },
+  "summary": {
+    "total_prompts": 45,
+    "successful_prompts": 45,
+    "failed_prompts": 0,
+    "full_registry_coverage_met": true,
+    "missing_tools": [],
+    "avg_tool_f1": 0.993,
+    "error_categories": {}
+  },
+  "coverage_results": [
+    {
+      "id": "CW01",
+      "domain": "weather",
+      "language": "en",
+      "query": "Give me the current weather summary for Lisbon right now.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 3.142,
+      "error": null,
+      "error_type": null,
+      "response": "⚠️ **Active Warnings:**\n✅ No active weather warnings for Lisbon.\n\n---\n\n**📅 Sunday, 15 March 2026**\n- 🌡️ **Temperature**: **10.5°C to 17.4°C**  \n- ☁️ **Conditions**: **Partly cloudy**  \n- 💧 **Rain**: **0%** - **No precipitation**  \n- 💨 **Wind**: **North**, **Moderate**\n\n---\n\n💡 **Practical Tips** (for the overall period):\n- 🧥 Mornings are cooler — leveled clothing recommended.\n- 😎 Afternoon pleasant for outdoor activities while partly cloudy.\n- ☔ No rain expected today, but check later updates if plans change.\n\n📌 **Source:** Data from [*IPMA*](https://www.ipma.pt/en/) | **Updated:** 11:13",
+      "tools_used": [
+        "get_current_weather_summary"
+      ],
+      "expected_tools": [
+        "get_current_weather_summary"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_current_weather_summary] returned:\n🌤️ Lisbon Weather Summary\n========================================\n\n📅 Updated: 2026-03-15T10:31:02\n📅 Today (2026-03-15):\n   🌡️ Temperature: 10.5°C to 17.4°C\n   🌤️ Conditions: Partly cloudy\n   💧 Rain probability: 0.0%\n   💨 Wind: North (Moderate)\n\n✅ No active weather warnings.\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CW02",
+      "domain": "weather",
+      "language": "en",
+      "query": "Show the 5-day weather forecast for Lisbon.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 7.462,
+      "error": null,
+      "error_type": null,
+      "response": "⚠️ **Active Warnings:**\n✅ **No active weather warnings for Lisbon.**\n\n---\n\n**📅 Sunday, 15 March 2026**\n- 🌡️ **Temperature**: **10.5°C to 17.4°C**  \n- ☁️ **Conditions**: **Partly cloudy**  \n- 💧 **Rain**: **0%** - **No precipitation**  \n- 💨 **Wind**: **North**, **Moderate**\n\n---\n\n**📅 Monday, 16 March 2026**\n- 🌡️ **Temperature**: **10.7°C to 21.2°C**  \n- ☁️ **Conditions**: **Clear sky**  \n- 💧 **Rain**: **0%** - **No precipitation**  \n- 💨 **Wind**: **East**, **Weak**\n\n---\n\n**📅 Tuesday, 17 March 2026**\n- 🌡️ **Temperature**: **9.4°C to 21.2°C**  \n- ☁️ **Conditions**: **Light showers / rain**  \n- 💧 **Rain**: **65%** - **Intensity: Weak**  \n- 💨 **Wind**: **South**, **Moderate**\n\n---\n\n**📅 Wednesday, 18 March 2026**\n- 🌡️ **Temperature**: **12.8°C to 19.4°C**  \n- ☁️ **Conditions**: **Light showers / rain**  \n- 💧 **Rain**: **96%** - **Intensity: Weak**  \n- 💨 **Wind**: **Southeast**, **Moderate**\n\n---\n\n**📅 Thursday, 19 March 2026**\n- 🌡️ **Temperature**: **13.0°C to 22.3°C**  \n- ☁️ **Conditions**: **Light showers / rain**  \n- 💧 **Rain**: **45%** - **Intensity: Weak**  \n- 💨 **Wind**: **Southeast**, **Moderate**\n\n---\n\n💡 **Practical Tips** (for the overall period):\n- ☔ Expect the highest chance of rain on **Wednesday** — carry a small umbrella or light rain jacket.\n- 🧥 Mornings are cooler (around 9–13°C) — bring a light layer for early outings.\n- 😎 Monday and Thursday look good for outdoor plans; Tuesday–Wednesday have shower risk, plan accordingly.\n\n📌 **Source:** Data from [*IPMA*](https://www.ipma.pt/en/) | **Updated:** 11:13",
+      "tools_used": [
+        "get_weather_forecast",
+        "get_weather_warnings"
+      ],
+      "expected_tools": [
+        "get_weather_forecast"
+      ],
+      "tool_metrics": {
+        "tool_precision": 0.5,
+        "tool_recall": 1.0,
+        "tool_f1": 0.667
+      },
+      "retrieved_context": "[get_weather_forecast] returned:\n🌤️ Weather Forecast for Lisbon\n========================================\n📅 Updated: 2026-03-15T10:31:02\n\n☀️ Sunday, Mar 15\n   🌡️ 10.5°C to 17.4°C\n   🌤️ Partly cloudy\n   💧 Rain: No rain expected (0.0%)\n   💨 Wind: North (Moderate)\n\n☀️ Monday, Mar 16\n   🌡️ 10.7°C to 21.2°C\n   🌤️ Clear sky\n   💧 Rain: No rain expected (0.0%)\n   💨 Wind: East (Weak)\n\n🌧️ Tuesday, Mar 17\n   🌡️ 9.4°C to 21.2°C\n   🌤️ Light showers/rain\n   💧 Rain: Likely (65.0%) | Intensity: Weak\n   💨 Wind: South (Moderate)\n\n🌧️ Wednesday, Mar 18\n   🌡️ 12.8°C to 19.4°C\n   🌤️ Light showers/rain\n   💧 Rain: Very likely (96.0%) | Intensity: Weak\n   💨 Wind: Southeast (Moderate)\n\n🌧️ Thursday, Mar 19\n   🌡️ 13.0°C to 22.3°C\n   🌤️ Light showers/rain\n   💧 Rain: Possible (45.0%) | Intensity: Weak\n   💨 Wind: Southeast (Moderate)\n\n\n---\n[get_weather_warnings] returned:\n✅ No active weather warnings for Lisbon.\n\n🌤️ Weather conditions are normal.",
+      "coverage_pass": true
+    },
+    {
+      "id": "CW03",
+      "domain": "weather",
+      "language": "en",
+      "query": "Check if there are active weather warnings for Lisbon.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 1.611,
+      "error": null,
+      "error_type": null,
+      "response": "⚠️ **Avisos Meteorológicos:**\n✅ **Sem avisos meteorológicos ativos para Lisboa.**\n\n📌 **Fonte:** Dados do [*IPMA*](https://www.ipma.pt) | **Atualizado:** 11:13",
+      "tools_used": [
+        "get_weather_warnings"
+      ],
+      "expected_tools": [
+        "get_weather_warnings"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_weather_warnings] returned:\n✅ No active weather warnings for Lisbon.\n\n🌤️ Weather conditions are normal.",
+      "coverage_pass": true
+    },
+    {
+      "id": "CW04",
+      "domain": "weather",
+      "language": "en",
+      "query": "Give me a Portugal-wide weather overview for today and mention Lisbon.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 4.236,
+      "error": null,
+      "error_type": null,
+      "response": "⚠️ **Active Warnings:**\n✅ No active weather warnings for Lisbon.\n\n---\n\n**📅 Sunday, 15 de Março de 2026**\n- 🌡️ **Temperatura (Lisboa)**: **11°C a 17°C**  \n- ☁️ **Condições (Lisboa)**: **Parcialmente nublado**  \n- 💧 **Chuva (Lisboa)**: **0% - sem precipitação**  \n- 💨 **Vento (Lisboa)**: **Norte, fraco/moderado**\n\n---\n\n**📅 Perspetiva para Portugal (hoje)**\n- 🌡️ **Intervalo de temperaturas**: **3°C a 21°C**  \n- ☁️ **Condições gerais**: Variação entre céu parcialmente nublado e períodos de sol conforme a região  \n- 💧 **Precipitação**: Maioria do país com pouca ou nenhuma precipitação hoje  \n- 💨 **Vento**: Direções e intensidade variáveis por distrito; em Lisboa vento de norte, fraco/moderado\n\n---\n\n💡 **Dicas Práticas** (para o período geral):\n- 🧥 Leve um agasalho leve para as manhãs e noites mais frescas em Lisboa\n- 😎 Aproveite os períodos de sol para atividades ao ar livre, especialmente nas regiões mais quentes do país\n- ☔ Mesmo com baixa probabilidade de chuva, verifique atualizações locais antes de viagens longas\n\n📌 **Fonte:** Dados do [*IPMA*](https://www.ipma.pt) | **Atualizado:** 11:13",
+      "tools_used": [
+        "get_portugal_weather_overview"
+      ],
+      "expected_tools": [
+        "get_portugal_weather_overview"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_portugal_weather_overview] returned:\n🇵🇹 Portugal Weather Overview - Today\n==================================================\n📅 Forecast Date: 2026-03-15\n🔄 Updated: 2026-03-15T10:31:03\n📊 Locations: 27\n\n🏙️ **LISBON (Focus Area)**\n------------------------------\n   🌤️ Partly cloudy\n   🌡️ 11°C to 17°C\n   💧 Precipitation: 0.0%\n   💨 Wind: North\n\n📈 **Portugal Summary**\n------------------------------\n   🌡️ Temperature range: 3°C to 21°C\n   📍 Coldest: 3°C | Warmest: 21°C\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTM01",
+      "domain": "transport",
+      "language": "en",
+      "query": "What is the current status of the Lisbon Metro lines?",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 1.602,
+      "error": null,
+      "error_type": null,
+      "response": "🚇 Metro de Lisboa Status (Official API) 🟡 Yellow Line (Rato ↔ Odivelas) ✅ Normal service 🔵 Blue Line (Santa Apolónia ↔ Reboleira) ✅ Normal service 🟢 Green Line (Telheiras ↔ Cais do Sodré) ✅ Normal service 🔴 Red Line (S. Sebastião ↔ Aeroporto) ✅ Normal service ✅ All lines operating normally.",
+      "tools_used": [
+        "get_metro_status"
+      ],
+      "expected_tools": [
+        "get_metro_status"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_metro_status] returned:\n🚇 Metro de Lisboa Status (Official API)\n=============================================\n\n🟡 Yellow Line (Rato ↔ Odivelas)\n   ✅ Normal service\n\n🔵 Blue Line (Santa Apolónia ↔ Reboleira)\n   ✅ Normal service\n\n🟢 Green Line (Telheiras ↔ Cais do Sodré)\n   ✅ Normal service\n\n🔴 Red Line (S. Sebastião ↔ Aeroporto)\n   ✅ Normal service\n\n✅ All lines operating normally.",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTM02",
+      "domain": "transport",
+      "language": "en",
+      "query": "What is the current wait time at Oriente metro station?",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 7.019,
+      "error": null,
+      "error_type": null,
+      "response": "🚇 **Oriente → Oriente**\n\n⏳ **Tempo total estimado:** ~n/a\n\n🗺️ **O seu Trajeto de Metro:**\n- 📍 **Embarque na estação Oriente**\n\n🗓️ **Próximos Metros** (tempo real):\n- **Estação Oriente:** Direção **Aeroporto** — **⏱️ Próximo Metro em:** **7 min 48s** | **15 min 25s**\n- **Estação Oriente:** Direção **São Sebastião** — **⏱️ Próximo Metro em:** **1 min 22s** | **9 min 17s**\n\n💡 **Dica rápida:** Aguarde na plataforma correspondente à direção desejada; o próximo metro para São Sebastião chega em ~1 min.\n\n📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Atualizado:** 11:13",
+      "tools_used": [
+        "get_metro_wait_time"
+      ],
+      "expected_tools": [
+        "get_metro_wait_time"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_metro_wait_time] returned:\n🚇 Metro Wait Times at Oriente\n==================================================\n\n🔴 Direction: Aeroporto\n   ⏱️ Next train: 7 min 48s\n   ⏳ Following: 15 min 25s, 23 min 36s\n\n🔴 Direction: São Sebastião\n   ⏱️ Next train: 1 min 22s\n   ⏳ Following: 9 min 17s, 17 min 28s\n\n📍 Updated: 11:13:40",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTM03",
+      "domain": "transport",
+      "language": "en",
+      "query": "Show me the wait times for the entire Red metro line.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.824,
+      "error": null,
+      "error_type": null,
+      "response": "🔴 Red Line (S. Sebastião ↔ Aeroporto) - Wait Times 📍 Aeroporto → São Sebastião: 3 min 14s → Aeroporto: 5 min 31s 📍 Alameda → Aeroporto: 5 min 8s → São Sebastião: 2 min 52s 📍 Bela Vista → Aeroporto: 1 min 18s → São Sebastião: 7 min 50s 📍 Cabo Ruivo → São Sebastião: 3 min 1s → Aeroporto: 5 min 56s 📍 Chelas → Aeroporto: 3 min 2s → São Sebastião: 6 min 2s 📍 Encarnacao → São Sebastião: 5 min 11s → Aeroporto: 2 min 52s 📍 Moscavide → São Sebastião: 7 min 11s → Aeroporto: 47s 📍 Olaias → Aeroporto: 6 min 59s → São Sebastião: 1 min 2s 📍 Olivais → São Sebastião: 4 min 31s → Aeroporto: 4 min 30s 📍 Oriente → São Sebastião: 1 min 12s → Aeroporto: 7 min 44s 📍 S. Sebastião → Aeroporto: 9 min 49s → Aeroporto: 1 min 39s 📍 Saldanha → Aeroporto: 3 min 8s → São Sebastião: 4 min 56s 📍 **Updated**: 11:13:45",
+      "tools_used": [
+        "get_metro_line_wait_times"
+      ],
+      "expected_tools": [
+        "get_metro_line_wait_times"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_metro_line_wait_times] returned:\n🔴 Red Line (S. Sebastião ↔ Aeroporto) - Wait Times\n=======================================================\n\n📍 Aeroporto\n   → São Sebastião: 3 min 14s\n   → Aeroporto: 5 min 31s\n\n📍 Alameda\n   → Aeroporto: 5 min 8s\n   → São Sebastião: 2 min 52s\n\n📍 Bela Vista\n   → Aeroporto: 1 min 18s\n   → São Sebastião: 7 min 50s\n\n📍 Cabo Ruivo\n   → São Sebastião: 3 min 1s\n   → Aeroporto: 5 min 56s\n\n📍 Chelas\n   → Aeroporto: 3 min 2s\n   → São Sebastião: 6 min 2s\n\n📍 Encarnacao\n   → São Sebastião: 5 min 11s\n   → Aeroporto: 2 min 52s\n\n📍 Moscavide\n   → São Sebastião: 7 min 11s\n   → Aeroporto: 47s\n\n📍 Olaias\n   → Aeroporto: 6 min 59s\n   → São Sebastião: 1 min 2s\n\n📍 Olivais\n   → São Sebastião: 4 min 31s\n   → Aeroporto: 4 min 30s\n\n📍 Oriente\n   → São Sebastião: 1 min 12s\n   → Aeroporto: 7 min 44s\n\n📍 S. Sebastião\n   → Aeroporto: 9 min 49s\n   → Aeroporto: 1 min 39s\n\n📍 Saldanha\n   → Aeroporto: 3 min 8s\n   → São Sebastião: 4 min 56s\n\n📍 Updated: 11:13:45",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTM04",
+      "domain": "transport",
+      "language": "en",
+      "query": "Which metro station is nearest to GPS coordinates 38.725, -9.149?",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.825,
+      "error": null,
+      "error_type": null,
+      "response": "🚇 Nearest Metro Stations **1.** 🟡 Marquês de Pombal 📏 **Distance**: 157m (~1 min walk) 🚇 **Lines**: Amarela, Azul **2.** 🔵 Parque 📏 **Distance**: 534m (~6 min walk) 🚇 **Lines**: Azul **3.** 🔵 Avenida 📏 **Distance**: 610m (~7 min walk) 🚇 **Lines**: Azul **4.** 🟡 Picoas 📏 **Distance**: 659m (~7 min walk) 🚇 **Lines**: Amarela **5.** 🟡 Rato 📏 **Distance**: 702m (~8 min walk) 🚇 **Lines**: Amarela",
+      "tools_used": [
+        "find_nearest_metro"
+      ],
+      "expected_tools": [
+        "find_nearest_metro"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[find_nearest_metro] returned:\n🚇 Nearest Metro Stations\n=============================================\n\n1. 🟡 Marquês de Pombal\n   📏 Distance: 157m (~1 min walk)\n   🚇 Lines: Amarela, Azul\n\n2. 🔵 Parque\n   📏 Distance: 534m (~6 min walk)\n   🚇 Lines: Azul\n\n3. 🔵 Avenida\n   📏 Distance: 610m (~7 min walk)\n   🚇 Lines: Azul\n\n4. 🟡 Picoas\n   📏 Distance: 659m (~7 min walk)\n   🚇 Lines: Amarela\n\n5. 🟡 Rato\n   📏 Distance: 702m (~8 min walk)\n   🚇 Lines: Amarela\n\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTM05",
+      "domain": "transport",
+      "language": "en",
+      "query": "What is the scheduled frequency of the Green metro line on weekdays?",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.818,
+      "error": null,
+      "error_type": null,
+      "response": "🟢 Green Line (Telheiras ↔ Cais do Sodré)\n📅 Service Frequency (Weekdays) ⏰ 06:30 - 07:14 🚇 Train every 6:50 ⏰ 07:15 - 09:59 🚇 Train every 5:35 ⏰ 10:00 - 16:14 🚇 Train every 6:05 ⏰ 16:15 - 20:29 🚇 Train every 5:35 ⏰ 20:30 - 20:59 🚇 Train every 6 min ⏰ 21:00 - 22:14 🚇 Train every 7:55 ⏰ 22:15 - 23:59 🚇 Train every 11:50 ⏰ 00:00 - 01:05 🚇 Train every 9:30 💡 **Tip**: Trains are more frequent during rush hours (7:15-9:30 and 16:45-19:00).",
+      "tools_used": [
+        "get_metro_frequency"
+      ],
+      "expected_tools": [
+        "get_metro_frequency"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_metro_frequency] returned:\n🟢 Green Line (Telheiras ↔ Cais do Sodré)\n📅 Service Frequency (Weekdays)\n==================================================\n\n⏰ 06:30 - 07:14\n   🚇 Train every 6:50\n\n⏰ 07:15 - 09:59\n   🚇 Train every 5:35\n\n⏰ 10:00 - 16:14\n   🚇 Train every 6:05\n\n⏰ 16:15 - 20:29\n   🚇 Train every 5:35\n\n⏰ 20:30 - 20:59\n   🚇 Train every 6 min\n\n⏰ 21:00 - 22:14\n   🚇 Train every 7:55\n\n⏰ 22:15 - 23:59\n   🚇 Train every 11:50\n\n⏰ 00:00 - 01:05\n   🚇 Train every 9:30\n\n💡 Tip: Trains are more frequent during rush hours (7:15-9:30 and 16:45-19:00).",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTM06",
+      "domain": "transport",
+      "language": "en",
+      "query": "List all Lisbon Metro stations.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.015,
+      "error": null,
+      "error_type": null,
+      "response": "🚇 Metro de Lisboa - All Stations 🟡 Yellow Line (Rato ↔ Odivelas) Ameixoeira, Campo Grande, Campo Pequeno, Cidade Universitária, Entre Campos, Lumiar, Marquês de Pombal, Odivelas, Picoas, Quinta das Conchas, Rato, Saldanha, Senhor Roubado 🔵 Blue Line (Santa Apolónia ↔ Reboleira) Alfornelos, Alto dos Moinhos, Amadora Este, Avenida, Baixa/Chiado, Carnide, Colégio Militar/Luz, Jardim Zoológico, Laranjeiras, Marquês de Pombal, Parque, Pontinha, Praça de Espanha, Reboleira, Restauradores, Santa Apolónia, São Sebastião, Terreiro do Paço 🟢 Green Line (Cais do Sodré ↔ Telheiras) Alameda, Alvalade, Anjos, Areeiro, Arroios, Baixa/Chiado, Cais do Sodré, Campo Grande, Intendente, Martim Moniz, Roma, Rossio, Telheiras 🔴 Red Line (São Sebastião ↔ Aeroporto) Aeroporto, Alameda, Bela Vista, Cabo Ruivo, Chelas, Encarnação, Moscavide, Olaias, Olivais, Oriente, Saldanha, São Sebastião 📊 **Total**: 50 stations across 4 lines\n💡 **Interchange stations**: Campo Grande, Alameda, Saldanha, Marquês de Pombal, Baixa-Chiado, São Sebastião",
+      "tools_used": [
+        "get_all_metro_stations"
+      ],
+      "expected_tools": [
+        "get_all_metro_stations"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_all_metro_stations] returned:\n🚇 Metro de Lisboa - All Stations\n==================================================\n\n🟡 Yellow Line (Rato ↔ Odivelas)\n   Ameixoeira, Campo Grande, Campo Pequeno, Cidade Universitária, Entre Campos, Lumiar, Marquês de Pombal, Odivelas, Picoas, Quinta das Conchas, Rato, Saldanha, Senhor Roubado\n\n🔵 Blue Line (Santa Apolónia ↔ Reboleira)\n   Alfornelos, Alto dos Moinhos, Amadora Este, Avenida, Baixa/Chiado, Carnide, Colégio Militar/Luz, Jardim Zoológico, Laranjeiras, Marquês de Pombal, Parque, Pontinha, Praça de Espanha, Reboleira, Restauradores, Santa Apolónia, São Sebastião, Terreiro do Paço\n\n🟢 Green Line (Cais do Sodré ↔ Telheiras)\n   Alameda, Alvalade, Anjos, Areeiro, Arroios, Baixa/Chiado, Cais do Sodré, Campo Grande, Intendente, Martim Moniz, Roma, Rossio, Telheiras\n\n🔴 Red Line (São Sebastião ↔ Aeroporto)\n   Aeroporto, Alameda, Bela Vista, Cabo Ruivo, Chelas, Encarnação, Moscavide, Olaias, Olivais, Oriente, Saldanha, São Sebastião\n\n📊 Total: 50 stations across 4 lines\n💡 Interchange stations: Campo Grande, Alameda, Saldanha, Marquês de Pombal, Baixa-Chiado, São Sebastião",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCM01",
+      "domain": "transport",
+      "language": "en",
+      "query": "Show active Carris Metropolitana service alerts.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.379,
+      "error": null,
+      "error_type": null,
+      "response": "⚠️ **Carris Metropolitana Service Alerts** **1. Oeiras | 1120, 1121, 1523, 1529, 1530, 1601, 1604, 1605, 1606, 1607, 1608, 1614, 1615, 1618, 1619, 1638, 1725: Condicionamento de trânsito** 📝 Entre os dias 16 e 18 de março, as linhas 1120, 1121, 1523, 1529, 1530, 1601, 1604, 1605, 1606, 1607, 1608, 1614, 1615, 1618, 1619, 1638, 1725 poderão sofrer condicionamentos de trânsito, na Rua Desem... 🚌 **Routes**: 1120_0, 1121_0, 1523_0, 1529_0, 1529_1 ⚠️ **Cause**: Construction | Effect: Significant Delays ⏰ Period: 04:00:00 - 23:59:59 **2. Sintra | 1203, 1205, 1206, 1208, 1223, 1232, 1234, 1251, 1614, 1619, 1625, 1628, 1631, 1639 | Condicionamento de trânsito** 📝 No dia 15 de março, durante a manhã, as linhas 1203, 1205, 1206, 1208, 1223, 1232, 1234, 1251, 1614, 1619, 1625, 1628, 1631, 1639 poderão sofrer condicionamento de trânsito na zona de Algueirão e Mem ... 🚌 **Routes**: 1203_0, 1205_0, 1206_1, 1223_0, 1232_0 ⚠️ **Cause**: Demonstration | Effect: Significant Delays ⏰ Period: 09:00:00 - 14:00:00 **3. Almada | 3022, 3023, 3024, 3025, 3709 e 3710: Desvio de Percurso** 📝 Entre o dia 16 e 23 de março, entre as 8h e as 14h, a R. Doutor Horácio da Silva Louro, na Costa da Caparica, estará cortada ao trânsito devido a obras. Deste modo, as paragens COSTA CAPARICA R DR HOR... 🚌 **Routes**: 3025_0, 3709_0, 3710_0, 3023_0, 3023_0 ⚠️ **Cause**: Construction | Effect: Detour ⏰ Period: 08:00:00 - 14:00:00 **4. Sintra | 1230: Desvio de percurso Quinta da Samaritana** 📝 Devido a obras de repavimentação na Quinta da Samaritana, em Belas, a linha 1230 | Monte Abraão (Estação) | Circular via Idanha/Belas tem o seu percurso alterado durante a duração da obra, deixando te... 🚌 **Routes**: 1230_0, 1230_0, 1230_0, 1230_0, 1230_0 ⚠️ **Cause**: Construction | Effect: Detour ⏰ Period: 10:51:00 - 00:59:59 **5. Loures | 2761: Desvio de percurso Fanhões** 📝 No dia 15 de março, entre as 7h00 e as 15h30, devido à realização do Trail dos Calceteiros, em Fanhões, a linha 2761 | Bucelas - Lisboa (Campo Grande) via Cabeço de Montachique e Ramada realiza percur... 🚌 **Routes**: 2761_0 ⚠️ **Cause**: Demonstration | Effect: Detour ⏰ Period: 07:00:00 - 15:30:00 **6. Oeiras | 1122 e 1725: Desvio de percurso Caxias** 📝 As linhas 1122 e 1725 realizam desvio de percurso devido a obras de repavimentação na Rua Vasco da Gama, em Caxias, no Alto do Lagoal. Assim, efetuam percurso via Avenida Salvador Allende, retomando o... 🚌 **Routes**: 1122_0, 1122_0, 1122_0, 1122_0, 1122_0 ⚠️ **Cause**: Construction | Effect: Detour ⏰ Period: 08:00:00 - 18:00:00 **7. Lisboa e Sintra | 1731: Ajuste de horários** 📝 A partir do dia 16 de março, as linhas 1731 | Agualva-Cacém (Estação) - Hospital São Francisco Xavier terão ajustes nos seus horários aos dias úteis escolares. Consulte os horários na app ou site Carr... 🚌 **Routes**: 1731_0 ⚠️ **Cause**: Other Cause | Effect: Modified Service ⏰ Period: 14:00:00 - 00:59:59 **8. Lisboa e Sintra | 1717 e 1721: Ajuste de horários** 📝 A partir do dia 16 de março, as linhas 1717 e 1721 terão ajustes nos seus horários aos domingos. Consulte os horários na app ou site Carris Metropolitana, na página de cada linha, selecionando o dia e... 🚌 **Routes**: 1717_0, 1721_0, 1721_2 ⚠️ **Cause**: Other Cause | Effect: Modified Service ⏰ Period: 14:00:00 - 00:59:59 **9. Cascais e Sintra | 1626: Ajuste de horários** 📝 A partir do dia 16 de março, a linha 1626 | CascaiShopping (Terminal) - Portela Sintra (Estação Sul) terá ajustes nos seus horários aos dias úteis, em ambos os sentidos. Consulte os horários na app ou... 🚌 **Routes**: 1626_0 ⚠️ **Cause**: Other Cause | Effect: Modified Service ⏰ Period: 14:00:00 - 00:59:59 **10. Oeiras e Sintra | 1524: Ajuste de horários** 📝 A partir do dia 16 de março, a linha 1524 | Tercena (Estação) | Circular via Casal do Cotão – Taguspark terá ajustes nos seus horários aos dias úteis escolares, em ambos os sentidos. Consulte os horár... 🚌 **Routes**: 1524_0 ⚠️ **Cause**: Other Cause | Effect: Modified Service ⏰ Period: 14:00:00 - 00:59:59 ... and 60 more alerts.",
+      "tools_used": [
+        "get_carris_metropolitana_alerts"
+      ],
+      "expected_tools": [
+        "get_carris_metropolitana_alerts"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_carris_metropolitana_alerts] returned:\n⚠️ **Carris Metropolitana Service Alerts**\n=============================================\n\n**1. Oeiras | 1120, 1121, 1523, 1529, 1530, 1601, 1604, 1605, 1606, 1607, 1608, 1614, 1615, 1618, 1619, 1638, 1725: Condicionamento de trânsito**\n   📝 Entre os dias 16 e 18 de março, as linhas 1120, 1121, 1523, 1529, 1530, 1601, 1604, 1605, 1606, 1607, 1608, 1614, 1615, 1618, 1619, 1638, 1725 poderão sofrer condicionamentos de trânsito, na Rua Desem...\n   🚌 Routes: 1120_0, 1121_0, 1523_0, 1529_0, 1529_1\n   ⚠️ Cause: Construction | Effect: Significant Delays\n   ⏰ Period: 04:00:00 - 23:59:59\n\n**2. Sintra | 1203, 1205, 1206, 1208, 1223, 1232, 1234, 1251, 1614, 1619, 1625, 1628, 1631, 1639 | Condicionamento de trânsito**\n   📝 No dia 15 de março, durante a manhã, as linhas 1203, 1205, 1206, 1208, 1223, 1232, 1234, 1251, 1614, 1619, 1625, 1628, 1631, 1639 poderão sofrer condicionamento de trânsito na zona de Algueirão e Mem ...\n   🚌 Routes: 1203_0, 1205_0, 1206_1, 1223_0, 1232_0\n   ⚠️ Cause: Demonstration | Effect: Significant Delays\n   ⏰ Period: 09:00:00 - 14:00:00\n\n**3. Almada | 3022, 3023, 3024, 3025, 3709 e 3710: Desvio de Percurso**\n   📝 Entre o dia 16 e 23 de março, entre as 8h e as 14h, a R. Doutor Horácio da Silva Louro, na Costa da Caparica, estará cortada ao trânsito devido a obras. Deste modo, as paragens COSTA CAPARICA R DR HOR...\n   🚌 Routes: 3025_0, 3709_0, 3710_0, 3023_0, 3023_0\n   ⚠️ Cause: Construction | Effect: Detour\n   ⏰ Period: 08:00:00 - 14:00:00\n\n**4. Sintra | 1230: Desvio de percurso Quinta da Samaritana**\n   📝 Devido a obras de repavimentação na Quinta da Samaritana, em Belas, a linha 1230 | Monte Abraão (Estação) | Circular via Idanha/Belas tem o seu percurso alterado durante a duração da obra, deixando te...\n   🚌 Routes: 1230_0, 1230_0, 1230_0, 1230_0, 1230_0\n   ⚠️ Cause: Construction | Effect: Detour\n   ⏰ Period: 10:51:00 - 00:59:59\n\n**5. Loures | 2761: Desvio de percurso Fanhões**\n   📝 No dia 15 de março, entre as 7h00 e as 15h30, devido à realização do Trail dos Calceteiros, em Fanhões, a linha 2761 | Bucelas - Lisboa (Campo Grande) via Cabeço de Montachique e Ramada realiza percur...\n   🚌 Routes: 2761_0\n   ⚠️ Cause: Demonstration | Effect: Detour\n   ⏰ Period: 07:00:00 - 15:30:00\n\n**6. Oeiras | 1122 e 1725: Desvio de percurso Caxias**\n   📝 As linhas 1122 e 1725 realizam desvio de percurso devido a obras de repavimentação na Rua Vasco da Gama, em Caxias, no Alto do Lagoal. Assim, efetuam percurso via Avenida Salvador Allende, retomando o...\n   🚌 Routes: 1122_0, 1122_0, 1122_0, 1122_0, 1122_0\n   ⚠️ Cause: Construction | Effect: Detour\n   ⏰ Period: 08:00:00 - 18:00:00\n\n**7. Lisboa e Sintra | 1731: Ajuste de horários**\n   📝 A partir do dia 16 de março, as linhas 1731 | Agualva-Cacém (Estação) - Hospital São Francisco Xavier terão ajustes nos seus horários aos dias úteis escolares. Consulte os horários na app ou site Carr...\n   🚌 Routes: 1731_0\n   ⚠️ Cause: Other Cause | Effect: Modified Service\n   ⏰ Period: 14:00:00 - 00:59:59\n\n**8. Lisboa e Sintra | 1717 e 1721: Ajuste de horários**\n   📝 A partir do dia 16 de março, as linhas 1717 e 1721 terão ajustes nos seus horários aos domingos. Consulte os horários na app ou site Carris Metropolitana, na página de cada linha, selecionando o dia e...\n   🚌 Routes: 1717_0, 1721_0, 1721_2\n   ⚠️ Cause: Other Cause | Effect: Modified Service\n   ⏰ Period: 14:00:00 - 00:59:59\n\n**9. Cascais e Sintra | 1626: Ajuste de horários**\n   📝 A partir do dia 16 de março, a linha 1626 | CascaiShopping (Terminal) - Portela Sintra (Estação Sul) terá ajustes nos seus horários aos dias úteis, em ambos os sentidos. Consulte os horários na app ou...\n   🚌 Routes: 1626_0\n   ⚠️ Cause: Other Cause | Effect: Modified Service\n   ⏰ Period: 14:00:00 - 00:59:59\n\n**10. Oeiras e Sintra | 1524: Ajuste de horários**\n   📝 A partir do dia 16 de março, a linha 1524 | Tercena (Estação) | Circular via Casal do Cotão – Taguspark terá ajustes nos seus horários aos dias úteis escolares, em ambos os sentidos. Consulte os horár...\n   🚌 Routes: 1524_0\n   ⚠️ Cause: Other Cause | Effect: Modified Service\n   ⏰ Period: 14:00:00 - 00:59:59\n\n... and 60 more alerts.\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCM02",
+      "domain": "transport",
+      "language": "en",
+      "query": "Give me Carris Metropolitana stop information for stop ID 010101.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 4.166,
+      "error": null,
+      "error_type": null,
+      "response": "❌ Could not find stop with",
+      "tools_used": [
+        "get_carris_metropolitana_stop_info"
+      ],
+      "expected_tools": [
+        "get_carris_metropolitana_stop_info"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_carris_metropolitana_stop_info] returned:\n❌ Could not find stop with ID: 010101",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCM03",
+      "domain": "transport",
+      "language": "en",
+      "query": "Search Carris Metropolitana lines for 470.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.36,
+      "error": null,
+      "error_type": null,
+      "response": "🚌 **Carris Metropolitana lines matching '470'** (8 found) 1. **Line 4470** 📍 Setúbal (ITS) - Praia do Creiro via Vila Nogueira de Azeitão 📌 **Localities**: Setúbal, Aldeia de Irmãos, Vila Nogueira de Azeitão, Brejos de Azeitão, Vila Fresca de Azeitão, Aldeia Grande, São Luís da Serra 2. **Line 4701** 📍 Lisboa (Oriente) - Vale da Amoreira 📌 **Localities**: Parque das Nações, Lançada, Sarilhos Grandes, Broega, Moita, Alto de São Sebastião, Alto São Sebastião, Alhos Vedros 3. **Line 4702** 📍 Lisboa (Oriente) - São Francisco 📌 **Localities**: Parque das Nações, Alcochete, Valbom, São Francisco, Moscavide 4. **Line 4704** 📍 Atalaia - Lisboa (Oriente) via B. Areias e B. Esteval 📌 **Localities**: Atalaia, Montijo, Cova da Loba, Bairro do Areias, Moscavide, Parque das Nações, Bairro do Esteval 5. **Line 4705** 📍 Lisboa (Oriente) - Samouco 📌 **Localities**: Parque das Nações, Afonsoeiro, Bela Vista, Montijo, Samouco, Alcochete, Moscavide 6. **Line 4706** 📍 Montijo (Urb. Alto dos Moinhos) - Lisboa (Oriente) 📌 **Localities**: Montijo, Bela Vista, Afonsoeiro, Moscavide, Parque das Nações 7. **Line 4707** 📍 Lisboa (Oriente) - Montijo (Terminal Rodoviário) 📌 **Localities**: Montijo, Bela Vista, Afonsoeiro, Moscavide, Parque das Nações 8. **Line 4708** 📍 Alcochete (Freeport) - Lisboa (Oriente) via Montijo 📌 **Localities**: Parque das Nações, Afonsoeiro, Bela Vista, Montijo, Samouco, Alcochete, Qta. da Pacheca, São Francisco 💡 Podes perguntar por rotas diretas entre dois locais ou horários de uma linha específica. ⚠️ **Scope**: Carris Metropolitana covers AML metropolitan / intermunicipal buses and many lines entering Lisbon municipality, but not Carris Urban-only routes such as 28E, 15E, 732 or 738.\n💡 For Lisbon city-only bus or tram trips, cross-check Carris Urban or Metro data.",
+      "tools_used": [
+        "search_carris_metropolitana_lines"
+      ],
+      "expected_tools": [
+        "search_carris_metropolitana_lines"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[search_carris_metropolitana_lines] returned:\n🚌 **Carris Metropolitana lines matching '470'** (8 found)\n==================================================\n\n1. **Line 4470**\n   📍 Setúbal (ITS) - Praia do Creiro via Vila Nogueira de Azeitão\n   📌 Localities: Setúbal, Aldeia de Irmãos, Vila Nogueira de Azeitão, Brejos de Azeitão, Vila Fresca de Azeitão, Aldeia Grande, São Luís da Serra\n\n2. **Line 4701**\n   📍 Lisboa (Oriente) - Vale da Amoreira\n   📌 Localities: Parque das Nações, Lançada, Sarilhos Grandes, Broega, Moita, Alto de São Sebastião, Alto São Sebastião, Alhos Vedros\n\n3. **Line 4702**\n   📍 Lisboa (Oriente) - São Francisco\n   📌 Localities: Parque das Nações, Alcochete, Valbom, São Francisco, Moscavide\n\n4. **Line 4704**\n   📍 Atalaia - Lisboa (Oriente) via B. Areias e B. Esteval\n   📌 Localities: Atalaia, Montijo, Cova da Loba, Bairro do Areias, Moscavide, Parque das Nações, Bairro do Esteval\n\n5. **Line 4705**\n   📍 Lisboa (Oriente) - Samouco\n   📌 Localities: Parque das Nações, Afonsoeiro, Bela Vista, Montijo, Samouco, Alcochete, Moscavide\n\n6. **Line 4706**\n   📍 Montijo (Urb. Alto dos Moinhos) - Lisboa (Oriente)\n   📌 Localities: Montijo, Bela Vista, Afonsoeiro, Moscavide, Parque das Nações\n\n7. **Line 4707**\n   📍 Lisboa (Oriente) - Montijo (Terminal Rodoviário)\n   📌 Localities: Montijo, Bela Vista, Afonsoeiro, Moscavide, Parque das Nações\n\n8. **Line 4708**\n   📍 Alcochete (Freeport) - Lisboa (Oriente) via Montijo\n   📌 Localities: Parque das Nações, Afonsoeiro, Bela Vista, Montijo, Samouco, Alcochete, Qta. da Pacheca, São Francisco\n\n\n----------------------------------------\n💡 Podes perguntar por rotas diretas entre dois locais ou horários de uma linha específica.\n\n⚠️ Scope: Carris Metropolitana covers AML metropolitan / intermunicipal buses and many lines entering Lisbon municipality, but not Carris Urban-only routes such as 28E, 15E, 732 or 738.\n💡 For Lisbon city-only bus or tram trips, cross-check Carris Urban or Metro data.\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCM04",
+      "domain": "transport",
+      "language": "en",
+      "query": "Find Carris Metropolitana bus routes from Almada to Cacilhas.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.934,
+      "error": null,
+      "error_type": null,
+      "response": "🚌 **BUS ROUTE FINDER**\n📍 **From**: Almada\n📍**To**: Cacilhas 🔍 **Resolving origin location...** ✅ Found 10 stops matching 'Almada' - ALMADA (LARGO CRISTO REI) TERMINAL - ALMADA (AV CRISTO REI) NÚCLEO ÁGUA - ALMADA (AV CRISTO REI) NÚCLEO ÁGUA 🔍 **Resolving destination location...** ✅ Found 10 stops matching 'Cacilhas' - CACILHAS AV 25 ABRIL 45C (SEG SOCIAL) - CACILHAS (AV 25 ABRIL N3A) - Cacilhas (Terminal) P5 🔍 **Finding direct bus routes...** ✅ **1 ROUTE OPTION(S) FOUND** (1 lines total) 🚌 **Option 1** 🚏 **Board at**: ALMADA (LARGO CRISTO REI) TERMINAL 🚏 **Alight at**: CACILHAS AV 25 ABRIL 45C (SEG SOCIAL) 🚍 Lines: **3001** 💡 **Tips:** - Check carrismetropolitana.pt or carris.pt for detailed schedules - Metro may be faster for longer trips",
+      "tools_used": [
+        "find_bus_routes"
+      ],
+      "expected_tools": [
+        "find_bus_routes"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[find_bus_routes] returned:\n🚌 **BUS ROUTE FINDER**\n==================================================\n📍 From: Almada\n📍 To: Cacilhas\n==================================================\n\n🔍 **Resolving origin location...**\n   ✅ Found 10 stops matching 'Almada'\n      • ALMADA (LARGO CRISTO REI) TERMINAL\n      • ALMADA (AV CRISTO REI) NÚCLEO ÁGUA\n      • ALMADA (AV CRISTO REI) NÚCLEO ÁGUA\n\n🔍 **Resolving destination location...**\n   ✅ Found 10 stops matching 'Cacilhas'\n      • CACILHAS AV 25 ABRIL 45C (SEG SOCIAL)\n      • CACILHAS (AV 25 ABRIL N3A)\n      • Cacilhas (Terminal) P5\n\n🔍 **Finding direct bus routes...**\n\n✅ **1 ROUTE OPTION(S) FOUND** (1 lines total)\n----------------------------------------\n\n🚌 **Option 1**\n   🚏 Board at: ALMADA (LARGO CRISTO REI) TERMINAL\n   🚏 Alight at: CACILHAS AV 25 ABRIL 45C (SEG SOCIAL)\n   🚍 Lines: **3001**\n\n⚠️ **Note:** Verify that buses run in your intended direction. Check schedules at carrismetropolitana.pt\n\n\n----------------------------------------\n💡 **Tips:**\n   • Check carrismetropolitana.pt or carris.pt for detailed schedules\n   • Metro may be faster for longer trips\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCM05",
+      "domain": "transport",
+      "language": "en",
+      "query": "Show real-time Carris Metropolitana bus positions near Almada.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 2.927,
+      "error": null,
+      "error_type": null,
+      "response": "🚌 Real-Time Buses Near Almada\n📍 **Radius**: 1.0km | 15 buses found 📡 **Data freshness**: cached Carris Metropolitana (2s old).\nℹ️ 93 vehicle(s) were omitted because the API response did not include usable GPS coordinates. **1.** 🚏 Line 3507 🚗 AR-48-BL (Crossway Low Entry City) 📍 💨 **Speed**: 6.944444444444445 km/h | Bearing: 52° 📡 **Last update**: 24s ago 🚏 Approaching next stop 📏 Distance from search point: 0.446 km **2.** 🚏 Line 3026 🚗 AS-40-GC (Daily 70C21 Itrabus II) 📍 💨 **Speed**: 5 km/h | Bearing: 250° 📡 **Last update**: 18s ago 🚏 Approaching next stop 📏 Distance from search point: 0.635 km **3.** 🛑 Line 3007 🚗 AQ-26-VG (Crossway Low Entry City) 📍 💨 **Speed**: 0 km/h | Bearing: 0° 📡 **Last update**: 15s ago 🛑 Currently stopped (Doors: CLOSED) 📏 Distance from search point: 0.642 km **4.** 🛑 Line 3702 🚗 AQ-62-VV (Crossway Low Entry City) 📍 💨 **Speed**: 0 km/h | Bearing: 0° 🛑 Currently stopped (Doors: OPEN) 📏 Distance from search point: 0.671 km **5.** 🛑 Line 3703 🚗 AQ-42-VV (Crossway Low Entry City) 📍 💨 **Speed**: 3.611111111111111 km/h | Bearing: 138° 📡 **Last update**: 67m ago 🛑 Currently stopped (Doors: CLOSED) 📏 Distance from search point: 0.675 km **6.** 🛑 Line 3703 🚗 AQ-31-VG (Crossway Low Entry City) 📍 💨 **Speed**: 0 km/h | Bearing: 0° 📡 **Last update**: 53s ago 🛑 Currently stopped (Doors: OPEN) 📏 Distance from search point: 0.675 km **7.** 🛑 Line 3703 🚗 AR-90-OC (Crossway Low Entry Line) 📍 💨 **Speed**: 0.8333333333333333 km/h | Bearing: 0° 🛑 Currently stopped (Doors: OPEN) 📏 Distance from search point: 0.678 km **8.** 🛑 Line 3703 🚗 AR-56-GS (Crossway Low Entry City) 📍 💨 **Speed**: 0 km/h | Bearing: 0° 🛑 Currently stopped (Doors: OPEN) 📏 Distance from search point: 0.681 km **9.** 🚏 Line 3011 🚗 AQ-47-VG (Crossway Low Entry City) 📍 💨 **Speed**: 6.111111111111111 km/h | Bearing: 12° 📡 **Last update**: 12s ago 🚏 Approaching next stop 📏 Distance from search point: 0.688 km **10.** 🚏 Line 3702 🚗 AR-93-OC (Crossway Low Entry City) 📍 💨 **Speed**: 6.944444444444445 km/h | Bearing: 57° 🚏 Approaching next stop 📏 Distance from search point: 0.692 km ... and 5 more vehicles. ⚠️ Vehicle-level timestamp note: 4 shown vehicle(s) reported stale timestamps in the upstream API, so exact per- could not be trusted. ⚠️ **Scope**: Carris Metropolitana covers AML metropolitan / intermunicipal buses and many lines entering Lisbon municipality, but not Carris Urban-only routes such as 28E, 15E, 732 or 738.\n💡 For Lisbon city-only bus or tram trips, cross-check Carris Urban or Metro data.",
+      "tools_used": [
+        "get_real_time_bus_positions"
+      ],
+      "expected_tools": [
+        "get_real_time_bus_positions"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_real_time_bus_positions] returned:\n🚌 Real-Time Buses Near Almada\n📍 Radius: 1.0km | 15 buses found\n==================================================\n\n📡 Data freshness: cached Carris Metropolitana vehicle snapshot (2s old).\nℹ️ 93 vehicle(s) were omitted because the API response did not include usable GPS coordinates.\n\n1. 🚏 Line 3507\n   🚗 AR-48-BL (Crossway Low Entry City)\n   📍 GPS: 38.68216, -9.15264\n   💨 Speed: 6.944444444444445 km/h | Bearing: 52°\n   📡 Last update: 24s ago\n   🚏 Approaching next stop\n   📏 Distance from search point: 0.446 km\n\n2. 🚏 Line 3026\n   🚗 AS-40-GC (Daily 70C21 Itrabus II)\n   📍 GPS: 38.67763, -9.15566\n   💨 Speed: 5 km/h | Bearing: 250°\n   📡 Last update: 18s ago\n   🚏 Approaching next stop\n   📏 Distance from search point: 0.635 km\n\n3. 🛑 Line 3007\n   🚗 AQ-26-VG (Crossway Low Entry City)\n   📍 GPS: 38.68392, -9.15030\n   💨 Speed: 0 km/h | Bearing: 0°\n   📡 Last update: 15s ago\n   🛑 Currently stopped (Doors: CLOSED)\n   📏 Distance from search point: 0.642 km\n\n4. 🛑 Line 3702\n   🚗 AQ-62-VV (Crossway Low Entry City)\n   📍 GPS: 38.67716, -9.15655\n   💨 Speed: 0 km/h | Bearing: 0°\n   🛑 Currently stopped (Doors: OPEN)\n   📏 Distance from search point: 0.671 km\n\n5. 🛑 Line 3703\n   🚗 AQ-42-VV (Crossway Low Entry City)\n   📍 GPS: 38.67706, -9.15744\n   💨 Speed: 3.611111111111111 km/h | Bearing: 138°\n   📡 Last update: 67m ago\n   🛑 Currently stopped (Doors: CLOSED)\n   📏 Distance from search point: 0.675 km\n\n6. 🛑 Line 3703\n   🚗 AQ-31-VG (Crossway Low Entry City)\n   📍 GPS: 38.67711, -9.15662\n   💨 Speed: 0 km/h | Bearing: 0°\n   📡 Last update: 53s ago\n   🛑 Currently stopped (Doors: OPEN)\n   📏 Distance from search point: 0.675 km\n\n7. 🛑 Line 3703\n   🚗 AR-90-OC (Crossway Low Entry Line)\n   📍 GPS: 38.67709, -9.15659\n   💨 Speed: 0.8333333333333333 km/h | Bearing: 0°\n   🛑 Currently stopped (Doors: OPEN)\n   📏 Distance from search point: 0.678 km\n\n8. 🛑 Line 3703\n   🚗 AR-56-GS (Crossway Low Entry City)\n   📍 GPS: 38.67705, -9.15676\n   💨 Speed: 0 km/h | Bearing: 0°\n   🛑 Currently stopped (Doors: OPEN)\n   📏 Distance from search point: 0.681 km\n\n9. 🚏 Line 3011\n   🚗 AQ-47-VG (Crossway Low Entry City)\n   📍 GPS: 38.67775, -9.15370\n   💨 Speed: 6.111111111111111 km/h | Bearing: 12°\n   📡 Last update: 12s ago\n   🚏 Approaching next stop\n   📏 Distance from search point: 0.688 km\n\n10. 🚏 Line 3702\n   🚗 AR-93-OC (Crossway Low Entry City)\n   📍 GPS: 38.67693, -9.15691\n   💨 Speed: 6.944444444444445 km/h | Bearing: 57°\n   🚏 Approaching next stop\n   📏 Distance from search point: 0.692 km\n\n... and 5 more vehicles.\n\n⚠️ Vehicle-level timestamp note: 4 shown vehicle(s) reported stale timestamps in the upstream API, so exact per-vehicle age could not be trusted.\n\n⚠️ Scope: Carris Metropolitana covers AML metropolitan / intermunicipal buses and many lines entering Lisbon municipality, but not Carris Urban-only routes such as 28E, 15E, 732 or 738.\n💡 For Lisbon city-only bus or tram trips, cross-check Carris Urban or Metro data.\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCM06",
+      "domain": "transport",
+      "language": "en",
+      "query": "Show live GPS locations for Carris Metropolitana line 470.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.015,
+      "error": null,
+      "error_type": null,
+      "response": "ℹ️ No active buses found on line 470 at this time. 💡 The line may not be operating right now. ⚠️ **Scope**: Carris Metropolitana covers AML metropolitan / intermunicipal buses and many lines entering Lisbon municipality, but not Carris Urban-only routes such as 28E, 15E, 732 or 738.\n💡 For Lisbon city-only bus or tram trips, cross-check Carris Urban or Metro data.",
+      "tools_used": [
+        "get_bus_realtime_locations"
+      ],
+      "expected_tools": [
+        "get_bus_realtime_locations"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_bus_realtime_locations] returned:\nℹ️ No active buses found on line 470 at this time.\n\n💡 The line may not be operating right now.\n\n⚠️ Scope: Carris Metropolitana covers AML metropolitan / intermunicipal buses and many lines entering Lisbon municipality, but not Carris Urban-only routes such as 28E, 15E, 732 or 738.\n💡 For Lisbon city-only bus or tram trips, cross-check Carris Urban or Metro data.\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCM07",
+      "domain": "transport",
+      "language": "en",
+      "query": "Show the next departures for Carris Metropolitana line 470 at stop 010101.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.383,
+      "error": null,
+      "error_type": null,
+      "response": "❌ Line '470' not found. 💡 Verifica o identificador da linha. Podes perguntar-me pelas linhas disponíveis.",
+      "tools_used": [
+        "get_bus_next_departures"
+      ],
+      "expected_tools": [
+        "get_bus_next_departures"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_bus_next_departures] returned:\n❌ Line '470' not found.\n\n💡 Verifica o identificador da linha. Podes perguntar-me pelas linhas disponíveis.",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCM08",
+      "domain": "transport",
+      "language": "en",
+      "query": "Find direct Carris Metropolitana bus lines between Oeiras and Amadora.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.736,
+      "error": null,
+      "error_type": null,
+      "response": "🚌 **Buses: Oeiras → Amadora** ✅ **19 direct line(s) found:** **1. 🚍 Linha 1501** 📍 **Terminals**: Reboleira (Estação) | Circular via Alfragide (Zona Industrial e Centro comercial) 🚏 Oeiras → Amadora **2. 🚍 Linha 1502** 📍 **Terminals**: Algés (Estação) ↔ Amadora (Estação Sul) via Linda-a-Velha 🚏 Oeiras → Linda-a-Velha → Amadora **3. 🚍 Linha 1503** 📍 **Terminals**: Algés (Estação) ↔ Bº Zambujal 🚏 Oeiras → Miraflores → Carnaxide → Amadora **4. 🚍 Linha 1504** 📍 **Terminals**: Algés (Estação) ↔ Bº Zambujal 🚏 Oeiras → Linda-a-Velha → Carnaxide → Alfragide → Amadora **5. 🚍 Linha 1506** 📍 **Terminals**: Amadora (Hospital) via Alfragide e Damaia| Circular 🚏 Oeiras → Alfragide → Reboleira → Amadora **6. 🚍 Linha 1507** 📍 **Terminals**: Caxias (Estação) ↔ Reboleira (Metro) 🚏 Oeiras → Laveiras → Queijas → Carnaxide → Amadora 📋 **Other lines**: 1601, 1701, 1712, 1713, 1714, 1715, 1716, 1717, 1726, 1728, 1730, 1740, 1741 💡 **How to use it:** - Look for the line number (e.g. **1501**) at the stop - Check the bus direction (Oeiras → Amadora) - **Schedules and stops**: carrismetropolitana.pt ⚠️ **Scope**: Carris Metropolitana covers AML metropolitan / intermunicipal buses and many lines entering Lisbon municipality, but not Carris Urban-only routes such as 28E, 15E, 732 or 738.\n💡 For Lisbon city-only bus or tram trips, cross-check Carris Urban or Metro data.",
+      "tools_used": [
+        "find_direct_bus_lines"
+      ],
+      "expected_tools": [
+        "find_direct_bus_lines"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[find_direct_bus_lines] returned:\n🚌 **Autocarros: Oeiras → Amadora**\n==================================================\n\n✅ **19 linha(s) direta(s) encontrada(s):**\n\n**1. 🚍 Linha 1501**\n   📍 Terminais: Reboleira (Estação) | Circular via Alfragide (Zona Industrial e Centro comercial)\n   🚏 Oeiras → Amadora\n\n**2. 🚍 Linha 1502**\n   📍 Terminais: Algés (Estação) ↔ Amadora (Estação Sul) via Linda-a-Velha\n   🚏 Oeiras → Linda-a-Velha → Amadora\n\n**3. 🚍 Linha 1503**\n   📍 Terminais: Algés (Estação) ↔ Bº Zambujal\n   🚏 Oeiras → Miraflores → Carnaxide → Amadora\n\n**4. 🚍 Linha 1504**\n   📍 Terminais: Algés (Estação) ↔ Bº Zambujal\n   🚏 Oeiras → Linda-a-Velha → Carnaxide → Alfragide → Amadora\n\n**5. 🚍 Linha 1506**\n   📍 Terminais: Amadora (Hospital) via Alfragide e Damaia| Circular\n   🚏 Oeiras → Alfragide → Reboleira → Amadora\n\n**6. 🚍 Linha 1507**\n   📍 Terminais: Caxias (Estação) ↔ Reboleira (Metro)\n   🚏 Oeiras → Laveiras → Queijas → Carnaxide → Amadora\n\n📋 Outras linhas: 1601, 1701, 1712, 1713, 1714, 1715, 1716, 1717, 1726, 1728, 1730, 1740, 1741\n\n--------------------------------------------------\n💡 **Como usar:**\n   • Procure pelo número da linha (ex: **1501**) na paragem\n   • Verifique a direção do autocarro (Oeiras → Amadora)\n   • Horários e paragens: carrismetropolitana.pt\n\n⚠️ Scope: Carris Metropolitana covers AML metropolitan / intermunicipal buses and many lines entering Lisbon municipality, but not Carris Urban-only routes such as 28E, 15E, 732 or 738.\n💡 For Lisbon city-only bus or tram trips, cross-check Carris Urban or Metro data.\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCU01",
+      "domain": "transport",
+      "language": "en",
+      "query": "Search Carris stops for Marquês de Pombal.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.502,
+      "error": null,
+      "error_type": null,
+      "response": "Carris Stops (pesquisa: 'Marquês de Pombal') **Stop**: Marquês Pombal | Código: 1229 **Stop**: Marquês Pombal | Código: 1220 **Stop**: Marquês Pombal | Código: 1221 **Stop**: Marquês Pombal | Código: 1212 **Stop**: Marquês Pombal | Código: 1203 **Stop**: Marquês Pombal | Código: 1213 Showing 6 paragens\nUsa o ID da Stop com carris_get_arrivals To ver chegadas em tempo real.",
+      "tools_used": [
+        "carris_get_stops"
+      ],
+      "expected_tools": [
+        "carris_get_stops"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[carris_get_stops] returned:\nParagens Carris (pesquisa: 'Marquês de Pombal')\n=============================================\n\nPARAGEM: Marquês Pombal\n   ID: 1229 | Código: 1229\n   GPS: 38.72567, -9.14904\n\nPARAGEM: Marquês Pombal\n   ID: 1220 | Código: 1220\n   GPS: 38.72616, -9.15024\n\nPARAGEM: Marquês Pombal\n   ID: 1221 | Código: 1221\n   GPS: 38.72543, -9.15151\n\nPARAGEM: Marquês Pombal\n   ID: 1212 | Código: 1212\n   GPS: 38.72467, -9.15085\n\nPARAGEM: Marquês Pombal\n   ID: 1203 | Código: 1203\n   GPS: 38.72588, -9.14924\n\nPARAGEM: Marquês Pombal\n   ID: 1213 | Código: 1213\n   GPS: 38.72610, -9.15047\n\nA mostrar 6 paragens\nUsa o ID da paragem com carris_get_arrivals para ver chegadas em tempo real.\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCU02",
+      "domain": "transport",
+      "language": "en",
+      "query": "Show route information for tram 28E.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.638,
+      "error": null,
+      "error_type": null,
+      "response": "Rotas Carris (Lisboa Urbano) ELÉTRICOS 28E: Martim Moniz - Campo Ourique (Prazeres) **Total**: 1 elétricos + 0 Buses",
+      "tools_used": [
+        "carris_get_routes"
+      ],
+      "expected_tools": [
+        "carris_get_routes"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[carris_get_routes] returned:\nRotas Carris (Lisboa Urbano)\n=============================================\n\nELÉTRICOS\n------------------------------\n   28E: Martim Moniz - Campo Ourique (Prazeres)\n\nTotal: 1 elétricos + 0 autocarros\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCU03",
+      "domain": "transport",
+      "language": "en",
+      "query": "Show the next Carris departures for stop 1234.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.443,
+      "error": null,
+      "error_type": null,
+      "response": "Stop '1234' not found.",
+      "tools_used": [
+        "carris_get_next_departures"
+      ],
+      "expected_tools": [
+        "carris_get_next_departures"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[carris_get_next_departures] returned:\nStop '1234' not found.",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCU04",
+      "domain": "transport",
+      "language": "en",
+      "query": "Find Carris routes between Graça and Belém.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 20.683,
+      "error": null,
+      "error_type": null,
+      "response": "**Routes**: Graça -> Belém Resolving locations... **From**: Graça To: Belém Found 1 direct routes! BUSES 760: Gomes Freire - Cemitério Ajuda (Sem informação em tempo real nesta Stop)",
+      "tools_used": [
+        "carris_find_routes_between"
+      ],
+      "expected_tools": [
+        "carris_find_routes_between"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[carris_find_routes_between] returned:\nRoutes: Graça -> Belém\n=======================================================\n\nResolving locations...\n   From: Graça\n   To: Belém\n\nFound 1 direct routes!\n\nBUSES\n----------------------------------------\n   760: Gomes Freire - Cemitério Ajuda\n     (Sem informação em tempo real nesta paragem)\n\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCU05",
+      "domain": "transport",
+      "language": "en",
+      "query": "Show real-time Carris vehicles for route 15E.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 3.411,
+      "error": null,
+      "error_type": null,
+      "response": "vehicles Carris em Tempo Real\n**Dados de**: 11:14:19 📡 Carris GTFS-RT: cached live snapshot in use (0s old). ELÉTRICOS\n- 🚌 **15E** - > Algés [Em trânsito] | Próxima Stop: Calvário\n- 🚌 **15E** - > Pç. Figueira [Em trânsito] 15E -> Pç. Figueira [Em trânsito] | Próxima Stop: Centro Cultural Belém\n- 🚌 **15E** - > Pç. Figueira - Algés [Em trânsito] | Próxima Stop: Mosteiro Jerónimos\n- 🚌 **15E** - > Pç. Figueira [Em trânsito] | Próxima Stop: Cais Sodré\n- 🚌 **15E** - > Algés [Em trânsito] | Próxima Stop: Cais Sodré\n- 🚌 **15E** - > Algés [Em trânsito] | Próxima Stop: Centro Cultural Belém **Total**: 7 elétricos + 0 Buses = 7 vehicles",
+      "tools_used": [
+        "carris_get_realtime_vehicles"
+      ],
+      "expected_tools": [
+        "carris_get_realtime_vehicles"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[carris_get_realtime_vehicles] returned:\nVeículos Carris em Tempo Real\n=======================================================\nDados de: 11:14:19\n\n📡 Carris GTFS-RT: cached live snapshot in use (0s old).\n\nELÉTRICOS\n----------------------------------------\n15E -> Algés [Em trânsito]\n   GPS: 38.70215, -9.18025 | Próxima paragem: Calvário\n15E -> Pç. Figueira [Em trânsito]\n   GPS: 38.71280, -9.13772\n15E -> Pç. Figueira [Em trânsito]\n   GPS: 38.69793, -9.20428 | Próxima paragem: Centro Cultural Belém\n15E -> Pç. Figueira - Algés [Em trânsito]\n   GPS: 38.69652, -9.20843 | Próxima paragem: Mosteiro Jerónimos\n   Matrícula: 61-87-ZB\n15E -> Pç. Figueira [Em trânsito]\n   GPS: 38.70628, -9.14502 | Próxima paragem: Cais Sodré\n15E -> Algés [Em trânsito]\n   GPS: 38.70632, -9.14538 | Próxima paragem: Cais Sodré\n15E -> Algés [Em trânsito]\n   GPS: 38.69582, -9.21067 | Próxima paragem: Centro Cultural Belém\n\nTotal: 7 elétricos + 0 autocarros = 7 veículos\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCU06",
+      "domain": "transport",
+      "language": "en",
+      "query": "Show real-time arrivals at Carris stop 1234.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.438,
+      "error": null,
+      "error_type": null,
+      "response": "Stop '1234' não encontrada. Usa carris_get_stops To pesquisar.",
+      "tools_used": [
+        "carris_get_arrivals"
+      ],
+      "expected_tools": [
+        "carris_get_arrivals"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[carris_get_arrivals] returned:\nParagem '1234' não encontrada. Usa carris_get_stops para pesquisar.",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCU07",
+      "domain": "transport",
+      "language": "en",
+      "query": "Estimate the ETA of route 28E at Martim Moniz.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 1.423,
+      "error": null,
+      "error_type": null,
+      "response": "**ETA**: Linha 28E -> Martim Moniz\n**Hora atual**: 11:14 📡 Carris GTFS-RT: cached live snapshot in use (4s old). 5 vehicles on the way: **1.** Chegada estimada: 11:22 (2 min early) **Posição atual**: Igreja Anjos 2 stops remaining **Tempo viagem estimado**: ~6 min **2.** Chegada estimada: 11:34 (13 min early) **Posição atual**: R. Maria Andrade 3 stops remaining **Tempo viagem estimado**: ~7 min **3.** Chegada estimada: 11:48 (4 min late) **Posição atual**: Lg. Academia Nacional Belas Artes 19 stops remaining **Tempo viagem estimado**: ~34 min **4.** Chegada estimada: 12:04 **Posição atual**: Cç. Estrela 28 stops remaining **Tempo viagem estimado**: ~50 min **5.** Chegada estimada: 12:13 (2 min early) **Posição atual**: R. Saraiva Carvalho 33 stops remaining **Tempo viagem estimado**: ~57 min",
+      "tools_used": [
+        "carris_vehicle_eta"
+      ],
+      "expected_tools": [
+        "carris_vehicle_eta"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[carris_vehicle_eta] returned:\nETA: Linha 28E -> Martim Moniz\n=======================================================\nHora atual: 11:14\n\n📡 Carris GTFS-RT: cached live snapshot in use (4s old).\n\n5 veículos a caminho:\n----------------------------------------\n\n1. Chegada estimada: 11:22 (adiantado 2 min)\n   Posição atual: Igreja Anjos\n   Faltam 2 paragens\n   Tempo viagem estimado: ~6 min\n\n2. Chegada estimada: 11:34 (adiantado 13 min)\n   Posição atual: R. Maria Andrade\n   Faltam 3 paragens\n   Tempo viagem estimado: ~7 min\n\n3. Chegada estimada: 11:48 (atrasado +4 min)\n   Posição atual: Lg. Academia Nacional Belas Artes\n   Faltam 19 paragens\n   Tempo viagem estimado: ~34 min\n\n4. Chegada estimada: 12:04\n   Posição atual: Cç. Estrela\n   Faltam 28 paragens\n   Tempo viagem estimado: ~50 min\n\n5. Chegada estimada: 12:13 (adiantado 2 min)\n   Posição atual: R. Saraiva Carvalho\n   Faltam 33 paragens\n   Tempo viagem estimado: ~57 min\n\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCU08",
+      "domain": "transport",
+      "language": "en",
+      "query": "What is the service frequency for Carris route 15E?",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.682,
+      "error": null,
+      "error_type": null,
+      "response": "🚌 **Route Frequency 15E**\n📍 **Stop**: Algés (Jardim) 📊 **Total de departures Today**: 181 🌅 Morning (06:00-09:59) ⏱️ Frequência média: **8 min** 📏 **Min/Max**: 2-14 min 🕒 **Primeiro**: 06:14 | Último: 09:51 📈 **departures**: 28 ☀️ Midday (10:00-13:59) ⏱️ Frequência média: **6 min** 📏 **Min/Max**: 2-11 min 🕒 **Primeiro**: 10:00 | Último: 13:58 📈 **departures**: 43 🌤️ Afternoon (14:00-17:59) ⏱️ Frequência média: **5 min** 📏 **Min/Max**: 2-8 min 🕒 **Primeiro**: 14:06 | Último: 17:59 📈 **departures**: 45 🌙 Evening (18:00-22:59) ⏱️ Frequência média: **7 min** 📏 **Min/Max**: 2-14 min 🕒 **Primeiro**: 18:02 | Último: 22:55 📈 **departures**: 45 🌃 Night (23:00-05:59) ⏱️ Frequência média: **10 min** 📏 **Min/Max**: 5-17 min 🕒 **Primeiro**: 23:07 | Último: 24:31 📈 **departures**: 9 📌 **Source:** Dados GTFS Carris (horários programados)",
+      "tools_used": [
+        "carris_get_service_frequency"
+      ],
+      "expected_tools": [
+        "carris_get_service_frequency"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[carris_get_service_frequency] returned:\n🚌 **Frequência da Linha 15E**\n📍 Paragem: Algés (Jardim)\n==================================================\n\n📊 Total de passagens hoje: 181\n\n🌅 Morning (06:00-09:59)\n   ⏱️ Frequência média: **8 min**\n   📏 Min/Max: 2-14 min\n   🕒 Primeiro: 06:14 | Último: 09:51\n   📈 Passagens: 28\n\n☀️ Midday (10:00-13:59)\n   ⏱️ Frequência média: **6 min**\n   📏 Min/Max: 2-11 min\n   🕒 Primeiro: 10:00 | Último: 13:58\n   📈 Passagens: 43\n\n🌤️ Afternoon (14:00-17:59)\n   ⏱️ Frequência média: **5 min**\n   📏 Min/Max: 2-8 min\n   🕒 Primeiro: 14:06 | Último: 17:59\n   📈 Passagens: 45\n\n🌙 Evening (18:00-22:59)\n   ⏱️ Frequência média: **7 min**\n   📏 Min/Max: 2-14 min\n   🕒 Primeiro: 18:02 | Último: 22:55\n   📈 Passagens: 45\n\n🌃 Night (23:00-05:59)\n   ⏱️ Frequência média: **10 min**\n   📏 Min/Max: 5-17 min\n   🕒 Primeiro: 23:07 | Último: 24:31\n   📈 Passagens: 9\n\n📌 **Fonte:** Dados GTFS Carris (horários programados)\n⚠️ Frequências reais podem variar com o tráfego.\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCP01",
+      "domain": "transport",
+      "language": "en",
+      "query": "Show the current status of CP urban trains in Lisbon.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.877,
+      "error": null,
+      "error_type": null,
+      "response": "🚆 **CP Trains - Lisbon Metropolitan Area (AML)** 📊 **25 trains** serving AML\n⚠️ **24 trains** with delays 🚈 **Urbanos Lisboa** (14 trains) 🚆 **#19036**: Cascais → Cais do Sodre ⚠️ 5 min late 📍 **Position**: (38.6998, -9.2635) ❓ **#18242**: Lisboa Oriente → Sintra ⚠️ 5 min late 📍 **Position**: (38.7629, -9.2963) 🚉 **#16018**: Azambuja → Lisboa Santa Apolonia ⚠️ 5 min late 📍 **Position**: (39.0493, -8.9052) 🚆 **#19035**: Cais do Sodre → Cascais ⚠️ 3 min late 📍 **Position**: (38.6905, -9.3600) 🚉 **#17220**: Praias do Sado-A → Barreiro ⚠️ 2 min late 📍 **Position**: (38.6601, -9.0470) ... and 9 more Urbanos Lisboa trains. 🚃 **Regionais** (2 trains) 🚆 **#4411**: Lisboa Santa Apolonia → Tomar ⚠️ 7 min late 📍 **Position**: (39.3237, -8.6278) 🚉 **#4414**: Tomar → Lisboa Santa Apolonia ⚠️ 5 min late 📍 **Position**: (39.1856, -8.7239) 🚄 **Intercidades** (7 trains) 🚆 **#511**: Lisboa Santa Apolonia → Guarda ⚠️ 27 min late 📍 **Position**: (40.5817, -7.7872) 🚆 **#594**: Lisboa Oriente → Evora ⚠️ 13 min late 📍 **Position**: (38.6643, -8.5983) 🚆 **#570**: Lisboa Oriente → Faro ⚠️ 11 min late 📍 **Position**: (38.5678, -8.7243) 🚆 **#720**: Braga → Lisboa Santa Apolonia ⚠️ 9 min late 📍 **Position**: (40.9603, -8.6353) 🚆 **#721**: Lisboa Santa Apolonia → Braga ⚠️ 8 min late 📍 **Position**: (39.8877, -8.6439) ... and 2 more Intercidades trains. 🚅 **Alfa Pendular** (2 trains) 🚆 **#180**: Porto Campanha → Faro ⚠️ 38 min late 📍 **Position**: (37.3750, -8.3931) 🚆 **#182**: Faro → Porto Campanha ⚠️ 26 min late 📍 **Position**: (39.3294, -8.6250) 📍 **AML Coverage**: 72 stations\n🔗 **Lines**: Cascais, Sintra, Azambuja, Fertagus\n💡 Podes perguntar por uma estação específica To mais detalhes.",
+      "tools_used": [
+        "get_train_status"
+      ],
+      "expected_tools": [
+        "get_train_status"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_train_status] returned:\n🚆 **CP Trains - Lisbon Metropolitan Area (AML)**\n==================================================\n\n📊 **25 trains** serving AML\n⚠️ **24 trains** with delays\n\n\n🚈 **Urbanos Lisboa** (14 trains)\n----------------------------------------\n\n   🚆 **#19036**: Cascais → Cais do Sodre\n      ⚠️ 5 min late\n      📍 Position: (38.6998, -9.2635)\n\n   ❓ **#18242**: Lisboa Oriente → Sintra\n      ⚠️ 5 min late\n      📍 Position: (38.7629, -9.2963)\n\n   🚉 **#16018**: Azambuja → Lisboa Santa Apolonia\n      ⚠️ 5 min late\n      📍 Position: (39.0493, -8.9052)\n\n   🚆 **#19035**: Cais do Sodre → Cascais\n      ⚠️ 3 min late\n      📍 Position: (38.6905, -9.3600)\n\n   🚉 **#17220**: Praias do Sado-A → Barreiro\n      ⚠️ 2 min late\n      📍 Position: (38.6601, -9.0470)\n\n   ... and 9 more Urbanos Lisboa trains.\n\n🚃 **Regionais** (2 trains)\n----------------------------------------\n\n   🚆 **#4411**: Lisboa Santa Apolonia → Tomar\n      ⚠️ 7 min late\n      📍 Position: (39.3237, -8.6278)\n\n   🚉 **#4414**: Tomar → Lisboa Santa Apolonia\n      ⚠️ 5 min late\n      📍 Position: (39.1856, -8.7239)\n\n🚄 **Intercidades** (7 trains)\n----------------------------------------\n\n   🚆 **#511**: Lisboa Santa Apolonia → Guarda\n      ⚠️ 27 min late\n      📍 Position: (40.5817, -7.7872)\n\n   🚆 **#594**: Lisboa Oriente → Evora\n      ⚠️ 13 min late\n      📍 Position: (38.6643, -8.5983)\n\n   🚆 **#570**: Lisboa Oriente → Faro\n      ⚠️ 11 min late\n      📍 Position: (38.5678, -8.7243)\n\n   🚆 **#720**: Braga → Lisboa Santa Apolonia\n      ⚠️ 9 min late\n      📍 Position: (40.9603, -8.6353)\n\n   🚆 **#721**: Lisboa Santa Apolonia → Braga\n      ⚠️ 8 min late\n      📍 Position: (39.8877, -8.6439)\n\n   ... and 2 more Intercidades trains.\n\n🚅 **Alfa Pendular** (2 trains)\n----------------------------------------\n\n   🚆 **#180**: Porto Campanha → Faro\n      ⚠️ 38 min late\n      📍 Position: (37.3750, -8.3931)\n\n   🚆 **#182**: Faro → Porto Campanha\n      ⚠️ 26 min late\n      📍 Position: (39.3294, -8.6250)\n\n--------------------------------------------------\n📍 **AML Coverage**: 72 stations\n🔗 Lines: Cascais, Sintra, Azambuja, Fertagus\n💡 Podes perguntar por uma estação específica para mais detalhes.\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCP02",
+      "domain": "transport",
+      "language": "en",
+      "query": "Search CP stations for Rossio.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.031,
+      "error": null,
+      "error_type": null,
+      "response": "🚉 **CP Stations matching 'Rossio'** (1 found) 1. **Lisboa Rossio** 🆔 94_59006 📍 (38.7142, -9.1415) 🚆 **Routes**: Linha de Sintra",
+      "tools_used": [
+        "search_cp_stations"
+      ],
+      "expected_tools": [
+        "search_cp_stations"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[search_cp_stations] returned:\n🚉 **CP Stations matching 'Rossio'** (1 found)\n==================================================\n\n1. **Lisboa Rossio**\n   🆔 94_59006\n   📍 (38.7142, -9.1415)\n   🚆 Routes: Linha de Sintra\n\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCP03",
+      "domain": "transport",
+      "language": "en",
+      "query": "Show the next train departures from Entrecampos.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.045,
+      "error": null,
+      "error_type": null,
+      "response": "🚆 **Departures from Entrecampos**\n📅 Sunday, 15 March 2026 🕐 **11:17** → Sintra 🚆 Linha de Sintra 🕐 **11:42** → Lisboa Oriente 🚆 Linha de Sintra 🕐 **11:47** → Lisboa Oriente 🚆 IC 🕐 **11:47** → Sintra 🚆 Linha de Sintra 🕐 **12:12** → Lisboa Oriente 🚆 Linha de Sintra 🕐 **12:17** → Sintra 🚆 Linha de Sintra 🕐 **12:42** → Lisboa Oriente 🚆 Linha de Sintra 🕐 **12:47** → Sintra 🚆 Linha de Sintra 🕐 **13:12** → Lisboa Oriente 🚆 Linha de Sintra 🕐 **13:17** → Sintra 🚆 Linha de Sintra 💡 Podes perguntar por atrasos em tempo real de um comboio específico.",
+      "tools_used": [
+        "get_train_schedule"
+      ],
+      "expected_tools": [
+        "get_train_schedule"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_train_schedule] returned:\n🚆 **Departures from Entrecampos**\n📅 Sunday, 15 March 2026\n==================================================\n\n🕐 **11:17** → Sintra\n   🚆 Linha de Sintra\n\n🕐 **11:42** → Lisboa Oriente\n   🚆 Linha de Sintra\n\n🕐 **11:47** → Lisboa Oriente\n   🚆 IC\n\n🕐 **11:47** → Sintra\n   🚆 Linha de Sintra\n\n🕐 **12:12** → Lisboa Oriente\n   🚆 Linha de Sintra\n\n🕐 **12:17** → Sintra\n   🚆 Linha de Sintra\n\n🕐 **12:42** → Lisboa Oriente\n   🚆 Linha de Sintra\n\n🕐 **12:47** → Sintra\n   🚆 Linha de Sintra\n\n🕐 **13:12** → Lisboa Oriente\n   🚆 Linha de Sintra\n\n🕐 **13:17** → Sintra\n   🚆 Linha de Sintra\n\n--------------------------------------------------\n💡 Podes perguntar por atrasos em tempo real de um comboio específico.\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCP04",
+      "domain": "transport",
+      "language": "en",
+      "query": "List the CP urban routes available in the Lisbon Metropolitan Area.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.023,
+      "error": null,
+      "error_type": null,
+      "response": "🚆 **CP Routes from GTFS Data** 🚆 **AP** 📋 **Type**: Rail 🎨 **Color**: #FFFFFF 🚆 **IC** 📋 **Type**: Rail 🎨 **Color**: #FFFFFF 🚆 **IR** 📋 **Type**: Rail 🎨 **Color**: #FFFFFF 🚆 **Linha da Azambuja** 📋 **Type**: Other 🎨 **Color**: #FF0000 🚆 **Linha de Aveiro** 📋 **Type**: Other 🎨 **Color**: #FFA500 🚆 **Linha de Braga** 📋 **Type**: Other 🎨 **Color**: #008000 🚆 **Linha de Cascais** 📋 **Type**: Other 🎨 **Color**: #FFA500 🚆 **Linha de Guimaraes** 📋 **Type**: Other 🎨 **Color**: #FF0000 🚆 **Linha de Leixoes** 📋 **Type**: Other 🎨 **Color**: #A988A7 🚆 **Linha de Sintra** 📋 **Type**: Other 🎨 **Color**: #008000 🚆 **Linha do Marco** 📋 **Type**: Other 🎨 **Color**: #0000FF 🚆 **Linha do Sado** 📋 **Type**: Other 🎨 **Color**: #0000FF 🚆 **R** 📋 **Type**: Rail 🎨 **Color**: #FFFFFF 🚆 **U** 📋 **Type**: Other 🎨 **Color**: #FFFFFF",
+      "tools_used": [
+        "get_cp_routes"
+      ],
+      "expected_tools": [
+        "get_cp_routes"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_cp_routes] returned:\n🚆 **CP Routes from GTFS Data**\n==================================================\n\n🚆 **AP**\n   📋 Type: Rail\n   🎨 Color: #FFFFFF\n\n🚆 **IC**\n   📋 Type: Rail\n   🎨 Color: #FFFFFF\n\n🚆 **IR**\n   📋 Type: Rail\n   🎨 Color: #FFFFFF\n\n🚆 **Linha da Azambuja**\n   📋 Type: Other\n   🎨 Color: #FF0000\n\n🚆 **Linha de Aveiro**\n   📋 Type: Other\n   🎨 Color: #FFA500\n\n🚆 **Linha de Braga**\n   📋 Type: Other\n   🎨 Color: #008000\n\n🚆 **Linha de Cascais**\n   📋 Type: Other\n   🎨 Color: #FFA500\n\n🚆 **Linha de Guimaraes**\n   📋 Type: Other\n   🎨 Color: #FF0000\n\n🚆 **Linha de Leixoes**\n   📋 Type: Other\n   🎨 Color: #A988A7\n\n🚆 **Linha de Sintra**\n   📋 Type: Other\n   🎨 Color: #008000\n\n🚆 **Linha do Marco**\n   📋 Type: Other\n   🎨 Color: #0000FF\n\n🚆 **Linha do Sado**\n   📋 Type: Other\n   🎨 Color: #0000FF\n\n🚆 **R**\n   📋 Type: Rail\n   🎨 Color: #FFFFFF\n\n🚆 **U**\n   📋 Type: Other\n   🎨 Color: #FFFFFF\n\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCP05",
+      "domain": "transport",
+      "language": "en",
+      "query": "Plan a CP train trip from Rossio to Sintra.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.765,
+      "error": null,
+      "error_type": null,
+      "response": "🚆 **Train: Lisboa Rossio → Sintra** 📊 **TRIP SUMMARY** 🚆 Line: **Linha de Sintra** ⏱️ Duration: **40 minutos** 📍 **Status**: ⚠️ Some trains are delayed by 5 min 📊 Remaining departures today: **15** 📋 **Next 8 Departures:** 🕐 **12:01** → 12:41 (40min) 🕐 **13:01** → 13:41 (40min) 🕐 **14:01** → 14:41 (40min) 🕐 **15:01** → 15:41 (40min) 🕐 **16:01** → 16:41 (40min) 🕐 **17:01** → 17:41 (40min) 🕐 **18:01** → 18:41 (40min) 🕐 **19:01** → 19:41 (40min) ... e mais 7 Remaining departures today. 📅 Sunday, 15 March 2026 | 11:14\n💡 **Schedules**: cp.pt | Tickets: app CP or station",
+      "tools_used": [
+        "plan_train_trip"
+      ],
+      "expected_tools": [
+        "plan_train_trip"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[plan_train_trip] returned:\n🚆 **Comboio: Lisboa Rossio → Sintra**\n==================================================\n\n📊 **RESUMO DA VIAGEM**\n   🚆 Linha: **Linha de Sintra**\n   ⏱️ Duração: **40 minutos**\n   📍 Estado: ⚠️ Alguns comboios com +5min atraso\n   📊 Partidas restantes hoje: **15**\n\n--------------------------------------------------\n📋 **Próximas 8 Partidas:**\n\n   🕐 **12:01** → 12:41 (40min)\n   🕐 **13:01** → 13:41 (40min)\n   🕐 **14:01** → 14:41 (40min)\n   🕐 **15:01** → 15:41 (40min)\n   🕐 **16:01** → 16:41 (40min)\n   🕐 **17:01** → 17:41 (40min)\n   🕐 **18:01** → 18:41 (40min)\n   🕐 **19:01** → 19:41 (40min)\n\n   ... e mais 7 partidas restantes hoje.\n\n--------------------------------------------------\n📅 Sunday, 15 March 2026 | 11:14\n💡 Horários: cp.pt | Bilhetes: app CP ou estação\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTCP06",
+      "domain": "transport",
+      "language": "en",
+      "query": "What is the train service frequency on the Sintra line?",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.041,
+      "error": null,
+      "error_type": null,
+      "response": "🚆 **Frequência: Linha de Sintra**\n📍 **Estação**: Lisboa Oriente 📊 **Total de trains Today**: 39 🌅 Morning (06:00-09:59) ⏱️ Frequência média: **30 min** 📏 **Min/Max**: 30-30 min 🕒 **Primeiro**: 06:08 | Último: 09:38 📈 **trains**: 8 ☀️ Midday (10:00-13:59) ⏱️ Frequência média: **30 min** 📏 **Min/Max**: 30-30 min 🕒 **Primeiro**: 10:08 | Último: 13:38 📈 **trains**: 8 🌤️ Afternoon (14:00-17:59) ⏱️ Frequência média: **30 min** 📏 **Min/Max**: 30-30 min 🕒 **Primeiro**: 14:08 | Último: 17:38 📈 **trains**: 8 🌙 Evening (18:00-22:59) ⏱️ Frequência média: **30 min** 📏 **Min/Max**: 30-30 min 🕒 **Primeiro**: 18:08 | Último: 22:38 📈 **trains**: 10 🌃 Night (23:00-01:59) ⏱️ Frequência média: **30 min** 📏 **Min/Max**: 30-30 min 🕒 **Primeiro**: 23:08 | Último: 23:38 📈 **trains**: 2 📌 **Source:** Dados GTFS CP (horários programados)",
+      "tools_used": [
+        "get_train_frequency"
+      ],
+      "expected_tools": [
+        "get_train_frequency"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_train_frequency] returned:\n🚆 **Frequência: Linha de Sintra**\n📍 Estação: Lisboa Oriente\n==================================================\n\n📊 Total de comboios hoje: 39\n\n🌅 Morning (06:00-09:59)\n   ⏱️ Frequência média: **30 min**\n   📏 Min/Max: 30-30 min\n   🕒 Primeiro: 06:08 | Último: 09:38\n   📈 Comboios: 8\n\n☀️ Midday (10:00-13:59)\n   ⏱️ Frequência média: **30 min**\n   📏 Min/Max: 30-30 min\n   🕒 Primeiro: 10:08 | Último: 13:38\n   📈 Comboios: 8\n\n🌤️ Afternoon (14:00-17:59)\n   ⏱️ Frequência média: **30 min**\n   📏 Min/Max: 30-30 min\n   🕒 Primeiro: 14:08 | Último: 17:38\n   📈 Comboios: 8\n\n🌙 Evening (18:00-22:59)\n   ⏱️ Frequência média: **30 min**\n   📏 Min/Max: 30-30 min\n   🕒 Primeiro: 18:08 | Último: 22:38\n   📈 Comboios: 10\n\n🌃 Night (23:00-01:59)\n   ⏱️ Frequência média: **30 min**\n   📏 Min/Max: 30-30 min\n   🕒 Primeiro: 23:08 | Último: 23:38\n   📈 Comboios: 2\n\n📌 **Fonte:** Dados GTFS CP (horários programados)\n⚠️ Consulte cp.pt para informação em tempo real.\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTMM01",
+      "domain": "transport",
+      "language": "en",
+      "query": "Give me a transport summary across metro, bus, and train in Lisbon right now.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 1.257,
+      "error": null,
+      "error_type": null,
+      "response": "🚇 🚌 🚆 **Lisbon Transport Status** — Atualizado: 11:14 🚇 **Metro de Lisboa**\n- 🟢 **Status**: Normal service on all lines 🚋 **Carris (Urbano)**\n- 🟢 **Vehicles in service**: 221 vehicles 🚌 **Carris Metropolitana (Suburbano)**\n- ⚠️ **Active alerts**: 70 alerts 🚆 **CP trains (AML)**\n- 📊 **Trains running in AML**: 25 trains\n- ⚠️ **Trains with delays > 1 min**: 20 trains 📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt), [*Carris*](https://www.carris.pt), [*Carris Metropolitana*](https://www.carrismetropolitana.pt) e [*CP*](https://www.cp.pt) | **Updated:** 11:14",
+      "tools_used": [
+        "get_transport_summary"
+      ],
+      "expected_tools": [
+        "get_transport_summary"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_transport_summary] returned:\n🚇 🚌 🚆 **Situação dos Transportes de Lisboa** — Atualizado: 11:14\n\n🚇 **Metro de Lisboa**\n- 🟢 **Estado**: Circulação normal em todas as linhas\n\n🚋 **Carris (Urbano)**\n- 🟢 **Veículos em serviço**: 221 veículos\n\n🚌 **Carris Metropolitana (Suburbano)**\n- ⚠️ **Alertas ativos**: 70 alertas\n\n🚆 **CP Comboios (AML)**\n- 📊 **Comboios a circular na AML**: 25 comboios\n- ⚠️ **Comboios com atrasos > 1 min**: 20 comboios\n\n📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt), [*Carris*](https://www.carris.pt), [*Carris Metropolitana*](https://www.carrismetropolitana.pt) e [*CP*](https://www.cp.pt) **| Atualizado:** 11:14\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CTMM02",
+      "domain": "transport",
+      "language": "en",
+      "query": "How do I get from Baixa-Chiado to Aeroporto using public transport?",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 0.02,
+      "error": null,
+      "error_type": null,
+      "response": "🗺️ **Route: Baixa-Chiado → Aeroporto Humberto Delgado** 📍 **LOCATION INFORMATION**\n**Aeroporto Humberto Delgado** 🚇 Nearest Metro: **Aeroporto** (🔴 Vermelha Line) ℹ️ Lisbon Airport 🚇 **METRO ROUTE**\n🔄 **Transfer Required** 💡 **Transfer at**: Alameda (🟢 ↔ 🔴) ⏱️ Estimated travel time: **~35 min** (15 stations + 1 transfer) **Full Route**: 1. 🟢 Board at **Baixa-Chiado** → Direction **Telheiras** 2. Exit at **Alameda** 3. 🔴 Transfer to **Red Line (S. Sebastião ↔ Aeroporto)** → Direction **Aeroporto** 4. Exit at **Aeroporto** **5.** Walk to Aeroporto Humberto Delgado 📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Updated:** 11:14",
+      "tools_used": [
+        "get_route_between_stations"
+      ],
+      "expected_tools": [
+        "get_route_between_stations"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_route_between_stations] returned:\n🗺️ **Route: Baixa-Chiado → Aeroporto Humberto Delgado**\n\n📍 **LOCATION INFORMATION**\n**Aeroporto Humberto Delgado**\n   🚇 Nearest Metro: **Aeroporto** (🔴 Vermelha Line)\n   ℹ️ Lisbon Airport\n\n🚇 **METRO ROUTE**\n🔄 **Transfer Required**\n\n   💡 **Transfer at**: Alameda (🟢 ↔ 🔴)\n   ⏱️ Estimated travel time: **~35 min** (15 stations + 1 transfer)\n\n   **Full Route**:\n   1. 🟢 Board at **Baixa-Chiado** → direção **Telheiras**\n   2. Exit at **Alameda**\n   3. 🔴 Transfer to **Red Line (S. Sebastião ↔ Aeroporto)** → direção **Aeroporto**\n   4. Exit at **Aeroporto**\n   5. Walk to Aeroporto Humberto Delgado\n\n\n📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) **| Atualizado:** 11:14\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CR01",
+      "domain": "researcher",
+      "language": "en",
+      "query": "Find attractions related to Jerónimos Monastery.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 18.315,
+      "error": null,
+      "error_type": null,
+      "response": "**1.** 🏛️ **Jerónimos Monastery** - ⭐ **4.5/5**\n- 📝 **Breve descrição**: Monumento manuelino do século XVI, classificado pela UNESCO, com igreja e claustros ricamente decorados que celebram a Era dos Descobrimentos.\n- 📍 **Morada**: Morada não disponível nos dados (ver site)\n- 🕒 **Horário**: Today: Closed (ver site para horários atualizados)\n- 💡 **Dica**: Combine a visita com os outros pontos de Belém — os claustros são especialmente fotogénicos; compre bilhetes antecipados nos períodos de maior afluência.\n- 🌐 **[Site Oficial](https://www.visitlisboa.com/en/places/jeronimos-monastery)**\n\n**2.** 🏛️ **Ask Me Lisboa | Belém - Jerónimos Monastery**\n- 📝 **Breve descrição**: Posto de informação turística localizado junto ao Mosteiro dos Jerónimos, útil para bilhetes, mapas e dicas locais.\n- 📍 **Morada**: Morada não disponível nos dados (ver site)\n- 🕒 **Horário**: Today: Closed\n- 💡 **Dica**: Passe antes de entrar no mosteiro para pedir mapas e confirmar horários de visita guiada.\n- 🌐 **[Mais detalhes](https://www.visitlisboa.com/en/places/ask-me-lisboa-belem-jeronimos-monastery)**\n\n**3.** 🏛️ **Monastery of Batalha**\n- 📝 **Breve descrição**: Outro notável mosteiro classificado pela UNESCO, exemplo importante da arquitetura gótica e manuelina em Portugal; frequentemente associado ao circuito de mosteiros nacionais.\n- 📍 **Morada**: Morada não disponível nos dados\n- 🕒 **Horário**: Consultar website\n- 💡 **Dica**: Fica fora de Lisboa mas faz parte do mesmo período histórico — bom para quem deseja ampliar a rota dos mosteiros portugueses.\n- 🌐 **[Mais detalhes](https://www.visitlisboa.com/en/places/monastery-of-batalha)**\n\n**4.** 🏛️ **Monastery of Odivelas – Convent of St. Dinis**\n- 📝 **Breve descrição**: Convento histórico nos arredores de Lisboa com importância patrimonial; ligado ao património monástico português.\n- 📍 **Morada**: Morada não disponível nos dados\n- 🕒 **Horário**: Consultar website\n- 💡 **Dica**: Adequado para quem procura exemplos menos visitados da tradição monástica portuguesa.\n- 🌐 **[Mais detalhes](https://www.visitlisboa.com/en/places/monastery-of-odivelas-convent-of-st-dinis)**\n\n**5.** 🏛️ **Convent of Arrábida**\n- 📝 **Breve descrição**: Convento situado na Serra da Arrábida, integrando património religioso e natural — uma extensão geográfica e temática do interesse por mosteiros conventuais.\n- 📍 **Morada**: Morada não disponível nos dados\n- 🕒 **Horário**: Consultar website\n- 💡 **Dica**: Combine com uma visita à serra para paisagens costeiras e trilhos.\n- 🌐 **[Mais detalhes](https://www.visitlisboa.com/en/places/convent-of-arrabida)**\n\n📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places)",
+      "tools_used": [
+        "search_places_attractions"
+      ],
+      "expected_tools": [
+        "search_places_attractions"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[search_places_attractions] returned:\n🏛️ **Found 5 Places/Attractions in Lisbon:**\n\n\n1. 🏛️ **Jerónimos Monastery**\n   📂 Category: Museums & Monuments\n   The Jerónimos Monastery was proclaimed a UNESCO World Heritage Site in 1983. This notable 16th century work of architecture became part of Portuguese identity and culture.\n   📍 Lisbon\n   🕐 Today: Closed\n   ⭐ TripAdvisor: 4.5/5 (33042 reviews)\n   📞 351213620034\n   🔗 https://www.visitlisboa.com/en/places/jeronimos-monastery\n\n2. 🏛️ **Monastery of Batalha**\n   📂 Category: Museums & Monuments\n   UNESCO’s World Heritage | The Monastery of Santa Maria da Vitória (Monastery of Batalha), was built after a vow made by King João I to thank the Virgin Mary for Portugal’s victory over Spain in the ba...\n   📍 Lisbon\n   ⭐ TripAdvisor: 4.7/5 (3168 reviews)\n   📞 +351 244765497\n   🔗 https://www.visitlisboa.com/en/places/monastery-of-batalha\n\n3. 🏛️ **Monastery of Odivelas – Convent of St. Dinis**\n   📂 Category: Monuments\n   Discover the impressive history of the monastery of Odivelas, or convent of São Dinis, a national monument right on the edges of Lisbon.\n   📍 Lisbon\n   ⭐ TripAdvisor: 4/5 (37 reviews)\n   🔗 https://www.visitlisboa.com/en/places/monastery-of-odivelas-convent-of-st-dinis\n\n4. 🏛️ **Ask Me Lisboa | Belém - Jerónimos Monastery**\n   📂 Category: Tourist Offices\n   Tourist Office\n   📍 Lisbon\n   🕐 Today: Closed\n   ⭐ TripAdvisor: 2.1/5 (41 reviews)\n   📞 351910517981\n   🔗 https://www.visitlisboa.com/en/places/ask-me-lisboa-belem-jeronimos-monastery\n\n5. 🏛️ **Convent of Arrábida**\n   📂 Category: Monuments\n   Discover a unique convent in an amazing place close to Lisbon. In the middle of the Serra da Arrábida Nature Park, this convent could be taken from a fairytale.\n   📍 Lisbon\n   ⭐ TripAdvisor: 4.7/5 (9 reviews)\n   🔗 https://www.visitlisboa.com/en/places/convent-of-arrabida\n\n\n📊 **Sources:** 5 from VisitLisboa, 0 from Lisboa Aberta\n💡 Try more specific queries for better results.",
+      "coverage_pass": true
+    },
+    {
+      "id": "CR02",
+      "domain": "researcher",
+      "language": "en",
+      "query": "Find cultural events in Lisbon this weekend.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 8.371,
+      "error": null,
+      "error_type": null,
+      "response": "**1.** 🎵 **Kysha Mine — \"Lance de Escola: Das Aulas ao Verão\"**\n- 📝 **Brief description**: A music performance aimed at family audiences where friends set off on a playful adventure to \"Saturn Camp\", blending song and storytelling.\n- 📍 **Address**: Rossio dos Olivais, Lisboa, 1990-231\n- 📅 **Date/Time**: **15 Mar 2026** (single-day event)\n- 💶 **Price**: **From €40**\n- 🌐 **[More details](https://www.visitlisboa.com/en/events/kysha-mine-lance-de-escola-das-aulas-ao-verao)**\n- 🎟️ **[Buy Tickets](https://www.bol.pt/Comprar/Bilhetes/166645-kysha_mine_lance_de_escola_das_aulas_ao_verao_uma_nova_diversao-meo_arena)**\n\n**2.** 🎭 **Ana, Carolina e Adelaide — \"Ainda Estamos Aqui\"**\n- 📝 **Brief description**: A theatrical piece about republican women and activists, focusing on Ana de Castro Osório and themes of women’s rights and history.\n- 📍 **Address**: Rua Alexandre Braga, 24 A, 1150-004, Lisboa\n- 📅 **Date/Time**: **12 Mar – 15 Mar 2026**\n- 💶 **Price**: **Paid** (check link for pricing)\n- 🌐 **[More details](https://www.visitlisboa.com/en/events/ana-carolina-e-adelaide-ainda-estamos-aqui)**\n- 🎟️ **[Buy Tickets](https://escolademulheres.bol.pt/Comprar/Bilhetes/172037-ana_carolina_e_adelaide_ainda_estamos_aqui-espaco_escola_de_mulheres/)**\n\n**3.** 🎪 **NAUTICAMPO (FIL)**\n- 📝 **Brief description**: International fair focused on recreational boating, adventure sports and outdoor activities — exhibitions, stands and demonstrations.\n- 📍 **Address**: Edifício FIL, Rua do Bojador, Parque das Nações, 1998-010, Lisboa\n- 📅 **Date/Time**: **11 Mar – 15 Mar 2026** (runs during the week including this weekend)\n- 💶 **Price**: **Paid** (varies by ticket type)\n- 🌐 **[More details](https://www.visitlisboa.com/en/events/nauticampo_)**\n- 🎟️ **[Buy Tickets](https://tickets.fil.pt)**\n\n**4.** 👗 **March Modalisboa — Lisboa Fashion Week**\n- 📝 **Brief description**: City-wide fashion week showcasing Portuguese designers, runway shows and events opening Lisbon to contemporary designer fashion.\n- 📍 **Address**: Rua do Comércio, ala poente, 1100-148, Lisboa\n- 📅 **Date/Time**: **12 Mar – 15 Mar 2026**\n- 💶 **Price**: **Reservation required / Paid** (check event pages for programme and access)\n- 🌐 **[More details](https://www.visitlisboa.com/en/events/march-modalisboa-lisboa-fashion-week)**\n\n**5.** 🎶 **Fado in Chiado**\n- 📝 **Brief description**: Traditional Lisbon fado performances in the historic Chiado district — ongoing long-running shows that present Portugal’s emblematic music style.\n- 📍 **Address**: Rua da Misericórdia 14, 1200-094, Lisboa\n- 📅 **Date/Time**: Shows on multiple dates including the weekend (check link for exact schedule)\n- 💶 **Price**: **Paid**\n- 🌐 **[More details](https://www.visitlisboa.com/en/events/fado-in-chiado)**\n- 🎟️ **[Buy Tickets](https://fareharbor.com/embeds/book/fadoinchiado/?full-items=yes&flow=323594)**\n\n📌 **Source:** [*VisitLisboa Events*](https://www.visitlisboa.com/en/events)",
+      "tools_used": [
+        "search_cultural_events"
+      ],
+      "expected_tools": [
+        "search_cultural_events"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[search_cultural_events] returned:\n🧭 **Filter used:** this weekend (2026-03-15 to 2026-03-16), all categories, theme focus: cultural events.\n📊 **Result count:** 11 confirmed-date event(s) match this filter.\n✨ **Highlights shown:** 5 most relevant result(s).\n\n1. 📅 **Kysha Mine Lance de Escola Das Aulas Ao Verao**\n   🗓️ **When:** 15 Mar\n   ⏱️ **Duration:** 🎯 Single day\n   📂 **Category:** Music\n   📝 **Description:** In “Lance Da Escola: From classes to summer, a new adventure,” the inseparable best friends embark on a trip to Saturn Camp, full of surprises.\n   📍 Rossio dos Olivais, Lisboa, 1990-231\n   💰 **Price:** From €40\n   🔗 https://www.visitlisboa.com/en/events/kysha-mine-lance-de-escola-das-aulas-ao-verao\n   🎟️ **Buy tickets:** https://www.bol.pt/Comprar/Bilhetes/166645-kysha_mine_lance_de_escola_das_aulas_ao_verao_uma_nova_diversao-meo_arena\n\n2. 📅 **Ana Carolina E Adelaide Ainda Estamos Aqui**\n   🗓️ **When:** 12 Mar to 15 Mar\n   ⏱️ **Duration:** 📅 About 1 week\n   📂 **Category:** Theater Opera & Dance\n   📝 **Description:** Ana, Carolina e Adelaide: ainda estamos aqui ( Ana, Carolina and Adelaide: we are still here ) is a theatrical performance about the republican women and women’s rights activists Ana de Castro Osório.\n   📍 Rua Alexandre Braga, 24 A, 1150-004, Lisboa\n   🔗 https://www.visitlisboa.com/en/events/ana-carolina-e-adelaide-ainda-estamos-aqui\n   🎟️ **Buy tickets:** https://escolademulheres.bol.pt/Comprar/Bilhetes/172037-ana_carolina_e_adelaide_ainda_estamos_aqui-espaco_escola_de_mulheres/\n\n3. 📅 **Nauticampo**\n   🗓️ **When:** 11 Mar to 15 Mar\n   ⏱️ **Duration:** 📅 About 1 week\n   📂 **Category:** Fairs\n   📝 **Description:** Visit NAUTICAMPO! FIL, International Fair of Lisbon – Portugal International Exhibition of Recreational Boating, Adventure Sports.\n   📍 Edifício FIL, Rua do Bojador, Parque das Nações, 1998-010, Lisboa\n   💰 **Price:** Paid\n   🔗 https://www.visitlisboa.com/en/events/nauticampo_\n   🎟️ **Buy tickets:** https://tickets.fil.pt\n\n4. 📅 **March Modalisboa Lisboa Fashion Week**\n   🗓️ **When:** 12 Mar to 15 Mar\n   ⏱️ **Duration:** 📅 About 1 week\n   📂 **Category:** Main Events\n   📝 **Description:** Reservation required Between 12 and 15 March, MODALISBOA PEBBLING presented by OMODA & JAECOO, co organised with The Municipality of Lisboa, develops a programme designed to open the city to Designer Fashion.\n   📍 Rua do Comércio ala poente, 1100-148, Lisboa\n   🔗 https://www.visitlisboa.com/en/events/march-modalisboa-lisboa-fashion-week\n\n5. 📅 **Fado In Chiado**\n   🗓️ **When:** 16 Mar | 14 Mar | 17 Mar | (+299 more dates)\n   ⏱️ **Duration:** 🏛️ Long-running (353 days)\n   📂 **Category:** Music\n   📝 **Description:** Fado is Portuguese and was born in Lisbon. It was adopted by Portuguese culture and is now a symbol of Portugal, with a strong tradition in the historic districts of Lisbon.\n   📍 Rua da Misericórdia 14,, 1200-094, Lisboa\n   💰 **Price:** Paid\n   🔗 https://www.visitlisboa.com/en/events/fado-in-chiado\n   🎟️ **Buy tickets:** https://fareharbor.com/embeds/book/fadoinchiado/?full-items=yes&flow=323594\n\n💡 This list shows 5 highlights. Narrow the search by category, area, or date for a tighter selection.\n⚠️ **Source completeness note:** 31 additional matching record(s) were excluded because the source does not confirm their dates yet.",
+      "coverage_pass": true
+    },
+    {
+      "id": "CR03",
+      "domain": "researcher",
+      "language": "en",
+      "query": "List the available VisitLisboa event categories.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 2.976,
+      "error": null,
+      "error_type": null,
+      "response": "**1.** 🎵 **Music** - **49 events**\n\n**2.** 🖼️ **Exhibitions** - **43 events**\n\n**3.** 🌟 **Main Events** - **29 events**\n\n**4.** 🛍️ **Fairs** - **27 events**\n\n**5.** 🎪 **Festivals** - **15 events**\n\n**6.** 🔎 **Others** - **14 events**\n\n**7.** 🎭 **Theater, Opera & Dance** - **10 events**\n\n**8.** ⚽ **Sports** - **10 events**\n\n**9.** 🎬 **Cinema** - **4 events**\n\n**10.** ❓ **Uncategorized** - **2 events**\n\n📌 **Source:** [*VisitLisboa Events*](https://www.visitlisboa.com/en/events)",
+      "tools_used": [
+        "get_event_categories"
+      ],
+      "expected_tools": [
+        "get_event_categories"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_event_categories] returned:\n🎭 **Event Categories in Lisbon:**\n\n  • Music: 49 events\n  • Exhibitions: 43 events\n  • Main Events: 29 events\n  • Fairs: 27 events\n  • Festivals: 15 events\n  • Others: 14 events\n  • Theater Opera & Dance: 10 events\n  • Sports: 10 events\n  • Cinema: 4 events\n  • Uncategorized: 2 events\n\n📊 **Total events:** 203\n\n💡 Podes perguntar-me sobre um tipo de evento específico para pesquisa detalhada.",
+      "coverage_pass": true
+    },
+    {
+      "id": "CR04",
+      "domain": "researcher",
+      "language": "en",
+      "query": "List the available VisitLisboa place categories.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 12.152,
+      "error": null,
+      "error_type": null,
+      "response": "**1.** 🏛️ **Hotel**\n- 📝 **Breve descrição**: Categoria para hotéis registados em Lisboa.\n- 📍 **Morada**: Consultar individualmente\n- 🕒 **Horário**: Consultar website\n- 💡 **Dica**: Útil para procurar alojamento central.\n- 🌐 **[Site Oficial](https://www.visitlisboa.com/)**\n\n**2.** 🏛️ **Uncategorized**\n- 📝 **Breve descrição**: Locais que ainda não foram classificados numa categoria específica.\n- 📍 **Morada**: Morada não disponível nos dados\n- 🕒 **Horário**: Consultar website\n- 💡 **Dica**: Pode incluir locais novos ou itens com categorização pendente.\n\n**3.** 🏛️ **Restaurant**\n- 📝 **Breve descrição**: Restaurantes e espaços de restauração em Lisboa.\n- 📍 **Morada**: Consultar individualmente\n- 🕒 **Horário**: Consultar website\n- 💡 **Dica**: Para pesquisa de restaurantes recomendo também TheFork.pt ou Zomato.pt\n- 🌐 **[Site Oficial](https://www.visitlisboa.com/)**\n\n**4.** 🏛️ **Tours**\n- 📝 **Breve descrição**: Empresas e serviços que oferecem passeios turísticos guiados.\n- 📍 **Morada**: Consultar individualmente\n- 🕒 **Horário**: Consultar website\n- 💡 **Dica**: Ideal para reservar visitas guiadas ou experiências locais.\n\n**5.** 🏛️ **Museums**\n- 📝 **Breve descrição**: Museus de várias áreas temáticas na cidade.\n- 📍 **Morada**: Consultar individualmente\n- 🕒 **Horário**: Consultar website\n- 💡 **Dica**: Para exposições temporárias ver secção de eventos.\n\n**6.** 🏛️ **Monuments**\n- 📝 **Breve descrição**: Monumentos históricos e pontos de interesse arquitetónico.\n- 📍 **Morada**: Consultar individualmente\n- 🕒 **Horário**: Consultar website\n- 💡 **Dica**: Inclui pontos como torres, igrejas e praças.\n\n**7.** 🏛️ **Museums & Monuments**\n- 📝 **Breve descrição**: Categoria combinada para museus que são também monumentos ou para agrupar ambos os tipos.\n- 📍 **Morada**: Consultar individualmente\n- 🕒 **Horário**: Consultar website\n\n**8.** 🏛️ **Apartments & Hotel Apartments**\n- 📝 **Breve descrição**: Apartamentos turísticos e aparthotéis para estadias independentes.\n- 📍 **Morada**: Consultar individualmente\n\n**9.** 🏛️ **DMCS & PCOS**\n- 📝 **Breve descrição**: Acrónimo interno para certos tipos de alojamento/entidades (dados administrativos).\n- 📍 **Morada**: Morada não disponível nos dados\n- 💡 **Dica**: Categoria técnica usada no catálogo.\n\n**10.** 🏛️ **Shopping**\n- 📝 **Breve descrição**: Centros comerciais, lojas e áreas de compras.\n- 📍 **Morada**: Consultar individualmente\n\n**11.** 🏛️ **Tourist Offices**\n- 📝 **Breve descrição**: Postos de informação turística oficiais em Lisboa.\n- 📍 **Morada**: Consultar individualmente\n- 💡 **Dica**: Úteis para mapas, bilhetes e informação local.\n\n**12.** 🏛️ **Nature**\n- 📝 **Breve descrição**: Espaços naturais e áreas verdes dentro ou perto da cidade.\n- 📍 **Morada**: Consultar individualmente\n\n**13.** 🏛️ **View Points**\n- 📝 **Breve descrição**: Miradouros e pontos com vistas panorâmicas sobre Lisboa.\n- 📍 **Morada**: Consultar individualmente\n- 💡 **Dica**: Leve calçado confortável — muitos miradouros exigem subidas.\n\n**14.** 🏛️ **Tejo Cruises**\n- 📝 **Breve descrição**: Passeios e cruzeiros no rio Tejo.\n- 📍 **Morada**: Consultar operadores individualmente\n\n**15.** 🏛️ **Local & Rural Accommodation**\n- 📝 **Breve descrição**: Alojamento de cariz local ou rural disponível na região metropolitana.\n- 📍 **Morada**: Consultar individualmente\n\n**16.** 🏛️ **Attractions**\n- 📝 **Breve descrição**: Atrações turísticas diversas que não se encaixam noutras categorias.\n- 📍 **Morada**: Consultar individualmente\n\n**17.** 🏛️ **Guest Houses**\n- 📝 **Breve descrição**: Pensões e guest houses para estadias pequenas e típicas.\n- 📍 **Morada**: Consultar individualmente\n\n**18.** 🏛️ **18 Holes**\n- 📝 **Breve descrição**: Campos de golfe de 18 buracos nas proximidades de Lisboa.\n- 📍 **Morada**: Consultar individualmente\n\n**19.** 🏛️ **Only in Lisbon**\n- 📝 **Breve descrição**: Locais ou experiências exclusivas da cidade de Lisboa.\n- 📍 **Morada**: Consultar individualmente\n\n**20.** 🏛️ **Cultural Centres**\n- 📝 **Breve descrição**: Centros culturais com programação variada (exposições, música, teatro).\n- 📍 **Morada**: Consultar individualmente\n\n📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places)",
+      "tools_used": [
+        "get_place_categories"
+      ],
+      "expected_tools": [
+        "get_place_categories"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_place_categories] returned:\n🏛️ **Place Categories in Lisbon:**\n\n  • Hotel: 225 places\n  • Uncategorized: 171 places\n  • Restaurant: 113 places\n  • Tours: 101 places\n  • Museums: 69 places\n  • Monuments: 61 places\n  • Museums & Monuments: 46 places\n  • Apartments & Hotel Apartments: 32 places\n  • DMCS & PCOS: 32 places\n  • Shopping: 30 places\n  • Tourist Offices: 27 places\n  • Nature: 21 places\n  • View Points: 20 places\n  • Tejo Cruises: 16 places\n  • Local & Rural Accommodation: 16 places\n  • Attractions: 13 places\n  • Guest Houses: 12 places\n  • 18 Holes: 12 places\n  • Only in Lisbon: 11 places\n  • Cultural Centres: 9 places\n  ... and 30 more categories\n\n📊 **Total places:** 1147\n\n💡 Podes perguntar-me sobre um tipo de local específico para pesquisa detalhada.",
+      "coverage_pass": true
+    },
+    {
+      "id": "CR05",
+      "domain": "researcher",
+      "language": "en",
+      "query": "Search the Lisbon knowledge base for Lisboa Card.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 4.537,
+      "error": null,
+      "error_type": null,
+      "response": "**1.** 🪪 **Lisboa Card**\n- 📝 **Breve descrição**: O **Lisboa Card** é um cartão contactless, pessoal e intransmissível que oferece transporte público gratuito (ou com desconto) e entrada gratuita ou com descontos em múltiplos museus e monumentos de Lisboa. Deve ser preenchido com a data e hora do primeiro uso, assinado e validado numa forma de transporte público.\n- 📍 **Morada / Contactos**: Rua do Arsenal, n.º 7, **1100-038 Lisboa**; **Tel:** 210 312 800; **Email:** lisboacard@lismarketing.pt\n- 📅 **Validade / Uso**: Válido a partir da data/hora assinalada no cartão; períodos típicos incluem 24h, 48h e 72h (verificar opções atualizadas).\n- 💶 **Preço**: Não disponível nos dados retornados — consultar site oficial para preços e tipos.\n- 🌐 **[Mais detalhes / Onde comprar](https://www.visitlisboa.com)**\n- 🎟️ **[Pontos de venda e informação detalhada](https://www.visitlisboa.com)**\n\n📌 **Fonte:** [*VisitLisboa*] (https://www.visitlisboa.com)",
+      "tools_used": [
+        "search_lisbon_knowledge"
+      ],
+      "expected_tools": [
+        "search_lisbon_knowledge"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[search_lisbon_knowledge] returned:\n🔍 **Lisbon Knowledge Search Results:**\n\nQuery: \"Lisboa Card\"\n\n\n📚 **From Lisboa Card Guide:**\n   • 3\n210 312 800\nlisboacard@lismarketing.pt\nHow to use/ Instrucciones de uso\nThe Lisboa Card is a \ncontactless, personal and \nnon-transferable card \nthat is valid once you have \nfilled in the date and time \nof first use, signed it and \nvalidated it on a form of \npublic transport.\nThe Lisboa Card Guide ...\n   • 2\nForeword / Introducción\nRua do Arsenal, n. o 7, 1100-038 Lisboa \nwww.visitlisboa.com\nThe Lisboa Card is a \nTurismo de Lisboa product \nmanaged by Lismarke -\nting in collaboration with \nMuseus e Monumentos de \nPortugal, CARRIS, Me -\ntropolitano de Lisboa, CP, \nFertagus and the entities \nthat offer d...\n   • Lisboa Shop (Centro Tejo) \nand Mitos e Lendas de \nSintra;\n• Through the Turismo de \nLisboa website:\nwww.visitlisboa.com;\n• Through online platforms \nand Tourism Operators;\n• At authorised retailers \nand partners of Turismo \nde Lisboa.\nLa Lisboa Card es un \nproducto de Turismo de \nLisboa gestionado p...\n\n\n📊 **Total results:** 5",
+      "coverage_pass": true
+    },
+    {
+      "id": "CROD01",
+      "domain": "researcher",
+      "language": "pt",
+      "query": "Encontra farmácias perto do Rossio.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 11.751,
+      "error": null,
+      "error_type": null,
+      "response": "**1.** 🏥 **Farmácia Homeopática de Santa Justa**\n- 📝 **Breve descrição**: Farmácia próxima ao elevador de Santa Justa, com enfoque em produtos homeopáticos e medicamentos convencionais.\n- 📍 **Morada**: Rua de Santa Justa, 8\n- 🕒 **Horário**: Morada disponível nos dados; horário não disponível — consultar no local ou website\n- 💡 **Dica**: Muito perto da estação do Rossio — ideal para compras rápidas.\n- 🌐 **[Morada geo (coords)](https://www.google.com/maps/search/?api=1&query=38.712793,-9.136991)**\n\n**2.** 🏥 **Farmácia Azevedo, Filhos (Farmácia Azevedos)**\n- 📝 **Breve descrição**: Farmácia tradicional situada na Praça D. Pedro IV (Rossio), conveniente para quem está na zona central.\n- 📍 **Morada**: Praça D. Pedro IV, 31\n- 🕒 **Horário**: Horário não disponível nos dados — consultar no local\n- 💡 **Dica**: Diretamente na praça do Rossio, fácil de encontrar.\n- 🌐 **[Morada geo (coords)](https://www.google.com/maps/search/?api=1&query=38.713352,-9.139769)**\n\n**3.** 🏥 **Farmácia Normal**\n- 📝 **Breve descrição**: Farmácia próxima ao Rossio, serviço habitual de dispensação de medicamentos e produtos de saúde.\n- 📍 **Morada**: Rua da Prata, 220\n- 🕒 **Horário**: Horário não disponível nos dados — consultar no local\n- 💡 **Dica**: Boa opção se vem pela Rua da Prata / Baixa.\n- 🌐 **[Morada geo (coords)](https://www.google.com/maps/search/?api=1&query=38.712268,-9.137344)**\n\n**4.** 🏥 **Farmácia Barral**\n- 📝 **Breve descrição**: Farmácia na movimentada Rua Augusta, perto do Rossio e da Baixa Pombalina.\n- 📍 **Morada**: Rua Augusta, 225\n- 🕒 **Horário**: Horário não disponível nos dados — consultar no local\n- 💡 **Dica**: Situa-se numa das ruas comerciais principais — útil para quem faz compras na Baixa.\n- 🌐 **[Morada geo (coords)](https://www.google.com/maps/search/?api=1&query=38.711960,-9.138290)**\n\n**5.** 🏥 **Farmácia Internacional**\n- 📝 **Breve descrição**: Farmácia localizada na Rua Áurea, perto do Rossio, com fácil acesso a turistas e moradores.\n- 📍 **Morada**: Rua Áurea, 228-230\n- 🕒 **Horário**: Horário não disponível nos dados — consultar no local\n- 💡 **Dica**: Próxima da confluência entre Rua Augusta e Rossio; conveniente para quem passeia pela zona.\n- 🌐 **[Morada geo (coords)](https://www.google.com/maps/search/?api=1&query=38.711836,-9.138914)**\n\n📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais)",
+      "tools_used": [
+        "find_nearby_services"
+      ],
+      "expected_tools": [
+        "find_nearby_services"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[find_nearby_services] returned:\n📍 Found 5 results from 'Farmácias e Parafarmácias (near Rossio)':\n\n1. Farmácia Homeopática de Santa Justa\n   📍 Rua de Santa Justa, 8\n   📏 0.16 km away\n   🗺️ (38.712793, -9.136991)\n\n2. Farmácia Azevedo, Filhos (Farmácia Azevedos)\n   📍 Praça D. Pedro IV, 31\n   📏 0.18 km away\n   🗺️ (38.713352, -9.139769)\n\n3. Farmácia Normal\n   📍 Rua da Prata, 220\n   📏 0.20 km away\n   🗺️ (38.712268, -9.137344)\n\n4. Farmácia Barral\n   📍 Rua Augusta, 225\n   📏 0.23 km away\n   🗺️ (38.711960, -9.138290)\n\n5. Farmácia Internacional\n   📍 Rua Áurea, 228-230\n   📏 0.26 km away\n   🗺️ (38.711836, -9.138914)\n\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CROD02",
+      "domain": "researcher",
+      "language": "en",
+      "query": "List available Lisboa Aberta service datasets.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 8.727,
+      "error": null,
+      "error_type": null,
+      "response": "**1.** 🗂️ **Lisboa. Pontos de encontro - Emergência**\n- 📝 **Brief description**: Map service indicating civil protection meeting points across Lisbon.\n- 📍 **Address / Source ID**: Dataset available in the Lisboa Aberta catalogue.\n- 💡 **Tip**: Useful for emergency planning and public safety mapping.\n- 🌐 **[Dataset Details](https://dados.cm-lisboa.pt/)**\n\n**2.** 🗂️ **Zonas de Emissões Reduzidas**\n- 📝 **Brief description**: Map service showing Low Emission Zones and related transport interfaces in Lisbon.\n- 📍 **Address / Source ID**: Dataset available in the Lisboa Aberta catalogue.\n- 💡 **Tip**: Relevant for drivers and urban mobility analyses.\n- 🌐 **[Dataset Details](https://dados.cm-lisboa.pt/)**\n\n**3.** 🗂️ **Rede Ferroviária Subterrânea**\n- 📝 **Brief description**: Basemap service for Lisbon’s underground rail network.\n- 📍 **Address / Source ID**: Dataset available in the Lisboa Aberta catalogue.\n- 💡 **Tip**: Useful for transport planning and mapping apps.\n- 🌐 **[Dataset Details](https://dados.cm-lisboa.pt/)**\n\n**4.** 🗂️ **Rede LoRa**\n- 📝 **Brief description**: Geographical locations of LoRa gateways that are part of the city’s IoT infrastructure.\n- 📍 **Address / Source ID**: Dataset available in the Lisboa Aberta catalogue.\n- 💡 **Tip**: Useful for IoT deployment and network coverage studies.\n- 🌐 **[Dataset Details](https://dados.cm-lisboa.pt/)**\n\n**5.** 🗂️ **Sítios de interesse público (Arqueologia)**\n- 📝 **Brief description**: Dataset of archaeological sites and public interest locations in Lisbon.\n- 📍 **Address / Source ID**: Dataset available in the Lisboa Aberta catalogue.\n- 💡 **Tip**: Good for heritage research and cultural mapping.\n- 🌐 **[Dataset Details](https://dados.cm-lisboa.pt/)**\n\n**6.** 🗂️ **Depósito Coletivo de Resíduos Alimentares**\n- 📝 **Brief description**: Locations of collective food waste deposit points in Lisbon.\n- 📍 **Address / Source ID**: Dataset available in the Lisboa Aberta catalogue.\n- 💡 **Tip**: Useful for circular economy and waste management projects.\n- 🌐 **[Dataset Details](https://dados.cm-lisboa.pt/)**\n\n**7.** 🗂️ **Escolas Públicas - 3º Ciclo e Secundário**\n- 📝 **Brief description**: Public middle and secondary schools dataset for Lisbon.\n- 📍 **Address / Source ID**: Dataset available in the Lisboa Aberta catalogue.\n- 💡 **Tip**: Use for education planning or proximity searches.\n- 🌐 **[Dataset Details](https://dados.cm-lisboa.pt/)**\n\n**8.** 🗂️ **Centros Desportivos**\n- 📝 **Brief description**: Locations and data for sports centres across Lisbon.\n- 📍 **Address / Source ID**: Dataset available in the Lisboa Aberta catalogue.\n- 💡 **Tip**: Helpful for leisure, sports programming and facility management.\n- 🌐 **[Dataset Details](https://dados.cm-lisboa.pt/)**\n\n**9.** 🗂️ **Interface Fluvial**\n- 📝 **Brief description**: Locations of main river transport stations (ferry/river interfaces) in Lisbon.\n- 📍 **Address / Source ID**: Dataset available in the Lisboa Aberta catalogue.\n- 💡 **Tip**: Useful for multimodal transport planning.\n- 🌐 **[Dataset Details](https://dados.cm-lisboa.pt/)**\n\n**10.** 🗂️ **Pilhões**\n- 📝 **Brief description**: Map service locating bollards installed in Lisbon public space.\n- 📍 **Address / Source ID**: Dataset available in the Lisboa Aberta catalogue.\n- 💡 **Tip**: Useful for urban furniture and accessibility studies.\n- 🌐 **[Dataset Details](https://dados.cm-lisboa.pt/)**\n\n📌 **Source:** [*Lisboa Aberta Datasets*](https://dados.cm-lisboa.pt/)\n\n(There are 168 datasets in total. If you want a filtered list by category—e.g., saúde, educação, transportes, cultura—or more details for specific dataset entries, tell me which category or dataset name and I’ll filter the catalogue.)",
+      "tools_used": [
+        "list_available_datasets"
+      ],
+      "expected_tools": [
+        "list_available_datasets"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[list_available_datasets] returned:\n📂 Available Datasets (168 total):\n\n1. Lisboa. Pontos de encontro - Emergência.\n   Serviço de mapa com indicação da localização de proteção civil e na Cidade de Lisboa. (PMEPC_PE_PT).\n\n2. Zonas de Emissões Reduzidas\n   Serviço de mapa com indicação das principais estações de transportes, interfaces fluviais, elevadore...\n\n3. Rede Ferroviária Subterrânea\n   Serviço de cartografia base. Lisbon Basemap.\n\n4. Rede LoRa\n   Serviço de mapas com a localização geográfica de vários gateways que integram a infraestrutura da re...\n\n5. Sitios de interesse público\n   Conjunto de dados relativos a \"Sítios de interesse público\" - escavações arqueológicas.\n\n6. Depósito Coletivo de Resíduos Alimentares\n   Localização dos pontos de deposição coletiva de resíduos alimentares em Lisboa.\n\n7. Escolas Públicas - 3º Ciclo e Secundário\n   Conjunto de dados referentes a \"Escolas Públicas do 3º Ciclo e Secundário\" em Lisboa. Dataset of \"Pu...\n\n8. Centros Desportivos\n   Serviço de mapa com a localização e dados referentes a Centros Desportivos | Map service with the lo...\n\n9. Interface Fluvial\n   Localização das principais estações de transportes fluviais de Lisboa. Location of Lisbon's main riv...\n\n10. Pilhões\n   Serviço de mapa com a localização dos Pilhões em Lisboa\n\n11. Papeleiras\n   Serviço de mapa com a localização das Papeleiras em Lisboa\n\n12. Estacionamento de velocípedes do formato HotSpot, com ou sem suportes\n   Localização das zonas de estacionamento dedicadas a velocípedes com formato do tipo HotSpot (com esp...\n\n13. Estacionamento para velocípedes\n   Localização das zonas de estacionamento dedicadas a velocípedes, quer seja de curto, médio como long...\n\n14. Associações Culturais\n   Conjunto de dados com a localização de Associações Culturais, em Lisboa. Map service providing data ...\n\n15. Fundações Culturais\n   Conjunto de dados com a localização de Fundações, em Lisboa, com actividade predominantemente Cultur...\n\n16. Parques Caninos\n   Identifica a localização espacial dos parques caninos.\n\n17. Topónimos Ibero-Americanos\n   Identificação das ruas de Lisboa com topónimos ibero-Americanos, incluindo informação sobre cada top...\n\n18. Casas Regionais\n   Conjunto de dados com a localização de Casas Regionais em Lisboa. Map service providing data concern...\n\n19. Intervenções Arqueológicas da CML\n   Conjunto de dados georreferenciados, com aplicação urbanística e histórica, decorrentes das interven...\n\n20. Residências Artísticas\n   Conjunto de dados com a localização de Residências Artísticas em Lisboa.\n\n... and 148 more datasets.\n💡 Filtra por categoria para resultados mais específicos.",
+      "coverage_pass": true
+    },
+    {
+      "id": "CROD03",
+      "domain": "researcher",
+      "language": "en",
+      "query": "Show dataset details for farmacias.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 2.66,
+      "error": null,
+      "error_type": null,
+      "response": "**I couldn't find a dataset named \"farmacias\".**\n\n- It appears there is no dataset with the exact name \"farmacias\" in the available catalogue.\n- Try alternative dataset names or keywords such as **\"farmácias\"** (with accent), **\"pharmacies\"**, **\"saúde\"**, or broader terms like **\"serviços de saúde\"**.\n\nIf you'd like, I can:\n- Search the catalogue for related datasets (e.g., by keyword \"farmácias\" or category \"saúde\"), or\n- List available service categories so you can pick one.\n\nWhich would you prefer?\n\n📌 **Source:** [*Lisboa Aberta datasets*]",
+      "tools_used": [
+        "get_dataset_details"
+      ],
+      "expected_tools": [
+        "get_dataset_details"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[get_dataset_details] returned:\n❌ No dataset found matching: 'farmacias'",
+      "coverage_pass": true
+    },
+    {
+      "id": "CROD04",
+      "domain": "researcher",
+      "language": "en",
+      "query": "Search open datasets for Fernando Pessoa.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 3.182,
+      "error": null,
+      "error_type": null,
+      "response": "Não foram encontrados resultados para **Fernando Pessoa** nos conjuntos de dados abertos pesquisados.  \n\n📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais)",
+      "tools_used": [
+        "find_place_in_datasets"
+      ],
+      "expected_tools": [
+        "find_place_in_datasets"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[find_place_in_datasets] returned:\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CROD05",
+      "domain": "researcher",
+      "language": "en",
+      "query": "List the available service categories from Lisboa Aberta.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 6.896,
+      "error": null,
+      "error_type": null,
+      "response": "**1.** 🏥 **Saúde**\n- 📝 **Breve descrição**: Datasets sobre hospitais, farmácias, centros de saúde e clínicas na cidade.\n- 📍 **Exemplos de conteúdos**: localização de urgências, contactos (quando disponíveis), horários (quando disponíveis).\n- 🌐 **[Ver mais detalhes nos datasets]**\n\n**2.** 🎓 **Educação**\n- 📝 **Breve descrição**: Informação sobre escolas, universidades, institutos e creches do município.\n- 📍 **Exemplos de conteúdos**: moradas das escolas, tipologia (escola básica/secundária), agrupamentos.\n- 🌐 **[Ver mais detalhes nos datasets]**\n\n**3.** 🚔 **Segurança**\n- 📝 **Breve descrição**: Dados relativos a forças de segurança, bombeiros e proteção civil.\n- 📍 **Exemplos de conteúdos**: localizações de esquadras, quartéis de bombeiros, pontos de apoio em emergências.\n- 🌐 **[Ver mais detalhes nos datasets]**\n\n**4.** 🏛️ **Cultura**\n- 📝 **Breve descrição**: Museus, bibliotecas, teatros, cinemas e monumentos.\n- 📍 **Exemplos de conteúdos**: moradas, descrições e eventos relacionados (quando disponíveis).\n- 🌐 **[Ver mais detalhes nos datasets]**\n\n**5.** 🌳 **Ambiente**\n- 📝 **Breve descrição**: Informação sobre jardins, parques, espaços verdes e pontos de recolha/reciclagem.\n- 📍 **Exemplos de conteúdos**: localização de jardins, áreas verdes e infraestruturas ambientais.\n- 🌐 **[Ver mais detalhes nos datasets]**\n\n**6.** 🚇 **Transportes**\n- 📝 **Breve descrição**: Dados sobre mobilidade urbana, estacionamento, bicicletas partilhadas e infraestruturas de transporte.\n- 📍 **Exemplos de conteúdos**: localizações de parques de estacionamento, estações e pontos de mobilidade.\n- 🌐 **[Ver mais detalhes nos datasets]**\n\n**7.** 🏨 **Turismo**\n- 📝 **Breve descrição**: Informação sobre hotéis, alojamento, miradouros e postos de turismo.\n- 📍 **Exemplos de conteúdos**: moradas e categorias de alojamento turístico.\n- 🌐 **[Ver mais detalhes nos datasets]**\n\n**8.** 🛒 **Comércio**\n- 📝 **Breve descrição**: Mercados, feiras, centros comerciais e lojas.\n- 📍 **Exemplos de conteúdos**: localização de mercados municipais e feiras regulares.\n- 🌐 **[Ver mais detalhes nos datasets]**\n\n**9.** 🏢 **Serviços**\n- 📝 **Breve descrição**: Serviços públicos como juntas de freguesia, Câmara Municipal, embaixadas e WC públicos.\n- 📍 **Exemplos de conteúdos**: moradas e tipos de serviços municipais.\n- 🌐 **[Ver mais detalhes nos datasets]**\n\n**10.** ⚽ **Desporto**\n- 📝 **Breve descrição**: Instalações desportivas, piscinas e espaços para atividade física ao ar livre.\n- 📍 **Exemplos de conteúdos**: localizações de pavilhões, campos e piscinas municipais.\n- 🌐 **[Ver mais detalhes nos datasets]**\n\n📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places)",
+      "tools_used": [
+        "list_service_categories"
+      ],
+      "expected_tools": [
+        "list_service_categories"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[list_service_categories] returned:\n📂 **Categorias de Serviços Disponíveis (Lisboa Aberta)**\n=======================================================\n\n🏥 **Saúde** (Health) - 12 datasets\n   Hospitais, farmácias, centros de saúde, clínicas\n\n🎓 **Educação** (Education) - 60 datasets\n   Escolas, universidades, institutos, creches\n\n🚔 **Segurança** (Safety & Emergency) - 6 datasets\n   Polícia, bombeiros, proteção civil, emergências\n\n🏛️ **Cultura** (Culture & Heritage) - 20 datasets\n   Museus, bibliotecas, teatros, cinemas, monumentos\n\n🌳 **Ambiente** (Environment & Green Spaces) - 11 datasets\n   Jardins, parques, espaços verdes, reciclagem\n\n🚇 **Transportes** (Transport & Mobility) - 8 datasets\n   Estacionamento, bicicletas, mobilidade urbana\n\n🏨 **Turismo** (Tourism & Accommodation) - 3 datasets\n   Hotéis, alojamento, miradouros, postos de turismo\n\n🛒 **Comércio** (Commerce & Markets) - 5 datasets\n   Mercados, feiras, centros comerciais, lojas\n\n🏢 **Serviços** (Public Services) - 8 datasets\n   Juntas de freguesia, câmara municipal, embaixadas, WC públicos\n\n⚽ **Desporto** (Sports & Leisure) - 5 datasets\n   Instalações desportivas, piscinas, fitness ao ar livre\n\n💡 Podes perguntar por uma categoria específica para resultados mais detalhados.\n📊 Total: 168 datasets available.\n",
+      "coverage_pass": true
+    },
+    {
+      "id": "CRW01",
+      "domain": "researcher",
+      "language": "en",
+      "query": "Search the web for the history of Castelo de São Jorge.",
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 1
+      },
+      "latency_s": 6.69,
+      "error": null,
+      "error_type": null,
+      "response": "I detected English — here is a concise web-based history of Castelo de São Jorge.\n\n- Human occupation of the castle hill dates back to at least the 8th century BC.  \n- The oldest fortifications on the site originate around the 2nd century BC, and the hill was successively fortified/occupied by Phoenicians, Carthaginians, Romans and Moors.  \n- Under Muslim rule the site formed part of the defensive system of al-Ushbuna (Lisbon).  \n- In 1147 the hill and its fortress were captured by Afonso I of Portugal (with help from Northern European crusaders) during the Siege of Lisbon; the castle then became a royal palace.  \n- Over the medieval and early modern periods the castle served multiple roles: royal residence, military barracks and, at one point, housing the Torre do Tombo (the national archives).  \n- The 1755 Lisbon earthquake caused substantial damage to the castle; later restoration and archaeological work in the 20th century recovered and conserved many structures.  \n- Today Castelo de São Jorge is a national monument and museum offering archaeological remains, restored battlements and panoramic views over Lisbon.\n\n📌 Source: [*Wikipedia – São Jorge Castle*](https://en.wikipedia.org/wiki/S%C3%A3o_Jorge_Castle)",
+      "tools_used": [
+        "search_history_culture"
+      ],
+      "expected_tools": [
+        "search_history_culture"
+      ],
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "retrieved_context": "[search_history_culture] returned:\n📚 **Wikipédia: São Jorge Castle**\n🔗 URL: https://en.wikipedia.org/wiki/S%C3%A3o_Jorge_Castle\n\nSão Jorge Castle (Portuguese: Castelo de São Jorge; Portuguese pronunciation: [kɐʃˈtɛlu dɨ sɐ̃w̃ ˈʒɔɾʒɨ]), sometimes known in English as Saint George's Castle, is a historic castle in the Portuguese capital of Lisbon, located in the freguesia of Santa Maria Maior. Human occupation of the castle hill dates to at least the 8th century BC while the oldest fortifications on the site date from the 2nd century BC. The hill on which Saint George's Castle stands has played an important part in the history of Lisbon, having served as the location of fortifications occupied successively by Phoenicians, Carthaginians, Romans, and Moors, before its conquest by the Portuguese in the 1147 Siege of Lisbon. Since the 12th century, the castle has variously served as a royal palace, a military barracks, home of the Torre do Tombo National Archive, and now as a national monument and museum.\n",
+      "coverage_pass": true
+    }
+  ]
+}

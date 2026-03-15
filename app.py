@@ -14,6 +14,7 @@ for _ls_logger_name in ("langsmith.client", "langsmith.utils", "langsmith"):
     logging.getLogger(_ls_logger_name).setLevel(logging.ERROR)
 
 import base64
+import html
 import os
 import re
 import sys
@@ -283,6 +284,85 @@ def md_to_html(text: str) -> str:
     return re.sub(r"\*\*(.*?)\*\*", r"<strong>\1</strong>", text)
 
 
+def rich_text_to_html(text: str) -> str:
+    """Convert simple translation markdown blocks into safe HTML for `st.html()` sections."""
+    if not text:
+        return ""
+
+    blocks: list[str] = []
+    list_items: list[str] = []
+    list_tag: Optional[str] = None
+
+    def flush_list() -> None:
+        nonlocal list_items, list_tag
+        if not list_items or not list_tag:
+            return
+        items_html = "".join(f"<li>{item}</li>" for item in list_items)
+        blocks.append(f"<{list_tag}>{items_html}</{list_tag}>")
+        list_items = []
+        list_tag = None
+
+    for raw_line in text.strip().splitlines():
+        line = raw_line.strip()
+        if not line:
+            flush_list()
+            continue
+
+        ordered_match = re.match(r"^\d+\.\s+(.*)$", line)
+        unordered_match = re.match(r"^-\s+(.*)$", line)
+
+        if ordered_match:
+            content = md_to_html(html.escape(ordered_match.group(1).strip()))
+            if list_tag != "ol":
+                flush_list()
+                list_tag = "ol"
+            list_items.append(content)
+            continue
+
+        if unordered_match:
+            content = md_to_html(html.escape(unordered_match.group(1).strip()))
+            if list_tag != "ul":
+                flush_list()
+                list_tag = "ul"
+            list_items.append(content)
+            continue
+
+        flush_list()
+        blocks.append(f"<p>{md_to_html(html.escape(line))}</p>")
+
+    flush_list()
+    return "".join(blocks)
+
+
+def render_html_block(content: str) -> None:
+    """Render raw HTML reliably, preferring `st.html()` when available."""
+    if hasattr(st, "html"):
+        st.html(content)
+        return
+    st.markdown(content, unsafe_allow_html=True)
+
+
+def build_info_feature_card_html(icon: str, title: str, description: str) -> str:
+    """Build a feature card used on the Info page."""
+    return (
+        '<div class="info-card">'
+        f'<div class="info-card-icon">{html.escape(icon)}</div>'
+        f'<div class="info-card-title">{html.escape(title)}</div>'
+        f'<div class="info-card-desc">{html.escape(description)}</div>'
+        '</div>'
+    )
+
+
+def build_info_detail_card_html(icon: str, title: str, body: str) -> str:
+    """Build a detail card used on the Info page."""
+    return (
+        '<div class="info-detail-card">'
+        f'<div class="info-detail-title">{html.escape(icon)} <span>{html.escape(title)}</span></div>'
+        f'<div class="info-detail-body">{body}</div>'
+        '</div>'
+    )
+
+
 # ==========================================================================
 # PRODUCTION UI - CUSTOM CSS AND ASSETS
 # ==========================================================================
@@ -320,6 +400,9 @@ CSS = f"""
     --primary-red: #ff4011;
     --dark-bg: #1a1a1a;
     --light-bg: #ffffff;
+    --gray-50: #f8fafc;
+    --gray-100: #e9eef5;
+    --border-color: rgba(43, 43, 43, 0.1);
     --text-main: #2b2b2b;
     --text-muted: #5e5e5e;
     --shadow-sm: 0 10px 28px rgba(15, 23, 42, 0.07);
@@ -1583,83 +1666,90 @@ def run_interaction(user_input: str):
 
 
 def run_info_page():
-    st.markdown("""
+    render_html_block("""
         <style>
         .info-main-container { padding: 1rem 0; animation: fadeIn 0.8s ease; }
         .info-header { text-align: center; margin-bottom: 3.5rem; }
         .info-header h2 { font-size: 3rem; font-weight: 800; background: linear-gradient(135deg, var(--primary-red) 0%, #ff6b6b 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.5rem; letter-spacing: -1px; }
         .info-header h4 { color: var(--text-muted); font-weight: 500; font-size: 1.15rem; margin-bottom: 1.5rem; }
-        .info-header p { color: var(--text-main); font-size: 1.15rem; max-width: 800px; margin: 0 auto; line-height: 1.6; }
+        .info-header p { color: var(--text-main); font-size: 1.15rem; max-width: 820px; margin: 0 auto; line-height: 1.7; }
 
-        .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; margin-bottom: 4rem; }
+        .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem; margin-bottom: 2.5rem; }
         .info-card { background: white; border: 1px solid var(--border-color); border-radius: 16px; padding: 2rem; transition: all 0.3s ease; box-shadow: var(--shadow-sm); position: relative; overflow: hidden; }
-        .info-card::before { content: ""; position: absolute; top: 0; left: 0; width: 4px; height: 100%; background: var(--primary-red); opacity: 0.4; transition: opacity 0.3s ease; }
-        .info-card:hover { transform: translateY(-5px); box-shadow: var(--shadow-md); border-color: var(--primary-red); }
+        .info-card::before { content: ""; position: absolute; top: 0; left: 0; width: 4px; height: 100%; background: var(--primary-red); opacity: 0.45; transition: opacity 0.3s ease; }
+        .info-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-md); border-color: rgba(255, 64, 17, 0.28); }
         .info-card:hover::before { opacity: 1; }
         .info-card-icon { font-size: 2.2rem; margin-bottom: 1.2rem; display: inline-block; background: var(--gray-50); padding: 0.75rem 1rem; border-radius: 12px; }
-        .info-card-title { font-weight: 700; font-size: 1.3rem; color: var(--text-main); margin-bottom: 0.75rem; }
-        .info-card-desc { color: var(--text-muted); line-height: 1.6; font-size: 1rem; }
+        .info-card-title { font-weight: 700; font-size: 1.25rem; color: var(--text-main); margin-bottom: 0.75rem; }
+        .info-card-desc { color: var(--text-muted); line-height: 1.65; font-size: 1rem; }
 
-        .info-architecture { background: linear-gradient(120deg, #ffffff 0%, var(--gray-50) 100%); border: 1px solid var(--border-color); border-left: 5px solid var(--primary-red); border-radius: 16px; padding: 2.5rem; margin-bottom: 4rem; box-shadow: var(--shadow-sm); }
-        .info-arch-title { font-weight: 800; font-size: 1.6rem; margin-bottom: 1rem; color: var(--text-main); display: flex; align-items: center; gap: 0.75rem; }
-        .info-arch-desc { color: var(--text-main); font-size: 1.1rem; line-height: 1.6; }
+        .info-architecture { background: linear-gradient(120deg, #ffffff 0%, var(--gray-50) 100%); border: 1px solid var(--border-color); border-left: 5px solid var(--primary-red); border-radius: 18px; padding: 2.25rem; margin-bottom: 2rem; box-shadow: var(--shadow-sm); }
+        .info-arch-title { font-weight: 800; font-size: 1.55rem; margin-bottom: 0.9rem; color: var(--text-main); display: flex; align-items: center; gap: 0.75rem; }
+        .info-arch-desc { color: var(--text-main); font-size: 1.08rem; line-height: 1.75; }
 
-        .info-footer { display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 2rem; padding-top: 3rem; border-top: 1px solid var(--border-color); }
-        .info-author-box { background: var(--gray-50); border-radius: 16px; padding: 2rem 4rem; border: 1px solid var(--gray-100); text-align: center; max-width: 600px; box-shadow: var(--shadow-sm); }
-        .info-author-label { text-transform: uppercase; font-size: 0.85rem; letter-spacing: 1.5px; color: var(--text-muted); margin-bottom: 1rem; display: block; font-weight: 700; }
-        .info-author-text { color: var(--text-main); line-height: 1.7; font-size: 1.1rem; }
-        
+        .info-details-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; margin-bottom: 2.25rem; }
+        .info-detail-card { background: linear-gradient(180deg, #ffffff 0%, #fffdf8 100%); border: 1px solid var(--border-color); border-radius: 16px; padding: 1.6rem 1.7rem; box-shadow: var(--shadow-sm); }
+        .info-detail-title { display: flex; align-items: center; gap: 0.6rem; font-weight: 800; color: var(--text-main); font-size: 1.08rem; margin-bottom: 0.9rem; }
+        .info-detail-body { color: var(--text-main); line-height: 1.7; }
+        .info-detail-body p { margin: 0 0 0.75rem 0; }
+        .info-detail-body p:last-child { margin-bottom: 0; }
+        .info-detail-body ul, .info-detail-body ol { margin: 0; padding-left: 1.25rem; }
+        .info-detail-body li { margin-bottom: 0.45rem; color: var(--text-muted); }
+        .info-detail-body strong { color: var(--text-main); }
+
+        .info-footer { display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 1rem; padding-top: 2.2rem; border-top: 1px solid var(--border-color); }
+        .info-author-box { background: var(--gray-50); border-radius: 16px; padding: 2rem 2.5rem; border: 1px solid var(--gray-100); text-align: center; max-width: 760px; box-shadow: var(--shadow-sm); }
+        .info-author-label { text-transform: uppercase; font-size: 0.85rem; letter-spacing: 1.5px; color: var(--text-muted); margin-bottom: 0.8rem; display: block; font-weight: 700; }
+        .info-author-text { color: var(--text-main); line-height: 1.75; font-size: 1.04rem; }
+        .info-author-text p { margin: 0 0 0.5rem 0; }
+        .info-author-text p:last-child { margin-bottom: 0; }
+
         .back-btn-container { margin-top: 3rem; display: flex; justify-content: center; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         </style>
-    """, unsafe_allow_html=True)
+    """)
 
-    html_content = f"""
-<div class="info-main-container">
-    <div class="info-header">
-        <h2>{t("info_title")}</h2>
-        <h4>{t("info_subtitle")}</h4>
-        <p>{t("info_intro")}</p>
-    </div>
+    feature_cards = "".join(
+        [
+            build_info_feature_card_html("🏛️", t("info_f1_title"), t("info_f1_desc")),
+            build_info_feature_card_html("🚇", t("info_f2_title"), t("info_f2_desc")),
+            build_info_feature_card_html("🌤️", t("info_f3_title"), t("info_f3_desc")),
+            build_info_feature_card_html("🏥", t("info_f4_title"), t("info_f4_desc")),
+        ]
+    )
 
-    <div class="info-grid">
-        <div class="info-card">
-            <div class="info-card-icon">🏛️</div>
-            <div class="info-card-title">{t("info_f1_title")}</div>
-            <div class="info-card-desc">{t("info_f1_desc")}</div>
-        </div>
-        <div class="info-card">
-            <div class="info-card-icon">🚇</div>
-            <div class="info-card-title">{t("info_f2_title")}</div>
-            <div class="info-card-desc">{t("info_f2_desc")}</div>
-        </div>
-        <div class="info-card">
-            <div class="info-card-icon">🌤️</div>
-            <div class="info-card-title">{t("info_f3_title")}</div>
-            <div class="info-card-desc">{t("info_f3_desc")}</div>
-        </div>
-        <div class="info-card">
-            <div class="info-card-icon">🏥</div>
-            <div class="info-card-title">{t("info_f4_title")}</div>
-            <div class="info-card-desc">{t("info_f4_desc")}</div>
-        </div>
-    </div>
+    detail_cards = "".join(
+        [
+            build_info_detail_card_html("🎯", t("info_objective"), rich_text_to_html(t("info_objective_text"))),
+            build_info_detail_card_html("🧩", t("info_data_sources"), rich_text_to_html(t("info_data_sources_text"))),
+            build_info_detail_card_html("🔒", t("info_privacy"), rich_text_to_html(t("info_privacy_text"))),
+            build_info_detail_card_html("🛠️", t("info_how_to_use"), rich_text_to_html(t("info_how_to_use_text"))),
+        ]
+    )
 
-    <div class="info-architecture">
-        <div class="info-arch-title">⚙️ {t("info_architecture_title")}</div>
-        <div class="info-arch-desc">{t("info_architecture_desc")}</div>
-    </div>
+    html_content = (
+        '<div class="info-main-container">'
+        '<div class="info-header">'
+        f'<h2>{html.escape(t("info_title"))}</h2>'
+        f'<h4>{html.escape(t("info_subtitle"))}</h4>'
+        f'<p>{html.escape(t("info_intro"))}</p>'
+        '</div>'
+        f'<div class="info-grid">{feature_cards}</div>'
+        '<div class="info-architecture">'
+        f'<div class="info-arch-title">⚙️ <span>{html.escape(t("info_architecture_title"))}</span></div>'
+        f'<div class="info-arch-desc">{html.escape(t("info_architecture_desc"))}</div>'
+        '</div>'
+        f'<div class="info-details-grid">{detail_cards}</div>'
+        '<div class="info-footer">'
+        '<div class="info-author-box">'
+        f'<span class="info-author-label">🎓 {html.escape(t("info_author"))}</span>'
+        f'<div class="info-author-text">{rich_text_to_html(t("info_author_text"))}</div>'
+        '</div>'
+        '</div>'
+        '</div>'
+    )
 
-    <div class="info-footer">
-        <div class="info-author-box">
-            <span class="info-author-label">🎓 {t("info_author")}</span>
-            <div class="info-author-text">{t("info_author_text")}</div>
-        </div>
-    </div>
-</div>
-"""
-    
-    st.markdown(html_content, unsafe_allow_html=True)
+    render_html_block(html_content)
 
     st.markdown('<div class="back-btn-container">', unsafe_allow_html=True)
     back_text = t("back_to_chat")

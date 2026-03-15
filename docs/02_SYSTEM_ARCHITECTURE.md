@@ -5,6 +5,13 @@ This document describes the runtime architecture implemented in the repository t
 > [!IMPORTANT]
 > The repository still contains the single-agent `LisbonAssistant` for compatibility, but the documented default runtime is the multi-agent system.
 
+## 🖼️ Conceptual Framework Figure
+
+The latest thesis-facing framework figure stored in the repository is shown below.
+
+![LISBOA framework figure](../img/LISBOA_Framework_fev2026.png)
+
+
 ## 🧩 High-Level Components
 
 | Layer | Main files | Responsibility |
