@@ -135,12 +135,50 @@ class ResearcherAgent(BaseAgent):
             return self._run_direct_tool_fallback(user_message, language)
 
         args = {"query": user_message, "max_results": 5}
-        if any(term in user_message.lower() for term in ["museum", "museu", "monument", "monumento"]):
-            args["category"] = "Museums & Monuments"
+        category_hint = self._infer_place_category_hint(user_message)
+        if category_hint:
+            args["category"] = category_hint
 
         result = tool.invoke(args)
         source_line = self._build_places_source_line(result, language)
         return f"{result}\n\n{source_line}".strip()
+
+    @staticmethod
+    def _infer_place_category_hint(user_message: str) -> Optional[str]:
+        """Infers a high-level VisitLisboa place category from common PT/EN query terms."""
+        query = (user_message or "").lower()
+
+        if any(term in query for term in ["museum", "museu", "monument", "monumento"]):
+            return "Museums & Monuments"
+        if any(
+            term in query
+            for term in [
+                "restaurant",
+                "restaurants",
+                "restaurante",
+                "restaurantes",
+                "seafood",
+                "marisco",
+                "marisqueira",
+                "food",
+                "dining",
+                "gastronomy",
+                "gastronomia",
+                "cuisine",
+                "lunch",
+                "dinner",
+                "brunch",
+                "cafe",
+                "café",
+            ]
+        ):
+            return "Restaurants"
+        if any(term in query for term in ["hotel", "hotels", "accommodation", "lodging", "stay", "alojamento"]):
+            return "Hotels"
+        if any(term in query for term in ["viewpoint", "view point", "miradouro", "scenic view"]):
+            return "View Points"
+
+        return None
 
     @staticmethod
     def _build_places_source_line(result: str, language: str) -> str:
@@ -331,8 +369,10 @@ class ResearcherAgent(BaseAgent):
         args = {"query": query_text, "max_results": max_results}
         if self._is_broad_attractions_query(user_message):
             args["category"] = "Museums & Monuments"
-        elif any(term in message_lower for term in ["museum", "museu", "monument", "monumento"]):
-            args["category"] = "Museums & Monuments"
+        else:
+            category_hint = self._infer_place_category_hint(user_message)
+            if category_hint:
+                args["category"] = category_hint
 
         result = places_tool.invoke(args)
         source_line = self._build_places_source_line(result, language)
@@ -430,7 +470,12 @@ class ResearcherAgent(BaseAgent):
 
         tool = self._get_tool_by_name("search_places_attractions")
         if tool:
-            result = tool.invoke({"query": user_message, "max_results": 5})
+            args = {"query": user_message, "max_results": 5}
+            category_hint = self._infer_place_category_hint(user_message)
+            if category_hint:
+                args["category"] = category_hint
+
+            result = tool.invoke(args)
             source_line = self._build_places_source_line(result, language)
             return f"{result}\n\n{source_line}".strip()
 
@@ -541,8 +586,9 @@ class ResearcherAgent(BaseAgent):
         ]
         if any(keyword in query_lower for keyword in place_keywords):
             args = {"query": query, "max_results": 5}
-            if any(term in query_lower for term in ["museum", "museu", "monument", "monumento"]):
-                args["category"] = "Museums & Monuments"
+            category_hint = cls._infer_place_category_hint(query)
+            if category_hint:
+                args["category"] = category_hint
             return cls._build_tool_call("search_places_attractions", args)
 
         return None

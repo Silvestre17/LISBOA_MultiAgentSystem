@@ -69,6 +69,11 @@ class Config:
     # Directory for ChromaDB vector store (persistent embeddings)
     VECTOR_DB_DIR = BASE_DIR / "data" / "vector_db"
 
+    # Versioned local LLM pricing snapshot used for runtime/eval cost accounting.
+    # This avoids live pricing lookups during user requests and keeps summaries
+    # reproducible for a known snapshot date.
+    LLM_PRICING_CATALOG_PATH = BASE_DIR / "data" / "pricing" / "llm_model_pricing.json"
+
     # Path to VisitLisboa places JSON (webscraping output)
     # Contains: museums, restaurants, attractions, etc.
     PATH_VISIT_LISBOA_PLACES = DATA_COLLECTION_DIR / "webscraping" / "places.json"
@@ -346,6 +351,8 @@ if __name__ == "__main__":
         - Model names should be displayed
         - Lisbon parameters should be correct
     """
+    import json
+
     print("\033[1m" + "=" * 60 + "\033[0m")
     print("\033[1m📋 Configuration Test\033[0m")
     print("\033[1m" + "=" * 60 + "\033[0m")
@@ -355,6 +362,7 @@ if __name__ == "__main__":
     print(f"   Base Directory: {BASE_DIR}")
     print(f"   Data Collection: {Config.DATA_COLLECTION_DIR}")
     print(f"   Vector DB: {Config.VECTOR_DB_DIR}")
+    print(f"   Pricing Catalog: {Config.LLM_PRICING_CATALOG_PATH}")
     print(f"   Places JSON: {Config.PATH_VISIT_LISBOA_PLACES}")
     print(f"   Events JSON: {Config.PATH_VISIT_LISBOA_EVENTS}")
     print(f"   Datasets JSON: {Config.PATH_DADOS_ABERTOS_METADATA}")
@@ -362,6 +370,7 @@ if __name__ == "__main__":
     # Check if paths exist
     print("\n\033[1m✅ Path Validation:\033[0m")
     paths_to_check = [
+        ("Pricing Catalog", Config.LLM_PRICING_CATALOG_PATH),
         ("Places JSON", Config.PATH_VISIT_LISBOA_PLACES),
         ("Events JSON", Config.PATH_VISIT_LISBOA_EVENTS),
         ("Datasets JSON", Config.PATH_DADOS_ABERTOS_METADATA),
@@ -373,6 +382,17 @@ if __name__ == "__main__":
             else "\033[1;31m✗ Missing\033[0m"
         )
         print(f"   {name}: {status}")
+
+    print("\n\033[1m💵 Pricing Catalog Validation:\033[0m")
+    try:
+        with Config.LLM_PRICING_CATALOG_PATH.open("r", encoding="utf-8") as handle:
+            pricing_payload = json.load(handle)
+        model_count = len(pricing_payload.get("models", {})) if isinstance(pricing_payload, dict) else 0
+        snapshot_date = pricing_payload.get("pricing_snapshot_date", "n/a") if isinstance(pricing_payload, dict) else "n/a"
+        print(f"   Models in catalog: \033[1;32m{model_count}\033[0m")
+        print(f"   Snapshot date: {snapshot_date}")
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"   \033[1;31m✗ Could not load pricing catalog:\033[0m {exc}")
 
     # Test API keys
     print("\n\033[1m🔑 API Keys:\033[0m")

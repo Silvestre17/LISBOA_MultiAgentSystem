@@ -1,23 +1,22 @@
-# ===========================================================================
-# Master Thesis - Evaluation Runtime Utilities
+# ==========================================================================
+# Master Thesis
 #   - André Filipe Gomes Silvestre, 20240502
 #
-# Lightweight helpers shared by benchmark and ablation scripts.
-# These utilities stay inside eval/ and do NOT affect application runtime.
-# ===========================================================================
+# Shared LLM usage and cost utilities.
+#
+# These helpers are runtime-safe and can be reused by both the interactive
+# multi-agent runtime and the evaluation scripts. They keep token normalization,
+# pricing resolution, and cost aggregation in one place.
+# ==========================================================================
 
 from __future__ import annotations
 
-import hashlib
 import json
-from collections import Counter
 from copy import deepcopy
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-from tools import __all__ as EXPORTED_TOOL_NAMES
-
-RESULTS_ROOT = Path(__file__).with_name("results")
 PRICING_METADATA_ALIASES = {
     "source": "pricing_source",
     "pricing_source": "pricing_source",
@@ -26,10 +25,18 @@ PRICING_METADATA_ALIASES = {
     "snapshot_date": "pricing_snapshot_date",
     "pricing_snapshot_date": "pricing_snapshot_date",
 }
+_LOCAL_PROVIDER_PREFIXES = ("lmstudio::", "local::", "ollama::")
 
 
 def _coerce_int(value: Any) -> int:
-    """Safely coerces numeric values to integers."""
+    """Safely coerce numeric values to integers.
+
+    Args:
+        value: Raw numeric-like value.
+
+    Returns:
+        int: Parsed integer or zero when coercion fails.
+    """
     try:
         return int(value or 0)
     except (TypeError, ValueError):
@@ -37,7 +44,14 @@ def _coerce_int(value: Any) -> int:
 
 
 def _coerce_float(value: Any) -> float | None:
-    """Safely coerces numeric values to floats."""
+    """Safely coerce numeric values to floats.
+
+    Args:
+        value: Raw numeric-like value.
+
+    Returns:
+        Optional[float]: Parsed float or None when coercion fails.
+    """
     if value is None:
         return None
     try:
@@ -47,21 +61,47 @@ def _coerce_float(value: Any) -> float | None:
 
 
 def _round_money(value: float) -> float:
-    """Rounds small USD values while preserving useful precision."""
+    """Round USD values while preserving useful precision.
+
+    Args:
+        value: Raw floating-point USD value.
+
+    Returns:
+        float: Rounded USD value.
+    """
     return round(float(value), 10)
 
 
+def build_model_id(provider: str, model_name: str) -> str:
+    """Return a stable provider::model identifier.
+
+    Args:
+        provider: Model provider name.
+        model_name: Provider model name.
+
+    Returns:
+        str: Stable provider-qualified identifier.
+    """
+    return f"{provider}::{model_name}"
+
+
 def normalize_model_lookup_key(model_id: str | None) -> str:
-    """Normalizes a provider/model lookup key for case-insensitive matching."""
+    """Normalize a provider/model lookup key for case-insensitive matching.
+
+    Args:
+        model_id: Raw model identifier.
+
+    Returns:
+        str: Normalized lookup key.
+    """
     return str(model_id or "").strip().lower()
 
 
 def normalize_token_usage(usage: Any) -> dict[str, int]:
-    """
-    Normalizes token usage payloads to input/output/total integers.
+    """Normalize token usage payloads to input/output/total integers.
 
     Args:
-        usage: Raw usage payload, nested usage dict, or already-normalized tokens.
+        usage: Raw usage payload, nested usage dict, or normalized tokens.
 
     Returns:
         Dict[str, int]: Normalized token counts.
@@ -82,7 +122,10 @@ def normalize_token_usage(usage: Any) -> dict[str, int]:
         input_tokens = max(
             input_tokens,
             _coerce_int(
-                candidate.get("input_tokens", candidate.get("prompt_tokens", candidate.get("input_token_count")))
+                candidate.get(
+                    "input_tokens",
+                    candidate.get("prompt_tokens", candidate.get("input_token_count")),
+                )
             ),
         )
         output_tokens = max(
@@ -90,7 +133,10 @@ def normalize_token_usage(usage: Any) -> dict[str, int]:
             _coerce_int(
                 candidate.get(
                     "output_tokens",
-                    candidate.get("completion_tokens", candidate.get("output_token_count")),
+                    candidate.get(
+                        "completion_tokens",
+                        candidate.get("output_token_count"),
+                    ),
                 )
             ),
         )
@@ -118,14 +164,13 @@ def build_usage_payload(
     llm_usage_breakdown: Optional[list[dict[str, Any]]] = None,
     by_agent: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    """
-    Builds a stable usage payload for persisted evaluation artefacts.
+    """Build a stable usage payload for runtime or evaluation artefacts.
 
     Args:
         usage: Raw usage payload or normalized usage dict.
         model_id: Optional model identifier.
-        call_count: Number of LLM calls represented in the payload.
-        usage_available: Whether the provider exposed token usage metadata.
+        call_count: Number of represented LLM calls.
+        usage_available: Whether token metadata was exposed by the provider.
         llm_usage_breakdown: Optional per-call breakdown list.
         by_agent: Optional per-agent usage mapping.
 
@@ -168,7 +213,15 @@ def combine_usage_payloads(
     *,
     model_id: str | None = None,
 ) -> dict[str, Any]:
-    """Combines multiple usage payloads into a single aggregate record."""
+    """Combine multiple usage payloads into a single aggregate record.
+
+    Args:
+        payloads: Usage payloads to combine.
+        model_id: Optional aggregate model identifier.
+
+    Returns:
+        Dict[str, Any]: Aggregate usage payload.
+    """
     combined_tokens = {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -200,11 +253,13 @@ def combine_usage_payloads(
 def split_pricing_config(
     pricing_by_model: Optional[dict[str, Any]],
 ) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
-    """
-    Splits pricing config into a normalized model catalog and metadata.
+    """Split pricing config into a normalized catalog and metadata.
 
-    Supports either a flat mapping of ``model_id -> price dict`` or a wrapped
-    structure with a top-level ``models`` key plus metadata.
+    Args:
+        pricing_by_model: Flat or wrapped pricing configuration.
+
+    Returns:
+        Tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]: Normalized catalog and metadata.
     """
     if not pricing_by_model:
         return {}, {}
@@ -248,7 +303,14 @@ def split_pricing_config(
 
 
 def get_pricing_metadata(pricing_by_model: Optional[dict[str, Any]]) -> dict[str, Any]:
-    """Returns normalized pricing metadata ready for persisted artefacts."""
+    """Return normalized pricing metadata ready for persisted artefacts.
+
+    Args:
+        pricing_by_model: Pricing catalog or wrapped pricing config.
+
+    Returns:
+        Dict[str, Any]: Normalized metadata.
+    """
     _, metadata = split_pricing_config(pricing_by_model)
     normalized: dict[str, Any] = {}
     for key, value in metadata.items():
@@ -258,12 +320,42 @@ def get_pricing_metadata(pricing_by_model: Optional[dict[str, Any]]) -> dict[str
     return normalized
 
 
+def _build_zero_cost_local_pricing(model_id: str) -> dict[str, Any]:
+    """Build an explicit zero-cost pricing record for local providers.
+
+    Args:
+        model_id: Provider-qualified local model identifier.
+
+    Returns:
+        Dict[str, Any]: Zero-cost pricing record.
+    """
+    model_name = model_id.split("::", 1)[1] if "::" in model_id else model_id
+    return {
+        "input": 0.0,
+        "output": 0.0,
+        "input_cached": 0.0,
+        "name": model_name or "local-model",
+        "pricing_lookup_key": normalize_model_lookup_key(model_id),
+    }
+
+
 def resolve_model_pricing(
     pricing_by_model: Optional[dict[str, Any]],
     model_id: str | None,
 ) -> Optional[dict[str, Any]]:
-    """Resolves model pricing using exact and model-only lookup fallbacks."""
-    if not pricing_by_model or not model_id:
+    """Resolve model pricing using exact and model-only lookup fallbacks.
+
+    Local providers such as LM Studio default to zero-cost pricing when the
+    model is not explicitly present in the catalog.
+
+    Args:
+        pricing_by_model: Pricing catalog or wrapped pricing config.
+        model_id: Provider-qualified model identifier.
+
+    Returns:
+        Optional[Dict[str, Any]]: Resolved pricing record, if any.
+    """
+    if not model_id:
         return None
 
     catalog, _ = split_pricing_config(pricing_by_model)
@@ -278,6 +370,9 @@ def resolve_model_pricing(
             pricing["pricing_lookup_key"] = lookup_key
             return pricing
 
+    if normalized_model_id.startswith(_LOCAL_PROVIDER_PREFIXES):
+        return _build_zero_cost_local_pricing(normalized_model_id)
+
     return None
 
 
@@ -285,7 +380,15 @@ def resolve_usage_model_id(
     usage_entry: dict[str, Any],
     default_model_id: str | None = None,
 ) -> str | None:
-    """Resolves the most specific model identifier available for a usage entry."""
+    """Resolve the most specific model identifier available for a usage entry.
+
+    Args:
+        usage_entry: Usage breakdown entry.
+        default_model_id: Default model identifier fallback.
+
+    Returns:
+        Optional[str]: Best available model identifier.
+    """
     model_id = usage_entry.get("model_id")
     if model_id:
         return str(model_id)
@@ -303,7 +406,16 @@ def _build_single_model_cost_payload(
     pricing_by_model: Optional[dict[str, Any]],
     model_id: str | None,
 ) -> dict[str, Any]:
-    """Builds the cost payload for a single-model usage payload."""
+    """Build the cost payload for a single-model usage payload.
+
+    Args:
+        tokens: Normalized token payload.
+        pricing_by_model: Pricing catalog or wrapped pricing config.
+        model_id: Provider-qualified model identifier.
+
+    Returns:
+        Dict[str, Any]: Stable single-model cost payload.
+    """
     pricing = resolve_model_pricing(pricing_by_model, model_id)
     input_price = pricing.get("input") if pricing else None
     output_price = pricing.get("output") if pricing else None
@@ -312,7 +424,7 @@ def _build_single_model_cost_payload(
     input_cost = (tokens["input_tokens"] / 1_000_000) * input_price if input_price is not None else 0.0
     output_cost = (tokens["output_tokens"] / 1_000_000) * output_price if output_price is not None else 0.0
     total_tokens = tokens["total_tokens"]
-    pricing_complete = input_price is not None and output_price is not None
+    pricing_complete = total_tokens == 0 or (input_price is not None and output_price is not None)
     missing_models = []
     if total_tokens > 0 and not pricing_complete:
         missing_models = [model_id] if model_id else ["unknown_model"]
@@ -320,7 +432,7 @@ def _build_single_model_cost_payload(
     return {
         "model_id": model_id,
         "pricing_lookup_key": pricing.get("pricing_lookup_key") if pricing else None,
-        "pricing_found": pricing is not None,
+        "pricing_found": pricing is not None or total_tokens == 0,
         "pricing_complete": pricing_complete,
         "tokens": deepcopy(tokens),
         "input_per_million_usd": input_price,
@@ -339,11 +451,15 @@ def build_cost_payload(
     *,
     model_id: str | None = None,
 ) -> dict[str, Any]:
-    """
-    Builds a stable cost payload from a usage payload and pricing config.
+    """Build a stable cost payload from usage and pricing.
 
-    Supports both single-model usage payloads and multi-model payloads with a
-    per-call ``llm_usage_breakdown``.
+    Args:
+        usage_payload: Usage payload or raw usage dict.
+        pricing_by_model: Pricing catalog or wrapped pricing config.
+        model_id: Optional override for the aggregate model id.
+
+    Returns:
+        Dict[str, Any]: Stable cost payload.
     """
     usage_payload = build_usage_payload(usage_payload, model_id=model_id)
     breakdown = usage_payload.get("llm_usage_breakdown")
@@ -354,9 +470,17 @@ def build_cost_payload(
         cost_breakdown = []
         pricing_found = True
         pricing_complete = True
+        attributed_tokens = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        }
 
         for entry in breakdown:
             entry_tokens = normalize_token_usage(entry.get("tokens", entry))
+            attributed_tokens["input_tokens"] += entry_tokens["input_tokens"]
+            attributed_tokens["output_tokens"] += entry_tokens["output_tokens"]
+            attributed_tokens["total_tokens"] += entry_tokens["total_tokens"]
             entry_model_id = resolve_usage_model_id(
                 entry,
                 usage_payload.get("model_id"),
@@ -369,8 +493,12 @@ def build_cost_payload(
             total_input_cost += event_cost["input_cost_usd"]
             total_output_cost += event_cost["output_cost_usd"]
             missing_pricing_models.extend(event_cost.get("missing_pricing_models", []))
-            pricing_found = pricing_found and bool(event_cost.get("pricing_found", False) or entry_tokens["total_tokens"] == 0)
-            pricing_complete = pricing_complete and bool(event_cost.get("pricing_complete", False) or entry_tokens["total_tokens"] == 0)
+            pricing_found = pricing_found and bool(
+                event_cost.get("pricing_found", False) or entry_tokens["total_tokens"] == 0
+            )
+            pricing_complete = pricing_complete and bool(
+                event_cost.get("pricing_complete", False) or entry_tokens["total_tokens"] == 0
+            )
             cost_breakdown.append(
                 {
                     "call_index": entry.get("call_index"),
@@ -385,6 +513,68 @@ def build_cost_payload(
                     "input_cost_usd": event_cost.get("input_cost_usd", 0.0),
                     "output_cost_usd": event_cost.get("output_cost_usd", 0.0),
                     "total_cost_usd": event_cost.get("total_cost_usd", 0.0),
+                }
+            )
+
+        aggregate_tokens = normalize_token_usage(usage_payload.get("tokens", usage_payload))
+        remainder_tokens = {
+            "input_tokens": max(aggregate_tokens["input_tokens"] - attributed_tokens["input_tokens"], 0),
+            "output_tokens": max(aggregate_tokens["output_tokens"] - attributed_tokens["output_tokens"], 0),
+            "total_tokens": max(
+                aggregate_tokens["total_tokens"] - attributed_tokens["total_tokens"],
+                max(aggregate_tokens["input_tokens"] - attributed_tokens["input_tokens"], 0)
+                + max(aggregate_tokens["output_tokens"] - attributed_tokens["output_tokens"], 0),
+            ),
+        }
+        if remainder_tokens["total_tokens"] > 0:
+            remainder_model_id = model_id or usage_payload.get("model_id")
+            if not remainder_model_id:
+                breakdown_model_ids = [
+                    resolved_model_id
+                    for resolved_model_id in (
+                        resolve_usage_model_id(entry, usage_payload.get("model_id"))
+                        for entry in breakdown
+                    )
+                    if resolved_model_id
+                ]
+                unique_breakdown_model_ids = list(dict.fromkeys(breakdown_model_ids))
+                if len(unique_breakdown_model_ids) == 1:
+                    remainder_model_id = unique_breakdown_model_ids[0]
+
+            remainder_cost = _build_single_model_cost_payload(
+                remainder_tokens,
+                pricing_by_model,
+                remainder_model_id,
+            )
+            total_input_cost += remainder_cost["input_cost_usd"]
+            total_output_cost += remainder_cost["output_cost_usd"]
+            missing_pricing_models.extend(remainder_cost.get("missing_pricing_models", []))
+            pricing_found = pricing_found and bool(
+                remainder_cost.get("pricing_found", False) or remainder_tokens["total_tokens"] == 0
+            )
+            pricing_complete = pricing_complete and bool(
+                remainder_cost.get("pricing_complete", False) or remainder_tokens["total_tokens"] == 0
+            )
+
+            remainder_provider = None
+            remainder_model = None
+            if remainder_model_id and "::" in str(remainder_model_id):
+                remainder_provider, remainder_model = str(remainder_model_id).split("::", 1)
+
+            cost_breakdown.append(
+                {
+                    "call_index": len(cost_breakdown) + 1,
+                    "agent_name": "unattributed",
+                    "provider": remainder_provider,
+                    "model": remainder_model,
+                    "model_id": remainder_model_id,
+                    "tokens": deepcopy(remainder_cost["tokens"]),
+                    "pricing_lookup_key": remainder_cost.get("pricing_lookup_key"),
+                    "pricing_found": remainder_cost.get("pricing_found", False),
+                    "pricing_complete": remainder_cost.get("pricing_complete", False),
+                    "input_cost_usd": remainder_cost.get("input_cost_usd", 0.0),
+                    "output_cost_usd": remainder_cost.get("output_cost_usd", 0.0),
+                    "total_cost_usd": remainder_cost.get("total_cost_usd", 0.0),
                 }
             )
 
@@ -412,7 +602,14 @@ def build_cost_payload(
 
 
 def combine_cost_payloads(payloads: Iterable[dict[str, Any]]) -> dict[str, Any]:
-    """Combines multiple cost payloads into a single aggregate record."""
+    """Combine multiple cost payloads into a single aggregate record.
+
+    Args:
+        payloads: Cost payloads to combine.
+
+    Returns:
+        Dict[str, Any]: Aggregate cost payload.
+    """
     combined_tokens = {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -459,213 +656,40 @@ def combine_cost_payloads(payloads: Iterable[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
+@lru_cache(maxsize=4)
+def load_pricing_catalog(catalog_path: str | Path | None = None) -> dict[str, Any]:
+    """Load a versioned local pricing catalog from disk.
 
-def fingerprint_payload(payload: Any) -> str:
-    """Return a stable SHA-256 fingerprint for a JSON-serializable payload."""
-    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
-    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    Args:
+        catalog_path: Optional explicit JSON path. When omitted, the default
+            runtime catalog under ``data/pricing/llm_model_pricing.json`` is used.
 
+    Returns:
+        Dict[str, Any]: Parsed pricing config, or an empty dict if unavailable.
+    """
+    if catalog_path is None:
+        root = Path(__file__).resolve().parents[2]
+        target_path = root / "data" / "pricing" / "llm_model_pricing.json"
+    else:
+        target_path = Path(catalog_path)
 
-def build_model_id(provider: str, model_name: str) -> str:
-    """Return a stable provider::model identifier used in result artefacts."""
-    return f"{provider}::{model_name}"
+    try:
+        with target_path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return {}
 
-
-def build_model_manifest(
-    provider: str,
-    model_name: str,
-    temperature: float | None = None,
-    *,
-    extra: Optional[dict[str, Any]] = None,
-) -> dict[str, Any]:
-    """Return a compact, explicit model manifest for persisted artefacts."""
-    manifest: dict[str, Any] = {
-        "model_id": build_model_id(provider, model_name),
-        "provider": provider,
-        "model": model_name,
-    }
-    if temperature is not None:
-        manifest["temperature"] = temperature
-    if extra:
-        manifest.update(extra)
-    return manifest
+    return payload if isinstance(payload, dict) else {}
 
 
-def ensure_results_dir(result_type: str) -> Path:
-    """Create and return the output directory for a result category."""
-    target_dir = RESULTS_ROOT / result_type
-    target_dir.mkdir(parents=True, exist_ok=True)
-    return target_dir
-
-
-def build_results_output_path(
-    result_type: str,
-    prefix: str,
-    timestamp: str,
-    suffix: str = ".json",
-) -> Path:
-    """Build an output path inside eval/results/<result_type>/."""
-    return ensure_results_dir(result_type) / f"{prefix}_{timestamp}{suffix}"
-
-
-
-def compute_dataset_fingerprint(dataset: list[dict[str, Any]]) -> str:
-    """Return a fingerprint for the benchmark dataset content."""
-    return fingerprint_payload(dataset)
-
-
-
-def compute_tool_registry_fingerprint(tool_names: Optional[Iterable[str]] = None) -> str:
-    """Return a fingerprint for the authoritative tool registry."""
-    registry = sorted(tool_names or EXPORTED_TOOL_NAMES)
-    return fingerprint_payload(registry)
-
-
-def compute_tool_metrics(expected: list[str], actual: list[str]) -> dict[str, float]:
-    """Compute deterministic Precision, Recall, F1 for tool usage."""
-    if not expected and not actual:
-        return {"tool_precision": 1.0, "tool_recall": 1.0, "tool_f1": 1.0}
-    if not expected:
-        return {"tool_precision": 0.0, "tool_recall": 1.0, "tool_f1": 0.0}
-    if not actual:
-        return {"tool_precision": 1.0, "tool_recall": 0.0, "tool_f1": 0.0}
-
-    expected_set = set(expected)
-    actual_set = set(actual)
-    tp = len(expected_set & actual_set)
-    precision = tp / len(actual_set) if actual_set else 0.0
-    recall = tp / len(expected_set) if expected_set else 0.0
-    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
-
-    return {
-        "tool_precision": round(precision, 3),
-        "tool_recall": round(recall, 3),
-        "tool_f1": round(f1, 3),
-    }
-
-
-def select_balanced_subset(
-    records: list[dict[str, Any]],
-    limit: int | None,
-    *,
-    group_key: str,
-) -> list[dict[str, Any]]:
-    """Return a stable round-robin subset balanced across a grouping key."""
-    if limit is None or limit >= len(records):
-        return records
-
-    grouped_records: dict[str, list[dict[str, Any]]] = {}
-    group_order: list[str] = []
-    for record in records:
-        group_value = str(record.get(group_key, "ungrouped"))
-        if group_value not in grouped_records:
-            grouped_records[group_value] = []
-            group_order.append(group_value)
-        grouped_records[group_value].append(record)
-
-    subset: list[dict[str, Any]] = []
-    while len(subset) < limit and any(grouped_records[group] for group in group_order):
-        for group in group_order:
-            if grouped_records[group]:
-                subset.append(grouped_records[group].pop(0))
-                if len(subset) == limit:
-                    break
-    return subset
-
-
-
-def categorize_error(error: str | None) -> str | None:
-    """Map raw runtime errors to stable evaluation categories."""
-    if not error:
-        return None
-
-    text = error.lower()
-
-    if "setup error" in text or "not found in .env" in text or "not configured" in text:
-        return "setup_error"
-    if "401" in text or "403" in text or "unauthorized" in text or "forbidden" in text:
-        return "auth_error"
-    if "api key" in text or "credentials" in text:
-        return "auth_error"
-    if "429" in text or "rate limit" in text:
-        return "rate_limit"
-    if "timeout" in text or "timed out" in text:
-        return "timeout"
-    if "connection" in text or "network" in text or "dns" in text:
-        return "network_error"
-    if "no isolated agent for domain" in text:
-        return "unsupported_domain"
-    if "judge" in text:
-        return "judge_error"
-    return "execution_error"
-
-
-
-def summarize_error_categories(records: Iterable[dict[str, Any]]) -> dict[str, int]:
-    """Count error categories across benchmark/ablation records."""
-    counter: Counter[str] = Counter()
-    for record in records:
-        category = record.get("error_type") or categorize_error(record.get("error"))
-        if category:
-            counter[category] += 1
-    return dict(sorted(counter.items()))
-
-
-
-def build_run_metadata(
-    groundtruth_queries_path: str | Path,
-    groundtruth_queries: list[dict[str, Any]],
-    *,
-    response_models: Optional[Any] = None,
-    evaluation_model: Optional[str] = None,
-    extra: Optional[dict[str, Any]] = None,
-) -> dict[str, Any]:
-    """Build lightweight reproducibility metadata for evaluation outputs."""
-    metadata: dict[str, Any] = {
-        "groundtruth_queries_path": str(groundtruth_queries_path),
-        "groundtruth_queries_count": len(groundtruth_queries),
-        "groundtruth_queries_fingerprint": compute_dataset_fingerprint(groundtruth_queries),
-        "total_queries": len(groundtruth_queries),
-        "tool_registry_count": len(EXPORTED_TOOL_NAMES),
-        "tool_registry_fingerprint": compute_tool_registry_fingerprint(),
-    }
-    if response_models is not None:
-        metadata["response_models"] = response_models
-    if evaluation_model is not None:
-        metadata["evaluation_model"] = evaluation_model
-    if extra:
-        metadata.update(extra)
-    return metadata
-
-
-# Keep evaluation cost/usage helpers aligned with the runtime-safe shared module.
-from agent.utils import usage_costs as _shared_usage_costs  # noqa: E402
-
-globals().update(
-    {
-        "PRICING_METADATA_ALIASES": _shared_usage_costs.PRICING_METADATA_ALIASES,
-        "normalize_model_lookup_key": _shared_usage_costs.normalize_model_lookup_key,
-        "normalize_token_usage": _shared_usage_costs.normalize_token_usage,
-        "build_usage_payload": _shared_usage_costs.build_usage_payload,
-        "combine_usage_payloads": _shared_usage_costs.combine_usage_payloads,
-        "split_pricing_config": _shared_usage_costs.split_pricing_config,
-        "get_pricing_metadata": _shared_usage_costs.get_pricing_metadata,
-        "resolve_model_pricing": _shared_usage_costs.resolve_model_pricing,
-        "resolve_usage_model_id": _shared_usage_costs.resolve_usage_model_id,
-        "build_cost_payload": _shared_usage_costs.build_cost_payload,
-        "combine_cost_payloads": _shared_usage_costs.combine_cost_payloads,
-        "build_model_id": _shared_usage_costs.build_model_id,
-        "load_pricing_catalog": _shared_usage_costs.load_pricing_catalog,
-    }
-)
-
-
-# ===========================================================================
+# ==========================================================================
 # Test Block
-# ===========================================================================
+# ==========================================================================
 if __name__ == "__main__":
+    import math
+
     print("\033[1m" + "=" * 68 + "\033[0m")
-    print("\033[1m🧪 Evaluation Runtime Utilities Smoke Test\033[0m")
+    print("\033[1m🧪 Usage & Cost Utilities Smoke Test\033[0m")
     print("\033[1m" + "=" * 68 + "\033[0m")
 
     counters = {"passed": 0, "failed": 0}
@@ -678,35 +702,84 @@ if __name__ == "__main__":
             counters["failed"] += 1
             print(f"\033[1;31m❌ FAIL\033[0m: {label}")
 
-    usage = build_usage_payload(
-        {"prompt_tokens": 120, "completion_tokens": 30},
-        model_id="azure::gpt-5-mini",
+    pricing_catalog = load_pricing_catalog()
+    metadata = get_pricing_metadata(pricing_catalog)
+    models = pricing_catalog.get("models", {}) if isinstance(pricing_catalog, dict) else {}
+
+    _check(bool(models), "Pricing catalog loads with model entries")
+    _check(bool(metadata.get("pricing_snapshot_date")), "Pricing snapshot date is present")
+
+    expected_prices = {
+        "azure::deepseek-r1": (1.35, 5.4),
+        "azure::phi-4-reasoning-plus": (0.125, 0.5),
+        "azure::grok-4": (3.0, 15.0),
+        "azure::llama-3.3-70b": (0.71, 0.71),
+        "azure::kimi-k2-thinking": (0.6, 2.5),
+        "azure::claude-sonnet-4.5": (3.0, 15.0),
+    }
+
+    for model_id, (expected_input, expected_output) in expected_prices.items():
+        pricing = resolve_model_pricing(pricing_catalog, model_id)
+        _check(pricing is not None, f"Pricing resolved for {model_id}")
+        if pricing:
+            _check(
+                math.isclose(float(pricing.get("input", 0.0) or 0.0), expected_input, rel_tol=0, abs_tol=1e-9)
+                and math.isclose(float(pricing.get("output", 0.0) or 0.0), expected_output, rel_tol=0, abs_tol=1e-9),
+                f"Expected input/output pricing for {model_id}",
+            )
+
+    deepseek_usage = build_usage_payload(
+        {"input_tokens": 1_000_000, "output_tokens": 100_000, "total_tokens": 1_100_000},
+        model_id="azure::deepseek-r1",
         call_count=1,
     )
-    pricing = {
-        "models": {
-            "azure::gpt-5-mini": {"input": 0.25, "output": 2.0},
-            "azure::claude-haiku-4.5": {"input": 1.0, "output": 5.0},
-        },
-        "pricing_snapshot_date": "2026-03-19",
-    }
-    cost = build_cost_payload(usage, pricing)
-    metrics = compute_tool_metrics(["get_weather_forecast", "get_metro_status"], ["get_metro_status"])
-    metadata = build_run_metadata(
-        groundtruth_queries_path="eval/evaluation_groundtruth_queries.json",
-        groundtruth_queries=[{"domain": "weather", "query": "test"}],
-        response_models={"weather": "azure::gpt-5-mini"},
+    deepseek_cost = build_cost_payload(deepseek_usage, pricing_catalog)
+    _check(
+        math.isclose(deepseek_cost["total_cost_usd"], 1.89, rel_tol=0, abs_tol=1e-9),
+        "DeepSeek R1 cost payload matches expected USD total",
     )
 
-    _check(usage["tokens"]["total_tokens"] == 150, "Usage normalization handles prompt/completion aliases")
-    _check(cost["pricing_complete"] is True and cost["total_cost_usd"] > 0, "Cost payload computes a positive total")
-    _check(metrics["tool_precision"] == 1.0 and metrics["tool_recall"] == 0.5, "Tool metrics remain deterministic")
-    _check(bool(metadata.get("tool_registry_fingerprint")), "Run metadata includes tool registry fingerprint")
-    _check(fingerprint_payload({"a": 1}) == fingerprint_payload({"a": 1}), "Fingerprinting is stable")
+    local_usage = build_usage_payload(
+        {"input_tokens": 800, "output_tokens": 200, "total_tokens": 1_000},
+        model_id="lmstudio::demo/local-model",
+        call_count=1,
+    )
+    local_cost = build_cost_payload(local_usage, pricing_catalog)
+    _check(local_cost["pricing_complete"] is True, "Local providers default to explicit zero-cost pricing")
+    _check(math.isclose(local_cost["total_cost_usd"], 0.0, rel_tol=0, abs_tol=1e-12), "Local provider total cost is zero")
+
+    multi_model_usage = build_usage_payload(
+        {
+            "tokens": {"input_tokens": 2_000, "output_tokens": 400, "total_tokens": 2_400},
+            "call_count": 2,
+            "usage_available": True,
+            "llm_usage_breakdown": [
+                {
+                    "call_index": 1,
+                    "agent_name": "supervisor",
+                    "model_id": "azure::gpt-5-mini",
+                    "tokens": {"input_tokens": 1_000, "output_tokens": 200, "total_tokens": 1_200},
+                    "usage_available": True,
+                },
+                {
+                    "call_index": 2,
+                    "agent_name": "researcher",
+                    "model_id": "azure::claude-haiku-4.5",
+                    "tokens": {"input_tokens": 1_000, "output_tokens": 200, "total_tokens": 1_200},
+                    "usage_available": True,
+                },
+            ],
+        }
+    )
+    multi_model_cost = build_cost_payload(multi_model_usage, pricing_catalog)
+    _check(
+        len(multi_model_cost.get("llm_cost_breakdown", [])) == 2,
+        "Multi-model usage produces a per-call cost breakdown",
+    )
 
     print("\n\033[1mSummary:\033[0m")
     print(f"   Passed: {counters['passed']}")
     print(f"   Failed: {counters['failed']}")
     if counters["failed"]:
         raise SystemExit(1)
-    print("\n\033[1;32m✅ Evaluation runtime utilities smoke test passed!\033[0m")
+    print("\n\033[1;32m✅ Usage & cost utilities smoke test passed!\033[0m")

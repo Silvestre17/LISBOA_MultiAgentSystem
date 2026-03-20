@@ -239,7 +239,13 @@ class WeatherAgent(BaseAgent):
             or any(term in query for term in ["warning", "warnings", "aviso", "avisos"])
         )
 
-    def _run_direct_tool_fallback(self, user_message: str) -> str:
+    def _run_direct_tool_fallback(
+        self,
+        user_message: str,
+        *,
+        force_forecast_days: Optional[int] = None,
+        include_warnings: bool = False,
+    ) -> str:
         """
         Runs a deterministic tool-only fallback when Azure blocks weather prompt
         attempts. This preserves real data access without relying on another
@@ -250,8 +256,8 @@ class WeatherAgent(BaseAgent):
             return self._build_forecast_horizon_limit_message(language)
 
         query = user_message.lower()
-        requested_forecast_days = self._extract_requested_forecast_days(user_message)
-        wants_warnings = any(term in query for term in ["warning", "warnings", "aviso", "avisos"])
+        requested_forecast_days = force_forecast_days or self._extract_requested_forecast_days(user_message)
+        wants_warnings = include_warnings or any(term in query for term in ["warning", "warnings", "aviso", "avisos"])
         wants_forecast = requested_forecast_days is not None
         wants_current = any(term in query for term in ["today", "current", "now", "hoje", "agora"]) or (
             any(term in query for term in ["weather", "tempo"]) and not wants_warnings and not wants_forecast

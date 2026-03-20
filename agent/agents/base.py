@@ -31,9 +31,48 @@ except ModuleNotFoundError:
     from config import Config
 
 
+_LOCAL_LLM_PROVIDERS = {"lmstudio"}
+
+
 # ==========================================================================
 # Tool Definitions by Agent
 # ==========================================================================
+
+
+def _normalize_messages_for_lmstudio(messages: List[Any]) -> List[Any]:
+    """Collapse multiple system messages into one for LM Studio-compatible chat payloads.
+
+    Some LM Studio prompt templates, including the user-provided
+    `qwen/qwen3.5-9b` setup validated on 2026-03-17, fail when the chat payload
+    contains more than one ``SystemMessage``. LangChain agents in this
+    repository often prepend several system messages, for example for language,
+    grounding, and retry instructions. To keep those instructions while
+    preserving compatibility, we merge all system-message contents into a
+    single leading ``SystemMessage`` and keep every non-system message in order.
+    """
+    if not messages:
+        return messages
+
+    system_contents: List[str] = []
+    non_system_messages: List[Any] = []
+    for message in messages:
+        if isinstance(message, SystemMessage):
+            content = str(getattr(message, "content", "") or "").strip()
+            if content:
+                system_contents.append(content)
+            continue
+        non_system_messages.append(message)
+
+    if len(system_contents) <= 1:
+        return messages
+
+    merged_system_message = SystemMessage(content="\n\n".join(system_contents))
+    return [merged_system_message, *non_system_messages]
+
+
+def is_local_provider(provider: Any) -> bool:
+    """Returns whether the provider represents a local runtime that should stay sequential."""
+    return str(provider or "").strip().lower() in _LOCAL_LLM_PROVIDERS
 
 
 def get_agent_tools(agent_name: str) -> List:
@@ -338,6 +377,8 @@ def clean_response(content: str, _print: bool = True) -> str:
 
     # Remove <think>...</think> blocks (Qwen3 reasoning) - handles multiline
     content = re.sub(r"<think>.*?</think>\s*", "", content, flags=re.DOTALL)
+    # Remove dangling <think> blocks when the model starts reasoning but never closes the tag.
+    content = re.sub(r"<think>.*$", "", content, flags=re.DOTALL)
 
     # Remove <tool_call>...</tool_call> blocks
     content = re.sub(r"</?tool_call>\s*", "", content, flags=re.DOTALL)
@@ -408,6 +449,34 @@ def parse_json_response(content: str) -> Optional[Dict[str, Any]]:
         return json.loads(content)
     except json.JSONDecodeError:
         return None
+
+
+def _cleaned_response_looks_incomplete(cleaned_content: str, raw_content: str = "") -> bool:
+    """Detect whether a cleaned final answer is too incomplete to show to the user.
+
+    This mainly guards local models that occasionally stop after a header or leak
+    an unfinished reasoning block after tool execution.
+    """
+    cleaned = str(cleaned_content or "").strip()
+    raw = str(raw_content or "")
+    if not cleaned:
+        return True
+
+    lowered = cleaned.lower()
+    if "an error occurred while processing" in lowered or "having difficulty processing your request" in lowered:
+        return True
+
+    if "<think>" in raw and len(cleaned) < 120:
+        return True
+
+    first_line = cleaned.splitlines()[0].strip()
+    if len(cleaned.splitlines()) <= 2 and (
+        re.match(r"^###\s+.+$", first_line)
+        or re.match(r"^\*\*[^*]+\*\*$", first_line)
+    ):
+        return True
+
+    return False
 
 
 # ==========================================================================
@@ -503,10 +572,12 @@ class BaseAgent:
         
     def get_tool_calls_log(self) -> List[Dict[str, Any]]:
         """Returns a defensive copy of the logged tool calls."""
-        return deepcopy(self._tool_calls_log)
+        return deepcopy(getattr(self, "_tool_calls_log", []))
 
     def _record_tool_call(self, tool_name: str, args: dict) -> None:
         """Records a tool call to the agent's internal log."""
+        if not hasattr(self, "_tool_calls_log") or self._tool_calls_log is None:
+            self._tool_calls_log = []
         self._tool_calls_log.append({
             "tool_name": tool_name,
             "args": deepcopy(args)
@@ -709,9 +780,14 @@ class BaseAgent:
             content filter issue, or re-raises after exhausting retries.
         """
         last_exception = None
+        prepared_messages = (
+            _normalize_messages_for_lmstudio(messages)
+            if getattr(self, "llm_provider", "") == "lmstudio"
+            else messages
+        )
         for attempt in range(retries + 1):
             try:
-                response = llm.invoke(messages)
+                response = llm.invoke(prepared_messages)
                 self._record_llm_usage(llm, response)
                 return response
             except Exception as e:
@@ -888,7 +964,18 @@ class BaseAgent:
         if json_tool_result:
             return clean_response(json_tool_result)
 
-        return clean_response(response.content)
+        cleaned_response = clean_response(response.content)
+        if _cleaned_response_looks_incomplete(cleaned_response, getattr(response, "content", "")) and last_tool_results:
+            combined_tool_fallback = clean_response("\n\n".join(last_tool_results))
+            if not _cleaned_response_looks_incomplete(combined_tool_fallback):
+                if verbose:
+                    print("      [FALLBACK] Final reply looked incomplete. Returning combined tool results instead.")
+                return combined_tool_fallback
+            if verbose:
+                print("      [FALLBACK] Final reply looked incomplete. Returning latest tool result instead.")
+            return clean_response(last_tool_results[-1])
+
+        return cleaned_response
 
 
 # ==========================================================================
@@ -961,6 +1048,16 @@ if __name__ == "__main__":
     print("\033[1m🧪 Base Agent Utilities Test\033[0m")
     print("\033[1m" + "=" * 60 + "\033[0m")
 
+    counters = {"passed": 0, "failed": 0}
+
+    def _check(condition: bool, label: str) -> None:
+        if condition:
+            counters["passed"] += 1
+            print(f"   \033[1;32m✅ PASS\033[0m: {label}")
+        else:
+            counters["failed"] += 1
+            print(f"   \033[1;31m❌ FAIL\033[0m: {label}")
+
     # Test tool loading
     for agent in ["weather", "transport", "researcher", "planner", "supervisor"]:
         tools = get_agent_tools(agent)
@@ -969,4 +1066,20 @@ if __name__ == "__main__":
             for t in tools:
                 print(f"   - {t.name}")
 
+    print("\n\033[1m🔎 Deterministic helper checks:\033[0m")
+    _check(is_local_provider("lmstudio") is True, "LM Studio is treated as a local provider")
+    _check(is_local_provider("azure") is False, "Azure is not treated as a local provider")
+    _check(clean_response("<think>internal</think>Hello Lisbon!") == "Hello Lisbon!", "clean_response strips leaked think blocks")
+    _check(
+        detect_tool_loop(
+            [AIMessage(content="", tool_calls=[{"name": "get_metro_status", "args": {}, "id": "call_1"}])],
+            [{"name": "get_metro_status", "args": {}, "id": "call_2"}],
+            lookback=1,
+        ) is True,
+        "Loop detector flags repeated tool calls",
+    )
+
+    print(f"\n\033[1mSummary:\033[0m Passed={counters['passed']} Failed={counters['failed']}")
+    if counters["failed"]:
+        raise SystemExit(1)
     print("\n\033[1;32m✅ Base utilities loaded successfully!\033[0m")

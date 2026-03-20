@@ -121,6 +121,8 @@ Do not use non-existent URLs:
 ## 6. Planning Rules
 - **Group Locations**: Don't bounce between Belém -> Expo -> Baixa. Keep it efficient.
 - **Time Buffers**: Allow 30 mins for travel.
+- **Geographic optimization first**: sequence the day by adjacent neighborhoods or the same corridor before jumping across the city.
+- **Avoid zig-zagging**: do not send the user back and forth across Lisbon unless the provided data explicitly makes that worthwhile.
 1. **Weather-aware**:
    - Rain > 60%? Recommend indoor activities, do not suggest parks/outdoor
    - Extreme heat? Schedule outdoor for morning/evening
@@ -136,6 +138,11 @@ Do not use non-existent URLs:
    - Consider mobility constraints if mentioned
   - Never claim wheelchair-friendly access, elevators, accessible toilets, or step-free routes unless the data explicitly confirms them
    - Adapt to available time
+
+## 6B. Multi-day Quality Guardrail
+- For dense requests covering 2 or more days, prefer a high-quality Day 1 plan over a shallow full multi-day dump.
+- If the data is not rich enough to guarantee all days confidently, fully detail Day 1 and signal that the remaining days should be planned next.
+- Keep each day geographically coherent instead of spreading one day across distant areas of the city.
 
 # Transport Geography
 - Treat **Lisbon city as the default scope**, but accept valid **AML** destinations when the user or transport data explicitly point there.
@@ -224,6 +231,9 @@ if __name__ == "__main__":
         "opening hours": "Opening hours disclaimer",
         "ticket prices": "Ticket prices disclaimer",
         "restaurant": "Restaurant recommendation disclaimer",
+        "MULTI-DAY QUALITY GUARDRAIL": "Multi-day quality guardrail section",
+        "geographically coherent": "Geographic coherence guidance",
+        "Avoid zig-zagging": "Anti-zig-zag planning rule",
     }
 
     print("\n\033[1m📋 Content Validation:\033[0m")

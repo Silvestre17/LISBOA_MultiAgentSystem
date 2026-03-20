@@ -8,7 +8,8 @@
 
 import re
 import unicodedata
-from typing import Dict, List
+from datetime import datetime
+from typing import Dict, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -82,6 +83,10 @@ _PLANNER_ACCESSIBILITY_RE = re.compile(
     r"\b(wheelchair|step[- ]?free|accessible|accessibility|elevator|lift|accessible restroom|cadeira de rodas|acess[ií]vel|elevador|wc adaptado|mobilidade reduzida|curb[- ]?cut)\b",
     re.IGNORECASE,
 )
+_PLANNER_SOURCE_LINE_RE = re.compile(
+    r"^(?:[-*•]\s*)?(?:📌\s*)?(?:\*\*)?(?:Fonte|Source)(?:\*\*)?:.*$",
+    re.IGNORECASE,
+)
 
 
 def _normalize_planner_text(text: str) -> str:
@@ -127,6 +132,170 @@ def _query_requests_accessibility(user_message: str) -> bool:
             re.IGNORECASE,
         )
     )
+
+
+def _extract_requested_day_count(user_message: str) -> Optional[int]:
+    """Extract the requested itinerary length in days when it is explicit.
+
+    Args:
+        user_message: Original planner request.
+
+    Returns:
+        Optional[int]: Requested number of days, when it can be inferred.
+    """
+    query = (user_message or "").lower()
+    explicit_match = re.search(r"\b([2-7])\s*(?:day|days|dia|dias)\b", query)
+    if explicit_match:
+        return int(explicit_match.group(1))
+
+    word_to_days = {
+        "two days": 2,
+        "three days": 3,
+        "four days": 4,
+        "five days": 5,
+        "six days": 6,
+        "seven days": 7,
+        "dois dias": 2,
+        "três dias": 3,
+        "tres dias": 3,
+        "quatro dias": 4,
+        "cinco dias": 5,
+        "seis dias": 6,
+        "sete dias": 7,
+        "weekend": 2,
+        "fim de semana": 2,
+    }
+    for phrase, count in word_to_days.items():
+        if phrase in query:
+            return count
+
+    return None
+
+
+def _build_multi_day_planner_instruction(language: str, requested_days: Optional[int]) -> str:
+    """Build a quality-focused instruction for multi-day itinerary requests.
+
+    Args:
+        language: Output language code.
+        requested_days: Explicit day count, if detected.
+
+    Returns:
+        str: Additional planner instruction, or an empty string.
+    """
+    if not requested_days or requested_days <= 1:
+        return ""
+
+    if language == "pt":
+        return (
+            f"MULTI-DAY QUALITY MODE: o pedido é para {requested_days} dias. "
+            "Entregue apenas o Dia 1 em detalhe agora, com sequência geograficamente otimizada e transportes claros. "
+            "Não esboce os restantes dias com baixa confiança. Termine com uma nota curta a explicar que os dias seguintes devem ser pedidos depois de validar o Dia 1."
+        )
+
+    return (
+        f"MULTI-DAY QUALITY MODE: the request covers {requested_days} days. "
+        "Deliver only Day 1 in full detail now, with geographically optimized sequencing and clear transport guidance. "
+        "Do not sketch later days with low confidence. Finish with one short note explaining that the remaining days should be requested after Day 1 is confirmed."
+    )
+
+
+def _build_multi_day_follow_up_note(language: str, requested_days: Optional[int]) -> Optional[str]:
+    """Build a short follow-up note for multi-day planner fallbacks.
+
+    Args:
+        language: Output language code.
+        requested_days: Explicit day count, if detected.
+
+    Returns:
+        Optional[str]: Follow-up note, when relevant.
+    """
+    if not requested_days or requested_days <= 1:
+        return None
+
+    if language == "pt":
+        return (
+            f"Para manter a qualidade num pedido de {requested_days} dias, este primeiro bloco cobre apenas o Dia 1. "
+            "Se a estrutura estiver alinhada, peça-me depois o Dia 2."
+        )
+
+    return (
+        f"To keep quality high across a {requested_days}-day request, this first block only covers Day 1. "
+        "If the structure fits what you want, ask me next for Day 2."
+    )
+
+
+def _is_later_day_section_marker(line: str) -> bool:
+    """Returns whether a line starts a Day 2+ section in common markdown variants."""
+    cleaned = str(line or "")
+    cleaned = re.sub(r"^\s*#{1,6}\s*", "", cleaned)
+    cleaned = re.sub(r"^\s*(?:[-*•]\s*|\d+[\.)]\s*)", "", cleaned)
+    cleaned = re.sub(r"^[\s\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+", "", cleaned)
+    cleaned = re.sub(r"[*_`]+", "", cleaned).strip()
+
+    marker_patterns = [
+        r"^(?:dia|day)\s*(?:2|3|4|5|6|7)\b(?:\s*[:.\-–—·].*)?$",
+        r"^d\s*(?:2|3|4|5|6|7)\b(?:\s*[:.\-–—·].*)?$",
+        r"^(?:dia|day)\s*(?:ii|iii|iv|v|vi|vii)\b(?:\s*[:.\-–—·].*)?$",
+    ]
+    return any(re.match(pattern, cleaned, flags=re.IGNORECASE) for pattern in marker_patterns)
+
+
+def enforce_multi_day_quality_mode(response: str, user_message: str, language: str) -> str:
+    """Clamp multi-day requests to a high-quality Day 1 response.
+
+    Args:
+        response: Planner draft or repaired final response.
+        user_message: Original user request.
+        language: Output language code.
+
+    Returns:
+        str: Day 1-focused response for explicit multi-day requests.
+    """
+    requested_days = _extract_requested_day_count(user_message)
+    if not requested_days or requested_days <= 1:
+        return response
+
+    lines = str(response or "").splitlines()
+    trimmed_lines: List[str] = []
+    truncated = False
+    truncation_index: Optional[int] = None
+
+    for index, line in enumerate(lines):
+        if _is_later_day_section_marker(line):
+            truncated = True
+            truncation_index = index
+            break
+        trimmed_lines.append(line)
+
+    normalized_lines = list(trimmed_lines if truncated else lines)
+    replacement_title = (
+        "### 📅 Dia 1 · Itinerário sugerido"
+        if language == "pt"
+        else "### 📅 Day 1 · Suggested itinerary"
+    )
+    title_updated = False
+    for index, line in enumerate(normalized_lines):
+        if line.strip().startswith("### ") or line.strip().startswith("## "):
+            normalized_lines[index] = replacement_title
+            title_updated = True
+            break
+    if not title_updated:
+        normalized_lines = [replacement_title, "", *normalized_lines]
+
+    if truncated and truncation_index is not None:
+        preserved_tail = [
+            line
+            for line in lines[truncation_index:]
+            if _PLANNER_SOURCE_LINE_RE.match(line.strip())
+        ]
+        if preserved_tail:
+            normalized_lines.extend(["", *preserved_tail])
+
+    follow_up_note = _build_multi_day_follow_up_note(language, requested_days)
+    if follow_up_note and follow_up_note not in "\n".join(normalized_lines):
+        normalized_lines.extend(["", f"- {follow_up_note}"])
+
+    return "\n".join(normalized_lines).strip()
 
 
 def _context_has_accessibility_data(*texts: str) -> bool:
@@ -217,6 +386,199 @@ def _build_planner_grounding_message(
     return "\n".join(rules)
 
 
+def _compact_planner_context_block(
+    heading: str,
+    content: str,
+    *,
+    max_lines: int = 18,
+    max_chars: int = 1400,
+) -> str:
+    """Trim agent context before planner synthesis to keep the prompt compact and stable."""
+    if not content:
+        return ""
+
+    kept_lines: List[str] = []
+    char_count = 0
+    for raw_line in str(content).splitlines():
+        stripped = raw_line.strip()
+        if not stripped or _PLANNER_SOURCE_LINE_RE.match(stripped):
+            continue
+
+        kept_lines.append(raw_line.rstrip())
+        char_count += len(raw_line)
+        if len(kept_lines) >= max_lines or char_count >= max_chars:
+            break
+
+    compact_body = "\n".join(kept_lines).strip()
+    if not compact_body:
+        return ""
+    return f"{heading}\n{compact_body}"
+
+
+def _extract_planner_fallback_bullets(text: str, *, max_items: int = 4) -> List[str]:
+    """Extract compact user-facing bullets from worker outputs for deterministic planner fallback."""
+    bullets: List[str] = []
+    seen = set()
+    for raw_line in str(text or "").splitlines():
+        stripped = raw_line.strip()
+        if (
+            not stripped
+            or stripped.startswith(("### ", "#### ", "---"))
+            or _PLANNER_SOURCE_LINE_RE.match(stripped)
+        ):
+            continue
+
+        if stripped.startswith(("- ", "* ", "• ")):
+            candidate = re.sub(r"^[-*•]\s+", "", stripped)
+        elif stripped.startswith(("⛅", "⚠️", "💡", "🚇", "🚌", "📍", "🏛️", "☕", "🌤️")):
+            candidate = stripped
+        else:
+            continue
+
+        normalized = _normalize_planner_text(candidate)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        bullets.append(f"- {candidate}")
+        if len(bullets) >= max_items:
+            break
+
+    return bullets
+
+
+def _build_planner_fallback_source_line(
+    language: str,
+    weather_data: str,
+    transport_data: str,
+    places_data: str,
+    events_data: str,
+) -> str:
+    """Build a compact, deduplicated source line for deterministic planner fallback."""
+    combined = "\n".join([weather_data or "", transport_data or "", places_data or "", events_data or ""]).lower()
+    sources: List[str] = []
+    if weather_data or "ipma" in combined:
+        sources.append("[*IPMA*](https://www.ipma.pt)")
+    if "visitlisboa" in combined or places_data or events_data:
+        sources.append("[*VisitLisboa*](https://www.visitlisboa.com)")
+    if "metrolisboa" in combined:
+        sources.append("[*Metro de Lisboa*](https://www.metrolisboa.pt)")
+    if "carris" in combined or transport_data:
+        sources.append("[*Carris*](https://www.carris.pt)")
+    if "cp.pt" in combined or "comboio" in combined or "train" in combined:
+        sources.append("[*CP*](https://www.cp.pt)")
+
+    timestamp = "**Atualizado:**" if language == "pt" else "**Updated:**"
+    source_label = "📌 **Fonte:**" if language == "pt" else "📌 **Source:**"
+    return f"{source_label} {' | '.join(sources)} | {timestamp} {datetime.now().strftime('%H:%M')}"
+
+
+def _build_deterministic_planner_fallback(
+    user_message: str,
+    language: str,
+    weather_data: str,
+    transport_data: str,
+    places_data: str,
+    events_data: str,
+    qa_disclaimers: list[str] | None,
+) -> str:
+    """Build a compact deterministic itinerary when planner LLM synthesis fails or times out."""
+    requested_days = _extract_requested_day_count(user_message)
+    title = (
+        "### 📅 Dia 1 · Itinerário Sugerido"
+        if language == "pt"
+        else "### 📅 Day 1 · Suggested Itinerary"
+    ) if requested_days and requested_days > 1 else (
+        "### 📅 Itinerário Sugerido"
+        if language == "pt"
+        else "### 📅 Suggested Itinerary"
+    )
+    weather_heading = "### ⛅ Condições e Segurança" if language == "pt" else "### ⛅ Weather and Safety"
+    transport_heading = "### 🚇 Como Chegar e Deslocação" if language == "pt" else "### 🚇 Getting There and Moving Around"
+    activities_heading = "### 📍 Sugestões para a visita" if language == "pt" else "### 📍 Visit Suggestions"
+    notes_heading = "### ✨ Notas Práticas" if language == "pt" else "### ✨ Practical Notes"
+
+    weather_bullets = _extract_planner_fallback_bullets(weather_data, max_items=3)
+    transport_bullets = _extract_planner_fallback_bullets(transport_data, max_items=4)
+    activity_bullets = _extract_planner_fallback_bullets(
+        "\n".join(part for part in [places_data, events_data] if part),
+        max_items=4,
+    )
+    note_bullets = [f"- {item}" for item in (qa_disclaimers or [])[:3]]
+
+    if not weather_bullets:
+        weather_bullets = [
+            "- Confirme a previsão do IPMA antes de sair."
+            if language == "pt"
+            else "- Check the latest IPMA forecast before leaving."
+        ]
+    if not transport_bullets:
+        transport_bullets = [
+            "- Confirme o trajeto em carris.pt, metrolisboa.pt ou cp.pt antes de partir."
+            if language == "pt"
+            else "- Confirm the route on carris.pt, metrolisboa.pt, or cp.pt before leaving."
+        ]
+    if not activity_bullets:
+        activity_bullets = [
+            "- Priorize espaços interiores e pausas curtas, com base nos locais já recolhidos."
+            if language == "pt"
+            else "- Prioritize indoor stops and short breaks based on the gathered places data."
+        ]
+    if not note_bullets:
+        note_bullets = [
+            "- Verifique horários e acessibilidade diretamente nos operadores e locais oficiais."
+            if language == "pt"
+            else "- Verify opening hours and accessibility directly with the official operators and venues."
+        ]
+
+    follow_up_note = _build_multi_day_follow_up_note(language, requested_days)
+    if follow_up_note:
+        note_bullets.insert(0, f"- {follow_up_note}")
+
+    sections = [
+        title,
+        "",
+        weather_heading,
+        *weather_bullets,
+        "",
+        "---",
+        "",
+        transport_heading,
+        *transport_bullets,
+        "",
+        "---",
+        "",
+        activities_heading,
+        *activity_bullets,
+        "",
+        "---",
+        "",
+        notes_heading,
+        *note_bullets,
+        "",
+        _build_planner_fallback_source_line(
+            language,
+            weather_data,
+            transport_data,
+            places_data,
+            events_data,
+        ),
+    ]
+    return "\n".join(sections).strip()
+
+
+def _planner_response_requires_fallback(cleaned_response: str) -> bool:
+    """Return whether the cleaned planner draft is effectively a failure placeholder."""
+    normalized = (cleaned_response or "").strip().lower()
+    if not normalized:
+        return True
+    failure_markers = [
+        "desculpe, tive dificuldades em processar o pedido",
+        "sorry, i'm having difficulty processing your request",
+        "an error occurred while processing",
+    ]
+    return any(marker in normalized for marker in failure_markers)
+
+
 class PlannerAgent(BaseAgent):
     """
     Itinerary planner agent that synthesizes outputs from other agents.
@@ -265,18 +627,45 @@ class PlannerAgent(BaseAgent):
         """
         # Build context from agent outputs
         context_parts = []
-        
         if weather_data:
-            context_parts.append(f"## 🌤️ Weather Data\n{weather_data}")
-        
+            compact_weather = _compact_planner_context_block(
+                "## 🌤️ Weather Data",
+                weather_data,
+                max_lines=12,
+                max_chars=900,
+            )
+            if compact_weather:
+                context_parts.append(compact_weather)
+
         if places_data:
-            context_parts.append(f"## 🏛️ Places & Attractions\n{places_data}")
-        
+            compact_places = _compact_planner_context_block(
+                "## 🏛️ Places & Attractions",
+                places_data,
+                max_lines=22,
+                max_chars=1600,
+            )
+            if compact_places:
+                context_parts.append(compact_places)
+
         if events_data:
-            context_parts.append(f"## 🎭 Events\n{events_data}")
-        
+            compact_events = _compact_planner_context_block(
+                "## 🎭 Events",
+                events_data,
+                max_lines=18,
+                max_chars=1400,
+            )
+            if compact_events:
+                context_parts.append(compact_events)
+
         if transport_data:
-            context_parts.append(f"## 🚇 Transport Info\n{transport_data}")
+            compact_transport = _compact_planner_context_block(
+                "## 🚇 Transport Info",
+                transport_data,
+                max_lines=18,
+                max_chars=1400,
+            )
+            if compact_transport:
+                context_parts.append(compact_transport)
         
         # Inject QA disclaimers so the planner transparently communicates limitations
         if qa_disclaimers:
@@ -299,8 +688,13 @@ class PlannerAgent(BaseAgent):
             accessibility_requested=accessibility_requested,
             accessibility_confirmed=accessibility_confirmed,
         )
-        
         language = infer_response_language(user_query=user_message, default="en")
+        requested_days = _extract_requested_day_count(user_message)
+        multi_day_instruction = _build_multi_day_planner_instruction(
+            language=language,
+            requested_days=requested_days,
+        )
+
         language_instruction = (
             "Respond ENTIRELY in Portuguese (PT-PT)."
             if language == "pt"
@@ -311,13 +705,52 @@ class PlannerAgent(BaseAgent):
             SystemMessage(content=self.system_prompt),
             SystemMessage(content=language_instruction),
             SystemMessage(content=grounding_message),
+            *([SystemMessage(content=multi_day_instruction)] if multi_day_instruction else []),
+            SystemMessage(
+                content=(
+                    "OUTPUT BUDGET:\n"
+                    "- Maximum 4 itinerary/activity cards.\n"
+                    "- Maximum 2 bullets per card.\n"
+                    "- Maximum 320 words total.\n"
+                    "- Prefer short factual sentences over long explanations."
+                )
+            ),
             SystemMessage(content=f"# Data from Specialized Agents\n\n{context}"),
             HumanMessage(content=f"Based on the data above, create an itinerary for: {user_message}")
         ]
         
         # Planner has no tools - LLM call with retry for Azure content filter
-        response = self._safe_llm_invoke(self.llm, messages)
-        cleaned_response = clean_response(response.content)
+        try:
+            response = self._safe_llm_invoke(self.llm, messages)
+            cleaned_response = clean_response(response.content)
+        except Exception:
+            fallback = _build_deterministic_planner_fallback(
+                user_message=user_message,
+                language=language,
+                weather_data=weather_data,
+                transport_data=transport_data,
+                places_data=places_data,
+                events_data=events_data,
+                qa_disclaimers=qa_disclaimers,
+            )
+            fallback = enforce_multi_day_quality_mode(fallback, user_message, language)
+            return finalize_worker_response(
+                fallback,
+                agent_name="planner",
+                user_query=user_message,
+                language=language,
+            )
+
+        if _planner_response_requires_fallback(cleaned_response):
+            cleaned_response = _build_deterministic_planner_fallback(
+                user_message=user_message,
+                language=language,
+                weather_data=weather_data,
+                transport_data=transport_data,
+                places_data=places_data,
+                events_data=events_data,
+                qa_disclaimers=qa_disclaimers,
+            )
 
         grounding_issues = _find_planner_grounding_issues(
             cleaned_response,
@@ -354,6 +787,23 @@ class PlannerAgent(BaseAgent):
                 accessibility_requested=accessibility_requested,
                 accessibility_confirmed=accessibility_confirmed,
             )
+
+        if _planner_response_requires_fallback(cleaned_response):
+            cleaned_response = _build_deterministic_planner_fallback(
+                user_message=user_message,
+                language=language,
+                weather_data=weather_data,
+                transport_data=transport_data,
+                places_data=places_data,
+                events_data=events_data,
+                qa_disclaimers=qa_disclaimers,
+            )
+
+        cleaned_response = enforce_multi_day_quality_mode(
+            cleaned_response,
+            user_message,
+            language,
+        )
 
         return finalize_worker_response(
             cleaned_response,
@@ -398,48 +848,100 @@ class PlannerAgent(BaseAgent):
 # ==========================================================================
 if __name__ == "__main__":
     import io
+    import os
     import sys
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    from types import SimpleNamespace
+
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     print("\033[1m" + "=" * 60 + "\033[0m")
     print("\033[1m🧪 Planner Agent Test\033[0m")
     print("\033[1m" + "=" * 60 + "\033[0m")
-    
-    try:
-        agent = PlannerAgent()
-        print(f"\n\033[1m✅ Planner Agent initialized:\033[0m {agent.get_model_info()}")
-        print(f"   Tools: {len(agent.tools)} (planner has no tools)")
-        
-        # Simulate data from other agents
-        mock_weather = """
-        Today in Lisbon: ☀️ Clear sky
-        🌡️ Temperature: 18°C - 24°C
-        🌧️ Precipitation: 10% (unlikely)
-        🌤️ UV Index: High - bring sunscreen!
-        """
-        
-        mock_places = """
-        1. 🏛️ **Mosteiro dos Jerónimos** - UNESCO World Heritage
-           📍 Belém | 🕐 10:00-17:00 | 💰 €10
-        
-        2. 🏛️ **Museu Nacional dos Coches** - World's best carriage collection
-           📍 Belém | 🕐 10:00-18:00 | 💰 €8
-        
-        3. 🎨 **MAAT** - Modern architecture & contemporary art
-           📍 Belém | 🕐 11:00-19:00 | 💰 €9
-        """
-        
-        print("\n\033[1m📝 Testing with mock data:\033[0m")
-        response = agent.invoke(
-            user_message="Plan my morning in Belém",
-            weather_data=mock_weather,
-            places_data=mock_places
-        )
-        print("\n\033[1m🤖 Response:\033[0m")
-        print(response[:800] + "..." if len(response) > 800 else response)
-        
-        print("\n\033[1;32m✅ Planner agent working!\033[0m")
-        
-    except Exception as e:
-        print(f"\n\033[1;31m❌ Error:\033[0m {e}")
-        import traceback
-        traceback.print_exc()
+    counters = {"passed": 0, "failed": 0}
+
+    def _check(condition: bool, label: str) -> None:
+        if condition:
+            counters["passed"] += 1
+            print(f"   \033[1;32m✅ PASS\033[0m: {label}")
+        else:
+            counters["failed"] += 1
+            print(f"   \033[1;31m❌ FAIL\033[0m: {label}")
+
+    mock_weather = """
+    Today in Lisbon: ☀️ Clear sky
+    🌡️ Temperature: 18°C - 24°C
+    🌧️ Precipitation: 10% (unlikely)
+    🌤️ UV Index: High - bring sunscreen!
+    """
+    mock_places = """
+    1. 🏛️ **Mosteiro dos Jerónimos** - UNESCO World Heritage
+       📍 Belém | 🕐 10:00-17:00 | 💰 €10
+
+    2. 🏛️ **Museu Nacional dos Coches** - Carriage collection
+       📍 Belém | 🕐 10:00-18:00 | 💰 €8
+    """
+
+    print("\n\033[1m📝 Offline deterministic smoke checks:\033[0m")
+    _check(_extract_requested_day_count("Plan 3 days in Lisbon for me.") == 3, "Requested day count parser detects multi-day requests")
+
+    clamped = enforce_multi_day_quality_mode(
+        response="### 📅 Lisbon Plan\n- 📅 Day 1\n- Jerónimos\n- 📅 Day 2\n- MAAT",
+        user_message="Plan 3 days in Lisbon for me.",
+        language="en",
+    )
+    _check("\n- 📅 Day 2" not in clamped and "Day 1" in clamped, "Multi-day clamp removes later day sections")
+
+    mocked_agent = PlannerAgent.__new__(PlannerAgent)
+    mocked_agent.system_prompt = "PLANNER PROMPT"
+    mocked_agent.llm = object()
+    mocked_agent._safe_llm_invoke = lambda _llm, _messages: SimpleNamespace(
+        content="### 📅 Day 1\n- **Jerónimos Monastery**\n- Short grounded plan"
+    )
+
+    mocked_response = mocked_agent.invoke(
+        user_message="Plan 3 days in Lisbon for me.",
+        weather_data=mock_weather,
+        places_data=mock_places,
+        events_data="",
+        transport_data="🚇 Metro available",
+    )
+    print("\n\033[1m🤖 Mocked planner response:\033[0m")
+    print(mocked_response[:800] + "..." if len(mocked_response) > 800 else mocked_response)
+    _check("Day 1" in mocked_response, "Planner invoke works with a mocked LLM response")
+
+    fallback_agent = PlannerAgent.__new__(PlannerAgent)
+    fallback_agent.system_prompt = "PLANNER PROMPT"
+    fallback_agent.llm = object()
+
+    def _raise_forced_fallback(_llm, _messages):
+        raise RuntimeError("forced planner fallback")
+
+    fallback_agent._safe_llm_invoke = _raise_forced_fallback
+    fallback_response = fallback_agent.invoke(
+        user_message="Plan 3 days in Lisbon for me.",
+        weather_data=mock_weather,
+        places_data=mock_places,
+        events_data="",
+        transport_data="🚇 Metro available",
+    )
+    _check("Source" in fallback_response and "Suggested itinerary" in fallback_response, "Planner fallback stays user-facing and structured")
+
+    if os.getenv("LISBOA_RUN_LIVE_PLANNER_TESTS") == "1":
+        print("\n\033[1m🌐 Optional live planner smoke:\033[0m")
+        try:
+            live_agent = PlannerAgent()
+            live_response = live_agent.invoke(
+                user_message="Plan my morning in Belém",
+                weather_data=mock_weather,
+                places_data=mock_places,
+            )
+            print(live_response[:800] + "..." if len(live_response) > 800 else live_response)
+            _check(bool(live_response.strip()), "Live planner smoke returned content")
+        except Exception as exc:
+            _check(False, f"Live planner smoke failed: {exc}")
+    else:
+        print("\n   ℹ️ Live planner smoke skipped. Set LISBOA_RUN_LIVE_PLANNER_TESTS=1 to enable it.")
+
+    print(f"\n\033[1mSummary:\033[0m Passed={counters['passed']} Failed={counters['failed']}")
+    if counters["failed"]:
+        raise SystemExit(1)
+    print("\n\033[1;32m✅ Planner agent smoke test passed!\033[0m")

@@ -610,9 +610,9 @@ def test_multiagent_combine_outputs_uses_structured_renderer_without_llm() -> No
         language="en",
     )
 
-    assert "### 🌤️ Weather" in output
-    assert "### 🚇 Transport" in output
-    assert "### ⚠️ Notes" in output
+    assert "### 🌤️ Weather Snapshot" in output
+    assert "### 🚇 Mobility and Connections" in output
+    assert "### ⚠️ Helpful Notes" in output
     assert output.count("📌 **Source:**") == 1
     assert "[*IPMA*](https://www.ipma.pt/en/)" in output
     assert "[*Metro de Lisboa*](https://www.metrolisboa.pt)" in output
@@ -638,8 +638,8 @@ def test_multiagent_combine_outputs_uses_pt_labels_and_single_footer() -> None:
         language="pt",
     )
 
-    assert "### 📍 Informação Local" in output
-    assert "### 🚇 Transportes" in output
+    assert "### 📍 Destaques locais" in output
+    assert "### 🚇 Mobilidade e ligações" in output
     assert output.count("📌 **Fonte:**") == 1
     assert "[*VisitLisboa Places*](https://www.visitlisboa.com/pt-pt/locais)" in output
     assert "[*Carris*](https://www.carris.pt)" in output
@@ -776,7 +776,7 @@ def test_transport_agent_invoke_combines_bus_only_options_across_operators() -> 
         assert "TRAMS" not in result
         assert "15E" not in result
         assert "### 🚌" in result
-        assert "#### 🚌 Carris Urban" in result
+        assert "**🚌 Carris Urban**" in result
         assert "BUSES" not in result
 
 
@@ -841,7 +841,7 @@ def test_transport_agent_invoke_returns_gentle_message_when_bus_only_matches_do_
 
         assert "autocarro" in result.lower()
         assert "não consegui confirmar" in result.lower() or "nao consegui confirmar" in result.lower()
-        assert "#### ℹ️ Notas de cobertura" in result
+        assert "**ℹ️ Notas de cobertura**" in result
 
 
 def test_transport_agent_invoke_formats_surface_only_routes_when_metro_is_excluded() -> None:
