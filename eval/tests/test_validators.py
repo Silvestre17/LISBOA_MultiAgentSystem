@@ -395,14 +395,14 @@ class TestResponseContracts:
 
     def test_compare_response_contracts_collapse_planner_card_variants(self):
         reference = (
-            "### 📅 Itinerário sugerido\n\n"
+            "### 📅 Itinerário Sugerido\n\n"
             "---\n\n"
             "### ☕ 14:00 · Pausa interior\n\n"
             "- Café\n\n"
             "---\n\n"
             "### 🏛️ 15:30 · Museu\n\n"
             "- Visita curta\n\n"
-            "### ✨ Dicas práticas\n\n"
+            "### ✨ Dicas Práticas\n\n"
             "- Leva guarda-chuva"
         )
         candidate = (
@@ -413,7 +413,7 @@ class TestResponseContracts:
             "---\n\n"
             "### 📍 16:00 · Explorar interiores\n\n"
             "- Museu recomendado\n\n"
-            "### ✨ Notas práticas\n\n"
+            "### ✨ Notas Práticas\n\n"
             "- Confirma horários"
         )
 
@@ -425,7 +425,7 @@ class TestResponseContracts:
         reference = (
             "### 📅 Itinerário para hoje\n\n"
             "- Resumo\n\n"
-            "### ✨ Dicas práticas\n\n"
+            "### ✨ Dicas Práticas\n\n"
             "- Confirmar horários"
         )
         candidate = (
@@ -440,17 +440,17 @@ class TestResponseContracts:
 
     def test_compare_response_contracts_accepts_planner_advisory_headers_and_longer_length(self):
         reference = (
-            "### 📅 Itinerário sugerido\n\n"
+            "### 📅 Itinerário Sugerido\n\n"
             + ("- Bloco detalhado de texto\n" * 10)
             + "\n### 🔎 Fontes indicadas\n\n- Confirmar horários"
         )
         candidate = (
-            "### 📅 Itinerário sugerido\n\n"
+            "### 📅 Itinerário Sugerido\n\n"
             "- Resumo compacto\n"
             "- Dica logística\n"
             "- Transporte a confirmar\n"
             "- Verificar horários\n\n"
-            "### ✨ Notas práticas\n\n"
+            "### ✨ Notas Práticas\n\n"
             "- Confirmar horários"
         )
 

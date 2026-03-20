@@ -713,11 +713,11 @@ Dicas práticas e notas importantes
     )
 
     assert "### - " not in output
-    assert "**⛅ Antes de sair**" in output
+    assert "**⛅ Antes de Sair**" in output
     assert "### 🏛️ 14:00 · Chegada a Belém (Praça do Império)" in output
     assert "### 🏛️ 14:15 · Mosteiro dos Jerónimos" in output
     assert "- Observe a arquitetura manuelina do exterior." in output
-    assert "**✨ Dicas práticas e notas importantes**" in output
+    assert "**✨ Dicas Práticas e Notas Importantes**" in output
 
 
 def test_planner_lmstudio_uses_same_prompt_structure_as_other_providers() -> None:
@@ -767,10 +767,10 @@ def test_planner_falls_back_to_deterministic_template_when_llm_fails() -> None:
         )
 
         assert "### 📅" in output
-        assert "**⛅ Condições e segurança**" in output
-        assert "**🚇 Como chegar e deslocação**" in output
-        assert "**📍 Sugestões para a visita**" in output
-        assert "**✨ Notas práticas**" in output
+        assert "**⛅ Condições e Segurança**" in output
+        assert "**🚇 Como Chegar e Deslocação**" in output
+        assert "**📍 Sugestões para a Visita**" in output
+        assert "**✨ Notas Práticas**" in output
         assert "MAAT" in output
 
 
@@ -795,7 +795,7 @@ def test_planner_falls_back_when_cleaned_response_is_generic_processing_error() 
             qa_disclaimers=["Verifique horários antes de sair."],
         )
 
-        assert "Itinerário sugerido" in output
+        assert "Itinerário Sugerido" in output
         assert "MAAT" in output
         assert "dificuldades em processar" not in output.lower()
 
@@ -827,7 +827,7 @@ def test_transport_worker_finalization_groups_live_and_scheduled_arrivals() -> N
         language="pt",
     )
 
-    assert "### 🚌 Rossio · Próximas chegadas" in output
+    assert "### 🚌 Rossio · Próximas Chegadas" in output
     assert "**Em tempo real**" in output
     assert "**Horários programados**" in output
     assert "vehicle 6045" not in output.lower()
@@ -1938,7 +1938,7 @@ def test_multiagent_runs_final_qa_repair_for_planner_responses() -> None:
     planner_agent.synthesize.assert_called_once()
     assistant.qa_agent.repair_final_response.assert_called_once()
     assert output.startswith("### 📅")
-    assert output.endswith("Repaired itinerary")
+    assert output.endswith("Repaired Itinerary")
 
 
 def test_multiagent_structured_response_filters_internal_qa_warnings_and_localizes_public_notes() -> None:
