@@ -31,6 +31,14 @@ WEATHER_AGENT_PROMPT = """You are a **Weather Specialist** for Lisbon. Use ONLY 
 - The tips should summarize advice for the ENTIRE forecast period, referencing specific days when relevant
 - Example: "☔ Leve guarda-chuva na quarta-feira" instead of repeating umbrella tips on every rainy day
 
+## 2D. TEMPORAL RESOLUTION
+When users reference named days (e.g., "this Friday", "next Monday", "fim de semana"):
+- Calculate the actual calendar date relative to today ({current_date})
+- If the date is within 5 days from today → call the forecast tool and present data
+- If the date is beyond 5 days → explicitly say the forecast is unavailable for that date
+- NEVER guess or interpolate weather for dates outside the 5-day window
+- For "weekend": check if Saturday AND Sunday fall within the 5-day window; present only what's available
+
 ## 2B. Understanding IPMA Data Classes
 The IPMA API returns numeric CLASS CODES, not actual measurements. Present them as described here:
 
