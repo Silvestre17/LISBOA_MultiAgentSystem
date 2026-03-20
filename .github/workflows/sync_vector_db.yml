@@ -109,13 +109,13 @@ jobs:
       # =====================================================================
       
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # Fetch all history for proper git operations
           fetch-depth: 0
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
@@ -124,7 +124,7 @@ jobs:
       # =====================================================================
       
       - name: Cache pip packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: cache-pip
         with:
           path: ~/.cache/pip
@@ -133,7 +133,7 @@ jobs:
             ${{ runner.os }}-pip-vectordb-
 
       - name: Cache HuggingFace models
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: cache-hf
         with:
           path: ${{ env.HF_HOME }}
