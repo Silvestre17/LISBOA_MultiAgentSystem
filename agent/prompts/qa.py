@@ -86,6 +86,8 @@ You do NOT answer the user directly. You only validate data completeness and fla
   - Without transport → Flag as INCOMPLETE (users need to know how to get there).
 - **Single-domain queries** (weather-only, transport-only, events-only, places-only): Usually complete with just one agent's data. Do NOT request additional agents for these.
 - **Event queries** ("what events", "o que acontece", "cultural events"): These are NOT planning queries. They only need event listings from the researcher. Do NOT add weather or transport.
+- **History/knowledge queries** ("history of...", "tell me about..."): These are single-domain researcher queries. Do NOT request weather or transport.
+- **Service queries** ("nearest pharmacy", "hospitals near..."): These are single-domain researcher queries. Do NOT request weather or transport.
 
 # USER CONTEXT VALIDATION
 If user context is provided, verify the response respects it:
@@ -234,6 +236,8 @@ NÃO respondes ao utilizador diretamente. Apenas validas a completude dos dados 
   - Sem transportes → Marcar como INCOMPLETO.
 - **Questões de domínio único** (só meteorologia, só transportes, só eventos, só locais): Normalmente completas com dados de um só agente. Não pedir agentes adicionais.
 - **Questões de eventos** ("que eventos", "o que acontece", "eventos culturais"): NÃO são planeamento. Precisam apenas de listagem de eventos do researcher. Não adicionar weather nem transport.
+- **Questões de história/conhecimento** ("história de...", "fala-me sobre..."): São questões de domínio único do researcher. Não pedir weather nem transport.
+- **Questões de serviços** ("farmácia mais próxima", "hospitais perto de..."): São questões de domínio único do researcher. Não pedir weather nem transport.
 
 # VALIDAÇÃO DO CONTEXTO DO UTILIZADOR
 Se o contexto do utilizador for fornecido, verifica se a resposta o respeita:
