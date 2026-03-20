@@ -31,6 +31,8 @@ from eval.runtime_utils import (
     combine_cost_payloads,
     combine_usage_payloads,
     get_pricing_metadata,
+    load_pricing_catalog,
+    resolve_model_pricing,
     split_pricing_config,
 )
 
@@ -108,6 +110,27 @@ class TestPricingLookup:
             "pricing_updated_at": "2026-03-05",
         }
 
+    def test_repository_catalog_includes_selected_azure_foundry_models(self):
+        """The checked-in pricing catalog should cover selected Azure non-OpenAI models."""
+        catalog = load_pricing_catalog()
+
+        expected_prices = {
+            "azure::deepseek-r1": (1.35, 5.4),
+            "azure::phi-4-reasoning-plus": (0.125, 0.5),
+            "azure::grok-4": (3.0, 15.0),
+            "azure::llama-3.3-70b": (0.71, 0.71),
+            "azure::kimi-k2-thinking": (0.6, 2.5),
+            "azure::claude-haiku-4.5": (1.0, 5.0),
+            "azure::claude-sonnet-4.5": (3.0, 15.0),
+            "azure::claude-opus-4.1": (15.0, 75.0),
+        }
+
+        for model_id, (expected_input, expected_output) in expected_prices.items():
+            pricing = resolve_model_pricing(catalog, model_id)
+            assert pricing is not None, model_id
+            assert pricing["input"] == pytest.approx(expected_input)
+            assert pricing["output"] == pytest.approx(expected_output)
+
 
 class TestCostPayloads:
     """Tests for single-model and multi-model cost computation."""
@@ -159,9 +182,10 @@ class TestCostPayloads:
         cost = build_cost_payload(usage, pricing)
         assert cost["pricing_complete"]
         assert len(cost["llm_cost_breakdown"]) == 2
-        assert cost["input_cost_usd"] == pytest.approx(0.000035)
-        assert cost["output_cost_usd"] == pytest.approx(0.00007)
-        assert cost["total_cost_usd"] == pytest.approx(0.000105)
+        assert cost["llm_cost_breakdown"][1]["agent_name"] == "unattributed"
+        assert cost["input_cost_usd"] == pytest.approx(0.000075)
+        assert cost["output_cost_usd"] == pytest.approx(0.00015)
+        assert cost["total_cost_usd"] == pytest.approx(0.000225)
 
     def test_combine_cost_payloads_preserves_totals(self):
         """Combining response and evaluation cost payloads should sum totals."""
@@ -189,3 +213,18 @@ class TestCostPayloads:
         assert combined["tokens"]["output_tokens"] == 30
         assert combined["tokens"]["total_tokens"] == 180
         assert combined["total_cost_usd"] == pytest.approx(0.0045)
+
+    def test_build_cost_payload_treats_local_models_as_zero_cost(self):
+        """Local providers such as LM Studio should default to zero-cost pricing."""
+        usage = build_usage_payload(
+            {"input_tokens": 1200, "output_tokens": 300, "total_tokens": 1500},
+            model_id="lmstudio::qwen/qwen3.5-9b",
+            call_count=1,
+        )
+
+        cost = build_cost_payload(usage, {})
+
+        assert cost["pricing_found"] is True
+        assert cost["pricing_complete"] is True
+        assert cost["total_cost_usd"] == pytest.approx(0.0)
+        assert cost["missing_pricing_models"] == []

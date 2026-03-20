@@ -21,19 +21,25 @@
 import os
 import re
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from langchain_core.documents import Document
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from agent.agents.base import BaseAgent, clean_response
 from agent.agents.planner_agent import PlannerAgent
 from agent.agents.qa_agent import QualityAssuranceAgent
 from agent.agents.researcher_agent import ResearcherAgent
 from agent.agents.supervisor import SupervisorAgent
-from agent.agents.transport_agent import TransportAgent
+from agent.agents.transport_agent import (
+    TransportAgent,
+    _clean_query_fragment,
+    _extract_route_endpoints,
+)
 from agent.agents.weather_agent import WeatherAgent
 from agent.graph import MultiAgentAssistant
 from agent.utils.response_formatter import (
@@ -301,6 +307,63 @@ def test_supervisor_standalone_attractions_query_ignores_previous_topic_history(
         )
 
         assert decision["agents"] == ["researcher"]
+
+
+def test_supervisor_lmstudio_route_uses_same_llm_path_as_other_providers() -> None:
+    """LM Studio supervisor routing should use the same LLM path as cloud providers."""
+    with patch.object(SupervisorAgent, "__init__", lambda self: None):
+        agent = SupervisorAgent()
+        agent.llm_provider = "lmstudio"
+        agent.llm = object()
+        agent._safe_llm_invoke = MagicMock(
+            return_value=MagicMock(
+                content='{"reasoning": "Route with LLM", "agents": ["weather", "transport"], "direct_response": null}'
+            )
+        )
+
+        decision = agent.route(
+            "Tell me the weather today and how I get from Rossio to Belém.",
+            language="en",
+        )
+
+        agent._safe_llm_invoke.assert_called_once()
+        assert decision["agents"] == ["weather", "transport"]
+        assert decision["direct_response"] is None
+
+
+def test_supervisor_fallback_mixed_weather_and_route_query_detects_both_domains() -> None:
+    """Fallback routing should capture both weather and transport in natural PT route phrasing."""
+    with patch.object(SupervisorAgent, "__init__", lambda self: None):
+        agent = SupervisorAgent()
+
+        decision = agent._fallback_routing(
+            "Diz-me o tempo hoje em Lisboa e como vou do Rossio para Belém.",
+            llm_response="",
+            language="pt",
+        )
+
+        assert "weather" in decision["agents"]
+        assert "transport" in decision["agents"]
+        assert "researcher" not in decision["agents"]
+
+
+def test_supervisor_planning_query_forces_research_transport_and_weather_when_needed() -> None:
+    """Planning queries should deterministically include the grounding workers needed for a robust itinerary."""
+    with patch.object(SupervisorAgent, "__init__", lambda self: None):
+        agent = SupervisorAgent()
+        agent.llm = object()
+        agent._safe_llm_invoke = MagicMock(
+            return_value=MagicMock(
+                content='{"reasoning": "Planner-only draft", "agents": ["planner"], "direct_response": null}'
+            )
+        )
+
+        decision = agent.route(
+            "Planeia a minha tarde em Belém, diz-me como lá chegar a partir do Rossio e considera o tempo.",
+            language="pt",
+        )
+
+        assert decision["agents"] == ["planner", "researcher", "transport", "weather"]
 
 
 
@@ -650,11 +713,91 @@ Dicas práticas e notas importantes
     )
 
     assert "### - " not in output
-    assert "### ⛅ Antes de sair" in output
+    assert "**⛅ Antes de sair**" in output
     assert "### 🏛️ 14:00 · Chegada a Belém (Praça do Império)" in output
     assert "### 🏛️ 14:15 · Mosteiro dos Jerónimos" in output
     assert "- Observe a arquitetura manuelina do exterior." in output
-    assert "### ✨ Dicas práticas e notas importantes" in output
+    assert "**✨ Dicas práticas e notas importantes**" in output
+
+
+def test_planner_lmstudio_uses_same_prompt_structure_as_other_providers() -> None:
+    """LM Studio planner invocations should reuse the same prompt structure as cloud models."""
+    with patch.object(PlannerAgent, "__init__", lambda self: None), patch(
+        "agent.agents.planner_agent.finalize_worker_response",
+        side_effect=lambda response, **_kwargs: response,
+    ):
+        agent = PlannerAgent()
+        agent.system_prompt = "PLANNER PROMPT"
+        agent.llm_provider = "lmstudio"
+        agent.llm = object()
+        agent._safe_llm_invoke = MagicMock(return_value=SimpleNamespace(content="Draft itinerary"))
+
+        output = agent.invoke(
+            user_message="Plan my afternoon in Belém.",
+            weather_data="Sunny.",
+            transport_data="Metro available.",
+            places_data="1. **Jerónimos Monastery**",
+        )
+
+        messages = agent._safe_llm_invoke.call_args.args[1]
+        system_messages = [message.content for message in messages if isinstance(message, SystemMessage)]
+        assert system_messages[0] == "PLANNER PROMPT"
+        assert any("Respond ENTIRELY in English." in content for content in system_messages)
+        assert any("GROUNDING RULES:" in content for content in system_messages)
+        assert any("OUTPUT BUDGET:" in content for content in system_messages)
+        assert any("# Data from Specialized Agents" in content for content in system_messages)
+        assert output == "Draft itinerary"
+
+
+def test_planner_falls_back_to_deterministic_template_when_llm_fails() -> None:
+    """Planner should return a compact deterministic itinerary if the planner LLM fails."""
+    with patch.object(PlannerAgent, "__init__", lambda self: None):
+        agent = PlannerAgent()
+        agent.system_prompt = "PLANNER PROMPT"
+        agent.llm_provider = "lmstudio"
+        agent.llm = object()
+        agent._safe_llm_invoke = MagicMock(side_effect=TimeoutError("planner timeout"))
+
+        output = agent.invoke(
+            user_message="Planeia a minha tarde em Belém e considera o tempo.",
+            weather_data="- Chuva forte provável\n📌 **Fonte:** [*IPMA*](https://www.ipma.pt)",
+            transport_data="- Confirma o trajeto em carris.pt\n📌 **Fonte:** [*Carris*](https://www.carris.pt)",
+            places_data="- **MAAT**\n- **Museu Nacional dos Coches**",
+            qa_disclaimers=["Verifique horários antes de sair."],
+        )
+
+        assert "### 📅" in output
+        assert "**⛅ Condições e segurança**" in output
+        assert "**🚇 Como chegar e deslocação**" in output
+        assert "**📍 Sugestões para a visita**" in output
+        assert "**✨ Notas práticas**" in output
+        assert "MAAT" in output
+
+
+def test_planner_falls_back_when_cleaned_response_is_generic_processing_error() -> None:
+    """Planner should also switch to the deterministic template when clean_response collapses the draft into a generic error."""
+    with patch.object(PlannerAgent, "__init__", lambda self: None):
+        agent = PlannerAgent()
+        agent.system_prompt = "PLANNER PROMPT"
+        agent.llm_provider = "lmstudio"
+        agent.llm = object()
+        agent._safe_llm_invoke = MagicMock(
+            return_value=SimpleNamespace(
+                content="How do I get there?\n\nWe are in Portuguese.\n\nStep-by-step:"
+            )
+        )
+
+        output = agent.invoke(
+            user_message="Planeia a minha tarde em Belém e considera o tempo.",
+            weather_data="- Chuva forte provável",
+            transport_data="- Confirma o trajeto em carris.pt",
+            places_data="- **MAAT**",
+            qa_disclaimers=["Verifique horários antes de sair."],
+        )
+
+        assert "Itinerário sugerido" in output
+        assert "MAAT" in output
+        assert "dificuldades em processar" not in output.lower()
 
 
 def test_transport_worker_finalization_groups_live_and_scheduled_arrivals() -> None:
@@ -717,6 +860,54 @@ def test_transport_worker_finalization_strips_inline_gps_vehicle_and_plate_metad
     assert "22685" not in output
     assert "99-XE-555" not in output
     assert "dados atualizados" in output.lower()
+
+
+def test_transport_worker_finalization_strips_weather_disclaimer_block() -> None:
+    """Transport answers should not keep cross-domain weather disclaimers when weather is handled elsewhere."""
+    raw = """Aqui está o ponto de situação para o teu trajeto:
+
+⛈️ **Tempo em Lisboa**
+- Infelizmente não tenho acesso a dados meteorológicos em tempo real. Recomendo consultar [IPMA](https://www.ipma.pt) ou o [In-Weather](https://in-weather.com) para previsões detalhadas.
+
+🚇🚌 **Como ir do Rossio para Belém:**
+
+**Opção 1: Autocarro (Carris Urbano)**
+- 📍 **Embarque**: Rossio
+- 🚌 **Linha 732** - para Caselas — ~43 min
+
+📌 **Fonte:** [*Carris*](https://www.carris.pt) | **Atualizado:** 11:03"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="transport",
+        user_query="Diz-me o tempo hoje em Lisboa e como vou do Rossio para Belém.",
+        language="pt",
+    )
+
+    assert "não tenho acesso a dados meteorológicos" not in output.lower()
+    assert "in-weather" not in output.lower()
+    assert "Como ir do Rossio para Belém" in output
+
+
+def test_transport_worker_finalization_strips_inline_weather_side_note_variant() -> None:
+    """Transport answers should remove inline weather-side notes such as 'Sobre o tempo em Lisboa'."""
+    raw = """### 🚌 Sobre o tempo em Lisboa: 🌤️ Não tenho acesso a dados meteorológicos no momento. Recomendo verificar o [IPMA](https://www.ipma.pt) ou o [Google Weather](https://weather.google.com) para a previsão atualizada!
+
+**Horários programados**
+- 🚌 **732** → para Caselas · **11:25** · Próximo: (tempo real)
+
+📌 **Fonte:** [*Carris*](https://www.carris.pt) | **Atualizado:** 11:10"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="transport",
+        user_query="Diz-me o tempo hoje em Lisboa e como vou do Rossio para Belém.",
+        language="pt",
+    )
+
+    assert "Sobre o tempo em Lisboa" not in output
+    assert "google weather" not in output.lower()
+    assert "Horários programados" in output
 
 
 def test_strip_unsupported_closing_offers_removes_inline_offer_clause() -> None:
@@ -794,7 +985,9 @@ def test_researcher_double_content_filter_falls_back_to_direct_tool() -> None:
         output = agent.invoke("Museums in Lisbon")
 
         assert call_counter["count"] == 2
-        dummy_places_tool.invoke.assert_called_once_with({"query": "Museums in Lisbon", "max_results": 5})
+        dummy_places_tool.invoke.assert_called_once_with(
+            {"query": "Museums in Lisbon", "max_results": 5, "category": "Museums & Monuments"}
+        )
         assert "[*VisitLisboa Places*](https://www.visitlisboa.com/en/places)" in output
 
 
@@ -821,6 +1014,32 @@ def test_researcher_accessibility_place_queries_skip_freeform_llm() -> None:
             {"query": "Belem museums wheelchair accessible", "max_results": 5, "category": "Museums & Monuments"}
         )
         assert "Jerónimos Monastery" in output
+        assert "[*VisitLisboa Places*](https://www.visitlisboa.com/en/places)" in output
+
+
+def test_researcher_direct_place_lookup_applies_restaurant_category_for_dining_queries() -> None:
+    """Dining queries should narrow deterministic place lookups to the restaurant category."""
+    with patch.object(ResearcherAgent, "__init__", lambda self: None):
+        agent = ResearcherAgent()
+        agent.system_prompt = "PRIMARY PROMPT"
+
+        dummy_places_tool = MagicMock()
+        dummy_places_tool.name = "search_places_attractions"
+        dummy_places_tool.invoke = MagicMock(
+            return_value=(
+                "**1.** 🏛️ **5 Oceanos**\n"
+                "- 📍 **Address**: Doca do Bom Sucesso, Lisbon"
+            )
+        )
+        agent.tools = [dummy_places_tool]
+        agent.execute_react_loop = MagicMock(side_effect=AssertionError("LLM flow should be skipped"))
+
+        output = agent.invoke("Best seafood restaurants near the Tagus river.")
+
+        dummy_places_tool.invoke.assert_called_once_with(
+            {"query": "Best seafood restaurants near the Tagus river.", "max_results": 5, "category": "Restaurants"}
+        )
+        assert "5 Oceanos" in output
         assert "[*VisitLisboa Places*](https://www.visitlisboa.com/en/places)" in output
 
 
@@ -918,6 +1137,26 @@ def test_weather_current_query_uses_direct_current_summary_tool() -> None:
 
         current_tool.invoke.assert_called_once_with({})
         assert "**Updated:** 11:31" in output
+
+
+def test_weather_lmstudio_multiagent_context_uses_same_react_loop_path() -> None:
+    """LM Studio weather multi-agent runs should use the same LLM path unless a generic deterministic fast path already applies."""
+    with patch.object(WeatherAgent, "__init__", lambda self: None):
+        agent = WeatherAgent()
+        agent.system_prompt = "PRIMARY WEATHER PROMPT"
+        agent.llm_provider = "lmstudio"
+        agent.execute_react_loop = MagicMock(return_value="🌤️ Weather Forecast for Lisbon")
+        agent._run_direct_tool_fallback = MagicMock(side_effect=AssertionError("Local-only fallback should be skipped"))
+
+        output = agent.invoke(
+            "Planeia a minha tarde em Belém, diz-me como lá chegar a partir do Rossio e considera o tempo.",
+            context="User language: pt",
+            verbose=False,
+        )
+
+        agent.execute_react_loop.assert_called_once()
+        agent._run_direct_tool_fallback.assert_not_called()
+        assert output.strip()
 
 
 def test_weather_forecast_query_uses_direct_tool_path_with_requested_days() -> None:
@@ -1128,6 +1367,270 @@ def test_transport_direct_status_fallback_prefers_metro_tool() -> None:
         summary_tool.invoke.assert_not_called()
 
 
+def test_base_agent_safe_llm_invoke_collapses_multiple_system_messages_for_lmstudio() -> None:
+    """LM Studio invocations should merge multiple system messages into one compatible payload."""
+    agent = BaseAgent.__new__(BaseAgent)
+    agent.llm_provider = "lmstudio"
+    agent._record_llm_usage = lambda _llm, _response: None
+
+    captured = {}
+
+    class FakeLLM:
+        def invoke(self, messages):
+            captured["messages"] = messages
+            return SimpleNamespace(content="ok")
+
+    response = agent._safe_llm_invoke(
+        FakeLLM(),
+        [
+            SystemMessage(content="System A"),
+            SystemMessage(content="System B"),
+            HumanMessage(content="Olá"),
+        ],
+        retries=0,
+    )
+
+    assert response.content == "ok"
+    system_messages = [message for message in captured["messages"] if isinstance(message, SystemMessage)]
+    assert len(system_messages) == 1
+    assert "System A" in system_messages[0].content
+    assert "System B" in system_messages[0].content
+
+
+def test_base_agent_safe_llm_invoke_preserves_multiple_system_messages_for_non_lmstudio() -> None:
+    """Azure/OpenAI paths should keep the original multi-system payload unchanged."""
+    agent = BaseAgent.__new__(BaseAgent)
+    agent.llm_provider = "azure"
+    agent._record_llm_usage = lambda _llm, _response: None
+
+    captured = {}
+
+    class FakeLLM:
+        def invoke(self, messages):
+            captured["messages"] = messages
+            return SimpleNamespace(content="ok")
+
+    response = agent._safe_llm_invoke(
+        FakeLLM(),
+        [
+            SystemMessage(content="System A"),
+            SystemMessage(content="System B"),
+            HumanMessage(content="Hello"),
+        ],
+        retries=0,
+    )
+
+    assert response.content == "ok"
+    system_messages = [message for message in captured["messages"] if isinstance(message, SystemMessage)]
+    assert len(system_messages) == 2
+
+
+def test_clean_response_removes_dangling_think_block() -> None:
+    """Dangling LM Studio think blocks should be stripped even when the tag is never closed."""
+    raw = "### 🚇 Informação de Transportes\n\n<think>Now I have all the information."
+
+    output = clean_response(raw)
+
+    assert "<think>" not in output
+    assert output.strip() == "### 🚇 Informação de Transportes"
+
+
+def test_base_agent_execute_react_loop_keeps_parallel_tool_execution_for_lmstudio() -> None:
+    """LM Studio tool batches should still run in parallel because tools do not spawn extra LLMs."""
+    agent = BaseAgent.__new__(BaseAgent)
+    agent.llm_provider = "lmstudio"
+    agent.llm_with_tools = object()
+    agent._record_llm_usage = lambda _llm, _response: None
+    agent._record_tool_call = lambda _tool_name, _args: None
+
+    tool_a = MagicMock()
+    tool_a.name = "tool_a"
+
+    tool_b = MagicMock()
+    tool_b.name = "tool_b"
+
+    agent.tools = [tool_a, tool_b]
+    agent.execute_tools_parallel = MagicMock(
+        return_value={"call_a": "result a", "call_b": "result b"}
+    )
+
+    responses = iter(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "tool_a", "args": {"origin": "Rossio"}, "id": "call_a"},
+                    {"name": "tool_b", "args": {"destination": "Belém"}, "id": "call_b"},
+                ],
+            ),
+            SimpleNamespace(content="done", tool_calls=[]),
+        ]
+    )
+    agent._safe_llm_invoke = MagicMock(side_effect=lambda _llm, _messages, verbose=False: next(responses))
+
+    output = agent.execute_react_loop(messages=[HumanMessage(content="Route test")], verbose=False)
+
+    agent.execute_tools_parallel.assert_called_once()
+    tool_calls = agent.execute_tools_parallel.call_args.args[0]
+    assert [tool_call["name"] for tool_call in tool_calls] == ["tool_a", "tool_b"]
+    assert output == "done"
+
+
+def test_base_agent_execute_react_loop_falls_back_to_tool_results_for_incomplete_think_reply() -> None:
+    """If the final LM Studio reply is just a header plus dangling think text, return the real tool result instead."""
+    agent = BaseAgent.__new__(BaseAgent)
+    agent.llm_provider = "lmstudio"
+    agent.llm_with_tools = object()
+    agent._record_llm_usage = lambda _llm, _response: None
+    agent._record_tool_call = lambda _tool_name, _args: None
+
+    route_tool = MagicMock()
+    route_tool.name = "route_tool"
+    route_tool.invoke = MagicMock(return_value="🗺️ **Route: Rossio → Belém**")
+    agent.tools = [route_tool]
+
+    responses = iter(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "route_tool", "args": {"origin": "Rossio", "destination": "Belém"}, "id": "call_route"},
+                ],
+            ),
+            SimpleNamespace(content="### 🚇 Informação de Transportes\n\n<think>Now I have all the information.", tool_calls=[]),
+        ]
+    )
+    agent._safe_llm_invoke = MagicMock(side_effect=lambda _llm, _messages, verbose=False: next(responses))
+
+    output = agent.execute_react_loop(messages=[HumanMessage(content="Route test")], verbose=False)
+
+    assert "<think>" not in output
+    assert "Rossio" in output
+
+
+def test_qa_lmstudio_validate_uses_same_llm_validation_path() -> None:
+    """LM Studio QA should use the same prompt-driven validation path as cloud providers."""
+    with patch.object(QualityAssuranceAgent, "__init__", lambda self: None):
+        agent = QualityAssuranceAgent()
+        agent.llm_provider = "lmstudio"
+        agent.llm = object()
+        agent._safe_llm_invoke = MagicMock(
+            return_value=MagicMock(
+                content='{"complete": true, "missing_data": [], "required_agents": [], "reasoning": "All data present.", "disclaimers": []}'
+            )
+        )
+
+        fact_check = {
+            "valid": True,
+            "disclaimers": [],
+            "critical_issues": [],
+            "checks_performed": ["output_hygiene"],
+            "repairable_agents": [],
+            "per_agent": {},
+        }
+        agent._verify_facts = MagicMock(return_value=fact_check)
+        agent._merge_fact_check_results = MagicMock(return_value=fact_check)
+
+        result = agent.validate(
+            user_query="Planeia a minha tarde em Belém.",
+            agent_outputs={"weather": "ok", "transport": "ok", "researcher": "ok"},
+            agents_called=["weather", "transport", "researcher"],
+            language="pt",
+        )
+
+        agent._safe_llm_invoke.assert_called_once()
+        assert result["complete"] is True
+        assert result["required_agents"] == []
+        assert result["needs_repair"] is False
+
+
+def test_qa_lmstudio_repair_final_response_uses_same_llm_repair_path() -> None:
+    """LM Studio final QA repair should use the same repair path as cloud models."""
+    with patch.object(QualityAssuranceAgent, "__init__", lambda self: None):
+        agent = QualityAssuranceAgent()
+        agent.llm_provider = "lmstudio"
+        agent.llm = object()
+        agent._safe_llm_invoke = MagicMock(return_value=MagicMock(content="### 📅 Repaired\n- Conteúdo"))
+
+        draft = "### 📅 Rascunho\n- Conteúdo"
+        result = agent.repair_final_response(
+            user_query="Planeia a minha tarde em Belém.",
+            draft_response=draft,
+            agent_outputs={"weather": "ok", "transport": "ok", "researcher": "ok"},
+            qa_result={"disclaimers": ["Verificar horários"], "fact_check": {"disclaimers": []}},
+            language="pt",
+        )
+
+        agent._safe_llm_invoke.assert_called_once()
+        assert result.startswith("### 📅 Repaired")
+
+
+def test_qa_repair_final_response_keeps_draft_when_repair_collapses_to_generic_error() -> None:
+    """QA repair must not replace a usable draft with the generic clean_response error placeholder."""
+    with patch.object(QualityAssuranceAgent, "__init__", lambda self: None):
+        agent = QualityAssuranceAgent()
+        agent.llm_provider = "lmstudio"
+        agent.llm = object()
+        agent._safe_llm_invoke = MagicMock(
+            return_value=MagicMock(
+                content="How do I get there?\n\nWe are in Portuguese.\n\nStep-by-step:"
+            )
+        )
+
+        draft = "### 📅 Draft\n- Conteúdo grounded"
+        result = agent.repair_final_response(
+            user_query="Planeia a minha tarde em Belém.",
+            draft_response=draft,
+            agent_outputs={"weather": "ok"},
+            qa_result={"disclaimers": ["Verificar horários"], "fact_check": {"disclaimers": []}},
+            language="pt",
+        )
+
+        assert result == draft
+
+
+def test_transport_clean_query_fragment_strips_using_the_metro_suffix() -> None:
+    """Route endpoint cleanup should strip English mode suffixes from location fragments."""
+    assert _clean_query_fragment("Rossio using the metro") == "Rossio"
+
+
+def test_transport_extract_route_endpoints_from_planner_style_phrase() -> None:
+    """Planner-style PT route phrasing should still yield clean origin/destination endpoints."""
+    assert _extract_route_endpoints(
+        "Planeia a minha tarde em Belém, diz-me como lá chegar a partir do Rossio e considera o tempo."
+    ) == ("Rossio", "Belém")
+
+
+def test_transport_extract_route_endpoints_from_do_para_phrase() -> None:
+    """Simple PT phrasing with 'do X para Y' should resolve route endpoints deterministically."""
+    assert _extract_route_endpoints("Como vou do Rossio para Belém?") == ("Rossio", "Belém")
+
+
+def test_transport_lmstudio_multiagent_context_uses_same_react_loop_path() -> None:
+    """LM Studio transport multi-agent runs should use the same LLM path as cloud providers."""
+    with patch.object(TransportAgent, "__init__", lambda self: None):
+        agent = TransportAgent()
+        agent.system_prompt = "TRANSPORT PROMPT"
+        agent.llm_provider = "lmstudio"
+        agent.execute_react_loop = MagicMock(return_value="🗺️ **Route: Rossio → Belém**")
+        agent.tools = []
+        agent._resolve_deterministic_response = MagicMock(return_value=None)
+        agent._invoke_deterministic_tool_call = MagicMock(return_value=None)
+
+        with patch(
+            "agent.agents.transport_agent.finalize_worker_response",
+            side_effect=lambda response, **_kwargs: response,
+        ):
+            output = agent.invoke(
+                "Planeia a minha tarde em Belém, diz-me como lá chegar a partir do Rossio e considera o tempo.",
+                context="User language: pt",
+                verbose=False,
+            )
+
+        agent.execute_react_loop.assert_called_once()
+        assert "Rossio" in output
+
+
 def test_transport_stop_name_arrivals_query_uses_deterministic_carris_tool() -> None:
     """Carris stop-name arrival queries should bypass the free-form LLM path."""
     with patch.object(TransportAgent, "__init__", lambda self: None):
@@ -1162,6 +1665,37 @@ def test_transport_stop_name_arrivals_query_uses_deterministic_carris_tool() -> 
         assert "Rossio" in output
 
 
+def test_transport_agent_returns_honest_limitation_for_ferry_queries() -> None:
+    """Ferry queries should avoid the LLM path and explain the unsupported runtime scope clearly."""
+    with patch.object(TransportAgent, "__init__", lambda self: None):
+        agent = TransportAgent()
+        agent.system_prompt = "TRANSPORT PROMPT"
+        agent.execute_react_loop = MagicMock(side_effect=AssertionError("LLM path should be skipped"))
+        agent.tools = []
+
+        output = agent.invoke("Ferry to Cacilhas right now?", context="", verbose=False)
+
+    assert "runtime" in output.lower()
+    assert "ferry" in output.lower() or "transtejo" in output.lower()
+    assert "Metro de Lisboa" in output
+    assert "Carris Metropolitana" in output
+    assert "CP" in output
+
+
+def test_transport_agent_returns_honest_limitation_for_fertagus_queries() -> None:
+    """Fertagus-specific queries should be answered with an explicit limitation note, not invented schedules."""
+    with patch.object(TransportAgent, "__init__", lambda self: None):
+        agent = TransportAgent()
+        agent.system_prompt = "TRANSPORT PROMPT"
+        agent.execute_react_loop = MagicMock(side_effect=AssertionError("LLM path should be skipped"))
+        agent.tools = []
+
+        output = agent.invoke("What is the next Fertagus train to Setúbal?", context="", verbose=False)
+
+    assert "Fertagus" in output
+    assert "can't directly verify" in output.lower() or "not yet confirmed" in output.lower()
+
+
 def test_multiagent_skips_qa_for_simple_weather_queries() -> None:
     """Simple deterministic weather queries should not pay the extra QA latency."""
     assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
@@ -1194,6 +1728,72 @@ def test_multiagent_skips_qa_for_simple_weather_queries() -> None:
     weather_agent.invoke.assert_called_once()
     assistant.qa_agent.validate.assert_not_called()
     assert output == "🌤️ Forecast body"
+
+
+def test_multiagent_local_worker_batches_run_sequentially_without_threadpool() -> None:
+    """Local LM Studio worker batches should not use the parallel executor."""
+    assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
+    assistant.state = {"messages": [], "user_context": None}
+
+    assistant.supervisor = MagicMock()
+    assistant.supervisor.route = MagicMock(
+        return_value={"agents": ["weather", "transport"], "direct_response": None, "reasoning": "local worker batch"}
+    )
+
+    call_order: list[str] = []
+
+    weather_agent = MagicMock()
+    weather_agent.llm_provider = "lmstudio"
+    weather_agent._is_current_weather_query = MagicMock(return_value=False)
+    weather_agent._is_simple_forecast_query = MagicMock(return_value=False)
+    weather_agent.invoke = MagicMock(side_effect=lambda *_args, **_kwargs: call_order.append("weather") or "🌤️ Weather ok")
+
+    transport_agent = MagicMock()
+    transport_agent.llm_provider = "lmstudio"
+    transport_agent.invoke = MagicMock(side_effect=lambda *_args, **_kwargs: call_order.append("transport") or "🚇 Transport ok")
+
+    assistant.agents = {"weather": weather_agent, "transport": transport_agent}
+    assistant.qa_agent = MagicMock()
+    assistant.qa_agent.validate = MagicMock(
+        return_value={
+            "complete": True,
+            "missing_data": [],
+            "required_agents": [],
+            "reasoning": "All data present.",
+            "disclaimers": [],
+            "critical_issues": [],
+            "repairable_agents": [],
+            "needs_repair": False,
+            "fact_check": {
+                "disclaimers": [],
+                "critical_issues": [],
+                "repairable_agents": [],
+                "per_agent": {},
+            },
+        }
+    )
+    assistant._combine_outputs = MagicMock(return_value="combined")
+
+    with patch("agent.graph.LANGSMITH_AVAILABLE", False), patch(
+        "agent.graph.clean_response", side_effect=lambda text: text
+    ), patch("agent.graph.format_response", side_effect=lambda text: text), patch(
+        "agent.graph.generate_response_title", return_value=None
+    ), patch("agent.graph.ensure_response_title", side_effect=lambda text, title: text), patch(
+        "agent.graph.ContextThreadPoolExecutor",
+        side_effect=AssertionError("Parallel worker executor should be skipped"),
+    ):
+        output = assistant.chat(
+            "Planeia a minha tarde em Belém, diz-me como lá chegar a partir do Rossio e considera o tempo.",
+            language="pt",
+            verbose=False,
+        )
+
+    assert call_order == ["weather", "transport"]
+    assistant._combine_outputs.assert_called_once_with(
+        {"weather": "🌤️ Weather ok", "transport": "🚇 Transport ok"},
+        language="pt",
+    )
+    assert output == "combined"
 
 
 def test_multiagent_retries_worker_when_qa_flags_repairable_critical_issue() -> None:
@@ -1339,6 +1939,33 @@ def test_multiagent_runs_final_qa_repair_for_planner_responses() -> None:
     assistant.qa_agent.repair_final_response.assert_called_once()
     assert output.startswith("### 📅")
     assert output.endswith("Repaired itinerary")
+
+
+def test_multiagent_structured_response_filters_internal_qa_warnings_and_localizes_public_notes() -> None:
+    """Hybrid responses should hide internal QA chatter while keeping localized user-facing caveats."""
+    assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
+
+    output = assistant._render_structured_hybrid_response(
+        {
+            "weather": "Tempo estável.",
+            "transport": "Rota confirmada.",
+            "_qa_disclaimers": [
+                "O Agente de Transporte mencionou não ter acesso a dados meteorológicos, o que contradiz o Agente de Meteorologia; esta informação deve ser ignorada na resposta final.",
+                "Some URLs reference unverified domains: in-weather.com. Please verify links before visiting.",
+                "Carris bus route numbers and schedules should be verified at carris.pt, as GTFS data may not reflect the most recent changes.",
+                "Dados de transporte em tempo real podem sofrer alterações.",
+                "Some metro station names could not be verified: metro",
+            ],
+        },
+        language="pt",
+    )
+
+    assert "Agente de Transporte" not in output
+    assert "deve ser ignorada na resposta final" not in output
+    assert "domínios não verificados (in-weather" in output
+    assert "os horários da Carris devem ser confirmados em carris.pt" in output
+    assert "Dados de transporte em tempo real podem sofrer alterações." in output
+    assert "could not be verified" not in output
 
 
 def test_search_places_attractions_respects_category_and_excludes_service_like_results() -> None:

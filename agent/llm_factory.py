@@ -162,6 +162,9 @@ class LLMFactory:
                 temperature=temperature,
                 base_url=Config.LMSTUDIO_BASE_URL,  # e.g., "http://localhost:1234/v1"
                 api_key="lm-studio",  # LM Studio ignores API key, any string works
+                max_tokens=2048,
+                timeout=180,
+                max_retries=1,
                 # Add penalties to prevent repetition (critical for small models)
                 frequency_penalty=0.5,
                 presence_penalty=0.3,

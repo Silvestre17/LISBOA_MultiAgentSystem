@@ -31,6 +31,8 @@ from eval.validators.response_heuristics import (
     check_language_compliance,
     check_response_length,
     check_tool_leaks,
+    compare_response_contracts,
+    extract_response_contract,
     run_all_heuristics,
 )
 from eval.validators.transport_validator import (
@@ -266,6 +268,25 @@ class TestCheckHallucinatedFeatures:
     def test_purchase_tickets_claim_is_hallucination(self):
         r = check_hallucinated_features("I can purchase your tickets directly here.")
         assert r["hallucinated"]
+    
+    def test_ferry_schedule_claim_is_hallucination(self):
+        """Positive ferry schedule claims should be flagged because that data is not supported in-runtime."""
+        r = check_hallucinated_features("The next Transtejo ferry departs at 18:10 with live updates.")
+        assert r["hallucinated"]
+        assert "Ferry schedule/live data" in r["flagged_claims"]
+    
+    def test_ferry_limitation_note_is_not_a_hallucination(self):
+        """An honest limitation note about ferries should not be misclassified as a fake capability."""
+        r = check_hallucinated_features(
+            "I can't verify live ferry departures in this runtime, so please check the official operator page."
+        )
+        assert not r["hallucinated"]
+    
+    def test_shared_bike_live_availability_claim_is_hallucination(self):
+        """Positive Gira or scooter live-availability claims should be flagged as unsupported."""
+        r = check_hallucinated_features("There are 7 Gira bikes available live at the nearest dock.")
+        assert r["hallucinated"]
+        assert "Shared bike/scooter live availability" in r["flagged_claims"]
 
 
 class TestCheckEmojiDensity:
@@ -310,3 +331,129 @@ class TestRunAllHeuristics:
         r = run_all_heuristics(bad, "en")
         assert not r["overall_pass"]
         assert "tool_leaks" in r["critical_failures"]
+
+
+class TestResponseContracts:
+    """Tests for deterministic presentation-contract extraction and comparison."""
+
+    def test_extract_response_contract_detects_sections_and_source(self):
+        response = (
+            "### 🌤️ Weather\n\n"
+            "- Sunny today\n\n"
+            "---\n\n"
+            "### 🚇 Transport\n\n"
+            "- Metro running normally\n\n"
+            "📌 **Source:** [*IPMA*](https://www.ipma.pt) | [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Updated:** 11:10"
+        )
+
+        contract = extract_response_contract(response)
+
+        assert contract["starts_with_title"] is True
+        assert contract["has_source_line"] is True
+        assert contract["top_level_headers"] == ["weather", "transport"]
+        assert contract["bullet_count"] == 2
+
+    def test_compare_response_contracts_accepts_same_structure_with_different_wording(self):
+        reference = (
+            "### 🌤️ Meteorologia\n\n"
+            "- Céu limpo\n\n"
+            "---\n\n"
+            "### 🚇 Transportes\n\n"
+            "- Metro em circulação normal\n\n"
+            "📌 **Fonte:** [*IPMA*](https://www.ipma.pt) | **Atualizado:** 11:03"
+        )
+        candidate = (
+            "### 🌤️ Meteorologia\n\n"
+            "- Aguaceiros fracos\n\n"
+            "---\n\n"
+            "### 🚇 Transportes\n\n"
+            "- Autocarro 728 disponível\n\n"
+            "📌 **Fonte:** [*IPMA*](https://www.ipma.pt) | **Atualizado:** 11:08"
+        )
+
+        comparison = compare_response_contracts(reference, candidate)
+
+        assert comparison["consistent"] is True
+        assert comparison["issues"] == []
+
+    def test_compare_response_contracts_flags_missing_source_and_header_drift(self):
+        reference = (
+            "### 🌤️ Weather\n\n"
+            "- Sunny\n\n"
+            "---\n\n"
+            "### 🚇 Transport\n\n"
+            "- Metro OK\n\n"
+            "📌 **Source:** [*IPMA*](https://www.ipma.pt) | **Updated:** 11:10"
+        )
+        candidate = "Weather is sunny today. Metro is running normally."
+
+        comparison = compare_response_contracts(reference, candidate)
+
+        assert comparison["consistent"] is False
+        assert "source_footer_mismatch" in comparison["issues"]
+        assert "top_level_header_mismatch" in comparison["issues"]
+
+    def test_compare_response_contracts_collapse_planner_card_variants(self):
+        reference = (
+            "### 📅 Itinerário sugerido\n\n"
+            "---\n\n"
+            "### ☕ 14:00 · Pausa interior\n\n"
+            "- Café\n\n"
+            "---\n\n"
+            "### 🏛️ 15:30 · Museu\n\n"
+            "- Visita curta\n\n"
+            "### ✨ Dicas práticas\n\n"
+            "- Leva guarda-chuva"
+        )
+        candidate = (
+            "### 📅 Plano para a tarde\n\n"
+            "---\n\n"
+            "### 📍 14:30 · Chegada a Belém\n\n"
+            "- Começa por um espaço interior\n\n"
+            "---\n\n"
+            "### 📍 16:00 · Explorar interiores\n\n"
+            "- Museu recomendado\n\n"
+            "### ✨ Notas práticas\n\n"
+            "- Confirma horários"
+        )
+
+        comparison = compare_response_contracts(reference, candidate)
+
+        assert comparison["consistent"] is True
+
+    def test_compare_response_contracts_accepts_planner_title_only_vs_title_plus_optional_sections(self):
+        reference = (
+            "### 📅 Itinerário para hoje\n\n"
+            "- Resumo\n\n"
+            "### ✨ Dicas práticas\n\n"
+            "- Confirmar horários"
+        )
+        candidate = (
+            "### 📅 Itinerário para hoje\n\n"
+            "- Resumo\n\n"
+            "- Confirmar horários"
+        )
+
+        comparison = compare_response_contracts(reference, candidate)
+
+        assert comparison["consistent"] is True
+
+    def test_compare_response_contracts_accepts_planner_advisory_headers_and_longer_length(self):
+        reference = (
+            "### 📅 Itinerário sugerido\n\n"
+            + ("- Bloco detalhado de texto\n" * 10)
+            + "\n### 🔎 Fontes indicadas\n\n- Confirmar horários"
+        )
+        candidate = (
+            "### 📅 Itinerário sugerido\n\n"
+            "- Resumo compacto\n"
+            "- Dica logística\n"
+            "- Transporte a confirmar\n"
+            "- Verificar horários\n\n"
+            "### ✨ Notas práticas\n\n"
+            "- Confirmar horários"
+        )
+
+        comparison = compare_response_contracts(reference, candidate)
+
+        assert comparison["consistent"] is True

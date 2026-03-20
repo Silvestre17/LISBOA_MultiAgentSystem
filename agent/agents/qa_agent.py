@@ -560,16 +560,6 @@ class QualityAssuranceAgent(BaseAgent):
                 "reasoning": result.get("reasoning", ""),
                 "disclaimers": result.get("disclaimers", []),
             }
-            llm_result = self._normalize_event_query_validation(
-                user_query=user_query,
-                agents_called=agents_called,
-                llm_result=llm_result,
-            )
-            llm_result = self._normalize_place_query_validation(
-                user_query=user_query,
-                agents_called=agents_called,
-                llm_result=llm_result,
-            )
         else:
             # Fallback: if JSON parsing still fails, pass with disclaimer
             logger.warning("QA: JSON parse failed after retry; passing with disclaimer.")
@@ -580,6 +570,17 @@ class QualityAssuranceAgent(BaseAgent):
                 "reasoning": "QA validation could not parse LLM response after retry.",
                 "disclaimers": ["Quality validation was limited for this response"],
             }
+
+        llm_result = self._normalize_event_query_validation(
+            user_query=user_query,
+            agents_called=agents_called,
+            llm_result=llm_result,
+        )
+        llm_result = self._normalize_place_query_validation(
+            user_query=user_query,
+            agents_called=agents_called,
+            llm_result=llm_result,
+        )
 
         # ── Phase 2: Deterministic fact verification ─────────────────
         combined_output = "\n".join(
@@ -723,6 +724,16 @@ class QualityAssuranceAgent(BaseAgent):
                 ],
             )
             repaired = clean_response(response.content, _print=False).strip()
+            repaired_lower = repaired.lower()
+            if any(
+                marker in repaired_lower
+                for marker in [
+                    "desculpe, tive dificuldades em processar o pedido",
+                    "sorry, i'm having difficulty processing your request",
+                    "an error occurred while processing",
+                ]
+            ):
+                return draft_response
             return repaired or draft_response
         except Exception as exc:
             logger.warning("QA final repair pass failed, keeping draft response: %s", exc)

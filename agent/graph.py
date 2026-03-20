@@ -24,7 +24,10 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 
-from agent.agents.base import clean_response  # Shared response cleaning utility
+from agent.agents.base import (  # Shared response cleaning utility
+    clean_response,
+    is_local_provider,
+)
 from agent.llm_factory import LLMFactory
 from agent.prompts import get_system_prompt
 from agent.state import AgentState, create_initial_state
@@ -34,6 +37,7 @@ from agent.utils.langsmith_tracing import (
     ContextThreadPoolExecutor,
     annotate_current_run,
     get_current_run_tree,
+    get_langsmith_request_tracking_status,
     traceable,
 )
 
@@ -42,6 +46,12 @@ from agent.utils.response_formatter import (
     ensure_response_title,
     format_response,
     generate_response_title,
+)
+from agent.utils.usage_costs import (
+    build_cost_payload,
+    build_usage_payload,
+    get_pricing_metadata,
+    load_pricing_catalog,
 )
 
 try:
@@ -758,6 +768,19 @@ class MultiAgentAssistant:
                 deduped.append(item)
         return deduped
 
+    def _agent_uses_local_provider(self, agent_name: str) -> bool:
+        """Returns whether the given worker agent is backed by a local provider."""
+        agent = self.agents.get(agent_name)
+        provider = getattr(agent, "llm_provider", "") if agent is not None else ""
+        return is_local_provider(provider)
+
+    def _should_execute_agent_batch_in_parallel(self, agent_names: List[str]) -> bool:
+        """Returns whether a worker batch should run in parallel without overloading local runtimes."""
+        if len(agent_names) <= 1:
+            return False
+
+        return not any(self._agent_uses_local_provider(agent_name) for agent_name in agent_names)
+
     @classmethod
     def _get_agent_specific_qa_feedback(
         cls,
@@ -784,6 +807,491 @@ class MultiAgentAssistant:
             list(agent_fact_check.get("critical_issues", []))
             + list(agent_fact_check.get("disclaimers", []))
         )
+
+    @staticmethod
+    def _sanitize_single_qa_warning(warning: object, language: str) -> Optional[str]:
+        """Converts raw QA warnings into concise user-facing notes and drops internal-only messages."""
+        if not warning:
+            return None
+
+        normalized = re.sub(r"\s+", " ", str(warning)).strip()
+        if not normalized:
+            return None
+
+        lowered = normalized.lower()
+        internal_markers = [
+            "agente de ",
+            "agent ",
+            "contradiz",
+            "contradict",
+            "ignore na resposta final",
+            "ignored in the final response",
+            "worker",
+        ]
+        if any(marker in lowered for marker in internal_markers):
+            return None
+
+        if "station names could not be verified" in lowered or "nomes de estações não puderam ser verificados" in lowered:
+            return None
+
+        if "some urls reference unverified domains" in lowered:
+            domains_match = re.search(r"domains?:\s*([^\.]+)", normalized, flags=re.IGNORECASE)
+            domains = domains_match.group(1).strip() if domains_match else "fontes externas"
+            if language == "pt":
+                return f"Alguns links remetem para domínios não verificados ({domains}). Confirme-os antes de visitar."
+            return f"Some links point to unverified domains ({domains}). Please verify them before visiting."
+
+        if "carris bus route numbers and schedules should be verified at carris.pt" in lowered:
+            if language == "pt":
+                return "Os números das linhas e os horários da Carris devem ser confirmados em carris.pt, porque os dados GTFS podem não refletir alterações muito recentes."
+            return "Carris line numbers and schedules should be confirmed at carris.pt, because GTFS data may miss very recent changes."
+
+        return normalized
+
+    @classmethod
+    def _sanitize_qa_disclaimers(
+        cls,
+        warnings: List[object],
+        language: str,
+    ) -> List[str]:
+        """Drops internal QA warnings and localizes a small set of common user-facing caveats."""
+        sanitized: List[str] = []
+        for warning in warnings:
+            cleaned = cls._sanitize_single_qa_warning(warning, language)
+            if cleaned and cleaned not in sanitized:
+                sanitized.append(cleaned)
+        return sanitized
+
+    def _append_assistant_message(self, content: str) -> None:
+        """Append the final assistant message to conversation state.
+
+        Args:
+            content: Final user-facing assistant response.
+        """
+        if not content:
+            return
+        self.state.setdefault("messages", []).append(AIMessage(content=content))
+
+    def _run_lightweight_weather_fact_check(
+        self,
+        user_query: str,
+        weather_output: str,
+        language: str,
+        verbose: bool = False,
+    ) -> Dict[str, Any]:
+        """Run deterministic fact-checking for simple weather-only requests.
+
+        This preserves the low-latency weather fast path while still checking
+        for obvious factual or formatting issues. If critical issues are found,
+        the caller can escalate to the full QA validation pass.
+
+        Args:
+            user_query: Original user query.
+            weather_output: Weather worker output.
+            language: Output language code.
+            verbose: Whether to emit terminal diagnostics.
+
+        Returns:
+            Dict[str, Any]: Deterministic fact-check result plus escalation hints.
+        """
+        verify_facts = getattr(self.qa_agent, "_verify_facts", None)
+        if not callable(verify_facts) or not weather_output:
+            return {
+                "performed": False,
+                "requires_full_qa": False,
+                "fact_check": {},
+                "disclaimers": [],
+            }
+
+        try:
+            fact_check = verify_facts(
+                weather_output,
+                user_query,
+                self.state.get("user_context"),
+            )
+        except Exception as exc:
+            if verbose:
+                print(f"   [QA] Lightweight weather fact-check unavailable: {exc}")
+            return {
+                "performed": False,
+                "requires_full_qa": False,
+                "fact_check": {},
+                "disclaimers": [],
+            }
+
+        if not isinstance(fact_check, dict):
+            return {
+                "performed": False,
+                "requires_full_qa": False,
+                "fact_check": {},
+                "disclaimers": [],
+            }
+
+        sanitized_disclaimers = self._sanitize_qa_disclaimers(
+            fact_check.get("disclaimers", []),
+            language,
+        )
+        critical_issues = self._dedupe_preserve_order(
+            list(fact_check.get("critical_issues", []))
+        )
+
+        if verbose:
+            print("\n   [QA] Fast deterministic weather fact-check completed")
+            if sanitized_disclaimers:
+                for disclaimer in sanitized_disclaimers:
+                    print(f"   [QA FACT-CHECK] {disclaimer}")
+            if critical_issues:
+                for issue in critical_issues:
+                    print(f"   [QA FACT-CHECK] Critical: {issue}")
+
+        return {
+            "performed": True,
+            "requires_full_qa": bool(critical_issues),
+            "fact_check": fact_check,
+            "disclaimers": sanitized_disclaimers,
+        }
+
+    @staticmethod
+    def _format_usd_cost_label(cost_payload: Optional[Dict[str, Any]]) -> str:
+        """Format the total USD cost using a compact terminal-friendly label.
+
+        Args:
+            cost_payload: Cost payload with ``total_cost_usd``.
+
+        Returns:
+            str: Compact cost label such as ``(0.003$)``.
+        """
+        if not isinstance(cost_payload, dict):
+            return "(0.000$)"
+        return f"({float(cost_payload.get('total_cost_usd', 0.0) or 0.0):.3f}$)"
+
+    def _collect_execution_summary(
+        self,
+        *,
+        agents_to_call: List[str],
+        agent_outputs: Dict[str, Any],
+        direct_response_used: bool,
+        workers: List[str],
+        run_workers_in_parallel: bool,
+        qa_result: Optional[Dict[str, Any]],
+        retry_agents_used: List[str],
+        final_repair_ran: bool,
+        simple_weather_fact_check: Optional[Dict[str, Any]],
+        elapsed_time: float,
+    ) -> Dict[str, Any]:
+        """Collect runtime metrics for the terminal execution summary.
+
+        Args:
+            agents_to_call: Agents selected by the supervisor.
+            agent_outputs: Worker outputs gathered for the request.
+            direct_response_used: Whether the supervisor answered directly.
+            workers: Worker agents executed before planner synthesis.
+            run_workers_in_parallel: Whether workers ran in parallel.
+            qa_result: QA validation result, if any.
+            retry_agents_used: Agents retried after QA feedback.
+            final_repair_ran: Whether the final QA repair pass ran.
+            simple_weather_fact_check: Fast weather fact-check metadata.
+            elapsed_time: End-to-end request duration in seconds.
+
+        Returns:
+            Dict[str, Any]: Structured execution summary payload.
+        """
+        usage_snapshot = {
+            agent_name: self._normalize_usage_summary(summary)
+            for agent_name, summary in self.get_llm_usage_snapshot().items()
+        }
+        aggregate_usage = build_usage_payload(
+            self.get_llm_usage_summary(),
+            by_agent=usage_snapshot,
+        )
+
+        pricing_catalog = load_pricing_catalog(str(Config.LLM_PRICING_CATALOG_PATH))
+        pricing_metadata = get_pricing_metadata(pricing_catalog)
+        total_cost = build_cost_payload(
+            aggregate_usage,
+            pricing_catalog,
+            model_id=aggregate_usage.get("model_id"),
+        )
+        langsmith_request_status = get_langsmith_request_tracking_status()
+
+        agent_objects = {
+            "supervisor": self.supervisor,
+            **self.agents,
+            "qa": self.qa_agent,
+        }
+        effective_agents = self._dedupe_preserve_order(
+            [
+                "supervisor",
+                *workers,
+                *agents_to_call,
+                *[name for name in agent_outputs.keys() if not str(name).startswith("_")],
+                *retry_agents_used,
+                "qa" if qa_result or final_repair_ran or (simple_weather_fact_check or {}).get("performed") else "",
+            ]
+        )
+
+        relevant_agents: List[str] = []
+        agent_tool_logs: Dict[str, List[Dict[str, Any]]] = {}
+        agent_costs: Dict[str, Dict[str, Any]] = {}
+        models_used: List[str] = []
+
+        for agent_name, agent_obj in agent_objects.items():
+            usage_summary = usage_snapshot.get(agent_name, self._normalize_usage_summary({}))
+            tool_log = self._normalize_tool_calls_log(
+                getattr(agent_obj, "get_tool_calls_log", lambda: [])()
+            ) if agent_name in self.agents else []
+
+            if (
+                agent_name in effective_agents
+                or usage_summary["call_count"] > 0
+                or tool_log
+            ):
+                relevant_agents.append(agent_name)
+                if tool_log:
+                    agent_tool_logs[agent_name] = tool_log
+                agent_costs[agent_name] = build_cost_payload(
+                    usage_summary,
+                    pricing_catalog,
+                    model_id=usage_summary.get("model_id"),
+                )
+                if usage_summary["call_count"] > 0 and usage_summary["model_id"] != "Unknown":
+                    if usage_summary["model_id"] not in models_used:
+                        models_used.append(usage_summary["model_id"])
+
+        if direct_response_used:
+            execution_type = "direct"
+        elif "planner" in agents_to_call:
+            execution_type = "planner"
+        elif len(workers) > 1:
+            execution_type = "hybrid"
+        elif len(workers) == 1:
+            execution_type = "single-worker"
+        else:
+            execution_type = "fallback"
+
+        worker_mode = "parallel" if workers and run_workers_in_parallel else "sequential" if workers else "n/a"
+
+        qa_steps: List[str] = []
+        if direct_response_used:
+            qa_steps.append("not-applicable")
+        elif simple_weather_fact_check and simple_weather_fact_check.get("performed"):
+            qa_steps.append("fast-weather-fact-check")
+        elif qa_result:
+            qa_steps.append("validated")
+        else:
+            qa_steps.append("not-run")
+        if retry_agents_used:
+            qa_steps.append("retry")
+        if final_repair_ran:
+            qa_steps.append("final-repair")
+
+        return {
+            "elapsed_time": elapsed_time,
+            "execution_type": execution_type,
+            "worker_mode": worker_mode,
+            "qa_path": " -> ".join(qa_steps),
+            "langsmith": langsmith_request_status,
+            "usage": aggregate_usage,
+            "pricing_metadata": pricing_metadata,
+            "total_cost": total_cost,
+            "models_used": models_used,
+            "relevant_agents": relevant_agents,
+            "agent_usage": usage_snapshot,
+            "agent_costs": agent_costs,
+            "agent_tool_logs": agent_tool_logs,
+            "total_tool_invocations": sum(len(tool_log) for tool_log in agent_tool_logs.values()),
+            "retry_agents_used": retry_agents_used,
+        }
+
+    def _print_execution_summary(self, summary: Dict[str, Any]) -> None:
+        """Print a compact analytical execution summary to the terminal.
+
+        Args:
+            summary: Structured summary payload returned by
+                ``_collect_execution_summary``.
+        """
+        usage = summary.get("usage", {}) if isinstance(summary, dict) else {}
+        tokens = usage.get("tokens", {}) if isinstance(usage, dict) else {}
+        langsmith = summary.get("langsmith", {}) if isinstance(summary, dict) else {}
+        pricing_metadata = summary.get("pricing_metadata", {}) if isinstance(summary, dict) else {}
+        total_cost = summary.get("total_cost", {}) if isinstance(summary, dict) else {}
+
+        print("\n" + "=" * 80)
+        print("📊 EXECUTION SUMMARY")
+        print("=" * 80)
+        print(f"⏱️  Time taken: {float(summary.get('elapsed_time', 0.0) or 0.0):.2f}s")
+        print(
+            f"🧭  Execution: {summary.get('execution_type', 'unknown')} | "
+            f"Workers: {summary.get('worker_mode', 'n/a')} | "
+            f"QA: {summary.get('qa_path', 'n/a')}"
+        )
+        print(
+            f"📈  LLM Calls: {int(usage.get('call_count', 0) or 0)} | "
+            f"🪙 Tokens: {int(tokens.get('total_tokens', 0) or 0)} "
+            f"(Input: {int(tokens.get('input_tokens', 0) or 0)} | Output: {int(tokens.get('output_tokens', 0) or 0)})"
+        )
+
+        models_used = summary.get("models_used", []) if isinstance(summary, dict) else []
+        print(f"🧠  Models: {', '.join(models_used) if models_used else 'No LLM call'}")
+
+        pricing_snapshot = (
+            pricing_metadata.get("pricing_snapshot_date")
+            or pricing_metadata.get("pricing_updated_at")
+            or "n/a"
+        )
+        print(
+            f"💵  Total Cost: {self._format_usd_cost_label(total_cost)} | "
+            f"Pricing Snapshot: {pricing_snapshot}"
+        )
+
+        if isinstance(langsmith, dict) and langsmith:
+            project_name = str(langsmith.get("project_name") or "").strip()
+            langsmith_parts = [
+                f"🛰️  LangSmith: {langsmith.get('status_label', 'disabled')}",
+                f"Save attempt: {'yes' if langsmith.get('save_attempted') else 'no'}",
+            ]
+            if project_name:
+                langsmith_parts.append(f"Project: {project_name}")
+            print(" | ".join(langsmith_parts))
+
+            langsmith_note = str(langsmith.get("note") or "").strip()
+            if langsmith_note:
+                print(f"      {langsmith_note}")
+
+        missing_pricing = total_cost.get("missing_pricing_models", []) if isinstance(total_cost, dict) else []
+        if missing_pricing:
+            print(f"⚠️  Missing pricing: {', '.join(missing_pricing)}")
+
+        relevant_agents = summary.get("relevant_agents", []) if isinstance(summary, dict) else []
+        if relevant_agents:
+            print("🧩  Agent breakdown:")
+            agent_usage = summary.get("agent_usage", {})
+            agent_costs = summary.get("agent_costs", {})
+            agent_tool_logs = summary.get("agent_tool_logs", {})
+
+            for agent_name in relevant_agents:
+                usage_summary = agent_usage.get(agent_name, self._normalize_usage_summary({}))
+                tokens_summary = usage_summary.get("tokens", {})
+                tool_count = len(agent_tool_logs.get(agent_name, []))
+                model_label = usage_summary.get("model_id", "Unknown")
+                if usage_summary.get("call_count", 0) == 0:
+                    model_label = "tool-only" if tool_count else "no-llm"
+
+                display_name = "QA" if agent_name == "qa" else agent_name.title()
+                print(
+                    f"    │ {display_name} [{model_label}] | "
+                    f"LLM {usage_summary.get('call_count', 0)} | "
+                    f"Tools {tool_count} | "
+                    f"Tok {int(tokens_summary.get('input_tokens', 0) or 0)}/"
+                    f"{int(tokens_summary.get('output_tokens', 0) or 0)}/"
+                    f"{int(tokens_summary.get('total_tokens', 0) or 0)} | "
+                    f"Cost {self._format_usd_cost_label(agent_costs.get(agent_name))}"
+                )
+
+        agent_tool_logs = summary.get("agent_tool_logs", {}) if isinstance(summary, dict) else {}
+        if agent_tool_logs:
+            print("🔧  Tool calls:")
+            for agent_name, tool_log in agent_tool_logs.items():
+                display_name = "QA" if agent_name == "qa" else agent_name.title()
+                print(f"    │ {display_name} [{len(tool_log)} call(s)]")
+                for item in tool_log:
+                    try:
+                        args_str = json.dumps(item.get("args", {}), ensure_ascii=False)
+                    except Exception:
+                        args_str = str(item.get("args", {}))
+                    if len(args_str) > 140:
+                        args_str = args_str[:137] + "..."
+                    print(f"    ├──> {item.get('tool_name', 'unknown')}({args_str})")
+            print(f"    ╰── Total Tool Invocations: {summary.get('total_tool_invocations', 0)}")
+        else:
+            print("🔧  Tool calls: 0")
+
+    def _finalize_chat_response(
+        self,
+        *,
+        response: str,
+        message: str,
+        language: str,
+        agents_to_call: List[str],
+        agent_outputs: Dict[str, Any],
+        direct_response_used: bool,
+        start_time: float,
+        workers: List[str],
+        run_workers_in_parallel: bool,
+        qa_result: Optional[Dict[str, Any]],
+        retry_agents_used: List[str],
+        final_repair_ran: bool,
+        simple_weather_fact_check: Optional[Dict[str, Any]],
+    ) -> str:
+        """Apply final formatting, persist history, and print analytics.
+
+        Args:
+            response: Raw drafted response.
+            message: Original user message.
+            language: Output language code.
+            agents_to_call: Agents selected by the supervisor.
+            agent_outputs: Worker outputs gathered during the run.
+            direct_response_used: Whether the supervisor answered directly.
+            start_time: Request start timestamp.
+            workers: Workers executed before planner synthesis.
+            run_workers_in_parallel: Whether workers ran in parallel.
+            qa_result: QA result payload, if any.
+            retry_agents_used: Agents retried after QA feedback.
+            final_repair_ran: Whether the final QA repair pass ran.
+            simple_weather_fact_check: Fast weather fact-check metadata.
+
+        Returns:
+            str: Final user-facing response.
+        """
+        from agent.utils.response_formatter import strip_technical_output_artifacts
+
+        effective_agents = self._dedupe_preserve_order(
+            [
+                *agents_to_call,
+                *[name for name in agent_outputs.keys() if not str(name).startswith("_")],
+            ]
+        )
+
+        sanitized_response = clean_response(response)
+        if "transport" in effective_agents:
+            sanitized_response = strip_technical_output_artifacts(sanitized_response)
+
+        formatted = format_response(sanitized_response)
+        if "transport" in effective_agents:
+            formatted = strip_technical_output_artifacts(formatted)
+
+        if effective_agents:
+            title = generate_response_title(effective_agents, message, language)
+            final_output = ensure_response_title(formatted, title)
+            if "transport" in effective_agents:
+                final_output = strip_technical_output_artifacts(final_output)
+        else:
+            final_output = formatted
+
+        self._append_assistant_message(final_output)
+
+        execution_summary = self._collect_execution_summary(
+            agents_to_call=effective_agents,
+            agent_outputs=agent_outputs,
+            direct_response_used=direct_response_used,
+            workers=workers,
+            run_workers_in_parallel=run_workers_in_parallel,
+            qa_result=qa_result,
+            retry_agents_used=retry_agents_used,
+            final_repair_ran=final_repair_ran,
+            simple_weather_fact_check=simple_weather_fact_check,
+            elapsed_time=time_module.time() - start_time,
+        )
+        self._print_execution_summary(execution_summary)
+
+        if Config.SHOW_MARKDOWN_RESPONSE_IN_TERMINAL:
+            print("=" * 80)
+            print("📝 FINAL RESPONSE (Markdown)")
+            print("=" * 80)
+            print(final_output)
+            print("=" * 80 + "\n")
+
+        return final_output
 
     @classmethod
     def _build_qa_retry_context(
@@ -880,10 +1388,15 @@ class MultiAgentAssistant:
         """
         # Add to conversation history
         import time
+
         from langchain_core.messages import HumanMessage
 
         self.state["messages"].append(HumanMessage(content=message))
         start_time = time.time()
+        run_workers_in_parallel = False
+        retry_agents_used: List[str] = []
+        final_repair_ran = False
+        simple_weather_fact_check: Optional[Dict[str, Any]] = None
 
         # Reset tracking for all sub-agents to capture metrics strictly for this request
         self.supervisor.reset_llm_usage_tracking()
@@ -999,7 +1512,21 @@ class MultiAgentAssistant:
         if direct_response and not agents_to_call:
             if verbose:
                 print("      Mode: DIRECT RESPONSE (no agents called)")
-            return format_response(clean_response(direct_response))
+            return self._finalize_chat_response(
+                response=direct_response,
+                message=message,
+                language=language,
+                agents_to_call=[],
+                agent_outputs={},
+                direct_response_used=True,
+                start_time=start_time,
+                workers=[],
+                run_workers_in_parallel=False,
+                qa_result=None,
+                retry_agents_used=[],
+                final_repair_ran=False,
+                simple_weather_fact_check=None,
+            )
 
         # Step 3: Execute agents (Parallelized with LangSmith context propagation)
         agent_outputs = {}
@@ -1009,8 +1536,11 @@ class MultiAgentAssistant:
         workers = [a for a in agents_to_call if a != "planner" and a in self.agents]
 
         if workers:
+            run_workers_in_parallel = self._should_execute_agent_batch_in_parallel(workers)
+
             if verbose:
-                print(f"      [PARALLEL] Executing {len(workers)} agents: {workers}")
+                execution_mode = "PARALLEL" if run_workers_in_parallel else "SEQUENTIAL"
+                print(f"      [{execution_mode}] Executing {len(workers)} agents: {workers}")
 
             if on_status_change:
                 friendly_workers = [name_map.get(w, w) for w in workers]
@@ -1034,37 +1564,72 @@ class MultiAgentAssistant:
                         agent_context += f"\nPrevious user question (for context only): {msg.content[:150]}"
                         break
 
-            # Use ContextThreadPoolExecutor to propagate LangSmith tracing context
-            with ContextThreadPoolExecutor(max_workers=len(workers)) as executor:
-                # Submit all tasks with timing
-                future_to_agent = {}
-                agent_start_times = {}
+            if run_workers_in_parallel:
+                # Use ContextThreadPoolExecutor to propagate LangSmith tracing context
+                with ContextThreadPoolExecutor(max_workers=len(workers)) as executor:
+                    # Submit all tasks with timing
+                    future_to_agent = {}
+                    agent_start_times = {}
 
+                    for agent_name in workers:
+                        if verbose:
+                            print(f"\n   [AGENT: {agent_name.upper()}] Starting...")
+                        agent_start_times[agent_name] = time_module.time()
+
+                        # Pass verbose=verbose to invoke
+                        future_to_agent[
+                            executor.submit(
+                                self.agents[agent_name].invoke,
+                                message,
+                                agent_context,  # Context with language
+                                verbose,        # Verbose flag
+                            )
+                        ] = agent_name
+
+                    # Collect results as they complete with latency tracking
+                    for future in as_completed(future_to_agent):
+                        agent_name = future_to_agent[future]
+                        agent_latency = time_module.time() - agent_start_times[agent_name]
+
+                        try:
+                            output = future.result()
+                            agent_outputs[agent_name] = output
+
+                            # Log latency to LangSmith metadata if available
+                            if LANGSMITH_AVAILABLE:
+                                annotate_current_run(
+                                    metadata={
+                                        f"agent_{agent_name}_latency_ms": int(agent_latency * 1000),
+                                        f"agent_{agent_name}_output_chars": len(output),
+                                    }
+                                )
+
+                            if verbose:
+                                print(
+                                    f"   [AGENT: {agent_name.upper()}] Finished ({len(output)} chars, {agent_latency:.2f}s)"
+                                )
+                        except Exception as e:
+                            error_type = type(e).__name__
+                            error_msg = f"Error ({error_type}): {str(e)}"
+                            agent_outputs[agent_name] = error_msg
+                            if verbose:
+                                print(f"   [AGENT: {agent_name.upper()}] Failed ({error_type}): {str(e)}")
+            else:
                 for agent_name in workers:
                     if verbose:
                         print(f"\n   [AGENT: {agent_name.upper()}] Starting...")
-                    agent_start_times[agent_name] = time_module.time()
 
-                    # Pass verbose=verbose to invoke
-                    future_to_agent[
-                        executor.submit(
-                            self.agents[agent_name].invoke,
-                            message,
-                            agent_context,  # Context with language
-                            verbose,        # Verbose flag
-                        )
-                    ] = agent_name
-
-                # Collect results as they complete with latency tracking
-                for future in as_completed(future_to_agent):
-                    agent_name = future_to_agent[future]
-                    agent_latency = time_module.time() - agent_start_times[agent_name]
+                    agent_start = time_module.time()
 
                     try:
-                        output = future.result()
+                        output = self.agents[agent_name].invoke(
+                            message,
+                            agent_context,
+                            verbose,
+                        )
                         agent_outputs[agent_name] = output
+                        agent_latency = time_module.time() - agent_start
 
-                        # Log latency to LangSmith metadata if available
                         if LANGSMITH_AVAILABLE:
                             annotate_current_run(
                                 metadata={
@@ -1097,6 +1662,29 @@ class MultiAgentAssistant:
         if skip_qa_for_simple_weather:
             if verbose:
                 print("\n   [QA] Skipped for simple deterministic weather query")
+
+            simple_weather_fact_check = self._run_lightweight_weather_fact_check(
+                user_query=message,
+                weather_output=str(agent_outputs.get("weather", "")),
+                language=language,
+                verbose=verbose,
+            )
+            if simple_weather_fact_check.get("requires_full_qa"):
+                skip_qa_for_simple_weather = False
+                if verbose:
+                    print("   [QA] Escalating simple weather query to full QA after deterministic fact-check")
+            else:
+                qa_result = {
+                    "complete": True,
+                    "missing_data": [],
+                    "required_agents": [],
+                    "reasoning": "Fast deterministic weather fact-check completed.",
+                    "disclaimers": simple_weather_fact_check.get("disclaimers", []),
+                    "critical_issues": [],
+                    "repairable_agents": [],
+                    "needs_repair": False,
+                    "fact_check": simple_weather_fact_check.get("fact_check", {}),
+                }
 
         if agent_outputs and len(workers) > 0 and not skip_qa_for_simple_weather:
             if verbose:
@@ -1153,6 +1741,7 @@ class MultiAgentAssistant:
             )
 
             if retry_agents and (not qa_result["complete"] or qa_result.get("needs_repair")):
+                retry_agents_used = list(retry_agents)
 
                 if retry_agents:
                     if verbose:
@@ -1167,35 +1756,60 @@ class MultiAgentAssistant:
                         )
                         on_status_change(msg)
 
-                    # Execute retry agents in parallel
-                    with ContextThreadPoolExecutor(max_workers=len(retry_agents)) as executor:
-                        retry_futures = {}
+                    run_retry_in_parallel = self._should_execute_agent_batch_in_parallel(retry_agents)
+
+                    if run_retry_in_parallel:
+                        # Execute retry agents in parallel
+                        with ContextThreadPoolExecutor(max_workers=len(retry_agents)) as executor:
+                            retry_futures = {}
+                            for agent_name in retry_agents:
+                                # Use targeted feedback context when the agent is being retried after QA
+                                ctx = self._build_qa_retry_context(
+                                    base_context=agent_context,
+                                    qa_result=qa_result,
+                                    agent_name=agent_name,
+                                )
+                                retry_futures[
+                                    executor.submit(
+                                        self.agents[agent_name].invoke,
+                                        message,
+                                        ctx,
+                                        verbose,
+                                    )
+                                ] = agent_name
+
+                            for future in as_completed(retry_futures):
+                                agent_name = retry_futures[future]
+                                try:
+                                    output = future.result()
+                                    if agent_name in workers and agent_name in agent_outputs:
+                                        # Overwrite with the newer, more complete response from QA retry
+                                        agent_outputs[agent_name] = output
+                                    else:
+                                        agent_outputs[agent_name] = output
+
+                                    if verbose:
+                                        print(f"   [QA RETRY: {agent_name.upper()}] Finished ({len(output)} chars)")
+                                except Exception as e:
+                                    if agent_name not in workers:
+                                        agent_outputs[agent_name] = f"Error: {str(e)}"
+                                    if verbose:
+                                        print(f"   [QA RETRY: {agent_name.upper()}] Failed: {str(e)}")
+                    else:
                         for agent_name in retry_agents:
-                            # Use targeted feedback context when the agent is being retried after QA
                             ctx = self._build_qa_retry_context(
                                 base_context=agent_context,
                                 qa_result=qa_result,
                                 agent_name=agent_name,
                             )
-                            retry_futures[
-                                executor.submit(
-                                    self.agents[agent_name].invoke,
+                            try:
+                                output = self.agents[agent_name].invoke(
                                     message,
                                     ctx,
                                     verbose,
                                 )
-                            ] = agent_name
+                                agent_outputs[agent_name] = output
 
-                        for future in as_completed(retry_futures):
-                            agent_name = retry_futures[future]
-                            try:
-                                output = future.result()
-                                if agent_name in workers and agent_name in agent_outputs:
-                                    # Overwrite with the newer, more complete response from QA retry
-                                    agent_outputs[agent_name] = output
-                                else:
-                                    agent_outputs[agent_name] = output
-                                    
                                 if verbose:
                                     print(f"   [QA RETRY: {agent_name.upper()}] Finished ({len(output)} chars)")
                             except Exception as e:
@@ -1259,6 +1873,7 @@ class MultiAgentAssistant:
                 all_qa_warnings = self._dedupe_preserve_order(
                     list(all_qa_warnings) + list(fc_warns.get("disclaimers", []))
                 )
+            all_qa_warnings = self._sanitize_qa_disclaimers(all_qa_warnings, language)
             if all_qa_warnings:
                 agent_outputs["_qa_disclaimers"] = all_qa_warnings
                 if verbose:
@@ -1302,6 +1917,7 @@ class MultiAgentAssistant:
         if self._should_run_final_qa_repair(agents_to_call, qa_result):
             if verbose:
                 print("\n   [QA] Running final repair pass on the drafted response...")
+            final_repair_ran = True
             response = self.qa_agent.repair_final_response(
                 user_query=message,
                 draft_response=response,
@@ -1323,130 +1939,30 @@ class MultiAgentAssistant:
                 )
                 response = canonicalize_local_information_terms(response, language)
 
-        from agent.utils.response_formatter import strip_technical_output_artifacts
+        if "planner" in agents_to_call:
+            from agent.agents.planner_agent import enforce_multi_day_quality_mode
 
-        sanitized_response = clean_response(response)
-        if "transport" in agents_to_call:
-            sanitized_response = strip_technical_output_artifacts(sanitized_response)
-        formatted = format_response(sanitized_response)
-        if "transport" in agents_to_call:
-            formatted = strip_technical_output_artifacts(formatted)
-        title = generate_response_title(agents_to_call, message, language)
-        final_output = ensure_response_title(formatted, title)
-        if "transport" in agents_to_call:
-            final_output = strip_technical_output_artifacts(final_output)
-
-        # ---------------------------------------------------------------------
-        # ANALYTICAL SUMMARY (Terminal ONLY)
-        # ---------------------------------------------------------------------
-        elapsed_time = time.time() - start_time
-        
-        all_agents_used = []
-        agent_model_map = {}
-        models_used = set()
-        total_tokens = 0
-        total_input_tokens = 0
-        total_output_tokens = 0
-        total_llm_calls = 0
-        
-        # 1. Supervisor metrics
-        sup_usage = self._normalize_usage_summary(
-            getattr(self.supervisor, "get_llm_usage_summary", lambda: {})()
-        )
-        if sup_usage["call_count"] > 0:
-            all_agents_used.append("supervisor")
-            agent_model_map["supervisor"] = sup_usage["model_id"]
-            models_used.add(sup_usage["model_id"])
-            total_tokens += sup_usage["tokens"]["total_tokens"]
-            total_input_tokens += sup_usage["tokens"]["input_tokens"]
-            total_output_tokens += sup_usage["tokens"]["output_tokens"]
-            total_llm_calls += sup_usage["call_count"]
-            
-        # 2. Worker metrics and Tool calls
-        agents_tool_logs = {}
-        for a_name, a_obj in self.agents.items():
-            u = self._normalize_usage_summary(
-                getattr(a_obj, "get_llm_usage_summary", lambda: {})()
+            response = enforce_multi_day_quality_mode(
+                response=response,
+                user_message=message,
+                language=language,
             )
-            tools_used = self._normalize_tool_calls_log(
-                getattr(a_obj, "get_tool_calls_log", lambda: [])()
-            )
-            
-            if u["call_count"] > 0 or tools_used:
-                if a_name not in all_agents_used:
-                    all_agents_used.append(a_name)
-                    
-                if u["call_count"] > 0:
-                    agent_model_map[a_name] = u["model_id"]
-                    models_used.add(u["model_id"])
-                    total_tokens += u["tokens"]["total_tokens"]
-                    total_input_tokens += u["tokens"]["input_tokens"]
-                    total_output_tokens += u["tokens"]["output_tokens"]
-                    total_llm_calls += u["call_count"]
-                    
-                if tools_used:
-                    agents_tool_logs[a_name] = tools_used
 
-        # 3. QA Agent metrics
-        qa_usage = self._normalize_usage_summary(
-            getattr(self.qa_agent, "get_llm_usage_summary", lambda: {})()
+        return self._finalize_chat_response(
+            response=response,
+            message=message,
+            language=language,
+            agents_to_call=agents_to_call,
+            agent_outputs=agent_outputs,
+            direct_response_used=False,
+            start_time=start_time,
+            workers=workers,
+            run_workers_in_parallel=run_workers_in_parallel,
+            qa_result=qa_result,
+            retry_agents_used=retry_agents_used,
+            final_repair_ran=final_repair_ran,
+            simple_weather_fact_check=simple_weather_fact_check,
         )
-        if qa_usage["call_count"] > 0:
-            all_agents_used.append("qa")
-            agent_model_map["qa"] = qa_usage["model_id"]
-            models_used.add(qa_usage["model_id"])
-            total_tokens += qa_usage["tokens"]["total_tokens"]
-            total_input_tokens += qa_usage["tokens"]["input_tokens"]
-            total_output_tokens += qa_usage["tokens"]["output_tokens"]
-            total_llm_calls += qa_usage["call_count"]
-
-        # Print Analytical Breakdown
-        print("\n" + "=" * 80)
-        print("📊 EXECUTION SUMMARY")
-        print("=" * 80)
-        print(f"⏱️   Time taken: {elapsed_time:.2f}s")
-        print(f"🧠  Global Models: {', '.join(models_used) if models_used else 'Unknown'}")
-        
-        formatted_agents = []
-        for a in all_agents_used:
-            model_info = f" [{agent_model_map[a]}]" if a in agent_model_map else ""
-            formatted_a_name = "QA" if a.lower() == "qa" else a.title()
-            formatted_agents.append(f"{formatted_a_name}{model_info}")
-            
-        print(f"🤖  Agents Used: {', '.join(formatted_agents) if formatted_agents else 'None'}")
-        
-        if agents_tool_logs:
-            print("🔧  Tools Called:")
-            total_t_calls = 0
-            for a_name, t_log in agents_tool_logs.items():
-                formatted_a_name = "QA" if a_name.lower() == "qa" else a_name.title()
-                print(f"    │ {formatted_a_name} [{len(t_log)} call(s)]")
-                for item in t_log:
-                    total_t_calls += 1
-                    try:
-                        import json
-                        args_str = json.dumps(item['args'], ensure_ascii=False)
-                    except Exception:
-                        args_str = str(item['args'])
-                    if len(args_str) > 150:
-                        args_str = args_str[:147] + "..."
-                    print(f"    ├──> {item['tool_name']}({args_str})")
-            print(f"    ╰── Total Tool Invocations: {total_t_calls}")
-        else:
-            print("🔧  Tools Called: 0")
-
-        print(f"📈  LLM Calls: {total_llm_calls}")
-        print(f"🪙   Total Tokens: {total_tokens} (Input: {total_input_tokens} | Output: {total_output_tokens})")
-        
-        # Print markdown to terminal if debugging is enabled
-        if Config.SHOW_MARKDOWN_RESPONSE_IN_TERMINAL:
-            print("=" * 80)
-            print("📝 FINAL RESPONSE (Markdown)")
-            print("=" * 80)
-            print(final_output)
-            print("=" * 80 + "\n")
-
-        return final_output
 
     @staticmethod
     def _extract_structured_section_parts(text: str) -> tuple[str, List[str], Optional[str]]:
@@ -1491,18 +2007,18 @@ class MultiAgentAssistant:
         section_order = ["weather", "transport", "researcher"]
         section_labels = {
             "pt": {
-                "weather": "### 🌤️ Meteorologia",
-                "transport": "### 🚇 Transportes",
-                "researcher": "### 📍 Informação Local",
-                "notes": "### ⚠️ Notas",
+                "weather": "### 🌤️ Resumo Meteorológico",
+                "transport": "### 🚇 Mobilidade e Ligações",
+                "researcher": "### 📍 Destaques Locais",
+                "notes": "### ⚠️ Notas Úteis",
                 "source": "📌 **Fonte:**",
                 "updated": "**Atualizado:**",
             },
             "en": {
-                "weather": "### 🌤️ Weather",
-                "transport": "### 🚇 Transport",
-                "researcher": "### 📍 Local Information",
-                "notes": "### ⚠️ Notes",
+                "weather": "### 🌤️ Weather Snapshot",
+                "transport": "### 🚇 Mobility and Connections",
+                "researcher": "### 📍 Local Highlights",
+                "notes": "### ⚠️ Helpful Notes",
                 "source": "📌 **Source:**",
                 "updated": "**Updated:**",
             },
@@ -1531,7 +2047,10 @@ class MultiAgentAssistant:
             title = labels.get(agent_name, f"### {agent_name.title()}")
             sections.append(f"{title}\n\n{body}")
 
-        qa_disclaimers = agent_outputs.get("_qa_disclaimers", [])
+        qa_disclaimers = self._sanitize_qa_disclaimers(
+            agent_outputs.get("_qa_disclaimers", []),
+            language,
+        )
         if qa_disclaimers:
             notes = "\n".join(f"- ⚠️ {warning}" for warning in qa_disclaimers)
             sections.append(f"{labels['notes']}\n\n{notes}")
@@ -1657,7 +2176,9 @@ def create_multiagent_assistant() -> MultiAgentAssistant:
 # Test Block - Comprehensive Multi-Agent System Tests
 # ==========================================================================
 if __name__ == "__main__":
+    import os
     import sys
+    from unittest.mock import MagicMock
 
     # .Fix Windows console encoding
     if sys.platform == "win32":
@@ -1667,167 +2188,163 @@ if __name__ == "__main__":
             pass
 
     print("=" * 70)
-    print("MULTI-AGENT SYSTEM - COMPREHENSIVE TEST SUITE")
+    print("MULTI-AGENT SYSTEM - SMOKE TEST SUITE")
     print("=" * 70)
 
-    try:
-        # Initialize
-        if Config.USE_MULTI_AGENT:
-            print("\n[INIT] Initializing Multi-Agent Assistant...")
-            assistant = MultiAgentAssistant()
-            print("[OK] Ready!")
-            print(f"   Supervisor: {assistant.model_info['supervisor']}")
-            print(f"   Weather:    {assistant.model_info['weather']}")
-            print(f"   Transport:  {assistant.model_info['transport']}")
-            print(f"   Researcher: {assistant.model_info['researcher']}")
-            print(f"   Planner:    {assistant.model_info['planner']}")
+    counters = {"passed": 0, "failed": 0}
+
+    def _check(condition: bool, label: str) -> None:
+        if condition:
+            counters["passed"] += 1
+            print(f"[PASS] {label}")
         else:
-            print("\n[INIT] Single-Agent mode - switching to Multi-Agent for tests...")
+            counters["failed"] += 1
+            print(f"[FAIL] {label}")
+
+    def _make_usage_summary(
+        *,
+        model_id: str = "Unknown",
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        call_count: int = 0,
+    ) -> Dict[str, Any]:
+        total_tokens = input_tokens + output_tokens
+        breakdown = []
+        if call_count > 0:
+            provider, model = model_id.split("::", 1) if "::" in model_id else ("unknown", model_id)
+            breakdown.append(
+                {
+                    "call_index": 1,
+                    "provider": provider,
+                    "model": model,
+                    "model_id": model_id,
+                    "tokens": {
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "total_tokens": total_tokens,
+                    },
+                    "usage_available": True,
+                }
+            )
+        return {
+            "call_count": call_count,
+            "usage_available": bool(call_count),
+            "model_id": model_id,
+            "tokens": {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens,
+            },
+            "llm_usage_breakdown": breakdown,
+        }
+
+    def _make_worker_mock(
+        *,
+        model_id: str = "azure::gpt-5-mini",
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        call_count: int = 0,
+    ):
+        worker = MagicMock()
+        worker.get_llm_usage_summary = MagicMock(
+            return_value=_make_usage_summary(
+                model_id=model_id,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                call_count=call_count,
+            )
+        )
+        worker.get_tool_calls_log = MagicMock(return_value=[])
+        worker.reset_llm_usage_tracking = MagicMock()
+        worker.llm_provider = "azure"
+        return worker
+
+    try:
+        print("\n[OFFLINE] Building execution-summary smoke test...")
+        assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
+        assistant.state = {"messages": [], "user_context": None}
+        assistant.supervisor = MagicMock()
+        assistant.supervisor.get_llm_usage_summary = MagicMock(
+            return_value=_make_usage_summary(
+                model_id="azure::gpt-5-mini",
+                input_tokens=600,
+                output_tokens=120,
+                call_count=1,
+            )
+        )
+        assistant.qa_agent = MagicMock()
+        assistant.qa_agent.get_llm_usage_summary = MagicMock(
+            return_value=_make_usage_summary(
+                model_id="azure::gpt-5-mini",
+                input_tokens=200,
+                output_tokens=50,
+                call_count=1,
+            )
+        )
+        assistant.agents = {
+            "weather": _make_worker_mock(model_id="azure::gpt-5-mini", input_tokens=100, output_tokens=20, call_count=1),
+            "transport": _make_worker_mock(),
+            "researcher": _make_worker_mock(model_id="azure::claude-haiku-4.5", input_tokens=80, output_tokens=40, call_count=1),
+            "planner": _make_worker_mock(),
+        }
+
+        original_tracking_status = get_langsmith_request_tracking_status
+        globals()["get_langsmith_request_tracking_status"] = lambda: {
+            "tracking_state": "disabled",
+            "status_label": "disabled",
+            "save_attempted": False,
+            "current_run_attached": False,
+            "project_name": None,
+            "run_id": None,
+            "reason": "LangSmith tracing is disabled by environment",
+            "note": "LangSmith tracing is disabled by environment",
+        }
+        try:
+            summary = assistant._collect_execution_summary(
+                agents_to_call=["weather", "researcher"],
+                agent_outputs={"weather": "ok", "researcher": "ok"},
+                direct_response_used=False,
+                workers=["weather", "researcher"],
+                run_workers_in_parallel=True,
+                qa_result={"complete": True},
+                retry_agents_used=[],
+                final_repair_ran=False,
+                simple_weather_fact_check=None,
+                elapsed_time=1.23,
+            )
+        finally:
+            globals()["get_langsmith_request_tracking_status"] = original_tracking_status
+
+        assistant._print_execution_summary(summary)
+        _check(summary["execution_type"] == "hybrid", "Execution summary classifies parallel worker runs as hybrid")
+        _check(summary["total_cost"]["pricing_complete"] is True, "Execution summary resolves complete pricing")
+        _check(summary["langsmith"]["status_label"] == "disabled", "Execution summary includes LangSmith request state")
+
+        if os.getenv("LISBOA_RUN_LIVE_GRAPH_TESTS") == "1":
+            print("\n[LIVE] Running optional multi-agent smoke queries...")
             assistant = MultiAgentAssistant()
-
-        # =================================================================
-        # TEST CATEGORIES
-        # =================================================================
-
-        test_cases = [
-            # ---------------------------------------------------------
-            # CATEGORY 1: OFF-TOPIC / GENERAL (No agents needed)
-            # ---------------------------------------------------------
-            {
-                "category": "OFF-TOPIC / GENERAL",
-                "description": "Questions unrelated to Lisbon - should respond directly without agents",
-                "queries": [
-                    ("Hello!", "Greeting - no agents needed"),
-                    (
-                        "What is the capital of France?",
-                        "Off-topic - should decline or answer directly",
-                    ),
-                    ("Who won the World Cup in 2022?", "Off-topic - not about Lisbon"),
-                ],
-            },
-            # ---------------------------------------------------------
-            # CATEGORY 2: SINGLE AGENT - WEATHER ONLY
-            # ---------------------------------------------------------
-            {
-                "category": "SINGLE AGENT - WEATHER",
-                "description": "Weather questions - should ONLY call weather agent",
-                "queries": [
-                    (
-                        "What's the weather in Lisbon today?",
-                        "Should use only weather agent",
-                    ),
-                    ("Is it going to rain tomorrow?", "Simple forecast - weather only"),
-                ],
-            },
-            # ---------------------------------------------------------
-            # CATEGORY 3: SINGLE AGENT - TRANSPORT ONLY
-            # ---------------------------------------------------------
-            {
-                "category": "SINGLE AGENT - TRANSPORT",
-                "description": "Transport questions - should ONLY call transport agent",
-                "queries": [
-                    ("Is the metro working?", "Metro status - transport only"),
-                    ("How do I get from Rossio to Belem?", "Routing - transport only"),
-                    (
-                        "When is the next metro at Saldanha towards Odivelas?",
-                        "Metro wait-time fast path - transport only",
-                    ),
-                    (
-                        "What are the next departures for 732 at Rossio?",
-                        "Carris urban stop/line fast path - transport only",
-                    ),
-                    (
-                        "How do I get from Rossio to Sintra by train?",
-                        "CP fast path - transport only",
-                    ),
-                    (
-                        "Show real-time Carris Metropolitana buses near Almada",
-                        "Carris Metropolitana fast path - transport only",
-                    ),
-                ],
-            },
-            # ---------------------------------------------------------
-            # CATEGORY 4: SINGLE AGENT - RESEARCHER ONLY
-            # ---------------------------------------------------------
-            {
-                "category": "SINGLE AGENT - RESEARCHER",
-                "description": "Places/events questions - should ONLY call researcher agent",
-                "queries": [
-                    (
-                        "What are the best museums in Lisbon?",
-                        "Places search - researcher only",
-                    ),
-                    ("Are there any events today?", "Events search - researcher only"),
-                    (
-                        "Tell me about the history of Castelo de São Jorge",
-                        "History search - researcher only",
-                    ),
-                ],
-            },
-            # ---------------------------------------------------------
-            # CATEGORY 5: MULTI-AGENT - COMPLEX QUERIES
-            # ---------------------------------------------------------
-            {
-                "category": "MULTI-AGENT - COMPLEX",
-                "description": "Complex queries requiring multiple agents + planner",
-                "queries": [
-                    (
-                        "Plan my day visiting museums, considering the weather",
-                        "Needs weather + researcher + planner",
-                    ),
-                    (
-                        "Suggest outdoor activities for today based on weather",
-                        "Needs weather + researcher + planner",
-                    ),
-                    (
-                        "Plan my afternoon in Belém, tell me how to get there from Rossio, and consider the weather",
-                        "Needs researcher + transport + weather + planner",
-                    ),
-                ],
-            },
-        ]
-
-        # =================================================================
-        # RUN TESTS
-        # =================================================================
-
-        total_tests = 0
-
-        for category_data in test_cases:
-            print("\n" + "=" * 70)
-            print(f"CATEGORY: {category_data['category']}")
-            print(f"   {category_data['description']}")
-            print("=" * 70)
-
-            for query, expected in category_data["queries"]:
-                total_tests += 1
-                print(f"\n{'─' * 70}")
-                print(f"[TEST {total_tests}]: {query}")
-                print(f"   Expected: {expected}")
+            live_queries = [
+                "Hello!",
+                "What's the weather in Lisbon today?",
+                "How do I get from Rossio to Sintra by train?",
+            ]
+            for index, query in enumerate(live_queries, start=1):
+                print("\n" + "─" * 70)
+                print(f"[LIVE TEST {index}] {query}")
                 print("─" * 70)
-
-                # Run with verbose mode to show routing and agent usage
-                response = assistant.chat(query, verbose=True)
-
-                print("\n[RESPONSE]:")
-
-                # Print full response
-                print(response)
-
-                # Reset state for next test
+                live_response = assistant.chat(query, verbose=True)
+                print(live_response)
+                _check(bool(live_response.strip()), f"Live graph smoke returned content for '{query}'")
                 assistant.reset()
+        else:
+            print("\n[INFO] Live graph smoke skipped. Set LISBOA_RUN_LIVE_GRAPH_TESTS=1 to enable it.")
 
-        # =================================================================
-        # SUMMARY
-        # =================================================================
         print("\n" + "=" * 70)
-        print(f"TEST SUMMARY: {total_tests} tests completed")
+        print(f"TEST SUMMARY: Passed={counters['passed']} Failed={counters['failed']}")
         print("=" * 70)
-        print("\nKey observations to verify:")
-        print("   1. OFF-TOPIC: Should show 'DIRECT RESPONSE' (no agents called)")
-        print("   2. SINGLE AGENT: Should show only ONE agent being called")
-        print("   3. MULTI-AGENT: Should show multiple agents + PLANNER synthesizing")
-        print("\n[OK] All tests completed!")
+        if counters["failed"]:
+            raise SystemExit(1)
+        print("\n[OK] Multi-agent smoke tests completed!")
 
     except Exception as e:
         print(f"\n[ERROR]: {e}")
@@ -1835,6 +2352,6 @@ if __name__ == "__main__":
 
         traceback.print_exc()
         print("\n[Tips]:")
-        print("   1. Ensure API keys are set in .env file")
-        print("   2. Check LM Studio is running for local models")
-        print("   3. Check network connectivity for cloud providers")
+        print("   1. Use the default offline smoke mode for quick validation")
+        print("   2. Set LISBOA_RUN_LIVE_GRAPH_TESTS=1 only when live provider checks are intended")
+        raise

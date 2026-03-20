@@ -116,8 +116,49 @@ class SupervisorAgent(BaseAgent):
             r"\bcomo est[aá] o tempo\b",
             r"\bqual (?:é|e) o tempo\b",
             r"\btempo em\b",
+            r"\btempo hoje\b",
+            r"\btempo amanh[ãa]\b",
         ]
         return any(re.search(pattern, message_lower) for pattern in weather_patterns)
+
+    @staticmethod
+    def _looks_like_transport_query(message_lower: str) -> bool:
+        """Detects transport and routing queries from natural PT/EN phrasing, not only explicit mode words."""
+        transport_patterns = [
+            r"\bmetro\b",
+            r"\bbus\b",
+            r"\btrain\b",
+            r"\bcarris\b",
+            r"\bcomboio\b",
+            r"\bautocarro\b",
+            r"\broute\b",
+            r"\brota\b",
+            r"\btransporte\b",
+            r"\btransport\b",
+            r"\bferry\b",
+            r"\bbarco\b",
+            r"\bfertagus\b",
+            r"\bcp\b",
+            r"\bfrequ[êe]ncia\b",
+            r"\bfrequency\b",
+            r"\bheadway\b",
+            r"\bintervalo\b",
+            r"\bde quanto em quanto\b",
+            r"\bhow often\b",
+            r"\bhow to get\b",
+            r"\bhow do i get\b",
+            r"\bhow can i get\b",
+            r"\bget from\b",
+            r"\bgo from\b",
+            r"\bcomo chego\b",
+            r"\bcomo vou\b",
+            r"\bcomo posso ir\b",
+            r"\bcomo ir\b",
+            r"\ba partir d(?:o|a)\b",
+            r"\bfrom\s+.+\s+to\s+.+",
+            r"\bdo\s+.+\s+para\s+.+",
+        ]
+        return any(re.search(pattern, message_lower) for pattern in transport_patterns)
 
     @classmethod
     def _is_obvious_out_of_scope(cls, user_message: str) -> bool:
@@ -269,7 +310,7 @@ class SupervisorAgent(BaseAgent):
             "library", "biblioteca", "police", "polícia", "policia",
         ]
 
-        transport_hit = any(term in message_lower for term in transport_terms)
+        transport_hit = cls._looks_like_transport_query(message_lower) or any(term in message_lower for term in transport_terms)
         event_hit = any(term in message_lower for term in event_terms)
         place_hit = any(term in message_lower for term in place_terms)
         service_hit = any(term in message_lower for term in service_terms)
@@ -320,6 +361,24 @@ class SupervisorAgent(BaseAgent):
             r"\bvisit multiple\b",
         ]
         return any(re.search(pattern, message_lower) for pattern in planning_patterns)
+
+    @staticmethod
+    def _planning_query_mentions_weather(user_message: str) -> bool:
+        """Detects explicit weather references inside itinerary/planning requests."""
+        message_lower = (user_message or "").lower()
+        weather_hints = [
+            "weather",
+            "forecast",
+            "rain",
+            "chuva",
+            "previsão",
+            "previsao",
+            "consider the weather",
+            "considera o tempo",
+            "considera a meteorologia",
+            "com o tempo",
+        ]
+        return any(hint in message_lower for hint in weather_hints)
 
     @traceable(name="supervisor_agent", run_type="chain", tags=["sub-agent", "supervisor"])
     def route(
@@ -386,12 +445,29 @@ class SupervisorAgent(BaseAgent):
         if decision:
             agents = decision.get("agents", [])
             reasoning = decision.get("reasoning", "")
+            message_lower = user_message.lower()
 
             # Check if this is a planning query that requires weather
             is_planning_query = self._is_planning_query(user_message)
 
+            if is_planning_query:
+                if "planner" not in agents:
+                    agents.append("planner")
+                    reasoning += " (Added planner agent: itinerary/planning query)"
+
+                if "researcher" not in agents:
+                    agents.append("researcher")
+                    reasoning += " (Added researcher agent: planning needs place/activity grounding)"
+
+                if self._looks_like_transport_query(message_lower) and "transport" not in agents:
+                    agents.append("transport")
+                    reasoning += " (Added transport agent: planning query includes route/transport intent)"
+
             # Force weather agent for near-future planning
-            if is_planning_query and self._requires_weather_for_planning(user_message):
+            if is_planning_query and (
+                self._requires_weather_for_planning(user_message)
+                or self._planning_query_mentions_weather(user_message)
+            ):
                 if "weather" not in agents:
                     agents.append("weather")
                     reasoning += " (Added weather agent: planning for near-future date)"
@@ -625,7 +701,7 @@ class SupervisorAgent(BaseAgent):
         # Check for keywords
         if self._looks_like_weather_query(message_lower):
             agents.append("weather")
-        if any(kw in message_lower for kw in transport_keywords):
+        if self._looks_like_transport_query(message_lower) or any(kw in message_lower for kw in transport_keywords):
             agents.append("transport")
         if any(kw in message_lower for kw in places_keywords):
             agents.append("researcher")
@@ -633,12 +709,18 @@ class SupervisorAgent(BaseAgent):
             if "researcher" not in agents:
                 agents.append("researcher")
         if self._is_planning_query(message_lower):
-            # Itinerary needs weather + researcher + planner
-            if "weather" not in agents:
+            # Itinerary queries should be grounded consistently across providers.
+            if (
+                self._requires_weather_for_planning(user_message)
+                or self._planning_query_mentions_weather(user_message)
+            ) and "weather" not in agents:
                 agents.append("weather")
+            if self._looks_like_transport_query(message_lower) and "transport" not in agents:
+                agents.append("transport")
             if "researcher" not in agents:
                 agents.append("researcher")
-            agents.append("planner")
+            if "planner" not in agents:
+                agents.append("planner")
 
         # If still no agents and not a greeting, default to researcher
         if not agents:

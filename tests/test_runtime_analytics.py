@@ -1,0 +1,453 @@
+# ==========================================================================
+# Master Thesis - Runtime Analytics and Planning Guardrails Tests
+#   - André Filipe Gomes Silvestre, 20240502
+#
+#   Focused regression tests for:
+#     - runtime execution summary and cost accounting
+#     - assistant history persistence
+#     - lightweight weather fact-checking
+#     - future-planning transport responses
+#     - multi-day planner quality mode
+# ==========================================================================
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+from langchain_core.messages import AIMessage
+
+from agent.agents.planner_agent import PlannerAgent, enforce_multi_day_quality_mode
+from agent.agents.transport_agent import (
+    TransportAgent,
+    _build_deterministic_metro_route_response,
+)
+from agent.graph import MultiAgentAssistant
+
+
+def _make_usage_summary(
+    *,
+    model_id: str = "Unknown",
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    call_count: int = 0,
+    agent_name: str | None = None,
+) -> dict:
+    """Build a stable mocked usage summary for runtime tests."""
+    breakdown = []
+    total_tokens = input_tokens + output_tokens
+    if call_count > 0:
+        provider, model = model_id.split("::", 1) if "::" in model_id else ("unknown", model_id)
+        breakdown.append(
+            {
+                "call_index": 1,
+                "agent_name": agent_name,
+                "provider": provider,
+                "model": model,
+                "model_id": model_id,
+                "tokens": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "total_tokens": total_tokens,
+                },
+                "usage_available": True,
+            }
+        )
+
+    return {
+        "call_count": call_count,
+        "usage_available": bool(call_count),
+        "model_id": model_id,
+        "tokens": {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+        },
+        "llm_usage_breakdown": breakdown,
+    }
+
+
+def _make_worker_mock(
+    *,
+    output: str = "",
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    call_count: int = 0,
+    model_id: str = "azure::gpt-5-mini",
+) -> MagicMock:
+    """Create a worker-like mock with the methods used by ``MultiAgentAssistant``."""
+    worker = MagicMock()
+    worker.invoke = MagicMock(return_value=output)
+    worker.reset_llm_usage_tracking = MagicMock()
+    worker.get_llm_usage_summary = MagicMock(
+        return_value=_make_usage_summary(
+            model_id=model_id,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            call_count=call_count,
+        )
+    )
+    worker.get_tool_calls_log = MagicMock(return_value=[])
+    worker.llm_provider = "azure"
+    return worker
+
+
+def test_multiagent_direct_response_records_history_and_prints_execution_summary(capsys) -> None:
+    """Direct supervisor responses should still be recorded in history and emit the runtime summary."""
+    assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
+    assistant.state = {"messages": [], "user_context": None}
+
+    assistant.supervisor = MagicMock()
+    assistant.supervisor.reset_llm_usage_tracking = MagicMock()
+    assistant.supervisor.route = MagicMock(
+        return_value={"agents": [], "direct_response": "Olá direto", "reasoning": "Direct reply"}
+    )
+    assistant.supervisor.get_llm_usage_summary = MagicMock(
+        return_value=_make_usage_summary(
+            model_id="azure::gpt-5-mini",
+            input_tokens=4000,
+            output_tokens=800,
+            call_count=1,
+            agent_name="supervisor",
+        )
+    )
+
+    assistant.qa_agent = MagicMock()
+    assistant.qa_agent.reset_llm_usage_tracking = MagicMock()
+    assistant.qa_agent.get_llm_usage_summary = MagicMock(return_value=_make_usage_summary(agent_name="qa"))
+
+    assistant.agents = {
+        "weather": _make_worker_mock(),
+        "transport": _make_worker_mock(),
+        "researcher": _make_worker_mock(),
+        "planner": _make_worker_mock(),
+    }
+
+    with patch("agent.graph.LANGSMITH_AVAILABLE", False), patch.object(
+        __import__("agent.graph", fromlist=["Config"]).Config,
+        "SHOW_MARKDOWN_RESPONSE_IN_TERMINAL",
+        False,
+    ), patch(
+        "agent.graph.get_langsmith_request_tracking_status",
+        return_value={
+            "tracking_state": "disabled",
+            "status_label": "disabled",
+            "save_attempted": False,
+            "current_run_attached": False,
+            "project_name": None,
+            "run_id": None,
+            "reason": "LangSmith tracing is disabled by environment",
+            "note": "LangSmith tracing is disabled by environment",
+        },
+    ):
+        output = assistant.chat("Olá", language="pt", verbose=False)
+
+    captured = capsys.readouterr().out
+    assert output == "Olá direto"
+    assert isinstance(assistant.state["messages"][-1], AIMessage)
+    assert assistant.state["messages"][-1].content == "Olá direto"
+    assert "EXECUTION SUMMARY" in captured
+    assert "Execution: direct" in captured
+    assert "(0.003$)" in captured
+    assert "Pricing Snapshot: 2026-03-19" in captured
+    assert "LangSmith: disabled | Save attempt: no" in captured
+
+
+def test_execution_summary_prints_active_langsmith_save_attempt(capsys) -> None:
+    """The terminal summary should expose whether the current request is being traced."""
+    assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
+
+    assistant._print_execution_summary(
+        {
+            "elapsed_time": 1.23,
+            "execution_type": "hybrid",
+            "worker_mode": "parallel",
+            "qa_path": "validated",
+            "langsmith": {
+                "tracking_state": "tracking_request",
+                "status_label": "enabled",
+                "save_attempted": True,
+                "current_run_attached": True,
+                "project_name": "LISBOA Chat",
+                "run_id": "run_123",
+                "reason": "LangSmith tracing enabled",
+                "note": "Request trace context is attached. LangSmith persistence is asynchronous, so final ingestion or quota acceptance is not confirmed here.",
+            },
+            "usage": {
+                "call_count": 2,
+                "tokens": {
+                    "input_tokens": 100,
+                    "output_tokens": 20,
+                    "total_tokens": 120,
+                },
+            },
+            "pricing_metadata": {"pricing_snapshot_date": "2026-03-19"},
+            "total_cost": {"total_cost_usd": 0.0015, "missing_pricing_models": []},
+            "models_used": ["azure::gpt-5-mini"],
+            "relevant_agents": [],
+            "agent_usage": {},
+            "agent_costs": {},
+            "agent_tool_logs": {},
+            "total_tool_invocations": 0,
+            "retry_agents_used": [],
+        }
+    )
+
+    captured = capsys.readouterr().out
+    assert "LangSmith: enabled | Save attempt: yes | Project: LISBOA Chat" in captured
+    assert "persistence is asynchronous" in captured.lower()
+
+
+def test_multiagent_simple_weather_runs_lightweight_fact_check_but_skips_validate() -> None:
+    """Simple weather queries should keep low latency while still running deterministic fact-checking."""
+    assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
+    assistant.state = {"messages": [], "user_context": None}
+
+    assistant.supervisor = MagicMock()
+    assistant.supervisor.reset_llm_usage_tracking = MagicMock()
+    assistant.supervisor.route = MagicMock(
+        return_value={"agents": ["weather"], "direct_response": None, "reasoning": "weather only"}
+    )
+    assistant.supervisor.get_llm_usage_summary = MagicMock(return_value=_make_usage_summary(agent_name="supervisor"))
+
+    weather_agent = _make_worker_mock(output="🌤️ Forecast body")
+    weather_agent._is_current_weather_query = MagicMock(return_value=False)
+    weather_agent._is_simple_forecast_query = MagicMock(return_value=True)
+
+    assistant.agents = {
+        "weather": weather_agent,
+        "transport": _make_worker_mock(),
+        "researcher": _make_worker_mock(),
+        "planner": _make_worker_mock(),
+    }
+
+    assistant.qa_agent = MagicMock()
+    assistant.qa_agent.reset_llm_usage_tracking = MagicMock()
+    assistant.qa_agent.get_llm_usage_summary = MagicMock(return_value=_make_usage_summary(agent_name="qa"))
+    assistant.qa_agent._verify_facts = MagicMock(
+        return_value={
+            "valid": True,
+            "disclaimers": [],
+            "critical_issues": [],
+            "checks_performed": ["output_hygiene"],
+            "repairable_agents": [],
+            "per_agent": {},
+        }
+    )
+    assistant.qa_agent.validate = MagicMock(side_effect=AssertionError("Full QA should stay skipped"))
+
+    with patch("agent.graph.LANGSMITH_AVAILABLE", False), patch.object(
+        __import__("agent.graph", fromlist=["Config"]).Config,
+        "SHOW_MARKDOWN_RESPONSE_IN_TERMINAL",
+        False,
+    ), patch("agent.graph.clean_response", side_effect=lambda text: text), patch(
+        "agent.graph.format_response", side_effect=lambda text: text
+    ), patch("agent.graph.generate_response_title", return_value=None), patch(
+        "agent.graph.ensure_response_title", side_effect=lambda text, _title: text
+    ):
+        output = assistant.chat(
+            "Qual é a previsão do tempo para os próximos 3 dias?",
+            language="pt",
+            verbose=False,
+        )
+
+    weather_agent.invoke.assert_called_once()
+    assistant.qa_agent._verify_facts.assert_called_once()
+    assistant.qa_agent.validate.assert_not_called()
+    assert output == "🌤️ Forecast body"
+
+
+def test_transport_future_metro_route_omits_realtime_waits() -> None:
+    """Future transport planning should not show current Metro waits or line-status blocks."""
+    wait_lines = MagicMock(return_value=["- ⏱️ 2 min"])
+
+    with patch(
+        "tools.transport_api.get_route_between_stations",
+        new=MagicMock(invoke=MagicMock(return_value="METRO ROUTE")),
+    ), patch(
+        "agent.agents.transport_agent._parse_route_details",
+        return_value={
+            "board_station": "Rossio",
+            "final_station": "Aeroporto",
+            "transfer_station": None,
+            "directions": ["Aeroporto"],
+            "estimated_time": "~25 min",
+            "walk_target": None,
+        },
+    ), patch(
+        "agent.agents.transport_agent._get_line_id_between",
+        return_value="verde",
+    ), patch(
+        "agent.agents.transport_agent._build_route_state_lines",
+        return_value=["- 🟢 **Linha Verde**: circulação normal"],
+    ), patch(
+        "agent.agents.transport_agent._build_metro_wait_lines",
+        wait_lines,
+    ), patch(
+        "agent.agents.transport_agent._build_practical_tip",
+        return_value="",
+    ), patch(
+        "agent.agents.transport_agent._build_additional_route_options",
+        return_value=[],
+    ), patch(
+        "agent.agents.transport_agent._get_transport_display_name",
+        side_effect=lambda value, detailed=False: value,
+    ), patch(
+        "tools.metrolisboa_api.get_landmark_info",
+        return_value=None,
+    ), patch(
+        "tools.metrolisboa_api.METRO_LINES",
+        {"verde": {"emoji": "🟢"}},
+    ):
+        output = _build_deterministic_metro_route_response(
+            "Como vou amanhã do Rossio ao Aeroporto de metro?",
+            context="User language: pt",
+        )
+
+    wait_lines.assert_not_called()
+    assert output is not None
+    assert "Planeamento futuro" in output
+    assert "Próximos Metros" not in output
+    assert "circulação normal" not in output
+
+
+def test_planner_multi_day_request_injects_quality_mode_instruction() -> None:
+    """Multi-day planner queries should explicitly activate the day-by-day quality mode."""
+    with patch.object(PlannerAgent, "__init__", lambda self: None), patch(
+        "agent.agents.planner_agent.finalize_worker_response",
+        side_effect=lambda response, **_kwargs: response,
+    ):
+        agent = PlannerAgent()
+        agent.system_prompt = "PLANNER PROMPT"
+        agent.llm = object()
+        agent._safe_llm_invoke = MagicMock(return_value=SimpleNamespace(content="### 📅 Day 1\n- Grounded content"))
+
+        output = agent.invoke(
+            user_message="Plan 3 days in Lisbon for me.",
+            weather_data="🌤️ Dry weather",
+            transport_data="🚇 Metro available",
+            places_data="- **Jerónimos Monastery**",
+            events_data="",
+        )
+
+    sent_messages = agent._safe_llm_invoke.call_args.args[1]
+    system_messages = [message.content for message in sent_messages if hasattr(message, "content")]
+    assert any("MULTI-DAY QUALITY MODE" in content for content in system_messages)
+    assert output.startswith("### 📅 Day 1")
+
+
+def test_enforce_multi_day_quality_mode_trims_later_days() -> None:
+    """The deterministic clamp should remove Day 2+ content from explicit multi-day responses."""
+    draft = (
+        "### 📅 Plano de 3 dias em Lisboa\n"
+        "- 📅 Dia 1\n"
+        "- Museu Nacional do Azulejo\n"
+        "- 📅 Dia 2\n"
+        "- MAAT\n"
+        "- 📅 Dia 3\n"
+        "- Museu do Chiado"
+    )
+
+    output = enforce_multi_day_quality_mode(
+        response=draft,
+        user_message="Planeia 3 dias em Lisboa.",
+        language="pt",
+    )
+
+    assert output.startswith("### 📅 Dia 1 · Itinerário Sugerido")
+    assert "\n- 📅 Dia 2" not in output
+    assert "\n- 📅 Dia 3" not in output
+    assert "Museu Nacional do Azulejo" in output
+    assert "este primeiro bloco cobre apenas o Dia 1" in output
+
+
+def test_enforce_multi_day_quality_mode_trims_bold_day_two_headers() -> None:
+    """The multi-day clamp should catch bold markdown variants for Day 2+ sections."""
+    draft = (
+        "### 📅 3-day Lisbon plan\n"
+        "- **Day 1:** Belém\n"
+        "- Jerónimos Monastery\n"
+        "- **Day 2:** Alfama\n"
+        "- São Jorge Castle"
+    )
+
+    output = enforce_multi_day_quality_mode(
+        response=draft,
+        user_message="Plan 3 days in Lisbon for me.",
+        language="en",
+    )
+
+    assert output.startswith("### 📅 Day 1 · Suggested Itinerary")
+    assert "**Day 2:**" not in output
+    assert "Jerónimos Monastery" in output
+    assert "ask me next for Day 2" in output
+
+
+def test_enforce_multi_day_quality_mode_trims_shorthand_day_markers() -> None:
+    """The multi-day clamp should also catch compact D2/D3 section markers."""
+    draft = (
+        "### 📅 Lisbon plan\n"
+        "- Day 1 · Baixa\n"
+        "- Rossio and Chiado\n"
+        "- D2: Sintra\n"
+        "- Pena Palace"
+    )
+
+    output = enforce_multi_day_quality_mode(
+        response=draft,
+        user_message="Plan 2 days in Lisbon for me.",
+        language="en",
+    )
+
+    assert "D2:" not in output
+    assert "Rossio and Chiado" in output
+
+
+def test_transport_deterministic_tool_call_records_tool_usage() -> None:
+    """Deterministic transport fast paths should still populate the tool-call log."""
+    with patch.object(TransportAgent, "__init__", lambda self: None), patch(
+        "agent.agents.transport_agent.finalize_worker_response",
+        side_effect=lambda response, **_kwargs: response,
+    ):
+        agent = TransportAgent()
+        agent._tool_calls_log = []
+        tool = MagicMock()
+        tool.invoke = MagicMock(return_value="ok")
+        agent._get_tool_by_name = MagicMock(return_value=tool)
+
+        output = agent._invoke_deterministic_tool_call(
+            "What are the direct Carris Metropolitana buses from Oeiras to Amadora?",
+            language="en",
+        )
+
+    assert output is not None
+    assert "ok" in output
+    tool.invoke.assert_called_once()
+    assert agent.get_tool_calls_log()[0]["tool_name"] == "find_direct_bus_lines"
+
+
+def test_transport_formats_direct_carris_metropolitana_output() -> None:
+    """Direct Carris Metropolitana fast paths should strip raw wrapper/scope lines."""
+    raw_result = (
+        "🚌 **Buses: Oeiras → Amadora**\n\n"
+        "✅ **19 direct line(s) found:**\n\n"
+        "**1. 🚍 Linha 1501**\n"
+        " 📍 **Terminals**: Reboleira (Estação) | Circular via Alfragide\n"
+        "💡 **How to use it:**\n"
+        " - Look for the line number\n"
+        "⚠️ **Scope**: raw wrapper that should disappear"
+    )
+
+    with patch.object(TransportAgent, "__init__", lambda self: None):
+        agent = TransportAgent()
+        formatted = agent._format_deterministic_tool_result(
+            tool_name="find_direct_bus_lines",
+            tool_args={"origin": "Oeiras", "destination": "Amadora"},
+            result=raw_result,
+            language="en",
+        )
+
+    assert formatted.startswith("### 🚌 Direct Carris Metropolitana lines for Oeiras → Amadora")
+    assert "How to use it" in formatted
+    assert "Scope" not in formatted
+    assert "Carris Metropolitana" in formatted

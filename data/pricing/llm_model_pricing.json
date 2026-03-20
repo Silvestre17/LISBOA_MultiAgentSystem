@@ -1,0 +1,191 @@
+{
+  "pricing_source": "Azure OpenAI: https://azure.microsoft.com/pricing/details/cognitive-services/openai-service/ | Azure Foundry Models: https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/deepseek/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/microsoft/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/grok/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/llama/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/kimi/ | Microsoft Foundry pricing: https://azure.microsoft.com/en-us/pricing/details/microsoft-foundry/#pricing | Anthropic Foundry announcement: https://www.anthropic.com/news/claude-in-microsoft-foundry | Anthropic API pricing: https://platform.claude.com/docs/en/docs/about-claude/pricing | OpenAI detailed docs: https://developers.openai.com/api/docs/pricing | OpenAI GPT-5-mini snapshot: https://www.llm-prices.com/current-v1.json",
+  "pricing_updated_at": "2026-03-19",
+  "pricing_snapshot_date": "2026-03-19",
+  "models": {
+    "azure::gpt-5-mini": {
+      "input": 0.25,
+      "input_cached": 0.03,
+      "output": 2.0,
+      "name": "Azure GPT-5 Mini Global"
+    },
+    "azure::gpt-5": {
+      "input": 1.25,
+      "input_cached": 0.13,
+      "output": 10.0,
+      "name": "Azure GPT-5 Global"
+    },
+    "azure::gpt-5.1": {
+      "input": 1.25,
+      "input_cached": 0.13,
+      "output": 10.0,
+      "name": "Azure GPT-5.1 Global"
+    },
+    "azure::gpt-5.1-codex-mini": {
+      "input": 0.25,
+      "input_cached": 0.03,
+      "output": 2.0,
+      "name": "Azure GPT-5.1 Codex Mini Global"
+    },
+    "azure::gpt-4.1-mini": {
+      "input": 0.4,
+      "input_cached": 0.1,
+      "output": 1.6,
+      "name": "Azure GPT-4.1 Mini Global"
+    },
+    "azure::gpt-4o-mini": {
+      "input": 0.15,
+      "input_cached": 0.075,
+      "output": 0.6,
+      "name": "Azure GPT-4o Mini Global"
+    },
+    "azure::o4-mini": {
+      "input": 1.1,
+      "input_cached": 0.28,
+      "output": 4.4,
+      "name": "Azure o4-mini Global"
+    },
+    "azure::o3-mini": {
+      "input": 1.1,
+      "input_cached": 0.55,
+      "output": 4.4,
+      "name": "Azure o3-mini Global"
+    },
+    "azure::deepseek-v3.2": {
+      "input": 0.58,
+      "output": 1.68,
+      "name": "Azure DeepSeek V3.2 Global"
+    },
+    "azure::deepseek-r1": {
+      "input": 1.35,
+      "output": 5.4,
+      "name": "Azure DeepSeek R1 Global"
+    },
+    "azure::phi-4": {
+      "input": 0.125,
+      "output": 0.5,
+      "name": "Azure Phi-4"
+    },
+    "azure::phi-4-reasoning-plus": {
+      "input": 0.125,
+      "output": 0.5,
+      "name": "Azure Phi-4 Reasoning Plus"
+    },
+    "azure::mai-ds-r1": {
+      "input": 1.35,
+      "output": 5.4,
+      "name": "Azure MAI-DS-R1 Global"
+    },
+    "azure::grok-4": {
+      "input": 3.0,
+      "output": 15.0,
+      "name": "Azure Grok 4 Global"
+    },
+    "azure::llama-3.3-70b": {
+      "input": 0.71,
+      "output": 0.71,
+      "name": "Azure Llama 3.3 70B Global"
+    },
+    "azure::kimi-k2-thinking": {
+      "input": 0.6,
+      "output": 2.5,
+      "name": "Azure Kimi K2 Thinking Global"
+    },
+    "azure::claude-haiku-4.5": {
+      "input": 1.0,
+      "input_cached": 0.1,
+      "output": 5.0,
+      "name": "Azure Claude Haiku 4.5 via Microsoft Foundry"
+    },
+    "azure::claude-sonnet-4.5": {
+      "input": 3.0,
+      "input_cached": 0.3,
+      "output": 15.0,
+      "name": "Azure Claude Sonnet 4.5 via Microsoft Foundry"
+    },
+    "azure::claude-opus-4.1": {
+      "input": 15.0,
+      "input_cached": 1.5,
+      "output": 75.0,
+      "name": "Azure Claude Opus 4.1 via Microsoft Foundry"
+    },
+    "openai::gpt-5-mini": {
+      "input": 0.25,
+      "input_cached": 0.025,
+      "output": 2.0,
+      "name": "OpenAI GPT-5 Mini"
+    },
+    "openai::gpt-5": {
+      "input": 1.25,
+      "input_cached": 0.125,
+      "output": 10.0,
+      "name": "OpenAI GPT-5"
+    },
+    "openai::gpt-5.1": {
+      "input": 1.25,
+      "input_cached": 0.125,
+      "output": 10.0,
+      "name": "OpenAI GPT-5.1"
+    },
+    "openai::gpt-5.1-codex-mini": {
+      "input": 0.25,
+      "input_cached": 0.025,
+      "output": 2.0,
+      "name": "OpenAI GPT-5.1 Codex Mini"
+    },
+    "openai::gpt-5.4-mini": {
+      "input": 0.75,
+      "input_cached": 0.075,
+      "output": 4.5,
+      "name": "OpenAI GPT-5.4 Mini"
+    },
+    "openai::gpt-5.4": {
+      "input": 2.5,
+      "input_cached": 0.25,
+      "output": 15.0,
+      "name": "OpenAI GPT-5.4"
+    },
+    "openai::gpt-4.1-mini": {
+      "input": 0.4,
+      "input_cached": 0.1,
+      "output": 1.6,
+      "name": "OpenAI GPT-4.1 Mini"
+    },
+    "openai::gpt-4o-mini": {
+      "input": 0.15,
+      "input_cached": 0.075,
+      "output": 0.6,
+      "name": "OpenAI GPT-4o Mini"
+    },
+    "openai::o4-mini": {
+      "input": 1.1,
+      "input_cached": 0.275,
+      "output": 4.4,
+      "name": "OpenAI o4-mini"
+    },
+    "openai::o3-mini": {
+      "input": 1.1,
+      "input_cached": 0.55,
+      "output": 4.4,
+      "name": "OpenAI o3-mini"
+    },
+    "lmstudio::qwen/qwen3.5-9b": {
+      "input": 0.0,
+      "input_cached": 0.0,
+      "output": 0.0,
+      "name": "LM Studio local model"
+    },
+    "lmstudio::deepseek/deepseek-r1-0528-qwen3-8b": {
+      "input": 0.0,
+      "input_cached": 0.0,
+      "output": 0.0,
+      "name": "LM Studio local model"
+    },
+    "lmstudio::qwen/qwen3-8b": {
+      "input": 0.0,
+      "input_cached": 0.0,
+      "output": 0.0,
+      "name": "LM Studio local model"
+    }
+  }
+}

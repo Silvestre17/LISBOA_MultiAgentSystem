@@ -76,6 +76,16 @@ _INLINE_OFFER_RE = re.compile(
     r"(?:\s+|^)(?:If you want(?:,)?|If you['’]d like(?:,)?|Would you like me to|Let me know if|I can also|I can help(?: you)?|I can bring|I can fetch|I can filter|I can get updated|Se quiser(?:es)?(?:,)?|Se preferir(?:,)?|Posso também|Posso tambem|Posso detalhar|Posso filtrar|Posso trazer|Posso ver|Posso verificar|Posso procurar|Quer que eu)\b.*$",
     re.IGNORECASE | re.MULTILINE,
 )
+_TRANSPORT_WEATHER_BLOCK_RE = re.compile(
+    r"\n?[⛈️🌤️☔]\s*\*\*(?:Tempo em Lisboa|Weather in Lisbon|Weather)\*\*\s*\n(?:\s*[-*•].*\n?){1,4}(?=(?:\s*(?:🚇|🚌|🚆|\*\*Opção|\*\*Option|📌|$)))",
+    re.IGNORECASE,
+)
+_TIMED_SECTION_HEADER_RE = re.compile(
+    r"^(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s*)?\d{1,2}:\d{2}\s*·\s*.+$"
+)
+_TRANSPORT_ROUTE_TITLE_RE = re.compile(
+    r"^(?:[🚇🚌🚆🚋]\s+)?\*\*[^*]+(?:→|·)[^*]+\*\*(?:\s*(?::|—|-).*)?$"
+)
 
 
 def infer_response_language(
@@ -550,6 +560,15 @@ def _planner_activity_icon(title: str, emoji: str = "") -> str:
     return "📍"
 
 
+def _strip_leading_section_emoji(text: str) -> str:
+    """Remove a leading emoji already present in a planner section label."""
+    return re.sub(
+        r"^[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D\s]+",
+        "",
+        text or "",
+    ).strip()
+
+
 _PLANNER_CLOCK_EMOJI_TO_TIME = {
     "🕐": (1, 0),
     "🕜": (1, 30),
@@ -626,15 +645,43 @@ def structure_planner_markdown(text: str) -> str:
 
         title_window_match = re.search(r"(\d{1,2}:\d{2}\s*[→-]\s*\d{1,2}:\d{2})", normalized)
 
-        if re.search(r"\b(como chegar|deslocar-se|how to get there|get around)\b", lowered) and ":" not in normalized:
+        if any(
+            keyword in lowered
+            for keyword in (
+                "condições e segurança",
+                "condicoes e seguranca",
+                "weather and safety",
+                "conditions and safety",
+            )
+        ) and ":" not in normalized:
             append_separator()
-            structured.append(f"### 🚇 {normalized.rstrip(':')}")
+            structured.append(f"### ⛅ {_strip_leading_section_emoji(normalized).rstrip(':')}")
+            current_block = "section"
+            continue
+
+        if re.search(r"\b(como chegar|desloca(?:r-se|ção)|how to get there|get around)\b", lowered) and ":" not in normalized:
+            append_separator()
+            structured.append(f"### 🚇 {_strip_leading_section_emoji(normalized).rstrip(':')}")
+            current_block = "section"
+            continue
+
+        if any(
+            keyword in lowered
+            for keyword in (
+                "sugestões para a visita",
+                "sugestoes para a visita",
+                "visit suggestions",
+                "para a visita",
+            )
+        ) and ":" not in normalized:
+            append_separator()
+            structured.append(f"### 📍 {_strip_leading_section_emoji(normalized).rstrip(':')}")
             current_block = "section"
             continue
 
         if re.search(r"\b(fontes|verificaç|verification|sources?)\b", lowered) and ":" not in normalized:
             append_separator()
-            structured.append(f"### 🔎 {normalized.rstrip(':')}")
+            structured.append(f"### 🔎 {_strip_leading_section_emoji(normalized).rstrip(':')}")
             current_block = "section"
             continue
 
@@ -695,14 +742,26 @@ def structure_planner_markdown(text: str) -> str:
         if preface_match:
             append_separator()
             label = preface_match.group("label")
-            structured.append(f"### {_planner_section_icon(label)} {label}")
+            structured.append(f"### {_planner_section_icon(label)} {_strip_leading_section_emoji(label)}")
             structured.append(f"- {preface_match.group('content').strip()}")
             current_block = "section"
             continue
 
-        if re.search(r"\b(dicas? práticas?|practical tips|important notes|notas importantes|final notes)\b", lowered) and ":" not in normalized:
+        if any(
+            keyword in lowered
+            for keyword in (
+                "dicas práticas",
+                "dicas praticas",
+                "practical tips",
+                "important notes",
+                "notas importantes",
+                "notas práticas",
+                "notas praticas",
+                "final notes",
+            )
+        ) and ":" not in normalized:
             append_separator()
-            structured.append(f"### ✨ {normalized.rstrip(':')}")
+            structured.append(f"### ✨ {_strip_leading_section_emoji(normalized).rstrip(':')}")
             current_block = "section"
             continue
 
@@ -727,7 +786,7 @@ def structure_planner_markdown(text: str) -> str:
             )
             if is_major_section:
                 append_separator()
-                structured.append(f"### {_planner_section_icon(label)} {label}")
+                structured.append(f"### {_planner_section_icon(label)} {_strip_leading_section_emoji(label)}")
                 if content:
                     structured.append(f"- {content}")
                 current_block = "section"
@@ -745,6 +804,49 @@ def structure_planner_markdown(text: str) -> str:
             structured.append(bullet_content)
 
     return clean_newlines("\n".join(structured)).strip()
+
+
+def soften_internal_markdown_headers(
+    text: str,
+    *,
+    preserve_first_header: bool = True,
+    preserve_timed_cards: bool = True,
+) -> str:
+    """Convert internal markdown headers into softer section labels.
+
+    This keeps the main response title and timed itinerary cards intact while
+    making the remaining sections feel closer to the cleaner weather/event UI.
+    """
+    if not text:
+        return text
+
+    softened_lines: list[str] = []
+    header_count = 0
+
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        header_match = re.match(r"^(#{3,4})\s+(.+)$", stripped)
+        if not header_match:
+            softened_lines.append(raw_line)
+            continue
+
+        header_count += 1
+        title = header_match.group(2).strip()
+        plain_title = _strip_markdown_formatting(title)
+
+        if preserve_first_header and header_count == 1 and len(header_match.group(1)) == 3:
+            softened_lines.append(stripped)
+            continue
+
+        if preserve_timed_cards and _TIMED_SECTION_HEADER_RE.match(plain_title):
+            softened_lines.append(stripped)
+            continue
+
+        if softened_lines and softened_lines[-1].strip():
+            softened_lines.append("")
+        softened_lines.append(f"**{title}**")
+
+    return clean_newlines("\n".join(softened_lines)).strip()
 
 
 def _looks_like_pt_transport_text(text: str) -> bool:
@@ -995,6 +1097,54 @@ def structure_transport_markdown(text: str) -> str:
     text = re.sub(r"\bHorario\b", "Horário", text, flags=re.IGNORECASE)
     
     return clean_newlines(text).strip()
+
+
+def strip_transport_weather_disclaimers(text: str) -> str:
+    """Removes weather-side disclaimers that sometimes leak into transport answers."""
+    if not text:
+        return text
+
+    cleaned = _TRANSPORT_WEATHER_BLOCK_RE.sub("\n", text)
+
+    result_lines: list[str] = []
+    skipping_weather_block = False
+    restart_markers = (
+        "**Opção",
+        "**Option",
+        "**Horários programados**",
+        "**Scheduled times**",
+        "### ",
+        "🚇",
+        "🚌",
+        "🚆",
+        "📌",
+    )
+
+    for raw_line in cleaned.splitlines():
+        stripped = raw_line.strip()
+        lowered = stripped.lower()
+
+        if re.search(r"(?:sobre o tempo em lisboa|tempo em lisboa|weather in lisbon|weather update)", lowered):
+            skipping_weather_block = True
+            continue
+
+        if skipping_weather_block:
+            if stripped.startswith(restart_markers) or "como ir do" in lowered or "how to get from" in lowered:
+                skipping_weather_block = False
+            else:
+                continue
+
+        if re.search(
+            r"n[aã]o tenho acesso a dados meteorol[oó]gicos|don't have access to (?:real-time )?weather|google weather|in-weather",
+            lowered,
+        ):
+            continue
+        if re.search(r"recomend[oa].*(?:ipma|weather|previs|forecast)", lowered):
+            continue
+
+        result_lines.append(raw_line)
+
+    return clean_newlines("\n".join(result_lines)).strip()
 
 
 def canonicalize_transport_terms(text: str, language: str = "en") -> str:
@@ -1830,12 +1980,23 @@ def finalize_worker_response(
         finalized = strip_unsupported_closing_offers(finalized)
         finalized = canonicalize_local_information_terms(finalized, language=preferred_language)
         if agent_name == "transport":
+            finalized = strip_transport_weather_disclaimers(finalized)
             finalized = canonicalize_transport_terms(finalized, language=preferred_language)
             finalized = strip_technical_output_artifacts(finalized)
             finalized = structure_transport_markdown(finalized)
+            finalized = soften_internal_markdown_headers(
+                finalized,
+                preserve_first_header=True,
+                preserve_timed_cards=False,
+            )
             finalized = format_response(finalized)
         else:
             finalized = structure_planner_markdown(finalized)
+            finalized = soften_internal_markdown_headers(
+                finalized,
+                preserve_first_header=True,
+                preserve_timed_cards=True,
+            )
             finalized = format_response(finalized)
             finalized = canonicalize_planner_source_line(finalized, language=preferred_language)
 
@@ -2346,9 +2507,9 @@ def generate_response_title(
 
         elif agent == "transport":
             return (
-                "### \U0001f687 Informação de Transportes"
+                "### \U0001f687 Mobilidade em Lisboa"
                 if language == "pt"
-                else "### \U0001f687 Transport Information"
+                else "### \U0001f687 Lisbon Mobility"
             )
 
         elif agent == "researcher":
@@ -2412,17 +2573,17 @@ def generate_response_title(
                 )
             else:
                 return (
-                    "### \U0001f4cb Informação Local"
+                    "### \U0001f4cd Destaques Locais"
                     if language == "pt"
-                    else "### \U0001f4cb Local Information"
+                    else "### \U0001f4cd Local Highlights"
                 )
 
     # --- Multi-agent (without planner) - combined titles ---
     if "weather" in agents_called and "transport" in agents_called:
         return (
-            "### \U0001f324\ufe0f\U0001f687 Meteorologia e Transportes"
+            "### \U0001f9ed Meteorologia e Mobilidade"
             if language == "pt"
-            else "### \U0001f324\ufe0f\U0001f687 Weather & Transport"
+            else "### \U0001f9ed Weather & Mobility"
         )
     elif "weather" in agents_called:
         return (
@@ -2432,15 +2593,15 @@ def generate_response_title(
         )
     elif "transport" in agents_called:
         return (
-            "### \U0001f687 Informação de Transportes"
+            "### \U0001f687 Mobilidade em Lisboa"
             if language == "pt"
-            else "### \U0001f687 Transport Information"
+            else "### \U0001f687 Lisbon Mobility"
         )
     else:
         return (
-            "### \U0001f4cb Informação Local"
+            "### \U0001f4cd Destaques Locais"
             if language == "pt"
-            else "### \U0001f4cb Local Information"
+            else "### \U0001f4cd Local Highlights"
         )
 
 
@@ -2465,6 +2626,8 @@ def ensure_response_title(text: str, title: Optional[str]) -> str:
 
     # Check if response already starts with a header or bold title
     first_line = text.strip().split("\n")[0].strip()
+    if _TRANSPORT_ROUTE_TITLE_RE.match(first_line):
+        return f"{title}\n\n{text}"
     if first_line.startswith("### ") or first_line.startswith("## ") or first_line.startswith("# "):
         return text  # Already has a header
     if re.match(r"^\*\*[^*]+\*\*\s*$", first_line):

@@ -141,6 +141,7 @@ def _load_langsmith_symbols() -> Optional[Dict[str, Any]]:
     """Import LangSmith runtime symbols only when tracing is actually requested."""
     try:
         import logging
+
         # Suppress LangSmith's noisy error logs about quotas/connection failures
         logging.getLogger("langsmith").setLevel(logging.CRITICAL)
         logging.getLogger("langsmith.client").setLevel(logging.CRITICAL)
@@ -339,6 +340,99 @@ def get_langsmith_project_name(
         _get_env_value(os.environ, "LANGSMITH_PROJECT", "LANGCHAIN_PROJECT")
         or "default"
     )
+
+
+def get_langsmith_request_tracking_status(
+    status: Optional[Dict[str, Any]] = None,
+    run_tree: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Return a per-request LangSmith tracking summary for terminal analytics.
+
+    This helper reports whether the current request is attached to an active
+    LangSmith run context. LangSmith persistence is asynchronous, so the result
+    intentionally describes whether a save attempt is in progress, not whether
+    remote ingestion or quota acceptance has been synchronously confirmed.
+
+    Args:
+        status: Optional pre-resolved LangSmith tracing status.
+        run_tree: Optional injected current run tree for tests.
+
+    Returns:
+        Dict[str, Any]: Compact per-request tracking metadata.
+    """
+    resolved = status or get_langsmith_tracing_status()
+    reason = str(resolved.get("reason", "") or "")
+    current_run = run_tree
+    if current_run is None:
+        try:
+            current_run = get_current_run_tree()
+        except Exception:
+            current_run = None
+
+    current_run_attached = current_run is not None
+    project_name = (
+        get_langsmith_project_name(resolved)
+        if resolved.get("enabled") or resolved.get("requested")
+        else None
+    )
+
+    run_id = None
+    if current_run_attached:
+        for attr_name in ("id", "run_id", "trace_id"):
+            value = getattr(current_run, attr_name, None)
+            if value is not None and str(value).strip():
+                run_id = str(value).strip()
+                break
+
+    if resolved.get("enabled") and current_run_attached:
+        return {
+            "tracking_state": "tracking_request",
+            "status_label": "enabled",
+            "save_attempted": True,
+            "current_run_attached": True,
+            "project_name": project_name,
+            "run_id": run_id,
+            "reason": reason,
+            "note": (
+                "Request trace context is attached. LangSmith persistence is asynchronous, "
+                "so final ingestion or quota acceptance is not confirmed here."
+            ),
+        }
+
+    if resolved.get("enabled"):
+        return {
+            "tracking_state": "enabled_no_active_run",
+            "status_label": "enabled",
+            "save_attempted": False,
+            "current_run_attached": False,
+            "project_name": project_name,
+            "run_id": None,
+            "reason": reason,
+            "note": "LangSmith is enabled, but this request has no active run context attached.",
+        }
+
+    if resolved.get("requested"):
+        return {
+            "tracking_state": "auto_disabled",
+            "status_label": "auto-disabled",
+            "save_attempted": False,
+            "current_run_attached": False,
+            "project_name": project_name,
+            "run_id": None,
+            "reason": reason,
+            "note": reason,
+        }
+
+    return {
+        "tracking_state": "disabled",
+        "status_label": "disabled",
+        "save_attempted": False,
+        "current_run_attached": False,
+        "project_name": None,
+        "run_id": None,
+        "reason": reason,
+        "note": reason,
+    }
 
 
 def get_langsmith_scoped_project_name(
@@ -558,6 +652,7 @@ __all__ = [
     "get_current_run_tree",
     "get_langsmith_display_state",
     "get_langsmith_project_name",
+    "get_langsmith_request_tracking_status",
     "get_langsmith_scoped_project_name",
     "get_langsmith_tracing_status",
     "is_langsmith_tracing_opted_in",
@@ -567,3 +662,77 @@ __all__ = [
     "tracing_project_override",
     "tracing_context",
 ]
+
+
+# ==========================================================================
+# Test Block
+# ==========================================================================
+if __name__ == "__main__":
+    print("\033[1m" + "=" * 68 + "\033[0m")
+    print("\033[1m🧪 LangSmith Tracing Smoke Test\033[0m")
+    print("\033[1m" + "=" * 68 + "\033[0m")
+
+    counters = {"passed": 0, "failed": 0}
+
+    def _check(condition: bool, label: str) -> None:
+        if condition:
+            counters["passed"] += 1
+            print(f"\033[1;32m✅ PASS\033[0m: {label}")
+        else:
+            counters["failed"] += 1
+            print(f"\033[1;31m❌ FAIL\033[0m: {label}")
+
+    class _FakeExecutor:
+        pass
+
+    class _FakeRunTree:
+        id = "run_123"
+
+    class _FakeClient:
+        pass
+
+    def _fake_traceable(*_args, **_kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
+    fake_symbols = {
+        "Client": _FakeClient,
+        "traceable": _fake_traceable,
+        "tracing_context": _noop_tracing_context,
+        "get_current_run_tree": _noop_get_current_run_tree,
+        "RunTree": _FakeRunTree,
+        "ContextThreadPoolExecutor": _FakeExecutor,
+    }
+
+    disabled_status = resolve_langsmith_tracing_status(
+        env={"LANGCHAIN_TRACING_V2": "false", "LANGCHAIN_API_KEY": "dummy"},
+        imported_symbols=fake_symbols,
+    )
+    enabled_status = resolve_langsmith_tracing_status(
+        env={
+            "LANGCHAIN_TRACING_V2": "true",
+            "LANGCHAIN_API_KEY": "lsv2-real-looking-key",
+            "LANGCHAIN_ENDPOINT": "https://api.smith.langchain.com",
+            "LANGCHAIN_PROJECT": "thesis-traces",
+        },
+        imported_symbols=fake_symbols,
+        probe=lambda client_cls, endpoint, api_key: (True, "LangSmith tracing enabled"),
+    )
+    request_status = get_langsmith_request_tracking_status(
+        status=enabled_status,
+        run_tree=_FakeRunTree(),
+    )
+
+    _check(disabled_status["enabled"] is False and disabled_status["requested"] is False, "Disabled tracing stays off when env flag is false")
+    _check(enabled_status["enabled"] is True and enabled_status["project_name"] == "thesis-traces", "Tracing enables with valid injected credentials")
+    _check(get_langsmith_display_state(enabled_status)["state"] == "active", "Display state resolves to active when tracing is enabled")
+    _check(request_status["save_attempted"] is True and request_status["run_id"] == "run_123", "Per-request tracking reports an attached active run")
+    _check(is_langsmith_tracing_opted_in(env={"LISBOA_ENABLE_CLI_LANGSMITH": "true"}) is True, "Opt-in helper recognises truthy batch tracing flag")
+
+    print("\n\033[1mSummary:\033[0m")
+    print(f"   Passed: {counters['passed']}")
+    print(f"   Failed: {counters['failed']}")
+    if counters["failed"]:
+        raise SystemExit(1)
+    print("\n\033[1;32m✅ LangSmith tracing smoke test passed!\033[0m")

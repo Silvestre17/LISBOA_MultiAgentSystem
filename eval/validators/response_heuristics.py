@@ -15,6 +15,144 @@ from __future__ import annotations
 import re
 from typing import Any
 
+_SOURCE_LINE_RE = re.compile(
+    r"^(?:[-*•]\s*)?(?:📌\s*)?(?:\*\*)?(?:Fonte|Source)(?:\*\*)?:.*$",
+    re.IGNORECASE,
+)
+_MARKDOWN_LINK_RE = re.compile(r"\[[^\]]+\]\([^)]+\)")
+_EMOJI_PREFIX_RE = re.compile(r"^[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D\s]+")
+_TITLE_LINE_RE = re.compile(
+    r"^(?:###\s+.+|\*\*[^*]+\*\*\s*$|[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D].+)$"
+)
+_PLANNER_STRUCTURAL_HEADERS = {"planner_title", "planner_card", "planner_tips", "weather", "transport"}
+
+
+def _normalize_contract_header(header: str) -> str:
+    """Normalize a heading into a provider-agnostic signature token."""
+    cleaned = re.sub(r"^#+\s*", "", (header or "").strip())
+    cleaned = re.sub(r"\*\*", "", cleaned)
+    cleaned = _EMOJI_PREFIX_RE.sub("", cleaned)
+    cleaned = re.sub(r"[^\w\s&/-]", " ", cleaned, flags=re.UNICODE)
+    normalized = re.sub(r"\s+", " ", cleaned).strip().lower()
+
+    if re.search(r"\b(itinerary|itinerario|itinerário|roteiro|plano)\b", normalized):
+        return "planner_title"
+    if re.search(r"\b(dicas|tips|notes|notas|fontes|sources|horarios|horários|confirmacoes|confirmações|logistica|logística|seguranca|segurança)\b", normalized):
+        return "planner_tips"
+    if re.search(r"\b(weather|meteorologia|meteorological|condicoes|condições)\b", normalized):
+        return "weather"
+    if re.search(r"\b(transport|transportes|como chegar|getting there|route)\b", normalized):
+        return "transport"
+    if re.search(r"\b((?:\d{1,2}:\d{2})|(?:\d{1,2}\s+\d{2})|chegada|visita|pausa|almoco|almoço|cafe|café|activity|atividade|regresso|return)\b", normalized):
+        return "planner_card"
+
+    return normalized
+
+
+def _collapse_structural_headers(headers: list[str]) -> list[str]:
+    """Collapse repeated planner-card headers so equivalent itineraries compare cleanly."""
+    collapsed: list[str] = []
+    for header in headers:
+        if header == "planner_card" and collapsed and collapsed[-1] == "planner_card":
+            continue
+        collapsed.append(header)
+    return collapsed
+
+
+def extract_response_contract(response: str) -> dict[str, Any]:
+    """Extract a deterministic presentation contract from a rendered response.
+
+    The goal is to compare whether two responses follow the same output
+    architecture, even if wording differs. The contract focuses on structural
+    signals rather than semantics.
+    """
+    text = str(response or "").strip()
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    top_headers = [line for line in lines if line.startswith("### ")]
+    normalized_headers = [_normalize_contract_header(line) for line in top_headers]
+    first_line = lines[0] if lines else ""
+    bullet_count = sum(1 for line in lines if re.match(r"^[-*•]\s+", line))
+    separator_count = sum(1 for line in lines if line == "---")
+
+    return {
+        "starts_with_title": bool(_TITLE_LINE_RE.match(first_line)),
+        "top_level_headers": normalized_headers,
+        "has_source_line": any(_SOURCE_LINE_RE.match(line) for line in lines),
+        "has_notes_section": any(header.endswith("notes") or header.endswith("notas") for header in normalized_headers),
+        "separator_count": separator_count,
+        "bullet_count": bullet_count,
+        "link_count": len(_MARKDOWN_LINK_RE.findall(text)),
+        "char_count": len(text),
+        "word_count": len(text.split()),
+    }
+
+
+def compare_response_contracts(
+    reference_response: str,
+    candidate_response: str,
+    *,
+    max_length_ratio: float = 3.0,
+    max_bullet_ratio: float = 4.0,
+) -> dict[str, Any]:
+    """Compare two rendered responses for structural consistency.
+
+    The comparison tolerates wording differences, but flags output shapes that
+    drift too much across providers.
+    """
+    reference = extract_response_contract(reference_response)
+    candidate = extract_response_contract(candidate_response)
+    issues: list[str] = []
+
+    if reference["starts_with_title"] != candidate["starts_with_title"]:
+        issues.append("title_style_mismatch")
+
+    if reference["has_source_line"] != candidate["has_source_line"]:
+        issues.append("source_footer_mismatch")
+
+    if reference["has_notes_section"] != candidate["has_notes_section"]:
+        issues.append("notes_section_mismatch")
+
+    reference_headers = _collapse_structural_headers(reference["top_level_headers"])
+    candidate_headers = _collapse_structural_headers(candidate["top_level_headers"])
+    if "planner_title" in reference_headers and "planner_title" in candidate_headers:
+        reference_unexpected = [header for header in reference_headers if header not in _PLANNER_STRUCTURAL_HEADERS]
+        candidate_unexpected = [header for header in candidate_headers if header not in _PLANNER_STRUCTURAL_HEADERS]
+        if reference_unexpected != candidate_unexpected:
+            issues.append("top_level_header_mismatch")
+    elif reference_headers != candidate_headers:
+        issues.append("top_level_header_mismatch")
+
+    ref_chars = max(int(reference["char_count"]), 1)
+    cand_chars = max(int(candidate["char_count"]), 1)
+    planner_like = "planner_title" in reference_headers and "planner_title" in candidate_headers
+    allowed_length_ratio = max_length_ratio if not planner_like else max(max_length_ratio, 5.0)
+    length_ratio = max(ref_chars, cand_chars) / min(ref_chars, cand_chars)
+    if length_ratio > allowed_length_ratio:
+        issues.append("length_ratio_too_high")
+
+    ref_bullets = int(reference["bullet_count"])
+    cand_bullets = int(candidate["bullet_count"])
+    if bool(ref_bullets) != bool(cand_bullets):
+        issues.append("bullet_presence_mismatch")
+        bullet_ratio = float(max(ref_bullets, cand_bullets) or 1)
+    elif ref_bullets > 0 and cand_bullets > 0:
+        bullet_ratio = max(ref_bullets, cand_bullets) / min(ref_bullets, cand_bullets)
+        if bullet_ratio > max_bullet_ratio:
+            issues.append("bullet_ratio_too_high")
+    else:
+        bullet_ratio = 1.0
+
+    return {
+        "consistent": len(issues) == 0,
+        "issues": issues,
+        "length_ratio": round(length_ratio, 3),
+        "bullet_ratio": round(bullet_ratio, 3),
+        "reference_headers": reference_headers,
+        "candidate_headers": candidate_headers,
+        "reference_contract": reference,
+        "candidate_contract": candidate,
+    }
+
 # -----------------------------------------------------------------------
 # Individual Heuristic Functions
 # -----------------------------------------------------------------------
@@ -174,11 +312,45 @@ def check_hallucinated_features(response: str) -> dict[str, Any]:
         (r"\bhistorical\s+(?:weather|climate)\s+(?:data|average|record)\b",
          "Historical climate data"),
     ]
+    negation_markers = (
+        "can't",
+        "cannot",
+        "not available",
+        "not supported",
+        "unsupported",
+        "can't verify",
+        "cannot verify",
+        "nao consigo",
+        "não consigo",
+        "nao confirm",
+        "não confirm",
+        "indispon",
+    )
 
     flagged = []
     for pattern, description in unsupported_claims:
         if re.search(pattern, text_lower):
             flagged.append(description)
+    
+    ferry_patterns = [
+        r"\b(?:next|upcoming|live|real[\s-]?time|departure|departures|arrival|arrivals|schedule|schedules|fare|price|cost|hor[aá]rio|hor[aá]rios|partidas?|chegadas?)\b.{0,60}\b(?:transtejo|soflusa|ferry|ferries)\b",
+        r"\b(?:transtejo|soflusa|ferry|ferries)\b.{0,60}\b(?:next|upcoming|live|real[\s-]?time|departure|departures|arrival|arrivals|schedule|schedules|fare|price|cost|hor[aá]rio|hor[aá]rios|partidas?|chegadas?)\b",
+    ]
+    if any(re.search(pattern, text_lower) for pattern in ferry_patterns) and not any(
+        marker in text_lower for marker in negation_markers
+    ):
+        flagged.append("Ferry schedule/live data")
+    
+    micromobility_patterns = [
+        r"\b(?:available|availability|live|real[\s-]?time|nearest|closest|dock|docks|station|stations|vehicle|vehicles)\b.{0,60}\b(?:gira|bike|bikes|bicycle|bicycles|bicicleta|bicicletas|scooter|scooters|trotinete|trotinetes)\b",
+        r"\b(?:gira|bike|bikes|bicycle|bicycles|bicicleta|bicicletas|scooter|scooters|trotinete|trotinetes)\b.{0,60}\b(?:available|availability|live|real[\s-]?time|nearest|closest|dock|docks|station|stations|vehicle|vehicles)\b",
+    ]
+    if any(re.search(pattern, text_lower) for pattern in micromobility_patterns) and not any(
+        marker in text_lower for marker in negation_markers
+    ):
+        flagged.append("Shared bike/scooter live availability")
+    
+    flagged = list(dict.fromkeys(flagged))
 
     return {"hallucinated": len(flagged) > 0, "flagged_claims": flagged}
 
@@ -240,6 +412,7 @@ def run_all_heuristics(
         "language_compliance": check_language_compliance(response, expected_language),
         "hallucinated_features": check_hallucinated_features(response),
         "emoji_density": check_emoji_density(response),
+        "presentation_contract": extract_response_contract(response),
     }
 
     # Overall: pass if no critical failures

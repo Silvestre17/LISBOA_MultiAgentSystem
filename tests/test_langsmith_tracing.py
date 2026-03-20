@@ -33,6 +33,7 @@ from agent.utils.langsmith_tracing import (
     annotate_current_run,
     get_langsmith_display_state,
     get_langsmith_project_name,
+    get_langsmith_request_tracking_status,
     get_langsmith_scoped_project_name,
     is_langsmith_tracing_opted_in,
     resolve_langsmith_tracing_status,
@@ -251,6 +252,51 @@ def test_get_langsmith_project_name_prefers_status_then_default(monkeypatch) -> 
 
     assert get_langsmith_project_name({"project_name": "thesis-traces"}) == "thesis-traces"
     assert get_langsmith_project_name({"project_name": None}) == "default"
+
+
+def test_request_tracking_status_marks_active_request_as_save_attempt() -> None:
+    """An attached run context should count as a save attempt for the current request."""
+
+    class FakeRunTree:
+        id = "run_123"
+
+    tracking = get_langsmith_request_tracking_status(
+        status={
+            "enabled": True,
+            "requested": True,
+            "reason": "LangSmith tracing enabled",
+            "project_name": "LISBOA Chat",
+        },
+        run_tree=FakeRunTree(),
+    )
+
+    assert tracking["tracking_state"] == "tracking_request"
+    assert tracking["status_label"] == "enabled"
+    assert tracking["save_attempted"] is True
+    assert tracking["current_run_attached"] is True
+    assert tracking["project_name"] == "LISBOA Chat"
+    assert tracking["run_id"] == "run_123"
+    assert "asynchronous" in tracking["note"].lower()
+
+
+def test_request_tracking_status_reports_auto_disabled_request() -> None:
+    """Auto-disabled tracing should surface that this request is not being saved."""
+    tracking = get_langsmith_request_tracking_status(
+        status={
+            "enabled": False,
+            "requested": True,
+            "reason": "LangSmith tracing disabled: API key is forbidden for this endpoint",
+            "project_name": "LISBOA Chat",
+        },
+        run_tree=None,
+    )
+
+    assert tracking["tracking_state"] == "auto_disabled"
+    assert tracking["status_label"] == "auto-disabled"
+    assert tracking["save_attempted"] is False
+    assert tracking["current_run_attached"] is False
+    assert tracking["project_name"] == "LISBOA Chat"
+    assert "forbidden" in tracking["note"].lower()
 
 
 def test_is_langsmith_tracing_opted_in_uses_truthy_custom_env_flag() -> None:
