@@ -86,6 +86,70 @@ _TIMED_SECTION_HEADER_RE = re.compile(
 _TRANSPORT_ROUTE_TITLE_RE = re.compile(
     r"^(?:[🚇🚌🚆🚋]\s+)?\*\*[^*]+(?:→|·)[^*]+\*\*(?:\s*(?::|—|-).*)?$"
 )
+_DISPLAY_TITLE_SMALL_WORDS = {
+    "pt": {
+        "a", "à", "ao", "aos", "às", "com", "da", "das", "de", "do", "dos", "e",
+        "em", "na", "nas", "no", "nos", "o", "os", "ou", "para", "por", "sem",
+        "um", "uma", "uns", "umas",
+    },
+    "en": {
+        "a", "an", "and", "as", "at", "by", "for", "from", "in", "of", "on", "or",
+        "the", "to", "via", "with",
+    },
+}
+
+
+def _title_case_segment(text: str, language: str) -> str:
+    """Apply display-oriented title casing to one compact text segment."""
+    if not text:
+        return text
+
+    if text.isupper() or re.search(r"\d", text):
+        return text
+
+    for separator in ("-", "/"):
+        if separator in text:
+            return separator.join(_title_case_segment(part, language) for part in text.split(separator))
+
+    lowered = text.lower()
+    return lowered[:1].upper() + lowered[1:]
+
+
+def to_display_title_case(text: str, language: str = "en") -> str:
+    """Format headings in a consistent PT/EN display title case."""
+    if not text:
+        return text
+
+    language = language if language in _DISPLAY_TITLE_SMALL_WORDS else "en"
+    small_words = _DISPLAY_TITLE_SMALL_WORDS[language]
+    parts = re.split(r"(\s+)", text.strip())
+    result: list[str] = []
+    word_index = 0
+
+    for part in parts:
+        if not part or part.isspace():
+            result.append(part)
+            continue
+
+        match = re.match(r"^(?P<prefix>[^\wÀ-ÿ]*)(?P<core>[\wÀ-ÿ'.’-]+)(?P<suffix>[^\wÀ-ÿ]*)$", part)
+        if not match:
+            result.append(part)
+            continue
+
+        prefix = match.group("prefix")
+        core = match.group("core")
+        suffix = match.group("suffix")
+        lowered = core.lower()
+
+        if word_index > 0 and lowered in small_words:
+            transformed = lowered
+        else:
+            transformed = _title_case_segment(core, language)
+
+        result.append(f"{prefix}{transformed}{suffix}")
+        word_index += 1
+
+    return "".join(result)
 
 
 def infer_response_language(
@@ -569,6 +633,12 @@ def _strip_leading_section_emoji(text: str) -> str:
     ).strip()
 
 
+def _planner_display_heading(text: str, language: str) -> str:
+    """Normalize planner headings into consistent PT/EN display title case."""
+    cleaned = _strip_leading_section_emoji(text or "").rstrip(":")
+    return to_display_title_case(cleaned, language=language)
+
+
 _PLANNER_CLOCK_EMOJI_TO_TIME = {
     "🕐": (1, 0),
     "🕜": (1, 30),
@@ -610,6 +680,7 @@ def structure_planner_markdown(text: str) -> str:
     if not text:
         return text
 
+    language = infer_response_language(context_text=text, default="en")
     structured: list[str] = []
     current_block: Optional[str] = None
     overall_title_rendered = False
@@ -655,13 +726,13 @@ def structure_planner_markdown(text: str) -> str:
             )
         ) and ":" not in normalized:
             append_separator()
-            structured.append(f"### ⛅ {_strip_leading_section_emoji(normalized).rstrip(':')}")
+            structured.append(f"### ⛅ {_planner_display_heading(normalized, language)}")
             current_block = "section"
             continue
 
         if re.search(r"\b(como chegar|desloca(?:r-se|ção)|how to get there|get around)\b", lowered) and ":" not in normalized:
             append_separator()
-            structured.append(f"### 🚇 {_strip_leading_section_emoji(normalized).rstrip(':')}")
+            structured.append(f"### 🚇 {_planner_display_heading(normalized, language)}")
             current_block = "section"
             continue
 
@@ -675,13 +746,13 @@ def structure_planner_markdown(text: str) -> str:
             )
         ) and ":" not in normalized:
             append_separator()
-            structured.append(f"### 📍 {_strip_leading_section_emoji(normalized).rstrip(':')}")
+            structured.append(f"### 📍 {_planner_display_heading(normalized, language)}")
             current_block = "section"
             continue
 
         if re.search(r"\b(fontes|verificaç|verification|sources?)\b", lowered) and ":" not in normalized:
             append_separator()
-            structured.append(f"### 🔎 {_strip_leading_section_emoji(normalized).rstrip(':')}")
+            structured.append(f"### 🔎 {_planner_display_heading(normalized, language)}")
             current_block = "section"
             continue
 
@@ -725,7 +796,7 @@ def structure_planner_markdown(text: str) -> str:
             ).rstrip(":")
             if title_window_match:
                 clean_title = re.sub(r"\s*\([^)]*\d{1,2}:\d{2}[^)]*\)", "", clean_title).strip()
-            structured.append(f"### 📅 {clean_title}")
+            structured.append(f"### 📅 {to_display_title_case(clean_title, language=language)}")
             if title_window_match:
                 structured.append(
                     f"- ⏰ **Janela sugerida**: {title_window_match.group(1)}"
@@ -742,7 +813,7 @@ def structure_planner_markdown(text: str) -> str:
         if preface_match:
             append_separator()
             label = preface_match.group("label")
-            structured.append(f"### {_planner_section_icon(label)} {_strip_leading_section_emoji(label)}")
+            structured.append(f"### {_planner_section_icon(label)} {_planner_display_heading(label, language)}")
             structured.append(f"- {preface_match.group('content').strip()}")
             current_block = "section"
             continue
@@ -761,7 +832,7 @@ def structure_planner_markdown(text: str) -> str:
             )
         ) and ":" not in normalized:
             append_separator()
-            structured.append(f"### ✨ {_strip_leading_section_emoji(normalized).rstrip(':')}")
+            structured.append(f"### ✨ {_planner_display_heading(normalized, language)}")
             current_block = "section"
             continue
 
@@ -786,14 +857,14 @@ def structure_planner_markdown(text: str) -> str:
             )
             if is_major_section:
                 append_separator()
-                structured.append(f"### {_planner_section_icon(label)} {_strip_leading_section_emoji(label)}")
+                structured.append(f"### {_planner_section_icon(label)} {_planner_display_heading(label, language)}")
                 if content:
                     structured.append(f"- {content}")
                 current_block = "section"
                 continue
 
             bullet_icon = (section_match.group("emoji") or "").strip() or "🔹"
-            structured.append(f"- {bullet_icon} **{label}**: {content}")
+            structured.append(f"- {bullet_icon} **{to_display_title_case(label, language=language)}**: {content}")
             current_block = current_block or "section"
             continue
 
@@ -820,6 +891,7 @@ def soften_internal_markdown_headers(
     if not text:
         return text
 
+    language = infer_response_language(context_text=text, default="en")
     softened_lines: list[str] = []
     header_count = 0
 
@@ -844,7 +916,7 @@ def soften_internal_markdown_headers(
 
         if softened_lines and softened_lines[-1].strip():
             softened_lines.append("")
-        softened_lines.append(f"**{title}**")
+        softened_lines.append(f"**{to_display_title_case(title, language=language)}**")
 
     return clean_newlines("\n".join(softened_lines)).strip()
 
@@ -868,16 +940,21 @@ def _clean_transport_arrival_title(title: str, is_pt: bool) -> str:
 
     if re.match(r"^Pr[oó]ximas\s+Chegadas\s*:\s*", plain, flags=re.IGNORECASE):
         stop_name = re.sub(r"^Pr[oó]ximas\s+Chegadas\s*:\s*", "", plain, flags=re.IGNORECASE).strip()
-        return f"### 🚌 {stop_name} · Próximas chegadas"
+        return f"### 🚌 {stop_name} · Próximas Chegadas"
 
     if re.match(r"^Next\s+Arrivals?\s*:\s*", plain, flags=re.IGNORECASE):
         stop_name = re.sub(r"^Next\s+Arrivals?\s*:\s*", "", plain, flags=re.IGNORECASE).strip()
-        return f"### 🚌 {stop_name} · Next arrivals"
+        return f"### 🚌 {stop_name} · Next Arrivals"
 
     if "→" in plain:
-        plain = re.sub(r"\s*→\s*(Pr[oó]ximas\s+chegadas|Next\s+Arrivals?)", lambda match: f" · {match.group(1)}", plain, flags=re.IGNORECASE)
+        plain = re.sub(
+            r"\s*→\s*(Pr[oó]ximas\s+chegadas|Next\s+Arrivals?)",
+            lambda match: f" · {to_display_title_case(match.group(1), language='pt' if is_pt else 'en')}",
+            plain,
+            flags=re.IGNORECASE,
+        )
 
-    return f"### 🚌 {plain}" if plain else ("### 🚌 Próximas chegadas" if is_pt else "### 🚌 Next arrivals")
+    return f"### 🚌 {plain}" if plain else ("### 🚌 Próximas Chegadas" if is_pt else "### 🚌 Next Arrivals")
 
 
 def _build_carris_source_line(is_pt: bool, timestamp: Optional[str]) -> Optional[str]:

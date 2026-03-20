@@ -665,6 +665,7 @@ class QualityAssuranceAgent(BaseAgent):
                 "- Preserva a mesma língua do utilizador, o estilo visual, os emojis úteis e a estrutura markdown.\n"
                 "- Todas as tuas edições, avisos e aditamentos de texto devem ser estritamente em Português (PT-PT).\n"
                 "- Mantém ou melhora a linha de fonte final se ela já existir.\n"
+                "- Preserva quaisquer perguntas interativas ao utilizador que estejam no final do texto (ex: perguntar se o utilizador quer planear o Dia 2).\n"
                 "- Formata qualquer nota ou aviso de QA no final da resposta usando explicitamente listas com bullets iniciados por ⚠️ (ex: - ⚠️ Nota...).\n"
                 "- Devolve apenas a resposta final reparada, sem prefácio nem explicações."
             )
@@ -686,6 +687,7 @@ class QualityAssuranceAgent(BaseAgent):
                 "- Remove any references to QA, validation, fact-checking, reasoning, or internal agents.\n"
                 "- Preserve the user's language, visual style, helpful emojis, and markdown structure.\n"
                 "- Keep or improve the final source line if one already exists.\n"
+                "- Preserve any interactive questions to the user at the end of the text (e.g., asking if they want to plan Day 2).\n"
                 "- Format any QA disclaimer or note at the bottom of the response explicitly using bullet points starting with ⚠️ (e.g., - ⚠️ Note...).\n"
                 "- Return only the repaired final answer, with no preface or explanation."
             )

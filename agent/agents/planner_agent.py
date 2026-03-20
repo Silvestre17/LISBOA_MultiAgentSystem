@@ -269,9 +269,9 @@ def enforce_multi_day_quality_mode(response: str, user_message: str, language: s
 
     normalized_lines = list(trimmed_lines if truncated else lines)
     replacement_title = (
-        "### 📅 Dia 1 · Itinerário sugerido"
+        "### 📅 Dia 1 · Itinerário Sugerido"
         if language == "pt"
-        else "### 📅 Day 1 · Suggested itinerary"
+        else "### 📅 Day 1 · Suggested Itinerary"
     )
     title_updated = False
     for index, line in enumerate(normalized_lines):
@@ -923,7 +923,7 @@ if __name__ == "__main__":
         events_data="",
         transport_data="🚇 Metro available",
     )
-    _check("Source" in fallback_response and "Suggested itinerary" in fallback_response, "Planner fallback stays user-facing and structured")
+    _check("Source" in fallback_response and "Suggested Itinerary" in fallback_response, "Planner fallback stays user-facing and structured")
 
     if os.getenv("LISBOA_RUN_LIVE_PLANNER_TESTS") == "1":
         print("\n\033[1m🌐 Optional live planner smoke:\033[0m")
