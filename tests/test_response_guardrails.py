@@ -480,8 +480,8 @@ def test_researcher_worker_finalization_structures_ranked_results_into_nested_li
     )
 
     assert "- 📅 **Artur Pizarro Prokofiev 2**" in output
-    assert "  - 🗓️ **Quando:** 14 Mar às 19:00" in output
-    assert "  - 📂 **Categoria**: Música" in output
+    assert "    - 🗓️ **Quando:** 14 Mar às 19:00" in output
+    assert "    - 📂 **Categoria**: Música" in output
     assert "- 🏛️ **Mosteiro dos Jerónimos**" in output
 
 
@@ -519,9 +519,10 @@ def test_researcher_worker_finalization_localizes_event_summary_notes_for_pt() -
     raw = """1. 📅 **Artur Pizarro Prokofiev 2**
    🗓️ **When:** 14 Mar at 19:00
 
-🧭 **Filter used:** this week (2026-03-11 to 2026-03-16), all categories, broad event discovery.
-📊 **Result count:** 26 confirmed-date event(s) match this filter.
-✨ **Highlights shown:** 5 most relevant result(s).
+- 🧾 **Search summary**
+    - 🧭 **Filter used:** this week (2026-03-11 to 2026-03-16), all categories, broad event discovery.
+    - 📊 **Result count:** 26 confirmed-date event(s) match this filter.
+    - ✨ **Highlights shown:** 5 most relevant result(s).
 ⚠️ **Source completeness note:** 30 additional matching record(s) were excluded because the source does not confirm their dates yet.
 
 📌 **Fonte:** [*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos)"""
@@ -533,12 +534,61 @@ def test_researcher_worker_finalization_localizes_event_summary_notes_for_pt() -
         language="pt",
     )
 
-    assert "**Filtro aplicado:** esta semana (2026-03-11 a 2026-03-16), todas as categorias, pesquisa geral de eventos." in output
-    assert "**Resultado do filtro:** 26 evento(s) com data confirmada correspondem a este filtro." in output
-    assert "**Destaques mostrados:** 5 resultado(s) mais relevantes." in output
+    assert "- 🧾 **Resumo da pesquisa**" in output
+    assert "    - 🧭 **Filtro aplicado:** esta semana (2026-03-11 a 2026-03-16), todas as categorias, pesquisa geral de eventos." in output
+    assert "    - 📊 **Resultado do filtro:** 26 evento(s) com data confirmada correspondem a este filtro." in output
+    assert "    - ✨ **Destaques mostrados:** 5 resultado(s) mais relevantes." in output
     assert "**Nota sobre a completude da fonte:** 30 registo(s) adicional(is) compatíveis foram excluídos" in output
     assert "Evento sem nome" not in output
     assert "Unknown event" not in output
+
+
+def test_researcher_direct_event_lookup_infers_music_weekend_filters_for_pt_query() -> None:
+    """PT weekend live-music queries should become category-aware and use a cleaned thematic focus."""
+    with patch.object(ResearcherAgent, "__init__", lambda self: None):
+        agent = ResearcherAgent()
+        agent.system_prompt = "PRIMARY PROMPT"
+
+        events_tool = MagicMock()
+        events_tool.name = "search_cultural_events"
+        events_tool.invoke = MagicMock(return_value="1. 📅 **Revenge Of The 90 S**")
+        agent.tools = [events_tool]
+        agent.execute_react_loop = MagicMock(side_effect=AssertionError("LLM flow should be skipped"))
+
+        output = agent.invoke("Encontra eventos de música ao vivo para este fim de semana.", context="", verbose=False)
+
+        events_tool.invoke.assert_called_once_with(
+            {
+                "max_results": 5,
+                "language": "pt",
+                "offset": 0,
+                "date_filter": "this weekend",
+                "category": "Music",
+                "query": "música ao vivo",
+            }
+        )
+        assert "Revenge Of The 90 S" in output
+
+
+def test_pt_live_music_focus_tokens_match_english_event_metadata() -> None:
+    """PT live-music focus text should expand into EN-compatible tokens for VisitLisboa event matching."""
+    focus = ResearcherAgent._extract_event_focus_query(
+        "Encontra eventos de música ao vivo para este fim de semana."
+    )
+    tokens = visitlisboa_api._expand_event_query_tokens(focus)
+
+    sample_event = {
+        "title": "Revenge Of The 90 S",
+        "full_description": "A high-energy live party with DJ sets and nostalgia.",
+        "short_description": "Live party experience.",
+        "category": "Music",
+    }
+
+    assert focus == "música ao vivo"
+    assert "encontra" not in tokens
+    assert "music" in tokens
+    assert "live" in tokens
+    assert visitlisboa_api._event_matches_query(sample_event, tokens) is True
 
 
 def test_researcher_worker_finalization_sanitizes_slug_suffixes_and_adds_description_label() -> None:
@@ -606,7 +656,7 @@ def test_researcher_direct_event_lookup_bypasses_llm_for_week_query() -> None:
 
         output = agent.invoke("Que grandes eventos temos esta semana?", context="", verbose=False)
 
-        events_tool.invoke.assert_called_once_with({"max_results": 5, "language": "pt", "date_filter": "this week"})
+        events_tool.invoke.assert_called_once_with({"max_results": 5, "language": "pt", "offset": 0, "date_filter": "this week"})
         assert "Artur Pizarro Prokofiev 2" in output
         assert "[*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos)" in output
 
@@ -986,7 +1036,7 @@ def test_researcher_double_content_filter_falls_back_to_direct_tool() -> None:
 
         assert call_counter["count"] == 2
         dummy_places_tool.invoke.assert_called_once_with(
-            {"query": "Museums in Lisbon", "max_results": 5, "category": "Museums & Monuments"}
+            {"query": "Museums in Lisbon", "max_results": 5, "offset": 0, "language": "en", "category": "Museums & Monuments"}
         )
         assert "[*VisitLisboa Places*](https://www.visitlisboa.com/en/places)" in output
 
@@ -1011,7 +1061,7 @@ def test_researcher_accessibility_place_queries_skip_freeform_llm() -> None:
         output = agent.invoke("Belem museums wheelchair accessible")
 
         dummy_places_tool.invoke.assert_called_once_with(
-            {"query": "Belem museums wheelchair accessible", "max_results": 5, "category": "Museums & Monuments"}
+            {"query": "Belem museums wheelchair accessible", "max_results": 5, "offset": 0, "language": "en", "category": "Museums & Monuments"}
         )
         assert "Jerónimos Monastery" in output
         assert "[*VisitLisboa Places*](https://www.visitlisboa.com/en/places)" in output
@@ -1037,7 +1087,7 @@ def test_researcher_direct_place_lookup_applies_restaurant_category_for_dining_q
         output = agent.invoke("Best seafood restaurants near the Tagus river.")
 
         dummy_places_tool.invoke.assert_called_once_with(
-            {"query": "Best seafood restaurants near the Tagus river.", "max_results": 5, "category": "Restaurants"}
+            {"query": "Best seafood restaurants near the Tagus river.", "max_results": 5, "offset": 0, "language": "en", "category": "Restaurants"}
         )
         assert "5 Oceanos" in output
         assert "[*VisitLisboa Places*](https://www.visitlisboa.com/en/places)" in output
@@ -2329,3 +2379,39 @@ def test_supervisor_fallback_handles_obvious_oos(query: str, language: str) -> N
 
         assert decision["agents"] == []
         assert decision["direct_response"]
+
+
+def test_supervisor_weather_typo_query_routes_without_llm() -> None:
+    """Small spelling mistakes in weather queries should still hit the weather worker deterministically."""
+    with patch.object(SupervisorAgent, "__init__", lambda self: None):
+        agent = SupervisorAgent()
+        agent._safe_llm_invoke = MagicMock(side_effect=AssertionError("LLM should not be called"))
+
+        decision = agent.route("Qual é a previsao do weathr para Lisboa amanhã?", language="pt")
+
+        assert decision["agents"] == ["weather"]
+        assert decision["direct_response"] is None
+
+
+def test_supervisor_transport_typo_query_routes_without_llm() -> None:
+    """Transport intent should stay deterministic when a core keyword is slightly misspelled."""
+    with patch.object(SupervisorAgent, "__init__", lambda self: None):
+        agent = SupervisorAgent()
+        agent._safe_llm_invoke = MagicMock(side_effect=AssertionError("LLM should not be called"))
+
+        decision = agent.route("Metrro para o Aeroporto?", language="pt")
+
+        assert decision["agents"] == ["transport"]
+        assert decision["direct_response"] is None
+
+
+def test_supervisor_researcher_typo_query_routes_without_llm() -> None:
+    """Discovery queries with minor typos such as 'musems' should still stay in the researcher domain."""
+    with patch.object(SupervisorAgent, "__init__", lambda self: None):
+        agent = SupervisorAgent()
+        agent._safe_llm_invoke = MagicMock(side_effect=AssertionError("LLM should not be called"))
+
+        decision = agent.route("Best musems in Lisbon for first timers?", language="en")
+
+        assert decision["agents"] == ["researcher"]
+        assert decision["direct_response"] is None

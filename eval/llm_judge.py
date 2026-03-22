@@ -14,13 +14,19 @@
 
 import json
 import os
+import re
 from typing import Any, cast
 
 from langchain_core.prompts import PromptTemplate
 from pydantic import BaseModel, Field
 
 from agent.llm_factory import LLMFactory
-from eval.runtime_utils import build_cost_payload, build_model_id, build_usage_payload
+from eval.runtime_utils import (
+    build_cost_payload,
+    build_model_id,
+    build_usage_payload,
+    combine_usage_payloads,
+)
 
 # ---------------------------------------------------------------------------
 # Pydantic Score Model (Chain-of-Thought FIRST, then scores)
@@ -202,11 +208,91 @@ class LLMJudge:
             model=model_name,
             temperature=0.0,
         )
+        self.base_llm = base_llm
         self.llm = base_llm.with_structured_output(LLMJudgeScore, include_raw=True)
         
         self.prompt = PromptTemplate.from_template(JUDGE_PROMPT_TEMPLATE)
         self.provider = provider
         self.model_name = model_name
+
+    def _build_usage_payload(self, usage_source: Any) -> dict[str, Any]:
+        """Normalize usage metadata for one judge invocation attempt."""
+        evaluation_model_id = build_model_id(self.provider, self.model_name)
+        return build_usage_payload(
+            LLMFactory.extract_usage_metadata(usage_source),
+            model_id=evaluation_model_id,
+            call_count=1,
+        )
+
+    @staticmethod
+    def _coerce_judge_score(parsed_result: Any) -> LLMJudgeScore:
+        """Normalize structured or JSON-decoded payloads into ``LLMJudgeScore``."""
+        if isinstance(parsed_result, LLMJudgeScore):
+            return parsed_result
+        if isinstance(parsed_result, BaseModel):
+            return LLMJudgeScore.model_validate(parsed_result.model_dump())
+        if isinstance(parsed_result, dict):
+            return LLMJudgeScore.model_validate(parsed_result)
+        raise TypeError(f"Unsupported judge payload type: {type(parsed_result)!r}")
+
+    @staticmethod
+    def _extract_response_text(response_obj: Any) -> str:
+        """Extract textual content from a raw model response object."""
+        if response_obj is None:
+            return ""
+        if hasattr(response_obj, "content"):
+            content = getattr(response_obj, "content")
+            if isinstance(content, list):
+                return "\n".join(str(item) for item in content)
+            return str(content)
+        if isinstance(response_obj, dict):
+            if "content" in response_obj:
+                return str(response_obj["content"])
+            if "text" in response_obj:
+                return str(response_obj["text"])
+        return str(response_obj)
+
+    @staticmethod
+    def _extract_json_candidate(text: str) -> dict[str, Any]:
+        """Extract the first plausible JSON object from an LLM response body."""
+        normalized_text = str(text or "").strip()
+        if not normalized_text:
+            raise ValueError("Judge fallback returned empty content.")
+
+        fenced_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", normalized_text, re.DOTALL)
+        json_candidate = fenced_match.group(1) if fenced_match else normalized_text
+        if not fenced_match:
+            start = json_candidate.find("{")
+            end = json_candidate.rfind("}")
+            if start == -1 or end == -1 or end <= start:
+                raise ValueError("Judge fallback did not return a JSON object.")
+            json_candidate = json_candidate[start:end + 1]
+
+        sanitized = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", json_candidate)
+        return cast(dict[str, Any], json.loads(sanitized))
+
+    def _try_parse_raw_response(self, raw_response: Any) -> LLMJudgeScore | None:
+        """Attempt to salvage a structured score from an unparsable raw response."""
+        response_text = self._extract_response_text(raw_response)
+        if not response_text.strip():
+            return None
+        try:
+            return self._coerce_judge_score(self._extract_json_candidate(response_text))
+        except Exception:
+            return None
+
+    def _invoke_json_fallback(self, prompt_val: Any) -> tuple[LLMJudgeScore, dict[str, Any]]:
+        """Run a second-pass plain-text JSON judge request when structured output fails."""
+        fallback_prompt = (
+            f"{prompt_val.to_string() if hasattr(prompt_val, 'to_string') else str(prompt_val)}\n\n"
+            "Return ONLY valid JSON with these keys: reasoning, factual_accuracy, tool_usage, "
+            "completeness, relevance, response_quality. Each score must be an integer from 1 to 5. "
+            "Do not wrap the JSON in markdown fences."
+        )
+        fallback_raw = self.base_llm.invoke(fallback_prompt)
+        fallback_usage = self._build_usage_payload(fallback_raw)
+        fallback_payload = self._extract_json_candidate(self._extract_response_text(fallback_raw))
+        return self._coerce_judge_score(fallback_payload), fallback_usage
 
     def evaluate(
         self,
@@ -255,25 +341,57 @@ class LLMJudge:
             "response": response,
         })
 
+        evaluation_model_id = build_model_id(self.provider, self.model_name)
+        usage_payloads: list[dict[str, Any]] = []
+
         try:
-            raw_result = self.llm.invoke(prompt_val)
+            try:
+                raw_result = self.llm.invoke(prompt_val)
+            except Exception:
+                fallback_result, fallback_usage = self._invoke_json_fallback(prompt_val)
+                usage_payloads.append(fallback_usage)
+                evaluation_usage = combine_usage_payloads(usage_payloads)
+                evaluation_cost = build_cost_payload(
+                    evaluation_usage,
+                    pricing_by_model,
+                    model_id=evaluation_model_id,
+                )
+                return {
+                    "factual_accuracy": fallback_result.factual_accuracy,
+                    "tool_usage": fallback_result.tool_usage,
+                    "completeness": fallback_result.completeness,
+                    "relevance": fallback_result.relevance,
+                    "response_quality": fallback_result.response_quality,
+                    "composite_score": fallback_result.get_composite_score(),
+                    "reasoning": fallback_result.reasoning,
+                    "evaluation_usage": evaluation_usage,
+                    "evaluation_cost_usd": evaluation_cost,
+                }
+
             parsed_result = raw_result
             usage_source = raw_result
 
             if isinstance(raw_result, dict):
                 parsing_error = raw_result.get("parsing_error")
-                if parsing_error:
-                    raise parsing_error
                 parsed_result = raw_result.get("parsed")
                 usage_source = raw_result.get("raw", raw_result)
+                usage_payloads.append(self._build_usage_payload(usage_source))
 
-            result = cast(LLMJudgeScore, parsed_result)
-            evaluation_model_id = build_model_id(self.provider, self.model_name)
-            evaluation_usage = build_usage_payload(
-                LLMFactory.extract_usage_metadata(usage_source),
-                model_id=evaluation_model_id,
-                call_count=1,
-            )
+                if parsing_error or parsed_result is None:
+                    parsed_result = self._try_parse_raw_response(usage_source)
+                    if parsed_result is None and parsing_error:
+                        raise parsing_error
+            else:
+                usage_payloads.append(self._build_usage_payload(usage_source))
+
+            try:
+                result = self._coerce_judge_score(parsed_result)
+            except Exception:
+                fallback_result, fallback_usage = self._invoke_json_fallback(prompt_val)
+                usage_payloads.append(fallback_usage)
+                result = fallback_result
+
+            evaluation_usage = combine_usage_payloads(usage_payloads)
             evaluation_cost = build_cost_payload(
                 evaluation_usage,
                 pricing_by_model,
@@ -293,8 +411,11 @@ class LLMJudge:
             }
         except Exception as e:
             print(f"Error during LLM judgment: {e}")
-            evaluation_model_id = build_model_id(self.provider, self.model_name)
-            empty_usage = build_usage_payload({}, model_id=evaluation_model_id, call_count=1)
+            empty_usage = (
+                combine_usage_payloads(usage_payloads)
+                if usage_payloads
+                else build_usage_payload({}, model_id=evaluation_model_id, call_count=1)
+            )
             return {
                 "factual_accuracy": 0,
                 "tool_usage": 0,

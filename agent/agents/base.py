@@ -574,6 +574,50 @@ class BaseAgent:
         """Returns a defensive copy of the logged tool calls."""
         return deepcopy(getattr(self, "_tool_calls_log", []))
 
+    def _invoke_tool(
+        self,
+        tool: Any,
+        args: Optional[dict] = None,
+        *,
+        tool_name: Optional[str] = None,
+        verbose: bool = False,
+    ) -> Any:
+        """Invoke a loaded tool while recording the call for analytics.
+
+        Args:
+            tool: Loaded LangChain tool-like object.
+            args: Tool arguments.
+            tool_name: Optional explicit tool name override.
+            verbose: Whether to print a debug line before execution.
+
+        Returns:
+            Any: Raw tool result.
+        """
+        resolved_args = args if isinstance(args, dict) else {}
+        resolved_name = str(tool_name or getattr(tool, "name", "unknown")).strip() or "unknown"
+        self._record_tool_call(resolved_name, resolved_args)
+        if verbose:
+            print(f"      [TOOL] Calling {resolved_name} with args: {resolved_args}")
+        return tool.invoke(resolved_args)
+
+    def _invoke_tool_by_name(
+        self,
+        tool_name: str,
+        args: Optional[dict] = None,
+        *,
+        verbose: bool = False,
+    ) -> Any:
+        """Resolve a loaded tool by name and invoke it with analytics logging."""
+        resolved_name = str(tool_name or "").strip()
+        if not resolved_name:
+            raise ValueError("Tool name cannot be empty.")
+
+        for tool in self.tools:
+            if getattr(tool, "name", "") == resolved_name:
+                return self._invoke_tool(tool, args, tool_name=resolved_name, verbose=verbose)
+
+        raise ValueError(f"Tool '{resolved_name}' not found.")
+
     def _record_tool_call(self, tool_name: str, args: dict) -> None:
         """Records a tool call to the agent's internal log."""
         if not hasattr(self, "_tool_calls_log") or self._tool_calls_log is None:
@@ -683,10 +727,7 @@ class BaseAgent:
         for tool in self.tools:
             if tool.name == tool_name:
                 try:
-                    self._record_tool_call(tool_name, tool_args)
-                    if verbose:
-                        print(f"      [TOOL] Calling {tool_name} with args: {tool_args}")
-                    return str(tool.invoke(tool_args))
+                    return str(self._invoke_tool(tool, tool_args, tool_name=tool_name, verbose=verbose))
                 except Exception as e:
                     return f"Error executing {tool_name}: {str(e)}"
 
@@ -731,8 +772,7 @@ class BaseAgent:
                 return (tool_id, f"Tool '{tool_name}' not found.")
             
             try:
-                self._record_tool_call(tool_name, tool_args)
-                result = tool_map[tool_name].invoke(tool_args)
+                result = self._invoke_tool(tool_map[tool_name], tool_args, tool_name=tool_name)
                 return (tool_id, str(result))
             except Exception as e:
                 return (tool_id, f"Error executing {tool_name}: {str(e)}")

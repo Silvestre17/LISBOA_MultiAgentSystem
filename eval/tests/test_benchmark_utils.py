@@ -35,8 +35,10 @@ from eval.run_benchmark import (
     _build_summary,
     compute_tool_metrics,
     parse_response_model_spec,
+    resolve_judge_models,
     resolve_response_models,
 )
+from eval.runtime_utils import aggregate_judge_runs
 
 # ==========================================================================
 # Tests for compute_tool_metrics()
@@ -240,6 +242,24 @@ class TestBenchmarkModelSelection:
             {"provider": "openai", "model": "gpt-5-mini", "temperature": 0.1},
         ]
 
+    def test_resolve_judge_models_defaults_to_closed_and_open_pair(self):
+        """The benchmark should default to the closed/open judge matrix."""
+        resolved = resolve_judge_models()
+
+        assert resolved == benchmark_module.DEFAULT_JUDGE_MODELS
+        assert resolved is not benchmark_module.DEFAULT_JUDGE_MODELS
+
+    def test_resolve_judge_models_accepts_repeatable_specs(self):
+        """Judge model specs should support explicit closed/open overrides."""
+        resolved = resolve_judge_models(
+            ["azure::gpt-5-mini", "lmstudio::qwen/qwen3.5-9b"],
+        )
+
+        assert resolved == [
+            {"provider": "azure", "model": "gpt-5-mini", "temperature": 0.0},
+            {"provider": "lmstudio", "model": "qwen/qwen3.5-9b", "temperature": 0.0},
+        ]
+
 
 class TestAblationProviderOverrides:
     """Validate temporary provider overrides used by the ablation runner."""
@@ -266,6 +286,24 @@ class TestAblationProviderOverrides:
                 assert Config.MODEL_PROVIDER == "openai"
 
             assert Config.MODEL_PROVIDER == "azure"
+        finally:
+            Config.MODEL_PROVIDER = original_provider
+
+    def test_temporary_lisboa_provider_can_override_model_name(self):
+        """Dual-profile ablation should be able to swap LISBOA onto another model within the same provider."""
+        original_provider = Config.MODEL_PROVIDER
+        original_azure_models = [config.copy() for config in Config.AGENT_MODELS_AZURE.values()]
+        Config.MODEL_PROVIDER = "azure"
+
+        try:
+            with ablation_module.temporary_lisboa_provider("azure", model_name="Kimi-K2.5") as active_provider:
+                assert active_provider == "azure"
+                assert Config.MODEL_PROVIDER == "azure"
+                assert {config["model"] for config in Config.AGENT_MODELS_AZURE.values()} == {"Kimi-K2.5"}
+
+            assert Config.MODEL_PROVIDER == "azure"
+            restored_models = [config["model"] for config in Config.AGENT_MODELS_AZURE.values()]
+            assert restored_models == [config["model"] for config in original_azure_models]
         finally:
             Config.MODEL_PROVIDER = original_provider
 
@@ -304,9 +342,14 @@ class TestBenchmarkSummaryCostAccounting:
                     "tokens": {"input_tokens": 180, "output_tokens": 45, "total_tokens": 225},
                 },
                 "response_cost_usd": {
+                    "model_id": "azure::gpt-5-mini",
+                    "pricing_lookup_key": "azure::gpt-5-mini",
                     "pricing_found": True,
                     "pricing_complete": True,
                     "tokens": {"input_tokens": 120, "output_tokens": 30, "total_tokens": 150},
+                    "input_per_million_usd": 0.25,
+                    "output_per_million_usd": 2.0,
+                    "cached_input_per_million_usd": 0.03,
                     "input_cost_usd": 0.00003,
                     "output_cost_usd": 0.00006,
                     "total_cost_usd": 0.00009,
@@ -337,11 +380,55 @@ class TestBenchmarkSummaryCostAccounting:
         assert summary["overall"]["response_usage"]["tokens"]["input_tokens"] == 120
         assert summary["overall"]["evaluation_usage"]["tokens"]["output_tokens"] == 15
         assert summary["overall"]["combined_usage"]["tokens"]["total_tokens"] == 225
+        assert summary["overall"]["response_cost_usd"]["pricing_lookup_key"] == "azure::gpt-5-mini"
+        assert summary["overall"]["response_cost_usd"]["output_per_million_usd"] == pytest.approx(2.0)
         assert summary["overall"]["response_cost_usd"]["total_cost_usd"] == pytest.approx(0.00009)
         assert summary["overall"]["evaluation_cost_usd"]["total_cost_usd"] == pytest.approx(0.000045)
         assert summary["overall"]["combined_cost_usd"]["total_cost_usd"] == pytest.approx(0.000135)
         assert summary["per_domain"]["weather"]["combined_cost_usd"]["total_cost_usd"] == pytest.approx(0.000135)
+        assert summary["per_response_model"]["azure::gpt-5-mini"]["response_cost_usd"]["model_id"] == "azure::gpt-5-mini"
         assert summary["per_response_model"]["azure::gpt-5-mini"]["combined_usage"]["tokens"]["total_tokens"] == 225
+    
+    def test_aggregate_judge_runs_excludes_failed_judges_from_average(self):
+        """A failed judge should remain stored but should not drag the compatibility average to zero."""
+        aggregated = aggregate_judge_runs(
+            [
+                {
+                    "judge_model": "azure::gpt-5-mini",
+                    "scores": {
+                        "factual_accuracy": 5,
+                        "tool_usage": 4,
+                        "completeness": 5,
+                        "relevance": 4,
+                        "response_quality": 5,
+                        "composite_score": 4.6,
+                        "reasoning": "Closed judge succeeded.",
+                    },
+                    "evaluation_usage": {"tokens": {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}, "call_count": 1, "usage_available": True},
+                    "evaluation_cost_usd": {"tokens": {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}, "pricing_found": True, "pricing_complete": True, "input_cost_usd": 0.1, "output_cost_usd": 0.2, "total_cost_usd": 0.3, "missing_pricing_models": []},
+                    "error": None,
+                },
+                {
+                    "judge_model": "azure::Kimi-K2.5",
+                    "scores": {
+                        "factual_accuracy": 0,
+                        "tool_usage": 0,
+                        "completeness": 0,
+                        "relevance": 0,
+                        "response_quality": 0,
+                        "composite_score": 0.0,
+                        "reasoning": "Judge Failed: empty content.",
+                    },
+                    "evaluation_usage": {"tokens": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}, "call_count": 1, "usage_available": False},
+                    "evaluation_cost_usd": {"tokens": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}, "pricing_found": True, "pricing_complete": True, "input_cost_usd": 0.0, "output_cost_usd": 0.0, "total_cost_usd": 0.0, "missing_pricing_models": []},
+                    "error": "Judge Failed: empty content.",
+                },
+            ]
+        )
+
+        assert aggregated["scores"]["composite_score"] == pytest.approx(4.6)
+        assert aggregated["judge_summary"]["successful_judges"] == 1
+        assert aggregated["judge_summary"]["failed_judges"] == 1
 
 
 class TestRunIsolatedAgent:

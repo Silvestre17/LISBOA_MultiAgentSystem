@@ -137,6 +137,8 @@ from tools.web_knowledge import search_history_culture
 _QA_HISTORY_WINDOW = 6
 # Max characters per message used in QA history preview
 _QA_MSG_PREVIEW_LEN = 200
+# Hard cap for stored user/assistant turns to prevent unbounded session growth.
+_MAX_CONVERSATION_HISTORY_MESSAGES = 60
 
 # ==========================================================================
 # Tool Configuration
@@ -870,7 +872,19 @@ class MultiAgentAssistant:
         """
         if not content:
             return
-        self.state.setdefault("messages", []).append(AIMessage(content=content))
+        messages = self.state.setdefault("messages", [])
+        messages.append(AIMessage(content=content))
+        if len(messages) > _MAX_CONVERSATION_HISTORY_MESSAGES:
+            del messages[:-_MAX_CONVERSATION_HISTORY_MESSAGES]
+
+    def _append_user_message(self, content: str) -> None:
+        """Append a user message while pruning stale conversation history."""
+        if not content:
+            return
+        messages = self.state.setdefault("messages", [])
+        messages.append(HumanMessage(content=content))
+        if len(messages) > _MAX_CONVERSATION_HISTORY_MESSAGES:
+            del messages[:-_MAX_CONVERSATION_HISTORY_MESSAGES]
 
     def _run_lightweight_weather_fact_check(
         self,
@@ -962,12 +976,32 @@ class MultiAgentAssistant:
             str: Compact cost label such as ``(0.003$)``.
         """
         if not isinstance(cost_payload, dict):
-            return "(0.000$)"
-        return f"({float(cost_payload.get('total_cost_usd', 0.0) or 0.0):.3f}$)"
+            return "(0.0000$)"
+
+        total_cost = float(cost_payload.get("total_cost_usd", 0.0) or 0.0)
+        if total_cost <= 0:
+            return "(0.0000$)"
+        if total_cost < 0.0001:
+            return f"({total_cost:.6f}$)"
+        if total_cost < 0.01:
+            return f"({total_cost:.4f}$)"
+        if total_cost < 1:
+            return f"({total_cost:.3f}$)"
+        return f"({total_cost:.2f}$)"
+
+    @staticmethod
+    def _truncate_summary_text(text: object, max_length: int = 180) -> str:
+        """Trim terminal summary strings to a readable single-line preview."""
+        normalized = re.sub(r"\s+", " ", str(text or "")).strip()
+        if len(normalized) <= max_length:
+            return normalized
+        return normalized[: max_length - 3].rstrip() + "..."
 
     def _collect_execution_summary(
         self,
         *,
+        user_request: str,
+        routing_reasoning: str,
         agents_to_call: List[str],
         agent_outputs: Dict[str, Any],
         direct_response_used: bool,
@@ -1087,6 +1121,9 @@ class MultiAgentAssistant:
 
         return {
             "elapsed_time": elapsed_time,
+            "user_request": user_request,
+            "routing_reasoning": routing_reasoning,
+            "selected_agents": list(agents_to_call),
             "execution_type": execution_type,
             "worker_mode": worker_mode,
             "qa_path": " -> ".join(qa_steps),
@@ -1120,6 +1157,18 @@ class MultiAgentAssistant:
         print("📊 EXECUTION SUMMARY")
         print("=" * 80)
         print(f"⏱️  Time taken: {float(summary.get('elapsed_time', 0.0) or 0.0):.2f}s")
+        request_text = self._truncate_summary_text(summary.get("user_request", ""), 220)
+        if request_text:
+            print(f"🗣️  User request: {request_text}")
+
+        selected_agents = summary.get("selected_agents", []) if isinstance(summary, dict) else []
+        selected_agents_label = ", ".join(selected_agents) if selected_agents else "direct response"
+        print(f"🎯  Routed agents: {selected_agents_label}")
+
+        routing_reasoning = self._truncate_summary_text(summary.get("routing_reasoning", ""), 220)
+        if routing_reasoning:
+            print(f"🧠  Routing reason: {routing_reasoning}")
+
         print(
             f"🧭  Execution: {summary.get('execution_type', 'unknown')} | "
             f"Workers: {summary.get('worker_mode', 'n/a')} | "
@@ -1146,12 +1195,18 @@ class MultiAgentAssistant:
 
         if isinstance(langsmith, dict) and langsmith:
             project_name = str(langsmith.get("project_name") or "").strip()
+            run_id = str(langsmith.get("run_id") or "").strip()
+            run_context_label = "attached" if langsmith.get("current_run_attached") else "not-attached"
+            persistence_state = str(langsmith.get("persistence_state") or "n/a").replace("_", " ")
             langsmith_parts = [
                 f"🛰️  LangSmith: {langsmith.get('status_label', 'disabled')}",
-                f"Save attempt: {'yes' if langsmith.get('save_attempted') else 'no'}",
+                f"Run context: {run_context_label}",
+                f"Persistence: {persistence_state}",
             ]
             if project_name:
                 langsmith_parts.append(f"Project: {project_name}")
+            if run_id:
+                langsmith_parts.append(f"Run ID: {self._truncate_summary_text(run_id, 18)}")
             print(" | ".join(langsmith_parts))
 
             langsmith_note = str(langsmith.get("note") or "").strip()
@@ -1175,7 +1230,12 @@ class MultiAgentAssistant:
                 tool_count = len(agent_tool_logs.get(agent_name, []))
                 model_label = usage_summary.get("model_id", "Unknown")
                 if usage_summary.get("call_count", 0) == 0:
-                    model_label = "tool-only" if tool_count else "no-llm"
+                    if tool_count:
+                        model_label = "tool-only"
+                    elif agent_name == "supervisor":
+                        model_label = "heuristic-only"
+                    else:
+                        model_label = "no-llm"
 
                 display_name = "QA" if agent_name == "qa" else agent_name.title()
                 print(
@@ -1213,6 +1273,7 @@ class MultiAgentAssistant:
         message: str,
         language: str,
         agents_to_call: List[str],
+        routing_reasoning: str,
         agent_outputs: Dict[str, Any],
         direct_response_used: bool,
         start_time: float,
@@ -1230,6 +1291,7 @@ class MultiAgentAssistant:
             message: Original user message.
             language: Output language code.
             agents_to_call: Agents selected by the supervisor.
+            routing_reasoning: Supervisor routing explanation for this turn.
             agent_outputs: Worker outputs gathered during the run.
             direct_response_used: Whether the supervisor answered directly.
             start_time: Request start timestamp.
@@ -1271,7 +1333,9 @@ class MultiAgentAssistant:
         self._append_assistant_message(final_output)
 
         execution_summary = self._collect_execution_summary(
-            agents_to_call=effective_agents,
+            user_request=message,
+            routing_reasoning=routing_reasoning,
+            agents_to_call=agents_to_call,
             agent_outputs=agent_outputs,
             direct_response_used=direct_response_used,
             workers=workers,
@@ -1391,7 +1455,7 @@ class MultiAgentAssistant:
 
         from langchain_core.messages import HumanMessage
 
-        self.state["messages"].append(HumanMessage(content=message))
+        self._append_user_message(message)
         start_time = time.time()
         run_workers_in_parallel = False
         retry_agents_used: List[str] = []
@@ -1517,6 +1581,7 @@ class MultiAgentAssistant:
                 message=message,
                 language=language,
                 agents_to_call=[],
+                routing_reasoning=reasoning,
                 agent_outputs={},
                 direct_response_used=True,
                 start_time=start_time,
@@ -1953,6 +2018,7 @@ class MultiAgentAssistant:
             message=message,
             language=language,
             agents_to_call=agents_to_call,
+            routing_reasoning=reasoning,
             agent_outputs=agent_outputs,
             direct_response_used=False,
             start_time=start_time,
@@ -2108,6 +2174,10 @@ class MultiAgentAssistant:
         from agent.state import create_initial_state
 
         self.state = create_initial_state()
+        for agent in self.agents.values():
+            reset_context = getattr(agent, "reset_conversation_context", None)
+            if callable(reset_context):
+                reset_context()
 
     def reset_llm_usage_tracking(self) -> None:
         """Resets LLM usage tracking across supervisor, QA, and worker agents."""
@@ -2293,6 +2363,7 @@ if __name__ == "__main__":
             "tracking_state": "disabled",
             "status_label": "disabled",
             "save_attempted": False,
+            "persistence_state": "disabled",
             "current_run_attached": False,
             "project_name": None,
             "run_id": None,
@@ -2301,6 +2372,8 @@ if __name__ == "__main__":
         }
         try:
             summary = assistant._collect_execution_summary(
+                user_request="Demo summary request",
+                routing_reasoning="Demo smoke-test routing",
                 agents_to_call=["weather", "researcher"],
                 agent_outputs={"weather": "ok", "researcher": "ok"},
                 direct_response_used=False,

@@ -627,9 +627,17 @@ button[kind="secondary"]:hover {{
     margin-top: 0.2rem;
     margin-bottom: 0.3rem;
 }}
+[data-testid="stChatMessage"] ul ul {{
+    padding-left: 1.2rem;
+    margin-top: 0.1rem;
+    margin-bottom: 0.15rem;
+}}
 [data-testid="stChatMessage"] ul li {{
     margin-bottom: 0.35rem;
     position: relative;
+}}
+[data-testid="stChatMessage"] ul ul li {{
+    margin-bottom: 0.22rem;
 }}
 [data-testid="stChatMessage"] ul li::before {{
     content: "";
@@ -757,11 +765,6 @@ button[kind="secondary"]:hover {{
 }}
 
 /* ============ ORDERED LISTS IN CHAT ============ */
-[data-testid="stChatMessage"] ul {{
-    list-style-type: none;
-    padding-left: 1.5rem;
-    line-height: 1.4;
-}}
 [data-testid="stChatMessage"] ol {{
     padding-left: 0;
     list-style: none;
@@ -1556,12 +1559,21 @@ def handle_chat_stream(text: str):
 
 
 def render_assistant_markdown(text: str) -> str:
-    """Render assistant markdown progressively using Streamlit's native chat streaming."""
+    """Render assistant markdown progressively, then re-render the final full markdown."""
     if not text:
         st.markdown("")
         return ""
-    rendered = st.write_stream(handle_chat_stream(text))
-    return rendered if isinstance(rendered, str) else text
+
+    placeholder = st.empty()
+    rendered_chunks: list[str] = []
+
+    for chunk in handle_chat_stream(text):
+        rendered_chunks.append(chunk)
+        placeholder.markdown("".join(rendered_chunks))
+
+    final_text = "".join(rendered_chunks) if rendered_chunks else text
+    placeholder.markdown(final_text)
+    return final_text
 
 
 def clean_response_for_display(text: str) -> str:

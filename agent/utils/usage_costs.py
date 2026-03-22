@@ -26,6 +26,17 @@ PRICING_METADATA_ALIASES = {
     "pricing_snapshot_date": "pricing_snapshot_date",
 }
 _LOCAL_PROVIDER_PREFIXES = ("lmstudio::", "local::", "ollama::")
+# NOTE:
+# These aliases are only for lexical normalization, such as punctuation or
+# separator variants of the *same* catalog model identifier. They must not be
+# used to collapse different SKUs or different serving modes into one pricing
+# record. The JSON pricing catalog remains the source of truth.
+_MODEL_PRICING_ALIASES = {
+    "azure::kimi-k2-5": ("azure::kimi-k2.5", "kimi-k2.5"),
+    "azure::kimi-k2_5": ("azure::kimi-k2.5", "kimi-k2.5"),
+    "kimi-k2-5": ("kimi-k2.5",),
+    "kimi-k2_5": ("kimi-k2.5",),
+}
 
 
 def _coerce_int(value: Any) -> int:
@@ -95,6 +106,44 @@ def normalize_model_lookup_key(model_id: str | None) -> str:
         str: Normalized lookup key.
     """
     return str(model_id or "").strip().lower()
+
+
+def _get_model_lookup_candidates(model_id: str | None) -> list[str]:
+    """Return pricing lookup candidates including normalized aliases."""
+    normalized_model_id = normalize_model_lookup_key(model_id)
+    if not normalized_model_id:
+        return []
+
+    candidates = [normalized_model_id]
+    if "::" in normalized_model_id:
+        candidates.append(normalized_model_id.split("::", 1)[1])
+
+    for alias in _MODEL_PRICING_ALIASES.get(normalized_model_id, ()): 
+        if alias not in candidates:
+            candidates.append(alias)
+
+    return candidates
+
+
+def _single_non_null_value(values: Iterable[Any]) -> Any | None:
+    """Return the unique non-null value when all observed values agree.
+
+    Args:
+        values: Candidate values gathered during an aggregate computation.
+
+    Returns:
+        Any | None: The shared value when exactly one unique non-null value is
+        present, otherwise None.
+    """
+    unique_values: list[Any] = []
+    for value in values:
+        if value is None:
+            continue
+        if value not in unique_values:
+            unique_values.append(value)
+        if len(unique_values) > 1:
+            return None
+    return unique_values[0] if unique_values else None
 
 
 def normalize_token_usage(usage: Any) -> dict[str, int]:
@@ -360,9 +409,7 @@ def resolve_model_pricing(
 
     catalog, _ = split_pricing_config(pricing_by_model)
     normalized_model_id = normalize_model_lookup_key(model_id)
-    lookup_candidates = [normalized_model_id]
-    if "::" in normalized_model_id:
-        lookup_candidates.append(normalized_model_id.split("::", 1)[1])
+    lookup_candidates = _get_model_lookup_candidates(model_id)
 
     for lookup_key in lookup_candidates:
         if lookup_key in catalog:
@@ -470,6 +517,11 @@ def build_cost_payload(
         cost_breakdown = []
         pricing_found = True
         pricing_complete = True
+        aggregate_model_ids: list[str] = []
+        aggregate_pricing_lookup_keys: list[str] = []
+        aggregate_input_prices: list[float] = []
+        aggregate_output_prices: list[float] = []
+        aggregate_cached_input_prices: list[float] = []
         attributed_tokens = {
             "input_tokens": 0,
             "output_tokens": 0,
@@ -490,6 +542,11 @@ def build_cost_payload(
                 pricing_by_model,
                 entry_model_id,
             )
+            aggregate_model_ids.append(event_cost.get("model_id"))
+            aggregate_pricing_lookup_keys.append(event_cost.get("pricing_lookup_key"))
+            aggregate_input_prices.append(event_cost.get("input_per_million_usd"))
+            aggregate_output_prices.append(event_cost.get("output_per_million_usd"))
+            aggregate_cached_input_prices.append(event_cost.get("cached_input_per_million_usd"))
             total_input_cost += event_cost["input_cost_usd"]
             total_output_cost += event_cost["output_cost_usd"]
             missing_pricing_models.extend(event_cost.get("missing_pricing_models", []))
@@ -546,6 +603,11 @@ def build_cost_payload(
                 pricing_by_model,
                 remainder_model_id,
             )
+            aggregate_model_ids.append(remainder_cost.get("model_id"))
+            aggregate_pricing_lookup_keys.append(remainder_cost.get("pricing_lookup_key"))
+            aggregate_input_prices.append(remainder_cost.get("input_per_million_usd"))
+            aggregate_output_prices.append(remainder_cost.get("output_per_million_usd"))
+            aggregate_cached_input_prices.append(remainder_cost.get("cached_input_per_million_usd"))
             total_input_cost += remainder_cost["input_cost_usd"]
             total_output_cost += remainder_cost["output_cost_usd"]
             missing_pricing_models.extend(remainder_cost.get("missing_pricing_models", []))
@@ -579,14 +641,14 @@ def build_cost_payload(
             )
 
         return {
-            "model_id": model_id or usage_payload.get("model_id"),
-            "pricing_lookup_key": None,
+            "model_id": _single_non_null_value(aggregate_model_ids) or model_id or usage_payload.get("model_id"),
+            "pricing_lookup_key": _single_non_null_value(aggregate_pricing_lookup_keys),
             "pricing_found": pricing_found,
             "pricing_complete": pricing_complete,
             "tokens": deepcopy(usage_payload.get("tokens", {})),
-            "input_per_million_usd": None,
-            "output_per_million_usd": None,
-            "cached_input_per_million_usd": None,
+            "input_per_million_usd": _single_non_null_value(aggregate_input_prices),
+            "output_per_million_usd": _single_non_null_value(aggregate_output_prices),
+            "cached_input_per_million_usd": _single_non_null_value(aggregate_cached_input_prices),
             "input_cost_usd": _round_money(total_input_cost),
             "output_cost_usd": _round_money(total_output_cost),
             "total_cost_usd": _round_money(total_input_cost + total_output_cost),
@@ -621,6 +683,11 @@ def combine_cost_payloads(payloads: Iterable[dict[str, Any]]) -> dict[str, Any]:
     pricing_complete = True
     missing_pricing_models: list[str] = []
     cost_breakdown: list[dict[str, Any]] = []
+    aggregate_model_ids: list[str] = []
+    aggregate_pricing_lookup_keys: list[str] = []
+    aggregate_input_prices: list[float] = []
+    aggregate_output_prices: list[float] = []
+    aggregate_cached_input_prices: list[float] = []
 
     for payload in payloads:
         tokens = normalize_token_usage(payload.get("tokens", payload))
@@ -629,6 +696,11 @@ def combine_cost_payloads(payloads: Iterable[dict[str, Any]]) -> dict[str, Any]:
         combined_tokens["total_tokens"] += tokens["total_tokens"]
         total_input_cost += float(payload.get("input_cost_usd", 0.0) or 0.0)
         total_output_cost += float(payload.get("output_cost_usd", 0.0) or 0.0)
+        aggregate_model_ids.append(payload.get("model_id"))
+        aggregate_pricing_lookup_keys.append(payload.get("pricing_lookup_key"))
+        aggregate_input_prices.append(payload.get("input_per_million_usd"))
+        aggregate_output_prices.append(payload.get("output_per_million_usd"))
+        aggregate_cached_input_prices.append(payload.get("cached_input_per_million_usd"))
 
         payload_tokens = tokens["total_tokens"]
         pricing_found = pricing_found and bool(payload.get("pricing_found", False) or payload_tokens == 0)
@@ -638,14 +710,14 @@ def combine_cost_payloads(payloads: Iterable[dict[str, Any]]) -> dict[str, Any]:
             cost_breakdown.extend(deepcopy(payload["llm_cost_breakdown"]))
 
     result = {
-        "model_id": None,
-        "pricing_lookup_key": None,
+        "model_id": _single_non_null_value(aggregate_model_ids),
+        "pricing_lookup_key": _single_non_null_value(aggregate_pricing_lookup_keys),
         "pricing_found": pricing_found,
         "pricing_complete": pricing_complete,
         "tokens": combined_tokens,
-        "input_per_million_usd": None,
-        "output_per_million_usd": None,
-        "cached_input_per_million_usd": None,
+        "input_per_million_usd": _single_non_null_value(aggregate_input_prices),
+        "output_per_million_usd": _single_non_null_value(aggregate_output_prices),
+        "cached_input_per_million_usd": _single_non_null_value(aggregate_cached_input_prices),
         "input_cost_usd": _round_money(total_input_cost),
         "output_cost_usd": _round_money(total_output_cost),
         "total_cost_usd": _round_money(total_input_cost + total_output_cost),
@@ -714,7 +786,7 @@ if __name__ == "__main__":
         "azure::phi-4-reasoning-plus": (0.125, 0.5),
         "azure::grok-4": (3.0, 15.0),
         "azure::llama-3.3-70b": (0.71, 0.71),
-        "azure::kimi-k2-thinking": (0.6, 2.5),
+        "azure::kimi-k2.5": (0.6, 3.0),
         "azure::claude-sonnet-4.5": (3.0, 15.0),
     }
 

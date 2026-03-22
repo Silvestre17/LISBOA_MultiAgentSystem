@@ -389,13 +389,14 @@ def get_langsmith_request_tracking_status(
             "tracking_state": "tracking_request",
             "status_label": "enabled",
             "save_attempted": True,
+            "persistence_state": "unconfirmed",
             "current_run_attached": True,
             "project_name": project_name,
             "run_id": run_id,
             "reason": reason,
             "note": (
-                "Request trace context is attached. LangSmith persistence is asynchronous, "
-                "so final ingestion or quota acceptance is not confirmed here."
+                "Run context is attached locally. LangSmith persistence remains unconfirmed and may fail asynchronously, "
+                "for example because of remote quota or ingestion limits."
             ),
         }
 
@@ -404,6 +405,7 @@ def get_langsmith_request_tracking_status(
             "tracking_state": "enabled_no_active_run",
             "status_label": "enabled",
             "save_attempted": False,
+            "persistence_state": "not_attached",
             "current_run_attached": False,
             "project_name": project_name,
             "run_id": None,
@@ -416,6 +418,7 @@ def get_langsmith_request_tracking_status(
             "tracking_state": "auto_disabled",
             "status_label": "auto-disabled",
             "save_attempted": False,
+            "persistence_state": "not_active",
             "current_run_attached": False,
             "project_name": project_name,
             "run_id": None,
@@ -427,6 +430,7 @@ def get_langsmith_request_tracking_status(
         "tracking_state": "disabled",
         "status_label": "disabled",
         "save_attempted": False,
+        "persistence_state": "disabled",
         "current_run_attached": False,
         "project_name": None,
         "run_id": None,

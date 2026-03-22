@@ -34,6 +34,7 @@ from eval.runtime_utils import (
     load_pricing_catalog,
     resolve_model_pricing,
     split_pricing_config,
+    write_json_artifact,
 )
 
 
@@ -119,7 +120,7 @@ class TestPricingLookup:
             "azure::phi-4-reasoning-plus": (0.125, 0.5),
             "azure::grok-4": (3.0, 15.0),
             "azure::llama-3.3-70b": (0.71, 0.71),
-            "azure::kimi-k2-thinking": (0.6, 2.5),
+            "azure::kimi-k2.5": (0.6, 3.0),
             "azure::claude-haiku-4.5": (1.0, 5.0),
             "azure::claude-sonnet-4.5": (3.0, 15.0),
             "azure::claude-opus-4.1": (15.0, 75.0),
@@ -130,6 +131,40 @@ class TestPricingLookup:
             assert pricing is not None, model_id
             assert pricing["input"] == pytest.approx(expected_input)
             assert pricing["output"] == pytest.approx(expected_output)
+
+    def test_repository_catalog_resolves_kimi_deployment_alias(self):
+        """Kimi deployment labels should map to the catalog entry used for cost accounting."""
+        catalog = load_pricing_catalog()
+
+        pricing = resolve_model_pricing(catalog, "azure::Kimi-K2.5")
+
+        assert pricing is not None
+        assert pricing["pricing_lookup_key"] == "azure::kimi-k2.5"
+        assert pricing["input"] == pytest.approx(0.6)
+        assert pricing["output"] == pytest.approx(3.0)
+
+    def test_repository_catalog_resolves_kimi_k25_punctuation_aliases_only(self):
+        """Only punctuation variants of the same Kimi K2.5 SKU should resolve to the K2.5 pricing entry."""
+        catalog = load_pricing_catalog()
+
+        for model_id in ("azure::kimi-k2-5", "azure::kimi-k2_5"):
+            pricing = resolve_model_pricing(catalog, model_id)
+            assert pricing is not None, model_id
+            assert pricing["pricing_lookup_key"] == "azure::kimi-k2.5"
+            assert pricing["input"] == pytest.approx(0.6)
+            assert pricing["output"] == pytest.approx(3.0)
+
+    def test_repository_catalog_does_not_conflate_distinct_kimi_skus(self):
+        """Kimi K2 and thinking-labelled variants must not silently inherit K2.5 pricing."""
+        catalog = load_pricing_catalog()
+
+        for model_id in (
+            "azure::kimi-k2",
+            "azure::kimi-k2-thinking",
+            "azure::kimi-k2.5-thinking",
+            "kimi-k2.5-thinking",
+        ):
+            assert resolve_model_pricing(catalog, model_id) is None, model_id
 
 
 class TestCostPayloads:
@@ -190,18 +225,28 @@ class TestCostPayloads:
     def test_combine_cost_payloads_preserves_totals(self):
         """Combining response and evaluation cost payloads should sum totals."""
         response_cost = {
+            "model_id": "azure::gpt-5-mini",
+            "pricing_lookup_key": "azure::gpt-5-mini",
             "pricing_found": True,
             "pricing_complete": True,
             "tokens": {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
+            "input_per_million_usd": 0.25,
+            "output_per_million_usd": 2.0,
+            "cached_input_per_million_usd": 0.03,
             "input_cost_usd": 0.001,
             "output_cost_usd": 0.002,
             "total_cost_usd": 0.003,
             "missing_pricing_models": [],
         }
         evaluation_cost = {
+            "model_id": "azure::gpt-5-mini",
+            "pricing_lookup_key": "azure::gpt-5-mini",
             "pricing_found": True,
             "pricing_complete": True,
             "tokens": {"input_tokens": 50, "output_tokens": 10, "total_tokens": 60},
+            "input_per_million_usd": 0.25,
+            "output_per_million_usd": 2.0,
+            "cached_input_per_million_usd": 0.03,
             "input_cost_usd": 0.0005,
             "output_cost_usd": 0.001,
             "total_cost_usd": 0.0015,
@@ -212,7 +257,30 @@ class TestCostPayloads:
         assert combined["tokens"]["input_tokens"] == 150
         assert combined["tokens"]["output_tokens"] == 30
         assert combined["tokens"]["total_tokens"] == 180
+        assert combined["model_id"] == "azure::gpt-5-mini"
+        assert combined["pricing_lookup_key"] == "azure::gpt-5-mini"
+        assert combined["output_per_million_usd"] == pytest.approx(2.0)
         assert combined["total_cost_usd"] == pytest.approx(0.0045)
+
+    def test_write_json_artifact_formats_money_fields_with_minimum_decimals(self, tmp_path):
+        """Persisted evaluation artefacts should keep USD fields readable at small magnitudes."""
+        output_path = tmp_path / "artifact.json"
+
+        write_json_artifact(
+            {
+                "input_cost_usd": 0.01,
+                "output_cost_usd": 3.0,
+                "total_cost_usd": 0.0007,
+                "input_per_million_usd": 0.6,
+            },
+            output_path,
+        )
+
+        content = output_path.read_text(encoding="utf-8")
+        assert '"input_cost_usd": 0.01000' in content
+        assert '"output_cost_usd": 3.00000' in content
+        assert '"total_cost_usd": 0.00070' in content
+        assert '"input_per_million_usd": 0.60000' in content
 
     def test_build_cost_payload_treats_local_models_as_zero_cost(self):
         """Local providers such as LM Studio should default to zero-cost pricing."""

@@ -12,12 +12,14 @@
 
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.agents.planner_agent import PlannerAgent, enforce_multi_day_quality_mode
+from agent.agents.researcher_agent import ResearcherAgent
 from agent.agents.transport_agent import (
     TransportAgent,
     _build_deterministic_metro_route_response,
@@ -74,6 +76,7 @@ def _make_worker_mock(
     output_tokens: int = 0,
     call_count: int = 0,
     model_id: str = "azure::gpt-5-mini",
+    tool_log: list[dict] | None = None,
 ) -> MagicMock:
     """Create a worker-like mock with the methods used by ``MultiAgentAssistant``."""
     worker = MagicMock()
@@ -87,7 +90,7 @@ def _make_worker_mock(
             call_count=call_count,
         )
     )
-    worker.get_tool_calls_log = MagicMock(return_value=[])
+    worker.get_tool_calls_log = MagicMock(return_value=list(tool_log or []))
     worker.llm_provider = "azure"
     return worker
 
@@ -133,6 +136,7 @@ def test_multiagent_direct_response_records_history_and_prints_execution_summary
             "tracking_state": "disabled",
             "status_label": "disabled",
             "save_attempted": False,
+            "persistence_state": "disabled",
             "current_run_attached": False,
             "project_name": None,
             "run_id": None,
@@ -147,10 +151,12 @@ def test_multiagent_direct_response_records_history_and_prints_execution_summary
     assert isinstance(assistant.state["messages"][-1], AIMessage)
     assert assistant.state["messages"][-1].content == "Olá direto"
     assert "EXECUTION SUMMARY" in captured
+    assert "User request: Olá" in captured
+    assert "Routed agents: direct response" in captured
     assert "Execution: direct" in captured
-    assert "(0.003$)" in captured
+    assert re.search(r"Total Cost: \(0\.\d{3,6}\$\)", captured)
     assert "Pricing Snapshot: 2026-03-19" in captured
-    assert "LangSmith: disabled | Save attempt: no" in captured
+    assert "LangSmith: disabled | Run context: not-attached | Persistence: disabled" in captured
 
 
 def test_execution_summary_prints_active_langsmith_save_attempt(capsys) -> None:
@@ -167,11 +173,12 @@ def test_execution_summary_prints_active_langsmith_save_attempt(capsys) -> None:
                 "tracking_state": "tracking_request",
                 "status_label": "enabled",
                 "save_attempted": True,
+                "persistence_state": "unconfirmed",
                 "current_run_attached": True,
                 "project_name": "LISBOA Chat",
                 "run_id": "run_123",
                 "reason": "LangSmith tracing enabled",
-                "note": "Request trace context is attached. LangSmith persistence is asynchronous, so final ingestion or quota acceptance is not confirmed here.",
+                "note": "Run context is attached locally. LangSmith persistence remains unconfirmed and may fail asynchronously, for example because of remote quota or ingestion limits.",
             },
             "usage": {
                 "call_count": 2,
@@ -194,8 +201,68 @@ def test_execution_summary_prints_active_langsmith_save_attempt(capsys) -> None:
     )
 
     captured = capsys.readouterr().out
-    assert "LangSmith: enabled | Save attempt: yes | Project: LISBOA Chat" in captured
-    assert "persistence is asynchronous" in captured.lower()
+    assert "LangSmith: enabled | Run context: attached | Persistence: unconfirmed | Project: LISBOA Chat" in captured
+    assert "Run ID: run_123" in captured
+    assert "quota or ingestion limits" in captured.lower()
+
+
+def test_execution_summary_marks_tool_only_agents_and_prints_tool_args(capsys) -> None:
+    """Tool-only workers should be labeled clearly and print their logged arguments."""
+    assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
+
+    assistant._print_execution_summary(
+        {
+            "elapsed_time": 2.01,
+            "user_request": "Give me the next 5 events that match",
+            "routing_reasoning": "Follow-up domain override from previous user query (researcher)",
+            "selected_agents": ["researcher"],
+            "execution_type": "single-worker",
+            "worker_mode": "sequential",
+            "qa_path": "validated",
+            "langsmith": {
+                "tracking_state": "disabled",
+                "status_label": "disabled",
+                "save_attempted": False,
+                "persistence_state": "disabled",
+                "current_run_attached": False,
+                "project_name": None,
+                "run_id": None,
+                "reason": "LangSmith tracing is disabled by environment",
+                "note": "LangSmith tracing is disabled by environment",
+            },
+            "usage": {
+                "call_count": 0,
+                "tokens": {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "total_tokens": 0,
+                },
+            },
+            "pricing_metadata": {"pricing_snapshot_date": "2026-03-19"},
+            "total_cost": {"total_cost_usd": 0.0, "missing_pricing_models": []},
+            "models_used": [],
+            "relevant_agents": ["researcher"],
+            "agent_usage": {"researcher": _make_usage_summary(agent_name="researcher")},
+            "agent_costs": {"researcher": {"total_cost_usd": 0.0, "missing_pricing_models": []}},
+            "agent_tool_logs": {
+                "researcher": [
+                    {
+                        "tool_name": "search_cultural_events",
+                        "args": {"date_filter": "this week", "max_results": 5, "offset": 5},
+                    }
+                ]
+            },
+            "total_tool_invocations": 1,
+            "retry_agents_used": [],
+        }
+    )
+
+    captured = capsys.readouterr().out
+    assert "User request: Give me the next 5 events that match" in captured
+    assert "Routed agents: researcher" in captured
+    assert "Researcher [tool-only]" in captured
+    assert "search_cultural_events" in captured
+    assert '"offset": 5' in captured
 
 
 def test_multiagent_simple_weather_runs_lightweight_fact_check_but_skips_validate() -> None:
@@ -451,3 +518,77 @@ def test_transport_formats_direct_carris_metropolitana_output() -> None:
     assert "How to use it" in formatted
     assert "Scope" not in formatted
     assert "Carris Metropolitana" in formatted
+
+
+def test_researcher_follow_up_paginates_the_next_event_batch() -> None:
+    """Researcher event follow-ups should advance the offset instead of repeating the first batch."""
+
+    class DummyEventsTool:
+        name = "search_cultural_events"
+
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def invoke(self, args: dict) -> str:
+            self.calls.append(dict(args))
+            offset = int(args.get("offset", 0) or 0)
+            if offset == 0:
+                return "1. 📅 **Event A**\n2. 📅 **Event B**"
+            if offset == 2:
+                return "1. 📅 **Event C**\n2. 📅 **Event D**"
+            return "❌ There are no more events to show for this filter window."
+
+    with patch.object(ResearcherAgent, "__init__", lambda self: None):
+        agent = ResearcherAgent()
+        agent.tools = [DummyEventsTool()]
+        agent._last_search_context = None
+
+        first_batch = agent._run_direct_event_lookup(
+            "What major events are happening this week?",
+            "en",
+        )
+        second_batch = agent._maybe_continue_previous_search(
+            "Give me the next 2 events that match",
+            "en",
+        )
+
+    tool = agent.tools[0]
+    assert "Event A" in first_batch and "Event B" in first_batch
+    assert second_batch is not None
+    assert "Event C" in second_batch and "Event D" in second_batch
+    assert "Event A" not in second_batch
+    assert tool.calls[0]["offset"] == 0
+    assert tool.calls[1]["offset"] == 2
+
+
+def test_transport_follow_up_reuses_previous_route_for_mode_switch() -> None:
+    """Short transport follow-ups like 'And by metro?' should inherit the last route endpoints."""
+    with patch.object(TransportAgent, "__init__", lambda self: None):
+        agent = TransportAgent()
+        agent._last_transport_context = {
+            "origin": "Rossio",
+            "destination": "Oriente",
+            "last_user_query": "How do I get from Rossio to Oriente?",
+            "mode": None,
+        }
+
+        rewritten = agent._rewrite_follow_up_transport_query("And by metro?", "en")
+
+    assert rewritten == "How do I get from Rossio to Oriente by metro?"
+
+
+def test_multiagent_message_history_is_pruned_to_recent_window() -> None:
+    """Conversation state should keep a bounded recent window instead of growing forever."""
+    assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
+    assistant.state = {
+        "messages": [HumanMessage(content=f"msg {index}") for index in range(59)],
+        "user_context": None,
+    }
+
+    assistant._append_user_message("latest user")
+    assistant._append_assistant_message("latest assistant")
+
+    assert len(assistant.state["messages"]) == 60
+    assert assistant.state["messages"][-2].content == "latest user"
+    assert assistant.state["messages"][-1].content == "latest assistant"
+    assert assistant.state["messages"][0].content == "msg 1"

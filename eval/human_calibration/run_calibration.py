@@ -57,11 +57,17 @@ def load_human_scores(filepath: str) -> dict[str, dict[str, int]]:
     return scores
 
 
-def load_judge_scores(filepath: str) -> dict[str, dict[str, float]]:
+def load_judge_scores(
+    filepath: str,
+    *,
+    judge_source: str = "average",
+) -> dict[str, dict[str, float]]:
     """Load LLM judge scores from benchmark results.
 
     Args:
         filepath: Path to the benchmark results JSON.
+        judge_source: ``average`` for the compatibility score block, or a
+            specific judge model id to select one judge run from ``judge_runs``.
 
     Returns:
         Dict mapping entry id to judge scores dict.
@@ -73,6 +79,16 @@ def load_judge_scores(filepath: str) -> dict[str, dict[str, float]]:
     for entry in data.get("benchmark_results", []):
         entry_id = entry["id"]
         judge = entry.get("scores", {})
+        if judge_source != "average":
+            selected_run = next(
+                (
+                    judge_run
+                    for judge_run in entry.get("judge_runs", [])
+                    if judge_run.get("judge_model") == judge_source
+                ),
+                None,
+            )
+            judge = selected_run.get("scores", {}) if isinstance(selected_run, dict) else {}
         if all(d in judge for d in DIMENSIONS):
             scores[entry_id] = {d: judge[d] for d in DIMENSIONS}
 
@@ -144,7 +160,12 @@ def mean_absolute_error(human: list[int], judge: list[int]) -> float:
     return round(float(np.mean(np.abs(np.array(human) - np.array(judge)))), 4)
 
 
-def run_calibration(human_file: str, benchmark_file: str) -> dict[str, Any]:
+def run_calibration(
+    human_file: str,
+    benchmark_file: str,
+    *,
+    judge_source: str = "average",
+) -> dict[str, Any]:
     """Run full calibration analysis.
 
     Args:
@@ -155,7 +176,7 @@ def run_calibration(human_file: str, benchmark_file: str) -> dict[str, Any]:
         Dict with per-dimension and overall agreement metrics.
     """
     human_scores = load_human_scores(human_file)
-    judge_scores = load_judge_scores(benchmark_file)
+    judge_scores = load_judge_scores(benchmark_file, judge_source=judge_source)
 
     if not human_scores:
         print("\033[1;31mERROR:\033[0m No valid human scores found. "
@@ -241,10 +262,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Human-Judge Calibration Analysis")
     parser.add_argument("--human", required=True, help="Path to filled calibration JSON")
     parser.add_argument("--benchmark", required=True, help="Path to benchmark results JSON")
+    parser.add_argument(
+        "--judge-source",
+        default="average",
+        help="Use averaged benchmark scores (default) or provide a specific judge model id from judge_runs.",
+    )
     parser.add_argument("--output", default=None, help="Output file for results (optional, defaults to eval/results/calibration/)")
     args = parser.parse_args()
 
-    results = run_calibration(args.human, args.benchmark)
+    results = run_calibration(args.human, args.benchmark, judge_source=args.judge_source)
 
     if results:
         output_path = (
@@ -264,8 +290,10 @@ if __name__ == "__main__":
             "calibration_metadata": {
                 "human_scores_path": args.human,
                 "benchmark_results_path": args.benchmark,
+                "judge_source": args.judge_source,
                 "benchmark_response_models": benchmark_artifact.get("benchmark_metadata", {}).get("response_models"),
                 "benchmark_evaluation_model": benchmark_artifact.get("benchmark_metadata", {}).get("evaluation_model"),
+                "benchmark_evaluation_models": benchmark_artifact.get("benchmark_metadata", {}).get("evaluation_models"),
                 "timestamp": datetime.now().isoformat(),
                 "output_directory": str(output_path.parent),
             },

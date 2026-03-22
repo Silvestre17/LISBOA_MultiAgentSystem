@@ -9,6 +9,7 @@
 
 import re
 import uuid
+from copy import deepcopy
 from datetime import datetime
 from difflib import SequenceMatcher
 from functools import lru_cache
@@ -2580,6 +2581,15 @@ class TransportAgent(BaseAgent):
         """Initializes the transport agent."""
         super().__init__("transport")
         self.system_prompt = get_transport_prompt()
+        self._last_transport_context: Optional[dict] = None
+
+    def reset_conversation_context(self) -> None:
+        """Clears cached transport follow-up context for the session."""
+        self._last_transport_context = None
+
+    def get_last_transport_context(self) -> Optional[dict]:
+        """Returns the latest cached transport follow-up context."""
+        return deepcopy(self._last_transport_context)
 
     def _get_tool_by_name(self, tool_name: str):
         """Returns a loaded tool by name, or None if not found."""
@@ -2587,6 +2597,74 @@ class TransportAgent(BaseAgent):
             if getattr(tool, "name", "") == tool_name:
                 return tool
         return None
+
+    @staticmethod
+    def _extract_follow_up_mode(user_message: str) -> Optional[str]:
+        """Extracts a requested transport mode from a short follow-up."""
+        query = (user_message or "").lower()
+        if any(term in query for term in ["metro"]):
+            return "metro"
+        if any(term in query for term in ["bus", "autocarro", "autocarros", "carris"]):
+            return "bus"
+        if any(term in query for term in ["train", "comboio", "comboios", "cp"]):
+            return "train"
+        if any(term in query for term in ["tram", "trams", "elétrico", "eletrico", "elétricos", "eletricos"]):
+            return "tram"
+        return None
+
+    def _rewrite_follow_up_transport_query(self, user_message: str, language: str) -> str:
+        """Rewrites short transport follow-ups using the last remembered route endpoints."""
+        if _extract_route_endpoints(user_message):
+            return user_message
+
+        normalized = re.sub(r"[!?.,;:]+", "", (user_message or "").strip().lower())
+        follow_up_prefixes = ("e ", "and ", "what about", "how about", "same ", "also ", "agora ", "now ")
+        is_short_referential_follow_up = normalized.startswith(follow_up_prefixes) or len(normalized.split()) <= 6
+        if not is_short_referential_follow_up:
+            return user_message
+
+        last_context = getattr(self, "_last_transport_context", None)
+        if not last_context:
+            return user_message
+
+        mode = self._extract_follow_up_mode(user_message)
+        if not mode:
+            return user_message
+
+        origin = str(last_context.get("origin") or "").strip()
+        destination = str(last_context.get("destination") or "").strip()
+        if not origin or not destination:
+            return user_message
+
+        if language == "pt":
+            mode_phrase = {
+                "metro": "de metro",
+                "bus": "de autocarro",
+                "train": "de comboio",
+                "tram": "de elétrico",
+            }.get(mode, "")
+            return f"Como vou de {origin} para {destination} {mode_phrase}?".strip()
+
+        mode_phrase = {
+            "metro": "by metro",
+            "bus": "by bus",
+            "train": "by train",
+            "tram": "by tram",
+        }.get(mode, "")
+        return f"How do I get from {origin} to {destination} {mode_phrase}?".strip()
+
+    def _remember_transport_context(self, user_message: str) -> None:
+        """Caches the latest route endpoints so transport-mode follow-ups can reuse them."""
+        endpoints = _extract_route_endpoints(user_message)
+        if not endpoints:
+            return
+
+        self._last_transport_context = {
+            "origin": endpoints[0],
+            "destination": endpoints[1],
+            "last_user_query": user_message,
+            "mode": self._extract_follow_up_mode(user_message),
+        }
 
     @staticmethod
     def _is_status_query(user_message: str) -> bool:
@@ -2611,13 +2689,11 @@ class TransportAgent(BaseAgent):
         if any(re.search(pattern, query) for pattern in metro_status_patterns):
             metro_tool = self._get_tool_by_name("get_metro_status")
             if metro_tool:
-                self._record_tool_call("get_metro_status", {})
-                return metro_tool.invoke({})
+                return self._invoke_tool(metro_tool, {}, tool_name="get_metro_status")
 
         summary_tool = self._get_tool_by_name("get_transport_summary")
         if summary_tool:
-            self._record_tool_call("get_transport_summary", {})
-            return summary_tool.invoke({})
+            return self._invoke_tool(summary_tool, {}, tool_name="get_transport_summary")
 
         return None
 
@@ -2734,7 +2810,13 @@ class TransportAgent(BaseAgent):
         urban_tool = self._get_tool_by_name("carris_find_routes_between")
         frequency_tool = self._get_tool_by_name("carris_get_service_frequency")
         urban_result = (
-            str(urban_tool.invoke({"origin": origin, "destination": destination})).strip()
+            str(
+                self._invoke_tool(
+                    urban_tool,
+                    {"origin": origin, "destination": destination},
+                    tool_name="carris_find_routes_between",
+                )
+            ).strip()
             if urban_tool
             else ""
         )
@@ -2744,7 +2826,11 @@ class TransportAgent(BaseAgent):
                 return ""
             try:
                 return str(
-                    frequency_tool.invoke({"route_short_name": route_short_name})
+                    self._invoke_tool(
+                        frequency_tool,
+                        {"route_short_name": route_short_name},
+                        tool_name="carris_get_service_frequency",
+                    )
                 ).strip()
             except Exception:
                 return ""
@@ -2754,7 +2840,13 @@ class TransportAgent(BaseAgent):
             urban_tram_block = _extract_carris_mode_section(urban_result, "TRAMS")
             metropolitan_tool = self._get_tool_by_name("find_direct_bus_lines")
             metropolitan_result = (
-                str(metropolitan_tool.invoke({"origin": origin, "destination": destination})).strip()
+                str(
+                    self._invoke_tool(
+                        metropolitan_tool,
+                        {"origin": origin, "destination": destination},
+                        tool_name="find_direct_bus_lines",
+                    )
+                ).strip()
                 if metropolitan_tool
                 else ""
             )
@@ -2844,7 +2936,13 @@ class TransportAgent(BaseAgent):
             urban_tram_block = _extract_carris_mode_section(urban_result, "TRAMS")
             metropolitan_tool = self._get_tool_by_name("find_direct_bus_lines")
             metropolitan_result = (
-                str(metropolitan_tool.invoke({"origin": origin, "destination": destination})).strip()
+                str(
+                    self._invoke_tool(
+                        metropolitan_tool,
+                        {"origin": origin, "destination": destination},
+                        tool_name="find_direct_bus_lines",
+                    )
+                ).strip()
                 if metropolitan_tool
                 else ""
             )
@@ -3093,8 +3191,7 @@ class TransportAgent(BaseAgent):
         if not tool:
             return None
 
-        self._record_tool_call(tool_name, tool_args)
-        result = tool.invoke(tool_args)
+        result = self._invoke_tool(tool, tool_args, tool_name=tool_name)
         resolved_language = language or infer_response_language(user_query=user_message, default="en")
         formatted_result = self._format_deterministic_tool_result(
             tool_name=tool_name,
@@ -3241,6 +3338,7 @@ class TransportAgent(BaseAgent):
             language = language_match.group(1).lower()
         else:
             language = infer_response_language(user_query=user_message, default="en")
+        effective_user_message = self._rewrite_follow_up_transport_query(user_message, language)
         language_instruction = (
             "Respond ENTIRELY in Portuguese (PT-PT)."
             if language == "pt"
@@ -3257,28 +3355,30 @@ class TransportAgent(BaseAgent):
                 SystemMessage(content=f"Context from other agents:\n{context}")
             )
 
-        messages.append(HumanMessage(content=user_message))
+        messages.append(HumanMessage(content=effective_user_message))
 
         # Skip tool enforcement for greetings/thanks
         is_greeting = any(
-            w in user_message.lower()
+            w in effective_user_message.lower()
             for w in ["hello", "thanks", "obrigado", "tchau", "olá", "bom dia"]
         )
 
         if not is_greeting:
             deterministic_response = self._resolve_deterministic_response(
-                user_message=user_message,
+                user_message=effective_user_message,
                 context=context,
                 language=language,
             )
             if deterministic_response:
+                self._remember_transport_context(effective_user_message)
                 return deterministic_response
 
             deterministic_tool_response = self._invoke_deterministic_tool_call(
-                user_message=user_message,
+                user_message=effective_user_message,
                 language=language,
             )
             if deterministic_tool_response:
+                self._remember_transport_context(effective_user_message)
                 return deterministic_tool_response
 
         response = self.execute_react_loop(
@@ -3291,10 +3391,11 @@ class TransportAgent(BaseAgent):
             ),
         )
 
+        self._remember_transport_context(effective_user_message)
         return finalize_worker_response(
-            self._ensure_realtime_wait_times(user_message, response),
+            self._ensure_realtime_wait_times(effective_user_message, response),
             agent_name="transport",
-            user_query=user_message,
+            user_query=effective_user_message,
             language=language,
         )
 
@@ -3379,7 +3480,7 @@ class TransportAgent(BaseAgent):
                     result = f"Tool '{tool_name}' not found."
                 else:
                     try:
-                        result = tool.invoke(tool_args)
+                        result = self._invoke_tool(tool, tool_args, tool_name=tool_name)
                     except Exception as exc:
                         result = f"Error executing {tool_name}: {exc}"
 

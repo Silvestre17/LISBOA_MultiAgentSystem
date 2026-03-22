@@ -13,6 +13,7 @@
 # ==========================================================================
 
 import json
+import os
 import time
 from copy import deepcopy
 from datetime import datetime
@@ -28,9 +29,11 @@ from agent.utils.langsmith_tracing import (
 )
 from eval.llm_judge import LLMJudge
 from eval.runtime_utils import (
+    aggregate_judge_runs,
     build_cost_payload,
     build_model_id,
     build_model_manifest,
+    build_multi_judge_manifest,
     build_results_output_path,
     build_run_metadata,
     build_usage_payload,
@@ -39,9 +42,12 @@ from eval.runtime_utils import (
     combine_usage_payloads,
     compute_tool_metrics,
     get_pricing_metadata,
+    parse_model_spec,
+    resolve_model_specs,
     select_balanced_subset,
     split_pricing_config,
     summarize_error_categories,
+    write_json_artifact,
 )
 from eval.validators.response_heuristics import run_all_heuristics
 
@@ -62,6 +68,7 @@ MODELS_TO_TEST = [
     # TEST: proprietary model 1
     {"provider": "azure", "model": "gpt-5-mini", "temperature": 0.0},
 ]
+DEFAULT_JUDGE_MODELS = deepcopy(MODELS_TO_TEST)
 
 # Latency SLA thresholds (seconds) per domain
 SLA_THRESHOLDS = {
@@ -79,43 +86,12 @@ def parse_response_model_spec(
     *,
     temperature: float | None = None,
 ) -> dict[str, str | float]:
-    """Parse a CLI response-model spec into the benchmark matrix format.
-
-    Args:
-        model_spec: Model spec in ``provider::model`` or ``provider:model``
-            format.
-        temperature: Optional temperature override applied to the parsed model.
-
-    Returns:
-        Dict ready for the benchmark ``models`` parameter.
-
-    Raises:
-        ValueError: If the spec is malformed or the provider is unsupported.
-    """
-    normalized_spec = str(model_spec or "").strip()
-    if not normalized_spec:
-        raise ValueError("Response model spec cannot be empty.")
-
-    separator = "::" if "::" in normalized_spec else ":" if ":" in normalized_spec else None
-    if separator is None:
-        raise ValueError(
-            "Response model spec must use 'provider::model' or 'provider:model' format."
-        )
-
-    provider, model_name = [part.strip() for part in normalized_spec.split(separator, 1)]
-    normalized_provider = provider.lower()
-    if normalized_provider not in SUPPORTED_MODEL_PROVIDERS:
-        raise ValueError(
-            f"Unsupported provider '{provider}'. Expected one of: {sorted(SUPPORTED_MODEL_PROVIDERS)}"
-        )
-    if not model_name:
-        raise ValueError("Response model spec is missing the model name.")
-
-    return {
-        "provider": normalized_provider,
-        "model": model_name,
-        "temperature": 0.0 if temperature is None else float(temperature),
-    }
+    """Parse a CLI response-model spec into the benchmark matrix format."""
+    return parse_model_spec(
+        model_spec,
+        temperature=temperature,
+        supported_providers=SUPPORTED_MODEL_PROVIDERS,
+    )
 
 
 def resolve_response_models(
@@ -124,28 +100,150 @@ def resolve_response_models(
     temperature: float | None = None,
 ) -> list[dict[str, str | float]]:
     """Return the benchmark response-model matrix after optional CLI overrides."""
-    if not model_specs:
-        default_models = deepcopy(MODELS_TO_TEST)
-        if temperature is not None:
-            for model_config in default_models:
-                model_config["temperature"] = float(temperature)
-        return default_models
+    return resolve_model_specs(
+        MODELS_TO_TEST,
+        model_specs,
+        temperature=temperature,
+        supported_providers=SUPPORTED_MODEL_PROVIDERS,
+    )
 
-    resolved_models: list[dict[str, str | float]] = []
-    seen_configs: set[tuple[str, str, float]] = set()
-    for model_spec in model_specs:
-        parsed = parse_response_model_spec(model_spec, temperature=temperature)
-        dedupe_key = (
-            str(parsed["provider"]),
-            str(parsed["model"]),
-            float(parsed["temperature"]),
+
+def resolve_judge_models(
+    judge_model_specs: list[str] | None = None,
+    *,
+    provider: str | None = None,
+    model_name: str | None = None,
+) -> list[dict[str, str | float]]:
+    """Resolve the benchmark judge matrix after CLI and environment overrides."""
+    env_judge_specs = [
+        spec.strip()
+        for spec in str(os.getenv("EVAL_JUDGE_MODEL_SPECS", "") or "").split(",")
+        if spec.strip()
+    ]
+
+    if judge_model_specs:
+        return resolve_model_specs(
+            DEFAULT_JUDGE_MODELS,
+            judge_model_specs,
+            temperature=0.0,
+            supported_providers=SUPPORTED_MODEL_PROVIDERS,
         )
-        if dedupe_key in seen_configs:
-            continue
-        seen_configs.add(dedupe_key)
-        resolved_models.append(parsed)
+    if env_judge_specs:
+        return resolve_model_specs(
+            DEFAULT_JUDGE_MODELS,
+            env_judge_specs,
+            temperature=0.0,
+            supported_providers=SUPPORTED_MODEL_PROVIDERS,
+        )
 
-    return resolved_models
+    if provider or model_name:
+        resolved_provider = str(provider or os.getenv("EVAL_JUDGE_PROVIDER", DEFAULT_JUDGE_MODELS[0]["provider"]))
+        resolved_model_name = str(model_name or os.getenv("EVAL_JUDGE_MODEL_NAME", DEFAULT_JUDGE_MODELS[0]["model"]))
+        return [
+            parse_model_spec(
+                f"{resolved_provider}::{resolved_model_name}",
+                temperature=0.0,
+                supported_providers=SUPPORTED_MODEL_PROVIDERS,
+            )
+        ]
+
+    return deepcopy(DEFAULT_JUDGE_MODELS)
+
+
+def _build_empty_judge_payload(
+    judge_model_manifest: dict[str, object],
+    pricing_by_model: dict | None,
+    *,
+    call_count: int = 0,
+) -> tuple[dict, dict]:
+    """Return empty-but-shaped usage and cost payloads for a judge model."""
+    model_id = str(judge_model_manifest.get("model_id") or "")
+    empty_usage = build_usage_payload({}, model_id=model_id, call_count=call_count)
+    empty_cost = build_cost_payload(
+        empty_usage,
+        pricing_by_model,
+        model_id=model_id,
+    )
+    return empty_usage, empty_cost
+
+
+def _evaluate_with_judges(
+    *,
+    judges: list[LLMJudge],
+    judge_model_manifests: list[dict[str, object]],
+    query: str,
+    expected_facts: list[str],
+    expected_tools: list[str],
+    actual_tools: list[str],
+    retrieved_context: str,
+    response: str,
+    response_error: str | None,
+    pricing_by_model: dict | None,
+) -> tuple[list[dict], dict[str, object]]:
+    """Evaluate one response with every configured judge and average the scores."""
+    judge_runs: list[dict] = []
+
+    for judge, judge_model_manifest in zip(judges, judge_model_manifests):
+        empty_eval_usage, empty_eval_cost = _build_empty_judge_payload(
+            judge_model_manifest,
+            pricing_by_model,
+            call_count=0,
+        )
+
+        judge_scores = {
+            "composite_score": None,
+            "reasoning": "",
+            "factual_accuracy": None,
+            "tool_usage": None,
+            "completeness": None,
+            "relevance": None,
+            "response_quality": None,
+        }
+        evaluation_usage = empty_eval_usage
+        evaluation_cost = empty_eval_cost
+        judge_error = None
+
+        if response_error is not None:
+            judge_error = f"Generator failed before judgment. Error: {response_error}"
+            judge_scores["reasoning"] = f"Judge skipped because the generator failed: {response_error}"
+        else:
+            try:
+                judge_result = judge.evaluate(
+                    query=query,
+                    expected_facts=expected_facts,
+                    expected_tools=expected_tools,
+                    actual_tools=actual_tools,
+                    retrieved_context=retrieved_context,
+                    response=response,
+                    pricing_by_model=pricing_by_model,
+                )
+                evaluation_usage = judge_result.get("evaluation_usage", empty_eval_usage)
+                evaluation_cost = judge_result.get("evaluation_cost_usd", empty_eval_cost)
+                judge_scores = {
+                    key: value
+                    for key, value in judge_result.items()
+                    if key not in {"evaluation_usage", "evaluation_cost_usd"}
+                }
+                if str(judge_scores.get("reasoning") or "").startswith("Judge Failed"):
+                    judge_error = str(judge_scores.get("reasoning"))
+            except Exception as exc:
+                judge_error = str(exc)
+                judge_scores["reasoning"] = f"Judge API error: {exc}"
+
+        judge_runs.append(
+            {
+                "judge_model": str(judge_model_manifest["model_id"]),
+                "judge_model_config": deepcopy(judge_model_manifest),
+                "scores": judge_scores,
+                "evaluation_usage": evaluation_usage,
+                "evaluation_cost_usd": evaluation_cost,
+                "error": judge_error,
+                "error_type": categorize_error(judge_error),
+            }
+        )
+
+    aggregated = aggregate_judge_runs(judge_runs)
+    return judge_runs, aggregated
 
 
 def load_groundtruth_queries(
@@ -248,6 +346,7 @@ def run_benchmark(
     limit: int = None,
     models: list = MODELS_TO_TEST,
     pricing_by_model: dict | None = None,
+    judge_model_specs: list[str] | None = None,
     judge_provider: str | None = None,
     judge_model: str | None = None,
 ):
@@ -261,8 +360,9 @@ def run_benchmark(
             ``provider::model`` with ``input`` and ``output`` prices in USD per
             million tokens. When provided, each record stores organized
             response/evaluation/combined token counts and costs.
-        judge_provider: Optional provider override for the evaluation judge.
-        judge_model: Optional model override for the evaluation judge.
+        judge_model_specs: Optional repeatable list of judge model specs.
+        judge_provider: Optional provider override for a single evaluation judge.
+        judge_model: Optional model override for a single evaluation judge.
     """
     benchmark_langsmith_project = get_langsmith_scoped_project_name(
         BENCHMARK_LANGSMITH_SCOPE_LABEL,
@@ -292,21 +392,35 @@ def run_benchmark(
                 group_key="domain",
             )
 
-        # Initialize the judge
+        judge_configs = resolve_judge_models(
+            judge_model_specs,
+            provider=judge_provider,
+            model_name=judge_model,
+        )
+
+        # Initialize the judges
         try:
-            judge = LLMJudge(provider=judge_provider, model_name=judge_model)
+            judges = [
+                LLMJudge(
+                    provider=str(judge_config["provider"]),
+                    model_name=str(judge_config["model"]),
+                )
+                for judge_config in judge_configs
+            ]
         except ValueError as e:
             print(f"FAILED TO INIT JUDGE: {e}")
             return
 
-        # TEST: The evaluator model is selected in eval/llm_judge.py via
-        # EVAL_JUDGE_PROVIDER / EVAL_JUDGE_MODEL_NAME, not in the response-model matrix.
-        evaluation_model_manifest = build_model_manifest(
-            judge.provider,
-            judge.model_name,
-            0.0,
-        )
-        evaluation_model_id = evaluation_model_manifest["model_id"]
+        judge_model_manifests = [
+            build_model_manifest(
+                str(judge_config["provider"]),
+                str(judge_config["model"]),
+                float(judge_config.get("temperature", 0.0) or 0.0),
+            )
+            for judge_config in judge_configs
+        ]
+        evaluation_model_manifest = build_multi_judge_manifest(judge_model_manifests)
+        evaluation_model_id = str(evaluation_model_manifest["model_id"])
 
         response_model_manifests = [
             build_model_manifest(
@@ -344,65 +458,27 @@ def run_benchmark(
                     pricing_by_model,
                     model_id=response_model_id,
                 )
-                empty_evaluation_usage = build_usage_payload(
-                    {},
-                    model_id=evaluation_model_id,
-                    call_count=0,
-                )
-                empty_evaluation_cost = build_cost_payload(
-                    empty_evaluation_usage,
-                    pricing_by_model,
-                    model_id=evaluation_model_id,
-                )
-
-                # Skip judge if model failed to save tokens/API costs
                 if error is not None:
                     model_consecutive_errors += 1
-                    judge_result = {
-                        "composite_score": None,
-                        "reasoning": f"Model failed to generate response. Skipped judge. Error: {error}",
-                        "factual_accuracy": None,
-                        "tool_usage": None,
-                        "completeness": None,
-                        "relevance": None,
-                        "response_quality": None,
-                        "evaluation_usage": empty_evaluation_usage,
-                        "evaluation_cost_usd": empty_evaluation_cost,
-                    }
                 else:
                     model_consecutive_errors = 0
-                    try:
-                        # Judge response
-                        judge_result = judge.evaluate(
-                            query=item['query'],
-                            expected_facts=item.get('expected_facts', []),
-                            expected_tools=item.get('expected_tools', []),
-                            actual_tools=tools,
-                            retrieved_context=retrieved_context,
-                            response=response,
-                            pricing_by_model=pricing_by_model,
-                        )
-                    except Exception as e:
-                        print(f"          → [JUDGE ERROR] {e}")
-                        judge_result = {
-                            "composite_score": None,
-                            "reasoning": f"Judge API error: {e}",
-                            "factual_accuracy": None,
-                            "tool_usage": None,
-                            "completeness": None,
-                            "relevance": None,
-                            "response_quality": None,
-                            "evaluation_usage": empty_evaluation_usage,
-                            "evaluation_cost_usd": empty_evaluation_cost,
-                        }
 
-                evaluation_usage = judge_result.get("evaluation_usage", empty_evaluation_usage)
-                evaluation_cost = judge_result.get("evaluation_cost_usd", empty_evaluation_cost)
-                judge_scores = {
-                    key: value
-                    for key, value in judge_result.items()
-                    if key not in {"evaluation_usage", "evaluation_cost_usd"}
-                }
+                judge_runs, aggregated_judges = _evaluate_with_judges(
+                    judges=judges,
+                    judge_model_manifests=judge_model_manifests,
+                    query=item['query'],
+                    expected_facts=item.get('expected_facts', []),
+                    expected_tools=item.get('expected_tools', []),
+                    actual_tools=tools,
+                    retrieved_context=retrieved_context,
+                    response=response,
+                    response_error=error,
+                    pricing_by_model=pricing_by_model,
+                )
+
+                evaluation_usage = aggregated_judges.get("evaluation_usage", build_usage_payload({}, model_id=evaluation_model_id, call_count=0))
+                evaluation_cost = aggregated_judges.get("evaluation_cost_usd", build_cost_payload(build_usage_payload({}, model_id=evaluation_model_id, call_count=0), pricing_by_model, model_id=evaluation_model_id))
+                judge_scores = dict(aggregated_judges.get("scores", {}))
                 combined_usage = combine_usage_payloads([response_usage, evaluation_usage])
                 combined_cost = combine_cost_payloads([response_cost, evaluation_cost])
 
@@ -425,10 +501,12 @@ def run_benchmark(
                     "edge_case": item.get("edge_case", False),
                     "edge_type": item.get("edge_type", None),
                     "expected_behavior": item.get("expected_behavior"),
+                    "agents_used": [item["domain"]],
                     "response_model": response_model_id,
                     "response_model_config": deepcopy(response_model_manifest),
                     "evaluation_model": evaluation_model_id,
                     "evaluation_model_config": deepcopy(evaluation_model_manifest),
+                    "evaluation_models": list(evaluation_model_manifest.get("judge_models", [])),
                     "latency_s": round(latency, 2),
                     "error": error,
                     "error_type": error_type,
@@ -438,8 +516,13 @@ def run_benchmark(
                     "expected_facts": item.get("expected_facts", []),
                     "retrieved_context": retrieved_context,
                     "scores": judge_scores,
+                    "judge_runs": judge_runs,
+                    "scores_by_judge": aggregated_judges.get("scores_by_judge", {}),
+                    "judge_summary": aggregated_judges.get("judge_summary", {}),
                     "response_usage": response_usage,
                     "response_cost_usd": response_cost,
+                    "agent_usage": {item["domain"]: deepcopy(response_usage)},
+                    "agent_costs": {item["domain"]: deepcopy(response_cost)},
                     "evaluation_usage": evaluation_usage,
                     "evaluation_cost_usd": evaluation_cost,
                     "combined_usage": combined_usage,
@@ -463,30 +546,34 @@ def run_benchmark(
         # Save Results
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path = build_results_output_path("benchmark", "benchmark_results", timestamp)
-        with open(output_path, "w", encoding="utf-8") as f:
-            benchmark_metadata = build_run_metadata(
-                GROUNDTRUTH_QUERIES_PATH,
-                groundtruth_queries,
-                response_models=[manifest["model_id"] for manifest in response_model_manifests],
-                evaluation_model=evaluation_model_id,
-                extra={
-                    "response_model_configs": response_model_manifests,
-                    "evaluation_model_config": evaluation_model_manifest,
-                    "benchmark_domains": list(BENCHMARK_DOMAINS),
-                    "langsmith_enabled": LANGSMITH_AVAILABLE,
-                    "langsmith_project": benchmark_langsmith_project,
-                    "timestamp": datetime.now().isoformat(),
-                    "real_services": True,
-                    "pricing_model_count": len(pricing_catalog),
-                    "output_directory": str(output_path.parent),
-                    **get_pricing_metadata(pricing_by_model),
-                },
-            )
-            json.dump({
+        benchmark_metadata = build_run_metadata(
+            GROUNDTRUTH_QUERIES_PATH,
+            groundtruth_queries,
+            response_models=[manifest["model_id"] for manifest in response_model_manifests],
+            evaluation_model=evaluation_model_id,
+            extra={
+                "response_model_configs": response_model_manifests,
+                "evaluation_model_config": evaluation_model_manifest,
+                "benchmark_domains": list(BENCHMARK_DOMAINS),
+                "langsmith_enabled": LANGSMITH_AVAILABLE,
+                "langsmith_project": benchmark_langsmith_project,
+                "timestamp": datetime.now().isoformat(),
+                "real_services": True,
+                "evaluation_models": list(evaluation_model_manifest.get("judge_models", [])),
+                "judge_model_configs": judge_model_manifests,
+                "pricing_model_count": len(pricing_catalog),
+                "output_directory": str(output_path.parent),
+                **get_pricing_metadata(pricing_by_model),
+            },
+        )
+        write_json_artifact(
+            {
                 "benchmark_metadata": benchmark_metadata,
                 "summary": summary,
                 "benchmark_results": results,
-            }, f, indent=2, ensure_ascii=False)
+            },
+            output_path,
+        )
         
         print(f"\nBenchmark complete. Results saved to {output_path}")
 
@@ -508,12 +595,17 @@ def _build_summary(results: list) -> dict:
 
     def _compact_cost(payload: dict) -> dict:
         return {
+            "model_id": payload.get("model_id"),
+            "pricing_lookup_key": payload.get("pricing_lookup_key"),
             "pricing_found": bool(payload.get("pricing_found", False)),
             "pricing_complete": bool(payload.get("pricing_complete", False)),
             "tokens": payload.get(
                 "tokens",
                 {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
             ),
+            "input_per_million_usd": None if payload.get("input_per_million_usd") is None else float(payload.get("input_per_million_usd") or 0.0),
+            "output_per_million_usd": None if payload.get("output_per_million_usd") is None else float(payload.get("output_per_million_usd") or 0.0),
+            "cached_input_per_million_usd": None if payload.get("cached_input_per_million_usd") is None else float(payload.get("cached_input_per_million_usd") or 0.0),
             "input_cost_usd": float(payload.get("input_cost_usd", 0.0) or 0.0),
             "output_cost_usd": float(payload.get("output_cost_usd", 0.0) or 0.0),
             "total_cost_usd": float(payload.get("total_cost_usd", 0.0) or 0.0),
@@ -643,16 +735,22 @@ if __name__ == "__main__":
         help="Optional temperature applied to the selected benchmark response models.",
     )
     parser.add_argument(
+        "--judge-model-spec",
+        action="append",
+        dest="judge_model_specs",
+        help="Repeatable evaluation-judge model spec in provider::model format, for example lmstudio::qwen/qwen3.5-9b.",
+    )
+    parser.add_argument(
         "--judge-provider",
         type=str,
         default=None,
-        help="Optional provider override for the evaluation judge.",
+        help="Optional provider override for a single evaluation judge when --judge-model-spec is not used.",
     )
     parser.add_argument(
         "--judge-model",
         type=str,
         default=None,
-        help="Optional model override for the evaluation judge.",
+        help="Optional model override for a single evaluation judge when --judge-model-spec is not used.",
     )
     args = parser.parse_args()
     
@@ -665,6 +763,7 @@ if __name__ == "__main__":
     run_benchmark(
         limit=limit,
         models=selected_models,
+        judge_model_specs=args.judge_model_specs,
         judge_provider=args.judge_provider,
         judge_model=args.judge_model,
     )

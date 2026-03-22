@@ -268,21 +268,21 @@ class WeatherAgent(BaseAgent):
         if (wants_warnings or (wants_forecast and not wants_current)) and not wants_current:
             warnings_tool = self._get_tool_by_name("get_weather_warnings")
             if warnings_tool:
-                sections.append(warnings_tool.invoke({"area": "LSB"}))
+                sections.append(self._invoke_tool(warnings_tool, {"area": "LSB"}))
 
         if wants_current:
             current_tool = self._get_tool_by_name("get_current_weather_summary")
             if current_tool:
-                sections.append(current_tool.invoke({}))
+                sections.append(self._invoke_tool(current_tool, {}))
 
         forecast_tool = self._get_tool_by_name("get_weather_forecast")
         if forecast_tool and wants_forecast and requested_forecast_days:
-            sections.append(forecast_tool.invoke({"days": requested_forecast_days}))
+            sections.append(self._invoke_tool(forecast_tool, {"days": requested_forecast_days}))
 
         if not sections:
             current_tool = self._get_tool_by_name("get_current_weather_summary")
             if current_tool:
-                sections.append(current_tool.invoke({}))
+                sections.append(self._invoke_tool(current_tool, {}))
 
         if not sections:
             return "Unable to retrieve weather data at the moment."

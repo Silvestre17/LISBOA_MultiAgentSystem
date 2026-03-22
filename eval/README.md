@@ -136,7 +136,7 @@ The dataset is designed so that `expected_tools` collectively reference the expo
 
 ### 🤖 LLM-as-a-Judge
 
-`llm_judge.py` uses a configurable Azure or OpenAI compatible judge model with structured output to score five dimensions on a 1 to 5 scale:
+`llm_judge.py` uses configurable Azure-compatible judges with structured output to score five dimensions on a 1 to 5 scale:
 
 - factual accuracy
 - tool usage
@@ -144,7 +144,16 @@ The dataset is designed so that `expected_tools` collectively reference the expo
 - relevance
 - response quality
 
-The current documented default judge path is `gpt-5-mini`, overrideable through `EVAL_JUDGE_MODEL_NAME` and `EVAL_JUDGE_PROVIDER`.
+As of 2026-03, the benchmark and ablation runners can evaluate the same response with more than one judge model, persist every raw `judge_runs` entry, and store an averaged compatibility `scores` block so downstream readers do not need to recompute the mean manually.
+
+If one judge fails, that failed run is still persisted in `judge_runs` and flagged in `judge_summary`, but it is excluded from the averaged compatibility `scores` block.
+
+The default evaluation matrix is now a closed plus open judge pair:
+
+- `azure::gpt-5-mini`
+- `lmstudio::qwen/qwen3.5-9b`
+
+This matrix can be overridden with repeatable `--judge-model-spec provider::model` flags or with `EVAL_JUDGE_MODEL_SPECS`.
 
 Bias controls already present in the judge flow include:
 
@@ -173,9 +182,11 @@ Persisted outputs can include:
 - tool registry fingerprint
 - response model metadata and configs
 - evaluation model metadata and configs
+- multi-judge metadata including `evaluation_models`, `judge_model_configs`, and per-record `judge_runs`
 - token usage blocks for response, evaluation, and combined calls
 - optional cost accounting via `pricing_by_model`
 - per-call usage breakdown for the LISBOA arm when available
+- per-agent usage and per-agent cost blocks for LISBOA ablation records when available
 
 Expected pricing structure:
 
@@ -210,16 +221,16 @@ Flat mappings also work.
 - `transport`
 - `researcher`
 
-Each output record can contain scores, tool metrics, heuristics, latency, SLA compliance, model metadata, and optional cost blocks.
+Each output record can contain averaged compatibility `scores`, raw `judge_runs`, `scores_by_judge`, tool metrics, heuristics, latency, SLA compliance, model metadata, and organized response/evaluation/combined cost blocks.
 
 ### Ablation scope
 
-`run_ablation.py` compares:
+`run_ablation.py` compares two fair profile pairs:
 
-- **zero-shot** responses from a direct model call
-- **LISBOA** responses from the full multi-agent pipeline
+- a **closed-source pair**, where zero-shot and LISBOA both use the closed response profile
+- an **open-model pair**, where zero-shot and LISBOA both use the open response profile
 
-This is where the thesis can compare grounded orchestration against an unguided baseline using the same evaluation rubric.
+Within each pair, the zero-shot and LISBOA arms are judged by the same multi-judge matrix. Persisted ablation records keep the primary compatibility `metrics` block for the primary profile and store every profile-specific comparison under `comparisons`.
 
 ### Strict live coverage scope
 
@@ -279,8 +290,10 @@ python -m pytest eval/tests/test_dataset_integrity.py eval/tests/test_benchmark_
 python eval/run_benchmark.py --mode run_test
 python eval/run_benchmark.py --mode full
 python eval/run_benchmark.py --limit 5
+python eval/run_benchmark.py --limit 3 --judge-model-spec azure::gpt-5-mini --judge-model-spec lmstudio::qwen/qwen3.5-9b
 python eval/run_ablation.py --mode run_test
 python eval/run_ablation.py --mode full
+python eval/run_ablation.py --limit 3 --open-model-spec azure::Kimi-K2.5 --judge-model-spec azure::gpt-5-mini --judge-model-spec lmstudio::qwen/qwen3.5-9b
 ```
 
 ### Coverage and prompt-driven checks
@@ -296,7 +309,10 @@ python -m pytest tests/test_tool_prompt_coverage.py --run-live -m "live and cove
 
 ```bash
 python eval/human_calibration/run_calibration.py --human eval/human_calibration/calibration_filled.json --benchmark eval/results/benchmark/benchmark_results_YYYYMMDD_HHMMSS.json
+python eval/human_calibration/run_calibration.py --human eval/human_calibration/calibration_filled.json --benchmark eval/results/benchmark/benchmark_results_YYYYMMDD_HHMMSS.json --judge-source azure::gpt-5-mini
 ```
+
+Use `--judge-source average` (default) to read the compatibility-average `scores` block, or pass a specific judge model id from `judge_runs` to calibrate one judge independently.
 
 ## 🔐 Environment requirements
 

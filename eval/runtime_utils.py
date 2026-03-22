@@ -10,14 +10,26 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections import Counter
 from copy import deepcopy
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Optional, Sequence
 
 from tools import __all__ as EXPORTED_TOOL_NAMES
 
 RESULTS_ROOT = Path(__file__).with_name("results")
+SUPPORTED_MODEL_PROVIDERS = frozenset({"azure", "openai", "lmstudio"})
+JUDGE_NUMERIC_SCORE_FIELDS = (
+    "factual_accuracy",
+    "tool_usage",
+    "completeness",
+    "relevance",
+    "response_quality",
+    "composite_score",
+)
+JUDGE_SCORE_FIELDS = JUDGE_NUMERIC_SCORE_FIELDS + ("reasoning",)
 PRICING_METADATA_ALIASES = {
     "source": "pricing_source",
     "pricing_source": "pricing_source",
@@ -26,6 +38,18 @@ PRICING_METADATA_ALIASES = {
     "snapshot_date": "pricing_snapshot_date",
     "pricing_snapshot_date": "pricing_snapshot_date",
 }
+JSON_MONEY_FIELD_NAMES = (
+    "input_cost_usd",
+    "output_cost_usd",
+    "total_cost_usd",
+    "input_per_million_usd",
+    "output_per_million_usd",
+    "cached_input_per_million_usd",
+)
+MIN_JSON_MONEY_DECIMALS = 5
+_JSON_MONEY_FIELD_PATTERN = re.compile(
+    rf'(?P<prefix>\s*"(?:{"|".join(JSON_MONEY_FIELD_NAMES)})"\s*:\s*)(?P<value>-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?P<suffix>\s*,?\s*)$'
+)
 
 
 def _coerce_int(value: Any) -> int:
@@ -49,6 +73,56 @@ def _coerce_float(value: Any) -> float | None:
 def _round_money(value: float) -> float:
     """Rounds small USD values while preserving useful precision."""
     return round(float(value), 10)
+
+
+def _round_score(value: float) -> float:
+    """Round averaged judge scores while preserving useful report precision."""
+    return round(float(value), 4)
+
+
+def format_json_money_number(
+    value: Any,
+    *,
+    min_decimal_places: int = MIN_JSON_MONEY_DECIMALS,
+) -> str:
+    """Format a USD numeric literal with a minimum number of decimal places."""
+    try:
+        decimal_value = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return str(value)
+
+    literal = format(decimal_value, "f")
+    if "." not in literal:
+        return f"{literal}.{'0' * min_decimal_places}"
+
+    integer_part, fractional_part = literal.split(".", 1)
+    trimmed_fractional = fractional_part.rstrip("0")
+    required_length = max(len(trimmed_fractional), min_decimal_places)
+    normalized_fractional = trimmed_fractional.ljust(required_length, "0")
+    return f"{integer_part}.{normalized_fractional}"
+
+
+def serialize_json_artifact(payload: Any) -> str:
+    """Serialize an evaluation artefact with readable USD field precision."""
+    serialized = json.dumps(payload, indent=2, ensure_ascii=False)
+    formatted_lines: list[str] = []
+    for line in serialized.splitlines():
+        match = _JSON_MONEY_FIELD_PATTERN.match(line)
+        if not match:
+            formatted_lines.append(line)
+            continue
+        formatted_lines.append(
+            f"{match.group('prefix')}{format_json_money_number(match.group('value'))}{match.group('suffix')}"
+        )
+    return "\n".join(formatted_lines) + "\n"
+
+
+def write_json_artifact(payload: Any, output_path: str | Path) -> None:
+    """Persist a JSON artefact with stable minimum-decimal USD formatting."""
+    Path(output_path).write_text(
+        serialize_json_artifact(payload),
+        encoding="utf-8",
+    )
 
 
 def normalize_model_lookup_key(model_id: str | None) -> str:
@@ -471,6 +545,88 @@ def build_model_id(provider: str, model_name: str) -> str:
     return f"{provider}::{model_name}"
 
 
+def parse_model_spec(
+    model_spec: str,
+    *,
+    temperature: float | None = None,
+    supported_providers: Optional[Sequence[str]] = None,
+) -> dict[str, str | float]:
+    """Parse a provider-qualified model spec into a stable config dict.
+
+    Args:
+        model_spec: Model spec in ``provider::model`` or ``provider:model`` format.
+        temperature: Optional temperature override.
+        supported_providers: Optional allowed provider family list.
+
+    Returns:
+        Dict containing ``provider``, ``model``, and ``temperature``.
+
+    Raises:
+        ValueError: If the spec is empty, malformed, or uses an unsupported provider.
+    """
+    normalized_spec = str(model_spec or "").strip()
+    if not normalized_spec:
+        raise ValueError("Model spec cannot be empty.")
+
+    separator = "::" if "::" in normalized_spec else ":" if ":" in normalized_spec else None
+    if separator is None:
+        raise ValueError(
+            "Model spec must use 'provider::model' or 'provider:model' format."
+        )
+
+    provider, model_name = [part.strip() for part in normalized_spec.split(separator, 1)]
+    normalized_provider = provider.lower()
+    allowed = set(supported_providers or SUPPORTED_MODEL_PROVIDERS)
+    if normalized_provider not in allowed:
+        raise ValueError(
+            f"Unsupported provider '{provider}'. Expected one of: {sorted(allowed)}"
+        )
+    if not model_name:
+        raise ValueError("Model spec is missing the model name.")
+
+    return {
+        "provider": normalized_provider,
+        "model": model_name,
+        "temperature": 0.0 if temperature is None else float(temperature),
+    }
+
+
+def resolve_model_specs(
+    default_models: Sequence[dict[str, Any]],
+    model_specs: list[str] | None = None,
+    *,
+    temperature: float | None = None,
+    supported_providers: Optional[Sequence[str]] = None,
+) -> list[dict[str, str | float]]:
+    """Resolve a repeatable list of CLI model specs against default configs."""
+    if not model_specs:
+        resolved_defaults = deepcopy(list(default_models))
+        if temperature is not None:
+            for model_config in resolved_defaults:
+                model_config["temperature"] = float(temperature)
+        return resolved_defaults
+
+    resolved_models: list[dict[str, str | float]] = []
+    seen_configs: set[tuple[str, str, float]] = set()
+    for model_spec in model_specs:
+        parsed = parse_model_spec(
+            model_spec,
+            temperature=temperature,
+            supported_providers=supported_providers,
+        )
+        dedupe_key = (
+            str(parsed["provider"]),
+            str(parsed["model"]),
+            float(parsed["temperature"]),
+        )
+        if dedupe_key in seen_configs:
+            continue
+        seen_configs.add(dedupe_key)
+        resolved_models.append(parsed)
+
+    return resolved_models
+
+
 def build_model_manifest(
     provider: str,
     model_name: str,
@@ -489,6 +645,89 @@ def build_model_manifest(
     if extra:
         manifest.update(extra)
     return manifest
+
+
+def build_multi_judge_manifest(
+    judge_model_manifests: Sequence[dict[str, Any]],
+    *,
+    aggregation: str = "mean",
+) -> dict[str, Any]:
+    """Build a compact synthetic manifest describing a multi-judge average."""
+    judge_models = [manifest.get("model_id") for manifest in judge_model_manifests if manifest.get("model_id")]
+    return {
+        "kind": "judge_average",
+        "model_id": f"judge_average::{len(judge_models)}",
+        "aggregation": aggregation,
+        "judge_models": judge_models,
+        "judge_model_configs": deepcopy(list(judge_model_manifests)),
+    }
+
+
+def aggregate_judge_runs(judge_runs: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate judge-level outputs into compatibility-friendly average fields."""
+    normalized_runs = [deepcopy(run) for run in judge_runs]
+    successful_runs = []
+    for run in normalized_runs:
+        if run.get("error"):
+            continue
+        scores = run.get("scores", {})
+        if not isinstance(scores, dict):
+            continue
+        if any(scores.get(field) is not None for field in JUDGE_NUMERIC_SCORE_FIELDS):
+            successful_runs.append(run)
+
+    averaged_scores: dict[str, Any] = {field: None for field in JUDGE_SCORE_FIELDS}
+    if successful_runs:
+        for field in JUDGE_NUMERIC_SCORE_FIELDS:
+            values = [
+                float(run.get("scores", {}).get(field))
+                for run in successful_runs
+                if run.get("scores", {}).get(field) is not None
+            ]
+            averaged_scores[field] = _round_score(sum(values) / len(values)) if values else None
+
+        reasoning_parts = []
+        for run in successful_runs:
+            judge_model = str(run.get("judge_model") or "unknown_judge")
+            reasoning = str(run.get("scores", {}).get("reasoning") or "").strip()
+            if reasoning:
+                reasoning_parts.append(f"[{judge_model}] {reasoning}")
+        averaged_scores["reasoning"] = (
+            "\n\n".join(reasoning_parts)
+            if reasoning_parts
+            else "No successful judge reasoning available."
+        )
+    else:
+        averaged_scores["reasoning"] = "No successful judge evaluations were available."
+
+    scores_by_judge: dict[str, Any] = {}
+    for index, run in enumerate(normalized_runs, start=1):
+        judge_model = str(run.get("judge_model") or f"judge_{index}")
+        unique_key = judge_model if judge_model not in scores_by_judge else f"{judge_model}#{index}"
+        scores_by_judge[unique_key] = deepcopy(run.get("scores", {}))
+
+    return {
+        "scores": averaged_scores,
+        "scores_by_judge": scores_by_judge,
+        "evaluation_usage": combine_usage_payloads(
+            [run.get("evaluation_usage", {}) for run in normalized_runs]
+        ),
+        "evaluation_cost_usd": combine_cost_payloads(
+            [run.get("evaluation_cost_usd", {}) for run in normalized_runs]
+        ),
+        "judge_summary": {
+            "judge_count": len(normalized_runs),
+            "successful_judges": len(successful_runs),
+            "failed_judges": len(normalized_runs) - len(successful_runs),
+            "all_judges_succeeded": bool(normalized_runs) and len(successful_runs) == len(normalized_runs),
+            "averaging_method": "mean",
+            "judge_models": [
+                run.get("judge_model")
+                for run in normalized_runs
+                if run.get("judge_model")
+            ],
+        },
+    }
 
 
 def ensure_results_dir(result_type: str) -> Path:

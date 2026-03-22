@@ -7,6 +7,8 @@
 # ==========================================================================
 
 import re
+import unicodedata
+from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -35,7 +37,63 @@ class SupervisorAgent(BaseAgent):
     @staticmethod
     def _normalize_query(user_message: str) -> str:
         """Normalizes user text for lightweight routing heuristics."""
-        return re.sub(r"[!?.,;:]+", "", (user_message or "").strip().lower())
+        normalized = unicodedata.normalize("NFKD", str(user_message or ""))
+        normalized = "".join(
+            char for char in normalized if not unicodedata.combining(char)
+        )
+        normalized = re.sub(r"[!?.,;:]+", " ", normalized.lower()).strip()
+        return re.sub(r"\s+", " ", normalized)
+
+    @staticmethod
+    def _query_tokens(text: str) -> List[str]:
+        """Extract normalized alphanumeric tokens for lightweight fuzzy checks."""
+        return [token for token in re.findall(r"[a-z0-9]+", str(text or "")) if token]
+
+    @classmethod
+    def _contains_domain_keyword(
+        cls,
+        user_message: str,
+        keywords: List[str],
+        *,
+        minimum_ratio: float = 0.86,
+    ) -> bool:
+        """Returns whether a query matches a domain keyword exactly or with a mild typo.
+
+        This keeps the supervisor deterministic for obvious single-domain queries
+        while tolerating small spelling mistakes such as ``weathr`` or ``musems``.
+        """
+        normalized = cls._normalize_query(user_message)
+        if not normalized:
+            return False
+
+        normalized_keywords: List[str] = []
+        for keyword in keywords:
+            normalized_keyword = cls._normalize_query(keyword)
+            if not normalized_keyword:
+                continue
+            normalized_keywords.append(normalized_keyword)
+            if " " in normalized_keyword:
+                if normalized_keyword in normalized:
+                    return True
+                continue
+            if re.search(rf"\b{re.escape(normalized_keyword)}\b", normalized):
+                return True
+
+        query_tokens = cls._query_tokens(normalized)
+        single_token_keywords = [
+            keyword for keyword in normalized_keywords if " " not in keyword and len(keyword) >= 4
+        ]
+        for token in query_tokens:
+            if len(token) < 4:
+                continue
+            for keyword in single_token_keywords:
+                score = SequenceMatcher(None, token, keyword).ratio()
+                if token in keyword or keyword in token:
+                    score += 0.08
+                if score >= minimum_ratio:
+                    return True
+
+        return False
 
     @classmethod
     def _is_greeting_only(cls, user_message: str) -> bool:
@@ -59,8 +117,8 @@ class SupervisorAgent(BaseAgent):
             "obrigada",
         }
 
-    @staticmethod
-    def _has_lisbon_context(message_lower: str) -> bool:
+    @classmethod
+    def _has_lisbon_context(cls, message_lower: str) -> bool:
         """Returns whether the query clearly references Lisbon/AML topics."""
         lisbon_keywords = [
             "lisbon",
@@ -97,11 +155,16 @@ class SupervisorAgent(BaseAgent):
             "sintra",
             "cascais",
         ]
-        return any(keyword in message_lower for keyword in lisbon_keywords)
+        return cls._contains_domain_keyword(
+            message_lower,
+            lisbon_keywords,
+            minimum_ratio=0.88,
+        )
 
-    @staticmethod
-    def _looks_like_weather_query(message_lower: str) -> bool:
+    @classmethod
+    def _looks_like_weather_query(cls, message_lower: str) -> bool:
         """Detects weather queries without over-matching generic PT words like `tempo`."""
+        normalized = cls._normalize_query(message_lower)
         weather_patterns = [
             r"\bweather\b",
             r"\brain\b",
@@ -117,13 +180,31 @@ class SupervisorAgent(BaseAgent):
             r"\bqual (?:é|e) o tempo\b",
             r"\btempo em\b",
             r"\btempo hoje\b",
-            r"\btempo amanh[ãa]\b",
+            r"\btempo amanh[aã]\b",
         ]
-        return any(re.search(pattern, message_lower) for pattern in weather_patterns)
+        if any(re.search(pattern, normalized) for pattern in weather_patterns):
+            return True
 
-    @staticmethod
-    def _looks_like_transport_query(message_lower: str) -> bool:
+        return cls._contains_domain_keyword(
+            normalized,
+            [
+                "weather",
+                "forecast",
+                "temperature",
+                "meteo",
+                "rain",
+                "chover",
+                "previsao",
+                "chuva",
+                "temperatura",
+            ],
+            minimum_ratio=0.85,
+        )
+
+    @classmethod
+    def _looks_like_transport_query(cls, message_lower: str) -> bool:
         """Detects transport and routing queries from natural PT/EN phrasing, not only explicit mode words."""
+        normalized = cls._normalize_query(message_lower)
         transport_patterns = [
             r"\bmetro\b",
             r"\bbus\b",
@@ -139,7 +220,7 @@ class SupervisorAgent(BaseAgent):
             r"\bbarco\b",
             r"\bfertagus\b",
             r"\bcp\b",
-            r"\bfrequ[êe]ncia\b",
+            r"\bfrequencia\b",
             r"\bfrequency\b",
             r"\bheadway\b",
             r"\bintervalo\b",
@@ -154,16 +235,41 @@ class SupervisorAgent(BaseAgent):
             r"\bcomo vou\b",
             r"\bcomo posso ir\b",
             r"\bcomo ir\b",
-            r"\ba partir d(?:o|a)\b",
+            r"\ba partir do\b",
+            r"\ba partir da\b",
             r"\bfrom\s+.+\s+to\s+.+",
-            r"\bdo\s+.+\s+para\s+.+",
         ]
-        return any(re.search(pattern, message_lower) for pattern in transport_patterns)
+        if any(re.search(pattern, normalized) for pattern in transport_patterns):
+            return True
+
+        return cls._contains_domain_keyword(
+            normalized,
+            [
+                "metro",
+                "autocarro",
+                "comboio",
+                "train",
+                "bus",
+                "carris",
+                "transport",
+                "transporte",
+                "route",
+                "rota",
+                "station",
+                "paragem",
+                "tram",
+                "departure",
+                "departures",
+                "frequency",
+                "frequencia",
+            ],
+            minimum_ratio=0.85,
+        )
 
     @classmethod
     def _is_obvious_out_of_scope(cls, user_message: str) -> bool:
         """Detects clearly out-of-scope trivia, math, coding, or translation queries."""
-        message_lower = (user_message or "").lower()
+        message_lower = cls._normalize_query(user_message)
         if cls._has_lisbon_context(message_lower):
             return False
 
@@ -289,7 +395,7 @@ class SupervisorAgent(BaseAgent):
         if cls._looks_like_follow_up(user_message) or cls._is_planning_query(user_message):
             return None
 
-        message_lower = (user_message or "").lower()
+        message_lower = cls._normalize_query(user_message)
         weather_hit = cls._looks_like_weather_query(message_lower)
         transport_terms = [
             "metro", "bus", "autocarro", "comboio", "train", "carris",
@@ -310,10 +416,14 @@ class SupervisorAgent(BaseAgent):
             "library", "biblioteca", "police", "polícia", "policia",
         ]
 
-        transport_hit = cls._looks_like_transport_query(message_lower) or any(term in message_lower for term in transport_terms)
-        event_hit = any(term in message_lower for term in event_terms)
-        place_hit = any(term in message_lower for term in place_terms)
-        service_hit = any(term in message_lower for term in service_terms)
+        transport_hit = cls._looks_like_transport_query(message_lower) or cls._contains_domain_keyword(
+            message_lower,
+            transport_terms,
+            minimum_ratio=0.85,
+        )
+        event_hit = cls._contains_domain_keyword(message_lower, event_terms, minimum_ratio=0.84)
+        place_hit = cls._contains_domain_keyword(message_lower, place_terms, minimum_ratio=0.82)
+        service_hit = cls._contains_domain_keyword(message_lower, service_terms, minimum_ratio=0.84)
 
         if weather_hit and not any([transport_hit, event_hit, place_hit, service_hit]):
             return {
@@ -338,10 +448,96 @@ class SupervisorAgent(BaseAgent):
 
         return None
 
-    @staticmethod
-    def _is_planning_query(user_message: str) -> bool:
+    @classmethod
+    def _follow_up_domain_override(
+        cls,
+        user_message: str,
+        conversation_history: Optional[List],
+    ) -> Optional[Dict[str, Any]]:
+        """Routes short follow-ups by reusing the current or previous domain safely."""
+        if not conversation_history or not cls._looks_like_follow_up(user_message):
+            return None
+
+        event_terms = [
+            "event", "events", "evento", "eventos", "concert", "concerto",
+            "festival", "exhibition", "exposição", "exposicao", "music", "música",
+            "musica", "what's on", "o que há", "o que ha",
+        ]
+        place_terms = [
+            "attraction", "attractions", "atração", "atrações", "atracao", "atracoes",
+            "museum", "museu", "monument", "monumento", "miradouro", "places", "locais",
+            "restaurant", "restaurante", "what to visit", "o que visitar",
+        ]
+        service_terms = [
+            "pharmacy", "farmácia", "farmacia", "hospital", "school", "escola",
+            "library", "biblioteca", "police", "polícia", "policia",
+        ]
+        transport_terms = [
+            "metro", "bus", "autocarro", "comboio", "train", "carris", "tram",
+            "elétrico", "eletrico", "route", "rota", "station", "estação", "estacao",
+            "stop", "paragem", "departure", "departures", "chegar", "get there",
+        ]
+
+        def infer_domain(text: str) -> Optional[str]:
+            text_lower = cls._normalize_query(text)
+            if cls._is_planning_query(text_lower):
+                return "planner"
+            if cls._looks_like_weather_query(text_lower):
+                return "weather"
+            if cls._looks_like_transport_query(text_lower) or cls._contains_domain_keyword(
+                text_lower,
+                transport_terms,
+                minimum_ratio=0.85,
+            ):
+                return "transport"
+            if cls._contains_domain_keyword(
+                text_lower,
+                event_terms + place_terms + service_terms,
+                minimum_ratio=0.82,
+            ):
+                return "researcher"
+            return None
+
+        current_domain = infer_domain(user_message)
+        if current_domain == "planner":
+            return {
+                "reasoning": "Follow-up domain override from current planning intent",
+                "agents": ["planner", "researcher"],
+                "direct_response": None,
+            }
+        if current_domain:
+            return {
+                "reasoning": f"Follow-up domain override from current query ({current_domain})",
+                "agents": [current_domain],
+                "direct_response": None,
+            }
+
+        last_user_message = None
+        for msg in reversed(conversation_history):
+            if isinstance(msg, HumanMessage) and msg.content:
+                last_user_message = str(msg.content)
+                break
+
+        previous_domain = infer_domain(last_user_message or "")
+        if previous_domain == "planner":
+            return {
+                "reasoning": "Follow-up domain override from previous planning query",
+                "agents": ["planner", "researcher"],
+                "direct_response": None,
+            }
+        if previous_domain:
+            return {
+                "reasoning": f"Follow-up domain override from previous user query ({previous_domain})",
+                "agents": [previous_domain],
+                "direct_response": None,
+            }
+
+        return None
+
+    @classmethod
+    def _is_planning_query(cls, user_message: str) -> bool:
         """Detects itinerary/planning intent without over-matching words like `today`."""
-        message_lower = user_message.lower()
+        message_lower = cls._normalize_query(user_message)
         planning_patterns = [
             r"\bplan\b",
             r"\bplan my day\b",
@@ -360,7 +556,14 @@ class SupervisorAgent(BaseAgent):
             r"\bir a vários? locais\b",
             r"\bvisit multiple\b",
         ]
-        return any(re.search(pattern, message_lower) for pattern in planning_patterns)
+        if any(re.search(pattern, message_lower) for pattern in planning_patterns):
+            return True
+
+        return cls._contains_domain_keyword(
+            message_lower,
+            ["plan", "itinerary", "roteiro", "plano", "agenda", "schedule"],
+            minimum_ratio=0.86,
+        )
 
     @staticmethod
     def _planning_query_mentions_weather(user_message: str) -> bool:
@@ -408,6 +611,10 @@ class SupervisorAgent(BaseAgent):
         single_domain_override = self._single_domain_override(user_message)
         if single_domain_override:
             return single_domain_override
+
+        follow_up_override = self._follow_up_domain_override(user_message, conversation_history)
+        if follow_up_override:
+            return follow_up_override
 
         system_prompt = get_supervisor_prompt(language)
 
