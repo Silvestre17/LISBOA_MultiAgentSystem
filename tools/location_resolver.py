@@ -114,6 +114,27 @@ _CURATED_DISPLAY_NAMES = {
 }
 
 
+def _build_nominatim_search_params(query: str) -> Dict[str, Any]:
+    """Builds a Nominatim query bounded to Portugal and the AML viewbox.
+
+    Restricting the search window reduces false positives for similarly named
+    places outside the system scope and keeps geocoding aligned with the AML.
+    """
+    viewbox = (
+        f"{AML_BOUNDS['lon_min']},{AML_BOUNDS['lat_max']},"
+        f"{AML_BOUNDS['lon_max']},{AML_BOUNDS['lat_min']}"
+    )
+    return {
+        "q": query,
+        "format": "jsonv2",
+        "limit": 8,
+        "addressdetails": 1,
+        "countrycodes": "pt",
+        "viewbox": viewbox,
+        "bounded": 1,
+    }
+
+
 def normalize_location_text(text: str) -> str:
     """Normalizes free-form location text for matching.
 
@@ -259,12 +280,7 @@ def _fetch_nominatim_results_cached(query: str) -> List[Dict[str, Any]]:
         Raw list of result dictionaries.
     """
     headers = {"User-Agent": NOMINATIM_USER_AGENT}
-    params = {
-        "q": query,
-        "format": "jsonv2",
-        "limit": 8,
-        "addressdetails": 1,
-    }
+    params = _build_nominatim_search_params(query)
 
     try:
         response = requests.get(
@@ -278,6 +294,9 @@ def _fetch_nominatim_results_cached(query: str) -> List[Dict[str, Any]]:
         if not isinstance(payload, list):
             return []
         return payload
+    except ValueError as exc:
+        logger.info("Invalid Nominatim JSON for '%s': %s", query, exc)
+        return []
     except requests.RequestException as exc:
         logger.info("Nominatim lookup failed for '%s': %s", query, exc)
         return []

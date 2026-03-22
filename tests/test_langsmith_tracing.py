@@ -273,10 +273,12 @@ def test_request_tracking_status_marks_active_request_as_save_attempt() -> None:
     assert tracking["tracking_state"] == "tracking_request"
     assert tracking["status_label"] == "enabled"
     assert tracking["save_attempted"] is True
+    assert tracking["persistence_state"] == "unconfirmed"
     assert tracking["current_run_attached"] is True
     assert tracking["project_name"] == "LISBOA Chat"
     assert tracking["run_id"] == "run_123"
-    assert "asynchronous" in tracking["note"].lower()
+    assert "unconfirmed" in tracking["note"].lower()
+    assert "quota" in tracking["note"].lower()
 
 
 def test_request_tracking_status_reports_auto_disabled_request() -> None:
@@ -294,6 +296,7 @@ def test_request_tracking_status_reports_auto_disabled_request() -> None:
     assert tracking["tracking_state"] == "auto_disabled"
     assert tracking["status_label"] == "auto-disabled"
     assert tracking["save_attempted"] is False
+    assert tracking["persistence_state"] == "not_active"
     assert tracking["current_run_attached"] is False
     assert tracking["project_name"] == "LISBOA Chat"
     assert "forbidden" in tracking["note"].lower()

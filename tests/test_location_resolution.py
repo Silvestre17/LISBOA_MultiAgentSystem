@@ -21,6 +21,8 @@ from agent.prompts.planner import get_planner_prompt
 from agent.prompts.qa import get_qa_prompt
 from agent.prompts.researcher import get_researcher_prompt
 from tools.location_resolver import (
+    AML_BOUNDS,
+    _fetch_nominatim_results_cached,
     build_dynamic_landmark_info,
     get_location_display_name,
 )
@@ -159,3 +161,38 @@ def test_curated_display_names_keep_manual_polish_examples_stable() -> None:
     assert get_location_display_name("Biblioteca Nacional") == "Biblioteca Nacional de Portugal"
     assert get_location_display_name("Faculdade de Ciências") == "Faculdade de Ciências da Universidade de Lisboa (FCUL)"
     assert get_location_display_name("FCUL") == "FCUL"
+
+
+def test_nominatim_requests_are_bounded_to_portugal_and_the_aml() -> None:
+    """Live geocoding should stay scoped to Portugal and the AML viewbox to reduce false positives."""
+
+    class DummyResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> list[dict]:
+            return []
+
+    captured: dict[str, object] = {}
+    _fetch_nominatim_results_cached.cache_clear()
+
+    def fake_get(url, params, headers, timeout):
+        captured["url"] = url
+        captured["params"] = dict(params)
+        captured["headers"] = dict(headers)
+        captured["timeout"] = timeout
+        return DummyResponse()
+
+    with patch("tools.location_resolver.requests.get", side_effect=fake_get):
+        result = _fetch_nominatim_results_cached("Rossio")
+
+    params = captured.get("params")
+
+    assert isinstance(params, dict)
+    assert result == []
+    assert params["countrycodes"] == "pt"
+    assert params["bounded"] == 1
+    assert params["viewbox"] == (
+        f"{AML_BOUNDS['lon_min']},{AML_BOUNDS['lat_max']},"
+        f"{AML_BOUNDS['lon_max']},{AML_BOUNDS['lat_min']}"
+    )

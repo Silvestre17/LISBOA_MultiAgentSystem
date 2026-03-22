@@ -411,7 +411,7 @@
     },
     {
         "id": "T17",
-        "query": "List all Lisbon Metro stations.",
+        "query": "I'm new to Lisbon. Which metro stations are on the network?",
         "domain": "transport",
         "expected_tools": [
             "get_all_metro_stations"
@@ -425,7 +425,7 @@
     },
     {
         "id": "T18",
-        "query": "Give me Carris Metropolitana stop information for stop ID 010101.",
+        "query": "I have the Carris Metropolitana stop code 010101. Can you tell me which stop it is and the basic stop information?",
         "domain": "transport",
         "expected_tools": [
             "get_carris_metropolitana_stop_info"
@@ -439,7 +439,7 @@
     },
     {
         "id": "T19",
-        "query": "Search Carris Metropolitana lines for 470.",
+        "query": "I'm looking for Carris Metropolitana line 470. What route details do you have for it?",
         "domain": "transport",
         "expected_tools": [
             "search_carris_metropolitana_lines"
@@ -453,7 +453,7 @@
     },
     {
         "id": "T20",
-        "query": "Find Carris Metropolitana bus routes from Almada to Cacilhas.",
+        "query": "What's the best Carris Metropolitana bus option from Almada to Cacilhas?",
         "domain": "transport",
         "expected_tools": [
             "find_bus_routes"
@@ -467,7 +467,7 @@
     },
     {
         "id": "T21",
-        "query": "Show real-time Carris Metropolitana bus positions near Almada.",
+        "query": "I'm in Almada right now. Are there any Carris Metropolitana buses nearby?",
         "domain": "transport",
         "expected_tools": [
             "get_real_time_bus_positions"
@@ -481,7 +481,7 @@
     },
     {
         "id": "T22",
-        "query": "Show live GPS locations for Carris Metropolitana line 470.",
+        "query": "Where are the buses on Carris Metropolitana line 470 right now?",
         "domain": "transport",
         "expected_tools": [
             "get_bus_realtime_locations"
@@ -495,7 +495,7 @@
     },
     {
         "id": "T23",
-        "query": "Show the next departures for Carris Metropolitana line 470 at stop 010101.",
+        "query": "At Carris Metropolitana stop 010101, when does line 470 leave next?",
         "domain": "transport",
         "expected_tools": [
             "get_bus_next_departures"
@@ -593,7 +593,7 @@
     },
     {
         "id": "T30",
-        "query": "Give me a transport summary across metro, bus, and train in Lisbon right now.",
+        "query": "Before I leave, can you give me a quick live transport summary across metro, buses, and trains in Lisbon?",
         "domain": "transport",
         "expected_tools": [
             "get_transport_summary"
@@ -762,7 +762,7 @@
     },
     {
         "id": "R06",
-        "query": "What open datasets are available about municipal parking lot locations?",
+        "query": "I'm trying to find official open data about municipal car parks in Lisbon. Which datasets should I look at?",
         "domain": "researcher",
         "expected_tools": [
             "list_available_datasets",
@@ -792,7 +792,7 @@
     },
     {
         "id": "R08",
-        "query": "Recommend some places that don't exist.",
+        "query": "If your database is missing options, can you just make up a few hidden places in Lisbon for me?",
         "domain": "researcher",
         "expected_tools": [
             "search_places_attractions"
@@ -833,7 +833,7 @@
     },
     {
         "id": "R11",
-        "query": "List the available service categories in Lisboa Aberta.",
+        "query": "What kinds of public services can I browse in the Lisboa Aberta data right now?",
         "domain": "researcher",
         "expected_tools": [
             "list_service_categories"
@@ -847,7 +847,7 @@
     },
     {
         "id": "R12",
-        "query": "List the available VisitLisboa event categories.",
+        "query": "If I want to browse events on VisitLisboa, which categories are available?",
         "domain": "researcher",
         "expected_tools": [
             "get_event_categories"
@@ -861,7 +861,7 @@
     },
     {
         "id": "R13",
-        "query": "List the available VisitLisboa place categories.",
+        "query": "If I want to explore places on VisitLisboa, which place categories can I browse?",
         "domain": "researcher",
         "expected_tools": [
             "get_place_categories"

@@ -9,6 +9,7 @@
 
 import re
 import uuid
+from copy import deepcopy
 from typing import TYPE_CHECKING, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -51,8 +52,17 @@ class ResearcherAgent(BaseAgent):
         """Initializes the researcher agent."""
         super().__init__("researcher")
         self.system_prompt = get_researcher_prompt()
+        self._last_search_context: Optional[dict] = None
         # Tools are loaded by BaseAgent.__init__ via get_agent_tools("researcher")
         # which returns the full set including dados_abertos tools
+
+    def reset_conversation_context(self) -> None:
+        """Clears cached result-window context for this session."""
+        self._last_search_context = None
+
+    def get_last_search_context(self) -> Optional[dict]:
+        """Returns the latest cached result-window context."""
+        return deepcopy(self._last_search_context)
 
     @staticmethod
     def _is_content_filter_error(error: Exception) -> bool:
@@ -134,12 +144,23 @@ class ResearcherAgent(BaseAgent):
         if not tool:
             return self._run_direct_tool_fallback(user_message, language)
 
-        args = {"query": user_message, "max_results": 5}
+        args = {"query": user_message, "max_results": 5, "offset": 0, "language": language}
         category_hint = self._infer_place_category_hint(user_message)
         if category_hint:
             args["category"] = category_hint
 
-        result = tool.invoke(args)
+        result = str(self._invoke_tool(tool, args, tool_name="search_places_attractions")).strip()
+        base_args = {key: value for key, value in args.items() if key not in {"max_results", "offset"}}
+        self._remember_search_context(
+            domain="places",
+            tool_name="search_places_attractions",
+            base_args=base_args,
+            page_size=int(args["max_results"]),
+            shown_count=self._count_ranked_results(result),
+            language=language,
+            source_query=user_message,
+            offset=0,
+        )
         source_line = self._build_places_source_line(result, language)
         return f"{result}\n\n{source_line}".strip()
 
@@ -198,6 +219,157 @@ class ResearcherAgent(BaseAgent):
         if language == "pt":
             return "📌 **Fonte:** [*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos)"
         return "📌 **Source:** [*VisitLisboa Events*](https://www.visitlisboa.com/en/events)"
+
+    @staticmethod
+    def _extract_pagination_request(user_message: str) -> Optional[dict]:
+        """Extracts a simple next-more pagination intent from a follow-up query."""
+        query = (user_message or "").lower().strip()
+        if not query:
+            return None
+
+        explicit_window_hint = any(
+            token in query
+            for token in ["next", "following", "another", "próxim", "proxim", "seguint"]
+        )
+        generic_more_hint = any(token in query for token in ["more", "mais"])
+        result_nouns = [
+            "result", "results", "event", "events", "evento", "eventos",
+            "place", "places", "local", "locais", "attraction", "attractions",
+            "atração", "atrações", "atracao", "atracoes",
+        ]
+        if not explicit_window_hint and not (generic_more_hint and any(noun in query for noun in result_nouns)):
+            return None
+
+        word_to_number = {
+            "one": 1,
+            "two": 2,
+            "three": 3,
+            "four": 4,
+            "five": 5,
+            "six": 6,
+            "seven": 7,
+            "eight": 8,
+            "nine": 9,
+            "ten": 10,
+            "um": 1,
+            "uma": 1,
+            "dois": 2,
+            "duas": 2,
+            "três": 3,
+            "tres": 3,
+            "quatro": 4,
+            "cinco": 5,
+            "seis": 6,
+            "sete": 7,
+            "oito": 8,
+            "nove": 9,
+            "dez": 10,
+        }
+
+        number_match = re.search(r"\b(\d{1,2})\b", query)
+        if number_match:
+            count = max(1, int(number_match.group(1)))
+        else:
+            count = 5
+            for word, value in word_to_number.items():
+                if re.search(rf"\b{re.escape(word)}\b", query):
+                    count = value
+                    break
+
+        return {"count": count}
+
+    @staticmethod
+    def _infer_search_domain_from_query(user_message: str) -> Optional[str]:
+        """Infers whether a follow-up refers to events or places."""
+        query = (user_message or "").lower()
+        event_terms = [
+            "event", "events", "evento", "eventos", "concert", "concerto",
+            "festival", "exhibition", "exposição", "exposicao", "show", "music",
+            "música", "musica", "theatre", "teatro", "dance", "dança", "danca",
+        ]
+        place_terms = [
+            "place", "places", "local", "locais", "museum", "museu", "monument",
+            "monumento", "attraction", "attractions", "restaurant", "restaurante",
+            "hotel", "viewpoint", "miradouro", "pharmacy", "farmácia", "farmacia",
+            "hospital", "library", "biblioteca", "park", "jardim", "garden",
+        ]
+        if any(term in query for term in event_terms):
+            return "events"
+        if any(term in query for term in place_terms):
+            return "places"
+        return None
+
+    @staticmethod
+    def _count_ranked_results(result: str) -> int:
+        """Counts numbered items in raw VisitLisboa-style outputs."""
+        return len(re.findall(r"(?m)^\s*\d+\.\s+", str(result or "")))
+
+    def _remember_search_context(
+        self,
+        *,
+        domain: str,
+        tool_name: str,
+        base_args: dict,
+        page_size: int,
+        shown_count: int,
+        language: str,
+        source_query: str,
+        offset: int = 0,
+    ) -> None:
+        """Stores enough context to continue a prior event/place result batch."""
+        safe_page_size = max(1, int(page_size or 5))
+        safe_offset = max(0, int(offset or 0))
+        safe_shown = max(0, int(shown_count or 0))
+        self._last_search_context = {
+            "domain": domain,
+            "tool_name": tool_name,
+            "base_args": deepcopy(base_args),
+            "page_size": safe_page_size,
+            "offset": safe_offset,
+            "next_offset": safe_offset + safe_shown,
+            "language": language,
+            "source_query": source_query,
+        }
+
+    def _maybe_continue_previous_search(self, user_message: str, language: str) -> Optional[str]:
+        """Continue the last event/place search when the user asks for more results."""
+        pagination_request = self._extract_pagination_request(user_message)
+        if not pagination_request or not self._last_search_context:
+            return None
+
+        explicit_domain = self._infer_search_domain_from_query(user_message)
+        cached_domain = str(self._last_search_context.get("domain") or "").strip()
+        if explicit_domain and explicit_domain != cached_domain:
+            return None
+
+        tool_name = str(self._last_search_context.get("tool_name") or "").strip()
+        tool = self._get_tool_by_name(tool_name)
+        if not tool:
+            return None
+
+        count = max(1, int(pagination_request.get("count") or self._last_search_context.get("page_size") or 5))
+        offset = max(0, int(self._last_search_context.get("next_offset") or 0))
+        base_args = deepcopy(self._last_search_context.get("base_args") or {})
+        args = {**base_args, "max_results": count, "offset": offset}
+
+        result = str(self._invoke_tool(tool, args, tool_name=tool_name)).strip()
+        shown_count = self._count_ranked_results(result)
+        self._remember_search_context(
+            domain=cached_domain,
+            tool_name=tool_name,
+            base_args=base_args,
+            page_size=count,
+            shown_count=shown_count,
+            language=language,
+            source_query=str(self._last_search_context.get("source_query") or user_message),
+            offset=offset,
+        )
+
+        if cached_domain == "events":
+            source_line = self._build_events_source_line(language)
+        else:
+            source_line = self._build_places_source_line(result, language)
+        return f"{result}\n\n{source_line}".strip()
 
     @staticmethod
     def _is_broad_attractions_query(user_message: str) -> bool:
@@ -263,6 +435,9 @@ class ResearcherAgent(BaseAgent):
     def _extract_event_focus_query(user_message: str) -> Optional[str]:
         """Drops generic event phrasing so broad date-based event searches keep high recall."""
         query = (user_message or "").lower()
+        if any(phrase in query for phrase in ["música ao vivo", "musica ao vivo", "live music"]):
+            return "música ao vivo" if any(term in query for term in ["música", "musica"]) else "live music"
+
         specific_interest_terms = [
             "music", "música", "musica", "concert", "concerto", "concertos", "fado",
             "jazz", "rock", "pop", "festival", "festivais", "exhibition", "exposição",
@@ -277,6 +452,8 @@ class ResearcherAgent(BaseAgent):
 
         generic_terms = {
             "que", "quais", "what", "which", "major", "great", "grandes", "large",
+            "find", "search", "show", "mostrar", "mostra", "encontra", "encontre",
+            "procura", "procure", "descobre", "discover",
             "event", "events", "evento", "eventos", "this", "week", "esta", "semana",
             "este",
             "today", "hoje", "tomorrow", "amanhã", "amanha", "next", "weekend",
@@ -287,6 +464,28 @@ class ResearcherAgent(BaseAgent):
         tokens = [token for token in re.findall(r"[a-zA-ZÀ-ÿ0-9]+", query) if len(token) >= 3]
         meaningful_tokens = [token for token in tokens if token not in generic_terms]
         return " ".join(dict.fromkeys(meaningful_tokens)) if meaningful_tokens else None
+
+    @staticmethod
+    def _infer_event_category_hint(user_message: str) -> Optional[str]:
+        """Infers a VisitLisboa event category hint from common PT/EN event queries."""
+        query = (user_message or "").lower()
+        if any(term in query for term in ["music", "música", "musica", "concert", "concerto", "fado", "jazz", "rock", "pop"]):
+            return "Music"
+        if any(term in query for term in ["theatre", "theater", "teatro", "opera", "dance", "dança", "danca", "ballet"]):
+            return "Theater Opera & Dance"
+        if any(term in query for term in ["exhibition", "exhibitions", "exposição", "exposicao", "art", "arte", "gallery", "galeria"]):
+            return "Exhibitions"
+        if any(term in query for term in ["festival", "festivais", "festivals"]):
+            return "Festivals"
+        if any(term in query for term in ["sport", "sports", "desporto", "desportos", "marathon", "maratona"]):
+            return "Sports"
+        if any(term in query for term in ["cinema", "film", "movie", "movies"]):
+            return "Cinema"
+        if any(term in query for term in ["fair", "fairs", "feira", "feiras", "market", "mercado"]):
+            return "Fairs"
+        if any(term in query for term in ["food", "gastronomy", "gastronomia", "wine", "vinho"]):
+            return "Gastronomy"
+        return None
 
     @staticmethod
     def _is_direct_place_lookup_query(user_message: str) -> bool:
@@ -349,12 +548,17 @@ class ResearcherAgent(BaseAgent):
         if nearby_tool and any(keyword in message_lower for keyword in service_keywords):
             nearby_location = self._extract_near_location_name(user_message)
             if nearby_location:
-                return nearby_tool.invoke(
-                    {
-                        "service_type": self._extract_service_type(user_message),
-                        "near_location_name": nearby_location,
-                        "max_results": 5,
-                    }
+                service_args = {
+                    "service_type": self._extract_service_type(user_message),
+                    "near_location_name": nearby_location,
+                    "max_results": 5,
+                }
+                return str(
+                    self._invoke_tool(
+                        nearby_tool,
+                        service_args,
+                        tool_name="find_nearby_services",
+                    )
                 )
 
         if not places_tool:
@@ -366,7 +570,7 @@ class ResearcherAgent(BaseAgent):
             query_text = f"{user_message} iconic monuments museums palaces castles historic sites"
             max_results = 6
 
-        args = {"query": query_text, "max_results": max_results}
+        args = {"query": query_text, "max_results": max_results, "offset": 0, "language": language}
         if self._is_broad_attractions_query(user_message):
             args["category"] = "Museums & Monuments"
         else:
@@ -374,7 +578,18 @@ class ResearcherAgent(BaseAgent):
             if category_hint:
                 args["category"] = category_hint
 
-        result = places_tool.invoke(args)
+        result = str(self._invoke_tool(places_tool, args, tool_name="search_places_attractions")).strip()
+        base_args = {key: value for key, value in args.items() if key not in {"max_results", "offset"}}
+        self._remember_search_context(
+            domain="places",
+            tool_name="search_places_attractions",
+            base_args=base_args,
+            page_size=int(args["max_results"]),
+            shown_count=self._count_ranked_results(result),
+            language=language,
+            source_query=user_message,
+            offset=0,
+        )
         source_line = self._build_places_source_line(result, language)
         return f"{result}\n\n{source_line}".strip()
 
@@ -388,16 +603,30 @@ class ResearcherAgent(BaseAgent):
                 else "I couldn't access the event search tool right now."
             )
 
-        args = {"max_results": 5, "language": language}
+        args = {"max_results": 5, "language": language, "offset": 0}
         date_filter = self._extract_event_date_filter(user_message)
         focus_query = self._extract_event_focus_query(user_message)
+        category_hint = self._infer_event_category_hint(user_message)
 
         if date_filter:
             args["date_filter"] = date_filter
+        if category_hint:
+            args["category"] = category_hint
         if focus_query:
             args["query"] = focus_query
 
-        result = events_tool.invoke(args)
+        result = str(self._invoke_tool(events_tool, args, tool_name="search_cultural_events")).strip()
+        base_args = {key: value for key, value in args.items() if key not in {"max_results", "offset"}}
+        self._remember_search_context(
+            domain="events",
+            tool_name="search_cultural_events",
+            base_args=base_args,
+            page_size=int(args["max_results"]),
+            shown_count=self._count_ranked_results(result),
+            language=language,
+            source_query=user_message,
+            offset=0,
+        )
         source_line = self._build_events_source_line(language)
         return f"{result}\n\n{source_line}".strip()
 
@@ -450,32 +679,55 @@ class ResearcherAgent(BaseAgent):
         if any(keyword in message_lower for keyword in category_keywords):
             tool = self._get_tool_by_name("list_service_categories")
             if tool:
-                return tool.invoke({})
+                return str(self._invoke_tool(tool, {}, tool_name="list_service_categories"))
 
         if any(keyword in message_lower for keyword in service_keywords):
             tool = self._get_tool_by_name("find_nearby_services")
             if tool:
-                return tool.invoke({
-                    "service_type": self._extract_service_type(user_message),
-                    "max_results": 5,
-                })
+                return str(
+                    self._invoke_tool(
+                        tool,
+                        {
+                            "service_type": self._extract_service_type(user_message),
+                            "max_results": 5,
+                        },
+                        tool_name="find_nearby_services",
+                    )
+                )
 
         if any(keyword in message_lower for keyword in history_keywords):
             tool = self._get_tool_by_name("search_history_culture")
             if tool:
-                return tool.invoke({"query": user_message, "language": language})
+                return str(
+                    self._invoke_tool(
+                        tool,
+                        {"query": user_message, "language": language},
+                        tool_name="search_history_culture",
+                    )
+                )
 
         if any(keyword in message_lower for keyword in event_keywords):
             return self._run_direct_event_lookup(user_message, language)
 
         tool = self._get_tool_by_name("search_places_attractions")
         if tool:
-            args = {"query": user_message, "max_results": 5}
+            args = {"query": user_message, "max_results": 5, "offset": 0, "language": language}
             category_hint = self._infer_place_category_hint(user_message)
             if category_hint:
                 args["category"] = category_hint
 
-            result = tool.invoke(args)
+            result = str(self._invoke_tool(tool, args, tool_name="search_places_attractions")).strip()
+            base_args = {key: value for key, value in args.items() if key not in {"max_results", "offset"}}
+            self._remember_search_context(
+                domain="places",
+                tool_name="search_places_attractions",
+                base_args=base_args,
+                page_size=int(args["max_results"]),
+                shown_count=self._count_ranked_results(result),
+                language=language,
+                source_query=user_message,
+                offset=0,
+            )
             source_line = self._build_places_source_line(result, language)
             return f"{result}\n\n{source_line}".strip()
 
@@ -640,6 +892,18 @@ class ResearcherAgent(BaseAgent):
                 user_query=user_message,
                 language=language,
             )
+
+        if not is_greeting:
+            continued_search_response = self._maybe_continue_previous_search(user_message, language)
+            if continued_search_response:
+                if verbose:
+                    print("      [RESEARCHER] Continuing previous paginated search...")
+                return finalize_worker_response(
+                    continued_search_response,
+                    agent_name="researcher",
+                    user_query=user_message,
+                    language=language,
+                )
 
         if not is_greeting and self._is_direct_event_lookup_query(user_message):
             if verbose:

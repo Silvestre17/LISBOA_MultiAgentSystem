@@ -1,5 +1,5 @@
 {
-  "pricing_source": "Azure OpenAI: https://azure.microsoft.com/pricing/details/cognitive-services/openai-service/ | Azure Foundry Models: https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/deepseek/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/microsoft/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/grok/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/llama/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/kimi/ | Microsoft Foundry pricing: https://azure.microsoft.com/en-us/pricing/details/microsoft-foundry/#pricing | Anthropic Foundry announcement: https://www.anthropic.com/news/claude-in-microsoft-foundry | Anthropic API pricing: https://platform.claude.com/docs/en/docs/about-claude/pricing | OpenAI detailed docs: https://developers.openai.com/api/docs/pricing | OpenAI GPT-5-mini snapshot: https://www.llm-prices.com/current-v1.json",
+  "pricing_source": "Azure OpenAI: https://azure.microsoft.com/pricing/details/cognitive-services/openai-service/ | Azure Foundry Models: https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/deepseek/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/microsoft/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/grok/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/llama/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/kimi/ | Microsoft Foundry pricing: https://azure.microsoft.com/en-us/pricing/details/microsoft-foundry/#pricing | Microsoft Foundry Kimi-K2.5 announcement: https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/kimi-k2-5-now-in-microsoft-foundry/4492321 | Anthropic Foundry announcement: https://www.anthropic.com/news/claude-in-microsoft-foundry | Anthropic API pricing: https://platform.claude.com/docs/en/docs/about-claude/pricing | OpenAI detailed docs: https://developers.openai.com/api/docs/pricing | OpenAI GPT-5-mini snapshot: https://www.llm-prices.com/current-v1.json",
   "pricing_updated_at": "2026-03-19",
   "pricing_snapshot_date": "2026-03-19",
   "models": {
@@ -86,10 +86,10 @@
       "output": 0.71,
       "name": "Azure Llama 3.3 70B Global"
     },
-    "azure::kimi-k2-thinking": {
+    "azure::kimi-k2.5": {
       "input": 0.6,
-      "output": 2.5,
-      "name": "Azure Kimi K2 Thinking Global"
+      "output": 3.0,
+      "name": "Azure Kimi K2.5 via Microsoft Foundry"
     },
     "azure::claude-haiku-4.5": {
       "input": 1.0,

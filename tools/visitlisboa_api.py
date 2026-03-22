@@ -647,6 +647,7 @@ def _format_event_filter_summary(
     end_date: Optional[datetime],
     total_results: int,
     shown_results: int,
+    offset: int = 0,
     language: str = "en",
 ) -> List[str]:
     """Builds a contextual summary for the event filter and result count."""
@@ -662,6 +663,8 @@ def _format_event_filter_summary(
     normalized_category = (category or "").strip()
     normalized_filter = _localize_event_date_filter(date_filter, language=language)
     normalized_category = _localize_event_category(normalized_category, language=language)
+    shown_from = offset + 1 if shown_results > 0 else 0
+    shown_to = offset + shown_results if shown_results > 0 else 0
 
     if language == "pt":
         scope_parts = [f"{normalized_filter} ({date_window})"]
@@ -671,9 +674,10 @@ def _format_event_filter_summary(
         else:
             scope_parts.append("pesquisa geral de eventos")
         return [
-            f"🧭 **Filtro aplicado:** {', '.join(scope_parts)}.",
-            f"📊 **Resultado do filtro:** {total_results} evento(s) com data confirmada correspondem a este filtro.",
-            f"✨ **Destaques mostrados:** {shown_results} resultado(s) mais relevantes.",
+            "- 🧾 **Resumo da pesquisa**",
+            f"    - 🧭 **Filtro aplicado:** {', '.join(scope_parts)}.",
+            f"    - 📊 **Resultado do filtro:** {total_results} evento(s) com data confirmada correspondem a este filtro.",
+            f"    - ✨ **Destaques mostrados:** {shown_results} resultado(s) mais relevantes (janela {shown_from}-{shown_to}).",
         ]
 
     scope_parts = [f"{normalized_filter} ({date_window})"]
@@ -683,9 +687,10 @@ def _format_event_filter_summary(
     else:
         scope_parts.append("broad event discovery")
     return [
-        f"🧭 **Filter used:** {', '.join(scope_parts)}.",
-        f"📊 **Result count:** {total_results} confirmed-date event(s) match this filter.",
-        f"✨ **Highlights shown:** {shown_results} most relevant result(s).",
+        "- 🧾 **Search summary**",
+        f"    - 🧭 **Filter used:** {', '.join(scope_parts)}.",
+        f"    - 📊 **Result count:** {total_results} confirmed-date event(s) match this filter.",
+        f"    - ✨ **Highlights shown:** {shown_results} most relevant result(s) (window {shown_from}-{shown_to}).",
     ]
 
 
@@ -694,14 +699,20 @@ _EVENT_GENERIC_QUERY_TERMS = {
     'cultura', 'cultural', 'culture', 'culturais',
     'lisbon', 'lisboa', 'portugal', 'city', 'cidade',
     'great', 'major', 'grandes', 'explorar', 'explore',
+    'find', 'finding', 'search', 'show', 'mostrar', 'mostra', 'encontra', 'encontre',
+    'procura', 'procure', 'descobre', 'discover', 'want', 'quero',
     'this', 'week', 'esta', 'semana', 'what', 'which', 'que', 'quais',
     'there', 'happening', 'temos', 'have', 'local', 'locais',
 }
 
 _EVENT_QUERY_SYNONYMS = {
     'music': ['concert', 'concerto', 'live', 'band', 'artist', 'musical', 'fado', 'jazz', 'rock', 'pop'],
+    'musica': ['music', 'concert', 'concerto', 'live', 'band', 'artist', 'musical', 'fado', 'jazz', 'rock', 'pop'],
+    'música': ['music', 'concert', 'concerto', 'live', 'band', 'artist', 'musical', 'fado', 'jazz', 'rock', 'pop'],
     'concert': ['music', 'live', 'performance', 'show', 'gig'],
     'concerts': ['music', 'live', 'performance', 'show', 'gig'],
+    'live': ['music', 'concert', 'performance', 'gig', 'show'],
+    'vivo': ['live', 'music', 'concert', 'performance', 'gig', 'show'],
     'art': ['exhibition', 'gallery', 'museum', 'painting', 'sculpture', 'artwork'],
     'exhibition': ['art', 'gallery', 'museum', 'display', 'expo'],
     'theater': ['theatre', 'play', 'drama', 'stage', 'performance'],
@@ -726,7 +737,10 @@ def _expand_event_query_tokens(query: Optional[str]) -> List[str]:
     if not query:
         return []
 
-    original_tokens = [t.strip().lower() for t in query.split() if len(t.strip()) >= 3]
+    normalized_query = _normalize_place_hint_text(query)
+    normalized_query = re.sub(r"\bmusica\s+ao\s+vivo\b", "live music", normalized_query)
+    normalized_query = re.sub(r"\bao\s+vivo\b", "live", normalized_query)
+    original_tokens = [t.strip().lower() for t in normalized_query.split() if len(t.strip()) >= 3]
     query_tokens = [t for t in original_tokens if t not in _EVENT_GENERIC_QUERY_TERMS]
 
     if not query_tokens:
@@ -1565,6 +1579,7 @@ def search_cultural_events(
     category: Optional[str] = None,
     date_filter: Optional[str] = None,
     max_results: int = 10,
+    offset: int = 0,
     language: Optional[str] = None,
 ) -> str:
     """
@@ -1588,6 +1603,7 @@ def search_cultural_events(
                     Or ISO date: '2025-01-15'.
             Default: 'upcoming' (next 30 days).
         max_results (int): Maximum number of results to return (default: 10).
+        offset (int): Number of matching results to skip before returning the next batch.
     
     Returns:
         str: Formatted list of matching events with dates and links.
@@ -1605,6 +1621,8 @@ def search_cultural_events(
         
         if not isinstance(max_results, int) or max_results <= 0:
             max_results = 10
+        if not isinstance(offset, int) or offset < 0:
+            offset = 0
         
         render_language = _infer_visitlisboa_output_language(query, language)
 
@@ -1616,7 +1634,9 @@ def search_cultural_events(
         
         # Logging
         date_info = f"{start_date.strftime('%Y-%m-%d') if start_date else 'any'} to {end_date.strftime('%Y-%m-%d') if end_date else 'any'}"
-        logger.info(f"search_cultural_events: query='{query}', category='{category}', dates={date_info}, max={max_results}")
+        logger.info(
+            f"search_cultural_events: query='{query}', category='{category}', dates={date_info}, max={max_results}, offset={offset}"
+        )
         
         # ALWAYS load JSON for date filtering (vector store doesn't filter by date)
         all_events_data = _load_events_json()
@@ -1669,10 +1689,12 @@ def search_cultural_events(
                 logger.info(f"Query '{query}' contained only generic terms, skipping text filter.")
         
         if not events_data:
+            localized_date_filter = _localize_event_date_filter(date_filter, language=render_language)
+            localized_category = _localize_event_category(category, language=render_language) if category else None
             if render_language == "pt":
                 message = (
                     "❌ Não encontrei eventos com data confirmada que correspondam ao filtro pedido.\n\n"
-                    f"🧭 **Filtro aplicado:** {date_filter} ({date_info}), {category or 'todas as categorias'}"
+                    f"🧭 **Filtro aplicado:** {localized_date_filter} ({date_info}), {localized_category or 'todas as categorias'}"
                 )
                 if query:
                     message += f", foco temático: {query}"
@@ -1680,7 +1702,7 @@ def search_cultural_events(
             else:
                 message = (
                     "❌ No confirmed-date events matched the requested filter.\n\n"
-                    f"🧭 **Filter used:** {date_filter} ({date_info}), {category or 'all categories'}"
+                    f"🧭 **Filter used:** {localized_date_filter} ({date_info}), {localized_category or 'all categories'}"
                 )
                 if query:
                     message += f", theme focus: {query}"
@@ -1706,9 +1728,37 @@ def search_cultural_events(
         
         events_data.sort(key=lambda e: e.get('_relevance_score', 0), reverse=True)
         logger.info(f"Sorted by temporal relevance (top score: {events_data[0].get('_relevance_score', 0):.1f})")
+
+        if offset >= len(events_data):
+            output_parts = _format_event_filter_summary(
+                query=query,
+                category=category,
+                date_filter=date_filter,
+                start_date=start_date,
+                end_date=end_date,
+                total_results=len(events_data),
+                shown_results=0,
+                offset=offset,
+                language=render_language,
+            )
+            if render_language == "pt":
+                output_parts.extend(
+                    [
+                        "",
+                        "❌ Já não há mais eventos para mostrar com este filtro.",
+                    ]
+                )
+            else:
+                output_parts.extend(
+                    [
+                        "",
+                        "❌ There are no more events to show for this filter window.",
+                    ]
+                )
+            return "\n".join(output_parts).strip()
         
         # Limit results
-        results = events_data[:max_results]
+        results = events_data[offset : offset + max_results]
         
         # Format output with contextual filter summary and concise descriptions
         output_parts = _format_event_filter_summary(
@@ -1719,6 +1769,7 @@ def search_cultural_events(
             end_date=end_date,
             total_results=len(events_data),
             shown_results=len(results),
+            offset=offset,
             language=render_language,
         )
         output_parts.append("")
@@ -1802,7 +1853,9 @@ def search_cultural_events(
 def search_places_attractions(
     query: Optional[str] = None,
     category: Optional[str] = None,
-    max_results: int = 10
+    max_results: int = 10,
+    offset: int = 0,
+    language: Optional[str] = None,
 ) -> str:
     """
     Search for places and attractions in Lisbon using HYBRID search.
@@ -1820,6 +1873,8 @@ def search_places_attractions(
             'Museums & Monuments', 'Restaurants', 'Hotels', 'View Points',
             'Beaches', 'Shopping', 'Nightlife', 'Parks & Gardens', 'Tours'.
         max_results (int): Maximum number of results to return (default: 10).
+        offset (int): Number of matching results to skip before returning the next batch.
+        language (str, optional): Preferred output language (`pt` or `en`).
     
     Returns:
         str: Formatted list of matching places with descriptions and links.
@@ -1836,8 +1891,15 @@ def search_places_attractions(
         
         if not isinstance(max_results, int) or max_results <= 0:
             max_results = 10
+        if not isinstance(offset, int) or offset < 0:
+            offset = 0
+
+        requested_window = max_results + offset
+        render_language = _infer_visitlisboa_output_language(query, language)
         
-        logger.info(f"search_places_attractions: query='{query}', category='{category}', max={max_results}")
+        logger.info(
+            f"search_places_attractions: query='{query}', category='{category}', max={max_results}, offset={offset}"
+        )
         required_service_terms = _extract_required_service_term_groups(query)
         
         # Check if we should also search Dados Abertos (hybrid mode)
@@ -1846,7 +1908,7 @@ def search_places_attractions(
         
         if search_dados_abertos and query:
             logger.info("Hybrid mode: Query contains Dados Abertos keywords")
-            dados_abertos_results = _search_dados_abertos_hybrid(query, max_results=max_results // 2 + 1)
+            dados_abertos_results = _search_dados_abertos_hybrid(query, max_results=requested_window // 2 + 1)
             logger.info(f"Dados Abertos returned {len(dados_abertos_results)} results")
         
         # =====================================================================
@@ -1876,7 +1938,7 @@ def search_places_attractions(
                 
                 results_with_scores = kb.search_with_scores(
                     query=search_query, 
-                    k=max_results * 2,
+                    k=requested_window * 2,
                     collections=[COLLECTION_PLACES]
                 )
                 
@@ -2003,7 +2065,7 @@ def search_places_attractions(
                 scored_candidates.sort(key=lambda x: x['final_score'], reverse=True)
                 
                 # Convert to standard format
-                for item in scored_candidates[:max_results]:
+                for item in scored_candidates[:requested_window]:
                     metadata = item['metadata']
                     # Attempt to get real address/location
                     real_location = metadata.get('address') or metadata.get('location') or 'Lisbon'
@@ -2022,18 +2084,18 @@ def search_places_attractions(
                 logger.warning(f"Vector search failed: {e}")
 
         # JSON fallback to improve recall when vector search under-recovers
-        if query and len(visitlisboa_results) < max_results:
+        if query and len(visitlisboa_results) < requested_window:
             fallback_items = _fallback_search(
                 query=query,
                 category=category,
                 data=_load_places_json(),
-                max_results=max_results * 2,
+                max_results=requested_window * 2,
             )
             fallback_results = [_convert_raw_place_to_result(item) for item in fallback_items]
             combined_visitlisboa: List[Dict[str, Any]] = []
             seen_visitlisboa_keys: set[str] = set()
             _append_unique_place_results(combined_visitlisboa, visitlisboa_results, seen_visitlisboa_keys)
-            _append_unique_place_results(combined_visitlisboa, fallback_results, seen_visitlisboa_keys, limit=max_results)
+            _append_unique_place_results(combined_visitlisboa, fallback_results, seen_visitlisboa_keys, limit=requested_window)
             visitlisboa_results = combined_visitlisboa
 
         if required_service_terms:
@@ -2067,8 +2129,8 @@ def search_places_attractions(
         if search_dados_abertos and dados_abertos_results:
             # User searched for infrastructure -> prioritize Dados Abertos
             # Take half from Dados Abertos, half from VisitLisboa
-            da_quota = max_results // 2 + 1
-            vl_quota = max_results - da_quota + 1
+            da_quota = requested_window // 2 + 1
+            vl_quota = requested_window - da_quota + 1
             
             # Add Dados Abertos first (more relevant for infrastructure queries)
             _append_unique_place_results(all_results, dados_abertos_results[:da_quota], existing_keys)
@@ -2089,27 +2151,48 @@ def search_places_attractions(
         if not all_results:
             # Last resort fallback
             if query:
-                fallback_items = _fallback_search(query, category, _load_places_json(), max_results=max_results)
+                fallback_items = _fallback_search(query, category, _load_places_json(), max_results=requested_window)
                 if fallback_items:
                     all_results = [_convert_raw_place_to_result(item) for item in fallback_items]
 
             if not all_results and query:
                 logger.info("No results from hybrid search, trying direct Dados Abertos")
                 from tools.dados_abertos import _search_place_in_datasets_logic
-                open_data_results = _search_place_in_datasets_logic(query, max_results=max_results)
+                open_data_results = _search_place_in_datasets_logic(query, max_results=requested_window)
                 if open_data_results:
                     return open_data_results
             
+            if render_language == "pt":
+                return f"Não foram encontrados locais correspondentes a '{query or 'todos'}' no VisitLisboa ou nos registos de dados abertos."
             return f"No places found matching: '{query or 'all'}' in VisitLisboa or Open Data registries."
         
         # Limit to max_results
-        final_results = all_results[:max_results]
+        final_results = all_results[offset : offset + max_results]
+        if not final_results:
+            if render_language == "pt":
+                return (
+                    f"🧭 **Janela de resultados:** {offset + 1}-{offset + max_results} de {len(all_results)}.\n\n"
+                    "❌ Já não há mais locais para mostrar com este filtro."
+                )
+            return (
+                f"🧭 **Result window:** {offset + 1}-{offset + max_results} of {len(all_results)}.\n\n"
+                "❌ There are no more places to show for this filter window."
+            )
         
         # Count sources
         vl_count = sum(1 for r in final_results if r.get('source') == 'visitlisboa')
         da_count = sum(1 for r in final_results if r.get('source') == 'dados_abertos')
         
-        output_parts = [f"🏛️ **Found {len(final_results)} Places/Attractions in Lisbon:**\n"]
+        if render_language == "pt":
+            output_parts = [
+                f"🏛️ **Found {len(final_results)} Places/Attractions in Lisbon:**\n",
+                f"🧭 **Janela de resultados:** {offset + 1}-{offset + len(final_results)} de {len(all_results)}.",
+            ]
+        else:
+            output_parts = [
+                f"🏛️ **Found {len(final_results)} Places/Attractions in Lisbon:**\n",
+                f"🧭 **Result window:** {offset + 1}-{offset + len(final_results)} of {len(all_results)}.",
+            ]
         
         for i, place in enumerate(final_results, 1):
             title = place.get('title', 'Unknown')
@@ -2253,9 +2336,11 @@ def get_place_categories() -> str:
         
         if not places_data:
             return "❌ Places data not available."
+
+        category_counts = {}
+        output_parts = ["🏛️ **Available Place Categories:**\n"]
         
         # Count places by category
-        category_counts = {}
         for place in places_data:
             cat = place.get('category', 'Uncategorized')
             category_counts[cat] = category_counts.get(cat, 0) + 1
@@ -2263,7 +2348,6 @@ def get_place_categories() -> str:
         # Sort by count
         sorted_categories = sorted(category_counts.items(), key=lambda x: x[1], reverse=True)
         
-        output_parts = ["🏛️ **Place Categories in Lisbon:**\n"]
         for cat, count in sorted_categories[:20]:  # Top 20
             output_parts.append(f"  • {cat}: {count} places")
         

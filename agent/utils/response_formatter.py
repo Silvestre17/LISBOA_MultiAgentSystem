@@ -1321,6 +1321,7 @@ def canonicalize_local_information_terms(text: str, language: str = "en") -> str
 
     if language == "en":
         replacements = [
+            (r"\*\*Resumo da pesquisa\*\*", "**Search summary**"),
             (r"\*\*Breve descri(?:ç|c)[aã]o\*\*:", "**Brief description**:"),
             (r"\*\*Morada\*\*:", "**Address**:"),
             (r"\*\*Localiza(?:ç|c)[aã]o\*\*:", "**Location**:"),
@@ -1356,6 +1357,7 @@ def canonicalize_local_information_terms(text: str, language: str = "en") -> str
         ]
     else:
         replacements = [
+            (r"\*\*Search summary\*\*", "**Resumo da pesquisa**"),
             (r"\*\*Brief description\*\*:", "**Breve descrição**:"),
             (r"\*\*Address\*\*:", "**Morada**:"),
             (r"\*\*Location\*\*:", "**Localização**:"),
@@ -1592,6 +1594,12 @@ def localize_local_information_values(text: str, language: str = "en") -> str:
             flags=re.IGNORECASE,
         )
         updated_line = re.sub(
+            r"([0-9]+)\s+most relevant result\(s\)\s*\(window\s+([0-9]+-[0-9]+)\)\.",
+            r"\1 resultado(s) mais relevantes (janela \2).",
+            updated_line,
+            flags=re.IGNORECASE,
+        )
+        updated_line = re.sub(
             r"\ball categories\b",
             "todas as categorias",
             updated_line,
@@ -1758,7 +1766,7 @@ def structure_ranked_research_results(text: str) -> str:
     summary_re = re.compile(r"^(?:📊|⚠️|💡|📌|###|##|#)")
     structured_lines: list[str] = []
     inside_ranked_item = False
-    last_nested_index: Optional[int] = None
+    child_prefix = "    - "
 
     for raw_line in text.splitlines():
         stripped = raw_line.strip()
@@ -1767,14 +1775,12 @@ def structure_ranked_research_results(text: str) -> str:
             if structured_lines and structured_lines[-1] != "":
                 structured_lines.append("")
             inside_ranked_item = False
-            last_nested_index = None
             continue
 
         entry_match = entry_re.match(stripped)
         if entry_match:
             structured_lines.append(f"- {entry_match.group(2).strip()}")
             inside_ranked_item = True
-            last_nested_index = None
             continue
 
         if inside_ranked_item:
@@ -1782,30 +1788,30 @@ def structure_ranked_research_results(text: str) -> str:
                 if structured_lines and structured_lines[-1] != "":
                     structured_lines.append("")
                 structured_lines.append(stripped)
+                structured_lines.append("")
                 inside_ranked_item = False
-                last_nested_index = None
                 continue
 
             if stripped.startswith(("- ", "* ", "• ")):
                 normalized_bullet = stripped.replace("• ", "- ", 1)
-                structured_lines.append(f"  {normalized_bullet}")
-                last_nested_index = len(structured_lines) - 1
+                structured_lines.append(f"    {normalized_bullet}")
                 continue
 
-            if (
-                last_nested_index is not None
-                and "**" not in structured_lines[last_nested_index]
-                and not re.match(r"^[🗓️⏱️📂📍💰🎟️⭐📞🌐🔗🗺️🕐🚇🚆🚌🏛️🎭]\s", stripped)
-            ):
-                structured_lines[last_nested_index] = f"{structured_lines[last_nested_index]} {stripped}"
-                continue
+            structured_lines.append(f"{child_prefix}{stripped}")
+            continue
 
-            structured_lines.append(f"  - {stripped}")
-            last_nested_index = len(structured_lines) - 1
+        if summary_re.match(stripped):
+            if structured_lines and structured_lines[-1] != "":
+                structured_lines.append("")
+            structured_lines.append(stripped)
+            structured_lines.append("")
+            continue
+
+        if raw_line[:1].isspace() and stripped.startswith(("- ", "* ", "• ")):
+            structured_lines.append(raw_line.rstrip())
             continue
 
         structured_lines.append(stripped)
-        last_nested_index = None
 
     return clean_newlines("\n".join(structured_lines)).strip()
 
