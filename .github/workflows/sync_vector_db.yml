@@ -77,7 +77,7 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     
     runs-on: ubuntu-latest
-    timeout-minutes: 120  # 2 hours max per batch
+    timeout-minutes: 240  # 4 hours max per batch
 
     steps:
       # =====================================================================
@@ -188,7 +188,7 @@ jobs:
       
       - name: Sync Vector Database
         if: steps.check-changes.outputs.changes_detected == 'true' || github.event_name == 'workflow_dispatch'
-        timeout-minutes: 90  # Step-level timeout (less than job timeout)
+        timeout-minutes: 180  # Step-level timeout (less than job timeout)
         run: |
           echo "============================================================"
           echo "🔄 Starting Vector Store Sync"
