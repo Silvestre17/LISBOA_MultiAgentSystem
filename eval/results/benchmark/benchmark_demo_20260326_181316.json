@@ -1,0 +1,1196 @@
+{
+  "benchmark_metadata": {
+    "groundtruth_queries_path": "C:\\Users\\andre\\OneDrive - NOVAIMS\\[MDSAA-DS]_Thesis\\Thesis2025-26_AFGS\\eval\\evaluation_groundtruth_queries_demo.json",
+    "groundtruth_queries_count": 1,
+    "groundtruth_queries_fingerprint": "b35e2f6ab539d70958f772e7f4ef63307d641833aa5bbfb616482afc6bfadadb",
+    "total_queries": 1,
+    "tool_registry_count": 45,
+    "tool_registry_fingerprint": "e0a23b55c2dfdc8d328162e28dfbbf4e6770e989ae90bbabc5525229ab157666",
+    "response_models": [
+      "azure::gpt-5-mini",
+      "azure::Kimi-K2.5"
+    ],
+    "evaluation_model": "judge_average::2",
+    "response_model_configs": [
+      {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 0.0
+      },
+      {
+        "model_id": "azure::Kimi-K2.5",
+        "provider": "azure",
+        "model": "Kimi-K2.5",
+        "temperature": 0.0
+      }
+    ],
+    "evaluation_model_config": {
+      "kind": "judge_average",
+      "model_id": "judge_average::2",
+      "aggregation": "mean",
+      "judge_models": [
+        "azure::gpt-5-mini",
+        "azure::Kimi-K2.5"
+      ],
+      "judge_model_configs": [
+        {
+          "model_id": "azure::gpt-5-mini",
+          "provider": "azure",
+          "model": "gpt-5-mini",
+          "temperature": 0.0
+        },
+        {
+          "model_id": "azure::Kimi-K2.5",
+          "provider": "azure",
+          "model": "Kimi-K2.5",
+          "temperature": 0.0
+        }
+      ]
+    },
+    "benchmark_domains": [
+      "weather",
+      "transport",
+      "researcher"
+    ],
+    "langsmith_enabled": true,
+    "langsmith_project": "thesis-mar-2026-tests - Benchmark",
+    "timestamp": "2026-03-26T18:13:16.423820",
+    "real_services": true,
+    "evaluation_models": [
+      "azure::gpt-5-mini",
+      "azure::Kimi-K2.5"
+    ],
+    "judge_model_configs": [
+      {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 0.0
+      },
+      {
+        "model_id": "azure::Kimi-K2.5",
+        "provider": "azure",
+        "model": "Kimi-K2.5",
+        "temperature": 0.0
+      }
+    ],
+    "pricing_model_count": 32,
+    "output_directory": "C:\\Users\\andre\\OneDrive - NOVAIMS\\[MDSAA-DS]_Thesis\\Thesis2025-26_AFGS\\eval\\results\\benchmark",
+    "pricing_source": "Azure OpenAI: https://azure.microsoft.com/pricing/details/cognitive-services/openai-service/ | Azure Foundry Models: https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/deepseek/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/microsoft/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/grok/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/llama/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/kimi/ | Microsoft Foundry pricing: https://azure.microsoft.com/en-us/pricing/details/microsoft-foundry/#pricing | Microsoft Foundry Kimi-K2.5 announcement: https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/kimi-k2-5-now-in-microsoft-foundry/4492321 | Anthropic Foundry announcement: https://www.anthropic.com/news/claude-in-microsoft-foundry | Anthropic API pricing: https://platform.claude.com/docs/en/docs/about-claude/pricing | OpenAI detailed docs: https://developers.openai.com/api/docs/pricing | OpenAI GPT-5-mini snapshot: https://www.llm-prices.com/current-v1.json",
+    "pricing_updated_at": "2026-03-19",
+    "pricing_snapshot_date": "2026-03-19"
+  },
+  "summary": {
+    "overall": {
+      "total_evaluated": 2,
+      "total_errors": 0,
+      "error_categories": {},
+      "avg_composite_score": 4.2,
+      "avg_latency_s": 8.355,
+      "avg_tool_f1": 0.5,
+      "heuristics_pass_rate": 1.0,
+      "sla_compliance": 1.0,
+      "response_usage": {
+        "call_count": 0,
+        "usage_available": false,
+        "tokens": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0
+        }
+      },
+      "evaluation_usage": {
+        "call_count": 4,
+        "usage_available": true,
+        "tokens": {
+          "input_tokens": 5184,
+          "output_tokens": 5072,
+          "total_tokens": 10256
+        }
+      },
+      "combined_usage": {
+        "call_count": 4,
+        "usage_available": true,
+        "tokens": {
+          "input_tokens": 5184,
+          "output_tokens": 5072,
+          "total_tokens": 10256
+        }
+      },
+      "response_cost_usd": {
+        "model_id": null,
+        "pricing_lookup_key": null,
+        "pricing_found": true,
+        "pricing_complete": true,
+        "tokens": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0
+        },
+        "input_per_million_usd": null,
+        "output_per_million_usd": null,
+        "cached_input_per_million_usd": 0.03000,
+        "input_cost_usd": 0.00000,
+        "output_cost_usd": 0.00000,
+        "total_cost_usd": 0.00000,
+        "missing_pricing_models": []
+      },
+      "evaluation_cost_usd": {
+        "model_id": null,
+        "pricing_lookup_key": null,
+        "pricing_found": true,
+        "pricing_complete": true,
+        "tokens": {
+          "input_tokens": 5184,
+          "output_tokens": 5072,
+          "total_tokens": 10256
+        },
+        "input_per_million_usd": null,
+        "output_per_million_usd": null,
+        "cached_input_per_million_usd": 0.03000,
+        "input_cost_usd": 0.00178075,
+        "output_cost_usd": 0.01474,
+        "total_cost_usd": 0.01652075,
+        "missing_pricing_models": []
+      },
+      "combined_cost_usd": {
+        "model_id": null,
+        "pricing_lookup_key": null,
+        "pricing_found": true,
+        "pricing_complete": true,
+        "tokens": {
+          "input_tokens": 5184,
+          "output_tokens": 5072,
+          "total_tokens": 10256
+        },
+        "input_per_million_usd": null,
+        "output_per_million_usd": null,
+        "cached_input_per_million_usd": 0.03000,
+        "input_cost_usd": 0.00178075,
+        "output_cost_usd": 0.01474,
+        "total_cost_usd": 0.01652075,
+        "missing_pricing_models": []
+      }
+    },
+    "per_domain": {
+      "transport": {
+        "count": 2,
+        "errors": 0,
+        "avg_composite_score": 4.2,
+        "avg_factual_accuracy": 4.25,
+        "avg_tool_f1": 0.5,
+        "heuristics_pass_rate": 1.0,
+        "response_usage": {
+          "call_count": 0,
+          "usage_available": false,
+          "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          }
+        },
+        "evaluation_usage": {
+          "call_count": 4,
+          "usage_available": true,
+          "tokens": {
+            "input_tokens": 5184,
+            "output_tokens": 5072,
+            "total_tokens": 10256
+          }
+        },
+        "combined_usage": {
+          "call_count": 4,
+          "usage_available": true,
+          "tokens": {
+            "input_tokens": 5184,
+            "output_tokens": 5072,
+            "total_tokens": 10256
+          }
+        },
+        "response_cost_usd": {
+          "model_id": null,
+          "pricing_lookup_key": null,
+          "pricing_found": true,
+          "pricing_complete": true,
+          "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          },
+          "input_per_million_usd": null,
+          "output_per_million_usd": null,
+          "cached_input_per_million_usd": 0.03000,
+          "input_cost_usd": 0.00000,
+          "output_cost_usd": 0.00000,
+          "total_cost_usd": 0.00000,
+          "missing_pricing_models": []
+        },
+        "evaluation_cost_usd": {
+          "model_id": null,
+          "pricing_lookup_key": null,
+          "pricing_found": true,
+          "pricing_complete": true,
+          "tokens": {
+            "input_tokens": 5184,
+            "output_tokens": 5072,
+            "total_tokens": 10256
+          },
+          "input_per_million_usd": null,
+          "output_per_million_usd": null,
+          "cached_input_per_million_usd": 0.03000,
+          "input_cost_usd": 0.00178075,
+          "output_cost_usd": 0.01474,
+          "total_cost_usd": 0.01652075,
+          "missing_pricing_models": []
+        },
+        "combined_cost_usd": {
+          "model_id": null,
+          "pricing_lookup_key": null,
+          "pricing_found": true,
+          "pricing_complete": true,
+          "tokens": {
+            "input_tokens": 5184,
+            "output_tokens": 5072,
+            "total_tokens": 10256
+          },
+          "input_per_million_usd": null,
+          "output_per_million_usd": null,
+          "cached_input_per_million_usd": 0.03000,
+          "input_cost_usd": 0.00178075,
+          "output_cost_usd": 0.01474,
+          "total_cost_usd": 0.01652075,
+          "missing_pricing_models": []
+        }
+      }
+    },
+    "per_response_model": {
+      "azure::Kimi-K2.5": {
+        "count": 1,
+        "avg_composite_score": 3.8,
+        "errors": 0,
+        "error_categories": {},
+        "heuristics_pass_rate": 1.0,
+        "response_usage": {
+          "call_count": 0,
+          "usage_available": false,
+          "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          }
+        },
+        "evaluation_usage": {
+          "call_count": 2,
+          "usage_available": true,
+          "tokens": {
+            "input_tokens": 3294,
+            "output_tokens": 4836,
+            "total_tokens": 8130
+          }
+        },
+        "combined_usage": {
+          "call_count": 2,
+          "usage_available": true,
+          "tokens": {
+            "input_tokens": 3294,
+            "output_tokens": 4836,
+            "total_tokens": 8130
+          }
+        },
+        "response_cost_usd": {
+          "model_id": "azure::Kimi-K2.5",
+          "pricing_lookup_key": "azure::kimi-k2.5",
+          "pricing_found": true,
+          "pricing_complete": true,
+          "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          },
+          "input_per_million_usd": 0.60000,
+          "output_per_million_usd": 3.00000,
+          "cached_input_per_million_usd": null,
+          "input_cost_usd": 0.00000,
+          "output_cost_usd": 0.00000,
+          "total_cost_usd": 0.00000,
+          "missing_pricing_models": []
+        },
+        "evaluation_cost_usd": {
+          "model_id": null,
+          "pricing_lookup_key": null,
+          "pricing_found": true,
+          "pricing_complete": true,
+          "tokens": {
+            "input_tokens": 3294,
+            "output_tokens": 4836,
+            "total_tokens": 8130
+          },
+          "input_per_million_usd": null,
+          "output_per_million_usd": null,
+          "cached_input_per_million_usd": 0.03000,
+          "input_cost_usd": 0.00130825,
+          "output_cost_usd": 0.014268,
+          "total_cost_usd": 0.01557625,
+          "missing_pricing_models": []
+        },
+        "combined_cost_usd": {
+          "model_id": "azure::Kimi-K2.5",
+          "pricing_lookup_key": "azure::kimi-k2.5",
+          "pricing_found": true,
+          "pricing_complete": true,
+          "tokens": {
+            "input_tokens": 3294,
+            "output_tokens": 4836,
+            "total_tokens": 8130
+          },
+          "input_per_million_usd": 0.60000,
+          "output_per_million_usd": 3.00000,
+          "cached_input_per_million_usd": 0.03000,
+          "input_cost_usd": 0.00130825,
+          "output_cost_usd": 0.014268,
+          "total_cost_usd": 0.01557625,
+          "missing_pricing_models": []
+        }
+      },
+      "azure::gpt-5-mini": {
+        "count": 1,
+        "avg_composite_score": 4.6,
+        "errors": 0,
+        "error_categories": {},
+        "heuristics_pass_rate": 1.0,
+        "response_usage": {
+          "call_count": 0,
+          "usage_available": false,
+          "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          }
+        },
+        "evaluation_usage": {
+          "call_count": 2,
+          "usage_available": true,
+          "tokens": {
+            "input_tokens": 1890,
+            "output_tokens": 236,
+            "total_tokens": 2126
+          }
+        },
+        "combined_usage": {
+          "call_count": 2,
+          "usage_available": true,
+          "tokens": {
+            "input_tokens": 1890,
+            "output_tokens": 236,
+            "total_tokens": 2126
+          }
+        },
+        "response_cost_usd": {
+          "model_id": "azure::gpt-5-mini",
+          "pricing_lookup_key": "azure::gpt-5-mini",
+          "pricing_found": true,
+          "pricing_complete": true,
+          "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          },
+          "input_per_million_usd": 0.25000,
+          "output_per_million_usd": 2.00000,
+          "cached_input_per_million_usd": 0.03000,
+          "input_cost_usd": 0.00000,
+          "output_cost_usd": 0.00000,
+          "total_cost_usd": 0.00000,
+          "missing_pricing_models": []
+        },
+        "evaluation_cost_usd": {
+          "model_id": null,
+          "pricing_lookup_key": null,
+          "pricing_found": true,
+          "pricing_complete": true,
+          "tokens": {
+            "input_tokens": 1890,
+            "output_tokens": 236,
+            "total_tokens": 2126
+          },
+          "input_per_million_usd": null,
+          "output_per_million_usd": null,
+          "cached_input_per_million_usd": 0.03000,
+          "input_cost_usd": 0.0004725,
+          "output_cost_usd": 0.000472,
+          "total_cost_usd": 0.0009445,
+          "missing_pricing_models": []
+        },
+        "combined_cost_usd": {
+          "model_id": "azure::gpt-5-mini",
+          "pricing_lookup_key": "azure::gpt-5-mini",
+          "pricing_found": true,
+          "pricing_complete": true,
+          "tokens": {
+            "input_tokens": 1890,
+            "output_tokens": 236,
+            "total_tokens": 2126
+          },
+          "input_per_million_usd": 0.25000,
+          "output_per_million_usd": 2.00000,
+          "cached_input_per_million_usd": 0.03000,
+          "input_cost_usd": 0.0004725,
+          "output_cost_usd": 0.000472,
+          "total_cost_usd": 0.0009445,
+          "missing_pricing_models": []
+        }
+      }
+    }
+  },
+  "benchmark_results": [
+    {
+      "id": "T02",
+      "domain": "transport",
+      "query": "How do I get from Baixa-Chiado to Aeroporto?",
+      "language": "en",
+      "edge_case": false,
+      "edge_type": null,
+      "expected_behavior": null,
+      "agents_used": [
+        "transport"
+      ],
+      "response_model": "azure::gpt-5-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5-mini",
+        "provider": "azure",
+        "model": "gpt-5-mini",
+        "temperature": 0.0
+      },
+      "evaluation_model": "judge_average::2",
+      "evaluation_model_config": {
+        "kind": "judge_average",
+        "model_id": "judge_average::2",
+        "aggregation": "mean",
+        "judge_models": [
+          "azure::gpt-5-mini",
+          "azure::Kimi-K2.5"
+        ],
+        "judge_model_configs": [
+          {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 0.0
+          },
+          {
+            "model_id": "azure::Kimi-K2.5",
+            "provider": "azure",
+            "model": "Kimi-K2.5",
+            "temperature": 0.0
+          }
+        ]
+      },
+      "evaluation_models": [
+        "azure::gpt-5-mini",
+        "azure::Kimi-K2.5"
+      ],
+      "latency_s": 13.82,
+      "error": null,
+      "error_type": null,
+      "response": "### 🚌 Next Arrivals\n\n**Real time**\n- 🚇 **Baixa** → Chiado → Aeroporto Humberto Delgado · ⚠️ Line Status: · 🟢 Green Line: normal service · 🔴 Red Line: normal service · ⏳ Estimated total time: ~35 min · 🗺️ Your Metro Route: · 📍 Board at Baixa-Chiado · 🟢 Green Line - direction Telheiras · 🔄 Transfer at Alameda · 🔴 Red Line - direction Aeroporto · 🎯 Exit at Aeroporto · 🚶 Walk to Aeroporto Humberto Delgado · 🗓️ Next Metros (): · Station Baixa-Chiado: Direction Telheiras — ⏱️ Next Metro in: 9 min 3s | 19 min 17s | 24 min 46s · Station Alameda: Direction Aeroporto — ⏱️ Next Metro in: 2 min 55s | 6 min 20s | 10 min 31s\n\n💡 **Quick tip**: From Aeroporto to Aeroporto Humberto Delgado, the final walk is short.\n\n📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Updated:** 18:11",
+      "tools_used": [
+        "get_route_between_stations",
+        "get_metro_wait_time",
+        "get_metro_wait_time",
+        "carris_find_routes_between"
+      ],
+      "expected_tools": [
+        "get_route_between_stations"
+      ],
+      "expected_facts": [
+        "Start at Baixa-Chiado (Azul/Verde lines)",
+        "Take Verde line to Alameda, transfer to Vermelha line",
+        "Ride Vermelha line to Aeroporto (terminal station)",
+        "Alternative: Azul line to São Sebastião, transfer to Vermelha"
+      ],
+      "retrieved_context": "[get_route_between_stations] returned:\n🗺️ **Route: Baixa-Chiado → Aeroporto Humberto Delgado**\n\n📍 **LOCATION INFORMATION**\n**Aeroporto Humberto Delgado**\n   🚇 Nearest Metro: **Aeroporto** (🔴 Vermelha Line)\n   ℹ️ Lisbon Airport\n\n🚇 **METRO ROUTE**\n🔄 **Transfer Required**\n\n   💡 **Transfer at**: Alameda (🟢 ↔ 🔴)\n   ⏱️ Estimated travel time: **~35 min** (15 stations + 1 transfer)\n\n   **Full Route**:\n   1. 🟢 Board at **Baixa-Chiado** → direção **Telheiras**\n   2. Exit at **Alameda**\n   3. 🔴 Transfer to **Red Line (S. Sebastião ↔ Aeroporto)** → direção **Aeroporto**\n   4. Exit at **Aeroporto**\n   5. Walk to Aeroporto Humberto Delgado\n\n\n📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) **| Atualizado:** 18:11\n\n---\n[get_metro_wait_time] returned:\n🚇 Metro Wait Times at Baixa Chiado\n==================================================\n\n🟢 Direction: Telheiras\n   ⏱️ Next train: 9 min 3s\n   ⏳ Following: 19 min 17s, 24 min 46s\n\n📍 Updated: 18:11:22\n---\n[get_metro_wait_time] returned:\n🚇 Metro Wait Times at Alameda\n==================================================\n\n🔴 Direction: Aeroporto\n   ⏱️ Next train: 2 min 55s\n   ⏳ Following: 6 min 20s, 10 min 31s\n\n📍 Updated: 18:11:24\n---\n[carris_find_routes_between] returned:\nRoutes: Baixa-Chiado -> Aeroporto\n=======================================================\n\nResolving locations...\n   From: Baixa-Chiado\n   To: Aeroporto Humberto Delgado\n\nFound 3 direct routes!\n\nBUSES\n----------------------------------------\n   781: Cais Sodré - Prior Velho\n     (Sem informação em tempo real nesta paragem)\n\n   783: Igreja Encarnação - Restauradores\n     (Sem informação em tempo real nesta paragem)\n\n   210: Cais Sodré - Prior Velho\n     (Sem informação em tempo real nesta paragem)\n\n",
+      "scores": {
+        "factual_accuracy": 5.0,
+        "tool_usage": 5.0,
+        "completeness": 4.0,
+        "relevance": 5.0,
+        "response_quality": 4.0,
+        "composite_score": 4.6,
+        "reasoning": "[azure::gpt-5-mini] The agent’s response correctly outlines the metro route from Baixa-Chiado to Aeroporto: board the Green (Verde) line toward Telheiras, transfer at Alameda to the Red (Vermelha) line, and ride to Aeroporto, matching the retrieved route. Real-time wait times for Baixa-Chiado and Alameda are included and align with the get_metro_wait_time outputs; bus alternatives were available in the retrieved context but only briefly listed by the agent (no detailed bus guidance), which is acceptable since the metro is the primary route. The agent used the expected get_route_between_stations tool and also included supplementary tools (wait times and bus routes); those extras are relevant and not misused. Minor issues: a small phrasing oddity (“Baixa → Chiado → Aeroporto Humberto Delgado”) and a redundant tip about walking from Aeroporto to Aeroporto Humberto Delgado, but no hallucinated facts were introduced."
+      },
+      "judge_runs": [
+        {
+          "judge_model": "azure::gpt-5-mini",
+          "judge_model_config": {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 0.0
+          },
+          "scores": {
+            "factual_accuracy": 5,
+            "tool_usage": 5,
+            "completeness": 4,
+            "relevance": 5,
+            "response_quality": 4,
+            "composite_score": 4.6,
+            "reasoning": "The agent’s response correctly outlines the metro route from Baixa-Chiado to Aeroporto: board the Green (Verde) line toward Telheiras, transfer at Alameda to the Red (Vermelha) line, and ride to Aeroporto, matching the retrieved route. Real-time wait times for Baixa-Chiado and Alameda are included and align with the get_metro_wait_time outputs; bus alternatives were available in the retrieved context but only briefly listed by the agent (no detailed bus guidance), which is acceptable since the metro is the primary route. The agent used the expected get_route_between_stations tool and also included supplementary tools (wait times and bus routes); those extras are relevant and not misused. Minor issues: a small phrasing oddity (“Baixa → Chiado → Aeroporto Humberto Delgado”) and a redundant tip about walking from Aeroporto to Aeroporto Humberto Delgado, but no hallucinated facts were introduced."
+          },
+          "evaluation_usage": {
+            "model_id": null,
+            "call_count": 1,
+            "usage_available": true,
+            "tokens": {
+              "input_tokens": 1890,
+              "output_tokens": 236,
+              "total_tokens": 2126
+            }
+          },
+          "evaluation_cost_usd": {
+            "model_id": "azure::gpt-5-mini",
+            "pricing_lookup_key": "azure::gpt-5-mini",
+            "pricing_found": true,
+            "pricing_complete": true,
+            "tokens": {
+              "input_tokens": 1890,
+              "output_tokens": 236,
+              "total_tokens": 2126
+            },
+            "input_per_million_usd": 0.25000,
+            "output_per_million_usd": 2.00000,
+            "cached_input_per_million_usd": 0.03000,
+            "input_cost_usd": 0.0004725,
+            "output_cost_usd": 0.000472,
+            "total_cost_usd": 0.0009445,
+            "missing_pricing_models": []
+          },
+          "error": null,
+          "error_type": null
+        },
+        {
+          "judge_model": "azure::Kimi-K2.5",
+          "judge_model_config": {
+            "model_id": "azure::Kimi-K2.5",
+            "provider": "azure",
+            "model": "Kimi-K2.5",
+            "temperature": 0.0
+          },
+          "scores": {
+            "factual_accuracy": 0,
+            "tool_usage": 0,
+            "completeness": 0,
+            "relevance": 0,
+            "response_quality": 0,
+            "composite_score": 0.0,
+            "reasoning": "Judge Failed: Judge fallback returned empty content."
+          },
+          "evaluation_usage": {
+            "model_id": "azure::Kimi-K2.5",
+            "call_count": 1,
+            "usage_available": false,
+            "tokens": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "total_tokens": 0
+            }
+          },
+          "evaluation_cost_usd": {
+            "model_id": "azure::Kimi-K2.5",
+            "pricing_lookup_key": "azure::kimi-k2.5",
+            "pricing_found": true,
+            "pricing_complete": true,
+            "tokens": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "total_tokens": 0
+            },
+            "input_per_million_usd": 0.60000,
+            "output_per_million_usd": 3.00000,
+            "cached_input_per_million_usd": null,
+            "input_cost_usd": 0.00000,
+            "output_cost_usd": 0.00000,
+            "total_cost_usd": 0.00000,
+            "missing_pricing_models": []
+          },
+          "error": "Judge Failed: Judge fallback returned empty content.",
+          "error_type": "judge_error"
+        }
+      ],
+      "scores_by_judge": {
+        "azure::gpt-5-mini": {
+          "factual_accuracy": 5,
+          "tool_usage": 5,
+          "completeness": 4,
+          "relevance": 5,
+          "response_quality": 4,
+          "composite_score": 4.6,
+          "reasoning": "The agent’s response correctly outlines the metro route from Baixa-Chiado to Aeroporto: board the Green (Verde) line toward Telheiras, transfer at Alameda to the Red (Vermelha) line, and ride to Aeroporto, matching the retrieved route. Real-time wait times for Baixa-Chiado and Alameda are included and align with the get_metro_wait_time outputs; bus alternatives were available in the retrieved context but only briefly listed by the agent (no detailed bus guidance), which is acceptable since the metro is the primary route. The agent used the expected get_route_between_stations tool and also included supplementary tools (wait times and bus routes); those extras are relevant and not misused. Minor issues: a small phrasing oddity (“Baixa → Chiado → Aeroporto Humberto Delgado”) and a redundant tip about walking from Aeroporto to Aeroporto Humberto Delgado, but no hallucinated facts were introduced."
+        },
+        "azure::Kimi-K2.5": {
+          "factual_accuracy": 0,
+          "tool_usage": 0,
+          "completeness": 0,
+          "relevance": 0,
+          "response_quality": 0,
+          "composite_score": 0.0,
+          "reasoning": "Judge Failed: Judge fallback returned empty content."
+        }
+      },
+      "judge_summary": {
+        "judge_count": 2,
+        "successful_judges": 1,
+        "failed_judges": 1,
+        "all_judges_succeeded": false,
+        "averaging_method": "mean",
+        "judge_models": [
+          "azure::gpt-5-mini",
+          "azure::Kimi-K2.5"
+        ]
+      },
+      "response_usage": {
+        "model_id": "azure::gpt-5-mini",
+        "call_count": 0,
+        "usage_available": false,
+        "tokens": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0
+        },
+        "llm_usage_breakdown": []
+      },
+      "response_cost_usd": {
+        "model_id": "azure::gpt-5-mini",
+        "pricing_lookup_key": "azure::gpt-5-mini",
+        "pricing_found": true,
+        "pricing_complete": true,
+        "tokens": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0
+        },
+        "input_per_million_usd": 0.25000,
+        "output_per_million_usd": 2.00000,
+        "cached_input_per_million_usd": 0.03000,
+        "input_cost_usd": 0.00000,
+        "output_cost_usd": 0.00000,
+        "total_cost_usd": 0.00000,
+        "missing_pricing_models": []
+      },
+      "agent_usage": {
+        "transport": {
+          "model_id": "azure::gpt-5-mini",
+          "call_count": 0,
+          "usage_available": false,
+          "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          },
+          "llm_usage_breakdown": []
+        }
+      },
+      "agent_costs": {
+        "transport": {
+          "model_id": "azure::gpt-5-mini",
+          "pricing_lookup_key": "azure::gpt-5-mini",
+          "pricing_found": true,
+          "pricing_complete": true,
+          "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          },
+          "input_per_million_usd": 0.25000,
+          "output_per_million_usd": 2.00000,
+          "cached_input_per_million_usd": 0.03000,
+          "input_cost_usd": 0.00000,
+          "output_cost_usd": 0.00000,
+          "total_cost_usd": 0.00000,
+          "missing_pricing_models": []
+        }
+      },
+      "evaluation_usage": {
+        "model_id": null,
+        "call_count": 2,
+        "usage_available": true,
+        "tokens": {
+          "input_tokens": 1890,
+          "output_tokens": 236,
+          "total_tokens": 2126
+        }
+      },
+      "evaluation_cost_usd": {
+        "model_id": null,
+        "pricing_lookup_key": null,
+        "pricing_found": true,
+        "pricing_complete": true,
+        "tokens": {
+          "input_tokens": 1890,
+          "output_tokens": 236,
+          "total_tokens": 2126
+        },
+        "input_per_million_usd": null,
+        "output_per_million_usd": null,
+        "cached_input_per_million_usd": 0.03000,
+        "input_cost_usd": 0.0004725,
+        "output_cost_usd": 0.000472,
+        "total_cost_usd": 0.0009445,
+        "missing_pricing_models": []
+      },
+      "combined_usage": {
+        "model_id": null,
+        "call_count": 2,
+        "usage_available": true,
+        "tokens": {
+          "input_tokens": 1890,
+          "output_tokens": 236,
+          "total_tokens": 2126
+        }
+      },
+      "combined_cost_usd": {
+        "model_id": "azure::gpt-5-mini",
+        "pricing_lookup_key": "azure::gpt-5-mini",
+        "pricing_found": true,
+        "pricing_complete": true,
+        "tokens": {
+          "input_tokens": 1890,
+          "output_tokens": 236,
+          "total_tokens": 2126
+        },
+        "input_per_million_usd": 0.25000,
+        "output_per_million_usd": 2.00000,
+        "cached_input_per_million_usd": 0.03000,
+        "input_cost_usd": 0.0004725,
+        "output_cost_usd": 0.000472,
+        "total_cost_usd": 0.0009445,
+        "missing_pricing_models": []
+      },
+      "tool_metrics": {
+        "tool_precision": 0.333,
+        "tool_recall": 1.0,
+        "tool_f1": 0.5
+      },
+      "heuristics": {
+        "tool_leaks": {
+          "leaked": false,
+          "leaked_items": []
+        },
+        "response_length": {
+          "acceptable": true,
+          "char_count": 791,
+          "word_count": 148,
+          "issues": []
+        },
+        "language_compliance": {
+          "compliant": true,
+          "detected_indicators": {
+            "en": 3,
+            "pt": 1,
+            "fr": 1
+          },
+          "expected_language": "en"
+        },
+        "hallucinated_features": {
+          "hallucinated": false,
+          "flagged_claims": []
+        },
+        "emoji_density": {
+          "acceptable": true,
+          "emoji_count": 18,
+          "ratio": 0.0228
+        },
+        "presentation_contract": {
+          "starts_with_title": true,
+          "top_level_headers": [
+            "next arrivals"
+          ],
+          "has_source_line": true,
+          "has_notes_section": false,
+          "separator_count": 0,
+          "bullet_count": 1,
+          "link_count": 1,
+          "char_count": 791,
+          "word_count": 148
+        },
+        "overall_pass": true,
+        "critical_failures": []
+      },
+      "sla_met": true
+    },
+    {
+      "id": "T02",
+      "domain": "transport",
+      "query": "How do I get from Baixa-Chiado to Aeroporto?",
+      "language": "en",
+      "edge_case": false,
+      "edge_type": null,
+      "expected_behavior": null,
+      "agents_used": [
+        "transport"
+      ],
+      "response_model": "azure::Kimi-K2.5",
+      "response_model_config": {
+        "model_id": "azure::Kimi-K2.5",
+        "provider": "azure",
+        "model": "Kimi-K2.5",
+        "temperature": 0.0
+      },
+      "evaluation_model": "judge_average::2",
+      "evaluation_model_config": {
+        "kind": "judge_average",
+        "model_id": "judge_average::2",
+        "aggregation": "mean",
+        "judge_models": [
+          "azure::gpt-5-mini",
+          "azure::Kimi-K2.5"
+        ],
+        "judge_model_configs": [
+          {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 0.0
+          },
+          {
+            "model_id": "azure::Kimi-K2.5",
+            "provider": "azure",
+            "model": "Kimi-K2.5",
+            "temperature": 0.0
+          }
+        ]
+      },
+      "evaluation_models": [
+        "azure::gpt-5-mini",
+        "azure::Kimi-K2.5"
+      ],
+      "latency_s": 2.89,
+      "error": null,
+      "error_type": null,
+      "response": "### 🚌 Next Arrivals\n\n**Real time**\n- 🚇 **Baixa** → Chiado → Aeroporto Humberto Delgado · ⚠️ Line Status: · 🟢 Green Line: normal service · 🔴 Red Line: normal service · ⏳ Estimated total time: ~35 min · 🗺️ Your Metro Route: · 📍 Board at Baixa-Chiado · 🟢 Green Line - direction Telheiras · 🔄 Transfer at Alameda · 🔴 Red Line - direction Aeroporto · 🎯 Exit at Aeroporto · 🚶 Walk to Aeroporto Humberto Delgado · 🗓️ Next Metros (): · Station Baixa-Chiado: Direction Telheiras — ⏱️ Next Metro in: 8 min 50s | 18 min 57s | 24 min 35s · Station Alameda: Direction Aeroporto — ⏱️ Next Metro in: 2 min 44s | 6 min 20s | 10 min 11s\n\n💡 **Quick tip**: From Aeroporto to Aeroporto Humberto Delgado, the final walk is short.\n\n📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Updated:** 18:11",
+      "tools_used": [
+        "get_route_between_stations",
+        "get_metro_wait_time",
+        "get_metro_wait_time",
+        "carris_find_routes_between"
+      ],
+      "expected_tools": [
+        "get_route_between_stations"
+      ],
+      "expected_facts": [
+        "Start at Baixa-Chiado (Azul/Verde lines)",
+        "Take Verde line to Alameda, transfer to Vermelha line",
+        "Ride Vermelha line to Aeroporto (terminal station)",
+        "Alternative: Azul line to São Sebastião, transfer to Vermelha"
+      ],
+      "retrieved_context": "[get_route_between_stations] returned:\n🗺️ **Route: Baixa-Chiado → Aeroporto Humberto Delgado**\n\n📍 **LOCATION INFORMATION**\n**Aeroporto Humberto Delgado**\n   🚇 Nearest Metro: **Aeroporto** (🔴 Vermelha Line)\n   ℹ️ Lisbon Airport\n\n🚇 **METRO ROUTE**\n🔄 **Transfer Required**\n\n   💡 **Transfer at**: Alameda (🟢 ↔ 🔴)\n   ⏱️ Estimated travel time: **~35 min** (15 stations + 1 transfer)\n\n   **Full Route**:\n   1. 🟢 Board at **Baixa-Chiado** → direção **Telheiras**\n   2. Exit at **Alameda**\n   3. 🔴 Transfer to **Red Line (S. Sebastião ↔ Aeroporto)** → direção **Aeroporto**\n   4. Exit at **Aeroporto**\n   5. Walk to Aeroporto Humberto Delgado\n\n\n📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) **| Atualizado:** 18:11\n\n---\n[get_metro_wait_time] returned:\n🚇 Metro Wait Times at Baixa Chiado\n==================================================\n\n🟢 Direction: Telheiras\n   ⏱️ Next train: 8 min 50s\n   ⏳ Following: 18 min 57s, 24 min 35s\n\n📍 Updated: 18:11:39\n---\n[get_metro_wait_time] returned:\n🚇 Metro Wait Times at Alameda\n==================================================\n\n🔴 Direction: Aeroporto\n   ⏱️ Next train: 2 min 44s\n   ⏳ Following: 6 min 20s, 10 min 11s\n\n📍 Updated: 18:11:40\n---\n[carris_find_routes_between] returned:\nRoutes: Baixa-Chiado -> Aeroporto\n=======================================================\n\nResolving locations...\n   From: Baixa-Chiado\n   To: Aeroporto Humberto Delgado\n\nFound 3 direct routes!\n\n📡 Carris GTFS-RT: cached live snapshot in use (0s old).\n\nBUSES\n----------------------------------------\n   781: Cais Sodré - Prior Velho\n     (Sem informação em tempo real nesta paragem)\n\n   783: Igreja Encarnação - Restauradores\n     (Sem informação em tempo real nesta paragem)\n\n   210: Cais Sodré - Prior Velho\n     (Sem informação em tempo real nesta paragem)\n\n",
+      "scores": {
+        "factual_accuracy": 3.5,
+        "tool_usage": 4.0,
+        "completeness": 3.5,
+        "relevance": 4.5,
+        "response_quality": 3.5,
+        "composite_score": 3.8,
+        "reasoning": "[azure::gpt-5-mini] The agent's response correctly gives the primary metro route from Baixa-Chiado to Aeroporto: board the Green (Verde) line toward Telheiras, transfer at Alameda to the Red (Vermelha) line toward Aeroporto, and exit at Aeroporto — this matches the retrieved route. It also includes the alternative timing details (wait times at Baixa-Chiado and Alameda) pulled from the wait_time tools and lists bus alternatives from the Carris tool, though it does not explicitly present the alternative transfer via São Sebastião. All major facts are supported by the retrieved context; no fabricated stations or false claims are present. The agent used the expected get_route_between_stations tool along with additional appropriate real-time tools (get_metro_wait_time twice and carris_find_routes_between), so tool usage is complete though slightly redundant. The response is clear and concise, with minor omissions (missing explicit alternative via São Sebastião) but otherwise complete and relevant.\n\n[azure::Kimi-K2.5] : The agent correctly identified the primary metro route from Baixa-Chiado to Aeroporto via Alameda, accurately stating the Green line direction (Telheiras) and Red line transfer details as confirmed by the retrieved context. However, the agent invented line status information (\"Green Line: normal service\", \"Red Line: normal service\") that does not appear in any retrieved tool output, constituting a factual hallucination. Additionally, the agent omitted the alternative route via São Sebastião using the Azul line specified in the expected facts. While the agent successfully utilized the required get_route_between_stations tool and appropriately supplemented it with get_metro_wait_time for both stations, the additional call to carris_find_routes_between was redundant as its results were not integrated into the final response. The formatting is cluttered with run-on bullet points, empty parentheses (\"Next Metros ()\"), and a misleading header (\"### 🚌 Next Arrivals\"), though the core navigation instructions remain decipherable."
+      },
+      "judge_runs": [
+        {
+          "judge_model": "azure::gpt-5-mini",
+          "judge_model_config": {
+            "model_id": "azure::gpt-5-mini",
+            "provider": "azure",
+            "model": "gpt-5-mini",
+            "temperature": 0.0
+          },
+          "scores": {
+            "factual_accuracy": 4,
+            "tool_usage": 5,
+            "completeness": 4,
+            "relevance": 5,
+            "response_quality": 4,
+            "composite_score": 4.4,
+            "reasoning": "The agent's response correctly gives the primary metro route from Baixa-Chiado to Aeroporto: board the Green (Verde) line toward Telheiras, transfer at Alameda to the Red (Vermelha) line toward Aeroporto, and exit at Aeroporto — this matches the retrieved route. It also includes the alternative timing details (wait times at Baixa-Chiado and Alameda) pulled from the wait_time tools and lists bus alternatives from the Carris tool, though it does not explicitly present the alternative transfer via São Sebastião. All major facts are supported by the retrieved context; no fabricated stations or false claims are present. The agent used the expected get_route_between_stations tool along with additional appropriate real-time tools (get_metro_wait_time twice and carris_find_routes_between), so tool usage is complete though slightly redundant. The response is clear and concise, with minor omissions (missing explicit alternative via São Sebastião) but otherwise complete and relevant."
+          },
+          "evaluation_usage": {
+            "model_id": null,
+            "call_count": 1,
+            "usage_available": true,
+            "tokens": {
+              "input_tokens": 1909,
+              "output_tokens": 240,
+              "total_tokens": 2149
+            }
+          },
+          "evaluation_cost_usd": {
+            "model_id": "azure::gpt-5-mini",
+            "pricing_lookup_key": "azure::gpt-5-mini",
+            "pricing_found": true,
+            "pricing_complete": true,
+            "tokens": {
+              "input_tokens": 1909,
+              "output_tokens": 240,
+              "total_tokens": 2149
+            },
+            "input_per_million_usd": 0.25000,
+            "output_per_million_usd": 2.00000,
+            "cached_input_per_million_usd": 0.03000,
+            "input_cost_usd": 0.00047725,
+            "output_cost_usd": 0.00048,
+            "total_cost_usd": 0.00095725,
+            "missing_pricing_models": []
+          },
+          "error": null,
+          "error_type": null
+        },
+        {
+          "judge_model": "azure::Kimi-K2.5",
+          "judge_model_config": {
+            "model_id": "azure::Kimi-K2.5",
+            "provider": "azure",
+            "model": "Kimi-K2.5",
+            "temperature": 0.0
+          },
+          "scores": {
+            "factual_accuracy": 3,
+            "tool_usage": 3,
+            "completeness": 3,
+            "relevance": 4,
+            "response_quality": 3,
+            "composite_score": 3.2,
+            "reasoning": ": The agent correctly identified the primary metro route from Baixa-Chiado to Aeroporto via Alameda, accurately stating the Green line direction (Telheiras) and Red line transfer details as confirmed by the retrieved context. However, the agent invented line status information (\"Green Line: normal service\", \"Red Line: normal service\") that does not appear in any retrieved tool output, constituting a factual hallucination. Additionally, the agent omitted the alternative route via São Sebastião using the Azul line specified in the expected facts. While the agent successfully utilized the required get_route_between_stations tool and appropriately supplemented it with get_metro_wait_time for both stations, the additional call to carris_find_routes_between was redundant as its results were not integrated into the final response. The formatting is cluttered with run-on bullet points, empty parentheses (\"Next Metros ()\"), and a misleading header (\"### 🚌 Next Arrivals\"), though the core navigation instructions remain decipherable."
+          },
+          "evaluation_usage": {
+            "model_id": null,
+            "call_count": 1,
+            "usage_available": true,
+            "tokens": {
+              "input_tokens": 1385,
+              "output_tokens": 4596,
+              "total_tokens": 5981
+            }
+          },
+          "evaluation_cost_usd": {
+            "model_id": "azure::Kimi-K2.5",
+            "pricing_lookup_key": "azure::kimi-k2.5",
+            "pricing_found": true,
+            "pricing_complete": true,
+            "tokens": {
+              "input_tokens": 1385,
+              "output_tokens": 4596,
+              "total_tokens": 5981
+            },
+            "input_per_million_usd": 0.60000,
+            "output_per_million_usd": 3.00000,
+            "cached_input_per_million_usd": null,
+            "input_cost_usd": 0.000831,
+            "output_cost_usd": 0.013788,
+            "total_cost_usd": 0.014619,
+            "missing_pricing_models": []
+          },
+          "error": null,
+          "error_type": null
+        }
+      ],
+      "scores_by_judge": {
+        "azure::gpt-5-mini": {
+          "factual_accuracy": 4,
+          "tool_usage": 5,
+          "completeness": 4,
+          "relevance": 5,
+          "response_quality": 4,
+          "composite_score": 4.4,
+          "reasoning": "The agent's response correctly gives the primary metro route from Baixa-Chiado to Aeroporto: board the Green (Verde) line toward Telheiras, transfer at Alameda to the Red (Vermelha) line toward Aeroporto, and exit at Aeroporto — this matches the retrieved route. It also includes the alternative timing details (wait times at Baixa-Chiado and Alameda) pulled from the wait_time tools and lists bus alternatives from the Carris tool, though it does not explicitly present the alternative transfer via São Sebastião. All major facts are supported by the retrieved context; no fabricated stations or false claims are present. The agent used the expected get_route_between_stations tool along with additional appropriate real-time tools (get_metro_wait_time twice and carris_find_routes_between), so tool usage is complete though slightly redundant. The response is clear and concise, with minor omissions (missing explicit alternative via São Sebastião) but otherwise complete and relevant."
+        },
+        "azure::Kimi-K2.5": {
+          "factual_accuracy": 3,
+          "tool_usage": 3,
+          "completeness": 3,
+          "relevance": 4,
+          "response_quality": 3,
+          "composite_score": 3.2,
+          "reasoning": ": The agent correctly identified the primary metro route from Baixa-Chiado to Aeroporto via Alameda, accurately stating the Green line direction (Telheiras) and Red line transfer details as confirmed by the retrieved context. However, the agent invented line status information (\"Green Line: normal service\", \"Red Line: normal service\") that does not appear in any retrieved tool output, constituting a factual hallucination. Additionally, the agent omitted the alternative route via São Sebastião using the Azul line specified in the expected facts. While the agent successfully utilized the required get_route_between_stations tool and appropriately supplemented it with get_metro_wait_time for both stations, the additional call to carris_find_routes_between was redundant as its results were not integrated into the final response. The formatting is cluttered with run-on bullet points, empty parentheses (\"Next Metros ()\"), and a misleading header (\"### 🚌 Next Arrivals\"), though the core navigation instructions remain decipherable."
+        }
+      },
+      "judge_summary": {
+        "judge_count": 2,
+        "successful_judges": 2,
+        "failed_judges": 0,
+        "all_judges_succeeded": true,
+        "averaging_method": "mean",
+        "judge_models": [
+          "azure::gpt-5-mini",
+          "azure::Kimi-K2.5"
+        ]
+      },
+      "response_usage": {
+        "model_id": "azure::Kimi-K2.5",
+        "call_count": 0,
+        "usage_available": false,
+        "tokens": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0
+        },
+        "llm_usage_breakdown": []
+      },
+      "response_cost_usd": {
+        "model_id": "azure::Kimi-K2.5",
+        "pricing_lookup_key": "azure::kimi-k2.5",
+        "pricing_found": true,
+        "pricing_complete": true,
+        "tokens": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0
+        },
+        "input_per_million_usd": 0.60000,
+        "output_per_million_usd": 3.00000,
+        "cached_input_per_million_usd": null,
+        "input_cost_usd": 0.00000,
+        "output_cost_usd": 0.00000,
+        "total_cost_usd": 0.00000,
+        "missing_pricing_models": []
+      },
+      "agent_usage": {
+        "transport": {
+          "model_id": "azure::Kimi-K2.5",
+          "call_count": 0,
+          "usage_available": false,
+          "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          },
+          "llm_usage_breakdown": []
+        }
+      },
+      "agent_costs": {
+        "transport": {
+          "model_id": "azure::Kimi-K2.5",
+          "pricing_lookup_key": "azure::kimi-k2.5",
+          "pricing_found": true,
+          "pricing_complete": true,
+          "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          },
+          "input_per_million_usd": 0.60000,
+          "output_per_million_usd": 3.00000,
+          "cached_input_per_million_usd": null,
+          "input_cost_usd": 0.00000,
+          "output_cost_usd": 0.00000,
+          "total_cost_usd": 0.00000,
+          "missing_pricing_models": []
+        }
+      },
+      "evaluation_usage": {
+        "model_id": null,
+        "call_count": 2,
+        "usage_available": true,
+        "tokens": {
+          "input_tokens": 3294,
+          "output_tokens": 4836,
+          "total_tokens": 8130
+        }
+      },
+      "evaluation_cost_usd": {
+        "model_id": null,
+        "pricing_lookup_key": null,
+        "pricing_found": true,
+        "pricing_complete": true,
+        "tokens": {
+          "input_tokens": 3294,
+          "output_tokens": 4836,
+          "total_tokens": 8130
+        },
+        "input_per_million_usd": null,
+        "output_per_million_usd": null,
+        "cached_input_per_million_usd": 0.03000,
+        "input_cost_usd": 0.00130825,
+        "output_cost_usd": 0.014268,
+        "total_cost_usd": 0.01557625,
+        "missing_pricing_models": []
+      },
+      "combined_usage": {
+        "model_id": null,
+        "call_count": 2,
+        "usage_available": true,
+        "tokens": {
+          "input_tokens": 3294,
+          "output_tokens": 4836,
+          "total_tokens": 8130
+        }
+      },
+      "combined_cost_usd": {
+        "model_id": "azure::Kimi-K2.5",
+        "pricing_lookup_key": "azure::kimi-k2.5",
+        "pricing_found": true,
+        "pricing_complete": true,
+        "tokens": {
+          "input_tokens": 3294,
+          "output_tokens": 4836,
+          "total_tokens": 8130
+        },
+        "input_per_million_usd": 0.60000,
+        "output_per_million_usd": 3.00000,
+        "cached_input_per_million_usd": 0.03000,
+        "input_cost_usd": 0.00130825,
+        "output_cost_usd": 0.014268,
+        "total_cost_usd": 0.01557625,
+        "missing_pricing_models": []
+      },
+      "tool_metrics": {
+        "tool_precision": 0.333,
+        "tool_recall": 1.0,
+        "tool_f1": 0.5
+      },
+      "heuristics": {
+        "tool_leaks": {
+          "leaked": false,
+          "leaked_items": []
+        },
+        "response_length": {
+          "acceptable": true,
+          "char_count": 792,
+          "word_count": 148,
+          "issues": []
+        },
+        "language_compliance": {
+          "compliant": true,
+          "detected_indicators": {
+            "en": 3,
+            "pt": 1,
+            "fr": 1
+          },
+          "expected_language": "en"
+        },
+        "hallucinated_features": {
+          "hallucinated": false,
+          "flagged_claims": []
+        },
+        "emoji_density": {
+          "acceptable": true,
+          "emoji_count": 18,
+          "ratio": 0.0227
+        },
+        "presentation_contract": {
+          "starts_with_title": true,
+          "top_level_headers": [
+            "next arrivals"
+          ],
+          "has_source_line": true,
+          "has_notes_section": false,
+          "separator_count": 0,
+          "bullet_count": 1,
+          "link_count": 1,
+          "char_count": 792,
+          "word_count": 148
+        },
+        "overall_pass": true,
+        "critical_failures": []
+      },
+      "sla_met": true
+    }
+  ]
+}

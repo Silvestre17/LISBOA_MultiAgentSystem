@@ -252,12 +252,12 @@ class TestBenchmarkModelSelection:
     def test_resolve_judge_models_accepts_repeatable_specs(self):
         """Judge model specs should support explicit closed/open overrides."""
         resolved = resolve_judge_models(
-            ["azure::gpt-5-mini", "lmstudio::qwen/qwen3.5-9b"],
+            ["azure::gpt-5-mini", "azure::Kimi-K2.5"],
         )
 
         assert resolved == [
             {"provider": "azure", "model": "gpt-5-mini", "temperature": 0.0},
-            {"provider": "lmstudio", "model": "qwen/qwen3.5-9b", "temperature": 0.0},
+            {"provider": "azure", "model": "Kimi-K2.5", "temperature": 0.0},
         ]
 
 
