@@ -10,9 +10,15 @@
 #   python scripts/run_prompts.py --suite smoke              # Runs end-to-end sanity prompts through the full MultiAgentAssistant
 #   python scripts/run_prompts.py --suite coverage           # Runs strict worker-agent coverage prompts and checks expected tool calls
 #   python scripts/run_prompts.py --suite coverage --limit 5 # Runs only the first 5 coverage prompts for a quick spot-check
-#   python scripts/run_prompts.py --prompt "Como está o tempo hoje?" --language pt
+#   python scripts/run_prompts.py 
+#          --prompt "Como está o tempo hoje?" --language pt  # Ask one custom prompt via CLI args and run it through the smoke runner (supports provider/model overrides for coverage mode)
 #   python scripts/run_prompts.py --interactive              # Ask for one ad-hoc prompt via stdin and run it immediately
-#   python scripts/run_prompts.py --suite coverage --prompt "Next train from Rossio?" --domain transport --provider azure --model gpt-5-mini
+#   python scripts/run_prompts.py --suite coverage
+#          --prompt "Next train from Rossio?" 
+#          --domain transport 
+#          --provider azure 
+#          --model gpt-5-mini                                # Run a custom coverage prompt with specific domain and model overrides
+#
 # Parameters:
 #   --suite {smoke,coverage}   choose the prompt suite
 #   --limit N                  run only the first N selected prompts
@@ -26,6 +32,7 @@
 #   --provider NAME            override provider family (smoke) or worker provider (coverage)
 #   --model NAME               override worker model for coverage runs
 #   --temperature FLOAT        override worker temperature for coverage runs
+#
 # Notes:
 #   - Run this script from the repository root using the relative path above.
 #   - Avoid absolute pytest-style paths in this workspace on Windows because
@@ -70,7 +77,7 @@ SMOKE_PROMPTS = [
         "planner",
     ),
     (
-        "Quais os próximos autocarros da Carris no Rossio e qual é a melhor opção para seguir para Belém agora?",
+        "Quais os próximos autocarros da Carris no Rossio para seguir para Belém agora?",
         "pt",
         "transport",
     ),
@@ -93,7 +100,7 @@ SMOKE_PROMPTS = [
     # Researcher: tourists and residents
     ("Best seafood restaurants near the Tagus river with a nice view and not overly touristy.", "en", "researcher"),
     ("Where is the nearest pharmacy to Parque das Nações that should still be useful this evening?", "en", "researcher"),
-    ("Museus grátis ao domingo em Lisboa e como chegar ao primeiro a partir do Marquês de Pombal.", "pt", "researcher"),
+    ("Quais são os museus gratuitos este fim de semana em Lisboa e algum evento interessante igualmente gratuito?", "pt", "researcher"),
 
     # Multi-agent and multilingual
     (
