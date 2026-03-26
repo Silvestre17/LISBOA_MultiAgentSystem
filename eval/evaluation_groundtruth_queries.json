@@ -717,18 +717,17 @@
     },
     {
         "id": "R03",
-        "query": "Où puis-je trouver de la nourriture traditionnelle?",
+        "query": "Que eventos culturais estão a acontecer hoje em Lisboa?",
         "domain": "researcher",
         "expected_tools": [
-            "search_places_attractions"
+            "search_cultural_events"
         ],
         "expected_facts": [
-            "List of traditional Portuguese restaurants or tascas"
+            "List of current cultural events in Lisbon",
+            "Event titles or venues when available"
         ],
-        "language": "fr",
-        "edge_case": true,
-        "edge_type": "cross_lingual_query",
-        "expected_behavior": "Handle French query by responding with relevant results (system is multilingual)"
+        "language": "pt",
+        "edge_case": false
     },
     {
         "id": "R04",
