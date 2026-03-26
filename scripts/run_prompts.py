@@ -63,51 +63,48 @@ SUPPORTED_COVERAGE_DOMAINS = {"weather", "transport", "researcher"}
 
 # Each prompt is a tuple: (prompt_text, language_code, category)
 SMOKE_PROMPTS = [
-    
-    # CRITICAL Prompts
-    ("Sugere um plano para uma tarde em Belém com detalhes históricos e onde comer um pastel.", "pt", "planner"),
-    ("Quais os próximos autocarros da Carris no Rossio?", "pt", "transport"),    
-
-    # BASIC Prompts
-    ("How is the weather in Lisbon today?", "en", "weather"),
-    ("Will it rain this weekend in Sintra?", "en", "weather"),
-    ("What is the current temperature in downtown Lisbon?", "en", "weather"),
-    ("How do I get from Lisbon Airport to Rossio using the metro?", "en", "transport"),
-    ("Is the 28E tram running on time right now?", "en", "transport"),
-    ("Next train from Cais do Sodré to Cascais.", "en", "transport"),
-    ("Bus from Marquês de Pombal to Belém Tower.", "en", "transport"),
-    ("Are there any subway strikes today?", "en", "transport"),
-    ("Best seafood restaurants near the Tagus river.", "en", "researcher"),
-    ("Where is the nearest pharmacy to Parque das Nações?", "en", "researcher"),
-    ("Museums of modern art open today.", "en", "researcher"),
-    ("Cheap sushi places in Saldanha.", "en", "researcher"),
+    # CRITICAL end-to-end prompts
     (
-        "Plan a perfect afternoon in Belém visiting the Tower, Jerónimos Monastery, and eating Pastéis de Nata. Include transport from Chiado.",
-        "en",
+        "Planeia amanhã um dia inteiro em Lisboa a começar no Rossio com dois museus, almoço típico, deslocações em transporte público e adaptação se chover.",
+        "pt",
         "planner",
     ),
-    ("I want to go for a drink in Bairro Alto tonight. Any recommendations?", "en", "researcher"),
-    ("Como vou do Castelo de São Jorge para Belém de autocarro? Quero evitar o metro.", "pt", "transport"),
-    ("Onde estão os elétricos agora em tempo real?", "pt", "transport"),
-    ("Quais as linhas de elétrico que passam na Graça?", "pt", "transport"),
-    ("Próximo comboio para Sintra a partir do Rossio.", "pt", "transport"),
-    ("Quero ir de Entrecampos ao Marquês.", "pt", "transport"),
-    ("Sugere um passeio em Alfama com poucas subidas, estou com uma pessoa idosa.", "pt", "planner"),
-    ("Quero ir jantar e depois sair à noite em Lisboa. O que recomendas?", "pt", "researcher"),
-    ("Museus grátis ao domingo em Lisboa.", "pt", "researcher"),
-    ("Onde posso fazer um teste Covid hoje em Lisboa?", "pt", "researcher"),
-    ("Há trotinetes elétricas perto do Jardim da Estrela?", "pt", "researcher"),
-    ("Quero ir de metro para a Madeira.", "pt", "edge_case"),
     (
-        "Wie komme ich vom Flughafen Lissabon ins Stadtzentrum mit öffentlichen Verkehrsmitteln?",
-        "de",
+        "Quais os próximos autocarros da Carris no Rossio e qual é a melhor opção para seguir para Belém agora?",
+        "pt",
         "transport",
     ),
     (
-        "Quel temps fait-il à Lisbonne aujourd'hui et quel est le meilleur moyen d'aller à la Tour de Belém?",
+        "Plan a full afternoon in Belém starting from Chiado, include historical context, realistic transport, and one pastry stop.",
+        "en",
+        "planner",
+    ),
+
+    # Weather
+    ("How is the weather in Lisbon today and what should I wear for walking outdoors?", "en", "weather"),
+    ("Vai chover amanhã em Lisboa e há algum aviso meteorológico ativo?", "pt", "weather"),
+
+    # Transport: realtime, future, deterministic routes, and scope limits
+    ("How do I get from Lisbon Airport to Rossio using the metro right now?", "en", "transport"),
+    ("Como vou amanhã do Rossio ao Aeroporto de metro e o que muda por ser uma viagem futura?", "pt", "transport"),
+    ("Is the 28E tram running on time right now, and if not what fallback should I take?", "en", "transport"),
+    ("Next train from Cais do Sodré to Cascais, and tell me if there are any obvious disruptions.", "en", "transport"),
+
+    # Researcher: tourists and residents
+    ("Best seafood restaurants near the Tagus river with a nice view and not overly touristy.", "en", "researcher"),
+    ("Where is the nearest pharmacy to Parque das Nações that should still be useful this evening?", "en", "researcher"),
+    ("Museus grátis ao domingo em Lisboa e como chegar ao primeiro a partir do Marquês de Pombal.", "pt", "researcher"),
+
+    # Multi-agent and multilingual
+    (
+        "Quel temps fait-il à Lisbonne aujourd'hui et quel est le meilleur moyen d'aller à la Tour de Belém depuis le centre?",
         "fr",
         "multi",
     ),
+
+    # Guardrails / edge cases
+    ("Quero ir de metro para a Madeira.", "pt", "edge_case"),
+    ("Preciso do próximo Fertagus para Setúbal e de ferry para o Barreiro agora.", "pt", "edge_case"),
 ]
 
 

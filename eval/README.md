@@ -105,6 +105,8 @@ The fast manifest-integrity checks now live in `eval/tests/test_dataset_integrit
 
 The shared dataset lives in `evaluation_groundtruth_queries.json` and currently contains **72 entries across 6 domains**.
 
+For demonstrations, the repository also includes `evaluation_groundtruth_queries_demo.json`, a tiny two-query walkthrough corpus intended to show the mechanics of the runners without launching a full evaluation cycle.
+
 | Domain | Count | Coverage |
 |--------|------:|----------|
 | `weather` | 13 | IPMA forecasts, warnings, current weather, Portugal-wide overview |
@@ -151,7 +153,7 @@ If one judge fails, that failed run is still persisted in `judge_runs` and flagg
 The default evaluation matrix is now a closed plus open judge pair:
 
 - `azure::gpt-5-mini`
-- `lmstudio::qwen/qwen3.5-9b`
+- `azure::Kimi-K2.5`
 
 This matrix can be overridden with repeatable `--judge-model-spec provider::model` flags or with `EVAL_JUDGE_MODEL_SPECS`.
 
@@ -290,11 +292,22 @@ python -m pytest eval/tests/test_dataset_integrity.py eval/tests/test_benchmark_
 python eval/run_benchmark.py --mode run_test
 python eval/run_benchmark.py --mode full
 python eval/run_benchmark.py --limit 5
-python eval/run_benchmark.py --limit 3 --judge-model-spec azure::gpt-5-mini --judge-model-spec lmstudio::qwen/qwen3.5-9b
+python eval/run_benchmark.py --limit 3 --judge-model-spec azure::gpt-5-mini --judge-model-spec azure::Kimi-K2.5
 python eval/run_ablation.py --mode run_test
 python eval/run_ablation.py --mode full
-python eval/run_ablation.py --limit 3 --open-model-spec azure::Kimi-K2.5 --judge-model-spec azure::gpt-5-mini --judge-model-spec lmstudio::qwen/qwen3.5-9b
+python eval/run_ablation.py --limit 3 --open-model-spec azure::Kimi-K2.5 --judge-model-spec azure::gpt-5-mini --judge-model-spec azure::Kimi-K2.5
 ```
+
+Both runners now auto-load the checked-in pricing catalog from `data/pricing/llm_model_pricing.json` when no explicit `pricing_by_model` payload is injected programmatically, so CLI-generated artefacts include cost accounting by default.
+
+### Tiny demo dataset walkthrough
+
+```bash
+python eval/run_ablation.py --dataset eval/evaluation_groundtruth_queries_demo.json --open-model-spec azure::Kimi-K2.5 --output-prefix ablation_demo
+python eval/run_benchmark.py --dataset eval/evaluation_groundtruth_queries_demo.json --limit 1 --output-prefix benchmark_demo
+```
+
+Use the ablation command above to demonstrate the full zero-shot versus LISBOA comparison flow on a tiny corpus. The benchmark command is intentionally limited because the demo JSON includes a `multi_agent` entry, while the isolated benchmark only evaluates the worker-agent domains. The custom output prefixes keep demo artefacts persisted without replacing the main `benchmark_results_*` and `ablation_results_*` files that power the analysis notebook.
 
 ### Coverage and prompt-driven checks
 

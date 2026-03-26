@@ -41,4 +41,9 @@ ENV/
 .idea/
 .venv/
 .vscode/
+
+
 certs
+eval/results/smoke/azure_smoke_raw_20260326.md
+eval/results/smoke/lmstudio_smoke_raw_20260326.md
+eval/results/smoke/smoke_prompt_assessment_20260326.md

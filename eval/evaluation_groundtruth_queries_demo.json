@@ -1,0 +1,36 @@
+[
+  {
+    "id": "T02",
+    "query": "How do I get from Baixa-Chiado to Aeroporto?",
+    "domain": "transport",
+    "expected_tools": [
+      "get_route_between_stations"
+    ],
+    "expected_facts": [
+      "Start at Baixa-Chiado (Azul/Verde lines)",
+      "Take Verde line to Alameda, transfer to Vermelha line",
+      "Ride Vermelha line to Aeroporto (terminal station)",
+      "Alternative: Azul line to São Sebastião, transfer to Vermelha"
+    ],
+    "language": "en",
+    "edge_case": false
+  },
+  {
+    "id": "M01",
+    "query": "Plan a full day in Lisbon for tomorrow. I want to visit museums and use public transport.",
+    "domain": "multi_agent",
+    "expected_tools": [
+      "get_weather_forecast",
+      "search_places_attractions",
+      "get_metro_status",
+      "get_route_between_stations"
+    ],
+    "expected_facts": [
+      "Weather forecast for tomorrow",
+      "Museum recommendations",
+      "Transport route suggestions"
+    ],
+    "language": "en",
+    "edge_case": false
+  }
+]

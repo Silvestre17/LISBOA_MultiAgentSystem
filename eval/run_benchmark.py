@@ -42,6 +42,7 @@ from eval.runtime_utils import (
     combine_usage_payloads,
     compute_tool_metrics,
     get_pricing_metadata,
+    load_pricing_catalog,
     parse_model_spec,
     resolve_model_specs,
     select_balanced_subset,
@@ -59,14 +60,14 @@ SUPPORTED_MODEL_PROVIDERS = {"azure", "openai", "lmstudio"}
 
 
 # TEST: Define the per-agent response-model benchmark matrix here.
-# These defaults avoid placeholder models and run in the current Azure-based
-# environment. Uncomment and edit the LM Studio entries when you want the
-# 2 open-source + 2 proprietary matrix described in Section 3.6.1.
+# These defaults mirror the active evaluation setup on this machine:
+# Azure GPT-5-mini for the closed model and Azure Kimi-K2.5 for the
+# open-model comparison profile.
 MODELS_TO_TEST = [
-    # TEST: open-source model 1
-    {"provider": "lmstudio", "model": "qwen/qwen3.5-9b", "temperature": 0.0},
     # TEST: proprietary model 1
     {"provider": "azure", "model": "gpt-5-mini", "temperature": 0.0},
+    # TEST: open-model profile served through Azure
+    {"provider": "azure", "model": "Kimi-K2.5", "temperature": 0.0},
 ]
 DEFAULT_JUDGE_MODELS = deepcopy(MODELS_TO_TEST)
 
@@ -79,6 +80,30 @@ SLA_THRESHOLDS = {
     "greeting": 5.0,
     "out_of_scope": 5.0,
 }
+
+
+def resolve_groundtruth_path(dataset_path: str | Path | None = None) -> Path:
+    """Resolve an optional ground-truth dataset path relative to the repository root."""
+    if dataset_path is None:
+        return GROUNDTRUTH_QUERIES_PATH
+
+    candidate = Path(dataset_path)
+    if candidate.is_absolute():
+        return candidate
+
+    repo_root = Path(__file__).resolve().parent.parent
+    repo_relative = repo_root / candidate
+    if repo_relative.exists():
+        return repo_relative
+
+    return (Path.cwd() / candidate).resolve()
+
+
+def resolve_pricing_catalog(pricing_by_model: dict | None = None) -> dict | None:
+    """Return the active pricing catalog, defaulting to the checked-in repository snapshot."""
+    if pricing_by_model is not None:
+        return pricing_by_model
+    return load_pricing_catalog()
 
 
 def parse_response_model_spec(
@@ -349,6 +374,8 @@ def run_benchmark(
     judge_model_specs: list[str] | None = None,
     judge_provider: str | None = None,
     judge_model: str | None = None,
+    groundtruth_path: str | Path | None = None,
+    output_prefix: str = "benchmark_results",
 ):
     """
     Execute the academic benchmark and save the results JSON.
@@ -384,7 +411,9 @@ def run_benchmark(
         print(f"STARTING ACADEMIC LISBOA BENCHMARK (LIMIT={limit})")
         print("=" * 60)
         
-        groundtruth_queries = load_groundtruth_queries(GROUNDTRUTH_QUERIES_PATH)
+        resolved_groundtruth_path = resolve_groundtruth_path(groundtruth_path)
+        pricing_by_model = resolve_pricing_catalog(pricing_by_model)
+        groundtruth_queries = load_groundtruth_queries(resolved_groundtruth_path)
         if limit:
             groundtruth_queries = select_balanced_subset(
                 groundtruth_queries,
@@ -545,9 +574,9 @@ def run_benchmark(
 
         # Save Results
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = build_results_output_path("benchmark", "benchmark_results", timestamp)
+        output_path = build_results_output_path("benchmark", output_prefix, timestamp)
         benchmark_metadata = build_run_metadata(
-            GROUNDTRUTH_QUERIES_PATH,
+            resolved_groundtruth_path,
             groundtruth_queries,
             response_models=[manifest["model_id"] for manifest in response_model_manifests],
             evaluation_model=evaluation_model_id,
@@ -752,6 +781,18 @@ if __name__ == "__main__":
         default=None,
         help="Optional model override for a single evaluation judge when --judge-model-spec is not used.",
     )
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default=None,
+        help="Optional dataset path, for example eval/evaluation_groundtruth_queries_demo.json.",
+    )
+    parser.add_argument(
+        "--output-prefix",
+        type=str,
+        default="benchmark_results",
+        help="Output filename prefix inside eval/results/benchmark/.",
+    )
     args = parser.parse_args()
     
     limit = 5 if args.mode == "run_test" else args.limit
@@ -766,4 +807,6 @@ if __name__ == "__main__":
         judge_model_specs=args.judge_model_specs,
         judge_provider=args.judge_provider,
         judge_model=args.judge_model,
+        groundtruth_path=args.dataset,
+        output_prefix=args.output_prefix,
     )

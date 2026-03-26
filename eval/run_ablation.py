@@ -46,6 +46,7 @@ from eval.runtime_utils import (
     combine_usage_payloads,
     compute_tool_metrics,
     get_pricing_metadata,
+    load_pricing_catalog,
     parse_model_spec,
     resolve_model_specs,
     select_balanced_subset,
@@ -62,12 +63,36 @@ SUPPORTED_MODEL_PROVIDERS = {"azure", "openai", "lmstudio"}
 # TEST: Zero-shot baseline model lives here by default, or can be overridden via CLI.
 DEFAULT_ZERO_SHOT_PROVIDER = "azure"
 DEFAULT_ZERO_SHOT_MODEL = "gpt-5-mini"
-DEFAULT_OPEN_PROVIDER = "lmstudio"
-DEFAULT_OPEN_MODEL = "qwen/qwen3.5-9b"
+DEFAULT_OPEN_PROVIDER = "azure"
+DEFAULT_OPEN_MODEL = "Kimi-K2.5"
 DEFAULT_JUDGE_MODELS = [
     {"provider": DEFAULT_ZERO_SHOT_PROVIDER, "model": DEFAULT_ZERO_SHOT_MODEL, "temperature": 0.0},
     {"provider": DEFAULT_OPEN_PROVIDER, "model": DEFAULT_OPEN_MODEL, "temperature": 0.0},
 ]
+
+
+def resolve_groundtruth_path(dataset_path: str | Path | None = None) -> Path:
+    """Resolve an optional ground-truth dataset path relative to the repository root."""
+    if dataset_path is None:
+        return GROUNDTRUTH_QUERIES_PATH
+
+    candidate = Path(dataset_path)
+    if candidate.is_absolute():
+        return candidate
+
+    repo_root = Path(__file__).resolve().parent.parent
+    repo_relative = repo_root / candidate
+    if repo_relative.exists():
+        return repo_relative
+
+    return (Path.cwd() / candidate).resolve()
+
+
+def resolve_pricing_catalog(pricing_by_model: dict | None = None) -> dict | None:
+    """Return the active pricing catalog, defaulting to the checked-in repository snapshot."""
+    if pricing_by_model is not None:
+        return pricing_by_model
+    return load_pricing_catalog()
 
 
 def normalize_model_provider(provider: str | None) -> str | None:
@@ -291,10 +316,12 @@ def _evaluate_with_judges(
     return judge_runs, aggregated
 
 
-def load_groundtruth_queries(filepath: str | Path = GROUNDTRUTH_QUERIES_PATH, limit=20):
-    """Load a prefix of the shared evaluation ground-truth corpus for ablation runs."""
+def load_groundtruth_queries(filepath: str | Path = GROUNDTRUTH_QUERIES_PATH, limit: int | None = None):
+    """Load the shared evaluation ground-truth corpus, optionally selecting a balanced subset."""
     with open(filepath, "r", encoding="utf-8") as f:
         data = json.load(f)
+    if limit is None:
+        return data
     return select_balanced_subset(data, limit, group_key="domain")
 
 
@@ -657,6 +684,8 @@ def run_ablation(
     lisboa_provider: str | None = None,
     judge_provider: str | None = None,
     judge_model: str | None = None,
+    groundtruth_path: str | Path | None = None,
+    output_prefix: str = "ablation_results",
 ):
     """
     Execute the ablation study and save the results JSON.
@@ -696,9 +725,11 @@ def run_ablation(
         print(f"STARTING ABLATION STUDY (Zero-Shot vs LISBOA Framework) (LIMIT={limit})")
         print("=" * 60)
         
+        resolved_groundtruth_path = resolve_groundtruth_path(groundtruth_path)
+        pricing_by_model = resolve_pricing_catalog(pricing_by_model)
         groundtruth_queries = load_groundtruth_queries(
-            GROUNDTRUTH_QUERIES_PATH,
-            limit=limit if limit else 20,
+            resolved_groundtruth_path,
+            limit=limit,
         )
 
         if lisboa_provider is not None:
@@ -1026,11 +1057,11 @@ def run_ablation(
 
         primary_profile_metadata = profile_metadata.get(primary_profile_key, {})
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = build_results_output_path("ablation", "ablation_results", timestamp)
+        output_path = build_results_output_path("ablation", output_prefix, timestamp)
         write_json_artifact(
             {
                 "ablation_metadata": build_run_metadata(
-                    GROUNDTRUTH_QUERIES_PATH,
+                    resolved_groundtruth_path,
                     groundtruth_queries,
                     response_models={
                         "zero_shot": (primary_profile_metadata.get("zero_shot_model_config", {}) or {}).get("model_id"),
@@ -1116,6 +1147,18 @@ if __name__ == "__main__":
         default=None,
         help="Optional model override for a single evaluation judge when --judge-model-spec is not used.",
     )
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default=None,
+        help="Optional dataset path, for example eval/evaluation_groundtruth_queries_demo.json.",
+    )
+    parser.add_argument(
+        "--output-prefix",
+        type=str,
+        default="ablation_results",
+        help="Output filename prefix inside eval/results/ablation/.",
+    )
     args = parser.parse_args()
     
     limit = 5 if args.mode == "run_test" else args.limit
@@ -1129,4 +1172,6 @@ if __name__ == "__main__":
         lisboa_provider=args.lisboa_provider,
         judge_provider=args.judge_provider,
         judge_model=args.judge_model,
+        groundtruth_path=args.dataset,
+        output_prefix=args.output_prefix,
     )
