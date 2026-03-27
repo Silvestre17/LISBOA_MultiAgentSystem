@@ -13,18 +13,18 @@
 # Required libraries:
 # pip install requests beautifulsoup4 tqdm
 
-import json                         # To handle JSON data
-import logging                      # To log messages (for Github Actions)
-import os                           # To handle file paths correctly
-import random                       # To make delays random
-import re                           # To extract numbers from strings
-import sys                          # To exit the script in case of critical errors
-import time                         # To add delays
-from datetime import datetime       # To handle date parsing and formatting
+import json  # To handle JSON data
+import logging  # To log messages (for Github Actions)
+import os  # To handle file paths correctly
+import random  # To make delays random
+import re  # To extract numbers from strings
+import sys  # To exit the script in case of critical errors
+import time  # To add delays
+from datetime import datetime  # To handle date parsing and formatting
 
-import requests                     # To make HTTP requests
-from bs4 import BeautifulSoup       # To parse HTML content
-from tqdm import tqdm               # To show progress bars
+import requests  # To make HTTP requests
+from bs4 import BeautifulSoup  # To parse HTML content
+from tqdm import tqdm  # To show progress bars
 
 # --- Configuration & Anti-Bot Measures ---
 
@@ -182,6 +182,64 @@ def _extract_event_dates_from_text(text):
         )
 
     return extracted_dates
+
+
+def _extract_event_schedule_notes(text):
+    """Extracts recurring-session notes from free text when they are user-visible."""
+    normalized_text = str(text or "").replace('\r', '\n')
+    if not normalized_text.strip():
+        return []
+
+    weekday_pattern = re.compile(
+        r'\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|every|daily|'
+        r'segunda(?:\-feira)?|ter[c\u00e7]a(?:\-feira)?|quarta(?:\-feira)?|'
+        r'quinta(?:\-feira)?|sexta(?:\-feira)?|s[a\u00e1]bado|domingo)\b',
+        re.IGNORECASE,
+    )
+    time_pattern = re.compile(
+        r'\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b'     # 9 a.m. / 9 p.m.
+        r'|\b\d{1,2}:\d{2}\b'                                 # 21:00
+        r'|\b\d{1,2}h(?:\d{2})?\b',                           # 21h / 21h30 (PT/FR)
+        re.IGNORECASE,
+    )
+
+    notes = []
+    seen = set()
+    for raw_line in re.split(r'\n+', normalized_text):
+        note = _normalize_text(raw_line)
+        if not note:
+            continue
+        if weekday_pattern.search(note) and time_pattern.search(note):
+            if note not in seen:
+                seen.add(note)
+                notes.append(note)
+
+    return notes
+
+
+def _extract_event_highlight_links(details_div, base_domain):
+    """Extracts structured highlight links from aggregated event pages."""
+    if not details_div:
+        return []
+
+    highlight_links = []
+    seen_urls = set()
+    for heading in details_div.find_all(re.compile(r'^h[1-6]$')):
+        if _normalize_text(heading.get_text(" ", strip=True)).lower() != 'highlights':
+            continue
+
+        for sibling in heading.find_next_siblings():
+            if sibling.name and re.fullmatch(r'h[1-6]', sibling.name, re.IGNORECASE):
+                break
+            for link in sibling.find_all('a', href=True):
+                text = _normalize_text(link.get_text(" ", strip=True))
+                href = requests.compat.urljoin(base_domain, link['href'])  # type: ignore
+                if not text or href in seen_urls:
+                    continue
+                seen_urls.add(href)
+                highlight_links.append({'title': text, 'url': href})
+
+    return highlight_links
 
 
 def get_headers():
@@ -382,6 +440,12 @@ def scrape_event_details(session, event_url):
             # Detailed Description
             if details_div := soup.find('div', class_='from-cms'):
                 event_data['full_description'] = details_div.get_text(strip=True, separator='\n')
+                highlight_links = _extract_event_highlight_links(details_div, base_domain)
+                if highlight_links:
+                    event_data['highlight_links'] = highlight_links
+                schedule_notes = _extract_event_schedule_notes(event_data.get('full_description', ''))
+                if schedule_notes:
+                    event_data['schedule_notes'] = schedule_notes
 
             # =============================================
             # DATES & TIMES - Improved Parsing
@@ -481,6 +545,7 @@ def scrape_event_details(session, event_url):
             info_boxes = soup.find_all('div', class_='info-text')
             event_data['information_links'] = {}
             event_data['buy_tickets_url'] = None
+            event_data['venue_locations'] = []
             
             for box in info_boxes:
                 if h3 := box.find('h3'):
@@ -507,9 +572,17 @@ def scrape_event_details(session, event_url):
                     
                     # Otherwise, assume it's a VENUE/LOCATION box
                     else:
-                        event_data['venue_name'] = _normalize_text(h3_text)
+                        venue_payload = {'venue_name': _normalize_text(h3_text)}
                         if content_div:
-                            event_data['location'] = _normalize_text(content_div.get_text(" ", strip=True))
+                            venue_payload['location'] = _normalize_text(content_div.get_text(" ", strip=True))
+
+                        if venue_payload not in event_data['venue_locations']:
+                            event_data['venue_locations'].append(venue_payload)
+
+                        if not event_data.get('venue_name'):
+                            event_data['venue_name'] = venue_payload['venue_name']
+                        if venue_payload.get('location') and not event_data.get('location'):
+                            event_data['location'] = venue_payload['location']
 
             if not event_data.get('title') and event_data.get('url'):
                 slug = event_data['url'].rstrip('/').split('/')[-1].replace('-', ' ')

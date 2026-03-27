@@ -3,6 +3,7 @@
 #   - André Filipe Gomes Silvestre, 20240502
 # ==========================================================================
 
+import agent.agents as agents
 from agent.graph import (
     LisbonAssistant,
     MultiAgentAssistant,
@@ -73,5 +74,8 @@ __all__ = [
     "QA_AGENT_PROMPT_EN", "QA_AGENT_PROMPT_PT", "get_qa_prompt",
     
     # LLM
-    "LLMFactory"
+    "LLMFactory",
+
+    # Subpackages
+    "agents",
 ]

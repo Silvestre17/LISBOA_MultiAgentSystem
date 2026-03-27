@@ -13,17 +13,17 @@
 # Required libraries:
 # pip install requests beautifulsoup4 tqdm
 
-import json                         # To handle JSON data
-import logging                      # To log messages (for Github Actions)
-import os                           # To handle file paths correctly
-import random                       # To make delays random
-import re                           # To extract numbers from strings
-import sys                          # To exit the script in case of critical errors
-import time                         # To add delays
+import json  # To handle JSON data
+import logging  # To log messages (for Github Actions)
+import os  # To handle file paths correctly
+import random  # To make delays random
+import re  # To extract numbers from strings
+import sys  # To exit the script in case of critical errors
+import time  # To add delays
 
-import requests                     # To make HTTP requests
-from bs4 import BeautifulSoup       # To parse HTML content
-from tqdm import tqdm               # To show progress bars
+import requests  # To make HTTP requests
+from bs4 import BeautifulSoup  # To parse HTML content
+from tqdm import tqdm  # To show progress bars
 
 # --- Configuration & Anti-Bot Measures ---
 
@@ -87,6 +87,19 @@ def _extract_social_name(link):
     except Exception:
         pass
     return href
+
+
+def _extract_lisboa_card_badge_text(soup):
+    """Extracts the visible Lisboa Card badge text from the page header, if present."""
+    lisboa_card_link = soup.find(
+        'a',
+        href=lambda h: h and 'lisboa-card' in h and 'shop.visitlisboa' in h,
+    )
+    if not lisboa_card_link:
+        return None
+
+    badge_text = _normalize_text(lisboa_card_link.get_text(" ", strip=True))
+    return badge_text or None
 
 
 def get_total_pages(session, base_url):
@@ -197,13 +210,12 @@ def scrape_place_details(session, place_url):
             if desc := _first_element(soup, ['h2.max-w-xl + p', 'h1.font-serif + p', 'main p']):
                 place_data['short_description'] = _normalize_text(desc.get_text(" ", strip=True))
                 
-            # Lisboa Card Discount (e.g., "10% with Lisboa Card")
-            # Look for the yellow badge link that leads to lisboa-card shop
-            lisboa_card_link = soup.find('a', href=lambda h: h and 'lisboa-card' in h and 'shop.visitlisboa' in h)
-            if lisboa_card_link:
-                discount_text = _normalize_text(lisboa_card_link.get_text(" ", strip=True))
-                if discount_text and '%' in discount_text:
-                    place_data['lisboa_card_discount'] = discount_text
+            # Lisboa Card benefit badge (e.g., "15% with Lisboa Card" or "Free with Lisboa Card")
+            lisboa_card_badge = _extract_lisboa_card_badge_text(soup)
+            if lisboa_card_badge:
+                place_data['lisboa_card_benefit'] = lisboa_card_badge
+                if '%' in lisboa_card_badge:
+                    place_data['lisboa_card_discount'] = lisboa_card_badge
             
             # Lisbon Tourism Member badge (div with logo and text)
             for div in soup.find_all('div', class_=lambda c: c and 'bg-off-white' in c and 'font-bold' in c):
