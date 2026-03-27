@@ -188,7 +188,7 @@ The analysis notebook `eval/benchmark_ablation_analysis.ipynb` also exports late
 
 | Workflow | Trigger | Purpose | Main outputs |
 |----------|---------|---------|--------------|
-| `data_pipeline.yml` | daily at **04:00 UTC**, plus manual trigger | scrape VisitLisboa events daily and places weekly on Mondays | updated JSON artefacts under `data_collection/webscraping/` |
+| `data_pipeline.yml` | daily at **04:00 UTC**, plus manual trigger with `events` / `places` / `both` | scrape VisitLisboa events daily and places weekly on Mondays, while manual runs can target either dataset or both | updated JSON artefacts under `data_collection/webscraping/` |
 | `sync_vector_db.yml` | `workflow_run` after `Update Lisbon Data`, plus manual trigger | incrementally sync ChromaDB collections and commit vector DB updates | updated artefacts under `data/vector_db/` |
 
 ### Exit-code protocol used by the Sync Workflow

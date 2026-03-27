@@ -37,13 +37,14 @@ These sources are queried at runtime and are not versioned as scraped repository
 
 | Workflow | Schedule or trigger | What it updates |
 |----------|---------------------|-----------------|
-| `data_pipeline.yml` | daily at **04:00 UTC** | VisitLisboa event JSON every day and place JSON on Mondays |
+| `data_pipeline.yml` | daily at **04:00 UTC**, plus manual selector | VisitLisboa event JSON every day and place JSON on Mondays; manual runs can target events, places, or both |
 | `sync_vector_db.yml` | `workflow_run` after successful data update, plus manual trigger | incremental ChromaDB sync for changed collections |
 
 In practice:
 
 - VisitLisboa **events** are scraped daily
-- VisitLisboa **places** are scraped weekly on Mondays, unless manually triggered
+- VisitLisboa **places** are scraped weekly on Mondays during scheduled runs
+- manual runs can choose **events**, **places**, or **both**
 - vector collections are then updated incrementally instead of being rebuilt from scratch every time
 
 ## 🗂️ Scraped JSON Artefacts
