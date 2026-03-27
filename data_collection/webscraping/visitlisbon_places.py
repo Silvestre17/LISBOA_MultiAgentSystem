@@ -13,15 +13,16 @@
 # Required libraries:
 # pip install requests beautifulsoup4 tqdm
 
+import json                         # To handle JSON data
+import logging                      # To log messages (for Github Actions)
+import os                           # To handle file paths correctly
+import random                       # To make delays random
+import re                           # To extract numbers from strings
+import sys                          # To exit the script in case of critical errors
+import time                         # To add delays
+
 import requests                     # To make HTTP requests
 from bs4 import BeautifulSoup       # To parse HTML content
-import json                         # To handle JSON data
-import time                         # To add delays  
-import random                       # To make delays random
-import os                           # To handle file paths correctly
-import re                           # To extract numbers from strings
-import logging                      # To log messages (for Github Actions)
-import sys                          # To exit the script in case of critical errors
 from tqdm import tqdm               # To show progress bars
 
 # --- Configuration & Anti-Bot Measures ---
@@ -33,6 +34,21 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36"
 ]
+
+
+def _normalize_text(text):
+    """Normalizes whitespace while preserving readable text for scraping."""
+    if not text:
+        return ""
+    return re.sub(r'\s+', ' ', str(text).replace('\xa0', ' ')).strip()
+
+
+def _first_element(soup, selectors):
+    """Returns the first matching element for a list of selectors."""
+    for selector in selectors:
+        if element := soup.select_one(selector):
+            return element
+    return None
 
 
 def get_headers():
@@ -173,18 +189,19 @@ def scrape_place_details(session, place_url):
             # --- Parsing Logic ---
             
             # General
-            if title := soup.select_one('h1.font-serif, h2.max-w-xl'):
-                place_data['title'] = title.get_text(strip=True)
+            title = _first_element(soup, ['h2.max-w-xl', 'h1.font-serif', 'main h2', 'main h1'])
+            if title:
+                place_data['title'] = _normalize_text(title.get_text(" ", strip=True))
             if cat := soup.find('div', class_='text-green-primary'):
-                place_data['category'] = cat.get_text(strip=True)
-            if desc := soup.select_one('h2.max-w-xl + p, h1.font-serif + p'):
-                place_data['short_description'] = desc.get_text(strip=True)
+                place_data['category'] = _normalize_text(cat.get_text(" ", strip=True))
+            if desc := _first_element(soup, ['h2.max-w-xl + p', 'h1.font-serif + p', 'main p']):
+                place_data['short_description'] = _normalize_text(desc.get_text(" ", strip=True))
                 
             # Lisboa Card Discount (e.g., "10% with Lisboa Card")
             # Look for the yellow badge link that leads to lisboa-card shop
             lisboa_card_link = soup.find('a', href=lambda h: h and 'lisboa-card' in h and 'shop.visitlisboa' in h)
             if lisboa_card_link:
-                discount_text = lisboa_card_link.get_text(strip=True)
+                discount_text = _normalize_text(lisboa_card_link.get_text(" ", strip=True))
                 if discount_text and '%' in discount_text:
                     place_data['lisboa_card_discount'] = discount_text
             
@@ -216,23 +233,29 @@ def scrape_place_details(session, place_url):
             # Initialize structured fields
             place_data['contact_info'] = {}
             place_data['social_media'] = {}
+            place_data['information_links'] = {}
             place_data['schedules'] = []  # List to support multiple schedules
             place_data['tickets_offers'] = None
+            place_data['additional_sections'] = []
             
             # Parse info-text boxes for Location, Information, Schedules, Tickets
             for box in soup.find_all('div', class_='info-text'):
                 if h3 := box.find('h3'):
-                    h3_text = h3.get_text(strip=True)
+                    h3_text = _normalize_text(h3.get_text(" ", strip=True))
                     h3_lower = h3_text.lower()
+                    content = box.find('div', class_='info-text__content')
                     
-                    if 'location' in h3_lower:
-                        if content := box.find('div', class_='info-text__content'):
-                            place_data['location'] = content.get_text(strip=True)
+                    if h3_lower == 'location':
+                        if content:
+                            place_data['location'] = _normalize_text(content.get_text(" ", strip=True))
                             
-                    elif 'information' in h3_lower:
+                    elif h3_lower == 'information':
                         for link in box.find_all('a', href=True):
                             href = link['href']
-                            link_text = link.get_text(strip=True).lower()
+                            link_text = _normalize_text(link.get_text(" ", strip=True))
+                            normalized_link_text = link_text.lower()
+                            if link_text:
+                                place_data['information_links'][link_text] = href
                             
                             if href.startswith('tel:'):
                                 place_data['contact_info']['phone'] = href.replace('tel:', '').strip()
@@ -242,24 +265,27 @@ def scrape_place_details(session, place_url):
                                 # Social media link (has data-social attr or SVG icon)
                                 social_name = _extract_social_name(link)
                                 place_data['social_media'][social_name] = href
-                            elif 'ticket' in link_text:
+                            elif 'ticket' in normalized_link_text:
                                 # Tickets link in information section
                                 place_data['contact_info']['tickets_url'] = href
                             else:
                                 # Main website
-                                place_data['contact_info']['website'] = href
+                                place_data['contact_info'].setdefault('website', href)
                     
                     elif 'ticket' in h3_lower or 'offer' in h3_lower:
                         # Tickets & Offers section
-                        if content := box.find('div', class_='info-text__content'):
+                        if content:
                             offers_data = {'title': h3_text, 'links': []}
                             for link in content.find_all('a', href=True):
                                 offers_data['links'].append({
-                                    'text': link.get_text(strip=True),
+                                    'text': _normalize_text(link.get_text(" ", strip=True)) or 'link',
                                     'url': link['href']
                                 })
-                            if not offers_data['links']:
-                                offers_data['description'] = content.get_text(strip=True)
+                            description_text = _normalize_text(content.get_text(" ", strip=True))
+                            if description_text:
+                                offers_data['description'] = description_text
+                            if offers_data['links'] and not place_data['contact_info'].get('tickets_url'):
+                                place_data['contact_info']['tickets_url'] = offers_data['links'][0]['url']
                             place_data['tickets_offers'] = offers_data
                                 
                     elif 'schedule' in h3_lower:
@@ -267,17 +293,17 @@ def scrape_place_details(session, place_url):
                         schedule_entry = {'name': h3_text, 'hours': {}}
                         
                         # Check for "today" info
-                        if content := box.find('div', class_='info-text__content'):
+                        if content:
                             # Look for today's hours
                             today_p = content.find('p')
                             if today_p:
-                                today_text = today_p.get_text(strip=True)
+                                today_text = _normalize_text(today_p.get_text(" ", strip=True))
                                 schedule_entry['today'] = today_text
                             
                             # Check for date range (e.g., "From 20/03 to 21/12")
                             date_range_elem = content.find('p', class_=lambda c: c and 'text-xs' in c)
                             if date_range_elem:
-                                schedule_entry['date_range'] = date_range_elem.get_text(strip=True)
+                                schedule_entry['date_range'] = _normalize_text(date_range_elem.get_text(" ", strip=True))
                             
                             # Parse weekly hours from dropdown
                             dropdown = content.find('div', attrs={'data-controller': 'dropdown'})
@@ -287,23 +313,45 @@ def scrape_place_details(session, place_url):
                                     if day_span:
                                         time_span = day_span.find_next_sibling('span')
                                         if time_span:
-                                            day = day_span.get_text(strip=True)
-                                            hours = time_span.get_text(strip=True)
+                                            day = _normalize_text(day_span.get_text(" ", strip=True))
+                                            hours = _normalize_text(time_span.get_text(" ", strip=True))
                                             schedule_entry['hours'][day] = hours
+                            text_blob = _normalize_text(content.get_text(" ", strip=True))
+                            if text_blob and 'today:' not in text_blob.lower() and not schedule_entry.get('hours'):
+                                schedule_entry['summary'] = text_blob
                         
                         # Only add if we have meaningful data
-                        if schedule_entry.get('hours') or schedule_entry.get('today'):
+                        if schedule_entry.get('hours') or schedule_entry.get('today') or schedule_entry.get('summary'):
                             place_data['schedules'].append(schedule_entry)
+
+                    elif content:
+                        section_payload = {
+                            'title': h3_text,
+                            'text': _normalize_text(content.get_text(" ", strip=True)),
+                            'links': [
+                                {
+                                    'text': _normalize_text(link.get_text(" ", strip=True)) or 'link',
+                                    'url': link['href'],
+                                }
+                                for link in content.find_all('a', href=True)
+                            ],
+                        }
+                        if section_payload['text'] or section_payload['links']:
+                            place_data['additional_sections'].append(section_payload)
 
             # TripAdvisor Ratings (if available)
             if reviews_section := soup.find('h2', string='Reviews'):
                 if rating_div := reviews_section.find_next_sibling('div', class_='bg-off-white'):
                     place_data['tripadvisor'] = {}
                     if val := rating_div.find('span', class_='font-bold'):
-                        place_data['tripadvisor']['rating'] = val.get_text(strip=True)
+                        place_data['tripadvisor']['rating'] = _normalize_text(val.get_text(" ", strip=True))
                     if count_link := rating_div.find('a', string=re.compile(r'reviews$')):
-                        place_data['tripadvisor']['reviews_count'] = count_link.get_text(strip=True).replace(' reviews', '')
+                        place_data['tripadvisor']['reviews_count'] = _normalize_text(count_link.get_text(" ", strip=True)).replace(' reviews', '')
                         place_data['tripadvisor']['url'] = count_link['href']
+
+            tickets_offers = place_data.get('tickets_offers')
+            if isinstance(tickets_offers, dict) and not tickets_offers.get('description'):
+                tickets_offers['description'] = ''
 
             return place_data
 

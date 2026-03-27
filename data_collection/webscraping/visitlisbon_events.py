@@ -13,15 +13,17 @@
 # Required libraries:
 # pip install requests beautifulsoup4 tqdm
 
+import json                         # To handle JSON data
+import logging                      # To log messages (for Github Actions)
+import os                           # To handle file paths correctly
+import random                       # To make delays random
+import re                           # To extract numbers from strings
+import sys                          # To exit the script in case of critical errors
+import time                         # To add delays
+from datetime import datetime       # To handle date parsing and formatting
+
 import requests                     # To make HTTP requests
 from bs4 import BeautifulSoup       # To parse HTML content
-import json                         # To handle JSON data
-import time                         # To add delays  
-import random                       # To make delays random
-import os                           # To handle file paths correctly
-import re                           # To extract numbers from strings
-import logging                      # To log messages (for Github Actions)
-import sys                          # To exit the script in case of critical errors
 from tqdm import tqdm               # To show progress bars
 
 # --- Configuration & Anti-Bot Measures ---
@@ -33,6 +35,153 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36"
 ]
+
+MONTH_NAME_TO_NUMBER = {
+    'jan': 1,
+    'january': 1,
+    'feb': 2,
+    'february': 2,
+    'mar': 3,
+    'march': 3,
+    'apr': 4,
+    'april': 4,
+    'may': 5,
+    'jun': 6,
+    'june': 6,
+    'jul': 7,
+    'july': 7,
+    'aug': 8,
+    'august': 8,
+    'sep': 9,
+    'sept': 9,
+    'september': 9,
+    'oct': 10,
+    'october': 10,
+    'nov': 11,
+    'november': 11,
+    'dec': 12,
+    'december': 12,
+}
+
+
+def _normalize_text(text):
+    """Normalizes whitespace while preserving readable text for scraping."""
+    if not text:
+        return ""
+    return re.sub(r'\s+', ' ', str(text).replace('\xa0', ' ')).strip()
+
+
+def _first_text_match(soup, selectors):
+    """Returns the first non-empty text for the provided CSS selectors."""
+    for selector in selectors:
+        if element := soup.select_one(selector):
+            text = _normalize_text(element.get_text(" ", strip=True))
+            if text:
+                return text
+    return None
+
+
+def _first_element(soup, selectors):
+    """Returns the first matching element for a list of selectors."""
+    for selector in selectors:
+        if element := soup.select_one(selector):
+            return element
+    return None
+
+
+def _infer_iso_date(day_text, month_text, year_text=None, fallback_year=None):
+    """Converts textual month/day/year pieces into ISO date format."""
+    month_number = MONTH_NAME_TO_NUMBER.get((month_text or '').strip().lower())
+    if not month_number:
+        return None
+
+    day = int(day_text)
+    year = int(year_text) if year_text else int(fallback_year or datetime.now().year)
+    try:
+        return datetime(year, month_number, day).strftime('%Y-%m-%d')
+    except ValueError:
+        return None
+
+
+def _append_unique_date_entry(date_entries, candidate):
+    """Appends a date entry if it is not already present."""
+    candidate_key = json.dumps(candidate, sort_keys=True, ensure_ascii=False)
+    if candidate_key not in {json.dumps(entry, sort_keys=True, ensure_ascii=False) for entry in date_entries}:
+        date_entries.append(candidate)
+
+
+def _extract_event_dates_from_text(text):
+    """Parses date ranges or dated sessions from free text as a fallback."""
+    normalized = _normalize_text(text)
+    if not normalized:
+        return []
+
+    month_pattern = r'Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?'
+    range_pattern = re.compile(
+        rf'(?P<start_day>\d{{1,2}})\s+(?P<start_month>{month_pattern})(?:,?\s*(?P<start_year>\d{{4}}))?\s*[–-]\s*'
+        rf'(?P<end_day>\d{{1,2}})\s+(?P<end_month>{month_pattern})(?:,?\s*(?P<end_year>\d{{4}}))?',
+        re.IGNORECASE,
+    )
+    single_pattern = re.compile(
+        rf'(?P<day>\d{{1,2}})\s+(?P<month>{month_pattern})(?:,?\s*(?P<year>\d{{4}}))?(?:\s*(?:\||at)?\s*(?P<time>\d{{1,2}}:\d{{2}}))',
+        re.IGNORECASE,
+    )
+
+    extracted_dates = []
+
+    for match in range_pattern.finditer(normalized):
+        end_year = match.group('end_year')
+        start_year = match.group('start_year') or end_year
+        start_iso = _infer_iso_date(
+            match.group('start_day'),
+            match.group('start_month'),
+            start_year,
+            fallback_year=end_year,
+        )
+        end_iso = _infer_iso_date(
+            match.group('end_day'),
+            match.group('end_month'),
+            end_year,
+            fallback_year=start_year,
+        )
+        if start_iso and end_iso:
+            _append_unique_date_entry(
+                extracted_dates,
+                {
+                    'type': 'range',
+                    'start': {
+                        'datetime_iso': start_iso,
+                        'display_text': _normalize_text(match.group(0).split('–')[0].split('-')[0]),
+                        'time': None,
+                    },
+                    'end': {
+                        'datetime_iso': end_iso,
+                        'display_text': _normalize_text(match.group(0).split('–')[-1].split('-')[-1]),
+                        'time': None,
+                    },
+                },
+            )
+
+    for match in single_pattern.finditer(normalized):
+        iso_date = _infer_iso_date(match.group('day'), match.group('month'), match.group('year'))
+        if not iso_date:
+            continue
+        _append_unique_date_entry(
+            extracted_dates,
+            {
+                'type': 'single',
+                'date': {
+                    'datetime_iso': iso_date,
+                    'display_text': _normalize_text(
+                        f"{match.group('day')} {match.group('month')}"
+                        + (f", {match.group('year')}" if match.group('year') else "")
+                    ),
+                    'time': match.group('time'),
+                },
+            },
+        )
+
+    return extracted_dates
 
 
 def get_headers():
@@ -197,15 +346,24 @@ def scrape_event_details(session, event_url):
             # --- Parsing Logic ---
             
             # General Info
-            if title_tag := soup.find('h1'):
-                event_data['title'] = title_tag.get_text(strip=True)
+            title_tag = _first_element(soup, ['h2.max-w-xl', 'h1.font-serif', 'main h2', 'main h1'])
+            if title_tag:
+                event_data['title'] = _normalize_text(title_tag.get_text(" ", strip=True))
             if category_tag := soup.find('div', class_='text-green-primary'):
-                event_data['category'] = category_tag.get_text(strip=True)
+                event_data['category'] = _normalize_text(category_tag.get_text(" ", strip=True))
+
+            header_block = title_tag.find_parent('div') if title_tag else None
 
             # Main Short Description (paragraph after title h2)
-            if h2_title := soup.find('h2', class_='max-w-xl'):
-                if short_desc_tag := h2_title.find_parent('div').find('p'):
-                    event_data['short_description'] = short_desc_tag.get_text(strip=True)
+            short_desc_tag = None
+            if header_block:
+                short_desc_tag = header_block.find_next_sibling('p')
+            if not short_desc_tag:
+                short_desc_tag = _first_element(soup, ['h2.max-w-xl + p', 'h1.font-serif + p', 'main p'])
+            if short_desc_tag:
+                short_description = _normalize_text(short_desc_tag.get_text(" ", strip=True))
+                if short_description:
+                    event_data['short_description'] = short_description
 
             # Image & Video URLs
             event_data['image_urls'] = []
@@ -231,10 +389,18 @@ def scrape_event_details(session, event_url):
             event_data['dates'] = []
             
             # 1. Main date container (header section with date badge)
-            # Use lambda to match all required classes (they may have additional classes)
-            main_date_container = soup.find('div', class_=lambda c: c and all(
-                cls in c for cls in ['flex-wrap', 'gap-4', 'mt-2']
-            ))
+            main_date_container = None
+            if header_block:
+                main_date_container = header_block.find(lambda tag: tag.name == 'div' and tag.find('time'))
+            if not main_date_container:
+                main_date_container = _first_element(
+                    soup,
+                    [
+                        'div time',
+                    ],
+                )
+                main_date_container = main_date_container.parent if main_date_container else None
+
             if main_date_container:
                 times_elements = main_date_container.find_all('time')
                 header_time_str = _extract_time_from_container(main_date_container)
@@ -252,6 +418,17 @@ def scrape_event_details(session, event_url):
                         'type': 'single',
                         'date': _parse_date_entry(times_elements[0], header_time_str)
                     })
+
+            # 1B. Fallback from textual header/details if the structured date badge changed
+            if not event_data['dates']:
+                fallback_text_parts = []
+                if header_block:
+                    fallback_text_parts.append(header_block.get_text(" ", strip=True))
+                if event_data.get('short_description'):
+                    fallback_text_parts.append(event_data['short_description'])
+                if event_data.get('full_description'):
+                    fallback_text_parts.append(event_data['full_description'])
+                event_data['dates'] = _extract_event_dates_from_text("\n".join(fallback_text_parts))
 
             # 2. Additional dates section (id="dates") - for multi-date events
             if more_dates_section := soup.find('div', id='dates'):
@@ -285,11 +462,18 @@ def scrape_event_details(session, event_url):
             # PRICE / Entry Fee
             # =============================================
             # Look for price in yellow badge
-            price_container = soup.find('span', class_=lambda c: c and 'bg-yellow' in c)
+            price_container = _first_element(
+                soup,
+                [
+                    'span[class*="bg-yellow"]',
+                    'div[class*="bg-yellow"] span',
+                    'div[class*="bg-yellow"]',
+                ],
+            )
             if price_container:
-                event_data['price'] = price_container.get_text(strip=True)
+                event_data['price'] = _normalize_text(price_container.get_text(" ", strip=True))
             elif price_span_generic := soup.find('span', string=lambda t: t and ('Free Entry' in t or 'From' in t)):
-                event_data['price'] = price_span_generic.get_text(strip=True)
+                event_data['price'] = _normalize_text(price_span_generic.get_text(" ", strip=True))
 
             # =============================================
             # LOCATION and VENUE - Improved Parsing
@@ -300,31 +484,39 @@ def scrape_event_details(session, event_url):
             
             for box in info_boxes:
                 if h3 := box.find('h3'):
-                    h3_text = h3.get_text().strip()
+                    h3_text = _normalize_text(h3.get_text(" ", strip=True))
+                    h3_lower = h3_text.lower()
                     content_div = box.find('div', class_='info-text__content')
                     
                     # Check if this is the Information box
-                    if h3_text == 'Information':
+                    if h3_lower == 'information':
                         if content_div:
                             links = content_div.find_all('a')
                             for link in links:
                                 if 'href' in link.attrs:
                                     # Check for ticket links
-                                    link_text = link.get_text(strip=True)
-                                    if 'Buy Tickets' in link_text or 'ticket' in link['href'].lower():
+                                    link_text = _normalize_text(link.get_text(" ", strip=True)) or _normalize_text(link['href'])
+                                    if 'buy tickets' in link_text.lower() or 'ticket' in link['href'].lower():
                                         event_data['buy_tickets_url'] = link['href']
                                     else:
                                         event_data['information_links'][link_text] = link['href']
                     
                     # Check if this is the Dates box (skip, handled above)
-                    elif h3_text == 'Dates':
+                    elif h3_lower == 'dates':
                         continue
                     
                     # Otherwise, assume it's a VENUE/LOCATION box
                     else:
-                        event_data['venue_name'] = h3_text
+                        event_data['venue_name'] = _normalize_text(h3_text)
                         if content_div:
-                            event_data['location'] = content_div.get_text(strip=True)
+                            event_data['location'] = _normalize_text(content_div.get_text(" ", strip=True))
+
+            if not event_data.get('title') and event_data.get('url'):
+                slug = event_data['url'].rstrip('/').split('/')[-1].replace('-', ' ')
+                event_data['title'] = _normalize_text(slug.title())
+
+            if event_data.get('price'):
+                event_data['price'] = _normalize_text(event_data['price'])
 
             return event_data
 

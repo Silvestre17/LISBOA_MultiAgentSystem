@@ -3,7 +3,7 @@
 #   - André Filipe Gomes Silvestre, 20240502
 #
 # GitHub Actions Workflow to automate data scraping and updating of JSON files
-# 
+#
 # Strategy:
 #   1. Scrape Events data daily
 #   2. Scrape Places data weekly (only on Mondays)
@@ -21,10 +21,20 @@ on:
     # Daily at 04:00 AM UTC
     # - Events: Every day
     # - Places: Only on Mondays (controlled by if logic below)
-    - cron: '0 4 * * *'
-  
+    - cron: "0 4 * * *"
+
   # Allows manual run via GitHub "Run workflow" button
   workflow_dispatch:
+    inputs:
+      scrape_target:
+        description: "Choose which VisitLisboa scraper to run manually"
+        required: true
+        default: both
+        type: choice
+        options:
+          - events
+          - places
+          - both
 
 permissions:
   contents: write
@@ -40,7 +50,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
       - name: Cache pip dependencies
         uses: actions/cache@v5
@@ -55,13 +65,21 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements_github_action_webscraping.txt ]; then pip install -r requirements_github_action_webscraping.txt; fi
 
-      # 1. Run Events Script (Daily)
+      - name: Resolve Manual Selection
+        id: manual_selection
+        run: |
+          TARGET="${{ github.event.inputs.scrape_target || 'both' }}"
+          echo "scrape_target=$TARGET" >> $GITHUB_OUTPUT
+          echo "🎛️ Manual selection: $TARGET"
+
+      # 1. Run Events Script (Daily, or manually when requested)
       - name: Run Events Scraper
+        if: github.event_name != 'workflow_dispatch' || steps.manual_selection.outputs.scrape_target == 'events' || steps.manual_selection.outputs.scrape_target == 'both'
         run: |
           echo "Running Events Scraper..."
           python data_collection/webscraping/visitlisbon_events.py
 
-      # 2. Run Places Script (Only on Mondays or Manually)
+      # 2. Run Places Script (Only on Mondays automatically, or manually when requested)
       - name: Check if Monday
         id: check_day
         run: |
@@ -74,7 +92,7 @@ jobs:
           fi
 
       - name: Run Places Scraper
-        if: steps.check_day.outputs.day_of_week == '1' || github.event_name == 'workflow_dispatch'
+        if: steps.check_day.outputs.day_of_week == '1' || (github.event_name == 'workflow_dispatch' && (steps.manual_selection.outputs.scrape_target == 'places' || steps.manual_selection.outputs.scrape_target == 'both'))
         run: |
           echo "Running Places Scraper..."
           python data_collection/webscraping/visitlisbon_places.py
@@ -84,10 +102,10 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
+
           # Add only changed JSON files
           git add data_collection/webscraping/*.json
-          
+
           # Check for changes before committing
           if git diff --staged --quiet; then
             echo "No changes to commit."
