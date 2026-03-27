@@ -2241,7 +2241,7 @@ if __name__ == "__main__":
     print(result[:800])
 
     print("\n5. Testing get_carris_metropolitana_stop_info...")
-    result = get_carris_metropolitana_stop_info.invoke({"stop_id": "010101"})
+    result = get_carris_metropolitana_stop_info.invoke({"stop_id": "020037"})
     print(result[:500])
 
     print("\n6. Testing find_direct_bus_lines...")
@@ -2252,12 +2252,12 @@ if __name__ == "__main__":
     result = get_real_time_bus_positions.invoke({"location": "Almada", "radius_km": 1.0})
     print(result[:800])
 
-    print("\n8. Testing get_bus_realtime_locations for line 470...")
-    result = get_bus_realtime_locations.invoke({"line_id": "470"})
+    print("\n8. Testing get_bus_realtime_locations for line 3001...")
+    result = get_bus_realtime_locations.invoke({"line_id": "3001"})
     print(result[:800])
 
-    print("\n9. Testing get_bus_next_departures for line 470 at stop 010101...")
-    result = get_bus_next_departures.invoke({"line_id": "470", "stop_id": "010101"})
+    print("\n9. Testing get_bus_next_departures for line 3001 at stop 020037...")
+    result = get_bus_next_departures.invoke({"line_id": "3001", "stop_id": "020037"})
     print(result[:800])
 
     print("\n\033[1;32m✅ Carris Metropolitana API tests complete!\033[0m")

@@ -12,6 +12,38 @@ import uuid
 from copy import deepcopy
 from typing import TYPE_CHECKING, Optional
 
+# Words that start interrogative sentences — not place names when they appear at token[0].
+_QUESTION_STARTER_WORDS: frozenset = frozenset({
+    "is", "are", "was", "were", "do", "does", "did",
+    "have", "has", "had", "can", "could", "should",
+    "would", "will", "shall",
+    "what", "when", "where", "which", "who", "whom", "whose", "why", "how",
+    # PT-PT interrogative starters
+    "é", "estão", "fica", "ficam", "tem", "têm", "existe", "existem",
+    "qual", "quais", "quando", "onde", "como", "por",
+})
+
+# Tokens that are capitalised in English sentence position but are NOT proper place names.
+_NON_PROPER_PLACE_WORDS: frozenset = frozenset({
+    "is", "are", "was", "were", "do", "does", "did",
+    "have", "has", "had", "can", "could", "should", "would", "will", "shall",
+    "what", "when", "where", "which", "who", "whom", "whose", "why", "how",
+    "the", "a", "an", "this", "that", "these", "those", "it", "its",
+    "in", "at", "on", "near", "to", "from", "of", "with", "for", "by",
+    "about", "open", "closed", "free", "paid", "available", "visit",
+    "wheelchair", "accessible", "accessibility", "step",
+    "place", "places", "museum", "museums", "monument", "monuments",
+    "restaurant", "restaurants", "hotel", "hotels", "attraction", "attractions",
+    "there", "any", "some", "many", "much", "every", "all", "no", "not",
+    "and", "or", "but", "so", "if", "then", "too", "also",
+    "me", "you", "we", "they", "he", "she", "our", "your", "their",
+    # English day and month names (capitalise but are not place proper nouns)
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "mondays", "tuesdays", "wednesdays", "thursdays", "fridays", "saturdays", "sundays",
+    "january", "february", "march", "april", "may", "june", "july", "august",
+    "september", "october", "november", "december",
+})
+
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 
@@ -136,7 +168,10 @@ class ResearcherAgent(BaseAgent):
             "museum", "museu", "monument", "monumento", "place", "places",
             "attraction", "attractions", "belem", "belém",
         ]
-        return any(term in query for term in accessibility_terms) and any(term in query for term in place_terms)
+        return any(term in query for term in accessibility_terms) and (
+            any(term in query for term in place_terms)
+            or bool(ResearcherAgent._extract_place_focus_query(user_message))
+        )
 
     def _run_accessibility_place_lookup(self, user_message: str, language: str) -> str:
         """Runs a deterministic place lookup for accessibility-focused queries."""
@@ -144,8 +179,9 @@ class ResearcherAgent(BaseAgent):
         if not tool:
             return self._run_direct_tool_fallback(user_message, language)
 
-        args = {"query": user_message, "max_results": 5, "offset": 0, "language": language}
-        category_hint = self._infer_place_category_hint(user_message)
+        focus_query = self._extract_place_focus_query(user_message)
+        args = {"query": focus_query or user_message, "max_results": 5, "offset": 0, "language": language}
+        category_hint = self._infer_place_category_hint(user_message) or self._infer_place_category_hint(focus_query or "")
         if category_hint:
             args["category"] = category_hint
 
@@ -300,6 +336,25 @@ class ResearcherAgent(BaseAgent):
         return None
 
     @staticmethod
+    def _is_named_lookup_followup(user_message: str) -> bool:
+        """Detects short follow-ups such as 'what about "Book Fair"?' or 'e do MAAT?'."""
+        query = (user_message or "").strip()
+        if not query:
+            return False
+
+        query_lower = query.lower()
+        tokens = re.findall(r"[a-zA-ZÀ-ÿ0-9]+", query)
+        if any(symbol in query for symbol in ['"', '“', '”']):
+            return True
+        return len(tokens) <= 10 and any(
+            marker in query_lower
+            for marker in [
+                "what about", "how about", "tell me about", "more about",
+                "sobre", "fala-me de", "fala me de", "e do", "e da", "e o", "e a",
+            ]
+        )
+
+    @staticmethod
     def _count_ranked_results(result: str) -> int:
         """Counts numbered items in raw VisitLisboa-style outputs."""
         return len(re.findall(r"(?m)^\s*\d+\.\s+", str(result or "")))
@@ -408,8 +463,23 @@ class ResearcherAgent(BaseAgent):
             "festival", "festivals", "exhibition", "exposição", "exposicao",
             "music", "música", "musica", "show", "theatre", "teatro",
             "dance", "dança", "danca", "cinema", "what's on", "o que há", "o que ha",
+            "fair", "fairs", "feira", "feiras", "book fair", "livro",
         ]
-        return any(term in query for term in event_terms) and not any(
+        named_lookup_markers = [
+            "tell me about", "what about", "more about", "details about", "information about",
+            "sobre", "fala-me de", "fala me de", "e do", "e da",
+        ]
+        return (
+            any(term in query for term in event_terms)
+            or (
+                any(marker in query for marker in named_lookup_markers)
+                and ResearcherAgent._infer_event_category_hint(user_message) is not None
+            )
+            or (
+                any(symbol in user_message for symbol in ['"', '“', '”'])
+                and ResearcherAgent._infer_event_category_hint(user_message) is not None
+            )
+        ) and not any(
             term in query for term in planning_terms
         )
 
@@ -434,9 +504,30 @@ class ResearcherAgent(BaseAgent):
     @staticmethod
     def _extract_event_focus_query(user_message: str) -> Optional[str]:
         """Drops generic event phrasing so broad date-based event searches keep high recall."""
+        quoted_match = re.search(r'"([^"\n]{2,120})"|“([^”\n]{2,120})”', user_message or "")
+        if quoted_match:
+            quoted_subject = next((group for group in quoted_match.groups() if group), "").strip(" .?!")
+            if quoted_subject:
+                return quoted_subject
+
         query = (user_message or "").lower()
         if any(phrase in query for phrase in ["música ao vivo", "musica ao vivo", "live music"]):
             return "música ao vivo" if any(term in query for term in ["música", "musica"]) else "live music"
+
+        named_lookup_markers = [
+            "tell me about", "what about", "more about", "details about", "information about",
+            "sobre", "fala-me de", "fala me de", "e do", "e da",
+        ]
+        if any(marker in query for marker in named_lookup_markers) and ResearcherAgent._infer_event_category_hint(user_message):
+            subject = re.sub(
+                r"\b(?:tell me about|what about|more about|details about|information about|sobre(?: o| a| os| as)?|fala me de|e do|e da)\b",
+                " ",
+                query,
+            )
+            subject = re.sub(r"\b(?:event|events|evento|eventos)\b", " ", subject)
+            subject = re.sub(r"\s+", " ", subject).strip(" .?!")
+            if subject:
+                return subject
 
         specific_interest_terms = [
             "music", "música", "musica", "concert", "concerto", "concertos", "fado",
@@ -512,10 +603,16 @@ class ResearcherAgent(BaseAgent):
             "where is", "onde fica", "near ", "perto ", "belém", "belem", "alfama",
             "chiado", "baixa", "rossio", "oriente", "ajuda", "bairro alto", "cais do sodré",
             "cais do sodre", "campo grande", "colombo", "gulbenkian",
+            "tell me about", "what about", "more about", "details about", "information about",
+            "sobre", "fala-me de", "fala me de", "e do", "e da", "e o", "e a",
         ]
         if any(keyword in query for keyword in history_keywords + event_keywords):
             return False
         if any(keyword in query for keyword in service_keywords):
+            return True
+        if any(marker in query for marker in specific_lookup_markers):
+            return True
+        if any(symbol in user_message for symbol in ['"', '“', '”']) and not any(keyword in query for keyword in event_keywords):
             return True
         return any(keyword in query for keyword in place_keywords) and any(marker in query for marker in specific_lookup_markers)
 
@@ -535,11 +632,58 @@ class ResearcherAgent(BaseAgent):
                 return match.group("location").strip(" .?!,")
         return None
 
+    @staticmethod
+    def _extract_place_focus_query(user_message: str) -> Optional[str]:
+        """Extracts a specific place subject from quoted or 'tell me about' prompts."""
+        quoted_match = re.search(r'"([^"\n]{2,120})"|“([^”\n]{2,120})”', user_message or "")
+        if quoted_match:
+            quoted_subject = next((group for group in quoted_match.groups() if group), "").strip(" .?!")
+            if quoted_subject:
+                return quoted_subject
+
+        query = (user_message or "").lower()
+        _NAMED_LOOKUP_MARKER_RE = re.compile(
+            r"\b(?:tell me about|what about|more about|details about|information about"
+            r"|sobre(?: o| a| os| as)?|fala(?:-| )me de|e do|e da|e o|e a)\b",
+            re.IGNORECASE,
+        )
+        if _NAMED_LOOKUP_MARKER_RE.search(query):
+            subject = _NAMED_LOOKUP_MARKER_RE.sub(" ", query)
+            subject = re.sub(
+                r"\b(?:place|places|local|locais|attraction|attractions|museum|museu|monument|monumento|restaurant|restaurante|hotel|viewpoint|miradouro)\b",
+                " ",
+                subject,
+            )
+            subject = re.sub(r"\s+", " ", subject).strip(" .?!")
+            if subject:
+                return subject
+
+        raw_query = (user_message or "").strip()
+        tokens = re.findall(r"[a-zA-ZÀ-ÿ0-9']+", raw_query)
+        has_title_like_casing = any(char.isupper() for char in raw_query)
+        if has_title_like_casing and 1 <= len(tokens) <= 6:
+            lowered = raw_query.lower()
+            if not any(term in lowered for term in ["event", "events", "evento", "eventos"]):
+                first_lower = tokens[0].lower() if tokens else ""
+                if first_lower in _QUESTION_STARTER_WORDS:
+                    # Query is a question sentence — try to extract only proper-noun tokens.
+                    proper_nouns = [
+                        t for t in tokens
+                        if any(c.isupper() for c in t) and t.lower() not in _NON_PROPER_PLACE_WORDS
+                    ]
+                    if 1 <= len(proper_nouns) <= 4:
+                        return " ".join(proper_nouns)
+                    return None
+                return raw_query.strip(" .?!")
+
+        return None
+
     def _run_direct_place_lookup(self, user_message: str, language: str) -> str:
         """Runs a deterministic tool path for simple place and service lookups."""
         message_lower = user_message.lower()
         places_tool = self._get_tool_by_name("search_places_attractions")
         nearby_tool = self._get_tool_by_name("find_nearby_services")
+        place_focus_query = self._extract_place_focus_query(user_message)
 
         service_keywords = [
             "pharmacy", "farmácia", "farmacia", "hospital", "school", "escola",
@@ -564,7 +708,7 @@ class ResearcherAgent(BaseAgent):
         if not places_tool:
             return self._run_direct_tool_fallback(user_message, language)
 
-        query_text = user_message
+        query_text = place_focus_query or user_message
         max_results = 5
         if self._is_broad_attractions_query(user_message):
             query_text = f"{user_message} iconic monuments museums palaces castles historic sites"
@@ -900,6 +1044,32 @@ class ResearcherAgent(BaseAgent):
                     print("      [RESEARCHER] Continuing previous paginated search...")
                 return finalize_worker_response(
                     continued_search_response,
+                    agent_name="researcher",
+                    user_query=user_message,
+                    language=language,
+                )
+
+        last_search_context = getattr(self, "_last_search_context", None)
+        if not is_greeting and last_search_context and self._is_named_lookup_followup(user_message):
+            cached_domain = str(last_search_context.get("domain") or "").strip()
+            if cached_domain == "events":
+                if verbose:
+                    print("      [RESEARCHER] Resolving named follow-up against previous event domain...")
+
+                response = self._run_direct_event_lookup(user_message, language)
+                return finalize_worker_response(
+                    response,
+                    agent_name="researcher",
+                    user_query=user_message,
+                    language=language,
+                )
+            if cached_domain == "places":
+                if verbose:
+                    print("      [RESEARCHER] Resolving named follow-up against previous place domain...")
+
+                response = self._run_direct_place_lookup(user_message, language)
+                return finalize_worker_response(
+                    response,
                     agent_name="researcher",
                     user_query=user_message,
                     language=language,

@@ -30,6 +30,7 @@ import unicodedata
 import warnings
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta
+from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
 # Suppress chromadb telemetry warnings
@@ -135,6 +136,16 @@ def parse_date_range(date_query: Optional[str]) -> Tuple[Optional[datetime], Opt
             else:
                 end = today.replace(month=today.month + 2, day=1)
         return start, end
+
+    elif date_query in ['this year', 'este ano', 'year', 'ano']:
+        start = today.replace(month=1, day=1)
+        end = today.replace(year=today.year + 1, month=1, day=1)
+        return start, end
+
+    elif date_query in ['next year', 'próximo ano', 'proximo ano']:
+        start = today.replace(year=today.year + 1, month=1, day=1)
+        end = today.replace(year=today.year + 2, month=1, day=1)
+        return start, end
     
     # Handle month names
     month_names = {
@@ -178,6 +189,10 @@ def parse_date_range(date_query: Optional[str]) -> Tuple[Optional[datetime], Opt
         return date, date + timedelta(days=1)
     except ValueError:
         pass
+
+    if re.fullmatch(r'(?:19|20)\d{2}', date_query):
+        year = int(date_query)
+        return datetime(year, 1, 1), datetime(year + 1, 1, 1)
     
     # Default: next 30 days (reasonable default for "upcoming" events)
     if any(word in date_query for word in ['upcoming', 'próximos', 'proximos', 'soon', 'breve']):
@@ -512,11 +527,12 @@ def _localize_event_category(category: Optional[str], language: str = "en") -> s
 
 def _localize_event_date_filter(date_filter: Optional[str], language: str = "en") -> str:
     """Localizes common date-filter labels for user-facing summaries."""
-    raw = (date_filter or "upcoming").strip()
+    raw = (date_filter or "all available dates").strip()
     if language != "pt":
         return raw
 
     mapping = {
+        "all available dates": "todas as datas disponíveis",
         "today": "hoje",
         "tomorrow": "amanhã",
         "this week": "esta semana",
@@ -524,6 +540,8 @@ def _localize_event_date_filter(date_filter: Optional[str], language: str = "en"
         "this weekend": "este fim de semana",
         "this month": "este mês",
         "next month": "próximo mês",
+        "this year": "este ano",
+        "next year": "próximo ano",
         "upcoming": "próximos dias",
     }
     return mapping.get(raw.lower(), raw)
@@ -651,23 +669,23 @@ def _format_event_filter_summary(
     language: str = "en",
 ) -> List[str]:
     """Builds a contextual summary for the event filter and result count."""
+    normalized_filter = _localize_event_date_filter(date_filter, language=language)
     if start_date and end_date:
         connector = "a" if language == "pt" else "to"
         date_window = f"{start_date.strftime('%Y-%m-%d')} {connector} {(end_date - timedelta(days=1)).strftime('%Y-%m-%d')}"
     elif start_date:
         date_window = start_date.strftime('%Y-%m-%d')
     else:
-        date_window = "open range"
+        date_window = "intervalo aberto" if language == "pt" else "open range"
 
     normalized_query = (query or "").strip()
     normalized_category = (category or "").strip()
-    normalized_filter = _localize_event_date_filter(date_filter, language=language)
     normalized_category = _localize_event_category(normalized_category, language=language)
     shown_from = offset + 1 if shown_results > 0 else 0
     shown_to = offset + shown_results if shown_results > 0 else 0
 
     if language == "pt":
-        scope_parts = [f"{normalized_filter} ({date_window})"]
+        scope_parts = [normalized_filter if not date_filter else f"{normalized_filter} ({date_window})"]
         scope_parts.append(normalized_category if normalized_category else "todas as categorias")
         if normalized_query:
             scope_parts.append(f"foco temático: {normalized_query}")
@@ -680,7 +698,7 @@ def _format_event_filter_summary(
             f"    - ✨ **Destaques mostrados:** {shown_results} resultado(s) mais relevantes (janela {shown_from}-{shown_to}).",
         ]
 
-    scope_parts = [f"{normalized_filter} ({date_window})"]
+    scope_parts = [normalized_filter if not date_filter else f"{normalized_filter} ({date_window})"]
     scope_parts.append(normalized_category if normalized_category else "all categories")
     if normalized_query:
         scope_parts.append(f"theme focus: {normalized_query}")
@@ -694,6 +712,396 @@ def _format_event_filter_summary(
     ]
 
 
+_QUOTED_LOOKUP_PATTERN = re.compile(r'"([^"\n]{2,120})"|“([^”\n]{2,120})”')
+_GENERIC_LOOKUP_MARKER_PATTERN = re.compile(
+    r"\b(?:tell me about|tell me more about|more about|what about|how about|details(?: about| on)?|"
+    r"information(?: about| on)?|info(?: about| on)?|about(?: the)?|sobre(?: o| a| os| as)?|"
+    r"fala me de|diz me sobre|e do|e da|and what about|and how about)\b"
+)
+
+
+def _normalize_lookup_text(text: Optional[str]) -> str:
+    """Normalizes lookup text for cross-language name matching."""
+    normalized = unicodedata.normalize("NFKD", text or "")
+    normalized = "".join(c for c in normalized if not unicodedata.combining(c))
+    normalized = normalized.lower()
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _extract_lookup_tokens(text: Optional[str]) -> List[str]:
+    """Extracts normalized alphanumeric tokens for title matching."""
+    return re.findall(r"[a-z0-9]+", _normalize_lookup_text(text))
+
+
+def _unique_lookup_tokens(text: Optional[str]) -> List[str]:
+    """Returns unique normalized lookup tokens while preserving order."""
+    return list(dict.fromkeys(_extract_lookup_tokens(text)))
+
+
+def _minimum_token_similarity(query_token: str, candidate_token: str) -> float:
+    """Returns the minimum similarity required for fuzzy token matches."""
+    shortest_length = min(len(query_token), len(candidate_token))
+    if shortest_length <= 3:
+        return 1.0
+    if shortest_length == 4:
+        return 0.86
+    if shortest_length <= 6:
+        return 0.79
+    return 0.74
+
+
+def _token_similarity_score(query_token: str, candidate_token: str) -> float:
+    """Scores token similarity, including prefix and typo-friendly matches."""
+    if not query_token or not candidate_token:
+        return 0.0
+    if query_token == candidate_token:
+        return 1.0
+    if query_token.isdigit() or candidate_token.isdigit():
+        return 0.0
+
+    shorter_length = min(len(query_token), len(candidate_token))
+    longer_length = max(len(query_token), len(candidate_token))
+    length_ratio = shorter_length / longer_length if longer_length else 0.0
+
+    if len(query_token) >= 4 and candidate_token.startswith(query_token) and length_ratio >= 0.6:
+        return 0.97
+    if len(candidate_token) >= 4 and query_token.startswith(candidate_token) and length_ratio >= 0.6:
+        return 0.93
+    if len(query_token) >= 5 and query_token in candidate_token and length_ratio >= 0.55:
+        return 0.91
+    if len(candidate_token) >= 5 and candidate_token in query_token and length_ratio >= 0.55:
+        return 0.88
+
+    similarity = SequenceMatcher(None, query_token, candidate_token).ratio()
+    if similarity >= _minimum_token_similarity(query_token, candidate_token):
+        return similarity
+    return 0.0
+
+
+def _best_token_similarity(query_token: str, candidate_tokens: List[str]) -> float:
+    """Finds the best fuzzy score for a query token against candidate tokens."""
+    best_score = 0.0
+    for candidate_token in candidate_tokens:
+        score = _token_similarity_score(query_token, candidate_token)
+        if score > best_score:
+            best_score = score
+            if best_score >= 0.999:
+                break
+    return best_score
+
+
+def _collect_token_match_stats(query_tokens: List[str], searchable_text: Optional[str]) -> Tuple[int, float]:
+    """Returns matched-token count and weighted fuzzy score against candidate text."""
+    if not query_tokens or not searchable_text:
+        return 0, 0.0
+
+    candidate_tokens = _unique_lookup_tokens(searchable_text)
+    if not candidate_tokens:
+        return 0, 0.0
+
+    matched_count = 0
+    weighted_score = 0.0
+    for query_token in query_tokens:
+        best_score = _best_token_similarity(query_token, candidate_tokens)
+        if best_score > 0:
+            matched_count += 1
+            weighted_score += best_score
+
+    return matched_count, weighted_score
+
+
+def _phrase_similarity_score(query_phrase: Optional[str], candidate_phrase: Optional[str]) -> float:
+    """Scores phrase similarity while being robust to spacing and punctuation differences."""
+    normalized_query = _normalize_lookup_text(query_phrase)
+    normalized_candidate = _normalize_lookup_text(candidate_phrase)
+    if not normalized_query or not normalized_candidate:
+        return 0.0
+    if normalized_query == normalized_candidate:
+        return 1.0
+    if len(normalized_query) >= 5 and normalized_candidate.startswith(normalized_query):
+        return 0.97
+    if len(normalized_candidate) >= 5 and normalized_query.startswith(normalized_candidate):
+        return 0.92
+
+    compact_query = normalized_query.replace(" ", "")
+    compact_candidate = normalized_candidate.replace(" ", "")
+    if compact_query == compact_candidate:
+        return 0.99
+    if len(compact_query) >= 5 and compact_query in compact_candidate:
+        return 0.9
+    if len(compact_candidate) >= 5 and compact_candidate in compact_query:
+        return 0.87
+
+    similarity = SequenceMatcher(None, compact_query, compact_candidate).ratio()
+    threshold = 0.78 if min(len(compact_query), len(compact_candidate)) <= 8 else 0.72
+    return similarity if similarity >= threshold else 0.0
+
+
+def _text_contains_fuzzy_term(text: Optional[str], terms: List[str] | set[str] | Tuple[str, ...]) -> bool:
+    """Checks whether free text contains any term, tolerating minor typos and partial words."""
+    normalized_text = _normalize_lookup_text(text)
+    if not normalized_text:
+        return False
+
+    text_tokens = _unique_lookup_tokens(normalized_text)
+    for raw_term in terms:
+        normalized_term = _normalize_lookup_text(raw_term)
+        if not normalized_term:
+            continue
+        if normalized_term in normalized_text:
+            return True
+
+        term_tokens = _unique_lookup_tokens(normalized_term)
+        if not term_tokens:
+            continue
+
+        matched_count, weighted_score = _collect_token_match_stats(term_tokens, normalized_text)
+        if matched_count == len(term_tokens) and weighted_score >= max(0.9, len(term_tokens) * 0.78):
+            return True
+
+        if len(term_tokens) == 1 and _best_token_similarity(term_tokens[0], text_tokens) > 0:
+            return True
+
+    return False
+
+
+def _strip_lookup_year_tokens(text: Optional[str]) -> str:
+    """Removes standalone year-like tokens from a lookup phrase."""
+    normalized = _normalize_lookup_text(text)
+    return re.sub(r"\b(?:\d{2}|(?:19|20)\d{2})\b", " ", normalized).strip()
+
+
+def _extract_named_lookup_phrase(query: Optional[str], noise_tokens: set[str]) -> Optional[str]:
+    """Extracts the specific named subject from quoted or 'tell me about' queries."""
+    if not query:
+        return None
+
+    for raw_match in _QUOTED_LOOKUP_PATTERN.findall(query):
+        candidate = next((part for part in raw_match if part), "")
+        normalized_candidate = _normalize_lookup_text(candidate)
+        if normalized_candidate:
+            return normalized_candidate
+
+    normalized_query = _normalize_lookup_text(query)
+    if not _GENERIC_LOOKUP_MARKER_PATTERN.search(normalized_query):
+        return None
+
+    cleaned = _GENERIC_LOOKUP_MARKER_PATTERN.sub(" ", normalized_query)
+    tokens = [token for token in _extract_lookup_tokens(cleaned) if token not in noise_tokens]
+    if not tokens or len(tokens) > 8:
+        return None
+
+    return " ".join(tokens)
+
+
+def _build_event_searchable_text(event: Dict[str, Any]) -> str:
+    """Builds a richer event search blob including slug, venue, and links."""
+    information_links = event.get("information_links")
+    info_text = ""
+    if isinstance(information_links, dict):
+        info_text = " ".join(str(key) for key in information_links.keys())
+
+    highlight_links = event.get("highlight_links")
+    highlight_text = ""
+    if isinstance(highlight_links, list):
+        highlight_text = " ".join(
+            filter(
+                None,
+                [
+                    f"{item.get('title', '')} {item.get('url', '')}"
+                    for item in highlight_links
+                    if isinstance(item, dict)
+                ],
+            )
+        )
+
+    venue_locations = event.get("venue_locations")
+    venue_text = ""
+    if isinstance(venue_locations, list):
+        venue_text = " ".join(
+            filter(
+                None,
+                [
+                    f"{item.get('venue_name', '')} {item.get('location', '')}"
+                    for item in venue_locations
+                    if isinstance(item, dict)
+                ],
+            )
+        )
+
+    schedule_notes = event.get("schedule_notes")
+    schedule_text = ""
+    if isinstance(schedule_notes, list):
+        schedule_text = " ".join(str(note) for note in schedule_notes if note)
+
+    title = event.get("title") or _clean_event_title(event.get("title"), event.get("url", ""))
+    slug_title = _humanize_visitlisboa_slug(event.get("url", ""))
+    return " ".join(
+        filter(
+            None,
+            [
+                title,
+                slug_title,
+                event.get("category", ""),
+                event.get("location", ""),
+                event.get("venue_name", ""),
+                venue_text,
+                event.get("short_description", ""),
+                event.get("full_description", ""),
+                schedule_text,
+                info_text,
+                highlight_text,
+                event.get("url", ""),
+            ],
+        )
+    )
+
+
+def _flatten_text_values(value: Any) -> str:
+    """Flattens nested dict/list values into a searchable text blob."""
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        parts = []
+        for key, val in value.items():
+            parts.append(_flatten_text_values(key))
+            parts.append(_flatten_text_values(val))
+        return " ".join(part for part in parts if part)
+    if isinstance(value, list):
+        return " ".join(_flatten_text_values(item) for item in value)
+    return str(value)
+
+
+def _build_place_searchable_text(place: Dict[str, Any]) -> str:
+    """Builds a richer place search blob including structured enriched metadata."""
+    return " ".join(
+        filter(
+            None,
+            [
+                place.get('title', ''),
+                place.get('category', ''),
+                place.get('address', ''),
+                place.get('location', ''),
+                place.get('short_description', ''),
+                place.get('full_description', ''),
+                _flatten_text_values(place.get('features')),
+                _flatten_text_values(place.get('contact_info')),
+                _flatten_text_values(place.get('information_links')),
+                _flatten_text_values(place.get('social_media')),
+                _flatten_text_values(place.get('schedules')),
+                _flatten_text_values(place.get('tickets_offers')),
+                _flatten_text_values(place.get('additional_sections')),
+                _flatten_text_values(place.get('tripadvisor')),
+                place.get('lisboa_card_benefit', ''),
+                place.get('lisboa_card_discount', ''),
+                place.get('url', ''),
+            ],
+        )
+    )
+
+
+_EVENT_SPECIFIC_LOOKUP_NOISE_TOKENS = {
+    "tell", "about", "details", "detail", "information", "info", "event", "events",
+    "evento", "eventos", "more", "please", "show", "find", "me", "the", "this",
+    "that", "these", "those", "what", "which", "and", "how", "sobre", "diz",
+    "fala", "para", "from", "with", "there", "happening", "temos", "tem", "do",
+    "da", "de", "dos", "das", "this", "week", "today", "tomorrow", "next", "year",
+    "ano", "esta", "semana", "este", "proxima", "proximo",
+}
+
+
+def _extract_specific_event_lookup_phrase(query: Optional[str]) -> Optional[str]:
+    """Extracts a specific event name from a natural-language query when present."""
+    extracted = _extract_named_lookup_phrase(query, _EVENT_SPECIFIC_LOOKUP_NOISE_TOKENS)
+    if extracted:
+        return extracted
+
+    raw_query = (query or '').strip()
+    meaningful_tokens = [
+        token for token in _extract_lookup_tokens(raw_query)
+        if token not in _EVENT_SPECIFIC_LOOKUP_NOISE_TOKENS
+    ]
+    has_year_marker = bool(re.search(r"(?:'\d{2}\b|\b(?:19|20)\d{2}\b)", raw_query))
+    has_title_like_casing = any(char.isupper() for char in raw_query)
+
+    if meaningful_tokens and len(meaningful_tokens) <= 6 and (has_year_marker or has_title_like_casing):
+        return " ".join(meaningful_tokens)
+
+    return None
+
+
+def _score_event_query_match(
+    event: Dict[str, Any],
+    expanded_tokens: List[str],
+    specific_lookup_phrase: Optional[str] = None,
+) -> float:
+    """Scores how strongly an event matches the user's thematic or specific-name query."""
+    if not expanded_tokens and not specific_lookup_phrase:
+        return 0.0
+
+    searchable = _normalize_lookup_text(_build_event_searchable_text(event))
+    title_variants = {
+        _normalize_lookup_text(event.get("title")),
+        _normalize_lookup_text(_clean_event_title(event.get("title"), event.get("url", ""))),
+        _normalize_lookup_text(_humanize_visitlisboa_slug(event.get("url", ""))),
+    }
+    title_variants.discard("")
+    title_text = " ".join(sorted(title_variants))
+
+    score = 0.0
+    normalized_specific = _normalize_lookup_text(specific_lookup_phrase)
+    normalized_specific_no_year = _strip_lookup_year_tokens(specific_lookup_phrase)
+
+    if normalized_specific:
+        if normalized_specific in title_variants:
+            score += 140.0
+        elif normalized_specific_no_year and normalized_specific_no_year in title_variants:
+            score += 130.0
+        elif any(normalized_specific in title for title in title_variants):
+            score += 100.0
+        elif normalized_specific_no_year and any(normalized_specific_no_year in title for title in title_variants):
+            score += 92.0
+        elif normalized_specific in searchable:
+            score += 60.0
+        elif normalized_specific_no_year and normalized_specific_no_year in searchable:
+            score += 54.0
+
+        phrase_candidate = normalized_specific_no_year or normalized_specific
+        best_title_phrase_score = max(
+            (
+                max(
+                    _phrase_similarity_score(phrase_candidate, title),
+                    _phrase_similarity_score(phrase_candidate, _strip_lookup_year_tokens(title)),
+                )
+                for title in title_variants
+            ),
+            default=0.0,
+        )
+        if best_title_phrase_score > 0:
+            score += 70.0 * best_title_phrase_score
+
+        specific_tokens = [
+            token for token in _extract_lookup_tokens(normalized_specific_no_year or normalized_specific)
+            if not token.isdigit()
+        ]
+        if specific_tokens:
+            title_token_hits, title_weighted_score = _collect_token_match_stats(specific_tokens, title_text)
+            text_token_hits, text_weighted_score = _collect_token_match_stats(specific_tokens, searchable)
+            if title_token_hits == len(specific_tokens):
+                score += 48.0
+            score += min(36.0, title_weighted_score * 10.0)
+            score += min(18.0, text_weighted_score * 3.0)
+
+    if expanded_tokens:
+        title_hits, title_weighted_score = _collect_token_match_stats(expanded_tokens, title_text)
+        text_hits, text_weighted_score = _collect_token_match_stats(expanded_tokens, searchable)
+        score += min(32.0, title_weighted_score * 8.0)
+        score += min(24.0, text_weighted_score * 3.0)
+
+    return score
+
+
 _EVENT_GENERIC_QUERY_TERMS = {
     'event', 'events', 'evento', 'eventos',
     'cultura', 'cultural', 'culture', 'culturais',
@@ -703,6 +1111,8 @@ _EVENT_GENERIC_QUERY_TERMS = {
     'procura', 'procure', 'descobre', 'discover', 'want', 'quero',
     'this', 'week', 'esta', 'semana', 'what', 'which', 'que', 'quais',
     'there', 'happening', 'temos', 'have', 'local', 'locais',
+    'tell', 'about', 'details', 'detail', 'information', 'info', 'specific',
+    'sobre', 'diz', 'fala', 'me', 'more', 'please', 'year', 'ano',
 }
 
 _EVENT_QUERY_SYNONYMS = {
@@ -729,6 +1139,10 @@ _EVENT_QUERY_SYNONYMS = {
     'nightlife': ['night', 'evening', 'live', 'bar'],
     'noite': ['night', 'nightlife', 'evening', 'live'],
     'food': ['gastronomy', 'culinary', 'wine', 'taste', 'restaurant'],
+    'book': ['livro', 'literature', 'literary', 'reading'],
+    'livro': ['book', 'literature', 'literary', 'reading'],
+    'fair': ['feira', 'market', 'salon'],
+    'feira': ['fair', 'market', 'salon'],
 }
 
 
@@ -737,10 +1151,10 @@ def _expand_event_query_tokens(query: Optional[str]) -> List[str]:
     if not query:
         return []
 
-    normalized_query = _normalize_place_hint_text(query)
+    normalized_query = _normalize_lookup_text(query)
     normalized_query = re.sub(r"\bmusica\s+ao\s+vivo\b", "live music", normalized_query)
     normalized_query = re.sub(r"\bao\s+vivo\b", "live", normalized_query)
-    original_tokens = [t.strip().lower() for t in normalized_query.split() if len(t.strip()) >= 3]
+    original_tokens = [token for token in re.findall(r"[a-z0-9]+", normalized_query) if len(token) >= 3]
     query_tokens = [t for t in original_tokens if t not in _EVENT_GENERIC_QUERY_TERMS]
 
     if not query_tokens:
@@ -758,13 +1172,7 @@ def _event_matches_query(event: Dict[str, Any], expanded_tokens: List[str]) -> b
     if not expanded_tokens:
         return True
 
-    searchable = " ".join([
-        event.get('title', ''),
-        event.get('full_description', ''),
-        event.get('short_description', ''),
-        event.get('category', ''),
-    ]).lower()
-    return any(token in searchable for token in expanded_tokens)
+    return _score_event_query_match(event, expanded_tokens) > 0
 
 
 # ==========================================================================
@@ -812,19 +1220,44 @@ DADOS_ABERTOS_KEYWORDS = {
     'shopping', 'centro comercial', 'mall', 'mercado', 'feira', 'quiosque', 'loja',
     # Health & Emergency
     'hospital', 'urgência', 'urgencias', 'saude', 'saúde', 'clinica', 'clínica',
-    'farmacia', 'farmácia', 'bombeiros', 'policia', 'polícia', 'segurança', 'seguranca',
+    'farmacia', 'farmácia', 'pharmacy', 'pharmacies', 'bombeiros', 'firefighters', 'policia', 'polícia', 'police', 'segurança', 'seguranca',
     # Education
-    'escola', 'colegio', 'colégio', 'universidade', 'faculdade', 'instituto', 'creche',
+    'escola', 'school', 'schools', 'colegio', 'colégio', 'universidade', 'university', 'faculdade', 'faculty', 'instituto', 'institute', 'creche',
     # Culture (complement)
-    'biblioteca', 'teatro', 'cinema', 'galeria', 'monumento', 'miradouro', 'igreja',
+    'biblioteca', 'library', 'libraries', 'teatro', 'cinema', 'galeria', 'gallery', 'monumento', 'miradouro', 'igreja',
     # Outdoors & Leisure
-    'jardim', 'parque', 'piscina', 'desporto',
+    'jardim', 'garden', 'gardens', 'parque', 'park', 'parks', 'piscina', 'pool', 'desporto',
     # Services & Amenities
     'wc', 'banheiro', 'sanitário', 'sanitario', 'estacionamento', 'parking',
     'embaixada', 'cemiterio', 'cemitério', 'junta', 'câmara', 'camara',
     # Streets & Locations
     'rua', 'avenida', 'praça', 'praca', 'largo', 'bairro'
 }
+
+
+def _matches_open_data_keyword(query: Optional[str], keyword: str) -> bool:
+    """Checks open-data trigger keywords with conservative typo tolerance."""
+    normalized_query = _normalize_lookup_text(query)
+    normalized_keyword = _normalize_lookup_text(keyword)
+    if not normalized_query or not normalized_keyword:
+        return False
+    if normalized_keyword in normalized_query:
+        return True
+
+    query_tokens = _unique_lookup_tokens(normalized_query)
+    keyword_tokens = _unique_lookup_tokens(normalized_keyword)
+    if not keyword_tokens:
+        return False
+
+    if len(keyword_tokens) > 1:
+        matched_count, weighted_score = _collect_token_match_stats(keyword_tokens, normalized_query)
+        return matched_count == len(keyword_tokens) and weighted_score >= len(keyword_tokens) * 0.92
+
+    keyword_token = keyword_tokens[0]
+    if len(keyword_token) <= 4:
+        return keyword_token in query_tokens
+
+    return _best_token_similarity(keyword_token, query_tokens) >= 0.84
 
 
 def _should_search_dados_abertos(query: Optional[str]) -> bool:
@@ -839,9 +1272,8 @@ def _should_search_dados_abertos(query: Optional[str]) -> bool:
     """
     if not query:
         return False
-    
-    query_lower = query.lower()
-    return any(keyword in query_lower for keyword in DADOS_ABERTOS_KEYWORDS)
+
+    return any(_matches_open_data_keyword(query, keyword) for keyword in DADOS_ABERTOS_KEYWORDS)
 
 
 def _score_open_data_place_match(query: str, name: str, address: str = "") -> float:
@@ -863,13 +1295,20 @@ def _score_open_data_place_match(query: str, name: str, address: str = "") -> fl
     elif normalized_query and normalized_query in combined_text:
         score += 8.0
 
+    phrase_score = _phrase_similarity_score(normalized_query, name_text)
+    if phrase_score > 0:
+        score += 9.0 * phrase_score
+
     for token in tokens:
-        if token in name_text:
-            score += 3.0
-        elif token in address_text:
-            score += 1.5
-        elif token in combined_text:
-            score += 1.0
+        token_name_score = _best_token_similarity(token, _unique_lookup_tokens(name_text))
+        token_address_score = _best_token_similarity(token, _unique_lookup_tokens(address_text))
+        token_combined_score = _best_token_similarity(token, _unique_lookup_tokens(combined_text))
+        if token_name_score > 0:
+            score += 3.0 * token_name_score
+        elif token_address_score > 0:
+            score += 1.5 * token_address_score
+        elif token_combined_score > 0:
+            score += 1.0 * token_combined_score
 
     return score
 
@@ -1165,6 +1604,7 @@ _GENERIC_PLACE_QUERY_TOKENS = {
     "wheelchair", "accessible", "accessibility", "stepfree", "step", "mobility",
     "what", "where", "which", "when", "are", "the", "and", "for", "with",
     "from", "that", "this", "these", "those", "into", "about", "around",
+    "tell", "details", "detail", "information", "info", "more", "please",
     "museum", "museums", "museu", "museus", "monument", "monuments",
     "monumento", "monumentos", "open", "opened", "closed", "like",
     "imperdiveis", "imperdíveis", "primeira", "first", "time", "trip",
@@ -1229,8 +1669,7 @@ def _matches_place_location_hints(text: str, location_hints: List[str]) -> bool:
 
 def _query_requests_ranked_places(query: Optional[str]) -> bool:
     """Detects broad ranking intents such as 'best museums' or 'top places'."""
-    normalized_query = _normalize_place_hint_text(query)
-    return any(token in normalized_query for token in ["best", "top", "recommended", "recommend", "must-see", "must see"])
+    return _text_contains_fuzzy_term(query, ["best", "top", "recommended", "recommend", "must-see", "must see"])
 
 
 def _is_explicit_museum_candidate(title: str, url: str = "", extra_text: str = "") -> bool:
@@ -1280,11 +1719,28 @@ def _extract_place_query_tokens(query: Optional[str]) -> List[str]:
     if not query:
         return []
 
-    tokens = re.findall(r"[a-z0-9]+", _normalize_place_hint_text(query))
+    tokens = _extract_lookup_tokens(query)
     return [
         token for token in tokens
         if len(token) >= 3 and token not in _GENERIC_PLACE_QUERY_TOKENS
     ]
+
+
+def _extract_specific_place_lookup_phrase(query: Optional[str]) -> Optional[str]:
+    """Extracts a specific place name from quoted or 'tell me about' queries."""
+    extracted = _extract_named_lookup_phrase(query, _GENERIC_PLACE_QUERY_TOKENS)
+    if extracted:
+        return extracted
+
+    raw_query = (query or '').strip()
+    meaningful_tokens = [
+        token for token in _extract_lookup_tokens(raw_query)
+        if token not in _GENERIC_PLACE_QUERY_TOKENS
+    ]
+    has_title_like_casing = any(char.isupper() for char in raw_query)
+    if meaningful_tokens and len(meaningful_tokens) <= 5 and has_title_like_casing:
+        return " ".join(meaningful_tokens)
+    return None
 
 
 def _clean_place_description_text(text: Optional[str], fallback_title: str = "") -> str:
@@ -1311,16 +1767,112 @@ def _clean_place_description_text(text: Optional[str], fallback_title: str = "")
     return cleaned
 
 
+_PLACE_QUERY_DAY_ALIASES = {
+    "monday": ["monday", "segunda"],
+    "tuesday": ["tuesday", "terça", "terca"],
+    "wednesday": ["wednesday", "quarta"],
+    "thursday": ["thursday", "quinta"],
+    "friday": ["friday", "sexta"],
+    "saturday": ["saturday", "sábado", "sabado"],
+    "sunday": ["sunday", "domingo"],
+}
+
+
+def _query_mentions_lisboa_card(query: Optional[str]) -> bool:
+    """Returns whether the query explicitly asks about Lisboa Card benefits."""
+    return _text_contains_fuzzy_term(query, ["lisboa card", "free with lisboa card", "discount", "with lisboa card"])
+
+
+def _query_mentions_tickets(query: Optional[str]) -> bool:
+    """Returns whether the query explicitly asks about tickets or offers."""
+    return _text_contains_fuzzy_term(query, ["ticket", "tickets", "bilhete", "bilhetes", "offer", "offers", "price", "prices"])
+
+
+def _query_mentions_schedule(query: Optional[str]) -> bool:
+    """Returns whether the query explicitly asks about schedules or opening hours."""
+    return _text_contains_fuzzy_term(
+        query,
+        [
+            "schedule", "schedules", "opening hours", "hours", "open", "opens", "closed",
+            "horário", "horários", "horarios", "abre", "aberto", "aberta", "fechado", "fechada",
+            "today", "tomorrow", "hoje", "amanhã", "amanha",
+            "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+            "segunda", "terça", "terca", "quarta", "quinta", "sexta", "sábado", "sabado", "domingo",
+        ],
+    )
+
+
+def _extract_requested_schedule_days(query: Optional[str]) -> List[str]:
+    """Extracts requested weekdays from a schedule-related place query."""
+    normalized_query = _normalize_place_hint_text(query)
+    requested_days = []
+    for canonical_day, aliases in _PLACE_QUERY_DAY_ALIASES.items():
+        if any(alias in normalized_query for alias in aliases):
+            requested_days.append(canonical_day)
+    return requested_days
+
+
+def _schedule_day_matches(day_label: str, canonical_day: str) -> bool:
+    """Checks whether a scraped day label matches a canonical weekday."""
+    normalized_label = _normalize_place_hint_text(day_label)
+    return any(alias in normalized_label for alias in _PLACE_QUERY_DAY_ALIASES.get(canonical_day, []))
+
+
+def _format_place_schedule_previews(
+    schedules: List[Dict[str, Any]],
+    query: Optional[str],
+) -> List[str]:
+    """Builds concise schedule preview lines relevant to the user's query."""
+    if not schedules:
+        return []
+
+    requested_days = _extract_requested_schedule_days(query)
+    previews: List[str] = []
+
+    if requested_days:
+        for schedule in schedules:
+            schedule_name = schedule.get('name')
+            for requested_day in requested_days:
+                for day_label, hours in (schedule.get('hours') or {}).items():
+                    if _schedule_day_matches(day_label, requested_day):
+                        if schedule_name and str(schedule_name).lower() != 'schedule':
+                            previews.append(f"{schedule_name}: {day_label} {hours}")
+                        else:
+                            previews.append(f"{day_label}: {hours}")
+        if previews:
+            return previews[:2]
+
+    for schedule in schedules:
+        if schedule.get('today'):
+            previews.append(schedule['today'])
+            break
+
+    if previews:
+        return previews[:1]
+
+    # Fallback: show first two hours entries when no today shortcut is available.
+    for schedule in schedules:
+        for day_label, hours in list((schedule.get('hours') or {}).items())[:2]:
+            previews.append(f"{day_label}: {hours}")
+        if previews:
+            break
+
+    if previews:
+        return previews[:2]
+
+    for schedule in schedules:
+        if schedule.get('summary'):
+            previews.append(schedule['summary'])
+            break
+
+    return previews[:1]
+
+
 def _extract_required_service_term_groups(query: Optional[str]) -> List[set[str]]:
     """Extracts critical service-intent term groups that must remain present in results."""
-    normalized_query = _normalize_place_hint_text(query)
-    query_tokens = set(re.findall(r"[a-z0-9]+", normalized_query))
     required_groups: List[set[str]] = []
     for variants in _PUBLIC_SERVICE_FOCUS_TERMS.values():
-        if any(
-            (_normalize_place_hint_text(term) in normalized_query if " " in term else _normalize_place_hint_text(term) in query_tokens)
-            for term in variants
-        ):
+        if any(_matches_open_data_keyword(query, term) for term in variants):
             required_groups.append(variants)
     return required_groups
 
@@ -1330,13 +1882,8 @@ def _matches_required_service_terms(searchable_text: str, required_groups: List[
     if not required_groups:
         return True
 
-    normalized_text = _normalize_place_hint_text(searchable_text)
-    text_tokens = set(re.findall(r"[a-z0-9]+", normalized_text))
     return any(
-        any(
-            (_normalize_place_hint_text(term) in normalized_text if " " in term else _normalize_place_hint_text(term) in text_tokens)
-            for term in variants
-        )
+        _text_contains_fuzzy_term(searchable_text, variants)
         for variants in required_groups
     )
 
@@ -1441,7 +1988,6 @@ def _top_attraction_category_bonus(item_category: str) -> float:
 def _infer_place_query_intent(query: Optional[str], category: Optional[str]) -> Optional[str]:
     """Infers broad place-search intent for lightweight category exclusions."""
     normalized_category = _normalize_place_category_filter(category)
-    query_lower = (query or "").lower()
     museum_terms = ["museum", "museu", "museums", "museus"]
     monument_terms = ["monument", "monumento", "monuments", "monumentos", "monastery", "castle", "palace", "church"]
     top_attraction_terms = [
@@ -1450,9 +1996,9 @@ def _infer_place_query_intent(query: Optional[str], category: Optional[str]) -> 
         "highly recommended attractions", "o que visitar",
     ]
 
-    museum_requested = any(term in query_lower for term in museum_terms)
-    monument_requested = any(term in query_lower for term in monument_terms)
-    top_attractions_requested = any(term in query_lower for term in top_attraction_terms)
+    museum_requested = _text_contains_fuzzy_term(query, museum_terms)
+    monument_requested = _text_contains_fuzzy_term(query, monument_terms)
+    top_attractions_requested = _text_contains_fuzzy_term(query, top_attraction_terms)
 
     if top_attractions_requested:
         return "top_attractions"
@@ -1467,9 +2013,9 @@ def _infer_place_query_intent(query: Optional[str], category: Optional[str]) -> 
         return "monument_only"
     if museum_requested or monument_requested:
         return "museum_monument"
-    if any(term in query_lower for term in ["restaurant", "restaurante", "food", "dinner", "lunch", "brunch", "gastronomy"]):
+    if _text_contains_fuzzy_term(query, ["restaurant", "restaurante", "food", "dinner", "lunch", "brunch", "gastronomy"]):
         return "food"
-    if any(term in query_lower for term in ["hotel", "stay", "accommodation", "guest house"]):
+    if _text_contains_fuzzy_term(query, ["hotel", "stay", "accommodation", "guest house"]):
         return "accommodation"
     return None
 
@@ -1514,19 +2060,15 @@ def _fallback_search(query: str, category: str, data: List[Dict], max_results: i
     query_intent = _infer_place_query_intent(query, category)
     location_hints = _extract_place_location_hints(query)
     required_service_terms = _extract_required_service_term_groups(query)
+    normalized_query = _normalize_lookup_text(query)
+    specific_lookup_phrase = _extract_specific_place_lookup_phrase(query)
     
     for item in data:
         # Category filter
         if category and not _place_category_matches(item.get('category', ''), category):
             continue
         
-        searchable = " ".join([
-            item.get('title', ''),
-            item.get('full_description', ''),
-            item.get('short_description', ''),
-            item.get('category', ''),
-            item.get('location', '')
-        ]).lower()
+        searchable = _build_place_searchable_text(item).lower()
         normalized_searchable = _normalize_place_hint_text(searchable)
         service_anchor_text = " ".join([
             item.get('title', ''),
@@ -1557,10 +2099,14 @@ def _fallback_search(query: str, category: str, data: List[Dict], max_results: i
         # Query filter
         if query_lower:
             if query_tokens:
-                if not any(token in normalized_searchable for token in query_tokens):
+                matched_tokens, weighted_score = _collect_token_match_stats(query_tokens, normalized_searchable)
+                phrase_score = _phrase_similarity_score(specific_lookup_phrase or normalized_query, item.get('title', ''))
+                if matched_tokens == 0 and weighted_score <= 0 and phrase_score <= 0:
                     continue
             elif query_lower not in searchable:
-                continue
+                phrase_score = _phrase_similarity_score(normalized_query, item.get('title', ''))
+                if phrase_score <= 0:
+                    continue
         
         results.append(item)
         if len(results) >= max_results:
@@ -1625,17 +2171,19 @@ def search_cultural_events(
             offset = 0
         
         render_language = _infer_visitlisboa_output_language(query, language)
+        specific_lookup_phrase = _extract_specific_event_lookup_phrase(query)
+        effective_query = specific_lookup_phrase or query
 
-        # Parse date range (CRITICAL: defaults to upcoming 30 days if not specified)
-        if not date_filter:
+        # Parse date range. Broad discovery defaults to upcoming, but specific lookups should search across all dates.
+        if not date_filter and not specific_lookup_phrase:
             date_filter = 'upcoming'  # Default to next 30 days
         
-        start_date, end_date = parse_date_range(date_filter)
+        start_date, end_date = parse_date_range(date_filter) if date_filter else (None, None)
         
         # Logging
         date_info = f"{start_date.strftime('%Y-%m-%d') if start_date else 'any'} to {end_date.strftime('%Y-%m-%d') if end_date else 'any'}"
         logger.info(
-            f"search_cultural_events: query='{query}', category='{category}', dates={date_info}, max={max_results}, offset={offset}"
+            f"search_cultural_events: query='{query}', category='{category}', effective_query='{effective_query}', dates={date_info}, max={max_results}, offset={offset}"
         )
         
         # ALWAYS load JSON for date filtering (vector store doesn't filter by date)
@@ -1677,14 +2225,30 @@ def search_cultural_events(
             logger.info(f"After category filter: {len(events_data)} events")
         
         # Step 3: Filter by query (TOKEN-BASED matching for better recall)
+        query_scores: Dict[int, float] = {}
         if query:
-            expanded_tokens = _expand_event_query_tokens(query)
+            expanded_tokens = _expand_event_query_tokens(effective_query)
 
-            # If we have meaningful tokens left, apply the filter
-            if expanded_tokens:
-                events_data = [event for event in events_data if _event_matches_query(event, expanded_tokens)]
-                undated_candidates = [event for event in undated_candidates if _event_matches_query(event, expanded_tokens)]
-                logger.info(f"After query filter: {len(events_data)} events (tokens: {expanded_tokens[:5]}...)")
+            if specific_lookup_phrase or expanded_tokens:
+                def _score_collection(items: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[int, float]]:
+                    scores: Dict[int, float] = {}
+                    matched_items: List[Dict[str, Any]] = []
+                    for item in items:
+                        score = _score_event_query_match(
+                            item,
+                            expanded_tokens,
+                            specific_lookup_phrase=specific_lookup_phrase,
+                        )
+                        if score > 0:
+                            scores[id(item)] = score
+                            matched_items.append(item)
+                    return matched_items, scores
+
+                events_data, query_scores = _score_collection(events_data)
+                undated_candidates, _ = _score_collection(undated_candidates)
+                logger.info(
+                    f"After query filter: {len(events_data)} events (specific_lookup={bool(specific_lookup_phrase)}, tokens={expanded_tokens[:6]})"
+                )
             else:
                 logger.info(f"Query '{query}' contained only generic terms, skipping text filter.")
         
@@ -1725,9 +2289,21 @@ def search_cultural_events(
         for event in events_data:
             event['_relevance_score'] = calculate_temporal_relevance_score(event, start_date, end_date)
             event['_duration_days'] = get_event_duration_days(event)
+            event['_query_match_score'] = query_scores.get(id(event), 0.0)
         
-        events_data.sort(key=lambda e: e.get('_relevance_score', 0), reverse=True)
-        logger.info(f"Sorted by temporal relevance (top score: {events_data[0].get('_relevance_score', 0):.1f})")
+        if query_scores:
+            events_data.sort(
+                key=lambda e: (e.get('_query_match_score', 0.0), e.get('_relevance_score', 0.0)),
+                reverse=True,
+            )
+            logger.info(
+                "Sorted by query relevance first (top query score: %.1f, top temporal score: %.1f)",
+                events_data[0].get('_query_match_score', 0.0),
+                events_data[0].get('_relevance_score', 0.0),
+            )
+        else:
+            events_data.sort(key=lambda e: e.get('_relevance_score', 0), reverse=True)
+            logger.info(f"Sorted by temporal relevance (top score: {events_data[0].get('_relevance_score', 0):.1f})")
 
         if offset >= len(events_data):
             output_parts = _format_event_filter_summary(
@@ -1818,6 +2394,25 @@ def search_cultural_events(
                     output_parts.append(f"   🎟️ **Comprar bilhetes:** {event['buy_tickets_url']}")
                 else:
                     output_parts.append(f"   🎟️ **Buy tickets:** {event['buy_tickets_url']}")
+
+            if event.get('schedule_notes'):
+                schedule_summary = "; ".join(str(note) for note in event['schedule_notes'][:2])
+                if render_language == "pt":
+                    output_parts.append(f"   🕐 **Horários:** {schedule_summary}")
+                else:
+                    output_parts.append(f"   🕐 **Schedule:** {schedule_summary}")
+
+            if event.get('highlight_links'):
+                highlight_titles = ", ".join(
+                    str(item.get('title', ''))
+                    for item in event['highlight_links'][:3]
+                    if isinstance(item, dict) and item.get('title')
+                )
+                if highlight_titles:
+                    if render_language == "pt":
+                        output_parts.append(f"   ✨ **Destaques:** {highlight_titles}")
+                    else:
+                        output_parts.append(f"   ✨ **Highlights:** {highlight_titles}")
             
             output_parts.append("")  # Empty line between events
 
@@ -1896,19 +2491,22 @@ def search_places_attractions(
 
         requested_window = max_results + offset
         render_language = _infer_visitlisboa_output_language(query, language)
+        specific_lookup_query = _extract_specific_place_lookup_phrase(query)
+        effective_query = specific_lookup_query or query
+        query_intent = _infer_place_query_intent(effective_query or query, category)
         
         logger.info(
-            f"search_places_attractions: query='{query}', category='{category}', max={max_results}, offset={offset}"
+            f"search_places_attractions: query='{query}', effective_query='{effective_query}', category='{category}', max={max_results}, offset={offset}"
         )
-        required_service_terms = _extract_required_service_term_groups(query)
+        required_service_terms = _extract_required_service_term_groups(effective_query or query)
         
         # Check if we should also search Dados Abertos (hybrid mode)
-        search_dados_abertos = _should_search_dados_abertos(query)
+        search_dados_abertos = _should_search_dados_abertos(effective_query or query)
         dados_abertos_results = []
         
-        if search_dados_abertos and query:
+        if search_dados_abertos and (effective_query or query):
             logger.info("Hybrid mode: Query contains Dados Abertos keywords")
-            dados_abertos_results = _search_dados_abertos_hybrid(query, max_results=requested_window // 2 + 1)
+            dados_abertos_results = _search_dados_abertos_hybrid(effective_query or query, max_results=requested_window // 2 + 1)
             logger.info(f"Dados Abertos returned {len(dados_abertos_results)} results")
         
         # =====================================================================
@@ -1919,9 +2517,8 @@ def search_places_attractions(
         
         if kb:
             try:
-                query_intent = _infer_place_query_intent(query, category)
                 requested_category = _normalize_place_category_filter(category)
-                search_query = query or "places and attractions in Lisbon"
+                search_query = effective_query or query or "places and attractions in Lisbon"
                 if query_intent == "top_attractions":
                     search_query = f"iconic attractions monuments viewpoints historic sites {search_query}"
                 if category:
@@ -1930,9 +2527,12 @@ def search_places_attractions(
                         category_prefix = "Museums"
                     search_query = f"{category_prefix} {search_query}"
 
-                query_tokens = _extract_place_query_tokens(query or search_query)
-                location_hints = _extract_place_location_hints(query or search_query)
-                ranking_requested = _query_requests_ranked_places(query or search_query) or query_intent == "top_attractions"
+                query_tokens = _extract_place_query_tokens(effective_query or search_query)
+                location_hints = _extract_place_location_hints(effective_query or search_query)
+                ranking_requested = _query_requests_ranked_places(effective_query or search_query) or query_intent == "top_attractions"
+                lisboa_card_requested = _query_mentions_lisboa_card(effective_query or query)
+                tickets_requested = _query_mentions_tickets(effective_query or query)
+                schedule_requested = _query_mentions_schedule(effective_query or query)
                 
                 logger.info(f"search_places_attractions: searching VisitLisboa for '{search_query}'")
                 
@@ -1965,6 +2565,7 @@ def search_places_attractions(
                     normalized_title = _normalize_place_hint_text(metadata.get('title', ''))
                     normalized_searchable = _normalize_place_hint_text(searchable)
                     raw_location = metadata.get('address') or metadata.get('location') or ''
+                    full_place_data = _get_place_by_url(metadata.get('url', '')) if metadata.get('url') else None
                     location_text = f"{metadata.get('title', '')} {metadata.get('url', '')} {raw_location} {doc.page_content}".lower()
                     service_anchor_text = " ".join([
                         metadata.get('title', ''),
@@ -1993,10 +2594,11 @@ def search_places_attractions(
                     if not _matches_place_query_intent(item_category, metadata.get('title', ''), query_intent):
                         continue
 
-                    token_hits = sum(1 for token in query_tokens if token in normalized_searchable)
-                    title_hits = sum(1 for token in query_tokens if token in normalized_title)
+                    token_hits, token_weighted_score = _collect_token_match_stats(query_tokens, normalized_searchable)
+                    title_hits, title_weighted_score = _collect_token_match_stats(query_tokens, normalized_title)
+                    phrase_score = _phrase_similarity_score(effective_query or search_query, metadata.get('title', ''))
 
-                    if query_tokens and token_hits == 0 and vector_score > 1.25:
+                    if query_tokens and token_hits == 0 and phrase_score <= 0 and vector_score > 1.25:
                         continue
                     
                     # Calculate Rank Score
@@ -2022,15 +2624,23 @@ def search_places_attractions(
                         relevance_weight, rating_weight, reviews_weight = 0.60, 0.30, 0.10
                     
                     category_bonus = 0.22 if requested_category and _place_category_matches(item_category, requested_category) else 0.0
-                    title_bonus = min(0.18, title_hits * 0.09)
-                    token_bonus = min(0.15, token_hits * 0.05)
+                    title_bonus = min(0.18, title_weighted_score * 0.09)
+                    token_bonus = min(0.15, token_weighted_score * 0.05)
                     service_penalty = 0.25 if query_tokens and _is_service_like_place_category(item_category) and query_intent != "accommodation" else 0.0
                     museum_specific_bonus = 0.10 if query_intent == "museum_only" and _is_explicit_museum_candidate(
                         metadata.get('title', ''),
                         metadata.get('url', ''),
                         searchable,
                     ) else 0.0
+                    lisboa_card_bonus = 0.18 if lisboa_card_requested and full_place_data and (
+                        full_place_data.get('lisboa_card_benefit') or full_place_data.get('lisboa_card_discount')
+                    ) else 0.0
+                    tickets_bonus = 0.12 if tickets_requested and full_place_data and (
+                        full_place_data.get('tickets_offers') or full_place_data.get('contact_info', {}).get('tickets_url')
+                    ) else 0.0
+                    schedule_bonus = 0.12 if schedule_requested and full_place_data and full_place_data.get('schedules') else 0.0
                     top_attraction_bonus = _top_attraction_category_bonus(item_category) if query_intent == "top_attractions" else 0.0
+                    phrase_bonus = min(0.16, phrase_score * 0.16)
                     iconic_title_bonus = 0.0
                     if query_intent == "top_attractions":
                         iconic_markers = [
@@ -2048,7 +2658,11 @@ def search_places_attractions(
                         + title_bonus
                         + token_bonus
                         + museum_specific_bonus
+                        + lisboa_card_bonus
+                        + tickets_bonus
+                        + schedule_bonus
                         + top_attraction_bonus
+                        + phrase_bonus
                         + iconic_title_bonus
                         - service_penalty
                     )
@@ -2084,9 +2698,14 @@ def search_places_attractions(
                 logger.warning(f"Vector search failed: {e}")
 
         # JSON fallback to improve recall when vector search under-recovers
-        if query and len(visitlisboa_results) < requested_window:
+        should_use_json_fallback = bool(effective_query or query) and (
+            not visitlisboa_results
+            or bool(specific_lookup_query)
+            or query_intent != "top_attractions"
+        )
+        if should_use_json_fallback and len(visitlisboa_results) < requested_window:
             fallback_items = _fallback_search(
-                query=query,
+                query=effective_query or query,
                 category=category,
                 data=_load_places_json(),
                 max_results=requested_window * 2,
@@ -2150,15 +2769,15 @@ def search_places_attractions(
         
         if not all_results:
             # Last resort fallback
-            if query:
-                fallback_items = _fallback_search(query, category, _load_places_json(), max_results=requested_window)
+            if effective_query or query:
+                fallback_items = _fallback_search(effective_query or query, category, _load_places_json(), max_results=requested_window)
                 if fallback_items:
                     all_results = [_convert_raw_place_to_result(item) for item in fallback_items]
 
-            if not all_results and query:
+            if not all_results and (effective_query or query):
                 logger.info("No results from hybrid search, trying direct Dados Abertos")
                 from tools.dados_abertos import _search_place_in_datasets_logic
-                open_data_results = _search_place_in_datasets_logic(query, max_results=requested_window)
+                open_data_results = _search_place_in_datasets_logic(effective_query or query, max_results=requested_window)
                 if open_data_results:
                     return open_data_results
             
@@ -2213,9 +2832,12 @@ def search_places_attractions(
             
             output_parts.append(f"   📂 Category: {cat}")
             
-            # Lisboa Card discount (from enriched data)
-            if full_data and full_data.get('lisboa_card_discount'):
-                output_parts.append(f"   🎫 {full_data['lisboa_card_discount']}")
+            # Lisboa Card benefit (from enriched data)
+            lisboa_card_benefit = None
+            if full_data:
+                lisboa_card_benefit = full_data.get('lisboa_card_benefit') or full_data.get('lisboa_card_discount')
+            if lisboa_card_benefit:
+                output_parts.append(f"   🎫 {lisboa_card_benefit}")
             
             description_text = _clean_place_description_text(
                 (full_data.get('short_description') if full_data else None) or place.get('short_description'),
@@ -2231,10 +2853,8 @@ def search_places_attractions(
             
             # Schedule/opening hours (from enriched data)
             if full_data and full_data.get('schedules'):
-                for schedule in full_data['schedules']:
-                    if schedule.get('today'):
-                        output_parts.append(f"   🕐 {schedule['today']}")
-                        break
+                for preview in _format_place_schedule_previews(full_data['schedules'], effective_query or query):
+                    output_parts.append(f"   🕐 {preview}")
             
             # Tickets/prices (from enriched data)
             if full_data and full_data.get('tickets_offers'):
@@ -2244,6 +2864,11 @@ def search_places_attractions(
                     if len(tickets['description']) > 80:
                         price_desc += "..."
                     output_parts.append(f"   💰 {price_desc}")
+                elif tickets.get('links'):
+                    first_link = tickets['links'][0]
+                    output_parts.append(f"   🎟️ {first_link.get('text', 'Tickets')}: {first_link.get('url', '')}")
+            elif full_data and full_data.get('contact_info', {}).get('tickets_url') and _query_mentions_tickets(effective_query or query):
+                output_parts.append(f"   🎟️ Tickets: {full_data['contact_info']['tickets_url']}")
             
             # TripAdvisor rating (from enriched data)
             if full_data and full_data.get('tripadvisor'):
