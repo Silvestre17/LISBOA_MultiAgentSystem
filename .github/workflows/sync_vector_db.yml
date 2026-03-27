@@ -18,18 +18,23 @@
 #   - HuggingFace model (bge-m3): ~2.5GB
 #   - Total: ~2.9GB (within GitHub Pro's 10GB limit)
 #
-# Runtime (estimated):
-#   - Events update: ~10/30 minutes (small/large changes)
-#   - Places update: ~60 minutes
+# Runtime note:
+#   - Sync time varies with the number of changed documents and CPU-only embedding work.
+#   - Large resumptions can span multiple committed iterations and multiple daily runs.
 #
-# GitHub Actions Limits (Free/Pro):
-#   - Max runtime per job: 6 hours (we use 120 min timeout)
-#   - Max concurrent jobs: 20 (Free) / 180 (Pro)
-#   - Storage: 500MB (Free) / 2GB (Pro) - we use ~3GB cache
-#   - Minutes: 2000/month (Free) / 3000/month (Pro)
+# GitHub Actions Limits (GitHub-hosted standard runners, docs checked 2026-03):
+#   - Max runtime per job: 6 hours
+#   - Max concurrent jobs: 20 (Free) / 40 (Pro)
+#   - Included artifact storage: 500MB (Free) / 1GB (Pro)
+#   - Included minutes: 2000/month (Free) / 3000/month (Pro)
+#   - Default cache storage allowance: 10GB per repository
 # ==========================================================================
 
 name: Sync Vector Database
+
+concurrency:
+  group: sync-vector-db-${{ github.ref }}
+  cancel-in-progress: false
 
 on:
   # Trigger after data pipeline completes
@@ -37,37 +42,37 @@ on:
     workflows: ["Update Lisbon Data"]
     types:
       - completed
-  
+
   # Allow manual trigger
   workflow_dispatch:
     inputs:
       rebuild_events:
-        description: 'Force rebuild events collection'
+        description: "Force rebuild events collection"
         required: false
         default: false
         type: boolean
       rebuild_places:
-        description: 'Force rebuild places collection'
+        description: "Force rebuild places collection"
         required: false
         default: false
         type: boolean
       max_docs:
-        description: 'Max docs per run (default: 200)'
+        description: "Max docs per run (default: 200)"
         required: false
-        default: '200'
+        default: "200"
         type: string
 
 permissions:
   contents: write
 
 env:
-  PYTHON_VERSION: '3.10'
+  PYTHON_VERSION: "3.10"
   # Force unbuffered output to see logs immediately
-  PYTHONUNBUFFERED: '1'
+  PYTHONUNBUFFERED: "1"
   # Disable telemetry for faster startup
-  OTEL_SDK_DISABLED: 'true'
-  ANONYMIZED_TELEMETRY: 'false'
-  CHROMA_TELEMETRY: 'false'
+  OTEL_SDK_DISABLED: "true"
+  ANONYMIZED_TELEMETRY: "false"
+  CHROMA_TELEMETRY: "false"
   # HuggingFace cache directory
   HF_HOME: ${{ github.workspace }}/.cache/huggingface
 
@@ -75,20 +80,20 @@ jobs:
   sync-vector-db:
     # Only run if previous workflow succeeded (or manual trigger)
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
-    
+
     runs-on: ubuntu-latest
-    timeout-minutes: 240  # 4 hours max per batch
+    timeout-minutes: 360 # GitHub-hosted runner hard limit is 6 hours per job
 
     steps:
       # =====================================================================
       # Free Disk Space (Required for ML dependencies ~15GB freed)
       # =====================================================================
-      
+
       - name: Free Disk Space
         run: |
           echo "📊 Disk space before cleanup:"
           df -h /
-          
+
           # Remove unnecessary large packages (saves ~15GB)
           sudo rm -rf /usr/share/dotnet              # ~6GB
           sudo rm -rf /usr/local/lib/android         # ~6GB
@@ -97,17 +102,17 @@ jobs:
           sudo rm -rf /usr/share/swift               # ~1GB
           sudo rm -rf /usr/local/share/powershell    # ~500MB
           sudo rm -rf /usr/local/.ghcup              # ~500MB
-          
+
           # Clean apt cache
           sudo apt-get clean
-          
+
           echo "📊 Disk space after cleanup:"
           df -h /
 
       # =====================================================================
       # Setup
       # =====================================================================
-      
+
       - name: Checkout Repository
         uses: actions/checkout@v5
         with:
@@ -122,7 +127,7 @@ jobs:
       # =====================================================================
       # Caching (Critical for Performance)
       # =====================================================================
-      
+
       - name: Cache pip packages
         uses: actions/cache@v5
         id: cache-pip
@@ -144,39 +149,54 @@ jobs:
       # =====================================================================
       # Install Dependencies
       # =====================================================================
-      
+
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          
+
           # Install PyTorch CPU-only FIRST (before other packages that depend on it)
           # This avoids downloading the 3GB+ CUDA version
           echo "📦 Installing PyTorch (CPU-only)..."
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          
+
           # Install remaining dependencies
           echo "📦 Installing other dependencies..."
           pip install -r requirements_github_action_vectordb.txt
-          
+
           echo "✅ Dependencies installed"
 
       # =====================================================================
       # Check for Data Changes
       # =====================================================================
-      
+
       - name: Check if JSON files changed
         id: check-changes
         run: |
-          # Get the last commit that modified JSON files
-          EVENTS_CHANGED=$(git diff --name-only HEAD~1 HEAD -- 'data_collection/webscraping/events.json' | wc -l)
-          PLACES_CHANGED=$(git diff --name-only HEAD~1 HEAD -- 'data_collection/webscraping/places.json' | wc -l)
-          
+          if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            EVENTS_CHANGED=$(git diff --name-only HEAD~1 HEAD -- 'data_collection/webscraping/events.json' | wc -l)
+            PLACES_CHANGED=$(git diff --name-only HEAD~1 HEAD -- 'data_collection/webscraping/places.json' | wc -l)
+          else
+            EVENTS_CHANGED=1
+            PLACES_CHANGED=1
+          fi
+
+          PENDING_STATE_COUNT=0
+          if [ -d "data/vector_db/_sync_state" ]; then
+            PENDING_STATE_COUNT=$(find data/vector_db/_sync_state -maxdepth 1 -name '*.json' | wc -l)
+          fi
+          PENDING_STATE_EXISTS=false
+          if [ "$PENDING_STATE_COUNT" -gt 0 ]; then
+            PENDING_STATE_EXISTS=true
+          fi
+
           echo "events_changed=$EVENTS_CHANGED" >> $GITHUB_OUTPUT
           echo "places_changed=$PLACES_CHANGED" >> $GITHUB_OUTPUT
-          
-          if [ "$EVENTS_CHANGED" -gt 0 ] || [ "$PLACES_CHANGED" -gt 0 ]; then
+          echo "pending_state_count=$PENDING_STATE_COUNT" >> $GITHUB_OUTPUT
+          echo "pending_state_exists=$PENDING_STATE_EXISTS" >> $GITHUB_OUTPUT
+
+          if [ "$EVENTS_CHANGED" -gt 0 ] || [ "$PLACES_CHANGED" -gt 0 ] || [ "$PENDING_STATE_EXISTS" = "true" ]; then
             echo "changes_detected=true" >> $GITHUB_OUTPUT
-            echo "📝 Data changes detected"
+            echo "📝 Data changes or pending sync state detected"
           else
             echo "changes_detected=false" >> $GITHUB_OUTPUT
             echo "ℹ️ No data changes detected"
@@ -185,43 +205,60 @@ jobs:
       # =====================================================================
       # Sync Vector Store (Incremental Batching)
       # =====================================================================
-      
+
       - name: Sync Vector Database
         if: steps.check-changes.outputs.changes_detected == 'true' || github.event_name == 'workflow_dispatch'
-        timeout-minutes: 180  # Step-level timeout (less than job timeout)
+        timeout-minutes: 330 # Keep headroom for install, stats, and final repository operations
         run: |
           echo "============================================================"
           echo "🔄 Starting Vector Store Sync"
           echo "============================================================"
-          
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          commit_progress() {
+            local commit_msg="$1"
+            git add data/vector_db/
+
+            if git diff --staged --quiet; then
+              echo "ℹ️ No vector DB changes to commit for this iteration"
+              return 0
+            fi
+
+            git commit -m "$commit_msg"
+            git push
+            echo "✅ Progress committed: $commit_msg"
+          }
+
           # Configure max docs per iteration (default: 200)
           MAX_DOCS="${{ github.event.inputs.max_docs }}"
           if [ -z "$MAX_DOCS" ]; then
             MAX_DOCS=200
           fi
-          
+
           # Build base sync command
           SYNC_CMD="python tools/vector_store.py --no-gpu --max-docs $MAX_DOCS"
-          
+
           if [ "${{ github.event.inputs.rebuild_events }}" == "true" ]; then
             SYNC_CMD="$SYNC_CMD --rebuild-events"
             echo "⚠️ Force rebuilding events collection"
           fi
-          
+
           if [ "${{ github.event.inputs.rebuild_places }}" == "true" ]; then
             SYNC_CMD="$SYNC_CMD --rebuild-places"
             echo "⚠️ Force rebuilding places collection"
           fi
-          
+
           echo "Command: $SYNC_CMD"
           echo ""
-          
+
           # Incremental sync loop
           # Exit codes: 0 = complete, 2 = more work pending, other = error
           # Total capacity: 10 iterations × 200 docs = 2000 docs max per workflow run
           MAX_ITERATIONS=10
           TOTAL_PROCESSED=0
-          
+
           for i in $(seq 1 $MAX_ITERATIONS); do
             echo "────────────────────────────────────────────────────────────"
             echo "📦 Batch $i/$MAX_ITERATIONS (max $MAX_DOCS docs per batch)"
@@ -232,18 +269,32 @@ jobs:
             $SYNC_CMD
             EXIT_CODE=$?
             set -e
-            
+
+            COMMIT_MSG="Vector DB Sync: $(date +'%Y-%m-%d %H:%M') [batch-$i]"
+            if [ "${{ steps.check-changes.outputs.events_changed }}" -gt 0 ]; then
+              COMMIT_MSG="$COMMIT_MSG [events]"
+            fi
+            if [ "${{ steps.check-changes.outputs.places_changed }}" -gt 0 ]; then
+              COMMIT_MSG="$COMMIT_MSG [places]"
+            fi
+            if [ "${{ steps.check-changes.outputs.pending_state_exists }}" = "true" ]; then
+              COMMIT_MSG="$COMMIT_MSG [resume]"
+            fi
+
             echo ""
             echo "Exit code: $EXIT_CODE"
             
             # Handle different exit codes (including SIGTERM = 143)
             if [ $EXIT_CODE -eq 0 ]; then
+              commit_progress "$COMMIT_MSG"
               echo "✅ Sync complete (all documents processed)"
               break
             elif [ $EXIT_CODE -eq 2 ]; then
+              commit_progress "$COMMIT_MSG"
               echo "⏳ More work pending, continuing..."
               TOTAL_PROCESSED=$((TOTAL_PROCESSED + MAX_DOCS))
             elif [ $EXIT_CODE -eq 143 ]; then
+              commit_progress "$COMMIT_MSG"
               # SIGTERM received (runner timeout/memory pressure)
               echo "⚠️ SIGTERM received (exit code 143) - runner terminated process"
               echo "   Work completed so far has been saved"
@@ -264,7 +315,7 @@ jobs:
               echo "   → Or increase max_docs parameter for larger batches"
             fi
           done
-          
+
           echo ""
           echo "============================================================"
           echo "✅ Vector Store Sync Completed"
@@ -278,16 +329,16 @@ jobs:
       # =====================================================================
       # Commit Changes
       # =====================================================================
-      
+
       - name: Commit Vector Database Changes
         if: steps.check-changes.outputs.changes_detected == 'true' || github.event_name == 'workflow_dispatch'
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
+
           # Add vector database files
           git add data/vector_db/
-          
+
           # Check for changes before committing
           if git diff --staged --quiet; then
             echo "ℹ️ No vector DB changes to commit"
@@ -310,9 +361,9 @@ jobs:
       # =====================================================================
       # Skip notification
       # =====================================================================
-      
+
       - name: Skip Notification
         if: steps.check-changes.outputs.changes_detected == 'false' && github.event_name != 'workflow_dispatch'
         run: |
           echo "ℹ️ Skipped: No JSON data changes detected"
-          echo "Vector database is already up-to-date"
+          echo "Vector database is already up-to-date and there is no pending sync state"

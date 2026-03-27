@@ -116,6 +116,15 @@ python tools/vector_store.py --rebuild-all
 python tools/vector_store.py --no-gpu --max-docs 200
 ```
 
+Resumable sync behavior:
+
+- JSON source files remain the source of truth.
+- The sync process persists only checkpoint metadata under `data/vector_db/_sync_state/`.
+- Each checkpoint stores the collection name, semantic source fingerprint, sync mode, and pending document IDs that still need embedding.
+- If the source JSON changes before the pending queue finishes, the checkpoint is invalidated automatically and recomputed from the fresh JSON payload.
+- Modified records are updated with batched upserts, so the live collection is not mass-deleted before the replacement embeddings are ready.
+- Rebuild flags clear the corresponding checkpoint before rebuilding.
+
 ## ✅ Validation Ladder
 
 ### 1. Syntax and fast deterministic checks
@@ -189,7 +198,7 @@ The analysis notebook `eval/benchmark_ablation_analysis.ipynb` also exports late
 | Workflow | Trigger | Purpose | Main outputs |
 |----------|---------|---------|--------------|
 | `data_pipeline.yml` | daily at **04:00 UTC**, plus manual trigger with `events` / `places` / `both` | scrape VisitLisboa events daily and places weekly on Mondays, while manual runs can target either dataset or both | updated JSON artefacts under `data_collection/webscraping/` |
-| `sync_vector_db.yml` | `workflow_run` after `Update Lisbon Data`, plus manual trigger | incrementally sync ChromaDB collections and commit vector DB updates | updated artefacts under `data/vector_db/` |
+| `sync_vector_db.yml` | `workflow_run` after `Update Lisbon Data`, plus manual trigger | incrementally sync ChromaDB collections, persist pending checkpoints, and commit durable vector DB progress after each sync iteration | updated artefacts under `data/vector_db/`, including `_sync_state/` when work remains |
 
 ### Exit-code protocol used by the Sync Workflow
 
@@ -199,12 +208,20 @@ The analysis notebook `eval/benchmark_ablation_analysis.ipynb` also exports late
 | `2` | more work pending, safe to continue in another iteration |
 | `143` | runner terminated the process, treated as a graceful partial stop |
 
+Checkpoint semantics used by the sync workflow:
+
+- `sync_vector_db.yml` runs when scraped JSON changed and also when `_sync_state/` already contains pending work from an earlier run.
+- Each sync iteration stages and pushes `data/vector_db/` immediately after the Python sync command returns, so completed progress is durable before the next iteration starts.
+- Workflow concurrency is serialized per ref to avoid overlapping vector DB pushes.
+- As of 2026-03, the workflow timeout is configured below the GitHub-hosted 6-hour hard job limit, while still leaving room for dependency installation and final repository operations.
+
 ## 🚦 Performance and Batching Notes
 
 - `sync_vector_db.yml` uses batched vector-store updates to avoid CI timeouts.
 - `--max-docs` limits the number of documents processed per collection in a single sync pass.
 - Lower `max_docs` values reduce per-run pressure when the collection changes are large.
 - The repository caches pip dependencies and Hugging Face model downloads during CI.
+- Event sync runs before places sync inside the Python orchestration so time-sensitive event updates are refreshed earlier in a constrained CI window.
 
 ## 🩺 Troubleshooting
 
@@ -245,8 +262,10 @@ If the live suite fails before any meaningful execution, inspect the environment
 If vector synchronization repeatedly times out in GitHub Actions:
 
 - reduce `max_docs`
+- inspect `python tools/vector_store.py --stats --no-gpu` to see whether any collection reports pending sync work
 - rerun the workflow manually if the previous run exited with `2`
 - inspect whether the workflow reached the iteration cap before completion
+- inspect `data/vector_db/_sync_state/` only when diagnosis is required, and delete a checkpoint manually only if the source JSON changed and the saved queue is demonstrably stale or corrupted
 
 ### Local Model Connectivity
 

@@ -371,7 +371,7 @@ See [`eval/README.md`](./eval/README.md) for the complete evaluation workflow, o
 
 Two GitHub Actions workflows keep the knowledge base fresh:
 
-1. [`data_pipeline.yml`](./.github/workflows/data_pipeline.yml) scrapes VisitLisboa content daily at **04:00 UTC**. Places are refreshed weekly on Mondays unless manually triggered.
+1. [`data_pipeline.yml`](./.github/workflows/data_pipeline.yml) scrapes VisitLisboa content daily at **04:00 UTC**. Places are refreshed weekly on Mondays during scheduled runs. Manual runs can choose `events`, `places`, or `both` without changing the automatic behaviour.
 2. [`sync_vector_db.yml`](./.github/workflows/sync_vector_db.yml) runs after the scraping workflow completes successfully and performs incremental vector synchronization.
 
 ## 📄 License

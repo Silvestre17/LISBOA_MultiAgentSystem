@@ -52,7 +52,9 @@ import hashlib
 import json
 import time
 import warnings
+from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from tqdm import tqdm
@@ -109,6 +111,53 @@ if TYPE_CHECKING:
 COLLECTION_PDF = "lisbon_pdf"
 COLLECTION_PLACES = "lisbon_places"
 COLLECTION_EVENTS = "lisbon_events"
+SYNC_STATE_VERSION = 1
+SYNC_STATE_DIRNAME = "_sync_state"
+DEFAULT_BATCH_SIZE = 10
+
+
+@dataclass
+class CollectionSyncState:
+    """Persistent checkpoint metadata for a resumable collection sync."""
+
+    version: int
+    collection_name: str
+    source_tag: str
+    source_fingerprint: str
+    mode: str
+    pending_ids: List[str]
+    total_candidates: int
+    created_at: str
+    updated_at: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize the sync state to a JSON-friendly dictionary."""
+        return {
+            "version": self.version,
+            "collection_name": self.collection_name,
+            "source_tag": self.source_tag,
+            "source_fingerprint": self.source_fingerprint,
+            "mode": self.mode,
+            "pending_ids": list(self.pending_ids),
+            "total_candidates": self.total_candidates,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "CollectionSyncState":
+        """Build sync state from a persisted JSON payload."""
+        return cls(
+            version=int(payload.get("version", 0)),
+            collection_name=str(payload.get("collection_name", "")),
+            source_tag=str(payload.get("source_tag", "")),
+            source_fingerprint=str(payload.get("source_fingerprint", "")),
+            mode=str(payload.get("mode", "incremental")),
+            pending_ids=[str(item) for item in payload.get("pending_ids", [])],
+            total_candidates=int(payload.get("total_candidates", 0)),
+            created_at=str(payload.get("created_at", "")),
+            updated_at=str(payload.get("updated_at", "")),
+        )
 
 
 def compute_content_hash(content: str) -> str:
@@ -197,6 +246,102 @@ class KnowledgeBase:
         self.vector_db_path = str(Config.VECTOR_DB_DIR)
         os.makedirs(self.vector_db_path, exist_ok=True)
         print(f"   DB Path: {self.vector_db_path}", flush=True)
+
+    def _get_sync_state_dir(self) -> Path:
+        """Return the directory used to persist resumable sync checkpoints."""
+        state_dir = Path(self.vector_db_path) / SYNC_STATE_DIRNAME
+        state_dir.mkdir(parents=True, exist_ok=True)
+        return state_dir
+
+    def _get_sync_state_path(self, collection_name: str) -> Path:
+        """Return the checkpoint path for a collection sync."""
+        return self._get_sync_state_dir() / f"{collection_name}.json"
+
+    def _load_sync_state(self, collection_name: str) -> Optional[CollectionSyncState]:
+        """Load persisted checkpoint metadata for a collection, when available."""
+        state_path = self._get_sync_state_path(collection_name)
+        if not state_path.exists():
+            return None
+
+        try:
+            with state_path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            state = CollectionSyncState.from_dict(payload)
+        except (OSError, json.JSONDecodeError, ValueError, TypeError) as exc:
+            print(
+                f"   \033[1;33m⚠️ Ignoring invalid sync state {state_path.name}: {exc}\033[0m",
+                flush=True,
+            )
+            return None
+
+        if state.version != SYNC_STATE_VERSION:
+            print(
+                f"   \033[1;33m⚠️ Ignoring sync state with unsupported version: {state.version}\033[0m",
+                flush=True,
+            )
+            return None
+
+        return state
+
+    def _save_sync_state(self, state: CollectionSyncState) -> None:
+        """Persist checkpoint metadata atomically to survive workflow restarts."""
+        state_path = self._get_sync_state_path(state.collection_name)
+        temp_path = state_path.with_suffix(".json.tmp")
+        with temp_path.open("w", encoding="utf-8") as handle:
+            json.dump(state.to_dict(), handle, ensure_ascii=False, indent=2)
+        os.replace(temp_path, state_path)
+
+    def _clear_sync_state(self, collection_name: str) -> None:
+        """Delete a persisted checkpoint once a collection sync is complete."""
+        state_path = self._get_sync_state_path(collection_name)
+        try:
+            state_path.unlink()
+        except FileNotFoundError:
+            return
+
+    def _build_source_fingerprint(self, docs: Dict[str, "Document"]) -> str:
+        """Compute a semantic fingerprint for the current JSON-derived documents."""
+        fingerprint_parts = [
+            f"{doc_id}:{docs[doc_id].metadata.get('content_hash', '')}"
+            for doc_id in sorted(docs)
+        ]
+        return compute_content_hash("\n".join(fingerprint_parts))
+
+    def _build_sync_candidates(
+        self, new_ids: set[str], modified_ids: set[str]
+    ) -> List[str]:
+        """Order sync candidates deterministically, prioritizing modified records."""
+        return sorted(modified_ids) + sorted(new_ids)
+
+    def _is_compatible_sync_state(
+        self,
+        state: CollectionSyncState,
+        collection_name: str,
+        source_tag: str,
+        source_fingerprint: str,
+        sync_mode: str,
+    ) -> bool:
+        """Return whether a persisted checkpoint still matches the current source."""
+        return (
+            state.collection_name == collection_name
+            and state.source_tag == source_tag
+            and state.source_fingerprint == source_fingerprint
+            and state.mode == sync_mode
+        )
+
+    def _upsert_documents_batch(
+        self, collection: Any, docs: List["Document"], ids: List[str]
+    ) -> None:
+        """Embed and upsert a batch of documents without leaving gaps in the live DB."""
+        documents = [doc.page_content for doc in docs]
+        metadatas = [doc.metadata for doc in docs]
+        embeddings = self.embeddings.embed_documents(documents)
+        collection.upsert(
+            ids=ids,
+            documents=documents,
+            metadatas=metadatas,
+            embeddings=embeddings,
+        )
 
     def _get_collection(self, collection_name: str) -> "Chroma":
         """
@@ -459,7 +604,10 @@ class KnowledgeBase:
             flush=True,
         )
 
+        sync_mode = "rebuild" if force_rebuild else "incremental"
+
         if force_rebuild:
+            self._clear_sync_state(collection_name)
             self._delete_collection(collection_name)
 
         current_docs = self._load_json_data(json_path, source_tag)
@@ -468,6 +616,8 @@ class KnowledgeBase:
             return {"status": "error", "error": "No data loaded"}
 
         print(f"   📂 Loaded {len(current_docs)} items from JSON", flush=True)
+
+        source_fingerprint = self._build_source_fingerprint(current_docs)
 
         existing_hashes = self._get_existing_docs(collection_name)
         print(f"   📊 Existing in DB: {len(existing_hashes)} items", flush=True)
@@ -489,43 +639,108 @@ class KnowledgeBase:
         print(f"   \033[1;31m➖ Deleted:\033[0m {len(deleted_ids)}", flush=True)
 
         if not new_ids and not modified_ids and not deleted_ids:
+            self._clear_sync_state(collection_name)
             print("   \033[1;32m✓ No changes detected.\033[0m", flush=True)
             return {"status": "no_changes", "existing": len(existing_ids)}
 
         vectorstore = self._get_collection(collection_name)
         collection = vectorstore._collection
 
-        ids_to_delete = list(deleted_ids | modified_ids)
-        if ids_to_delete:
-            collection.delete(ids=ids_to_delete)
-            print(f"   🗑️ Deleted {len(ids_to_delete)} documents from DB", flush=True)
-
-        ids_to_add = list(new_ids | modified_ids)
-        has_more_work = False
-
-        if max_docs and len(ids_to_add) > max_docs:
+        deleted_id_list = sorted(deleted_ids)
+        if deleted_id_list:
+            collection.delete(ids=deleted_id_list)
             print(
-                f"   ⚠️ Limiting to {max_docs} documents (out of {len(ids_to_add)})",
+                f"   🗑️ Deleted {len(deleted_id_list)} removed documents from DB",
                 flush=True,
             )
-            ids_to_add = ids_to_add[:max_docs]
+
+        candidate_ids = self._build_sync_candidates(new_ids, modified_ids)
+        sync_state = self._load_sync_state(collection_name)
+        resumed_from_state = False
+
+        if sync_state and self._is_compatible_sync_state(
+            sync_state,
+            collection_name,
+            source_tag,
+            source_fingerprint,
+            sync_mode,
+        ):
+            candidate_id_set = set(candidate_ids)
+            resumed_ids = [
+                doc_id for doc_id in sync_state.pending_ids if doc_id in candidate_id_set
+            ]
+            resumed_id_set = set(resumed_ids)
+            new_candidate_ids = [
+                doc_id for doc_id in candidate_ids if doc_id not in resumed_id_set
+            ]
+            candidate_ids = resumed_ids + new_candidate_ids
+            sync_state.pending_ids = list(candidate_ids)
+            sync_state.total_candidates = max(
+                sync_state.total_candidates, len(candidate_ids)
+            )
+            sync_state.updated_at = datetime.now().isoformat()
+            resumed_from_state = True
+            if candidate_ids:
+                print(
+                    f"   ↪ Resuming from saved state ({len(candidate_ids)} pending)",
+                    flush=True,
+                )
+        else:
+            sync_state = CollectionSyncState(
+                version=SYNC_STATE_VERSION,
+                collection_name=collection_name,
+                source_tag=source_tag,
+                source_fingerprint=source_fingerprint,
+                mode=sync_mode,
+                pending_ids=list(candidate_ids),
+                total_candidates=len(candidate_ids),
+                created_at=datetime.now().isoformat(),
+                updated_at=datetime.now().isoformat(),
+            )
+
+        if not candidate_ids:
+            self._clear_sync_state(collection_name)
+            return {
+                "status": "synced",
+                "added": 0,
+                "modified": 0,
+                "deleted": len(deleted_id_list),
+                "total": len(current_ids),
+                "processed": 0,
+                "has_more_work": False,
+                "pending": 0,
+                "resumed_from_state": resumed_from_state,
+            }
+
+        self._save_sync_state(sync_state)
+
+        ids_to_process = list(candidate_ids)
+        has_more_work = False
+
+        if max_docs and len(ids_to_process) > max_docs:
+            print(
+                f"   ⚠️ Limiting to {max_docs} documents (out of {len(ids_to_process)})",
+                flush=True,
+            )
+            ids_to_process = ids_to_process[:max_docs]
             has_more_work = True
 
-        if ids_to_add:
-            docs_to_add = [current_docs[doc_id] for doc_id in ids_to_add]
-            # Reduced from 20 to 10 to prevent OOM/SIGTERM on GitHub Actions
-            batch_size = 10
+        remaining_after_window = candidate_ids[len(ids_to_process) :]
+
+        if ids_to_process:
+            docs_to_process = [current_docs[doc_id] for doc_id in ids_to_process]
+            batch_size = DEFAULT_BATCH_SIZE
 
             print(
-                f"   🔄 Indexing {len(docs_to_add)} documents (batch size: {batch_size})...",
+                f"   🔄 Syncing {len(docs_to_process)} documents (batch size: {batch_size})...",
                 flush=True,
             )
 
             # Use tqdm always to show progress in logs
-            iterator = range(0, len(docs_to_add), batch_size)
+            iterator = range(0, len(docs_to_process), batch_size)
             iterator = tqdm(
                 iterator,
-                total=(len(docs_to_add) + batch_size - 1) // batch_size,
+                total=(len(docs_to_process) + batch_size - 1) // batch_size,
                 desc="   Batch",
                 file=sys.stdout,
                 mininterval=1.0,
@@ -536,16 +751,23 @@ class KnowledgeBase:
                 # Check for graceful exit signal (SIGTERM from GitHub Actions)
                 if _graceful_exit_requested:
                     print(
-                        f"\n   \033[1;33m⚠️ Graceful exit: Processed {processed_count}/{len(docs_to_add)} docs\033[0m",
+                        f"\n   \033[1;33m⚠️ Graceful exit: Processed {processed_count}/{len(docs_to_process)} docs\033[0m",
                         flush=True,
                     )
                     has_more_work = True
                     break
 
-                batch_docs = docs_to_add[i : i + batch_size]
-                batch_ids = ids_to_add[i : i + batch_size]
-                vectorstore.add_documents(batch_docs, ids=batch_ids)
+                batch_docs = docs_to_process[i : i + batch_size]
+                batch_ids = ids_to_process[i : i + batch_size]
+                self._upsert_documents_batch(collection, batch_docs, batch_ids)
                 processed_count += len(batch_docs)
+
+                remaining_pending = (
+                    ids_to_process[processed_count:] + remaining_after_window
+                )
+                sync_state.pending_ids = remaining_pending
+                sync_state.updated_at = datetime.now().isoformat()
+                self._save_sync_state(sync_state)
 
                 # 🧹 Force garbage collection to free memory
                 gc.collect()
@@ -554,20 +776,35 @@ class KnowledgeBase:
 
             if not _graceful_exit_requested:
                 print(
-                    f"   \033[1;32m✓ Added/Updated {len(ids_to_add)} documents\033[0m",
+                    f"   \033[1;32m✓ Added/Updated {processed_count} documents\033[0m",
                     flush=True,
                 )
+        else:
+            processed_count = 0
+
+        remaining_pending = list(sync_state.pending_ids)
+        if not remaining_pending:
+            self._clear_sync_state(collection_name)
+        else:
+            has_more_work = True
+
+        processed_ids = set(ids_to_process[:processed_count])
+
+        processed_added = len([doc_id for doc_id in processed_ids if doc_id in new_ids])
+        processed_modified = len(
+            [doc_id for doc_id in processed_ids if doc_id in modified_ids]
+        )
 
         return {
             "status": "synced",
-            "added": len([x for x in ids_to_add if x in new_ids]),
-            "modified": len([x for x in ids_to_add if x in modified_ids]),
-            "deleted": len(deleted_ids),
+            "added": processed_added,
+            "modified": processed_modified,
+            "deleted": len(deleted_id_list),
             "total": len(current_ids),
+            "processed": processed_added + processed_modified,
             "has_more_work": has_more_work,
-            "pending": len(new_ids | modified_ids) - len(ids_to_add)
-            if has_more_work
-            else 0,
+            "pending": len(remaining_pending),
+            "resumed_from_state": resumed_from_state,
         }
 
     def sync_places_collection(
@@ -633,10 +870,10 @@ class KnowledgeBase:
             results["has_more_work"] = True
             return results
 
-        results["places"] = self.sync_places_collection(
-            force_rebuild=rebuild_places, max_docs=max_docs
+        results["events"] = self.sync_events_collection(
+            force_rebuild=rebuild_events, max_docs=max_docs
         )
-        if results["places"].get("has_more_work"):
+        if results["events"].get("has_more_work"):
             has_more_work = True
 
         # Check for graceful exit signal between collections
@@ -647,11 +884,10 @@ class KnowledgeBase:
             )
             has_more_work = True
         else:
-            events_max_docs = max_docs
-            results["events"] = self.sync_events_collection(
-                force_rebuild=rebuild_events, max_docs=events_max_docs
+            results["places"] = self.sync_places_collection(
+                force_rebuild=rebuild_places, max_docs=max_docs
             )
-            if results["events"].get("has_more_work"):
+            if results["places"].get("has_more_work"):
                 has_more_work = True
 
         print("\n\033[1m" + "=" * 60 + "\033[0m", flush=True)
@@ -699,7 +935,13 @@ class KnowledgeBase:
             try:
                 vectorstore = self._get_collection(col_name)
                 count = vectorstore._collection.count()
-                stats[col_name] = {"status": "ready", "count": count}
+                state = self._load_sync_state(col_name)
+                stats[col_name] = {
+                    "status": "ready",
+                    "count": count,
+                    "pending_sync": len(state.pending_ids) if state else 0,
+                    "sync_mode": state.mode if state else None,
+                }
             except Exception:
                 stats[col_name] = {"status": "not_built", "count": 0}
         stats["total"] = sum(
@@ -836,7 +1078,14 @@ Examples:
                 col_stats = stats.get(col_name, {})
                 status = col_stats.get("status", "unknown")
                 count = col_stats.get("count", 0)
-                print(f"   - {col_name}: {count} docs ({status})", flush=True)
+                pending_sync = col_stats.get("pending_sync", 0)
+                sync_suffix = (
+                    f", {pending_sync} pending sync" if pending_sync else ""
+                )
+                print(
+                    f"   - {col_name}: {count} docs ({status}{sync_suffix})",
+                    flush=True,
+                )
 
         elif args.test:
             print("\n\033[1m🔍 Testing Vector Store...\033[0m", flush=True)
