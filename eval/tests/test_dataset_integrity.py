@@ -211,25 +211,17 @@ class TestDatasetIntegrity:
                 empty_facts.append(item["id"])
         assert not empty_facts, f"Non-edge entries with empty expected_facts: {empty_facts}"
 
-    def test_dataset_covers_all_exported_tools(self, dataset):
-        """The benchmark dataset must reference every exported tool at least once."""
-        covered_tools = {
-            tool_name
-            for item in dataset
-            for tool_name in item.get("expected_tools", [])
-        }
-        missing_tools = sorted(VALID_TOOL_NAMES - covered_tools)
-        assert not missing_tools, (
-            "Dataset does not cover all exported tools:\n" + "\n".join(missing_tools)
-        )
-
     def test_total_dataset_size(self, dataset):
-        """Dataset should have a reasonable number of queries (>= 70)."""
-        assert len(dataset) >= 70, f"Dataset only has {len(dataset)} queries, expected >= 70"
+        """Dataset should have at least 72 queries (current corpus baseline)."""
+        assert len(dataset) >= 72, f"Dataset only has {len(dataset)} queries, expected >= 72"
 
 
 class TestCoverageManifestIntegrity:
-    """Validate the live prompt coverage manifest alongside the evaluation corpus."""
+    """Validate the dedicated live coverage manifest.
+
+    The shared benchmark/ablation corpus should stay realistic and user-facing.
+    Exhaustive exported-tool coverage belongs to the dedicated manifest below.
+    """
 
     REQUIRED_FIELDS = {"id", "domain", "language", "query", "expected_tools"}
 

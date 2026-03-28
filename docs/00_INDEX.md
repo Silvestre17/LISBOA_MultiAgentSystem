@@ -29,7 +29,6 @@ This documentation set describes the repository as it exists in code today. It h
 | `docs/03_TOOLS_REFERENCE.md` | authoritative tool inventory, agent-to-tool mapping, smoke checks | you need exact capabilities by domain |
 | `docs/04_DATA_SOURCES_AND_SCHEMAS.md` | source systems, refresh cadence, artefacts, vector collections | you are checking freshness, provenance, or storage |
 | `docs/05_DEPLOYMENT_AND_OPERATIONS.md` | setup, `.env` configuration, CI workflows, validation, troubleshooting | you want to run, test, or operate the project |
-| `docs/06_FUTURE_ENHANCEMENTS.md` | roadmap ideas and research directions | you are planning next iterations |
 | `../README.md` | public repository overview and guided entrypoint | you are onboarding to the repo |
 | `../eval/README.md` | benchmark, ablation, live coverage, and judge pipeline | you are working on evaluation |
 

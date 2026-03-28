@@ -102,7 +102,7 @@
     "id": "CTCM02",
     "domain": "transport",
     "language": "en",
-    "query": "Give me Carris Metropolitana stop information for stop ID 010101.",
+    "query": "Give me Carris Metropolitana stop information for stop ID 020037.",
     "expected_tools": [
       "get_carris_metropolitana_stop_info"
     ]
@@ -138,7 +138,7 @@
     "id": "CTCM06",
     "domain": "transport",
     "language": "en",
-    "query": "Show live GPS locations for Carris Metropolitana line 470.",
+    "query": "Show live GPS locations for Carris Metropolitana line 3001.",
     "expected_tools": [
       "get_bus_realtime_locations"
     ]
@@ -147,7 +147,7 @@
     "id": "CTCM07",
     "domain": "transport",
     "language": "en",
-    "query": "Show the next departures for Carris Metropolitana line 470 at stop 010101.",
+    "query": "Show the next departures for Carris Metropolitana line 3001 at stop 020037.",
     "expected_tools": [
       "get_bus_next_departures"
     ]

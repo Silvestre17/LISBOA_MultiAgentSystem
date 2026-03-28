@@ -320,6 +320,13 @@ class TestRunAllHeuristics:
         assert not r["overall_pass"]
         assert "tool_leaks" in r["critical_failures"]
 
+    def test_wrong_language_fails_overall(self):
+        """Language mismatches should count as critical evaluation failures."""
+        pt_response = "O metro está a funcionar normalmente em Lisboa."
+        r = run_all_heuristics(pt_response, "en")
+        assert not r["overall_pass"]
+        assert "language_compliance" in r["critical_failures"]
+
     def test_too_short_response_fails(self):
         r = run_all_heuristics("OK.", "en")
         assert not r["overall_pass"]

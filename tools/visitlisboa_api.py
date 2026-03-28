@@ -52,6 +52,7 @@ except ModuleNotFoundError:
 logger = logging.getLogger(__name__)
 
 # Collection names (must match vector_store.py)
+COLLECTION_PDF = "lisbon_pdf"
 COLLECTION_PLACES = "lisbon_places"
 COLLECTION_EVENTS = "lisbon_events"
 
@@ -1738,7 +1739,17 @@ def _extract_specific_place_lookup_phrase(query: Optional[str]) -> Optional[str]
         if token not in _GENERIC_PLACE_QUERY_TOKENS
     ]
     has_title_like_casing = any(char.isupper() for char in raw_query)
-    if meaningful_tokens and len(meaningful_tokens) <= 5 and has_title_like_casing:
+    title_like_tokens = re.findall(r"[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9'/-]*", raw_query)
+    capitalized_token_count = sum(1 for token in title_like_tokens if token and token[0].isupper())
+    requires_title_majority = math.ceil(len(title_like_tokens) / 2) if title_like_tokens else 0
+
+    if (
+        meaningful_tokens
+        and len(meaningful_tokens) <= 5
+        and has_title_like_casing
+        and title_like_tokens
+        and capitalized_token_count >= max(1, requires_title_majority)
+    ):
         return " ".join(meaningful_tokens)
     return None
 
@@ -2000,9 +2011,6 @@ def _infer_place_query_intent(query: Optional[str], category: Optional[str]) -> 
     monument_requested = _text_contains_fuzzy_term(query, monument_terms)
     top_attractions_requested = _text_contains_fuzzy_term(query, top_attraction_terms)
 
-    if top_attractions_requested:
-        return "top_attractions"
-
     if normalized_category == "museums & monuments" and museum_requested and not monument_requested:
         return "museum_only"
     if normalized_category == "museums & monuments":
@@ -2013,11 +2021,113 @@ def _infer_place_query_intent(query: Optional[str], category: Optional[str]) -> 
         return "monument_only"
     if museum_requested or monument_requested:
         return "museum_monument"
+    if top_attractions_requested:
+        return "top_attractions"
     if _text_contains_fuzzy_term(query, ["restaurant", "restaurante", "food", "dinner", "lunch", "brunch", "gastronomy"]):
         return "food"
     if _text_contains_fuzzy_term(query, ["hotel", "stay", "accommodation", "guest house"]):
         return "accommodation"
     return None
+
+
+def _infer_event_date_filter_from_query(query: Optional[str]) -> Optional[str]:
+    """Infers lightweight date filters directly from common PT/EN event phrasing."""
+    normalized_query = _normalize_lookup_text(query)
+    if not normalized_query:
+        return None
+
+    mappings = [
+        (["this weekend", "este fim de semana", "fim de semana", "weekend"], "this weekend"),
+        (["next week", "proxima semana", "próxima semana"], "next week"),
+        (["this week", "esta semana"], "this week"),
+        (["tomorrow", "amanha", "amanhã"], "tomorrow"),
+        (["today", "hoje"], "today"),
+        (["next month", "proximo mes", "próximo mês"], "next month"),
+        (["this month", "este mes", "este mês"], "this month"),
+        (["next year", "proximo ano", "próximo ano"], "next year"),
+        (["this year", "este ano"], "this year"),
+    ]
+
+    for terms, inferred_filter in mappings:
+        if any(term in normalized_query for term in terms):
+            return inferred_filter
+    return None
+
+
+def _extract_knowledge_doc_snippet(doc: Any, max_chars: int = 220) -> str:
+    """Builds a concise snippet from a vector-store document for user-facing summaries."""
+    content = str(getattr(doc, "page_content", "") or "")
+    if not content:
+        return ""
+
+    prioritized_prefixes = (
+        "short description:",
+        "full description:",
+        "details:",
+        "description:",
+        "location:",
+    )
+    ignored_prefixes = (
+        "name:",
+        "url:",
+        "image urls:",
+        "video urls:",
+        "indexed at:",
+        "content hash:",
+        "source:",
+    )
+
+    candidate_lines: List[str] = []
+    fallback_lines: List[str] = []
+    for raw_line in content.splitlines():
+        line = re.sub(r"\s+", " ", raw_line).strip()
+        if not line:
+            continue
+
+        lower_line = line.lower()
+        if lower_line.startswith(ignored_prefixes):
+            continue
+        if lower_line.startswith(prioritized_prefixes):
+            candidate_lines.append(line.split(":", 1)[1].strip())
+            continue
+
+        fallback_lines.append(line)
+
+    snippet = " ".join(candidate_lines[:2]) if candidate_lines else " ".join(fallback_lines[:2])
+    snippet = re.sub(r"\s+", " ", snippet).strip(" -")
+    if len(snippet) > max_chars:
+        snippet = snippet[:max_chars].rsplit(" ", 1)[0].rstrip(" ,;:") + "…"
+    return snippet
+
+
+def _infer_lisbon_knowledge_focus(query: Optional[str]) -> str:
+    """Infers which collection should be emphasized in mixed knowledge search."""
+    if _text_contains_fuzzy_term(
+        query,
+        [
+            "lisboa card", "airport", "aeroporto", "metro", "tram", "bus", "train",
+            "public transport", "transport", "how to get", "getting from", "go from",
+            "city center", "city centre", "centro da cidade", "carris", "cp", "fertagus",
+        ],
+    ):
+        return "guide"
+    if _text_contains_fuzzy_term(
+        query,
+        [
+            "event", "events", "concert", "festival", "exhibition", "show", "feira",
+            "evento", "eventos", "teatro", "music", "música", "musica",
+        ],
+    ):
+        return "events"
+    if _text_contains_fuzzy_term(
+        query,
+        [
+            "museum", "museu", "restaurant", "restaurante", "hotel", "viewpoint",
+            "miradouro", "place", "places", "attraction", "where to eat", "eat",
+        ],
+    ):
+        return "places"
+    return "general"
 
 
 def _matches_place_query_intent(item_category: str, searchable_text: str, query_intent: Optional[str]) -> bool:
@@ -2176,7 +2286,7 @@ def search_cultural_events(
 
         # Parse date range. Broad discovery defaults to upcoming, but specific lookups should search across all dates.
         if not date_filter and not specific_lookup_phrase:
-            date_filter = 'upcoming'  # Default to next 30 days
+            date_filter = _infer_event_date_filter_from_query(query) or 'upcoming'
         
         start_date, end_date = parse_date_range(date_filter) if date_filter else (None, None)
         
@@ -3016,6 +3126,8 @@ def search_lisbon_knowledge(
     """
     try:
         query = str(query).strip() if query else "Lisbon tourism information"
+        if not isinstance(max_results, int) or max_results <= 0:
+            max_results = 5
         
         logger.info(f"search_lisbon_knowledge: query='{query}', max={max_results}")
         
@@ -3024,52 +3136,80 @@ def search_lisbon_knowledge(
         if not kb:
             return "❌ Vector store not available. Try search_cultural_events or search_places_attractions instead."
         
+        focus = _infer_lisbon_knowledge_focus(query)
+        per_source_limit = max(1, min(4, max_results))
+        candidate_limit = max(per_source_limit + 1, 4)
+
         try:
-            # Search all collections
-            results = kb.search(query=query, k=max_results)
+            pdf_results = kb.search_with_scores(
+                query=query,
+                k=candidate_limit,
+                collections=[COLLECTION_PDF],
+            )
+            places_results = kb.search_with_scores(
+                query=query,
+                k=candidate_limit,
+                collections=[COLLECTION_PLACES],
+            )
+            events_results = kb.search_with_scores(
+                query=query,
+                k=candidate_limit,
+                collections=[COLLECTION_EVENTS],
+            )
         except Exception as e:
             logger.error(f"search_lisbon_knowledge search error: {e}")
             return f"❌ Search failed: {str(e)}. Try search_cultural_events or search_places_attractions instead."
         
-        if not results:
+        if not pdf_results and not places_results and not events_results:
             return f"No results found for: '{query}'"
-        
-        # Group by source
-        pdf_results = []
-        places_results = []
-        events_results = []
-        
-        for doc in results:
-            source = doc.metadata.get('source', 'unknown').lower()
-            if 'pdf' in source or 'guide' in source or 'turismo' in source:
-                pdf_results.append(doc)
-            elif 'place' in source:
-                places_results.append(doc)
-            elif 'event' in source:
-                events_results.append(doc)
         
         output_parts = ["🔍 **Lisbon Knowledge Search Results:**\n"]
         output_parts.append(f"Query: \"{query}\"\n")
-        
-        if pdf_results:
-            output_parts.append("\n📚 **From Lisboa Card Guide:**")
-            for doc in pdf_results[:3]:
-                content = doc.page_content[:300] + "..." if len(doc.page_content) > 300 else doc.page_content
-                output_parts.append(f"   • {content}")
-        
-        if places_results:
-            output_parts.append("\n🏛️ **Related Places:**")
-            for doc in places_results[:3]:
-                title = doc.metadata.get('title', 'Unknown')
-                output_parts.append(f"   • {title}")
-        
-        if events_results:
-            output_parts.append("\n📅 **Related Events:**")
-            for doc in events_results[:3]:
-                title = doc.metadata.get('title', 'Unknown')
-                output_parts.append(f"   • {title}")
-        
-        output_parts.append(f"\n\n📊 **Total results:** {len(results)}")
+
+        ordered_sections = {
+            "guide": [
+                ("📚", "Guide / PDF Knowledge", pdf_results),
+                ("🏛️", "Related Places", places_results),
+                ("📅", "Related Events", events_results),
+            ],
+            "places": [
+                ("🏛️", "Related Places", places_results),
+                ("📚", "Guide / PDF Knowledge", pdf_results),
+                ("📅", "Related Events", events_results),
+            ],
+            "events": [
+                ("📅", "Related Events", events_results),
+                ("🏛️", "Related Places", places_results),
+                ("📚", "Guide / PDF Knowledge", pdf_results),
+            ],
+            "general": [
+                ("📚", "Guide / PDF Knowledge", pdf_results),
+                ("🏛️", "Related Places", places_results),
+                ("📅", "Related Events", events_results),
+            ],
+        }[focus]
+
+        shown_count = 0
+        for icon, heading, scored_results in ordered_sections:
+            if not scored_results:
+                continue
+
+            output_parts.append(f"\n{icon} **{heading}:**")
+            for doc, _score in scored_results[:per_source_limit]:
+                title = str(doc.metadata.get('title', 'Unknown')).strip()
+                snippet = _extract_knowledge_doc_snippet(doc)
+                if snippet and title and title.lower() not in snippet.lower():
+                    output_parts.append(f"   • **{title}** — {snippet}")
+                elif snippet:
+                    output_parts.append(f"   • {snippet}")
+                else:
+                    output_parts.append(f"   • **{title}**")
+                shown_count += 1
+
+        output_parts.append(
+            f"\n\n📊 **Result slices shown:** {shown_count} "
+            f"({min(len(pdf_results), per_source_limit)} guide, {min(len(places_results), per_source_limit)} places, {min(len(events_results), per_source_limit)} events)"
+        )
         
         return "\n".join(output_parts)
     

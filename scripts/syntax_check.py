@@ -60,6 +60,21 @@ files = [
     "eval/run_ablation.py",
     "eval/tests/test_llm_judge.py",
     "eval/tests/test_dataset_integrity.py",
+    r"agent\llm_factory.py",
+    r"agent\utils\usage_costs.py",
+    r"agent\utils\langsmith_tracing.py",
+    r"agent\utils\optimization.py",
+    r"agent\utils\model_connection_probe.py",
+    r"tools\vector_store.py",
+    r"tools\location_resolver.py",
+    r"tools\utils.py",
+    "eval/runtime_utils.py",
+    "eval/validators/transport_validator.py",
+    "eval/validators/response_heuristics.py",
+    "eval/tests/test_benchmark_utils.py",
+    "eval/tests/test_cost_accounting.py",
+    "eval/tests/test_human_calibration.py",
+    "eval/tests/test_validators.py",
 ]
 
 passed = 0

@@ -21,6 +21,7 @@
 import os
 import re
 import sys
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -570,6 +571,598 @@ def test_researcher_direct_event_lookup_infers_music_weekend_filters_for_pt_quer
         assert "Revenge Of The 90 S" in output
 
 
+def test_search_cultural_events_specific_lookup_does_not_force_upcoming_date_window() -> None:
+    """Specific event lookups without an explicit date should search across all available dates."""
+    future_book_fair = {
+        "url": "https://www.visitlisboa.com/en/events/book-fair-1",
+        "category": "Fairs",
+        "full_description": "The Lisboa Book Fair fills Parque Eduardo VII with publishers and talks.",
+        "short_description": "Large annual Lisbon book fair.",
+        "dates": [
+            {
+                "type": "range",
+                "start": {"datetime_iso": "2026-05-27", "display_text": "27 May", "time": None},
+                "end": {"datetime_iso": "2026-06-14", "display_text": "14 Jun, 2026", "time": None},
+            }
+        ],
+        "price": "Free Entry",
+        "venue_name": "Parque Eduardo VII",
+        "location": "Lisboa",
+    }
+    unrelated_upcoming_fair = {
+        "title": "Sil The Leading Real Estate Show",
+        "url": "https://www.visitlisboa.com/en/events/sil-the-leading-real-estate-show",
+        "category": "Fairs",
+        "full_description": "Real estate fair in April.",
+        "short_description": "Property event.",
+        "dates": [
+            {
+                "type": "range",
+                "start": {"datetime_iso": "2026-04-23", "display_text": "23 Apr", "time": None},
+                "end": {"datetime_iso": "2026-04-25", "display_text": "25 Apr", "time": None},
+            }
+        ],
+        "venue_name": "FIL",
+        "location": "Lisboa",
+    }
+
+    with patch.object(visitlisboa_api, "_load_events_json", return_value=[future_book_fair, unrelated_upcoming_fair]):
+        output = visitlisboa_api.search_cultural_events.invoke(
+            {"query": 'Tell me about the event "Book Fair\'26"', "max_results": 1, "language": "en"}
+        )
+
+    assert "Book Fair" in output
+    assert "all available dates" in output
+    assert "upcoming" not in output.lower()
+
+
+def test_search_cultural_events_specific_lookup_matches_slug_when_title_is_missing() -> None:
+    """Specific PT event lookups should still match records whose visible name only lives in the URL slug."""
+    book_fair = {
+        "url": "https://www.visitlisboa.com/en/events/book-fair-1",
+        "category": "Fairs",
+        "full_description": "The Lisboa Book Fair returns to Parque Eduardo VII.",
+        "short_description": "Annual book fair in Lisbon.",
+        "dates": [
+            {
+                "type": "range",
+                "start": {"datetime_iso": "2026-05-27", "display_text": "27 May", "time": None},
+                "end": {"datetime_iso": "2026-06-14", "display_text": "14 Jun, 2026", "time": None},
+            }
+        ],
+        "venue_name": "Parque Eduardo VII",
+        "location": "Lisboa",
+    }
+
+    with patch.object(visitlisboa_api, "_load_events_json", return_value=[book_fair]):
+        output = visitlisboa_api.search_cultural_events.invoke(
+            {"query": 'Fala-me da "Feira do Livro\'26"', "max_results": 3, "language": "pt"}
+        )
+
+    assert "Book Fair" in output
+    assert "Sil The Leading Real Estate Show" not in output
+
+
+def test_search_cultural_events_matches_specific_event_with_typos() -> None:
+    """Specific event lookups should remain resilient to minor title typos."""
+    book_fair = {
+        "title": "Book Fair'26",
+        "url": "https://www.visitlisboa.com/en/events/book-fair-1",
+        "category": "Fairs",
+        "full_description": "The Lisboa Book Fair returns to Parque Eduardo VII.",
+        "short_description": "Annual book fair in Lisbon.",
+        "dates": [
+            {
+                "type": "range",
+                "start": {"datetime_iso": "2026-05-27", "display_text": "27 May", "time": None},
+                "end": {"datetime_iso": "2026-06-14", "display_text": "14 Jun, 2026", "time": None},
+            }
+        ],
+        "venue_name": "Parque Eduardo VII",
+        "location": "Lisboa",
+    }
+
+    with patch.object(visitlisboa_api, "_load_events_json", return_value=[book_fair]):
+        output = visitlisboa_api.search_cultural_events.invoke(
+            {"query": 'Tell me about the event "Bok Fiar\'26"', "max_results": 3, "language": "en"}
+        )
+
+    assert "Book Fair'26" in output
+
+
+def test_search_cultural_events_matches_thematic_event_query_with_typo() -> None:
+    """Thematic event discovery should tolerate small spelling mistakes such as 'concrts'."""
+    concert_event = {
+        "title": "Belle and Sebastian",
+        "url": "https://www.visitlisboa.com/en/events/belle-and-sebastian",
+        "category": "Music",
+        "full_description": "Live concert in Lisbon celebrating a cult album.",
+        "short_description": "Live concert in Lisbon.",
+        "dates": [
+            {
+                "type": "single",
+                "date": {"datetime_iso": "2026-07-21", "display_text": "21 Jul, 2026", "time": "21:00"},
+            }
+        ],
+        "location": "Lisboa",
+    }
+
+    with patch.object(visitlisboa_api, "_load_events_json", return_value=[concert_event]):
+        output = visitlisboa_api.search_cultural_events.invoke(
+            {"query": "concrts", "date_filter": "this year", "max_results": 3, "language": "en"}
+        )
+
+    assert "Belle and Sebastian" in output
+
+
+def test_search_places_attractions_specific_lookup_strips_tell_me_about_noise() -> None:
+    """Specific place lookups should not lose recall because 'tell me about' pollutes the place tokens."""
+    maat = {
+        "title": "MAAT",
+        "category": "Museums & Monuments",
+        "address": "Av. Brasília, Lisboa",
+        "short_description": "Museum of Art, Architecture and Technology.",
+        "full_description": "Contemporary art and architecture museum by the river.",
+        "url": "https://www.visitlisboa.com/en/places/maat",
+    }
+
+    with patch.object(visitlisboa_api, "_get_vector_store", return_value=None), patch.object(
+        visitlisboa_api,
+        "_should_search_dados_abertos",
+        return_value=False,
+    ), patch.object(visitlisboa_api, "_load_places_json", return_value=[maat]), patch.object(
+        visitlisboa_api,
+        "_get_place_by_url",
+        return_value=maat,
+    ):
+        output = visitlisboa_api.search_places_attractions.invoke(
+            {"query": "Tell me about MAAT", "max_results": 3, "language": "en"}
+        )
+
+    assert "MAAT" in output
+
+
+def test_search_places_attractions_matches_partial_words_in_fallback_search() -> None:
+    """Fallback place search should recover likely matches from half-typed words."""
+    maritime_museum = {
+        "title": "Maritime Museum",
+        "category": "Museums & Monuments",
+        "address": "Praça do Império, 1400-206, Lisboa",
+        "short_description": "The Maritime Museum is a World of Discoveries.",
+        "full_description": "The Maritime Museum is a World of Discoveries.",
+        "url": "https://www.visitlisboa.com/en/places/maritime-museum",
+    }
+
+    with patch.object(visitlisboa_api, "_get_vector_store", return_value=None), patch.object(
+        visitlisboa_api,
+        "_should_search_dados_abertos",
+        return_value=False,
+    ), patch.object(visitlisboa_api, "_load_places_json", return_value=[maritime_museum]), patch.object(
+        visitlisboa_api,
+        "_get_place_by_url",
+        return_value=maritime_museum,
+    ):
+        output = visitlisboa_api.search_places_attractions.invoke(
+            {"query": "marit mus", "max_results": 3, "language": "en"}
+        )
+
+    assert "Maritime Museum" in output
+
+
+def test_search_places_attractions_vector_reranking_handles_typos() -> None:
+    """Vector candidates should survive reranking even when the user misspells the place name."""
+
+    class DummyKB:
+        def search_with_scores(self, query, k, collections):
+            return [
+                (
+                    Document(
+                        page_content="Name: Maritime Museum\nCategory: Museums & Monuments\nShort Description: The Maritime Museum is a World of Discoveries.",
+                        metadata={
+                            "title": "Maritime Museum",
+                            "category": "Museums & Monuments",
+                            "url": "https://www.visitlisboa.com/en/places/maritime-museum",
+                            "rating": 4.3,
+                            "reviews": 1365,
+                        },
+                    ),
+                    0.72,
+                )
+            ]
+
+    with patch.object(visitlisboa_api, "_get_vector_store", return_value=DummyKB()), patch.object(
+        visitlisboa_api,
+        "_should_search_dados_abertos",
+        return_value=False,
+    ), patch.object(visitlisboa_api, "_load_places_json", return_value=[]), patch.object(
+        visitlisboa_api,
+        "_get_place_by_url",
+        return_value=None,
+    ):
+        output = visitlisboa_api.search_places_attractions.invoke(
+            {"query": "maritme musem", "category": "Museums & Monuments", "max_results": 3, "language": "en"}
+        )
+
+    assert "Maritime Museum" in output
+
+
+def test_search_places_attractions_typo_museum_query_still_prefers_real_museums() -> None:
+    """A typo like 'musuem' should still activate museum intent instead of letting hotels dominate."""
+
+    class DummyKB:
+        def search_with_scores(self, query, k, collections):
+            return [
+                (
+                    Document(
+                        page_content="Name: Hotel Jerónimos 8\nCategory: Hotel\nShort Description: Stay near Belém.",
+                        metadata={
+                            "title": "Hotel Jerónimos 8",
+                            "category": "Hotel",
+                            "url": "https://www.visitlisboa.com/en/places/hotel-jeronimos-8",
+                            "rating": 4.7,
+                            "reviews": 1200,
+                        },
+                    ),
+                    0.31,
+                ),
+                (
+                    Document(
+                        page_content="Name: Maritime Museum\nCategory: Museums & Monuments\nShort Description: Maritime heritage museum in Belém.",
+                        metadata={
+                            "title": "Maritime Museum",
+                            "category": "Museums & Monuments",
+                            "url": "https://www.visitlisboa.com/en/places/maritime-museum",
+                            "rating": 4.3,
+                            "reviews": 1365,
+                        },
+                    ),
+                    0.44,
+                ),
+            ]
+
+    with patch.object(visitlisboa_api, "_get_vector_store", return_value=DummyKB()), patch.object(
+        visitlisboa_api,
+        "_should_search_dados_abertos",
+        return_value=False,
+    ), patch.object(visitlisboa_api, "_load_places_json", return_value=[]), patch.object(
+        visitlisboa_api,
+        "_get_place_by_url",
+        return_value=None,
+    ):
+        output = visitlisboa_api.search_places_attractions.invoke(
+            {"query": "best musuem in lisbon", "max_results": 3, "language": "en"}
+        )
+
+    assert "Maritime Museum" in output
+    assert "Hotel Jerónimos 8" not in output
+
+
+def test_search_places_attractions_best_museums_query_keeps_museum_focus() -> None:
+    """'Best museums ...' queries should not be downgraded into broad top-attraction results."""
+
+    class DummyKB:
+        def search_with_scores(self, query, k, collections):
+            return [
+                (
+                    Document(
+                        page_content="Name: Belém\nCategory: General\nShort Description: District overview.",
+                        metadata={
+                            "title": "Belém",
+                            "category": "General",
+                            "url": "https://www.visitlisboa.com/en/places/belem-overview",
+                            "rating": 4.9,
+                            "reviews": 6000,
+                        },
+                    ),
+                    0.20,
+                ),
+                (
+                    Document(
+                        page_content="Name: Portugália Cervejaria Belém\nCategory: Restaurant\nShort Description: Restaurant in Belém.",
+                        metadata={
+                            "title": "Portugália Cervejaria Belém",
+                            "category": "Restaurant",
+                            "url": "https://www.visitlisboa.com/en/places/portugalia-cervejaria-belem",
+                            "rating": 4.7,
+                            "reviews": 1800,
+                        },
+                    ),
+                    0.21,
+                ),
+                (
+                    Document(
+                        page_content="Name: Maritime Museum\nCategory: Museums & Monuments\nShort Description: Maritime heritage museum in Belém.",
+                        metadata={
+                            "title": "Maritime Museum",
+                            "category": "Museums & Monuments",
+                            "url": "https://www.visitlisboa.com/en/places/maritime-museum",
+                            "rating": 4.3,
+                            "reviews": 1365,
+                        },
+                    ),
+                    0.45,
+                ),
+            ]
+
+    with patch.object(visitlisboa_api, "_get_vector_store", return_value=DummyKB()), patch.object(
+        visitlisboa_api,
+        "_should_search_dados_abertos",
+        return_value=False,
+    ), patch.object(visitlisboa_api, "_load_places_json", return_value=[]), patch.object(
+        visitlisboa_api,
+        "_get_place_by_url",
+        return_value=None,
+    ):
+        output = visitlisboa_api.search_places_attractions.invoke(
+            {"query": "best museums in Belem", "max_results": 3, "language": "en"}
+        )
+
+    assert "Maritime Museum" in output
+    assert "Portugália Cervejaria Belém" not in output
+    assert re.search(r"\*\*Bel[eé]m\*\*", output) is None
+
+
+def test_should_search_dados_abertos_handles_service_typos() -> None:
+    """Hybrid open-data triggers should tolerate common service typos such as 'pharmcy'."""
+    assert visitlisboa_api._should_search_dados_abertos("nearest pharmcy in lisbon") is True
+
+
+def test_search_cultural_events_surfaces_free_entry_price_in_output() -> None:
+    """Event responses should explicitly mention Free Entry when the scraper stored that price badge."""
+    book_fair = {
+        "title": "Book Fair'26",
+        "url": "https://www.visitlisboa.com/en/events/book-fair-1",
+        "category": "Fairs",
+        "short_description": "The Book Fair returns to Parque Eduardo VII.",
+        "full_description": "The Book Fair returns to Parque Eduardo VII.",
+        "price": "Free Entry",
+        "location": "Lisboa",
+        "dates": [
+            {
+                "type": "range",
+                "start": {"datetime_iso": "2026-05-27", "display_text": "27 May", "time": None},
+                "end": {"datetime_iso": "2026-06-14", "display_text": "14 Jun, 2026", "time": None},
+            }
+        ],
+    }
+
+    with patch.object(visitlisboa_api, "_load_events_json", return_value=[book_fair]):
+        output = visitlisboa_api.search_cultural_events.invoke(
+            {"query": "Book Fair'26", "max_results": 3, "language": "en"}
+        )
+
+    assert "Book Fair'26" in output
+    assert "**Price:** Free Entry" in output
+
+
+def test_search_places_attractions_surfaces_ticket_offer_description() -> None:
+    """Place responses should use scraped ticket/offer descriptions when available."""
+    maritime_museum = {
+        "title": "Maritime Museum",
+        "category": "Museums & Monuments",
+        "address": "Praça do Império, 1400-206, Lisboa",
+        "short_description": "The Maritime Museum is a World of Discoveries.",
+        "full_description": "The Maritime Museum is a World of Discoveries.",
+        "url": "https://www.visitlisboa.com/en/places/maritime-museum",
+        "tickets_offers": {
+            "title": "Tickets & Offers",
+            "description": "Children Free until (age): 3 Adult: 8 € Family: 21 €",
+            "links": [{"text": "link", "url": "https://cultura.marinha.pt/pt/museu/planearvisita/bilhetes"}],
+        },
+    }
+
+    with patch.object(visitlisboa_api, "_get_vector_store", return_value=None), patch.object(
+        visitlisboa_api,
+        "_should_search_dados_abertos",
+        return_value=False,
+    ), patch.object(visitlisboa_api, "_load_places_json", return_value=[maritime_museum]), patch.object(
+        visitlisboa_api,
+        "_get_place_by_url",
+        return_value=maritime_museum,
+    ):
+        output = visitlisboa_api.search_places_attractions.invoke(
+            {"query": "Maritime Museum", "max_results": 3, "language": "en"}
+        )
+
+    assert "Maritime Museum" in output
+    assert "Adult: 8 €" in output
+
+
+def test_search_places_attractions_surfaces_generic_lisboa_card_benefit() -> None:
+    """Place responses should surface generic Lisboa Card benefits, not only percentage discounts."""
+    bordalo = {
+        "title": "Bordalo Pinheiro Museum",
+        "category": "Museums & Monuments",
+        "address": "Campo Grande, 382, 1700-097, Lisboa",
+        "short_description": "Visit this museum in Campo Grande.",
+        "full_description": "Discover the collection of Rafael Bordalo Pinheiro.",
+        "url": "https://www.visitlisboa.com/en/places/bordalo-pinheiro-museum",
+        "lisboa_card_benefit": "Free with Lisboa Card",
+    }
+
+    with patch.object(visitlisboa_api, "_get_vector_store", return_value=None), patch.object(
+        visitlisboa_api,
+        "_should_search_dados_abertos",
+        return_value=False,
+    ), patch.object(visitlisboa_api, "_load_places_json", return_value=[bordalo]), patch.object(
+        visitlisboa_api,
+        "_get_place_by_url",
+        return_value=bordalo,
+    ):
+        output = visitlisboa_api.search_places_attractions.invoke(
+            {"query": "Which museums are free with Lisboa Card?", "category": "Museums & Monuments", "max_results": 3, "language": "en"}
+        )
+
+    assert "Bordalo Pinheiro Museum" in output
+    assert "Free with Lisboa Card" in output
+
+
+def test_search_places_attractions_surfaces_requested_day_hours_from_schedule() -> None:
+    """Place schedule queries should surface the requested weekday hours when that structured data exists."""
+    bordalo = {
+        "title": "Bordalo Pinheiro Museum",
+        "category": "Museums & Monuments",
+        "address": "Campo Grande, 382, 1700-097, Lisboa",
+        "short_description": "Visit this museum in Campo Grande.",
+        "full_description": "Discover the collection of Rafael Bordalo Pinheiro.",
+        "url": "https://www.visitlisboa.com/en/places/bordalo-pinheiro-museum",
+        "schedules": [
+            {
+                "name": "Schedule",
+                "today": "Today: Closed",
+                "hours": {"Sunday": "10:00 - 18:00", "Monday": "Closed"},
+            }
+        ],
+    }
+
+    with patch.object(visitlisboa_api, "_get_vector_store", return_value=None), patch.object(
+        visitlisboa_api,
+        "_should_search_dados_abertos",
+        return_value=False,
+    ), patch.object(visitlisboa_api, "_load_places_json", return_value=[bordalo]), patch.object(
+        visitlisboa_api,
+        "_get_place_by_url",
+        return_value=bordalo,
+    ):
+        output = visitlisboa_api.search_places_attractions.invoke(
+            {"query": "Is Bordalo Pinheiro Museum open on Sunday?", "max_results": 3, "language": "en"}
+        )
+
+    assert "Bordalo Pinheiro Museum" in output
+    assert "Sunday: 10:00 - 18:00" in output
+
+
+def test_search_cultural_events_surfaces_schedule_notes_and_highlights() -> None:
+    """Event responses should surface structured schedule notes and child highlight names when available."""
+    festivities = {
+        "title": "Lisbon Festivities",
+        "url": "https://www.visitlisboa.com/en/events/lisbon-festivities-1",
+        "category": "Main Events",
+        "short_description": "June festivities across Lisbon.",
+        "full_description": "June festivities across the city.",
+        "price": "Free Entry",
+        "location": "Lisboa",
+        "schedule_notes": [
+            "Thursday to Saturday, 9 p.m.",
+            "Saturday and Sunday, 4 p.m. and 9 p.m.",
+        ],
+        "highlight_links": [
+            {"title": "Arraiais Populares", "url": "https://www.visitlisboa.com/en/events/arraiais-populares-lisboa-on-the-street"},
+            {"title": "Popular Marches", "url": "https://www.visitlisboa.com/en/events/popular-marches-av-liberdade"},
+        ],
+        "dates": [
+            {
+                "type": "range",
+                "start": {"datetime_iso": "2026-06-01", "display_text": "01 Jun, 2026", "time": None},
+                "end": {"datetime_iso": "2026-06-30", "display_text": "30 Jun, 2026", "time": None},
+            }
+        ],
+    }
+
+    with patch.object(visitlisboa_api, "_load_events_json", return_value=[festivities]):
+        output = visitlisboa_api.search_cultural_events.invoke(
+            {"query": 'Tell me about "Lisbon Festivities"', "max_results": 3, "language": "en"}
+        )
+
+    assert "Lisbon Festivities" in output
+    assert "**Schedule:** Thursday to Saturday, 9 p.m.; Saturday and Sunday, 4 p.m. and 9 p.m." in output
+    assert "**Highlights:** Arraiais Populares, Popular Marches" in output
+
+
+def test_search_cultural_events_infers_weekend_filter_from_query_when_missing() -> None:
+    """Direct tool usage should infer 'this weekend' from the query even without an explicit date_filter arg."""
+    weekend_event = {
+        "title": "Weekend Fair",
+        "url": "https://www.visitlisboa.com/en/events/weekend-fair",
+        "category": "Fairs",
+        "short_description": "Weekend fair in Lisbon.",
+        "full_description": "Weekend fair in Lisbon.",
+        "location": "Lisboa",
+        "dates": [
+            {
+                "type": "single",
+                "date": {"datetime_iso": "2026-03-29", "display_text": "29 Mar, 2026", "time": None},
+            }
+        ],
+    }
+    later_event = {
+        "title": "Next Month Expo",
+        "url": "https://www.visitlisboa.com/en/events/next-month-expo",
+        "category": "Exhibitions",
+        "short_description": "Later exhibition.",
+        "full_description": "Later exhibition.",
+        "location": "Lisboa",
+        "dates": [
+            {
+                "type": "single",
+                "date": {"datetime_iso": "2026-04-12", "display_text": "12 Apr, 2026", "time": None},
+            }
+        ],
+    }
+
+    parse_date_range_mock = MagicMock(
+        return_value=(datetime(2026, 3, 28), datetime(2026, 3, 31))
+    )
+
+    with patch.object(visitlisboa_api, "_load_events_json", return_value=[weekend_event, later_event]), patch.object(
+        visitlisboa_api,
+        "parse_date_range",
+        parse_date_range_mock,
+    ):
+        output = visitlisboa_api.search_cultural_events.invoke(
+            {"query": "events this weekend", "max_results": 3, "language": "en"}
+        )
+
+    assert parse_date_range_mock.call_args.args[0] == "this weekend"
+    assert "Weekend Fair" in output
+    assert "Next Month Expo" not in output
+
+
+def test_search_lisbon_knowledge_transport_queries_include_pdf_guidance() -> None:
+    """Transport-like knowledge queries should surface guide/PDF knowledge instead of only place names."""
+
+    class DummyKB:
+        def search_with_scores(self, query, k, collections):
+            collection = collections[0]
+            if collection == visitlisboa_api.COLLECTION_PDF:
+                return [
+                    (
+                        Document(
+                            page_content="Airport metro line connects the airport to the city centre quickly and directly.",
+                            metadata={
+                                "title": "Lisboa Card Guide (p.12)",
+                                "source": "TurismoLisboa_OfficialGuide_PDF",
+                            },
+                        ),
+                        0.61,
+                    )
+                ]
+            if collection == visitlisboa_api.COLLECTION_PLACES:
+                return [
+                    (
+                        Document(
+                            page_content="Name: Holiday Inn Express Lisbon Airport\nShort Description: Hotel near the airport.",
+                            metadata={
+                                "title": "Holiday Inn Express Lisbon Airport",
+                                "source": "VisitLisboa_Places",
+                            },
+                        ),
+                        0.74,
+                    )
+                ]
+            return []
+
+    with patch.object(visitlisboa_api, "_get_vector_store", return_value=DummyKB()):
+        output = visitlisboa_api.search_lisbon_knowledge.invoke(
+            {"query": "getting from airport to city center", "max_results": 4}
+        )
+
+    assert "Guide / PDF Knowledge" in output
+    assert "Lisboa Card Guide (p.12)" in output
+    assert "airport to the city centre" in output.lower()
+    assert "Related Places" in output
+
+
 def test_pt_live_music_focus_tokens_match_english_event_metadata() -> None:
     """PT live-music focus text should expand into EN-compatible tokens for VisitLisboa event matching."""
     focus = ResearcherAgent._extract_event_focus_query(
@@ -659,6 +1252,40 @@ def test_researcher_direct_event_lookup_bypasses_llm_for_week_query() -> None:
         events_tool.invoke.assert_called_once_with({"max_results": 5, "language": "pt", "offset": 0, "date_filter": "this week"})
         assert "Artur Pizarro Prokofiev 2" in output
         assert "[*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos)" in output
+
+
+def test_researcher_named_event_followup_reuses_previous_event_domain() -> None:
+    """Short quoted follow-ups after an event search should stay on the deterministic event path."""
+    with patch.object(ResearcherAgent, "__init__", lambda self: None):
+        agent = ResearcherAgent()
+        agent.system_prompt = "PRIMARY PROMPT"
+        agent._last_search_context = {
+            "domain": "events",
+            "tool_name": "search_cultural_events",
+            "base_args": {"language": "pt"},
+            "page_size": 5,
+            "offset": 0,
+            "next_offset": 5,
+            "language": "pt",
+            "source_query": "Que eventos há esta semana?",
+        }
+
+        events_tool = MagicMock()
+        events_tool.name = "search_cultural_events"
+        events_tool.invoke = MagicMock(return_value="1. 📅 **Book Fair**")
+        agent.tools = [events_tool]
+        agent.execute_react_loop = MagicMock(side_effect=AssertionError("LLM flow should be skipped"))
+
+        output = agent.invoke('E da "Feira do Livro\'26"?', context="User language: pt", verbose=False)
+
+        called_args = events_tool.invoke.call_args.args[0]
+        assert called_args["max_results"] == 5
+        assert called_args["language"] == "pt"
+        assert called_args["offset"] == 0
+        assert called_args["category"] == "Fairs"
+        assert called_args["query"] == "Feira do Livro'26"
+        assert "date_filter" not in called_args
+        assert "Book Fair" in output
 
 
 def test_researcher_accessibility_query_strips_unconfirmed_accessibility_claims() -> None:
@@ -1067,6 +1694,57 @@ def test_researcher_accessibility_place_queries_skip_freeform_llm() -> None:
         assert "[*VisitLisboa Places*](https://www.visitlisboa.com/en/places)" in output
 
 
+def test_researcher_named_place_lookup_uses_extracted_focus_query() -> None:
+    """Named place follow-ups should query the place tool with the cleaned subject, not the full prompt."""
+    with patch.object(ResearcherAgent, "__init__", lambda self: None):
+        agent = ResearcherAgent()
+        agent.system_prompt = "PRIMARY PROMPT"
+
+        dummy_places_tool = MagicMock()
+        dummy_places_tool.name = "search_places_attractions"
+        dummy_places_tool.invoke = MagicMock(
+            return_value=(
+                "**1.** 🏛️ **MAAT**\n"
+                "- 📍 **Address**: Av. Brasília, Lisbon"
+            )
+        )
+        agent.tools = [dummy_places_tool]
+        agent.execute_react_loop = MagicMock(side_effect=AssertionError("LLM flow should be skipped"))
+
+        output = agent.invoke('Tell me about "MAAT".', context="", verbose=False)
+
+        dummy_places_tool.invoke.assert_called_once_with(
+            {"query": "MAAT", "max_results": 5, "offset": 0, "language": "en"}
+        )
+        assert "MAAT" in output
+        assert "[*VisitLisboa Places*](https://www.visitlisboa.com/en/places)" in output
+
+
+def test_researcher_accessibility_named_place_queries_skip_freeform_llm() -> None:
+    """Quoted accessibility place queries should now take the deterministic place path."""
+    with patch.object(ResearcherAgent, "__init__", lambda self: None):
+        agent = ResearcherAgent()
+        agent.system_prompt = "PRIMARY PROMPT"
+
+        dummy_places_tool = MagicMock()
+        dummy_places_tool.name = "search_places_attractions"
+        dummy_places_tool.invoke = MagicMock(
+            return_value=(
+                "**1.** 🏛️ **MAAT**\n"
+                "- 📍 **Address**: Av. Brasília, Lisbon"
+            )
+        )
+        agent.tools = [dummy_places_tool]
+        agent.execute_react_loop = MagicMock(side_effect=AssertionError("LLM flow should be skipped"))
+
+        output = agent.invoke('Is "MAAT" wheelchair accessible?', context="", verbose=False)
+
+        dummy_places_tool.invoke.assert_called_once_with(
+            {"query": "MAAT", "max_results": 5, "offset": 0, "language": "en"}
+        )
+        assert "MAAT" in output
+
+
 def test_researcher_direct_place_lookup_applies_restaurant_category_for_dining_queries() -> None:
     """Dining queries should narrow deterministic place lookups to the restaurant category."""
     with patch.object(ResearcherAgent, "__init__", lambda self: None):
@@ -1091,6 +1769,67 @@ def test_researcher_direct_place_lookup_applies_restaurant_category_for_dining_q
         )
         assert "5 Oceanos" in output
         assert "[*VisitLisboa Places*](https://www.visitlisboa.com/en/places)" in output
+
+
+def test_extract_place_focus_query_unquoted_question_extracts_proper_noun() -> None:
+    """Question-form queries without quotes should extract the proper-noun tokens, not the full sentence."""
+    # Unquoted accessibility question: should extract proper noun, not the full question.
+    assert ResearcherAgent._extract_place_focus_query("Is MAAT wheelchair accessible?") == "MAAT"
+    # Unquoted multi-word proper name inside a question.
+    assert ResearcherAgent._extract_place_focus_query("Is the Jerónimos Monastery open?") == "Jerónimos Monastery"
+    # Generic question with no named entity: should return None.
+    assert ResearcherAgent._extract_place_focus_query("Is there an entrance fee?") is None
+    # Non-question short proper names should still be extracted verbatim (existing behaviour).
+    assert ResearcherAgent._extract_place_focus_query("MAAT") == "MAAT"
+    assert ResearcherAgent._extract_place_focus_query("Torre de Belém") == "Torre de Belém"
+
+
+def test_search_places_generic_schedule_query_shows_hours_fallback() -> None:
+    """When no specific weekday is requested and no today shortcut exists, the hours dict should be surfaced."""
+    bordalo = {
+        "title": "Bordalo Pinheiro Museum",
+        "category": "Museums & Monuments",
+        "short_description": "Visit this museum.",
+        "full_description": "Discover the collection of Rafael Bordalo Pinheiro.",
+        "url": "https://www.visitlisboa.com/en/places/bordalo-pinheiro-museum",
+        "schedules": [
+            {
+                "name": "Schedule",
+                "hours": {"Tuesday": "10:00 - 18:00", "Wednesday": "10:00 - 18:00"},
+            }
+        ],
+    }
+
+    with patch.object(visitlisboa_api, "_get_vector_store", return_value=None), patch.object(
+        visitlisboa_api,
+        "_should_search_dados_abertos",
+        return_value=False,
+    ), patch.object(visitlisboa_api, "_load_places_json", return_value=[bordalo]), patch.object(
+        visitlisboa_api,
+        "_get_place_by_url",
+        return_value=bordalo,
+    ):
+        output = visitlisboa_api.search_places_attractions.invoke(
+            {"query": "What are the opening hours of the Bordalo Pinheiro Museum?", "max_results": 3, "language": "en"}
+        )
+
+    assert "Bordalo Pinheiro Museum" in output
+    assert "Tuesday: 10:00 - 18:00" in output
+
+
+def test_extract_event_schedule_notes_handles_pt_day_patterns() -> None:
+    """Portuguese weekday names paired with a time should be extracted as schedule notes."""
+    from data_collection.webscraping.visitlisbon_events import (
+        _extract_event_schedule_notes,
+    )
+
+    text = "Quinta-feira, 9 p.m.\nSexta-feira às 21h\nSábado e domingo, 15:00"
+    notes = _extract_event_schedule_notes(text)
+
+    assert len(notes) == 3
+    assert any("quinta" in note.lower() for note in notes)
+    assert any("sexta" in note.lower() for note in notes)
+    assert any("21h" in note for note in notes)
 
 
 def test_weather_double_content_filter_falls_back_to_direct_tools() -> None:
