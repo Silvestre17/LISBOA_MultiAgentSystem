@@ -103,12 +103,12 @@
             "get_current_weather_summary"
         ],
         "expected_facts": [
-            "UV index is not currently tracked/provided by IPMA"
+            "UV index is not included in the system's weather tools"
         ],
         "language": "en",
         "edge_case": true,
         "edge_type": "missing_data_field",
-        "expected_behavior": "Inform user that UV index is not available through IPMA API data"
+        "expected_behavior": "Inform user that the system's weather tools do not include UV index data"
     },
     {
         "id": "W09",
@@ -247,10 +247,11 @@
             "get_route_between_stations"
         ],
         "expected_facts": [
-            "Vermelha line from Oriente to São Sebastião",
-            "Transfer at São Sebastião to Azul (Blue) line",
-            "Azul line one stop to Marquês de Pombal",
-            "Estimated travel time (~15-20 minutes)"
+            "Vermelha (Red) line from Oriente (direction São Sebastião) to Saldanha",
+            "Transfer at Saldanha to Amarela (Yellow) line (direction Odivelas)",
+            "Amarela line one stop to Marquês de Pombal",
+            "Alternative: Vermelha (Red) line from Oriente (direction São Sebastião) to São Sebastião, transfer to Azul (Blue) line (direction Santa Apolónia)",
+            "Estimated travel time (~17-21 minutes)"
         ],
         "language": "en",
         "edge_case": false
@@ -274,12 +275,12 @@
         "domain": "transport",
         "expected_tools": [],
         "expected_facts": [
-            "System only covers Lisbon Metropolitan Area (Sintra, Cascais, Azambuja, Sado lines)"
+            "System only covers Lisbon Metropolitan Area (Sintra, Cascais, Azambuja, Fertagus, Sado lines)"
         ],
         "language": "pt",
         "edge_case": true,
         "edge_type": "geographic_out_of_bounds",
-        "expected_behavior": "Inform user that only AML suburban lines are covered (Sintra, Cascais, Azambuja, Sado)"
+        "expected_behavior": "Inform user that only AML suburban lines are covered (Sintra, Cascais, Azambuja, Fertagus, Sado)"
     },
     {
         "id": "T08",
@@ -319,7 +320,7 @@
         "expected_facts": [
             "Information about the 28E tram route",
             "Route connects Martim Moniz to Campo de Ourique (Prazeres)",
-            "Approximately 35-38 stops, ~50-58 minutes journey"
+            "Approximately 35-38 stops, ~45-60 minutes journey depending on traffic"
         ],
         "language": "en",
         "edge_case": false
@@ -345,7 +346,7 @@
             "find_nearest_metro"
         ],
         "expected_facts": [
-            "Name of the nearest metro station (e.g. Marquês de Pombal or Avenida)",
+            "Name of the nearest metro station (e.g. Marquês de Pombal or Intendente)",
             "Approximate distance"
         ],
         "language": "en",
@@ -357,14 +358,17 @@
         "id": "T13",
         "query": "I need to go to Setúbal. Where can I catch a Fertagus train?",
         "domain": "transport",
-        "expected_tools": [],
+        "expected_tools": [
+            "search_cp_stations",
+            "plan_train_trip"
+        ],
         "expected_facts": [
-            "System does not currently integrate Fertagus schedules (only CP, Carris, Metro)"
+            "Fertagus operates from Roma-Areeiro to Setúbal",
+            "Key boarding stations include Roma-Areeiro, Entrecampos, Sete Rios, Campolide",
+            "Crosses the Tagus via 25 de Abril Bridge"
         ],
         "language": "en",
-        "edge_case": true,
-        "edge_type": "unsupported_provider",
-        "expected_behavior": "Inform user that Fertagus is not currently integrated (only CP, Carris, Metro)"
+        "edge_case": false
     },
     {
         "id": "T14",
@@ -744,7 +748,7 @@
             "Originally a Moorish fortress (Alcáçova), built 10th-11th century",
             "Reconquered on October 25, 1147 by D. Afonso Henriques (first King of Portugal)",
             "Siege lasted ~4 months with aid of Crusaders (Second Crusade)",
-            "Served as royal palace from 13th to 16th century"
+            "Served as royal palace from the 14th to the 16th century"
         ],
         "language": "en",
         "edge_case": false
