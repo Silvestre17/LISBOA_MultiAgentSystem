@@ -2158,7 +2158,7 @@ class MultiAgentAssistant:
             return "\n\n---\n\n".join(filtered.values())
 
         except Exception:
-            # Fallback to simple concatenation if LLM fails
+            # Fallback to simple concatenation if structured rendering fails
             filtered = {k: v for k, v in agent_outputs.items() if not k.startswith("_")}
             sections = []
             if "weather" in filtered:

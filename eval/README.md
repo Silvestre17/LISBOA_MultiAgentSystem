@@ -56,7 +56,7 @@ The pipeline combines:
 
 ```text
 eval/
-├── evaluation_groundtruth_queries.json  # Shared benchmark + ablation corpus
+├── evaluation_groundtruth_queries.json  # Shared corpus; ablation filters to grounded domains by default
 ├── llm_judge.py                         # LLM-as-a-Judge with structured scoring
 ├── run_benchmark.py                     # Isolated worker benchmark runner
 ├── run_ablation.py                      # Zero-shot vs LISBOA comparison runner
@@ -103,7 +103,7 @@ The fast manifest-integrity checks now live in `eval/tests/test_dataset_integrit
 
 ## 🧪 Shared evaluation corpus
 
-The shared dataset lives in `evaluation_groundtruth_queries.json` and currently contains **72 entries across 6 domains**.
+The shared dataset lives in `evaluation_groundtruth_queries.json` and currently contains **72 entries across 6 domains**. Exhaustive exported-tool coverage is enforced separately by the strict live manifest in `tests/fixtures/tool_coverage_manifest.json`, so the main corpus can stay focused on realistic user-facing evaluation.
 
 For demonstrations, the repository also includes `evaluation_groundtruth_queries_demo.json`, a tiny two-query walkthrough corpus intended to show the mechanics of the runners without launching a full evaluation cycle.
 
@@ -232,7 +232,7 @@ Each output record can contain averaged compatibility `scores`, raw `judge_runs`
 - a **closed-source pair**, where zero-shot and LISBOA both use the closed response profile
 - an **open-model pair**, where zero-shot and LISBOA both use the open response profile
 
-Within each pair, the zero-shot and LISBOA arms are judged by the same multi-judge matrix. Persisted ablation records keep the primary compatibility `metrics` block for the primary profile and store every profile-specific comparison under `comparisons`.
+Within each pair, the zero-shot and LISBOA arms are judged by the same multi-judge matrix. By default, ablation runs focus on `weather`, `transport`, `researcher`, and `multi_agent` queries, excluding `greeting` and `out_of_scope` shortcuts because LISBOA handles those through supervisor-level direct responses rather than the grounded pipeline under study. Persisted ablation records keep the primary compatibility `metrics` block for the primary profile and store every profile-specific comparison under `comparisons`.
 
 ### Strict live coverage scope
 

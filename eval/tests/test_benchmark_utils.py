@@ -307,6 +307,21 @@ class TestAblationProviderOverrides:
         finally:
             Config.MODEL_PROVIDER = original_provider
 
+    def test_ablation_groundtruth_defaults_to_core_domains(self):
+        """Default ablation runs should focus on the grounded task domains under study."""
+        queries = ablation_module.load_groundtruth_queries(limit=None)
+        assert queries, "Default ablation corpus should not be empty"
+        assert {item["domain"] for item in queries} == set(ablation_module.DEFAULT_ABLATION_DOMAINS)
+
+    def test_ablation_groundtruth_accepts_explicit_domain_override(self):
+        """Researchers should still be able to target non-default domains intentionally."""
+        queries = ablation_module.load_groundtruth_queries(
+            limit=None,
+            include_domains=("greeting",),
+        )
+        assert queries, "Explicit domain overrides should still return matching rows"
+        assert {item["domain"] for item in queries} == {"greeting"}
+
 
 class TestBenchmarkSummaryCostAccounting:
     """Validates that benchmark summary aggregation preserves cost blocks."""

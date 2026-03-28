@@ -184,7 +184,7 @@
     },
     {
         "id": "T01",
-        "query": "Is the metro working correctly right now?",
+        "query": "Is the metro running normally right now?",
         "domain": "transport",
         "expected_tools": [
             "get_metro_status"
@@ -355,7 +355,7 @@
     },
     {
         "id": "T13",
-        "query": "Where can I catch the Fertagus train?",
+        "query": "I need to go to Setúbal. Where can I catch a Fertagus train?",
         "domain": "transport",
         "expected_tools": [],
         "expected_facts": [
@@ -397,7 +397,7 @@
     },
     {
         "id": "T16",
-        "query": "What's the scheduled frequency of the Green metro line on weekdays?",
+        "query": "How often does the Green metro line usually run on weekdays?",
         "domain": "transport",
         "expected_tools": [
             "get_metro_frequency"
@@ -411,7 +411,7 @@
     },
     {
         "id": "T17",
-        "query": "I'm new to Lisbon. Which metro stations are on the network?",
+        "query": "I'm new to Lisbon. What metro stations are there?",
         "domain": "transport",
         "expected_tools": [
             "get_all_metro_stations"
@@ -425,27 +425,27 @@
     },
     {
         "id": "T18",
-        "query": "I have the Carris Metropolitana stop code 010101. Can you tell me which stop it is and the basic stop information?",
+        "query": "Is there a direct Carris Metropolitana bus from Cacilhas to Cristo Rei?",
         "domain": "transport",
         "expected_tools": [
-            "get_carris_metropolitana_stop_info"
+            "find_direct_bus_lines"
         ],
         "expected_facts": [
-            "Stop metadata for the requested Carris Metropolitana stop",
-            "Stop name or locality when available"
+            "Direct Carris Metropolitana line options between Cacilhas and Cristo Rei",
+            "No-transfer suggestion when available"
         ],
         "language": "en",
         "edge_case": false
     },
     {
         "id": "T19",
-        "query": "I'm looking for Carris Metropolitana line 470. What route details do you have for it?",
+        "query": "Can you show Carris Metropolitana lines for Cacilhas?",
         "domain": "transport",
         "expected_tools": [
             "search_carris_metropolitana_lines"
         ],
         "expected_facts": [
-            "Matching Carris Metropolitana line results",
+            "Matching Carris Metropolitana line results for Cacilhas",
             "Basic line metadata or description"
         ],
         "language": "en",
@@ -481,7 +481,7 @@
     },
     {
         "id": "T22",
-        "query": "Where are the buses on Carris Metropolitana line 470 right now?",
+        "query": "I'm waiting for Carris Metropolitana line 1507. Where are the buses right now?",
         "domain": "transport",
         "expected_tools": [
             "get_bus_realtime_locations"
@@ -495,21 +495,24 @@
     },
     {
         "id": "T23",
-        "query": "At Carris Metropolitana stop 010101, when does line 470 leave next?",
+        "query": "I'm at Oriente and need to get to Loures by Carris Metropolitana right now. Is there a direct bus I should take, are there any service alerts, and where are the buses on that line at the moment?",
         "domain": "transport",
         "expected_tools": [
-            "get_bus_next_departures"
+            "find_direct_bus_lines",
+            "get_carris_metropolitana_alerts",
+            "get_bus_realtime_locations"
         ],
         "expected_facts": [
-            "Upcoming departure times for the requested line",
-            "Requested line and stop context"
+            "Direct Carris Metropolitana line options between Oriente and Loures when available",
+            "Whether there are active service alerts affecting the recommended line",
+            "Real-time bus locations for the relevant line when available"
         ],
         "language": "en",
         "edge_case": false
     },
     {
         "id": "T24",
-        "query": "Find direct Carris Metropolitana bus lines between Oeiras and Amadora.",
+        "query": "Is there a direct Carris Metropolitana bus from Oeiras to Amadora?",
         "domain": "transport",
         "expected_tools": [
             "find_direct_bus_lines"
@@ -523,7 +526,7 @@
     },
     {
         "id": "T25",
-        "query": "Show the current status of CP urban trains in Lisbon.",
+        "query": "Are CP commuter trains around Lisbon running normally right now?",
         "domain": "transport",
         "expected_tools": [
             "get_train_status"
@@ -537,7 +540,7 @@
     },
     {
         "id": "T26",
-        "query": "Search CP stations for Rossio.",
+        "query": "Are there CP stations near Rossio?",
         "domain": "transport",
         "expected_tools": [
             "search_cp_stations"
@@ -551,7 +554,21 @@
     },
     {
         "id": "T27",
-        "query": "List the CP urban routes available in the Lisbon Metropolitan Area.",
+        "query": "How do I get by train from Sete Rios to Oriente?",
+        "domain": "transport",
+        "expected_tools": [
+            "plan_train_trip"
+        ],
+        "expected_facts": [
+            "Trip plan between Sete Rios and Oriente",
+            "Relevant CP route or transfer guidance"
+        ],
+        "language": "en",
+        "edge_case": false
+    },
+    {
+        "id": "T28",
+        "query": "What CP lines can I use around Lisbon?",
         "domain": "transport",
         "expected_tools": [
             "get_cp_routes"
@@ -559,20 +576,6 @@
         "expected_facts": [
             "List of CP urban routes",
             "Route names or line coverage"
-        ],
-        "language": "en",
-        "edge_case": false
-    },
-    {
-        "id": "T28",
-        "query": "Plan a CP train trip from Rossio to Sintra.",
-        "domain": "transport",
-        "expected_tools": [
-            "plan_train_trip"
-        ],
-        "expected_facts": [
-            "Trip plan between Rossio and Sintra",
-            "Relevant CP route or transfer guidance"
         ],
         "language": "en",
         "edge_case": false
@@ -607,7 +610,7 @@
     },
     {
         "id": "T31",
-        "query": "Search Carris stops for Marquês de Pombal.",
+        "query": "Can you find Carris stops near Rato?",
         "domain": "transport",
         "expected_tools": [
             "carris_get_stops"
@@ -621,7 +624,7 @@
     },
     {
         "id": "T32",
-        "query": "Find Carris routes between Graça and Belém.",
+        "query": "How do I get from Graça to Belém on Carris?",
         "domain": "transport",
         "expected_tools": [
             "carris_find_routes_between"
@@ -635,7 +638,7 @@
     },
     {
         "id": "T33",
-        "query": "Show real-time Carris vehicles for route 15E.",
+        "query": "Where are the Carris 15E vehicles right now?",
         "domain": "transport",
         "expected_tools": [
             "carris_get_realtime_vehicles"
@@ -649,7 +652,7 @@
     },
     {
         "id": "T34",
-        "query": "Show real-time arrivals at Carris stop 1234.",
+        "query": "What are the next Carris arrivals at Rossio right now?",
         "domain": "transport",
         "expected_tools": [
             "carris_get_arrivals"
@@ -663,7 +666,7 @@
     },
     {
         "id": "T35",
-        "query": "Estimate the ETA of route 28E at Martim Moniz.",
+        "query": "What's the ETA for the 28E at Martim Moniz?",
         "domain": "transport",
         "expected_tools": [
             "carris_vehicle_eta"
@@ -677,7 +680,7 @@
     },
     {
         "id": "T36",
-        "query": "What is the service frequency for Carris route 15E?",
+        "query": "How often does the Carris 15E usually run?",
         "domain": "transport",
         "expected_tools": [
             "carris_get_service_frequency"
@@ -832,7 +835,7 @@
     },
     {
         "id": "R11",
-        "query": "What kinds of public services can I browse in the Lisboa Aberta data right now?",
+        "query": "I need to sort out some paperwork in Lisbon. What kinds of public services can I browse in Lisboa Aberta?",
         "domain": "researcher",
         "expected_tools": [
             "list_service_categories"
@@ -846,7 +849,7 @@
     },
     {
         "id": "R12",
-        "query": "If I want to browse events on VisitLisboa, which categories are available?",
+        "query": "I'm not sure what kind of event to look for this week. Which event categories can I browse on VisitLisboa?",
         "domain": "researcher",
         "expected_tools": [
             "get_event_categories"
@@ -860,7 +863,7 @@
     },
     {
         "id": "R13",
-        "query": "If I want to explore places on VisitLisboa, which place categories can I browse?",
+        "query": "I'm planning my itinerary and want ideas. Which place categories can I browse on VisitLisboa?",
         "domain": "researcher",
         "expected_tools": [
             "get_place_categories"

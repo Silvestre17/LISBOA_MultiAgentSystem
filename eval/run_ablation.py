@@ -20,6 +20,7 @@ from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
+from typing import Sequence
 
 from langchain_core.messages import HumanMessage
 
@@ -65,6 +66,7 @@ DEFAULT_ZERO_SHOT_PROVIDER = "azure"
 DEFAULT_ZERO_SHOT_MODEL = "gpt-5-mini"
 DEFAULT_OPEN_PROVIDER = "azure"
 DEFAULT_OPEN_MODEL = "Kimi-K2.5"
+DEFAULT_ABLATION_DOMAINS = ("weather", "transport", "researcher", "multi_agent")
 DEFAULT_JUDGE_MODELS = [
     {"provider": DEFAULT_ZERO_SHOT_PROVIDER, "model": DEFAULT_ZERO_SHOT_MODEL, "temperature": 0.0},
     {"provider": DEFAULT_OPEN_PROVIDER, "model": DEFAULT_OPEN_MODEL, "temperature": 0.0},
@@ -316,10 +318,17 @@ def _evaluate_with_judges(
     return judge_runs, aggregated
 
 
-def load_groundtruth_queries(filepath: str | Path = GROUNDTRUTH_QUERIES_PATH, limit: int | None = None):
-    """Load the shared evaluation ground-truth corpus, optionally selecting a balanced subset."""
+def load_groundtruth_queries(
+    filepath: str | Path = GROUNDTRUTH_QUERIES_PATH,
+    limit: int | None = None,
+    include_domains: Sequence[str] | None = DEFAULT_ABLATION_DOMAINS,
+):
+    """Load the ablation corpus, optionally filtering domains and selecting a balanced subset."""
     with open(filepath, "r", encoding="utf-8") as f:
         data = json.load(f)
+    if include_domains is not None:
+        allowed_domains = {str(domain) for domain in include_domains}
+        data = [item for item in data if item.get("domain") in allowed_domains]
     if limit is None:
         return data
     return select_balanced_subset(data, limit, group_key="domain")
@@ -685,6 +694,7 @@ def run_ablation(
     judge_provider: str | None = None,
     judge_model: str | None = None,
     groundtruth_path: str | Path | None = None,
+    include_domains: Sequence[str] | None = DEFAULT_ABLATION_DOMAINS,
     output_prefix: str = "ablation_results",
 ):
     """
@@ -704,6 +714,10 @@ def run_ablation(
             zero-shot and LISBOA within the same provider/model family per profile.
         judge_provider: Optional provider override for a single evaluation judge.
         judge_model: Optional model override for a single evaluation judge.
+        include_domains: Optional domain filter for the shared corpus. By default
+            the ablation excludes ``greeting`` and ``out_of_scope`` because LISBOA
+            answers those through hard-coded supervisor shortcuts rather than the
+            grounded pipeline under study.
     """
     ablation_langsmith_project = get_langsmith_scoped_project_name(
         ABLATION_LANGSMITH_SCOPE_LABEL,
@@ -730,7 +744,10 @@ def run_ablation(
         groundtruth_queries = load_groundtruth_queries(
             resolved_groundtruth_path,
             limit=limit,
+            include_domains=include_domains,
         )
+        active_domains = sorted({item["domain"] for item in groundtruth_queries})
+        print(f"[Ablation] Domains in scope: {active_domains}")
 
         if lisboa_provider is not None:
             print(
@@ -1084,6 +1101,7 @@ def run_ablation(
                         "timestamp": datetime.now().isoformat(),
                         "comparison": "zero_shot_vs_lisboa_dual_paradigm",
                         "real_services": True,
+                        "ablation_domains": active_domains,
                         "pricing_model_count": len(pricing_catalog),
                         "output_directory": str(output_path.parent),
                         **get_pricing_metadata(pricing_by_model),
@@ -1154,6 +1172,15 @@ if __name__ == "__main__":
         help="Optional dataset path, for example eval/evaluation_groundtruth_queries_demo.json.",
     )
     parser.add_argument(
+        "--include-domain",
+        action="append",
+        dest="include_domains",
+        help=(
+            "Repeatable domain filter for ablation runs. Defaults to weather, transport, "
+            "researcher, and multi_agent."
+        ),
+    )
+    parser.add_argument(
         "--output-prefix",
         type=str,
         default="ablation_results",
@@ -1173,5 +1200,6 @@ if __name__ == "__main__":
         judge_provider=args.judge_provider,
         judge_model=args.judge_model,
         groundtruth_path=args.dataset,
+        include_domains=args.include_domains or DEFAULT_ABLATION_DOMAINS,
         output_prefix=args.output_prefix,
     )

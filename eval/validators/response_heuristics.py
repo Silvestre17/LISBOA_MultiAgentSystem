@@ -421,6 +421,8 @@ def run_all_heuristics(
         critical_failures.append("tool_leaks")
     if not results["response_length"]["acceptable"]:
         critical_failures.append("response_length")
+    if not results["language_compliance"]["compliant"]:
+        critical_failures.append("language_compliance")
     if results["hallucinated_features"]["hallucinated"]:
         critical_failures.append("hallucinated_features")
 
