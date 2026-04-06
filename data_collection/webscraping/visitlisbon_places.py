@@ -1,12 +1,12 @@
 # ==========================================================================
 # Master Thesis - Web Scraper for "Visit Lisbon" Places
 #   - André Filipe Gomes Silvestre, 2025
-# 
+#
 # Description:
 #   This module implements a robust web scraper for "Visit Lisbon" places
 #   (museums, landmarks, etc.). It extracts details like schedule, contacts,
 #   and location, managing incremental updates to a JSON file.
-# 
+#
 #   Link: https://www.visitlisboa.com/en/places
 # ==========================================================================
 
@@ -53,10 +53,10 @@ def _first_element(soup, selectors):
 
 def get_headers():
     """Generates headers with random User-Agent.
-    
+
     Arg:
         None
-        
+
     Returns:
         dict: Headers dictionary.
     """
@@ -69,10 +69,10 @@ def get_headers():
 
 def _extract_social_name(link):
     """Extracts a clean social media name from a link's SVG icon.
-    
+
     Args:
         link: BeautifulSoup anchor tag containing an SVG icon.
-        
+
     Returns:
         str: Social media name (e.g., 'facebook', 'twitter') or the href as fallback.
     """
@@ -104,11 +104,11 @@ def _extract_lisboa_card_badge_text(soup):
 
 def get_total_pages(session, base_url):
     """Determines total pages for places.
-    
+
     Arg:
         session (requests.Session): The requests session.
         base_url (str): The base URL.
-        
+
     Returns:
         int: Total number of pages. If error, returns 1.
     """
@@ -117,16 +117,16 @@ def get_total_pages(session, base_url):
         response = session.get(base_url, headers=get_headers(), timeout=30)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
-        
+
         pagy_nav = soup.find('nav', id='pagy')
         if not pagy_nav:
             return 1
-            
+
         page_numbers = [1]
         for link in pagy_nav.find_all('a', href=True):
             if match := re.search(r'page=(\d+)', link['href']):
                 page_numbers.append(int(match.group(1)))
-        
+
         logging.info(f"Found a total of {max(page_numbers)} pages.")
         return max(page_numbers)
     except Exception as e:
@@ -136,71 +136,71 @@ def get_total_pages(session, base_url):
 
 def get_place_urls_from_page(session, page_number, base_url):
     """Fetches URLs from a specific page.
-    
+
     Arg:
         session (requests.Session): The requests session.
         page_number (int): The page number to fetch.
         base_url (str): The base URL.
-        
+
     Returns:
         list: List of place URLs. If error, returns empty list.
     """
     list_url = f"{base_url}?page={page_number}"
     place_urls = []
-    
+
     try:
         time.sleep(random.uniform(2, 4))  # Stealth delay
         response = session.get(list_url, headers=get_headers(), timeout=30)
         response.raise_for_status()
-        
+
         soup = BeautifulSoup(response.content, 'html.parser')
         cards = soup.find_all('div', attrs={'data-controller': 'clickable-card'})
-        
+
         for card in cards:
             if link_tag := card.find('a', attrs={'data-clickable-card-target': 'link'}):
                 if 'href' in link_tag.attrs:
                     # Construct absolute URL
                     full_url = requests.compat.urljoin("https://www.visitlisboa.com", link_tag['href'])  # type: ignore
                     place_urls.append(full_url)
-                    
+
     except Exception as e:
         logging.error(f"Error fetching page {page_number}: {e}")
-        
+
     return place_urls
 
 
 def scrape_place_details(session, place_url):
     """
     Scrapes detailed info from a place page.
-    
+
     Args:
         session (requests.Session): The requests session.
         place_url (str): The URL of the place page to scrape.
-        
+
     Returns:
         dict: Dictionary with place details. If error, returns None.
     """
     place_data = {'url': place_url}
     base_domain = "https://www.visitlisboa.com"
     max_retries = 3
-    
+
     for attempt in range(max_retries):
         try:
             time.sleep(random.uniform(1.5, 3))
-            
+
             response = session.get(place_url, headers=get_headers(), timeout=30)
-            
+
             if response.status_code == 429:
                 wait_time = (attempt + 2) * 5
                 logging.warning(f"Rate limit on {place_url}. Waiting {wait_time}s")
                 time.sleep(wait_time)
                 continue
-                
+
             response.raise_for_status()
             soup = BeautifulSoup(response.content, 'html.parser')
-            
+
             # --- Parsing Logic ---
-            
+
             # General
             title = _first_element(soup, ['h2.max-w-xl', 'h1.font-serif', 'main h2', 'main h1'])
             if title:
@@ -209,39 +209,39 @@ def scrape_place_details(session, place_url):
                 place_data['category'] = _normalize_text(cat.get_text(" ", strip=True))
             if desc := _first_element(soup, ['h2.max-w-xl + p', 'h1.font-serif + p', 'main p']):
                 place_data['short_description'] = _normalize_text(desc.get_text(" ", strip=True))
-                
+
             # Lisboa Card benefit badge (e.g., "15% with Lisboa Card" or "Free with Lisboa Card")
             lisboa_card_badge = _extract_lisboa_card_badge_text(soup)
             if lisboa_card_badge:
                 place_data['lisboa_card_benefit'] = lisboa_card_badge
                 if '%' in lisboa_card_badge:
                     place_data['lisboa_card_discount'] = lisboa_card_badge
-            
+
             # Lisbon Tourism Member badge (div with logo and text)
             for div in soup.find_all('div', class_=lambda c: c and 'bg-off-white' in c and 'font-bold' in c):
                 if 'Lisbon Tourism Member' in div.get_text():
                     place_data['lisbon_tourism_member'] = True
                     break
-                
+
             # Media
             place_data['image_urls'] = [
                 requests.compat.urljoin(base_domain, img['src'])  # type: ignore
-                for img in soup.select('div[data-carousel-target="track"] img') 
+                for img in soup.select('div[data-carousel-target="track"] img')
                 if 'src' in img.attrs
             ]
             place_data['video_urls'] = [
                 iframe['src'] for iframe in soup.find_all('iframe') if 'src' in iframe.attrs
             ]
-            
+
             # Full Description
             if details := soup.find('div', class_='from-cms'):
                 place_data['full_description'] = details.get_text(separator='\n', strip=True)
-                
+
             # Features (e.g., "5 stars", "Wi-Fi", "Bars & Restaurants")
             place_data['features'] = [
                 li.get_text(strip=True) for li in soup.select('ul.flex-wrap li.bg-green-primary')
             ]
-            
+
             # Initialize structured fields
             place_data['contact_info'] = {}
             place_data['social_media'] = {}
@@ -249,18 +249,18 @@ def scrape_place_details(session, place_url):
             place_data['schedules'] = []  # List to support multiple schedules
             place_data['tickets_offers'] = None
             place_data['additional_sections'] = []
-            
+
             # Parse info-text boxes for Location, Information, Schedules, Tickets
             for box in soup.find_all('div', class_='info-text'):
                 if h3 := box.find('h3'):
                     h3_text = _normalize_text(h3.get_text(" ", strip=True))
                     h3_lower = h3_text.lower()
                     content = box.find('div', class_='info-text__content')
-                    
+
                     if h3_lower == 'location':
                         if content:
                             place_data['location'] = _normalize_text(content.get_text(" ", strip=True))
-                            
+
                     elif h3_lower == 'information':
                         for link in box.find_all('a', href=True):
                             href = link['href']
@@ -268,7 +268,7 @@ def scrape_place_details(session, place_url):
                             normalized_link_text = link_text.lower()
                             if link_text:
                                 place_data['information_links'][link_text] = href
-                            
+
                             if href.startswith('tel:'):
                                 place_data['contact_info']['phone'] = href.replace('tel:', '').strip()
                             elif href.startswith('mailto:'):
@@ -283,7 +283,7 @@ def scrape_place_details(session, place_url):
                             else:
                                 # Main website
                                 place_data['contact_info'].setdefault('website', href)
-                    
+
                     elif 'ticket' in h3_lower or 'offer' in h3_lower:
                         # Tickets & Offers section
                         if content:
@@ -299,11 +299,11 @@ def scrape_place_details(session, place_url):
                             if offers_data['links'] and not place_data['contact_info'].get('tickets_url'):
                                 place_data['contact_info']['tickets_url'] = offers_data['links'][0]['url']
                             place_data['tickets_offers'] = offers_data
-                                
+
                     elif 'schedule' in h3_lower:
                         # Schedule section (can have multiple: Winter Schedule, Summer Schedule, etc.)
                         schedule_entry = {'name': h3_text, 'hours': {}}
-                        
+
                         # Check for "today" info
                         if content:
                             # Look for today's hours
@@ -311,12 +311,12 @@ def scrape_place_details(session, place_url):
                             if today_p:
                                 today_text = _normalize_text(today_p.get_text(" ", strip=True))
                                 schedule_entry['today'] = today_text
-                            
+
                             # Check for date range (e.g., "From 20/03 to 21/12")
                             date_range_elem = content.find('p', class_=lambda c: c and 'text-xs' in c)
                             if date_range_elem:
                                 schedule_entry['date_range'] = _normalize_text(date_range_elem.get_text(" ", strip=True))
-                            
+
                             # Parse weekly hours from dropdown
                             dropdown = content.find('div', attrs={'data-controller': 'dropdown'})
                             if dropdown:
@@ -331,7 +331,7 @@ def scrape_place_details(session, place_url):
                             text_blob = _normalize_text(content.get_text(" ", strip=True))
                             if text_blob and 'today:' not in text_blob.lower() and not schedule_entry.get('hours'):
                                 schedule_entry['summary'] = text_blob
-                        
+
                         # Only add if we have meaningful data
                         if schedule_entry.get('hours') or schedule_entry.get('today') or schedule_entry.get('summary'):
                             place_data['schedules'].append(schedule_entry)
@@ -380,11 +380,11 @@ def main():
     Main function to orchestrate the scraping process for places.
     This function handles updating existing places, adding new ones,
     and removing places that are no longer listed on the website.
-    """    
+    """
     script_dir = os.path.dirname(os.path.abspath(__file__))
     output_filepath = os.path.join(script_dir, 'places.json')
     base_url = "https://www.visitlisboa.com/en/places"
-    
+
     # 1. Load Existing
     existing_places = {}
     if os.path.exists(output_filepath) and os.path.getsize(output_filepath) > 0:
@@ -402,7 +402,7 @@ def main():
     with requests.Session() as session:
         total_pages = get_total_pages(session, base_url)
         logging.info("Harvesting URLs...")
-        
+
         for page in tqdm(range(1, total_pages + 1), desc="Pages", mininterval=5):
             urls = get_place_urls_from_page(session, page, base_url)
             all_urls.update(urls)
@@ -413,7 +413,7 @@ def main():
     if len(all_urls) == 0:
         logging.error("CRITICAL: No places found! Possible blocking or site structure change. Aborting save.")
         sys.exit(1)
-    
+
     if len(existing_places) > 0 and len(all_urls) < len(existing_places) * 0.5:
         logging.warning("WARNING: Significant drop in places count. Verify manually.")
 
@@ -424,7 +424,7 @@ def main():
     potential_updates = all_urls.intersection(existing_urls)
     updated_urls = set()
     unchanged_urls = set()
-    
+
     final_list = []
 
     with requests.Session() as session:
@@ -435,7 +435,7 @@ def main():
                 if details := scrape_place_details(session, url):
                     final_list.append(details)
                     logging.info(f"New place added: {url}")
-        
+
         # B. Updated
         if potential_updates:
             logging.info(f"Checking {len(potential_updates)} existing places.")
@@ -443,7 +443,7 @@ def main():
                 if new_details := scrape_place_details(session, url):
                     old_json = json.dumps(existing_places[url], sort_keys=True)
                     new_json = json.dumps(new_details, sort_keys=True)
-                    
+
                     if old_json != new_json:
                         final_list.append(new_details)
                         updated_urls.add(url)
@@ -462,7 +462,7 @@ def main():
     else:
         logging.error("Final list is empty. Something went wrong. Not saving.")
         sys.exit(1)
-    
+
     # 5. Log Report
     logging.info("\n--- Synchronization Report ---")
     logging.info(f"  - Added: {len(new_urls)} new places.")

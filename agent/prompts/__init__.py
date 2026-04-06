@@ -1,10 +1,10 @@
 # ==========================================================================
 # Master Thesis - Multi-Agent Prompts Package
 #   - André Filipe Gomes Silvestre, 20240502
-# 
+#
 #   Specialized prompts for each agent in the Multi-Agent System.
 #   Each agent has a focused, concise prompt optimized for its task.
-#   
+#
 #   Also re-exports the original single-agent system prompt for
 #   backward compatibility.
 # ==========================================================================
@@ -38,12 +38,12 @@ __all__ = [
     "COMPACT_SYSTEM_PROMPT_EN",
     "COMPACT_SYSTEM_PROMPT_PT",
     "get_system_prompt",
-    
+
     # Multi-agent specialized prompts
     "SUPERVISOR_PROMPT_EN",
     "SUPERVISOR_PROMPT_PT",
     "get_supervisor_prompt",
-    "WEATHER_AGENT_PROMPT", 
+    "WEATHER_AGENT_PROMPT",
     "get_weather_prompt",
     "TRANSPORT_AGENT_PROMPT",
     "get_transport_prompt",

@@ -1,7 +1,7 @@
-# ========================================================================== 
+# ==========================================================================
 # Master Thesis
 #   - André Filipe Gomes Silvestre, 20240502
-# 
+#
 # Regression tests for user-facing Metro API fallback and outage messaging.
 #
 # Run from the repository root with a relative path:

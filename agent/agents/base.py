@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from agent.utils.langsmith_tracing import ContextThreadPoolExecutor, traceable
+from agent.utils.langsmith_tracing import ContextThreadPoolExecutor, traceable  # noqa: F401
 
 try:
     from config import Config
@@ -287,7 +287,7 @@ def clean_response(content: str, _print: bool = True) -> str:
     # Handle None or empty content
     if content is None:
         return ""
-    
+
     # Handle non-string content (e.g., list from Responses API)
     if not isinstance(content, str):
         # If it's a list, try to extract text from it
@@ -302,7 +302,7 @@ def clean_response(content: str, _print: bool = True) -> str:
             content = "\n".join(text_parts) if text_parts else str(content)
         else:
             content = str(content)
-    
+
     if not content:
         return ""
 
@@ -569,7 +569,7 @@ class BaseAgent:
     def get_llm_usage_events(self) -> List[Dict[str, Any]]:
         """Returns a defensive copy of the raw LLM usage events."""
         return deepcopy(self._llm_usage_events)
-        
+
     def get_tool_calls_log(self) -> List[Dict[str, Any]]:
         """Returns a defensive copy of the logged tool calls."""
         return deepcopy(getattr(self, "_tool_calls_log", []))
@@ -741,13 +741,13 @@ class BaseAgent:
     ) -> Dict[str, str]:
         """
         Execute multiple tool calls in parallel for faster processing.
-        
+
         Args:
             tool_calls: List of tool call dicts with 'name', 'args', 'id' keys.
             max_workers: Maximum concurrent workers.
             timeout: Maximum wait time passed to `as_completed()` while waiting
                 for the batch to finish.
-        
+
         Returns:
             Dict mapping tool call IDs to results.
 
@@ -758,34 +758,34 @@ class BaseAgent:
         """
         if not tool_calls:
             return {}
-        
+
         # Create tool name to object mapping
         tool_map = {tool.name: tool for tool in self.tools}
         results = {}
-        
+
         def execute_single_tool(tool_call: Dict) -> Tuple[str, str]:
             tool_name = tool_call.get('name', '')
             tool_args = tool_call.get('args', {})
             tool_id = tool_call.get('id', f'call_{hash(tool_name)}')
-            
+
             if tool_name not in tool_map:
                 return (tool_id, f"Tool '{tool_name}' not found.")
-            
+
             try:
                 result = self._invoke_tool(tool_map[tool_name], tool_args, tool_name=tool_name)
                 return (tool_id, str(result))
             except Exception as e:
                 return (tool_id, f"Error executing {tool_name}: {str(e)}")
-        
+
         # Limit workers to number of tools
         num_workers = min(max_workers, len(tool_calls))
-        
+
         with ContextThreadPoolExecutor(max_workers=num_workers) as executor:
             future_to_tool = {
                 executor.submit(execute_single_tool, tc): tc
                 for tc in tool_calls
             }
-            
+
             for future in as_completed(future_to_tool, timeout=timeout):
                 try:
                     tool_id, result = future.result()
@@ -794,7 +794,7 @@ class BaseAgent:
                     tool_call = future_to_tool[future]
                     tool_id = tool_call.get('id', 'unknown')
                     results[tool_id] = f"Execution error: {str(e)}"
-        
+
         return results
 
     def _safe_llm_invoke(self, llm, messages: list, retries: int = 2, verbose: bool = False):
@@ -1026,18 +1026,18 @@ class BaseAgent:
 def detect_tool_loop(messages: List, recent_tool_calls: List, lookback: int = 3) -> bool:
     """
     Detects if recent tool calls are duplicates (potential infinite loop).
-    
+
     This utility is shared across weather_agent, transport_agent, and researcher_agent
     to prevent the LLM from calling the same tool repeatedly with the same arguments.
-    
+
     Args:
         messages: Conversation history.
         recent_tool_calls: Tool calls from the latest AI response.
         lookback: Number of previous AI messages to check (default 3).
-        
+
     Returns:
         bool: True if loop detected (duplicate tool calls), False otherwise.
-        
+
     Example:
         >>> if detect_tool_loop(state["messages"], response.tool_calls):
         >>>     # Force response generation instead of calling tools again
@@ -1045,7 +1045,7 @@ def detect_tool_loop(messages: List, recent_tool_calls: List, lookback: int = 3)
     """
     if not recent_tool_calls:
         return False
-    
+
     # Get signatures of recent tool calls
     def _get_signature(tool_call) -> str:
         """Creates unique signature for a tool call."""
@@ -1053,21 +1053,21 @@ def detect_tool_loop(messages: List, recent_tool_calls: List, lookback: int = 3)
             args_str = json.dumps(tool_call.get("args", {}), sort_keys=True)
         except (TypeError, AttributeError):
             args_str = str(getattr(tool_call, "args", {}))
-        
+
         name = (
             tool_call.get("name", "")
             if isinstance(tool_call, dict)
             else getattr(tool_call, "name", "")
         )
         return f"{name}:{args_str}"
-    
+
     # Get signatures of new tool calls
     new_signatures = {_get_signature(tc) for tc in recent_tool_calls}
-    
+
     # Get signatures of recent tool calls from history
     recent_signatures = set()
     ai_msg_count = 0
-    
+
     for msg in reversed(messages):
         if hasattr(msg, "tool_calls") and msg.tool_calls:
             ai_msg_count += 1
@@ -1075,7 +1075,7 @@ def detect_tool_loop(messages: List, recent_tool_calls: List, lookback: int = 3)
                 recent_signatures.add(_get_signature(tc))
             if ai_msg_count >= lookback:
                 break
-    
+
     # If all new tool calls were already made recently, it's a loop
     return bool(new_signatures) and new_signatures.issubset(recent_signatures)
 

@@ -19,6 +19,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent.agents.base import BaseAgent, clean_response, parse_json_response, traceable
 from agent.prompts.qa import get_qa_prompt
+from agent.utils.response_formatter import infer_response_language
 
 # Import authoritative static transport data from tool modules.
 # These provide the single source of truth for metro/CP verification (no API calls).
@@ -391,6 +392,112 @@ class QualityAssuranceAgent(BaseAgent):
 
         return llm_result
 
+    @classmethod
+    def _augment_query_specific_validation(
+        cls,
+        user_query: str,
+        agent_outputs: Dict[str, str],
+        llm_result: Dict[str, Any],
+        language: str,
+    ) -> Dict[str, Any]:
+        """Adds deterministic completeness guards for common multi-part query failures."""
+        query = cls._normalize_query(user_query)
+        combined_output = "\n".join(
+            str(value) for key, value in agent_outputs.items()
+            if not str(key).startswith("_") and isinstance(value, str)
+        )
+        output_lower = combined_output.lower()
+
+        missing_data = cls._dedupe_preserve_order(list(llm_result.get("missing_data", [])))
+        required_agents = cls._dedupe_preserve_order(list(llm_result.get("required_agents", [])))
+        disclaimers = cls._dedupe_preserve_order(list(llm_result.get("disclaimers", [])))
+        reasoning = str(llm_result.get("reasoning", "") or "").strip()
+        reasoning_notes: List[str] = []
+
+        def add_gap(message: str, required_agent: Optional[str] = None) -> None:
+            if message not in missing_data:
+                missing_data.append(message)
+            if required_agent and required_agent not in required_agents:
+                required_agents.append(required_agent)
+
+        expected_language = infer_response_language(user_query=user_query, default=language or "en")
+        output_language = infer_response_language(context_text=combined_output, default=expected_language)
+        if combined_output.strip() and output_language != expected_language:
+            add_gap(
+                "response language should match the user's English query"
+                if expected_language == "en"
+                else "o idioma da resposta deve corresponder ao pedido do utilizador em Português",
+            )
+            reasoning_notes.append("detected response-language mismatch")
+
+        service_requirements = [
+            (
+                ("hospital", "hospitals", "hospital", "hospitais"),
+                ("hospital", "hospitais", "🏥"),
+                "nearest hospital information" if language == "en" else "informação sobre o hospital mais próximo",
+            ),
+            (
+                ("pharmacy", "pharmacies", "farmácia", "farmacia", "farmácias", "farmacias"),
+                ("pharmacy", "pharmacies", "farmácia", "farmacia", "farmácias", "farmacias", "💊"),
+                "nearest pharmacy information" if language == "en" else "informação sobre a farmácia mais próxima",
+            ),
+        ]
+        for query_markers, output_markers, gap_label in service_requirements:
+            if any(marker in query for marker in query_markers) and not any(marker in output_lower for marker in output_markers):
+                add_gap(gap_label, required_agent="researcher")
+                reasoning_notes.append(gap_label)
+
+        asks_metro = bool(re.search(r"\bmetro\b", query))
+        asks_train = bool(re.search(r"\b(comboio|comboios|train|trains)\b", query))
+        asks_fastest = bool(re.search(r"\b(mais r[aá]pid[oa]|faster|fastest|quickest)\b", query))
+        asks_cheapest = bool(re.search(r"\b(mais barat[oa]|cheaper|cheapest|lowest cost|pre[cç]o)\b", query))
+        if asks_metro and asks_train:
+            if not re.search(r"\bmetro\b", output_lower):
+                add_gap(
+                    "metro option details" if language == "en" else "detalhes da opção de metro",
+                    required_agent="transport",
+                )
+            if not re.search(r"\b(comboio|comboios|train|trains)\b", output_lower):
+                add_gap(
+                    "train option details" if language == "en" else "detalhes da opção de comboio",
+                    required_agent="transport",
+                )
+            if asks_fastest and not re.search(r"\b(mais r[aá]pid[oa]|faster|fastest|quickest)\b", output_lower):
+                add_gap(
+                    "which option is faster" if language == "en" else "qual das opções é mais rápida",
+                    required_agent="transport",
+                )
+            if asks_cheapest and not re.search(
+                r"\b(mais barat[oa]|cheaper|cheapest|fare|tarifa|price|pre[cç]o|n[aã]o (?:foi )?poss[ií]vel|not available|not possible to confirm)\b",
+                output_lower,
+            ):
+                add_gap(
+                    "which option is cheaper or an explicit fare-data limitation"
+                    if language == "en"
+                    else "qual das opções é mais barata ou uma nota explícita sobre a falta de dados de tarifa",
+                    required_agent="transport",
+                )
+                reasoning_notes.append("missing fare comparison")
+                fare_disclaimer = (
+                    "Official fare data was not confirmed in the available transport tools."
+                    if language == "en"
+                    else "Os dados oficiais de tarifa não foram confirmados nas ferramentas de transporte disponíveis."
+                )
+                if fare_disclaimer not in disclaimers:
+                    disclaimers.append(fare_disclaimer)
+
+        llm_result["missing_data"] = cls._dedupe_preserve_order(missing_data)
+        llm_result["required_agents"] = cls._dedupe_preserve_order(required_agents)
+        llm_result["disclaimers"] = cls._dedupe_preserve_order(disclaimers)
+        if llm_result["missing_data"]:
+            llm_result["complete"] = False
+
+        if reasoning_notes:
+            note = " | ".join(reasoning_notes)
+            llm_result["reasoning"] = f"{reasoning} | {note}".strip(" |")
+
+        return llm_result
+
     @staticmethod
     def _dedupe_preserve_order(items: List[str]) -> List[str]:
         """Removes duplicates while preserving the original order."""
@@ -581,6 +688,12 @@ class QualityAssuranceAgent(BaseAgent):
             agents_called=agents_called,
             llm_result=llm_result,
         )
+        llm_result = self._augment_query_specific_validation(
+            user_query=user_query,
+            agent_outputs=agent_outputs,
+            llm_result=llm_result,
+            language=language,
+        )
 
         # ── Phase 2: Deterministic fact verification ─────────────────
         combined_output = "\n".join(
@@ -616,7 +729,9 @@ class QualityAssuranceAgent(BaseAgent):
 
         llm_result["critical_issues"] = fact_check.get("critical_issues", [])
         llm_result["repairable_agents"] = fact_check.get("repairable_agents", [])
-        llm_result["needs_repair"] = bool(fact_check.get("critical_issues"))
+        llm_result["needs_repair"] = bool(
+            fact_check.get("critical_issues") or llm_result.get("missing_data")
+        )
         llm_result["fact_check"] = fact_check
         return llm_result
 
@@ -639,6 +754,9 @@ class QualityAssuranceAgent(BaseAgent):
             return draft_response
 
         fact_check = qa_result.get("fact_check", {}) if isinstance(qa_result, dict) else {}
+        missing_data = self._dedupe_preserve_order(
+            list(qa_result.get("missing_data", []))
+        )
         critical_issues = self._dedupe_preserve_order(
             list(qa_result.get("critical_issues", []))
             + list(fact_check.get("critical_issues", []))
@@ -648,7 +766,7 @@ class QualityAssuranceAgent(BaseAgent):
             + list(fact_check.get("disclaimers", []))
         )
 
-        if not critical_issues and not disclaimers:
+        if not critical_issues and not disclaimers and not missing_data:
             return draft_response
 
         if language == "pt":
@@ -672,6 +790,7 @@ class QualityAssuranceAgent(BaseAgent):
             task_prefix = "# TAREFA DE REPARAÇÃO FINAL"
             critical_label = "Problemas críticos"
             disclaimer_label = "Notas e limitações"
+            missing_label = "Dados em falta"
             worker_label = "Outputs dos workers"
             draft_label = "Rascunho atual"
         else:
@@ -693,6 +812,7 @@ class QualityAssuranceAgent(BaseAgent):
             )
             task_prefix = "# FINAL REPAIR TASK"
             critical_label = "Critical issues"
+            missing_label = "Missing data"
             disclaimer_label = "Warnings and limitations"
             worker_label = "Worker outputs"
             draft_label = "Current draft"
@@ -706,12 +826,14 @@ class QualityAssuranceAgent(BaseAgent):
 
         worker_context = "\n\n".join(worker_context_parts) if worker_context_parts else ""
         critical_block = "\n".join(f"- {item}" for item in critical_issues) or "- None"
+        missing_block = "\n".join(f"- {item}" for item in missing_data) or "- None"
         disclaimer_block = "\n".join(f"- {item}" for item in disclaimers) or "- None"
 
         human_content = (
             f"{task_prefix}\n\n"
             f"**User query:** {user_query}\n\n"
             f"## {critical_label}\n{critical_block}\n\n"
+            f"## {missing_label}\n{missing_block}\n\n"
             f"## {disclaimer_label}\n{disclaimer_block}\n\n"
             f"## {draft_label}\n{draft_response[:_TRUNCATION_LIMIT]}\n\n"
             f"## {worker_label}\n{worker_context}"

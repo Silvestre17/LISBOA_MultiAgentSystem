@@ -17,7 +17,7 @@ import unicodedata
 from typing import Any
 
 # Import canonical metro data
-from tools.metrolisboa_api import METRO_LINES, METRO_STATIONS
+from tools.metrolisboa_api import METRO_STATIONS
 
 # -----------------------------------------------------------------------
 # Helpers

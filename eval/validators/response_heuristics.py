@@ -331,7 +331,7 @@ def check_hallucinated_features(response: str) -> dict[str, Any]:
     for pattern, description in unsupported_claims:
         if re.search(pattern, text_lower):
             flagged.append(description)
-    
+
     ferry_patterns = [
         r"\b(?:next|upcoming|live|real[\s-]?time|departure|departures|arrival|arrivals|schedule|schedules|fare|price|cost|hor[aá]rio|hor[aá]rios|partidas?|chegadas?)\b.{0,60}\b(?:transtejo|soflusa|ferry|ferries)\b",
         r"\b(?:transtejo|soflusa|ferry|ferries)\b.{0,60}\b(?:next|upcoming|live|real[\s-]?time|departure|departures|arrival|arrivals|schedule|schedules|fare|price|cost|hor[aá]rio|hor[aá]rios|partidas?|chegadas?)\b",
@@ -340,7 +340,7 @@ def check_hallucinated_features(response: str) -> dict[str, Any]:
         marker in text_lower for marker in negation_markers
     ):
         flagged.append("Ferry schedule/live data")
-    
+
     micromobility_patterns = [
         r"\b(?:available|availability|live|real[\s-]?time|nearest|closest|dock|docks|station|stations|vehicle|vehicles)\b.{0,60}\b(?:gira|bike|bikes|bicycle|bicycles|bicicleta|bicicletas|scooter|scooters|trotinete|trotinetes)\b",
         r"\b(?:gira|bike|bikes|bicycle|bicycles|bicicleta|bicicletas|scooter|scooters|trotinete|trotinetes)\b.{0,60}\b(?:available|availability|live|real[\s-]?time|nearest|closest|dock|docks|station|stations|vehicle|vehicles)\b",
@@ -349,7 +349,7 @@ def check_hallucinated_features(response: str) -> dict[str, Any]:
         marker in text_lower for marker in negation_markers
     ):
         flagged.append("Shared bike/scooter live availability")
-    
+
     flagged = list(dict.fromkeys(flagged))
 
     return {"hallucinated": len(flagged) > 0, "flagged_claims": flagged}

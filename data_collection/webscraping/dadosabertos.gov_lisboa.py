@@ -1,33 +1,34 @@
 # ==========================================================================
 # Master Thesis - Web Scraper for dados.gov.pt (Lisbon Datasets)
 #   - André Filipe Gomes Silvestre, 20240502
-# 
-# This script scrapes the dados.gov.pt portal specifically for datasets 
-# related to the Municipality of Lisbon (1106). 
+#
+# This script scrapes the dados.gov.pt portal specifically for datasets
+# related to the Municipality of Lisbon (1106).
 # It extracts the title, description, and the "Stable URL" for each dataset.
 # It filters out datasets with "Resultados" or "Desafio" in the title.
-# 
+#
 # Link to the portal: https://dados.gov.pt/pt/datasets/?geozone=pt%3Aconcelho%3A1106
 # ==========================================================================
 
 # Required libraries:
 # pip install requests beautifulsoup4
 
-import os                                          # For file path operations
-import requests                                    # For making HTTP requests
-from bs4 import BeautifulSoup                      # For parsing HTML content        
-import time                                        # For adding delays  
-import json                                        # For saving data in JSON format
-import logging                                     # For logging information
-from typing import List, Dict, Optional, Any       # For type hinting
-from urllib.parse import urljoin                   # For constructing absolute URLs
-from tqdm import tqdm                              # For progress bars
+import json                                     # For saving data in JSON format
+import logging                                  # For logging information
+import os                                       # For file path operations
+import time                                     # For adding delays
+from typing import Any, Dict, List, Optional    # For type hinting
+from urllib.parse import urljoin                # For constructing absolute URLs
+
+import requests                                 # For making HTTP requests
+from bs4 import BeautifulSoup                   # For parsing HTML content
+from tqdm import tqdm                           # For progress bars
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    
+
     # If we want to log to a file as well as console
     # handlers=[
     #     logging.FileHandler("scraper.log"),
@@ -80,18 +81,18 @@ class LisbonOpenDataScraper:
                 response = self.session.get(url, timeout=30)
                 response.raise_for_status()
                 return BeautifulSoup(response.content, 'html.parser')  # type: ignore
-            
+
             except requests.exceptions.RequestException as e:
                 wait_time = backoff_factor ** attempt
                 logging.warning(f"Error fetching {url}: {e}. Retrying in {wait_time}s...")
                 time.sleep(wait_time)
-        
+
         logging.error(f"Failed to fetch {url} after {retries} attempts.")
         return None
 
     def extract_dataset_details(self, dataset_url: str) -> Dict[str, str]:
         """
-        Visits a specific dataset page to extract detailed information, 
+        Visits a specific dataset page to extract detailed information,
         specifically the 'URL Estável', available file formats, and last update date.
 
         Args:
@@ -116,13 +117,13 @@ class LisbonOpenDataScraper:
         if json_ld_script:
             try:
                 data = json.loads(json_ld_script.string)
-                
+
                 # Extract Last Updated
                 if "dateModified" in data:
                     details["last_updated"] = data["dateModified"]
                 elif "dateCreated" in data:
                     details["last_updated"] = data["dateCreated"]
-                
+
                 # Extract File Formats
                 if "distribution" in data:
                     formats = set()
@@ -131,10 +132,10 @@ class LisbonOpenDataScraper:
                             formats.add(dist["encodingFormat"])
                         elif "fileFormat" in dist:
                             formats.add(dist["fileFormat"])
-                    
+
                     if formats:
                         details["file_formats"] = ", ".join(sorted(formats))
-                        
+
             except json.JSONDecodeError:
                 logging.warning(f"Failed to parse JSON-LD for {dataset_url}")
 
@@ -152,7 +153,7 @@ class LisbonOpenDataScraper:
                     else:
                         details["stable_url"] = dd.get_text(strip=True)
                 break
-        
+
         # Extract Description
         desc_div = soup.find("div", class_="markdown")
         if desc_div:
@@ -187,7 +188,7 @@ class LisbonOpenDataScraper:
                 clean_format = text.replace("Descarregar ficheiro como", "").replace("Download file as", "").strip()
                 if clean_format:
                     formats.add(clean_format)
-            
+
             if formats:
                 details["file_formats"] = ", ".join(sorted(formats))
 
@@ -204,7 +205,7 @@ class LisbonOpenDataScraper:
             List[Dict[str, Any]]: A list of dictionaries containing dataset info.
         """
         results = []
-        
+
         # Datasets are usually contained within <article> tags in the search results
         articles = soup.find_all("article", class_="fr-enlarge-link")
 
@@ -214,13 +215,13 @@ class LisbonOpenDataScraper:
                 title_tag = article.find("h4")
                 if not title_tag:
                     continue
-                
+
                 title = title_tag.get_text(strip=True)
-                
+
                 # Filter: Skip datasets with specif words in the title
                 title_lower = title.lower()
-                
-                # List of words to skip ("Resultados" or "Desafio" or "Recenseamento" or 
+
+                # List of words to skip ("Resultados" or "Desafio" or "Recenseamento" or
                 #                        "População Residente" or "População Presente" or "População Empregada" or
                 #                        "Alojamentos Familiares" "Edifícios por" or "Núcleos familiares" or
                 #                        "Famílias" or "Agregados familiares" or "Anomalia da"
@@ -230,7 +231,7 @@ class LisbonOpenDataScraper:
                                   "edifícios por", "núcleos familiares", "famílias", "agregados familiares",
                                   "anomalia da", "taxa de desemprego", "taxa de atividade", "taxa de emprego",
                                   "modelo"]
-                
+
                 if any(word in title_lower for word in excluded_words):
                     self.skipped_count += 1
                     # For debugging purposes
@@ -241,7 +242,7 @@ class LisbonOpenDataScraper:
                 link_tag = title_tag.find("a")
                 if not link_tag:
                     continue
-                
+
                 relative_url = link_tag.get("href")
                 full_url = urljoin(self.base_url, relative_url)
 
@@ -259,11 +260,11 @@ class LisbonOpenDataScraper:
                     "file_formats": details.get("file_formats", "N/A"),
                     "last_updated": details.get("last_updated", "N/A")
                 }
-                
+
                 results.append(dataset_info)
-                
+
                 # Polite delay between inner requests
-                time.sleep(1) 
+                time.sleep(1)
 
             except Exception as e:
                 logging.error(f"Error processing an article: {e}")
@@ -286,7 +287,7 @@ class LisbonOpenDataScraper:
 
         while current_url:
             logging.info(f"Scraping Search Page {page_num}: {current_url}")
-            
+
             soup = self._get_soup(current_url)
             if not soup:
                 break
@@ -297,7 +298,7 @@ class LisbonOpenDataScraper:
             # Pagination handling
             # Look for the "Next" button in the pagination list
             next_page_link = soup.find("a", class_="fr-pagination__link--next")
-            
+
             if next_page_link and next_page_link.get("href"):
                 next_relative = next_page_link.get("href")
                 # Handle cases where href is just query params or full path
@@ -307,7 +308,7 @@ class LisbonOpenDataScraper:
                     current_url = f"{self.base_url}/pt/datasets/{next_relative}"
                 else:
                     current_url = urljoin(self.base_url, next_relative)
-                
+
                 page_num += 1
                 time.sleep(1)  # Delay between search pages
             else:
@@ -340,21 +341,21 @@ def main():
     """
     scraper = LisbonOpenDataScraper()
     data = scraper.run()
-    
+
     if data:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         output_filepath = os.path.join(script_dir, 'lisbon_datasets.json')
-        
+
         # Save to JSON
         save_to_json(data, output_filepath)
-        
+
         # Print report
         print("\n\033[1m--- Extraction Report ---\033[0m")
         print(f"\033[1m  - Collected:\033[0m {len(data)}")
         print(f"\033[1m  - Skipped:\033[0m {scraper.skipped_count}")
         print(f"\033[1m  - Total processed:\033[0m {len(data) + scraper.skipped_count}")
         print("Extraction complete.")
-        
+
         # Print a preview
         print("\n\033[1m--- Extraction Preview ---\033[0m")
         for i, item in enumerate(data[:3]):

@@ -1,12 +1,11 @@
 # ==========================================================================
 # Master Thesis - Agent State Definition
 #   - André Filipe Gomes Silvestre, 20240502
-# 
+#
 #   Defines the state schema for the LangGraph agent.
 #   Uses TypedDict for type safety and clear state management.
 # ==========================================================================
 
-from datetime import datetime
 from typing import Annotated, List, Optional, TypedDict
 
 from langchain_core.messages import BaseMessage
@@ -16,12 +15,13 @@ from langgraph.graph.message import add_messages
 class UserContext(TypedDict, total=False):
     """
     User context information for personalized responses.
-    
+
     Attributes:
         latitude (float): User's current latitude.
         longitude (float): User's current longitude.
         preferences (List[str]): User interests (e.g., 'museums', 'food', 'nature').
         language (str): Preferred language ('en', 'pt').
+        ui_language (str): Interface language selected in the app UI.
         available_time (int): Available time in hours for activities.
         mobility (str): Mobility level ('full', 'limited', 'wheelchair').
     """
@@ -29,6 +29,7 @@ class UserContext(TypedDict, total=False):
     longitude: float
     preferences: List[str]
     language: str
+    ui_language: str
     available_time: int
     mobility: str
 
@@ -36,7 +37,7 @@ class UserContext(TypedDict, total=False):
 class WeatherContext(TypedDict, total=False):
     """
     Weather context from IPMA API.
-    
+
     Attributes:
         temperature_min (float): Minimum temperature in Celsius.
         temperature_max (float): Maximum temperature in Celsius.
@@ -56,7 +57,7 @@ class WeatherContext(TypedDict, total=False):
 class TransportContext(TypedDict, total=False):
     """
     Transport status context.
-    
+
     Attributes:
         metro_status (dict): Status of each metro line.
         carris_alerts (int): Number of active bus alerts.
@@ -72,10 +73,10 @@ class TransportContext(TypedDict, total=False):
 class AgentState(TypedDict):
     """
     Main state schema for the Lisbon Urban Assistant agent.
-    
+
     This state is passed through the LangGraph workflow and contains
     all context needed for personalized responses.
-    
+
     Attributes:
         messages (List[BaseMessage]): Conversation history with message reducer.
         user_context (UserContext): User-specific information.
@@ -84,7 +85,7 @@ class AgentState(TypedDict):
         current_plan (List[dict]): Current itinerary items.
         session_id (str): Unique session identifier.
         last_tool_result (str): Result from the last tool call.
-        
+
         Multi-Agent Orchestration:
         next_agent (str): Name of the next agent to execute, when applicable.
         agents_to_call (List[str]): Queue or routing decision from the supervisor.
@@ -95,19 +96,19 @@ class AgentState(TypedDict):
     """
     # Conversation history (uses add_messages reducer for proper appending)
     messages: Annotated[List[BaseMessage], add_messages]
-    
+
     # Context information
     user_context: Optional[UserContext]
     weather_context: Optional[WeatherContext]
     transport_context: Optional[TransportContext]
-    
+
     # Planning state
     current_plan: Optional[List[dict]]
-    
+
     # Session metadata
     session_id: Optional[str]
     last_tool_result: Optional[str]
-    
+
     # Multi-Agent orchestration fields
     next_agent: Optional[str]              # Current agent being executed, if tracked
     agents_to_call: Optional[List[str]]    # Supervisor routing decision
@@ -120,7 +121,7 @@ class AgentState(TypedDict):
 class PlanItem(TypedDict):
     """
     Single item in an itinerary plan.
-    
+
     Attributes:
         order (int): Order in the itinerary.
         time (str): Scheduled time (e.g., '10:00').
@@ -146,16 +147,16 @@ class PlanItem(TypedDict):
 def create_initial_state(session_id: str = None) -> AgentState:
     """
     Creates an initial empty state for a new conversation.
-    
+
     Args:
-        session_id (str, optional): Session identifier. 
+        session_id (str, optional): Session identifier.
                                    Generated if not provided.
-    
+
     Returns:
         AgentState: Initial state with empty values.
     """
     from uuid import uuid4
-    
+
     return AgentState(
         messages=[],
         user_context=None,
@@ -184,7 +185,7 @@ def update_weather_context(
 ) -> AgentState:
     """
     Updates the weather context in the state.
-    
+
     Args:
         state (AgentState): Current state.
         temp_min (float): Minimum temperature.
@@ -192,12 +193,12 @@ def update_weather_context(
         precip_prob (float): Precipitation probability.
         weather_type (str): Weather description.
         warnings (List[str], optional): Active warnings.
-    
+
     Returns:
         AgentState: Updated state with new weather context.
     """
     warnings = warnings or []
-    
+
     state["weather_context"] = WeatherContext(
         temperature_min=temp_min,
         temperature_max=temp_max,
@@ -206,7 +207,7 @@ def update_weather_context(
         has_warnings=len(warnings) > 0,
         warnings=warnings
     )
-    
+
     return state
 
 
@@ -217,12 +218,12 @@ def update_user_location(
 ) -> AgentState:
     """
     Updates the user's location in the state.
-    
+
     Args:
         state (AgentState): Current state.
         latitude (float): User latitude.
         longitude (float): User longitude.
-    
+
     Returns:
         AgentState: Updated state with new location.
     """
@@ -234,7 +235,7 @@ def update_user_location(
     else:
         state["user_context"]["latitude"] = latitude
         state["user_context"]["longitude"] = longitude
-    
+
     return state
 
 
@@ -245,19 +246,19 @@ if __name__ == "__main__":
     print("\033[1m" + "=" * 60 + "\033[0m")
     print("\033[1m🧪 Agent State Test\033[0m")
     print("\033[1m" + "=" * 60 + "\033[0m")
-    
+
     # Create initial state
     state = create_initial_state()
     print("\n\033[1m📋 Initial State:\033[0m")
     print(f"   Session ID: {state['session_id']}")
     print(f"   Messages: {len(state['messages'])}")
     print(f"   User Context: {state['user_context']}")
-    
+
     # Update location
     state = update_user_location(state, 38.7223, -9.1393)
     print("\n\033[1m📍 After Location Update:\033[0m")
     print(f"   User Context: {state['user_context']}")
-    
+
     # Update weather
     state = update_weather_context(
         state,
@@ -269,5 +270,5 @@ if __name__ == "__main__":
     )
     print("\n\033[1m🌤️ After Weather Update:\033[0m")
     print(f"   Weather: {state['weather_context']}")
-    
+
     print("\n\033[1;32m✅ State management working correctly!\033[0m")

@@ -1,7 +1,7 @@
 # ===========================================================================
 # Master Thesis
 #   - André Filipe Gomes Silvestre, 20240502
-# 
+#
 # Regression tests for transport-agent deterministic fast paths, invoke/build-
 # subgraph parity helpers, and structured multi-agent rendering.
 #

@@ -10,13 +10,13 @@
 #   python scripts/run_prompts.py --suite smoke              # Runs end-to-end sanity prompts through the full MultiAgentAssistant
 #   python scripts/run_prompts.py --suite coverage           # Runs strict worker-agent coverage prompts and checks expected tool calls
 #   python scripts/run_prompts.py --suite coverage --limit 5 # Runs only the first 5 coverage prompts for a quick spot-check
-#   python scripts/run_prompts.py 
+#   python scripts/run_prompts.py
 #          --prompt "Como está o tempo hoje?" --language pt  # Ask one custom prompt via CLI args and run it through the smoke runner (supports provider/model overrides for coverage mode)
 #   python scripts/run_prompts.py --interactive              # Ask for one ad-hoc prompt via stdin and run it immediately
 #   python scripts/run_prompts.py --suite coverage
-#          --prompt "Next train from Rossio?" 
-#          --domain transport 
-#          --provider azure 
+#          --prompt "Next train from Rossio?"
+#          --domain transport
+#          --provider azure
 #          --model gpt-5-mini                                # Run a custom coverage prompt with specific domain and model overrides
 #
 # Parameters:
@@ -89,7 +89,6 @@ SMOKE_PROMPTS = [
 
     # Weather
     ("How is the weather in Lisbon today and what should I wear for walking outdoors?", "en", "weather"),
-    ("Vai chover amanhã em Lisboa e há algum aviso meteorológico ativo?", "pt", "weather"),
 
     # Transport: realtime, future, deterministic routes, and scope limits
     ("How do I get from Lisbon Airport to Rossio using the metro right now?", "en", "transport"),
@@ -112,6 +111,14 @@ SMOKE_PROMPTS = [
     # Guardrails / edge cases
     ("Quero ir de metro para a Madeira.", "pt", "edge_case"),
     ("Preciso do próximo Fertagus para Setúbal e de ferry para o Barreiro agora.", "pt", "edge_case"),
+
+    # Additional test prompts (2025-03)
+    ("Qual o próximo autocarro do Marquês para Belém?", "pt", "test"),
+    ("Quero ir de metro ou comboio entre Entrecampos e Sete Rios? Qual o mais rápido e o mais barato?", "pt", "test"),
+    ("Estou em Entrecampos e quero fazer um passeio turistico mas não pelos sitios habituais turisticos. Quero algo diferente... sugere-me", "pt", "test"),
+    ("Qual o hospital e a farmácia mais perto do Saldanha?", "pt", "test"),
+    ("Quero ir de transportes públicos entre o ISCTE e a Zara do Rossio", "pt", "test"),
+    ("Qual museu ou monumento recomendas ir neste domingo sendo que apenas tenho das 19 às 20h para visitar?", "pt", "test"),
 ]
 
 

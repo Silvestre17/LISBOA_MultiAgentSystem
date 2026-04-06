@@ -21,7 +21,6 @@
 
 import base64
 import logging
-import math
 import os
 import re
 import socket
@@ -42,11 +41,12 @@ from cryptography.x509.oid import AuthorityInformationAccessOID, ExtensionOID
 from langchain_core.tools import tool
 
 try:
-    from config import Config
+    import config as _project_config
 except ModuleNotFoundError:
     import sys
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-    from config import Config
+else:
+    del _project_config
 
 try:
     from tools.utils import haversine_distance
@@ -948,13 +948,14 @@ def _metro_request(method: str, url: str, **kwargs) -> requests.Response:
         if "api.metrolisboa.pt" not in url.lower():
             raise
 
+        ssl_error = exc
         if verify is not False:
             dynamic_bundle = _build_runtime_metro_ca_bundle(force_refresh=True)
             if dynamic_bundle and dynamic_bundle != verify:
                 try:
                     return _perform_request(dynamic_bundle)
                 except requests.exceptions.SSLError as dynamic_exc:
-                    exc = dynamic_exc
+                    ssl_error = dynamic_exc
 
         if verify is False or not _METRO_SSL_ALLOW_INSECURE_FALLBACK:
             raise
@@ -962,7 +963,7 @@ def _metro_request(method: str, url: str, **kwargs) -> requests.Response:
         logger.warning(
             "Metro API SSL verification could not be completed securely for %s. Retrying insecurely because METRO_SSL_ALLOW_INSECURE_FALLBACK is enabled: %s",
             url,
-            exc,
+            ssl_error,
         )
         return _perform_request(False)
 
@@ -1006,14 +1007,14 @@ def fetch_json_with_retry(url: str, timeout: int = REQUEST_TIMEOUT, use_cache: b
                 response = http_pool.get(url, timeout=timeout)
             else:
                 response = requests.get(url, timeout=timeout)
-            
+
             response.raise_for_status()
             data = response.json()
-            
+
             # Cache the result
             if use_cache and OPTIMIZATION_AVAILABLE and transport_cache:
                 transport_cache.set(cache_key, data, ttl=60)  # 1 minute
-            
+
             return data
         except requests.exceptions.Timeout:
             wait_time = BACKOFF_FACTOR**attempt

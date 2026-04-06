@@ -36,7 +36,6 @@ from agent.utils.langsmith_tracing import (
     LANGSMITH_AVAILABLE,
     ContextThreadPoolExecutor,
     annotate_current_run,
-    get_current_run_tree,
     get_langsmith_request_tracking_status,
     traceable,
 )
@@ -46,6 +45,7 @@ from agent.utils.response_formatter import (
     ensure_response_title,
     format_response,
     generate_response_title,
+    infer_response_language,
 )
 from agent.utils.usage_costs import (
     build_cost_payload,
@@ -139,6 +139,8 @@ _QA_HISTORY_WINDOW = 6
 _QA_MSG_PREVIEW_LEN = 200
 # Hard cap for stored user/assistant turns to prevent unbounded session growth.
 _MAX_CONVERSATION_HISTORY_MESSAGES = 60
+# Maximum time to wait for all parallel workers before collecting partial results.
+_WORKER_BATCH_TIMEOUT_S = 120
 
 # ==========================================================================
 # Tool Configuration
@@ -558,6 +560,11 @@ class LisbonAssistant:
         """
         # Add user message to state
         self.state["messages"].append(HumanMessage(content=message))
+        ui_language = language
+        effective_language = infer_response_language(
+            user_query=message,
+            default=ui_language,
+        )
 
         # Update user language preference in state
         user_ctx = self.state.get("user_context")
@@ -565,16 +572,19 @@ class LisbonAssistant:
             from agent.state import UserContext
 
             user_ctx = UserContext()
-            user_ctx["language"] = language
+            user_ctx["language"] = effective_language
+            user_ctx["ui_language"] = ui_language
             self.state["user_context"] = user_ctx
         else:
-            user_ctx["language"] = language
+            user_ctx["language"] = effective_language
+            user_ctx["ui_language"] = ui_language
 
         if LANGSMITH_AVAILABLE:
             annotate_current_run(
                 metadata={
                     "assistant_mode": "single-agent",
-                    "language": language,
+                    "language": effective_language,
+                    "ui_language": ui_language,
                     "request_source": "user_chat",
                 }
             )
@@ -1405,6 +1415,8 @@ class MultiAgentAssistant:
             return True
         if qa_result.get("needs_repair"):
             return True
+        if qa_result.get("missing_data"):
+            return True
 
         fact_check = qa_result.get("fact_check", {})
         if isinstance(fact_check, dict) and fact_check.get("critical_issues"):
@@ -1461,6 +1473,11 @@ class MultiAgentAssistant:
         retry_agents_used: List[str] = []
         final_repair_ran = False
         simple_weather_fact_check: Optional[Dict[str, Any]] = None
+        ui_language = language
+        effective_language = infer_response_language(
+            user_query=message,
+            default=ui_language,
+        )
 
         # Reset tracking for all sub-agents to capture metrics strictly for this request
         self.supervisor.reset_llm_usage_tracking()
@@ -1474,16 +1491,19 @@ class MultiAgentAssistant:
             from agent.state import UserContext
 
             user_ctx = UserContext()
-            user_ctx["language"] = language
+            user_ctx["language"] = effective_language
+            user_ctx["ui_language"] = ui_language
             self.state["user_context"] = user_ctx
         else:
-            user_ctx["language"] = language
+            user_ctx["language"] = effective_language
+            user_ctx["ui_language"] = ui_language
 
         if LANGSMITH_AVAILABLE:
             annotate_current_run(
                 metadata={
                     "assistant_mode": "multi-agent",
-                    "language": language,
+                    "language": effective_language,
+                    "ui_language": ui_language,
                     "request_source": "user_chat",
                 }
             )
@@ -1492,7 +1512,7 @@ class MultiAgentAssistant:
         if on_status_change:
             status_msg = (
                 "🤔 A analisar o pedido..."
-                if language == "pt"
+                if ui_language == "pt"
                 else "🤔 Analyzing request..."
             )
             on_status_change(status_msg)
@@ -1502,7 +1522,7 @@ class MultiAgentAssistant:
         history_for_routing = self.state["messages"][:-1] if len(self.state["messages"]) > 1 else None
         routing = self.supervisor.route(
             message,
-            language=language,
+            language=effective_language,
             conversation_history=history_for_routing,
         )
         agents_to_call = routing.get("agents", [])
@@ -1553,7 +1573,7 @@ class MultiAgentAssistant:
             "researcher": "Local Search 🔎",
             "planner": "Planner 📅",
         }
-        name_map = name_map_pt if language == "pt" else name_map_en
+        name_map = name_map_pt if ui_language == "pt" else name_map_en
 
         # Notify status: Agents selected
         if agents_to_call:
@@ -1567,7 +1587,7 @@ class MultiAgentAssistant:
             if consulting and on_status_change:
                 msg = (
                     f"🚀 Vou consultar: {', '.join(consulting)}..."
-                    if language == "pt"
+                    if ui_language == "pt"
                     else f"🚀 Consulting: {', '.join(consulting)}..."
                 )
                 on_status_change(msg)
@@ -1579,7 +1599,7 @@ class MultiAgentAssistant:
             return self._finalize_chat_response(
                 response=direct_response,
                 message=message,
-                language=language,
+                language=effective_language,
                 agents_to_call=[],
                 routing_reasoning=reasoning,
                 agent_outputs={},
@@ -1611,14 +1631,14 @@ class MultiAgentAssistant:
                 friendly_workers = [name_map.get(w, w) for w in workers]
                 msg = (
                     f"⏳ A aguardar respostas de: {', '.join(friendly_workers)}..."
-                    if language == "pt"
+                    if ui_language == "pt"
                     else f"⏳ Waiting for: {', '.join(friendly_workers)}..."
                 )
                 on_status_change(msg)
 
             # Context for agents: language instruction + minimal follow-up context
             # Workers should focus on the CURRENT query, not be biased by history
-            agent_context = f"User language: {language}. Respond in {'Portuguese (PT-PT)' if language == 'pt' else 'English'}."
+            agent_context = f"User language: {effective_language}. Respond in {'Portuguese (PT-PT)' if effective_language == 'pt' else 'English'}."
 
             # Only add last user message for follow-up context (e.g., "E amanhã?")
             recent_msgs = self.state.get("messages", [])
@@ -1652,33 +1672,45 @@ class MultiAgentAssistant:
                         ] = agent_name
 
                     # Collect results as they complete with latency tracking
-                    for future in as_completed(future_to_agent):
-                        agent_name = future_to_agent[future]
-                        agent_latency = time_module.time() - agent_start_times[agent_name]
+                    try:
+                        for future in as_completed(future_to_agent, timeout=_WORKER_BATCH_TIMEOUT_S):
+                            agent_name = future_to_agent[future]
+                            agent_latency = time_module.time() - agent_start_times[agent_name]
 
-                        try:
-                            output = future.result()
-                            agent_outputs[agent_name] = output
+                            try:
+                                output = future.result()
+                                agent_outputs[agent_name] = output
 
-                            # Log latency to LangSmith metadata if available
-                            if LANGSMITH_AVAILABLE:
-                                annotate_current_run(
-                                    metadata={
-                                        f"agent_{agent_name}_latency_ms": int(agent_latency * 1000),
-                                        f"agent_{agent_name}_output_chars": len(output),
-                                    }
-                                )
+                                # Log latency to LangSmith metadata if available
+                                if LANGSMITH_AVAILABLE:
+                                    annotate_current_run(
+                                        metadata={
+                                            f"agent_{agent_name}_latency_ms": int(agent_latency * 1000),
+                                            f"agent_{agent_name}_output_chars": len(output),
+                                        }
+                                    )
 
-                            if verbose:
-                                print(
-                                    f"   [AGENT: {agent_name.upper()}] Finished ({len(output)} chars, {agent_latency:.2f}s)"
-                                )
-                        except Exception as e:
-                            error_type = type(e).__name__
-                            error_msg = f"Error ({error_type}): {str(e)}"
-                            agent_outputs[agent_name] = error_msg
-                            if verbose:
-                                print(f"   [AGENT: {agent_name.upper()}] Failed ({error_type}): {str(e)}")
+                                if verbose:
+                                    print(
+                                        f"   [AGENT: {agent_name.upper()}] Finished ({len(output)} chars, {agent_latency:.2f}s)"
+                                    )
+                            except Exception as e:
+                                error_type = type(e).__name__
+                                error_msg = f"Error ({error_type}): {str(e)}"
+                                agent_outputs[agent_name] = error_msg
+                                if verbose:
+                                    print(f"   [AGENT: {agent_name.upper()}] Failed ({error_type}): {str(e)}")
+                    except TimeoutError:
+                        # Some workers didn't finish within the timeout.
+                        # Results for already-completed workers are preserved.
+                        timed_out = [
+                            name for fut, name in future_to_agent.items()
+                            if name not in agent_outputs
+                        ]
+                        for timed_out_name in timed_out:
+                            agent_outputs[timed_out_name] = f"Error (TimeoutError): Worker {timed_out_name} exceeded {_WORKER_BATCH_TIMEOUT_S}s timeout."
+                        if verbose:
+                            print(f"   [TIMEOUT] Workers did not finish in {_WORKER_BATCH_TIMEOUT_S}s: {timed_out}")
             else:
                 for agent_name in workers:
                     if verbose:
@@ -1731,7 +1763,7 @@ class MultiAgentAssistant:
             simple_weather_fact_check = self._run_lightweight_weather_fact_check(
                 user_query=message,
                 weather_output=str(agent_outputs.get("weather", "")),
-                language=language,
+                language=effective_language,
                 verbose=verbose,
             )
             if simple_weather_fact_check.get("requires_full_qa"):
@@ -1758,7 +1790,7 @@ class MultiAgentAssistant:
             if on_status_change:
                 msg = (
                     "🔍 A validar completude dos dados..."
-                    if language == "pt"
+                    if ui_language == "pt"
                     else "🔍 Validating data completeness..."
                 )
                 on_status_change(msg)
@@ -1776,7 +1808,7 @@ class MultiAgentAssistant:
                 user_query=message,
                 agent_outputs=agent_outputs,
                 agents_called=workers,
-                language=language,
+                language=effective_language,
                 user_context=self.state.get("user_context"),
                 conversation_history=qa_history,
             )
@@ -1816,7 +1848,7 @@ class MultiAgentAssistant:
                         friendly_retry = [name_map.get(a, a) for a in retry_agents]
                         msg = (
                             f"🔄 A recolher dados adicionais: {', '.join(friendly_retry)}..."
-                            if language == "pt"
+                            if ui_language == "pt"
                             else f"🔄 Gathering additional data: {', '.join(friendly_retry)}..."
                         )
                         on_status_change(msg)
@@ -1843,7 +1875,7 @@ class MultiAgentAssistant:
                                     )
                                 ] = agent_name
 
-                            for future in as_completed(retry_futures):
+                            for future in as_completed(retry_futures, timeout=_WORKER_BATCH_TIMEOUT_S):
                                 agent_name = retry_futures[future]
                                 try:
                                     output = future.result()
@@ -1891,7 +1923,7 @@ class MultiAgentAssistant:
                         user_query=message,
                         agent_outputs=agent_outputs,
                         agents_called=workers + retry_agents,
-                        language=language,
+                        language=effective_language,
                         user_context=self.state.get("user_context"),
                         conversation_history=qa_history,
                     )
@@ -1924,7 +1956,9 @@ class MultiAgentAssistant:
                         list(qa_result.get("critical_issues", []))
                     )
                     qa_result["repairable_agents"] = current_repairable_agents
-                    qa_result["needs_repair"] = bool(qa_result["critical_issues"])
+                    qa_result["needs_repair"] = bool(
+                        qa_result["critical_issues"] or qa_result.get("missing_data")
+                    )
                     if qa_result.get("fact_check"):
                         qa_result["fact_check"]["disclaimers"] = merged_fc_disclaimers
                         qa_result["fact_check"]["critical_issues"] = current_fc_critical
@@ -1938,7 +1972,7 @@ class MultiAgentAssistant:
                 all_qa_warnings = self._dedupe_preserve_order(
                     list(all_qa_warnings) + list(fc_warns.get("disclaimers", []))
                 )
-            all_qa_warnings = self._sanitize_qa_disclaimers(all_qa_warnings, language)
+            all_qa_warnings = self._sanitize_qa_disclaimers(all_qa_warnings, effective_language)
             if all_qa_warnings:
                 agent_outputs["_qa_disclaimers"] = all_qa_warnings
                 if verbose:
@@ -1968,14 +2002,14 @@ class MultiAgentAssistant:
             response = self.agents["planner"].synthesize(message, agent_outputs)
         elif agent_outputs:
             # Combine agent outputs if no planner
-            response = self._combine_outputs(agent_outputs, language=language)
+            response = self._combine_outputs(agent_outputs, language=effective_language)
         else:
             # Fallback: Use researcher for general queries
             if verbose:
                 print("\n   [FALLBACK] Using researcher agent")
             response = self.agents["researcher"].invoke(
-                message, 
-                context=f"User language: {language}", 
+                message,
+                context=f"User language: {effective_language}",
                 verbose=verbose
             )
 
@@ -1988,21 +2022,21 @@ class MultiAgentAssistant:
                 draft_response=response,
                 agent_outputs=agent_outputs,
                 qa_result=qa_result,
-                language=language,
+                language=effective_language,
             )
             # Re-apply strict formatting because the QA LLM might destroy visual structure
             if "planner" in agents_to_call:
                 from agent.utils.response_formatter import finalize_worker_response
-                response = finalize_worker_response(response, "planner", message, language)
+                response = finalize_worker_response(response, "planner", message, effective_language)
             elif len(agents_to_call) == 1 and agents_to_call[0] in {"weather", "researcher", "transport"}:
                 from agent.utils.response_formatter import finalize_worker_response
-                response = finalize_worker_response(response, agents_to_call[0], message, language)
+                response = finalize_worker_response(response, agents_to_call[0], message, effective_language)
             else:
                 # Hybrid multi-agent response: unconditionally enforce PT translation of labels
                 from agent.utils.response_formatter import (
                     canonicalize_local_information_terms,
                 )
-                response = canonicalize_local_information_terms(response, language)
+                response = canonicalize_local_information_terms(response, effective_language)
 
         if "planner" in agents_to_call:
             from agent.agents.planner_agent import enforce_multi_day_quality_mode
@@ -2010,13 +2044,13 @@ class MultiAgentAssistant:
             response = enforce_multi_day_quality_mode(
                 response=response,
                 user_message=message,
-                language=language,
+                language=effective_language,
             )
 
         return self._finalize_chat_response(
             response=response,
             message=message,
-            language=language,
+            language=effective_language,
             agents_to_call=agents_to_call,
             routing_reasoning=reasoning,
             agent_outputs=agent_outputs,
@@ -2147,7 +2181,7 @@ class MultiAgentAssistant:
         """
         if not agent_outputs:
             return "Não foi possível obter informação útil dos agentes. Por favor, reformule a sua questão." if language == "pt" else "Unable to retrieve useful information from the agents. Please rephrase your question."
-        
+
         try:
             structured = self._render_structured_hybrid_response(agent_outputs, language)
             if structured:

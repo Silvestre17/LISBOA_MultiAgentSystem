@@ -38,6 +38,8 @@ _PLACEHOLDER_TOKENS = (
 _DEFAULT_LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
 _DEFAULT_NONINTERACTIVE_TRACING_OPT_IN_ENV = "LISBOA_ENABLE_CLI_LANGSMITH"
 _TRUTHY_VALUES = {"1", "true", "yes", "on"}
+_LAST_LANGSMITH_RUNTIME_FAILURE: Optional[Dict[str, str]] = None
+_LANGSMITH_RUNTIME_HANDLER_INSTALLED = False
 
 
 def _noop_traceable(*args, **kwargs):
@@ -137,15 +139,75 @@ def _disabled_status(reason: str, requested: bool) -> Dict[str, Any]:
     }
 
 
+def _classify_langsmith_runtime_failure(message: str) -> str:
+    """Classify a LangSmith runtime persistence failure into a compact state."""
+    lowered = (message or "").lower()
+    if any(token in lowered for token in ("quota", "credit", "credits", "billing", "429", "rate limit")):
+        return "failed_remote_quota"
+    if any(token in lowered for token in ("401", "403", "unauthorized", "forbidden", "api key")):
+        return "failed_remote_auth"
+    if any(token in lowered for token in ("timeout", "connection", "dns", "network", "ssl", "temporarily unavailable")):
+        return "failed_remote_network"
+    return "failed_remote"
+
+
+def _record_langsmith_runtime_failure(message: str) -> None:
+    """Persist the last observed LangSmith runtime failure for later summaries."""
+    global _LAST_LANGSMITH_RUNTIME_FAILURE
+
+    normalized_message = str(message or "").strip()
+    if not normalized_message:
+        return
+
+    _LAST_LANGSMITH_RUNTIME_FAILURE = {
+        "message": normalized_message,
+        "persistence_state": _classify_langsmith_runtime_failure(normalized_message),
+    }
+
+
+def get_last_langsmith_runtime_failure() -> Optional[Dict[str, str]]:
+    """Return the latest captured LangSmith runtime failure, if any."""
+    if not _LAST_LANGSMITH_RUNTIME_FAILURE:
+        return None
+    return dict(_LAST_LANGSMITH_RUNTIME_FAILURE)
+
+
+class _LangSmithRuntimeFailureHandler(logging.Handler):
+    """Capture LangSmith SDK runtime persistence failures without noisy console spam."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = record.getMessage()
+        except Exception:
+            message = str(getattr(record, "msg", "") or "")
+
+        lowered = message.lower()
+        if not any(token in lowered for token in ("langsmith", "smith.langchain", "run", "trace", "project", "ingest", "batch")):
+            return
+        _record_langsmith_runtime_failure(message)
+
+
+def _install_langsmith_runtime_handler() -> None:
+    """Attach a lightweight runtime-error capture handler to LangSmith loggers once."""
+    global _LANGSMITH_RUNTIME_HANDLER_INSTALLED
+
+    if _LANGSMITH_RUNTIME_HANDLER_INSTALLED:
+        return
+
+    handler = _LangSmithRuntimeFailureHandler(level=logging.ERROR)
+    for logger_name in ("langsmith", "langsmith.client", "langsmith.run_helpers"):
+        target_logger = logging.getLogger(logger_name)
+        target_logger.setLevel(logging.ERROR)
+        target_logger.addHandler(handler)
+
+    _LANGSMITH_RUNTIME_HANDLER_INSTALLED = True
+
+
 def _load_langsmith_symbols() -> Optional[Dict[str, Any]]:
     """Import LangSmith runtime symbols only when tracing is actually requested."""
     try:
-        import logging
+        _install_langsmith_runtime_handler()
 
-        # Suppress LangSmith's noisy error logs about quotas/connection failures
-        logging.getLogger("langsmith").setLevel(logging.CRITICAL)
-        logging.getLogger("langsmith.client").setLevel(logging.CRITICAL)
-        
         from langsmith import Client, ContextThreadPoolExecutor
         from langsmith.run_helpers import (
             get_current_run_tree,
@@ -375,6 +437,7 @@ def get_langsmith_request_tracking_status(
         if resolved.get("enabled") or resolved.get("requested")
         else None
     )
+    runtime_failure = get_last_langsmith_runtime_failure()
 
     run_id = None
     if current_run_attached:
@@ -383,6 +446,19 @@ def get_langsmith_request_tracking_status(
             if value is not None and str(value).strip():
                 run_id = str(value).strip()
                 break
+
+    if resolved.get("enabled") and current_run_attached and runtime_failure:
+        return {
+            "tracking_state": "tracking_request_failed_remote",
+            "status_label": "enabled",
+            "save_attempted": True,
+            "persistence_state": runtime_failure.get("persistence_state", "failed_remote"),
+            "current_run_attached": True,
+            "project_name": project_name,
+            "run_id": run_id,
+            "reason": reason,
+            "note": runtime_failure.get("message", reason),
+        }
 
     if resolved.get("enabled") and current_run_attached:
         return {

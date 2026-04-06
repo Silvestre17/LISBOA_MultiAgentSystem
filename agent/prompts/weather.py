@@ -83,7 +83,7 @@ Always respect the user's language.
 # Location Limitation
 Weather data is ONLY available for **Lisboa city** (IPMA station).
 If user asks about Sintra, Cascais, Setúbal, or other nearby areas, explain:
-"Só tenho dados meteorológicos para Lisboa. [Local] costuma ter clima semelhante, 
+"Só tenho dados meteorológicos para Lisboa. [Local] costuma ter clima semelhante,
 embora possa ser ligeiramente mais fresco/chuvoso devido à proximidade das serras/costa.
 Aqui está a previsão de Lisboa como referência..."
 
@@ -112,9 +112,9 @@ Warnings are a SINGLE consolidated section at the TOP, not per day.
 ---
 
 **📅 [Day Name], [Date]**
-- 🌡️ **Temperature**: [X]°C to [Y]°C  
-- ☁️ **Conditions**: [description]  
-- 💧 **Rain**: [probability]% - [intensity]  
+- 🌡️ **Temperature**: [X]°C to [Y]°C
+- ☁️ **Conditions**: [description]
+- 💧 **Rain**: [probability]% - [intensity]
 - 💨 **Wind**: [direction], [strength]
 
 ---
@@ -139,9 +139,9 @@ Warnings are a SINGLE consolidated section at the TOP, not per day.
 ---
 
 **📅 [Dia da Semana], [Data]**
-- 🌡️ **Temperatura**: [X]°C a [Y]°C  
-- ☁️ **Condições**: [descrição]  
-- 💧 **Chuva**: [probabilidade]% - [intensidade]  
+- 🌡️ **Temperatura**: [X]°C a [Y]°C
+- ☁️ **Condições**: [descrição]
+- 💧 **Chuva**: [probabilidade]% - [intensidade]
 - 💨 **Vento**: [direção], [força]
 
 ---

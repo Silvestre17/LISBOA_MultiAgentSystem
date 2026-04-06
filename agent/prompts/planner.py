@@ -127,7 +127,7 @@ Do not use non-existent URLs:
    - Rain > 60%? Recommend indoor activities, do not suggest parks/outdoor
    - Extreme heat? Schedule outdoor for morning/evening
    - Warnings? Mention and adapt plan
-   
+
 2. **Time-efficient**:
    - Group nearby locations
    - Consider opening hours
@@ -151,7 +151,7 @@ Do not use non-existent URLs:
 
 ## Metro stations that do not exist (do not mention):
 ❌ "Estação Belém" - does not exist
-❌ "Estação Jerónimos" - does not exist  
+❌ "Estação Jerónimos" - does not exist
 ❌ "Estação Torre de Belém" - does not exist
 ❌ "Estação Cascais" - does not exist
 ❌ "Estação Sintra" - does not exist

@@ -1,7 +1,7 @@
 # ==========================================================================
 # Master Thesis - Planner Agent
 #   - André Filipe Gomes Silvestre, 20240502
-# 
+#
 #   Itinerary synthesis agent. Combines outputs from other agents
 #   into coherent travel plans.
 # ==========================================================================
@@ -582,12 +582,12 @@ def _planner_response_requires_fallback(cleaned_response: str) -> bool:
 class PlannerAgent(BaseAgent):
     """
     Itinerary planner agent that synthesizes outputs from other agents.
-    
+
     Responsibilities:
         - Combine weather, transport, and places data
         - Apply constraints (mobility, time, weather)
         - Generate coherent, practical itineraries
-    
+
     Note:
         This agent has NO tools. It only synthesizes data gathered by worker
         agents and can surface QA disclaimers in the final planning response.
@@ -595,16 +595,16 @@ class PlannerAgent(BaseAgent):
         includes the planner. Direct and simple single-domain queries can
         return without using this agent.
     """
-    
+
     def __init__(self):
         """Initializes the planner agent."""
         super().__init__("planner")
         self.system_prompt = get_planner_prompt()
-    
+
     @traceable(name="planner_agent", run_type="chain", tags=["sub-agent", "planner"])
     def invoke(
-        self, 
-        user_message: str, 
+        self,
+        user_message: str,
         weather_data: str = "",
         transport_data: str = "",
         places_data: str = "",
@@ -613,7 +613,7 @@ class PlannerAgent(BaseAgent):
     ) -> str:
         """
         Creates an itinerary from gathered data.
-        
+
         Args:
             user_message: The user's original query.
             weather_data: Output from weather agent.
@@ -621,7 +621,7 @@ class PlannerAgent(BaseAgent):
             places_data: Output from researcher agent (places).
             events_data: Output from researcher agent (events).
             qa_disclaimers: Optional list of QA-flagged data limitations.
-            
+
         Returns:
             str: Formatted itinerary.
         """
@@ -666,7 +666,7 @@ class PlannerAgent(BaseAgent):
             )
             if compact_transport:
                 context_parts.append(compact_transport)
-        
+
         # Inject QA disclaimers so the planner transparently communicates limitations
         if qa_disclaimers:
             disclaimer_text = "\n".join(f"- ⚠️ {d}" for d in qa_disclaimers)
@@ -674,7 +674,7 @@ class PlannerAgent(BaseAgent):
                 f"## ⚠️ Data Limitations (from QA validation)\n"
                 f"Include these caveats in your response where relevant:\n{disclaimer_text}"
             )
-        
+
         context = "\n\n---\n\n".join(context_parts) if context_parts else "No additional data provided."
         allowed_places = _extract_allowed_place_names("\n".join(part for part in [places_data, events_data] if part))
         accessibility_requested = _query_requests_accessibility(user_message)
@@ -718,7 +718,7 @@ class PlannerAgent(BaseAgent):
             SystemMessage(content=f"# Data from Specialized Agents\n\n{context}"),
             HumanMessage(content=f"Based on the data above, create an itinerary for: {user_message}")
         ]
-        
+
         # Planner has no tools - LLM call with retry for Azure content filter
         try:
             response = self._safe_llm_invoke(self.llm, messages)
@@ -811,19 +811,19 @@ class PlannerAgent(BaseAgent):
             user_query=user_message,
             language=language,
         )
-    
+
     def synthesize(self, user_message: str, agent_outputs: Dict[str, str]) -> str:
         """
         Synthesizes outputs from multiple agents into a response.
-        
+
         Extracts QA disclaimers from internal keys and passes them
         to the planner so data limitations are surfaced to the user.
-        
+
         Args:
             user_message: Original user query.
             agent_outputs: Dict mapping agent names to their outputs.
                 May contain '_qa_disclaimers' (list) from QA validation.
-            
+
         Returns:
             str: Synthesized response.
         """

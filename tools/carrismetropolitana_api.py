@@ -19,23 +19,22 @@
 # pip install requests langchain-core
 
 import logging
-import math
 import os
 import re
-import time
 import unicodedata
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import requests
 from langchain_core.tools import tool
 
 try:
-    from config import Config
+    import config as _project_config
 except ModuleNotFoundError:
     import sys
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-    from config import Config
+else:
+    del _project_config
 
 logger = logging.getLogger(__name__)
 

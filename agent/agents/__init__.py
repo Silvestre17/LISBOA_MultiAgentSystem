@@ -1,7 +1,7 @@
 # ==========================================================================
 # Master Thesis - Multi-Agent Package
 #   - André Filipe Gomes Silvestre, 20240502
-# 
+#
 #   Specialized agents for the Multi-Agent System.
 #   Each agent has focused responsibilities and tools.
 # ==========================================================================

@@ -25,6 +25,8 @@ from agent.agents.weather_agent import WeatherAgent
 from agent.utils.langsmith_tracing import (
     LANGSMITH_AVAILABLE,
     get_langsmith_scoped_project_name,
+    get_langsmith_tracing_status,
+    get_last_langsmith_runtime_failure,
     tracing_project_override,
 )
 from eval.llm_judge import LLMJudge
@@ -320,7 +322,7 @@ def run_isolated_agent(domain: str, query: str, config: dict):
             f"Setup Error: {str(e)}",
             build_usage_payload({}, model_id=response_model_id, call_count=0),
         )
-    
+
     # Track execution
     start_time = time.time()
     tools_called = []
@@ -395,6 +397,7 @@ def run_benchmark(
         BENCHMARK_LANGSMITH_SCOPE_LABEL,
         env_name=BENCHMARK_LANGSMITH_PROJECT_ENV,
     )
+    langsmith_status = get_langsmith_tracing_status()
     if LANGSMITH_AVAILABLE:
         print(
             f"[LangSmith] Benchmark traces will be saved to project: {benchmark_langsmith_project}"
@@ -402,6 +405,7 @@ def run_benchmark(
     else:
         print(
             "[LangSmith] Benchmark tracing is inactive. "
+            f"{langsmith_status.get('reason', 'LangSmith tracing is disabled')} "
             "Set LANGSMITH_TRACING=true with valid credentials to save these runs to project: "
             f"{benchmark_langsmith_project}"
         )
@@ -410,7 +414,7 @@ def run_benchmark(
         print("=" * 60)
         print(f"STARTING ACADEMIC LISBOA BENCHMARK (LIMIT={limit})")
         print("=" * 60)
-        
+
         resolved_groundtruth_path = resolve_groundtruth_path(groundtruth_path)
         pricing_by_model = resolve_pricing_catalog(pricing_by_model)
         groundtruth_queries = load_groundtruth_queries(resolved_groundtruth_path)
@@ -471,15 +475,15 @@ def run_benchmark(
             )
             response_model_id = response_model_manifest["model_id"]
             print(f"\nEvaluating Model: {response_model_id}")
-            
+
             model_consecutive_errors = 0
-            
+
             for idx, item in enumerate(groundtruth_queries):
                 print(f"  [{idx+1}/{len(groundtruth_queries)}] [{item['domain'].upper()}] {item['query'][:50]}...")
-                
+
                 response, tools, retrieved_context, latency, error, response_usage = run_isolated_agent(
-                    domain=item['domain'], 
-                    query=item['query'], 
+                    domain=item['domain'],
+                    query=item['query'],
                     config=model_config
                 )
                 response_cost = build_cost_payload(
@@ -564,7 +568,7 @@ def run_benchmark(
 
                 score_display = f"{judge_scores['composite_score']:.2f}/5.0" if judge_scores['composite_score'] is not None else "N/A"
                 print(f"          -> Score: {score_display} | Latency: {latency:.2f}s | Reason: {judge_scores['reasoning']}")
-                
+
                 if error is not None and ("Setup Error" in error or model_consecutive_errors >= 2):
                     print(f"          -> ABORTING {response_model_id}: Model is failing continuously. Saving costs.")
                     break
@@ -603,8 +607,15 @@ def run_benchmark(
             },
             output_path,
         )
-        
+
         print(f"\nBenchmark complete. Results saved to {output_path}")
+        runtime_failure = get_last_langsmith_runtime_failure()
+        if runtime_failure:
+            print(
+                "[LangSmith] Latest persistence status: "
+                f"{runtime_failure.get('persistence_state', 'failed_remote')} - "
+                f"{runtime_failure.get('message', '')}"
+            )
 
 
 def _build_summary(results: list) -> dict:
@@ -647,12 +658,12 @@ def _build_summary(results: list) -> dict:
     overall_response_cost = combine_cost_payloads([r.get("response_cost_usd", {}) for r in results])
     overall_evaluation_cost = combine_cost_payloads([r.get("evaluation_cost_usd", {}) for r in results])
     overall_combined_cost = combine_cost_payloads([r.get("combined_cost_usd", {}) for r in results])
-    
+
     # Overall averages
     scores = [r["scores"]["composite_score"] for r in results if r["scores"]["composite_score"] is not None]
     latencies = [r["latency_s"] for r in results if r["error"] is None]
     errors = [r for r in results if r["error"] is not None]
-    
+
     summary = {
         "overall": {
             "total_evaluated": len(results),
@@ -679,7 +690,7 @@ def _build_summary(results: list) -> dict:
         "per_domain": {},
         "per_response_model": {},
     }
-    
+
     # Per-domain breakdown
     domains = set(r["domain"] for r in results)
     for domain in sorted(domains):
@@ -692,7 +703,7 @@ def _build_summary(results: list) -> dict:
         domain_response_cost = combine_cost_payloads([r.get("response_cost_usd", {}) for r in domain_results])
         domain_evaluation_cost = combine_cost_payloads([r.get("evaluation_cost_usd", {}) for r in domain_results])
         domain_combined_cost = combine_cost_payloads([r.get("combined_cost_usd", {}) for r in domain_results])
-        
+
         summary["per_domain"][domain] = {
             "count": len(domain_results),
             "errors": sum(1 for r in domain_results if r["error"] is not None),
@@ -712,7 +723,7 @@ def _build_summary(results: list) -> dict:
             "evaluation_cost_usd": _compact_cost(domain_evaluation_cost),
             "combined_cost_usd": _compact_cost(domain_combined_cost),
         }
-    
+
     # Per-model breakdown
     response_models = set(r["response_model"] for r in results)
     for model in sorted(response_models):
@@ -740,7 +751,7 @@ def _build_summary(results: list) -> dict:
             "evaluation_cost_usd": _compact_cost(model_evaluation_cost),
             "combined_cost_usd": _compact_cost(model_combined_cost),
         }
-    
+
     return summary
 
 
@@ -794,13 +805,13 @@ if __name__ == "__main__":
         help="Output filename prefix inside eval/results/benchmark/.",
     )
     args = parser.parse_args()
-    
+
     limit = 5 if args.mode == "run_test" else args.limit
     selected_models = resolve_response_models(
         args.response_models,
         temperature=args.response_temperature,
     )
-    
+
     run_benchmark(
         limit=limit,
         models=selected_models,

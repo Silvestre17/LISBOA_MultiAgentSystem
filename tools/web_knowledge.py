@@ -1,7 +1,7 @@
 # ==========================================================================
 # Master Thesis - Web Knowledge Tool
 #   - André Filipe Gomes Silvestre, 20240502
-# 
+#
 #   Real-time web search capability for the Researcher Agent.
 #   Implements a "Search Waterfall" strategy:
 #     1. Tavily Search (Optimized for AI, requires API Key)
@@ -218,7 +218,7 @@ def _search_tavily(query: str, language: str = "pt", live_query: bool = False) -
 
     Args:
         query (str): The topic to search (e.g., "História do Castelo de São Jorge").
-    
+
     Returns:
         str: Comprehensive search results from the best available source.
     """
@@ -285,7 +285,7 @@ def _search_tavily(query: str, language: str = "pt", live_query: bool = False) -
                 output.append(
                     "⚠️ Não encontrei um resultado oficial recente com data nas fontes devolvidas. Trata avisos antigos como contexto histórico, não como confirmação de que a perturbação continua ativa agora."
                 )
-        
+
         # Format results nicely
         for res in sorted_results[:5]:
             url = res.get('url', 'N/A')
@@ -301,7 +301,7 @@ def _search_tavily(query: str, language: str = "pt", live_query: bool = False) -
                     source_badge = f"{source_badge} | ⚪ undated"
             # Append full content without truncation
             output.append(f"\n### {source_badge} [{domain}]({url})\n{content}")
-        
+
         return "\n".join(output)
 
     except Exception as e:
@@ -316,7 +316,7 @@ def _search_duckduckgo(query: str) -> Optional[str]:
 
     Args:
         query (str): The topic to search (e.g., "História do Castelo de São Jorge").
-    
+
     Returns:
         str: Comprehensive search results from the best available source.
     """
@@ -324,7 +324,7 @@ def _search_duckduckgo(query: str) -> Optional[str]:
         # standardizing usage via wrapper for clarity/control
         wrapper = DuckDuckGoSearchAPIWrapper(backend="html")
         ddg_tool = DuckDuckGoSearchRun(api_wrapper=wrapper)
-        
+
         result = ddg_tool.invoke(query)
 
         if not result:
@@ -347,7 +347,7 @@ def _search_wikipedia(query: str, language: str = "pt") -> Optional[str]:
     Args:
         query (str): The topic to search (e.g., "História do Castelo de São Jorge").
         language (str): 'pt' for Portuguese, 'en' for English. Default 'pt'.
-    
+
     Returns:
         str: Comprehensive search results from the best available source.
     """
@@ -355,20 +355,20 @@ def _search_wikipedia(query: str, language: str = "pt") -> Optional[str]:
         wikipedia.set_lang(language)
         # Search for the page matching the query
         search_results = wikipedia.search(query, results=1)
-        
+
         if not search_results:
             return None
-            
+
         page_title = search_results[0]
-        
+
         # Get the page object
         page = wikipedia.page(page_title, auto_suggest=False)
-        
-        # Use content summary. 
-        # Note: 'summary' usually retrieves the intro section. 
+
+        # Use content summary.
+        # Note: 'summary' usually retrieves the intro section.
         # We avoid 'sentences=...' to get the full intro.
         summary = page.summary
-        
+
         output = f"""📚 **Wikipédia: {page.title}**
 🔗 URL: {page.url}
 
@@ -388,26 +388,26 @@ def _search_wikipedia(query: str, language: str = "pt") -> Optional[str]:
 def search_history_culture(query: str, language: str = "pt") -> str:
     """
     Search the web for historical facts, cultural context, and live information.
-    
+
     Uses a waterfall strategy to ensure the best possible result:
     1. **Tavily Search** (Best for AI, high quality, requires Key).
     2. **DuckDuckGo** (Broad fallback).
     3. **Wikipedia** (Encyclopedia fallback).
-    
+
     Args:
         query (str): The topic to search (e.g., "História do Castelo de São Jorge").
         language (str): 'pt' for Portuguese, 'en' for English. Default 'pt'.
-    
+
     Returns:
         str: Comprehensive search results from the best available source.
     """
-    
+
     # Context enhancement: Ensure search is localized to Lisbon/Portugal if needed
     # (Kept from original logic as it fits the project scope)
     search_query = query
     if "Lisboa" not in query and "Portugal" not in query:
         search_query = f"{query} Lisboa Portugal"
-    
+
     live_query = _is_live_info_query(query)
 
     # Prefer encyclopedic sources for background history/culture.
@@ -434,7 +434,7 @@ def search_history_culture(query: str, language: str = "pt") -> str:
     result = _search_wikipedia_with_fallback(query, language)
     if result:
         return result
-        
+
     return f"❌ Não foi possível encontrar informações sobre: '{query}' nas fontes disponíveis (Tavily, DDG, Wiki)."
 
 # ==========================================================================
@@ -446,14 +446,14 @@ if __name__ == "__main__":
     print("\033[1m" + "=" * 60 + "\033[0m")
     print("\033[1m🧪 Web Knowledge Tool Test (No Truncation)\033[0m")
     print("\033[1m" + "=" * 60 + "\033[0m")
-    
+
     test_queries = [
         ("História do Castelo de São Jorge", "pt"),
         ("Greve Metro Lisboa", "pt"),
         ("What is happening with Lisbon metro service today?", "en"),
         ("History of Belém Tower", "en"),
     ]
-    
+
     for q, lang in test_queries:
         print(f"\n\033[1m🔎 Testing Query:\033[0m '{q}' ({lang})")
         try:
@@ -462,7 +462,7 @@ if __name__ == "__main__":
             print(result)
             print("-" * 40)
             print(f"📊 Result Length: {len(result)} chars")
-            
+
         except Exception as e:
             print(f"❌ Failed: {e}")
 

@@ -149,7 +149,7 @@ SYSTEM_PROMPT_PT = """Tu és o **Assistente Urbano de Lisboa**, um agente de IA 
 # Regras de Precisão
 
 1.  **LIMITE PREVISÃO METEOROLÓGICA**: Máximo 5 DIAS.
-    *   Hoje é {current_date}. 
+    *   Hoje é {current_date}.
     *   Se o utilizador pedir para além de 5 dias: "Desculpa, só tenho previsões até 5 dias. Para [date], ainda não há dados disponíveis."
 
 2.  **ESTRUTURA & TAMANHO**:
