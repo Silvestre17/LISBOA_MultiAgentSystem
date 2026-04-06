@@ -29,8 +29,6 @@ from typing import Any, Dict, Optional
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from agent.utils.langsmith_tracing import LANGSMITH_STATUS
-
 try:
     from config import Config
 except ModuleNotFoundError:
@@ -78,23 +76,23 @@ class LLMFactory:
         The current heuristic treats o-series models and most `gpt-5` family
         deployments as reasoning-style models. Explicit chat variants such as
         `gpt-5-chat` are excluded from that rule.
-        
+
         Args:
             model_name (str): The model name to check.
-            
+
         Returns:
             bool: True if this is a reasoning model, False otherwise.
         """
         model_lower = model_name.lower()
-        
+
         # Check for o-series models (o1, o3, o4)
         is_o_series = any(x in model_lower for x in ["o1", "o3", "o4", "o-"])
-        
+
         # Check for gpt-5 (but NOT gpt-5-chat which supports temperature)
         is_gpt5_reasoning = (
             "gpt-5" in model_lower and "gpt-5-chat" not in model_lower
         )
-        
+
         return is_o_series or is_gpt5_reasoning
 
     @staticmethod
@@ -465,18 +463,18 @@ class LLMFactory:
 if __name__ == "__main__":
     """
     Test script for the LLM Factory.
-    
+
     This script tests the LLM Factory by:
         1. Creating an LLM instance with the default provider
         2. Displaying the model information
         3. Sending a simple test prompt
         4. Displaying the response
-    
+
     Expected Output (with valid API key):
         - LLM successfully initialized
         - Model name displayed
         - Response to test prompt shown
-    
+
     Expected Output (without valid API key):
         - Error message with troubleshooting tips
     """

@@ -118,7 +118,7 @@ def _get_model_lookup_candidates(model_id: str | None) -> list[str]:
     if "::" in normalized_model_id:
         candidates.append(normalized_model_id.split("::", 1)[1])
 
-    for alias in _MODEL_PRICING_ALIASES.get(normalized_model_id, ()): 
+    for alias in _MODEL_PRICING_ALIASES.get(normalized_model_id, ()):
         if alias not in candidates:
             candidates.append(alias)
 

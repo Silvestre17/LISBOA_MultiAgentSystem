@@ -103,7 +103,6 @@ warnings.filterwarnings("ignore", category=ImportWarning)
 if TYPE_CHECKING:
     from langchain_chroma import Chroma
     from langchain_core.documents import Document
-    from langchain_huggingface import HuggingFaceEmbeddings
 
 # ==========================================================================
 # Constants

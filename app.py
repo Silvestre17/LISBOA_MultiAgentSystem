@@ -143,11 +143,11 @@ TRANSLATIONS = {
         "info_objective": "System Capabilities",
         "info_objective_text": "LISBOA (Lisbon Itinerary System Based On AI) is a state-of-the-art intelligent platform serving both tourists and residents. It seamlessly integrates real-time mobility APIs, detailed meteorological forecasts, and a rich, dynamically updated database of cultural events and local landmarks to provide highly personalized, context-aware assistance.",
         "info_data_sources": "Integrated Networks",
-        "info_data_sources_text": """- **IPMA API** - Live meteorological updates  
-- **Metro de Lisboa** - Real-time subway status  
-- **Carris & Carris Metropolitana** - Surface transport tracking  
-- **CP (Comboios de Portugal)** - Railway networks  
-- **Lisboa Aberta** - Essential local services  
+        "info_data_sources_text": """- **IPMA API** - Live meteorological updates
+- **Metro de Lisboa** - Real-time subway status
+- **Carris & Carris Metropolitana** - Surface transport tracking
+- **CP (Comboios de Portugal)** - Railway networks
+- **Lisboa Aberta** - Essential local services
 - **VisitLisboa** - Tourism and cultural repositories""",
         "info_privacy": "Privacy First",
         "info_privacy_text": "- Your API credentials are stored locally in your browser session only\n- No conversation data is stored permanently on any server\n- Geolocation data is strictly processed per query",
@@ -252,11 +252,11 @@ NOVA IMS - Universidade NOVA de Lisboa
         "info_objective": "Capacidades do Sistema",
         "info_objective_text": "LISBOA (Lisbon Itinerary System Based On AI) é uma plataforma de ponta destinada a residentes e turistas. Integra perfeitamente APIs de mobilidade em tempo real, dados meteorológicos e um repositório dinâmico de eventos culturais para garantir recomendações personalizadas sempre atualizadas.",
         "info_data_sources": "Redes Integradas",
-        "info_data_sources_text": """- **API IPMA** - Atualizações meteorológicas  
-- **Metro de Lisboa** - Tempos de espera e estado  
-- **Carris & Carris Metropolitana** - Posições GPS e paragens  
-- **CP (Comboios de Portugal)** - Horários e serviços  
-- **Lisboa Aberta** - Dados essenciais da cidade  
+        "info_data_sources_text": """- **API IPMA** - Atualizações meteorológicas
+- **Metro de Lisboa** - Tempos de espera e estado
+- **Carris & Carris Metropolitana** - Posições GPS e paragens
+- **CP (Comboios de Portugal)** - Horários e serviços
+- **Lisboa Aberta** - Dados essenciais da cidade
 - **VisitLisboa** - Hub oficial de turismo""",
         "info_privacy": "Privacidade e Segurança",
         "info_privacy_text": "- As suas credenciais API são guardadas localmente apenas na sua sessão\n- Nenhum dado de conversa é guardado permanentemente\n- Operações de geolocalização descartadas após o uso",

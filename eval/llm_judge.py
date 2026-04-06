@@ -210,7 +210,7 @@ class LLMJudge:
         )
         self.base_llm = base_llm
         self.llm = base_llm.with_structured_output(LLMJudgeScore, include_raw=True)
-        
+
         self.prompt = PromptTemplate.from_template(JUDGE_PROMPT_TEMPLATE)
         self.provider = provider
         self.model_name = model_name

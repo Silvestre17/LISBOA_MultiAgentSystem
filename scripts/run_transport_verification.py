@@ -1,16 +1,16 @@
-# ========================================================================== 
+# ==========================================================================
 # Master Thesis
 #   - André Filipe Gomes Silvestre, 20240502
-# 
+#
 # Transport verification harness for development testing, deterministic tool
 # paths, TransportAgent invoke, TransportAgent subgraph execution, and optional
 # MultiAgentAssistant chat.
-# 
+#
 # This script generates JSON + Markdown verification reports for a fixed
 # catalogue of transport queries so scripted test scenarios and regression
 # checks can be reviewed quickly during development. It is intentionally kept
 # outside the formal evaluation framework in `eval/`.
-# 
+#
 # Run from the repository root with a relative path:
 #   python scripts/run_transport_verification.py --limit 4
 # ==========================================================================
@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
 from dataclasses import asdict, dataclass

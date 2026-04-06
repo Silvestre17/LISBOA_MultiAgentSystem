@@ -23,7 +23,6 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-import pytest
 
 from eval.validators.response_heuristics import (
     check_emoji_density,
@@ -268,20 +267,20 @@ class TestCheckHallucinatedFeatures:
     def test_purchase_tickets_claim_is_hallucination(self):
         r = check_hallucinated_features("I can purchase your tickets directly here.")
         assert r["hallucinated"]
-    
+
     def test_ferry_schedule_claim_is_hallucination(self):
         """Positive ferry schedule claims should be flagged because that data is not supported in-runtime."""
         r = check_hallucinated_features("The next Transtejo ferry departs at 18:10 with live updates.")
         assert r["hallucinated"]
         assert "Ferry schedule/live data" in r["flagged_claims"]
-    
+
     def test_ferry_limitation_note_is_not_a_hallucination(self):
         """An honest limitation note about ferries should not be misclassified as a fake capability."""
         r = check_hallucinated_features(
             "I can't verify live ferry departures in this runtime, so please check the official operator page."
         )
         assert not r["hallucinated"]
-    
+
     def test_shared_bike_live_availability_claim_is_hallucination(self):
         """Positive Gira or scooter live-availability claims should be flagged as unsupported."""
         r = check_hallucinated_features("There are 7 Gira bikes available live at the nearest dock.")

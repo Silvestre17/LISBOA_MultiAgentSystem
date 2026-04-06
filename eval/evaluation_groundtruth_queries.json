@@ -42,14 +42,15 @@
     },
     {
         "id": "W04",
-        "query": "Should I bring a jacket if I'm visiting Lisbon this Friday?",
+        "query": "What will the weather be like in Lisbon tomorrow?",
         "domain": "weather",
         "expected_tools": [
             "get_weather_forecast"
         ],
         "expected_facts": [
-            "Friday's exact temperature forecast",
-            "Conclusion if a jacket makes sense"
+            "Tomorrow's temperature min/max",
+            "Tomorrow's overall weather conditions",
+            "Rain probability for tomorrow"
         ],
         "language": "en",
         "edge_case": false
@@ -125,30 +126,32 @@
     },
     {
         "id": "W10",
-        "query": "Há alertas meteorológicos para o fim de semana?",
+        "query": "Há avisos meteorológicos ativos e vai chover amanhã em Lisboa?",
         "domain": "weather",
         "expected_tools": [
             "get_weather_warnings",
             "get_weather_forecast"
         ],
         "expected_facts": [
-            "Information regarding any IPMA warnings",
-            "Weekend forecast overview"
+            "Estado dos avisos meteorológicos ativos do IPMA",
+            "Probabilidade de chuva para amanhã",
+            "Temperatura mínima e máxima para amanhã"
         ],
         "language": "pt",
         "edge_case": false
     },
     {
         "id": "W11",
-        "query": "Is it safe to go sailing tomorrow?",
+        "query": "Is it safe to go sailing in Lisbon tomorrow?",
         "domain": "weather",
         "expected_tools": [
             "get_weather_warnings",
             "get_weather_forecast"
         ],
         "expected_facts": [
-            "Wind conditions for tomorrow",
-            "Any active sea/wind warnings"
+            "Tomorrow's wind conditions for Lisbon",
+            "Any relevant wind or rough-sea warning if present",
+            "Cautious recommendation based on available forecast and warnings"
         ],
         "language": "en",
         "edge_case": true,
@@ -264,23 +267,25 @@
             "get_metro_line_wait_times"
         ],
         "expected_facts": [
-            "Real-time wait time in minutes/seconds for the next train in Telheiras direction (usually 1st and 2nd next trains)"
+            "Real-time wait times for the next Green line train or trains from Cais do Sodré",
+            "Direction information when available"
         ],
         "language": "en",
         "edge_case": false
     },
     {
         "id": "T07",
-        "query": "Quero ir para o Porto de comboio a partir de Santa Apolónia.",
+        "query": "Quero apanhar o ferry para Cacilhas agora.",
         "domain": "transport",
         "expected_tools": [],
         "expected_facts": [
-            "System only covers Lisbon Metropolitan Area (Sintra, Cascais, Azambuja, Fertagus, Sado lines)"
+            "O runtime não confirma diretamente ferries Transtejo/Soflusa",
+            "O sistema só valida diretamente Metro de Lisboa, Carris Urban, Carris Metropolitana e CP"
         ],
         "language": "pt",
         "edge_case": true,
-        "edge_type": "geographic_out_of_bounds",
-        "expected_behavior": "Inform user that only AML suburban lines are covered (Sintra, Cascais, Azambuja, Fertagus, Sado)"
+        "edge_type": "unsupported_provider",
+        "expected_behavior": "Explicar que a informação dos ferries Transtejo/Soflusa não está disponível no sistema e evitar inventar horários, tarifas, ETAs ou estado em tempo real"
     },
     {
         "id": "T08",
@@ -312,15 +317,15 @@
     },
     {
         "id": "T10",
-        "query": "Is the tram 28E running?",
+        "query": "What route does tram 28E follow?",
         "domain": "transport",
         "expected_tools": [
             "carris_get_routes"
         ],
         "expected_facts": [
-            "Information about the 28E tram route",
             "Route connects Martim Moniz to Campo de Ourique (Prazeres)",
-            "Approximately 35-38 stops, ~45-60 minutes journey depending on traffic"
+            "Historic central Lisbon corridor via areas such as Graça, Alfama, Baixa, Chiado or Estrela",
+            "Carris Urban is the operator"
         ],
         "language": "en",
         "edge_case": false
@@ -358,17 +363,16 @@
         "id": "T13",
         "query": "I need to go to Setúbal. Where can I catch a Fertagus train?",
         "domain": "transport",
-        "expected_tools": [
-            "search_cp_stations",
-            "plan_train_trip"
-        ],
+        "expected_tools": [],
         "expected_facts": [
-            "Fertagus operates from Roma-Areeiro to Setúbal",
-            "Key boarding stations include Roma-Areeiro, Entrecampos, Sete Rios, Campolide",
-            "Crosses the Tagus via 25 de Abril Bridge"
+            "Fertagus trains are not directly verified in this runtime",
+            "The system should avoid inventing Fertagus schedules, fares, ETAs or real-time status",
+            "Only Metro de Lisboa, Carris Urban, Carris Metropolitana and CP are directly confirmed in this runtime"
         ],
         "language": "en",
-        "edge_case": false
+        "edge_case": true,
+        "edge_type": "unsupported_provider",
+        "expected_behavior": "Explain honestly that Fertagus is not directly confirmed in this runtime and avoid inventing schedules, fares, ETAs or real-time status"
     },
     {
         "id": "T14",
@@ -717,7 +721,7 @@
             "search_cultural_events"
         ],
         "expected_facts": [
-            "List of upcoming music events matching the temporal query"
+            "Upcoming music events matching the requested weekend window, or a clear no-results message if none are available"
         ],
         "language": "en",
         "edge_case": false
@@ -730,8 +734,8 @@
             "search_cultural_events"
         ],
         "expected_facts": [
-            "List of current cultural events in Lisbon",
-            "Event titles or venues when available"
+            "Eventos culturais a decorrer hoje em Lisboa, ou uma indicação clara de que não há resultados no momento",
+            "Títulos ou locais dos eventos quando disponíveis"
         ],
         "language": "pt",
         "edge_case": false
@@ -745,10 +749,10 @@
             "search_places_attractions"
         ],
         "expected_facts": [
-            "Originally a Moorish fortress (Alcáçova), built 10th-11th century",
-            "Reconquered on October 25, 1147 by D. Afonso Henriques (first King of Portugal)",
-            "Siege lasted ~4 months with aid of Crusaders (Second Crusade)",
-            "Served as royal palace from the 14th to the 16th century"
+            "Castelo de São Jorge occupies the old medieval alcáçova/citadel of Lisbon",
+            "Its current castle structure is associated with the Moorish period, around the mid-11th century",
+            "It is tied to the Christian conquest of Lisbon in 1147",
+            "The complex included a royal palace or residence before the court moved to the Paço da Ribeira by the end of the 15th century"
         ],
         "language": "en",
         "edge_case": false
@@ -768,16 +772,14 @@
     },
     {
         "id": "R06",
-        "query": "I'm trying to find official open data about municipal car parks in Lisbon. Which datasets should I look at?",
+        "query": "What open datasets for municipal car parks are available in Lisbon?",
         "domain": "researcher",
         "expected_tools": [
-            "list_available_datasets",
-            "get_dataset_details",
             "find_place_in_datasets"
         ],
         "expected_facts": [
-            "Identification of EMEL or parking datasets in Lisboa Aberta",
-            "Datasets from dados.gov.pt or lisboaaberta.cm-lisboa.pt"
+            "Identification of parking or EMEL-related open datasets",
+            "Reference to Lisboa Aberta or municipal open-data sources for those datasets"
         ],
         "language": "en",
         "edge_case": false
@@ -790,8 +792,8 @@
             "search_lisbon_knowledge"
         ],
         "expected_facts": [
-            "Oceanário de Lisboa offers a 15% discount with the Lisboa Card (NOT free entry)",
-            "The Lisboa Card provides free entry to 50+ other museums/attractions"
+            "Oceanário de Lisboa has a Lisboa Card discount, not free entry",
+            "Lisboa Card includes other transport or attraction benefits beyond Oceanário"
         ],
         "language": "en",
         "edge_case": false
@@ -881,25 +883,24 @@
     },
     {
         "id": "M01",
-        "query": "Plan a full day in Lisbon for tomorrow. I want to visit museums and use public transport.",
+        "query": "Plan a full museum day in Lisbon for tomorrow, starting in Rossio and using public transport.",
         "domain": "multi_agent",
         "expected_tools": [
             "get_weather_forecast",
             "search_places_attractions",
-            "get_metro_status",
-            "get_route_between_stations"
+            "get_transport_summary"
         ],
         "expected_facts": [
             "Weather forecast for tomorrow",
-            "Museum recommendations",
-            "Transport route suggestions"
+            "Museum recommendations for a full-day plan",
+            "General public-transport guidance for getting around Lisbon"
         ],
         "language": "en",
         "edge_case": false
     },
     {
         "id": "M02",
-        "query": "Quero visitar Belém amanhã. Como está o tempo e como chego lá de transportes públicos?",
+        "query": "Quero visitar Belém amanhã. Como está o tempo e como vou do Rossio para Belém de transportes públicos?",
         "domain": "multi_agent",
         "expected_tools": [
             "get_weather_forecast",
@@ -907,26 +908,25 @@
             "get_route_between_stations"
         ],
         "expected_facts": [
-            "Weather conditions for tomorrow",
-            "Belém attractions (Torre de Belém, Mosteiro dos Jerónimos, MAAT)",
-            "Transport options to Belém (tram 15E, train to Belém)"
+            "Condições meteorológicas para amanhã",
+            "Sugestões de atrações em Belém",
+            "Opções de ligação do Rossio para Belém, por exemplo elétrico 15E, comboio ou outra rota pública plausível"
         ],
         "language": "pt",
         "edge_case": false
     },
     {
         "id": "M03",
-        "query": "What outdoor events are happening this weekend? Should I bring an umbrella?",
+        "query": "What outdoor events are happening tomorrow in Lisbon? Should I bring an umbrella?",
         "domain": "multi_agent",
         "expected_tools": [
             "search_cultural_events",
-            "get_weather_forecast",
-            "get_weather_warnings"
+            "get_weather_forecast"
         ],
         "expected_facts": [
-            "List of weekend outdoor events",
-            "Weekend weather forecast",
-            "Rain probability"
+            "Outdoor event suggestions for tomorrow, or a clear no-results message if none are currently available",
+            "Tomorrow's weather forecast and rain probability",
+            "Practical advice on whether bringing an umbrella makes sense"
         ],
         "language": "en",
         "edge_case": false

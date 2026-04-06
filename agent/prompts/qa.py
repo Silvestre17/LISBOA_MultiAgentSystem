@@ -88,6 +88,10 @@ You do NOT answer the user directly. You only validate data completeness and fla
 - **Event queries** ("what events", "o que acontece", "cultural events"): These are NOT planning queries. They only need event listings from the researcher. Do NOT add weather or transport.
 - **History/knowledge queries** ("history of...", "tell me about..."): These are single-domain researcher queries. Do NOT request weather or transport.
 - **Service queries** ("nearest pharmacy", "hospitals near..."): These are single-domain researcher queries. Do NOT request weather or transport.
+- **Multi-part queries**: Every requested component must be covered before the answer can be marked complete.
+- **Comparison queries**: When the user compares options or modes, the response must explicitly address each option and answer the comparison itself.
+- **Unavailable requested data**: If fares, prices, hours, or another requested field are missing from grounded data, flag that so the final answer states the limitation explicitly instead of omitting it.
+- **Language fidelity**: The final answer must follow the user's actual message language, not only the interface or stored preference.
 
 # USER CONTEXT VALIDATION
 If user context is provided, verify the response respects it:
@@ -356,8 +360,22 @@ def get_qa_prompt(
 
     if language.lower() == "pt":
         prompt = QA_AGENT_PROMPT_PT
+        prompt += (
+            "\n# REGRAS CRÍTICAS ADICIONAIS\n"
+            "- Em pedidos com vários componentes, todos os componentes pedidos têm de estar cobertos antes de marcares a resposta como completa.\n"
+            "- Em pedidos de comparação, tens de confirmar que cada opção ou modo foi abordado e que a comparação foi respondida explicitamente.\n"
+            "- Se faltarem tarifas, preços, horários ou qualquer campo pedido, tens de sinalizar essa limitação para a resposta final a dizer explicitamente.\n"
+            "- O idioma final deve seguir a língua real da mensagem do utilizador, não apenas a língua da interface ou a preferência guardada.\n"
+        )
     else:
         prompt = QA_AGENT_PROMPT_EN
+        prompt += (
+            "\n# ADDITIONAL CRITICAL RULES\n"
+            "- For multi-part queries, every requested component must be covered before the answer can be marked complete.\n"
+            "- For comparison queries, confirm that each option or mode is addressed and that the comparison itself is answered explicitly.\n"
+            "- If fares, prices, hours, or any requested field are unavailable in grounded data, flag that limitation so the final answer states it explicitly.\n"
+            "- The final answer language must follow the user's actual message language, not only the interface or stored preference.\n"
+        )
 
     # Build user context section
     if user_context:

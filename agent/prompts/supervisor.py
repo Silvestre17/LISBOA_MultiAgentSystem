@@ -1,7 +1,7 @@
 # ==========================================================================
 # Master Thesis - Supervisor Agent Prompt
 #   - André Filipe Gomes Silvestre, 20240502
-# 
+#
 #   Smart routing prompt that classifies user intent and decides which
 #   specialized agents to call. Optimized for minimal token usage.
 # ==========================================================================
@@ -225,17 +225,17 @@ Analisa a questão e gera APENAS JSON válido:
 def get_supervisor_prompt(language: str = "en") -> str:
     """
     Returns supervisor prompt with current date/time in requested language.
-    
+
     Args:
         language: Language code ('en' or 'pt'). Defaults to 'en'.
     """
     now = datetime.now()
-    
+
     if language.lower() == "pt":
         prompt = SUPERVISOR_PROMPT_PT
     else:
         prompt = SUPERVISOR_PROMPT_EN
-        
+
     return prompt.format(
         current_date=now.strftime("%A, %B %d, %Y"),
         current_time=now.strftime("%H:%M")

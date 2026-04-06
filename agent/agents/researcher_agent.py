@@ -8,9 +8,11 @@
 # ==========================================================================
 
 import re
+import unicodedata
 import uuid
 from copy import deepcopy
-from typing import TYPE_CHECKING, Optional
+from datetime import datetime
+from typing import TYPE_CHECKING, List, Optional
 
 # Words that start interrogative sentences — not place names when they appear at token[0].
 _QUESTION_STARTER_WORDS: frozenset = frozenset({
@@ -129,12 +131,25 @@ class ResearcherAgent(BaseAgent):
         return infer_response_language(user_query=user_message, default="en")
 
     @staticmethod
-    def _build_messages(system_prompt: str, user_message: str, context: str = "") -> list:
-        """Builds the message list for a researcher invocation."""
-        language = ResearcherAgent._infer_research_query_language(user_message)
+    def _build_messages(
+        system_prompt: str,
+        user_message: str,
+        context: str = "",
+        language: str | None = None,
+    ) -> list:
+        """Builds the message list for a researcher invocation.
+
+        Args:
+            system_prompt: System prompt text.
+            user_message: The user's query.
+            context: Additional orchestrator context.
+            language: Pre-resolved language code ('pt' or 'en'). When ``None``,
+                the language is inferred from *user_message* as a fallback.
+        """
+        resolved_language = language or ResearcherAgent._infer_research_query_language(user_message)
         language_instruction = (
             "Respond ENTIRELY in Portuguese (PT-PT)."
-            if language == "pt"
+            if resolved_language == "pt"
             else "Respond ENTIRELY in English."
         )
 
@@ -579,6 +594,54 @@ class ResearcherAgent(BaseAgent):
         return None
 
     @staticmethod
+    def _extract_place_focus_query(user_message: str) -> Optional[str]:
+        """Extracts a focused place subject from broader PT/EN lookup phrasings."""
+        query = (user_message or "").strip()
+        if not query:
+            return None
+
+        quoted_match = re.search(r'"([^"\n]{2,120})"|“([^”\n]{2,120})”', query)
+        if quoted_match:
+            quoted_subject = next((group for group in quoted_match.groups() if group), "").strip(" .?!")
+            if quoted_subject:
+                return quoted_subject
+
+        named_lookup_re = re.compile(
+            r"\b(?:tell me about|what about|more about|details about|information about|where is|where's|find|show me|sobre(?: o| a| os| as)?|fala[- ]?me de|onde fica(?: o| a| os| as)?|encontra(?:r)?|mostrar(?:-me)?)\b",
+            re.IGNORECASE,
+        )
+        if named_lookup_re.search(query):
+            subject = named_lookup_re.sub(" ", query)
+            subject = re.sub(
+                r"\b(?:place|places|local|locais|attraction|attractions|museum|museu|monument|monumento|restaurant|restaurante|hotel|viewpoint|miradouro)\b",
+                " ",
+                subject,
+                flags=re.IGNORECASE,
+            )
+            subject = re.sub(r"\s+", " ", subject).strip(" .?!")
+            if subject:
+                return subject
+
+        tokens = re.findall(r"[a-zA-ZÀ-ÿ0-9']+", query)
+        has_title_like_casing = any(char.isupper() for char in query)
+        if has_title_like_casing and 1 <= len(tokens) <= 6:
+            lowered = query.lower()
+            if not any(term in lowered for term in ["event", "events", "evento", "eventos"]):
+                first_lower = tokens[0].lower() if tokens else ""
+                if first_lower in _QUESTION_STARTER_WORDS:
+                    proper_nouns = [
+                        token
+                        for token in tokens
+                        if any(char.isupper() for char in token) and token.lower() not in _NON_PROPER_PLACE_WORDS
+                    ]
+                    if 1 <= len(proper_nouns) <= 4:
+                        return " ".join(proper_nouns)
+                    return None
+                return query.strip(" .?!")
+
+        return None
+
+    @staticmethod
     def _is_direct_place_lookup_query(user_message: str) -> bool:
         """Detects straightforward place and service lookups that are safer to answer directly from tools."""
         query = (user_message or "").lower()
@@ -587,41 +650,44 @@ class ResearcherAgent(BaseAgent):
             "event", "events", "evento", "eventos", "concert", "concerto",
             "festival", "exhibition", "exposição", "exposicao", "show",
         ]
-        place_keywords = [
-            "museum", "museu", "monument", "monumento", "restaurant", "restaurante",
-            "hotel", "viewpoint", "miradouro", "beach", "praia", "garden", "jardim",
-            "park", "parque", "hospital", "pharmacy", "farmácia", "farmacia", "school",
-            "escola", "library", "biblioteca", "police", "polícia", "policia",
-            "attraction", "attractions", "place", "places", "where is", "onde fica",
-            "belém", "belem",
-        ]
-        service_keywords = [
-            "hospital", "pharmacy", "farmácia", "farmacia", "school", "escola",
-            "library", "biblioteca", "police", "polícia", "policia",
-        ]
-        specific_lookup_markers = [
-            "where is", "onde fica", "near ", "perto ", "belém", "belem", "alfama",
-            "chiado", "baixa", "rossio", "oriente", "ajuda", "bairro alto", "cais do sodré",
-            "cais do sodre", "campo grande", "colombo", "gulbenkian",
-            "tell me about", "what about", "more about", "details about", "information about",
-            "sobre", "fala-me de", "fala me de", "e do", "e da", "e o", "e a",
+        directed_lookup_markers = [
+            "where is", "where's", "onde fica", "tell me about", "what about",
+            "more about", "details about", "information about", "sobre",
+            "fala-me de", "fala me de", "closest to", "nearest to", "near ",
+            "mais perto", "mais próximo", "perto de", "perto do", "perto da",
         ]
         if any(keyword in query for keyword in history_keywords + event_keywords):
             return False
-        if any(keyword in query for keyword in service_keywords):
+
+        if ResearcherAgent._extract_service_types(user_message):
+            return ResearcherAgent._extract_near_location_name(user_message) is not None
+
+        focus_query = ResearcherAgent._extract_place_focus_query(user_message)
+        has_place_hint = ResearcherAgent._infer_place_category_hint(user_message) is not None
+        has_directional_lookup = any(marker in query for marker in directed_lookup_markers)
+
+        if focus_query and any(marker in query for marker in ["where is", "where's", "onde fica", "tell me about", "what about", "more about", "details about", "information about", "sobre", "fala-me de", "fala me de"]):
             return True
-        if any(marker in query for marker in specific_lookup_markers):
+
+        if has_place_hint and has_directional_lookup:
             return True
-        if any(symbol in user_message for symbol in ['"', '“', '”']) and not any(keyword in query for keyword in event_keywords):
-            return True
-        return any(keyword in query for keyword in place_keywords) and any(marker in query for marker in specific_lookup_markers)
+
+        return False
 
     @staticmethod
     def _extract_near_location_name(user_message: str) -> Optional[str]:
         """Extracts a nearby-location target from simple PT/EN service phrasings."""
         patterns = [
+            r"\bclosest to\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
+            r"\bnearest to\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
             r"\bnear\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
             r"\bnear the\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
+            r"\bmais perto de\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
+            r"\bmais perto do\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
+            r"\bmais perto da\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
+            r"\bmais próximo de\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
+            r"\bmais próximo do\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
+            r"\bmais próximo da\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
             r"\bperto de\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
             r"\bperto do\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
             r"\bperto da\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
@@ -631,111 +697,6 @@ class ResearcherAgent(BaseAgent):
             if match:
                 return match.group("location").strip(" .?!,")
         return None
-
-    @staticmethod
-    def _extract_place_focus_query(user_message: str) -> Optional[str]:
-        """Extracts a specific place subject from quoted or 'tell me about' prompts."""
-        quoted_match = re.search(r'"([^"\n]{2,120})"|“([^”\n]{2,120})”', user_message or "")
-        if quoted_match:
-            quoted_subject = next((group for group in quoted_match.groups() if group), "").strip(" .?!")
-            if quoted_subject:
-                return quoted_subject
-
-        query = (user_message or "").lower()
-        _NAMED_LOOKUP_MARKER_RE = re.compile(
-            r"\b(?:tell me about|what about|more about|details about|information about"
-            r"|sobre(?: o| a| os| as)?|fala(?:-| )me de|e do|e da|e o|e a)\b",
-            re.IGNORECASE,
-        )
-        if _NAMED_LOOKUP_MARKER_RE.search(query):
-            subject = _NAMED_LOOKUP_MARKER_RE.sub(" ", query)
-            subject = re.sub(
-                r"\b(?:place|places|local|locais|attraction|attractions|museum|museu|monument|monumento|restaurant|restaurante|hotel|viewpoint|miradouro)\b",
-                " ",
-                subject,
-            )
-            subject = re.sub(r"\s+", " ", subject).strip(" .?!")
-            if subject:
-                return subject
-
-        raw_query = (user_message or "").strip()
-        tokens = re.findall(r"[a-zA-ZÀ-ÿ0-9']+", raw_query)
-        has_title_like_casing = any(char.isupper() for char in raw_query)
-        if has_title_like_casing and 1 <= len(tokens) <= 6:
-            lowered = raw_query.lower()
-            if not any(term in lowered for term in ["event", "events", "evento", "eventos"]):
-                first_lower = tokens[0].lower() if tokens else ""
-                if first_lower in _QUESTION_STARTER_WORDS:
-                    # Query is a question sentence — try to extract only proper-noun tokens.
-                    proper_nouns = [
-                        t for t in tokens
-                        if any(c.isupper() for c in t) and t.lower() not in _NON_PROPER_PLACE_WORDS
-                    ]
-                    if 1 <= len(proper_nouns) <= 4:
-                        return " ".join(proper_nouns)
-                    return None
-                return raw_query.strip(" .?!")
-
-        return None
-
-    def _run_direct_place_lookup(self, user_message: str, language: str) -> str:
-        """Runs a deterministic tool path for simple place and service lookups."""
-        message_lower = user_message.lower()
-        places_tool = self._get_tool_by_name("search_places_attractions")
-        nearby_tool = self._get_tool_by_name("find_nearby_services")
-        place_focus_query = self._extract_place_focus_query(user_message)
-
-        service_keywords = [
-            "pharmacy", "farmácia", "farmacia", "hospital", "school", "escola",
-            "library", "biblioteca", "park", "garden", "jardim", "police", "polícia", "policia",
-        ]
-        if nearby_tool and any(keyword in message_lower for keyword in service_keywords):
-            nearby_location = self._extract_near_location_name(user_message)
-            if nearby_location:
-                service_args = {
-                    "service_type": self._extract_service_type(user_message),
-                    "near_location_name": nearby_location,
-                    "max_results": 5,
-                }
-                return str(
-                    self._invoke_tool(
-                        nearby_tool,
-                        service_args,
-                        tool_name="find_nearby_services",
-                    )
-                )
-
-        if not places_tool:
-            return self._run_direct_tool_fallback(user_message, language)
-
-        query_text = place_focus_query or user_message
-        max_results = 5
-        if self._is_broad_attractions_query(user_message):
-            query_text = f"{user_message} iconic monuments museums palaces castles historic sites"
-            max_results = 6
-
-        args = {"query": query_text, "max_results": max_results, "offset": 0, "language": language}
-        if self._is_broad_attractions_query(user_message):
-            args["category"] = "Museums & Monuments"
-        else:
-            category_hint = self._infer_place_category_hint(user_message)
-            if category_hint:
-                args["category"] = category_hint
-
-        result = str(self._invoke_tool(places_tool, args, tool_name="search_places_attractions")).strip()
-        base_args = {key: value for key, value in args.items() if key not in {"max_results", "offset"}}
-        self._remember_search_context(
-            domain="places",
-            tool_name="search_places_attractions",
-            base_args=base_args,
-            page_size=int(args["max_results"]),
-            shown_count=self._count_ranked_results(result),
-            language=language,
-            source_query=user_message,
-            offset=0,
-        )
-        source_line = self._build_places_source_line(result, language)
-        return f"{result}\n\n{source_line}".strip()
 
     def _run_direct_event_lookup(self, user_message: str, language: str) -> str:
         """Runs a deterministic VisitLisboa event lookup with explicit date parsing."""
@@ -774,32 +735,85 @@ class ResearcherAgent(BaseAgent):
         source_line = self._build_events_source_line(language)
         return f"{result}\n\n{source_line}".strip()
 
-    @staticmethod
-    def _extract_service_type(user_message: str) -> str:
-        """Extracts a practical service keyword for direct open-data fallback."""
-        query = user_message.lower()
-        service_map = {
-            "pharmacy": "farmácias",
-            "farmácia": "farmácias",
-            "farmacias": "farmácias",
-            "hospital": "hospitais",
-            "hospitais": "hospitais",
-            "school": "escolas",
-            "escola": "escolas",
-            "library": "bibliotecas",
-            "biblioteca": "bibliotecas",
-            "park": "jardins",
-            "jardim": "jardins",
-            "garden": "jardins",
-            "police": "polícia",
-            "polícia": "polícia",
-        }
+    def _run_direct_place_lookup(self, user_message: str, language: str) -> str:
+        """Runs a deterministic tool path for simple place and multi-service lookups."""
+        places_tool = self._get_tool_by_name("search_places_attractions")
+        nearby_tool = self._get_tool_by_name("find_nearby_services")
+        place_focus_query = self._extract_place_focus_query(user_message)
+        service_types = self._extract_service_types(user_message)
 
-        for keyword, service_type in service_map.items():
-            if keyword in query:
-                return service_type
+        if nearby_tool and service_types:
+            nearby_location = self._extract_near_location_name(user_message)
+            service_blocks: List[str] = []
+            missing_services: List[str] = []
 
-        return user_message
+            for service_type in service_types:
+                service_args = {
+                    "service_type": service_type,
+                    "max_results": 5,
+                }
+                if nearby_location:
+                    service_args["near_location_name"] = nearby_location
+                category_hint = self._service_category_for_type(service_type)
+                if category_hint:
+                    service_args["category"] = category_hint
+
+                result = str(
+                    self._invoke_tool(
+                        nearby_tool,
+                        service_args,
+                        tool_name="find_nearby_services",
+                    )
+                ).strip()
+
+                if result and not result.startswith(("❌", "Error:")):
+                    service_blocks.append(result)
+                else:
+                    missing_services.append(service_type)
+
+            if service_blocks:
+                combined = "\n\n".join(service_blocks).strip()
+                if missing_services:
+                    missing_label = ", ".join(missing_services)
+                    if language == "pt":
+                        combined += f"\n\n⚠️ Não foi possível confirmar resultados para: {missing_label}."
+                    else:
+                        combined += f"\n\n⚠️ I could not confirm results for: {missing_label}."
+                if "Lisboa Aberta" not in combined:
+                    combined += f"\n\n{self._build_open_data_services_source_line(language)}"
+                return combined.strip()
+
+        if not places_tool:
+            return self._run_direct_tool_fallback(user_message, language)
+
+        query_text = place_focus_query or user_message
+        max_results = 5
+        if self._is_broad_attractions_query(user_message):
+            query_text = f"{user_message} iconic monuments museums palaces castles historic sites"
+            max_results = 6
+
+        args = {"query": query_text, "max_results": max_results, "offset": 0, "language": language}
+        if self._is_broad_attractions_query(user_message):
+            args["category"] = "Museums & Monuments"
+        else:
+            category_hint = self._infer_place_category_hint(user_message)
+            if category_hint:
+                args["category"] = category_hint
+
+        result = str(self._invoke_tool(places_tool, args, tool_name="search_places_attractions")).strip()
+        base_args = {key: value for key, value in args.items() if key not in {"max_results", "offset"}}
+        self._remember_search_context(
+            domain="places",
+            tool_name="search_places_attractions",
+            base_args=base_args,
+            page_size=int(args["max_results"]),
+            shown_count=self._count_ranked_results(result),
+            language=language,
+            source_query=user_message,
+            offset=0,
+        )
+        source_line = self._build_places_source_line(result, language)
+        return f"{result}\n\n{source_line}".strip()
 
     def _run_direct_tool_fallback(self, user_message: str, language: str) -> str:
         """
@@ -808,11 +822,6 @@ class ResearcherAgent(BaseAgent):
         """
         message_lower = user_message.lower()
 
-        service_keywords = [
-            "pharmacy", "farmácia", "farmacias", "hospital", "school",
-            "escola", "library", "biblioteca", "park", "garden",
-            "jardim", "police", "polícia",
-        ]
         history_keywords = ["history", "história", "historia", "culture", "cultura"]
         event_keywords = [
             "event", "events", "evento", "eventos", "concert", "concerto",
@@ -825,19 +834,46 @@ class ResearcherAgent(BaseAgent):
             if tool:
                 return str(self._invoke_tool(tool, {}, tool_name="list_service_categories"))
 
-        if any(keyword in message_lower for keyword in service_keywords):
+        service_types = self._extract_service_types(user_message)
+        if service_types:
             tool = self._get_tool_by_name("find_nearby_services")
             if tool:
-                return str(
-                    self._invoke_tool(
-                        tool,
-                        {
-                            "service_type": self._extract_service_type(user_message),
-                            "max_results": 5,
-                        },
-                        tool_name="find_nearby_services",
-                    )
-                )
+                nearby_location = self._extract_near_location_name(user_message)
+                blocks: List[str] = []
+                missing_services: List[str] = []
+
+                for service_type in service_types:
+                    args = {
+                        "service_type": service_type,
+                        "max_results": 5,
+                    }
+                    if nearby_location:
+                        args["near_location_name"] = nearby_location
+                    category_hint = self._service_category_for_type(service_type)
+                    if category_hint:
+                        args["category"] = category_hint
+
+                    result = str(
+                        self._invoke_tool(
+                            tool,
+                            args,
+                            tool_name="find_nearby_services",
+                        )
+                    ).strip()
+                    if result and not result.startswith(("❌", "Error:")):
+                        blocks.append(result)
+                    else:
+                        missing_services.append(service_type)
+
+                if blocks:
+                    combined = "\n\n".join(blocks)
+                    if missing_services:
+                        if language == "pt":
+                            combined += f"\n\n⚠️ Não foi possível confirmar resultados para: {', '.join(missing_services)}."
+                        else:
+                            combined += f"\n\n⚠️ I could not confirm results for: {', '.join(missing_services)}."
+                    combined += f"\n\n{self._build_open_data_services_source_line(language)}"
+                    return combined.strip()
 
         if any(keyword in message_lower for keyword in history_keywords):
             tool = self._get_tool_by_name("search_history_culture")
@@ -881,6 +917,55 @@ class ResearcherAgent(BaseAgent):
             else "Não consegui concluir o fluxo semântico do prompt, mas as ferramentas de pesquisa continuam disponíveis."
         )
         return fallback_text
+
+    @staticmethod
+    def _extract_service_types(user_message: str) -> List[str]:
+        """Extracts one or more practical service types from a service query."""
+        normalized_query = unicodedata.normalize("NFKD", user_message or "")
+        normalized_query = normalized_query.encode("ascii", "ignore").decode("ascii").lower()
+        service_catalog = [
+            (("pharmacy", "pharmacies", "farm", "pharmac"), "farm\u00e1cias"),
+            (("hospital", "hospitals", "hospit"), "hospitais"),
+            (("school", "schools", "escola", "escolas", "sch"), "escolas"),
+            (("library", "libraries", "bibliot", "librar"), "bibliotecas"),
+            (("park", "parks", "garden", "gardens", "jardim", "jardins"), "jardins"),
+            (("police", "polic"), "pol\u00edcia"),
+        ]
+
+        extracted: List[str] = []
+        for markers, normalized_service in service_catalog:
+            if any(marker in normalized_query for marker in markers) and normalized_service not in extracted:
+                extracted.append(normalized_service)
+        return extracted
+
+    @classmethod
+    def _extract_service_type(cls, user_message: str) -> str:
+        """Extracts the first practical service keyword for open-data fallback."""
+        extracted = cls._extract_service_types(user_message)
+        return extracted[0] if extracted else user_message
+
+    @staticmethod
+    def _service_category_for_type(service_type: str) -> Optional[str]:
+        """Maps a service type to the most likely Lisboa Aberta taxonomy category."""
+        normalized = unicodedata.normalize("NFKD", service_type or "")
+        normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+        if normalized in {"farmacias", "hospitais"}:
+            return "sa\u00fade"
+        if normalized == "escolas":
+            return "educa\u00e7\u00e3o"
+        if normalized == "bibliotecas":
+            return "cultura"
+        if normalized == "jardins":
+            return "ambiente"
+        return None
+
+    @staticmethod
+    def _build_open_data_services_source_line(language: str) -> str:
+        """Builds a stable Lisboa Aberta source line for nearby-service answers."""
+        timestamp = datetime.now().strftime("%H:%M")
+        if language == "pt":
+            return f"\U0001F4CC **Fonte:** [*Lisboa Aberta*](https://dados.cm-lisboa.pt/) | **Atualizado:** {timestamp}"
+        return f"\U0001F4CC **Source:** [*Lisboa Aberta*](https://dados.cm-lisboa.pt/) | **Updated:** {timestamp}"
 
     @staticmethod
     def _build_tool_call(name: str, args: dict) -> AIMessage:
@@ -1011,8 +1096,8 @@ class ResearcherAgent(BaseAgent):
             language = language_match.group(1).lower()
         else:
             language = self._infer_research_query_language(user_message)
-            
-        messages = self._build_messages(self.system_prompt, user_message, context)
+
+        messages = self._build_messages(self.system_prompt, user_message, context, language=language)
 
         # Skip tool enforcement for greetings/thanks
         is_greeting = any(
@@ -1120,6 +1205,7 @@ class ResearcherAgent(BaseAgent):
                 get_researcher_prompt(safe_mode=True),
                 user_message,
                 context,
+                language=language,
             )
             try:
                 response = self.execute_react_loop(

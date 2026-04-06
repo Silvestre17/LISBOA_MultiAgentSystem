@@ -1,9 +1,9 @@
 # ==========================================================================
 # Master Thesis
 #   - André Filipe Gomes Silvestre, 20240502
-# 
+#
 # LangGraph compatibility helpers for import-time warnings.
-# 
+#
 # This module centralizes narrow workarounds for third-party LangGraph import
 # behavior so the rest of the codebase can keep clean imports.
 # ==========================================================================

@@ -1,12 +1,12 @@
 # ==========================================================================
 # Master Thesis - Web Scraper for "Visit Lisbon" Events
 #   - André Filipe Gomes Silvestre, 20240502
-# 
+#
 # Description:
 #   This module implements a robust web scraper for "Visit Lisbon" EVENTS.
 #   It extracts event details such as title, description, date, price, and location,
 #   managing incremental updates to a JSON file.
-# 
+#
 # Link to the events page: https://www.visitlisboa.com/en/events
 # ==========================================================================
 
@@ -244,10 +244,10 @@ def _extract_event_highlight_links(details_div, base_domain):
 
 def get_headers():
     """Generates headers with random User-Agent.
-    
+
     Arg:
         None
-        
+
     Returns:
         dict: Headers dictionary.
     """
@@ -260,29 +260,29 @@ def get_headers():
 
 def get_total_pages(session, base_url):
     """Determines total pages for events.
-    
+
     Arg:
         session (requests.Session): The requests session.
         base_url (str): The base URL.
-        
+
     Returns:
-        int: Total number of pages. If error, returns 1.    
+        int: Total number of pages. If error, returns 1.
     """
     logging.info("Determining total pages...")
     try:
         response = session.get(base_url, headers=get_headers(), timeout=30)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
-        
+
         pagy_nav = soup.find('nav', id='pagy')
         if not pagy_nav:
             return 1
-            
+
         page_numbers = [1]
         for link in pagy_nav.find_all('a', href=True):
             if match := re.search(r'page=(\d+)', link['href']):
                 page_numbers.append(int(match.group(1)))
-        
+
         logging.info(f"Found a total of {max(page_numbers)} pages.")
         return max(page_numbers)
     except Exception as e:
@@ -292,46 +292,46 @@ def get_total_pages(session, base_url):
 
 def get_event_urls_from_page(session, page_number, base_url):
     """Fetches URLs from a specific page.
-    
+
     Arg:
         session (requests.Session): The requests session.
         page_number (int): The page number to fetch.
         base_url (str): The base URL.
-        
+
     Returns:
         list: List of event URLs. If error, returns empty list.
     """
     list_url = f"{base_url}?page={page_number}"
     event_urls = []
-    
+
     try:
         time.sleep(random.uniform(2, 4))  # Stealth delay
         response = session.get(list_url, headers=get_headers(), timeout=30)
         response.raise_for_status()
-        
+
         soup = BeautifulSoup(response.content, 'html.parser')
         event_cards = soup.find_all('div', attrs={'data-controller': 'clickable-card'})
-        
+
         for card in event_cards:
             if link_tag := card.find('a', attrs={'data-clickable-card-target': 'link'}):
                 if 'href' in link_tag.attrs:
                     # Construct absolute URL
                     full_url = requests.compat.urljoin("https://www.visitlisboa.com", link_tag['href'])  # type: ignore
                     event_urls.append(full_url)
-                    
+
     except Exception as e:
         logging.error(f"Error fetching page {page_number}: {e}")
-        
+
     return event_urls
 
 
 def _extract_time_from_container(container):
     """
     Extracts time string from a container that has a schedule icon.
-    
+
     Args:
         container: BeautifulSoup element containing time info.
-        
+
     Returns:
         str or None: Time string if found.
     """
@@ -350,11 +350,11 @@ def _extract_time_from_container(container):
 def _parse_date_entry(time_element, time_str=None):
     """
     Parses a single date entry from a time element.
-    
+
     Args:
         time_element: BeautifulSoup <time> element.
         time_str (str, optional): Associated time string (e.g., "18:30").
-        
+
     Returns:
         dict: Date entry with datetime_iso, display_text, and time fields.
     """
@@ -369,40 +369,40 @@ def _parse_date_entry(time_element, time_str=None):
 def scrape_event_details(session, event_url):
     """
     Scrapes detailed info from an event page.
-    
+
     Handles different page structures for dates:
     - Single date events (e.g., concerts)
     - Date range events (e.g., exhibitions)
     - Multi-date events with specific times (e.g., theater performances)
-    
+
     Args:
         session (requests.Session): The requests session.
         event_url (str): The URL of the event page to scrape.
-        
+
     Returns:
         dict: Dictionary with event details. If error, returns None.
     """
     event_data = {'url': event_url}
     base_domain = "https://www.visitlisboa.com"
     max_retries = 3
-    
+
     for attempt in range(max_retries):
         try:
             time.sleep(random.uniform(1.5, 3))
-            
+
             response = session.get(event_url, headers=get_headers(), timeout=30)
-            
+
             if response.status_code == 429:
                 wait_time = (attempt + 2) * 5
                 logging.warning(f"Rate limit on {event_url}. Waiting {wait_time}s")
                 time.sleep(wait_time)
                 continue
-                
+
             response.raise_for_status()
             soup = BeautifulSoup(response.content, 'html.parser')
-            
+
             # --- Parsing Logic ---
-            
+
             # General Info
             title_tag = _first_element(soup, ['h2.max-w-xl', 'h1.font-serif', 'main h2', 'main h1'])
             if title_tag:
@@ -436,7 +436,7 @@ def scrape_event_details(session, event_url):
             for iframe in iframes:
                 if 'src' in iframe.attrs and iframe['src']:
                     event_data['video_urls'].append(iframe['src'])
-            
+
             # Detailed Description
             if details_div := soup.find('div', class_='from-cms'):
                 event_data['full_description'] = details_div.get_text(strip=True, separator='\n')
@@ -451,7 +451,7 @@ def scrape_event_details(session, event_url):
             # DATES & TIMES - Improved Parsing
             # =============================================
             event_data['dates'] = []
-            
+
             # 1. Main date container (header section with date badge)
             main_date_container = None
             if header_block:
@@ -468,7 +468,7 @@ def scrape_event_details(session, event_url):
             if main_date_container:
                 times_elements = main_date_container.find_all('time')
                 header_time_str = _extract_time_from_container(main_date_container)
-                
+
                 if len(times_elements) == 2:
                     # Date RANGE (e.g., exhibitions: "12 Dec, 2024 - 31 Dec, 2025")
                     event_data['dates'].append({
@@ -498,18 +498,18 @@ def scrape_event_details(session, event_url):
             if more_dates_section := soup.find('div', id='dates'):
                 # Find all date rows (border-b class)
                 date_rows = more_dates_section.find_all('div', class_='border-b')
-                
+
                 for row in date_rows:
                     time_element = row.find('time')
                     if time_element:
                         # Extract time from this specific row
                         row_time_str = _extract_time_from_container(row)
-                        
+
                         date_entry = {
                             'type': 'single',
                             'date': _parse_date_entry(time_element, row_time_str)
                         }
-                        
+
                         # Avoid duplicates (header date might be repeated)
                         is_duplicate = False
                         for existing in event_data['dates']:
@@ -518,7 +518,7 @@ def scrape_event_details(session, event_url):
                                         existing.get('date', {}).get('time') == date_entry['date']['time']):
                                     is_duplicate = True
                                     break
-                        
+
                         if not is_duplicate:
                             event_data['dates'].append(date_entry)
 
@@ -546,13 +546,13 @@ def scrape_event_details(session, event_url):
             event_data['information_links'] = {}
             event_data['buy_tickets_url'] = None
             event_data['venue_locations'] = []
-            
+
             for box in info_boxes:
                 if h3 := box.find('h3'):
                     h3_text = _normalize_text(h3.get_text(" ", strip=True))
                     h3_lower = h3_text.lower()
                     content_div = box.find('div', class_='info-text__content')
-                    
+
                     # Check if this is the Information box
                     if h3_lower == 'information':
                         if content_div:
@@ -565,11 +565,11 @@ def scrape_event_details(session, event_url):
                                         event_data['buy_tickets_url'] = link['href']
                                     else:
                                         event_data['information_links'][link_text] = link['href']
-                    
+
                     # Check if this is the Dates box (skip, handled above)
                     elif h3_lower == 'dates':
                         continue
-                    
+
                     # Otherwise, assume it's a VENUE/LOCATION box
                     else:
                         venue_payload = {'venue_name': _normalize_text(h3_text)}
@@ -606,11 +606,11 @@ def main():
     This function handles updating existing events, adding new ones,
     and removing events that are no longer listed on the website.
     """
-    
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
     output_filepath = os.path.join(script_dir, 'events.json')
     base_url = "https://www.visitlisboa.com/en/events"
-    
+
     # 1. Load Existing
     existing_events = {}
     if os.path.exists(output_filepath) and os.path.getsize(output_filepath) > 0:
@@ -628,7 +628,7 @@ def main():
     with requests.Session() as session:
         total_pages = get_total_pages(session, base_url)
         logging.info("Harvesting URLs...")
-        
+
         for page in tqdm(range(1, total_pages + 1), desc="Pages", mininterval=5):
             urls = get_event_urls_from_page(session, page, base_url)
             all_urls.update(urls)
@@ -639,7 +639,7 @@ def main():
     if len(all_urls) == 0:
         logging.error("CRITICAL: No events found! Possible blocking or site structure change. Aborting save.")
         sys.exit(1)
-    
+
     if len(existing_events) > 0 and len(all_urls) < len(existing_events) * 0.5:
         logging.warning("WARNING: Significant drop in events count. Verify manually.")
 
@@ -650,7 +650,7 @@ def main():
     potential_updates = all_urls.intersection(existing_urls)
     updated_urls = set()
     unchanged_urls = set()
-    
+
     final_list = []
 
     with requests.Session() as session:
@@ -661,7 +661,7 @@ def main():
                 if details := scrape_event_details(session, url):
                     final_list.append(details)
                     logging.info(f"New event added: {url}")
-        
+
         # B. Updated
         if potential_updates:
             logging.info(f"Checking {len(potential_updates)} existing events.")
@@ -669,7 +669,7 @@ def main():
                 if new_details := scrape_event_details(session, url):
                     old_json = json.dumps(existing_events[url], sort_keys=True)
                     new_json = json.dumps(new_details, sort_keys=True)
-                    
+
                     if old_json != new_json:
                         final_list.append(new_details)
                         updated_urls.add(url)
@@ -688,7 +688,7 @@ def main():
     else:
         logging.error("Final list is empty. Something went wrong. Not saving.")
         sys.exit(1)
-    
+
     # 5. Log Report
     logging.info("\n--- Synchronization Report ---")
     logging.info(f"  - Added: {len(new_urls)} new events.")

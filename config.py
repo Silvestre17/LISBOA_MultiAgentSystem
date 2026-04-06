@@ -344,7 +344,7 @@ class Config:
 if __name__ == "__main__":
     """
     Test script to verify configuration loading.
-    
+
     Expected Output:
         - All paths should exist or be valid
         - API keys should be loaded (or show 'Not set')

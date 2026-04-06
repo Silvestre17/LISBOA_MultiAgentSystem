@@ -1,7 +1,7 @@
-# ========================================================================== 
+# ==========================================================================
 # Master Thesis
 #   - André Filipe Gomes Silvestre, 20240502
-# 
+#
 # Regression tests for the transport verification harness.
 #
 # Run from the repository root with a relative path:

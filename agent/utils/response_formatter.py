@@ -9,6 +9,7 @@
 # ==========================================================================
 
 import re
+import unicodedata
 from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse
@@ -53,7 +54,11 @@ _PT_DURATION_VALUE_MAP = {
 
 _SOURCE_LINE_RE = re.compile(r'^(?:[-*•]\s*)?(?:📌\s*)?(?:\*\*)?(?:Fonte|Source)(?:\*\*)?:.*$', re.IGNORECASE)
 _PT_LANGUAGE_HINTS_RE = re.compile(
-    r"\b(olá|ola|bom dia|boa tarde|boa noite|como|quero|preciso|museu|museus|evento|eventos|hoje|amanhã|amanha|previsão|tempo|locais|morada|fonte|autocarro|comboio|bairro)\b",
+    r"\b(olá|ola|bom dia|boa tarde|boa noite|como|qual|quais|quero|preciso|planeia|planejar|plano|roteiro|sugere|visitar|passeio|museu|museus|evento|eventos|hoje|amanhã|amanha|previsão|tempo|locais|morada|fonte|autocarro|comboio|bairro|perto)\b",
+    re.IGNORECASE,
+)
+_EN_LANGUAGE_HINTS_RE = re.compile(
+    r"\b(hello|hi|good morning|good afternoon|good evening|what|where|when|which|who|why|how|tell me|plan|afternoon|evening|night|trip|visit|around|can you|could you|would you|i want|i need|please|today|tomorrow|weather|forecast|museum|museums|event|events|book fair|train|bus|metro|source|address)\b",
     re.IGNORECASE,
 )
 _EVENT_HINTS_RE = re.compile(
@@ -169,17 +174,33 @@ def infer_response_language(
     Returns:
         str: `pt` or `en`.
     """
+    normalized_default = default if default in {"pt", "en"} else "en"
+
     if user_query:
-        return "pt" if _PT_LANGUAGE_HINTS_RE.search(user_query) else (default if default in {"pt", "en"} else "en")
+        pt_match = bool(_PT_LANGUAGE_HINTS_RE.search(user_query))
+        en_match = bool(_EN_LANGUAGE_HINTS_RE.search(user_query))
+        has_pt_diacritics = bool(re.search(r"[ãõáàâéêíóôúç]", user_query, re.IGNORECASE))
+
+        if pt_match and not en_match:
+            return "pt"
+        if en_match and not pt_match:
+            return "en"
+        if pt_match and en_match:
+            return "pt"
+        if has_pt_diacritics:
+            return "pt"
+        return normalized_default
 
     combined = context_text.strip()
     if not combined:
-        return default if default in {"pt", "en"} else "en"
+        return normalized_default
 
     if _PT_LANGUAGE_HINTS_RE.search(combined):
         return "pt"
+    if _EN_LANGUAGE_HINTS_RE.search(combined):
+        return "en"
 
-    return default if default in {"pt", "en"} else "en"
+    return normalized_default
 
 
 def has_source_line(text: str) -> bool:
@@ -582,6 +603,8 @@ def _normalize_planner_line(text: str) -> str:
     """Remove planner-specific markdown noise before structural parsing."""
     cleaned = _strip_markdown_formatting(text)
     cleaned = re.sub(r"^(?:###\s*)?(?:[-*•]\s*)?", "", cleaned).strip()
+    cleaned = re.sub(r"(\d{1,2})\s*:\s*(\d{2})", r"\1:\2", cleaned)
+    cleaned = re.sub(r"\s*[·•]\s*", " · ", cleaned)
     return cleaned
 
 
@@ -670,11 +693,11 @@ def _planner_clock_to_time(clock_emoji: str, afternoon_context: bool) -> Optiona
     if afternoon_context and 1 <= hour <= 6:
         hour += 12
     return f"{hour:02d}:{minute:02d}"
- 
- 
+
+
 def structure_planner_markdown(text: str) -> str:
     """
-    Enforces the premium card layout for itineraries by transforming 
+    Enforces the premium card layout for itineraries by transforming
     flat text into a visual card structure with horizontal rules.
     """
     if not text:
@@ -741,6 +764,14 @@ def structure_planner_markdown(text: str) -> str:
             for keyword in (
                 "sugestões para a visita",
                 "sugestoes para a visita",
+                "sugestões",
+                "sugestoes",
+                "recomendações",
+                "recomendacoes",
+                "recommendations",
+                "opções",
+                "opcoes",
+                "options",
                 "visit suggestions",
                 "para a visita",
             )
@@ -754,6 +785,18 @@ def structure_planner_markdown(text: str) -> str:
             append_separator()
             structured.append(f"### 🔎 {_planner_display_heading(normalized, language)}")
             current_block = "section"
+            continue
+
+        if re.search(
+            r"\b(hor[aá]rio indicado|opening hours?|pode j[aá] estar encerrado|may already be closed)\b",
+            lowered,
+        ):
+            if not current_block:
+                append_separator()
+                heading = "Notas Importantes" if language == "pt" else "Important Notes"
+                structured.append(f"### ⚠️ {_planner_display_heading(heading, language)}")
+                current_block = "section"
+            structured.append(f"- ⚠️ {normalized.rstrip('.')}.")
             continue
 
         activity_match = re.match(
@@ -784,6 +827,18 @@ def structure_planner_markdown(text: str) -> str:
                 structured.append(f"### {icon} {derived_time} · {title}")
                 current_block = "activity"
                 continue
+
+        enumerated_item_match = re.match(
+            r"^(?P<num>\d+)[\.\)]\s+(?P<title>.+)$",
+            normalized,
+        )
+        if enumerated_item_match:
+            append_separator()
+            title = enumerated_item_match.group("title").strip(" -–—")
+            icon = _planner_activity_icon(title)
+            structured.append(f"### {icon} {title}")
+            current_block = "activity"
+            continue
 
         if (
             not overall_title_rendered
@@ -1146,33 +1201,198 @@ def _compact_transport_arrivals_markdown(text: str) -> Optional[str]:
     return clean_newlines("\n".join(output_lines)).strip()
 
 
+def _structure_transport_route_dump_markdown(text: str) -> Optional[str]:
+    """Convert raw Carris route dumps into a cleaner, card-like markdown layout."""
+    if not text:
+        return None
+
+    if not re.search(r"^\s*\*{0,2}Routes\*{0,2}\s*:", text, re.IGNORECASE | re.MULTILINE):
+        return None
+
+    lines = [line.rstrip() for line in text.splitlines()]
+    is_pt = _looks_like_pt_transport_text(text)
+
+    route_title_re = re.compile(
+        r"^\s*\*{0,2}Routes\*{0,2}\s*:\s*(?P<origin>.+?)\s*(?:->|→)\s*(?P<destination>.+?)\s*$",
+        re.IGNORECASE,
+    )
+    mode_heading_re = re.compile(r"^(BUSES|TRAMS|TRAINS|METRO)\s*$", re.IGNORECASE)
+    route_line_re = re.compile(r"^(?P<line>[0-9A-Z]{1,6}[A-Z]?)\s*:\s*(?P<destination>.+)$")
+    resolved_from_re = re.compile(r"^\*{0,2}From\*{0,2}\s*:\s*(?P<value>.+)$", re.IGNORECASE)
+    resolved_to_re = re.compile(r"^\*{0,2}To\*{0,2}\s*:\s*(?P<value>.+)$", re.IGNORECASE)
+    count_re = re.compile(r"Found\s+(?P<count>\d+)\s+direct\s+routes?!", re.IGNORECASE)
+
+    summary: dict[str, str] = {}
+    sections: dict[str, list[dict[str, object]]] = {}
+    current_mode: Optional[str] = None
+    current_entry: Optional[dict[str, object]] = None
+
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if not stripped or set(stripped) <= {"=", "-", " "}:
+            continue
+
+        route_title_match = route_title_re.match(stripped)
+        if route_title_match:
+            summary["origin"] = route_title_match.group("origin").strip()
+            summary["destination"] = route_title_match.group("destination").strip()
+            continue
+
+        from_match = resolved_from_re.match(stripped)
+        if from_match:
+            summary["resolved_origin"] = from_match.group("value").strip()
+            continue
+
+        to_match = resolved_to_re.match(stripped)
+        if to_match:
+            summary["resolved_destination"] = to_match.group("value").strip()
+            continue
+
+        count_match = count_re.search(stripped)
+        if count_match:
+            summary["direct_count"] = count_match.group("count")
+            continue
+
+        if "GTFS-RT" in stripped.upper():
+            summary["feed_status"] = _strip_markdown_formatting(stripped)
+            continue
+
+        mode_match = mode_heading_re.match(stripped)
+        if mode_match:
+            current_mode = mode_match.group(1).upper()
+            sections.setdefault(current_mode, [])
+            current_entry = None
+            continue
+
+        route_match = route_line_re.match(_strip_markdown_formatting(stripped))
+        if current_mode and route_match:
+            current_entry = {
+                "line": route_match.group("line").strip(),
+                "destination": route_match.group("destination").strip(),
+                "notes": [],
+            }
+            sections[current_mode].append(current_entry)
+            continue
+
+        if current_entry is None:
+            continue
+
+        normalized = _strip_markdown_formatting(stripped)
+        if re.match(r"^Next\s*:", normalized, re.IGNORECASE):
+            current_entry["next"] = re.sub(r"^Next\s*:\s*", "", normalized, flags=re.IGNORECASE).strip()
+        elif "tempo real" in normalized.lower() or "real-time" in normalized.lower():
+            current_entry["realtime"] = normalized
+        elif "travel" in normalized.lower() or "viagem" in normalized.lower():
+            current_entry["travel_time"] = normalized
+        else:
+            notes = current_entry.setdefault("notes", [])
+            if isinstance(notes, list):
+                notes.append(normalized)
+
+    if not sections:
+        return None
+
+    mode_titles = {
+        "pt": {"BUSES": "#### 🚌 Autocarros", "TRAMS": "#### 🚋 Elétricos", "TRAINS": "#### 🚆 Comboios", "METRO": "#### 🚇 Metro"},
+        "en": {"BUSES": "#### 🚌 Buses", "TRAMS": "#### 🚋 Trams", "TRAINS": "#### 🚆 Trains", "METRO": "#### 🚇 Metro"},
+    }
+    mode_icons = {"BUSES": "🚌", "TRAMS": "🚋", "TRAINS": "🚆", "METRO": "🚇"}
+    language_key = "pt" if is_pt else "en"
+    output_lines: list[str] = []
+
+    origin_display = summary.get("resolved_origin") or summary.get("origin")
+    destination_display = summary.get("resolved_destination") or summary.get("destination")
+    if origin_display and destination_display:
+        output_lines.append(
+            f"**Trajeto:** {origin_display} → {destination_display}"
+            if is_pt
+            else f"**Route:** {origin_display} → {destination_display}"
+        )
+        output_lines.append("")
+
+    if summary.get("direct_count"):
+        output_lines.append(
+            f"📊 **Ligações diretas encontradas:** {summary['direct_count']}"
+            if is_pt
+            else f"📊 **Direct connections found:** {summary['direct_count']}"
+        )
+    if summary.get("feed_status"):
+        feed_status = str(summary["feed_status"])
+        if is_pt:
+            feed_status = feed_status.replace("live active", "tempo real ativo")
+            output_lines.append(f"📡 **Tempo real:** {feed_status}")
+        else:
+            output_lines.append(f"📡 **Real time:** {feed_status}")
+    if output_lines and output_lines[-1] != "":
+        output_lines.append("")
+
+    for mode_name in ("METRO", "TRAINS", "TRAMS", "BUSES"):
+        entries = sections.get(mode_name, [])
+        if not entries:
+            continue
+        output_lines.extend([mode_titles[language_key][mode_name], ""])
+        for item_number, entry in enumerate(entries, 1):
+            line_label = "Linha" if is_pt else "Line"
+            departures_label = "Próximas saídas" if is_pt else "Next departures"
+            realtime_label = "Tempo real" if is_pt else "Real time"
+            travel_label = "Tempo estimado" if is_pt else "Estimated travel time"
+            note_label = "Nota" if is_pt else "Note"
+            icon = mode_icons.get(mode_name, "🚌")
+
+            output_lines.append(
+                f"{item_number}. {icon} **{line_label} {entry.get('line', '')}** — {entry.get('destination', '')}"
+            )
+            if entry.get("next"):
+                output_lines.append(f"   🕐 **{departures_label}:** {entry['next']}")
+            if entry.get("realtime"):
+                output_lines.append(f"   ℹ️ **{realtime_label}:** {entry['realtime']}")
+            if entry.get("travel_time"):
+                travel_value = str(entry["travel_time"]).replace("~", "~ ").replace("min travel", "min")
+                output_lines.append(f"   ⏱️ **{travel_label}:** {travel_value.strip()}")
+            notes = entry.get("notes", [])
+            if isinstance(notes, list):
+                for note in notes:
+                    output_lines.append(f"   ℹ️ **{note_label}:** {note}")
+            output_lines.append("")
+
+    structured = clean_newlines("\n".join(output_lines)).strip()
+    if not structured:
+        return None
+
+    if not has_source_line(structured):
+        structured = f"{structured}\n\n{_build_carris_source_line(is_pt, datetime.now().strftime('%H:%M'))}"
+    return structured
+
+
 def structure_transport_markdown(text: str) -> str:
     """
-    Cleans up transport agent text, normalizing placeholders and improving 
-    list readability for stop schedules.
+    Cleans up transport agent text, normalizing placeholders and improving
+    readability for raw route dumps and stop schedules.
     """
     if not text:
         return text
-    
-    # Remove common ugly placeholders inherited from raw tool output or prompt mentions
+
     placeholder_patterns = [
         r"\[Check schedule\]", r"\(Check schedule\)", r'["\']?Check schedule["\']?',
         r"\[Tempo \d+\]", r"\[Time \d+\]",
         r"\[Nº Linha\]", r"\[Destino\]", r"\[Tempos\]",
         r"\[Origin\]", r"\[Destination\]", r"\[Station\]", r"\[Direction\]",
-        r"\[Transfer Station\]", r"\[Landmark\]", r"\[Name\]"
+        r"\[Transfer Station\]", r"\[Landmark\]", r"\[Name\]",
     ]
     for pattern in placeholder_patterns:
         text = re.sub(pattern, "(Sem informação em tempo real)", text, flags=re.IGNORECASE)
 
+    route_dump = _structure_transport_route_dump_markdown(text)
+    if route_dump:
+        return route_dump.strip()
+
     compacted = _compact_transport_arrivals_markdown(text)
     if compacted:
         return compacted.strip()
-    
-    # Ensure bus line headers are bolded if the LLM forgot
+
     text = re.sub(r"^(?:\s*-\s*)?([0-9A-Z]{2,4})\s*-\s*", r"- 🚌 **\1** - ", text, flags=re.MULTILINE)
     text = re.sub(r"\bHorario\b", "Horário", text, flags=re.IGNORECASE)
-    
+
     return clean_newlines(text).strip()
 
 
@@ -1757,6 +1977,42 @@ def clean_researcher_tool_artifacts(text: str) -> str:
     return "\n".join(cleaned_lines).strip()
 
 
+def _infer_service_heading_from_dataset(
+    dataset_title: str,
+    language: str = "en",
+) -> tuple[str, str]:
+    """Infer a stable section heading and item icon for nearby-service datasets."""
+    normalized_title = (dataset_title or "").strip()
+    lowered_title = normalized_title.lower()
+    near_match = re.search(r"\((?:near|perto de)\s+(.+?)\)$", normalized_title, re.IGNORECASE)
+    near_location = near_match.group(1).strip() if near_match else ""
+
+    service_catalog = [
+        ("💊", "Farmácias", "Pharmacies", ("farm", "parafarm")),
+        ("🏥", "Hospitais", "Hospitals", ("hospital",)),
+        ("📚", "Bibliotecas", "Libraries", ("bibliot", "library")),
+        ("🎓", "Escolas", "Schools", ("escola", "school")),
+        ("🌿", "Jardins", "Gardens", ("jardim", "garden", "park", "parque")),
+        ("👮", "Polícia", "Police", ("polic",)),
+    ]
+
+    for icon, pt_label, en_label, markers in service_catalog:
+        if any(marker in lowered_title for marker in markers):
+            label = pt_label if language == "pt" else en_label
+            if near_location:
+                if language == "pt":
+                    return f"#### {icon} {label} perto de {near_location}", icon
+                return f"#### {icon} {label} near {near_location}", icon
+            return f"#### {icon} {label}", icon
+
+    generic_label = "Serviços próximos" if language == "pt" else "Nearby services"
+    if near_location:
+        if language == "pt":
+            return f"#### 📍 {generic_label} perto de {near_location}", "📍"
+        return f"#### 📍 {generic_label} near {near_location}", "📍"
+    return f"#### 📍 {generic_label}", "📍"
+
+
 def structure_ranked_research_results(text: str) -> str:
     """Converts flat numbered researcher results into nested markdown lists."""
     if not text:
@@ -1994,6 +2250,334 @@ def canonicalize_planner_source_line(text: str, language: str = "en") -> str:
     return _replace_source_line(text, replacement)
 
 
+def _looks_like_mojibake(text: str) -> bool:
+    """Best-effort detector for common UTF-8/Windows-1252 mojibake fragments."""
+    return any(fragment in (text or "") for fragment in ("Ã", "Â", "ðŸ", "\x8d", "\x8f"))
+
+
+def _strip_accents_compat(value: str) -> str:
+    """Accent-insensitive normalization helper used by robust formatters."""
+    normalized = unicodedata.normalize("NFKD", value or "")
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+
+def structure_service_lookup_markdown(text: str, language: str = "en") -> str:
+    """Convert nearby-service dumps into stable markdown, including mojibake inputs."""
+    if not text or "results from '" not in text.lower():
+        return text
+
+    is_pt = language == "pt"
+    mojibake = _looks_like_mojibake(text)
+    header_re = re.compile(r"Found\s+\d+\s+results?\s+from\s+'(?P<title>[^']+)':", re.IGNORECASE)
+    item_re = re.compile(r"^(?:\*\*)?(?P<num>\d+)\.?(?:\*\*)?\s+(?P<name>.+?)\s*$")
+
+    address_label = "Morada" if is_pt else "Address"
+    distance_label = "DistÃ¢ncia" if (is_pt and mojibake) else ("Distância" if is_pt else "Distance")
+    coords_label = "Coordenadas" if is_pt else "Coordinates"
+    source_line = (
+        f"\U0001F4CC **Fonte:** [*Lisboa Aberta*](https://dados.cm-lisboa.pt/) | **Atualizado:** {datetime.now().strftime('%H:%M')}"
+        if is_pt
+        else f"\U0001F4CC **Source:** [*Lisboa Aberta*](https://dados.cm-lisboa.pt/) | **Updated:** {datetime.now().strftime('%H:%M')}"
+    )
+
+    def infer_heading(dataset_title: str) -> tuple[str, str]:
+        normalized_title = _strip_accents_compat(dataset_title).lower()
+        raw_location_match = re.search(r"\((?:near|perto de)\s+([^)]+)\)", dataset_title, re.IGNORECASE)
+        location = raw_location_match.group(1).strip() if raw_location_match else ""
+
+        if "farm" in normalized_title:
+            heading = (
+                f"Farmácias Perto de {location}" if is_pt and location else
+                "Farmácias Próximas" if is_pt else
+                f"Pharmacies Near {location}" if location else
+                "Nearby Pharmacies"
+            )
+            return f"#### \U0001F48A {heading}", "\U0001F48A"
+        if "hospital" in normalized_title:
+            heading = (
+                f"Hospitais Perto de {location}" if is_pt and location else
+                "Hospitais Próximos" if is_pt else
+                f"Hospitals Near {location}" if location else
+                "Nearby Hospitals"
+            )
+            return f"#### \U0001F3E5 {heading}", "\U0001F3E5"
+        if "polic" in normalized_title:
+            heading = (
+                f"Polícia Perto de {location}" if is_pt and location else
+                "Polícia Próxima" if is_pt else
+                f"Police Near {location}" if location else
+                "Nearby Police"
+            )
+            return f"#### \U0001F46E {heading}", "\U0001F46E"
+        return f"#### \U0001F4CD {dataset_title.strip()}", "\U0001F4CD"
+
+    lines = text.splitlines()
+    structured_lines: list[str] = []
+    pending_heading: Optional[str] = None
+    transformed = False
+    index = 0
+
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if not stripped:
+            index += 1
+            continue
+
+        if re.match(r"^#{3,4}\s+", stripped):
+            pending_heading = stripped
+            index += 1
+            continue
+
+        normalized_header = _strip_accents_compat(_strip_markdown_formatting(stripped))
+        header_match = header_re.search(normalized_header)
+        if not header_match:
+            if pending_heading:
+                structured_lines.extend([pending_heading, ""])
+                pending_heading = None
+            structured_lines.append(stripped)
+            index += 1
+            continue
+
+        transformed = True
+        dataset_title = header_match.group("title").strip()
+        auto_heading, item_icon = infer_heading(dataset_title)
+        section_heading = pending_heading or auto_heading
+        pending_heading = None
+        structured_lines.extend([section_heading, ""])
+        index += 1
+
+        entries: list[dict[str, str]] = []
+        current_entry: Optional[dict[str, str]] = None
+        while index < len(lines):
+            current_line = lines[index].strip()
+            if not current_line:
+                index += 1
+                continue
+
+            normalized_current = _strip_accents_compat(_strip_markdown_formatting(current_line))
+            if re.match(r"^#{3,4}\s+", current_line) or header_re.search(normalized_current):
+                break
+
+            plain_line = _strip_markdown_formatting(current_line).strip()
+            item_match = item_re.match(plain_line)
+            if item_match:
+                current_entry = {
+                    "name": item_match.group("name").strip(),
+                    "address": "",
+                    "distance": "",
+                    "coords": "",
+                }
+                entries.append(current_entry)
+                index += 1
+                continue
+
+            if current_entry is not None:
+                lowered_plain = _strip_accents_compat(plain_line).lower()
+                if re.search(r"\(-?\d+\.\d+,\s*-?\d+\.\d+\)", plain_line):
+                    current_entry["coords"] = plain_line
+                elif "km away" in lowered_plain or re.search(r"\b\d+(?:\.\d+)?\s*km\b", lowered_plain):
+                    current_entry["distance"] = plain_line
+                elif not current_entry["address"]:
+                    current_entry["address"] = plain_line
+
+            index += 1
+
+        for item_number, entry in enumerate(entries, 1):
+            structured_lines.append(f"{item_number}. {item_icon} **{entry['name']}**")
+            if entry["address"]:
+                structured_lines.append(f"   \U0001F4CD **{address_label}:** {entry['address']}")
+            if entry["distance"]:
+                structured_lines.append(f"   \U0001F4CF **{distance_label}:** {entry['distance']}")
+            if entry["coords"]:
+                structured_lines.append(f"   \U0001F5FA\uFE0F **{coords_label}:** {entry['coords']}")
+            structured_lines.append("")
+
+    if pending_heading:
+        structured_lines.extend([pending_heading, ""])
+
+    structured = clean_newlines("\n".join(structured_lines)).strip()
+    if not transformed:
+        return text
+    if structured and not has_source_line(structured):
+        structured = f"{structured}\n\n{source_line}".strip()
+    return structured
+
+
+def repair_planner_markdown_contract(text: str, language: str = "en") -> str:
+    """Restore the planner markdown contract after generic formatting passes."""
+    if not text:
+        return text
+
+    is_pt = language == "pt"
+    section_icons = {"⛅", "🚇", "📍", "✨", "⚠️", "📝"}
+    repaired_lines: list[str] = []
+    title_fixed = False
+
+    def itinerary_title_match(value: str) -> Optional[str]:
+        body = re.sub(r"^###\s+", "", value).strip()
+        normalized_body = _strip_accents_compat(body).lower()
+        if any(token in normalized_body for token in ("itiner", "itinerary", "plano", "roteiro")):
+            cleaned = re.sub(r"^[^A-Za-zÀ-ÿ0-9]+", "", body).strip(" :-")
+            if cleaned:
+                return cleaned
+        return None
+
+    def canonical_planner_section(value: str) -> Optional[str]:
+        normalized_value = _strip_accents_compat(value).lower()
+        if "antes de sair" in normalized_value or ("before" in normalized_value and "go" in normalized_value):
+            return f"**⛅ {'Antes de Sair' if is_pt else 'Before You Go'}**"
+        if ("condic" in normalized_value and "seguran" in normalized_value) or (
+            "conditions" in normalized_value and "safety" in normalized_value
+        ):
+            return f"**⛅ {'Condições e Segurança' if is_pt else 'Conditions and Safety'}**"
+        if (
+            "como chegar" in normalized_value
+            or "desloca" in normalized_value
+            or "how to get there" in normalized_value
+            or "get around" in normalized_value
+        ):
+            return f"**🚇 {'Como Chegar e Deslocação' if is_pt else 'How to Get There and Get Around'}**"
+        if (
+            "sugest" in normalized_value
+            or "recomend" in normalized_value
+            or "visita" in normalized_value
+            or "visit suggestions" in normalized_value
+            or "recommendations" in normalized_value
+            or "options" in normalized_value
+        ):
+            return f"**📍 {'Sugestões para a Visita' if is_pt else 'Visit Suggestions'}**"
+        if "notas" in normalized_value and "pratic" in normalized_value and "dicas" not in normalized_value and "important" not in normalized_value:
+            return f"**✨ {'Notas Práticas' if is_pt else 'Practical Notes'}**"
+        if (
+            ("dicas" in normalized_value and "notas" in normalized_value)
+            or ("dicas" in normalized_value and "pratic" in normalized_value)
+            or ("notas" in normalized_value and "important" in normalized_value)
+            or ("notas" in normalized_value and "pratic" in normalized_value)
+            or "practical tips" in normalized_value
+            or "important notes" in normalized_value
+            or "final notes" in normalized_value
+        ):
+            return f"**✨ {'Dicas Práticas e Notas Importantes' if is_pt else 'Practical Tips and Important Notes'}**"
+        return None
+
+    def timed_card_icon(title: str) -> str:
+        normalized_title = _strip_accents_compat(title).lower()
+        if any(
+            keyword in normalized_title
+            for keyword in (
+                "mosteiro",
+                "museu",
+                "museum",
+                "monument",
+                "igreja",
+                "church",
+                "torre",
+                "castle",
+                "castelo",
+                "palacio",
+                "palácio",
+                "praca",
+                "praça",
+                "belem",
+                "belém",
+                "chegada",
+            )
+        ):
+            return "\U0001F3DB\uFE0F"
+        if any(keyword in normalized_title for keyword in ("pastel", "nata", "bakery", "pastry")):
+            return "\U0001F950"
+        if any(keyword in normalized_title for keyword in ("cafe", "café", "coffee", "bar")):
+            return "\u2615"
+        if any(keyword in normalized_title for keyword in ("almoco", "almoço", "lunch", "jantar", "dinner", "restaurant", "restaurante")):
+            return "\U0001F37D\uFE0F"
+        if any(keyword in normalized_title for keyword in ("jardim", "garden", "walk", "passeio", "tejo", "river")):
+            return "\U0001F33F"
+        return "\U0001F3DB\uFE0F"
+
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            if repaired_lines and repaired_lines[-1] != "":
+                repaired_lines.append("")
+            continue
+
+        if stripped == "---":
+            if repaired_lines and repaired_lines[-1] != "---":
+                repaired_lines.append("---")
+            continue
+
+        if _SOURCE_LINE_RE.match(stripped):
+            if repaired_lines and repaired_lines[-1] not in {"", "---"}:
+                repaired_lines.extend(["", "---", ""])
+            repaired_lines.append(stripped)
+            continue
+
+        plain = _strip_markdown_formatting(stripped)
+        plain = re.sub(r"(\d{1,2})\s*:\s*(\d{2})", r"\1:\2", plain)
+
+        title_candidate = itinerary_title_match(plain)
+        if not title_fixed and title_candidate:
+            repaired_lines.append(f"### \U0001F4C5 {title_candidate}")
+            title_fixed = True
+            continue
+
+        timed_match = re.search(
+            r"(?P<time>\d{1,2}:\d{2})\s*[^A-Za-zÀ-ÿ0-9]{0,4}\s*(?P<title>[A-Za-zÀ-ÿ].+)$",
+            plain,
+        )
+        if timed_match and "atualizado" not in plain.lower() and "updated" not in plain.lower():
+            title = timed_match.group("title").strip(" -—–")
+            icon = timed_card_icon(title)
+            repaired_lines.append(f"### {icon} {timed_match.group('time')} · {title}")
+            continue
+
+        canonical_section = None
+        if not re.match(r"^(?:[-*•]\s*)", stripped):
+            canonical_section = canonical_planner_section(plain)
+        if canonical_section:
+            repaired_lines.append(canonical_section)
+            continue
+
+        if re.match(r"^(?:[-*•]\s*)", stripped):
+            bullet_plain = re.sub(r"^(?:[-*•]\s*)", "", plain).strip()
+            bullet_normalized = _strip_accents_compat(bullet_plain).lower()
+            if any(
+                token in bullet_normalized
+                for token in ("notas", "dicas", "sugest", "condic", "como chegar", "desloca", "recommend", "options")
+            ):
+                canonical_bullet_section = canonical_planner_section(bullet_plain)
+                if canonical_bullet_section:
+                    repaired_lines.append(canonical_bullet_section)
+                    continue
+
+        header_match = re.match(r"^###\s+(?P<icon>[^\s]+)\s+(?P<title>.+)$", plain)
+        if header_match:
+            icon = header_match.group("icon").strip()
+            title = header_match.group("title").strip()
+            if icon in section_icons and not _TIMED_SECTION_HEADER_RE.match(f"{icon} {title}"):
+                repaired_lines.append(f"**{icon} {title}**")
+                continue
+
+        icon_heading_match = re.match(r"^(?P<icon>[^\s]+)\s+(?P<title>.+)$", plain)
+        if icon_heading_match:
+            icon = icon_heading_match.group("icon").strip()
+            title = icon_heading_match.group("title").strip()
+            if icon in section_icons and ":" not in title:
+                repaired_lines.append(f"**{icon} {title}**")
+                continue
+
+        repaired_lines.append(plain)
+
+    repaired = clean_newlines("\n".join(repaired_lines)).strip()
+    if repaired and not repaired.startswith("### ") and re.search(r"\b(itiner[aáàâã]rio|itinerary|plano|roteiro)\b", _strip_accents_compat(repaired), re.IGNORECASE):
+        first_line, *rest = repaired.splitlines()
+        maybe_title = itinerary_title_match(first_line)
+        if maybe_title:
+            repaired = "\n".join([f"### \U0001F4C5 {maybe_title}", *rest]).strip()
+
+    return repaired
+
+
 def finalize_worker_response(
     text: str,
     agent_name: str,
@@ -2045,9 +2629,16 @@ def finalize_worker_response(
             timestamp=weather_timestamp,
         )
     elif agent_name == "researcher":
-        finalized = format_response(finalized)
-        finalized = clean_researcher_tool_artifacts(finalized)
-        finalized = structure_ranked_research_results(finalized)
+        service_structured = structure_service_lookup_markdown(
+            finalized,
+            language=preferred_language,
+        )
+        if service_structured != finalized:
+            finalized = service_structured
+        else:
+            finalized = format_response(finalized)
+            finalized = clean_researcher_tool_artifacts(finalized)
+            finalized = structure_ranked_research_results(finalized)
         if _ACCESSIBILITY_QUERY_RE.search(user_query or ""):
             finalized = strip_unconfirmed_accessibility_claims(
                 finalized,
@@ -2081,6 +2672,7 @@ def finalize_worker_response(
                 preserve_timed_cards=True,
             )
             finalized = format_response(finalized)
+            finalized = repair_planner_markdown_contract(finalized, language=preferred_language)
             finalized = canonicalize_planner_source_line(finalized, language=preferred_language)
 
     return clean_newlines(finalized).strip()
@@ -2264,43 +2856,43 @@ def normalize_bullets(text: str) -> str:
     """
     lines = text.split("\n")
     out = []
-    
+
     # Match labels (e.g. "Data/Hora:", "Preço: ") optionally prefixed by emoji
     label_pattern = re.compile(r'^([\u2600-\U0010ffff\u2B50\u200D\uFE0F]{1,3}\s*)?([A-Za-zÀ-ÿ/\s]{3,25}):\s*(.*)')
-    
+
     # Matches the useless ratings added by VisitLisboa tool
     remove_stars_pattern = re.compile(r'\s*-\s*⭐\s*4\.5/5\s*$')
     # Filter repeated 'Nota:' elements
     filter_nota_pattern = re.compile(r'^(?:⚠️\s*)?Nota:', re.IGNORECASE)
-    
+
     nota_count = 0
-    
+
     for line in lines:
         stripped = line.strip()
         if not stripped:
             out.append("")
             continue
-            
+
         m_nota = filter_nota_pattern.match(stripped)
         if m_nota:
             nota_count += 1
             if nota_count > 1:
                 continue
-                
+
         # Remove dummy stars
         stripped = remove_stars_pattern.sub('', stripped)
-            
+
         indent = len(line) - len(line.lstrip())
         spaces = " " * indent
-        
+
         # Determine if it's a bulleted line
         is_bullet = stripped.startswith("- ") or stripped.startswith("* ") or stripped.startswith("• ")
-        
+
         if is_bullet:
             content = stripped[2:].strip()
         else:
             content = stripped
-            
+
         # Detect numbered lists and format labels (Data/Hora: -> **Data/Hora**: )
         if "**" not in content and not content.startswith("#"):
             m_num = re.match(r'^(\d+\.)\s+(.*)', content)
@@ -2319,7 +2911,7 @@ def normalize_bullets(text: str) -> str:
                     looks_like_url_prefix = lowered_label in {"http", "https"} or lowered_rest.startswith("//")
                     if not looks_like_url_prefix:
                         content = f"{emoji_part}**{label}**: {rest}"
-                
+
         # Format the output block
         if is_bullet:
             # Normalize all bullet variants to standard Markdown "- "
@@ -2331,7 +2923,7 @@ def normalize_bullets(text: str) -> str:
                 out.append(f"{spaces}{content}")
             else:
                 out.append(line)
-                
+
     return "\n".join(out)
 
 

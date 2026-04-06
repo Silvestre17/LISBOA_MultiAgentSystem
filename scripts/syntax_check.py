@@ -80,7 +80,7 @@ files = [
 passed = 0
 failed = 0
 for f in files:
-    full = os.path.join(base, f)
+    full = os.path.join(base, os.path.normpath(f))
     if not os.path.exists(full):
         print(f"SKIP: {f} (not found)")
         continue
@@ -96,3 +96,5 @@ print(f"\n{'='*50}")
 print(f"Passed: {passed}/{passed+failed}  Failed: {failed}/{passed+failed}")
 if failed == 0:
     print("ALL SYNTAX CHECKS PASSED")
+else:
+    sys.exit(1)

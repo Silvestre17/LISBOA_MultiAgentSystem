@@ -29,6 +29,8 @@ from agent.llm_factory import LLMFactory
 from agent.utils.langsmith_tracing import (
     LANGSMITH_AVAILABLE,
     get_langsmith_scoped_project_name,
+    get_langsmith_tracing_status,
+    get_last_langsmith_runtime_failure,
     tracing_project_override,
 )
 from config import Config
@@ -342,7 +344,7 @@ def run_zero_shot(
     """Run the raw zero-shot baseline without LISBOA tool grounding."""
     llm = LLMFactory.get_llm(provider=provider, model=model_name, temperature=0.0)
     model_id = build_model_id(provider, model_name)
-    
+
     start = time.time()
     try:
         response = llm.invoke([HumanMessage(content=query)])
@@ -391,7 +393,7 @@ def run_lisboa(query: str, system: MultiAgentAssistant, *, language: str = "en")
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             response = system.chat(query, language=language, verbose=False)
         latency = time.time() - start
-        
+
         retrieved_context_str = "\n---\n".join(retrieved_context_blocks)
         response_usage = build_usage_payload(system.get_llm_usage_summary())
         agent_usage_snapshot = {
@@ -411,7 +413,7 @@ def run_lisboa(query: str, system: MultiAgentAssistant, *, language: str = "en")
             for agent_name, usage_payload in agent_usage_snapshot.items()
             if int(usage_payload.get("call_count", 0) or 0) > 0 or agent_tool_logs.get(agent_name)
         ]
-        
+
         return (
             response,
             tools_called,
@@ -723,6 +725,7 @@ def run_ablation(
         ABLATION_LANGSMITH_SCOPE_LABEL,
         env_name=ABLATION_LANGSMITH_PROJECT_ENV,
     )
+    langsmith_status = get_langsmith_tracing_status()
     if LANGSMITH_AVAILABLE:
         print(
             f"[LangSmith] Ablation traces will be saved to project: {ablation_langsmith_project}"
@@ -730,6 +733,7 @@ def run_ablation(
     else:
         print(
             "[LangSmith] Ablation tracing is inactive. "
+            f"{langsmith_status.get('reason', 'LangSmith tracing is disabled')} "
             "Set LANGSMITH_TRACING=true with valid credentials to save these runs to project: "
             f"{ablation_langsmith_project}"
         )
@@ -738,7 +742,7 @@ def run_ablation(
         print("=" * 60)
         print(f"STARTING ABLATION STUDY (Zero-Shot vs LISBOA Framework) (LIMIT={limit})")
         print("=" * 60)
-        
+
         resolved_groundtruth_path = resolve_groundtruth_path(groundtruth_path)
         pricing_by_model = resolve_pricing_catalog(pricing_by_model)
         groundtruth_queries = load_groundtruth_queries(
@@ -1114,6 +1118,13 @@ def run_ablation(
         )
 
         print(f"\nAblation Study complete. Results saved to {output_path}")
+        runtime_failure = get_last_langsmith_runtime_failure()
+        if runtime_failure:
+            print(
+                "[LangSmith] Latest persistence status: "
+                f"{runtime_failure.get('persistence_state', 'failed_remote')} - "
+                f"{runtime_failure.get('message', '')}"
+            )
 
 
 if __name__ == "__main__":
@@ -1187,9 +1198,9 @@ if __name__ == "__main__":
         help="Output filename prefix inside eval/results/ablation/.",
     )
     args = parser.parse_args()
-    
+
     limit = 5 if args.mode == "run_test" else args.limit
-    
+
     run_ablation(
         limit=limit,
         zero_shot_provider=args.zero_shot_provider,

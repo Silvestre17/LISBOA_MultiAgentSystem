@@ -80,12 +80,25 @@ class WeatherAgent(BaseAgent):
         )
 
     @staticmethod
-    def _build_messages(system_prompt: str, user_message: str, context: str = "") -> list:
-        """Builds the message list for a weather invocation."""
-        language = WeatherAgent._infer_weather_query_language(user_message)
+    def _build_messages(
+        system_prompt: str,
+        user_message: str,
+        context: str = "",
+        language: str | None = None,
+    ) -> list:
+        """Builds the message list for a weather invocation.
+
+        Args:
+            system_prompt: System prompt text.
+            user_message: The user's query.
+            context: Additional orchestrator context.
+            language: Pre-resolved language code ('pt' or 'en'). When ``None``,
+                the language is inferred from *user_message* as a fallback.
+        """
+        resolved_language = language or WeatherAgent._infer_weather_query_language(user_message)
         language_instruction = (
             "Respond ENTIRELY in Portuguese (PT-PT)."
-            if language == "pt"
+            if resolved_language == "pt"
             else "Respond ENTIRELY in English."
         )
 
@@ -382,7 +395,7 @@ class WeatherAgent(BaseAgent):
                 language=language,
             )
 
-        messages = self._build_messages(self.system_prompt, user_message, context)
+        messages = self._build_messages(self.system_prompt, user_message, context, language=language)
         tool_enforcement_msg = (
             "You MUST use a tool (like get_current_weather_summary) to get real data. "
             "Do NOT answer from your knowledge base. Call the tool now."
@@ -415,6 +428,7 @@ class WeatherAgent(BaseAgent):
                 get_weather_prompt(safe_mode=True),
                 user_message,
                 context,
+                language=language,
             )
             try:
                 response = self.execute_react_loop(

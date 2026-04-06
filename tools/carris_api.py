@@ -30,7 +30,6 @@ import argparse
 import csv
 import json
 import logging
-import math
 import os
 import re
 import sqlite3
@@ -791,8 +790,8 @@ def _get_active_services(
 
     cursor.execute(
         f"""
-        SELECT service_id FROM calendar 
-        WHERE {day_of_week} = 1 
+        SELECT service_id FROM calendar
+        WHERE {day_of_week} = 1
         AND start_date <= ? AND end_date >= ?
     """,
         (date_str, date_str),
@@ -802,7 +801,7 @@ def _get_active_services(
 
     cursor.execute(
         """
-        SELECT service_id FROM calendar_dates 
+        SELECT service_id FROM calendar_dates
         WHERE date = ? AND exception_type = 1
     """,
         (date_str,),
@@ -812,7 +811,7 @@ def _get_active_services(
 
     cursor.execute(
         """
-        SELECT service_id FROM calendar_dates 
+        SELECT service_id FROM calendar_dates
         WHERE date = ? AND exception_type = 2
     """,
         (date_str,),
@@ -1126,8 +1125,8 @@ def get_vehicle_eta_at_stop(
 
     cursor.execute(
         """
-        SELECT stop_sequence, departure_time 
-        FROM stop_times 
+        SELECT stop_sequence, departure_time
+        FROM stop_times
         WHERE trip_id = ? AND stop_id = ?
     """,
         (trip_id, current_stop_id),
@@ -1143,7 +1142,7 @@ def get_vehicle_eta_at_stop(
     cursor.execute(
         """
         SELECT stop_sequence, arrival_time, departure_time
-        FROM stop_times 
+        FROM stop_times
         WHERE trip_id = ? AND stop_id = ?
     """,
         (trip_id, target_stop_id),
@@ -1679,8 +1678,8 @@ def carris_get_next_departures(
             FROM stop_times st
             JOIN trips t ON st.trip_id = t.trip_id
             JOIN routes r ON t.route_id = r.route_id
-            WHERE st.stop_id IN ({stop_placeholders}) 
-            AND t.service_id IN ({placeholders}) 
+            WHERE st.stop_id IN ({stop_placeholders})
+            AND t.service_id IN ({placeholders})
             AND st.departure_time >= ?
             AND st.stop_sequence < (
                 SELECT MAX(st2.stop_sequence)
@@ -1906,7 +1905,7 @@ def carris_find_routes_between(
                 SELECT DISTINCT r.route_id, r.route_short_name, r.route_long_name
                 FROM routes r
                 WHERE r.route_id IN (
-                    SELECT t.route_id 
+                    SELECT t.route_id
                     FROM stop_times st_o
                     JOIN stop_times st_d ON st_o.trip_id = st_d.trip_id
                         AND st_o.stop_sequence < st_d.stop_sequence
@@ -2331,7 +2330,7 @@ def carris_get_service_frequency(
 
     Returns:
         str: Formatted frequency information by time window.
-        
+
     Examples:
         >>> carris_get_service_frequency("28E")
         >>> carris_get_service_frequency("15E", stop_name="Praça da Figueira")
@@ -2739,7 +2738,7 @@ if __name__ == "__main__":
     # =========================================================================
     # DIRECTION-AWARE ROUTING TESTS
     # =========================================================================
-    
+
     # TEST 14: Direction-aware routing (origin BEFORE destination in trip)
     def _test_direction_fix():
         result = carris_find_routes_between.invoke(
@@ -2750,10 +2749,10 @@ if __name__ == "__main__":
         if "Linha" in result or "Route" in result or "rota" in result.lower():
             return f"✅ Direction-aware routing working\n{result[:500]}"
         return result[:500]
-    
+
     run_test("Direction Routing: Cais do Sodré → Belém (forward)", _test_direction_fix)
-    
-    # TEST 15: Reverse direction test  
+
+    # TEST 15: Reverse direction test
     def _test_reverse_direction():
         result = carris_find_routes_between.invoke(
             {"origin": "Belém", "destination": "Cais do Sodré"}
@@ -2761,9 +2760,9 @@ if __name__ == "__main__":
         if "não encontrada" in result.lower() and "erro" in result.lower():
             raise AssertionError("Reverse route not found")
         return f"✅ Reverse routing working\n{result[:500]}"
-    
+
     run_test("Direction Routing: Belém → Cais do Sodré (reverse)", _test_reverse_direction)
-    
+
     # TEST 16: SQL direction constraint verification
     def _test_sql_direction_constraint():
         conn = sqlite3.connect(CARRIS_DB_PATH)
@@ -2785,40 +2784,40 @@ if __name__ == "__main__":
         """)
         rows = cur.fetchall()
         conn.close()
-        
+
         if not rows:
             raise AssertionError("No routes found with direction constraint (stop_sequence ordering)")
-        
+
         return "Routes Figueira→Belém with direction constraint:\n" + \
                "\n".join(f"   {r[0]}: {r[1]}" for r in rows)
-    
+
     run_test("SQL Direction Constraint Verification", _test_sql_direction_constraint)
 
     # =========================================================================
     # FREQUENCY TOOL TESTS
     # =========================================================================
-    
+
     # TEST 17: carris_get_service_frequency - Tram 28E
     run_test(
         "carris_get_service_frequency('28E')",
         carris_get_service_frequency.invoke,
         {"route_short_name": "28E"},
     )
-    
+
     # TEST 18: carris_get_service_frequency - Bus 758
     run_test(
         "carris_get_service_frequency('758')",
         carris_get_service_frequency.invoke,
         {"route_short_name": "758"},
     )
-    
+
     # TEST 19: carris_get_service_frequency with specific stop
     run_test(
         "carris_get_service_frequency('15E', stop='Belém')",
         carris_get_service_frequency.invoke,
         {"route_short_name": "15E", "stop_name": "Belém"},
     )
-    
+
     # TEST 20: Frequency output format validation
     def _test_frequency_format():
         result = carris_get_service_frequency.invoke({"route_short_name": "28E"})
@@ -2832,16 +2831,16 @@ if __name__ == "__main__":
         if errors:
             raise AssertionError(f"Missing in frequency output: {errors}")
         return f"✅ Frequency output format valid (checks: {list(checks.keys())})"
-    
+
     run_test("Frequency Output Format Validation", _test_frequency_format)
-    
+
     # TEST 21: Frequency - invalid route (edge case)
     run_test(
         "carris_get_service_frequency('999Z') - Invalid Route",
         carris_get_service_frequency.invoke,
         {"route_short_name": "999Z"},
     )
-    
+
     # TEST 22: Direction-safe Rossio departures for line 732
     if stop_id_rossio:
         run_test(

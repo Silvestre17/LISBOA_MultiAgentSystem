@@ -8,6 +8,7 @@
 # ==========================================================================
 
 import re
+import unicodedata
 import uuid
 from copy import deepcopy
 from datetime import datetime
@@ -2710,6 +2711,175 @@ class TransportAgent(BaseAgent):
             return f"📌 **Fonte:** {' | '.join(deduped_sources)} | **Atualizado:** {timestamp}"
         return f"📌 **Source:** {' | '.join(deduped_sources)} | **Updated:** {timestamp}"
 
+    @staticmethod
+    def _extract_train_lines_summary(summary_text: str) -> Optional[str]:
+        """Extracts the CP line summary from a train-tool response."""
+        if not summary_text:
+            return None
+
+        match = re.search(r"(?:Linhas?|Line(?:s)?):\s*\**([^*\n]+)\**", summary_text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+        return None
+
+    @staticmethod
+    def _is_mode_comparison_query(user_message: str) -> bool:
+        """Detect explicit transport-mode comparison requests such as metro vs train."""
+        normalized_query = unicodedata.normalize("NFKD", user_message or "")
+        normalized_query = normalized_query.encode("ascii", "ignore").decode("ascii").lower()
+        compares_metro_train = (
+            "metro" in normalized_query
+            and any(term in normalized_query for term in ["comboio", "comboios", "train", "trains"])
+        )
+        asks_comparison = bool(
+            re.search(r"\b(mais rapid[oa]|mais barat[oa]|faster|fastest|cheaper|cheapest|compare|comparar)\b", normalized_query)
+        )
+        return compares_metro_train and asks_comparison
+
+    @staticmethod
+    def _extract_duration_minutes(summary_text: str) -> Optional[int]:
+        """Extract a best-effort trip duration in minutes from a transport summary."""
+        if not summary_text:
+            return None
+
+        normalized_text = unicodedata.normalize("NFKD", summary_text)
+        normalized_text = normalized_text.encode("ascii", "ignore").decode("ascii")
+        patterns = [
+            r"(?:Tempo total estimado|Estimated total time|Duracao|Duration):\s*\**~?\s*(\d+)",
+            r"~\s*(\d+)\s*min",
+            r"\b(\d+)\s*min(?:utos?)?\b",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, normalized_text, flags=re.IGNORECASE)
+            if match:
+                try:
+                    return int(match.group(1))
+                except (TypeError, ValueError):
+                    continue
+        return None
+
+    @staticmethod
+    def _extract_departure_times(summary_text: str, limit: int = 3) -> List[str]:
+        """Extract the first distinct departure times listed in a summary."""
+        if not summary_text:
+            return []
+
+        matches = re.findall(r"(?:\*\*)?(\d{1,2}:\d{2})(?:\*\*)?\s*(?:→|>)", summary_text)
+        deduped: List[str] = []
+        for item in matches:
+            if item not in deduped:
+                deduped.append(item)
+            if len(deduped) >= limit:
+                break
+        return deduped
+
+    def _build_mode_comparison_response(
+        self,
+        user_message: str,
+        context: str = "",
+        language: str = "en",
+    ) -> Optional[str]:
+        """Build a deterministic metro-vs-train comparison answer when the user asks for one."""
+        if not self._is_mode_comparison_query(user_message):
+            return None
+
+        endpoints = _extract_route_endpoints(user_message)
+        if not endpoints:
+            return None
+
+        origin, destination = endpoints
+        metro_response = _build_deterministic_metro_route_response(user_message, context) or ""
+
+        train_tool = self._get_tool_by_name("plan_train_trip")
+        train_response = ""
+        if train_tool:
+            train_response = str(
+                self._invoke_tool(
+                    train_tool,
+                    {"origin": origin, "destination": destination},
+                    tool_name="plan_train_trip",
+                )
+            ).strip()
+
+        if not metro_response and not train_response:
+            return None
+
+        metro_minutes = self._extract_duration_minutes(metro_response)
+        train_minutes = self._extract_duration_minutes(train_response)
+        train_lines = self._extract_train_lines_summary(train_response)
+        train_departures = self._extract_departure_times(train_response, limit=3)
+        normalized_query = unicodedata.normalize("NFKD", user_message or "")
+        normalized_query = normalized_query.encode("ascii", "ignore").decode("ascii").lower()
+        asks_cheapest = bool(re.search(r"\b(mais barat[oa]|cheaper|cheapest|preco|price)\b", normalized_query))
+
+        arrow = "\u2192"
+        if language == "pt":
+            lines = [
+                f"**Compara\u00e7\u00e3o:** {origin} {arrow} {destination}",
+                "",
+                "#### \U0001F687 Metro",
+                f"\u23F1\uFE0F **Tempo estimado:** {metro_minutes} min"
+                if metro_minutes is not None
+                else "\u23F1\uFE0F **Tempo estimado:** n\u00e3o foi poss\u00edvel confirmar com os dados dispon\u00edveis",
+                "",
+                "#### \U0001F686 Comboio",
+                f"\u23F1\uFE0F **Tempo estimado:** {train_minutes} min"
+                if train_minutes is not None
+                else "\u23F1\uFE0F **Tempo estimado:** n\u00e3o foi poss\u00edvel confirmar com os dados dispon\u00edveis",
+            ]
+            if train_lines:
+                lines.append(f"\U0001F686 **Linhas:** {train_lines}")
+            if train_departures:
+                lines.append(f"\U0001F550 **Pr\u00f3ximas sa\u00eddas mostradas:** {', '.join(train_departures)}")
+
+            lines.extend(["", "#### \u2705 Conclus\u00e3o"])
+            if metro_minutes is not None and train_minutes is not None:
+                faster_label = "Comboio" if train_minutes < metro_minutes else "Metro"
+                lines.append(f"- **Mais r\u00e1pido:** {faster_label}")
+            else:
+                lines.append("- **Mais r\u00e1pido:** n\u00e3o foi poss\u00edvel comparar com seguran\u00e7a porque falta pelo menos uma dura\u00e7\u00e3o oficial")
+            if asks_cheapest:
+                lines.append("- **Mais barato:** n\u00e3o foi poss\u00edvel confirmar com dados oficiais de tarifa nas tools dispon\u00edveis")
+        else:
+            lines = [
+                f"**Comparison:** {origin} {arrow} {destination}",
+                "",
+                "#### \U0001F687 Metro",
+                f"\u23F1\uFE0F **Estimated time:** {metro_minutes} min"
+                if metro_minutes is not None
+                else "\u23F1\uFE0F **Estimated time:** could not be confirmed from the available data",
+                "",
+                "#### \U0001F686 Train",
+                f"\u23F1\uFE0F **Estimated time:** {train_minutes} min"
+                if train_minutes is not None
+                else "\u23F1\uFE0F **Estimated time:** could not be confirmed from the available data",
+            ]
+            if train_lines:
+                lines.append(f"\U0001F686 **Lines:** {train_lines}")
+            if train_departures:
+                lines.append(f"\U0001F550 **Next departures shown:** {', '.join(train_departures)}")
+
+            lines.extend(["", "#### \u2705 Verdict"])
+            if metro_minutes is not None and train_minutes is not None:
+                faster_label = "Train" if train_minutes < metro_minutes else "Metro"
+                lines.append(f"- **Faster:** {faster_label}")
+            else:
+                lines.append("- **Faster:** I could not compare confidently because at least one official duration is missing")
+            if asks_cheapest:
+                lines.append("- **Cheaper:** official fare data could not be confirmed with the currently available tools")
+
+        lines.extend([
+            "",
+            self._build_transport_source_line(
+                language,
+                [
+                    "[*Metro de Lisboa*](https://www.metrolisboa.pt)",
+                    "[*CP*](https://www.cp.pt)",
+                ],
+            ),
+        ])
+        return "\n".join(lines).strip()
+
     def _format_deterministic_tool_result(
         self,
         tool_name: str,
@@ -3067,6 +3237,19 @@ class TransportAgent(BaseAgent):
         if unsupported_mode_response:
             return finalize_worker_response(
                 unsupported_mode_response,
+                agent_name="transport",
+                user_query=user_message,
+                language=resolved_language,
+            )
+
+        comparison_response = self._build_mode_comparison_response(
+            user_message=user_message,
+            context=context,
+            language=resolved_language,
+        )
+        if comparison_response:
+            return finalize_worker_response(
+                comparison_response,
                 agent_name="transport",
                 user_query=user_message,
                 language=resolved_language,

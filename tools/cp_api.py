@@ -22,23 +22,23 @@ import json
 import logging
 import os
 import sqlite3
-import time
 import unicodedata
 import zipfile
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional
 
 import requests
 from langchain_core.tools import tool
 
 try:
-    from config import Config
+    import config as _project_config
 except ModuleNotFoundError:
     import sys
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-    from config import Config
+else:
+    del _project_config
 
 logger = logging.getLogger(__name__)
 
@@ -136,22 +136,22 @@ CP_KEY_STATIONS = {
     "rossio": {"name": "Rossio", "lines": ["sintra"], "metro": "verde"},
     "cais_sodre": {"name": "Cais do Sodré", "lines": ["cascais"], "metro": "verde"},
     "santa_apolonia": {"name": "Santa Apolónia", "lines": ["azambuja", "norte"], "metro": "azul"},
-    
+
     # Cascais Line
     "cascais": {"name": "Cascais", "lines": ["cascais"], "description": "Western terminus, beach town"},
     "estoril": {"name": "Estoril", "lines": ["cascais"], "description": "Casino and beach resort"},
     "oeiras": {"name": "Oeiras", "lines": ["cascais"], "description": "Business district"},
     "belem": {"name": "Belém", "lines": ["cascais"], "description": "Near UNESCO monuments"},
-    
+
     # Sintra Line
     "sintra": {"name": "Sintra", "lines": ["sintra"], "description": "UNESCO World Heritage site"},
     "queluz": {"name": "Queluz-Belas", "lines": ["sintra"], "description": "Near Queluz Palace"},
     "amadora": {"name": "Amadora", "lines": ["sintra"], "description": "Suburban hub"},
-    
+
     # Azambuja Line
     "vila_franca": {"name": "Vila Franca de Xira", "lines": ["azambuja"], "description": "Northern suburbs"},
     "alverca": {"name": "Alverca", "lines": ["azambuja"], "description": "Industrial zone"},
-    
+
     # South Bank
     "barreiro": {"name": "Barreiro", "lines": ["sado"], "description": "Ferry connection to Lisboa"},
     "setubal": {"name": "Setúbal", "lines": ["sado", "fertagus"], "description": "Southern city"},
@@ -165,10 +165,10 @@ CP_STATIONS = CP_KEY_STATIONS
 def get_cp_station_info(station_name: str) -> Optional[Dict[str, Any]]:
     """
     Returns information about a CP train station from the key stations list.
-    
+
     Args:
         station_name: Name of the station (case-insensitive).
-        
+
     Returns:
         Station information or None if not found.
     """
@@ -181,11 +181,11 @@ def get_cp_station_info(station_name: str) -> Optional[Dict[str, Any]]:
         return normalized
 
     station_lower = normalize_station(station_name)
-    
+
     # Try direct match first
     if station_lower in CP_KEY_STATIONS:
         return CP_KEY_STATIONS[station_lower]
-    
+
     # Try partial match
     for key, info in CP_KEY_STATIONS.items():
         info_name = normalize_station(info['name'])
@@ -212,7 +212,7 @@ def get_cp_station_info(station_name: str) -> Optional[Dict[str, Any]]:
                 "lat": station.get("lat"),
                 "lon": station.get("lon"),
             }
-    
+
     return None
 
 
@@ -223,7 +223,7 @@ def get_cp_station_info(station_name: str) -> Optional[Dict[str, Any]]:
 class CPGTFSManager:
     """
     Manages CP GTFS static data with SQLite storage.
-    
+
     Features:
     - Downloads GTFS feed from CP's official URL
     - Stores data in SQLite for efficient querying
@@ -231,11 +231,11 @@ class CPGTFSManager:
     - Smart update detection using HTTP ETag/Last-Modified headers
     - Provides query methods for schedules, routes, and stops
     """
-    
+
     def __init__(self, data_dir: Path = DATA_DIR):
         """
         Initializes the GTFS manager.
-        
+
         Args:
             data_dir: Directory for storing GTFS data and SQLite DB.
         """
@@ -243,10 +243,10 @@ class CPGTFSManager:
         self.db_path = data_dir / "cp_gtfs.db"
         self.metadata_path = data_dir / "metadata.json"
         self.gtfs_zip_path = data_dir / "gtfs.zip"
-        
+
         # Ensure data directory exists
         self.data_dir.mkdir(parents=True, exist_ok=True)
-    
+
     def _load_metadata(self) -> Dict[str, Any]:
         """Loads metadata from JSON file."""
         if self.metadata_path.exists():
@@ -256,20 +256,20 @@ class CPGTFSManager:
             except (json.JSONDecodeError, IOError):
                 return {}
         return {}
-    
+
     def _save_metadata(self, metadata: Dict[str, Any]) -> None:
         """Saves metadata to JSON file."""
         with open(self.metadata_path, 'w', encoding='utf-8') as f:
             json.dump(metadata, f, indent=2, default=str)
-    
+
     def check_for_updates(self) -> bool:
         """
         Checks if GTFS data needs to be refreshed using HTTP headers.
-        
+
         Uses HTTP HEAD request to check Last-Modified or ETag headers
         from the server, avoiding unnecessary downloads when data hasn't changed.
         Falls back to time-based refresh if headers are unavailable.
-        
+
         Returns:
             True if update is needed, False otherwise.
         """
@@ -277,21 +277,21 @@ class CPGTFSManager:
         last_download = metadata.get('last_download')
         cached_etag = metadata.get('etag')
         cached_last_modified = metadata.get('last_modified')
-        
+
         # If no previous download, update is needed
         if not last_download:
             logger.info("No previous GTFS download found. Update needed.")
             return True
-        
+
         # Try HTTP HEAD request to check server's Last-Modified/ETag
         try:
             logger.info("Checking GTFS server for updates (HEAD request)...")
             head_response = requests.head(CP_GTFS_URL, timeout=10, allow_redirects=True)
             head_response.raise_for_status()
-            
+
             server_etag = head_response.headers.get('ETag')
             server_last_modified = head_response.headers.get('Last-Modified')
-            
+
             # Check ETag first (most reliable)
             if server_etag and cached_etag:
                 if server_etag == cached_etag:
@@ -300,7 +300,7 @@ class CPGTFSManager:
                 else:
                     logger.info(f"ETag changed: {cached_etag[:20]}... → {server_etag[:20]}... Update needed.")
                     return True
-            
+
             # Check Last-Modified header
             if server_last_modified and cached_last_modified:
                 if server_last_modified == cached_last_modified:
@@ -309,66 +309,66 @@ class CPGTFSManager:
                 else:
                     logger.info(f"Last-Modified changed: {cached_last_modified} → {server_last_modified}. Update needed.")
                     return True
-            
+
             # If server provides new headers we didn't have, log and update
             if server_etag or server_last_modified:
                 logger.info(f"Server headers available (ETag: {bool(server_etag)}, Last-Modified: {bool(server_last_modified)})")
-            
+
         except requests.exceptions.RequestException as e:
             logger.warning(f"HEAD request failed: {e}. Falling back to time-based check.")
-        
+
         # Fallback: time-based refresh
         try:
             last_download_dt = datetime.fromisoformat(last_download)
             days_since = (datetime.now() - last_download_dt).days
-            
+
             if days_since >= GTFS_REFRESH_DAYS:
                 logger.info(f"GTFS data is {days_since} days old. Update needed (time-based fallback).")
                 return True
-            
+
             logger.info(f"GTFS data is {days_since} days old. No update needed (time-based fallback).")
             return False
-            
+
         except (ValueError, TypeError):
             logger.warning("Invalid last_download timestamp. Update needed.")
             return True
-    
+
     def download_gtfs(self) -> bool:
         """
         Downloads CP GTFS feed from the official URL.
-        
+
         Captures HTTP headers (Last-Modified, ETag) for smart update checking.
-        
+
         Returns:
             True if download successful, False otherwise.
         """
         logger.info(f"Downloading CP GTFS from {CP_GTFS_URL}...")
-        
+
         try:
             response = requests.get(CP_GTFS_URL, timeout=60, stream=True)
             response.raise_for_status()
-            
+
             # Capture server headers for future update checks
             server_etag = response.headers.get('ETag')
             server_last_modified = response.headers.get('Last-Modified')
             content_length = response.headers.get('Content-Length', 'unknown')
-            
+
             logger.info(f"  Content-Length: {content_length} bytes")
             if server_last_modified:
                 logger.info(f"  Last-Modified: {server_last_modified}")
             if server_etag:
                 logger.info(f"  ETag: {server_etag[:30]}...")
-            
+
             # Save to file
             with open(self.gtfs_zip_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
-            
+
             # Verify it's a valid ZIP
             if not zipfile.is_zipfile(self.gtfs_zip_path):
                 logger.error("Downloaded file is not a valid ZIP")
                 return False
-            
+
             # Store server headers in metadata for future update checks
             metadata = self._load_metadata()
             metadata['last_download'] = datetime.now().isoformat()
@@ -378,10 +378,10 @@ class CPGTFSManager:
                 metadata['last_modified'] = server_last_modified
             metadata['content_length'] = content_length
             self._save_metadata(metadata)
-            
+
             logger.info("\033[1;32m✅ GTFS downloaded successfully\033[0m")
             return True
-            
+
         except requests.exceptions.Timeout:
             logger.error("Timeout downloading CP GTFS (60s)")
             return False
@@ -391,38 +391,38 @@ class CPGTFSManager:
         except IOError as e:
             logger.error(f"Error saving GTFS file: {e}")
             return False
-    
+
     def convert_to_sqlite(self) -> bool:
         """
         Converts GTFS ZIP to SQLite database with optimized schema.
-        
+
         Creates tables: agency, calendar, calendar_dates, routes, stops,
                        trips, stop_times, shapes (if available)
-        
+
         Returns:
             True if conversion successful, False otherwise.
         """
         if not self.gtfs_zip_path.exists():
             logger.error("GTFS ZIP file not found")
             return False
-        
+
         logger.info("Converting GTFS to SQLite...")
-        
+
         # Remove old database if exists
         if self.db_path.exists():
             self.db_path.unlink()
-        
+
         try:
             conn = sqlite3.connect(str(self.db_path))
             cursor = conn.cursor()
-            
+
             # Enable optimizations
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA synchronous=NORMAL")
-            
+
             # Create tables with proper schema
             self._create_tables(cursor)
-            
+
             # Read and insert GTFS data
             with zipfile.ZipFile(self.gtfs_zip_path, 'r') as zf:
                 gtfs_files = {
@@ -435,7 +435,7 @@ class CPGTFSManager:
                     'stop_times.txt': self._insert_stop_times,
                     'shapes.txt': self._insert_shapes,
                 }
-                
+
                 for filename, insert_func in gtfs_files.items():
                     if filename in zf.namelist():
                         logger.info(f"  Processing {filename}...")
@@ -449,28 +449,28 @@ class CPGTFSManager:
                             logger.warning(f"  Error processing {filename}: {e}")
                     else:
                         logger.warning(f"  {filename} not found in GTFS")
-            
+
             # Create indexes for fast queries
             self._create_indexes(cursor)
-            
+
             conn.commit()
             conn.close()
-            
+
             # Update metadata with DB creation time (preserve download headers)
             metadata = self._load_metadata()
             metadata['db_created'] = datetime.now().isoformat()
             self._save_metadata(metadata)
-            
+
             logger.info(f"\033[1;32m✅ SQLite database created at {self.db_path}\033[0m")
             return True
-            
+
         except Exception as e:
             logger.error(f"Error converting GTFS to SQLite: {e}")
             return False
-    
+
     def _create_tables(self, cursor: sqlite3.Cursor) -> None:
         """Creates GTFS tables with proper schema."""
-        
+
         # Agency table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS agency (
@@ -482,7 +482,7 @@ class CPGTFSManager:
                 agency_phone TEXT
             )
         """)
-        
+
         # Calendar table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS calendar (
@@ -498,7 +498,7 @@ class CPGTFSManager:
                 end_date TEXT
             )
         """)
-        
+
         # Calendar dates table (exceptions)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS calendar_dates (
@@ -508,7 +508,7 @@ class CPGTFSManager:
                 PRIMARY KEY (service_id, date)
             )
         """)
-        
+
         # Routes table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS routes (
@@ -522,7 +522,7 @@ class CPGTFSManager:
                 route_text_color TEXT
             )
         """)
-        
+
         # Stops table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS stops (
@@ -539,7 +539,7 @@ class CPGTFSManager:
                 platform_code TEXT
             )
         """)
-        
+
         # Trips table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS trips (
@@ -555,7 +555,7 @@ class CPGTFSManager:
                 FOREIGN KEY (service_id) REFERENCES calendar(service_id)
             )
         """)
-        
+
         # Stop times table (largest table)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS stop_times (
@@ -572,7 +572,7 @@ class CPGTFSManager:
                 FOREIGN KEY (stop_id) REFERENCES stops(stop_id)
             )
         """)
-        
+
         # Shapes table (optional)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS shapes (
@@ -584,7 +584,7 @@ class CPGTFSManager:
                 PRIMARY KEY (shape_id, shape_pt_sequence)
             )
         """)
-    
+
     def _create_indexes(self, cursor: sqlite3.Cursor) -> None:
         """Creates indexes for common query patterns."""
         indexes = [
@@ -592,33 +592,33 @@ class CPGTFSManager:
             "CREATE INDEX IF NOT EXISTS idx_stop_times_stop ON stop_times(stop_id)",
             "CREATE INDEX IF NOT EXISTS idx_stop_times_trip ON stop_times(trip_id)",
             "CREATE INDEX IF NOT EXISTS idx_stop_times_departure ON stop_times(departure_time)",
-            
+
             # Trips indexes
             "CREATE INDEX IF NOT EXISTS idx_trips_route ON trips(route_id)",
             "CREATE INDEX IF NOT EXISTS idx_trips_service ON trips(service_id)",
-            
+
             # Stops indexes
             "CREATE INDEX IF NOT EXISTS idx_stops_name ON stops(stop_name)",
             "CREATE INDEX IF NOT EXISTS idx_stops_coords ON stops(stop_lat, stop_lon)",
-            
+
             # Routes indexes
             "CREATE INDEX IF NOT EXISTS idx_routes_name ON routes(route_short_name)",
-            
+
             # Calendar dates index
             "CREATE INDEX IF NOT EXISTS idx_calendar_dates_date ON calendar_dates(date)",
         ]
-        
+
         for idx_sql in indexes:
             try:
                 cursor.execute(idx_sql)
             except sqlite3.Error as e:
                 logger.warning(f"Index creation warning: {e}")
-    
+
     def _insert_agency(self, cursor: sqlite3.Cursor, reader: csv.DictReader) -> None:
         """Inserts agency data."""
         for row in reader:
             cursor.execute("""
-                INSERT OR REPLACE INTO agency 
+                INSERT OR REPLACE INTO agency
                 (agency_id, agency_name, agency_url, agency_timezone, agency_lang, agency_phone)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (
@@ -629,7 +629,7 @@ class CPGTFSManager:
                 row.get('agency_lang', 'pt'),
                 row.get('agency_phone', '')
             ))
-    
+
     def _insert_calendar(self, cursor: sqlite3.Cursor, reader: csv.DictReader) -> None:
         """Inserts calendar data."""
         for row in reader:
@@ -649,7 +649,7 @@ class CPGTFSManager:
                 row.get('start_date'),
                 row.get('end_date')
             ))
-    
+
     def _insert_calendar_dates(self, cursor: sqlite3.Cursor, reader: csv.DictReader) -> None:
         """Inserts calendar dates (exceptions)."""
         for row in reader:
@@ -661,7 +661,7 @@ class CPGTFSManager:
                 row.get('date'),
                 int(row.get('exception_type', 1))
             ))
-    
+
     def _insert_routes(self, cursor: sqlite3.Cursor, reader: csv.DictReader) -> None:
         """Inserts routes data."""
         for row in reader:
@@ -679,7 +679,7 @@ class CPGTFSManager:
                 row.get('route_color', ''),
                 row.get('route_text_color', '')
             ))
-    
+
     def _insert_stops(self, cursor: sqlite3.Cursor, reader: csv.DictReader) -> None:
         """Inserts stops data."""
         for row in reader:
@@ -688,7 +688,7 @@ class CPGTFSManager:
                 lon = float(row.get('stop_lon', 0)) if row.get('stop_lon') else None
             except ValueError:
                 lat, lon = None, None
-            
+
             cursor.execute("""
                 INSERT OR REPLACE INTO stops
                 (stop_id, stop_code, stop_name, stop_desc, stop_lat, stop_lon, zone_id, stop_url, location_type, parent_station, platform_code)
@@ -706,7 +706,7 @@ class CPGTFSManager:
                 row.get('parent_station', ''),
                 row.get('platform_code', '')
             ))
-    
+
     def _insert_trips(self, cursor: sqlite3.Cursor, reader: csv.DictReader) -> None:
         """Inserts trips data."""
         for row in reader:
@@ -724,12 +724,12 @@ class CPGTFSManager:
                 row.get('block_id', ''),
                 row.get('shape_id', '')
             ))
-    
+
     def _insert_stop_times(self, cursor: sqlite3.Cursor, reader: csv.DictReader) -> None:
         """Inserts stop times data (batch insert for performance)."""
         batch = []
         batch_size = 10000
-        
+
         for row in reader:
             batch.append((
                 row.get('trip_id'),
@@ -741,7 +741,7 @@ class CPGTFSManager:
                 int(row.get('pickup_type', 0)) if row.get('pickup_type') else 0,
                 int(row.get('drop_off_type', 0)) if row.get('drop_off_type') else 0
             ))
-            
+
             if len(batch) >= batch_size:
                 cursor.executemany("""
                     INSERT OR REPLACE INTO stop_times
@@ -749,7 +749,7 @@ class CPGTFSManager:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, batch)
                 batch = []
-        
+
         # Insert remaining
         if batch:
             cursor.executemany("""
@@ -757,12 +757,12 @@ class CPGTFSManager:
                 (trip_id, arrival_time, departure_time, stop_id, stop_sequence, stop_headsign, pickup_type, drop_off_type)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, batch)
-    
+
     def _insert_shapes(self, cursor: sqlite3.Cursor, reader: csv.DictReader) -> None:
         """Inserts shapes data (batch insert for performance)."""
         batch = []
         batch_size = 10000
-        
+
         for row in reader:
             try:
                 lat = float(row.get('shape_pt_lat', 0))
@@ -771,7 +771,7 @@ class CPGTFSManager:
                 dist = float(row.get('shape_dist_traveled', 0)) if row.get('shape_dist_traveled') else None
             except ValueError:
                 continue
-            
+
             batch.append((
                 row.get('shape_id'),
                 lat,
@@ -779,7 +779,7 @@ class CPGTFSManager:
                 seq,
                 dist
             ))
-            
+
             if len(batch) >= batch_size:
                 cursor.executemany("""
                     INSERT OR REPLACE INTO shapes
@@ -787,21 +787,21 @@ class CPGTFSManager:
                     VALUES (?, ?, ?, ?, ?)
                 """, batch)
                 batch = []
-        
+
         if batch:
             cursor.executemany("""
                 INSERT OR REPLACE INTO shapes
                 (shape_id, shape_pt_lat, shape_pt_lon, shape_pt_sequence, shape_dist_traveled)
                 VALUES (?, ?, ?, ?, ?)
             """, batch)
-    
+
     def ensure_database(self, force_refresh: bool = False) -> bool:
         """
         Ensures GTFS database is available and up-to-date.
-        
+
         Args:
             force_refresh: Force download even if cache is valid.
-            
+
         Returns:
             True if database is ready, False otherwise.
         """
@@ -810,29 +810,29 @@ class CPGTFSManager:
             if not self.check_for_updates():
                 logger.info(f"Using existing GTFS database: {self.db_path}")
                 return True
-        
+
         # Download and convert
         if self.download_gtfs():
             return self.convert_to_sqlite()
-        
+
         # If download failed but database exists, use existing
         if self.db_path.exists():
             logger.warning("Download failed, using existing database")
             return True
-        
+
         return False
-    
+
     def get_db_connection(self) -> Optional[sqlite3.Connection]:
         """
         Gets a connection to the GTFS SQLite database.
-        
+
         Returns:
             SQLite connection or None if not available.
         """
         if not self.db_path.exists():
             if not self.ensure_database():
                 return None
-        
+
         try:
             conn = sqlite3.connect(str(self.db_path))
             conn.row_factory = sqlite3.Row
@@ -840,30 +840,30 @@ class CPGTFSManager:
         except sqlite3.Error as e:
             logger.error(f"Database connection error: {e}")
             return None
-    
+
     def get_active_services(self, date: Optional[datetime] = None) -> List[str]:
         """
         Gets service IDs active on the given date.
-        
+
         Args:
             date: Date to check (defaults to today).
-            
+
         Returns:
             List of active service IDs.
         """
         if date is None:
             date = datetime.now()
-        
+
         date_str = date.strftime('%Y%m%d')
         weekday = date.strftime('%A').lower()
-        
+
         conn = self.get_db_connection()
         if not conn:
             return []
-        
+
         try:
             cursor = conn.cursor()
-            
+
             # Get services from calendar that are active today
             query = f"""
                 SELECT service_id FROM calendar
@@ -872,7 +872,7 @@ class CPGTFSManager:
             """
             cursor.execute(query, (date_str, date_str))
             active_services = set(row['service_id'] for row in cursor.fetchall())
-            
+
             # Add services with exception_type = 1 (service added)
             cursor.execute("""
                 SELECT service_id FROM calendar_dates
@@ -880,7 +880,7 @@ class CPGTFSManager:
             """, (date_str,))
             for row in cursor.fetchall():
                 active_services.add(row['service_id'])
-            
+
             # Remove services with exception_type = 2 (service removed)
             cursor.execute("""
                 SELECT service_id FROM calendar_dates
@@ -888,10 +888,10 @@ class CPGTFSManager:
             """, (date_str,))
             for row in cursor.fetchall():
                 active_services.discard(row['service_id'])
-            
+
             conn.close()
             return list(active_services)
-            
+
         except sqlite3.Error as e:
             logger.error(f"Error getting active services: {e}")
             conn.close()
@@ -929,46 +929,46 @@ def _is_cache_valid(last_load: Optional[datetime]) -> bool:
 def load_cp_aml_stations(force_reload: bool = False) -> Dict[str, Dict[str, Any]]:
     """
     Loads CP train stations in the AML (Área Metropolitana de Lisboa) into cache.
-    
+
     Filters the ~462 CP stations to only include the ~81 stations within
     the Lisbon Metropolitan Area bounding box.
-    
+
     Args:
         force_reload: Force refresh even if cache is valid.
-        
+
     Returns:
         Dictionary mapping station code to station info.
     """
     global _cp_stations_cache, _cp_stations_last_load
-    
+
     if not force_reload and _cp_stations_cache and _is_cache_valid(_cp_stations_last_load):
         logger.info(f"Using cached CP AML stations ({len(_cp_stations_cache)} stations)")
         return _cp_stations_cache
-    
+
     logger.info("Loading CP AML stations from API...")
-    
+
     try:
         response = requests.get(CP_STATIONS_URL, timeout=15)
         response.raise_for_status()
         data = response.json()
-        
+
         all_stations = data.get('stations', [])
-        
+
         if not isinstance(all_stations, list):
             logger.error("Unexpected response format from CP stations API")
             return _cp_stations_cache or {}
-        
+
         # Filter to AML region only
         aml_stations = {}
         for station in all_stations:
             try:
                 lat = float(station.get('latitude', 0))
                 lon = float(station.get('longitude', 0))
-                
+
                 # Check if within AML bounding box
                 if (AML_BOUNDS['lat_min'] <= lat <= AML_BOUNDS['lat_max'] and
                         AML_BOUNDS['lon_min'] <= lon <= AML_BOUNDS['lon_max']):
-                    
+
                     code = station.get('code', '')
                     aml_stations[code] = {
                         'code': code,
@@ -979,14 +979,14 @@ def load_cp_aml_stations(force_reload: bool = False) -> Dict[str, Dict[str, Any]
                     }
             except (ValueError, TypeError):
                 continue
-        
+
         # Update cache
         _cp_stations_cache = aml_stations
         _cp_stations_last_load = datetime.now()
-        
+
         logger.info(f"\033[1;32m✅ Loaded {len(aml_stations)} CP AML stations\033[0m")
         return aml_stations
-        
+
     except requests.exceptions.Timeout:
         logger.error("Timeout loading CP stations (15s)")
         return _cp_stations_cache or {}
@@ -1001,45 +1001,45 @@ def load_cp_aml_stations(force_reload: bool = False) -> Dict[str, Dict[str, Any]
 def get_cp_aml_trains() -> List[Dict[str, Any]]:
     """
     Gets real-time train data filtered to only trains serving the AML region.
-    
+
     A train serves the AML if:
     - Its origin station is in the AML, OR
     - Its destination station is in the AML, OR
     - Its current location (lastStation) is in the AML
-    
+
     Returns:
         List of trains serving the AML with full details.
     """
     aml_stations = load_cp_aml_stations()
     aml_codes = set(aml_stations.keys())
-    
+
     if not aml_codes:
         logger.warning("No AML stations loaded, returning all trains")
         data = fetch_json_with_retry(CP_VEHICLES_URL)
         return data.get('vehicles', []) if data else []
-    
+
     try:
         response = requests.get(CP_VEHICLES_URL, timeout=15)
         response.raise_for_status()
         data = response.json()
-        
+
         all_trains = data.get('vehicles', [])
-        
+
         # Filter to trains serving AML
         aml_trains = []
         for train in all_trains:
             origin_code = train.get('origin', {}).get('code', '')
             dest_code = train.get('destination', {}).get('code', '')
             last_station = train.get('lastStation', '')
-            
+
             if (origin_code in aml_codes or
                     dest_code in aml_codes or
                     last_station in aml_codes):
                 aml_trains.append(train)
-        
+
         logger.info(f"Filtered to {len(aml_trains)}/{len(all_trains)} trains serving AML")
         return aml_trains
-        
+
     except requests.exceptions.RequestException as e:
         logger.error(f"Error fetching trains: {e}")
         return []
@@ -1051,27 +1051,27 @@ def get_cp_aml_trains() -> List[Dict[str, Any]]:
 def search_cp_station(query: str) -> List[Dict[str, Any]]:
     """
     Searches for CP train stations in the AML by name.
-    
+
     Args:
         query: Station name or partial name to search for.
-        
+
     Returns:
         List of matching stations with code, name, lat, lon.
     """
     aml_stations = load_cp_aml_stations()
     query_lower = query.lower().strip()
-    
+
     matches = []
     for code, station in aml_stations.items():
         if query_lower in station['name'].lower():
             matches.append(station)
-    
+
     # Sort by relevance
     matches.sort(key=lambda x: (
         0 if query_lower == x['name'].lower() else 1,
         x['name']
     ))
-    
+
     return matches
 
 
@@ -1082,16 +1082,16 @@ def search_cp_station(query: str) -> List[Dict[str, Any]]:
 def get_gtfs_stops_in_aml() -> List[Dict[str, Any]]:
     """
     Gets all GTFS stops within the AML region.
-    
+
     Returns:
         List of stops with id, name, lat, lon.
     """
     manager = get_gtfs_manager()
     conn = manager.get_db_connection()
-    
+
     if not conn:
         return []
-    
+
     try:
         cursor = conn.cursor()
         cursor.execute("""
@@ -1105,11 +1105,11 @@ def get_gtfs_stops_in_aml() -> List[Dict[str, Any]]:
             AML_BOUNDS['lat_min'], AML_BOUNDS['lat_max'],
             AML_BOUNDS['lon_min'], AML_BOUNDS['lon_max']
         ))
-        
+
         stops = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return stops
-        
+
     except sqlite3.Error as e:
         logger.error(f"Error querying GTFS stops: {e}")
         conn.close()
@@ -1119,16 +1119,16 @@ def get_gtfs_stops_in_aml() -> List[Dict[str, Any]]:
 def get_gtfs_routes() -> List[Dict[str, Any]]:
     """
     Gets all GTFS routes.
-    
+
     Returns:
         List of routes with id, name, type.
     """
     manager = get_gtfs_manager()
     conn = manager.get_db_connection()
-    
+
     if not conn:
         return []
-    
+
     try:
         cursor = conn.cursor()
         cursor.execute("""
@@ -1136,11 +1136,11 @@ def get_gtfs_routes() -> List[Dict[str, Any]]:
             FROM routes
             ORDER BY route_short_name
         """)
-        
+
         routes = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return routes
-        
+
     except sqlite3.Error as e:
         logger.error(f"Error querying GTFS routes: {e}")
         conn.close()
@@ -1154,41 +1154,41 @@ def get_stop_departures(
 ) -> List[Dict[str, Any]]:
     """
     Gets upcoming departures from a stop.
-    
+
     Args:
         stop_id: GTFS stop ID.
         limit: Maximum number of departures to return.
         date: Date for schedule (defaults to today).
-        
+
     Returns:
         List of departures with time, route, headsign.
     """
     manager = get_gtfs_manager()
     conn = manager.get_db_connection()
-    
+
     if not conn:
         return []
-    
+
     if date is None:
         date = datetime.now()
-    
+
     # Get active services for the date
     active_services = manager.get_active_services(date)
-    
+
     if not active_services:
         logger.warning("No active services for the specified date")
         conn.close()
         return []
-    
+
     try:
         cursor = conn.cursor()
-        
+
         # Current time in GTFS format (HH:MM:SS)
         current_time = date.strftime('%H:%M:%S')
-        
+
         # Build placeholders for service IDs
         placeholders = ','.join(['?' for _ in active_services])
-        
+
         query = f"""
             SELECT st.departure_time, st.stop_headsign, t.trip_headsign,
                    r.route_short_name, r.route_long_name, r.route_id, t.trip_id
@@ -1206,9 +1206,9 @@ def get_stop_departures(
             ORDER BY st.departure_time
             LIMIT ?
         """
-        
+
         cursor.execute(query, [stop_id] + active_services + [current_time, limit])
-        
+
         departures = []
         for row in cursor.fetchall():
             departures.append({
@@ -1218,10 +1218,10 @@ def get_stop_departures(
                 'route_id': row['route_id'],
                 'trip_id': row['trip_id']
             })
-        
+
         conn.close()
         return departures
-        
+
     except sqlite3.Error as e:
         logger.error(f"Error querying departures: {e}")
         conn.close()
@@ -1231,19 +1231,19 @@ def get_stop_departures(
 def get_trip_stops(trip_id: str) -> List[Dict[str, Any]]:
     """
     Gets all stops for a trip in order.
-    
+
     Args:
         trip_id: GTFS trip ID.
-        
+
     Returns:
         List of stops with times and sequence.
     """
     manager = get_gtfs_manager()
     conn = manager.get_db_connection()
-    
+
     if not conn:
         return []
-    
+
     try:
         cursor = conn.cursor()
         cursor.execute("""
@@ -1254,11 +1254,11 @@ def get_trip_stops(trip_id: str) -> List[Dict[str, Any]]:
             WHERE st.trip_id = ?
             ORDER BY st.stop_sequence
         """, (trip_id,))
-        
+
         stops = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return stops
-        
+
     except sqlite3.Error as e:
         logger.error(f"Error querying trip stops: {e}")
         conn.close()
@@ -1268,20 +1268,20 @@ def get_trip_stops(trip_id: str) -> List[Dict[str, Any]]:
 def search_gtfs_stop(query: str, limit: int = 10) -> List[Dict[str, Any]]:
     """
     Searches for GTFS stops by name within AML.
-    
+
     Args:
         query: Stop name or partial name.
         limit: Maximum results.
-        
+
     Returns:
         List of matching stops.
     """
     manager = get_gtfs_manager()
     conn = manager.get_db_connection()
-    
+
     if not conn:
         return []
-    
+
     try:
         cursor = conn.cursor()
         cursor.execute("""
@@ -1291,8 +1291,8 @@ def search_gtfs_stop(query: str, limit: int = 10) -> List[Dict[str, Any]]:
             AND stop_lat BETWEEN ? AND ?
             AND stop_lon BETWEEN ? AND ?
             AND location_type = 0
-            ORDER BY 
-                CASE 
+            ORDER BY
+                CASE
                     WHEN LOWER(stop_name) = LOWER(?) THEN 0
                     WHEN LOWER(stop_name) LIKE LOWER(? || '%') THEN 1
                     ELSE 2
@@ -1306,11 +1306,11 @@ def search_gtfs_stop(query: str, limit: int = 10) -> List[Dict[str, Any]]:
             query, query,
             limit
         ))
-        
+
         stops = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return stops
-        
+
     except sqlite3.Error as e:
         logger.error(f"Error searching GTFS stops: {e}")
         conn.close()
@@ -1320,19 +1320,19 @@ def search_gtfs_stop(query: str, limit: int = 10) -> List[Dict[str, Any]]:
 def get_routes_at_stop(stop_id: str) -> List[Dict[str, Any]]:
     """
     Gets all routes that serve a specific stop.
-    
+
     Args:
         stop_id: GTFS stop ID.
-        
+
     Returns:
         List of routes serving the stop.
     """
     manager = get_gtfs_manager()
     conn = manager.get_db_connection()
-    
+
     if not conn:
         return []
-    
+
     try:
         cursor = conn.cursor()
         cursor.execute("""
@@ -1343,11 +1343,11 @@ def get_routes_at_stop(stop_id: str) -> List[Dict[str, Any]]:
             WHERE st.stop_id = ?
             ORDER BY r.route_short_name
         """, (stop_id,))
-        
+
         routes = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return routes
-        
+
     except sqlite3.Error as e:
         logger.error(f"Error querying routes at stop: {e}")
         conn.close()
@@ -1362,59 +1362,59 @@ def get_routes_at_stop(stop_id: str) -> List[Dict[str, Any]]:
 def get_train_status() -> str:
     """
     Gets real-time status of CP trains serving the Lisbon Metropolitan Area (AML).
-    
+
     This function combines real-time data from comboios.live API with
     GTFS static schedule data for comprehensive train information.
-    
+
     Returns:
         str: List of AML trains with status, delays, and positions.
     """
     aml_trains = get_cp_aml_trains()
-    
+
     if not aml_trains:
         return "❌ Failed to fetch train status. The API may be temporarily unavailable."
-    
+
     aml_stations = load_cp_aml_stations()
-    
+
     response = "🚆 **CP Trains - Lisbon Metropolitan Area (AML)**\n"
     response += "=" * 50 + "\n\n"
-    
+
     # Group trains by service type
     by_service = defaultdict(list)
-    
+
     for train in aml_trains:
         service_name = train.get('service', {}).get('designation', 'Unknown')
         by_service[service_name].append(train)
-    
+
     # Count stats
     total_trains = len(aml_trains)
     delayed_trains = sum(1 for t in aml_trains if (t.get('delay') or 0) > 0)
-    
+
     response += f"📊 **{total_trains} trains** serving AML\n"
     if delayed_trains > 0:
         response += f"⚠️ **{delayed_trains} trains** with delays\n"
     response += "\n"
-    
+
     # Display by service type
     service_order = ['Urbanos Lisboa', 'Regionais', 'Intercidades', 'Alfa Pendular']
-    
+
     for service_name in service_order:
         if service_name not in by_service:
             continue
-            
+
         trains = by_service[service_name]
         trains.sort(key=lambda x: -(x.get('delay') or 0))
-        
+
         service_emoji = {
             'Urbanos Lisboa': '🚈',
             'Regionais': '🚃',
             'Intercidades': '🚄',
             'Alfa Pendular': '🚅'
         }.get(service_name, '🚆')
-        
+
         response += f"\n{service_emoji} **{service_name}** ({len(trains)} trains)\n"
         response += "-" * 40 + "\n"
-        
+
         for train in trains[:5]:
             train_number = train.get('trainNumber', 'N/A')
             delay = train.get('delay') or 0
@@ -1422,12 +1422,12 @@ def get_train_status() -> str:
             has_disruptions = train.get('hasDisruptions', False)
             lat = train.get('latitude')
             lon = train.get('longitude')
-            
+
             origin = train.get('origin', {})
             destination = train.get('destination', {})
             origin_name = origin.get('designation', 'N/A') if origin else 'N/A'
             dest_name = destination.get('designation', 'N/A') if destination else 'N/A'
-            
+
             # Delay in seconds, convert to minutes
             delay_minutes = delay // 60 if delay else 0
             if delay_minutes == 0:
@@ -1436,35 +1436,35 @@ def get_train_status() -> str:
                 delay_str = f"⚠️ {delay_minutes} min late"
             else:
                 delay_str = "✅ Ahead"
-            
+
             status_emoji = {
                 'IN_TRANSIT': '🚆',
                 'AT_STATION': '🚉',
                 'STOPPED': '⏸️'
             }.get(status, '❓')
-            
+
             response += f"\n   {status_emoji} **#{train_number}**: {origin_name} → {dest_name}\n"
             response += f"      {delay_str}"
-            
+
             if has_disruptions:
                 response += " | ⚠️ Disruptions"
-            
+
             if lat and lon:
                 try:
                     response += f"\n      📍 Position: ({float(lat):.4f}, {float(lon):.4f})"
                 except (ValueError, TypeError):
                     pass
-            
+
             response += "\n"
-        
+
         if len(trains) > 5:
             response += f"\n   ... and {len(trains) - 5} more {service_name} trains.\n"
-    
+
     response += "\n" + "-" * 50 + "\n"
     response += f"📍 **AML Coverage**: {len(aml_stations)} stations\n"
     response += "🔗 Lines: Cascais, Sintra, Azambuja, Fertagus\n"
     response += "💡 Podes perguntar por uma estação específica para mais detalhes.\n"
-    
+
     return response
 
 
@@ -1472,56 +1472,56 @@ def get_train_status() -> str:
 def search_cp_stations(query: str) -> str:
     """
     Searches for CP train stations in the Lisbon Metropolitan Area (AML).
-    
+
     The AML includes ~81 stations across multiple lines:
     - Linha de Cascais (Cais do Sodré ↔ Cascais)
     - Linha de Sintra (Rossio/Oriente ↔ Sintra)
     - Linha de Azambuja (Santa Apolónia/Oriente ↔ Azambuja)
     - Fertagus (Entrecampos ↔ Setúbal)
-    
+
     Args:
         query: Station name or partial name to search for.
-        
+
     Returns:
         str: List of matching stations with details.
     """
     # Try GTFS database first
     gtfs_matches = search_gtfs_stop(query, limit=15)
-    
+
     # Fall back to real-time API if GTFS not available
     if not gtfs_matches:
         rt_matches = search_cp_station(query)
         if not rt_matches:
             return (f"❌ No CP stations found matching '{query}' in the AML region.\n\n"
                     "💡 Try searching for: Oriente, Rossio, Cais do Sodré, Cascais, Sintra, Entrecampos")
-        
+
         response = f"🚉 **CP Stations matching '{query}'** ({len(rt_matches)} found)\n"
         response += "=" * 50 + "\n\n"
-        
+
         for i, station in enumerate(rt_matches[:10], 1):
             name = station.get('name', 'Unknown')
             code = station.get('code', '')
             lat = station.get('lat', 0)
             lon = station.get('lon', 0)
-            
+
             response += f"{i}. **{name}** ({code})\n"
             response += f"   📍 ({lat:.4f}, {lon:.4f})\n\n"
-        
+
         return response
-    
+
     response = f"🚉 **CP Stations matching '{query}'** ({len(gtfs_matches)} found)\n"
     response += "=" * 50 + "\n\n"
-    
+
     for i, stop in enumerate(gtfs_matches[:10], 1):
         name = stop.get('stop_name', 'Unknown')
         stop_id = stop.get('stop_id', '')
         lat = stop.get('stop_lat', 0)
         lon = stop.get('stop_lon', 0)
-        
+
         response += f"{i}. **{name}**\n"
         response += f"   🆔 {stop_id}\n"
         response += f"   📍 ({lat:.4f}, {lon:.4f})\n"
-        
+
         # Get routes at this stop
         routes = get_routes_at_stop(stop_id)
         if routes:
@@ -1530,12 +1530,12 @@ def search_cp_stations(query: str) -> str:
             ))
             route_names = [n for n in route_names if n]
             response += f"   🚆 Routes: {', '.join(route_names[:8])}\n"
-        
+
         response += "\n"
-    
+
     if len(gtfs_matches) > 10:
         response += f"... and {len(gtfs_matches) - 10} more stations.\n"
-    
+
     return response
 
 
@@ -1543,48 +1543,48 @@ def search_cp_stations(query: str) -> str:
 def get_train_schedule(station_name: str, limit: int = 10) -> str:
     """
     Gets upcoming train departures from a CP station using GTFS schedule data.
-    
+
     This shows the static schedule. For real-time delays, use get_train_status.
-    
+
     Args:
         station_name: Station name to search for.
         limit: Maximum number of departures to show (default 10).
-        
+
     Returns:
         str: Upcoming departures with times and destinations.
     """
     # Find the station
     stops = search_gtfs_stop(station_name, limit=5)
-    
+
     if not stops:
         return (f"❌ Station '{station_name}' not found.\n\n"
                 "💡 Try searching for: Oriente, Rossio, Cais do Sodré, Cascais, Sintra")
-    
+
     # Use the first (best) match
     station = stops[0]
     stop_id = station['stop_id']
     stop_name = station['stop_name']
-    
+
     # Get departures
     departures = get_stop_departures(stop_id, limit=limit)
-    
+
     if not departures:
         return (f"❌ No scheduled departures found for **{stop_name}** today.\n\n"
                 "This may be due to:\n"
                 "- No more trains today\n"
                 "- Holiday schedule\n"
                 "- GTFS data not yet available")
-    
+
     now = datetime.now()
     response = f"🚆 **Departures from {stop_name}**\n"
     response += f"📅 {now.strftime('%A, %d %B %Y')}\n"
     response += "=" * 50 + "\n\n"
-    
+
     for dep in departures:
         dep_time = dep['departure_time']
         headsign = dep['headsign'] or 'N/A'
         route_name = dep['route_name'] or ''
-        
+
         # Format time nicely
         try:
             parts = dep_time.split(':')
@@ -1593,15 +1593,15 @@ def get_train_schedule(station_name: str, limit: int = 10) -> str:
             time_str = f"{hour:02d}:{minute}"
         except (IndexError, ValueError):
             time_str = dep_time
-        
+
         response += f"🕐 **{time_str}** → {headsign}\n"
         if route_name:
             response += f"   🚆 {route_name}\n"
         response += "\n"
-    
+
     response += "-" * 50 + "\n"
     response += "💡 Podes perguntar por atrasos em tempo real de um comboio específico.\n"
-    
+
     return response
 
 
@@ -1609,27 +1609,27 @@ def get_train_schedule(station_name: str, limit: int = 10) -> str:
 def get_cp_routes() -> str:
     """
     Gets all CP train routes/lines available in the GTFS data.
-    
+
     Returns:
         str: List of CP routes with names and types.
     """
     routes = get_gtfs_routes()
-    
+
     if not routes:
         # Fall back to static list
         response = "🚆 **CP Lines - Lisbon Metropolitan Area**\n"
         response += "=" * 50 + "\n\n"
-        
+
         for line_id, info in CP_LINES.items():
             response += f"**{info['name']}**\n"
             response += f"   📍 {info['terminal_a']} ↔ {info['terminal_b']}\n"
             response += f"   📝 {info['description']}\n\n"
-        
+
         return response
-    
+
     response = "🚆 **CP Routes from GTFS Data**\n"
     response += "=" * 50 + "\n\n"
-    
+
     # Deduplicate routes by short name (GTFS has multiple entries per route)
     seen = set()
     unique_routes = []
@@ -1638,16 +1638,16 @@ def get_cp_routes() -> str:
         if key not in seen:
             seen.add(key)
             unique_routes.append(route)
-    
+
     # Group by route type
     rail_types = {0: 'Tram', 1: 'Metro', 2: 'Rail', 3: 'Bus', 7: 'Funicular', 11: 'Trolleybus', 12: 'Monorail'}
-    
+
     for route in unique_routes:
         route_type = rail_types.get(route['route_type'], 'Other')
         name = route['route_short_name'] or route['route_long_name'] or route['route_id']
         long_name = route['route_long_name'] or ''
         color = route.get('route_color', '')
-        
+
         response += f"🚆 **{name}**"
         if long_name and long_name != name:
             response += f" - {long_name}"
@@ -1655,7 +1655,7 @@ def get_cp_routes() -> str:
         if color:
             response += f"   🎨 Color: #{color}\n"
         response += "\n"
-    
+
     return response
 
 
@@ -1663,59 +1663,59 @@ def get_cp_routes() -> str:
 def plan_train_trip(origin: str, destination: str) -> str:
     """
     Plans a train trip between two stations using GTFS schedule data.
-    
+
     Calculates travel time based on actual GTFS timetables (NOT estimated).
     Also shows real-time delay information when available.
-    
+
     Args:
         origin: Starting station name (e.g., 'Entrecampos', 'Rossio').
         destination: Ending station name (e.g., 'Sintra', 'Cascais').
-        
+
     Returns:
         str: Trip details including travel time from GTFS, next departures, and delays.
     """
     manager = get_gtfs_manager()
-    
+
     # Find origin station
     origin_stops = search_gtfs_stop(origin, limit=3)
     if not origin_stops:
         return (f"❌ Station '{origin}' not found.\n\n"
                 "💡 Try: Oriente, Rossio, Entrecampos, Cais do Sodré, Cascais, Sintra")
-    
+
     # Find destination station
     dest_stops = search_gtfs_stop(destination, limit=3)
     if not dest_stops:
         return (f"❌ Station '{destination}' not found.\n\n"
                 "💡 Try: Oriente, Rossio, Entrecampos, Cais do Sodré, Cascais, Sintra")
-    
+
     origin_station = origin_stops[0]
     dest_station = dest_stops[0]
     origin_id = origin_station['stop_id']
     dest_id = dest_station['stop_id']
     origin_name = origin_station['stop_name']
     dest_name = dest_station['stop_name']
-    
+
     now = datetime.now()
     current_time = now.strftime('%H:%M:%S')
-    
+
     # Get active services for today
     active_services = manager.get_active_services(now)
-    
+
     if not active_services:
         return "❌ No train services active today. This might be a holiday or data issue."
-    
+
     conn = manager.get_db_connection()
     if not conn:
         return "❌ Database not available. Try running `initialize_cp_gtfs()` first."
-    
+
     try:
         cursor = conn.cursor()
         placeholders = ','.join(['?' for _ in active_services])
-        
+
         # Find ALL trips that go from origin to destination (no LIMIT)
         # We need all results to show accurate remaining count
         query = f"""
-            SELECT 
+            SELECT
                 st_origin.trip_id,
                 st_origin.departure_time as origin_departure,
                 st_dest.arrival_time as dest_arrival,
@@ -1735,17 +1735,17 @@ def plan_train_trip(origin: str, destination: str) -> str:
             AND st_origin.departure_time >= ?
             ORDER BY st_origin.departure_time
         """
-        
+
         cursor.execute(query, [origin_id, dest_id] + active_services + [current_time])
         trips = cursor.fetchall()
         conn.close()
-        
+
         if not trips:
             # Try without time constraint to see if route exists at all
             conn = manager.get_db_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT COUNT(*) 
+                SELECT COUNT(*)
                 FROM stop_times st_origin
                 JOIN stop_times st_dest ON st_origin.trip_id = st_dest.trip_id
                 JOIN trips t ON st_origin.trip_id = t.trip_id
@@ -1755,7 +1755,7 @@ def plan_train_trip(origin: str, destination: str) -> str:
             """, (origin_id, dest_id))
             total_trips = cursor.fetchone()[0]
             conn.close()
-            
+
             if total_trips == 0:
                 return (f"❌ No direct train service found between **{origin_name}** and **{dest_name}**.\n\n"
                         "💡 These stations may be on different lines. Consider:\n"
@@ -1764,30 +1764,30 @@ def plan_train_trip(origin: str, destination: str) -> str:
             else:
                 return (f"⏰ No more trains today from **{origin_name}** to **{dest_name}**.\n\n"
                         f"There are {total_trips} trips on other days. Try again tomorrow or check schedules online.")
-        
+
         # Calculate travel time from GTFS data
         def parse_gtfs_time(time_str: str) -> int:
             """Convert GTFS time (HH:MM:SS) to minutes since midnight."""
             parts = time_str.split(':')
             return int(parts[0]) * 60 + int(parts[1])
-        
+
         def format_time(time_str: str) -> str:
             """Format GTFS time for display (handle times > 24:00)."""
             parts = time_str.split(':')
             hour = int(parts[0]) % 24
             return f"{hour:02d}:{parts[1]}"
-        
+
         # Calculate travel times for ALL trips to find min/max range
         def calc_trip_travel(trip) -> int:
             dep_m = parse_gtfs_time(trip['origin_departure'])
             arr_m = parse_gtfs_time(trip['dest_arrival'])
             diff = arr_m - dep_m
             return diff + 24 * 60 if diff < 0 else diff
-        
+
         trip_durations = [calc_trip_travel(t) for t in trips]
         min_duration = min(trip_durations)
         max_duration = max(trip_durations)
-        
+
         # Get route name: use the MOST COMMON route across all trips
         # (e.g., Oriente->Sintra has 68 trips on "Linha de Sintra" and 14 on
         # "Linha da Azambuja" - we should show "Linha de Sintra")
@@ -1798,10 +1798,10 @@ def plan_train_trip(origin: str, destination: str) -> str:
         route_name = route_counts.most_common(1)[0][0]
         distinct_routes = list(route_counts.keys())
         multi_route = len(distinct_routes) > 1
-        
+
         # Get real-time delay info
         aml_trains = get_cp_aml_trains()
-        
+
         # Build map of real-time trains heading to destination, keyed by departure time
         # for matching with GTFS scheduled departures
         realtime_trains = {}
@@ -1821,11 +1821,11 @@ def plan_train_trip(origin: str, destination: str) -> str:
                 if delay_mins > 0:
                     route_has_delays = True
                     route_delay_mins = max(route_delay_mins, delay_mins)
-        
+
         # Build response
         response = f"🚆 **Comboio: {origin_name} → {dest_name}**\n"
         response += "=" * 50 + "\n\n"
-        
+
         # Summary box at top
         response += "📊 **RESUMO DA VIAGEM**\n"
         if multi_route:
@@ -1848,40 +1848,40 @@ def plan_train_trip(origin: str, destination: str) -> str:
             response += "   📍 Estado: ℹ️ Sem dados em tempo real\n"
         response += f"   📊 Partidas restantes hoje: **{len(trips)}**\n"
         response += "\n"
-        
+
         response += "-" * 50 + "\n"
-        
+
         # Show up to 8 departures
         display_count = min(8, len(trips))
         response += f"📋 **Próximas {display_count} Partidas:**\n\n"
-        
+
         for i, trip in enumerate(trips[:8], 1):
             origin_dep = trip['origin_departure']
             dest_arr = trip['dest_arrival']
             trip_route = trip['route_short_name'] or trip['route_long_name'] or 'CP'
-            
+
             # Calculate travel time in minutes from GTFS departure→arrival
             trip_travel_mins = calc_trip_travel(trip)
-            
+
             # Format display times
             dep_display = format_time(origin_dep)
             arr_display = format_time(dest_arr)
-            
+
             response += f"   🕐 **{dep_display}** → {arr_display} ({trip_travel_mins}min)"
             # Show route label per departure if multiple routes
             if multi_route:
                 response += f" [{trip_route}]"
             response += "\n"
-        
+
         if len(trips) > 8:
             response += f"\n   ... e mais {len(trips) - 8} partidas restantes hoje.\n"
-        
+
         response += "\n" + "-" * 50 + "\n"
         response += f"📅 {now.strftime('%A, %d %B %Y')} | {now.strftime('%H:%M')}\n"
         response += "💡 Horários: cp.pt | Bilhetes: app CP ou estação\n"
-        
+
         return response
-        
+
     except Exception as e:
         if conn:
             conn.close()
@@ -1893,31 +1893,31 @@ def plan_train_trip(origin: str, destination: str) -> str:
 def initialize_cp_gtfs(force_refresh: bool = False) -> str:
     """
     Initializes or updates the CP GTFS database.
-    
+
     Downloads the latest GTFS feed from CP and converts it to SQLite
     for fast schedule queries. This is automatically called when needed,
     but can be manually triggered to force a refresh.
-    
+
     Args:
         force_refresh: Force download even if data is recent.
-        
+
     Returns:
         str: Status message about the initialization.
     """
     manager = get_gtfs_manager()
-    
+
     response = "🚆 **CP GTFS Database Initialization**\n"
     response += "=" * 50 + "\n\n"
-    
+
     if manager.db_path.exists() and not force_refresh:
         metadata = manager._load_metadata()
         last_download = metadata.get('last_download', 'Unknown')
         response += "📊 **Existing database found**\n"
         response += f"   Last updated: {last_download}\n\n"
-        
+
         if not manager.check_for_updates():
             response += "✅ Database is up-to-date. No refresh needed.\n"
-            
+
             # Show some stats
             conn = manager.get_db_connection()
             if conn:
@@ -1929,23 +1929,23 @@ def initialize_cp_gtfs(force_refresh: bool = False) -> str:
                 cursor.execute("SELECT COUNT(*) FROM trips")
                 trips_count = cursor.fetchone()[0]
                 conn.close()
-                
+
                 response += "\n📈 **Database Stats:**\n"
                 response += f"   - Stops: {stops_count}\n"
                 response += f"   - Routes: {routes_count}\n"
                 response += f"   - Trips: {trips_count}\n"
-            
+
             return response
-    
+
     response += "📥 **Downloading CP GTFS feed...**\n"
-    
+
     if manager.download_gtfs():
         response += "✅ Download successful\n\n"
-        
+
         response += "🔄 **Converting to SQLite...**\n"
         if manager.convert_to_sqlite():
             response += "✅ Conversion successful\n\n"
-            
+
             # Show stats
             conn = manager.get_db_connection()
             if conn:
@@ -1957,12 +1957,12 @@ def initialize_cp_gtfs(force_refresh: bool = False) -> str:
                 cursor.execute("SELECT COUNT(*) FROM trips")
                 trips_count = cursor.fetchone()[0]
                 conn.close()
-                
+
                 response += "📈 **Database Stats:**\n"
                 response += f"   - Stops: {stops_count}\n"
                 response += f"   - Routes: {routes_count}\n"
                 response += f"   - Trips: {trips_count}\n"
-            
+
             response += f"\n💾 Database location: {manager.db_path}\n"
             return response
         else:
@@ -1992,7 +1992,7 @@ def get_train_frequency(
 
     Returns:
         str: Formatted frequency information by time window.
-        
+
     Examples:
         >>> get_train_frequency("Sintra")
         >>> get_train_frequency("Cascais", station_name="Cais do Sodré")

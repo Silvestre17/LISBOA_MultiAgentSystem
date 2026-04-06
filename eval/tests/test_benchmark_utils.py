@@ -21,7 +21,6 @@
 
 import os
 import sys
-from types import SimpleNamespace
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
@@ -403,7 +402,7 @@ class TestBenchmarkSummaryCostAccounting:
         assert summary["per_domain"]["weather"]["combined_cost_usd"]["total_cost_usd"] == pytest.approx(0.000135)
         assert summary["per_response_model"]["azure::gpt-5-mini"]["response_cost_usd"]["model_id"] == "azure::gpt-5-mini"
         assert summary["per_response_model"]["azure::gpt-5-mini"]["combined_usage"]["tokens"]["total_tokens"] == 225
-    
+
     def test_aggregate_judge_runs_excludes_failed_judges_from_average(self):
         """A failed judge should remain stored but should not drag the compatibility average to zero."""
         aggregated = aggregate_judge_runs(
