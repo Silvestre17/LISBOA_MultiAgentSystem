@@ -63,11 +63,11 @@ SUPPORTED_MODEL_PROVIDERS = {"azure", "openai", "lmstudio"}
 
 # TEST: Define the per-agent response-model benchmark matrix here.
 # These defaults mirror the active evaluation setup on this machine:
-# Azure GPT-5-mini for the closed model and Azure Kimi-K2.5 for the
+# Azure GPT-5.4-mini for the closed model and Azure Kimi-K2.5 for the
 # open-model comparison profile.
 MODELS_TO_TEST = [
     # TEST: proprietary model 1
-    {"provider": "azure", "model": "gpt-5-mini", "temperature": 0.0},
+    {"provider": "azure", "model": "gpt-5.4-mini", "temperature": 0.0},
     # TEST: open-model profile served through Azure
     {"provider": "azure", "model": "Kimi-K2.5", "temperature": 0.0},
 ]
@@ -766,7 +766,7 @@ if __name__ == "__main__":
         "--response-model",
         action="append",
         dest="response_models",
-        help="Repeatable response-model override in provider::model format, for example azure::gpt-5-mini.",
+        help="Repeatable response-model override in provider::model format, for example azure::gpt-5.4-mini.",
     )
     parser.add_argument(
         "--response-temperature",
