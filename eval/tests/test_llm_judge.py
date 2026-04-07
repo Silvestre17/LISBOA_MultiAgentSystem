@@ -184,7 +184,7 @@ class TestLLMJudgeEvaluate:
             retrieved_context="{'temp': 15, 'condition': 'Sunny'}",
             response="The temperature is 15 degrees Celsius and it's sunny.",
             pricing_by_model={
-                "azure::gpt-5-mini": {
+                "azure::gpt-5.4-mini": {
                     "input": 0.25,
                     "output": 2.0,
                 }

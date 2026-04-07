@@ -825,7 +825,7 @@ def init_system_state():
                 "endpoint": normalized_value(os.getenv("AZURE_OPENAI_ENDPOINT", "")),
                 "model": normalized_value(os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", ""))
                 or normalized_value(Config.AZURE_OPENAI_DEPLOYMENT_NAME)
-                or "gpt-5-mini",
+                    or normalized_value(Config.DEFAULT_GPT_MODEL_NAME),
             },
             "lmstudio": {
                 "base_url": normalized_value(Config.LMSTUDIO_BASE_URL),
@@ -948,11 +948,9 @@ def set_credentials_env(provider: str) -> None:
     openai_key = normalized_value(creds["openai"].get("api_key"))
     azure_key = normalized_value(creds["azure"].get("api_key"))
     azure_endpoint = normalized_value(creds["azure"].get("endpoint"))
-    azure_model = (
-        normalized_value(creds["azure"].get("model"))
-        or normalized_value(Config.AZURE_OPENAI_DEPLOYMENT_NAME)
-        or "gpt-5-mini"
-    )
+    azure_model = normalized_value(creds["azure"].get("model")) or normalized_value(
+        Config.AZURE_OPENAI_DEPLOYMENT_NAME
+    ) or normalized_value(Config.DEFAULT_GPT_MODEL_NAME)
     lmstudio_url = normalized_value(creds["lmstudio"].get("base_url"))
     lmstudio_model = normalized_value(creds["lmstudio"].get("model"))
 
@@ -978,11 +976,9 @@ def provider_has_required_credentials(provider: str) -> Tuple[bool, Optional[str
     openai_key = normalized_value(creds["openai"].get("api_key"))
     azure_key = normalized_value(creds["azure"].get("api_key"))
     azure_endpoint = normalized_value(creds["azure"].get("endpoint"))
-    azure_model = (
-        normalized_value(creds["azure"].get("model"))
-        or normalized_value(Config.AZURE_OPENAI_DEPLOYMENT_NAME)
-        or "gpt-5-mini"
-    )
+    azure_model = normalized_value(creds["azure"].get("model")) or normalized_value(
+        Config.AZURE_OPENAI_DEPLOYMENT_NAME
+    ) or normalized_value(Config.DEFAULT_GPT_MODEL_NAME)
     lmstudio_url = normalized_value(st.session_state.credentials["lmstudio"].get("base_url"))
     lmstudio_model = normalized_value(st.session_state.credentials["lmstudio"].get("model"))
 
@@ -1321,7 +1317,7 @@ def build_sidebar():
                 effective_azure_model = (
                     normalized_value(st.session_state.credentials["azure"].get("model"))
                     or normalized_value(Config.AZURE_OPENAI_DEPLOYMENT_NAME)
-                    or "gpt-5-mini"
+                    or normalized_value(Config.DEFAULT_GPT_MODEL_NAME)
                 )
                 if effective_azure_model:
                     configured_items.append("Deployment")

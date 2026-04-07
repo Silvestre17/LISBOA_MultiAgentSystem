@@ -17,9 +17,6 @@ import os
 import re
 from typing import Any, cast
 
-from langchain_core.prompts import PromptTemplate
-from pydantic import BaseModel, Field
-
 from agent.llm_factory import LLMFactory
 from eval.runtime_utils import (
     build_cost_payload,
@@ -27,6 +24,8 @@ from eval.runtime_utils import (
     build_usage_payload,
     combine_usage_payloads,
 )
+from langchain_core.prompts import PromptTemplate
+from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # Pydantic Score Model (Chain-of-Thought FIRST, then scores)
@@ -195,13 +194,13 @@ class LLMJudge:
             provider: LLM provider (azure, openai, lmstudio).
             model_name: Model to use as judge. Should differ from the
                 generator model to avoid self-preference bias.
-                Defaults to EVAL_JUDGE_MODEL_NAME if set, otherwise gpt-5-mini.
+                Defaults to EVAL_JUDGE_MODEL_NAME if set, otherwise gpt-5.4-mini.
         """
         # TEST: Set the evaluator model here for thesis experiments.
         # Recommended workflow: keep these environment variables explicit so the
         # saved JSON artefacts always distinguish generator vs evaluator model.
         provider = provider or os.getenv("EVAL_JUDGE_PROVIDER", "azure")
-        model_name = model_name or os.getenv("EVAL_JUDGE_MODEL_NAME", "gpt-5-mini")
+        model_name = model_name or os.getenv("EVAL_JUDGE_MODEL_NAME", "gpt-5.4-mini")
 
         base_llm = LLMFactory.get_llm(
             provider=provider,
