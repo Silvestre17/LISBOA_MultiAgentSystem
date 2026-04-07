@@ -146,13 +146,13 @@ The dataset is designed so that `expected_tools` collectively reference the expo
 - relevance
 - response quality
 
-As of 2026-03, the benchmark and ablation runners can evaluate the same response with more than one judge model, persist every raw `judge_runs` entry, and store an averaged compatibility `scores` block so downstream readers do not need to recompute the mean manually.
+As of 2026-04, the benchmark and ablation runners can evaluate the same response with more than one judge model, persist every raw `judge_runs` entry, and store an averaged compatibility `scores` block so downstream readers do not need to recompute the mean manually.
 
 If one judge fails, that failed run is still persisted in `judge_runs` and flagged in `judge_summary`, but it is excluded from the averaged compatibility `scores` block.
 
 The default evaluation matrix is now a closed plus open judge pair:
 
-- `azure::gpt-5-mini`
+- `azure::gpt-5.4-mini`
 - `azure::Kimi-K2.5`
 
 This matrix can be overridden with repeatable `--judge-model-spec provider::model` flags or with `EVAL_JUDGE_MODEL_SPECS`.
@@ -197,7 +197,7 @@ pricing_by_model = {
     "pricing_source": "https://www.llm-prices.com/current-v1.json",
     "pricing_updated_at": "2026-03-05",
     "models": {
-        "azure::gpt-5-mini": {"input": 0.25, "output": 2.0},
+    "provider::model": {"input": 0.25, "output": 2.0},
     },
 }
 ```
@@ -292,10 +292,10 @@ python -m pytest eval/tests/test_dataset_integrity.py eval/tests/test_benchmark_
 python eval/run_benchmark.py --mode run_test
 python eval/run_benchmark.py --mode full
 python eval/run_benchmark.py --limit 5
-python eval/run_benchmark.py --limit 3 --judge-model-spec azure::gpt-5-mini --judge-model-spec azure::Kimi-K2.5
+python eval/run_benchmark.py --limit 3 --judge-model-spec azure::gpt-5.4-mini --judge-model-spec azure::Kimi-K2.5
 python eval/run_ablation.py --mode run_test
 python eval/run_ablation.py --mode full
-python eval/run_ablation.py --limit 3 --open-model-spec azure::Kimi-K2.5 --judge-model-spec azure::gpt-5-mini --judge-model-spec azure::Kimi-K2.5
+python eval/run_ablation.py --limit 3 --open-model-spec azure::Kimi-K2.5 --judge-model-spec azure::gpt-5.4-mini --judge-model-spec azure::Kimi-K2.5
 ```
 
 Both runners now auto-load the checked-in pricing catalog from `data/pricing/llm_model_pricing.json` when no explicit `pricing_by_model` payload is injected programmatically, so CLI-generated artefacts include cost accounting by default.
@@ -322,7 +322,7 @@ python -m pytest tests/test_tool_prompt_coverage.py --run-live -m "live and cove
 
 ```bash
 python eval/human_calibration/run_calibration.py --human eval/human_calibration/calibration_filled.json --benchmark eval/results/benchmark/benchmark_results_YYYYMMDD_HHMMSS.json
-python eval/human_calibration/run_calibration.py --human eval/human_calibration/calibration_filled.json --benchmark eval/results/benchmark/benchmark_results_YYYYMMDD_HHMMSS.json --judge-source azure::gpt-5-mini
+python eval/human_calibration/run_calibration.py --human eval/human_calibration/calibration_filled.json --benchmark eval/results/benchmark/benchmark_results_YYYYMMDD_HHMMSS.json --judge-source azure::gpt-5.4-mini
 ```
 
 Use `--judge-source average` (default) to read the compatibility-average `scores` block, or pass a specific judge model id from `judge_runs` to calibrate one judge independently.

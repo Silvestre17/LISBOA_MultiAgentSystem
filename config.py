@@ -126,10 +126,11 @@ class Config:
     # =========================================================================
 
     # OpenAI GPT model
-    # Options: gpt-5.2, gpt-5-mini (see https://platform.openai.com/docs/models)
+    # Options: gpt-5.4-mini, gpt-5.4, gpt-5.2 (see https://platform.openai.com/docs/models)
     # Can be set via environment variable OPENAI_MODEL_NAME
     # Default is set to a valid model name to avoid runtime errors.
-    OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", "gpt-5-mini")
+    DEFAULT_GPT_MODEL_NAME = "gpt-5.4-mini"
+    OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", DEFAULT_GPT_MODEL_NAME)
 
     # LM Studio model (Local server on port 1234)
     # Set to match the model loaded in your local LM Studio instance
@@ -141,7 +142,7 @@ class Config:
 
     # Azure OpenAI deployment name (must match your Azure deployment)
     AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv(
-        "AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-5-mini"
+        "AZURE_OPENAI_DEPLOYMENT_NAME", DEFAULT_GPT_MODEL_NAME
     )
 
     # =========================================================================
@@ -232,36 +233,36 @@ class Config:
     }
 
     # AZURE OPENAI CONFIGURATION (Cloud models)
-    # .NOTE: o-series/reasoning models (gpt-5-mini, o1, o3, etc.) only support temperature=1
+    # .NOTE: GPT-5.x reasoning models (gpt-5.4-mini, gpt-5-mini, o1, o3, etc.) only support temperature=1
     AGENT_MODELS_AZURE = {
         "supervisor": {
             "provider": "azure",
-            "model": "gpt-5-mini",
+            "model": DEFAULT_GPT_MODEL_NAME,
             "temperature": 1,
         },
         "weather": {
             "provider": "azure",
-            "model": "gpt-5-mini",
+            "model": DEFAULT_GPT_MODEL_NAME,
             "temperature": 1,
         },
         "transport": {
             "provider": "azure",
-            "model": "gpt-5-mini",
+            "model": DEFAULT_GPT_MODEL_NAME,
             "temperature": 1,
         },
         "researcher": {
             "provider": "azure",
-            "model": "gpt-5-mini",
+            "model": DEFAULT_GPT_MODEL_NAME,
             "temperature": 1,
         },
         "planner": {
             "provider": "azure",
-            "model": "gpt-5-mini",
+            "model": DEFAULT_GPT_MODEL_NAME,
             "temperature": 1,
         },
         "qa": {
             "provider": "azure",
-            "model": "gpt-5-mini",
+            "model": DEFAULT_GPT_MODEL_NAME,
             "temperature": 1,
         },
     }
@@ -270,32 +271,32 @@ class Config:
     AGENT_MODELS_OPENAI = {
         "supervisor": {
             "provider": "openai",
-            "model": "gpt-5-mini",
+            "model": DEFAULT_GPT_MODEL_NAME,
             "temperature": 0.1,
         },
         "weather": {
             "provider": "openai",
-            "model": "gpt-5-mini",
+            "model": DEFAULT_GPT_MODEL_NAME,
             "temperature": 0,
         },
         "transport": {
             "provider": "openai",
-            "model": "gpt-5-mini",
+            "model": DEFAULT_GPT_MODEL_NAME,
             "temperature": 0,
         },
         "researcher": {
             "provider": "openai",
-            "model": "gpt-5-mini",
+            "model": DEFAULT_GPT_MODEL_NAME,
             "temperature": 0,
         },
         "planner": {
             "provider": "openai",
-            "model": "gpt-5-mini",
+            "model": DEFAULT_GPT_MODEL_NAME,
             "temperature": 0.1,
         },
         "qa": {
             "provider": "openai",
-            "model": "gpt-5-mini",
+            "model": DEFAULT_GPT_MODEL_NAME,
             "temperature": 0,
         },
     }
@@ -321,10 +322,10 @@ class Config:
     def get_default_agent_model(cls):
         """Returns default agent model based on current MODEL_PROVIDER."""
         if cls.MODEL_PROVIDER == "azure":
-            # o-series/reasoning models only support temperature=1
-            return {"provider": "azure", "model": "gpt-5-mini", "temperature": 1}
+            # GPT-5.x reasoning models only support temperature=1
+            return {"provider": "azure", "model": cls.DEFAULT_GPT_MODEL_NAME, "temperature": 1}
         elif cls.MODEL_PROVIDER == "openai":
-            return {"provider": "openai", "model": "gpt-5-mini", "temperature": 0}
+            return {"provider": "openai", "model": cls.DEFAULT_GPT_MODEL_NAME, "temperature": 0}
         else:  # lmstudio or default
             return {
                 "provider": "lmstudio",

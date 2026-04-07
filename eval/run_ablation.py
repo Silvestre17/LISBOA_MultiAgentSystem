@@ -9,7 +9,7 @@
 # Usage:
 #   python eval/run_ablation.py --mode run_test                    # Quick ablation with 5 dataset entries
 #   python eval/run_ablation.py --limit 20                         # Run the first 20 dataset entries
-#   python eval/run_ablation.py --zero-shot-model gpt-5-mini       # Override the zero-shot baseline model
+#   python eval/run_ablation.py --zero-shot-model gpt-5.4-mini     # Override the zero-shot baseline model
 # ==========================================================================
 
 import io
@@ -65,7 +65,7 @@ ABLATION_LANGSMITH_SCOPE_LABEL = "Ablation"
 SUPPORTED_MODEL_PROVIDERS = {"azure", "openai", "lmstudio"}
 # TEST: Zero-shot baseline model lives here by default, or can be overridden via CLI.
 DEFAULT_ZERO_SHOT_PROVIDER = "azure"
-DEFAULT_ZERO_SHOT_MODEL = "gpt-5-mini"
+DEFAULT_ZERO_SHOT_MODEL = "gpt-5.4-mini"
 DEFAULT_OPEN_PROVIDER = "azure"
 DEFAULT_OPEN_MODEL = "Kimi-K2.5"
 DEFAULT_ABLATION_DOMAINS = ("weather", "transport", "researcher", "multi_agent")
