@@ -1,0 +1,1210 @@
+{
+  "benchmark_metadata": {
+    "groundtruth_queries_path": "C:\\Users\\andre\\OneDrive - NOVAIMS\\[MDSAA-DS]_Thesis\\Thesis2025-26_AFGS\\eval\\evaluation_groundtruth_queries.json",
+    "groundtruth_queries_count": 1,
+    "groundtruth_queries_fingerprint": "6f624c8d7069ba3e2b2e6c0fda8f093ec0b0f9d26806655c61aafadd37dc1849",
+    "total_queries": 1,
+    "tool_registry_count": 45,
+    "tool_registry_fingerprint": "e0a23b55c2dfdc8d328162e28dfbbf4e6770e989ae90bbabc5525229ab157666",
+    "response_models": [
+      "azure::gpt-5.4-mini",
+      "azure::Kimi-K2.5"
+    ],
+    "evaluation_model": "judge_average::2",
+    "response_model_configs": [
+      {
+        "model_id": "azure::gpt-5.4-mini",
+        "provider": "azure",
+        "model": "gpt-5.4-mini",
+        "temperature": 0.0
+      },
+      {
+        "model_id": "azure::Kimi-K2.5",
+        "provider": "azure",
+        "model": "Kimi-K2.5",
+        "temperature": 0.0
+      }
+    ],
+    "evaluation_model_config": {
+      "kind": "judge_average",
+      "model_id": "judge_average::2",
+      "aggregation": "mean",
+      "judge_models": [
+        "azure::gpt-5.4-mini",
+        "azure::Kimi-K2.5"
+      ],
+      "judge_model_configs": [
+        {
+          "model_id": "azure::gpt-5.4-mini",
+          "provider": "azure",
+          "model": "gpt-5.4-mini",
+          "temperature": 0.0
+        },
+        {
+          "model_id": "azure::Kimi-K2.5",
+          "provider": "azure",
+          "model": "Kimi-K2.5",
+          "temperature": 0.0
+        }
+      ]
+    },
+    "benchmark_domains": [
+      "weather",
+      "transport",
+      "researcher"
+    ],
+    "langsmith_enabled": true,
+    "langsmith_project": "thesis-mar-2026-tests - Benchmark",
+    "timestamp": "2026-04-09T16:29:18.963131",
+    "real_services": true,
+    "evaluation_models": [
+      "azure::gpt-5.4-mini",
+      "azure::Kimi-K2.5"
+    ],
+    "judge_model_configs": [
+      {
+        "model_id": "azure::gpt-5.4-mini",
+        "provider": "azure",
+        "model": "gpt-5.4-mini",
+        "temperature": 0.0
+      },
+      {
+        "model_id": "azure::Kimi-K2.5",
+        "provider": "azure",
+        "model": "Kimi-K2.5",
+        "temperature": 0.0
+      }
+    ],
+    "pricing_model_count": 32,
+    "output_directory": "C:\\Users\\andre\\OneDrive - NOVAIMS\\[MDSAA-DS]_Thesis\\Thesis2025-26_AFGS\\eval\\results\\benchmark",
+    "pricing_source": "Azure OpenAI: https://azure.microsoft.com/pricing/details/cognitive-services/openai-service/ | Azure Foundry Models: https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/deepseek/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/microsoft/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/grok/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/llama/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/kimi/ | Microsoft Foundry pricing: https://azure.microsoft.com/en-us/pricing/details/microsoft-foundry/#pricing | Microsoft Foundry Kimi-K2.5 announcement: https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/kimi-k2-5-now-in-microsoft-foundry/4492321 | Anthropic Foundry announcement: https://www.anthropic.com/news/claude-in-microsoft-foundry | Anthropic API pricing: https://platform.claude.com/docs/en/docs/about-claude/pricing | OpenAI detailed docs: https://developers.openai.com/api/docs/pricing | OpenAI GPT-5-mini snapshot: https://www.llm-prices.com/current-v1.json",
+    "pricing_updated_at": "2026-03-19",
+    "pricing_snapshot_date": "2026-03-19"
+  },
+  "summary": {
+    "overall": {
+      "total_evaluated": 2,
+      "total_errors": 0,
+      "error_categories": {},
+      "avg_composite_score": 4.7,
+      "avg_latency_s": 0.41,
+      "avg_tool_f1": 1.0,
+      "heuristics_pass_rate": 1.0,
+      "sla_compliance": 1.0,
+      "response_usage": {
+        "call_count": 0,
+        "usage_available": false,
+        "tokens": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0
+        }
+      },
+      "evaluation_usage": {
+        "call_count": 4,
+        "usage_available": true,
+        "tokens": {
+          "input_tokens": 3325,
+          "output_tokens": 4353,
+          "total_tokens": 7678
+        }
+      },
+      "combined_usage": {
+        "call_count": 4,
+        "usage_available": true,
+        "tokens": {
+          "input_tokens": 3325,
+          "output_tokens": 4353,
+          "total_tokens": 7678
+        }
+      },
+      "response_cost_usd": {
+        "model_id": null,
+        "pricing_lookup_key": "azure::kimi-k2.5",
+        "pricing_found": true,
+        "pricing_complete": true,
+        "tokens": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0
+        },
+        "input_per_million_usd": 0.60000,
+        "output_per_million_usd": 3.00000,
+        "cached_input_per_million_usd": null,
+        "input_cost_usd": 0.00000,
+        "output_cost_usd": 0.00000,
+        "total_cost_usd": 0.00000,
+        "missing_pricing_models": []
+      },
+      "evaluation_cost_usd": {
+        "model_id": null,
+        "pricing_lookup_key": "azure::kimi-k2.5",
+        "pricing_found": false,
+        "pricing_complete": false,
+        "tokens": {
+          "input_tokens": 3325,
+          "output_tokens": 4353,
+          "total_tokens": 7678
+        },
+        "input_per_million_usd": 0.60000,
+        "output_per_million_usd": 3.00000,
+        "cached_input_per_million_usd": null,
+        "input_cost_usd": 0.0004302,
+        "output_cost_usd": 0.012153,
+        "total_cost_usd": 0.0125832,
+        "missing_pricing_models": [
+          "azure::gpt-5.4-mini"
+        ]
+      },
+      "combined_cost_usd": {
+        "model_id": null,
+        "pricing_lookup_key": "azure::kimi-k2.5",
+        "pricing_found": false,
+        "pricing_complete": false,
+        "tokens": {
+          "input_tokens": 3325,
+          "output_tokens": 4353,
+          "total_tokens": 7678
+        },
+        "input_per_million_usd": 0.60000,
+        "output_per_million_usd": 3.00000,
+        "cached_input_per_million_usd": null,
+        "input_cost_usd": 0.0004302,
+        "output_cost_usd": 0.012153,
+        "total_cost_usd": 0.0125832,
+        "missing_pricing_models": [
+          "azure::gpt-5.4-mini"
+        ]
+      }
+    },
+    "per_domain": {
+      "weather": {
+        "count": 2,
+        "errors": 0,
+        "avg_composite_score": 4.7,
+        "avg_factual_accuracy": 4.25,
+        "avg_tool_f1": 1.0,
+        "heuristics_pass_rate": 1.0,
+        "response_usage": {
+          "call_count": 0,
+          "usage_available": false,
+          "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          }
+        },
+        "evaluation_usage": {
+          "call_count": 4,
+          "usage_available": true,
+          "tokens": {
+            "input_tokens": 3325,
+            "output_tokens": 4353,
+            "total_tokens": 7678
+          }
+        },
+        "combined_usage": {
+          "call_count": 4,
+          "usage_available": true,
+          "tokens": {
+            "input_tokens": 3325,
+            "output_tokens": 4353,
+            "total_tokens": 7678
+          }
+        },
+        "response_cost_usd": {
+          "model_id": null,
+          "pricing_lookup_key": "azure::kimi-k2.5",
+          "pricing_found": true,
+          "pricing_complete": true,
+          "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          },
+          "input_per_million_usd": 0.60000,
+          "output_per_million_usd": 3.00000,
+          "cached_input_per_million_usd": null,
+          "input_cost_usd": 0.00000,
+          "output_cost_usd": 0.00000,
+          "total_cost_usd": 0.00000,
+          "missing_pricing_models": []
+        },
+        "evaluation_cost_usd": {
+          "model_id": null,
+          "pricing_lookup_key": "azure::kimi-k2.5",
+          "pricing_found": false,
+          "pricing_complete": false,
+          "tokens": {
+            "input_tokens": 3325,
+            "output_tokens": 4353,
+            "total_tokens": 7678
+          },
+          "input_per_million_usd": 0.60000,
+          "output_per_million_usd": 3.00000,
+          "cached_input_per_million_usd": null,
+          "input_cost_usd": 0.0004302,
+          "output_cost_usd": 0.012153,
+          "total_cost_usd": 0.0125832,
+          "missing_pricing_models": [
+            "azure::gpt-5.4-mini"
+          ]
+        },
+        "combined_cost_usd": {
+          "model_id": null,
+          "pricing_lookup_key": "azure::kimi-k2.5",
+          "pricing_found": false,
+          "pricing_complete": false,
+          "tokens": {
+            "input_tokens": 3325,
+            "output_tokens": 4353,
+            "total_tokens": 7678
+          },
+          "input_per_million_usd": 0.60000,
+          "output_per_million_usd": 3.00000,
+          "cached_input_per_million_usd": null,
+          "input_cost_usd": 0.0004302,
+          "output_cost_usd": 0.012153,
+          "total_cost_usd": 0.0125832,
+          "missing_pricing_models": [
+            "azure::gpt-5.4-mini"
+          ]
+        }
+      }
+    },
+    "per_response_model": {
+      "azure::Kimi-K2.5": {
+        "count": 1,
+        "avg_composite_score": 4.8,
+        "errors": 0,
+        "error_categories": {},
+        "heuristics_pass_rate": 1.0,
+        "response_usage": {
+          "call_count": 0,
+          "usage_available": false,
+          "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          }
+        },
+        "evaluation_usage": {
+          "call_count": 2,
+          "usage_available": true,
+          "tokens": {
+            "input_tokens": 2021,
+            "output_tokens": 4206,
+            "total_tokens": 6227
+          }
+        },
+        "combined_usage": {
+          "call_count": 2,
+          "usage_available": true,
+          "tokens": {
+            "input_tokens": 2021,
+            "output_tokens": 4206,
+            "total_tokens": 6227
+          }
+        },
+        "response_cost_usd": {
+          "model_id": "azure::Kimi-K2.5",
+          "pricing_lookup_key": "azure::kimi-k2.5",
+          "pricing_found": true,
+          "pricing_complete": true,
+          "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          },
+          "input_per_million_usd": 0.60000,
+          "output_per_million_usd": 3.00000,
+          "cached_input_per_million_usd": null,
+          "input_cost_usd": 0.00000,
+          "output_cost_usd": 0.00000,
+          "total_cost_usd": 0.00000,
+          "missing_pricing_models": []
+        },
+        "evaluation_cost_usd": {
+          "model_id": null,
+          "pricing_lookup_key": "azure::kimi-k2.5",
+          "pricing_found": false,
+          "pricing_complete": false,
+          "tokens": {
+            "input_tokens": 2021,
+            "output_tokens": 4206,
+            "total_tokens": 6227
+          },
+          "input_per_million_usd": 0.60000,
+          "output_per_million_usd": 3.00000,
+          "cached_input_per_million_usd": null,
+          "input_cost_usd": 0.0004302,
+          "output_cost_usd": 0.012153,
+          "total_cost_usd": 0.0125832,
+          "missing_pricing_models": [
+            "azure::gpt-5.4-mini"
+          ]
+        },
+        "combined_cost_usd": {
+          "model_id": "azure::Kimi-K2.5",
+          "pricing_lookup_key": "azure::kimi-k2.5",
+          "pricing_found": false,
+          "pricing_complete": false,
+          "tokens": {
+            "input_tokens": 2021,
+            "output_tokens": 4206,
+            "total_tokens": 6227
+          },
+          "input_per_million_usd": 0.60000,
+          "output_per_million_usd": 3.00000,
+          "cached_input_per_million_usd": null,
+          "input_cost_usd": 0.0004302,
+          "output_cost_usd": 0.012153,
+          "total_cost_usd": 0.0125832,
+          "missing_pricing_models": [
+            "azure::gpt-5.4-mini"
+          ]
+        }
+      },
+      "azure::gpt-5.4-mini": {
+        "count": 1,
+        "avg_composite_score": 4.6,
+        "errors": 0,
+        "error_categories": {},
+        "heuristics_pass_rate": 1.0,
+        "response_usage": {
+          "call_count": 0,
+          "usage_available": false,
+          "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          }
+        },
+        "evaluation_usage": {
+          "call_count": 2,
+          "usage_available": true,
+          "tokens": {
+            "input_tokens": 1304,
+            "output_tokens": 147,
+            "total_tokens": 1451
+          }
+        },
+        "combined_usage": {
+          "call_count": 2,
+          "usage_available": true,
+          "tokens": {
+            "input_tokens": 1304,
+            "output_tokens": 147,
+            "total_tokens": 1451
+          }
+        },
+        "response_cost_usd": {
+          "model_id": "azure::gpt-5.4-mini",
+          "pricing_lookup_key": null,
+          "pricing_found": true,
+          "pricing_complete": true,
+          "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          },
+          "input_per_million_usd": null,
+          "output_per_million_usd": null,
+          "cached_input_per_million_usd": null,
+          "input_cost_usd": 0.00000,
+          "output_cost_usd": 0.00000,
+          "total_cost_usd": 0.00000,
+          "missing_pricing_models": []
+        },
+        "evaluation_cost_usd": {
+          "model_id": null,
+          "pricing_lookup_key": "azure::kimi-k2.5",
+          "pricing_found": false,
+          "pricing_complete": false,
+          "tokens": {
+            "input_tokens": 1304,
+            "output_tokens": 147,
+            "total_tokens": 1451
+          },
+          "input_per_million_usd": 0.60000,
+          "output_per_million_usd": 3.00000,
+          "cached_input_per_million_usd": null,
+          "input_cost_usd": 0.00000,
+          "output_cost_usd": 0.00000,
+          "total_cost_usd": 0.00000,
+          "missing_pricing_models": [
+            "azure::gpt-5.4-mini"
+          ]
+        },
+        "combined_cost_usd": {
+          "model_id": "azure::gpt-5.4-mini",
+          "pricing_lookup_key": "azure::kimi-k2.5",
+          "pricing_found": false,
+          "pricing_complete": false,
+          "tokens": {
+            "input_tokens": 1304,
+            "output_tokens": 147,
+            "total_tokens": 1451
+          },
+          "input_per_million_usd": 0.60000,
+          "output_per_million_usd": 3.00000,
+          "cached_input_per_million_usd": null,
+          "input_cost_usd": 0.00000,
+          "output_cost_usd": 0.00000,
+          "total_cost_usd": 0.00000,
+          "missing_pricing_models": [
+            "azure::gpt-5.4-mini"
+          ]
+        }
+      }
+    }
+  },
+  "benchmark_results": [
+    {
+      "id": "W01",
+      "domain": "weather",
+      "query": "What's the weather like in Lisbon today?",
+      "language": "en",
+      "edge_case": false,
+      "edge_type": null,
+      "expected_behavior": null,
+      "agents_used": [
+        "weather"
+      ],
+      "response_model": "azure::gpt-5.4-mini",
+      "response_model_config": {
+        "model_id": "azure::gpt-5.4-mini",
+        "provider": "azure",
+        "model": "gpt-5.4-mini",
+        "temperature": 0.0
+      },
+      "evaluation_model": "judge_average::2",
+      "evaluation_model_config": {
+        "kind": "judge_average",
+        "model_id": "judge_average::2",
+        "aggregation": "mean",
+        "judge_models": [
+          "azure::gpt-5.4-mini",
+          "azure::Kimi-K2.5"
+        ],
+        "judge_model_configs": [
+          {
+            "model_id": "azure::gpt-5.4-mini",
+            "provider": "azure",
+            "model": "gpt-5.4-mini",
+            "temperature": 0.0
+          },
+          {
+            "model_id": "azure::Kimi-K2.5",
+            "provider": "azure",
+            "model": "Kimi-K2.5",
+            "temperature": 0.0
+          }
+        ]
+      },
+      "evaluation_models": [
+        "azure::gpt-5.4-mini",
+        "azure::Kimi-K2.5"
+      ],
+      "latency_s": 0.82,
+      "error": null,
+      "error_type": null,
+      "response": "**🌤️ Lisbon Weather Summary**\n\n- **📅 Today (2026-04-09)**\n  - 🌡️ **Temperature**: 9.9°C to 21.9°C\n  - 🌤️ **Conditions**: Sunny intervals\n  - 💧 **Rain probability**: 53.0%\n  - 💨 **Wind**: Northeast (Moderate)\n  - ⚠️ **Active Warnings**:\n- 🟡 💨 Wind\n- 🟡 🌊 Rough Sea\n\n📌 **Source:** Data from [*IPMA*](https://www.ipma.pt/en/) | **Updated:** 14:31",
+      "tools_used": [
+        "get_current_weather_summary"
+      ],
+      "expected_tools": [
+        "get_current_weather_summary"
+      ],
+      "expected_facts": [
+        "Current temperature",
+        "Current condition (e.g., sunny, raining)"
+      ],
+      "retrieved_context": "[get_current_weather_summary] returned:\n🌤️ Lisbon Weather Summary\n========================================\n\n📅 Updated: 2026-04-09T14:31:02\n📅 Today (2026-04-09):\n   🌡️ Temperature: 9.9°C to 21.9°C\n   🌤️ Conditions: Sunny intervals\n   💧 Rain probability: 53.0%\n   💨 Wind: Northeast (Moderate)\n\n⚠️ Active Warnings:\n   🟡 💨 Wind\n   🟡 🌊 Rough Sea\n",
+      "scores": {
+        "factual_accuracy": 4.0,
+        "tool_usage": 5.0,
+        "completeness": 5.0,
+        "relevance": 5.0,
+        "response_quality": 4.0,
+        "composite_score": 4.6,
+        "reasoning": "[azure::gpt-5.4-mini] The response is well supported by the retrieved weather summary: it correctly reports the temperature range, current conditions, rain probability, wind direction/intensity, and active warnings. It also uses the expected tool exactly once, which matches the query’s requirement for current weather in Lisbon. The only minor issue is that it adds a source attribution to IPMA that is not explicitly present in the tool output, though this is a small formatting/detail concern rather than a substantive factual error. Overall, the answer is complete, relevant, and clearly formatted."
+      },
+      "judge_runs": [
+        {
+          "judge_model": "azure::gpt-5.4-mini",
+          "judge_model_config": {
+            "model_id": "azure::gpt-5.4-mini",
+            "provider": "azure",
+            "model": "gpt-5.4-mini",
+            "temperature": 0.0
+          },
+          "scores": {
+            "factual_accuracy": 4,
+            "tool_usage": 5,
+            "completeness": 5,
+            "relevance": 5,
+            "response_quality": 4,
+            "composite_score": 4.6,
+            "reasoning": "The response is well supported by the retrieved weather summary: it correctly reports the temperature range, current conditions, rain probability, wind direction/intensity, and active warnings. It also uses the expected tool exactly once, which matches the query’s requirement for current weather in Lisbon. The only minor issue is that it adds a source attribution to IPMA that is not explicitly present in the tool output, though this is a small formatting/detail concern rather than a substantive factual error. Overall, the answer is complete, relevant, and clearly formatted."
+          },
+          "evaluation_usage": {
+            "model_id": null,
+            "call_count": 1,
+            "usage_available": true,
+            "tokens": {
+              "input_tokens": 1304,
+              "output_tokens": 147,
+              "total_tokens": 1451
+            }
+          },
+          "evaluation_cost_usd": {
+            "model_id": "azure::gpt-5.4-mini",
+            "pricing_lookup_key": null,
+            "pricing_found": false,
+            "pricing_complete": false,
+            "tokens": {
+              "input_tokens": 1304,
+              "output_tokens": 147,
+              "total_tokens": 1451
+            },
+            "input_per_million_usd": null,
+            "output_per_million_usd": null,
+            "cached_input_per_million_usd": null,
+            "input_cost_usd": 0.00000,
+            "output_cost_usd": 0.00000,
+            "total_cost_usd": 0.00000,
+            "missing_pricing_models": [
+              "azure::gpt-5.4-mini"
+            ]
+          },
+          "error": null,
+          "error_type": null
+        },
+        {
+          "judge_model": "azure::Kimi-K2.5",
+          "judge_model_config": {
+            "model_id": "azure::Kimi-K2.5",
+            "provider": "azure",
+            "model": "Kimi-K2.5",
+            "temperature": 0.0
+          },
+          "scores": {
+            "factual_accuracy": 0,
+            "tool_usage": 0,
+            "completeness": 0,
+            "relevance": 0,
+            "response_quality": 0,
+            "composite_score": 0.0,
+            "reasoning": "Judge Failed: {\"object\": \"error\", \"message\": \"Server at maximum concurrent capacity (8). Try again later.\", \"type\": \"429\", \"param\": null, \"code\": 429}\nPlease check this guide to understand why this error code might have been returned \nhttps://docs.microsoft.com/en-us/azure/machine-learning/how-to-troubleshoot-online-endpoints#http-status-codes"
+          },
+          "evaluation_usage": {
+            "model_id": "azure::Kimi-K2.5",
+            "call_count": 1,
+            "usage_available": false,
+            "tokens": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "total_tokens": 0
+            }
+          },
+          "evaluation_cost_usd": {
+            "model_id": "azure::Kimi-K2.5",
+            "pricing_lookup_key": "azure::kimi-k2.5",
+            "pricing_found": true,
+            "pricing_complete": true,
+            "tokens": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "total_tokens": 0
+            },
+            "input_per_million_usd": 0.60000,
+            "output_per_million_usd": 3.00000,
+            "cached_input_per_million_usd": null,
+            "input_cost_usd": 0.00000,
+            "output_cost_usd": 0.00000,
+            "total_cost_usd": 0.00000,
+            "missing_pricing_models": []
+          },
+          "error": "Judge Failed: {\"object\": \"error\", \"message\": \"Server at maximum concurrent capacity (8). Try again later.\", \"type\": \"429\", \"param\": null, \"code\": 429}\nPlease check this guide to understand why this error code might have been returned \nhttps://docs.microsoft.com/en-us/azure/machine-learning/how-to-troubleshoot-online-endpoints#http-status-codes",
+          "error_type": "rate_limit"
+        }
+      ],
+      "scores_by_judge": {
+        "azure::gpt-5.4-mini": {
+          "factual_accuracy": 4,
+          "tool_usage": 5,
+          "completeness": 5,
+          "relevance": 5,
+          "response_quality": 4,
+          "composite_score": 4.6,
+          "reasoning": "The response is well supported by the retrieved weather summary: it correctly reports the temperature range, current conditions, rain probability, wind direction/intensity, and active warnings. It also uses the expected tool exactly once, which matches the query’s requirement for current weather in Lisbon. The only minor issue is that it adds a source attribution to IPMA that is not explicitly present in the tool output, though this is a small formatting/detail concern rather than a substantive factual error. Overall, the answer is complete, relevant, and clearly formatted."
+        },
+        "azure::Kimi-K2.5": {
+          "factual_accuracy": 0,
+          "tool_usage": 0,
+          "completeness": 0,
+          "relevance": 0,
+          "response_quality": 0,
+          "composite_score": 0.0,
+          "reasoning": "Judge Failed: {\"object\": \"error\", \"message\": \"Server at maximum concurrent capacity (8). Try again later.\", \"type\": \"429\", \"param\": null, \"code\": 429}\nPlease check this guide to understand why this error code might have been returned \nhttps://docs.microsoft.com/en-us/azure/machine-learning/how-to-troubleshoot-online-endpoints#http-status-codes"
+        }
+      },
+      "judge_summary": {
+        "judge_count": 2,
+        "successful_judges": 1,
+        "failed_judges": 1,
+        "all_judges_succeeded": false,
+        "averaging_method": "mean",
+        "judge_models": [
+          "azure::gpt-5.4-mini",
+          "azure::Kimi-K2.5"
+        ]
+      },
+      "response_usage": {
+        "model_id": "azure::gpt-5.4-mini",
+        "call_count": 0,
+        "usage_available": false,
+        "tokens": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0
+        },
+        "llm_usage_breakdown": []
+      },
+      "response_cost_usd": {
+        "model_id": "azure::gpt-5.4-mini",
+        "pricing_lookup_key": null,
+        "pricing_found": true,
+        "pricing_complete": true,
+        "tokens": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0
+        },
+        "input_per_million_usd": null,
+        "output_per_million_usd": null,
+        "cached_input_per_million_usd": null,
+        "input_cost_usd": 0.00000,
+        "output_cost_usd": 0.00000,
+        "total_cost_usd": 0.00000,
+        "missing_pricing_models": []
+      },
+      "agent_usage": {
+        "weather": {
+          "model_id": "azure::gpt-5.4-mini",
+          "call_count": 0,
+          "usage_available": false,
+          "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          },
+          "llm_usage_breakdown": []
+        }
+      },
+      "agent_costs": {
+        "weather": {
+          "model_id": "azure::gpt-5.4-mini",
+          "pricing_lookup_key": null,
+          "pricing_found": true,
+          "pricing_complete": true,
+          "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          },
+          "input_per_million_usd": null,
+          "output_per_million_usd": null,
+          "cached_input_per_million_usd": null,
+          "input_cost_usd": 0.00000,
+          "output_cost_usd": 0.00000,
+          "total_cost_usd": 0.00000,
+          "missing_pricing_models": []
+        }
+      },
+      "evaluation_usage": {
+        "model_id": null,
+        "call_count": 2,
+        "usage_available": true,
+        "tokens": {
+          "input_tokens": 1304,
+          "output_tokens": 147,
+          "total_tokens": 1451
+        }
+      },
+      "evaluation_cost_usd": {
+        "model_id": null,
+        "pricing_lookup_key": "azure::kimi-k2.5",
+        "pricing_found": false,
+        "pricing_complete": false,
+        "tokens": {
+          "input_tokens": 1304,
+          "output_tokens": 147,
+          "total_tokens": 1451
+        },
+        "input_per_million_usd": 0.60000,
+        "output_per_million_usd": 3.00000,
+        "cached_input_per_million_usd": null,
+        "input_cost_usd": 0.00000,
+        "output_cost_usd": 0.00000,
+        "total_cost_usd": 0.00000,
+        "missing_pricing_models": [
+          "azure::gpt-5.4-mini"
+        ]
+      },
+      "combined_usage": {
+        "model_id": null,
+        "call_count": 2,
+        "usage_available": true,
+        "tokens": {
+          "input_tokens": 1304,
+          "output_tokens": 147,
+          "total_tokens": 1451
+        }
+      },
+      "combined_cost_usd": {
+        "model_id": "azure::gpt-5.4-mini",
+        "pricing_lookup_key": "azure::kimi-k2.5",
+        "pricing_found": false,
+        "pricing_complete": false,
+        "tokens": {
+          "input_tokens": 1304,
+          "output_tokens": 147,
+          "total_tokens": 1451
+        },
+        "input_per_million_usd": 0.60000,
+        "output_per_million_usd": 3.00000,
+        "cached_input_per_million_usd": null,
+        "input_cost_usd": 0.00000,
+        "output_cost_usd": 0.00000,
+        "total_cost_usd": 0.00000,
+        "missing_pricing_models": [
+          "azure::gpt-5.4-mini"
+        ]
+      },
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "heuristics": {
+        "tool_leaks": {
+          "leaked": false,
+          "leaked_items": []
+        },
+        "response_length": {
+          "acceptable": true,
+          "char_count": 342,
+          "word_count": 50,
+          "issues": []
+        },
+        "language_compliance": {
+          "compliant": true,
+          "detected_indicators": {
+            "en": 1,
+            "pt": 0,
+            "fr": 0
+          },
+          "expected_language": "en"
+        },
+        "hallucinated_features": {
+          "hallucinated": false,
+          "flagged_claims": []
+        },
+        "emoji_density": {
+          "acceptable": true,
+          "emoji_count": 14,
+          "ratio": 0.0409
+        },
+        "presentation_contract": {
+          "starts_with_title": true,
+          "top_level_headers": [],
+          "has_source_line": true,
+          "has_notes_section": false,
+          "separator_count": 0,
+          "bullet_count": 8,
+          "link_count": 1,
+          "char_count": 342,
+          "word_count": 50
+        },
+        "overall_pass": true,
+        "critical_failures": []
+      },
+      "sla_met": true
+    },
+    {
+      "id": "W01",
+      "domain": "weather",
+      "query": "What's the weather like in Lisbon today?",
+      "language": "en",
+      "edge_case": false,
+      "edge_type": null,
+      "expected_behavior": null,
+      "agents_used": [
+        "weather"
+      ],
+      "response_model": "azure::Kimi-K2.5",
+      "response_model_config": {
+        "model_id": "azure::Kimi-K2.5",
+        "provider": "azure",
+        "model": "Kimi-K2.5",
+        "temperature": 0.0
+      },
+      "evaluation_model": "judge_average::2",
+      "evaluation_model_config": {
+        "kind": "judge_average",
+        "model_id": "judge_average::2",
+        "aggregation": "mean",
+        "judge_models": [
+          "azure::gpt-5.4-mini",
+          "azure::Kimi-K2.5"
+        ],
+        "judge_model_configs": [
+          {
+            "model_id": "azure::gpt-5.4-mini",
+            "provider": "azure",
+            "model": "gpt-5.4-mini",
+            "temperature": 0.0
+          },
+          {
+            "model_id": "azure::Kimi-K2.5",
+            "provider": "azure",
+            "model": "Kimi-K2.5",
+            "temperature": 0.0
+          }
+        ]
+      },
+      "evaluation_models": [
+        "azure::gpt-5.4-mini",
+        "azure::Kimi-K2.5"
+      ],
+      "latency_s": 0.0,
+      "error": null,
+      "error_type": null,
+      "response": "**🌤️ Lisbon Weather Summary**\n\n- **📅 Today (2026-04-09)**\n  - 🌡️ **Temperature**: 9.9°C to 21.9°C\n  - 🌤️ **Conditions**: Sunny intervals\n  - 💧 **Rain probability**: 53.0%\n  - 💨 **Wind**: Northeast (Moderate)\n  - ⚠️ **Active Warnings**:\n- 🟡 💨 Wind\n- 🟡 🌊 Rough Sea\n\n📌 **Source:** Data from [*IPMA*](https://www.ipma.pt/en/) | **Updated:** 14:31",
+      "tools_used": [
+        "get_current_weather_summary"
+      ],
+      "expected_tools": [
+        "get_current_weather_summary"
+      ],
+      "expected_facts": [
+        "Current temperature",
+        "Current condition (e.g., sunny, raining)"
+      ],
+      "retrieved_context": "[get_current_weather_summary] returned:\n🌤️ Lisbon Weather Summary\n========================================\n\n📅 Updated: 2026-04-09T14:31:02\n📅 Today (2026-04-09):\n   🌡️ Temperature: 9.9°C to 21.9°C\n   🌤️ Conditions: Sunny intervals\n   💧 Rain probability: 53.0%\n   💨 Wind: Northeast (Moderate)\n\n⚠️ Active Warnings:\n   🟡 💨 Wind\n   🟡 🌊 Rough Sea\n",
+      "scores": {
+        "factual_accuracy": 4.5,
+        "tool_usage": 5.0,
+        "completeness": 5.0,
+        "relevance": 5.0,
+        "response_quality": 4.5,
+        "composite_score": 4.8,
+        "reasoning": "[azure::gpt-5.4-mini] The response correctly uses the provided weather tool and reports the current temperature range and condition exactly as shown in the retrieved context, so the key factual elements are supported. It also includes extra details such as rain probability, wind, and active warnings, all of which are present in the tool output, though the user only explicitly asked for the weather today. The source attribution to IPMA and the update time are consistent with the context, but they are not necessary for answering the query. Overall, the answer is accurate, relevant, and complete, with only minor extra formatting detail.\n\n[azure::Kimi-K2.5] The agent correctly utilized the `get_current_weather_summary` tool to retrieve Lisbon's weather data, matching the expected tool exactly. All weather-specific facts—including the temperature range of 9.9°C to 21.9°C, \"Sunny intervals\" conditions, and active wind and rough sea warnings—are accurately transcribed from the retrieved context. However, the agent introduced an unsupported detail by attributing the data source to IPMA with a hyperlink, which is not mentioned in the provided context, constituting a minor hallucination. The response formatting is generally clear and readable with effective use of emojis and bullet points, though the warning sub-bullets appear at the same indentation level as the parent \"Active Warnings\" bullet rather than being nested. Overall, the response comprehensively answers the user's query with accurate meteorological information despite the minor source attribution issue."
+      },
+      "judge_runs": [
+        {
+          "judge_model": "azure::gpt-5.4-mini",
+          "judge_model_config": {
+            "model_id": "azure::gpt-5.4-mini",
+            "provider": "azure",
+            "model": "gpt-5.4-mini",
+            "temperature": 0.0
+          },
+          "scores": {
+            "factual_accuracy": 5,
+            "tool_usage": 5,
+            "completeness": 5,
+            "relevance": 5,
+            "response_quality": 5,
+            "composite_score": 5.0,
+            "reasoning": "The response correctly uses the provided weather tool and reports the current temperature range and condition exactly as shown in the retrieved context, so the key factual elements are supported. It also includes extra details such as rain probability, wind, and active warnings, all of which are present in the tool output, though the user only explicitly asked for the weather today. The source attribution to IPMA and the update time are consistent with the context, but they are not necessary for answering the query. Overall, the answer is accurate, relevant, and complete, with only minor extra formatting detail."
+          },
+          "evaluation_usage": {
+            "model_id": null,
+            "call_count": 1,
+            "usage_available": true,
+            "tokens": {
+              "input_tokens": 1304,
+              "output_tokens": 155,
+              "total_tokens": 1459
+            }
+          },
+          "evaluation_cost_usd": {
+            "model_id": "azure::gpt-5.4-mini",
+            "pricing_lookup_key": null,
+            "pricing_found": false,
+            "pricing_complete": false,
+            "tokens": {
+              "input_tokens": 1304,
+              "output_tokens": 155,
+              "total_tokens": 1459
+            },
+            "input_per_million_usd": null,
+            "output_per_million_usd": null,
+            "cached_input_per_million_usd": null,
+            "input_cost_usd": 0.00000,
+            "output_cost_usd": 0.00000,
+            "total_cost_usd": 0.00000,
+            "missing_pricing_models": [
+              "azure::gpt-5.4-mini"
+            ]
+          },
+          "error": null,
+          "error_type": null
+        },
+        {
+          "judge_model": "azure::Kimi-K2.5",
+          "judge_model_config": {
+            "model_id": "azure::Kimi-K2.5",
+            "provider": "azure",
+            "model": "Kimi-K2.5",
+            "temperature": 0.0
+          },
+          "scores": {
+            "factual_accuracy": 4,
+            "tool_usage": 5,
+            "completeness": 5,
+            "relevance": 5,
+            "response_quality": 4,
+            "composite_score": 4.6,
+            "reasoning": "The agent correctly utilized the `get_current_weather_summary` tool to retrieve Lisbon's weather data, matching the expected tool exactly. All weather-specific facts—including the temperature range of 9.9°C to 21.9°C, \"Sunny intervals\" conditions, and active wind and rough sea warnings—are accurately transcribed from the retrieved context. However, the agent introduced an unsupported detail by attributing the data source to IPMA with a hyperlink, which is not mentioned in the provided context, constituting a minor hallucination. The response formatting is generally clear and readable with effective use of emojis and bullet points, though the warning sub-bullets appear at the same indentation level as the parent \"Active Warnings\" bullet rather than being nested. Overall, the response comprehensively answers the user's query with accurate meteorological information despite the minor source attribution issue."
+          },
+          "evaluation_usage": {
+            "model_id": null,
+            "call_count": 1,
+            "usage_available": true,
+            "tokens": {
+              "input_tokens": 717,
+              "output_tokens": 4051,
+              "total_tokens": 4768
+            }
+          },
+          "evaluation_cost_usd": {
+            "model_id": "azure::Kimi-K2.5",
+            "pricing_lookup_key": "azure::kimi-k2.5",
+            "pricing_found": true,
+            "pricing_complete": true,
+            "tokens": {
+              "input_tokens": 717,
+              "output_tokens": 4051,
+              "total_tokens": 4768
+            },
+            "input_per_million_usd": 0.60000,
+            "output_per_million_usd": 3.00000,
+            "cached_input_per_million_usd": null,
+            "input_cost_usd": 0.0004302,
+            "output_cost_usd": 0.012153,
+            "total_cost_usd": 0.0125832,
+            "missing_pricing_models": []
+          },
+          "error": null,
+          "error_type": null
+        }
+      ],
+      "scores_by_judge": {
+        "azure::gpt-5.4-mini": {
+          "factual_accuracy": 5,
+          "tool_usage": 5,
+          "completeness": 5,
+          "relevance": 5,
+          "response_quality": 5,
+          "composite_score": 5.0,
+          "reasoning": "The response correctly uses the provided weather tool and reports the current temperature range and condition exactly as shown in the retrieved context, so the key factual elements are supported. It also includes extra details such as rain probability, wind, and active warnings, all of which are present in the tool output, though the user only explicitly asked for the weather today. The source attribution to IPMA and the update time are consistent with the context, but they are not necessary for answering the query. Overall, the answer is accurate, relevant, and complete, with only minor extra formatting detail."
+        },
+        "azure::Kimi-K2.5": {
+          "factual_accuracy": 4,
+          "tool_usage": 5,
+          "completeness": 5,
+          "relevance": 5,
+          "response_quality": 4,
+          "composite_score": 4.6,
+          "reasoning": "The agent correctly utilized the `get_current_weather_summary` tool to retrieve Lisbon's weather data, matching the expected tool exactly. All weather-specific facts—including the temperature range of 9.9°C to 21.9°C, \"Sunny intervals\" conditions, and active wind and rough sea warnings—are accurately transcribed from the retrieved context. However, the agent introduced an unsupported detail by attributing the data source to IPMA with a hyperlink, which is not mentioned in the provided context, constituting a minor hallucination. The response formatting is generally clear and readable with effective use of emojis and bullet points, though the warning sub-bullets appear at the same indentation level as the parent \"Active Warnings\" bullet rather than being nested. Overall, the response comprehensively answers the user's query with accurate meteorological information despite the minor source attribution issue."
+        }
+      },
+      "judge_summary": {
+        "judge_count": 2,
+        "successful_judges": 2,
+        "failed_judges": 0,
+        "all_judges_succeeded": true,
+        "averaging_method": "mean",
+        "judge_models": [
+          "azure::gpt-5.4-mini",
+          "azure::Kimi-K2.5"
+        ]
+      },
+      "response_usage": {
+        "model_id": "azure::Kimi-K2.5",
+        "call_count": 0,
+        "usage_available": false,
+        "tokens": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0
+        },
+        "llm_usage_breakdown": []
+      },
+      "response_cost_usd": {
+        "model_id": "azure::Kimi-K2.5",
+        "pricing_lookup_key": "azure::kimi-k2.5",
+        "pricing_found": true,
+        "pricing_complete": true,
+        "tokens": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0
+        },
+        "input_per_million_usd": 0.60000,
+        "output_per_million_usd": 3.00000,
+        "cached_input_per_million_usd": null,
+        "input_cost_usd": 0.00000,
+        "output_cost_usd": 0.00000,
+        "total_cost_usd": 0.00000,
+        "missing_pricing_models": []
+      },
+      "agent_usage": {
+        "weather": {
+          "model_id": "azure::Kimi-K2.5",
+          "call_count": 0,
+          "usage_available": false,
+          "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          },
+          "llm_usage_breakdown": []
+        }
+      },
+      "agent_costs": {
+        "weather": {
+          "model_id": "azure::Kimi-K2.5",
+          "pricing_lookup_key": "azure::kimi-k2.5",
+          "pricing_found": true,
+          "pricing_complete": true,
+          "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          },
+          "input_per_million_usd": 0.60000,
+          "output_per_million_usd": 3.00000,
+          "cached_input_per_million_usd": null,
+          "input_cost_usd": 0.00000,
+          "output_cost_usd": 0.00000,
+          "total_cost_usd": 0.00000,
+          "missing_pricing_models": []
+        }
+      },
+      "evaluation_usage": {
+        "model_id": null,
+        "call_count": 2,
+        "usage_available": true,
+        "tokens": {
+          "input_tokens": 2021,
+          "output_tokens": 4206,
+          "total_tokens": 6227
+        }
+      },
+      "evaluation_cost_usd": {
+        "model_id": null,
+        "pricing_lookup_key": "azure::kimi-k2.5",
+        "pricing_found": false,
+        "pricing_complete": false,
+        "tokens": {
+          "input_tokens": 2021,
+          "output_tokens": 4206,
+          "total_tokens": 6227
+        },
+        "input_per_million_usd": 0.60000,
+        "output_per_million_usd": 3.00000,
+        "cached_input_per_million_usd": null,
+        "input_cost_usd": 0.0004302,
+        "output_cost_usd": 0.012153,
+        "total_cost_usd": 0.0125832,
+        "missing_pricing_models": [
+          "azure::gpt-5.4-mini"
+        ]
+      },
+      "combined_usage": {
+        "model_id": null,
+        "call_count": 2,
+        "usage_available": true,
+        "tokens": {
+          "input_tokens": 2021,
+          "output_tokens": 4206,
+          "total_tokens": 6227
+        }
+      },
+      "combined_cost_usd": {
+        "model_id": "azure::Kimi-K2.5",
+        "pricing_lookup_key": "azure::kimi-k2.5",
+        "pricing_found": false,
+        "pricing_complete": false,
+        "tokens": {
+          "input_tokens": 2021,
+          "output_tokens": 4206,
+          "total_tokens": 6227
+        },
+        "input_per_million_usd": 0.60000,
+        "output_per_million_usd": 3.00000,
+        "cached_input_per_million_usd": null,
+        "input_cost_usd": 0.0004302,
+        "output_cost_usd": 0.012153,
+        "total_cost_usd": 0.0125832,
+        "missing_pricing_models": [
+          "azure::gpt-5.4-mini"
+        ]
+      },
+      "tool_metrics": {
+        "tool_precision": 1.0,
+        "tool_recall": 1.0,
+        "tool_f1": 1.0
+      },
+      "heuristics": {
+        "tool_leaks": {
+          "leaked": false,
+          "leaked_items": []
+        },
+        "response_length": {
+          "acceptable": true,
+          "char_count": 342,
+          "word_count": 50,
+          "issues": []
+        },
+        "language_compliance": {
+          "compliant": true,
+          "detected_indicators": {
+            "en": 1,
+            "pt": 0,
+            "fr": 0
+          },
+          "expected_language": "en"
+        },
+        "hallucinated_features": {
+          "hallucinated": false,
+          "flagged_claims": []
+        },
+        "emoji_density": {
+          "acceptable": true,
+          "emoji_count": 14,
+          "ratio": 0.0409
+        },
+        "presentation_contract": {
+          "starts_with_title": true,
+          "top_level_headers": [],
+          "has_source_line": true,
+          "has_notes_section": false,
+          "separator_count": 0,
+          "bullet_count": 8,
+          "link_count": 1,
+          "char_count": 342,
+          "word_count": 50
+        },
+        "overall_pass": true,
+        "critical_failures": []
+      },
+      "sla_met": true
+    }
+  ]
+}
