@@ -42,15 +42,14 @@
     },
     {
         "id": "W04",
-        "query": "What will the weather be like in Lisbon tomorrow?",
+        "query": "Should I bring a jacket if I'm visiting Lisbon this Friday?",
         "domain": "weather",
         "expected_tools": [
             "get_weather_forecast"
         ],
         "expected_facts": [
-            "Tomorrow's temperature min/max",
-            "Tomorrow's overall weather conditions",
-            "Rain probability for tomorrow"
+            "Friday's exact temperature forecast",
+            "Conclusion if a jacket makes sense"
         ],
         "language": "en",
         "edge_case": false
@@ -126,16 +125,15 @@
     },
     {
         "id": "W10",
-        "query": "Há avisos meteorológicos ativos e vai chover amanhã em Lisboa?",
+        "query": "Há alertas meteorológicos para o fim de semana?",
         "domain": "weather",
         "expected_tools": [
             "get_weather_warnings",
             "get_weather_forecast"
         ],
         "expected_facts": [
-            "Estado dos avisos meteorológicos ativos do IPMA",
-            "Probabilidade de chuva para amanhã",
-            "Temperatura mínima e máxima para amanhã"
+            "Information regarding any IPMA warnings",
+            "Weekend forecast overview"
         ],
         "language": "pt",
         "edge_case": false
@@ -275,17 +273,16 @@
     },
     {
         "id": "T07",
-        "query": "Quero apanhar o ferry para Cacilhas agora.",
+        "query": "Quero ir para o Porto de comboio a partir de Santa Apolónia.",
         "domain": "transport",
         "expected_tools": [],
         "expected_facts": [
-            "O runtime não confirma diretamente ferries Transtejo/Soflusa",
-            "O sistema só valida diretamente Metro de Lisboa, Carris Urban, Carris Metropolitana e CP"
+            "System only covers Lisbon Metropolitan Area (Sintra, Cascais, Azambuja, Fertagus, Sado lines)"
         ],
         "language": "pt",
         "edge_case": true,
-        "edge_type": "unsupported_provider",
-        "expected_behavior": "Explicar que a informação dos ferries Transtejo/Soflusa não está disponível no sistema e evitar inventar horários, tarifas, ETAs ou estado em tempo real"
+        "edge_type": "geographic_out_of_bounds",
+        "expected_behavior": "Inform user that only AML suburban lines are covered (Sintra, Cascais, Azambuja, Fertagus, Sado)"
     },
     {
         "id": "T08",
@@ -317,15 +314,15 @@
     },
     {
         "id": "T10",
-        "query": "What route does tram 28E follow?",
+        "query": "Is the tram 28E running?",
         "domain": "transport",
         "expected_tools": [
             "carris_get_routes"
         ],
         "expected_facts": [
+            "Information about the 28E tram route",
             "Route connects Martim Moniz to Campo de Ourique (Prazeres)",
-            "Historic central Lisbon corridor via areas such as Graça, Alfama, Baixa, Chiado or Estrela",
-            "Carris Urban is the operator"
+            "Approximately 35-38 stops, ~45-60 minutes journey depending on traffic"
         ],
         "language": "en",
         "edge_case": false
@@ -910,7 +907,7 @@
         "expected_facts": [
             "Condições meteorológicas para amanhã",
             "Sugestões de atrações em Belém",
-            "Opções de ligação do Rossio para Belém, por exemplo elétrico 15E, comboio ou outra rota pública plausível"
+            "Opções de ligação do Rossio para Belém, por exemplo autocarro 727 (Estação do Rossio → R. Pinto Ferreira), comboio (Cais do Sodré -> Belém) ou outra rota pública plausível"
         ],
         "language": "pt",
         "edge_case": false
