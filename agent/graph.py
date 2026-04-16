@@ -697,6 +697,7 @@ class MultiAgentAssistant:
 
         # Initialize state
         self.state = create_initial_state()
+        self.last_execution_summary: Dict[str, Any] | None = None
 
         self.model_info = {
             "supervisor": self.supervisor.get_model_info(),
@@ -1356,6 +1357,7 @@ class MultiAgentAssistant:
             simple_weather_fact_check=simple_weather_fact_check,
             elapsed_time=time_module.time() - start_time,
         )
+        self.last_execution_summary = execution_summary
         self._print_execution_summary(execution_summary)
 
         if Config.SHOW_MARKDOWN_RESPONSE_IN_TERMINAL:
@@ -2024,28 +2026,39 @@ class MultiAgentAssistant:
                 qa_result=qa_result,
                 language=effective_language,
             )
-            # Re-apply strict formatting because the QA LLM might destroy visual structure
-            if "planner" in agents_to_call:
-                from agent.utils.response_formatter import finalize_worker_response
-                response = finalize_worker_response(response, "planner", message, effective_language)
-            elif len(agents_to_call) == 1 and agents_to_call[0] in {"weather", "researcher", "transport"}:
-                from agent.utils.response_formatter import finalize_worker_response
-                response = finalize_worker_response(response, agents_to_call[0], message, effective_language)
-            else:
-                # Hybrid multi-agent response: unconditionally enforce PT translation of labels
-                from agent.utils.response_formatter import (
-                    canonicalize_local_information_terms,
-                )
-                response = canonicalize_local_information_terms(response, effective_language)
 
         if "planner" in agents_to_call:
             from agent.agents.planner_agent import enforce_multi_day_quality_mode
+            from agent.utils.response_formatter import finalize_worker_response
 
             response = enforce_multi_day_quality_mode(
                 response=response,
                 user_message=message,
                 language=effective_language,
             )
+            response = finalize_worker_response(response, "planner", message, effective_language)
+        elif len(agents_to_call) == 1 and agents_to_call[0] in {"researcher", "transport"}:
+            from agent.utils.response_formatter import finalize_worker_response
+
+            response = finalize_worker_response(
+                response,
+                agents_to_call[0],
+                message,
+                effective_language,
+            )
+        elif len(agents_to_call) == 1 and agents_to_call[0] == "weather" and final_repair_ran:
+            from agent.utils.response_formatter import finalize_worker_response
+
+            response = finalize_worker_response(
+                response,
+                "weather",
+                message,
+                effective_language,
+            )
+        elif len(agents_to_call) > 1:
+            from agent.utils.response_formatter import canonicalize_local_information_terms
+
+            response = canonicalize_local_information_terms(response, effective_language)
 
         return self._finalize_chat_response(
             response=response,
@@ -2208,6 +2221,7 @@ class MultiAgentAssistant:
         from agent.state import create_initial_state
 
         self.state = create_initial_state()
+        self.last_execution_summary = None
         for agent in self.agents.values():
             reset_context = getattr(agent, "reset_conversation_context", None)
             if callable(reset_context):

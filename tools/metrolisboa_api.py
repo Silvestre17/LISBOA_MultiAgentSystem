@@ -12,6 +12,10 @@
 #       * Automatic token refresh
 #     - Fallback to unofficial API when credentials unavailable
 #
+#   Usage:
+#     > python tools/metrolisboa_api.py
+#       Run the manual Metro de Lisboa tool test suite, including OAuth-backed tests when credentials are configured.
+#
 #   API Documentation: https://api.metrolisboa.pt/store/
 #   API Base: https://api.metrolisboa.pt:8243/estadoServicoML/1.0.1/
 # ==========================================================================

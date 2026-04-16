@@ -7,9 +7,18 @@
 #   eval/results/benchmark/
 #
 # Usage:
-#   python eval/run_benchmark.py --mode run_test        # Quick benchmark with 5 dataset entries per response model
-#   python eval/run_benchmark.py --limit 20             # Benchmark the first 20 dataset entries per response model
-#   python eval/run_benchmark.py --mode full            # Benchmark the full dataset with all configured response models
+#   > python eval/run_benchmark.py --mode run_test
+#       Quick benchmark with 5 dataset entries per response model.
+#   > python eval/run_benchmark.py --limit 20
+#       Benchmark the first 20 dataset entries per response model.
+#   > python eval/run_benchmark.py --mode full
+#       Benchmark the full dataset with all configured response models.
+#   > python eval/run_benchmark.py --dataset eval/evaluation_groundtruth_queries_demo.json --output-prefix benchmark_results_demo
+#       Run the benchmark against an alternate dataset and keep the artefacts separate from the main notebook inputs.
+#   > python eval/run_benchmark.py --response-model azure::gpt-5.4-mini --response-model lmstudio::qwen/qwen3.5-9b
+#       Override the benchmark response-model set with one or more explicit provider::model identifiers.
+#   > python eval/run_benchmark.py --judge-model-spec openai::gpt-5.4-mini
+#       Override the evaluation judge with one or more explicit provider::model identifiers.
 # ==========================================================================
 
 import json

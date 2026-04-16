@@ -7,26 +7,33 @@
 #   (museums, landmarks, etc.). It extracts details like schedule, contacts,
 #   and location, managing incremental updates to a JSON file.
 #
-#   Link: https://www.visitlisboa.com/en/places
+# Usage:
+#   > python data_collection/webscraping/visitlisbon_places.py
+#       Scrape the VisitLisboa places catalogue and update `data_collection/webscraping/places.json`.
+#
+# Notes:
+#   - The script merges by URL, adds new places, updates changed ones, and removes entries no longer listed online.
+#   - Saving is aborted if the scraper finds zero places, to avoid wiping the dataset after a blocking or markup failure.
+#
+# Link to the places page: https://www.visitlisboa.com/en/places
 # ==========================================================================
 
 # Required libraries:
 # pip install requests beautifulsoup4 tqdm
 
-import json  # To handle JSON data
-import logging  # To log messages (for Github Actions)
-import os  # To handle file paths correctly
-import random  # To make delays random
-import re  # To extract numbers from strings
-import sys  # To exit the script in case of critical errors
-import time  # To add delays
+import json                     # To handle JSON data
+import logging                  # To log messages (for Github Actions)
+import os                       # To handle file paths correctly
+import random                   # To make delays random
+import re                       # To extract numbers from strings
+import sys                      # To exit the script in case of critical errors
+import time                     # To add delays
 
-import requests  # To make HTTP requests
-from bs4 import BeautifulSoup  # To parse HTML content
-from tqdm import tqdm  # To show progress bars
+import requests                 # To make HTTP requests
+from bs4 import BeautifulSoup   # To parse HTML content
+from tqdm import tqdm           # To show progress bars
 
 # --- Configuration & Anti-Bot Measures ---
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 USER_AGENTS = [

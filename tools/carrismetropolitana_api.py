@@ -11,6 +11,10 @@
 #     - Real-time vehicle GPS tracking
 #     - Bus route planning between any locations
 #
+#   Usage:
+#     > python tools/carrismetropolitana_api.py
+#       Run the manual Carris Metropolitana tool test suite against line, stop, route, and realtime helpers.
+#
 #   API Documentation: https://github.com/carrismetropolitana/api
 #   API Base: https://api.carrismetropolitana.pt
 # ==========================================================================

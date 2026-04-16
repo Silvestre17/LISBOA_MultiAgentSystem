@@ -428,6 +428,38 @@ def test_researcher_worker_finalization_localizes_common_labels_for_en() -> None
     assert "Horário" not in output
 
 
+def test_researcher_worker_finalization_localizes_service_lookup_sections_in_pt() -> None:
+    """PT nearby-service answers should localize hospital headings and strip duplicated inline icons."""
+    raw = """📍 Found 1 results from 'Farmácias e Parafarmácias (near Saldanha)':
+
+1. Farmácia Dalva
+   📍 Avenida Duque d'Ávila, 125
+   📏 0.07 km away
+   🗺️ (38.735010, -9.145924)
+
+📍 Found 1 results from 'Hospitais Publicos (near Saldanha)':
+
+1. Maternidade Dr. Alfredo da Costa
+   📍 Rua Pinheiro Chagas, 5-5A
+   📏 0.30 km away
+   🗺️ (38.732623, -9.147440)
+"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="researcher",
+        user_query="Qual o hospital e a farmácia mais perto do Saldanha?",
+        language="pt",
+    )
+
+    assert "#### 💊 Farmácias Perto de Saldanha" in output
+    assert "#### 🏥 Hospitais Públicos Perto de Saldanha" in output
+    assert "📍 **Morada:** Avenida Duque d'Ávila, 125" in output
+    assert "📏 **Distância:** 0.07 km" in output
+    assert "km away" not in output
+    assert "📍 **Morada:** 📍" not in output
+
+
 def test_researcher_worker_finalization_strips_raw_tool_artifacts() -> None:
     """Researcher post-processing should remove raw tool summary scaffolding."""
     raw = """🏛️ **Found 2 Places/Attractions in Lisbon:**
@@ -1477,6 +1509,182 @@ def test_planner_falls_back_when_cleaned_response_is_generic_processing_error() 
         assert "dificuldades em processar" not in output.lower()
 
 
+def test_planner_worker_finalization_repairs_broken_qa_repair_markdown_contract() -> None:
+    """Planner post-processing should recover a stable title and remove malformed timed cards from QA repair output."""
+    raw = """**📍 Sugestões para a Visita**
+**📍 Sugestões para a Visita**
+
+### 🏛️ 19:00 · ainda pode valer a pena pela vista sobre a Baixa e o Terreiro do Paço.
+- # 🏛️ Arco da Rua Augusta
+- 📍 **Morada**: Rua Augusta, 2, 1100-053, Lisboa
+
+### 🏛️ 03:00 · Horário ao domingo: 10:00–19:00
+- 🌐 **Site Oficial**: [visitlisboa.com](https://www.visitlisboa.com/en/places/arco-da-rua-augusta)
+**🚇 Como Chegar e Deslocação**
+**🚇 Como Chegar e Deslocação**"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="planner",
+        user_query="Qual museu ou monumento recomendas ir neste domingo sendo que apenas tenho das 19 às 20h para visitar?",
+        language="pt",
+    )
+
+    assert output.startswith("### 📅 ")
+    assert output.count("**📍 Sugestões para a Visita**") == 1
+    assert output.count("**🚇 Como Chegar e Deslocação**") == 1
+    assert "### 🏛️ 03:00 · Horário ao domingo" not in output
+    assert "- 🏛️ **Arco da Rua Augusta**" in output
+
+
+def test_planner_worker_finalization_demotes_live_schedule_metadata_headers() -> None:
+    """Planner post-processing should demote malformed live schedule headers into stable metadata bullets."""
+    raw = """- 📅 **Recomendação para Domingo,**: 19:00–20:00
+- 🏛️ **Monument to the Discoveries**
+- 📍 **Localização**: Lisboa
+
+### 📍 03:00 · Horário ao domingo: há duas indicações nos dados — 10:00–19:00 e 10:00–18:00, por isso convém verificar diretamente antes de ir.
+- 🏛️ **Museu Medeiros e Almeida**
+- 📍 **Localização**: Lisboa
+
+### 📍 03:00 · Horário ao domingo: 10:00–18:00
+- ⚠️ **Conclusão**: com os horários disponíveis, não há confirmação de uma opção garantidamente aberta entre as 19:00 e as 20:00."""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="planner",
+        user_query="Qual museu ou monumento recomendas ir neste domingo sendo que apenas tenho das 19 às 20h para visitar?",
+        language="pt",
+    )
+
+    assert output.startswith("### 📅 ")
+    assert "### 📍 03:00 ·" not in output
+    assert "- 📍 **Horário ao domingo**:" in output
+    assert "Monument to the Discoveries" in output
+
+
+def test_planner_worker_finalization_repairs_bracketed_time_bullets_from_live_output() -> None:
+    """Planner post-processing should convert malformed bracketed time bullets into stable timed cards and section headings."""
+    raw = """### 📅 Itinerário para Domingo, 19:00–20:00
+- ⛅ Condições meteorológicas
+- ⚠️ Dados meteorológicos não disponíveis. Considera consultar o IPMA antes de planear uma visita ao ar livre.
+- 🌤️ **Para esta janela, a melhor opção da lista é um espaço exterior, mas o horário pode já estar a terminar.**
+- 🏛️ **[19**: 00] - Monumento aos Descobrimentos
+- 📍 **Localização**: Lisboa
+- 💡 **Dica**: É a opção mais adequada para este horário; vai ao fim da tarde para aproveitar o exterior e a vista.
+
+---
+
+- 📍 **Horário**: Domingo: 10:00 - 19:00
+- 🚌 **Transporte**: Não há dados de transporte confirmados.
+- 🏛️ **[19**: 30] - Fim da visita / observação exterior
+- 📍 **Localização**: Monumento aos Descobrimentos
+- ⚠️ **⚠️ 💡 Nota**: O horário indicado vai até às 19:00, por isso a visita pode ter de ser breve ou apenas exterior.
+- ✨ Dicas
+- O Museu de Marinha não é adequado para esta janela, porque fecha antes das 19:00.
+- 🔹 **Horários de Funcionamento**: consultar o website oficial.
+- 🔹 **Preços**: verificar no local ou no website oficial.
+
+---
+
+📌 **Fonte:** [*VisitLisboa*](https://www.visitlisboa.com) | [*IPMA*](https://www.ipma.pt) | [*Metro de Lisboa*](https://www.metrolisboa.pt) | [*Carris*](https://www.carris.pt) | **Atualizado:** 11:17"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="planner",
+        user_query="Qual museu ou monumento recomendas ir neste domingo sendo que apenas tenho das 19 às 20h para visitar?",
+        language="pt",
+    )
+
+    assert "**⛅ Condições Meteorológicas**" in output
+    assert "**✨ Dicas Práticas**" in output
+    assert "### 🏛️ 19:00 · Monumento aos Descobrimentos" in output
+    assert "### 🏛️ 19:30 · Fim da visita / observação exterior" in output
+    assert "**[19**" not in output
+
+
+def test_planner_worker_finalization_preserves_full_time_window_in_title_bullet() -> None:
+    """Planner title bullets with time windows should keep the full HH:MM-HH:MM range."""
+    raw = """- 📅 Recomendação para Domingo, 19:00–20:00
+- Para este domingo, nenhum dos museus/monumentos listados é viável entre as 19:00 e as 20:00.
+"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="planner",
+        user_query="Qual museu ou monumento recomendas ir neste domingo sendo que apenas tenho das 19 às 20h para visitar?",
+        language="pt",
+    )
+
+    assert output.startswith("### 📅 Recomendação para Domingo")
+    assert "**Janela sugerida:** 19:00–20:00" in output
+    assert "00–20:00" not in output.replace("19:00–20:00", "")
+
+
+def test_planner_worker_finalization_separates_semantic_headings_from_previous_bullets() -> None:
+    """Planner semantic section headings should be separated from previous bullets so Streamlit renders them as standalone blocks."""
+    raw = """### 📅 Itinerário para Domingo
+- ⏰ **Janela sugerida:** 19:00–20:00
+**⛅ Condições Meteorológicas**
+- ⚠️ Dados meteorológicos não disponíveis.
+**🚇 Como Chegar e Deslocação**
+- 🚌 Sem dados de transporte fornecidos.
+"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="planner",
+        user_query="Qual museu ou monumento recomendas ir neste domingo sendo que apenas tenho das 19 às 20h para visitar?",
+        language="pt",
+    )
+
+    assert "19:00–20:00\n\n**⛅ Condições Meteorológicas**" in output
+    assert "\n\n**🚇 Como Chegar e Deslocação**" in output or "\n\n---\n\n**🚇 Como Chegar e Deslocação**" in output
+
+
+def test_planner_worker_finalization_splits_inline_transport_bullets_and_drops_duplicate_time() -> None:
+    """Planner cleanup should split inline transport bullets and remove duplicated end times from headings."""
+    raw = """### 📅 Itinerário para Domingo
+### 🏛️ 19:00 · 20:00 · Palácio dos Condes de Almada / Palácio da Independência
+- 💡 **Dica**: Fica muito perto da Igreja de São Domingos e é prático para uma passagem rápida na Baixa. - 🚌 **Transporte**: Sem dados de transporte confirmados.
+"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="planner",
+        user_query="Qual museu ou monumento recomendas ir neste domingo sendo que apenas tenho das 19 às 20h para visitar?",
+        language="pt",
+    )
+
+    assert "### 🏛️ 19:00 · Palácio dos Condes de Almada / Palácio da Independência" in output
+    assert "19:00 · 20:00 ·" not in output
+    assert "Dica**: Fica muito perto" in output
+    assert "\n- 🚌 **Transporte**: Sem dados de transporte confirmados." in output
+
+
+def test_planner_worker_finalization_normalizes_malformed_recommendation_window_lines() -> None:
+    """Malformed recommendation-window bullets should collapse into a single canonical suggested-window line."""
+    raw = """### 📅 Itinerário para Domingo
+⏰ **Janela Sugerida:** 19:00–20:00
+
+**⛅ Condições Meteorológicas**
+- ⚠️ Dados meteorológicos não disponíveis.
+- 🏛️ **Recomendações para 19**: 00–20:00
+- Monument to the Discoveries
+- 📍 **Localização**: Lisboa
+"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="planner",
+        user_query="Qual museu ou monumento recomendas ir neste domingo sendo que apenas tenho das 19 às 20h para visitar?",
+        language="pt",
+    )
+
+    assert output.count("⏰ **Janela Sugerida:** 19:00–20:00") == 1
+    assert "**Recomendações para 19**: 00–20:00" not in output
+
+
 def test_transport_worker_finalization_groups_live_and_scheduled_arrivals() -> None:
     """Carris arrival summaries should group real-time and scheduled items instead of repeating the schedule label per line."""
     raw = """🚌 **Rossio → Próximas chegadas (paragem ID 908)**
@@ -1585,6 +1793,35 @@ def test_transport_worker_finalization_strips_inline_weather_side_note_variant()
     assert "Sobre o tempo em Lisboa" not in output
     assert "google weather" not in output.lower()
     assert "Horários programados" in output
+
+
+def test_transport_worker_finalization_localizes_pt_route_labels_and_footer_spelling() -> None:
+    """PT transport finalization should not leak English route labels or the misspelled 'Actualizado' footer."""
+    raw = """### 🚇 Mobilidade em Lisboa
+
+**Route:** ISCTE - Instituto Universitário de Lisboa → Zara do Rossio
+
+📊 **Ligação encontrada:** 1
+📡 **Tempo real:** activo em tempo real.
+
+**🚌 Autocarros**
+
+1. 🚌 **Linha 732** — para Caselas
+   🕐 **Próximas partidas:** 10:47, 10:48, 11:06
+
+📌 **Fonte:** [*Carris*](https://www.carris.pt) | **Actualizado:** 10:33"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="transport",
+        user_query="Quero ir de transportes públicos entre o ISCTE e a Zara do Rossio",
+        language="pt",
+    )
+
+    assert "**Trajeto:**" in output
+    assert "**Route:**" not in output
+    assert "**Atualizado:** 10:33" in output
+    assert "Actualizado" not in output
 
 
 def test_strip_unsupported_closing_offers_removes_inline_offer_clause() -> None:
@@ -2728,6 +2965,131 @@ def test_multiagent_runs_final_qa_repair_for_planner_responses() -> None:
     assistant.qa_agent.repair_final_response.assert_called_once()
     assert output.startswith("### 📅")
     assert output.endswith("Repaired Itinerary")
+
+
+def test_multiagent_planner_chat_normalizes_malformed_recommendation_window_lines() -> None:
+    """Planner chat output should collapse malformed recommendation-window bullets into a single canonical window line."""
+    assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
+    assistant.state = {"messages": [], "user_context": None}
+
+    assistant.supervisor = MagicMock()
+    assistant.supervisor.route = MagicMock(
+        return_value={"agents": ["researcher", "planner"], "direct_response": None, "reasoning": "research + planner"}
+    )
+
+    researcher_agent = MagicMock()
+    researcher_agent.invoke = MagicMock(return_value="📍 Researcher notes")
+
+    malformed_planner_draft = (
+        "### 📅 Itinerário para Domingo\n"
+        "⏰ **Janela Sugerida:** 19:00–20:00\n\n"
+        "**⛅ Condições Meteorológicas**\n"
+        "- ⚠️ Dados meteorológicos não disponíveis.\n"
+        "- 🏛️ **Recomendação para 19**: 00–20:00\n"
+        "- Monument to the Discoveries\n"
+        "- 📍 **Localização**: Lisboa\n"
+    )
+
+    planner_agent = MagicMock()
+    planner_agent.synthesize = MagicMock(return_value=malformed_planner_draft)
+
+    assistant.agents = {"researcher": researcher_agent, "planner": planner_agent}
+    assistant.qa_agent = MagicMock()
+    assistant.qa_agent.validate = MagicMock(
+        return_value={
+            "complete": True,
+            "missing_data": [],
+            "required_agents": [],
+            "reasoning": "All data present.",
+            "disclaimers": [],
+            "critical_issues": [],
+            "repairable_agents": [],
+            "needs_repair": False,
+            "fact_check": {
+                "disclaimers": [],
+                "critical_issues": [],
+                "repairable_agents": [],
+                "per_agent": {},
+            },
+        }
+    )
+    assistant.qa_agent.repair_final_response = MagicMock(return_value=malformed_planner_draft)
+
+    with patch("agent.graph.LANGSMITH_AVAILABLE", False), patch(
+        "agent.graph.clean_response", side_effect=lambda text: text
+    ), patch("agent.graph.format_response", side_effect=lambda text: text), patch(
+        "agent.graph.generate_response_title", return_value=None
+    ), patch("agent.graph.ensure_response_title", side_effect=lambda text, title: text):
+        output = assistant.chat(
+            "Qual museu ou monumento recomendas ir neste domingo sendo que apenas tenho das 19 às 20h para visitar?",
+            language="pt",
+            verbose=False,
+        )
+
+    assistant.qa_agent.repair_final_response.assert_called_once()
+    assert output.count("⏰ **Janela Sugerida:** 19:00–20:00") == 1
+    assert "**Recomendação para 19**: 00–20:00" not in output
+    assert "Monument to the Discoveries" in output
+
+
+def test_multiagent_always_finalizes_single_worker_output_even_without_final_qa_repair() -> None:
+    """Single-worker responses should still pass through the worker formatter when QA does not request a final repair."""
+    assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
+    assistant.state = {"messages": [], "user_context": None}
+
+    assistant.supervisor = MagicMock()
+    assistant.supervisor.route = MagicMock(
+        return_value={"agents": ["researcher"], "direct_response": None, "reasoning": "research only"}
+    )
+
+    researcher_agent = MagicMock()
+    researcher_agent.invoke = MagicMock(
+        return_value=(
+            "📍 Found 1 results from 'Farmácias e Parafarmácias (near Saldanha)':\n\n"
+            "1. Farmácia Dalva\n"
+            "   📍 Avenida Duque d'Ávila, 125\n"
+            "   📏 0.07 km away\n"
+            "   🗺️ (38.735010, -9.145924)\n"
+        )
+    )
+
+    assistant.agents = {"researcher": researcher_agent}
+    assistant.qa_agent = MagicMock()
+    assistant.qa_agent.validate = MagicMock(
+        return_value={
+            "complete": True,
+            "missing_data": [],
+            "required_agents": [],
+            "reasoning": "All data present.",
+            "disclaimers": [],
+            "critical_issues": [],
+            "repairable_agents": [],
+            "needs_repair": False,
+            "fact_check": {
+                "disclaimers": [],
+                "critical_issues": [],
+                "repairable_agents": [],
+                "per_agent": {},
+            },
+        }
+    )
+    assistant.qa_agent.repair_final_response = MagicMock(side_effect=AssertionError("Final QA repair should not run"))
+
+    with patch("agent.graph.LANGSMITH_AVAILABLE", False), patch(
+        "agent.graph.clean_response", side_effect=lambda text: text
+    ), patch("agent.graph.format_response", side_effect=lambda text: text), patch(
+        "agent.graph.generate_response_title", return_value=None
+    ), patch("agent.graph.ensure_response_title", side_effect=lambda text, title: text):
+        output = assistant.chat(
+            "Qual o hospital e a farmácia mais perto do Saldanha?",
+            language="pt",
+            verbose=False,
+        )
+
+    assistant.qa_agent.repair_final_response.assert_not_called()
+    researcher_agent.invoke.assert_called_once()
+    assert "#### 💊 Farmácias Perto de Saldanha" in output
+    assert "km away" not in output
 
 
 def test_multiagent_structured_response_filters_internal_qa_warnings_and_localizes_public_notes() -> None:

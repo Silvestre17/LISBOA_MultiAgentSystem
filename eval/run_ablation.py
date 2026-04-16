@@ -7,9 +7,18 @@
 #   eval/results/ablation/
 #
 # Usage:
-#   python eval/run_ablation.py --mode run_test                    # Quick ablation with 5 dataset entries
-#   python eval/run_ablation.py --limit 20                         # Run the first 20 dataset entries
-#   python eval/run_ablation.py --zero-shot-model gpt-5.4-mini     # Override the zero-shot baseline model
+#   > python eval/run_ablation.py --mode run_test
+#       Quick ablation with 5 dataset entries.
+#   > python eval/run_ablation.py --limit 20
+#       Run the first 20 dataset entries.
+#   > python eval/run_ablation.py --zero-shot-model gpt-5.4-mini
+#       Override the zero-shot baseline model.
+#   > python eval/run_ablation.py --dataset eval/evaluation_groundtruth_queries_demo.json --output-prefix ablation_results_demo
+#       Run ablation on an alternate dataset and keep the artefacts separate from the main notebook inputs.
+#   > python eval/run_ablation.py --include-domain weather --include-domain transport
+#       Restrict the ablation run to a repeated set of specific domains.
+#   > python eval/run_ablation.py --open-model-spec azure::Kimi-K2.5 --judge-model-spec openai::gpt-5.4-mini
+#       Add an explicit open-model comparison profile and override the evaluation judge.
 # ==========================================================================
 
 import io

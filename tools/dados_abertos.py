@@ -9,6 +9,10 @@
 #     - Proximity-based filtering with Haversine distance
 #     - Multiple specialized query functions
 #
+#   Usage:
+#     > python tools/dados_abertos.py
+#       Run the manual Lisboa Aberta dataset-discovery and GeoJSON tool test suite.
+#
 #   Data Source: https://dados.gov.pt/pt/datasets/?geozone=pt%3Aconcelho%3A1106 / https://dados.cm-lisboa.pt/
 # ==========================================================================
 

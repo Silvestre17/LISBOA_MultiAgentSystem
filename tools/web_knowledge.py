@@ -7,6 +7,10 @@
 #     1. Tavily Search (Optimized for AI, requires API Key)
 #     2. DuckDuckGo Search (Free fallback)
 #     3. Wikipedia (Encyclopedia fallback for history/facts)
+#
+#   Usage:
+#     > python tools/web_knowledge.py
+#       Run the manual web-search fallback test queries for the Researcher agent.
 # ==========================================================================
 
 import logging
