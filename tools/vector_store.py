@@ -19,26 +19,33 @@
 #
 #   Usage:
 #     # Full sync (checks all collections, only processes changes)
-#     python tools/vector_store.py
+#       > python tools/vector_store.py
 #
 #     # Force rebuild specific collection
-#     python tools/vector_store.py --rebuild-pdf
-#     python tools/vector_store.py --rebuild-places
-#     python tools/vector_store.py --rebuild-events
+#       > python tools/vector_store.py --rebuild-pdf
+#       > python tools/vector_store.py --rebuild-places
+#       > python tools/vector_store.py --rebuild-events
 #
 #     # Rebuild everything
-#     python tools/vector_store.py --rebuild-all
+#       > python tools/vector_store.py --rebuild-all
 #
 #     # Test search
-#     python tools/vector_store.py --test
+#       > python tools/vector_store.py --test
 # ==========================================================================
 
 import os
 import signal
 import sys
 
+
+def _safe_reconfigure_stream(stream, **kwargs) -> None:
+    """Best-effort stream reconfiguration for real stdio streams only."""
+    if stream is not None and hasattr(stream, "reconfigure"):
+        stream.reconfigure(**kwargs)
+
+
 # CRITICAL: Force unbuffered output immediately to debug GitHub Actions hangs
-sys.stdout.reconfigure(line_buffering=True)
+_safe_reconfigure_stream(sys.stdout, line_buffering=True)
 
 # Set environment variables BEFORE any heavy imports
 # This environment disables telemetry for OpenTelemetry and ChromaDB (privacy)

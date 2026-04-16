@@ -6,6 +6,20 @@
 # assistant. It compares whether different response models preserve the same
 # architectural presentation contract, even when wording differs.
 #
+# Usage:
+#   > python scripts/run_provider_consistency.py
+#       Compare the default provider sequence (`azure`, then `lmstudio`) over the built-in prompt set.
+#   > python scripts/run_provider_consistency.py --provider azure --provider openai
+#       Compare a custom provider pair sequentially.
+#   > python scripts/run_provider_consistency.py --category transport --limit 3
+#       Run only a filtered subset of the built-in prompt set.
+#   > python scripts/run_provider_consistency.py --prompt "Como vou do Rossio para Belém?" --language pt --provider azure --provider lmstudio
+#       Compare one ad-hoc prompt across at least two providers.
+#
+# Notes:
+#   - At least two providers are required for a valid consistency comparison.
+#   - Results are written to `eval/results/consistency/`.
+#
 # ===========================================================================
 
 # Required libraries:

@@ -602,10 +602,31 @@ def _strip_markdown_formatting(text: str) -> str:
 def _normalize_planner_line(text: str) -> str:
     """Remove planner-specific markdown noise before structural parsing."""
     cleaned = _strip_markdown_formatting(text)
-    cleaned = re.sub(r"^(?:###\s*)?(?:[-*•]\s*)?", "", cleaned).strip()
+    cleaned = re.sub(r"^(?:###\s*)?(?:[-*•]\s*)?(?:#+\s*)?", "", cleaned).strip()
     cleaned = re.sub(r"(\d{1,2})\s*:\s*(\d{2})", r"\1:\2", cleaned)
     cleaned = re.sub(r"\s*[·•]\s*", " · ", cleaned)
     return cleaned
+
+
+def _is_planner_metadata_line(text: str) -> bool:
+    """Detect non-activity planner lines that should not become timed cards."""
+    normalized = _strip_accents_compat(_strip_markdown_formatting(text)).lower()
+    return any(
+        keyword in normalized
+        for keyword in (
+            "horario",
+            "opening hours",
+            "site oficial",
+            "official site",
+            "morada",
+            "address",
+            "coordenad",
+            "coord",
+            "website",
+            "source",
+            "fonte",
+        )
+    )
 
 
 def _planner_section_icon(label: str) -> str:
@@ -708,6 +729,7 @@ def structure_planner_markdown(text: str) -> str:
     current_block: Optional[str] = None
     overall_title_rendered = False
     afternoon_context = bool(re.search(r"\b(tarde|afternoon)\b", text, re.IGNORECASE))
+    seen_section_headings: set[str] = set()
 
     def append_separator() -> None:
         if not structured:
@@ -716,6 +738,16 @@ def structure_planner_markdown(text: str) -> str:
             structured.pop()
         if structured and structured[-1] != "---":
             structured.extend(["", "---", ""])
+
+    def append_semantic_section(heading: str) -> None:
+        nonlocal current_block
+        if heading in seen_section_headings:
+            current_block = "section"
+            return
+        append_separator()
+        structured.append(heading)
+        seen_section_headings.add(heading)
+        current_block = "section"
 
     for raw_line in text.splitlines():
         stripped = raw_line.strip()
@@ -748,15 +780,11 @@ def structure_planner_markdown(text: str) -> str:
                 "conditions and safety",
             )
         ) and ":" not in normalized:
-            append_separator()
-            structured.append(f"### ⛅ {_planner_display_heading(normalized, language)}")
-            current_block = "section"
+            append_semantic_section(f"### ⛅ {_planner_display_heading(normalized, language)}")
             continue
 
         if re.search(r"\b(como chegar|desloca(?:r-se|ção)|how to get there|get around)\b", lowered) and ":" not in normalized:
-            append_separator()
-            structured.append(f"### 🚇 {_planner_display_heading(normalized, language)}")
-            current_block = "section"
+            append_semantic_section(f"### 🚇 {_planner_display_heading(normalized, language)}")
             continue
 
         if any(
@@ -776,15 +804,11 @@ def structure_planner_markdown(text: str) -> str:
                 "para a visita",
             )
         ) and ":" not in normalized:
-            append_separator()
-            structured.append(f"### 📍 {_planner_display_heading(normalized, language)}")
-            current_block = "section"
+            append_semantic_section(f"### 📍 {_planner_display_heading(normalized, language)}")
             continue
 
         if re.search(r"\b(fontes|verificaç|verification|sources?)\b", lowered) and ":" not in normalized:
-            append_separator()
-            structured.append(f"### 🔎 {_planner_display_heading(normalized, language)}")
-            current_block = "section"
+            append_semantic_section(f"### 🔎 {_planner_display_heading(normalized, language)}")
             continue
 
         if re.search(
@@ -804,12 +828,20 @@ def structure_planner_markdown(text: str) -> str:
             normalized,
         )
         if activity_match and "atualizado" not in lowered and "updated" not in lowered:
-            append_separator()
             title = activity_match.group("title").strip(" -–—")
-            icon = _planner_activity_icon(title, activity_match.group("emoji") or "")
-            structured.append(f"### {icon} {activity_match.group('time')} · {title}")
-            current_block = "activity"
-            continue
+            if _is_planner_metadata_line(title):
+                normalized = " ".join(
+                    part
+                    for part in ((activity_match.group("emoji") or "").strip(), title)
+                    if part
+                ).strip()
+                lowered = normalized.lower()
+            else:
+                append_separator()
+                icon = _planner_activity_icon(title, activity_match.group("emoji") or "")
+                structured.append(f"### {icon} {activity_match.group('time')} · {title}")
+                current_block = "activity"
+                continue
 
         clock_activity_match = re.match(
             r"^(?P<clock>[🕐🕜🕑🕝🕒🕞🕓🕟🕔🕠🕕🕖🕗🕘🕙🕚🕛])\s*(?P<title>.+)$",
@@ -840,6 +872,27 @@ def structure_planner_markdown(text: str) -> str:
             current_block = "activity"
             continue
 
+        calendar_window_match = re.search(
+            r"^(?P<emoji>📅)\s*(?P<label>.+?)(?:\s*[:,]\s*|\s+)(?P<window>\d{1,2}:\d{2}\s*(?:[–—−‑-]|to)\s*\d{1,2}:\d{2})$",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if calendar_window_match and not overall_title_rendered:
+            clean_title = calendar_window_match.group("label").strip().rstrip(",:- ")
+            window_value = re.sub(
+                r"\s*(?:(?P<dash>[–—−‑-])|(?P<word>to))\s*",
+                lambda match: match.group("dash") or " to ",
+                calendar_window_match.group("window").strip(),
+                flags=re.IGNORECASE,
+            )
+            structured.append(f"### 📅 {to_display_title_case(clean_title, language=language)}")
+            structured.append(
+                f"⏰ **{'Janela sugerida:' if language == 'pt' else 'Suggested window:'}** {window_value}"
+            )
+            overall_title_rendered = True
+            current_block = "section"
+            continue
+
         if (
             not overall_title_rendered
             and re.search(r"\b(itinerário|itinerary|plano|roteiro)\b", lowered)
@@ -866,11 +919,9 @@ def structure_planner_markdown(text: str) -> str:
             flags=re.IGNORECASE,
         )
         if preface_match:
-            append_separator()
             label = preface_match.group("label")
-            structured.append(f"### {_planner_section_icon(label)} {_planner_display_heading(label, language)}")
+            append_semantic_section(f"### {_planner_section_icon(label)} {_planner_display_heading(label, language)}")
             structured.append(f"- {preface_match.group('content').strip()}")
-            current_block = "section"
             continue
 
         if any(
@@ -886,13 +937,11 @@ def structure_planner_markdown(text: str) -> str:
                 "final notes",
             )
         ) and ":" not in normalized:
-            append_separator()
-            structured.append(f"### ✨ {_planner_display_heading(normalized, language)}")
-            current_block = "section"
+            append_semantic_section(f"### ✨ {_planner_display_heading(normalized, language)}")
             continue
 
         section_match = re.match(
-            r"^(?P<emoji>[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+)?\s*(?P<label>[^:]{2,60})\s*:\s*(?P<content>.+)$",
+            r"^(?P<emoji>[\U0001F300-\U0001FAFF\u2300-\u27BF\uFE0F\u200D]+)?\s*(?P<label>[^:]{2,60})\s*:\s*(?P<content>.+)$",
             normalized,
         )
         if section_match:
@@ -911,15 +960,28 @@ def structure_planner_markdown(text: str) -> str:
                 )
             )
             if is_major_section:
-                append_separator()
-                structured.append(f"### {_planner_section_icon(label)} {_planner_display_heading(label, language)}")
+                append_semantic_section(f"### {_planner_section_icon(label)} {_planner_display_heading(label, language)}")
                 if content:
                     structured.append(f"- {content}")
-                current_block = "section"
                 continue
 
             bullet_icon = (section_match.group("emoji") or "").strip() or "🔹"
             structured.append(f"- {bullet_icon} **{to_display_title_case(label, language=language)}**: {content}")
+            current_block = current_block or "section"
+            continue
+
+        poi_heading_match = re.match(
+            r"^(?P<emoji>[\U0001F300-\U0001FAFF\u2300-\u27BF\uFE0F\u200D]+)\s+(?P<title>[A-Za-zÀ-ÿ].+)$",
+            normalized,
+        )
+        if (
+            poi_heading_match
+            and poi_heading_match.group("emoji").strip() not in {"⛅", "🚇", "📍", "🔎", "✨", "⚠️", "📝"}
+            and ":" not in normalized
+        ):
+            structured.append(
+                f"- {poi_heading_match.group('emoji').strip()} **{poi_heading_match.group('title').strip()}**"
+            )
             current_block = current_block or "section"
             continue
 
@@ -1445,88 +1507,103 @@ def strip_transport_weather_disclaimers(text: str) -> str:
 
 
 def canonicalize_transport_terms(text: str, language: str = "en") -> str:
-    """Normalizes common transport-summary labels to English when needed."""
-    if not text or language != "en":
+    """Normalizes transport-summary labels for the requested response language."""
+    if not text:
         return text
 
-    replacements = [
-        (r"Situação dos Transportes de Lisboa", "Lisbon Transport Status"),
-        (r"\bAtualizado:\b", "Updated:"),
-        (r"\bAtualizado às\b", "Updated at"),
-        (r"\*\*Estado\*\*:", "**Status**:"),
-        (r"\*\*Estado das Linhas:\*\*", "**Line Status:**"),
-        (r"\*\*Comboio:", "**Train:"),
-        (r"\*\*RESUMO DA VIAGEM\*\*", "**TRIP SUMMARY**"),
-        (r"Linha:", "Line:"),
-        (r"Dura[cç][aã]o:", "Duration:"),
-        (r"\*\*Pr[oó]ximas\s+(\d+)\s+Partidas:\*\*", r"**Next \1 Departures:**"),
-        (r"\bOutras linhas\b", "Other lines"),
-        (r"Circulação normal em todas as linhas", "Normal service on all lines"),
-        (r"\*\*Veículos em serviço\*\*:", "**Vehicles in service**:"),
-        (r"\*\*Alertas ativos\*\*:", "**Active alerts**:"),
-        (r"\*\*Comboios a circular na AML\*\*:", "**Trains running in AML**:"),
-        (r"\*\*Comboios com atrasos > 1 min\*\*:", "**Trains with delays > 1 min**:"),
-        (r"\*\*Tempo total estimado:\*\*", "**Estimated total time:**"),
-        (r"\*\*O seu Trajeto de Metro:\*\*", "**Your Metro Route:**"),
-        (r"\*\*Próximos Metros\*\* \(tempo real\)", "**Next Metros** (real time)"),
-        (r"\*\*Próximo Metro em:\*\*", "**Next Metro in:**"),
-        (r"\*\*Fonte:\*\*", "**Source:**"),
-        (r"\bEmbarque na estação\b", "Board at"),
-        (r"\bTransferência em\b", "Transfer at"),
-        (r"\bSaia na estação\b", "Exit at"),
-        (r"\bSiga a pé para\b", "Walk to"),
-        (r"\bDireção\b", "Direction"),
-        (r"\bSem dados em tempo real\b", "No real-time data available"),
-        (r"Próximas Chegadas", "Next Arrivals"),
-        (r"Paragens Carris", "Carris Stops"),
-        (r"\bParagem\b", "Stop"),
-        (r"\bHora:\b", "Time:"),
-        (r"\*\*Hora\*\*:", "**Time**:"),
-        (r"\bA mostrar\b", "Showing"),
-        (r"Usa o ID da paragem com carris_get_arrivals para ver chegadas em tempo real\.", "Use the stop ID to check real-time arrivals."),
-        (r"\bAutocarro\b", "Bus"),
-        (r"\bElétrico\b", "Tram"),
-        (r"\bEletrico\b", "Tram"),
-        (r"\bPróxima paragem:\b", "Next stop:"),
-        (r"\*\*Próxima paragem\*\*:", "**Next stop**:"),
-        (r"\bMatrícula:\b", "Plate:"),
-        (r"\*\*Matrícula\*\*:", "**Plate**:"),
-        (r"\bFaltam\s+(\d+)\s+paragens\b", r"\1 stops remaining"),
-        (r"\bVeículos? a caminho\b", "vehicles on the way"),
-        (r"\bTempo viagem estimado:\b", "Estimated travel time:"),
-        (r"\badiantado\s+(\d+)\s+min\b", r"\1 min early"),
-        (r"\batrasado \+(\d+)\s+min\b", r"\1 min late"),
-        (r"\bDados de:\b", "Feed timestamp:"),
-        (r"\bFrequência da Linha\b", "Route Frequency"),
-        (r"\bAutocarros\b", "Buses"),
-        (r"\bTerminais\b", "Terminals"),
-        (r"\*\*Terminais\*\*:", "**Terminals**:"),
-        (r"\*\*Como usar:\*\*", "**How to use it:**"),
-        (r"Procure pelo n[uú]mero da linha \(ex: \*\*([^*]+)\*\*\) na (?:paragem|Stop)", r"Look for the line number (e.g. **\1**) at the stop"),
-        (r"Verifique a (?:dire[cç][aã]o|Direction) do (?:autocarro|Bus)", "Check the bus direction"),
-        (r"Hor[aá]rios e paragens", "Schedules and stops"),
-        (r"\*\*Hor[aá]rios\*\*:", "**Schedules**:"),
-        (r"Bilhetes:", "Tickets:"),
-        (r"\*\*(\d+) linha\(s\) direta\(s\) encontrada\(s\):\*\*", r"**\1 direct line(s) found:**"),
-        (r"Alguns\s+comboios\s+com\s*\+(\d+)min atraso", r"Some trains are delayed by \1 min"),
-        (r"Alguns\s+t*trains?\s+com\s*\+(\d+)min atraso", r"Some trains are delayed by \1 min"),
-        (r"ou estação", "or station"),
-        (r"Partidas restantes Today", "Remaining departures today"),
-        (r"\bHoje\b", "Today"),
-        (r"\bParagem:\b", "Stop:"),
-        (r"\bTotal de passagens hoje:\b", "Total departures today:"),
-        (r"\bpassagem\b", "departure"),
-        (r"\bpassagens\b", "departures"),
-        (r"\bPara\b", "To"),
-        (r"(\*\*\[[^\]]+\]\*\*\s+)Para\b", r"\1To"),
-        (r"->\s+([^\n]+?)\s*/\s*circula[cç][aã]o", r"-> \1 / circular service"),
-        (r"Restauradoures", "Restauradores"),
-        (r":\s*para\s+", ": to "),
-        (r"\bveículos\b", "vehicles"),
-        (r"\balertas\b", "alerts"),
-        (r"\bcomboios\b", "trains"),
-        (r"\*\*Fonte:\*\*", "**Source:**"),
-    ]
+    if language == "en":
+        replacements = [
+            (r"Situação dos Transportes de Lisboa", "Lisbon Transport Status"),
+            (r"\bAtualizado:\b", "Updated:"),
+            (r"\bAtualizado às\b", "Updated at"),
+            (r"\*\*Estado\*\*:", "**Status**:"),
+            (r"\*\*Estado das Linhas:\*\*", "**Line Status:**"),
+            (r"\*\*Comboio:", "**Train:"),
+            (r"\*\*RESUMO DA VIAGEM\*\*", "**TRIP SUMMARY**"),
+            (r"Linha:", "Line:"),
+            (r"Dura[cç][aã]o:", "Duration:"),
+            (r"\*\*Pr[oó]ximas\s+(\d+)\s+Partidas:\*\*", r"**Next \1 Departures:**"),
+            (r"\bOutras linhas\b", "Other lines"),
+            (r"Circulação normal em todas as linhas", "Normal service on all lines"),
+            (r"\*\*Veículos em serviço\*\*:", "**Vehicles in service**:"),
+            (r"\*\*Alertas ativos\*\*:", "**Active alerts**:"),
+            (r"\*\*Comboios a circular na AML\*\*:", "**Trains running in AML**:"),
+            (r"\*\*Comboios com atrasos > 1 min\*\*:", "**Trains with delays > 1 min**:"),
+            (r"\*\*Tempo total estimado:\*\*", "**Estimated total time:**"),
+            (r"\*\*O seu Trajeto de Metro:\*\*", "**Your Metro Route:**"),
+            (r"\*\*Próximos Metros\*\* \(tempo real\)", "**Next Metros** (real time)"),
+            (r"\*\*Próximo Metro em:\*\*", "**Next Metro in:**"),
+            (r"\*\*Fonte:\*\*", "**Source:**"),
+            (r"\bEmbarque na estação\b", "Board at"),
+            (r"\bTransferência em\b", "Transfer at"),
+            (r"\bSaia na estação\b", "Exit at"),
+            (r"\bSiga a pé para\b", "Walk to"),
+            (r"\bDireção\b", "Direction"),
+            (r"\bSem dados em tempo real\b", "No real-time data available"),
+            (r"Próximas Chegadas", "Next Arrivals"),
+            (r"Paragens Carris", "Carris Stops"),
+            (r"\bParagem\b", "Stop"),
+            (r"\bHora:\b", "Time:"),
+            (r"\*\*Hora\*\*:", "**Time**:"),
+            (r"\bA mostrar\b", "Showing"),
+            (r"Usa o ID da paragem com carris_get_arrivals para ver chegadas em tempo real\.", "Use the stop ID to check real-time arrivals."),
+            (r"\bAutocarro\b", "Bus"),
+            (r"\bElétrico\b", "Tram"),
+            (r"\bEletrico\b", "Tram"),
+            (r"\bPróxima paragem:\b", "Next stop:"),
+            (r"\*\*Próxima paragem\*\*:", "**Next stop**:"),
+            (r"\bMatrícula:\b", "Plate:"),
+            (r"\*\*Matrícula\*\*:", "**Plate**:"),
+            (r"\bFaltam\s+(\d+)\s+paragens\b", r"\1 stops remaining"),
+            (r"\bVeículos? a caminho\b", "vehicles on the way"),
+            (r"\bTempo viagem estimado:\b", "Estimated travel time:"),
+            (r"\badiantado\s+(\d+)\s+min\b", r"\1 min early"),
+            (r"\batrasado \+(\d+)\s+min\b", r"\1 min late"),
+            (r"\bDados de:\b", "Feed timestamp:"),
+            (r"\bFrequência da Linha\b", "Route Frequency"),
+            (r"\bAutocarros\b", "Buses"),
+            (r"\bTerminais\b", "Terminals"),
+            (r"\*\*Terminais\*\*:", "**Terminals**:"),
+            (r"\*\*Como usar:\*\*", "**How to use it:**"),
+            (r"Procure pelo n[uú]mero da linha \(ex: \*\*([^*]+)\*\*\) na (?:paragem|Stop)", r"Look for the line number (e.g. **\1**) at the stop"),
+            (r"Verifique a (?:dire[cç][aã]o|Direction) do (?:autocarro|Bus)", "Check the bus direction"),
+            (r"Hor[aá]rios e paragens", "Schedules and stops"),
+            (r"\*\*Hor[aá]rios\*\*:", "**Schedules**:"),
+            (r"Bilhetes:", "Tickets:"),
+            (r"\*\*(\d+) linha\(s\) direta\(s\) encontrada\(s\):\*\*", r"**\1 direct line(s) found:**"),
+            (r"Alguns\s+comboios\s+com\s*\+(\d+)min atraso", r"Some trains are delayed by \1 min"),
+            (r"Alguns\s+t*trains?\s+com\s*\+(\d+)min atraso", r"Some trains are delayed by \1 min"),
+            (r"ou estação", "or station"),
+            (r"Partidas restantes Today", "Remaining departures today"),
+            (r"\bHoje\b", "Today"),
+            (r"\bParagem:\b", "Stop:"),
+            (r"\bTotal de passagens hoje:\b", "Total departures today:"),
+            (r"\bpassagem\b", "departure"),
+            (r"\bpassagens\b", "departures"),
+            (r"\bPara\b", "To"),
+            (r"(\*\*\[[^\]]+\]\*\*\s+)Para\b", r"\1To"),
+            (r"->\s+([^\n]+?)\s*/\s*circula[cç][aã]o", r"-> \1 / circular service"),
+            (r"Restauradoures", "Restauradores"),
+            (r":\s*para\s+", ": to "),
+            (r"\bveículos\b", "vehicles"),
+            (r"\balertas\b", "alerts"),
+            (r"\bcomboios\b", "trains"),
+            (r"\*\*Fonte:\*\*", "**Source:**"),
+        ]
+    else:
+        replacements = [
+            (r"\*\*Route:\*\*", "**Trajeto:**"),
+            (r"\*\*Routes:\*\*", "**Trajetos:**"),
+            (r"\*\*Updated\*\*:", "**Atualizado**:"),
+            (r"\*\*Updated:\*\*", "**Atualizado:**"),
+            (r"\*\*Source\*\*:", "**Fonte**:"),
+            (r"\*\*Source:\*\*", "**Fonte:**"),
+            (r"\bUpdated:\b", "Atualizado:"),
+            (r"\bSource:\b", "Fonte:"),
+            (r"\bActualizado\b", "Atualizado"),
+            (r"\bactivo\b", "ativo"),
+            (r"\blive active\b", "tempo real ativo"),
+        ]
 
     normalized = text
     for pattern, replacement in replacements:
@@ -2280,6 +2357,16 @@ def structure_service_lookup_markdown(text: str, language: str = "en") -> str:
         else f"\U0001F4CC **Source:** [*Lisboa Aberta*](https://dados.cm-lisboa.pt/) | **Updated:** {datetime.now().strftime('%H:%M')}"
     )
 
+    def normalize_entry_value(raw_value: str) -> str:
+        cleaned_value = _strip_leading_section_emoji(
+            _strip_markdown_formatting(raw_value).strip()
+        )
+        if is_pt:
+            distance_match = re.search(r"(?P<km>\d+(?:\.\d+)?)\s*km\b", cleaned_value, re.IGNORECASE)
+            if distance_match:
+                cleaned_value = f"{distance_match.group('km')} km"
+        return cleaned_value.strip()
+
     def infer_heading(dataset_title: str) -> tuple[str, str]:
         normalized_title = _strip_accents_compat(dataset_title).lower()
         raw_location_match = re.search(r"\((?:near|perto de)\s+([^)]+)\)", dataset_title, re.IGNORECASE)
@@ -2293,11 +2380,16 @@ def structure_service_lookup_markdown(text: str, language: str = "en") -> str:
                 "Nearby Pharmacies"
             )
             return f"#### \U0001F48A {heading}", "\U0001F48A"
-        if "hospital" in normalized_title:
+        if "hospit" in normalized_title:
+            is_public_hospital = any(marker in normalized_title for marker in ("public", "publico", "publicos", "publica", "publicas"))
             heading = (
+                f"Hospitais Públicos Perto de {location}" if is_pt and is_public_hospital and location else
                 f"Hospitais Perto de {location}" if is_pt and location else
+                "Hospitais Públicos Próximos" if is_pt and is_public_hospital else
                 "Hospitais Próximos" if is_pt else
+                f"Public Hospitals Near {location}" if is_public_hospital and location else
                 f"Hospitals Near {location}" if location else
+                "Nearby Public Hospitals" if is_public_hospital else
                 "Nearby Hospitals"
             )
             return f"#### \U0001F3E5 {heading}", "\U0001F3E5"
@@ -2362,7 +2454,7 @@ def structure_service_lookup_markdown(text: str, language: str = "en") -> str:
             item_match = item_re.match(plain_line)
             if item_match:
                 current_entry = {
-                    "name": item_match.group("name").strip(),
+                    "name": normalize_entry_value(item_match.group("name")),
                     "address": "",
                     "distance": "",
                     "coords": "",
@@ -2372,13 +2464,14 @@ def structure_service_lookup_markdown(text: str, language: str = "en") -> str:
                 continue
 
             if current_entry is not None:
-                lowered_plain = _strip_accents_compat(plain_line).lower()
-                if re.search(r"\(-?\d+\.\d+,\s*-?\d+\.\d+\)", plain_line):
-                    current_entry["coords"] = plain_line
+                normalized_value = normalize_entry_value(plain_line)
+                lowered_plain = _strip_accents_compat(normalized_value).lower()
+                if re.search(r"\(-?\d+\.\d+,\s*-?\d+\.\d+\)", normalized_value):
+                    current_entry["coords"] = normalized_value
                 elif "km away" in lowered_plain or re.search(r"\b\d+(?:\.\d+)?\s*km\b", lowered_plain):
-                    current_entry["distance"] = plain_line
+                    current_entry["distance"] = normalized_value
                 elif not current_entry["address"]:
-                    current_entry["address"] = plain_line
+                    current_entry["address"] = normalized_value
 
             index += 1
 
@@ -2423,7 +2516,11 @@ def repair_planner_markdown_contract(text: str, language: str = "en") -> str:
         return None
 
     def canonical_planner_section(value: str) -> Optional[str]:
-        normalized_value = _strip_accents_compat(value).lower()
+        normalized_value = _strip_accents_compat(_strip_leading_section_emoji(value)).lower()
+        if ("condic" in normalized_value and "meteorolog" in normalized_value) or (
+            "weather" in normalized_value and "condition" in normalized_value
+        ):
+            return f"**⛅ {'Condições Meteorológicas' if is_pt else 'Weather Conditions'}**"
         if "antes de sair" in normalized_value or ("before" in normalized_value and "go" in normalized_value):
             return f"**⛅ {'Antes de Sair' if is_pt else 'Before You Go'}**"
         if ("condic" in normalized_value and "seguran" in normalized_value) or (
@@ -2444,7 +2541,7 @@ def repair_planner_markdown_contract(text: str, language: str = "en") -> str:
             or "visit suggestions" in normalized_value
             or "recommendations" in normalized_value
             or "options" in normalized_value
-        ):
+        ) and "janela" not in normalized_value and "window" not in normalized_value:
             return f"**📍 {'Sugestões para a Visita' if is_pt else 'Visit Suggestions'}**"
         if "notas" in normalized_value and "pratic" in normalized_value and "dicas" not in normalized_value and "important" not in normalized_value:
             return f"**✨ {'Notas Práticas' if is_pt else 'Practical Notes'}**"
@@ -2458,6 +2555,8 @@ def repair_planner_markdown_contract(text: str, language: str = "en") -> str:
             or "final notes" in normalized_value
         ):
             return f"**✨ {'Dicas Práticas e Notas Importantes' if is_pt else 'Practical Tips and Important Notes'}**"
+        if normalized_value in {"dicas", "dicas praticas", "dicas práticas", "tips", "practical tips"}:
+            return f"**✨ {'Dicas Práticas' if is_pt else 'Practical Tips'}**"
         return None
 
     def timed_card_icon(title: str) -> str:
@@ -2514,21 +2613,60 @@ def repair_planner_markdown_contract(text: str, language: str = "en") -> str:
 
         plain = _strip_markdown_formatting(stripped)
         plain = re.sub(r"(\d{1,2})\s*:\s*(\d{2})", r"\1:\2", plain)
+        plain = re.sub(r"^(?:[-*•]\s*)?#\s+", "", plain).strip()
+        normalized_plain = _normalize_planner_line(stripped)
 
-        title_candidate = itinerary_title_match(plain)
+        title_candidate = itinerary_title_match(normalized_plain) or itinerary_title_match(plain)
         if not title_fixed and title_candidate:
             repaired_lines.append(f"### \U0001F4C5 {title_candidate}")
             title_fixed = True
             continue
 
-        timed_match = re.search(
-            r"(?P<time>\d{1,2}:\d{2})\s*[^A-Za-zÀ-ÿ0-9]{0,4}\s*(?P<title>[A-Za-zÀ-ÿ].+)$",
-            plain,
+        calendar_title_match = re.match(r"^(?:###\s+)?📅\s+(?P<title>.+)$", plain)
+        if not title_fixed and calendar_title_match:
+            repaired_lines.append(f"### 📅 {calendar_title_match.group('title').strip().rstrip(',:- ')}")
+            title_fixed = True
+            continue
+
+        timed_match = re.match(
+            r"^(?P<emoji>[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+)?\s*(?P<time>\d{1,2}:\d{2})\s*[·\-–—:]\s*(?P<title>[A-Za-zÀ-ÿ].+)$",
+            normalized_plain,
         )
-        if timed_match and "atualizado" not in plain.lower() and "updated" not in plain.lower():
+        if timed_match and "atualizado" not in normalized_plain.lower() and "updated" not in normalized_plain.lower():
             title = timed_match.group("title").strip(" -—–")
-            icon = timed_card_icon(title)
-            repaired_lines.append(f"### {icon} {timed_match.group('time')} · {title}")
+            if _is_planner_metadata_line(title):
+                metadata_match = re.match(r"^(?P<label>[^:]{2,60})\s*:\s*(?P<content>.+)$", title)
+                metadata_icon = (timed_match.group("emoji") or "📍").strip() or "📍"
+                if metadata_match:
+                    repaired_lines.append(
+                        f"- {metadata_icon} **{metadata_match.group('label').strip()}**: {metadata_match.group('content').strip()}"
+                    )
+                else:
+                    repaired_lines.append(f"- {metadata_icon} {title}")
+                continue
+            else:
+                icon = timed_card_icon(title)
+                repaired_lines.append(f"### {icon} {timed_match.group('time')} · {title}")
+                continue
+
+        bracketed_timed_match = re.match(
+            r"^(?P<emoji>[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+)?\s*\[(?P<time>\d{1,2}:\d{2})\]\s*[\-–—:]\s*(?P<title>.+)$",
+            normalized_plain,
+        )
+        if bracketed_timed_match:
+            title = bracketed_timed_match.group("title").strip(" -—–")
+            if _is_planner_metadata_line(title):
+                metadata_match = re.match(r"^(?P<label>[^:]{2,60})\s*:\s*(?P<content>.+)$", title)
+                metadata_icon = (bracketed_timed_match.group("emoji") or "📍").strip() or "📍"
+                if metadata_match:
+                    repaired_lines.append(
+                        f"- {metadata_icon} **{metadata_match.group('label').strip()}**: {metadata_match.group('content').strip()}"
+                    )
+                else:
+                    repaired_lines.append(f"- {metadata_icon} {title}")
+            else:
+                icon = (bracketed_timed_match.group("emoji") or "").strip() or timed_card_icon(title)
+                repaired_lines.append(f"### {icon} {bracketed_timed_match.group('time')} · {title}")
             continue
 
         canonical_section = None
@@ -2550,6 +2688,66 @@ def repair_planner_markdown_contract(text: str, language: str = "en") -> str:
                     repaired_lines.append(canonical_bullet_section)
                     continue
 
+            calendar_window_match = re.search(
+                r"(?P<window>\d{1,2}:\d{2}\s*(?:[–—−‑-]|to)\s*\d{1,2}:\d{2})$",
+                bullet_plain,
+                flags=re.IGNORECASE,
+            )
+            if bullet_plain.startswith("📅 ") and calendar_window_match and not title_fixed:
+                bullet_label = bullet_plain[2:calendar_window_match.start()].strip().rstrip(",:- ")
+                bullet_window = re.sub(
+                    r"\s*(?:(?P<dash>[–—−‑-])|(?P<word>to))\s*",
+                    lambda match: match.group("dash") or " to ",
+                    calendar_window_match.group("window").strip(),
+                    flags=re.IGNORECASE,
+                )
+                repaired_lines.append(f"### 📅 {bullet_label}")
+                title_fixed = True
+                window_label = "Janela sugerida" if is_pt else "Suggested window"
+                repaired_lines.append(f"⏰ **{window_label}:** {bullet_window}")
+                continue
+
+            bullet_field_match = re.match(
+                r"^(?P<icon>[\U0001F300-\U0001FAFF\u2300-\u27BF\uFE0F\u200D]+)\s+(?P<label>[^:]{2,60})\s*:\s*(?P<content>.+)$",
+                bullet_plain,
+            )
+            if bullet_field_match:
+                bullet_icon = bullet_field_match.group("icon").strip()
+                bullet_label = bullet_field_match.group("label").strip().rstrip(",")
+                bullet_content = bullet_field_match.group("content").strip()
+                normalized_label = _strip_accents_compat(bullet_label).lower()
+                if (
+                    not title_fixed
+                    and bullet_icon == "📅"
+                    and any(token in normalized_label for token in ("recomend", "itiner", "roteiro", "plano"))
+                ):
+                    repaired_lines.append(f"### 📅 {bullet_label}")
+                    title_fixed = True
+                    if bullet_content:
+                        window_label = "Janela sugerida" if is_pt else "Suggested window"
+                        repaired_lines.append(f"- ⏰ **{window_label}:** {bullet_content}")
+                    continue
+                repaired_lines.append(
+                    f"- {bullet_icon} **{bullet_label}:** {bullet_content}"
+                    if bullet_icon == "⏰" and normalized_label in {"janela sugerida", "suggested window"}
+                    else f"- {bullet_icon} **{bullet_label}**: {bullet_content}"
+                )
+                continue
+
+            bullet_poi_match = re.match(
+                r"^(?P<icon>[\U0001F300-\U0001FAFF\u2300-\u27BF\uFE0F\u200D]+)\s+(?P<title>[A-Za-zÀ-ÿ].+)$",
+                bullet_plain,
+            )
+            if (
+                bullet_poi_match
+                and bullet_poi_match.group("icon").strip() not in section_icons
+                and ":" not in bullet_poi_match.group("title")
+            ):
+                repaired_lines.append(
+                    f"- {bullet_poi_match.group('icon').strip()} **{bullet_poi_match.group('title').strip()}**"
+                )
+                continue
+
         header_match = re.match(r"^###\s+(?P<icon>[^\s]+)\s+(?P<title>.+)$", plain)
         if header_match:
             icon = header_match.group("icon").strip()
@@ -2566,14 +2764,143 @@ def repair_planner_markdown_contract(text: str, language: str = "en") -> str:
                 repaired_lines.append(f"**{icon} {title}**")
                 continue
 
+        poi_heading_match = re.match(
+            r"^(?P<icon>[\U0001F300-\U0001FAFF\u2300-\u27BF\uFE0F\u200D]+)\s+(?P<title>[A-Za-zÀ-ÿ].+)$",
+            plain,
+        )
+        if poi_heading_match:
+            icon = poi_heading_match.group("icon").strip()
+            title = poi_heading_match.group("title").strip()
+            if icon not in section_icons and ":" not in title:
+                repaired_lines.append(f"- {icon} **{title}**")
+                continue
+
         repaired_lines.append(plain)
 
-    repaired = clean_newlines("\n".join(repaired_lines)).strip()
+    deduped_lines: list[str] = []
+    previous_nonempty = ""
+    seen_section_headings: set[str] = set()
+    for line in repaired_lines:
+        stripped_line = line.strip()
+        is_semantic_section = (
+            stripped_line.startswith("**")
+            and any(icon in stripped_line for icon in section_icons)
+        )
+        if (
+            stripped_line
+            and stripped_line == previous_nonempty
+            and is_semantic_section
+        ):
+            continue
+        if is_semantic_section and stripped_line in seen_section_headings:
+            continue
+        deduped_lines.append(line)
+        if is_semantic_section:
+            seen_section_headings.add(stripped_line)
+        if stripped_line:
+            previous_nonempty = stripped_line
+
+    repaired = clean_newlines("\n".join(deduped_lines)).strip()
+    planner_like_output = any(
+        token in repaired
+        for token in (
+            "**🚇 Como Chegar e Deslocação**",
+            "**📍 Sugestões para a Visita**",
+            "**✨",
+            "### 🏛️",
+            "### 🌿",
+            "### 🍽️",
+            "### ☕",
+            "### 🥐",
+        )
+    )
     if repaired and not repaired.startswith("### ") and re.search(r"\b(itiner[aáàâã]rio|itinerary|plano|roteiro)\b", _strip_accents_compat(repaired), re.IGNORECASE):
         first_line, *rest = repaired.splitlines()
         maybe_title = itinerary_title_match(first_line)
         if maybe_title:
             repaired = "\n".join([f"### \U0001F4C5 {maybe_title}", *rest]).strip()
+    elif repaired and not repaired.startswith("### ") and planner_like_output:
+        default_title = "### \U0001F4C5 Itinerário Sugerido" if is_pt else "### \U0001F4C5 Suggested Itinerary"
+        repaired = f"{default_title}\n\n{repaired}".strip()
+
+    previous = None
+    while repaired != previous:
+        previous = repaired
+        repaired = re.sub(
+            r"(?P<header>\*\*[^\n]+\*\*)\n\n---\n\n(?P=header)",
+            r"\g<header>",
+            repaired,
+        )
+
+    repaired = re.sub(
+        r"(?m)^-?\s*⏰\s+\*\*(Janela\s+[Ss]ugerida|Suggested\s+[Ww]indow):\*\*\s*(.+)$",
+        r"⏰ **\1:** \2",
+        repaired,
+    )
+    repaired = re.sub(
+        r"(?m)^-?\s*⏰\s+\*\*(Janela\s+[Ss]ugerida|Suggested\s+[Ww]indow)\*\*:\s*(.+)$",
+        r"⏰ **\1:** \2",
+        repaired,
+    )
+    repaired = re.sub(
+        r"(?m)^-?\s*⏰\s+(Janela\s+[Ss]ugerida|Suggested\s+[Ww]indow):\s*(.+)$",
+        r"⏰ **\1:** \2",
+        repaired,
+    )
+    repaired = re.sub(
+        r"(?<!\n)\s+-\s+(?=(?:🚌|🚫|✅|✨|⚠️|🔹)\s+\*\*)",
+        "\n- ",
+        repaired,
+    )
+    repaired = re.sub(
+        r"(?<!\n)\s+-\s+(?=(?:🚌|🚫|✅|✨|⚠️|🔹)\s+[A-Za-zÀ-ÿ])",
+        "\n- ",
+        repaired,
+    )
+    repaired = re.sub(
+        r"(?m)^(###\s+\S+\s+\d{1,2}:\d{2})\s+·\s+\d{1,2}:\d{2}\s+·\s+",
+        r"\1 · ",
+        repaired,
+    )
+    repaired = re.sub(
+        r"(?m)^-\s+(?P<icon>[\U0001F300-\U0001FAFF\u2300-\u27BF\uFE0F\u200D]+)\s+\*\*(?P<hour>\d{1,2})\*\*:\s*(?P<minute>\d{2})\s+·\s+\d{1,2}:\d{2}\s+·\s+(?P<title>.+)$",
+        r"### \g<icon> \g<hour>:\g<minute> · \g<title>",
+        repaired,
+    )
+    repaired = re.sub(
+        r"(?m)^-\s+🚌\s+Transporte:\s*(.+)$",
+        r"- 🚌 **Transporte**: \1",
+        repaired,
+    )
+
+    normalized_lines: list[str] = []
+    has_window_line = False
+    canonical_window_label = "Janela Sugerida" if is_pt else "Suggested Window"
+    malformed_window_pattern = re.compile(
+        r"^-?\s*🏛️\s+\*\*Recomenda(?:ção|ções)\s+para(?:\s+[Aa]s)?\s+(?P<hour>\d{1,2})\*\*:\s*(?P<rest>\d{2}\s*[–—−‑-]\s*\d{1,2}:\d{2})$",
+        re.IGNORECASE,
+    )
+    for line in repaired.splitlines():
+        stripped_line = line.strip()
+        if re.match(r"^⏰\s+\*\*(?:Janela\s+[Ss]ugerida|Suggested\s+[Ww]indow):\*\*", stripped_line):
+            has_window_line = True
+            normalized_lines.append(line)
+            continue
+
+        malformed_window_match = malformed_window_pattern.match(stripped_line)
+        if malformed_window_match:
+            if not has_window_line:
+                normalized_lines.append(
+                    f"⏰ **{canonical_window_label}:** {malformed_window_match.group('hour')}:{malformed_window_match.group('rest').strip()}"
+                )
+                has_window_line = True
+            continue
+
+        normalized_lines.append(line)
+
+    repaired = "\n".join(normalized_lines)
+    repaired = add_section_spacing(repaired)
+    repaired = clean_newlines(repaired).strip()
 
     return repaired
 
@@ -2664,6 +2991,7 @@ def finalize_worker_response(
                 preserve_timed_cards=False,
             )
             finalized = format_response(finalized)
+            finalized = canonicalize_transport_terms(finalized, language=preferred_language)
         else:
             finalized = structure_planner_markdown(finalized)
             finalized = soften_internal_markdown_headers(
@@ -3086,6 +3414,7 @@ def add_section_spacing(text: str) -> str:
     # Patterns that should always have a blank line before them
     section_markers = [
         r"^#{1,4}\s",                     # Any markdown header
+        r"^\*\*[⛅🚇📍✨🔎⚠️📝].*\*\*$",  # Bold semantic section headings used by planner repair
         r"^(?:⚠️|⚠)\s*\*\*(?:Avisos|Aviso|Warnings?|Nota|Note)",
         r"^💡\s*\*\*(?:Dicas?|Tips?|Sugest)",
         r"^📌\s*\*\*(?:Fonte|Source)",
@@ -3348,6 +3677,7 @@ def strip_hallucinations(text: str) -> str:
     text = re.sub(r"Fonte:\s*📌\s*Fonte:\s*", "📌 **Fonte:** ", text, flags=re.IGNORECASE)
     text = re.sub(r"^Fonte:\s*", "📌 **Fonte:** ", text, flags=re.MULTILINE)
     text = re.sub(r"📌\s*Fonte:", "📌 **Fonte:**", text)
+    text = re.sub(r"\bActualizado\b", "Atualizado", text, flags=re.IGNORECASE)
     text = re.sub(r"\|\s*Atualizado:", "| **Atualizado:**", text)
     text = re.sub(r"\|\s*Updated:", "| **Updated:**", text)
     text = re.sub(r"\*\*\|\s*\*\*(Atualizado|Updated):\*+", r"| **\1:**", text)

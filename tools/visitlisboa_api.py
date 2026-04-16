@@ -14,6 +14,10 @@
 #     - lisbon_events collection: Cultural events, exhibitions, festivals
 #     - lisbon_places collection: Museums, monuments, restaurants
 #
+#   Usage:
+#     > python tools/visitlisboa_api.py
+#       Run the manual VisitLisboa semantic-search tool suite against the local vector store and JSON fallbacks.
+#
 #   Note: Requires vector store to be built first with vector_store.py
 # ==========================================================================
 

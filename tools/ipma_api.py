@@ -8,6 +8,10 @@
 #     - Daily forecast (up to 5 days)
 #     - Human-readable output
 #
+#   Usage:
+#     > python tools/ipma_api.py
+#       Run the manual IPMA connectivity and weather-tool test suite for Lisbon.
+#
 #   API Documentation: https://api.ipma.pt/
 # ==========================================================================
 

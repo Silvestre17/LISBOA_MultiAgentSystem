@@ -11,8 +11,21 @@
 # checks can be reviewed quickly during development. It is intentionally kept
 # outside the formal evaluation framework in `eval/`.
 #
-# Run from the repository root with a relative path:
-#   python scripts/run_transport_verification.py --limit 4
+# Usage:
+#   > python scripts/run_transport_verification.py
+#       Run the full default verification catalogue.
+#   > python scripts/run_transport_verification.py --limit 4
+#       Run only the first four default verification queries.
+#   > python scripts/run_transport_verification.py --query "Quero ir do Rossio para Belém agora"
+#       Append one or more ad-hoc transport queries to the default catalogue.
+#   > python scripts/run_transport_verification.py --include-multiagent
+#       Also verify the full MultiAgentAssistant chat path for every query.
+#   > python scripts/run_transport_verification.py --output-dir eval/results/transport_verification/custom
+#       Save the JSON and Markdown reports to a custom directory.
+#
+# Notes:
+#   - Reports are written as paired JSON and Markdown artefacts.
+#   - `--query` can be repeated multiple times.
 # ==========================================================================
 
 # Required libraries:

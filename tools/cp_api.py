@@ -11,6 +11,10 @@
 # GTFS Source: https://publico.cp.pt/gtfs/gtfs.zip
 # Real-time API: https://comboios.live/api/
 # Lines covered: Cascais, Sintra, Azambuja, Fertagus, Sado
+#
+# Usage:
+#   > python tools/cp_api.py
+#       Run the manual CP GTFS and real-time train-tool test suite.
 # ==========================================================================
 
 # Required libraries:

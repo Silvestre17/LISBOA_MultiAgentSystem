@@ -14,6 +14,10 @@
 #     - tools.carrismetropolitana_api: Suburban bus routes, stops, alerts
 #     - tools.cp_api: Train status, stations, delays
 #     - tools.carris_api: Urban Lisbon buses and trams
+#
+#   Usage:
+#     > python tools/transport_api.py
+#       Run the manual multi-modal transport integration test suite.
 # ==========================================================================
 
 # Required libraries:

@@ -7,6 +7,14 @@
 # It extracts the title, description, and the "Stable URL" for each dataset.
 # It filters out datasets with "Resultados" or "Desafio" in the title.
 #
+# Usage:
+#   > python data_collection/webscraping/dadosabertos.gov_lisboa.py
+#       Scrape Lisbon municipal datasets from dados.gov.pt and write `data_collection/webscraping/lisbon_datasets.json`.
+#
+# Notes:
+#   - The output file is resolved relative to this script directory.
+#   - The preview printed at the end is only a sample; the full dataset is written to JSON.
+#
 # Link to the portal: https://dados.gov.pt/pt/datasets/?geozone=pt%3Aconcelho%3A1106
 # ==========================================================================
 

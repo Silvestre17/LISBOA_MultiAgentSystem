@@ -7,27 +7,34 @@
 #   It extracts event details such as title, description, date, price, and location,
 #   managing incremental updates to a JSON file.
 #
+# Usage:
+#   > python data_collection/webscraping/visitlisbon_events.py
+#       Scrape the VisitLisboa events catalogue and update `data_collection/webscraping/events.json`.
+#
+# Notes:
+#   - The script merges by URL, adds new events, updates changed ones, and removes entries no longer listed online.
+#   - Saving is aborted if the scraper finds zero events, to avoid wiping the dataset after a blocking or markup failure.
+#
 # Link to the events page: https://www.visitlisboa.com/en/events
 # ==========================================================================
 
 # Required libraries:
 # pip install requests beautifulsoup4 tqdm
 
-import json  # To handle JSON data
-import logging  # To log messages (for Github Actions)
-import os  # To handle file paths correctly
-import random  # To make delays random
-import re  # To extract numbers from strings
-import sys  # To exit the script in case of critical errors
-import time  # To add delays
-from datetime import datetime  # To handle date parsing and formatting
+import json                     # To handle JSON data
+import logging                  # To log messages (for Github Actions)
+import os                       # To handle file paths correctly
+import random                   # To make delays random
+import re                       # To extract numbers from strings
+import sys                      # To exit the script in case of critical errors
+import time                     # To add delays
+from datetime import datetime   # To handle date parsing and formatting
 
-import requests  # To make HTTP requests
-from bs4 import BeautifulSoup  # To parse HTML content
-from tqdm import tqdm  # To show progress bars
+import requests                 # To make HTTP requests
+from bs4 import BeautifulSoup   # To parse HTML content
+from tqdm import tqdm           # To show progress bars
 
 # --- Configuration & Anti-Bot Measures ---
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 USER_AGENTS = [
