@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from agent.utils.langsmith_tracing import ContextThreadPoolExecutor, traceable  # noqa: F401
+from agent.utils.langsmith_tracing import ContextThreadPoolExecutor
 
 try:
     from config import Config
@@ -618,6 +618,32 @@ class BaseAgent:
 
         raise ValueError(f"Tool '{resolved_name}' not found.")
 
+    def _format_tool_result_for_fallback(
+        self,
+        *,
+        tool_name: str,
+        tool_args: Optional[dict],
+        result: Any,
+        language: str,
+    ) -> str:
+        """Formats a tool result for ReAct fallback paths when a subclass exposes a formatter."""
+        raw_result = str(result)
+        formatter = getattr(self, "_format_deterministic_tool_result", None)
+        if callable(formatter):
+            try:
+                formatted = formatter(
+                    tool_name=tool_name,
+                    tool_args=tool_args or {},
+                    result=raw_result,
+                    language=language,
+                )
+                if formatted:
+                    return clean_response(str(formatted))
+            except Exception:
+                pass
+
+        return clean_response(raw_result)
+
     def _record_tool_call(self, tool_name: str, args: dict) -> None:
         """Records a tool call to the agent's internal log."""
         if not hasattr(self, "_tool_calls_log") or self._tool_calls_log is None:
@@ -892,7 +918,16 @@ class BaseAgent:
 
         iteration = 0
         called_tools = set()        # Track tool signatures for loop detection
-        last_tool_results = []      # Store results for fallback
+        last_tool_results = []      # Store tool payloads for fallback formatting
+
+        from agent.utils.response_formatter import infer_response_language
+
+        fallback_query = ""
+        for message in reversed(messages):
+            if isinstance(message, HumanMessage) and getattr(message, "content", None):
+                fallback_query = str(message.content)
+                break
+        fallback_language = infer_response_language(user_query=fallback_query, default="en")
 
         while (
             hasattr(response, "tool_calls")
@@ -927,7 +962,13 @@ class BaseAgent:
                     print("      [LOOP] All tool calls are duplicates. Forcing response.")
                 # Return last tool result if available
                 if last_tool_results:
-                    return clean_response(last_tool_results[-1])
+                    latest = last_tool_results[-1]
+                    return self._format_tool_result_for_fallback(
+                        tool_name=latest["name"],
+                        tool_args=latest["args"],
+                        result=latest["result"],
+                        language=fallback_language,
+                    )
                 # Otherwise force LLM to respond using existing data
                 messages.append(
                     SystemMessage(
@@ -949,8 +990,11 @@ class BaseAgent:
                 for tool_call in tools_to_execute:
                     tool_id = tool_call.get("id", f"call_{iteration}")
                     tool_name = tool_call.get("name", "unknown")
+                    tool_args = tool_call.get("args", {})
                     result = tool_results.get(tool_id, f"Tool '{tool_name}' execution failed.")
-                    last_tool_results.append(str(result))
+                    last_tool_results.append(
+                        {"name": tool_name, "args": tool_args, "result": str(result)}
+                    )
 
                     if "error" in str(result).lower() or "failed" in str(result).lower():
                         print(f"      [ERROR] Tool {tool_name} failed: {str(result)[:150]}...")
@@ -976,7 +1020,9 @@ class BaseAgent:
                         if tool.name == tool_name:
                             try:
                                 tool_result = tool.invoke(tool_args)
-                                last_tool_results.append(str(tool_result))
+                                last_tool_results.append(
+                                    {"name": tool_name, "args": tool_args, "result": str(tool_result)}
+                                )
                                 if verbose:
                                     preview = (
                                         str(tool_result)[:100] + "..."
@@ -1006,14 +1052,29 @@ class BaseAgent:
 
         cleaned_response = clean_response(response.content)
         if _cleaned_response_looks_incomplete(cleaned_response, getattr(response, "content", "")) and last_tool_results:
-            combined_tool_fallback = clean_response("\n\n".join(last_tool_results))
+            formatted_tool_results = [
+                self._format_tool_result_for_fallback(
+                    tool_name=payload["name"],
+                    tool_args=payload["args"],
+                    result=payload["result"],
+                    language=fallback_language,
+                )
+                for payload in last_tool_results
+            ]
+            combined_tool_fallback = clean_response("\n\n".join(formatted_tool_results))
             if not _cleaned_response_looks_incomplete(combined_tool_fallback):
                 if verbose:
                     print("      [FALLBACK] Final reply looked incomplete. Returning combined tool results instead.")
                 return combined_tool_fallback
             if verbose:
                 print("      [FALLBACK] Final reply looked incomplete. Returning latest tool result instead.")
-            return clean_response(last_tool_results[-1])
+            latest = last_tool_results[-1]
+            return self._format_tool_result_for_fallback(
+                tool_name=latest["name"],
+                tool_args=latest["args"],
+                result=latest["result"],
+                language=fallback_language,
+            )
 
         return cleaned_response
 

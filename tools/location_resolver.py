@@ -76,6 +76,15 @@ AML_OUTSIDE_LISBON_TOKENS = {
 }
 
 _CURATED_QUERY_VARIANTS = {
+    "centre": ["Rossio, Lisboa, Portugal", "Baixa-Chiado, Lisboa, Portugal"],
+    "center": ["Rossio, Lisboa, Portugal", "Baixa-Chiado, Lisboa, Portugal"],
+    "centro": ["Rossio, Lisboa, Portugal", "Baixa-Chiado, Lisboa, Portugal"],
+    "centre of lisbon": ["Rossio, Lisboa, Portugal", "Baixa-Chiado, Lisboa, Portugal"],
+    "center of lisbon": ["Rossio, Lisboa, Portugal", "Baixa-Chiado, Lisboa, Portugal"],
+    "city centre": ["Rossio, Lisboa, Portugal", "Baixa-Chiado, Lisboa, Portugal"],
+    "city center": ["Rossio, Lisboa, Portugal", "Baixa-Chiado, Lisboa, Portugal"],
+    "centro de lisboa": ["Rossio, Lisboa, Portugal", "Baixa-Chiado, Lisboa, Portugal"],
+    "centro da cidade": ["Rossio, Lisboa, Portugal", "Baixa-Chiado, Lisboa, Portugal"],
     "jardim da estrela": ["Jardim da Estrela, Lisboa, Portugal"],
     "biblioteca nacional": ["Biblioteca Nacional de Portugal, Campo Grande, Lisboa, Portugal"],
     "biblioteca nacional de portugal": ["Biblioteca Nacional de Portugal, Campo Grande, Lisboa, Portugal"],
@@ -100,6 +109,15 @@ _CURATED_QUERY_VARIANTS = {
 }
 
 _CURATED_DISPLAY_NAMES = {
+    "centre": "Rossio",
+    "center": "Rossio",
+    "centro": "Rossio",
+    "centre of lisbon": "Rossio",
+    "center of lisbon": "Rossio",
+    "city centre": "Rossio",
+    "city center": "Rossio",
+    "centro de lisboa": "Rossio",
+    "centro da cidade": "Rossio",
     "jardim da estrela": "Jardim da Estrela",
     "biblioteca nacional": "Biblioteca Nacional de Portugal",
     "biblioteca nacional de portugal": "Biblioteca Nacional de Portugal",

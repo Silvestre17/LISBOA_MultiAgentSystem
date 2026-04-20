@@ -20,6 +20,18 @@
 # ===========================================================================
 
 from __future__ import annotations
+from eval.runtime_utils import (
+    build_model_manifest,
+    build_results_output_path,
+    categorize_error,
+    compute_tool_metrics,
+    compute_tool_registry_fingerprint,
+    fingerprint_payload,
+    summarize_error_categories,
+)
+from agent.agents.weather_agent import WeatherAgent
+from agent.agents.transport_agent import TransportAgent
+from agent.agents.researcher_agent import ResearcherAgent
 
 import json
 import sys
@@ -35,18 +47,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.agents.researcher_agent import ResearcherAgent
-from agent.agents.transport_agent import TransportAgent
-from agent.agents.weather_agent import WeatherAgent
-from eval.runtime_utils import (
-    build_model_manifest,
-    build_results_output_path,
-    categorize_error,
-    compute_tool_metrics,
-    compute_tool_registry_fingerprint,
-    fingerprint_payload,
-    summarize_error_categories,
-)
 
 AGENT_CLASSES = {
     "weather": WeatherAgent,
@@ -54,7 +54,6 @@ AGENT_CLASSES = {
     "researcher": ResearcherAgent,
 }
 COVERAGE_MANIFEST_PATH = PROJECT_ROOT / "tests" / "fixtures" / "tool_coverage_manifest.json"
-
 
 
 def _run_preconfigured_agent(agent: Any, query: str) -> tuple[str, list[str], str, float, str | None]:
@@ -187,7 +186,8 @@ def test_all_exported_tools_are_used_at_least_once(
                     "full_registry_coverage_met": not missing_tools,
                     "missing_tools": missing_tools,
                     "avg_tool_f1": round(
-                        sum(record["tool_metrics"]["tool_f1"] for record in coverage_records) / len(coverage_records),
+                        sum(record["tool_metrics"]["tool_f1"]
+                            for record in coverage_records) / len(coverage_records),
                         3,
                     ) if coverage_records else 0,
                     "error_categories": summarize_error_categories(coverage_records),
@@ -203,11 +203,13 @@ def test_all_exported_tools_are_used_at_least_once(
 
     if failures:
         problems.append(
-            "Per-case coverage mismatches:\n" + "\n".join(failures[:25]) + f"\n\nCoverage artefact: {output_path}"
+            "Per-case coverage mismatches:\n" +
+            "\n".join(failures[:25]) + f"\n\nCoverage artefact: {output_path}"
         )
     if missing_tools:
         problems.append(
-            "Missing tools across strict live suite:\n" + "\n".join(missing_tools) + f"\n\nCoverage artefact: {output_path}"
+            "Missing tools across strict live suite:\n" +
+            "\n".join(missing_tools) + f"\n\nCoverage artefact: {output_path}"
         )
 
     assert not problems, "\n\n".join(problems)

@@ -195,7 +195,7 @@ Expected pricing structure:
 ```python
 pricing_by_model = {
     "pricing_source": "https://www.llm-prices.com/current-v1.json",
-    "pricing_updated_at": "2026-03-05",
+  "pricing_updated_at": "2026-04-17",
     "models": {
     "provider::model": {"input": 0.25, "output": 2.0},
     },

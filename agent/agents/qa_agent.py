@@ -17,7 +17,8 @@ from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from agent.agents.base import BaseAgent, clean_response, parse_json_response, traceable
+from agent.agents.base import BaseAgent, clean_response, parse_json_response
+from agent.utils.langsmith_tracing import traceable
 from agent.prompts.qa import get_qa_prompt
 from agent.utils.response_formatter import infer_response_language
 
@@ -90,6 +91,7 @@ _VALID_DOMAINS = {
 
 # IPMA forecast range (max days available)
 _IPMA_FORECAST_DAYS = 5
+_TOP_LEVEL_SECTION_RE = re.compile(r"^###\s+", re.MULTILINE)
 
 # Lisbon historic temperature bounds (°C) for weather sanity checks.
 # Source: IPMA records. All-time high: 44.1°C (Aug 2023). Generous margins applied.
@@ -668,14 +670,19 @@ class QualityAssuranceAgent(BaseAgent):
                 "disclaimers": result.get("disclaimers", []),
             }
         else:
-            # Fallback: if JSON parsing still fails, pass with disclaimer
-            logger.warning("QA: JSON parse failed after retry; passing with disclaimer.")
+            # Fallback: if JSON parsing still fails, fail closed so the
+            # orchestration can still trigger the conservative repair path.
+            logger.warning("QA: JSON parse failed after retry; marking response incomplete.")
             llm_result = {
-                "complete": True,
-                "missing_data": [],
+                "complete": False,
+                "missing_data": [
+                    "QA validation structure could not be confirmed after retry"
+                ],
                 "required_agents": [],
                 "reasoning": "QA validation could not parse LLM response after retry.",
-                "disclaimers": ["Quality validation was limited for this response"],
+                "disclaimers": [
+                    "Quality validation could not produce a valid structured result after retry"
+                ],
             }
 
         llm_result = self._normalize_event_query_validation(
@@ -780,7 +787,7 @@ class QualityAssuranceAgent(BaseAgent):
                 "- Nunca inventes locais, horários, preços, acessibilidade, estações, ligações, ou URLs.\n"
                 "- Se algo não estiver confirmado, diz explicitamente que deve ser verificado.\n"
                 "- Remove referências internas a QA, validação, fact-checking, reasoning, ou agentes.\n"
-                "- Preserva a mesma língua do utilizador, o estilo visual, os emojis úteis e a estrutura markdown.\n"
+                "- Preserva o idioma de saída exigido pelo runtime, o estilo visual, os emojis úteis e a estrutura markdown.\n"
                 "- Todas as tuas edições, avisos e aditamentos de texto devem ser estritamente em Português (PT-PT).\n"
                 "- Mantém ou melhora a linha de fonte final se ela já existir.\n"
                 "- Preserva quaisquer perguntas interativas ao utilizador que estejam no final do texto (ex: perguntar se o utilizador quer planear o Dia 2).\n"
@@ -804,7 +811,8 @@ class QualityAssuranceAgent(BaseAgent):
                 "- Never invent venues, times, prices, accessibility claims, stations, links, or URLs.\n"
                 "- If something is not confirmed, say it should be verified.\n"
                 "- Remove any references to QA, validation, fact-checking, reasoning, or internal agents.\n"
-                "- Preserve the user's language, visual style, helpful emojis, and markdown structure.\n"
+                "- Preserve the required runtime output language, visual style, helpful emojis, and markdown structure.\n"
+                "- All edits, warnings, and added text must be strictly in English.\n"
                 "- Keep or improve the final source line if one already exists.\n"
                 "- Preserve any interactive questions to the user at the end of the text (e.g., asking if they want to plan Day 2).\n"
                 "- Format any QA disclaimer or note at the bottom of the response explicitly using bullet points starting with ⚠️ (e.g., - ⚠️ Note...).\n"
@@ -832,6 +840,7 @@ class QualityAssuranceAgent(BaseAgent):
         human_content = (
             f"{task_prefix}\n\n"
             f"**User query:** {user_query}\n\n"
+            f"**Required output language:** {'PT-PT' if language == 'pt' else 'English'}\n\n"
             f"## {critical_label}\n{critical_block}\n\n"
             f"## {missing_label}\n{missing_block}\n\n"
             f"## {disclaimer_label}\n{disclaimer_block}\n\n"
@@ -848,6 +857,8 @@ class QualityAssuranceAgent(BaseAgent):
                 ],
             )
             repaired = clean_response(response.content, _print=False).strip()
+            if self._repair_collapsed_structured_draft(draft_response, repaired):
+                return draft_response
             repaired_lower = repaired.lower()
             if any(
                 marker in repaired_lower
@@ -862,6 +873,18 @@ class QualityAssuranceAgent(BaseAgent):
         except Exception as exc:
             logger.warning("QA final repair pass failed, keeping draft response: %s", exc)
             return draft_response
+
+    @staticmethod
+    def _repair_collapsed_structured_draft(draft_response: str, repaired_response: str) -> bool:
+        """Return whether a repair pass collapsed a structured grounded draft too aggressively."""
+        draft_sections = len(_TOP_LEVEL_SECTION_RE.findall(draft_response or ""))
+        repaired_sections = len(_TOP_LEVEL_SECTION_RE.findall(repaired_response or ""))
+
+        if draft_sections >= 3 and repaired_sections < 2:
+            return True
+        if draft_sections >= 2 and repaired_sections == 0:
+            return True
+        return False
 
     def _verify_facts(
         self,
@@ -981,7 +1004,7 @@ class QualityAssuranceAgent(BaseAgent):
         # ── Check 4: Coordinate bounds (AML area) ─────────────────────
         checks.append("aml_coordinates")
         coord_patterns = [
-            r"(-?\d+\.?\d*)\s*[,°]\s*(-?\d+\.?\d*)",
+            r"(-?\d+\.\d+)\s*[,°]\s*(-?\d+\.\d+)",
             r"lat(?:itude)?\s*[:=]?\s*(-?\d+\.?\d*)\s*[,;]\s*lon(?:gitude)?\s*[:=]?\s*(-?\d+\.?\d*)",
         ]
         coord_matches: list = []

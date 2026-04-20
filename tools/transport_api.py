@@ -298,6 +298,46 @@ def _build_route_source_line(sources: List[str]) -> str:
     return f"\n📌 **Fonte:** {' e '.join(deduped_sources)} **| Atualizado:** {updated}\n"
 
 
+# Known place-name ambiguities for route planning. Maps a bare, normalized
+# token to a localized preamble that asks the user to clarify what they meant
+# before the tool renders a literal route to a Lisbon street of the same name.
+_KNOWN_AMBIGUITIES: Dict[str, Dict[str, str]] = {
+    "madeira": {
+        "street_name": "Rua Humberto Madeira",
+        "island": "Ilha da Madeira",
+    },
+}
+
+
+def _build_ambiguity_preamble(origin: str, destination: str) -> str:
+    """Return a short ambiguity note when a bare island/region name is used."""
+    def _detect(value: str) -> Optional[Dict[str, str]]:
+        token = (value or "").strip().lower()
+        # Only flag a *bare* place name. "Rua Humberto Madeira" clearly means
+        # the street, so we do not add the preamble there.
+        if not token or " " in token:
+            return None
+        hit = _KNOWN_AMBIGUITIES.get(token)
+        if not hit:
+            return None
+        return {**hit, "raw": value.strip()}
+
+    hit = _detect(origin) or _detect(destination)
+    if not hit:
+        return ""
+
+    name = hit["raw"].title()
+    island = hit["island"]
+    street = hit["street_name"]
+    return (
+        f"⚠️ **Ambiguidade no destino**: **{name}** pode referir-se à **{island}** ou a **{street}**, em Lisboa.\n"
+        f"- Se te referes à **{island}**, este planeador de metro/autocarro não cobre a ilha; "
+        "deves confirmar voo ou barco.\n"
+        f"- Se te referes a **{street}**, o trajeto de metro mais próximo fica em Encarnação (Linha Vermelha).\n"
+        "- Assumo a interpretação urbana abaixo. Se não for isso, reformula o pedido com o nome completo do destino."
+    )
+
+
 # ==========================================================================
 # LangChain Tools
 # ==========================================================================
@@ -326,6 +366,15 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     destination_display = _format_location_display_name(destination)
     response = f"🗺️ **Route: {origin_display} → {destination_display}**\n\n"
     sources_used: List[str] = []
+
+    # Phase 1.4 ambiguity preamble: when a bare island/region name (currently
+    # "Madeira") is used as origin or destination, Nominatim would silently
+    # resolve it to "Rua Humberto Madeira" in Lisbon and we would render a
+    # Metro route as if the user meant a street. That is misleading. Surface
+    # the ambiguity explicitly so the user can disambiguate.
+    ambiguity_note = _build_ambiguity_preamble(origin, destination)
+    if ambiguity_note:
+        response += ambiguity_note + "\n\n"
 
     if _normalize_station(origin) == _normalize_station(destination):
         response += "✅ **You are already at the destination.**\n"

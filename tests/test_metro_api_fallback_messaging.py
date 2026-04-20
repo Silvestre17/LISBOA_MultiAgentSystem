@@ -29,7 +29,7 @@ import requests
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from tools import metrolisboa_api  # noqa: E402
+from tools import metrolisboa_api
 
 
 def test_get_metro_status_fallback_mentions_official_api_unavailable() -> None:

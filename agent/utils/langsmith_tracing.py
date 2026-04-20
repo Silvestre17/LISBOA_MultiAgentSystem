@@ -172,6 +172,80 @@ def get_last_langsmith_runtime_failure() -> Optional[Dict[str, str]]:
     return dict(_LAST_LANGSMITH_RUNTIME_FAILURE)
 
 
+def is_langsmith_sync_flush_enabled() -> bool:
+    """Return True when ``LANGSMITH_SYNC_FLUSH`` is set to a truthy value.
+
+    When opted in, the runtime can call :func:`flush_langsmith_and_confirm` after
+    each user-facing run to actively wait for LangSmith to persist the trace and
+    to verify ingestion with a ``client.read_run`` probe. The flag defaults to
+    ``False`` so normal chat latency stays unaffected.
+    """
+    raw = os.environ.get("LANGSMITH_SYNC_FLUSH", "").strip().lower()
+    return raw in _TRUTHY_VALUES
+
+
+def flush_langsmith_and_confirm(run_id: Optional[str] = None) -> Dict[str, Any]:
+    """Best-effort synchronous flush + ingestion confirmation.
+
+    If LangSmith is not available this is a safe no-op. The return payload
+    always carries a ``confirmed`` flag so callers can decide whether to
+    upgrade the execution-summary persistence label from ``unconfirmed`` to
+    ``confirmed``.
+
+    Args:
+        run_id: Optional run id to probe with ``client.read_run`` after flush.
+
+    Returns:
+        Dict[str, Any]: ``{"enabled": bool, "confirmed": bool,
+        "run_id": Optional[str], "message": str}``.
+    """
+    result: Dict[str, Any] = {
+        "enabled": is_langsmith_sync_flush_enabled(),
+        "confirmed": False,
+        "run_id": run_id,
+        "message": "",
+    }
+    if not result["enabled"]:
+        result["message"] = "LANGSMITH_SYNC_FLUSH disabled; skipping sync flush."
+        return result
+    if not LANGSMITH_AVAILABLE:
+        result["message"] = "LangSmith unavailable; sync flush skipped."
+        return result
+    try:
+        from langsmith import Client
+        from langsmith.run_helpers import get_current_run_tree as _get_current_run_tree
+
+        try:
+            from langchain_core.tracers.langchain import wait_for_all_tracers as _wait_for_all_tracers
+        except Exception:  # pragma: no cover - optional dependency path
+            _wait_for_all_tracers = None
+
+        if _wait_for_all_tracers is not None:
+            _wait_for_all_tracers()
+
+        # Prefer explicit run_id, fall back to current run tree id when available
+        resolved_run_id = run_id
+        if not resolved_run_id:
+            try:
+                tree = _get_current_run_tree()
+                if tree is not None:
+                    resolved_run_id = getattr(tree, "id", None) or getattr(tree, "run_id", None)
+            except Exception:
+                resolved_run_id = None
+
+        if resolved_run_id:
+            client = Client()
+            client.read_run(str(resolved_run_id))
+            result["run_id"] = str(resolved_run_id)
+            result["confirmed"] = True
+            result["message"] = "LangSmith ingestion confirmed via read_run."
+        else:
+            result["message"] = "Flushed local tracer queue; no run id to probe for confirmation."
+    except Exception as exc:  # pragma: no cover - network / quota path
+        result["message"] = f"Sync flush failed: {exc}"
+    return result
+
+
 class _LangSmithRuntimeFailureHandler(logging.Handler):
     """Capture LangSmith SDK runtime persistence failures without noisy console spam."""
 
@@ -726,6 +800,8 @@ tracing_context = LANGSMITH_STATUS["tracing_context"]
 __all__ = [
     "annotate_current_run",
     "ContextThreadPoolExecutor",
+    "flush_langsmith_and_confirm",
+    "is_langsmith_sync_flush_enabled",
     "LANGSMITH_AVAILABLE",
     "LANGSMITH_STATUS",
     "RunTree",

@@ -51,7 +51,6 @@ try:
 except ImportError:
     from utils import fetch_json_with_retry
 
-
 # ==========================================================================
 # Constants and Configuration
 # ==========================================================================
@@ -165,6 +164,39 @@ CP_KEY_STATIONS = {
 # Alias for backward compatibility with transport_api.py
 CP_STATIONS = CP_KEY_STATIONS
 
+_PT_WEEKDAY_NAMES = {
+    0: "Segunda-feira",
+    1: "Terça-feira",
+    2: "Quarta-feira",
+    3: "Quinta-feira",
+    4: "Sexta-feira",
+    5: "Sábado",
+    6: "Domingo",
+}
+
+_PT_MONTH_NAMES = {
+    1: "Janeiro",
+    2: "Fevereiro",
+    3: "Março",
+    4: "Abril",
+    5: "Maio",
+    6: "Junho",
+    7: "Julho",
+    8: "Agosto",
+    9: "Setembro",
+    10: "Outubro",
+    11: "Novembro",
+    12: "Dezembro",
+}
+
+
+def _format_pt_datetime(dt: datetime, include_time: bool = False) -> str:
+    """Format a datetime using PT-PT weekday and month names without relying on OS locale."""
+    weekday = _PT_WEEKDAY_NAMES.get(dt.weekday(), dt.strftime("%A"))
+    month = _PT_MONTH_NAMES.get(dt.month, dt.strftime("%B"))
+    base = f"{weekday}, {dt.day} de {month} de {dt.year}"
+    return f"{base} | {dt.strftime('%H:%M')}" if include_time else base
+
 
 def get_cp_station_info(station_name: str) -> Optional[Dict[str, Any]]:
     """
@@ -219,10 +251,10 @@ def get_cp_station_info(station_name: str) -> Optional[Dict[str, Any]]:
 
     return None
 
-
 # ==========================================================================
 # CP GTFS Manager Class
 # ==========================================================================
+
 
 class CPGTFSManager:
     """
@@ -299,24 +331,29 @@ class CPGTFSManager:
             # Check ETag first (most reliable)
             if server_etag and cached_etag:
                 if server_etag == cached_etag:
-                    logger.info(f"\033[1;32m✅ ETag unchanged ({server_etag[:20]}...). No update needed.\033[0m")
+                    logger.info(
+                        f"\033[1;32m✅ ETag unchanged ({server_etag[:20]}...). No update needed.\033[0m")
                     return False
                 else:
-                    logger.info(f"ETag changed: {cached_etag[:20]}... → {server_etag[:20]}... Update needed.")
+                    logger.info(
+                        f"ETag changed: {cached_etag[:20]}... → {server_etag[:20]}... Update needed.")
                     return True
 
             # Check Last-Modified header
             if server_last_modified and cached_last_modified:
                 if server_last_modified == cached_last_modified:
-                    logger.info(f"\033[1;32m✅ Last-Modified unchanged ({server_last_modified}). No update needed.\033[0m")
+                    logger.info(
+                        f"\033[1;32m✅ Last-Modified unchanged ({server_last_modified}). No update needed.\033[0m")
                     return False
                 else:
-                    logger.info(f"Last-Modified changed: {cached_last_modified} → {server_last_modified}. Update needed.")
+                    logger.info(
+                        f"Last-Modified changed: {cached_last_modified} → {server_last_modified}. Update needed.")
                     return True
 
             # If server provides new headers we didn't have, log and update
             if server_etag or server_last_modified:
-                logger.info(f"Server headers available (ETag: {bool(server_etag)}, Last-Modified: {bool(server_last_modified)})")
+                logger.info(
+                    f"Server headers available (ETag: {bool(server_etag)}, Last-Modified: {bool(server_last_modified)})")
 
         except requests.exceptions.RequestException as e:
             logger.warning(f"HEAD request failed: {e}. Falling back to time-based check.")
@@ -327,10 +364,12 @@ class CPGTFSManager:
             days_since = (datetime.now() - last_download_dt).days
 
             if days_since >= GTFS_REFRESH_DAYS:
-                logger.info(f"GTFS data is {days_since} days old. Update needed (time-based fallback).")
+                logger.info(
+                    f"GTFS data is {days_since} days old. Update needed (time-based fallback).")
                 return True
 
-            logger.info(f"GTFS data is {days_since} days old. No update needed (time-based fallback).")
+            logger.info(
+                f"GTFS data is {days_since} days old. No update needed (time-based fallback).")
             return False
 
         except (ValueError, TypeError):
@@ -772,7 +811,8 @@ class CPGTFSManager:
                 lat = float(row.get('shape_pt_lat', 0))
                 lon = float(row.get('shape_pt_lon', 0))
                 seq = int(row.get('shape_pt_sequence', 0))
-                dist = float(row.get('shape_dist_traveled', 0)) if row.get('shape_dist_traveled') else None
+                dist = float(row.get('shape_dist_traveled', 0)) if row.get(
+                    'shape_dist_traveled') else None
             except ValueError:
                 continue
 
@@ -913,10 +953,10 @@ def get_gtfs_manager() -> CPGTFSManager:
         _gtfs_manager = CPGTFSManager()
     return _gtfs_manager
 
-
 # ==========================================================================
 # Helper Functions
 # ==========================================================================
+
 
 def _is_cache_valid(last_load: Optional[datetime]) -> bool:
     """Checks if the cache is still valid (not expired)."""
@@ -925,10 +965,10 @@ def _is_cache_valid(last_load: Optional[datetime]) -> bool:
     hours_elapsed = (datetime.now() - last_load).total_seconds() / 3600
     return hours_elapsed < CACHE_EXPIRATION_HOURS
 
-
 # ==========================================================================
 # Station Cache Functions (Real-time API)
 # ==========================================================================
+
 
 def load_cp_aml_stations(force_reload: bool = False) -> Dict[str, Dict[str, Any]]:
     """
@@ -1078,10 +1118,10 @@ def search_cp_station(query: str) -> List[Dict[str, Any]]:
 
     return matches
 
-
 # ==========================================================================
 # GTFS Query Functions
 # ==========================================================================
+
 
 def get_gtfs_stops_in_aml() -> List[Dict[str, Any]]:
     """
@@ -1273,6 +1313,11 @@ def search_gtfs_stop(query: str, limit: int = 10) -> List[Dict[str, Any]]:
     """
     Searches for GTFS stops by name within AML.
 
+    The GTFS feed ships without diacritics (e.g. the CP station for Cais do
+    Sodré is stored as ``Cais do Sodre``), so the query is normalized via
+    NFKD + ASCII stripping before being used in the SQL ``LIKE`` pattern to
+    remain diacritic-insensitive.
+
     Args:
         query: Stop name or partial name.
         limit: Maximum results.
@@ -1284,6 +1329,13 @@ def search_gtfs_stop(query: str, limit: int = 10) -> List[Dict[str, Any]]:
     conn = manager.get_db_connection()
 
     if not conn:
+        return []
+
+    # Strip diacritics so "Cais do Sodré" matches the ASCII DB entry.
+    normalized_query = unicodedata.normalize("NFKD", str(query or ""))
+    normalized_query = normalized_query.encode("ascii", "ignore").decode("ascii").strip()
+    if not normalized_query:
+        conn.close()
         return []
 
     try:
@@ -1304,10 +1356,10 @@ def search_gtfs_stop(query: str, limit: int = 10) -> List[Dict[str, Any]]:
                 stop_name
             LIMIT ?
         """, (
-            f'%{query}%',
+            f'%{normalized_query}%',
             AML_BOUNDS['lat_min'], AML_BOUNDS['lat_max'],
             AML_BOUNDS['lon_min'], AML_BOUNDS['lon_max'],
-            query, query,
+            normalized_query, normalized_query,
             limit
         ))
 
@@ -1357,10 +1409,10 @@ def get_routes_at_stop(stop_id: str) -> List[Dict[str, Any]]:
         conn.close()
         return []
 
-
 # ==========================================================================
 # LangChain Tools
 # ==========================================================================
+
 
 @tool
 def get_train_status() -> str:
@@ -1581,7 +1633,7 @@ def get_train_schedule(station_name: str, limit: int = 10) -> str:
 
     now = datetime.now()
     response = f"🚆 **Departures from {stop_name}**\n"
-    response += f"📅 {now.strftime('%A, %d %B %Y')}\n"
+    response += f"📅 {_format_pt_datetime(now)}\n"
     response += "=" * 50 + "\n\n"
 
     for dep in departures:
@@ -1644,7 +1696,8 @@ def get_cp_routes() -> str:
             unique_routes.append(route)
 
     # Group by route type
-    rail_types = {0: 'Tram', 1: 'Metro', 2: 'Rail', 3: 'Bus', 7: 'Funicular', 11: 'Trolleybus', 12: 'Monorail'}
+    rail_types = {0: 'Tram', 1: 'Metro', 2: 'Rail', 3: 'Bus',
+                  7: 'Funicular', 11: 'Trolleybus', 12: 'Monorail'}
 
     for route in unique_routes:
         route_type = rail_types.get(route['route_type'], 'Other')
@@ -1881,7 +1934,7 @@ def plan_train_trip(origin: str, destination: str) -> str:
             response += f"\n   ... e mais {len(trips) - 8} partidas restantes hoje.\n"
 
         response += "\n" + "-" * 50 + "\n"
-        response += f"📅 {now.strftime('%A, %d %B %Y')} | {now.strftime('%H:%M')}\n"
+        response += f"📅 {_format_pt_datetime(now, include_time=True)}\n"
         response += "💡 Horários: cp.pt | Bilhetes: app CP ou estação\n"
 
         return response
@@ -1891,7 +1944,6 @@ def plan_train_trip(origin: str, destination: str) -> str:
             conn.close()
         logger.error(f"Error planning train trip: {e}")
         return f"❌ Error planning trip: {str(e)}"
-
 
 
 def initialize_cp_gtfs(force_refresh: bool = False) -> str:
@@ -2141,10 +2193,10 @@ def get_train_frequency(
         logger.error(f"Error calculating train frequency: {e}")
         return f"Error calculating train frequency: {e}"
 
-
 # ==========================================================================
 # Test Block
 # ==========================================================================
+
 
 if __name__ == "__main__":
     import sys

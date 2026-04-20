@@ -108,8 +108,8 @@ warnings.filterwarnings("ignore", category=ImportWarning)
 
 # Lazy imports for heavy libraries to prevent startup hangs
 if TYPE_CHECKING:
-    from langchain_chroma import Chroma
-    from langchain_core.documents import Document
+    from langchain_chroma import Chroma  # noqa: F401
+    from langchain_core.documents import Document  # noqa: F401
 
 # ==========================================================================
 # Constants

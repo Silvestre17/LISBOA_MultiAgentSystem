@@ -126,7 +126,9 @@ These artefacts support faster local lookups and reduce repeated parsing of stat
 | Storage directory | `data/vector_db/` |
 | Embedding model | `BAAI/bge-m3` |
 | Collections | `lisbon_pdf`, `lisbon_places`, `lisbon_events` |
-| Language support | multilingual, with Portuguese and English retrieval |
+| Language support | multilingual retrieval, with Portuguese and English coverage in the indexed material |
+
+The vector store supports multilingual retrieval, but the 2026-04 runtime still emits final user-facing answers only in PT-PT or English.
 
 ### Sync Semantics
 

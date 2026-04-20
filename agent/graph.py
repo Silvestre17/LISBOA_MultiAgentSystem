@@ -16,7 +16,7 @@ import json
 import re
 
 # Always need as_completed for collecting parallel results
-import time as time_module  # For latency tracking
+import time as time_module
 from concurrent.futures import as_completed
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set
@@ -24,7 +24,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 
-from agent.agents.base import (  # Shared response cleaning utility
+from agent.agents.base import (
     clean_response,
     is_local_provider,
 )
@@ -42,10 +42,15 @@ from agent.utils.langsmith_tracing import (
 
 # Response formatting for Streamlit rendering
 from agent.utils.response_formatter import (
+    build_bilingual_note,
+    canonicalize_transport_terms,
+    enforce_language_labels,
     ensure_response_title,
+    final_visual_pass,
+    finalize_worker_response,
     format_response,
     generate_response_title,
-    infer_response_language,
+    resolve_output_language,
 )
 from agent.utils.usage_costs import (
     build_cost_payload,
@@ -561,9 +566,9 @@ class LisbonAssistant:
         # Add user message to state
         self.state["messages"].append(HumanMessage(content=message))
         ui_language = language
-        effective_language = infer_response_language(
+        effective_language, requires_bilingual_note, detected_language = resolve_output_language(
             user_query=message,
-            default=ui_language,
+            ui_default=ui_language,
         )
 
         # Update user language preference in state
@@ -574,10 +579,14 @@ class LisbonAssistant:
             user_ctx = UserContext()
             user_ctx["language"] = effective_language
             user_ctx["ui_language"] = ui_language
+            user_ctx["detected_language"] = detected_language or effective_language
+            user_ctx["requires_bilingual_note"] = requires_bilingual_note
             self.state["user_context"] = user_ctx
         else:
             user_ctx["language"] = effective_language
             user_ctx["ui_language"] = ui_language
+            user_ctx["detected_language"] = detected_language or effective_language
+            user_ctx["requires_bilingual_note"] = requires_bilingual_note
 
         if LANGSMITH_AVAILABLE:
             annotate_current_run(
@@ -585,6 +594,8 @@ class LisbonAssistant:
                     "assistant_mode": "single-agent",
                     "language": effective_language,
                     "ui_language": ui_language,
+                    "detected_language": detected_language or effective_language,
+                    "requires_bilingual_note": requires_bilingual_note,
                     "request_source": "user_chat",
                 }
             )
@@ -602,9 +613,21 @@ class LisbonAssistant:
         if hasattr(last_message, "content"):
             # Clean model-specific artifacts (thinking tags, chat tokens, etc.)
             # Uses clean_response from agent.agents.base, then format for Streamlit
-            return format_response(clean_response(last_message.content))
+            rendered = format_response(clean_response(last_message.content))
+        else:
+            rendered = format_response(clean_response(str(last_message)))
 
-        return format_response(clean_response(str(last_message)))
+        # Phase 1.2: enforce PT/EN label consistency on single-agent output too.
+        rendered = enforce_language_labels(rendered, effective_language)
+
+        if requires_bilingual_note and rendered.strip():
+            note = build_bilingual_note(detected_language or "und")
+            if note and note not in rendered:
+                rendered = f"{note}\n\n{rendered}"
+
+        rendered = final_visual_pass(rendered)
+
+        return rendered
 
     def reset(self):
         """Resets the conversation state."""
@@ -839,6 +862,12 @@ class MultiAgentAssistant:
             "contradict",
             "ignore na resposta final",
             "ignored in the final response",
+            "resposta final",
+            "final answer",
+            "títulos/categorias",
+            "titles/categories",
+            "rótulos consistentes",
+            "consistent labels",
             "worker",
         ]
         if any(marker in lowered for marker in internal_markers):
@@ -847,17 +876,66 @@ class MultiAgentAssistant:
         if "station names could not be verified" in lowered or "nomes de estações não puderam ser verificados" in lowered:
             return None
 
-        if "some urls reference unverified domains" in lowered:
-            domains_match = re.search(r"domains?:\s*([^\.]+)", normalized, flags=re.IGNORECASE)
-            domains = domains_match.group(1).strip() if domains_match else "fontes externas"
-            if language == "pt":
-                return f"Alguns links remetem para domínios não verificados ({domains}). Confirme-os antes de visitar."
-            return f"Some links point to unverified domains ({domains}). Please verify them before visiting."
+        if any(
+            marker in lowered
+            for marker in (
+                "domínios conhecidos",
+                "dominios conhecidos",
+                "known domains",
+                "não levantam suspeita de fabricação",
+                "nao levantam suspeita de fabricacao",
+                "do not raise fabrication concerns",
+                "do not suggest fabrication",
+            )
+        ):
+            return None
+
+        if any(
+            marker in lowered
+            for marker in (
+                "os indicadores apresentados",
+                "dados de autocarros e comboios apresentados são parciais",
+                "dados de autocarros e comboios apresentados sao parciais",
+                "bus and train data shown are partial",
+                "indicators shown",
+                "indicators presented",
+                "não foram fornecidos detalhes de cada alerta",
+                "nao foram fornecidos detalhes de cada alerta",
+                "não especificam perturbações concretas por linha ou serviço",
+                "nao especificam perturbacoes concretas por linha ou servico",
+                "do not specify concrete disruptions by line or service",
+                "details of each alert or affected line were not provided",
+            )
+        ):
+            return None
+
+        if (
+            "visitlisboa" in lowered
+            and any(marker in lowered for marker in ("acceptable", "aceitável", "aceitavel"))
+        ):
+            return None
+
+        if (
+            "visitlisboa.com" in lowered
+            and any(marker in lowered for marker in ("links presented use the domain", "os links apresentados usam o domínio"))
+        ):
+            return None
+
+        if "some urls reference unverified domains" in lowered or "domínios não verificados" in lowered:
+            return None
+
+        if "event details (dates, times, ticket prices) should be confirmed at visitlisboa.com" in lowered:
+            return None
 
         if "carris bus route numbers and schedules should be verified at carris.pt" in lowered:
             if language == "pt":
                 return "Os números das linhas e os horários da Carris devem ser confirmados em carris.pt, porque os dados GTFS podem não refletir alterações muito recentes."
             return "Carris line numbers and schedules should be confirmed at carris.pt, because GTFS data may miss very recent changes."
+
+        if "fonte explícita no output" in lowered or "explicit source in the output" in lowered:
+            if language == "pt":
+                return "A fonte indicada é apenas a do Metro de Lisboa; confirme Carris, Carris Metropolitana e CP nas respetivas fontes oficiais."
+            return "Only Metro de Lisboa is explicitly cited here; please confirm Carris, Carris Metropolitana, and CP through their official sources."
 
         return normalized
 
@@ -1058,6 +1136,34 @@ class MultiAgentAssistant:
             model_id=aggregate_usage.get("model_id"),
         )
         langsmith_request_status = get_langsmith_request_tracking_status()
+
+        # Optional opt-in sync flush: when LANGSMITH_SYNC_FLUSH=true, wait for
+        # local tracer queue to drain and probe the active run via
+        # client.read_run. On success we upgrade the persistence_state label
+        # from "unconfirmed" to "confirmed" so the execution summary reflects
+        # the verified ingestion.
+        try:
+            from agent.utils.langsmith_tracing import (
+                flush_langsmith_and_confirm as _flush_langsmith_and_confirm,
+                is_langsmith_sync_flush_enabled as _is_langsmith_sync_flush_enabled,
+            )
+            if _is_langsmith_sync_flush_enabled() and langsmith_request_status.get("current_run_attached"):
+                flush_info = _flush_langsmith_and_confirm(
+                    run_id=langsmith_request_status.get("run_id"),
+                )
+                if flush_info.get("confirmed"):
+                    langsmith_request_status = {
+                        **langsmith_request_status,
+                        "persistence_state": "confirmed",
+                        "note": flush_info.get("message") or langsmith_request_status.get("note"),
+                    }
+                elif flush_info.get("message"):
+                    langsmith_request_status = {
+                        **langsmith_request_status,
+                        "note": flush_info["message"],
+                    }
+        except Exception:  # pragma: no cover - defensive, flush is opt-in
+            pass
 
         agent_objects = {
             "supervisor": self.supervisor,
@@ -1316,7 +1422,13 @@ class MultiAgentAssistant:
         Returns:
             str: Final user-facing response.
         """
-        from agent.utils.response_formatter import strip_technical_output_artifacts
+        from agent.utils.response_formatter import (
+            ensure_transport_notes_heading,
+            infer_researcher_source_kind,
+            reconcile_researcher_event_response,
+            normalize_transport_notes_block,
+            strip_technical_output_artifacts,
+        )
 
         effective_agents = self._dedupe_preserve_order(
             [
@@ -1330,16 +1442,113 @@ class MultiAgentAssistant:
             sanitized_response = strip_technical_output_artifacts(sanitized_response)
 
         formatted = format_response(sanitized_response)
+        # Phase 1.2: deterministic PT/EN label repair to guarantee the final
+        # answer does not mix languages, even if one worker emitted a label in
+        # the other language. Operates only on bold `**Label**` tokens.
+        formatted = enforce_language_labels(formatted, language)
         if "transport" in effective_agents:
+            formatted = canonicalize_transport_terms(formatted, language=language)
             formatted = strip_technical_output_artifacts(formatted)
+            formatted = ensure_transport_notes_heading(formatted, language=language)
+            formatted = normalize_transport_notes_block(formatted)
 
         if effective_agents:
             title = generate_response_title(effective_agents, message, language)
             final_output = ensure_response_title(formatted, title)
             if "transport" in effective_agents:
+                final_output = canonicalize_transport_terms(final_output, language=language)
                 final_output = strip_technical_output_artifacts(final_output)
+                final_output = ensure_transport_notes_heading(final_output, language=language)
+                final_output = normalize_transport_notes_block(final_output)
         else:
             final_output = formatted
+
+        # Prepend a visually formatted bilingual note when the user wrote in a
+        # language other than PT or EN (e.g., FR, DE, JA). The assistant is
+        # optimized for PT-PT and EN, so the final response is provided in
+        # English along with a small note explaining why.
+        user_ctx = self.state.get("user_context") or {}
+        if user_ctx.get("requires_bilingual_note") and final_output.strip():
+            detected = user_ctx.get("detected_language") or "und"
+            note = build_bilingual_note(detected)
+            if note and note not in final_output:
+                final_output = f"{note}\n\n{final_output}"
+
+        single_domain_agents = [
+            agent_name for agent_name in effective_agents if agent_name in {"weather", "researcher", "transport"}
+        ]
+        if len(single_domain_agents) == 1:
+            final_output = finalize_worker_response(
+                final_output,
+                agent_name=single_domain_agents[0],
+                user_query=message,
+                language=language,
+            )
+
+        final_output = final_visual_pass(final_output)
+        if "transport" in effective_agents:
+            final_output = enforce_language_labels(final_output, language)
+            final_output = canonicalize_transport_terms(final_output, language=language)
+            final_output = ensure_transport_notes_heading(final_output, language=language)
+            final_output = normalize_transport_notes_block(final_output)
+            final_output = final_visual_pass(final_output)
+
+        if agent_outputs:
+            source_footer = self._build_combined_source_footer(agent_outputs, language)
+            if source_footer:
+                footer_line_re = re.compile(r"^(?:[-*•]\s*)?📌\s*\*\*(?:Fonte|Source):\*\*.*$", re.IGNORECASE)
+                kept_lines = [line for line in final_output.splitlines() if not footer_line_re.match(line.strip())]
+                while kept_lines and not kept_lines[-1].strip():
+                    kept_lines.pop()
+                final_output = "\n".join(kept_lines).rstrip()
+                final_output = f"{final_output}\n\n{source_footer}".strip()
+                final_output = final_visual_pass(final_output)
+                if "transport" in effective_agents:
+                    final_output = enforce_language_labels(final_output, language)
+                    final_output = canonicalize_transport_terms(final_output, language=language)
+                    final_output = ensure_transport_notes_heading(final_output, language=language)
+                    final_output = normalize_transport_notes_block(final_output)
+                    final_output = final_visual_pass(final_output)
+
+        if len(single_domain_agents) == 1:
+            final_output = finalize_worker_response(
+                final_output,
+                agent_name=single_domain_agents[0],
+                user_query=message,
+                language=language,
+            )
+
+        if single_domain_agents == ["researcher"] and isinstance(agent_outputs.get("researcher"), str):
+            final_output = reconcile_researcher_event_response(
+                final_output,
+                agent_outputs["researcher"],
+                language=language,
+                user_query=message,
+            )
+
+        if (
+            single_domain_agents == ["researcher"]
+            and infer_researcher_source_kind(user_query=message, text=final_output) == "events"
+            and (
+                "**Categoria:**" not in final_output
+                and "**Category:**" not in final_output
+                or "[Mais detalhes](" not in final_output
+                and "[More details](" not in final_output
+            )
+        ):
+            researcher_agent = self.agents.get("researcher")
+            if researcher_agent is not None and hasattr(researcher_agent, "_run_direct_event_lookup"):
+                try:
+                    direct_event_output = researcher_agent._run_direct_event_lookup(message, language)
+                except Exception:
+                    direct_event_output = ""
+                if direct_event_output:
+                    final_output = reconcile_researcher_event_response(
+                        final_output,
+                        direct_event_output,
+                        language=language,
+                        user_query=message,
+                    )
 
         self._append_assistant_message(final_output)
 
@@ -1426,6 +1635,30 @@ class MultiAgentAssistant:
 
         return False
 
+    @staticmethod
+    def _should_block_planner_publication(
+        qa_result: Optional[Dict[str, object]],
+    ) -> bool:
+        """Return whether planner synthesis should be suppressed after QA.
+
+        If the grounded worker evidence is still incomplete after the QA pass,
+        publishing a confident itinerary is worse than falling back to the
+        structured worker outputs plus explicit caveats.
+        """
+        if not qa_result:
+            return False
+        if qa_result.get("complete") is False:
+            return True
+        if qa_result.get("needs_repair"):
+            return True
+        if qa_result.get("missing_data"):
+            return True
+
+        fact_check = qa_result.get("fact_check", {})
+        return bool(
+            isinstance(fact_check, dict) and fact_check.get("critical_issues")
+        )
+
     @traceable(
         name="LISBOA Chat",
         run_type="chain",
@@ -1476,9 +1709,9 @@ class MultiAgentAssistant:
         final_repair_ran = False
         simple_weather_fact_check: Optional[Dict[str, Any]] = None
         ui_language = language
-        effective_language = infer_response_language(
+        effective_language, requires_bilingual_note, detected_language = resolve_output_language(
             user_query=message,
-            default=ui_language,
+            ui_default=ui_language,
         )
 
         # Reset tracking for all sub-agents to capture metrics strictly for this request
@@ -1495,10 +1728,14 @@ class MultiAgentAssistant:
             user_ctx = UserContext()
             user_ctx["language"] = effective_language
             user_ctx["ui_language"] = ui_language
+            user_ctx["detected_language"] = detected_language or effective_language
+            user_ctx["requires_bilingual_note"] = requires_bilingual_note
             self.state["user_context"] = user_ctx
         else:
             user_ctx["language"] = effective_language
             user_ctx["ui_language"] = ui_language
+            user_ctx["detected_language"] = detected_language or effective_language
+            user_ctx["requires_bilingual_note"] = requires_bilingual_note
 
         if LANGSMITH_AVAILABLE:
             annotate_current_run(
@@ -1506,6 +1743,8 @@ class MultiAgentAssistant:
                     "assistant_mode": "multi-agent",
                     "language": effective_language,
                     "ui_language": ui_language,
+                    "detected_language": detected_language or effective_language,
+                    "requires_bilingual_note": requires_bilingual_note,
                     "request_source": "user_chat",
                 }
             )
@@ -1773,12 +2012,22 @@ class MultiAgentAssistant:
                 if verbose:
                     print("   [QA] Escalating simple weather query to full QA after deterministic fact-check")
             else:
+                simple_weather_disclaimers = self._sanitize_qa_disclaimers(
+                    simple_weather_fact_check.get("disclaimers", []),
+                    effective_language,
+                )
+                if simple_weather_disclaimers:
+                    agent_outputs["_qa_disclaimers"] = simple_weather_disclaimers
+                    if verbose:
+                        for disclaimer in simple_weather_disclaimers:
+                            print(f"   [QA] Warning: {disclaimer}")
+
                 qa_result = {
                     "complete": True,
                     "missing_data": [],
                     "required_agents": [],
                     "reasoning": "Fast deterministic weather fact-check completed.",
-                    "disclaimers": simple_weather_fact_check.get("disclaimers", []),
+                    "disclaimers": simple_weather_disclaimers,
                     "critical_issues": [],
                     "repairable_agents": [],
                     "needs_repair": False,
@@ -1991,8 +2240,33 @@ class MultiAgentAssistant:
             clean_outputs[aname] = aoutput
         agent_outputs = clean_outputs
 
-        # Step 6: If Planner was requested, synthesize final response
-        if "planner" in agents_to_call:
+        planner_requested = "planner" in agents_to_call
+        planner_blocked = planner_requested and self._should_block_planner_publication(
+            qa_result
+        )
+        response_agents_to_call = list(agents_to_call)
+        planner_executed = False
+
+        if planner_blocked:
+            response_agents_to_call = [
+                agent_name for agent_name in agents_to_call if agent_name != "planner"
+            ]
+            if verbose:
+                print(
+                    "\n   [QA] Blocking planner synthesis because grounded data is still incomplete"
+                )
+            if on_status_change:
+                on_status_change(
+                    "⚠️ A consolidar resposta grounded sem itinerário final..."
+                    if effective_language == "pt"
+                    else "⚠️ Consolidating a grounded answer without final itinerary synthesis..."
+                )
+
+        # Step 6: If Planner was requested and QA did not block publication,
+        # synthesize the final response. Otherwise, fall back to the combined
+        # worker outputs so caveats remain visible instead of publishing a
+        # confident itinerary over incomplete evidence.
+        if planner_requested and not planner_blocked:
             if verbose:
                 print(
                     f"\n   [AGENT: PLANNER] Synthesizing from {list(agent_outputs.keys())}..."
@@ -2002,6 +2276,7 @@ class MultiAgentAssistant:
                 on_status_change("✍️ A escrever o itinerário final...")
 
             response = self.agents["planner"].synthesize(message, agent_outputs)
+            planner_executed = True
         elif agent_outputs:
             # Combine agent outputs if no planner
             response = self._combine_outputs(agent_outputs, language=effective_language)
@@ -2015,7 +2290,7 @@ class MultiAgentAssistant:
                 verbose=verbose
             )
 
-        if self._should_run_final_qa_repair(agents_to_call, qa_result):
+        if self._should_run_final_qa_repair(response_agents_to_call, qa_result):
             if verbose:
                 print("\n   [QA] Running final repair pass on the drafted response...")
             final_repair_ran = True
@@ -2027,7 +2302,7 @@ class MultiAgentAssistant:
                 language=effective_language,
             )
 
-        if "planner" in agents_to_call:
+        if planner_executed:
             from agent.agents.planner_agent import enforce_multi_day_quality_mode
             from agent.utils.response_formatter import finalize_worker_response
 
@@ -2037,16 +2312,16 @@ class MultiAgentAssistant:
                 language=effective_language,
             )
             response = finalize_worker_response(response, "planner", message, effective_language)
-        elif len(agents_to_call) == 1 and agents_to_call[0] in {"researcher", "transport"}:
+        elif len(response_agents_to_call) == 1 and response_agents_to_call[0] in {"researcher", "transport"}:
             from agent.utils.response_formatter import finalize_worker_response
 
             response = finalize_worker_response(
                 response,
-                agents_to_call[0],
+                response_agents_to_call[0],
                 message,
                 effective_language,
             )
-        elif len(agents_to_call) == 1 and agents_to_call[0] == "weather" and final_repair_ran:
+        elif len(response_agents_to_call) == 1 and response_agents_to_call[0] == "weather":
             from agent.utils.response_formatter import finalize_worker_response
 
             response = finalize_worker_response(
@@ -2055,7 +2330,7 @@ class MultiAgentAssistant:
                 message,
                 effective_language,
             )
-        elif len(agents_to_call) > 1:
+        elif len(response_agents_to_call) > 1:
             from agent.utils.response_formatter import canonicalize_local_information_terms
 
             response = canonicalize_local_information_terms(response, effective_language)
@@ -2064,7 +2339,7 @@ class MultiAgentAssistant:
             response=response,
             message=message,
             language=effective_language,
-            agents_to_call=agents_to_call,
+            agents_to_call=response_agents_to_call,
             routing_reasoning=reasoning,
             agent_outputs=agent_outputs,
             direct_response_used=False,
@@ -2114,8 +2389,6 @@ class MultiAgentAssistant:
         filtered = {k: v for k, v in agent_outputs.items() if not k.startswith("_")}
         if not filtered:
             return ""
-        if len(filtered) == 1:
-            return list(filtered.values())[0]
 
         section_order = ["weather", "transport", "researcher"]
         section_labels = {
@@ -2137,6 +2410,25 @@ class MultiAgentAssistant:
             },
         }
         labels = section_labels["pt" if language == "pt" else "en"]
+        qa_disclaimers = self._sanitize_qa_disclaimers(
+            agent_outputs.get("_qa_disclaimers", []),
+            language,
+        )
+
+        if len(filtered) == 1:
+            single_output = str(list(filtered.values())[0])
+            if not qa_disclaimers:
+                return single_output
+
+            body, links, timestamp = self._extract_structured_section_parts(single_output)
+            notes = "\n".join(f"- ⚠️ {warning}" for warning in qa_disclaimers)
+            response = (body or single_output.strip()) + f"\n\n---\n\n{labels['notes']}\n\n{notes}"
+            if links:
+                response += (
+                    f"\n\n{labels['source']} {' | '.join(links)} | "
+                    f"{labels['updated']} {timestamp or datetime.now().strftime('%H:%M')}"
+                )
+            return response.strip()
 
         sections: List[str] = []
         collected_links: List[str] = []
@@ -2160,10 +2452,6 @@ class MultiAgentAssistant:
             title = labels.get(agent_name, f"### {agent_name.title()}")
             sections.append(f"{title}\n\n{body}")
 
-        qa_disclaimers = self._sanitize_qa_disclaimers(
-            agent_outputs.get("_qa_disclaimers", []),
-            language,
-        )
         if qa_disclaimers:
             notes = "\n".join(f"- ⚠️ {warning}" for warning in qa_disclaimers)
             sections.append(f"{labels['notes']}\n\n{notes}")
@@ -2180,6 +2468,35 @@ class MultiAgentAssistant:
             )
 
         return response.strip()
+
+    def _build_combined_source_footer(self, agent_outputs: dict, language: str) -> Optional[str]:
+        """Build a deterministic shared source footer from worker outputs when one is missing."""
+        labels = {
+            "pt": {"source": "📌 **Fonte:**", "updated": "**Atualizado:**"},
+            "en": {"source": "📌 **Source:**", "updated": "**Updated:**"},
+        }
+        label_set = labels["pt" if language == "pt" else "en"]
+        collected_links: List[str] = []
+        collected_timestamps: List[str] = []
+
+        for agent_name, output in (agent_outputs or {}).items():
+            if str(agent_name).startswith("_") or not isinstance(output, str):
+                continue
+            _, links, timestamp = self._extract_structured_section_parts(output)
+            for link in links:
+                if link not in collected_links:
+                    collected_links.append(link)
+            if timestamp:
+                collected_timestamps.append(timestamp)
+
+        if not collected_links:
+            return None
+
+        timestamp = max(collected_timestamps) if collected_timestamps else datetime.now().strftime("%H:%M")
+        return (
+            f"{label_set['source']} {' | '.join(collected_links)} | "
+            f"{label_set['updated']} {timestamp}"
+        )
 
     def _combine_outputs(self, agent_outputs: dict, language: str = "en") -> str:
         """

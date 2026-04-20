@@ -14,6 +14,8 @@ from copy import deepcopy
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
+from tools.visitlisboa_api import _extract_specific_event_lookup_phrase, _extract_specific_place_lookup_phrase
+
 # Words that start interrogative sentences — not place names when they appear at token[0].
 _QUESTION_STARTER_WORDS: frozenset = frozenset({
     "is", "are", "was", "were", "do", "does", "did",
@@ -52,13 +54,15 @@ from langgraph.graph import END, StateGraph
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
-from agent.agents.base import BaseAgent, traceable
+from agent.agents.base import BaseAgent
 from agent.prompts.researcher import get_researcher_prompt
+from agent.utils.langsmith_tracing import traceable
 from agent.state import AgentState
 from agent.utils.langgraph_compat import ToolNode
 from agent.utils.response_formatter import (
     finalize_worker_response,
     infer_response_language,
+    resolve_output_language,
 )
 
 
@@ -87,16 +91,39 @@ class ResearcherAgent(BaseAgent):
         super().__init__("researcher")
         self.system_prompt = get_researcher_prompt()
         self._last_search_context: Optional[dict] = None
+        self._pending_deterministic_replay: Optional[dict] = None
+        self._pending_pagination_replay: Optional[dict] = None
         # Tools are loaded by BaseAgent.__init__ via get_agent_tools("researcher")
         # which returns the full set including dados_abertos tools
 
     def reset_conversation_context(self) -> None:
         """Clears cached result-window context for this session."""
         self._last_search_context = None
+        self._pending_deterministic_replay = None
+        self._pending_pagination_replay = None
 
     def get_last_search_context(self) -> Optional[dict]:
         """Returns the latest cached result-window context."""
         return deepcopy(self._last_search_context)
+
+    def _replay_same_deterministic_response_once(self, user_message: str) -> Optional[str]:
+        """Return a cached deterministic response once when the same message is retried immediately."""
+        normalized_message = (user_message or "").strip().lower()
+        pending_replay = getattr(self, "_pending_deterministic_replay", None)
+        if pending_replay and pending_replay.get("message") == normalized_message:
+            self._pending_deterministic_replay = None
+            replayed = str(pending_replay.get("response") or "").strip()
+            return replayed or None
+        self._pending_deterministic_replay = None
+        return None
+
+    def _remember_deterministic_response_for_retry(self, user_message: str, response: str) -> str:
+        """Stage a deterministic response so a same-message retry can replay it once."""
+        self._pending_deterministic_replay = {
+            "message": (user_message or "").strip().lower(),
+            "response": response,
+        }
+        return response
 
     @staticmethod
     def _is_content_filter_error(error: Exception) -> bool:
@@ -110,25 +137,12 @@ class ResearcherAgent(BaseAgent):
 
     @staticmethod
     def _infer_research_query_language(user_message: str) -> str:
-        """Adds a light PT-PT heuristic for broad local-discovery prompts."""
-        query = (user_message or "").lower()
-        query_tokens = set(re.findall(r"[a-zà-ÿ]+", query))
-        pt_token_markers = {
-            "quero", "lista", "atrações", "atracoes", "imperdíveis", "imperdiveis",
-            "hoje", "amanhã", "amanha", "eventos", "locais", "monumentos",
-            "miradouro", "museu", "museus",
-        }
-        en_token_markers = {
-            "what", "where", "best", "museum", "museums", "events", "attractions",
-            "wheelchair", "accessible", "history", "places", "nearby",
-        }
-        if any(token in query_tokens for token in pt_token_markers) or "esta semana" in query or re.search(r"[ãõáéíóúç]", query):
-            return "pt"
-        if any(token in query_tokens for token in en_token_markers) or any(
-            phrase in query for phrase in ["first time", "must see", "must-see", "in lisbon", "in belem", "in belém", "near "]
-        ):
-            return "en"
-        return infer_response_language(user_query=user_message, default="en")
+        """Resolve the researcher reply language via the shared PT/EN router."""
+        resolved_language, _requires_note, _detected_language = resolve_output_language(
+            user_query=user_message,
+            ui_default="en",
+        )
+        return resolved_language
 
     @staticmethod
     def _build_messages(
@@ -196,6 +210,8 @@ class ResearcherAgent(BaseAgent):
 
         focus_query = self._extract_place_focus_query(user_message)
         args = {"query": focus_query or user_message, "max_results": 5, "offset": 0, "language": language}
+        if _extract_specific_place_lookup_phrase(user_message):
+            args["specific_lookup"] = True
         category_hint = self._infer_place_category_hint(user_message) or self._infer_place_category_hint(focus_query or "")
         if category_hint:
             args["category"] = category_hint
@@ -272,6 +288,20 @@ class ResearcherAgent(BaseAgent):
         return "📌 **Source:** [*VisitLisboa Events*](https://www.visitlisboa.com/en/events)"
 
     @staticmethod
+    def _has_specific_lookup_fallback_intro(result: str) -> bool:
+        """Return whether a tool result starts with an exact-match miss plus alternatives."""
+        normalized = unicodedata.normalize("NFKD", str(result or "")).encode("ascii", "ignore").decode("ascii").lower()
+        return any(
+            marker in normalized
+            for marker in [
+                "nao encontrei um evento especifico com o nome",
+                "nao encontrei um local especifico com o nome",
+                "i could not find a specific event named",
+                "i could not find a specific place named",
+            ]
+        )
+
+    @staticmethod
     def _extract_pagination_request(user_message: str) -> Optional[dict]:
         """Extracts a simple next-more pagination intent from a follow-up query."""
         query = (user_message or "").lower().strip()
@@ -287,6 +317,9 @@ class ResearcherAgent(BaseAgent):
             "result", "results", "event", "events", "evento", "eventos",
             "place", "places", "local", "locais", "attraction", "attractions",
             "atração", "atrações", "atracao", "atracoes",
+            "option", "options", "opção", "opções", "opcao", "opcoes",
+            "museum", "museums", "museu", "museus", "hospital", "hospitals",
+            "restaurant", "restaurants", "restaurante", "restaurantes",
         ]
         if not explicit_window_hint and not (generic_more_hint and any(noun in query for noun in result_nouns)):
             return None
@@ -317,17 +350,17 @@ class ResearcherAgent(BaseAgent):
             "dez": 10,
         }
 
+        explicit_count: Optional[int] = None
         number_match = re.search(r"\b(\d{1,2})\b", query)
         if number_match:
-            count = max(1, int(number_match.group(1)))
+            explicit_count = max(1, int(number_match.group(1)))
         else:
-            count = 5
             for word, value in word_to_number.items():
                 if re.search(rf"\b{re.escape(word)}\b", query):
-                    count = value
+                    explicit_count = value
                     break
 
-        return {"count": count}
+        return {"count": explicit_count}
 
     @staticmethod
     def _infer_search_domain_from_query(user_message: str) -> Optional[str]:
@@ -405,7 +438,15 @@ class ResearcherAgent(BaseAgent):
         """Continue the last event/place search when the user asks for more results."""
         pagination_request = self._extract_pagination_request(user_message)
         if not pagination_request or not self._last_search_context:
+            self._pending_pagination_replay = None
             return None
+
+        normalized_message = (user_message or "").strip().lower()
+        pending_replay = getattr(self, "_pending_pagination_replay", None)
+        if pending_replay and pending_replay.get("message") == normalized_message:
+            self._pending_pagination_replay = None
+            return str(pending_replay.get("response") or "").strip() or None
+        self._pending_pagination_replay = None
 
         explicit_domain = self._infer_search_domain_from_query(user_message)
         cached_domain = str(self._last_search_context.get("domain") or "").strip()
@@ -439,7 +480,12 @@ class ResearcherAgent(BaseAgent):
             source_line = self._build_events_source_line(language)
         else:
             source_line = self._build_places_source_line(result, language)
-        return f"{result}\n\n{source_line}".strip()
+        response = f"{result}\n\n{source_line}".strip()
+        self._pending_pagination_replay = {
+            "message": normalized_message,
+            "response": response,
+        }
+        return response
 
     @staticmethod
     def _is_broad_attractions_query(user_message: str) -> bool:
@@ -469,6 +515,7 @@ class ResearcherAgent(BaseAgent):
     def _is_direct_event_lookup_query(user_message: str) -> bool:
         """Detects event-discovery queries that are safer to answer directly from tools."""
         query = (user_message or "").lower()
+        specific_lookup = _extract_specific_event_lookup_phrase(user_message)
         planning_terms = [
             "plan", "plano", "roteiro", "itinerary", "agenda",
             "combine", "combinar", "day plan", "plan my day",
@@ -478,13 +525,21 @@ class ResearcherAgent(BaseAgent):
             "festival", "festivals", "exhibition", "exposição", "exposicao",
             "music", "música", "musica", "show", "theatre", "teatro",
             "dance", "dança", "danca", "cinema", "what's on", "o que há", "o que ha",
-            "fair", "fairs", "feira", "feiras", "book fair", "livro",
+            "fair", "fairs", "feira", "feiras", "book fair",
+            "summit", "conference", "congress", "forum", "expo",
         ]
         named_lookup_markers = [
             "tell me about", "what about", "more about", "details about", "information about",
-            "sobre", "fala-me de", "fala me de", "e do", "e da",
+            "sobre", "fala-me de", "fala me de", "fala-me do", "fala me do", "fala-me da", "fala me da",
+            "diz-me sobre", "diz me sobre", "diz-me do", "diz me do", "diz-me da", "diz me da",
+            "e do", "e da",
         ]
         return (
+            (
+                bool(specific_lookup)
+                and not ResearcherAgent._is_direct_place_lookup_query(user_message)
+            )
+            or
             any(term in query for term in event_terms)
             or (
                 any(marker in query for marker in named_lookup_markers)
@@ -497,6 +552,26 @@ class ResearcherAgent(BaseAgent):
         ) and not any(
             term in query for term in planning_terms
         )
+
+    @staticmethod
+    def _is_mixed_event_place_query(user_message: str) -> bool:
+        """Detects mixed queries that ask for both places and events in the same turn."""
+        query = (user_message or "").lower()
+        event_terms = [
+            "event", "events", "evento", "eventos", "concert", "concerto",
+            "festival", "festivals", "exhibition", "exposição", "exposicao",
+            "music", "música", "musica", "show", "theatre", "teatro",
+            "dance", "dança", "danca", "cinema", "what's on", "o que há", "o que ha",
+            "fair", "fairs", "feira", "feiras",
+        ]
+        place_terms = [
+            "museum", "museums", "museu", "museus",
+            "restaurant", "restaurants", "restaurante", "restaurantes",
+            "pharmacy", "pharmacies", "farmácia", "farmacias", "farmácias",
+            "hospital", "hospitals", "attraction", "attractions", "place", "places",
+            "local", "locais", "monument", "monuments", "monumento", "monumentos",
+        ]
+        return any(term in query for term in event_terms) and any(term in query for term in place_terms)
 
     @staticmethod
     def _extract_event_date_filter(user_message: str) -> Optional[str]:
@@ -519,6 +594,10 @@ class ResearcherAgent(BaseAgent):
     @staticmethod
     def _extract_event_focus_query(user_message: str) -> Optional[str]:
         """Drops generic event phrasing so broad date-based event searches keep high recall."""
+        specific_lookup = _extract_specific_event_lookup_phrase(user_message)
+        if specific_lookup:
+            return specific_lookup
+
         quoted_match = re.search(r'"([^"\n]{2,120})"|“([^”\n]{2,120})”', user_message or "")
         if quoted_match:
             quoted_subject = next((group for group in quoted_match.groups() if group), "").strip(" .?!")
@@ -575,6 +654,8 @@ class ResearcherAgent(BaseAgent):
     def _infer_event_category_hint(user_message: str) -> Optional[str]:
         """Infers a VisitLisboa event category hint from common PT/EN event queries."""
         query = (user_message or "").lower()
+        if any(term in query for term in ["summit", "conference", "congress", "forum", "expo", "technology", "tech", "startup"]):
+            return "Main Events"
         if any(term in query for term in ["music", "música", "musica", "concert", "concerto", "fado", "jazz", "rock", "pop"]):
             return "Music"
         if any(term in query for term in ["theatre", "theater", "teatro", "opera", "dance", "dança", "danca", "ballet"]):
@@ -607,17 +688,11 @@ class ResearcherAgent(BaseAgent):
                 return quoted_subject
 
         named_lookup_re = re.compile(
-            r"\b(?:tell me about|what about|more about|details about|information about|where is|where's|find|show me|sobre(?: o| a| os| as)?|fala[- ]?me de|onde fica(?: o| a| os| as)?|encontra(?:r)?|mostrar(?:-me)?)\b",
+            r"\b(?:tell me about|what about|more about|details about|information about|where is|where's|find|show me|sobre(?: o| a| os| as)?|fala[- ]?me(?: mais)? sobre(?: o| a| os| as)?|fala[- ]?me de|diz[- ]?me(?: mais)? sobre(?: o| a| os| as)?|diz[- ]?me de|diz[- ]?me onde(?: e| é| fica)(?: o| a| os| as)?|onde(?: e| é| fica)(?: o| a| os| as)?|encontra(?:r)?|mostrar(?:-me)?)\b",
             re.IGNORECASE,
         )
         if named_lookup_re.search(query):
             subject = named_lookup_re.sub(" ", query)
-            subject = re.sub(
-                r"\b(?:place|places|local|locais|attraction|attractions|museum|museu|monument|monumento|restaurant|restaurante|hotel|viewpoint|miradouro)\b",
-                " ",
-                subject,
-                flags=re.IGNORECASE,
-            )
             subject = re.sub(r"\s+", " ", subject).strip(" .?!")
             if subject:
                 return subject
@@ -639,6 +714,10 @@ class ResearcherAgent(BaseAgent):
                     return None
                 return query.strip(" .?!")
 
+        specific_lookup = _extract_specific_place_lookup_phrase(user_message)
+        if specific_lookup:
+            return specific_lookup
+
         return None
 
     @staticmethod
@@ -651,22 +730,30 @@ class ResearcherAgent(BaseAgent):
             "festival", "exhibition", "exposição", "exposicao", "show",
         ]
         directed_lookup_markers = [
-            "where is", "where's", "onde fica", "tell me about", "what about",
+            "where is", "where's", "onde fica", "onde é", "onde e", "tell me about", "what about",
             "more about", "details about", "information about", "sobre",
-            "fala-me de", "fala me de", "closest to", "nearest to", "near ",
+            "fala-me de", "fala me de", "fala-me do", "fala me do", "fala-me da", "fala me da",
+            "diz-me sobre", "diz me sobre", "diz-me do", "diz me do", "diz-me da", "diz me da",
+            "diz-me onde é", "diz me onde e", "diz-me onde fica", "diz me onde fica",
+            "closest to", "nearest to", "near ",
             "mais perto", "mais próximo", "perto de", "perto do", "perto da",
         ]
         if any(keyword in query for keyword in history_keywords + event_keywords):
             return False
 
-        if ResearcherAgent._extract_service_types(user_message):
-            return ResearcherAgent._extract_near_location_name(user_message) is not None
-
         focus_query = ResearcherAgent._extract_place_focus_query(user_message)
+        if ResearcherAgent._extract_service_types(user_message):
+            return bool(ResearcherAgent._extract_near_location_name(user_message) or focus_query)
+
         has_place_hint = ResearcherAgent._infer_place_category_hint(user_message) is not None
         has_directional_lookup = any(marker in query for marker in directed_lookup_markers)
 
-        if focus_query and any(marker in query for marker in ["where is", "where's", "onde fica", "tell me about", "what about", "more about", "details about", "information about", "sobre", "fala-me de", "fala me de"]):
+        if focus_query and any(marker in query for marker in [
+            "where is", "where's", "onde fica", "onde é", "onde e", "tell me about", "what about", "more about",
+            "details about", "information about", "sobre", "fala-me de", "fala me de", "fala-me do",
+            "fala me do", "fala-me da", "fala me da", "diz-me sobre", "diz me sobre", "diz-me do",
+            "diz me do", "diz-me da", "diz me da", "diz-me onde é", "diz me onde e", "diz-me onde fica", "diz me onde fica",
+        ]):
             return True
 
         if has_place_hint and has_directional_lookup:
@@ -710,7 +797,8 @@ class ResearcherAgent(BaseAgent):
 
         args = {"max_results": 5, "language": language, "offset": 0}
         date_filter = self._extract_event_date_filter(user_message)
-        focus_query = self._extract_event_focus_query(user_message)
+        specific_lookup = _extract_specific_event_lookup_phrase(user_message)
+        focus_query = specific_lookup or self._extract_event_focus_query(user_message)
         category_hint = self._infer_event_category_hint(user_message)
 
         if date_filter:
@@ -719,15 +807,19 @@ class ResearcherAgent(BaseAgent):
             args["category"] = category_hint
         if focus_query:
             args["query"] = focus_query
+        if specific_lookup:
+            args["specific_lookup"] = True
 
         result = str(self._invoke_tool(events_tool, args, tool_name="search_cultural_events")).strip()
+        shown_count = self._count_ranked_results(result)
+        remembered_page_size = shown_count if (specific_lookup and shown_count and self._has_specific_lookup_fallback_intro(result)) else int(args["max_results"])
         base_args = {key: value for key, value in args.items() if key not in {"max_results", "offset"}}
         self._remember_search_context(
             domain="events",
             tool_name="search_cultural_events",
             base_args=base_args,
-            page_size=int(args["max_results"]),
-            shown_count=self._count_ranked_results(result),
+            page_size=remembered_page_size,
+            shown_count=shown_count,
             language=language,
             source_query=user_message,
             offset=0,
@@ -740,10 +832,11 @@ class ResearcherAgent(BaseAgent):
         places_tool = self._get_tool_by_name("search_places_attractions")
         nearby_tool = self._get_tool_by_name("find_nearby_services")
         place_focus_query = self._extract_place_focus_query(user_message)
+        specific_lookup = _extract_specific_place_lookup_phrase(user_message)
         service_types = self._extract_service_types(user_message)
+        nearby_location = self._extract_near_location_name(user_message)
 
-        if nearby_tool and service_types:
-            nearby_location = self._extract_near_location_name(user_message)
+        if nearby_tool and service_types and (nearby_location or not place_focus_query):
             service_blocks: List[str] = []
             missing_services: List[str] = []
 
@@ -793,6 +886,8 @@ class ResearcherAgent(BaseAgent):
             max_results = 6
 
         args = {"query": query_text, "max_results": max_results, "offset": 0, "language": language}
+        if specific_lookup:
+            args["specific_lookup"] = True
         if self._is_broad_attractions_query(user_message):
             args["category"] = "Museums & Monuments"
         else:
@@ -801,13 +896,15 @@ class ResearcherAgent(BaseAgent):
                 args["category"] = category_hint
 
         result = str(self._invoke_tool(places_tool, args, tool_name="search_places_attractions")).strip()
+        shown_count = self._count_ranked_results(result)
+        remembered_page_size = shown_count if (specific_lookup and shown_count and self._has_specific_lookup_fallback_intro(result)) else int(args["max_results"])
         base_args = {key: value for key, value in args.items() if key not in {"max_results", "offset"}}
         self._remember_search_context(
             domain="places",
             tool_name="search_places_attractions",
             base_args=base_args,
-            page_size=int(args["max_results"]),
-            shown_count=self._count_ranked_results(result),
+            page_size=remembered_page_size,
+            shown_count=shown_count,
             language=language,
             source_query=user_message,
             offset=0,
@@ -1097,13 +1194,16 @@ class ResearcherAgent(BaseAgent):
         else:
             language = self._infer_research_query_language(user_message)
 
-        messages = self._build_messages(self.system_prompt, user_message, context, language=language)
-
         # Skip tool enforcement for greetings/thanks
         is_greeting = any(
             w in user_message.lower()
             for w in ["hello", "thanks", "obrigado", "tchau", "olá", "bom dia"]
         )
+
+        if not is_greeting and (replayed_response := self._replay_same_deterministic_response_once(user_message)):
+            return replayed_response
+
+        messages = self._build_messages(self.system_prompt, user_message, context, language=language)
 
         tool_enforcement_msg = "" if is_greeting else (
             "You MUST use a tool (like search_places_attractions) to get real data. "
@@ -1115,24 +1215,24 @@ class ResearcherAgent(BaseAgent):
                 print("      [RESEARCHER] Using deterministic place lookup for accessibility-focused query...")
 
             response = self._run_accessibility_place_lookup(user_message, language)
-            return finalize_worker_response(
+            return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
                 response,
                 agent_name="researcher",
                 user_query=user_message,
                 language=language,
-            )
+            ))
 
         if not is_greeting:
             continued_search_response = self._maybe_continue_previous_search(user_message, language)
             if continued_search_response:
                 if verbose:
                     print("      [RESEARCHER] Continuing previous paginated search...")
-                return finalize_worker_response(
+                return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
                     continued_search_response,
                     agent_name="researcher",
                     user_query=user_message,
                     language=language,
-                )
+                ))
 
         last_search_context = getattr(self, "_last_search_context", None)
         if not is_greeting and last_search_context and self._is_named_lookup_followup(user_message):
@@ -1142,35 +1242,35 @@ class ResearcherAgent(BaseAgent):
                     print("      [RESEARCHER] Resolving named follow-up against previous event domain...")
 
                 response = self._run_direct_event_lookup(user_message, language)
-                return finalize_worker_response(
+                return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
                     response,
                     agent_name="researcher",
                     user_query=user_message,
                     language=language,
-                )
+                ))
             if cached_domain == "places":
                 if verbose:
                     print("      [RESEARCHER] Resolving named follow-up against previous place domain...")
 
                 response = self._run_direct_place_lookup(user_message, language)
-                return finalize_worker_response(
+                return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
                     response,
                     agent_name="researcher",
                     user_query=user_message,
                     language=language,
-                )
+                ))
 
-        if not is_greeting and self._is_direct_event_lookup_query(user_message):
+        if not is_greeting and self._is_direct_event_lookup_query(user_message) and not self._is_mixed_event_place_query(user_message):
             if verbose:
                 print("      [RESEARCHER] Using deterministic direct event lookup...")
 
             response = self._run_direct_event_lookup(user_message, language)
-            return finalize_worker_response(
+            return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
                 response,
                 agent_name="researcher",
                 user_query=user_message,
                 language=language,
-            )
+            ))
 
         if not is_greeting and hasattr(self, "tools") and (
             self._is_direct_place_lookup_query(user_message)
@@ -1180,18 +1280,18 @@ class ResearcherAgent(BaseAgent):
                 print("      [RESEARCHER] Using deterministic direct place lookup...")
 
             response = self._run_direct_place_lookup(user_message, language)
-            return finalize_worker_response(
+            return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
                 response,
                 agent_name="researcher",
                 user_query=user_message,
                 language=language,
-            )
+            ))
 
         try:
             response = self.execute_react_loop(
                 messages=messages,
                 verbose=verbose,
-                max_iterations=5,
+                max_iterations=6,
                 tool_enforcement_msg=tool_enforcement_msg,
             )
         except Exception as e:
@@ -1211,7 +1311,7 @@ class ResearcherAgent(BaseAgent):
                 response = self.execute_react_loop(
                     messages=safe_messages,
                     verbose=verbose,
-                    max_iterations=5,
+                    max_iterations=6,
                     tool_enforcement_msg=tool_enforcement_msg,
                 )
             except Exception as safe_error:

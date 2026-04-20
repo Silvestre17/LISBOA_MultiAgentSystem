@@ -26,15 +26,19 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import sys
 from typing import Any, Dict
+import types
 
 import agent.utils.langsmith_tracing as langsmith_tracing
 from agent.utils.langsmith_tracing import (
     annotate_current_run,
+    flush_langsmith_and_confirm,
     get_langsmith_display_state,
     get_langsmith_project_name,
     get_langsmith_request_tracking_status,
     get_langsmith_scoped_project_name,
+    is_langsmith_sync_flush_enabled,
     is_langsmith_tracing_opted_in,
     resolve_langsmith_tracing_status,
     tracing_disabled_unless_opted_in,
@@ -252,6 +256,65 @@ def test_get_langsmith_project_name_prefers_status_then_default(monkeypatch) -> 
 
     assert get_langsmith_project_name({"project_name": "thesis-traces"}) == "thesis-traces"
     assert get_langsmith_project_name({"project_name": None}) == "default"
+
+
+def test_is_langsmith_sync_flush_enabled_uses_truthy_flag(monkeypatch) -> None:
+    """The optional sync flush should only activate on explicit truthy env values."""
+    monkeypatch.setenv("LANGSMITH_SYNC_FLUSH", "true")
+    assert is_langsmith_sync_flush_enabled() is True
+
+    monkeypatch.setenv("LANGSMITH_SYNC_FLUSH", "0")
+    assert is_langsmith_sync_flush_enabled() is False
+
+
+def test_flush_langsmith_and_confirm_returns_disabled_noop_when_flag_is_off(monkeypatch) -> None:
+    """Without the env opt-in, the sync flush helper should exit as a safe no-op."""
+    monkeypatch.delenv("LANGSMITH_SYNC_FLUSH", raising=False)
+
+    result = flush_langsmith_and_confirm("run_123")
+
+    assert result == {
+        "enabled": False,
+        "confirmed": False,
+        "run_id": "run_123",
+        "message": "LANGSMITH_SYNC_FLUSH disabled; skipping sync flush.",
+    }
+
+
+def test_flush_langsmith_and_confirm_reads_run_when_enabled(monkeypatch) -> None:
+    """When enabled, the sync flush helper should confirm ingestion via Client.read_run."""
+    calls = {"waited": False, "run_id": None}
+
+    class FakeClient:
+        def read_run(self, run_id: str) -> None:
+            calls["run_id"] = run_id
+
+    class FakeTree:
+        id = "run_from_tree"
+
+    fake_langsmith_module = types.ModuleType("langsmith")
+    fake_langsmith_module.Client = FakeClient
+
+    fake_run_helpers_module = types.ModuleType("langsmith.run_helpers")
+    fake_run_helpers_module.get_current_run_tree = lambda: FakeTree()
+
+    fake_tracer_module = types.ModuleType("langchain_core.tracers.langchain")
+    fake_tracer_module.wait_for_all_tracers = lambda: calls.__setitem__("waited", True)
+
+    monkeypatch.setenv("LANGSMITH_SYNC_FLUSH", "true")
+    monkeypatch.setattr(langsmith_tracing, "LANGSMITH_AVAILABLE", True)
+    monkeypatch.setitem(sys.modules, "langsmith", fake_langsmith_module)
+    monkeypatch.setitem(sys.modules, "langsmith.run_helpers", fake_run_helpers_module)
+    monkeypatch.setitem(sys.modules, "langchain_core.tracers.langchain", fake_tracer_module)
+
+    result = flush_langsmith_and_confirm()
+
+    assert calls["waited"] is True
+    assert calls["run_id"] == "run_from_tree"
+    assert result["enabled"] is True
+    assert result["confirmed"] is True
+    assert result["run_id"] == "run_from_tree"
+    assert "confirmed" in result["message"].lower()
 
 
 def test_request_tracking_status_marks_active_request_as_save_attempt() -> None:

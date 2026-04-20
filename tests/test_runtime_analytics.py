@@ -25,6 +25,7 @@ from agent.agents.transport_agent import (
     _build_deterministic_metro_route_response,
 )
 from agent.graph import MultiAgentAssistant
+from agent.utils.response_formatter import finalize_worker_response
 
 
 def _make_usage_summary(
@@ -155,7 +156,7 @@ def test_multiagent_direct_response_records_history_and_prints_execution_summary
     assert "Routed agents: direct response" in captured
     assert "Execution: direct" in captured
     assert re.search(r"Total Cost: \(0\.\d{3,6}\$\)", captured)
-    assert "Pricing Snapshot: 2026-03-19" in captured
+    assert "Pricing Snapshot: 2026-04-17" in captured
     assert "LangSmith: disabled | Run context: not-attached | Persistence: disabled" in captured
 
 
@@ -321,7 +322,149 @@ def test_multiagent_simple_weather_runs_lightweight_fact_check_but_skips_validat
     weather_agent.invoke.assert_called_once()
     assistant.qa_agent._verify_facts.assert_called_once()
     assistant.qa_agent.validate.assert_not_called()
-    assert output == "🌤️ Forecast body"
+    assert output.startswith("🌤️ Forecast body")
+
+
+def test_multiagent_simple_weather_surfaces_lightweight_qa_disclaimers() -> None:
+    """Single-worker weather answers should keep lightweight QA caveats in the final render."""
+    assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
+    assistant.state = {"messages": [], "user_context": None}
+
+    assistant.supervisor = MagicMock()
+    assistant.supervisor.reset_llm_usage_tracking = MagicMock()
+    assistant.supervisor.route = MagicMock(
+        return_value={"agents": ["weather"], "direct_response": None, "reasoning": "weather only"}
+    )
+    assistant.supervisor.get_llm_usage_summary = MagicMock(return_value=_make_usage_summary(agent_name="supervisor"))
+
+    weather_agent = _make_worker_mock(
+        output="### 🌤️ Previsão\n\nSol todo o dia.\n\n📌 **Fonte:** [*IPMA*](https://www.ipma.pt) | **Atualizado:** 10:00"
+    )
+    weather_agent._is_current_weather_query = MagicMock(return_value=False)
+    weather_agent._is_simple_forecast_query = MagicMock(return_value=True)
+
+    assistant.agents = {
+        "weather": weather_agent,
+        "transport": _make_worker_mock(),
+        "researcher": _make_worker_mock(),
+        "planner": _make_worker_mock(),
+    }
+
+    assistant.qa_agent = MagicMock()
+    assistant.qa_agent.reset_llm_usage_tracking = MagicMock()
+    assistant.qa_agent.get_llm_usage_summary = MagicMock(return_value=_make_usage_summary(agent_name="qa"))
+    assistant.qa_agent.validate = MagicMock(side_effect=AssertionError("Full QA should stay skipped"))
+    assistant._run_lightweight_weather_fact_check = MagicMock(
+        return_value={
+            "performed": True,
+            "requires_full_qa": False,
+            "disclaimers": ["Live precipitation confidence should be rechecked before departure."],
+            "fact_check": {
+                "valid": True,
+                "disclaimers": ["Live precipitation confidence should be rechecked before departure."],
+                "critical_issues": [],
+                "checks_performed": ["output_hygiene"],
+                "repairable_agents": [],
+                "per_agent": {},
+            },
+        }
+    )
+
+    with patch("agent.graph.LANGSMITH_AVAILABLE", False), patch.object(
+        __import__("agent.graph", fromlist=["Config"]).Config,
+        "SHOW_MARKDOWN_RESPONSE_IN_TERMINAL",
+        False,
+    ):
+        output = assistant.chat(
+            "Qual é a previsão do tempo para os próximos 3 dias?",
+            language="pt",
+            verbose=False,
+        )
+
+    assert "- ⚠️ Live precipitation confidence should be" in output
+    assert "Live precipitation confidence should be rechecked before departure." in output
+    assistant.qa_agent.validate.assert_not_called()
+
+
+def test_multiagent_blocks_planner_synthesis_when_qa_is_still_incomplete() -> None:
+    """Planner synthesis should be skipped, but QA may still repair the grounded fallback draft."""
+    assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
+    assistant.state = {"messages": [], "user_context": None}
+
+    assistant.supervisor = MagicMock()
+    assistant.supervisor.reset_llm_usage_tracking = MagicMock()
+    assistant.supervisor.route = MagicMock(
+        return_value={
+            "agents": ["weather", "transport", "planner"],
+            "direct_response": None,
+            "reasoning": "planner request",
+        }
+    )
+    assistant.supervisor.get_llm_usage_summary = MagicMock(
+        return_value=_make_usage_summary(agent_name="supervisor")
+    )
+
+    assistant.agents = {
+        "weather": _make_worker_mock(
+            output="### 🌤️ Weather\n\nSunny all afternoon.\n\n📌 **Source:** [*IPMA*](https://www.ipma.pt) | **Updated:** 10:00"
+        ),
+        "transport": _make_worker_mock(
+            output="### 🚇 Transport\n\nTake tram 15E.\n\n📌 **Source:** [*Carris*](https://www.carris.pt) | **Updated:** 10:00"
+        ),
+        "researcher": _make_worker_mock(),
+        "planner": MagicMock(),
+    }
+    assistant.agents["planner"].reset_llm_usage_tracking = MagicMock()
+    assistant.agents["planner"].get_llm_usage_summary = MagicMock(
+        return_value=_make_usage_summary(agent_name="planner")
+    )
+    assistant.agents["planner"].synthesize = MagicMock(return_value="PLANNER OUTPUT")
+
+    assistant.qa_agent = MagicMock()
+    assistant.qa_agent.reset_llm_usage_tracking = MagicMock()
+    assistant.qa_agent.get_llm_usage_summary = MagicMock(
+        return_value=_make_usage_summary(agent_name="qa")
+    )
+    assistant.qa_agent.validate = MagicMock(
+        return_value={
+            "complete": False,
+            "missing_data": ["museum opening hours"],
+            "required_agents": [],
+            "reasoning": "Still incomplete.",
+            "disclaimers": ["Museum opening hours are not confirmed."],
+            "critical_issues": [],
+            "repairable_agents": [],
+            "needs_repair": True,
+            "fact_check": {
+                "critical_issues": [],
+                "disclaimers": [],
+                "checks_performed": [],
+                "repairable_agents": [],
+                "per_agent": {},
+            },
+        }
+    )
+    assistant.qa_agent.repair_final_response = MagicMock(return_value="REPAIRED SYNTHESIS")
+
+    assistant._append_assistant_message = MagicMock()
+    assistant._collect_execution_summary = MagicMock(return_value={})
+    assistant._print_execution_summary = MagicMock()
+
+    with patch("agent.graph.LANGSMITH_AVAILABLE", False), patch.object(
+        __import__("agent.graph", fromlist=["Config"]).Config,
+        "SHOW_MARKDOWN_RESPONSE_IN_TERMINAL",
+        False,
+    ):
+        output = assistant.chat(
+            "Plan a museum afternoon in Lisbon with transport.",
+            language="en",
+            verbose=False,
+        )
+
+    assistant.agents["planner"].synthesize.assert_not_called()
+    assistant.qa_agent.repair_final_response.assert_called_once()
+    assert "PLANNER OUTPUT" not in output
+    assert "REPAIRED SYNTHESIS" in output
 
 
 def test_transport_future_metro_route_omits_realtime_waits() -> None:
@@ -470,6 +613,29 @@ def test_enforce_multi_day_quality_mode_trims_shorthand_day_markers() -> None:
     assert "Rossio and Chiado" in output
 
 
+def test_planner_formatter_keeps_schedule_lines_out_of_timed_cards() -> None:
+    """Planner finalization must not turn schedule metadata into fake 01:00/03:00 activities."""
+    draft = (
+        "### 📅 Recomendação para domingo, entre as 19:00 e as 20:00\n"
+        "- 🕐 Próximas saídas do Rossio\n"
+        "- 🕒 Domingo: 10:00–19:00 ou 10:00–18:00\n"
+        "- 🕒 Domingo: 10:00–17:00\n"
+        "- 🏛️ Monument to the Discoveries\n"
+        "📌 **Fonte:** [*VisitLisboa*](https://www.visitlisboa.com) | **Atualizado:** 10:25"
+    )
+
+    output = finalize_worker_response(
+        draft,
+        agent_name="planner",
+        user_query="Qual museu ou monumento recomendas ir neste domingo sendo que apenas tenho das 19 às 20h para visitar?",
+        language="pt",
+    )
+
+    assert "01:00 · Próximas saídas" not in output
+    assert "03:00 · Domingo:" not in output
+    assert "Monument to the Discoveries" in output
+
+
 def test_transport_deterministic_tool_call_records_tool_usage() -> None:
     """Deterministic transport fast paths should still populate the tool-call log."""
     with patch.object(TransportAgent, "__init__", lambda self: None), patch(
@@ -520,6 +686,41 @@ def test_transport_formats_direct_carris_metropolitana_output() -> None:
     assert "Carris Metropolitana" in formatted
 
 
+def test_transport_formats_no_direct_carris_metropolitana_output_concisely() -> None:
+    """No-direct Carris Metropolitana results should collapse into a short grounded summary."""
+    raw_result = (
+        "🚌 **BUS ROUTE FINDER**\n"
+        "==================================================\n"
+        "📍 From: Rossio\n"
+        "📍 To: Museu Nacional de Arte Antiga\n"
+        "❌ **No direct bus routes found**\n\n"
+        "📊 **Lines available near your locations:**\n\n"
+        "   At Rossio: 1002, 1013, 1510\n"
+        "   At Museu Nacional de Arte Antiga: 3708\n\n"
+        "⚠️ **IMPORTANT: Carris Metropolitana Scope Note**\n"
+        "For Lisbon city-only trips, always cross-check Carris Urban when relevant\n"
+    )
+
+    with patch.object(TransportAgent, "__init__", lambda self: None):
+        agent = TransportAgent()
+        formatted = agent._format_deterministic_tool_result(
+            tool_name="find_direct_bus_lines",
+            tool_args={"origin": "Rossio", "destination": "Museu Nacional de Arte Antiga"},
+            result=raw_result,
+            language="pt",
+        )
+
+    assert formatted.startswith(
+        "### 🚌 Linhas diretas da Carris Metropolitana para Rossio → Museu Nacional de Arte Antiga"
+    )
+    assert "Sem linha suburbana direta confirmada" in formatted
+    assert "Linhas disponíveis perto da origem" in formatted
+    assert "Linhas disponíveis perto do destino" in formatted
+    assert "Carris Urban" in formatted
+    assert "BUS ROUTE FINDER" not in formatted
+    assert "Suggestions" not in formatted
+
+
 def test_researcher_follow_up_paginates_the_next_event_batch() -> None:
     """Researcher event follow-ups should advance the offset instead of repeating the first batch."""
 
@@ -559,6 +760,150 @@ def test_researcher_follow_up_paginates_the_next_event_batch() -> None:
     assert "Event A" not in second_batch
     assert tool.calls[0]["offset"] == 0
     assert tool.calls[1]["offset"] == 2
+
+
+def test_researcher_follow_up_paginates_specific_place_fallback_with_more_options() -> None:
+    """Specific place fallback batches should continue from the next concise window when the user asks for more options."""
+
+    class DummyPlacesTool:
+        name = "search_places_attractions"
+
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def invoke(self, args: dict) -> str:
+            self.calls.append(dict(args))
+            offset = int(args.get("offset", 0) or 0)
+            if offset == 0:
+                return (
+                    "❌ Não encontrei um local específico com o nome **museu do livro** na base de dados disponível. "
+                    "Como alternativa, deixo abaixo locais do mesmo tipo, estilo ou afinidade temática.\n\n"
+                    "🏛️ **Found 2 Places/Attractions in Lisbon:**\n"
+                    "🧭 **Janela de resultados:** 1-2 de 4.\n\n"
+                    "1. 🏛️ **Words Factory**\n"
+                    "   📂 Category: Museums & Monuments\n"
+                    "   📍 Lisboa\n"
+                    "   🔗 https://example.com/words-factory\n\n"
+                    "2. 🏛️ **João de Deus Museum**\n"
+                    "   📂 Category: Museums & Monuments\n"
+                    "   📍 Lisboa\n"
+                    "   🔗 https://example.com/joao-de-deus-museum\n"
+                )
+            if offset == 2:
+                return (
+                    "🏛️ **Found 2 Places/Attractions in Lisbon:**\n"
+                    "🧭 **Janela de resultados:** 3-4 de 4.\n\n"
+                    "1. 🏛️ **Museum of Illusions**\n"
+                    "   📂 Category: Museums & Monuments\n"
+                    "   📍 Lisboa\n"
+                    "   🔗 https://example.com/museum-of-illusions\n\n"
+                    "2. 🏛️ **National Museum of Sport**\n"
+                    "   📂 Category: Museums & Monuments\n"
+                    "   📍 Lisboa\n"
+                    "   🔗 https://example.com/national-museum-of-sport\n"
+                )
+            return "❌ Já não há mais locais para mostrar com este filtro."
+
+    with patch.object(ResearcherAgent, "__init__", lambda self: None):
+        agent = ResearcherAgent()
+        agent.tools = [DummyPlacesTool()]
+        agent._last_search_context = None
+
+        first_batch = agent._run_direct_place_lookup("Onde fica o Museu do Livro?", "pt")
+        second_batch = agent._maybe_continue_previous_search(
+            "Não me interessei por nenhum, quero mais opções que possa ir de outros museus",
+            "pt",
+        )
+
+    tool = agent.tools[0]
+    assert "Words Factory" in first_batch and "João de Deus Museum" in first_batch
+    assert second_batch is not None
+    assert "Museum of Illusions" in second_batch and "National Museum of Sport" in second_batch
+    assert "Words Factory" not in second_batch
+    assert tool.calls[0]["offset"] == 0
+    assert tool.calls[1]["offset"] == 2
+    assert tool.calls[1]["max_results"] == 2
+
+
+def test_researcher_same_follow_up_retry_reuses_the_same_paginated_batch_once() -> None:
+    """If QA retries the same paginated follow-up in the same turn, the researcher should replay the same batch once instead of skipping ahead."""
+
+    class DummyPlacesTool:
+        name = "search_places_attractions"
+
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def invoke(self, args: dict) -> str:
+            self.calls.append(dict(args))
+            offset = int(args.get("offset", 0) or 0)
+            if offset == 0:
+                return (
+                    "❌ Não encontrei um local específico com o nome **museu do livro** na base de dados disponível.\n\n"
+                    "1. 🏛️ **Words Factory**\n"
+                    "2. 🏛️ **João de Deus Museum**"
+                )
+            if offset == 2:
+                return (
+                    "🏛️ **Found 2 Places/Attractions in Lisbon:**\n"
+                    "🧭 **Janela de resultados:** 3-4 de 6.\n\n"
+                    "1. 🏛️ **Museum of Illusions**\n"
+                    "2. 🏛️ **Museu da Marioneta**"
+                )
+            if offset == 4:
+                return (
+                    "🏛️ **Found 2 Places/Attractions in Lisbon:**\n"
+                    "🧭 **Janela de resultados:** 5-6 de 6.\n\n"
+                    "1. 🏛️ **National Museum of Sport**\n"
+                    "2. 🏛️ **Portuguese Museum of Freemasonry**"
+                )
+            return "❌ Já não há mais locais para mostrar com este filtro."
+
+    with patch.object(ResearcherAgent, "__init__", lambda self: None):
+        agent = ResearcherAgent()
+        agent.tools = [DummyPlacesTool()]
+        agent._last_search_context = None
+        agent._pending_pagination_replay = None
+
+        agent._run_direct_place_lookup("Onde fica o Museu do Livro?", "pt")
+        first_follow_up = agent._maybe_continue_previous_search("Quero mais opções de museus", "pt")
+        replayed_follow_up = agent._maybe_continue_previous_search("Quero mais opções de museus", "pt")
+
+    tool = agent.tools[0]
+    assert first_follow_up == replayed_follow_up
+    assert "Museum of Illusions" in replayed_follow_up
+    assert "National Museum of Sport" not in replayed_follow_up
+    assert [call["offset"] for call in tool.calls] == [0, 2]
+
+
+def test_researcher_same_named_place_retry_reuses_cached_deterministic_response_once() -> None:
+    """A same-message retry of a deterministic place lookup should replay the cached response once."""
+    with patch.object(ResearcherAgent, "__init__", lambda self: None):
+        agent = ResearcherAgent()
+        agent.system_prompt = "RESEARCHER PROMPT"
+        agent._last_search_context = None
+        agent._pending_pagination_replay = None
+        agent._pending_deterministic_replay = None
+
+        places_tool = MagicMock()
+        places_tool.name = "search_places_attractions"
+        places_tool.invoke = MagicMock(
+            return_value=(
+                "❌ Não encontrei um local específico com o nome **museu do livro** na base de dados disponível.\n\n"
+                "1. 🏛️ **Words Factory**\n"
+                "   📂 Category: Museums & Monuments\n"
+                "   📍 Lisboa\n"
+                "   🔗 https://example.com/words-factory\n"
+            )
+        )
+        agent.tools = [places_tool]
+        agent.execute_react_loop = MagicMock(side_effect=AssertionError("LLM flow should be skipped"))
+
+        first_response = agent.invoke("Onde fica o Museu do Livro?", context="User language: pt", verbose=False)
+        replayed_response = agent.invoke("Onde fica o Museu do Livro?", context="User language: pt", verbose=False)
+
+    assert first_response == replayed_response
+    assert places_tool.invoke.call_count == 1
 
 
 def test_transport_follow_up_reuses_previous_route_for_mode_switch() -> None:

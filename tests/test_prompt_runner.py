@@ -31,7 +31,11 @@ def test_smoke_suite_skips_duplicate_final_echo_when_terminal_markdown_is_enable
     assistant.model_name = "Multi-Agent (test)"
     assistant.chat.return_value = "Single response body"
 
-    with patch.object(run_prompts, "MultiAgentAssistant", return_value=assistant), patch.object(
+    with patch.object(run_prompts, "_warm_smoke_resources", return_value={"ok": True}), patch.object(
+        run_prompts,
+        "MultiAgentAssistant",
+        return_value=assistant,
+    ), patch.object(
         run_prompts,
         "SMOKE_PROMPTS",
         [("Test prompt", "en", "transport")],
@@ -134,6 +138,94 @@ def test_stream_tee_supports_reconfigure_passthrough() -> None:
     tee.reconfigure(encoding="utf-8", errors="replace")
 
     assert primary.calls == [{"encoding": "utf-8", "errors": "replace"}]
+
+
+def test_smoke_suite_preloads_resources_before_assistant_init(capsys) -> None:
+    """Smoke mode should warm shared runtime resources before assistant startup."""
+    assistant = MagicMock()
+    assistant.model_name = "Multi-Agent (test)"
+    assistant.chat.return_value = "Single response body"
+    call_order: list[str] = []
+
+    with patch.object(
+        run_prompts,
+        "_warm_smoke_resources",
+        side_effect=lambda language="pt": call_order.append(f"preload:{language}") or {"ok": True},
+    ), patch.object(
+        run_prompts,
+        "MultiAgentAssistant",
+        side_effect=lambda: call_order.append("assistant") or assistant,
+    ), patch.object(
+        run_prompts,
+        "SMOKE_PROMPTS",
+        [("Test prompt", "pt", "transport")],
+    ), patch.object(
+        run_prompts.Config,
+        "SHOW_MARKDOWN_RESPONSE_IN_TERMINAL",
+        False,
+    ), patch.object(
+        run_prompts.Config,
+        "MODEL_PROVIDER",
+        "azure",
+    ):
+        exit_code = run_prompts._run_smoke_suite(_smoke_args())
+
+    assert exit_code == 0
+    assert call_order == ["preload:pt", "assistant"]
+
+
+def test_smoke_suite_aborts_when_preload_fails(capsys) -> None:
+    """Smoke mode should stop before assistant startup if the shared preload fails."""
+    with patch.object(
+        run_prompts,
+        "_warm_smoke_resources",
+        return_value={"ok": False, "transport_status": "failed", "kb_status": "failed"},
+    ), patch.object(
+        run_prompts,
+        "MultiAgentAssistant",
+    ) as assistant_cls, patch.object(
+        run_prompts,
+        "SMOKE_PROMPTS",
+        [("Test prompt", "en", "transport")],
+    ), patch.object(
+        run_prompts.Config,
+        "MODEL_PROVIDER",
+        "azure",
+    ):
+        exit_code = run_prompts._run_smoke_suite(_smoke_args())
+
+    captured = capsys.readouterr().out
+    assert exit_code == 1
+    assistant_cls.assert_not_called()
+    assert "Shared resource preload failed" in captured
+
+
+def test_custom_smoke_prompt_aborts_when_preload_fails(capsys) -> None:
+    """Custom smoke runs should also stop before assistant startup if preload fails."""
+    args = SimpleNamespace(
+        prompt="Test prompt",
+        interactive=False,
+        suite="smoke",
+        language="en",
+        provider=None,
+        quiet=True,
+        transcript_file=None,
+        domain=None,
+        model=None,
+        temperature=None,
+    )
+
+    with patch.object(
+        run_prompts,
+        "_warm_smoke_resources",
+        return_value={"ok": False},
+    ), patch.object(run_prompts, "MultiAgentAssistant") as assistant_cls:
+        exit_code = run_prompts._run_custom_prompt(args)
+
+    captured = capsys.readouterr().out
+    assert exit_code == 1
+    assistant_cls.assert_not_called()
+    assert "Shared resource preload failed" in captured
 
 
 def test_smoke_tool_trace_prefers_execution_summary_tool_counts(capsys) -> None:

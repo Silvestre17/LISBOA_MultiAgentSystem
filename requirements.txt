@@ -23,6 +23,11 @@ langchain-text-splitters==1.1.1  # Text splitting utilities aligned with the Lan
 langchain-openai==1.1.11      # OpenAI GPT models & Azure OpenAI Service
 
 # -----------------------------------------------------------------------------
+# Language Detection (for multilingual input handling)
+# -----------------------------------------------------------------------------
+langdetect==1.0.9             # ISO-639-1 language detection for non-PT/EN inputs
+
+# -----------------------------------------------------------------------------
 # Vector Store and Embeddings (RAG)
 # -----------------------------------------------------------------------------
 langchain-chroma==1.1.0       # ChromaDB integration for LangChain

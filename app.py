@@ -15,6 +15,7 @@ for _ls_logger_name in ("langsmith.client", "langsmith.utils", "langsmith"):
 
 import base64
 import html
+import json
 import os
 import re
 import sys
@@ -45,6 +46,12 @@ sys.path.insert(0, ".")
 from agent.utils.langsmith_tracing import (
     get_langsmith_display_state,
     get_langsmith_project_name,
+)
+from agent.utils.startup_resources import (
+    pre_warm_transport_networks as _pre_warm_transport_networks_impl,
+    pre_warm_vector_store as _pre_warm_vector_store_impl,
+    prepare_transport_database as _prepare_transport_database_impl,
+    run_startup_preload as _run_startup_preload_impl,
 )
 from config import Config
 
@@ -619,6 +626,20 @@ button[kind="secondary"]:hover {{
     box-shadow: 0 2px 6px rgba(255, 64, 17, 0.2);
 }}
 
+/* Google Maps links keep the same pill shape but switch to the requested blue-green gradient */
+[data-testid="stChatMessage"] a[href*="google.com/maps"] {{
+    color: #14532d;
+    background: linear-gradient(135deg, rgba(14, 224, 113, 0.2) 0%, rgba(55, 119, 255, 0.2) 100%);
+    border-bottom-color: rgba(55, 119, 255, 0.45);
+    box-shadow: 0 2px 8px rgba(55, 119, 255, 0.16);
+}}
+[data-testid="stChatMessage"] a[href*="google.com/maps"]:hover {{
+    color: #0f172a;
+    background: linear-gradient(135deg, rgba(14, 224, 113, 0.3) 0%, rgba(55, 119, 255, 0.28) 100%);
+    border-bottom-color: rgba(14, 224, 113, 0.7);
+    box-shadow: 0 4px 10px rgba(14, 224, 113, 0.2), 0 4px 12px rgba(55, 119, 255, 0.18);
+}}
+
 /* Unordered lists - clean with emoji support */
 [data-testid="stChatMessage"] ul {{
     list-style-type: none;
@@ -800,6 +821,37 @@ st.set_page_config(
 )
 
 
+def inject_meta_description() -> None:
+    """Ensure a stable meta description exists in the document head for SEO audits."""
+    description = (
+        "LISBOA is a bilingual AI assistant for Lisbon weather, transport, events, "
+        "places, and itinerary planning across the Lisbon Metropolitan Area."
+    )
+    st.html(
+        f"""
+        <script>
+        (() => {{
+            const descriptionText = {json.dumps(description)};
+            const doc = window.document;
+            let meta = doc.querySelector('meta[name="description"]');
+            if (!meta) {{
+                meta = doc.createElement('meta');
+                meta.name = 'description';
+                doc.head.appendChild(meta);
+            }}
+            if (meta.getAttribute('content') !== descriptionText) {{
+                meta.setAttribute('content', descriptionText);
+            }}
+        }})();
+        </script>
+        """,
+        unsafe_allow_javascript=True,
+    )
+
+
+inject_meta_description()
+
+
 def normalized_value(value: Optional[str]) -> str:
     """Normalize optional text values loaded from env or UI."""
     if not isinstance(value, str):
@@ -851,60 +903,32 @@ def init_system_state():
 @st.cache_resource(show_spinner=False)
 def pre_warm_vector_store() -> bool:
     """Load the vector store once per server process."""
-    try:
-        from tools.visitlisboa_api import initialize_vector_store
-
-        initialize_vector_store()
-        return True
-    except Exception:
-        return False
+    return _pre_warm_vector_store_impl()
 
 
 @st.cache_resource(show_spinner=False)
 def prepare_transport_database() -> Tuple[bool, str]:
     """Prepare Carris GTFS database once per server process."""
-    try:
-        from tools.carris_api import CARRIS_DB_PATH, CarrisGTFSManager
+    return _prepare_transport_database_impl()
 
-        manager = CarrisGTFSManager()
-        db_valid = False
-        if os.path.exists(CARRIS_DB_PATH):
-            needs_upd, _ = manager.check_for_updates()
-            if not needs_upd:
-                db_valid = True
-        if not db_valid:
-            manager.ensure_database(force_update=False)
-        db_size_mb = os.path.getsize(CARRIS_DB_PATH) / (1024 * 1024)
-        return True, f"Base de dados pronta ({db_size_mb:.0f} MB)"
-    except Exception:
-        return False, "Não foi possível preparar a base de dados de transportes"
+
+@st.cache_resource(show_spinner=False)
+def pre_warm_transport_networks() -> Dict[str, Any]:
+    """Warm the static transport datasets required by first-turn routing.
+
+    The goal is to avoid the first user prompt paying the cold-start cost for
+    Metro station cache loading, CP GTFS DB creation/checks, and Carris
+    Metropolitana stop/line/route cache downloads.
+    """
+    return _pre_warm_transport_networks_impl()
 
 
 def _run_startup_preload(language: str = "pt") -> Dict[str, Any]:
     """Load one-time shared resources needed by the production app."""
-    transport_ok, transport_status = prepare_transport_database()
-    kb_ok = True
-    kb_status: Optional[str] = None
-
-    if Config.USE_MULTI_AGENT:
-        kb_ok = pre_warm_vector_store()
-        kb_status = (
-            "Base de conhecimento pronta."
-            if kb_ok and language == "pt"
-            else "Knowledge base ready."
-            if kb_ok
-            else "Não foi possível carregar a base de conhecimento."
-            if language == "pt"
-            else "Could not load the knowledge base."
-        )
-
-    return {
-        "transport_ok": transport_ok,
-        "transport_status": transport_status,
-        "kb_ok": kb_ok,
-        "kb_status": kb_status,
-        "ok": transport_ok and kb_ok,
-    }
+    return _run_startup_preload_impl(
+        language=language,
+        use_multi_agent=Config.USE_MULTI_AGENT,
+    )
 
 
 def ensure_startup_resources(
@@ -1110,7 +1134,10 @@ def test_assistant_connection(provider: str) -> Tuple[bool, Optional[str]]:
         return False, message
 
 
-def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
+def initialize_assistant(
+    provider: str,
+    run_connection_probe: bool = True,
+) -> Tuple[bool, Optional[str]]:
     """Initialise the assistant securely and only when needed."""
     lang = st.session_state.get("language", "pt")
     credentials_ok, credentials_error = provider_has_required_credentials(provider)
@@ -1158,11 +1185,12 @@ def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
             else:
                 st.session_state.assistant = create_assistant(provider)
 
-        connection_ok, connection_error = test_assistant_connection(provider)
-        if not connection_ok:
-            st.session_state.assistant = None
-            st.session_state.initialized = False
-            return False, connection_error
+        if run_connection_probe:
+            connection_ok, connection_error = test_assistant_connection(provider)
+            if not connection_ok:
+                st.session_state.assistant = None
+                st.session_state.initialized = False
+                return False, connection_error
 
         st.session_state.initialized = True
         st.session_state.provider = provider
@@ -1187,10 +1215,6 @@ def initialize_assistant(provider: str) -> Tuple[bool, Optional[str]]:
 # ==========================================================================
 # UI COMPONENTS
 # ==========================================================================
-
-if logo_path:
-    st.logo("img/t.png", icon_image=logo_path, size="small")
-
 
 def display_banner():
     st.markdown(
@@ -1389,7 +1413,7 @@ def build_sidebar():
                     st.session_state.credentials["lmstudio"]["model"] = new_model
                     credentials_changed = True
 
-            if st.button(t("save_credentials"), use_container_width=True, type="primary"):
+            if st.button(t("save_credentials"), use_container_width=True, type="primary", key="connect_system_button"):
                 with st.spinner(
                     "🔌 A ligar o assistente ao motor de IA..."
                     if st.session_state.language == "pt"
@@ -1433,8 +1457,8 @@ def build_sidebar():
         ]
 
         q_act = None
-        for icon, label, qt in quick_acts:
-            if st.button(f"{icon} {label}", use_container_width=True):
+        for idx, (icon, label, qt) in enumerate(quick_acts):
+            if st.button(f"{icon} {label}", use_container_width=True, key=f"sidebar_qact_{idx}"):
                 q_act = qt
 
         st.divider()
@@ -1442,7 +1466,7 @@ def build_sidebar():
         # Session info
         col_s1, col_s2 = st.columns(2)
         with col_s1:
-            st.metric(t("messages"), len(st.session_state.messages))
+            st.metric(t("messages"), count_user_interactions(st.session_state.messages))
         with col_s2:
             provider_ready, _ = provider_has_required_credentials(selected_provider)
             if st.session_state.initialized and st.session_state.provider == selected_provider:
@@ -1513,7 +1537,7 @@ def build_welcome():
         ("🗺️", t("ex_planning"), t("ex_query_planning")),
     ]
 
-    st.markdown(f"#### 💡 {t('try_asking')}")
+    st.markdown(f"### 💡 {t('try_asking')}")
     cols = st.columns(3)
     chosen_ex = None
     for i, (ic, lab, qt) in enumerate(examples):
@@ -1567,8 +1591,13 @@ def render_assistant_markdown(text: str) -> str:
         rendered_chunks.append(chunk)
         placeholder.markdown("".join(rendered_chunks))
 
-    final_text = "".join(rendered_chunks) if rendered_chunks else text
-    placeholder.markdown(final_text)
+    # Force a clean final render from the original full text. During streaming,
+    # partial markdown can momentarily create malformed list or heading HTML,
+    # especially for long event/place cards. Replacing the placeholder ensures
+    # Streamlit rebuilds the DOM from the canonical final markdown.
+    final_text = text
+    placeholder.empty()
+    st.empty().markdown(final_text)
     return final_text
 
 
@@ -1576,6 +1605,28 @@ def clean_response_for_display(text: str) -> str:
     """Remove obvious citation artefacts before rendering the final response."""
     cleaned = re.sub(r"【.*?】", "", text or "")
     return cleaned.replace("\x00", "").strip()
+
+
+def count_user_interactions(messages: list[dict[str, Any]]) -> int:
+    """Count user turns only, so the sidebar metric reflects interactions, not message pairs."""
+    return sum(
+        1
+        for message in messages
+        if isinstance(message, dict) and message.get("role") == "user"
+    )
+
+
+def select_new_request(
+    *,
+    sidebar_request: Optional[str],
+    welcome_request: Optional[str],
+    chat_request: Optional[str],
+    pending_request: Optional[str],
+) -> Optional[str]:
+    """Choose the next new request while preventing duplicate consumption across reruns."""
+    if pending_request:
+        return None
+    return chat_request or welcome_request or sidebar_request
 
 
 def build_user_error_message(error: Exception) -> str:
@@ -1610,10 +1661,12 @@ def build_user_error_message(error: Exception) -> str:
     return t("error_generic")
 
 
-def run_interaction(user_input: str):
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    with st.chat_message("user"):
-        st.markdown(user_input)
+def run_interaction(user_input: str, user_message_already_rendered: bool = False):
+    """Run one chat turn and optionally skip re-rendering the user message."""
+    if not user_message_already_rendered:
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        with st.chat_message("user"):
+            st.markdown(user_input)
 
     with st.chat_message("assistant"):
         try:
@@ -1671,6 +1724,20 @@ def run_interaction(user_input: str):
             st.session_state.messages.append(
                 {"role": "assistant", "content": f"⚠️ {friendly_message}"}
             )
+
+
+def queue_pending_request(user_input: str) -> None:
+    """Queue a new request and append the user turn before the next rerun.
+
+    This keeps the sidebar interaction counter in sync on the first click or
+    first submitted message instead of lagging one rerun behind.
+    """
+    if not user_input:
+        return
+
+    st.session_state.pending_request = user_input
+    st.session_state.pending_request_user_appended = True
+    st.session_state.messages.append({"role": "user", "content": user_input})
 
 
 def run_info_page():
@@ -1789,32 +1856,58 @@ def main():
         run_info_page()
         return
 
-    req = None
-    if q_act:
-        req = q_act
+    pending = st.session_state.get("pending_request")
+
+    # Stage 1: Capture a new request from quick-action, chat input, or welcome
+    # button. Queue it and append the user turn immediately, then rerun once so
+    # the sidebar counter and chat history both reflect the new turn before the
+    # assistant call starts.
+    welcome_request = None
+    chat_request = None
 
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    if not st.session_state.messages:
-        ex_req = build_welcome()
-        if ex_req:
-            req = ex_req
+    if not pending and not st.session_state.messages:
+        welcome_request = build_welcome()
 
-    if in_text := st.chat_input(t("chat_placeholder")):
-        req = in_text
+    if not pending and (in_text := st.chat_input(t("chat_placeholder"))):
+        chat_request = in_text
 
-    if req:
+    new_request = select_new_request(
+        sidebar_request=q_act or None,
+        welcome_request=welcome_request,
+        chat_request=chat_request,
+        pending_request=pending,
+    )
+
+    if new_request:
+        queue_pending_request(new_request)
+        st.rerun()
+
+    # Stage 2: If a request is pending, ensure the assistant is initialized and
+    # execute the LLM call. The user message has already been appended during
+    # the previous rerun, so the sidebar counter is already in sync.
+    pending = st.session_state.get("pending_request")
+    if pending:
         if (
             not st.session_state.initialized
             or st.session_state.provider != selected_provider
         ):
-            success, error = initialize_assistant(selected_provider)
+            success, error = initialize_assistant(
+                selected_provider,
+                run_connection_probe=False,
+            )
             if not success:
                 st.error(error or t("initialization_failed"))
                 return
-        run_interaction(req)
+        already_appended = bool(st.session_state.pop("pending_request_user_appended", False))
+        st.session_state.pop("pending_request", None)
+        run_interaction(pending, user_message_already_rendered=already_appended)
+        # Trigger one final rerun so the sidebar counter picks up the assistant
+        # turn immediately instead of waiting for the next user action.
+        st.rerun()
 
     if not st.session_state.initialized:
         credentials_ready, _ = provider_has_required_credentials(selected_provider)

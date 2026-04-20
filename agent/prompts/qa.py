@@ -91,7 +91,8 @@ You do NOT answer the user directly. You only validate data completeness and fla
 - **Multi-part queries**: Every requested component must be covered before the answer can be marked complete.
 - **Comparison queries**: When the user compares options or modes, the response must explicitly address each option and answer the comparison itself.
 - **Unavailable requested data**: If fares, prices, hours, or another requested field are missing from grounded data, flag that so the final answer states the limitation explicitly instead of omitting it.
-- **Language fidelity**: The final answer must follow the user's actual message language, not only the interface or stored preference.
+- **Language fidelity**: The final answer must follow the runtime-resolved output language stored in user context. This assistant only outputs PT-PT or English. If the original user message was in another language, the final answer must still be in English.
+- **Label language consistency**: Verify that field labels such as Category, Source, Updated, Today, Closed, Address, Phone, Price, Tickets, and their PT equivalents all match the final output language. If labels are mixed across PT and EN, mark the answer as incomplete and request repair.
 
 # USER CONTEXT VALIDATION
 If user context is provided, verify the response respects it:
@@ -365,7 +366,8 @@ def get_qa_prompt(
             "- Em pedidos com vários componentes, todos os componentes pedidos têm de estar cobertos antes de marcares a resposta como completa.\n"
             "- Em pedidos de comparação, tens de confirmar que cada opção ou modo foi abordado e que a comparação foi respondida explicitamente.\n"
             "- Se faltarem tarifas, preços, horários ou qualquer campo pedido, tens de sinalizar essa limitação para a resposta final a dizer explicitamente.\n"
-            "- O idioma final deve seguir a língua real da mensagem do utilizador, não apenas a língua da interface ou a preferência guardada.\n"
+            "- O idioma final deve seguir o idioma de saída resolvido em runtime no contexto do utilizador. Este assistente só responde em PT-PT ou English. Se a mensagem original vier noutra língua, a resposta final deve continuar em English.\n"
+            "- Tens de verificar que todos os rótulos de campos, por exemplo Category, Source, Updated, Today, Closed, Address, Phone, Price, Tickets e equivalentes em PT, estão todos no idioma final correto. Se houver mistura PT e EN nos rótulos, marca a resposta como incompleta e exige reparação.\n"
         )
     else:
         prompt = QA_AGENT_PROMPT_EN
@@ -374,7 +376,8 @@ def get_qa_prompt(
             "- For multi-part queries, every requested component must be covered before the answer can be marked complete.\n"
             "- For comparison queries, confirm that each option or mode is addressed and that the comparison itself is answered explicitly.\n"
             "- If fares, prices, hours, or any requested field are unavailable in grounded data, flag that limitation so the final answer states it explicitly.\n"
-            "- The final answer language must follow the user's actual message language, not only the interface or stored preference.\n"
+            "- The final answer language must follow the runtime-resolved output language stored in user context. This assistant only outputs PT-PT or English. If the original user message was in another language, the final answer must still be in English.\n"
+            "- Verify that all field labels, for example Category, Source, Updated, Today, Closed, Address, Phone, Price, Tickets, and their PT equivalents, are all in the final output language. If labels are mixed across PT and EN, mark the answer as incomplete and require repair.\n"
         )
 
     # Build user context section

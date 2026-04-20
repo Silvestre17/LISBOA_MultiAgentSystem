@@ -13,8 +13,9 @@ from typing import Dict, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from agent.agents.base import BaseAgent, clean_response, traceable
+from agent.agents.base import BaseAgent, clean_response
 from agent.prompts.planner import get_planner_prompt
+from agent.utils.langsmith_tracing import traceable
 from agent.utils.response_formatter import (
     finalize_worker_response,
     infer_response_language,

@@ -29,6 +29,7 @@ import logging
 import math
 import os
 import re
+import threading
 import unicodedata
 import warnings
 from datetime import datetime, timedelta
@@ -721,6 +722,22 @@ _GENERIC_LOOKUP_MARKER_PATTERN = re.compile(
     r"information(?: about| on)?|info(?: about| on)?|about(?: the)?|sobre(?: o| a| os| as)?|"
     r"fala me de|diz me sobre|e do|e da|and what about|and how about)\b"
 )
+_LEADING_LOOKUP_PREFIX_RE = re.compile(
+    r"^(?:"
+    r"tell me(?: more)? about|what about|how about|details(?: about| on)?|information(?: about| on)?|"
+    r"info(?: about| on)?|about(?: the)?|"
+    r"where is|where s|when is|when s|is|are|"
+    r"sobre(?: o| a| os| as)?|"
+    r"fala me mais sobre(?: o| a| os| as)?|fala me(?: de| do| da| dos| das)?|"
+    r"diz me mais sobre(?: o| a| os| as)?|diz me sobre(?: o| a| os| as)?|diz me(?: de| do| da| dos| das)?|"
+    r"onde fica(?: o| a| os| as)?|onde e(?: o| a| os| as)?|quando e(?: o| a| os| as)?|"
+    r"e do|e da|e dos|e das|e o|e a|e os|e as"
+    r")\b\s*"
+)
+_TRAILING_LOOKUP_SUFFIX_RE = re.compile(
+    r"\b(?:wheelchair accessible|accessible|accessibility|open|closed|opening hours|hours|"
+    r"cadeira de rodas|acessivel|acessível|aberto|aberta|fechado|fechada|horarios|horários)\b.*$"
+)
 
 
 def _normalize_lookup_text(text: Optional[str]) -> str:
@@ -898,6 +915,174 @@ def _extract_named_lookup_phrase(query: Optional[str], noise_tokens: set[str]) -
     return " ".join(tokens)
 
 
+def _extract_prefixed_lookup_phrase(
+    query: Optional[str],
+    *,
+    noise_tokens: set[str],
+    max_tokens: int,
+    strip_trailing_status_terms: bool = False,
+) -> Optional[str]:
+    """Extract a named subject after removing leading question/lookup phrasing."""
+    if not query:
+        return None
+
+    for raw_match in _QUOTED_LOOKUP_PATTERN.findall(query):
+        candidate = next((part for part in raw_match if part), "")
+        normalized_candidate = _normalize_lookup_text(candidate)
+        if normalized_candidate:
+            return normalized_candidate
+
+    normalized_query = _normalize_lookup_text(query)
+    if not normalized_query:
+        return None
+
+    stripped = _LEADING_LOOKUP_PREFIX_RE.sub("", normalized_query).strip()
+    if strip_trailing_status_terms and stripped:
+        stripped = _TRAILING_LOOKUP_SUFFIX_RE.sub("", stripped).strip()
+    if stripped == normalized_query:
+        return None
+
+    stripped = re.sub(r"^(?:the|a|an|o|a|os|as)\s+", "", stripped).strip()
+    stripped = re.sub(r"\s+(?:please|por favor)$", "", stripped).strip()
+    tokens = [token for token in _extract_lookup_tokens(stripped) if token not in noise_tokens]
+    if not tokens or len(tokens) > max_tokens:
+        return None
+    return " ".join(tokens)
+
+
+def _is_strong_specific_event_match(
+    event: Dict[str, Any],
+    score: float,
+    phrase: Optional[str],
+    expanded_tokens: Optional[List[str]] = None,
+) -> bool:
+    """Return whether a scored event result looks like a true named match."""
+    phrase_tokens = [token for token in _extract_lookup_tokens(phrase) if not token.isdigit()]
+    if not phrase_tokens:
+        return False
+    threshold = 120.0 if len(phrase_tokens) >= 3 else 108.0
+    if score >= threshold:
+        return True
+
+    if expanded_tokens:
+        expanded_token_set = {token for token in expanded_tokens if token}
+        title_variants = {
+            _normalize_lookup_text(event.get("title")),
+            _normalize_lookup_text(_clean_event_title(event.get("title"), event.get("url", ""))),
+            _normalize_lookup_text(_humanize_visitlisboa_slug(event.get("url", ""))),
+        }
+        for title in title_variants:
+            cleaned_title = _strip_lookup_year_tokens(title)
+            title_tokens = [token for token in _extract_lookup_tokens(cleaned_title) if not token.isdigit()]
+            if (
+                title_tokens
+                and len(title_tokens) >= min(2, len(phrase_tokens))
+                and len(title_tokens) <= len(phrase_tokens)
+                and all(token in expanded_token_set for token in title_tokens)
+            ):
+                return True
+
+    return False
+
+
+_PLACE_LOOKUP_SOFT_TOKENS = {"de", "do", "da", "dos", "das", "the", "of", "and"}
+
+
+def _normalize_specific_place_signature(text: Optional[str]) -> str:
+    """Normalize a place name while ignoring lightweight connector tokens."""
+    tokens = [
+        token for token in _extract_lookup_tokens(text)
+        if not token.isdigit() and token not in _PLACE_LOOKUP_SOFT_TOKENS
+    ]
+    return " ".join(tokens)
+
+
+def _score_specific_place_lookup_match(place: Dict[str, Any], phrase: Optional[str]) -> float:
+    """Score how strongly a place matches a named lookup phrase."""
+    normalized_specific = _normalize_lookup_text(phrase)
+    if not normalized_specific:
+        return 0.0
+
+    searchable = _normalize_lookup_text(_build_place_searchable_text(place))
+    title = _normalize_lookup_text(place.get("title"))
+    if not searchable and not title:
+        return 0.0
+
+    specific_signature = _normalize_specific_place_signature(normalized_specific)
+    title_signature = _normalize_specific_place_signature(title)
+    searchable_signature = _normalize_specific_place_signature(searchable)
+
+    score = 0.0
+    if specific_signature and specific_signature == title_signature:
+        score += 140.0
+    elif normalized_specific == title:
+        score += 140.0
+    elif specific_signature and specific_signature in title_signature:
+        score += 100.0
+    elif normalized_specific in title:
+        score += 100.0
+    elif specific_signature and specific_signature in searchable_signature:
+        score += 60.0
+    elif normalized_specific in searchable:
+        score += 60.0
+
+    phrase_score = max(
+        _phrase_similarity_score(specific_signature or normalized_specific, title_signature or title),
+        _phrase_similarity_score(_strip_lookup_year_tokens(specific_signature or normalized_specific), title_signature or title),
+    )
+    if phrase_score > 0:
+        score += 70.0 * phrase_score
+
+    specific_tokens = [token for token in _extract_lookup_tokens(specific_signature or normalized_specific) if not token.isdigit()]
+    if specific_tokens:
+        title_hits, title_weighted_score = _collect_token_match_stats(specific_tokens, title_signature or title)
+        text_hits, text_weighted_score = _collect_token_match_stats(specific_tokens, searchable_signature or searchable)
+        if title_hits == len(specific_tokens):
+            score += 48.0
+        score += min(36.0, title_weighted_score * 10.0)
+        score += min(18.0, text_weighted_score * 3.0)
+
+    return score
+
+
+def _is_strong_specific_place_match(score: float, phrase: Optional[str]) -> bool:
+    """Return whether a place score is strong enough to count as a named match."""
+    phrase_tokens = [token for token in _extract_lookup_tokens(_normalize_specific_place_signature(phrase) or phrase) if not token.isdigit()]
+    if not phrase_tokens:
+        return False
+    threshold = 118.0 if len(phrase_tokens) >= 3 else 108.0
+    return score >= threshold
+
+
+def _build_specific_lookup_fallback_intro(
+    requested_name: str,
+    *,
+    language: str,
+    content_kind: str,
+) -> str:
+    """Build an explicit intro when an exact named lookup is not found."""
+    safe_name = requested_name.strip() or ("esse pedido" if language == "pt" else "that request")
+    if language == "pt":
+        if content_kind == "event":
+            return (
+                f"❌ Não encontrei um evento específico com o nome **{safe_name}** na base de dados disponível. "
+                "Como alternativa, deixo abaixo eventos do mesmo tipo, estilo ou afinidade temática."
+            )
+        return (
+            f"❌ Não encontrei um local específico com o nome **{safe_name}** na base de dados disponível. "
+            "Como alternativa, deixo abaixo locais do mesmo tipo, estilo ou afinidade temática."
+        )
+    if content_kind == "event":
+        return (
+            f"❌ I could not find a specific event named **{safe_name}** in the available database. "
+            "As an alternative, here are events with a similar type, style, or thematic affinity."
+        )
+    return (
+        f"❌ I could not find a specific place named **{safe_name}** in the available database. "
+        "As an alternative, here are places with a similar type, style, or thematic affinity."
+    )
+
+
 def _build_event_searchable_text(event: Dict[str, Any]) -> str:
     """Builds a richer event search blob including slug, venue, and links."""
     information_links = event.get("information_links")
@@ -1008,14 +1193,22 @@ _EVENT_SPECIFIC_LOOKUP_NOISE_TOKENS = {
     "tell", "about", "details", "detail", "information", "info", "event", "events",
     "evento", "eventos", "more", "please", "show", "find", "me", "the", "this",
     "that", "these", "those", "what", "which", "and", "how", "sobre", "diz",
-    "fala", "para", "from", "with", "there", "happening", "temos", "tem", "do",
-    "da", "de", "dos", "das", "this", "week", "today", "tomorrow", "next", "year",
+    "fala", "para", "from", "with", "there", "happening", "temos", "tem",
+    "this", "week", "today", "tomorrow", "next", "year",
     "ano", "esta", "semana", "este", "proxima", "proximo",
 }
 
 
 def _extract_specific_event_lookup_phrase(query: Optional[str]) -> Optional[str]:
     """Extracts a specific event name from a natural-language query when present."""
+    prefixed = _extract_prefixed_lookup_phrase(
+        query,
+        noise_tokens=_EVENT_SPECIFIC_LOOKUP_NOISE_TOKENS,
+        max_tokens=8,
+    )
+    if prefixed:
+        return prefixed
+
     extracted = _extract_named_lookup_phrase(query, _EVENT_SPECIFIC_LOOKUP_NOISE_TOKENS)
     if extracted:
         return extracted
@@ -1183,6 +1376,7 @@ def _event_matches_query(event: Dict[str, Any], expanded_tokens: List[str]) -> b
 # ==========================================================================
 
 _vector_store = None
+_vector_store_lock = threading.Lock()
 
 
 def _get_vector_store():
@@ -1194,17 +1388,25 @@ def _get_vector_store():
     """
     global _vector_store
 
-    if _vector_store is None:
-        try:
-            # Import here to avoid circular imports and slow startup
-            from tools.vector_store import KnowledgeBase
+    if _vector_store is False:
+        return None
+    if _vector_store is not None:
+        return _vector_store
 
-            # Initialize with CPU to avoid GPU memory issues in agent context
-            _vector_store = KnowledgeBase(use_gpu=False)
-            logger.info("✅ Vector store initialized for semantic search")
-        except Exception as e:
-            logger.warning(f"⚠️ Vector store unavailable: {e}")
-            _vector_store = False  # Mark as unavailable
+    with _vector_store_lock:
+        if _vector_store is False:
+            return None
+        if _vector_store is None:
+            try:
+                # Import here to avoid circular imports and slow startup
+                from tools.vector_store import KnowledgeBase
+
+                # Initialize with CPU to avoid GPU memory issues in agent context
+                _vector_store = KnowledgeBase(use_gpu=False)
+                logger.info("✅ Vector store initialized for semantic search")
+            except Exception as e:
+                logger.warning(f"⚠️ Vector store unavailable: {e}")
+                _vector_store = False  # Mark as unavailable
 
     return _vector_store if _vector_store else None
 
@@ -1612,6 +1814,11 @@ _GENERIC_PLACE_QUERY_TOKENS = {
     "imperdiveis", "imperdíveis", "primeira", "first", "time", "trip",
     "visitor", "visitors", "visita", "visiting", "must", "mustsee",
 }
+_SPECIFIC_PLACE_LOOKUP_TYPE_TOKENS = {
+    "museum", "museums", "museu", "museus",
+    "monument", "monuments", "monumento", "monumentos",
+}
+_SPECIFIC_PLACE_LOOKUP_NOISE_TOKENS = _GENERIC_PLACE_QUERY_TOKENS - _SPECIFIC_PLACE_LOOKUP_TYPE_TOKENS
 _KNOWN_PLACE_LOCATION_HINTS = {
     "belem", "alfama", "chiado", "baixa", "rossio", "oriente", "expo",
     "ajuda", "alcantara", "estrela", "graca", "mouraria", "restelo",
@@ -1730,14 +1937,29 @@ def _extract_place_query_tokens(query: Optional[str]) -> List[str]:
 
 def _extract_specific_place_lookup_phrase(query: Optional[str]) -> Optional[str]:
     """Extracts a specific place name from quoted or 'tell me about' queries."""
-    extracted = _extract_named_lookup_phrase(query, _GENERIC_PLACE_QUERY_TOKENS)
+    prefixed = _extract_prefixed_lookup_phrase(
+        query,
+        noise_tokens=_SPECIFIC_PLACE_LOOKUP_NOISE_TOKENS,
+        max_tokens=6,
+        strip_trailing_status_terms=True,
+    )
+    if prefixed:
+        prefixed_tokens = _extract_lookup_tokens(prefixed)
+        if len(prefixed_tokens) == 1 and prefixed_tokens[0] in _SPECIFIC_PLACE_LOOKUP_TYPE_TOKENS:
+            return None
+        return prefixed
+
+    extracted = _extract_named_lookup_phrase(query, _SPECIFIC_PLACE_LOOKUP_NOISE_TOKENS)
     if extracted:
+        extracted_tokens = _extract_lookup_tokens(extracted)
+        if len(extracted_tokens) == 1 and extracted_tokens[0] in _SPECIFIC_PLACE_LOOKUP_TYPE_TOKENS:
+            return None
         return extracted
 
     raw_query = (query or '').strip()
     meaningful_tokens = [
         token for token in _extract_lookup_tokens(raw_query)
-        if token not in _GENERIC_PLACE_QUERY_TOKENS
+        if token not in _SPECIFIC_PLACE_LOOKUP_NOISE_TOKENS
     ]
     has_title_like_casing = any(char.isupper() for char in raw_query)
     title_like_tokens = re.findall(r"[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9'/-]*", raw_query)
@@ -1751,6 +1973,8 @@ def _extract_specific_place_lookup_phrase(query: Optional[str]) -> Optional[str]
         and title_like_tokens
         and capitalized_token_count >= max(1, requires_title_majority)
     ):
+        if len(meaningful_tokens) == 1 and meaningful_tokens[0] in _SPECIFIC_PLACE_LOOKUP_TYPE_TOKENS:
+            return None
         return " ".join(meaningful_tokens)
     return None
 
@@ -2031,6 +2255,52 @@ def _infer_place_query_intent(query: Optional[str], category: Optional[str]) -> 
     return None
 
 
+def _infer_specific_place_fallback_category(query: Optional[str], category: Optional[str]) -> Optional[str]:
+    """Infer a same-type fallback category when a named place lookup has no exact match."""
+    if category:
+        return category
+
+    query_intent = _infer_place_query_intent(query, category)
+    if query_intent in {"museum_only", "museum_monument", "monument_only"}:
+        return "Museums & Monuments"
+    if query_intent == "food":
+        return "Restaurants"
+    if query_intent == "accommodation":
+        return "Hotels"
+    if _text_contains_fuzzy_term(query, ["viewpoint", "view point", "miradouro", "miradouros"]):
+        return "View Points"
+    if _text_contains_fuzzy_term(query, ["park", "parks", "garden", "gardens", "parque", "parques", "jardim", "jardins"]):
+        return "Parks & Gardens"
+    return None
+
+
+def _infer_specific_event_fallback_category(query: Optional[str], category: Optional[str]) -> Optional[str]:
+    """Infer a same-type fallback category when a named event lookup has no exact match."""
+    if category:
+        return category
+
+    normalized_query = _normalize_lookup_text(query)
+    if not normalized_query:
+        return None
+
+    category_rules = [
+        (["summit", "conference", "congress", "forum", "expo", "technology", "tech", "startup"], "Main Events"),
+        (["music", "concert", "concerto", "fado", "jazz", "rock", "pop"], "Music"),
+        (["theatre", "theater", "teatro", "opera", "dance", "danca", "dança", "ballet"], "Theater Opera & Dance"),
+        (["festival", "festivals", "festivais"], "Festivals"),
+        (["exhibition", "exhibitions", "exposicao", "exposição", "art", "arte", "gallery", "galeria"], "Exhibitions"),
+        (["sport", "sports", "desporto", "desportos", "marathon", "maratona", "grand prix", "triathlon"], "Sports"),
+        (["cinema", "film", "movie", "movies"], "Cinema"),
+        (["fair", "fairs", "feira", "feiras", "market", "mercado"], "Fairs"),
+        (["food", "gastronomy", "gastronomia", "wine", "vinho", "culinary"], "Gastronomy"),
+    ]
+
+    for terms, fallback_category in category_rules:
+        if any(term in normalized_query for term in terms):
+            return fallback_category
+    return None
+
+
 def _infer_event_date_filter_from_query(query: Optional[str]) -> Optional[str]:
     """Infers lightweight date filters directly from common PT/EN event phrasing."""
     normalized_query = _normalize_lookup_text(query)
@@ -2237,6 +2507,7 @@ def search_cultural_events(
     date_filter: Optional[str] = None,
     max_results: int = 10,
     offset: int = 0,
+    specific_lookup: bool = False,
     language: Optional[str] = None,
 ) -> str:
     """
@@ -2283,6 +2554,8 @@ def search_cultural_events(
 
         render_language = _infer_visitlisboa_output_language(query, language)
         specific_lookup_phrase = _extract_specific_event_lookup_phrase(query)
+        if specific_lookup and query and not specific_lookup_phrase:
+            specific_lookup_phrase = _normalize_lookup_text(query)
         effective_query = specific_lookup_phrase or query
 
         # Parse date range. Broad discovery defaults to upcoming, but specific lookups should search across all dates.
@@ -2335,15 +2608,19 @@ def search_cultural_events(
             undated_candidates = [e for e in undated_candidates if category_lower in e.get('category', '').lower()]
             logger.info(f"After category filter: {len(events_data)} events")
 
+        category_filtered_pool = list(events_data)
+
         # Step 3: Filter by query (TOKEN-BASED matching for better recall)
         query_scores: Dict[int, float] = {}
+        strong_specific_event_ids: set[int] = set()
         if query:
             expanded_tokens = _expand_event_query_tokens(effective_query)
 
             if specific_lookup_phrase or expanded_tokens:
-                def _score_collection(items: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[int, float]]:
+                def _score_collection(items: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[int, float], set[int]]:
                     scores: Dict[int, float] = {}
                     matched_items: List[Dict[str, Any]] = []
+                    strong_ids: set[int] = set()
                     for item in items:
                         score = _score_event_query_match(
                             item,
@@ -2353,19 +2630,52 @@ def search_cultural_events(
                         if score > 0:
                             scores[id(item)] = score
                             matched_items.append(item)
-                    return matched_items, scores
+                            if specific_lookup_phrase and _is_strong_specific_event_match(
+                                item,
+                                score,
+                                specific_lookup_phrase,
+                                expanded_tokens,
+                            ):
+                                strong_ids.add(id(item))
+                    return matched_items, scores, strong_ids
 
-                events_data, query_scores = _score_collection(events_data)
-                undated_candidates, _ = _score_collection(undated_candidates)
+                events_data, query_scores, strong_specific_event_ids = _score_collection(events_data)
+                undated_candidates, _, _ = _score_collection(undated_candidates)
                 logger.info(
                     f"After query filter: {len(events_data)} events (specific_lookup={bool(specific_lookup_phrase)}, tokens={expanded_tokens[:6]})"
                 )
             else:
                 logger.info(f"Query '{query}' contained only generic terms, skipping text filter.")
 
+        exact_lookup_not_found_intro: Optional[str] = None
+        if not events_data and specific_lookup_phrase:
+            fallback_category = _infer_specific_event_fallback_category(effective_query or query, category)
+            fallback_candidates = list(category_filtered_pool)
+            if fallback_category and not category:
+                fallback_category_lower = fallback_category.lower()
+                fallback_candidates = [
+                    event for event in fallback_candidates
+                    if fallback_category_lower in event.get('category', '').lower()
+                ]
+
+            if fallback_candidates:
+                events_data = fallback_candidates
+                query_scores = {id(event): 0.0 for event in events_data}
+                exact_lookup_not_found_intro = _build_specific_lookup_fallback_intro(
+                    specific_lookup_phrase,
+                    language=render_language,
+                    content_kind="event",
+                )
+
         if not events_data:
             localized_date_filter = _localize_event_date_filter(date_filter, language=render_language)
             localized_category = _localize_event_category(category, language=render_language) if category else None
+            if specific_lookup_phrase:
+                return _build_specific_lookup_fallback_intro(
+                    specific_lookup_phrase,
+                    language=render_language,
+                    content_kind="event",
+                )
             if render_language == "pt":
                 message = (
                     "❌ Não encontrei eventos com data confirmada que correspondam ao filtro pedido.\n\n"
@@ -2401,6 +2711,18 @@ def search_cultural_events(
             event['_relevance_score'] = calculate_temporal_relevance_score(event, start_date, end_date)
             event['_duration_days'] = get_event_duration_days(event)
             event['_query_match_score'] = query_scores.get(id(event), 0.0)
+
+        if specific_lookup_phrase:
+            exact_matches = [event for event in events_data if id(event) in strong_specific_event_ids]
+            if exact_matches:
+                events_data = exact_matches
+                exact_lookup_not_found_intro = None
+            elif exact_lookup_not_found_intro is None:
+                exact_lookup_not_found_intro = _build_specific_lookup_fallback_intro(
+                    specific_lookup_phrase,
+                    language=render_language,
+                    content_kind="event",
+                )
 
         if query_scores:
             events_data.sort(
@@ -2444,8 +2766,11 @@ def search_cultural_events(
                 )
             return "\n".join(output_parts).strip()
 
+        # Keep exact-match fallback alternatives concise on the first batch.
+        display_count = min(max_results, 2) if exact_lookup_not_found_intro and offset == 0 else max_results
+
         # Limit results
-        results = events_data[offset : offset + max_results]
+        results = events_data[offset : offset + display_count]
 
         # Format output with contextual filter summary and concise descriptions
         output_parts = _format_event_filter_summary(
@@ -2459,6 +2784,8 @@ def search_cultural_events(
             offset=offset,
             language=render_language,
         )
+        if exact_lookup_not_found_intro and offset == 0:
+            output_parts = [exact_lookup_not_found_intro, "", *output_parts]
         output_parts.append("")
 
         for i, event in enumerate(results, 1):
@@ -2564,6 +2891,7 @@ def search_places_attractions(
     category: Optional[str] = None,
     max_results: int = 10,
     offset: int = 0,
+    specific_lookup: bool = False,
     language: Optional[str] = None,
 ) -> str:
     """
@@ -2606,6 +2934,8 @@ def search_places_attractions(
         requested_window = max_results + offset
         render_language = _infer_visitlisboa_output_language(query, language)
         specific_lookup_query = _extract_specific_place_lookup_phrase(query)
+        if specific_lookup and query and not specific_lookup_query:
+            specific_lookup_query = _normalize_lookup_text(query)
         effective_query = specific_lookup_query or query
         query_intent = _infer_place_query_intent(effective_query or query, category)
 
@@ -2881,26 +3211,95 @@ def search_places_attractions(
         # STEP 3: Format Output
         # =====================================================================
 
+        exact_lookup_not_found_intro: Optional[str] = None
+
+        if specific_lookup_query and all_results:
+            exact_matches: List[Dict[str, Any]] = []
+            perfect_signature_matches: List[Dict[str, Any]] = []
+            requested_signature = _normalize_specific_place_signature(specific_lookup_query)
+            for result in all_results:
+                candidate = result
+                if result.get('url') and result.get('source') == 'visitlisboa':
+                    full_place = _get_place_by_url(result['url'])
+                    if full_place:
+                        candidate = full_place
+                score = _score_specific_place_lookup_match(candidate, specific_lookup_query)
+                if _is_strong_specific_place_match(score, specific_lookup_query):
+                    exact_matches.append(result)
+                    if requested_signature and _normalize_specific_place_signature(candidate.get('title')) == requested_signature:
+                        perfect_signature_matches.append(result)
+
+            if perfect_signature_matches:
+                all_results = perfect_signature_matches
+            elif exact_matches:
+                all_results = exact_matches
+            else:
+                exact_lookup_not_found_intro = _build_specific_lookup_fallback_intro(
+                    specific_lookup_query,
+                    language=render_language,
+                    content_kind="place",
+                )
+
         if not all_results:
             # Last resort fallback
             if effective_query or query:
                 fallback_items = _fallback_search(effective_query or query, category, _load_places_json(), max_results=requested_window)
                 if fallback_items:
                     all_results = [_convert_raw_place_to_result(item) for item in fallback_items]
+                    if specific_lookup_query and not exact_lookup_not_found_intro:
+                        exact_lookup_not_found_intro = _build_specific_lookup_fallback_intro(
+                            specific_lookup_query,
+                            language=render_language,
+                            content_kind="place",
+                        )
+
+            if not all_results and specific_lookup_query:
+                fallback_category = _infer_specific_place_fallback_category(specific_lookup_query, category)
+                if fallback_category:
+                    fallback_items = _fallback_search(None, fallback_category, _load_places_json(), max_results=requested_window)
+                    if fallback_items:
+                        all_results = [_convert_raw_place_to_result(item) for item in fallback_items]
+                        if not exact_lookup_not_found_intro:
+                            exact_lookup_not_found_intro = _build_specific_lookup_fallback_intro(
+                                specific_lookup_query,
+                                language=render_language,
+                                content_kind="place",
+                            )
 
             if not all_results and (effective_query or query):
                 logger.info("No results from hybrid search, trying direct Dados Abertos")
                 from tools.dados_abertos import _search_place_in_datasets_logic
                 open_data_results = _search_place_in_datasets_logic(effective_query or query, max_results=requested_window)
                 if open_data_results:
+                    if specific_lookup_query:
+                        normalized_specific_lookup = _normalize_lookup_text(specific_lookup_query)
+                        normalized_open_data_output = _normalize_lookup_text(open_data_results)
+                        if normalized_specific_lookup and normalized_specific_lookup not in normalized_open_data_output:
+                            intro = _build_specific_lookup_fallback_intro(
+                                specific_lookup_query,
+                                language=render_language,
+                                content_kind="place",
+                            )
+                            return f"{intro}\n\n{open_data_results}".strip()
                     return open_data_results
 
-            if render_language == "pt":
-                return f"Não foram encontrados locais correspondentes a '{query or 'todos'}' no VisitLisboa ou nos registos de dados abertos."
-            return f"No places found matching: '{query or 'all'}' in VisitLisboa or Open Data registries."
+            if specific_lookup_query and not all_results:
+                return _build_specific_lookup_fallback_intro(
+                    specific_lookup_query,
+                    language=render_language,
+                    content_kind="place",
+                )
 
-        # Limit to max_results
-        final_results = all_results[offset : offset + max_results]
+            if not all_results and render_language == "pt":
+                return f"Não foram encontrados locais correspondentes a '{query or 'todos'}' no VisitLisboa ou nos registos de dados abertos."
+            if not all_results:
+                return f"No places found matching: '{query or 'all'}' in VisitLisboa or Open Data registries."
+
+        # Keep exact-match fallback alternatives concise on the first batch.
+        display_count = min(max_results, 2) if exact_lookup_not_found_intro and offset == 0 else max_results
+
+        # Limit to the requested window.
+        final_results = all_results[offset : offset + display_count]
         if not final_results:
             if render_language == "pt":
                 return (
@@ -2926,6 +3325,9 @@ def search_places_attractions(
                 f"🏛️ **Found {len(final_results)} Places/Attractions in Lisbon:**\n",
                 f"🧭 **Result window:** {offset + 1}-{offset + len(final_results)} of {len(all_results)}.",
             ]
+
+        if exact_lookup_not_found_intro and offset == 0:
+            output_parts = [exact_lookup_not_found_intro, "", *output_parts]
 
         for i, place in enumerate(final_results, 1):
             title = place.get('title', 'Unknown')
