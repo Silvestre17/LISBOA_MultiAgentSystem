@@ -132,6 +132,25 @@ class TestPricingLookup:
             assert pricing["input"] == pytest.approx(expected_input)
             assert pricing["output"] == pytest.approx(expected_output)
 
+    def test_repository_catalog_includes_selected_2026_04_model_expansion_entries(self):
+        """The 2026-04 pricing refresh should cover the newly added GPT-5.4 and Foundry entries."""
+        catalog = load_pricing_catalog()
+
+        expected_prices = {
+            "azure::gpt-5.4-mini": (0.75, 4.5),
+            "azure::gpt-5.4": (2.5, 15.0),
+            "azure::gpt-5.4-pro": (30.0, 180.0),
+            "openai::gpt-5.4-nano": (0.2, 1.25),
+            "anthropic::claude-opus-4.7": (5.0, 25.0),
+            "google::gemini-3.1-pro-preview": (2.0, 12.0),
+        }
+
+        for model_id, (expected_input, expected_output) in expected_prices.items():
+            pricing = resolve_model_pricing(catalog, model_id)
+            assert pricing is not None, model_id
+            assert pricing["input"] == pytest.approx(expected_input)
+            assert pricing["output"] == pytest.approx(expected_output)
+
     def test_repository_catalog_resolves_kimi_deployment_alias(self):
         """Kimi deployment labels should map to the catalog entry used for cost accounting."""
         catalog = load_pricing_catalog()

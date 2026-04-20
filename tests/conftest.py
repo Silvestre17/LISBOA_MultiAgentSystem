@@ -7,6 +7,8 @@
 # ===========================================================================
 
 from __future__ import annotations
+from tools import __all__ as EXPORTED_TOOL_NAMES
+from config import Config
 
 import json
 import os
@@ -20,8 +22,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from config import Config
-from tools import __all__ as EXPORTED_TOOL_NAMES
 
 COVERAGE_MANIFEST_PATH = PROJECT_ROOT / "tests" / "fixtures" / "tool_coverage_manifest.json"
 STRICT_PLACEHOLDER_TOKENS = (
@@ -52,7 +52,6 @@ def _is_missing_env_value(value: str | None) -> bool:
 
     lowered = normalized.lower()
     return any(token in lowered for token in STRICT_PLACEHOLDER_TOKENS)
-
 
 
 def _required_llm_env_vars() -> list[str]:
@@ -124,7 +123,8 @@ def strict_live_environment() -> dict[str, Any]:
         if missing_env:
             details.append("Missing environment variables: " + ", ".join(sorted(missing_env)))
         if missing_paths:
-            details.append("Missing required files/directories: " + ", ".join(sorted(missing_paths)))
+            details.append("Missing required files/directories: " +
+                           ", ".join(sorted(missing_paths)))
         raise RuntimeError(
             "Strict live evaluation prerequisites are missing. "
             "Fix the following before running live coverage:\n- "

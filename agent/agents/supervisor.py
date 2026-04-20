@@ -13,8 +13,9 @@ from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from agent.agents.base import BaseAgent, clean_response, parse_json_response, traceable
+from agent.agents.base import BaseAgent, clean_response, parse_json_response
 from agent.prompts.supervisor import get_supervisor_prompt
+from agent.utils.langsmith_tracing import traceable
 from agent.utils.response_formatter import strip_unsupported_closing_offers
 
 

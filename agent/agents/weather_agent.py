@@ -17,8 +17,9 @@ from langgraph.graph import END, StateGraph
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
-from agent.agents.base import BaseAgent, traceable
+from agent.agents.base import BaseAgent
 from agent.prompts.weather import get_weather_prompt
+from agent.utils.langsmith_tracing import traceable
 from agent.state import AgentState
 from agent.utils.langgraph_compat import ToolNode
 from agent.utils.response_formatter import (

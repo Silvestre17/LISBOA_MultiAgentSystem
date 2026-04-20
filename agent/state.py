@@ -20,8 +20,14 @@ class UserContext(TypedDict, total=False):
         latitude (float): User's current latitude.
         longitude (float): User's current longitude.
         preferences (List[str]): User interests (e.g., 'museums', 'food', 'nature').
-        language (str): Preferred language ('en', 'pt').
+        language (str): Effective response language ('en', 'pt').
         ui_language (str): Interface language selected in the app UI.
+        detected_language (str): ISO-639-1 code (or extended code) of the
+            language detected from the latest user query, e.g. ``fr``, ``de``,
+            ``ja``. Populated by :func:`agent.utils.response_formatter.resolve_output_language`.
+        requires_bilingual_note (bool): True when the user wrote in a language
+            other than PT or EN and the assistant should surface a bilingual
+            note in the final response explaining it is optimized for PT/EN.
         available_time (int): Available time in hours for activities.
         mobility (str): Mobility level ('full', 'limited', 'wheelchair').
     """
@@ -30,6 +36,8 @@ class UserContext(TypedDict, total=False):
     preferences: List[str]
     language: str
     ui_language: str
+    detected_language: str
+    requires_bilingual_note: bool
     available_time: int
     mobility: str
 

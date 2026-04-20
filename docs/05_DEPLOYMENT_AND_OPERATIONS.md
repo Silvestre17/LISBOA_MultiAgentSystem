@@ -71,6 +71,7 @@ Metro TLS note:
 - `LANGSMITH_PROJECT`
 - `LANGSMITH_ENDPOINT`
 - `LANGSMITH_WORKSPACE_ID` when the LangSmith API key is linked to multiple workspaces
+- `LANGSMITH_SYNC_FLUSH` to force a post-run tracer flush and `read_run` confirmation probe when tracing persistence needs active debugging
 
 Legacy `LANGCHAIN_*` tracing aliases are still accepted by the runtime for backward compatibility, but the canonical `LANGSMITH_*` names above should be preferred for new setups.
 
@@ -87,6 +88,7 @@ Legacy `LANGCHAIN_*` tracing aliases are still accepted by the runtime for backw
 - Nested spans then capture the supervisor, worker agents, LangChain model calls, and tool executions used to answer that request.
 - The connection-validation flow behind `Save & Connect` in `app.py` is intentionally excluded from tracing to avoid wasting the free-tier trace quota.
 - If your LangSmith API key is linked to multiple workspaces, set `LANGSMITH_WORKSPACE_ID` or the tracing preflight check may auto-disable tracing.
+- `LANGSMITH_SYNC_FLUSH=true` makes the runtime wait for the local tracer queue to flush and then attempt a `read_run` confirmation after each user-facing run. The default remains off so normal chat latency is not increased.
 
 ## 🚀 First Run
 
@@ -98,8 +100,8 @@ streamlit run app.py
 
 When `app.py` starts, it also:
 
-- pre-warms the vector store
-- initializes or refreshes the Carris support database when needed
+- warms the Carris Urban support database, Metro station cache, CP GTFS plus AML station support data, and Carris Metropolitana caches
+- pre-warms the vector store only when multi-agent mode is enabled
 - loads environment values from `.env`
 
 ## 🧰 Vector-Store Operations
@@ -213,7 +215,7 @@ Checkpoint semantics used by the sync workflow:
 - `sync_vector_db.yml` runs when scraped JSON changed and also when `_sync_state/` already contains pending work from an earlier run.
 - Each sync iteration stages and pushes `data/vector_db/` immediately after the Python sync command returns, so completed progress is durable before the next iteration starts.
 - Workflow concurrency is serialized per ref to avoid overlapping vector DB pushes.
-- As of 2026-03, the workflow timeout is configured below the GitHub-hosted 6-hour hard job limit, while still leaving room for dependency installation and final repository operations.
+- As of 2026-04, the workflow timeout is configured below the GitHub-hosted 6-hour hard job limit, while still leaving room for dependency installation and final repository operations.
 
 ## 🚦 Performance and Batching Notes
 
@@ -245,7 +247,7 @@ If `METRO_CONSUMER_KEY` and `METRO_CONSUMER_SECRET` are missing, the system can 
 
 ### Metro TLS Chain Fails Even With Valid Credentials
 
-As of 2026-03, the preferred behavior is:
+As of 2026-04, the preferred behavior is:
 
 1. normal certificate verification
 2. automatic dynamic completion of missing issuer certificates

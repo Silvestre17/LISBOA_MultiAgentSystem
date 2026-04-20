@@ -53,6 +53,68 @@ def _default_validation_payload(**overrides) -> dict:
     return payload
 
 
+def test_repair_final_response_uses_runtime_output_language_in_prompt() -> None:
+    """The QA repair pass must obey the runtime-resolved PT/EN output language, not the raw user-message language."""
+    from agent.agents.qa_agent import QualityAssuranceAgent
+
+    agent = object.__new__(QualityAssuranceAgent)
+    agent.llm = MagicMock()
+
+    captured: dict[str, str] = {}
+
+    def _fake_safe_invoke(_llm, messages):
+        captured["system"] = messages[0].content
+        captured["human"] = messages[1].content
+        response = MagicMock()
+        response.content = "Repaired answer in English."
+        return response
+
+    agent._safe_llm_invoke = _fake_safe_invoke
+
+    repaired = agent.repair_final_response(
+        user_query="Quel temps fait-il à Lisbonne aujourd'hui?",
+        draft_response="Brouillon en français.",
+        agent_outputs={"weather": "Weather output.", "transport": "Transport output."},
+        qa_result={
+            "missing_data": ["transport details"],
+            "critical_issues": ["final answer is in the wrong language"],
+            "disclaimers": ["Language must follow runtime output language"],
+        },
+        language="en",
+    )
+
+    assert repaired == "Repaired answer in English."
+    assert "required runtime output language" in captured["system"].lower()
+    assert "preserve the user's language" not in captured["system"].lower()
+    assert "**Required output language:** English" in captured["human"]
+
+
+def test_validate_marks_double_json_parse_failure_as_incomplete() -> None:
+    """If QA cannot parse valid JSON twice, it should fail closed and trigger repair."""
+    from agent.agents.qa_agent import QualityAssuranceAgent
+
+    agent = object.__new__(QualityAssuranceAgent)
+    agent.llm = MagicMock()
+    agent._safe_llm_invoke = MagicMock(
+        side_effect=[
+            MagicMock(content="not json"),
+            MagicMock(content="still not json"),
+        ]
+    )
+
+    result = agent.validate(
+        user_query="How do I get from Rossio to Belém?",
+        agent_outputs={"transport": "Transport output."},
+        agents_called=["transport"],
+        language="en",
+    )
+
+    assert result["complete"] is False
+    assert result["needs_repair"] is True
+    assert any("qa validation structure could not be confirmed" in item.lower() for item in result["missing_data"])
+    assert any("quality validation could not produce a valid structured result" in item.lower() for item in result["disclaimers"])
+
+
 # ---------------------------------------------------------------
 # 1. Deterministic fact-check tests (no LLM needed)
 # ---------------------------------------------------------------
@@ -127,6 +189,16 @@ class TestVerifyFacts:
         assert any("outside" in w.lower() for w in result["disclaimers"]), (
             f"Expected AML warning for lat/lon text format in {result['disclaimers']}"
         )
+
+    def test_departure_time_lists_do_not_trigger_false_coordinate_warning(self):
+        """Comma-separated departure times must not be misread as out-of-scope coordinates."""
+        text = (
+            "Next departures: 11:33, 11:59, 12:14\n"
+            "The bus feed is active and the stop is Rossio."
+        )
+        result = self.agent._verify_facts(text, "test query", None)
+        coord_warns = [w for w in result["disclaimers"] if "outside" in w.lower()]
+        assert coord_warns == []
 
     # --- Date sanity checks ---
 
@@ -531,7 +603,7 @@ class TestValidatePipeline:
         assert self.agent._safe_llm_invoke.call_count == 2
 
     def test_validate_falls_back_after_double_json_failure(self):
-        """Two malformed replies should degrade gracefully with a safe fallback result."""
+        """Two malformed replies should fail closed with a conservative fallback result."""
         bad_response = MagicMock()
         bad_response.content = "Not JSON"
         self.agent._safe_llm_invoke = MagicMock(return_value=bad_response)
@@ -543,8 +615,9 @@ class TestValidatePipeline:
             language="en",
         )
 
-        assert result["complete"] is True
-        assert any("limited" in disclaimer.lower() for disclaimer in result["disclaimers"])
+        assert result["complete"] is False
+        assert "could not be confirmed" in result["missing_data"][0].lower()
+        assert any("structured result after retry" in disclaimer.lower() for disclaimer in result["disclaimers"])
         assert "fact_check" in result
 
     def test_validate_includes_context_and_skips_internal_keys(self):

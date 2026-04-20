@@ -7,6 +7,7 @@
 # ===========================================================================
 
 from __future__ import annotations
+from agent.utils import usage_costs as _shared_usage_costs
 
 import hashlib
 import json
@@ -156,7 +157,8 @@ def normalize_token_usage(usage: Any) -> dict[str, int]:
         input_tokens = max(
             input_tokens,
             _coerce_int(
-                candidate.get("input_tokens", candidate.get("prompt_tokens", candidate.get("input_token_count")))
+                candidate.get("input_tokens", candidate.get(
+                    "prompt_tokens", candidate.get("input_token_count")))
             ),
         )
         output_tokens = max(
@@ -383,8 +385,10 @@ def _build_single_model_cost_payload(
     output_price = pricing.get("output") if pricing else None
     cached_price = pricing.get("input_cached") if pricing else None
 
-    input_cost = (tokens["input_tokens"] / 1_000_000) * input_price if input_price is not None else 0.0
-    output_cost = (tokens["output_tokens"] / 1_000_000) * output_price if output_price is not None else 0.0
+    input_cost = (tokens["input_tokens"] / 1_000_000) * \
+        input_price if input_price is not None else 0.0
+    output_cost = (tokens["output_tokens"] / 1_000_000) * \
+        output_price if output_price is not None else 0.0
     total_tokens = tokens["total_tokens"]
     pricing_complete = input_price is not None and output_price is not None
     missing_models = []
@@ -443,8 +447,10 @@ def build_cost_payload(
             total_input_cost += event_cost["input_cost_usd"]
             total_output_cost += event_cost["output_cost_usd"]
             missing_pricing_models.extend(event_cost.get("missing_pricing_models", []))
-            pricing_found = pricing_found and bool(event_cost.get("pricing_found", False) or entry_tokens["total_tokens"] == 0)
-            pricing_complete = pricing_complete and bool(event_cost.get("pricing_complete", False) or entry_tokens["total_tokens"] == 0)
+            pricing_found = pricing_found and bool(event_cost.get(
+                "pricing_found", False) or entry_tokens["total_tokens"] == 0)
+            pricing_complete = pricing_complete and bool(event_cost.get(
+                "pricing_complete", False) or entry_tokens["total_tokens"] == 0)
             cost_breakdown.append(
                 {
                     "call_index": entry.get("call_index"),
@@ -508,8 +514,10 @@ def combine_cost_payloads(payloads: Iterable[dict[str, Any]]) -> dict[str, Any]:
         total_output_cost += float(payload.get("output_cost_usd", 0.0) or 0.0)
 
         payload_tokens = tokens["total_tokens"]
-        pricing_found = pricing_found and bool(payload.get("pricing_found", False) or payload_tokens == 0)
-        pricing_complete = pricing_complete and bool(payload.get("pricing_complete", False) or payload_tokens == 0)
+        pricing_found = pricing_found and bool(payload.get(
+            "pricing_found", False) or payload_tokens == 0)
+        pricing_complete = pricing_complete and bool(
+            payload.get("pricing_complete", False) or payload_tokens == 0)
         missing_pricing_models.extend(payload.get("missing_pricing_models", []))
         if isinstance(payload.get("llm_cost_breakdown"), list):
             cost_breakdown.extend(deepcopy(payload["llm_cost_breakdown"]))
@@ -531,7 +539,6 @@ def combine_cost_payloads(payloads: Iterable[dict[str, Any]]) -> dict[str, Any]:
     if cost_breakdown:
         result["llm_cost_breakdown"] = cost_breakdown
     return result
-
 
 
 def fingerprint_payload(payload: Any) -> str:
@@ -653,7 +660,8 @@ def build_multi_judge_manifest(
     aggregation: str = "mean",
 ) -> dict[str, Any]:
     """Build a compact synthetic manifest describing a multi-judge average."""
-    judge_models = [manifest.get("model_id") for manifest in judge_model_manifests if manifest.get("model_id")]
+    judge_models = [manifest.get("model_id")
+                    for manifest in judge_model_manifests if manifest.get("model_id")]
     return {
         "kind": "judge_average",
         "model_id": f"judge_average::{len(judge_models)}",
@@ -747,11 +755,9 @@ def build_results_output_path(
     return ensure_results_dir(result_type) / f"{prefix}_{timestamp}{suffix}"
 
 
-
 def compute_dataset_fingerprint(dataset: list[dict[str, Any]]) -> str:
     """Return a fingerprint for the benchmark dataset content."""
     return fingerprint_payload(dataset)
-
 
 
 def compute_tool_registry_fingerprint(tool_names: Optional[Iterable[str]] = None) -> str:
@@ -812,7 +818,6 @@ def select_balanced_subset(
     return subset
 
 
-
 def categorize_error(error: str | None) -> str | None:
     """Map raw runtime errors to stable evaluation categories."""
     if not error:
@@ -839,7 +844,6 @@ def categorize_error(error: str | None) -> str | None:
     return "execution_error"
 
 
-
 def summarize_error_categories(records: Iterable[dict[str, Any]]) -> dict[str, int]:
     """Count error categories across benchmark/ablation records."""
     counter: Counter[str] = Counter()
@@ -848,7 +852,6 @@ def summarize_error_categories(records: Iterable[dict[str, Any]]) -> dict[str, i
         if category:
             counter[category] += 1
     return dict(sorted(counter.items()))
-
 
 
 def build_run_metadata(
@@ -878,7 +881,6 @@ def build_run_metadata(
 
 
 # Keep evaluation cost/usage helpers aligned with the runtime-safe shared module.
-from agent.utils import usage_costs as _shared_usage_costs  # noqa: E402
 
 globals().update(
     {
@@ -897,7 +899,6 @@ globals().update(
         "load_pricing_catalog": _shared_usage_costs.load_pricing_catalog,
     }
 )
-
 
 # ===========================================================================
 # Test Block
@@ -930,18 +931,24 @@ if __name__ == "__main__":
         "pricing_snapshot_date": "2026-03-19",
     }
     cost = build_cost_payload(usage, pricing)
-    metrics = compute_tool_metrics(["get_weather_forecast", "get_metro_status"], ["get_metro_status"])
+    metrics = compute_tool_metrics(
+        ["get_weather_forecast", "get_metro_status"], ["get_metro_status"])
     metadata = build_run_metadata(
         groundtruth_queries_path="eval/evaluation_groundtruth_queries.json",
         groundtruth_queries=[{"domain": "weather", "query": "test"}],
         response_models={"weather": "azure::gpt-5-mini"},
     )
 
-    _check(usage["tokens"]["total_tokens"] == 150, "Usage normalization handles prompt/completion aliases")
-    _check(cost["pricing_complete"] is True and cost["total_cost_usd"] > 0, "Cost payload computes a positive total")
-    _check(metrics["tool_precision"] == 1.0 and metrics["tool_recall"] == 0.5, "Tool metrics remain deterministic")
-    _check(bool(metadata.get("tool_registry_fingerprint")), "Run metadata includes tool registry fingerprint")
-    _check(fingerprint_payload({"a": 1}) == fingerprint_payload({"a": 1}), "Fingerprinting is stable")
+    _check(usage["tokens"]["total_tokens"] == 150,
+           "Usage normalization handles prompt/completion aliases")
+    _check(cost["pricing_complete"] is True and cost["total_cost_usd"]
+           > 0, "Cost payload computes a positive total")
+    _check(metrics["tool_precision"] == 1.0 and metrics["tool_recall"]
+           == 0.5, "Tool metrics remain deterministic")
+    _check(bool(metadata.get("tool_registry_fingerprint")),
+           "Run metadata includes tool registry fingerprint")
+    _check(fingerprint_payload({"a": 1}) == fingerprint_payload(
+        {"a": 1}), "Fingerprinting is stable")
 
     print("\n\033[1mSummary:\033[0m")
     print(f"   Passed: {counters['passed']}")

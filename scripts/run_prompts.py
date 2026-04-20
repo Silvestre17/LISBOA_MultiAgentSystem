@@ -70,6 +70,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
 from agent.graph import MultiAgentAssistant
+from agent.utils.startup_resources import run_startup_preload
 from config import Config
 from eval.run_benchmark import run_isolated_agent
 from tools import __all__ as EXPORTED_TOOL_NAMES
@@ -81,12 +82,23 @@ DEFAULT_TRANSCRIPT_FILENAME = "test_queries_15.04.2026.txt"
 
 # Each prompt is a tuple: (prompt_text, language_code, category)
 SMOKE_PROMPTS = [
+    # Additional test prompts (2026-04)
+    ("Dá-me o ponto de situação do Metro, autocarros e comboios em Lisboa.", "pt", "transport"),
+    ("Quando é a Feira do Livro?", "pt", "event"),
+    ("Fala-me do Web Summit", "pt", "event"),
+    ("Onde fica o Museu do Livro?", "pt", "researcher"),
+    ("Fala-me do Mosteiro dos Jerónimos", "pt", "researcher"),
+    
+    
+    # Additional test prompts (2026-03)
+    ("Qual o próximo autocarro do Marquês para Belém?", "pt", "test"),
+    ("Quero ir de metro ou comboio entre Entrecampos e Sete Rios? Qual o mais rápido e o mais barato?", "pt", "test"),
+    ("Estou em Entrecampos e quero fazer um passeio turistico mas não pelos sitios habituais turisticos. Quero algo diferente... sugere-me", "pt", "test"),
+    ("Qual o hospital e a farmácia mais perto do Saldanha?", "pt", "test"),
+    ("Quero ir de transportes públicos entre o ISCTE e a Zara do Rossio", "pt", "test"),
+    ("Qual museu ou monumento recomendas ir neste domingo sendo que apenas tenho das 19 às 20h para visitar?", "pt", "test"),
+    
     # CRITICAL end-to-end prompts
-    (
-        "Planeia amanhã um dia inteiro em Lisboa a começar no Rossio com dois museus, almoço típico, deslocações em transporte público e adaptação se chover.",
-        "pt",
-        "planner",
-    ),
     (
         "Quais os próximos autocarros da Carris no Rossio para seguir para Belém agora?",
         "pt",
@@ -121,15 +133,7 @@ SMOKE_PROMPTS = [
 
     # Guardrails / edge cases
     ("Quero ir de metro para a Madeira.", "pt", "edge_case"),
-    ("Preciso do próximo Fertagus para Setúbal e de ferry para o Barreiro agora.", "pt", "edge_case"),
-
-    # Additional test prompts (2025-03)
-    ("Qual o próximo autocarro do Marquês para Belém?", "pt", "test"),
-    ("Quero ir de metro ou comboio entre Entrecampos e Sete Rios? Qual o mais rápido e o mais barato?", "pt", "test"),
-    ("Estou em Entrecampos e quero fazer um passeio turistico mas não pelos sitios habituais turisticos. Quero algo diferente... sugere-me", "pt", "test"),
-    ("Qual o hospital e a farmácia mais perto do Saldanha?", "pt", "test"),
-    ("Quero ir de transportes públicos entre o ISCTE e a Zara do Rossio", "pt", "test"),
-    ("Qual museu ou monumento recomendas ir neste domingo sendo que apenas tenho das 19 às 20h para visitar?", "pt", "test"),
+    ("Preciso do próximo Fertagus para Setúbal e de ferry para o Barreiro agora.", "pt", "edge_case")
 ]
 
 
@@ -348,6 +352,15 @@ def _run_custom_prompt(args) -> int:
             print("=" * 60, flush=True)
             print("🧪 CUSTOM SMOKE PROMPT", flush=True)
             print("=" * 60, flush=True)
+
+            preload_status = _warm_smoke_resources(language=language)
+            if not preload_status.get("ok", False):
+                print(
+                    "❌ Shared resource preload failed; aborting before assistant startup.",
+                    flush=True,
+                )
+                return 1
+
             print("\nInitializing Multi-Agent System...", flush=True)
             try:
                 assistant = MultiAgentAssistant()
@@ -440,6 +453,27 @@ def _print_smoke_tool_trace(messages, response: str, elapsed: float, execution_s
     print("\033[1;34m---------------------------------------\033[0m\n", flush=True)
 
 
+def _warm_smoke_resources(language: str = "pt") -> dict[str, Any]:
+    """Preload shared runtime resources before smoke-mode assistant startup."""
+    print("\n🚀 Preloading shared runtime resources...", flush=True)
+    preload_status = run_startup_preload(
+        language=language,
+        use_multi_agent=Config.USE_MULTI_AGENT,
+    )
+
+    transport_status = str(preload_status.get("transport_status") or "")
+    if transport_status:
+        prefix = "✅" if preload_status.get("transport_ok") else "⚠️"
+        print(f"{prefix} Transport preload: {transport_status}", flush=True)
+
+    kb_status = preload_status.get("kb_status")
+    if kb_status:
+        prefix = "✅" if preload_status.get("kb_ok") else "⚠️"
+        print(f"{prefix} {kb_status}", flush=True)
+
+    return preload_status
+
+
 def _select_subset(items, limit: int | None, offset: int, category: str | None, category_key: str):
     """Apply category filtering plus offset/limit slicing to a prompt list."""
     if category:
@@ -462,8 +496,18 @@ def _run_smoke_suite(args) -> int:
     print("\nInitializing Multi-Agent System...", flush=True)
     try:
         with _temporary_model_provider(args.provider):
-            assistant = MultiAgentAssistant()
             prompts_subset = _select_subset(SMOKE_PROMPTS, args.limit, args.offset, args.category, 2)
+
+            preload_language = prompts_subset[0][1][1] if prompts_subset else "pt"
+            preload_status = _warm_smoke_resources(language=preload_language)
+            if not preload_status.get("ok", False):
+                print(
+                    "❌ Shared resource preload failed; aborting smoke suite before assistant startup.",
+                    flush=True,
+                )
+                return 1
+
+            assistant = MultiAgentAssistant()
 
             print(f"✅ Model: {assistant.model_name}", flush=True)
             print(f"✅ Provider family: {Config.MODEL_PROVIDER}", flush=True)

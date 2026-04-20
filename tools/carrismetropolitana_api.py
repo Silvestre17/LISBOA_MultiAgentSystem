@@ -1109,6 +1109,13 @@ def resolve_location(
         )
         return result
 
+    if geocoded and is_within_lisbon_city(geocoded.get("lat"), geocoded.get("lon")):
+        logger.info(
+            "Resolved '%s' to a Lisbon-city POI but found no nearby Carris Metropolitana stops",
+            clean_name,
+        )
+        return result
+
     logger.warning(f"Could not resolve location '{clean_name}'")
     return result
 
@@ -1437,6 +1444,44 @@ def find_direct_bus_lines(origin: str, destination: str) -> str:
     origin_norm = normalize(origin)
     dest_norm = normalize(destination)
 
+    def _should_fallback_to_route_finder(text: str) -> bool:
+        normalized = normalize(text)
+        if not normalized:
+            return False
+        place_markers = (
+            "museum",
+            "museu",
+            "restaurant",
+            "restaurante",
+            "hotel",
+            "hospital",
+            "pharmacy",
+            "farmacia",
+            "farmácia",
+            "tower",
+            "torre",
+            "church",
+            "igreja",
+            "monument",
+            "monumento",
+            "fundacao",
+            "fundação",
+            "avenida",
+            "rua",
+            "praca",
+            "praça",
+            "campus",
+            "airport",
+            "aeroporto",
+            "city centre",
+            "city center",
+            "centre of lisbon",
+            "center of lisbon",
+            "centro de lisboa",
+            "centro da cidade",
+        )
+        return any(marker in normalized for marker in place_markers)
+
     direct_lines = []
 
     for line in data:
@@ -1477,6 +1522,28 @@ def find_direct_bus_lines(origin: str, destination: str) -> str:
             )
 
     if not direct_lines:
+        if _should_fallback_to_route_finder(origin) or _should_fallback_to_route_finder(destination):
+            search_radius_km = 0.8 if any(
+                marker in origin_norm or marker in dest_norm
+                for marker in (
+                    "city centre",
+                    "city center",
+                    "centre of lisbon",
+                    "center of lisbon",
+                    "centro de lisboa",
+                    "centro da cidade",
+                )
+            ) else 0.5
+            return str(
+                find_bus_routes.invoke(
+                    {
+                        "origin": origin,
+                        "destination": destination,
+                        "search_radius_km": search_radius_km,
+                    }
+                )
+            )
+
         response = f"❌ **Sem linhas diretas entre '{origin}' e '{destination}'**\n\n"
         response += "💡 **Sugestões:**\n"
         response += "   • Pode ser necessário fazer transbordo\n"
@@ -2089,7 +2156,14 @@ def find_bus_routes(
                 else:
                     response += f"      • {stop['name']}\n"
         else:
-            response += f"   ❌ Could not resolve '{destination}'\n"
+            dest_loc = dest_resolved.get("location")
+            if dest_loc and is_within_lisbon_city(dest_loc.get("lat"), dest_loc.get("lon")):
+                response += (
+                    f"   ℹ️ Geocoded '{destination}' inside Lisbon city, but no nearby Carris Metropolitana stops "
+                    f"were found within {search_radius_km}km\n"
+                )
+            else:
+                response += f"   ❌ Could not resolve '{destination}'\n"
 
     dest_stops = dest_resolved.get("stops", [])
 

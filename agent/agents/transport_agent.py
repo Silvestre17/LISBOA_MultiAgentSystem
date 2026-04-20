@@ -22,14 +22,18 @@ from langgraph.graph import END, StateGraph
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
-from agent.agents.base import BaseAgent, traceable
+from agent.agents.base import BaseAgent
 from agent.prompts.transport import get_transport_prompt
+from agent.utils.langsmith_tracing import traceable
 from agent.state import AgentState
 from agent.utils.langgraph_compat import ToolNode
 from agent.utils.response_formatter import (
     extract_update_time,
     finalize_worker_response,
+    has_source_line,
     infer_response_language,
+    operators_from_tool_names,
+    rebuild_transport_source_line,
 )
 
 
@@ -65,6 +69,12 @@ def _clean_query_fragment(part: str) -> str:
     )
     part = re.sub(
         r"\b(?:sem\s+complica(?:[çc](?:ão|ao|ões|oes))|qual(?:\s+[ée])?\s+a?\s*melhor\s+(?:forma|rota|caminho)|what(?:'s| is)\s+the\s+best\s+(?:way|route)|best\s+(?:way|route)|o\s+metro\s+serve\s+bem|serve\s+bem)\b.*$",
+        "",
+        part,
+        flags=re.IGNORECASE,
+    )
+    part = re.sub(
+        r"\b(?:e|and)\s+(?:o\s+que\s+muda|what\s+changes?|what\s+is\s+different|como\s+muda)\b.*$",
         "",
         part,
         flags=re.IGNORECASE,
@@ -416,11 +426,21 @@ def _query_has_status_intent(query: str) -> bool:
         r"\bis the metro working\b",
         r"\bmetro status\b",
         r"\btransport status\b",
+        r"\bstatus overview\b",
+        r"\bnetwork status\b",
         r"\bhow are the transports\b",
+        r"\bpoint of situation\b",
+        r"\bponto de situa[cç][aã]o\b",
         r"\bcomo est[aã]o os transportes\b",
         r"\best[aá] o metro a funcionar\b",
         r"\bestado do metro\b",
         r"\bestado dos transportes\b",
+        r"\bponto de situa[cç][aã]o do metro\b",
+        r"\bponto de situa[cç][aã]o dos transportes\b",
+        r"\bperturba(?:cao|ções|coes|ção|caoes)s?\b.*\bmetro\b",
+        r"\bperturba(?:cao|ções|coes|ção|caoes)s?\b.*\btransportes\b",
+        r"\btransportes?\b.*\blisboa\b",
+        r"\bmetro,?\s+autocarros?\s+e\s+comboios\b",
         r"\bare trains running\b",
         r"\bservice status\b",
     ]
@@ -570,6 +590,7 @@ def _build_metro_wait_lines(targets: List[Tuple[str, str]], language: str) -> Li
 def _extract_route_endpoints(user_message: str) -> Optional[Tuple[str, str]]:
     """Extracts route endpoints from common PT/EN route phrasings."""
     patterns = [
+        r"\b(?:quais\s+os\s+)?(?:pr[oó]xim(?:os|as)|next)\s+(?:autocarros?|buses?|el[eé]tricos?|trams?).*?\b(?:at|em|na|no)\s+(?P<origin>.+?)\s+(?:para\s+(?:seguir\s+)?(?:para\s+)?|to\s+)(?P<destination>.+?)(?:[\?\!\.,;]|$)",
         r"\b(?:plan|planeia|planeie|organiza|organize)\b.*?\b(?:em|in)\s+(?P<destination>[^,\?\!\.]+),\s*(?:diz[- ]me|diga[- ]me|tell me|show me)\s+como\s+l[aá]\s+chegar\s+a\s+partir\s+d(?:o|a)\s+(?P<origin>.+?)(?:\s+e\b|[\?\!\.,;]|$)",
         r"\b(?:plan|planeia|planeie|organiza|organize)\b.*?\b(?:em|in)\s+(?P<destination>[^,\?\!\.]+),\s*(?:tell me|show me)\s+how\s+to\s+get\s+there\s+from\s+(?P<origin>.+?)(?:\s+and\b|[\?\!\.,;]|$)",
         r"\b(?:quero|preciso|tenho)\s+(?:de\s+)?ir\s+(?:para|ao|a|à)\s+(?P<destination>.+?)\s+a\s+partir\s+d(?:o|a)\s+(?P<origin>.+?)(?:[\?\!\.,;]|$)",
@@ -771,6 +792,7 @@ def _tool_result_indicates_no_match(result: str) -> bool:
     negative_markers = [
         "no direct carris route found",
         "could not locate",
+        "could not resolve",
         "sem linhas diretas",
         "sem linha direta",
         "no direct bus routes found",
@@ -779,6 +801,7 @@ def _tool_result_indicates_no_match(result: str) -> bool:
         "não consegui",
         "not found",
         "no bus stops found",
+        "no nearby carris metropolitana stops were found",
     ]
     return any(marker in normalized for marker in negative_markers)
 
@@ -1099,6 +1122,83 @@ def _clean_metropolitana_direct_bus_block(text: str) -> str:
         cleaned_lines.append(raw_line)
 
     return "\n".join(cleaned_lines).strip()
+
+
+def _extract_metropolitana_nearby_lines(text: str, location_label: str) -> Optional[str]:
+    """Extracts the nearby-line inventory shown for one endpoint in a no-direct-line result."""
+    if not text or not location_label:
+        return None
+
+    match = re.search(
+        rf"At\s+{re.escape(location_label)}:\s*(?P<lines>.+)$",
+        text,
+        flags=re.IGNORECASE | re.MULTILINE,
+    )
+    if not match:
+        return None
+
+    return match.group("lines").strip()
+
+
+def _format_metropolitana_no_direct_summary(
+    text: str,
+    *,
+    origin: str,
+    destination: str,
+    language: str,
+    build_source_line: Callable[[str, List[str]], str],
+) -> str:
+    """Formats a concise no-direct-line summary for Carris Metropolitana results."""
+    title = (
+        f"### 🚌 Linhas diretas da Carris Metropolitana para {origin} → {destination}"
+        if language == "pt"
+        else f"### 🚌 Direct Carris Metropolitana lines for {origin} → {destination}"
+    )
+    summary_lines = [
+        "- ❌ **Sem linha suburbana direta confirmada** para esta ligação."
+        if language == "pt"
+        else "- ❌ **No direct suburban bus line was confirmed** for this trip."
+    ]
+
+    origin_lines = _extract_metropolitana_nearby_lines(text, origin)
+    destination_lines = _extract_metropolitana_nearby_lines(text, destination)
+    if origin_lines:
+        summary_lines.append(
+            f"- 📍 **Linhas disponíveis perto da origem:** {origin_lines}"
+            if language == "pt"
+            else f"- 📍 **Lines available near the origin:** {origin_lines}"
+        )
+    if destination_lines:
+        summary_lines.append(
+            f"- 📍 **Linhas disponíveis perto do destino:** {destination_lines}"
+            if language == "pt"
+            else f"- 📍 **Lines available near the destination:** {destination_lines}"
+        )
+
+    scope_markers = [
+        "important: carris metropolitana scope note",
+        "for lisbon city-only trips",
+        "lisbon city",
+    ]
+    if any(marker in _normalize_token(text) for marker in scope_markers):
+        summary_lines.append(
+            "- ⚠️ **Âmbito:** para trajetos dentro da cidade de Lisboa, confirme também Carris Urban ou uma combinação Metro + autocarro."
+            if language == "pt"
+            else "- ⚠️ **Scope:** for Lisbon city-only trips, also confirm Carris Urban or a Metro + bus combination."
+        )
+
+    return "\n".join(
+        [
+            title,
+            "",
+            *summary_lines,
+            "",
+            build_source_line(
+                language,
+                ["[*Carris Metropolitana*](https://www.carrismetropolitana.pt)"],
+            ),
+        ]
+    ).strip()
 
 
 def _parse_wait_targets_from_route(route_result: str) -> List[Tuple[str, str]]:
@@ -2482,6 +2582,13 @@ def _build_deterministic_metro_route_response(
 
 def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]:
     """Returns the raw route-tool guidance for non-metro-direct routes."""
+    if _query_has_wait_departure_intent(user_message) and re.search(
+        r"\b(carris|autocarro|autocarros|bus|buses|tram|trams|el[eé]trico|eletrico)\b",
+        user_message,
+        flags=re.IGNORECASE,
+    ):
+        return None
+
     endpoints = _extract_route_endpoints(user_message)
     if not endpoints:
         return None
@@ -2683,6 +2790,12 @@ class TransportAgent(BaseAgent):
             r"\bmetro status\b",
             r"\best[aá] o metro a funcionar\b",
             r"\bestado do metro\b",
+            r"\bestado das linhas do metro\b",
+            r"\bstatus das linhas do metro\b",
+            r"\bperturba(?:cao|ções|coes|ção|caoes)s?\b.*\bmetro\b",
+            r"\bperturba(?:cao|ções|coes|ção|caoes)s?\b.*\blinhas\b",
+            r"\bdisruptions?\b.*\bmetro\b",
+            r"\bmetro de lisboa\b.*\b(?:estado|status|perturba(?:cao|ções|coes|ção|caoes)s?)\b",
             r"\bmetro lines\b",
             r"\bmetro service\b",
         ]
@@ -2789,6 +2902,11 @@ class TransportAgent(BaseAgent):
 
         origin, destination = endpoints
         metro_response = _build_deterministic_metro_route_response(user_message, context) or ""
+        if metro_response:
+            self._record_tool_call(
+                "get_route_between_stations",
+                {"origin": origin, "destination": destination},
+            )
 
         train_tool = self._get_tool_by_name("plan_train_trip")
         train_response = ""
@@ -2817,7 +2935,7 @@ class TransportAgent(BaseAgent):
             lines = [
                 f"**Compara\u00e7\u00e3o:** {origin} {arrow} {destination}",
                 "",
-                "#### \U0001F687 Metro",
+                "#### \U0001F687 Metro de Lisboa",
                 f"\u23F1\uFE0F **Tempo estimado:** {metro_minutes} min"
                 if metro_minutes is not None
                 else "\u23F1\uFE0F **Tempo estimado:** n\u00e3o foi poss\u00edvel confirmar com os dados dispon\u00edveis",
@@ -2834,7 +2952,7 @@ class TransportAgent(BaseAgent):
 
             lines.extend(["", "#### \u2705 Conclus\u00e3o"])
             if metro_minutes is not None and train_minutes is not None:
-                faster_label = "Comboio" if train_minutes < metro_minutes else "Metro"
+                faster_label = "Comboio" if train_minutes < metro_minutes else "Metro de Lisboa"
                 lines.append(f"- **Mais r\u00e1pido:** {faster_label}")
             else:
                 lines.append("- **Mais r\u00e1pido:** n\u00e3o foi poss\u00edvel comparar com seguran\u00e7a porque falta pelo menos uma dura\u00e7\u00e3o oficial")
@@ -2844,7 +2962,7 @@ class TransportAgent(BaseAgent):
             lines = [
                 f"**Comparison:** {origin} {arrow} {destination}",
                 "",
-                "#### \U0001F687 Metro",
+                "#### \U0001F687 Lisbon Metro",
                 f"\u23F1\uFE0F **Estimated time:** {metro_minutes} min"
                 if metro_minutes is not None
                 else "\u23F1\uFE0F **Estimated time:** could not be confirmed from the available data",
@@ -2861,7 +2979,7 @@ class TransportAgent(BaseAgent):
 
             lines.extend(["", "#### \u2705 Verdict"])
             if metro_minutes is not None and train_minutes is not None:
-                faster_label = "Train" if train_minutes < metro_minutes else "Metro"
+                faster_label = "Train" if train_minutes < metro_minutes else "Lisbon Metro"
                 lines.append(f"- **Faster:** {faster_label}")
             else:
                 lines.append("- **Faster:** I could not compare confidently because at least one official duration is missing")
@@ -2892,7 +3010,165 @@ class TransportAgent(BaseAgent):
         if not cleaned_result:
             return cleaned_result
 
+        if tool_name == "get_metro_status":
+            line_name_map = {
+                "yellow line": ("Linha Amarela", "Yellow Line", "🟡"),
+                "blue line": ("Linha Azul", "Blue Line", "🔵"),
+                "green line": ("Linha Verde", "Green Line", "🟢"),
+                "red line": ("Linha Vermelha", "Red Line", "🔴"),
+                "linha amarela": ("Linha Amarela", "Yellow Line", "🟡"),
+                "linha azul": ("Linha Azul", "Blue Line", "🔵"),
+                "linha verde": ("Linha Verde", "Green Line", "🟢"),
+                "linha vermelha": ("Linha Vermelha", "Red Line", "🔴"),
+            }
+
+            parsed_lines: List[str] = []
+            line_matches = re.findall(
+                r"(?P<emoji>[🟡🔵🟢🔴])\s+(?P<line>Yellow Line|Blue Line|Green Line|Red Line|Linha Amarela|Linha Azul|Linha Verde|Linha Vermelha)\s*\n\s*(?:[✅⚠️]\s*)?(?P<status>[^\n]+)",
+                cleaned_result,
+                flags=re.IGNORECASE,
+            )
+
+            for emoji, raw_line_name, raw_status in line_matches:
+                canonical = line_name_map.get(raw_line_name.lower())
+                if not canonical:
+                    continue
+                pt_name, en_name, fallback_emoji = canonical
+                status_lower = raw_status.lower().strip()
+                if any(token in status_lower for token in ["normal service", "all lines operating normally", "serviço normal", "circulação normal", "ok"]):
+                    localized_status = "circulação normal" if language == "pt" else "normal service"
+                elif "unavailable" in status_lower or "indispon" in status_lower:
+                    localized_status = "estado em tempo real indisponível" if language == "pt" else "real-time status unavailable"
+                else:
+                    localized_status = raw_status.strip()
+
+                parsed_lines.append(
+                    f"- {emoji or fallback_emoji} **{pt_name if language == 'pt' else en_name}**: {localized_status}"
+                )
+
+            if not parsed_lines and re.search(
+                r"all lines operating normally|circula[cç][aã]o normal em todas as linhas",
+                cleaned_result,
+                flags=re.IGNORECASE,
+            ):
+                parsed_lines.append(
+                    "- 🟢 **Todas as linhas**: circulação normal"
+                    if language == "pt"
+                    else "- 🟢 **All lines**: normal service"
+                )
+
+            if parsed_lines:
+                title = "### 🚇 Estado do Metro de Lisboa" if language == "pt" else "### 🚇 Lisbon Metro Status"
+                return "\n".join(
+                    [
+                        title,
+                        "",
+                        *parsed_lines,
+                        "",
+                        self._build_transport_source_line(
+                            language,
+                            ["[*Metro de Lisboa*](https://www.metrolisboa.pt)"],
+                        ),
+                    ]
+                ).strip()
+
+        if tool_name == "carris_get_realtime_vehicles":
+            route_short_name = str(
+                tool_args.get("route_short_name") or tool_args.get("route_id") or ""
+            ).strip().upper()
+            timestamp_match = re.search(r"Dados de:\s*(\d{2}:\d{2})(?::\d{2})?", cleaned_result)
+            feed_timestamp = timestamp_match.group(1) if timestamp_match else datetime.now().strftime("%H:%M")
+
+            active_entries: List[Tuple[str, Optional[str]]] = []
+            current_destination: Optional[str] = None
+            for raw_line in cleaned_result.splitlines():
+                stripped = raw_line.strip()
+                if not stripped:
+                    continue
+
+                route_match = re.match(
+                    r"^(?P<route>[0-9A-Z]+)\s*->\s*(?P<destination>.+?)\s*\[[^\]]+\]$",
+                    stripped,
+                )
+                if route_match:
+                    if route_short_name and route_match.group("route").upper() != route_short_name:
+                        current_destination = None
+                        continue
+                    current_destination = route_match.group("destination").strip()
+                    active_entries.append((current_destination, None))
+                    continue
+
+                stop_match = re.search(r"Pr[oó]xima paragem:\s*(?P<stop>.+)$", stripped, re.IGNORECASE)
+                if stop_match and active_entries and current_destination:
+                    destination, _ = active_entries[-1]
+                    if destination == current_destination:
+                        active_entries[-1] = (destination, stop_match.group("stop").strip())
+
+            if active_entries:
+                direction_counts: Dict[str, int] = {}
+                sample_stops: Dict[str, str] = {}
+                for destination, next_stop in active_entries:
+                    direction_counts[destination] = direction_counts.get(destination, 0) + 1
+                    if next_stop and destination not in sample_stops:
+                        sample_stops[destination] = next_stop
+
+                total_active = len(active_entries)
+                title = (
+                    f"### 🚋 Estado do {route_short_name} em tempo real"
+                    if language == "pt"
+                    else f"### 🚋 {route_short_name} live snapshot"
+                )
+                summary_line = (
+                    f"- 📡 **Feed:** Carris GTFS-RT ativo às {feed_timestamp}."
+                    if language == "pt"
+                    else f"- 📡 **Feed:** Carris GTFS-RT active at {feed_timestamp}."
+                )
+                active_line = (
+                    f"- 🚋 **Veículos ativos:** {total_active} elétrico(s) {route_short_name} em circulação."
+                    if language == "pt"
+                    else f"- 🚋 **Active vehicles:** {total_active} {route_short_name} tram(s) currently in service."
+                )
+                direction_header = "- ↔️ **Sentidos ativos:**" if language == "pt" else "- ↔️ **Active directions:**"
+                limitation_line = (
+                    "- ⚠️ Este feed mostra veículos em circulação e próxima paragem, mas não confirma se a linha está a horas, atrasada, ou perturbada."
+                    if language == "pt"
+                    else "- ⚠️ This feed shows vehicles in service and their next stop, but it does not confirm whether the line is on time, delayed, or disrupted."
+                )
+                fallback_line = (
+                    f"- 💡 Se me disseres a tua origem e destino no {route_short_name}, posso sugerir um fallback grounded se esta linha não te servir."
+                    if language == "pt"
+                    else f"- 💡 If you tell me your origin and destination on the {route_short_name}, I can suggest a grounded fallback if this line is not suitable."
+                )
+
+                output_lines = [title, "", summary_line, active_line, direction_header]
+                for destination, count in sorted(direction_counts.items(), key=lambda item: (-item[1], item[0])):
+                    stop_note = sample_stops.get(destination)
+                    if language == "pt":
+                        bullet = f"  - **{destination}**: {count} veículo(s)"
+                        if stop_note:
+                            bullet += f" · próxima paragem observada: {stop_note}"
+                    else:
+                        bullet = f"  - **{destination}**: {count} vehicle(s)"
+                        if stop_note:
+                            bullet += f" · sample next stop: {stop_note}"
+                    output_lines.append(bullet)
+
+                output_lines.extend([limitation_line, fallback_line])
+                return "\n".join(output_lines).strip()
+
         if tool_name == "find_direct_bus_lines":
+            origin = str(tool_args.get("origin") or "Origin").strip()
+            destination = str(tool_args.get("destination") or "Destination").strip()
+
+            if _tool_result_indicates_no_match(cleaned_result):
+                return _format_metropolitana_no_direct_summary(
+                    cleaned_result,
+                    origin=origin,
+                    destination=destination,
+                    language=language,
+                    build_source_line=self._build_transport_source_line,
+                )
+
             filtered_lines: List[str] = []
             for raw_line in cleaned_result.splitlines():
                 stripped = raw_line.strip()
@@ -2925,8 +3201,6 @@ class TransportAgent(BaseAgent):
                 filtered_lines.append(line)
 
             if filtered_lines:
-                origin = str(tool_args.get("origin") or "Origin").strip()
-                destination = str(tool_args.get("destination") or "Destination").strip()
                 title = (
                     f"### 🚌 Linhas diretas da Carris Metropolitana para {origin} → {destination}"
                     if language == "pt"
@@ -3229,16 +3503,24 @@ class TransportAgent(BaseAgent):
     ) -> Optional[str]:
         """Resolves deterministic direct-response fast paths shared by invoke() and build_subgraph()."""
         resolved_language = language or infer_response_language(user_query=user_message, default="en")
+        endpoints = _extract_route_endpoints(user_message)
+        ambiguity_preamble = ""
+        if endpoints:
+            try:
+                from tools.transport_api import _build_ambiguity_preamble
+
+                ambiguity_preamble = _build_ambiguity_preamble(endpoints[0], endpoints[1])
+            except Exception:
+                ambiguity_preamble = ""
 
         unsupported_mode_response = _build_unsupported_transport_scope_response(
             user_message=user_message,
             language=resolved_language,
         )
         if unsupported_mode_response:
-            return finalize_worker_response(
+            return self._finalize_transport_response(
                 unsupported_mode_response,
-                agent_name="transport",
-                user_query=user_message,
+                user_message=user_message,
                 language=resolved_language,
             )
 
@@ -3248,10 +3530,9 @@ class TransportAgent(BaseAgent):
             language=resolved_language,
         )
         if comparison_response:
-            return finalize_worker_response(
+            return self._finalize_transport_response(
                 comparison_response,
-                agent_name="transport",
-                user_query=user_message,
+                user_message=user_message,
                 language=resolved_language,
             )
 
@@ -3261,28 +3542,27 @@ class TransportAgent(BaseAgent):
             language=resolved_language,
         )
         if constrained_route_response:
-            return finalize_worker_response(
+            return self._finalize_transport_response(
                 constrained_route_response,
-                agent_name="transport",
-                user_query=user_message,
+                user_message=user_message,
                 language=resolved_language,
             )
 
-        deterministic_response = _build_deterministic_metro_route_response(
-            user_message=user_message,
-            context=context,
-        )
+        deterministic_response = None
+        if not ambiguity_preamble:
+            deterministic_response = _build_deterministic_metro_route_response(
+                user_message=user_message,
+                context=context,
+            )
         if deterministic_response:
-            endpoints = _extract_route_endpoints(user_message)
             if endpoints:
                 self._record_tool_call(
                     "get_route_between_stations",
                     {"origin": endpoints[0], "destination": endpoints[1]},
                 )
-            return finalize_worker_response(
+            return self._finalize_transport_response(
                 deterministic_response,
-                agent_name="transport",
-                user_query=user_message,
+                user_message=user_message,
                 language=resolved_language,
             )
 
@@ -3297,10 +3577,9 @@ class TransportAgent(BaseAgent):
                 if metro_wait_request.get("direction"):
                     wait_args["direction"] = metro_wait_request.get("direction")
                 self._record_tool_call("get_metro_wait_time", wait_args)
-            return finalize_worker_response(
+            return self._finalize_transport_response(
                 metro_wait_response,
-                agent_name="transport",
-                user_query=user_message,
+                user_message=user_message,
                 language=resolved_language,
             )
 
@@ -3326,10 +3605,9 @@ class TransportAgent(BaseAgent):
                         "carris_vehicle_eta",
                         {"route_short_name": line, "stop": stop_reference},
                     )
-            return finalize_worker_response(
+            return self._finalize_transport_response(
                 carris_stop_response,
-                agent_name="transport",
-                user_query=user_message,
+                user_message=user_message,
                 language=resolved_language,
             )
 
@@ -3339,19 +3617,22 @@ class TransportAgent(BaseAgent):
         if not cp_tool_spec and not carris_metropolitana_tool_spec:
             direct_route_response = _build_deterministic_route_tool_response(user_message)
             if direct_route_response:
-                return finalize_worker_response(
+                if endpoints:
+                    self._record_tool_call(
+                        "get_route_between_stations",
+                        {"origin": endpoints[0], "destination": endpoints[1]},
+                    )
+                return self._finalize_transport_response(
                     direct_route_response,
-                    agent_name="transport",
-                    user_query=user_message,
+                    user_message=user_message,
                     language=resolved_language,
                 )
 
         direct_tool_response = self._run_direct_tool_fallback(user_message)
         if direct_tool_response:
-            return finalize_worker_response(
+            return self._finalize_transport_response(
                 direct_tool_response,
-                agent_name="transport",
-                user_query=user_message,
+                user_message=user_message,
                 language=resolved_language,
             )
 
@@ -3382,10 +3663,9 @@ class TransportAgent(BaseAgent):
             result=str(result).strip(),
             language=resolved_language,
         )
-        return finalize_worker_response(
+        return self._finalize_transport_response(
             formatted_result,
-            agent_name="transport",
-            user_query=user_message,
+            user_message=user_message,
             language=resolved_language,
         )
 
@@ -3499,6 +3779,46 @@ class TransportAgent(BaseAgent):
 
         return _upsert_realtime_wait_section(response, realtime_lines, language=language)
 
+    def _finalize_transport_response(
+        self,
+        response: str,
+        *,
+        user_message: str,
+        language: str,
+        ensure_wait_times: bool = False,
+    ) -> str:
+        """Finalize a transport response and rebuild its footer from recorded operators."""
+        formatted_response = response
+        if ensure_wait_times:
+            formatted_response = self._ensure_realtime_wait_times(user_message, formatted_response)
+
+        finalized = finalize_worker_response(
+            formatted_response,
+            agent_name="transport",
+            user_query=user_message,
+            language=language,
+        )
+
+        tool_names = [call.get("tool_name") for call in self.get_tool_calls_log()]
+        operators_used = operators_from_tool_names(tool_names)
+        if operators_used:
+            rebuilt = rebuild_transport_source_line(finalized, operators_used, language=language)
+            if rebuilt != finalized:
+                finalized = rebuilt
+            elif not has_source_line(finalized):
+                source_links = {
+                    "metro": "[*Metro de Lisboa*](https://www.metrolisboa.pt)",
+                    "carris": "[*Carris*](https://www.carris.pt)",
+                    "carris_metropolitana": "[*Carris Metropolitana*](https://www.carrismetropolitana.pt)",
+                    "cp": "[*CP*](https://www.cp.pt)",
+                }
+                finalized = (
+                    f"{finalized}\n\n"
+                    f"{self._build_transport_source_line(language, [source_links[op] for op in operators_used if op in source_links])}"
+                ).strip()
+
+        return finalized
+
     @traceable(name="transport_agent", run_type="chain", tags=["sub-agent", "transport"])
     def invoke(
         self, user_message: str, context: str = "", verbose: bool = False
@@ -3567,7 +3887,7 @@ class TransportAgent(BaseAgent):
         response = self.execute_react_loop(
             messages=messages,
             verbose=verbose,
-            max_iterations=5,
+            max_iterations=6,
             tool_enforcement_msg="" if is_greeting else (
                 "You MUST use a tool (like get_metro_status or get_route_between_stations) "
                 "to get real data. Do NOT answer from your knowledge base. Call the tool now."
@@ -3575,12 +3895,14 @@ class TransportAgent(BaseAgent):
         )
 
         self._remember_transport_context(effective_user_message)
-        return finalize_worker_response(
-            self._ensure_realtime_wait_times(effective_user_message, response),
-            agent_name="transport",
-            user_query=effective_user_message,
+        finalized = self._finalize_transport_response(
+            response,
+            user_message=effective_user_message,
             language=language,
+            ensure_wait_times=True,
         )
+
+        return finalized
 
     def build_subgraph(self) -> "CompiledStateGraph":
         """

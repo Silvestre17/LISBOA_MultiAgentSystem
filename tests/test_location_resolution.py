@@ -22,6 +22,7 @@ from agent.prompts.qa import get_qa_prompt
 from agent.prompts.researcher import get_researcher_prompt
 from tools.location_resolver import (
     AML_BOUNDS,
+    _build_query_variants,
     _fetch_nominatim_results_cached,
     build_dynamic_landmark_info,
     get_location_display_name,
@@ -161,6 +162,17 @@ def test_curated_display_names_keep_manual_polish_examples_stable() -> None:
     assert get_location_display_name("Biblioteca Nacional") == "Biblioteca Nacional de Portugal"
     assert get_location_display_name("Faculdade de Ciências") == "Faculdade de Ciências da Universidade de Lisboa (FCUL)"
     assert get_location_display_name("FCUL") == "FCUL"
+
+
+def test_city_centre_aliases_resolve_to_stable_central_lisbon_queries() -> None:
+    """Vague city-centre queries should start from stable central Lisbon anchors instead of noisy OSM matches."""
+    variants = _build_query_variants("centre of Lisbon")
+
+    assert variants[0] == "Rossio, Lisboa, Portugal"
+    assert "Baixa-Chiado, Lisboa, Portugal" in variants
+    assert get_location_display_name("centre of Lisbon") == "Rossio"
+    assert get_location_display_name("center") == "Rossio"
+    assert get_location_display_name("centre") == "Rossio"
 
 
 def test_nominatim_requests_are_bounded_to_portugal_and_the_aml() -> None:

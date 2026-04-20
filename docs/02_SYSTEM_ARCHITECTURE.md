@@ -30,7 +30,7 @@ The latest thesis-facing framework figure stored in the repository is shown belo
 - Streamlit chat experience through `app.py`
 - runtime provider and model selection
 - session state, quick actions, info pages, and status updates
-- pre-warming of the vector store and Carris support database at startup
+- startup warmup of the Carris Urban support database, Metro station cache, CP GTFS plus AML station support data, Carris Metropolitana caches, and optionally the vector store when multi-agent mode is enabled
 
 ### 🤖 Orchestration Layer
 
@@ -73,8 +73,9 @@ graph TD
 2. `SupervisorAgent.route()` decides whether the answer can be returned directly or whether worker agents are needed.
 3. Weather, transport, and research workers can run in parallel.
 4. `QualityAssuranceAgent.validate()` checks completeness, disclaimers, and retry needs.
-5. If the route includes planning, `PlannerAgent.synthesize()` writes the final itinerary.
-6. Otherwise, the system returns a direct or combined response without invoking the planner.
+5. If the route includes planning and QA confirms the grounded worker evidence is sufficiently complete, `PlannerAgent.synthesize()` writes the final itinerary.
+6. If QA still marks the grounded evidence as incomplete after the retry path, planner publication is skipped and the runtime falls back to structured worker outputs plus explicit caveats.
+7. Otherwise, the system returns a direct or combined response without invoking the planner.
 
 ## 🤝 Agent Roles and Tool Assignments
 
@@ -94,6 +95,7 @@ One of the most important architectural details is that the planner is **not** a
 - **Planning queries:** the final answer is synthesized by `PlannerAgent.synthesize()`.
 - **Greetings or out-of-scope requests:** the response can be returned directly by the supervisor.
 - **Simple single-domain requests:** the response can come from one specialist worker or from combined worker outputs, without using the planner.
+- **Language resolution in the 2026-04 runtime:** final user-facing answers are emitted only in **PT-PT** or **English**. If the detected input language is neither Portuguese nor English, the runtime answers in English and prepends a small bilingual note explaining that the assistant is optimized for PT-PT and English.
 
 This behavior is implemented in `MultiAgentAssistant.chat()` in `agent/graph.py`.
 
@@ -124,7 +126,7 @@ The QA step happens **after** worker execution and **before** final synthesis or
 | State field | Purpose |
 |-------------|---------|
 | `messages` | conversation history |
-| `user_context` | language, location, mobility, preferences, available time |
+| `user_context` | effective output language, UI language, detected input language, bilingual-note flag, location, mobility, preferences, available time |
 | `weather_context` | cached weather context when available |
 | `transport_context` | cached transport context when available |
 | `current_plan` | current itinerary structure |

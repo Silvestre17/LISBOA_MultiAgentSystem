@@ -45,6 +45,7 @@ from agent.agents.weather_agent import WeatherAgent
 from agent.graph import MultiAgentAssistant
 from agent.utils.response_formatter import (
     finalize_worker_response,
+    repair_known_live_typos,
     strip_unsupported_closing_offers,
 )
 from tools import ipma_api, visitlisboa_api
@@ -148,6 +149,50 @@ Level: Be aware
     assert "Temperatura" in output
     assert "Condições" in output
     assert "Vento" in output
+
+
+def test_weather_worker_finalization_localizes_month_abbreviation_and_high_cloud_for_pt() -> None:
+    """Portuguese weather responses should not leak English month abbreviations or high-cloud labels."""
+    raw = """🌤️ Weather Forecast for Lisbon
+📅 Updated: 2026-04-18T15:31:03
+☁️ Sunday, Apr 19
+   🌡️ Temperature: 14.4°C to 27.2°C
+   🌤️ Conditions: Cloudy (High cloud)
+   💧 Rain: No rain expected (0.0%)
+   💨 Wind: Northwest (Weak)"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="weather",
+        user_query="Qual é a previsão do tempo para os próximos 3 dias?",
+        language="pt",
+    )
+
+    assert "Domingo, Abr 19" in output
+    assert "Nublado (nuvens altas)" in output
+    assert "Cloudy (High cloud)" not in output
+
+
+def test_weather_worker_finalization_localizes_partly_cloudy_for_pt() -> None:
+    """Portuguese weather responses should translate the composite Partly cloudy phrase atomically."""
+    raw = """🌤️ Weather Forecast for Lisbon
+📅 Updated: 2026-04-18T15:31:03
+☀️ Saturday, Apr 18
+   🌡️ Temperature: 13.1°C to 28.2°C
+   🌤️ Partly cloudy
+   💧 Rain: No rain expected (0.0%)
+   💨 Wind: North (Weak)"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="weather",
+        user_query="Qual é a previsão do tempo para os próximos 3 dias?",
+        language="pt",
+    )
+
+    assert "Sábado, Abr 18" in output
+    assert "Parcialmente nublado" in output
+    assert "Partly Nublado" not in output
 
 
 def test_weather_worker_finalization_localizes_summary_labels_for_pt() -> None:
@@ -367,7 +412,6 @@ def test_supervisor_planning_query_forces_research_transport_and_weather_when_ne
         assert decision["agents"] == ["planner", "researcher", "transport", "weather"]
 
 
-
 def test_researcher_worker_finalization_uses_places_source_label_en() -> None:
     """Place queries should use the VisitLisboa Places source label in English."""
     raw = """**1.** 🏛️ **Museu Nacional do Azulejo**
@@ -386,7 +430,6 @@ Observation: If you want, I can fetch updated prices and opening hours."""
     assert "[*VisitLisboa Places*](https://www.visitlisboa.com/en/places)" in output
     assert "Observation:" not in output
     assert "updated prices" not in output.lower()
-
 
 
 def test_researcher_worker_finalization_uses_events_source_label_pt() -> None:
@@ -454,7 +497,7 @@ def test_researcher_worker_finalization_localizes_service_lookup_sections_in_pt(
 
     assert "#### 💊 Farmácias Perto de Saldanha" in output
     assert "#### 🏥 Hospitais Públicos Perto de Saldanha" in output
-    assert "📍 **Morada:** Avenida Duque d'Ávila, 125" in output
+    assert "📍 **Morada:** [Avenida Duque d'Ávila, 125](https://www.google.com/maps/search/?api=1&query=Avenida+Duque+d%27%C3%81vila%2C+125)" in output
     assert "📏 **Distância:** 0.07 km" in output
     assert "km away" not in output
     assert "📍 **Morada:** 📍" not in output
@@ -603,6 +646,60 @@ def test_researcher_direct_event_lookup_infers_music_weekend_filters_for_pt_quer
         assert "Revenge Of The 90 S" in output
 
 
+def test_researcher_named_event_lookup_uses_cleaned_specific_subject() -> None:
+    """Named PT event questions should query the event tool with the cleaned event title, not the full sentence."""
+    with patch.object(ResearcherAgent, "__init__", lambda self: None):
+        agent = ResearcherAgent()
+        agent.system_prompt = "PRIMARY PROMPT"
+
+        events_tool = MagicMock()
+        events_tool.name = "search_cultural_events"
+        events_tool.invoke = MagicMock(return_value="1. 📅 **Book Fair'26**")
+        agent.tools = [events_tool]
+        agent.execute_react_loop = MagicMock(side_effect=AssertionError("LLM flow should be skipped"))
+
+        output = agent.invoke("Quando é a feira do livro?", context="", verbose=False)
+
+        events_tool.invoke.assert_called_once_with(
+            {
+                "max_results": 5,
+                "language": "pt",
+                "offset": 0,
+                "category": "Fairs",
+                "query": "feira do livro",
+                "specific_lookup": True,
+            }
+        )
+        assert "Book Fair" in output
+
+
+def test_researcher_named_event_lookup_without_obvious_category_uses_direct_tool() -> None:
+    """Idiosyncratic named events such as Web Summit should still take the deterministic event path."""
+    with patch.object(ResearcherAgent, "__init__", lambda self: None):
+        agent = ResearcherAgent()
+        agent.system_prompt = "PRIMARY PROMPT"
+
+        events_tool = MagicMock()
+        events_tool.name = "search_cultural_events"
+        events_tool.invoke = MagicMock(return_value="1. 📅 **Web Summit**")
+        agent.tools = [events_tool]
+        agent.execute_react_loop = MagicMock(side_effect=AssertionError("LLM flow should be skipped"))
+
+        output = agent.invoke("Fala-me do Web Summit", context="", verbose=False)
+
+        events_tool.invoke.assert_called_once_with(
+            {
+                "max_results": 5,
+                "language": "pt",
+                "offset": 0,
+                "category": "Main Events",
+                "query": "web summit",
+                "specific_lookup": True,
+            }
+        )
+        assert "Web Summit" in output
+
+
 def test_search_cultural_events_specific_lookup_does_not_force_upcoming_date_window() -> None:
     """Specific event lookups without an explicit date should search across all available dates."""
     future_book_fair = {
@@ -700,6 +797,75 @@ def test_search_cultural_events_matches_specific_event_with_typos() -> None:
         )
 
     assert "Book Fair'26" in output
+
+
+def test_search_cultural_events_specific_lookup_reports_missing_exact_match_before_alternatives() -> None:
+    """Named event lookups should explicitly say the exact event was not found before suggesting similar alternatives."""
+    alternative_fair = {
+        "title": "Feira da Ladra",
+        "url": "https://www.visitlisboa.com/en/events/feira-da-ladra-flea-market",
+        "category": "Fairs",
+        "full_description": "Lisbon's historic flea market.",
+        "short_description": "Historic market in Campo de Santa Clara.",
+        "dates": [
+            {
+                "type": "single",
+                "date": {"datetime_iso": "2026-04-21", "display_text": "21 Apr", "time": None},
+            }
+        ],
+        "location": "Lisboa",
+    }
+    antique_fair = {
+        "title": "Feira de Alfarrabistas",
+        "url": "https://www.visitlisboa.com/en/events/feira-de-alfarrabistas-antique-book-fair",
+        "category": "Fairs",
+        "full_description": "Open-air antique and second-hand book fair.",
+        "short_description": "Book and antiques fair in Chiado.",
+        "dates": [
+            {
+                "type": "single",
+                "date": {"datetime_iso": "2026-04-25", "display_text": "25 Apr", "time": None},
+            }
+        ],
+        "location": "Lisboa",
+    }
+
+    with patch.object(visitlisboa_api, "_load_events_json", return_value=[alternative_fair, antique_fair]):
+        output = visitlisboa_api.search_cultural_events.invoke(
+            {"query": "Quando é a feira do livro?", "max_results": 2, "language": "pt"}
+        )
+
+    assert "Não encontrei um evento específico com o nome **feira do livro**" in output
+    assert "Como alternativa" in output
+    assert "Feira da Ladra" in output
+    assert "Feira de Alfarrabistas" in output
+
+
+def test_search_cultural_events_named_lookup_without_exact_match_uses_same_type_alternatives() -> None:
+    """Named event misses without obvious lexical overlap should still suggest same-type alternatives."""
+    alternative_main_event = {
+        "title": "Lisbon Innovation Forum",
+        "url": "https://www.visitlisboa.com/en/events/lisbon-innovation-forum",
+        "category": "Main Events",
+        "full_description": "Major innovation conference in Lisbon.",
+        "short_description": "Tech and startup forum.",
+        "dates": [
+            {
+                "type": "single",
+                "date": {"datetime_iso": "2026-11-15", "display_text": "15 Nov", "time": None},
+            }
+        ],
+        "location": "Lisboa",
+    }
+
+    with patch.object(visitlisboa_api, "_load_events_json", return_value=[alternative_main_event]):
+        output = visitlisboa_api.search_cultural_events.invoke(
+            {"query": "Web Summit", "max_results": 3, "language": "en"}
+        )
+
+    assert "I could not find a specific event named **web summit**" in output
+    assert "As an alternative" in output
+    assert "Lisbon Innovation Forum" in output
 
 
 def test_search_cultural_events_matches_thematic_event_query_with_typo() -> None:
@@ -1368,6 +1534,46 @@ def test_transport_worker_finalization_localizes_summary_counts_for_en() -> None
     assert "comboios" not in output
 
 
+def test_transport_worker_finalization_localizes_multimodal_summary_for_pt() -> None:
+    """Portuguese transport summaries should not leak English overview labels or caveats."""
+    raw = """🚇 🚌 🚆 **Lisbon Transport Status** — **Updated:** 17:47
+
+🚇 **Metro de Lisboa**
+- 🟢 **Status**: Normal service on all lines
+
+🚋 **Carris (Urban)**
+- 🟢 **Vehicles in service**: 261 vehicles
+
+🚌 **Carris Metropolitana (Suburban)**
+- ⚠️ **Active alerts**: 93 alerts
+
+🚆 **CP trains (AML)**
+- 📊 **Trains running in AML**: 34 trains
+- ⚠️ **Trains with delays over 1 minute**: 25 trains
+
+- ⚠️ Carris Metropolitana has active alerts, but the nature of the disruptions and the affected routes are not specified here.
+- ⚠️ Carris route numbers and schedules should be verified at carris.pt, as GTFS data may not reflect the most recent changes.
+
+📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Updated:** 17:47"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="transport",
+        user_query="Dá-me o ponto de situação do Metro, autocarros e comboios em Lisboa.",
+        language="pt",
+    )
+
+    assert "Situação dos Transportes de Lisboa" in output
+    assert "Circulação normal em todas as linhas" in output
+    assert "261 veículos" in output
+    assert "93 alertas" in output
+    assert "34 comboios" in output
+    assert "25 comboios" in output
+    assert "A Carris Metropolitana tem alertas ativos" in output
+    assert "Os números de linha e horários da Carris devem ser confirmados" in output
+    assert "Lisbon Transport Status" not in output
+
+
 def test_transport_worker_finalization_strips_embedded_stop_and_vehicle_ids_from_arrivals() -> None:
     """Transport finalization should remove embedded stop IDs and vehicle IDs from Carris arrival summaries."""
     raw = """🚌 **Rossio → Próximas chegadas (paragem ID 908)**
@@ -1951,10 +2157,167 @@ def test_researcher_named_place_lookup_uses_extracted_focus_query() -> None:
         output = agent.invoke('Tell me about "MAAT".', context="", verbose=False)
 
         dummy_places_tool.invoke.assert_called_once_with(
-            {"query": "MAAT", "max_results": 5, "offset": 0, "language": "en"}
+            {"query": "MAAT", "max_results": 5, "offset": 0, "language": "en", "specific_lookup": True}
         )
         assert "MAAT" in output
         assert "[*VisitLisboa Places*](https://www.visitlisboa.com/en/places)" in output
+
+
+def test_extract_specific_lookup_phrase_strips_pt_question_prefixes() -> None:
+    """Specific event/place lookup extractors should remove PT question phrasing generically."""
+    assert visitlisboa_api._extract_specific_event_lookup_phrase("Quando é a feira do livro?") == "feira do livro"
+    assert visitlisboa_api._extract_specific_event_lookup_phrase("Fala-me da feira do livro") == "feira do livro"
+    assert visitlisboa_api._extract_specific_place_lookup_phrase("Onde fica o MAAT?") == "maat"
+    assert visitlisboa_api._extract_specific_place_lookup_phrase("Diz-me mais sobre a Torre de Belém") == "torre de belem"
+
+
+def test_researcher_preserves_named_museum_lookup_and_routes_it_to_places() -> None:
+    """Named museum lookups should keep the full title and stay on the place path, not the event path."""
+    query = "Onde fica o Museu do Livro?"
+
+    assert ResearcherAgent._extract_place_focus_query(query) == "Museu do Livro"
+    assert ResearcherAgent._is_direct_place_lookup_query(query) is True
+    assert ResearcherAgent._is_direct_event_lookup_query(query) is False
+
+
+def test_researcher_named_hospital_query_with_onde_e_stays_on_place_path() -> None:
+    """PT named service lookups phrased as 'onde é' should still route to places, not events."""
+    query = "Diz-me onde é o Hospital de Santa Maria"
+
+    assert ResearcherAgent._extract_place_focus_query(query) == "Hospital de Santa Maria"
+    assert ResearcherAgent._is_direct_place_lookup_query(query) is True
+    assert ResearcherAgent._is_direct_event_lookup_query(query) is False
+
+
+def test_search_places_attractions_specific_lookup_reports_missing_exact_match_before_alternatives() -> None:
+    """Named place lookups should explicitly say the exact place was not found before suggesting similar alternatives."""
+    azulejo_museum = {
+        "title": "Museu Nacional do Azulejo",
+        "category": "Museums & Monuments",
+        "address": "Rua da Madre de Deus 4, Lisboa",
+        "location": "Lisboa",
+        "short_description": "National tile museum.",
+        "full_description": "Museum dedicated to Portuguese azulejo heritage.",
+        "url": "https://www.visitlisboa.com/en/places/museu-nacional-do-azulejo",
+    }
+
+    with patch.object(visitlisboa_api, "_get_vector_store", return_value=None), patch.object(
+        visitlisboa_api,
+        "_should_search_dados_abertos",
+        return_value=False,
+    ), patch.object(visitlisboa_api, "_load_places_json", return_value=[azulejo_museum]), patch.object(
+        visitlisboa_api,
+        "_get_place_by_url",
+        return_value=azulejo_museum,
+    ):
+        output = visitlisboa_api.search_places_attractions.invoke(
+            {"query": "Onde fica o Museu do Livro?", "max_results": 3, "language": "pt"}
+        )
+
+    assert "Não encontrei um local específico com o nome **museu do livro**" in output
+    assert "Como alternativa" in output
+    assert "Museu Nacional do Azulejo" in output
+
+
+def test_search_places_attractions_specific_lookup_shows_only_two_alternatives_in_first_batch() -> None:
+    """Specific place misses should keep the first alternative batch concise and paginable."""
+    fallback_places = [
+        {
+            "title": "Words Factory",
+            "category": "Museums & Monuments",
+            "address": "Lisboa",
+            "location": "Lisboa",
+            "short_description": "Library and cultural venue.",
+            "full_description": "Library and cultural venue.",
+            "url": "https://www.visitlisboa.com/en/places/words-factory",
+        },
+        {
+            "title": "João de Deus Museum",
+            "category": "Museums & Monuments",
+            "address": "Lisboa",
+            "location": "Lisboa",
+            "short_description": "Museum about reading and education.",
+            "full_description": "Museum about reading and education.",
+            "url": "https://www.visitlisboa.com/en/places/joao-de-deus-museum",
+        },
+        {
+            "title": "Museum of Illusions",
+            "category": "Museums & Monuments",
+            "address": "Lisboa",
+            "location": "Lisboa",
+            "short_description": "Immersive illusion museum.",
+            "full_description": "Immersive illusion museum.",
+            "url": "https://www.visitlisboa.com/en/places/museum-of-illusions",
+        },
+    ]
+
+    with patch.object(visitlisboa_api, "_get_vector_store", return_value=None), patch.object(
+        visitlisboa_api,
+        "_should_search_dados_abertos",
+        return_value=False,
+    ), patch.object(visitlisboa_api, "_load_places_json", return_value=fallback_places), patch.object(
+        visitlisboa_api,
+        "_get_place_by_url",
+        side_effect=lambda url: next((item for item in fallback_places if item["url"] == url), None),
+    ):
+        output = visitlisboa_api.search_places_attractions.invoke(
+            {"query": "Onde fica o Museu do Livro?", "max_results": 5, "language": "pt", "specific_lookup": True}
+        )
+
+    assert "Janela de resultados:** 1-2 de 3" in output
+    assert "Words Factory" in output
+    assert "João de Deus Museum" in output
+    assert "Museum of Illusions" not in output
+
+
+def test_specific_place_match_tolerates_connector_tokens_in_names() -> None:
+    """Named place scoring should treat connector tokens like 'de' as optional for exact matches."""
+    candidate = {"title": "Hospital Santa Maria", "category": "Open Data: Hospitais Públicos", "location": "Lisboa"}
+
+    score = visitlisboa_api._score_specific_place_lookup_match(candidate, "Hospital de Santa Maria")
+
+    assert visitlisboa_api._is_strong_specific_place_match(score, "Hospital de Santa Maria") is True
+
+
+def test_search_places_attractions_named_hospital_prefers_exact_facility_over_near_match() -> None:
+    """Specific hospital lookups should keep the exact facility when a near-miss hospital also exists."""
+    candidates = [
+        {
+            "title": "Hospital Santa Maria",
+            "category": "Open Data: Hospitais Públicos",
+            "address": "Avenida Professor Egas Moniz",
+            "location": "Lisboa",
+            "short_description": "Hospital público.",
+            "full_description": "Hospital público.",
+            "source": "dados_abertos",
+        },
+        {
+            "title": "Hospital Santa Marta",
+            "category": "Open Data: Hospitais Públicos",
+            "address": "Rua de Santa Marta, 50-50 I",
+            "location": "Lisboa",
+            "short_description": "Hospital público.",
+            "full_description": "Hospital público.",
+            "source": "dados_abertos",
+        },
+    ]
+
+    with patch.object(visitlisboa_api, "_get_vector_store", return_value=None), patch.object(
+        visitlisboa_api,
+        "_should_search_dados_abertos",
+        return_value=True,
+    ), patch.object(
+        visitlisboa_api,
+        "_search_dados_abertos_hybrid",
+        return_value=candidates,
+    ), patch.object(visitlisboa_api, "_load_places_json", return_value=[]):
+        output = visitlisboa_api.search_places_attractions.invoke(
+            {"query": "Hospital de Santa Maria", "max_results": 5, "language": "pt", "specific_lookup": True}
+        )
+
+    assert "Hospital Santa Maria" in output
+    assert "Hospital Santa Marta" not in output
+    assert "Não encontrei um local específico" not in output
 
 
 def test_researcher_accessibility_named_place_queries_skip_freeform_llm() -> None:
@@ -1977,7 +2340,7 @@ def test_researcher_accessibility_named_place_queries_skip_freeform_llm() -> Non
         output = agent.invoke('Is "MAAT" wheelchair accessible?', context="", verbose=False)
 
         dummy_places_tool.invoke.assert_called_once_with(
-            {"query": "MAAT", "max_results": 5, "offset": 0, "language": "en"}
+            {"query": "MAAT", "max_results": 5, "offset": 0, "language": "en", "specific_lookup": True}
         )
         assert "MAAT" in output
 
@@ -2534,6 +2897,56 @@ def test_base_agent_execute_react_loop_falls_back_to_tool_results_for_incomplete
     assert "Rossio" in output
 
 
+def test_base_agent_execute_react_loop_formats_tool_fallback_when_formatter_exists() -> None:
+    """Incomplete final replies should reuse agent-specific tool formatting instead of raw tool dumps."""
+    agent = BaseAgent.__new__(BaseAgent)
+    agent.llm_provider = "lmstudio"
+    agent.llm_with_tools = object()
+    agent._record_llm_usage = lambda _llm, _response: None
+    agent._record_tool_call = lambda _tool_name, _args: None
+
+    direct_bus_tool = MagicMock()
+    direct_bus_tool.name = "find_direct_bus_lines"
+    direct_bus_tool.invoke = MagicMock(
+        return_value=(
+            "🚌 **BUS ROUTE FINDER**\n"
+            "❌ **No direct bus routes found**\n"
+            "At Rossio: 1002, 1013\n"
+            "At Museu Nacional de Arte Antiga: 3708\n"
+        )
+    )
+    agent.tools = [direct_bus_tool]
+    agent._format_deterministic_tool_result = MagicMock(
+        return_value="### 🚌 Direct Carris Metropolitana lines for Rossio → Museu Nacional de Arte Antiga\n\n- ❌ **No direct suburban bus line was confirmed** for this trip."
+    )
+
+    responses = iter(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "find_direct_bus_lines",
+                        "args": {"origin": "Rossio", "destination": "Museu Nacional de Arte Antiga"},
+                        "id": "call_bus",
+                    },
+                ],
+            ),
+            SimpleNamespace(content="### 🚇 Mobility\n\n<think>Need to continue", tool_calls=[]),
+        ]
+    )
+    agent._safe_llm_invoke = MagicMock(side_effect=lambda _llm, _messages, verbose=False: next(responses))
+
+    output = agent.execute_react_loop(
+        messages=[HumanMessage(content="How do I get from Rossio to Museu Nacional de Arte Antiga?")],
+        verbose=False,
+    )
+
+    assert "BUS ROUTE FINDER" not in output
+    assert "No direct suburban bus line was confirmed" in output
+    agent._format_deterministic_tool_result.assert_called_once()
+
+
 def test_qa_lmstudio_validate_uses_same_llm_validation_path() -> None:
     """LM Studio QA should use the same prompt-driven validation path as cloud providers."""
     with patch.object(QualityAssuranceAgent, "__init__", lambda self: None):
@@ -2613,6 +3026,42 @@ def test_qa_repair_final_response_keeps_draft_when_repair_collapses_to_generic_e
         )
 
         assert result == draft
+
+
+def test_qa_repair_final_response_keeps_multisection_draft_when_repair_drops_sections() -> None:
+    """QA repair must keep a grounded multi-section draft when the repair collapses it to one section."""
+    with patch.object(QualityAssuranceAgent, "__init__", lambda self: None):
+        agent = QualityAssuranceAgent()
+        agent.llm_provider = "lmstudio"
+        agent.llm = object()
+        agent._safe_llm_invoke = MagicMock(
+            return_value=MagicMock(content="### 🌤️ Resumo Meteorológico\n\n- ✅ Sem avisos.")
+        )
+
+        draft = (
+            "### 🌤️ Resumo Meteorológico\n\n- Sol.\n\n"
+            "---\n\n"
+            "### 🚇 Mobilidade e Ligações\n\n- Tram 15E.\n\n"
+            "---\n\n"
+            "### 📍 Destaques Locais\n\n- Museu."
+        )
+        result = agent.repair_final_response(
+            user_query="Planeia a minha tarde em Belém.",
+            draft_response=draft,
+            agent_outputs={"weather": "ok", "transport": "ok", "researcher": "ok"},
+            qa_result={"disclaimers": ["Verificar horários"], "fact_check": {"disclaimers": []}},
+            language="pt",
+        )
+
+        assert result == draft
+
+
+def test_repair_known_live_typos_fixes_repeated_letter_glitches() -> None:
+    """Final typo cleanup should fix the repeated-letter artefacts seen in live QA repair runs."""
+    text = "coerennte confirmadoss ttradicional tradiciional rresposta refletiir enttre"
+    cleaned = repair_known_live_typos(text)
+
+    assert cleaned == "coerente confirmados tradicional tradicional resposta refletir entre"
 
 
 def test_transport_clean_query_fragment_strips_using_the_metro_suffix() -> None:
@@ -2753,7 +3202,8 @@ def test_multiagent_skips_qa_for_simple_weather_queries() -> None:
 
     weather_agent.invoke.assert_called_once()
     assistant.qa_agent.validate.assert_not_called()
-    assert output == "🌤️ Forecast body"
+    assert "Forecast body" in output
+    assert "[*IPMA*]" in output
 
 
 def test_multiagent_local_worker_batches_run_sequentially_without_threadpool() -> None:
@@ -3113,7 +3563,7 @@ def test_multiagent_structured_response_filters_internal_qa_warnings_and_localiz
 
     assert "Agente de Transporte" not in output
     assert "deve ser ignorada na resposta final" not in output
-    assert "domínios não verificados (in-weather" in output
+    assert "domínios não verificados" not in output
     assert "os horários da Carris devem ser confirmados em carris.pt" in output
     assert "Dados de transporte em tempo real podem sofrer alterações." in output
     assert "could not be verified" not in output
@@ -3448,7 +3898,6 @@ def test_supervisor_route_greeting_bypasses_llm() -> None:
         assert decision["agents"] == []
         assert decision["direct_response"]
         assert "Assistente Urbano de Lisboa" in decision["direct_response"]
-
 
 
 def test_supervisor_route_trivia_bypasses_llm() -> None:
