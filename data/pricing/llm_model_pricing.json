@@ -1,7 +1,7 @@
 {
   "pricing_source": "Azure OpenAI: https://azure.microsoft.com/pricing/details/cognitive-services/openai-service/ | Azure Foundry Models: https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/deepseek/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/microsoft/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/grok/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/llama/ | https://azure.microsoft.com/en-us/pricing/details/ai-foundry-models/kimi/ | Microsoft Foundry pricing: https://azure.microsoft.com/en-us/pricing/details/microsoft-foundry/#pricing | Microsoft Foundry Kimi-K2.5 announcement: https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/kimi-k2-5-now-in-microsoft-foundry/4492321 | Anthropic Foundry announcement: https://www.anthropic.com/news/claude-in-microsoft-foundry | Anthropic API pricing: https://platform.claude.com/docs/en/docs/about-claude/pricing | OpenAI detailed docs: https://developers.openai.com/api/docs/pricing | OpenAI GPT-5-mini snapshot: https://www.llm-prices.com/current-v1.json",
-  "pricing_updated_at": "2026-03-19",
-  "pricing_snapshot_date": "2026-03-19",
+  "pricing_updated_at": "2026-04-17",
+  "pricing_snapshot_date": "2026-04-17",
   "models": {
     "azure::gpt-5-mini": {
       "input": 0.25,
@@ -109,6 +109,48 @@
       "output": 75.0,
       "name": "Azure Claude Opus 4.1 via Microsoft Foundry"
     },
+    "azure::gpt-5.4-mini": {
+      "input": 0.75,
+      "input_cached": 0.075,
+      "output": 4.5,
+      "name": "Azure GPT-5.4 Mini Global"
+    },
+    "azure::gpt-5.4": {
+      "input": 2.5,
+      "input_cached": 0.25,
+      "output": 15.0,
+      "name": "Azure GPT-5.4 Global"
+    },
+    "azure::gpt-5.4-nano": {
+      "input": 0.2,
+      "input_cached": 0.02,
+      "output": 1.25,
+      "name": "Azure GPT-5.4 Nano Global"
+    },
+    "azure::gpt-5.4-pro": {
+      "input": 30.0,
+      "input_cached": 3.0,
+      "output": 180.0,
+      "name": "Azure GPT-5.4 Pro Global"
+    },
+    "azure::claude-opus-4.7": {
+      "input": 5.0,
+      "input_cached": 0.5,
+      "output": 25.0,
+      "name": "Azure Claude Opus 4.7 via Microsoft Foundry"
+    },
+    "azure::claude-opus-4.6": {
+      "input": 5.0,
+      "input_cached": 0.5,
+      "output": 25.0,
+      "name": "Azure Claude Opus 4.6 via Microsoft Foundry (priced as Opus 4.7)"
+    },
+    "azure::claude-sonnet-4.6": {
+      "input": 3.0,
+      "input_cached": 0.3,
+      "output": 15.0,
+      "name": "Azure Claude Sonnet 4.6 via Microsoft Foundry"
+    },
     "openai::gpt-5-mini": {
       "input": 0.25,
       "input_cached": 0.025,
@@ -168,6 +210,46 @@
       "input_cached": 0.55,
       "output": 4.4,
       "name": "OpenAI o3-mini"
+    },
+    "openai::gpt-5.4-nano": {
+      "input": 0.2,
+      "input_cached": 0.02,
+      "output": 1.25,
+      "name": "OpenAI GPT-5.4 Nano"
+    },
+    "openai::gpt-5.4-pro": {
+      "input": 30.0,
+      "input_cached": 3.0,
+      "output": 180.0,
+      "name": "OpenAI GPT-5.4 Pro"
+    },
+    "anthropic::claude-opus-4.7": {
+      "input": 5.0,
+      "input_cached": 0.5,
+      "output": 25.0,
+      "name": "Anthropic Claude Opus 4.7"
+    },
+    "anthropic::claude-opus-4.6": {
+      "input": 5.0,
+      "input_cached": 0.5,
+      "output": 25.0,
+      "name": "Anthropic Claude Opus 4.6 (priced as Opus 4.7)"
+    },
+    "anthropic::claude-sonnet-4.6": {
+      "input": 3.0,
+      "input_cached": 0.3,
+      "output": 15.0,
+      "name": "Anthropic Claude Sonnet 4.6"
+    },
+    "google::gemini-3.1-pro-preview": {
+      "input": 2.0,
+      "output": 12.0,
+      "name": "Google Gemini 3.1 Pro Preview"
+    },
+    "google::gemini-3.1-flash-lite-preview": {
+      "input": 0.25,
+      "output": 1.5,
+      "name": "Google Gemini 3.1 Flash Lite Preview"
     },
     "lmstudio::qwen/qwen3.5-9b": {
       "input": 0.0,
