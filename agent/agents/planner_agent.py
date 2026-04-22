@@ -600,7 +600,19 @@ class PlannerAgent(BaseAgent):
     def __init__(self):
         """Initializes the planner agent."""
         super().__init__("planner")
-        self.system_prompt = get_planner_prompt()
+        self.system_prompt = get_planner_prompt(language="en")
+        self._system_prompt_dynamic = True
+
+    def _get_runtime_system_prompt(self, language: str) -> str:
+        """Return the prompt for the requested language while preserving explicit test overrides."""
+        if not getattr(self, "_system_prompt_dynamic", False):
+            override_prompt = getattr(self, "system_prompt", "")
+            if override_prompt:
+                return override_prompt
+
+        prompt = get_planner_prompt(language=language)
+        self.system_prompt = prompt
+        return prompt
 
     @traceable(name="planner_agent", run_type="chain", tags=["sub-agent", "planner"])
     def invoke(
@@ -703,7 +715,7 @@ class PlannerAgent(BaseAgent):
         )
 
         messages = [
-            SystemMessage(content=self.system_prompt),
+            SystemMessage(content=self._get_runtime_system_prompt(language)),
             SystemMessage(content=language_instruction),
             SystemMessage(content=grounding_message),
             *([SystemMessage(content=multi_day_instruction)] if multi_day_instruction else []),

@@ -12,7 +12,7 @@ import unicodedata
 import uuid
 from copy import deepcopy
 from datetime import datetime
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from tools.visitlisboa_api import _extract_specific_event_lookup_phrase, _extract_specific_place_lookup_phrase
 
@@ -48,13 +48,144 @@ _NON_PROPER_PLACE_WORDS: frozenset = frozenset({
     "september", "october", "november", "december",
 })
 
+_STRUCTURED_QUERY_PLAN_INTENTS: frozenset[str] = frozenset({
+    "place_lookup",
+    "event_lookup",
+    "nearby_services",
+    "dataset_search",
+    "dataset_details",
+    "knowledge_search",
+    "unknown",
+})
+
+_STRUCTURED_SERVICE_TYPE_DEFINITIONS: Dict[str, Dict[str, Any]] = {
+    "pharmacies": {
+        "tool_label": "farmácias",
+        "category": "saúde",
+        "dataset_term": "Farmácias e Parafarmácias",
+        "aliases": {"pharmacies", "pharmacy", "farmacias", "farmacia", "farmácias", "farmácia"},
+    },
+    "hospitals": {
+        "tool_label": "hospitais",
+        "category": "saúde",
+        "dataset_term": "Hospitais Públicos",
+        "aliases": {"hospitals", "hospital", "hospitais", "hospitalares"},
+    },
+    "schools": {
+        "tool_label": "escolas",
+        "category": "educação",
+        "dataset_term": "Escolas Públicas",
+        "aliases": {"schools", "school", "escolas", "escola"},
+    },
+    "libraries": {
+        "tool_label": "bibliotecas",
+        "category": "cultura",
+        "dataset_term": "Bibliotecas Arquivos e Centros de Documentação",
+        "aliases": {"libraries", "library", "bibliotecas", "biblioteca"},
+    },
+    "gardens": {
+        "tool_label": "jardins",
+        "category": "ambiente",
+        "dataset_term": "Jardins - Parques Urbanos",
+        "aliases": {"gardens", "garden", "jardins", "jardim", "parks", "park", "parques", "parque"},
+    },
+    "police": {
+        "tool_label": "polícia",
+        "category": None,
+        "dataset_term": "Polícia Municipal",
+        "aliases": {"police", "policia", "polícia"},
+    },
+    "public_restrooms": {
+        "tool_label": "Instalações Sanitárias",
+        "category": None,
+        "dataset_term": "Instalações Sanitárias",
+        "aliases": {
+            "public_restrooms", "public_restroom", "public_toilet", "public_toilets",
+            "restroom", "restrooms", "wc", "sanitarios", "sanitario", "sanitários", "sanitário",
+            "casas_de_banho_publicas", "casa_de_banho_publica",
+        },
+    },
+    "bike_parking": {
+        "tool_label": "Estacionamento de velocípedes",
+        "category": None,
+        "dataset_term": "Estacionamento de velocípedes",
+        "aliases": {
+            "bike_parking", "bicycle_parking", "bikeparking", "bicycleparking",
+            "estacionamento_de_bicicletas", "estacionamento_de_velocipedes", "bicicletas",
+        },
+    },
+    "cemeteries": {
+        "tool_label": "cemitérios",
+        "category": None,
+        "dataset_term": "Cemitérios",
+        "aliases": {"cemeteries", "cemetery", "cemiterios", "cemiterio", "cemitérios", "cemitério"},
+    },
+    "firefighters": {
+        "tool_label": "bombeiros",
+        "category": None,
+        "dataset_term": "Bombeiros",
+        "aliases": {"firefighters", "firefighter", "bombeiros", "bombeiro"},
+    },
+    "parking": {
+        "tool_label": "estacionamento",
+        "category": None,
+        "dataset_term": "Parques de estacionamento na via pública",
+        "aliases": {"parking", "estacionamento", "car_park", "carpark"},
+    },
+    "markets": {
+        "tool_label": "mercados",
+        "category": None,
+        "dataset_term": "Mercados",
+        "aliases": {"markets", "market", "mercados", "mercado", "feiras", "feira"},
+    },
+    "embassies": {
+        "tool_label": "embaixadas",
+        "category": None,
+        "dataset_term": "Embaixadas",
+        "aliases": {"embassies", "embassy", "embaixadas", "embaixada"},
+    },
+    "metro_stations": {
+        "tool_label": "Estações de Metro",
+        "category": None,
+        "dataset_term": "Estações de Metro",
+        "aliases": {"metro_stations", "metro_station", "estacoes_de_metro", "estacao_de_metro", "estações_de_metro", "estação_de_metro"},
+    },
+    "sports_facilities": {
+        "tool_label": "Instalações Desportivas",
+        "category": None,
+        "dataset_term": "Instalações Desportivas",
+        "aliases": {"sports_facilities", "sports_facility", "instalacoes_desportivas", "instalações_desportivas"},
+    },
+    "citizen_shops": {
+        "tool_label": "Loja do Cidadão",
+        "category": None,
+        "dataset_term": "Loja do Cidadão",
+        "aliases": {"citizen_shops", "citizen_shop", "loja_do_cidadao", "loja_do_cidadão"},
+    },
+}
+
+_STRUCTURED_DATE_MONTHS: Dict[str, int] = {
+    "january": 1, "janeiro": 1, "jan": 1,
+    "february": 2, "fevereiro": 2, "feb": 2, "fev": 2,
+    "march": 3, "marco": 3, "março": 3, "mar": 3,
+    "april": 4, "abril": 4, "apr": 4, "abr": 4,
+    "may": 5, "maio": 5,
+    "june": 6, "junho": 6, "jun": 6,
+    "july": 7, "julho": 7, "jul": 7,
+    "august": 8, "agosto": 8, "aug": 8, "ago": 8,
+    "september": 9, "setembro": 9, "sep": 9, "set": 9,
+    "october": 10, "outubro": 10, "oct": 10, "out": 10,
+    "november": 11, "novembro": 11, "nov": 11,
+    "december": 12, "dezembro": 12, "dec": 12, "dez": 12,
+}
+
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
-from agent.agents.base import BaseAgent
+from agent.agents.base import BaseAgent, parse_json_response
 from agent.prompts.researcher import get_researcher_prompt
 from agent.utils.langsmith_tracing import traceable
 from agent.state import AgentState
@@ -105,6 +236,272 @@ class ResearcherAgent(BaseAgent):
     def get_last_search_context(self) -> Optional[dict]:
         """Returns the latest cached result-window context."""
         return deepcopy(self._last_search_context)
+
+    @staticmethod
+    def _normalize_structured_plan_text(value: Any) -> Optional[str]:
+        """Normalize optional JSON string fields returned by the structured query planner."""
+        text = str(value or "").strip()
+        if not text or text.lower() in {"null", "none", "unknown", "n/a"}:
+            return None
+        normalized = re.sub(r"\s+", " ", text).strip(" .?!,;:")
+        return normalized or None
+
+    @staticmethod
+    def _normalize_structured_service_token(value: Any) -> str:
+        """Normalize free-form service labels into a comparison-friendly token."""
+        normalized = unicodedata.normalize("NFKD", str(value or ""))
+        normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+        normalized = normalized.replace("-", "_").replace("/", "_")
+        normalized = re.sub(r"[^a-z0-9_ ]+", "", normalized)
+        normalized = re.sub(r"\s+", "_", normalized).strip("_")
+        return normalized
+
+    @classmethod
+    def _normalize_structured_service_types(cls, values: Any) -> List[str]:
+        """Map LLM-emitted service labels to a compact canonical enum set."""
+        if values is None:
+            return []
+
+        raw_values = values if isinstance(values, list) else [values]
+        normalized_services: List[str] = []
+        seen: set[str] = set()
+        for raw_value in raw_values:
+            normalized_token = cls._normalize_structured_service_token(raw_value)
+            if not normalized_token:
+                continue
+            for canonical, definition in _STRUCTURED_SERVICE_TYPE_DEFINITIONS.items():
+                aliases = {
+                    cls._normalize_structured_service_token(alias)
+                    for alias in definition.get("aliases", set())
+                }
+                aliases.add(cls._normalize_structured_service_token(canonical))
+                if normalized_token in aliases:
+                    if canonical not in seen:
+                        seen.add(canonical)
+                        normalized_services.append(canonical)
+                    break
+        return normalized_services
+
+    @staticmethod
+    def _normalize_structured_date_filter(value: Any, user_message: str) -> Optional[str]:
+        """Normalize date filters from the structured planner into tool-friendly values."""
+        raw_value = str(value or "").strip()
+        if raw_value.lower() in {"", "null", "none", "unknown", "n/a"}:
+            raw_value = ""
+
+        current_year = datetime.now().year
+        candidate = raw_value or user_message
+        normalized = unicodedata.normalize("NFKD", candidate)
+        normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+
+        iso_match = re.search(r"\b(20\d{2})-(\d{2})-(\d{2})\b", normalized)
+        if iso_match:
+            return iso_match.group(0)
+
+        compact_match = re.search(r"\b(\d{1,2})[/-](\d{1,2})\b", normalized)
+        if compact_match:
+            day = int(compact_match.group(1))
+            month = int(compact_match.group(2))
+            if 1 <= day <= 31 and 1 <= month <= 12:
+                return f"{current_year}-{month:02d}-{day:02d}"
+
+        long_match = re.search(r"\b(\d{1,2})\s+de\s+([a-z]+)\b", normalized)
+        if long_match:
+            day = int(long_match.group(1))
+            month = _STRUCTURED_DATE_MONTHS.get(long_match.group(2))
+            if month and 1 <= day <= 31:
+                return f"{current_year}-{month:02d}-{day:02d}"
+
+        for month_name in _STRUCTURED_DATE_MONTHS:
+            if re.search(rf"\b{re.escape(month_name)}\b", normalized):
+                return month_name
+
+        fallback = raw_value.strip()
+        return fallback or None
+
+    @staticmethod
+    def _has_explicit_calendar_reference(user_message: str) -> bool:
+        """Return whether a query mentions a concrete day or month that merits structured extraction."""
+        normalized = unicodedata.normalize("NFKD", user_message or "")
+        normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+        if re.search(r"\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b", normalized):
+            return True
+        if re.search(r"\b\d{1,2}\s+de\s+[a-z]+\b", normalized):
+            return True
+        return any(re.search(rf"\b{re.escape(month_name)}\b", normalized) for month_name in _STRUCTURED_DATE_MONTHS)
+
+    def _build_structured_query_plan_prompt(self) -> str:
+        """Build a compact JSON-only prompt for LLM-assisted routing of hard researcher queries."""
+        current_year = datetime.now().year
+        intents = ", ".join(f'"{intent}"' for intent in sorted(_STRUCTURED_QUERY_PLAN_INTENTS))
+        service_types = ", ".join(f'"{name}"' for name in _STRUCTURED_SERVICE_TYPE_DEFINITIONS)
+        return (
+            "You convert Lisbon local-information queries into a compact routing plan. "
+            "Return ONLY valid JSON with keys: intent, subject, near_location, service_types, dataset_name, date_filter, category_hint. "
+            f"intent must be one of [{intents}]. "
+            f"service_types must be an array using only [{service_types}]. "
+            f"For day-month references without a year, assume {current_year} and output YYYY-MM-DD. "
+            "For month-only filters, keep the month name exactly as written by the user. "
+            "For generic nearby-service queries, keep subject null unless the user names a specific facility. "
+            "Do not copy the nearby location into subject. Use null for unknown values and [] for no service types."
+        )
+
+    def _should_try_structured_query_plan(self, user_message: str) -> bool:
+        """Gate the extra LLM parsing step to only the researcher slices where regex heuristics are weak."""
+        normalized = unicodedata.normalize("NFKD", user_message or "")
+        normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        if not normalized:
+            return False
+
+        dataset_markers = [" dataset", " datasets", "dados abertos", "lisboa aberta"]
+        unsupported_service_markers = [
+            "casa de banho", "casas de banho", "sanitario", "sanitarios",
+            "biciclet", "velociped", "cemiter", "bombeir", "embaix",
+            "loja do cidada", "estacoes de metro", "estacao de metro",
+        ]
+        named_service_with_nearby = bool(
+            self._extract_near_location_name(user_message)
+            and self._extract_place_focus_query(user_message)
+            and self._extract_service_types(user_message)
+        )
+        event_with_explicit_calendar = (
+            self._is_direct_event_lookup_query(user_message)
+            and self._extract_event_date_filter(user_message) is None
+            and self._has_explicit_calendar_reference(user_message)
+        )
+
+        return (
+            any(marker in normalized for marker in dataset_markers)
+            or any(marker in normalized for marker in unsupported_service_markers)
+            or named_service_with_nearby
+            or event_with_explicit_calendar
+        )
+
+    def _extract_structured_query_plan(self, user_message: str) -> Optional[Dict[str, Any]]:
+        """Use the configured researcher LLM to parse hard natural-language queries into canonical routing fields."""
+        if not user_message or not user_message.strip():
+            return None
+
+        response = self._safe_llm_invoke(
+            self.llm,
+            [
+                SystemMessage(content=self._build_structured_query_plan_prompt()),
+                HumanMessage(content=user_message),
+            ],
+            retries=1,
+            verbose=False,
+        )
+        payload = parse_json_response(str(getattr(response, "content", response) or ""))
+        if not isinstance(payload, dict):
+            return None
+
+        intent = str(payload.get("intent") or "").strip().lower()
+        if intent not in _STRUCTURED_QUERY_PLAN_INTENTS or intent == "unknown":
+            return None
+
+        subject = self._normalize_structured_plan_text(payload.get("subject"))
+        near_location = self._normalize_structured_plan_text(payload.get("near_location"))
+        dataset_name = self._normalize_structured_plan_text(payload.get("dataset_name"))
+        category_hint = self._normalize_structured_plan_text(payload.get("category_hint"))
+        service_types = self._normalize_structured_service_types(payload.get("service_types"))
+        date_filter = self._normalize_structured_date_filter(payload.get("date_filter"), user_message)
+
+        if subject and near_location and subject.lower() == near_location.lower():
+            subject = None
+
+        return {
+            "intent": intent,
+            "subject": subject,
+            "near_location": near_location,
+            "service_types": service_types,
+            "dataset_name": dataset_name,
+            "date_filter": date_filter,
+            "category_hint": category_hint,
+        }
+
+    @staticmethod
+    def _structured_service_tool_label(service_type: str) -> Optional[str]:
+        """Resolve a canonical structured service enum to the best nearby-service tool label."""
+        definition = _STRUCTURED_SERVICE_TYPE_DEFINITIONS.get(service_type)
+        if not definition:
+            return None
+        return str(definition.get("tool_label") or "").strip() or None
+
+    @staticmethod
+    def _structured_service_category(service_type: str) -> Optional[str]:
+        """Resolve a canonical structured service enum to the best Lisboa Aberta taxonomy hint."""
+        definition = _STRUCTURED_SERVICE_TYPE_DEFINITIONS.get(service_type)
+        if not definition:
+            return None
+        category = definition.get("category")
+        return str(category).strip() if isinstance(category, str) and category.strip() else None
+
+    @staticmethod
+    def _structured_dataset_search_term(structured_plan: Dict[str, Any], user_message: str) -> Optional[str]:
+        """Choose the best dataset-search term from a structured plan."""
+        for field_name in ("dataset_name", "subject", "category_hint"):
+            value = ResearcherAgent._normalize_structured_plan_text(structured_plan.get(field_name))
+            if value:
+                return value
+        for service_type in structured_plan.get("service_types", []):
+            definition = _STRUCTURED_SERVICE_TYPE_DEFINITIONS.get(service_type)
+            dataset_term = str(definition.get("dataset_term") or "").strip() if definition else ""
+            if dataset_term:
+                return dataset_term
+        return ResearcherAgent._normalize_structured_plan_text(user_message)
+
+    def _run_structured_dataset_lookup(self, user_message: str, language: str, structured_plan: Dict[str, Any]) -> Optional[str]:
+        """Execute dataset-search or dataset-details intents resolved by the structured planner."""
+        intent = str(structured_plan.get("intent") or "").strip()
+        if intent not in {"dataset_search", "dataset_details"}:
+            return None
+
+        tool_name = "get_dataset_details" if intent == "dataset_details" else "list_available_datasets"
+        tool = self._get_tool_by_name(tool_name)
+        if not tool:
+            return None
+
+        if intent == "dataset_details":
+            dataset_name = self._normalize_structured_plan_text(structured_plan.get("dataset_name"))
+            dataset_name = dataset_name or self._structured_dataset_search_term(structured_plan, user_message)
+            if not dataset_name:
+                return None
+            result = str(self._invoke_tool(tool, {"dataset_name": dataset_name}, tool_name=tool_name)).strip()
+        else:
+            search_term = self._structured_dataset_search_term(structured_plan, user_message)
+            if not search_term:
+                return None
+            result = str(self._invoke_tool(tool, {"category": search_term}, tool_name=tool_name)).strip()
+
+        if not result:
+            return None
+        if "Lisboa Aberta" not in result:
+            result = f"{result}\n\n{self._build_open_data_services_source_line(language)}".strip()
+        return result
+
+    def _maybe_run_structured_query_plan(self, user_message: str, language: str) -> Optional[str]:
+        """Try a low-overhead LLM-assisted routing pass for researcher queries that regex heuristics underspecify."""
+        if not self._should_try_structured_query_plan(user_message):
+            return None
+
+        structured_plan = self._extract_structured_query_plan(user_message)
+        if not structured_plan:
+            return None
+
+        intent = structured_plan.get("intent")
+        if intent in {"dataset_search", "dataset_details"}:
+            return self._run_structured_dataset_lookup(user_message, language, structured_plan)
+        if intent == "event_lookup" and (structured_plan.get("date_filter") or structured_plan.get("subject")):
+            return self._run_direct_event_lookup(user_message, language, structured_plan=structured_plan)
+        if intent in {"nearby_services", "place_lookup"} and (
+            structured_plan.get("service_types")
+            or structured_plan.get("subject")
+            or structured_plan.get("near_location")
+        ):
+            return self._run_direct_place_lookup(user_message, language, structured_plan=structured_plan)
+        return None
 
     def _replay_same_deterministic_response_once(self, user_message: str) -> Optional[str]:
         """Return a cached deterministic response once when the same message is retried immediately."""
@@ -785,7 +1182,12 @@ class ResearcherAgent(BaseAgent):
                 return match.group("location").strip(" .?!,")
         return None
 
-    def _run_direct_event_lookup(self, user_message: str, language: str) -> str:
+    def _run_direct_event_lookup(
+        self,
+        user_message: str,
+        language: str,
+        structured_plan: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """Runs a deterministic VisitLisboa event lookup with explicit date parsing."""
         events_tool = self._get_tool_by_name("search_cultural_events")
         if not events_tool:
@@ -796,10 +1198,20 @@ class ResearcherAgent(BaseAgent):
             )
 
         args = {"max_results": 5, "language": language, "offset": 0}
-        date_filter = self._extract_event_date_filter(user_message)
-        specific_lookup = _extract_specific_event_lookup_phrase(user_message)
-        focus_query = specific_lookup or self._extract_event_focus_query(user_message)
+        date_filter = self._normalize_structured_date_filter(
+            structured_plan.get("date_filter"),
+            user_message,
+        ) if structured_plan else self._extract_event_date_filter(user_message)
         category_hint = self._infer_event_category_hint(user_message)
+        broad_date_discovery = not structured_plan and bool(date_filter) and category_hint is None
+        specific_lookup = None if structured_plan else _extract_specific_event_lookup_phrase(user_message)
+        focus_query = self._normalize_structured_plan_text(structured_plan.get("subject")) if structured_plan else None
+        extracted_focus_query = None if broad_date_discovery else self._extract_event_focus_query(user_message)
+        if broad_date_discovery:
+            specific_lookup = None
+        elif not structured_plan and date_filter and not extracted_focus_query:
+            specific_lookup = None
+        focus_query = focus_query or specific_lookup or extracted_focus_query
 
         if date_filter:
             args["date_filter"] = date_filter
@@ -827,16 +1239,70 @@ class ResearcherAgent(BaseAgent):
         source_line = self._build_events_source_line(language)
         return f"{result}\n\n{source_line}".strip()
 
-    def _run_direct_place_lookup(self, user_message: str, language: str) -> str:
+    def _run_direct_place_lookup(
+        self,
+        user_message: str,
+        language: str,
+        structured_plan: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """Runs a deterministic tool path for simple place and multi-service lookups."""
         places_tool = self._get_tool_by_name("search_places_attractions")
         nearby_tool = self._get_tool_by_name("find_nearby_services")
-        place_focus_query = self._extract_place_focus_query(user_message)
+        structured_subject = self._normalize_structured_plan_text(structured_plan.get("subject")) if structured_plan else None
+        place_focus_query = structured_subject or self._extract_place_focus_query(user_message)
         specific_lookup = _extract_specific_place_lookup_phrase(user_message)
+        if structured_subject and not specific_lookup:
+            specific_lookup = structured_subject
         service_types = self._extract_service_types(user_message)
-        nearby_location = self._extract_near_location_name(user_message)
+        for structured_service in structured_plan.get("service_types", []) if structured_plan else []:
+            tool_label = self._structured_service_tool_label(structured_service)
+            if tool_label and tool_label not in service_types:
+                service_types.append(tool_label)
+        nearby_location = self._normalize_structured_plan_text(structured_plan.get("near_location")) if structured_plan else None
+        nearby_location = nearby_location or self._extract_near_location_name(user_message)
 
-        if nearby_tool and service_types and (nearby_location or not place_focus_query):
+        if places_tool and place_focus_query and specific_lookup:
+            exact_args = {
+                "query": place_focus_query,
+                "max_results": 5,
+                "offset": 0,
+                "language": language,
+                "specific_lookup": True,
+            }
+            exact_category_hint = self._infer_place_category_hint(user_message)
+            if exact_category_hint:
+                exact_args["category"] = exact_category_hint
+
+            exact_result = str(self._invoke_tool(places_tool, exact_args, tool_name="search_places_attractions")).strip()
+            # Accept the specific-lookup result when either (a) it is a clean exact
+            # match, or (b) it is a "specific not found, here are alternatives"
+            # response that nevertheless surfaces ranked alternatives. 
+            # Falling through to the broad lookup in case (b) would re-call the tool with
+            # weaker arguments and return less useful data, while doubling the tool-call cost.
+            if exact_result and not exact_result.startswith("Error:"):
+                has_fallback_intro = self._has_specific_lookup_fallback_intro(exact_result)
+                shown_count = self._count_ranked_results(exact_result)
+                accept_clean_exact = not has_fallback_intro and not exact_result.startswith("❌")
+                accept_fallback_with_alternatives = has_fallback_intro and shown_count > 0
+                if accept_clean_exact or accept_fallback_with_alternatives:
+                    base_args = {key: value for key, value in exact_args.items() if key not in {"max_results", "offset"}}
+                    remembered_page_size = (
+                        shown_count if (accept_fallback_with_alternatives and shown_count) else int(exact_args["max_results"])
+                    )
+                    self._remember_search_context(
+                        domain="places",
+                        tool_name="search_places_attractions",
+                        base_args=base_args,
+                        page_size=remembered_page_size,
+                        shown_count=shown_count,
+                        language=language,
+                        source_query=user_message,
+                        offset=0,
+                    )
+                    source_line = self._build_places_source_line(exact_result, language)
+                    return f"{exact_result}\n\n{source_line}".strip()
+
+        if nearby_tool and service_types and (nearby_location or not place_focus_query or structured_plan):
             service_blocks: List[str] = []
             missing_services: List[str] = []
 
@@ -848,6 +1314,12 @@ class ResearcherAgent(BaseAgent):
                 if nearby_location:
                     service_args["near_location_name"] = nearby_location
                 category_hint = self._service_category_for_type(service_type)
+                if not category_hint and structured_plan:
+                    normalized_structured_services = structured_plan.get("service_types", [])
+                    for structured_service in normalized_structured_services:
+                        if self._structured_service_tool_label(structured_service) == service_type:
+                            category_hint = self._structured_service_category(structured_service)
+                            break
                 if category_hint:
                     service_args["category"] = category_hint
 
@@ -1255,6 +1727,18 @@ class ResearcherAgent(BaseAgent):
                 response = self._run_direct_place_lookup(user_message, language)
                 return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
                     response,
+                    agent_name="researcher",
+                    user_query=user_message,
+                    language=language,
+                ))
+
+        if not is_greeting:
+            structured_response = self._maybe_run_structured_query_plan(user_message, language)
+            if structured_response:
+                if verbose:
+                    print("      [RESEARCHER] Using structured LLM-assisted deterministic routing...")
+                return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
+                    structured_response,
                     agent_name="researcher",
                     user_query=user_message,
                     language=language,

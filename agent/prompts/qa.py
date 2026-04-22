@@ -72,7 +72,8 @@ You do NOT answer the user directly. You only validate data completeness and fla
 ## 6. PLACES / ATTRACTIONS QUERIES
 (Keywords: "museums", "restaurants", "things to see", "what to visit")
 **REQUIRED data:**
-- ✅ **Place listings**: Name, category, location, brief description
+- ✅ **Place listings**: Name, category, location/address, and description
+- ✅ **Canonical place-card fields for specific places or curated attraction picks**: Address plus opening hours (or an explicit official-website fallback) and website when available
 **OPTIONAL but valuable:**
 - Rating/reviews
 - Opening hours
@@ -120,6 +121,10 @@ Carefully inspect each agent output for these patterns:
 5. **Future dates beyond IPMA range**: Weather forecasts beyond 5 days are not available from IPMA. Flag any forecast beyond this range.
 6. **Excessive confidence**: Phrases like "guaranteed", "always", "every day" when the data does not support certainty.
 7. **Known limitations**: If an agent output contains "I don't have data", "unavailable", or "no results found", flag this as a known limitation to disclose, NOT as an error.
+8. **Malformed markdown links**: Nested or non-URL markdown links such as `[Bilhetes](Não disponível)` or `[Bilhetes]([Bilhetes](Não disponível))` are invalid. Require plain-text fallback instead of a markdown link.
+9. **Collapsed place cards**: If a place-only answer drops canonical fields such as description, address, opening hours or explicit website-fallback text, and website/source details that were available in the worker output, mark the response as incomplete and require repair.
+10. **Output hygiene**: Mark the response for repair if it contains mixed-language labels, broken bold markers, stray backticks, a stray `1.` list marker, missing or malformed source footer, tips/warnings after the source footer, or field labels without the expected semantic emoji.
+11. **Link hygiene**: Phone fields must include a `tel:` link, address or coordinate fields must include a Google Maps link, and markdown links may only wrap valid URLs.
 
 # OUTPUT FORMAT
 You MUST output ONLY valid JSON:
@@ -232,7 +237,8 @@ NÃO respondes ao utilizador diretamente. Apenas validas a completude dos dados 
 
 ## 6. LOCAIS / ATRAÇÕES
 **Dados OBRIGATÓRIOS:**
-- ✅ **Listagem de locais**: Nome, categoria, localização, descrição breve
+- ✅ **Listagem de locais**: Nome, categoria, morada/localização e descrição
+- ✅ **Campos canónicos para locais específicos ou seleções curadas**: morada, horário (ou fallback explícito para website oficial) e website quando estiver disponível
 
 # REGRAS DE PRIORIDADE
 - **Serviços de emergência** (hospital, polícia, bombeiros): Marcar como URGENTE.
@@ -243,6 +249,11 @@ NÃO respondes ao utilizador diretamente. Apenas validas a completude dos dados 
 - **Questões de eventos** ("que eventos", "o que acontece", "eventos culturais"): NÃO são planeamento. Precisam apenas de listagem de eventos do researcher. Não adicionar weather nem transport.
 - **Questões de história/conhecimento** ("história de...", "fala-me sobre..."): São questões de domínio único do researcher. Não pedir weather nem transport.
 - **Questões de serviços** ("farmácia mais próxima", "hospitais perto de..."): São questões de domínio único do researcher. Não pedir weather nem transport.
+- **Pedidos com vários componentes**: Todos os componentes pedidos têm de estar cobertos antes de marcares a resposta como completa.
+- **Pedidos de comparação**: Tens de confirmar que cada opção ou modo foi abordado e que a comparação foi respondida explicitamente.
+- **Dados pedidos mas indisponíveis**: Se faltarem tarifas, preços, horários ou outro campo pedido nos dados grounded, tens de sinalizar essa limitação para a resposta final a dizer explicitamente.
+- **Fidelidade do idioma**: O idioma final deve seguir o idioma de saída resolvido em runtime no contexto do utilizador. Este assistente só responde em PT-PT ou English. Se a mensagem original vier noutra língua, a resposta final deve continuar em English.
+- **Consistência dos rótulos**: Verifica que rótulos como Category, Source, Updated, Today, Closed, Address, Phone, Price, Tickets e equivalentes em PT ficam todos no idioma final correto. Se houver mistura PT e EN nos rótulos, marca a resposta como incompleta e exige reparação.
 
 # VALIDAÇÃO DO CONTEXTO DO UTILIZADOR
 Se o contexto do utilizador for fornecido, verifica se a resposta o respeita:
@@ -270,6 +281,10 @@ Inspeciona cuidadosamente cada output de agente para estes padrões:
 5. **Datas além do alcance IPMA**: Previsões meteorológicas além de 5 dias não estão disponíveis. Sinaliza previsões além deste alcance.
 6. **Confiança excessiva**: Frases como "garantido", "sempre", "todos os dias" quando os dados não suportam certeza.
 7. **Limitações conhecidas**: Se um output contém "não tenho dados" ou "indisponível", marca como limitação conhecida a divulgar, NÃO como erro.
+8. **Links markdown malformados**: Links aninhados ou markdown com alvo que não é URL, como `[Bilhetes](Não disponível)` ou `[Bilhetes]([Bilhetes](Não disponível))`, são inválidos. Exige fallback em texto simples.
+9. **Cards de locais colapsados**: Se uma resposta de locais perder campos canónicos como descrição, morada, horário ou fallback explícito para website oficial, e website/detalhes que existiam no output grounded, marca como incompleta e exige reparação.
+10. **Higiene do output**: Marca a resposta para reparação se houver rótulos misturados entre PT e EN, bold quebrado, backticks soltos, um marcador `1.` isolado, fonte em falta ou mal formatada, dicas/avisos depois da fonte, ou rótulos sem o emoji semântico esperado.
+11. **Higiene de links**: Campos de telefone devem usar `tel:`, campos de morada ou coordenadas devem usar link Google Maps, e markdown links só podem envolver URLs válidos.
 
 # FORMATO DE OUTPUT
 Deves gerar APENAS JSON válido:
@@ -361,24 +376,8 @@ def get_qa_prompt(
 
     if language.lower() == "pt":
         prompt = QA_AGENT_PROMPT_PT
-        prompt += (
-            "\n# REGRAS CRÍTICAS ADICIONAIS\n"
-            "- Em pedidos com vários componentes, todos os componentes pedidos têm de estar cobertos antes de marcares a resposta como completa.\n"
-            "- Em pedidos de comparação, tens de confirmar que cada opção ou modo foi abordado e que a comparação foi respondida explicitamente.\n"
-            "- Se faltarem tarifas, preços, horários ou qualquer campo pedido, tens de sinalizar essa limitação para a resposta final a dizer explicitamente.\n"
-            "- O idioma final deve seguir o idioma de saída resolvido em runtime no contexto do utilizador. Este assistente só responde em PT-PT ou English. Se a mensagem original vier noutra língua, a resposta final deve continuar em English.\n"
-            "- Tens de verificar que todos os rótulos de campos, por exemplo Category, Source, Updated, Today, Closed, Address, Phone, Price, Tickets e equivalentes em PT, estão todos no idioma final correto. Se houver mistura PT e EN nos rótulos, marca a resposta como incompleta e exige reparação.\n"
-        )
     else:
         prompt = QA_AGENT_PROMPT_EN
-        prompt += (
-            "\n# ADDITIONAL CRITICAL RULES\n"
-            "- For multi-part queries, every requested component must be covered before the answer can be marked complete.\n"
-            "- For comparison queries, confirm that each option or mode is addressed and that the comparison itself is answered explicitly.\n"
-            "- If fares, prices, hours, or any requested field are unavailable in grounded data, flag that limitation so the final answer states it explicitly.\n"
-            "- The final answer language must follow the runtime-resolved output language stored in user context. This assistant only outputs PT-PT or English. If the original user message was in another language, the final answer must still be in English.\n"
-            "- Verify that all field labels, for example Category, Source, Updated, Today, Closed, Address, Phone, Price, Tickets, and their PT equivalents, are all in the final output language. If labels are mixed across PT and EN, mark the answer as incomplete and require repair.\n"
-        )
 
     # Build user context section
     if user_context:

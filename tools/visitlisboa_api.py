@@ -2024,6 +2024,45 @@ def _query_mentions_tickets(query: Optional[str]) -> bool:
     return _text_contains_fuzzy_term(query, ["ticket", "tickets", "bilhete", "bilhetes", "offer", "offers", "price", "prices"])
 
 
+def _query_requests_free_events(query: Optional[str]) -> bool:
+    """Returns whether the query explicitly asks for free events."""
+    return _text_contains_fuzzy_term(
+        query,
+        [
+            "free",
+            "free entry",
+            "free admission",
+            "gratuito",
+            "gratuitos",
+            "gratuita",
+            "gratuitas",
+            "gratis",
+            "grátis",
+            "entrada gratuita",
+        ],
+    )
+
+
+def _event_matches_free_filter(event: Dict[str, Any]) -> bool:
+    """Returns True when an event clearly advertises free admission."""
+    price_text = _normalize_lookup_text(event.get("price") or "")
+    if not price_text:
+        return False
+    return any(
+        token in price_text
+        for token in [
+            "free",
+            "free entry",
+            "free admission",
+            "gratuito",
+            "gratuita",
+            "gratis",
+            "grátis",
+            "entrada gratuita",
+        ]
+    )
+
+
 def _query_mentions_schedule(query: Optional[str]) -> bool:
     """Returns whether the query explicitly asks about schedules or opening hours."""
     return _text_contains_fuzzy_term(
@@ -2139,6 +2178,18 @@ def _place_within_requested_geography(location_text: str, query: Optional[str]) 
 
     normalized_location = _normalize_place_hint_text(location_text)
     return not any(marker in normalized_location for marker in _OUTSIDE_LISBON_CITY_MARKERS)
+
+
+def _event_within_requested_geography(event: Dict[str, Any], query: Optional[str]) -> bool:
+    """Keeps Lisbon event discovery focused on Lisbon-city entries unless AML scope was explicit."""
+    location_text = " ".join(
+        part for part in [
+            str(event.get("location") or "").strip(),
+            str(event.get("address") or "").strip(),
+        ]
+        if part
+    )
+    return _place_within_requested_geography(location_text, query)
 
 
 def _normalize_place_result_key(place: Dict[str, Any]) -> str:
@@ -2557,6 +2608,17 @@ def search_cultural_events(
         if specific_lookup and query and not specific_lookup_phrase:
             specific_lookup_phrase = _normalize_lookup_text(query)
         effective_query = specific_lookup_phrase or query
+        free_filter_requested = _query_requests_free_events(effective_query or query)
+        if free_filter_requested and effective_query:
+            effective_query = re.sub(
+                r"\b(?:free(?:\s+entry|\s+admission)?|gratuit[oa]s?|gratis|gr[aá]tis|entrada\s+gratuita)\b",
+                " ",
+                effective_query,
+                flags=re.IGNORECASE,
+            )
+            effective_query = re.sub(r"\s+", " ", effective_query).strip(" .?!") or None
+            if specific_lookup_phrase and not effective_query:
+                specific_lookup_phrase = None
 
         # Parse date range. Broad discovery defaults to upcoming, but specific lookups should search across all dates.
         if not date_filter and not specific_lookup_phrase:
@@ -2607,6 +2669,11 @@ def search_cultural_events(
             events_data = [e for e in events_data if category_lower in e.get('category', '').lower()]
             undated_candidates = [e for e in undated_candidates if category_lower in e.get('category', '').lower()]
             logger.info(f"After category filter: {len(events_data)} events")
+
+        if free_filter_requested:
+            events_data = [event for event in events_data if _event_matches_free_filter(event)]
+            undated_candidates = [event for event in undated_candidates if _event_matches_free_filter(event)]
+            logger.info(f"After free-event filter: {len(events_data)} events")
 
         category_filtered_pool = list(events_data)
 
@@ -2711,6 +2778,7 @@ def search_cultural_events(
             event['_relevance_score'] = calculate_temporal_relevance_score(event, start_date, end_date)
             event['_duration_days'] = get_event_duration_days(event)
             event['_query_match_score'] = query_scores.get(id(event), 0.0)
+            event['_geography_score'] = 1 if _event_within_requested_geography(event, query) else 0
 
         if specific_lookup_phrase:
             exact_matches = [event for event in events_data if id(event) in strong_specific_event_ids]
@@ -2726,17 +2794,29 @@ def search_cultural_events(
 
         if query_scores:
             events_data.sort(
-                key=lambda e: (e.get('_query_match_score', 0.0), e.get('_relevance_score', 0.0)),
+                key=lambda e: (
+                    e.get('_geography_score', 0),
+                    e.get('_query_match_score', 0.0),
+                    e.get('_relevance_score', 0.0),
+                ),
                 reverse=True,
             )
             logger.info(
-                "Sorted by query relevance first (top query score: %.1f, top temporal score: %.1f)",
+                "Sorted by geography, query relevance, and temporal score (top geo: %d, query: %.1f, temporal: %.1f)",
+                events_data[0].get('_geography_score', 0),
                 events_data[0].get('_query_match_score', 0.0),
                 events_data[0].get('_relevance_score', 0.0),
             )
         else:
-            events_data.sort(key=lambda e: e.get('_relevance_score', 0), reverse=True)
-            logger.info(f"Sorted by temporal relevance (top score: {events_data[0].get('_relevance_score', 0):.1f})")
+            events_data.sort(
+                key=lambda e: (e.get('_geography_score', 0), e.get('_relevance_score', 0)),
+                reverse=True,
+            )
+            logger.info(
+                "Sorted by geography and temporal relevance (top geo: %d, top temporal score: %.1f)",
+                events_data[0].get('_geography_score', 0),
+                events_data[0].get('_relevance_score', 0.0),
+            )
 
         if offset >= len(events_data):
             output_parts = _format_event_filter_summary(
@@ -2971,12 +3051,14 @@ def search_places_attractions(
                         category_prefix = "Museums"
                     search_query = f"{category_prefix} {search_query}"
 
+                query_context = query or effective_query or search_query
+
                 query_tokens = _extract_place_query_tokens(effective_query or search_query)
                 location_hints = _extract_place_location_hints(effective_query or search_query)
                 ranking_requested = _query_requests_ranked_places(effective_query or search_query) or query_intent == "top_attractions"
-                lisboa_card_requested = _query_mentions_lisboa_card(effective_query or query)
-                tickets_requested = _query_mentions_tickets(effective_query or query)
-                schedule_requested = _query_mentions_schedule(effective_query or query)
+                lisboa_card_requested = _query_mentions_lisboa_card(query_context)
+                tickets_requested = _query_mentions_tickets(query_context)
+                schedule_requested = _query_mentions_schedule(query_context)
 
                 logger.info(f"search_places_attractions: searching VisitLisboa for '{search_query}'")
 
@@ -3369,7 +3451,7 @@ def search_places_attractions(
 
             # Schedule/opening hours (from enriched data)
             if full_data and full_data.get('schedules'):
-                for preview in _format_place_schedule_previews(full_data['schedules'], effective_query or query):
+                for preview in _format_place_schedule_previews(full_data['schedules'], query or effective_query):
                     output_parts.append(f"   🕐 {preview}")
 
             # Tickets/prices (from enriched data)
@@ -3383,7 +3465,7 @@ def search_places_attractions(
                 elif tickets.get('links'):
                     first_link = tickets['links'][0]
                     output_parts.append(f"   🎟️ {first_link.get('text', 'Tickets')}: {first_link.get('url', '')}")
-            elif full_data and full_data.get('contact_info', {}).get('tickets_url') and _query_mentions_tickets(effective_query or query):
+            elif full_data and full_data.get('contact_info', {}).get('tickets_url') and _query_mentions_tickets(query or effective_query):
                 output_parts.append(f"   🎟️ Tickets: {full_data['contact_info']['tickets_url']}")
 
             # TripAdvisor rating (from enriched data)

@@ -33,10 +33,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from agent.agents import transport_agent as transport_agent_module
 from agent.agents.transport_agent import (
     TransportAgent,
+    _build_destination_only_transport_overview_response,
     _build_deterministic_metro_route_response,
     _build_deterministic_transport_tool_call,
+    _extract_destination_only_target,
     _build_metro_wait_lines,
     _extract_route_endpoints,
+    _parse_route_mode_preferences,
     _parse_metro_wait_request,
     _query_has_status_intent,
 )
@@ -47,6 +50,7 @@ from agent.utils.response_formatter import (
     operators_from_tool_names,
     rebuild_transport_source_line,
 )
+from tools.transport_api import _build_ambiguity_preamble
 from tools.carrismetropolitana_api import find_bus_routes, find_direct_bus_lines, resolve_location
 from tools import carris_api, cp_api, metrolisboa_api, transport_api
 
@@ -78,11 +82,35 @@ def test_transport_tool_call_builder_maps_cp_trip_query() -> None:
     assert spec["args"] == {"origin": "Rossio", "destination": "Sintra"}
 
 
+def test_transport_tool_call_builder_maps_combios_cascais_to_cascais_line() -> None:
+    """The common 'combios cascais' typo should still map to the default Cascais-line CP trip."""
+    spec = _extract_tool_call_spec(
+        _build_deterministic_transport_tool_call("combios cascais")
+    )
+
+    assert spec["name"] == "plan_train_trip"
+    assert spec["args"] == {"origin": "Cais do Sodré", "destination": "Cascais"}
+
+
 def test_extract_route_endpoints_handles_pt_ate_a_metro_phrase() -> None:
     """PT-PT metro phrasings with `até à` should parse clean endpoints."""
     endpoints = _extract_route_endpoints("Quero ir de metro de Entrecampos até à NOVA IMS")
 
     assert endpoints == ("Entrecampos", "NOVA IMS")
+
+
+def test_extract_route_endpoints_handles_metro_shorthand_station_pair() -> None:
+    """Short Metro shorthand should recover the intended station pair without LLM fallback."""
+    endpoints = _extract_route_endpoints("ML azul baixa chiado rato")
+
+    assert endpoints == ("Baixa-Chiado", "Rato")
+
+
+def test_parse_route_mode_preferences_recognizes_ml_prefix_as_metro_only() -> None:
+    """ML + line-colour shorthand should keep Metro route queries on the metro-only path."""
+    preferences = _parse_route_mode_preferences("ML azul baixa chiado rato")
+
+    assert preferences["metro_only"] is True
 
 
 def test_extract_route_endpoints_handles_colloquial_pt_origin_then_destination_phrase() -> None:
@@ -919,6 +947,146 @@ def test_rebuild_transport_source_line_collapses_duplicate_transport_footers() -
 
     assert rebuilt.count("📌 **Source:**") == 1
     assert rebuilt.count("[*Metro de Lisboa*](https://www.metrolisboa.pt)") == 1
+
+
+def test_transport_finalize_metro_wait_response_keeps_single_metro_footer() -> None:
+    """Metro wait answers should end with exactly one Metro-only footer."""
+    agent = TransportAgent()
+    agent._tool_calls_log = [{"tool_name": "get_metro_wait_time", "args": {"station": "Rato"}}]
+
+    raw = (
+        "🚇 **Next metro at Rato**\n\n"
+        "🗓️ **Next Metro:**\n"
+        "- **Station Rato:** Direction **Odivelas** — **⏱️ Next metro in:** 3 min 19s | 7 min 24s"
+    )
+
+    result = agent._finalize_transport_response(
+        raw,
+        user_message="proximo metro rato",
+        language="en",
+    )
+
+    assert result.count("📌 **Source:**") == 1
+    assert "[*Metro de Lisboa*](https://www.metrolisboa.pt)" in result
+    assert "[*Carris*](https://www.carris.pt)" not in result
+    assert "[*Carris Metropolitana*](https://www.carrismetropolitana.pt)" not in result
+    assert "[*CP*](https://www.cp.pt)" not in result
+
+
+def test_transport_finalize_preserves_structured_metro_route_layout() -> None:
+    """A fully structured Metro route should not collapse into an arrivals-style block during finalization."""
+    agent = TransportAgent()
+    agent._record_tool_call("get_metro_status", {})
+    agent._record_tool_call("get_metro_wait_time", {"station": "Baixa-Chiado"})
+    structured_route = (
+        "🚇 **Baixa-Chiado** → **Rato**\n\n"
+        "⚠️ **Estado das Linhas:**\n"
+        "- 🔵 **Linha Azul**: circulação normal\n"
+        "- 🟡 **Linha Amarela**: circulação normal\n\n"
+        "⏳ **Tempo total estimado:** ~13 min\n\n"
+        "🗺️ **O seu Trajeto de Metro:**\n"
+        "- 📍 **Embarque na estação Baixa-Chiado**\n"
+        "- 🔵 **Linha Azul** - direção **Reboleira**\n"
+        "- 🔄 **Transferência em Marquês de Pombal**\n"
+        "- 🟡 **Linha Amarela** - direção **Rato**\n"
+        "- 🎯 **Saia na estação Rato**\n\n"
+        "🗓️ **Próximos Metros** (tempo real):\n"
+        "- **Estação Baixa-Chiado:** Direção Reboleira — **⏱️ Próximo Metro em:** 3 min 10s\n\n"
+        "💡 **Dica rápida:** Em Marquês de Pombal, siga a sinalização para a Linha Amarela."
+    )
+
+    result = agent._finalize_transport_response(
+        structured_route,
+        user_message="ML azul baixa chiado rato",
+        language="pt",
+    )
+
+    assert "### 🚌 Próximas Chegadas" not in result
+    assert "🗺️ **O seu Trajeto de Metro:**" in result
+    assert result.count("📌 **Fonte:**") == 1
+
+
+def test_transport_agent_invoke_clears_stale_operator_log_before_new_query() -> None:
+    """A fresh transport query must not inherit source operators from the previous one."""
+    agent = TransportAgent()
+    agent._tool_calls_log = [{"tool_name": "get_transport_summary", "args": {}}]
+
+    def _deterministic(*, user_message: str, context: str = "", language: str | None = None) -> str:
+        agent._record_tool_call("get_metro_wait_time", {"station": "Rato"})
+        return agent._finalize_transport_response(
+            "🚇 **Next metro at Rato**\n\n🗓️ **Next Metro:**\n- **Station Rato:** Direction **Odivelas** — **⏱️ Next metro in:** 3 min 19s | 7 min 24s",
+            user_message=user_message,
+            language=language or "en",
+        )
+
+    with patch.object(agent, "_resolve_deterministic_response", side_effect=_deterministic), patch.object(
+        agent,
+        "_remember_transport_context",
+        lambda *_args, **_kwargs: None,
+    ):
+        result = agent.invoke("proximo metro rato", context="User language: en")
+
+    assert result.count("📌 **Source:**") == 1
+    assert "[*Metro de Lisboa*](https://www.metrolisboa.pt)" in result
+    assert "[*Carris*](https://www.carris.pt)" not in result
+    assert "[*Carris Metropolitana*](https://www.carrismetropolitana.pt)" not in result
+    assert "[*CP*](https://www.cp.pt)" not in result
+
+
+def test_parse_metro_wait_request_handles_short_station_forms() -> None:
+    """Short metro wait queries should stay on the deterministic wait-time path."""
+    short_wait = _parse_metro_wait_request("proximo metro rato")
+    compact_station = _parse_metro_wait_request("metro oriente")
+    route_query = _parse_metro_wait_request("metro verde rossio rato")
+
+    assert short_wait == {"station": "Rato", "direction": None, "status_requested": False}
+    assert compact_station == {"station": "Oriente", "direction": None, "status_requested": False}
+    assert route_query is None
+
+
+def test_build_ambiguity_preamble_handles_new_bare_place_tokens() -> None:
+    """Bare ambiguous route endpoints should surface a clarification preamble before routing."""
+    oriente_note = _build_ambiguity_preamble("Rossio", "Oriente")
+    madeira_note = _build_ambiguity_preamble("Cais do Sodré", "Madeira")
+    explicit_street = _build_ambiguity_preamble("Cais do Sodré", "Rua Humberto Madeira")
+
+    assert "Parque das Nações" in oriente_note
+    assert "Estação Oriente / Gare do Oriente" in oriente_note
+    assert "Ilha da Madeira" in madeira_note
+    assert explicit_street == ""
+
+
+def test_extract_destination_only_target_handles_nearby_option_queries() -> None:
+    """Single-destination transport questions should be separated from real origin→destination routes."""
+    assert _extract_destination_only_target("Transport to Museu Calouste Gulbenkian") == "Museu Calouste Gulbenkian"
+    assert _extract_destination_only_target("Como vou para o MNAC?") == "MNAC"
+    assert _extract_destination_only_target("transportes disponiveis alfama") == "alfama"
+    assert _extract_destination_only_target("How do I get to Museu Nacional do Azulejo by bus?") is None
+
+
+def test_build_destination_only_transport_overview_response_uses_nearby_stops() -> None:
+    """Destination-only transport prompts should surface nearby Metro, CP, and Carris options instead of a zero-distance route."""
+    with patch("tools.transport_api.find_nearest_stops_for_place", return_value={
+        "display_name": "Museu Nacional de Arte Contemporânea (MNAC)",
+        "metro": "baixa/chiado",
+        "metro_line": "azul/verde",
+        "metro_walk_minutes": 3,
+        "train_station": "Lisboa Rossio",
+        "train_walk_minutes": 6,
+        "carris_stops": [
+            {"stop_name": "Rua do Alecrim", "distance_km": 0.18},
+            {"stop_name": "Chiado", "distance_km": 0.32},
+        ],
+    }):
+        response = _build_destination_only_transport_overview_response("Como vou para o MNAC?", "")
+
+    assert response is not None
+    assert "MNAC" in response
+    assert "Nearest Metro" not in response
+    assert "Metro mais próximo" in response
+    assert "Rua do Alecrim" in response
+    assert "Lisboa Rossio" in response
+    assert "Já está no destino" not in response
 
 
 def test_operators_from_tool_names_expands_transport_summary_to_all_used_networks() -> None:

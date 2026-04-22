@@ -822,17 +822,28 @@ st.set_page_config(
 
 
 def inject_meta_description() -> None:
-    """Ensure a stable meta description exists in the document head for SEO audits."""
+    """Ensure a stable meta description exists in the document head for SEO audits.
+
+    Uses ``streamlit.components.v1.html`` so the injected ``<script>`` actually
+    executes inside an iframe sibling that mutates the parent document head.
+    ``st.html`` sanitises script tags in current Streamlit releases, so it
+    cannot perform DOM mutations.
+    """
+
     description = (
         "LISBOA is a bilingual AI assistant for Lisbon weather, transport, events, "
         "places, and itinerary planning across the Lisbon Metropolitan Area."
     )
-    st.html(
+    # Imported lazily so test collection (which runs ``import app``) does not
+    # require a live Streamlit runtime to evaluate this side-effect helper.
+    from streamlit.components.v1 import html as components_html
+
+    components_html(
         f"""
         <script>
         (() => {{
             const descriptionText = {json.dumps(description)};
-            const doc = window.document;
+            const doc = window.parent ? window.parent.document : window.document;
             let meta = doc.querySelector('meta[name="description"]');
             if (!meta) {{
                 meta = doc.createElement('meta');
@@ -845,7 +856,7 @@ def inject_meta_description() -> None:
         }})();
         </script>
         """,
-        unsafe_allow_javascript=True,
+        height=0,
     )
 
 
@@ -1215,6 +1226,10 @@ def initialize_assistant(
 # ==========================================================================
 # UI COMPONENTS
 # ==========================================================================
+
+if logo_path:
+    st.logo("img/t.png", icon_image=logo_path, size="small")
+
 
 def display_banner():
     st.markdown(
