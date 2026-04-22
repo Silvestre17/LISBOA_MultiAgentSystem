@@ -47,7 +47,22 @@ class WeatherAgent(BaseAgent):
     def __init__(self):
         """Initializes the weather agent."""
         super().__init__("weather")
-        self.system_prompt = get_weather_prompt()
+        self.system_prompt = get_weather_prompt(language="en")
+        self._system_prompt_dynamic = True
+
+    def _get_runtime_system_prompt(self, language: str, *, safe_mode: bool = False) -> str:
+        """Return the prompt for the requested language while preserving explicit test overrides."""
+        if safe_mode:
+            return get_weather_prompt(language=language, safe_mode=True)
+
+        if not getattr(self, "_system_prompt_dynamic", False):
+            override_prompt = getattr(self, "system_prompt", "")
+            if override_prompt:
+                return override_prompt
+
+        prompt = get_weather_prompt(language=language)
+        self.system_prompt = prompt
+        return prompt
 
     @staticmethod
     def _infer_weather_query_language(user_message: str) -> str:
@@ -331,7 +346,7 @@ class WeatherAgent(BaseAgent):
         """Ensures weather subgraph LLM calls receive system and language instructions."""
         updated_messages = list(messages)
         if not updated_messages or not isinstance(updated_messages[0], SystemMessage):
-            updated_messages = [SystemMessage(content=self.system_prompt)] + updated_messages
+            updated_messages = [SystemMessage(content=self._get_runtime_system_prompt(language))] + updated_messages
 
         if not any(
             isinstance(message, SystemMessage)
@@ -396,7 +411,8 @@ class WeatherAgent(BaseAgent):
                 language=language,
             )
 
-        messages = self._build_messages(self.system_prompt, user_message, context, language=language)
+        system_prompt = self._get_runtime_system_prompt(language)
+        messages = self._build_messages(system_prompt, user_message, context, language=language)
         tool_enforcement_msg = (
             "You MUST use a tool (like get_current_weather_summary) to get real data. "
             "Do NOT answer from your knowledge base. Call the tool now."
@@ -426,7 +442,7 @@ class WeatherAgent(BaseAgent):
                 print("      [WEATHER] Retrying with safe prompt variant after content filter...")
 
             safe_messages = self._build_messages(
-                get_weather_prompt(safe_mode=True),
+                self._get_runtime_system_prompt(language, safe_mode=True),
                 user_message,
                 context,
                 language=language,

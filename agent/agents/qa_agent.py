@@ -20,7 +20,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from agent.agents.base import BaseAgent, clean_response, parse_json_response
 from agent.utils.langsmith_tracing import traceable
 from agent.prompts.qa import get_qa_prompt
-from agent.utils.response_formatter import infer_response_language
+from agent.utils.response_formatter import (
+    _LABEL_TRANSLATIONS,
+    _count_structured_place_cards,
+    _place_response_missing_required_fields,
+    infer_response_language,
+)
 
 # Import authoritative static transport data from tool modules.
 # These provide the single source of truth for metro/CP verification (no API calls).
@@ -716,9 +721,16 @@ class QualityAssuranceAgent(BaseAgent):
                 output,
                 user_query,
                 user_context,
+                language=language,
+                agent_name=agent_name,
             )
 
-        combined_fact_check = self._verify_facts(combined_output, user_query, user_context)
+        combined_fact_check = self._verify_facts(
+            combined_output,
+            user_query,
+            user_context,
+            language=language,
+        )
         fact_check = self._merge_fact_check_results(
             combined_fact_check=combined_fact_check,
             per_agent_fact_checks=per_agent_fact_checks,
@@ -891,6 +903,8 @@ class QualityAssuranceAgent(BaseAgent):
         combined_output: str,
         user_query: str,
         user_context: Optional[Dict[str, Any]] = None,
+        language: Optional[str] = None,
+        agent_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Deterministic fact verification against authoritative static data.
@@ -922,6 +936,14 @@ class QualityAssuranceAgent(BaseAgent):
         critical_issues: List[str] = []
         checks: List[str] = []
         output_lower = combined_output.lower()
+        expected_language = language if language in {"pt", "en"} else infer_response_language(
+            user_query=user_query,
+            default="en",
+        )
+
+        def add_critical_issue(message: str) -> None:
+            if message not in critical_issues:
+                critical_issues.append(message)
 
         # ── Check 1: Metro station names ──────────────────────────────
         # Uses METRO_STATIONS from metrolisboa_api as the authoritative source.
@@ -1155,25 +1177,114 @@ class QualityAssuranceAgent(BaseAgent):
         # ── Check 10: User-facing output hygiene ───────────────────────
         # Flags backend-oriented fields that should never reach the final UI.
         checks.append("output_hygiene")
+        structured_label_count = len(
+            re.findall(r"\*\*[^*:\n]{2,40}:?\*\*", combined_output)
+        )
+        structured_output = "### " in combined_output or structured_label_count >= 3
+        source_footer_match = re.search(
+            r"(?m)^📌\s*\*\*(?:Fonte|Source):\*\*.*$",
+            combined_output,
+        )
+
         if re.search(r"(?im)^\s*(?:[-*•]\s*)?(?:🗺️\s*)?GPS\s*:", combined_output):
-            critical_issues.append(
-                "Raw GPS coordinates leaked into user-facing output."
-            )
+            add_critical_issue("Raw GPS coordinates leaked into user-facing output.")
         if re.search(
             r"(?im)^\s*(?:[-*•]\s*)?(?:🚏\s*)?(?:next\s+)?stop(?:_id|\s+id)\s*[:=]|\b(?:line_id|stop_id|route_id|pattern_id|trip_id)\b",
             combined_output,
         ):
-            critical_issues.append(
-                "Technical transport identifiers leaked into user-facing output."
-            )
+            add_critical_issue("Technical transport identifiers leaked into user-facing output.")
         if re.search(
             r"\b(?:Unknown event|Evento sem nome|Unknown place|Local sem nome|Unknown station|Estação sem nome)\b",
             combined_output,
             re.IGNORECASE,
         ):
-            critical_issues.append(
-                "Unnamed placeholder content leaked into user-facing output."
-            )
+            add_critical_issue("Unnamed placeholder content leaked into user-facing output.")
+
+        translatable_pairs = [
+            (pt_label, en_label)
+            for pt_label, en_label, _ in _LABEL_TRANSLATIONS
+            if pt_label.lower() != en_label.lower()
+        ]
+        if expected_language == "en" and any(
+            re.search(rf"\*\*{re.escape(pt_label)}\s*:?[ ]*\*\*", combined_output, re.IGNORECASE)
+            for pt_label, _ in translatable_pairs
+        ):
+            add_critical_issue("Portuguese field labels leaked into an English response.")
+        if expected_language == "pt" and any(
+            re.search(rf"\*\*{re.escape(en_label)}\s*:?[ ]*\*\*", combined_output, re.IGNORECASE)
+            for _, en_label in translatable_pairs
+        ):
+            add_critical_issue("English field labels leaked into a Portuguese response.")
+
+        if structured_output and not source_footer_match:
+            add_critical_issue("Source footer is missing or malformed.")
+        if source_footer_match:
+            trailing_text = combined_output[source_footer_match.end():]
+            if re.search(r"(?m)^\s*(?:[-*•]\s*)?[💡⚠️]", trailing_text):
+                add_critical_issue("Tips and warnings must appear before the source footer.")
+
+        if re.search(r"(?m)^\s*1\.\s*$", combined_output):
+            add_critical_issue("Stray numbered-list markers leaked into the response.")
+        if re.search(r"(?m)^\s*\*\*\s*$", combined_output) or combined_output.count("**") % 2 != 0:
+            add_critical_issue("Broken bold markdown markers leaked into the response.")
+        if combined_output.count("`") % 2 != 0:
+            add_critical_issue("Raw markdown backticks leaked into the response.")
+
+        if re.search(r"\[[^\]]+\]\(\[[^\]]+\]\([^)]+\)\)", combined_output):
+            add_critical_issue("Nested markdown links leaked into the response.")
+        if re.search(
+            r"\[(?:Bilhetes|Tickets|Website|Phone|Telefone|Morada|Address)[^\]]*\]\((?!https?://|mailto:|tel:|https://www\.google\.com/maps)[^)]+\)",
+            combined_output,
+            re.IGNORECASE,
+        ):
+            add_critical_issue("Markdown links must only wrap valid URLs or tel: targets.")
+
+        if re.search(
+            r"(?m)^[^\n]*(?:📍\s*\*\*(?:Address|Morada|Endereço|Localização|Location)|📞\s*\*\*(?:Phone|Telefone)|🌐\s*\*\*(?:Website|Sítio)|🎟️\s*\*\*(?:Tickets|Bilhetes)).+",
+            combined_output,
+        ) and re.search(
+            r"(?m)^.+\S\s+(?:📍\s*\*\*|📞\s*\*\*|🌐\s*\*\*|🎟️\s*\*\*)",
+            combined_output,
+        ):
+            add_critical_issue("Structured emoji field labels must start on their own line.")
+
+        for line in combined_output.splitlines():
+            if re.search(r"(?:📞|\*\*(?:Phone|Telefone|Contact|Contacto):\*\*)", line, re.IGNORECASE):
+                if re.search(r"\+351\s*\d{3}\s*\d{3}\s*\d{3}", line) and "tel:" not in line.lower():
+                    add_critical_issue("Phone fields must include a tel: link.")
+            if re.search(r"(?:📍|\*\*(?:Address|Morada|Endereço|Localização|Location):\*\*)", line, re.IGNORECASE):
+                if "google.com/maps" not in line.lower():
+                    add_critical_issue("Address fields must use Google Maps links.")
+
+        if re.search(r"\(-?\d+\.\d+\s*,\s*-?\d+\.\d+\)", combined_output) and "google.com/maps" not in output_lower:
+            add_critical_issue("Coordinate pairs must be wrapped in Google Maps links.")
+
+        emoji_expectations = [
+            (r"\*\*(?:Phone|Telefone):\*\*", "📞"),
+            (r"\*\*(?:Address|Morada|Endereço|Location|Localização):\*\*", "📍"),
+            (r"\*\*(?:Source|Fonte):\*\*", "📌"),
+            (r"\*\*(?:Tip|Dica(?: rápida)?):\*\*", "💡"),
+            (r"\*\*(?:Warning|Aviso|Note|Nota|Atenção):\*\*", "⚠️"),
+            (r"\*\*(?:Tickets|Bilhetes):\*\*", "🎟️"),
+        ]
+        for pattern, expected_emoji in emoji_expectations:
+            for line in combined_output.splitlines():
+                if re.search(pattern, line, re.IGNORECASE) and expected_emoji not in line:
+                    add_critical_issue("Structured field labels are missing their expected semantic emoji.")
+                    break
+
+        if agent_name == "researcher" and self._is_place_listing_query(user_query):
+            place_card_count = _count_structured_place_cards(combined_output)
+            if place_card_count == 0:
+                add_critical_issue("Place cards collapsed into summary text and lost the canonical layout.")
+            elif _place_response_missing_required_fields(
+                combined_output,
+                expected_language,
+                place_card_count,
+            ):
+                add_critical_issue(
+                    "Place cards are missing canonical fields such as description, address, opening hours, or website."
+                )
 
         result = {
             "valid": len(critical_issues) == 0,

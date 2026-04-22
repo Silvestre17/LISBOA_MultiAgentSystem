@@ -2061,18 +2061,39 @@ def get_train_frequency(
     try:
         cursor = conn.cursor()
 
-        # Find route matching name
+        # A CP line can map to multiple GTFS route variants (short turns, branch
+        # terminals, and both travel directions). Selecting only the first match
+        # can pick a valid route_id that simply has no departures at the requested
+        # station today, which incorrectly reports "No departures found" for
+        # common cases like Cascais at Cais do Sodre.
         cursor.execute(
             "SELECT route_id, route_short_name, route_long_name FROM routes WHERE route_long_name LIKE ? OR route_short_name LIKE ?",
             (f"%{route_name}%", f"%{route_name}%"),
         )
-        route = cursor.fetchone()
-        if not route:
+        route_rows = cursor.fetchall()
+        if not route_rows:
             conn.close()
             return f"Route '{route_name}' not found in CP data. Try: Sintra, Cascais, Azambuja, Sado"
 
-        route_id = route["route_id"]
-        route_display = route["route_long_name"] or route["route_short_name"]
+        route_ids = [row["route_id"] for row in route_rows if row["route_id"]]
+        route_display = (
+            next(
+                (
+                    (row["route_long_name"] or "").strip()
+                    for row in route_rows
+                    if (row["route_long_name"] or "").strip()
+                ),
+                "",
+            )
+            or next(
+                (
+                    (row["route_short_name"] or "").strip()
+                    for row in route_rows
+                    if (row["route_short_name"] or "").strip()
+                ),
+                route_name,
+            )
+        )
 
         # Get active services for today
         active_services = manager.get_active_services()
@@ -2080,33 +2101,63 @@ def get_train_frequency(
             conn.close()
             return "No active train services found for today."
 
+        ph_r = ",".join(["?" for _ in route_ids])
         ph_s = ",".join(["?" for _ in active_services])
 
         # Determine which station to analyze
         if station_name:
+            stop_candidates = search_gtfs_stop(station_name, limit=10)
+            if not stop_candidates:
+                conn.close()
+                return f"Station '{station_name}' not found."
+
+            candidate_stop_ids = [stop["stop_id"] for stop in stop_candidates if stop.get("stop_id")]
+            ph_stop = ",".join(["?" for _ in candidate_stop_ids])
+
             cursor.execute(
-                "SELECT stop_id, stop_name FROM stops WHERE stop_name LIKE ? LIMIT 1",
-                (f"%{station_name}%",),
+                f"""
+                SELECT st.stop_id, s.stop_name, COUNT(*) AS departure_count
+                FROM stop_times st
+                JOIN trips t ON st.trip_id = t.trip_id
+                JOIN stops s ON st.stop_id = s.stop_id
+                WHERE t.route_id IN ({ph_r})
+                  AND st.stop_id IN ({ph_stop})
+                  AND t.service_id IN ({ph_s})
+                GROUP BY st.stop_id, s.stop_name
+                ORDER BY departure_count DESC, s.stop_name ASC
+                LIMIT 1
+                """,
+                route_ids + candidate_stop_ids + active_services,
             )
             stop_row = cursor.fetchone()
             if not stop_row:
                 conn.close()
-                return f"Station '{station_name}' not found."
+                requested_station = stop_candidates[0].get("stop_name") or station_name
+                return f"No departures found for '{route_name}' at '{requested_station}' today."
             stop_id = stop_row["stop_id"]
             stop_display = stop_row["stop_name"]
         else:
-            # Use first station on the route
+            # Pick the most common first stop among the matching route variants.
             cursor.execute(
                 f"""
-                SELECT st.stop_id, s.stop_name
-                FROM stop_times st
-                JOIN trips t ON st.trip_id = t.trip_id
+                WITH first_stop_per_trip AS (
+                    SELECT st.trip_id, MIN(st.stop_sequence) AS min_stop_sequence
+                    FROM stop_times st
+                    JOIN trips t ON st.trip_id = t.trip_id
+                    WHERE t.route_id IN ({ph_r}) AND t.service_id IN ({ph_s})
+                    GROUP BY st.trip_id
+                )
+                SELECT st.stop_id, s.stop_name, COUNT(*) AS trip_count
+                FROM first_stop_per_trip first_stop
+                JOIN stop_times st
+                  ON st.trip_id = first_stop.trip_id
+                 AND st.stop_sequence = first_stop.min_stop_sequence
                 JOIN stops s ON st.stop_id = s.stop_id
-                WHERE t.route_id = ? AND t.service_id IN ({ph_s})
-                ORDER BY st.stop_sequence ASC
+                GROUP BY st.stop_id, s.stop_name
+                ORDER BY trip_count DESC, s.stop_name ASC
                 LIMIT 1
                 """,
-                [route_id] + active_services,
+                route_ids + active_services,
             )
             stop_row = cursor.fetchone()
             if not stop_row:
@@ -2121,10 +2172,10 @@ def get_train_frequency(
             SELECT st.departure_time
             FROM stop_times st
             JOIN trips t ON st.trip_id = t.trip_id
-            WHERE t.route_id = ? AND st.stop_id = ? AND t.service_id IN ({ph_s})
+            WHERE t.route_id IN ({ph_r}) AND st.stop_id = ? AND t.service_id IN ({ph_s})
             ORDER BY st.departure_time ASC
             """,
-            [route_id, stop_id] + active_services,
+            route_ids + [stop_id] + active_services,
         )
 
         rows = cursor.fetchall()

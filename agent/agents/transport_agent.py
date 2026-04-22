@@ -195,6 +195,13 @@ def _get_metro_station_name_map() -> Dict[str, str]:
     for canonical in stations_by_code.values():
         alias_map[_normalize_token(canonical)] = canonical
 
+    canonical_overrides = {
+        "baixa chiado": "Baixa-Chiado",
+        "baixa/chiado": "Baixa-Chiado",
+    }
+    for alias, canonical in canonical_overrides.items():
+        alias_map[_normalize_token(alias)] = canonical
+
     return alias_map
 
 
@@ -589,6 +596,10 @@ def _build_metro_wait_lines(targets: List[Tuple[str, str]], language: str) -> Li
 
 def _extract_route_endpoints(user_message: str) -> Optional[Tuple[str, str]]:
     """Extracts route endpoints from common PT/EN route phrasings."""
+    shorthand_pair = _extract_metro_station_pair_from_shorthand(user_message)
+    if shorthand_pair:
+        return shorthand_pair
+
     patterns = [
         r"\b(?:quais\s+os\s+)?(?:pr[oó]xim(?:os|as)|next)\s+(?:autocarros?|buses?|el[eé]tricos?|trams?).*?\b(?:at|em|na|no)\s+(?P<origin>.+?)\s+(?:para\s+(?:seguir\s+)?(?:para\s+)?|to\s+)(?P<destination>.+?)(?:[\?\!\.,;]|$)",
         r"\b(?:plan|planeia|planeie|organiza|organize)\b.*?\b(?:em|in)\s+(?P<destination>[^,\?\!\.]+),\s*(?:diz[- ]me|diga[- ]me|tell me|show me)\s+como\s+l[aá]\s+chegar\s+a\s+partir\s+d(?:o|a)\s+(?P<origin>.+?)(?:\s+e\b|[\?\!\.,;]|$)",
@@ -622,6 +633,192 @@ def _extract_route_endpoints(user_message: str) -> Optional[Tuple[str, str]]:
                 return origin, destination
 
     return None
+
+
+def _extract_metro_station_pair_from_shorthand(user_message: str) -> Optional[Tuple[str, str]]:
+    """Extract a metro origin/destination pair from shorthand prompts like 'ML azul baixa chiado rato'."""
+    normalized_query = _normalize_token(user_message)
+    if not re.match(r"^(?:ml|metro)\b", normalized_query):
+        return None
+
+    shorthand = re.sub(r"^(?:ml|metro)\s+", "", normalized_query)
+    shorthand = re.sub(r"^(?:azul|blue|verde|green|amarela|yellow|vermelha|red)\s+", "", shorthand)
+    station_aliases = _get_metro_station_name_map()
+    hits: List[Tuple[int, int, str]] = []
+    for alias, canonical in station_aliases.items():
+        index = shorthand.find(alias)
+        if index < 0:
+            continue
+        hits.append((index, len(alias), canonical))
+
+    if len(hits) < 2:
+        return None
+
+    hits.sort(key=lambda item: (item[0], -item[1], item[2]))
+    selected: List[Tuple[int, int, str]] = []
+    occupied: List[Tuple[int, int]] = []
+    for index, length, canonical in hits:
+        span_end = index + length
+        if any(index < used_end and span_end > used_start for used_start, used_end in occupied):
+            continue
+        if selected and _normalize_token(selected[-1][2]) == _normalize_token(canonical):
+            continue
+        selected.append((index, length, canonical))
+        occupied.append((index, span_end))
+
+    if len(selected) < 2:
+        return None
+
+    origin = selected[0][2]
+    destination = selected[-1][2]
+    if _normalize_token(origin) == _normalize_token(destination):
+        return None
+    return origin, destination
+
+
+def _extract_destination_only_target(user_message: str) -> Optional[str]:
+    """Extract a destination when the user asks for nearby transport options without an origin."""
+    if _extract_route_endpoints(user_message):
+        return None
+    if _query_has_wait_departure_intent(user_message):
+        return None
+    if re.search(
+        r"\b(?:by|de)\s+(?:metro|bus|buses|autocarro|autocarros|train|comboio|comboios|tram|trams|el[eé]trico|el[eé]tricos)\b",
+        user_message,
+        flags=re.IGNORECASE,
+    ):
+        return None
+
+    mode_preferences = _parse_route_mode_preferences(user_message)
+    if any(mode_preferences.values()):
+        return None
+
+    query = user_message.strip()
+    patterns = [
+        r"\b(?:transport to|how do i get to|how to get to)\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
+        r"\b(?:como vou|como chego|quero ir)\s+(?:para|ao|à|a)\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
+        r"\btransportes?\s+dispon[ií]veis?\s+(?:em|para)?\s*(?P<destination>.+?)(?:[\?\!\.,;]|$)",
+        r"\bavailable\s+transport\s+(?:in|near|for)\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, query, flags=re.IGNORECASE)
+        if match:
+            return _clean_query_fragment(match.group("destination"))
+
+    return None
+
+
+def _build_destination_only_transport_overview_response(
+    user_message: str,
+    context: str,
+) -> Optional[str]:
+    """Build a nearby-options overview for single-destination transport questions."""
+    destination = _extract_destination_only_target(user_message)
+    if not destination:
+        return None
+
+    try:
+        from tools.transport_api import find_nearest_stops_for_place
+    except ImportError:
+        return None
+
+    overview = find_nearest_stops_for_place(destination)
+    if not overview:
+        return None
+
+    language = _infer_language(user_message, context)
+    display_name = str(overview.get("display_name") or destination).strip()
+    metro_name = str(overview.get("metro") or "").strip()
+    metro_line = str(overview.get("metro_line") or "").strip()
+    metro_walk_minutes = overview.get("metro_walk_minutes")
+    train_station = str(overview.get("train_station") or "").strip()
+    train_walk_minutes = overview.get("train_walk_minutes")
+    carris_stops = overview.get("carris_stops") or []
+    if not metro_name and not train_station and not carris_stops:
+        return None
+
+    title = (
+        f"🧭 **Transportes disponíveis perto de {display_name}**"
+        if language == "pt"
+        else f"🧭 **Transport options near {display_name}**"
+    )
+    lines = [title]
+    source_links: List[str] = []
+
+    if metro_name:
+        metro_bits = [f"🚇 **Metro mais próximo:** **{metro_name.title()}**" if language == "pt" else f"🚇 **Nearest Metro:** **{metro_name.title()}**"]
+        if metro_line:
+            metro_bits.append(metro_line.title())
+        if metro_walk_minutes:
+            walk_suffix = (
+                f"(~{metro_walk_minutes} min a pé)"
+                if language == "pt"
+                else f"(~{metro_walk_minutes} min walk)"
+            )
+            metro_bits.append(walk_suffix)
+        lines.extend(["", " · ".join(metro_bits)])
+        source_links.append("[*Metro de Lisboa*](https://www.metrolisboa.pt)")
+
+    if train_station:
+        train_line = (
+            f"🚆 **Estação CP mais próxima:** **{train_station}**"
+            if language == "pt"
+            else f"🚆 **Nearest CP station:** **{train_station}**"
+        )
+        if train_walk_minutes:
+            train_line += (
+                f" (~{train_walk_minutes} min a pé)"
+                if language == "pt"
+                else f" (~{train_walk_minutes} min walk)"
+            )
+        lines.extend(["", train_line])
+        source_links.append("[*CP*](https://www.cp.pt)")
+
+    if carris_stops:
+        lines.extend([
+            "",
+            "🚌 **Paragens Carris próximas:**" if language == "pt" else "🚌 **Nearby Carris stops:**",
+        ])
+        for stop in carris_stops:
+            distance_km = float(stop.get("distance_km") or 0.0)
+            distance_label = (
+                f"{round(distance_km * 1000):.0f} m"
+                if distance_km < 1
+                else f"{distance_km:.1f} km"
+            )
+            lines.append(f"- **{stop['stop_name']}** · {distance_label}")
+        source_links.append("[*Carris*](https://www.carris.pt)")
+
+    lines.extend([
+        "",
+        "💡 **Dica rápida:** Se me disseres a origem, calculo o percurso completo a partir deste destino."
+        if language == "pt"
+        else "💡 **Quick Tip:** If you tell me your origin, I can turn this into a full route from that destination.",
+        "",
+        (
+            f"📌 **Fonte:** {' | '.join(dict.fromkeys(source_links))} | **Atualizado:** {datetime.now().strftime('%H:%M')}"
+            if language == "pt"
+            else f"📌 **Source:** {' | '.join(dict.fromkeys(source_links))} | **Updated:** {datetime.now().strftime('%H:%M')}"
+        ),
+    ])
+    return "\n".join(lines).strip()
+
+
+def _is_preformatted_metro_route_response(response: str) -> bool:
+    """Return whether a deterministic Metro route is already in its final structured layout."""
+    text = str(response or "")
+    if not text:
+        return False
+
+    has_route_header = any(
+        marker in text
+        for marker in ["🗺️ **O seu Trajeto de Metro:**", "🗺️ **Your Metro Route:**"]
+    )
+    has_wait_section = any(
+        marker in text
+        for marker in ["🗓️ **Próximos Metros", "🗓️ **Next Metros"]
+    )
+    return text.startswith("🚇 **") and "⏳ **" in text and has_route_header and has_wait_section
 
 
 def _parse_route_mode_preferences(user_message: str) -> Dict[str, bool]:
@@ -759,6 +956,9 @@ def _parse_route_mode_preferences(user_message: str) -> Dict[str, bool]:
             r"\b(?:only|just|apenas|s[oó])\b(?:\s+de)?\s+metro\b",
             normalized,
         )
+    )
+    metro_only = metro_only or bool(
+        re.match(r"^(?:ml|metro)\s+(?:azul|blue|verde|green|amarela|yellow|vermelha|red)\b", normalized)
     )
 
     if exclude_tram and re.search(r"\b(bus|buses|autocarro|autocarros)\b", normalized):
@@ -1996,6 +2196,7 @@ def _parse_metro_wait_request(user_message: str) -> Optional[Dict[str, Any]]:
         r"when is the next metro at\s+(?P<station>.+?)(?:[\?\!\.,;]|$)",
         r"metro wait time at\s+(?P<station>.+?)(?:[\?\!\.,;]|$)",
         r"pr[oó]ximo metro\s+(?:na|em)\s+(?P<station>.+?)(?:[\?\!\.,;]|$)",
+        r"pr[oó]ximo metro\s+(?P<station>.+?)(?:[\?\!\.,;]|$)",
     ]
     for pattern in station_only_patterns:
         match = re.search(pattern, query, flags=re.IGNORECASE)
@@ -2005,6 +2206,14 @@ def _parse_metro_wait_request(user_message: str) -> Optional[Dict[str, Any]]:
                 "direction": None,
                 "status_requested": _query_has_status_intent(query),
             }
+
+    compact_station_match = re.fullmatch(r"metro\s+(?P<station>.+)", query, flags=re.IGNORECASE)
+    if compact_station_match and len(query.split()) <= 2:
+        return {
+            "station": _resolve_metro_station_name(compact_station_match.group("station")),
+            "direction": None,
+            "status_requested": _query_has_status_intent(query),
+        }
 
     return None
 
@@ -2124,8 +2333,6 @@ def _build_deterministic_metro_wait_response(
         line_ids = list(dict.fromkeys(get_station_lines(station)))
 
     waits_section = "🗓️ **Próximos Metros** (tempo real):" if language == "pt" else "🗓️ **Next Metros** (real time):"
-    source_label = "📌 **Fonte:**" if language == "pt" else "📌 **Source:**"
-    updated_label = "**Atualizado:**" if language == "pt" else "**Updated:**"
     title = (
         f"🚇 **{station}** → **{direction}**"
         if direction
@@ -2162,12 +2369,6 @@ def _build_deterministic_metro_wait_response(
             note = _localize_platform_note(block.get("note"), language)
             if note:
                 response_lines.append(f"  ℹ️ {note}")
-
-    response_lines.append("")
-    timestamp = extract_update_time(wait_result) or datetime.now().strftime("%H:%M")
-    response_lines.append(
-        f"{source_label} [*Metro de Lisboa*](https://www.metrolisboa.pt) | {updated_label} {timestamp}"
-    )
     return "\n".join(response_lines).strip()
 
 
@@ -2242,7 +2443,7 @@ def _build_cp_tool_spec(user_message: str) -> Optional[Dict[str, Any]]:
     query_lower = query.lower()
     route_name = _extract_cp_route_name(query)
     has_train_context = bool(
-        re.search(r"\b(cp|comboio|comboios|train|trains)\b", query_lower)
+        re.search(r"\b(cp|comboio|comboios|combios|train|trains)\b", query_lower)
         or (
             route_name
             and re.search(
@@ -2302,6 +2503,15 @@ def _build_cp_tool_spec(user_message: str) -> Optional[Dict[str, Any]]:
             "args": {
                 "origin": _resolve_cp_station_name(endpoints[0]),
                 "destination": _resolve_cp_station_name(endpoints[1]),
+            },
+        }
+
+    if route_name == "Cascais" and re.fullmatch(r"(?:cp|comboio|comboios|combios|train|trains)\s+cascais", query_lower):
+        return {
+            "name": "plan_train_trip",
+            "args": {
+                "origin": "Cais do Sodré",
+                "destination": "Cascais",
             },
         }
 
@@ -2688,8 +2898,20 @@ class TransportAgent(BaseAgent):
     def __init__(self):
         """Initializes the transport agent."""
         super().__init__("transport")
-        self.system_prompt = get_transport_prompt()
+        self.system_prompt = get_transport_prompt(language="en")
+        self._system_prompt_dynamic = True
         self._last_transport_context: Optional[dict] = None
+
+    def _get_runtime_system_prompt(self, language: str) -> str:
+        """Return the prompt for the requested language while preserving explicit test overrides."""
+        if not getattr(self, "_system_prompt_dynamic", False):
+            override_prompt = getattr(self, "system_prompt", "")
+            if override_prompt:
+                return override_prompt
+
+        prompt = get_transport_prompt(language=language)
+        self.system_prompt = prompt
+        return prompt
 
     def reset_conversation_context(self) -> None:
         """Clears cached transport follow-up context for the session."""
@@ -2720,15 +2942,26 @@ class TransportAgent(BaseAgent):
             return "tram"
         return None
 
+    @staticmethod
+    def _is_referential_mode_follow_up(user_message: str) -> bool:
+        """Returns whether a query is a true mode-only follow-up like 'And by metro?'."""
+        normalized = re.sub(r"[!?.,;:]+", "", (user_message or "").strip().lower())
+        if not normalized:
+            return False
+
+        return bool(
+            re.fullmatch(
+                r"(?:(?:e|and|what about|how about|same|also|agora|now)\s+)?(?:(?:de|by)\s+)?(?:metro|bus|autocarro|autocarros|carris|train|comboio|comboios|cp|tram|trams|el[eé]trico|el[eé]tricos)(?:\s+only)?",
+                normalized,
+            )
+        )
+
     def _rewrite_follow_up_transport_query(self, user_message: str, language: str) -> str:
         """Rewrites short transport follow-ups using the last remembered route endpoints."""
         if _extract_route_endpoints(user_message):
             return user_message
 
-        normalized = re.sub(r"[!?.,;:]+", "", (user_message or "").strip().lower())
-        follow_up_prefixes = ("e ", "and ", "what about", "how about", "same ", "also ", "agora ", "now ")
-        is_short_referential_follow_up = normalized.startswith(follow_up_prefixes) or len(normalized.split()) <= 6
-        if not is_short_referential_follow_up:
+        if not self._is_referential_mode_follow_up(user_message):
             return user_message
 
         last_context = getattr(self, "_last_transport_context", None)
@@ -3536,6 +3769,17 @@ class TransportAgent(BaseAgent):
                 language=resolved_language,
             )
 
+        destination_overview_response = _build_destination_only_transport_overview_response(
+            user_message=user_message,
+            context=context,
+        )
+        if destination_overview_response:
+            return self._finalize_transport_response(
+                destination_overview_response,
+                user_message=user_message,
+                language=resolved_language,
+            )
+
         constrained_route_response = self._build_mode_constrained_route_response(
             user_message=user_message,
             context=context,
@@ -3725,7 +3969,7 @@ class TransportAgent(BaseAgent):
         """Ensures transport subgraph LLM steps receive system and language instructions."""
         updated_messages = list(messages)
         if not updated_messages or not isinstance(updated_messages[0], SystemMessage):
-            updated_messages = [SystemMessage(content=self.system_prompt)] + updated_messages
+            updated_messages = [SystemMessage(content=self._get_runtime_system_prompt(language))] + updated_messages
 
         if not any(
             isinstance(message, SystemMessage)
@@ -3792,12 +4036,15 @@ class TransportAgent(BaseAgent):
         if ensure_wait_times:
             formatted_response = self._ensure_realtime_wait_times(user_message, formatted_response)
 
-        finalized = finalize_worker_response(
-            formatted_response,
-            agent_name="transport",
-            user_query=user_message,
-            language=language,
-        )
+        if _is_preformatted_metro_route_response(formatted_response):
+            finalized = formatted_response.strip()
+        else:
+            finalized = finalize_worker_response(
+                formatted_response,
+                agent_name="transport",
+                user_query=user_message,
+                language=language,
+            )
 
         tool_names = [call.get("tool_name") for call in self.get_tool_calls_log()]
         operators_used = operators_from_tool_names(tool_names)
@@ -3834,6 +4081,8 @@ class TransportAgent(BaseAgent):
         Returns:
             str: Transport information response.
         """
+        self.reset_llm_usage_tracking()
+
         # Extract explicit language preference from context if provided
         import re
         language_match = re.search(r"User language:\s*(en|pt)", context, re.IGNORECASE)
@@ -3848,8 +4097,9 @@ class TransportAgent(BaseAgent):
             else "Respond ENTIRELY in English."
         )
 
+        system_prompt = self._get_runtime_system_prompt(language)
         messages = [
-            SystemMessage(content=self.system_prompt),
+            SystemMessage(content=system_prompt),
             SystemMessage(content=language_instruction),
         ]
 

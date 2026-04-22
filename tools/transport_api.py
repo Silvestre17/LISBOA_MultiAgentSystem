@@ -45,6 +45,7 @@ from tools.cp_api import (
     get_cp_station_info,
 )
 from tools.location_resolver import get_location_display_name, normalize_location_text
+from tools.utils import haversine_distance
 
 # Import from the split modules
 from tools.metrolisboa_api import (
@@ -102,6 +103,87 @@ def _format_location_display_name(location: str, detailed: bool = False) -> str:
         logger.debug("Display-name resolution failed for '%s': %s", raw, exc)
 
     return raw.title()
+
+
+def find_nearest_stops_for_place(
+    place_name: str,
+    max_results: int = 3,
+    max_radius_km: float = 0.8,
+) -> Dict[str, Any]:
+    """Resolve a place to nearby metro, train, and Carris Urban stops using coordinates."""
+    try:
+        from tools.carris_api import _get_db_connection, geocode_location
+    except ImportError:
+        return {}
+
+    lat, lon, display_name = geocode_location(place_name)
+    if lat is None or lon is None:
+        try:
+            from tools.location_resolver import geocode_location_name
+        except ImportError:
+            geocoded = None
+        else:
+            geocoded = geocode_location_name(place_name, prefer_city=True, allow_aml=True)
+
+        if geocoded:
+            lat = geocoded.get("lat")
+            lon = geocoded.get("lon")
+            display_name = geocoded.get("display_name") or geocoded.get("full_display_name") or display_name
+
+    if lat is None or lon is None:
+        return {}
+
+    landmark = get_landmark_info(place_name) or {}
+    nearby_stops: List[Dict[str, Any]] = []
+    connection = _get_db_connection()
+    if connection:
+        try:
+            cursor = connection.cursor()
+            cursor.execute("SELECT stop_id, stop_name, stop_lat, stop_lon FROM stops")
+            rows = cursor.fetchall()
+            search_radii = [max_radius_km, 1.2, 1.8]
+            for radius in search_radii:
+                candidates: List[Dict[str, Any]] = []
+                for row in rows:
+                    stop_lat = row["stop_lat"]
+                    stop_lon = row["stop_lon"]
+                    if stop_lat is None or stop_lon is None:
+                        continue
+
+                    distance_km = haversine_distance(float(lat), float(lon), float(stop_lat), float(stop_lon))
+                    if distance_km > radius:
+                        continue
+
+                    candidates.append(
+                        {
+                            "stop_id": row["stop_id"],
+                            "stop_name": row["stop_name"],
+                            "distance_km": distance_km,
+                        }
+                    )
+
+                if candidates:
+                    nearby_stops = sorted(candidates, key=lambda item: (item["distance_km"], item["stop_name"]))
+                    break
+        finally:
+            connection.close()
+
+    return {
+        "query": place_name,
+        "display_name": (
+            landmark.get("display_name")
+            or landmark.get("name")
+            or landmark.get("short_name")
+            or display_name
+            or place_name
+        ),
+        "metro": landmark.get("metro"),
+        "metro_line": landmark.get("line", ""),
+        "metro_walk_minutes": landmark.get("metro_walk_minutes"),
+        "train_station": landmark.get("train_station"),
+        "train_walk_minutes": landmark.get("train_walk_minutes"),
+        "carris_stops": nearby_stops[:max_results],
+    }
 
 
 def _find_station_index(stations: list, station_name: str) -> int:
@@ -303,14 +385,40 @@ def _build_route_source_line(sources: List[str]) -> str:
 # before the tool renders a literal route to a Lisbon street of the same name.
 _KNOWN_AMBIGUITIES: Dict[str, Dict[str, str]] = {
     "madeira": {
-        "street_name": "Rua Humberto Madeira",
-        "island": "Ilha da Madeira",
+        "urban_name": "Rua Humberto Madeira",
+        "alternate_name": "Ilha da Madeira",
+        "alternate_hint": "Se te referes à **Ilha da Madeira**, este planeador de metro/autocarro não cobre a ilha; deves confirmar voo.",
+        "urban_hint": "Se te referes a **Rua Humberto Madeira**, o trajeto de metro mais próximo fica em Encarnação (Linha Vermelha).",
+    },
+    "oriente": {
+        "urban_name": "Estação Oriente / Gare do Oriente",
+        "alternate_name": "zona do Parque das Nações",
+        "alternate_hint": "Se te referes à **zona do Parque das Nações**, indica o local exacto (por exemplo Altice Arena, FIL ou Oceanário).",
+        "urban_hint": "Se te referes à **Estação Oriente / Gare do Oriente**, assumo a estação como destino abaixo.",
+    },
+    "marquês": {
+        "urban_name": "Estação Marquês de Pombal",
+        "alternate_name": "Avenida / rotunda Marquês de Pombal",
+        "alternate_hint": "Se te referes à **Avenida / rotunda Marquês de Pombal**, indica o ponto exacto porque a zona tem várias saídas e paragens.",
+        "urban_hint": "Se te referes à **Estação Marquês de Pombal**, assumo a estação como destino abaixo.",
+    },
+    "roma": {
+        "urban_name": "Estação Roma",
+        "alternate_name": "Avenida de Roma / zona envolvente",
+        "alternate_hint": "Se te referes à **Avenida de Roma / zona envolvente**, indica o ponto exacto porque a área é extensa.",
+        "urban_hint": "Se te referes à **Estação Roma**, assumo a estação como destino abaixo.",
+    },
+    "odivelas": {
+        "urban_name": "Estação Odivelas",
+        "alternate_name": "município de Odivelas",
+        "alternate_hint": "Se te referes ao **município de Odivelas**, indica o local exacto porque a estação não cobre toda a zona.",
+        "urban_hint": "Se te referes à **Estação Odivelas**, assumo a estação como destino abaixo.",
     },
 }
 
 
 def _build_ambiguity_preamble(origin: str, destination: str) -> str:
-    """Return a short ambiguity note when a bare island/region name is used."""
+    """Return a short ambiguity note when a bare ambiguous place token is used."""
     def _detect(value: str) -> Optional[Dict[str, str]]:
         token = (value or "").strip().lower()
         # Only flag a *bare* place name. "Rua Humberto Madeira" clearly means
@@ -327,13 +435,14 @@ def _build_ambiguity_preamble(origin: str, destination: str) -> str:
         return ""
 
     name = hit["raw"].title()
-    island = hit["island"]
-    street = hit["street_name"]
+    alternate_name = hit["alternate_name"]
+    urban_name = hit["urban_name"]
+    alternate_hint = hit["alternate_hint"]
+    urban_hint = hit["urban_hint"]
     return (
-        f"⚠️ **Ambiguidade no destino**: **{name}** pode referir-se à **{island}** ou a **{street}**, em Lisboa.\n"
-        f"- Se te referes à **{island}**, este planeador de metro/autocarro não cobre a ilha; "
-        "deves confirmar voo ou barco.\n"
-        f"- Se te referes a **{street}**, o trajeto de metro mais próximo fica em Encarnação (Linha Vermelha).\n"
+        f"⚠️ **Ambiguidade no destino**: **{name}** pode referir-se à **{alternate_name}** ou a **{urban_name}**, em Lisboa.\n"
+        f"- {alternate_hint}\n"
+        f"- {urban_hint}\n"
         "- Assumo a interpretação urbana abaixo. Se não for isso, reformula o pedido com o nome completo do destino."
     )
 

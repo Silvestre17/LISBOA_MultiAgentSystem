@@ -176,6 +176,24 @@ def test_q8_plan_train_trip_handles_cais_do_sodre_to_cascais() -> None:
     assert any(token in normalized for token in ["comboio", "train", "linha", "departures", "partidas"])
 
 
+def test_q8_get_train_frequency_handles_cais_do_sodre_for_cascais() -> None:
+    """CP frequency queries should aggregate valid Cascais route variants at Cais do Sodre."""
+    from tools.cp_api import get_train_frequency
+
+    frequency = str(
+        get_train_frequency.invoke(
+            {"route_name": "Cascais", "station_name": "Cais do Sodre"}
+        )
+    )
+    normalized = frequency.lower()
+
+    assert "no departures found" not in normalized
+    assert "not found" not in normalized
+    assert "cais do sodre" in normalized or "cais do sodré" in normalized
+    assert "cascais" in normalized
+    assert any(token in normalized for token in ["frequência", "frequency", "comboios", "trains"])
+
+
 # --------------------------------------------------------------------------
 # Q9. Seafood query in English → labels must stay English.
 # --------------------------------------------------------------------------
@@ -212,6 +230,42 @@ def test_q9_en_labels_do_not_survive_pt_response() -> None:
     assert "**Atualizado:**" in out
     assert "**Address:**" not in out
     assert "**Source:**" not in out
+
+
+def test_q9_transport_and_card_labels_convert_from_pt_to_en() -> None:
+    """Required PT transport/card labels must convert deterministically into English."""
+    mixed = (
+        "**Telefone:** +351 213 500 115\n"
+        "**Bilhetes:** Não disponível\n"
+        "**Preço:** Grátis\n"
+        "**Aviso:** Linha interrompida\n"
+        "**Atenção:** Confirma antes de sair\n"
+        "**Próximos metros:** 2 min\n"
+        "**Tempo estimado:** 14 min\n"
+        "**Trajeto:** Rossio → Belém\n"
+        "**Transfere em:** Alameda\n"
+        "**Embarca em:** Rossio\n"
+        "**Sai em:** Belém\n"
+        "**Segue a pé:** 6 min"
+    )
+    out = enforce_language_labels(mixed, language="en")
+
+    assert "**Phone:**" in out
+    assert "**Tickets:**" in out
+    assert "**Price:**" in out
+    assert "**Warning:**" in out
+    assert "**Note:**" in out
+    assert "**Next departures:**" in out
+    assert "**Estimated time:**" in out
+    assert "**Route:**" in out
+    assert "**Transfer at:**" in out
+    assert "**Board at:**" in out
+    assert "**Exit at:**" in out
+    assert "**Walk to:**" in out
+    assert "**Telefone:**" not in out
+    assert "**Bilhetes:**" not in out
+    assert "**Atenção:**" not in out
+    assert "**Trajeto:**" not in out
 
 
 # --------------------------------------------------------------------------
@@ -391,7 +445,7 @@ def test_q19b_final_visual_pass_preserves_leading_enumerator_when_real_list() ->
         (["get_carris_metropolitana_alerts"], ["carris_metropolitana"]),
         (["search_cp_stations"], ["cp"]),
         (["plan_train_trip"], ["cp"]),
-        (["get_transport_summary"], ["metro"]),
+        (["get_transport_summary"], ["metro", "carris", "carris_metropolitana", "cp"]),
         (["carris_get_stops", "search_cp_stations"], ["carris", "cp"]),
         ([], []),
     ],

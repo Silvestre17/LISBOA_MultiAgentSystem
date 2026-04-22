@@ -50,6 +50,7 @@ from agent.utils.response_formatter import (
     finalize_worker_response,
     format_response,
     generate_response_title,
+    reconcile_researcher_place_response,
     resolve_output_language,
 )
 from agent.utils.usage_costs import (
@@ -1519,6 +1520,12 @@ class MultiAgentAssistant:
             )
 
         if single_domain_agents == ["researcher"] and isinstance(agent_outputs.get("researcher"), str):
+            final_output = reconcile_researcher_place_response(
+                final_output,
+                agent_outputs["researcher"],
+                language=language,
+                user_query=message,
+            )
             final_output = reconcile_researcher_event_response(
                 final_output,
                 agent_outputs["researcher"],

@@ -800,8 +800,21 @@ def structure_weather_markdown(text: str) -> str:
     )
 
     def _is_section_line(line: str) -> bool:
+        # Strip leading emoji + whitespace and a trailing colon, then match the
+        # remaining text against the known section titles. Substring matching
+        # would misclassify lines like ``✅ Sem avisos meteorológicos ativos.``
+        # as a section header just because they contain the words "Avisos
+        # Meteorológicos".
         stripped = line.strip().rstrip(":")
-        return any(marker.lower() in stripped.lower() for marker in section_markers)
+        # Drop a single leading emoji cluster (followed by optional VS16) so
+        # ``🌤️ Lisbon Weather Summary`` collapses to ``Lisbon Weather Summary``.
+        emoji_stripped = re.sub(
+            r"^[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s*",
+            "",
+            stripped,
+        ).strip()
+        candidate = emoji_stripped.lower()
+        return any(candidate == marker.lower() for marker in section_markers)
 
     def _is_day_line(line: str) -> bool:
         stripped = line.strip().rstrip(":")
@@ -823,11 +836,57 @@ def structure_weather_markdown(text: str) -> str:
         match = re.match(r"^\*\*(.+)\*\*$", stripped)
         return match.group(1).strip() if match else stripped
 
+    # Short-circuit: only apply structured nesting when the input actually
+    # contains the day/section structure that justifies it. A single short
+    # status/detail line (e.g. ``🌤️ Forecast body`` from a fact-check shim)
+    # should be returned unchanged so callers do not see a spurious leading
+    # ``- `` prefix.
+    raw_lines = [line for line in text.splitlines() if line.strip()]
+    has_structural_anchor = any(
+        _is_section_line(line) or _is_day_line(line) for line in raw_lines
+    )
+    if not has_structural_anchor:
+        return text.strip()
+
     structured_lines: list[str] = []
     inside_day_block = False
+    source_lines = text.splitlines()
 
-    for raw_line in text.splitlines():
+    def _peek_next_nonblank_kind(start_idx: int) -> str:
+        """Returns the semantic kind of the next non-blank line after start_idx."""
+        for j in range(start_idx + 1, len(source_lines)):
+            candidate = source_lines[j].strip()
+            if not candidate:
+                continue
+            candidate = re.sub(r"^(?:[-*•]\s+)", "", candidate)
+            candidate = _unwrap_full_line_bold(candidate)
+            if not candidate:
+                continue
+            if _is_detail_line(candidate):
+                return "detail"
+            if _is_day_line(candidate):
+                return "day"
+            if _is_section_line(candidate):
+                return "section"
+            if _is_status_line(candidate):
+                return "status"
+            if _SOURCE_LINE_RE.match(candidate):
+                return "source"
+            return "other"
+        return ""
+
+    for idx, raw_line in enumerate(source_lines):
         stripped = raw_line.strip()
+        # A blank line usually indicates a paragraph break. Preserve the
+        # ``inside_day_block`` context only when the next non-blank line is
+        # still a detail bullet that logically belongs to the previous day.
+        # ``format_response`` inserts blanks between every bullet in the
+        # formatted weather output, so a blanket reset would strip the
+        # indentation from every detail line.
+        if not stripped:
+            if _peek_next_nonblank_kind(idx) != "detail":
+                inside_day_block = False
+            continue
         stripped = re.sub(r"^(?:[-*•]\s+)", "", stripped)
         stripped = _unwrap_full_line_bold(stripped)
         if not stripped:
@@ -860,13 +919,13 @@ def structure_weather_markdown(text: str) -> str:
             continue
 
         if _is_detail_line(stripped):
-            prefix = "    - " if inside_day_block else "- "
+            prefix = "  - " if inside_day_block else "- "
             structured_lines.append(f"{prefix}{stripped}")
             continue
 
         if _is_status_line(stripped):
             stripped = _strip_markdown_formatting(stripped)
-            prefix = "    - " if inside_day_block else "- "
+            prefix = "  - " if inside_day_block else "- "
             structured_lines.append(f"{prefix}{stripped}")
             inside_day_block = False
             continue

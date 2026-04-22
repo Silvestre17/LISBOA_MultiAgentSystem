@@ -293,6 +293,16 @@ class TestQAPrompt:
         ]:
             assert section in prompt, f"EN prompt missing section: {section}"
 
+    def test_en_prompt_mentions_place_card_completeness_and_malformed_ticket_links(self):
+        """EN QA prompt should explicitly guard against collapsed place cards and malformed ticket links."""
+        from agent.prompts.qa import get_qa_prompt
+
+        prompt = get_qa_prompt("en")
+
+        assert "Collapsed place cards" in prompt
+        assert "Malformed markdown links" in prompt
+        assert "[Bilhetes](Não disponível)" in prompt
+
     def test_pt_prompt_has_required_sections(self):
         """PT prompt should contain all new enhanced sections."""
         from agent.prompts.qa import get_qa_prompt
@@ -304,6 +314,15 @@ class TestQAPrompt:
             "acessibilidade",
         ]:
             assert section in prompt, f"PT prompt missing section: {section}"
+
+    def test_researcher_prompt_mentions_plain_text_ticket_fallback_for_non_urls(self):
+        """Researcher prompt should forbid markdown links for non-URL ticket placeholders."""
+        from agent.prompts.researcher import get_researcher_prompt
+
+        prompt = get_researcher_prompt()
+
+        assert "only render a markdown link when the value is a real URL" in prompt
+        assert "Não disponível" in prompt
 
     def test_user_context_injection(self):
         """User context dict should be rendered into the prompt."""
@@ -581,6 +600,61 @@ class TestValidatePipeline:
         assert result["needs_repair"] is True
         assert "transport" in result["repairable_agents"]
         assert result["fact_check"]["per_agent"]["transport"]["critical_issues"]
+
+    def test_validate_marks_mixed_labels_and_bad_links_for_repair(self):
+        """Mixed-language labels, non-URL markdown links, and post-source warnings must trigger repair."""
+        self.agent._safe_llm_invoke = MagicMock(
+            return_value=_make_llm_response(_default_validation_payload())
+        )
+
+        result = self.agent.validate(
+            user_query="Show me the event details in English.",
+            agent_outputs={
+                "researcher": (
+                    "### 🎭 Event\n\n"
+                    "**Categoria:** Música\n"
+                    "🎟️ **Bilhetes:** [Bilhetes](Não disponível)\n\n"
+                    "📌 **Source:** [*VisitLisboa*](https://www.visitlisboa.com) | **Updated:** 14:00\n"
+                    "- ⚠️ Confirm before you go."
+                )
+            },
+            agents_called=["researcher"],
+            language="en",
+        )
+
+        assert result["complete"] is True
+        assert result["needs_repair"] is True
+        assert "researcher" in result["repairable_agents"]
+        issues = " ".join(result["fact_check"]["per_agent"]["researcher"]["critical_issues"]).lower()
+        assert "portuguese field labels" in issues
+        assert "markdown links" in issues
+        assert "source footer" in issues
+
+    def test_validate_marks_collapsed_place_cards_for_repair(self):
+        """Place-only answers without canonical fields should be flagged for repair."""
+        self.agent._safe_llm_invoke = MagicMock(
+            return_value=_make_llm_response(_default_validation_payload())
+        )
+
+        result = self.agent.validate(
+            user_query="Lista as atrações imperdíveis para quem visita Lisboa pela primeira vez.",
+            agent_outputs={
+                "researcher": (
+                    "### 🏛️ Monument to the Discoveries\n\n"
+                    "Um dos monumentos mais emblemáticos de Lisboa."
+                )
+            },
+            agents_called=["researcher"],
+            language="pt",
+        )
+
+        assert result["complete"] is True
+        assert result["needs_repair"] is True
+        assert "researcher" in result["repairable_agents"]
+        assert any(
+            "place cards" in issue.lower()
+            for issue in result["fact_check"]["per_agent"]["researcher"]["critical_issues"]
+        )
 
     def test_validate_retries_after_invalid_json(self):
         """One malformed LLM reply should trigger a retry instead of an immediate fallback."""

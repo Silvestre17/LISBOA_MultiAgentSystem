@@ -885,8 +885,6 @@ def fetch_gtfs_rt_vehicles(use_cache: bool = True) -> List[Dict[str, Any]]:
     Returns:
         List of vehicle dictionaries with parsed GTFS-RT data.
     """
-    global _gtfs_rt_cache
-
     if not GTFS_RT_AVAILABLE:
         logger.error("gtfs-realtime-bindings library not installed")
         return []

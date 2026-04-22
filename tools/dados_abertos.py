@@ -583,8 +583,8 @@ def find_nearby_services(
                 combined_mask = combined_mask | mask
             matches = category_datasets[combined_mask]
             if matches.empty:
-                # If no match within category, use all category datasets
-                matches = category_datasets
+                # Fall back to service-specific search instead of broad category noise.
+                matches = search_datasets(service_type)
         else:
             matches = search_datasets(service_type)
     else:
@@ -603,78 +603,93 @@ def find_nearby_services(
     if matches.empty:
         return f"❌ No datasets found for: '{service_type}'\n💡 Try: farmácias, hospitais, escolas, jardins, metro, fontanários"
 
-    # Pick the best matching dataset
-    dataset = matches.iloc[0]
-    title = dataset['title']
-    stable_url = dataset.get('stable_url')
-
-    if not stable_url or stable_url == "N/A":
-        return f"❌ Dataset '{title}' found but no URL available."
-
-    # Fetch GeoJSON data
-    geojson_data = fetch_geojson_with_retry(stable_url)
-
-    if not geojson_data:
-        return f"❌ Failed to fetch data from: {title}\n   URL: {stable_url}"
-
-    features = geojson_data.get('features', [])
-
-    if not features:
-        return f"✓ Dataset '{title}' loaded but contains no features."
-
-    # Process features
+    selected_title = ""
+    selected_feature_count = 0
     results = []
+    dataset_errors: List[str] = []
 
-    for feature in features:
-        try:
-            properties = feature.get('properties', {})
-            geometry = feature.get('geometry', {})
+    for _, dataset in matches.iterrows():
+        title = dataset['title']
+        stable_url = dataset.get('stable_url')
+        if not stable_url or stable_url == "N/A":
+            dataset_errors.append(f"{title}: no URL available")
+            continue
 
-            coords = extract_coordinates(geometry)
-            if not coords:
+        geojson_data = fetch_geojson_with_retry(stable_url)
+        if not geojson_data:
+            dataset_errors.append(f"{title}: fetch failed")
+            continue
+
+        features = geojson_data.get('features', [])
+        if not features:
+            dataset_errors.append(f"{title}: no features")
+            continue
+
+        candidate_results = []
+        for feature in features:
+            try:
+                properties = feature.get('properties', {})
+                geometry = feature.get('geometry', {})
+
+                coords = extract_coordinates(geometry)
+                if not coords:
+                    continue
+
+                lat, lon = coords
+
+                distance = None
+                if user_lat is not None and user_lon is not None:
+                    distance = haversine_distance(user_lat, user_lon, lat, lon)
+
+                name = extract_name(properties)
+                address = extract_address(properties)
+
+                candidate_results.append({
+                    'name': name,
+                    'address': address,
+                    'lat': lat,
+                    'lon': lon,
+                    'distance': distance,
+                    'properties': properties
+                })
+            except Exception as e:
+                logger.warning(f"Error processing feature: {e}")
                 continue
 
-            lat, lon = coords
+        if user_lat is not None and user_lon is not None and candidate_results:
+            candidate_results = [r for r in candidate_results if r['distance'] is not None]
+            candidate_results.sort(key=lambda x: x['distance'])
 
-            # Calculate distance if user coordinates provided
-            distance = None
-            if user_lat is not None and user_lon is not None:
-                distance = haversine_distance(user_lat, user_lon, lat, lon)
+        candidate_results = candidate_results[:max_results]
+        if candidate_results:
+            selected_title = title
+            selected_feature_count = len(features)
+            results = candidate_results
+            break
 
-            name = extract_name(properties)
-            address = extract_address(properties)
+        dataset_errors.append(f"{title}: no usable location records")
 
-            results.append({
-                'name': name,
-                'address': address,
-                'lat': lat,
-                'lon': lon,
-                'distance': distance,
-                'properties': properties
-            })
-
-        except Exception as e:
-            logger.warning(f"Error processing feature: {e}")
-            continue
+    if not results:
+        if dataset_errors:
+            return (
+                f"❌ Could not load usable data for '{service_type}'.\n"
+                f"🧪 Tried datasets: {', '.join(dataset_errors[:3])}"
+            )
+        return f"❌ No datasets found for: '{service_type}'"
 
     # Sort by distance if coordinates provided
     if user_lat is not None and user_lon is not None and results:
-        results = [r for r in results if r['distance'] is not None]
-        results.sort(key=lambda x: x['distance'])
-
         # Add header about proximity
         if near_location_name:
-            title += f" (near {near_location_name})"
+            selected_title += f" (near {near_location_name})"
         else:
-            title += " (sorted by distance)"
-
-    results = results[:max_results]
+            selected_title += " (sorted by distance)"
 
     if not results:
-        return f"✓ Dataset '{title}' loaded ({len(features)} features) but couldn't extract location data."
+        return f"✓ Dataset '{selected_title}' loaded ({selected_feature_count} features) but couldn't extract location data."
 
     # Format response
-    response = f"📍 Found {len(results)} results from '{title}':\n\n"
+    response = f"📍 Found {len(results)} results from '{selected_title}':\n\n"
 
     for i, r in enumerate(results, 1):
         response += f"{i}. {r['name']}\n"

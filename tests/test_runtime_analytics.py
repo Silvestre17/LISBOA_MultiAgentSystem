@@ -16,6 +16,7 @@ import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.agents.planner_agent import PlannerAgent, enforce_multi_day_quality_mode
@@ -920,6 +921,30 @@ def test_transport_follow_up_reuses_previous_route_for_mode_switch() -> None:
         rewritten = agent._rewrite_follow_up_transport_query("And by metro?", "en")
 
     assert rewritten == "How do I get from Rossio to Oriente by metro?"
+
+
+@pytest.mark.parametrize(
+    ("query", "language"),
+    [
+        ("autocarro belem rossio", "pt"),
+        ("metro oriente", "en"),
+        ("proximo metro rato", "pt"),
+    ],
+)
+def test_transport_follow_up_does_not_hijack_fresh_short_queries(query: str, language: str) -> None:
+    """Fresh short transport queries with their own destination must not inherit the last cached route."""
+    with patch.object(TransportAgent, "__init__", lambda self: None):
+        agent = TransportAgent()
+        agent._last_transport_context = {
+            "origin": "Metro Santos",
+            "destination": "Madeira",
+            "last_user_query": "Como vou de metro para a Madeira?",
+            "mode": "metro",
+        }
+
+        rewritten = agent._rewrite_follow_up_transport_query(query, language)
+
+    assert rewritten == query
 
 
 def test_multiagent_message_history_is_pruned_to_recent_window() -> None:
