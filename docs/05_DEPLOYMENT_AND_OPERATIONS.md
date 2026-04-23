@@ -170,11 +170,11 @@ Strict live coverage currently validates that the following are available:
 ### 4. Benchmark and ablation runs
 
 ```bash
-python eval/run_benchmark.py --mode run_test
-python eval/run_benchmark.py --mode full
-python eval/run_benchmark.py --limit 5
-python eval/run_ablation.py --mode run_test
-python eval/run_ablation.py --mode full
+python -m eval.run_benchmark --mode run_test
+python -m eval.run_benchmark --mode full
+python -m eval.run_benchmark --limit 5
+python -m eval.run_ablation --mode run_test
+python -m eval.run_ablation --mode full
 ```
 
 For the evaluation model, refer to `eval/README.md` for judge-specific details and output schema notes.

@@ -7,17 +7,17 @@
 #   eval/results/ablation/
 #
 # Usage:
-#   > python eval/run_ablation.py --mode run_test
+#   > python -m eval.run_ablation --mode run_test
 #       Quick ablation with 5 dataset entries.
-#   > python eval/run_ablation.py --limit 20
+#   > python -m eval.run_ablation --limit 20
 #       Run the first 20 dataset entries.
-#   > python eval/run_ablation.py --zero-shot-model gpt-5.4-mini
+#   > python -m eval.run_ablation --zero-shot-model gpt-5.4-mini
 #       Override the zero-shot baseline model.
-#   > python eval/run_ablation.py --dataset eval/evaluation_groundtruth_queries_demo.json --output-prefix ablation_results_demo
+#   > python -m eval.run_ablation --dataset eval/evaluation_groundtruth_queries_demo.json --output-prefix ablation_results_demo
 #       Run ablation on an alternate dataset and keep the artefacts separate from the main notebook inputs.
-#   > python eval/run_ablation.py --include-domain weather --include-domain transport
+#   > python -m eval.run_ablation --include-domain weather --include-domain transport
 #       Restrict the ablation run to a repeated set of specific domains.
-#   > python eval/run_ablation.py --open-model-spec azure::Kimi-K2.5 --judge-model-spec openai::gpt-5.4-mini
+#   > python -m eval.run_ablation --open-model-spec azure::Kimi-K2.5 --judge-model-spec openai::gpt-5.4-mini
 #       Add an explicit open-model comparison profile and override the evaluation judge.
 # ==========================================================================
 
@@ -82,6 +82,57 @@ DEFAULT_JUDGE_MODELS = [
     {"provider": DEFAULT_ZERO_SHOT_PROVIDER, "model": DEFAULT_ZERO_SHOT_MODEL, "temperature": 0.0},
     {"provider": DEFAULT_OPEN_PROVIDER, "model": DEFAULT_OPEN_MODEL, "temperature": 0.0},
 ]
+
+
+def _is_transient_rate_limit_error(error: Exception | str | None) -> bool:
+    """Return whether the error matches a transient capacity or rate-limit failure."""
+    lowered = str(error or "").lower()
+    return any(
+        token in lowered
+        for token in (
+            "429",
+            "rate limit",
+            "too many requests",
+            "maximum concurrent capacity",
+            "concurrent capacity",
+        )
+    )
+
+
+def _describe_response_telemetry(
+    *,
+    response_usage: dict,
+    tools_used: list[str],
+    error: str | None,
+) -> dict[str, str | None]:
+    """Describe whether response-side usage metrics were captured or not applicable."""
+    call_count = int(response_usage.get("call_count", 0) or 0)
+    tokens = response_usage.get("tokens", {}) if isinstance(response_usage, dict) else {}
+    total_tokens = int(tokens.get("total_tokens", 0) or 0)
+
+    if error:
+        return {
+            "response_generation_mode": "failed",
+            "response_usage_status": "unavailable_due_to_error",
+            "response_usage_note": "Response generation failed before response-side usage telemetry could be finalized.",
+        }
+    if call_count > 0 or total_tokens > 0:
+        return {
+            "response_generation_mode": "llm",
+            "response_usage_status": "captured",
+            "response_usage_note": None,
+        }
+    if tools_used:
+        return {
+            "response_generation_mode": "deterministic_tool",
+            "response_usage_status": "not_applicable_no_llm",
+            "response_usage_note": "The response was produced through a deterministic tool or rule path without an LLM generation call, so response-side tokens and cost are zero by design.",
+        }
+    return {
+        "response_generation_mode": "deterministic_rule",
+        "response_usage_status": "not_applicable_no_llm",
+        "response_usage_note": "The response was produced through a deterministic non-LLM path, so response-side tokens and cost are zero by design.",
+    }
 
 
 def resolve_groundtruth_path(dataset_path: str | Path | None = None) -> Path:
@@ -355,24 +406,38 @@ def run_zero_shot(
     model_id = build_model_id(provider, model_name)
 
     start = time.time()
-    try:
-        response = llm.invoke([HumanMessage(content=query)])
-        latency = time.time() - start
-        response_usage = build_usage_payload(
-            LLMFactory.extract_usage_metadata(response),
-            model_id=model_id,
-            call_count=1,
-        )
-        return response.content, [], "", latency, None, response_usage
-    except Exception as e:
-        return (
-            f"Error: {e}",
-            [],
-            "",
-            time.time() - start,
-            str(e),
-            build_usage_payload({}, model_id=model_id, call_count=0),
-        )
+    last_error = None
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            response = llm.invoke([HumanMessage(content=query)])
+            latency = time.time() - start
+            response_usage = build_usage_payload(
+                LLMFactory.extract_usage_metadata(response),
+                model_id=model_id,
+                call_count=1,
+            )
+            return response.content, [], "", latency, None, response_usage
+        except Exception as e:
+            last_error = e
+            if _is_transient_rate_limit_error(e) and attempt < max_attempts - 1:
+                wait_s = 2.0 * (attempt + 1)
+                print(
+                    f"      [Zero-Shot Retry] Transient model capacity/rate-limit failure "
+                    f"(attempt {attempt + 1}/{max_attempts}). Retrying in {wait_s}s..."
+                )
+                time.sleep(wait_s)
+                continue
+            break
+
+    return (
+        f"Error: {last_error}",
+        [],
+        "",
+        time.time() - start,
+        str(last_error),
+        build_usage_payload({}, model_id=model_id, call_count=0),
+    )
 
 
 def run_lisboa(query: str, system: MultiAgentAssistant, *, language: str = "en"):
@@ -553,11 +618,27 @@ def _build_profile_summary(results: list[dict], profile_key: str) -> dict[str, o
     if not profile_records:
         return {
             "total_queries": 0,
+            "total_comparisons": 0,
             "zero_shot_avg": 0,
             "lisboa_avg": 0,
             "zero_shot_avg_tool_f1": 0,
             "lisboa_avg_tool_f1": 0,
             "lisboa_improvement": 0,
+            "zero_shot_counts": {
+                "total": 0,
+                "successful_responses": 0,
+                "errored_responses": 0,
+                "scored_responses": 0,
+                "heuristics_pass_count": 0,
+            },
+            "lisboa_counts": {
+                "total": 0,
+                "successful_responses": 0,
+                "errored_responses": 0,
+                "scored_responses": 0,
+                "heuristics_pass_count": 0,
+            },
+            "winner_counts": {"zero_shot": 0, "lisboa": 0, "tie": 0, "unresolved": 0},
             "zero_shot_heuristics_pass_rate": 0,
             "lisboa_heuristics_pass_rate": 0,
             "per_domain": {},
@@ -575,10 +656,24 @@ def _build_profile_summary(results: list[dict], profile_key: str) -> dict[str, o
     lisboa_blocks = [comparison["metrics"]["lisboa"] for comparison in comparison_blocks]
     zs_scores = [block["scores"]["composite_score"] for block in zero_shot_blocks if block["scores"].get("composite_score") is not None]
     ls_scores = [block["scores"]["composite_score"] for block in lisboa_blocks if block["scores"].get("composite_score") is not None]
+    zero_shot_heuristics_pass_count = sum(
+        1 for block in zero_shot_blocks if (block.get("heuristics") or {}).get("overall_pass", False)
+    )
+    lisboa_heuristics_pass_count = sum(
+        1 for block in lisboa_blocks if (block.get("heuristics") or {}).get("overall_pass", False)
+    )
+    winner_counts = {"zero_shot": 0, "lisboa": 0, "tie": 0, "unresolved": 0}
+    for comparison in comparison_blocks:
+        winner = comparison.get("comparison_summary", {}).get("winner_by_avg_composite")
+        if winner in winner_counts:
+            winner_counts[str(winner)] += 1
+        else:
+            winner_counts["unresolved"] += 1
 
     per_domain_summary: dict[str, object] = {}
     summary: dict[str, object] = {
         "total_queries": len(profile_records),
+        "total_comparisons": len(comparison_blocks),
         "zero_shot_avg": round(sum(zs_scores) / len(zs_scores), 3) if zs_scores else 0,
         "lisboa_avg": round(sum(ls_scores) / len(ls_scores), 3) if ls_scores else 0,
         "zero_shot_avg_tool_f1": round(
@@ -592,12 +687,27 @@ def _build_profile_summary(results: list[dict], profile_key: str) -> dict[str, o
         "lisboa_improvement": round(
             (sum(ls_scores) / len(ls_scores)) - (sum(zs_scores) / len(zs_scores)), 3
         ) if zs_scores and ls_scores else 0,
+        "zero_shot_counts": {
+            "total": len(zero_shot_blocks),
+            "successful_responses": sum(1 for block in zero_shot_blocks if block.get("error") is None),
+            "errored_responses": sum(1 for block in zero_shot_blocks if block.get("error") is not None),
+            "scored_responses": len(zs_scores),
+            "heuristics_pass_count": zero_shot_heuristics_pass_count,
+        },
+        "lisboa_counts": {
+            "total": len(lisboa_blocks),
+            "successful_responses": sum(1 for block in lisboa_blocks if block.get("error") is None),
+            "errored_responses": sum(1 for block in lisboa_blocks if block.get("error") is not None),
+            "scored_responses": len(ls_scores),
+            "heuristics_pass_count": lisboa_heuristics_pass_count,
+        },
+        "winner_counts": winner_counts,
         "zero_shot_heuristics_pass_rate": round(
-            sum(1 for block in zero_shot_blocks if (block.get("heuristics") or {}).get("overall_pass", False)) / len(zero_shot_blocks),
+            zero_shot_heuristics_pass_count / len(zero_shot_blocks),
             3,
         ) if zero_shot_blocks else 0,
         "lisboa_heuristics_pass_rate": round(
-            sum(1 for block in lisboa_blocks if (block.get("heuristics") or {}).get("overall_pass", False)) / len(lisboa_blocks),
+            lisboa_heuristics_pass_count / len(lisboa_blocks),
             3,
         ) if lisboa_blocks else 0,
         "per_domain": per_domain_summary,
@@ -642,6 +752,12 @@ def _build_profile_summary(results: list[dict], profile_key: str) -> dict[str, o
         domain_lisboa = [comparison["metrics"]["lisboa"] for comparison in domain_blocks]
         domain_zs_scores = [block["scores"]["composite_score"] for block in domain_zero_shot if block["scores"].get("composite_score") is not None]
         domain_ls_scores = [block["scores"]["composite_score"] for block in domain_lisboa if block["scores"].get("composite_score") is not None]
+        domain_zero_shot_heuristics_pass_count = sum(
+            1 for block in domain_zero_shot if (block.get("heuristics") or {}).get("overall_pass", False)
+        )
+        domain_lisboa_heuristics_pass_count = sum(
+            1 for block in domain_lisboa if (block.get("heuristics") or {}).get("overall_pass", False)
+        )
         per_domain_summary[domain] = {
             "count": len(domain_blocks),
             "zero_shot_avg": round(sum(domain_zs_scores) / len(domain_zs_scores), 3) if domain_zs_scores else 0,
@@ -652,6 +768,28 @@ def _build_profile_summary(results: list[dict], profile_key: str) -> dict[str, o
             ) if domain_zero_shot else 0,
             "lisboa_avg_tool_f1": round(
                 sum(block["tool_metrics"]["tool_f1"] for block in domain_lisboa) / len(domain_lisboa),
+                3,
+            ) if domain_lisboa else 0,
+            "zero_shot_counts": {
+                "total": len(domain_zero_shot),
+                "successful_responses": sum(1 for block in domain_zero_shot if block.get("error") is None),
+                "errored_responses": sum(1 for block in domain_zero_shot if block.get("error") is not None),
+                "scored_responses": len(domain_zs_scores),
+                "heuristics_pass_count": domain_zero_shot_heuristics_pass_count,
+            },
+            "lisboa_counts": {
+                "total": len(domain_lisboa),
+                "successful_responses": sum(1 for block in domain_lisboa if block.get("error") is None),
+                "errored_responses": sum(1 for block in domain_lisboa if block.get("error") is not None),
+                "scored_responses": len(domain_ls_scores),
+                "heuristics_pass_count": domain_lisboa_heuristics_pass_count,
+            },
+            "zero_shot_heuristics_pass_rate": round(
+                domain_zero_shot_heuristics_pass_count / len(domain_zero_shot),
+                3,
+            ) if domain_zero_shot else 0,
+            "lisboa_heuristics_pass_rate": round(
+                domain_lisboa_heuristics_pass_count / len(domain_lisboa),
                 3,
             ) if domain_lisboa else 0,
             "zero_shot_usage": {
@@ -748,6 +886,8 @@ def run_ablation(
         )
 
     with tracing_project_override(ablation_langsmith_project):
+        run_started_at = datetime.now()
+        run_started_perf = time.perf_counter()
         print("=" * 60)
         print(f"STARTING ABLATION STUDY (Zero-Shot vs LISBOA Framework) (LIMIT={limit})")
         print("=" * 60)
@@ -914,6 +1054,11 @@ def run_ablation(
                     )
                     zs_combined_usage = combine_usage_payloads([zs_response_usage, zs_evaluation_usage])
                     zs_combined_cost = combine_cost_payloads([zs_response_cost, zs_evaluation_cost])
+                    zs_response_telemetry = _describe_response_telemetry(
+                        response_usage=zs_response_usage,
+                        tools_used=zs_tools,
+                        error=zs_err,
+                    )
 
                     score_disp_zs = f"{zs_score['composite_score']:.2f}/5.0" if zs_score.get("composite_score") is not None else "N/A"
                     print(f"  [Zero-Shot] Score: {score_disp_zs} | Lat: {zs_lat:.2f}s")
@@ -962,6 +1107,11 @@ def run_ablation(
                     )
                     ls_combined_usage = combine_usage_payloads([ls_response_usage, ls_evaluation_usage])
                     ls_combined_cost = combine_cost_payloads([ls_response_cost, ls_evaluation_cost])
+                    ls_response_telemetry = _describe_response_telemetry(
+                        response_usage=ls_response_usage,
+                        tools_used=ls_tools,
+                        error=ls_err,
+                    )
 
                     score_disp_ls = f"{ls_score['composite_score']:.2f}/5.0" if ls_score.get("composite_score") is not None else "N/A"
                     print(f"  [LISBOA]    Score: {score_disp_ls} | Lat: {ls_lat:.2f}s | Tools: {len(ls_tools)}")
@@ -1008,6 +1158,9 @@ def run_ablation(
                                 "evaluation_model": evaluation_model_id,
                                 "evaluation_model_config": deepcopy(evaluation_model_manifest),
                                 "evaluation_models": list(evaluation_model_manifest.get("judge_models", [])),
+                                "response_generation_mode": zs_response_telemetry["response_generation_mode"],
+                                "response_usage_status": zs_response_telemetry["response_usage_status"],
+                                "response_usage_note": zs_response_telemetry["response_usage_note"],
                                 "scores": zs_score,
                                 "judge_runs": zs_judge_runs,
                                 "scores_by_judge": zs_aggregated_judges.get("scores_by_judge", {}),
@@ -1024,6 +1177,7 @@ def run_ablation(
                                 "combined_usage": zs_combined_usage,
                                 "combined_cost_usd": zs_combined_cost,
                                 "latency": round(zs_lat, 3),
+                                "latency_s": round(zs_lat, 3),
                                 "error": zs_err,
                                 "error_type": categorize_error(zs_err),
                                 "tool_metrics": zs_tool_metrics,
@@ -1036,6 +1190,9 @@ def run_ablation(
                                 "evaluation_model": evaluation_model_id,
                                 "evaluation_model_config": deepcopy(evaluation_model_manifest),
                                 "evaluation_models": list(evaluation_model_manifest.get("judge_models", [])),
+                                "response_generation_mode": ls_response_telemetry["response_generation_mode"],
+                                "response_usage_status": ls_response_telemetry["response_usage_status"],
+                                "response_usage_note": ls_response_telemetry["response_usage_note"],
                                 "scores": ls_score,
                                 "judge_runs": ls_judge_runs,
                                 "scores_by_judge": ls_aggregated_judges.get("scores_by_judge", {}),
@@ -1055,6 +1212,7 @@ def run_ablation(
                                 "llm_usage_breakdown": ls_response_usage.get("llm_usage_breakdown", []),
                                 "llm_usage_by_agent": ls_agent_usage,
                                 "latency": round(ls_lat, 3),
+                                "latency_s": round(ls_lat, 3),
                                 "error": ls_err,
                                 "error_type": categorize_error(ls_err),
                                 "tool_metrics": ls_tool_metrics,
@@ -1088,6 +1246,8 @@ def run_ablation(
         primary_profile_metadata = profile_metadata.get(primary_profile_key, {})
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path = build_results_output_path("ablation", output_prefix, timestamp)
+        run_finished_at = datetime.now()
+        total_runtime_s = round(time.perf_counter() - run_started_perf, 3)
         write_json_artifact(
             {
                 "ablation_metadata": build_run_metadata(
@@ -1111,12 +1271,16 @@ def run_ablation(
                         "evaluation_model_config": evaluation_model_manifest,
                         "langsmith_enabled": LANGSMITH_AVAILABLE,
                         "langsmith_project": ablation_langsmith_project,
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": run_finished_at.isoformat(),
+                        "run_started_at": run_started_at.isoformat(),
+                        "run_finished_at": run_finished_at.isoformat(),
+                        "total_runtime_s": total_runtime_s,
                         "comparison": "zero_shot_vs_lisboa_dual_paradigm",
                         "real_services": True,
                         "ablation_domains": active_domains,
                         "pricing_model_count": len(pricing_catalog),
                         "output_directory": str(output_path.parent),
+                        "output_file": str(output_path),
                         **get_pricing_metadata(pricing_by_model),
                     },
                 ),

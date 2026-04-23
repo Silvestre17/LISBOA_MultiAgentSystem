@@ -349,11 +349,11 @@ python scripts/run_prompts.py --suite smoke
 ### Main Evaluation Commands
 
 ```bash
-python eval/run_benchmark.py --mode run_test
-python eval/run_benchmark.py --mode full
-python eval/run_benchmark.py --limit 5
-python eval/run_ablation.py --mode run_test
-python eval/run_ablation.py --mode full
+python -m eval.run_benchmark --mode run_test
+python -m eval.run_benchmark --mode full
+python -m eval.run_benchmark --limit 5
+python -m eval.run_ablation --mode run_test
+python -m eval.run_ablation --mode full
 python -m pytest tests/test_tool_prompt_coverage.py --run-live -m "live and coverage" -v
 ```
 

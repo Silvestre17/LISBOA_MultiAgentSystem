@@ -21,6 +21,8 @@
 
 import os
 import sys
+from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
@@ -392,6 +394,9 @@ class TestBenchmarkSummaryCostAccounting:
 
         summary = _build_summary(sample_results)
         assert summary["overall"]["response_usage"]["tokens"]["input_tokens"] == 120
+        assert summary["overall"]["successful_responses"] == 1
+        assert summary["overall"]["errored_responses"] == 0
+        assert summary["overall"]["scored_responses"] == 1
         assert summary["overall"]["evaluation_usage"]["tokens"]["output_tokens"] == 15
         assert summary["overall"]["combined_usage"]["tokens"]["total_tokens"] == 225
         assert summary["overall"]["response_cost_usd"]["pricing_lookup_key"] == "azure::gpt-5-mini"
@@ -399,8 +404,13 @@ class TestBenchmarkSummaryCostAccounting:
         assert summary["overall"]["response_cost_usd"]["total_cost_usd"] == pytest.approx(0.00009)
         assert summary["overall"]["evaluation_cost_usd"]["total_cost_usd"] == pytest.approx(0.000045)
         assert summary["overall"]["combined_cost_usd"]["total_cost_usd"] == pytest.approx(0.000135)
+        assert summary["overall"]["heuristics_pass_count"] == 1
+        assert summary["overall"]["sla_met_count"] == 1
         assert summary["per_domain"]["weather"]["combined_cost_usd"]["total_cost_usd"] == pytest.approx(0.000135)
+        assert summary["per_domain"]["weather"]["successful_responses"] == 1
+        assert summary["per_domain"]["weather"]["heuristics_pass_count"] == 1
         assert summary["per_response_model"]["azure::gpt-5-mini"]["response_cost_usd"]["model_id"] == "azure::gpt-5-mini"
+        assert summary["per_response_model"]["azure::gpt-5-mini"]["successful_responses"] == 1
         assert summary["per_response_model"]["azure::gpt-5-mini"]["combined_usage"]["tokens"]["total_tokens"] == 225
 
     def test_aggregate_judge_runs_excludes_failed_judges_from_average(self):
@@ -493,3 +503,83 @@ class TestRunIsolatedAgent:
         assert "[get_metro_status] returned:\ntool-output:Is the metro working correctly right now?" in retrieved_context
         assert latency >= 0
         assert usage["model_id"] == "azure::gpt-5-mini"
+
+
+class TestResponseTelemetryDescriptions:
+    """Validate the persisted response telemetry annotations."""
+
+    def test_benchmark_marks_deterministic_tool_responses_as_no_llm(self):
+        """Zero response usage with tool output should be marked as deterministic, not missing."""
+        telemetry = benchmark_module._describe_response_telemetry(
+            response_usage={
+                "call_count": 0,
+                "usage_available": False,
+                "tokens": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+            },
+            tools_used=["get_route_between_stations"],
+            error=None,
+        )
+
+        assert telemetry["response_generation_mode"] == "deterministic_tool"
+        assert telemetry["response_usage_status"] == "not_applicable_no_llm"
+        assert "zero by design" in str(telemetry["response_usage_note"])
+
+    def test_ablation_marks_llm_responses_as_captured(self):
+        """Non-zero response usage should be marked as captured."""
+        telemetry = ablation_module._describe_response_telemetry(
+            response_usage={
+                "call_count": 1,
+                "usage_available": True,
+                "tokens": {"input_tokens": 100, "output_tokens": 25, "total_tokens": 125},
+            },
+            tools_used=[],
+            error=None,
+        )
+
+        assert telemetry == {
+            "response_generation_mode": "llm",
+            "response_usage_status": "captured",
+            "response_usage_note": None,
+        }
+
+
+class TestAblationZeroShotRetries:
+    """Validate transient retry behavior in the ablation zero-shot path."""
+
+    def test_run_zero_shot_retries_transient_rate_limit_once(self, monkeypatch):
+        """A transient 429 should be retried before the zero-shot arm fails."""
+        attempts = {"count": 0}
+
+        class FakeLLM:
+            def invoke(self, _messages):
+                attempts["count"] += 1
+                if attempts["count"] == 1:
+                    raise RuntimeError(
+                        '{"object": "error", "message": "Server at maximum concurrent capacity. Try again later.", '
+                        '"type": "429", "param": null, "code": 429}'
+                    )
+                return SimpleNamespace(content="Recovered")
+
+        monkeypatch.setattr(ablation_module.LLMFactory, "get_llm", lambda **_kwargs: FakeLLM())
+        monkeypatch.setattr(
+            ablation_module.LLMFactory,
+            "extract_usage_metadata",
+            lambda _response: {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        )
+
+        with patch("eval.run_ablation.time.sleep") as mocked_sleep:
+            response, tools, retrieved_context, latency, error, usage = ablation_module.run_zero_shot(
+                "Plan a full day in Lisbon",
+                provider="azure",
+                model_name="Kimi-K2.5",
+            )
+
+        assert response == "Recovered"
+        assert tools == []
+        assert retrieved_context == ""
+        assert error is None
+        assert latency >= 0
+        assert usage["call_count"] == 1
+        assert usage["tokens"]["total_tokens"] == 15
+        assert attempts["count"] == 2
+        mocked_sleep.assert_called_once_with(2.0)

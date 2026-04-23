@@ -7,17 +7,17 @@
 #   eval/results/benchmark/
 #
 # Usage:
-#   > python eval/run_benchmark.py --mode run_test
+#   > python -m eval.run_benchmark --mode run_test
 #       Quick benchmark with 5 dataset entries per response model.
-#   > python eval/run_benchmark.py --limit 20
+#   > python -m eval.run_benchmark --limit 20
 #       Benchmark the first 20 dataset entries per response model.
-#   > python eval/run_benchmark.py --mode full
+#   > python -m eval.run_benchmark --mode full
 #       Benchmark the full dataset with all configured response models.
-#   > python eval/run_benchmark.py --dataset eval/evaluation_groundtruth_queries_demo.json --output-prefix benchmark_results_demo
+#   > python -m eval.run_benchmark --dataset eval/evaluation_groundtruth_queries_demo.json --output-prefix benchmark_results_demo
 #       Run the benchmark against an alternate dataset and keep the artefacts separate from the main notebook inputs.
-#   > python eval/run_benchmark.py --response-model azure::gpt-5.4-mini --response-model lmstudio::qwen/qwen3.5-9b
+#   > python -m eval.run_benchmark --response-model azure::gpt-5.4-mini --response-model lmstudio::qwen/qwen3.5-9b
 #       Override the benchmark response-model set with one or more explicit provider::model identifiers.
-#   > python eval/run_benchmark.py --judge-model-spec openai::gpt-5.4-mini
+#   > python -m eval.run_benchmark --judge-model-spec openai::gpt-5.4-mini
 #       Override the evaluation judge with one or more explicit provider::model identifiers.
 # ==========================================================================
 
@@ -91,6 +91,42 @@ SLA_THRESHOLDS = {
     "greeting": 5.0,
     "out_of_scope": 5.0,
 }
+
+
+def _describe_response_telemetry(
+    *,
+    response_usage: dict,
+    tools_used: list[str],
+    error: str | None,
+) -> dict[str, str | None]:
+    """Describe whether response-side usage metrics were captured or not applicable."""
+    call_count = int(response_usage.get("call_count", 0) or 0)
+    tokens = response_usage.get("tokens", {}) if isinstance(response_usage, dict) else {}
+    total_tokens = int(tokens.get("total_tokens", 0) or 0)
+
+    if error:
+        return {
+            "response_generation_mode": "failed",
+            "response_usage_status": "unavailable_due_to_error",
+            "response_usage_note": "Response generation failed before response-side usage telemetry could be finalized.",
+        }
+    if call_count > 0 or total_tokens > 0:
+        return {
+            "response_generation_mode": "llm",
+            "response_usage_status": "captured",
+            "response_usage_note": None,
+        }
+    if tools_used:
+        return {
+            "response_generation_mode": "deterministic_tool",
+            "response_usage_status": "not_applicable_no_llm",
+            "response_usage_note": "The worker answered through a deterministic tool or rule path without an LLM generation call, so response-side tokens and cost are zero by design.",
+        }
+    return {
+        "response_generation_mode": "deterministic_rule",
+        "response_usage_status": "not_applicable_no_llm",
+        "response_usage_note": "The worker answered through a deterministic non-LLM path, so response-side tokens and cost are zero by design.",
+    }
 
 
 def resolve_groundtruth_path(dataset_path: str | Path | None = None) -> Path:
@@ -420,6 +456,8 @@ def run_benchmark(
         )
 
     with tracing_project_override(benchmark_langsmith_project):
+        run_started_at = datetime.now()
+        run_started_perf = time.perf_counter()
         print("=" * 60)
         print(f"STARTING ACADEMIC LISBOA BENCHMARK (LIMIT={limit})")
         print("=" * 60)
@@ -523,6 +561,11 @@ def run_benchmark(
                 judge_scores = dict(aggregated_judges.get("scores", {}))
                 combined_usage = combine_usage_payloads([response_usage, evaluation_usage])
                 combined_cost = combine_cost_payloads([response_cost, evaluation_cost])
+                response_telemetry = _describe_response_telemetry(
+                    response_usage=response_usage,
+                    tools_used=tools,
+                    error=error,
+                )
 
                 # Deterministic tool metrics
                 tool_metrics = compute_tool_metrics(
@@ -561,6 +604,9 @@ def run_benchmark(
                     "judge_runs": judge_runs,
                     "scores_by_judge": aggregated_judges.get("scores_by_judge", {}),
                     "judge_summary": aggregated_judges.get("judge_summary", {}),
+                    "response_generation_mode": response_telemetry["response_generation_mode"],
+                    "response_usage_status": response_telemetry["response_usage_status"],
+                    "response_usage_note": response_telemetry["response_usage_note"],
                     "response_usage": response_usage,
                     "response_cost_usd": response_cost,
                     "agent_usage": {item["domain"]: deepcopy(response_usage)},
@@ -588,6 +634,8 @@ def run_benchmark(
         # Save Results
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path = build_results_output_path("benchmark", output_prefix, timestamp)
+        run_finished_at = datetime.now()
+        total_runtime_s = round(time.perf_counter() - run_started_perf, 3)
         benchmark_metadata = build_run_metadata(
             resolved_groundtruth_path,
             groundtruth_queries,
@@ -599,12 +647,16 @@ def run_benchmark(
                 "benchmark_domains": list(BENCHMARK_DOMAINS),
                 "langsmith_enabled": LANGSMITH_AVAILABLE,
                 "langsmith_project": benchmark_langsmith_project,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": run_finished_at.isoformat(),
+                "run_started_at": run_started_at.isoformat(),
+                "run_finished_at": run_finished_at.isoformat(),
+                "total_runtime_s": total_runtime_s,
                 "real_services": True,
                 "evaluation_models": list(evaluation_model_manifest.get("judge_models", [])),
                 "judge_model_configs": judge_model_manifests,
                 "pricing_model_count": len(pricing_catalog),
                 "output_directory": str(output_path.parent),
+                "output_file": str(output_path),
                 **get_pricing_metadata(pricing_by_model),
             },
         )
@@ -672,10 +724,19 @@ def _build_summary(results: list) -> dict:
     scores = [r["scores"]["composite_score"] for r in results if r["scores"]["composite_score"] is not None]
     latencies = [r["latency_s"] for r in results if r["error"] is None]
     errors = [r for r in results if r["error"] is not None]
+    successful_results = [r for r in results if r["error"] is None]
+    scored_results = [r for r in results if r.get("scores", {}).get("composite_score") is not None]
+    heuristics_pass_count = sum(
+        1 for r in results if (r.get("heuristics") or {}).get("overall_pass", False)
+    )
+    sla_met_count = sum(1 for r in results if r.get("sla_met", False))
 
     summary = {
         "overall": {
             "total_evaluated": len(results),
+            "successful_responses": len(successful_results),
+            "errored_responses": len(errors),
+            "scored_responses": len(scored_results),
             "total_errors": len(errors),
             "error_categories": summarize_error_categories(results),
             "avg_composite_score": round(sum(scores) / len(scores), 3) if scores else 0,
@@ -683,11 +744,13 @@ def _build_summary(results: list) -> dict:
             "avg_tool_f1": round(
                 sum(r.get("tool_metrics", {}).get("tool_f1", 0) for r in results) / len(results), 3
             ) if results else 0,
+            "heuristics_pass_count": heuristics_pass_count,
             "heuristics_pass_rate": round(
-                sum(1 for r in results if (r.get("heuristics") or {}).get("overall_pass", False)) / len(results), 3
+                heuristics_pass_count / len(results), 3
             ) if results else 0,
+            "sla_met_count": sla_met_count,
             "sla_compliance": round(
-                sum(1 for r in results if r.get("sla_met", False)) / len(results), 3
+                sla_met_count / len(results), 3
             ) if results else 0,
             "response_usage": _compact_usage(overall_response_usage),
             "evaluation_usage": _compact_usage(overall_evaluation_usage),
@@ -715,11 +778,16 @@ def _build_summary(results: list) -> dict:
 
         summary["per_domain"][domain] = {
             "count": len(domain_results),
+            "successful_responses": sum(1 for r in domain_results if r["error"] is None),
             "errors": sum(1 for r in domain_results if r["error"] is not None),
+            "scored_responses": sum(1 for r in domain_results if r.get("scores", {}).get("composite_score") is not None),
             "avg_composite_score": round(sum(domain_scores) / len(domain_scores), 3) if domain_scores else 0,
             "avg_factual_accuracy": round(sum(factual_scores) / len(factual_scores), 3) if factual_scores else 0,
             "avg_tool_f1": round(
                 sum(r.get("tool_metrics", {}).get("tool_f1", 0) for r in domain_results) / max(1, len(domain_results)), 3
+            ),
+            "heuristics_pass_count": sum(
+                1 for r in domain_results if (r.get("heuristics") or {}).get("overall_pass", False)
             ),
             "heuristics_pass_rate": round(
                 sum(1 for r in domain_results if (r.get("heuristics") or {}).get("overall_pass", False)) / max(1, len(domain_results)),
@@ -746,9 +814,14 @@ def _build_summary(results: list) -> dict:
         model_combined_cost = combine_cost_payloads([r.get("combined_cost_usd", {}) for r in model_results])
         summary["per_response_model"][model] = {
             "count": len(model_results),
+            "successful_responses": sum(1 for r in model_results if r["error"] is None),
             "avg_composite_score": round(sum(model_scores) / len(model_scores), 3) if model_scores else 0,
             "errors": sum(1 for r in model_results if r["error"] is not None),
+            "scored_responses": sum(1 for r in model_results if r.get("scores", {}).get("composite_score") is not None),
             "error_categories": summarize_error_categories(model_results),
+            "heuristics_pass_count": sum(
+                1 for r in model_results if (r.get("heuristics") or {}).get("overall_pass", False)
+            ),
             "heuristics_pass_rate": round(
                 sum(1 for r in model_results if (r.get("heuristics") or {}).get("overall_pass", False)) / max(1, len(model_results)),
                 3,
