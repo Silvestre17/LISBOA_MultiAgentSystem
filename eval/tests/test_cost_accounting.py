@@ -281,6 +281,46 @@ class TestCostPayloads:
         assert combined["output_per_million_usd"] == pytest.approx(2.0)
         assert combined["total_cost_usd"] == pytest.approx(0.0045)
 
+    def test_combine_cost_payloads_does_not_mislabel_mixed_model_totals(self):
+        """Mixed totals should not inherit a misleading single-model label."""
+        response_cost = {
+            "model_id": "azure::gpt-5.4-mini",
+            "pricing_lookup_key": "azure::gpt-5.4-mini",
+            "pricing_found": True,
+            "pricing_complete": True,
+            "tokens": {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
+            "input_per_million_usd": 0.75,
+            "output_per_million_usd": 4.5,
+            "cached_input_per_million_usd": 0.075,
+            "input_cost_usd": 0.001,
+            "output_cost_usd": 0.002,
+            "total_cost_usd": 0.003,
+            "missing_pricing_models": [],
+        }
+        evaluation_cost = {
+            "model_id": None,
+            "pricing_lookup_key": None,
+            "pricing_found": True,
+            "pricing_complete": True,
+            "tokens": {"input_tokens": 50, "output_tokens": 10, "total_tokens": 60},
+            "input_per_million_usd": None,
+            "output_per_million_usd": None,
+            "cached_input_per_million_usd": None,
+            "input_cost_usd": 0.0005,
+            "output_cost_usd": 0.001,
+            "total_cost_usd": 0.0015,
+            "missing_pricing_models": [],
+        }
+
+        combined = combine_cost_payloads([response_cost, evaluation_cost])
+
+        assert combined["tokens"]["total_tokens"] == 180
+        assert combined["model_id"] is None
+        assert combined["pricing_lookup_key"] is None
+        assert combined["input_per_million_usd"] is None
+        assert combined["contributing_model_ids"] == ["azure::gpt-5.4-mini"]
+        assert combined["total_cost_usd"] == pytest.approx(0.0045)
+
     def test_write_json_artifact_formats_money_fields_with_minimum_decimals(self, tmp_path):
         """Persisted evaluation artefacts should keep USD fields readable at small magnitudes."""
         output_path = tmp_path / "artifact.json"

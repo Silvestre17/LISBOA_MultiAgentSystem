@@ -2814,6 +2814,36 @@ def test_base_agent_safe_llm_invoke_preserves_multiple_system_messages_for_non_l
     assert len(system_messages) == 2
 
 
+def test_base_agent_safe_llm_invoke_retries_transient_rate_limit_errors() -> None:
+    """Transient 429 capacity failures should be retried before surfacing an error."""
+    agent = BaseAgent.__new__(BaseAgent)
+    agent.llm_provider = "azure"
+    agent._record_llm_usage = lambda _llm, _response: None
+
+    attempts = {"count": 0}
+
+    class FakeLLM:
+        def invoke(self, messages):
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise RuntimeError(
+                    '{"object": "error", "message": "Server at maximum concurrent capacity. Try again later.", '
+                    '"type": "429", "param": null, "code": 429}'
+                )
+            return SimpleNamespace(content="ok")
+
+    with patch("agent.agents.base.time_module.sleep") as mocked_sleep:
+        response = agent._safe_llm_invoke(
+            FakeLLM(),
+            [HumanMessage(content="Plan a full day in Lisbon")],
+            retries=1,
+        )
+
+    assert response.content == "ok"
+    assert attempts["count"] == 2
+    mocked_sleep.assert_called_once_with(2.0)
+
+
 def test_clean_response_removes_dangling_think_block() -> None:
     """Dangling LM Studio think blocks should be stripped even when the tag is never closed."""
     raw = "### 🚇 Informação de Transportes\n\n<think>Now I have all the information."

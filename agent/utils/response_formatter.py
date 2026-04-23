@@ -3231,6 +3231,78 @@ def _extract_first_url(value: str) -> str:
     return match.group(0).rstrip(").,;") if match else ""
 
 
+_CANONICAL_PLACE_CARD_START_RE = re.compile(r"^###\s+(?P<emoji>\S+)\s+(?P<title>.+?)\s*$")
+
+
+def _iter_structured_place_card_sections(text: str) -> List[List[str]]:
+    """Split canonical or pre-canonical place-card markdown into per-card sections."""
+    sections: List[List[str]] = []
+    current_section: List[str] = []
+
+    for raw_line in (text or "").splitlines():
+        stripped = raw_line.strip()
+        if _CANONICAL_PLACE_CARD_START_RE.match(stripped) or _RESEARCHER_CARD_START_RE.match(stripped):
+            if current_section:
+                sections.append(current_section)
+            current_section = [raw_line]
+            continue
+        if current_section:
+            current_section.append(raw_line)
+
+    if current_section:
+        sections.append(current_section)
+
+    return sections
+
+
+def _count_structured_place_cards(text: str) -> int:
+    """Count place cards that still preserve the canonical structured layout."""
+    return len(_iter_structured_place_card_sections(text))
+
+
+def _place_response_missing_required_fields(
+    text: str,
+    expected_language: str,
+    place_card_count: int,
+) -> bool:
+    """Return whether any structured place card is missing canonical core fields."""
+    if place_card_count <= 0:
+        return True
+
+    sections = _iter_structured_place_card_sections(text)
+    if len(sections) < place_card_count:
+        return True
+
+    for section in sections[:place_card_count]:
+        section_text = "\n".join(section)
+        normalized = _strip_accents_compat(_strip_markdown_formatting(section_text)).lower()
+
+        has_description = bool(
+            re.search(r"\b(description|descricao)\b", normalized)
+            or re.search(r"^\s*[-*]\s+📝", section_text, re.MULTILINE)
+        )
+        has_address = bool(
+            re.search(r"\b(address|morada|location|localizacao|endereco)\b", normalized)
+            or re.search(r"^\s*[-*]\s+📍", section_text, re.MULTILINE)
+        )
+        has_hours = bool(
+            re.search(r"\b(hours|opening hours|today|horario|horarios de funcionamento|hoje)\b", normalized)
+            or re.search(r"^\s*[-*]\s+🕐", section_text, re.MULTILINE)
+            or re.search(r"\b(check the official website|consultar website oficial)\b", normalized)
+        )
+        has_website = bool(
+            re.search(r"\b(website|site oficial|official page|url)\b", normalized)
+            or "http://" in normalized
+            or "https://" in normalized
+            or re.search(r"\b(check the official website|consultar website oficial)\b", normalized)
+        )
+
+        if not (has_description and has_address and has_hours and has_website):
+            return True
+
+    return False
+
+
 def _is_researcher_event_meta_line(text: str) -> bool:
     """Return whether a line is a search-summary or generic follow-up note for event lists."""
     normalized = _strip_accents_compat(_strip_markdown_formatting(text or "")).lower().strip()
@@ -3773,6 +3845,31 @@ def reconcile_researcher_event_response(
     if source_line:
         rendered_lines.append(source_line)
     return _strip_event_card_separators(clean_newlines("\n".join(rendered_lines)).strip())
+
+
+def reconcile_researcher_place_response(
+    text: str,
+    worker_text: str,
+    language: str = "en",
+    user_query: str = "",
+) -> str:
+    """Rehydrate canonical place cards when QA or synthesis collapses grounded fields."""
+    if infer_researcher_source_kind(user_query=user_query, text=text) != "places":
+        return text
+
+    worker_canonical = format_researcher_card(worker_text, language=language, user_query=user_query)
+    if not worker_canonical:
+        return text
+
+    primary_count = _count_structured_place_cards(text)
+    fallback_count = _count_structured_place_cards(worker_canonical)
+    if primary_count == 0 and fallback_count > 0:
+        return worker_canonical
+    if primary_count <= 0:
+        return text
+    if _place_response_missing_required_fields(text, language, primary_count):
+        return worker_canonical
+    return text
 
 
 def format_researcher_event_cards(text: str, language: str = "en", user_query: str = "") -> str:

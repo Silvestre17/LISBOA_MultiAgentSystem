@@ -6,11 +6,11 @@
 # between human scores and LLM-as-a-Judge scores for calibration.
 #
 # Usage:
-#   > python eval/human_calibration/run_calibration.py \
+#   > python -m eval.human_calibration.run_calibration \
 #       --human eval/human_calibration/calibration_filled.json \
 #       --benchmark eval/results/benchmark/benchmark_results_YYYYMMDD_HHMMSS.json
 #       Use averaged benchmark judge scores for the calibration summary.
-#   > python eval/human_calibration/run_calibration.py \
+#   > python -m eval.human_calibration.run_calibration \
 #       --human eval/human_calibration/calibration_filled.json \
 #       --benchmark eval/results/benchmark/benchmark_results_YYYYMMDD_HHMMSS.json \
 #       --judge-source openai::gpt-5.4-mini \

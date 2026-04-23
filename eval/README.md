@@ -173,22 +173,31 @@ The evaluation pipeline also computes non-LLM checks:
 |-----------|------|---------|
 | Tool Precision, Recall, F1 | `run_benchmark.py` and `run_ablation.py` | compare observed tools against `expected_tools` |
 | Response heuristics | `validators/response_heuristics.py` | detect tool leaks, bad length, language mismatch, unsupported capability claims, heavy emoji use |
-| Metro route validator | `validators/transport_validator.py` | validate station existence, line membership, transfer correctness, and route facts |
+| Metro route validator | `validators/transport_validator.py` | deterministic validation helper used by the validator suite, not automatically injected into benchmark or ablation artefacts |
 | Error categorization | `runtime_utils.py` | normalize runtime failures into stable evaluation categories |
 
 ### 🧾 Reproducibility, token, and cost metadata
 
-Persisted outputs can include:
+Persisted benchmark and ablation artefacts now persist, at minimum:
 
+- dataset path
 - ground-truth dataset fingerprint
 - tool registry fingerprint
+- response model matrix and configs
 - response model metadata and configs
 - evaluation model metadata and configs
 - multi-judge metadata including `evaluation_models`, `judge_model_configs`, and per-record `judge_runs`
+- output directory and output file path
+- run timestamp, `run_started_at`, `run_finished_at`, and `total_runtime_s`
+- aggregate totals, averages, pass counts, error counts, and normalized error-category summaries
 - token usage blocks for response, evaluation, and combined calls
-- optional cost accounting via `pricing_by_model`
+- cost accounting via the checked-in pricing catalog unless a different `pricing_by_model` payload is injected programmatically
 - per-call usage breakdown for the LISBOA arm when available
 - per-agent usage and per-agent cost blocks for LISBOA ablation records when available
+- explicit response-side telemetry annotations via `response_generation_mode`, `response_usage_status`, and `response_usage_note`
+- mixed-cost `contributing_model_ids` when a combined total spans more than one contributing model family
+
+For isolated worker benchmark runs, `response_usage` may legitimately remain zero when a worker answers via a deterministic tool or rule path without an LLM generation call. Those cases are now marked explicitly with `response_generation_mode = deterministic_tool` or `deterministic_rule` and `response_usage_status = not_applicable_no_llm` instead of silently looking like missing telemetry.
 
 Expected pricing structure:
 
@@ -225,6 +234,8 @@ Flat mappings also work.
 
 Each output record can contain averaged compatibility `scores`, raw `judge_runs`, `scores_by_judge`, tool metrics, heuristics, latency, SLA compliance, model metadata, and organized response/evaluation/combined cost blocks.
 
+Current benchmark records also persist `response_generation_mode`, `response_usage_status`, and `response_usage_note` so deterministic tool-only worker responses do not get mistaken for failed token accounting.
+
 ### Ablation scope
 
 `run_ablation.py` compares two fair profile pairs:
@@ -233,6 +244,8 @@ Each output record can contain averaged compatibility `scores`, raw `judge_runs`
 - an **open-model pair**, where zero-shot and LISBOA both use the open response profile
 
 Within each pair, the zero-shot and LISBOA arms are judged by the same multi-judge matrix. By default, ablation runs focus on `weather`, `transport`, `researcher`, and `multi_agent` queries, excluding `greeting` and `out_of_scope` shortcuts because LISBOA handles those through supervisor-level direct responses rather than the grounded pipeline under study. Persisted ablation records keep the primary compatibility `metrics` block for the primary profile and store every profile-specific comparison under `comparisons`.
+
+The run-level ablation summary also persists `zero_shot_counts`, `lisboa_counts`, `winner_counts`, and per-domain arm counts so failed runs are visible instead of disappearing into averaged metrics.
 
 ### Strict live coverage scope
 
@@ -289,13 +302,13 @@ python -m pytest eval/tests/test_dataset_integrity.py eval/tests/test_benchmark_
 ### Benchmark and ablation
 
 ```bash
-python eval/run_benchmark.py --mode run_test
-python eval/run_benchmark.py --mode full
-python eval/run_benchmark.py --limit 5
-python eval/run_benchmark.py --limit 3 --judge-model-spec azure::gpt-5.4-mini --judge-model-spec azure::Kimi-K2.5
-python eval/run_ablation.py --mode run_test
-python eval/run_ablation.py --mode full
-python eval/run_ablation.py --limit 3 --open-model-spec azure::Kimi-K2.5 --judge-model-spec azure::gpt-5.4-mini --judge-model-spec azure::Kimi-K2.5
+python -m eval.run_benchmark --mode run_test
+python -m eval.run_benchmark --mode full
+python -m eval.run_benchmark --limit 5
+python -m eval.run_benchmark --limit 3 --judge-model-spec azure::gpt-5.4-mini --judge-model-spec azure::Kimi-K2.5
+python -m eval.run_ablation --mode run_test
+python -m eval.run_ablation --mode full
+python -m eval.run_ablation --limit 3 --open-model-spec azure::Kimi-K2.5 --judge-model-spec azure::gpt-5.4-mini --judge-model-spec azure::Kimi-K2.5
 ```
 
 Both runners now auto-load the checked-in pricing catalog from `data/pricing/llm_model_pricing.json` when no explicit `pricing_by_model` payload is injected programmatically, so CLI-generated artefacts include cost accounting by default.
@@ -303,8 +316,8 @@ Both runners now auto-load the checked-in pricing catalog from `data/pricing/llm
 ### Tiny demo dataset walkthrough
 
 ```bash
-python eval/run_ablation.py --dataset eval/evaluation_groundtruth_queries_demo.json --open-model-spec azure::Kimi-K2.5 --output-prefix ablation_demo
-python eval/run_benchmark.py --dataset eval/evaluation_groundtruth_queries_demo.json --limit 1 --output-prefix benchmark_demo
+python -m eval.run_ablation --dataset eval/evaluation_groundtruth_queries_demo.json --open-model-spec azure::Kimi-K2.5 --output-prefix ablation_demo
+python -m eval.run_benchmark --dataset eval/evaluation_groundtruth_queries_demo.json --limit 1 --output-prefix benchmark_demo
 ```
 
 Use the ablation command above to demonstrate the full zero-shot versus LISBOA comparison flow on a tiny corpus. The benchmark command is intentionally limited because the demo JSON includes a `multi_agent` entry, while the isolated benchmark only evaluates the worker-agent domains. The custom output prefixes keep demo artefacts persisted without replacing the main `benchmark_results_*` and `ablation_results_*` files that power the analysis notebook.
@@ -321,8 +334,8 @@ python -m pytest tests/test_tool_prompt_coverage.py --run-live -m "live and cove
 ### Calibration
 
 ```bash
-python eval/human_calibration/run_calibration.py --human eval/human_calibration/calibration_filled.json --benchmark eval/results/benchmark/benchmark_results_YYYYMMDD_HHMMSS.json
-python eval/human_calibration/run_calibration.py --human eval/human_calibration/calibration_filled.json --benchmark eval/results/benchmark/benchmark_results_YYYYMMDD_HHMMSS.json --judge-source azure::gpt-5.4-mini
+python -m eval.human_calibration.run_calibration --human eval/human_calibration/calibration_filled.json --benchmark eval/results/benchmark/benchmark_results_YYYYMMDD_HHMMSS.json
+python -m eval.human_calibration.run_calibration --human eval/human_calibration/calibration_filled.json --benchmark eval/results/benchmark/benchmark_results_YYYYMMDD_HHMMSS.json --judge-source azure::gpt-5.4-mini
 ```
 
 Use `--judge-source average` (default) to read the compatibility-average `scores` block, or pass a specific judge model id from `judge_runs` to calibrate one judge independently.

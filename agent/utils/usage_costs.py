@@ -688,12 +688,16 @@ def combine_cost_payloads(payloads: Iterable[dict[str, Any]]) -> dict[str, Any]:
     aggregate_input_prices: list[float] = []
     aggregate_output_prices: list[float] = []
     aggregate_cached_input_prices: list[float] = []
+    contributing_non_null_model_ids: list[str] = []
+    has_unknown_contributing_model = False
 
     for payload in payloads:
         tokens = normalize_token_usage(payload.get("tokens", payload))
+        payload_total_tokens = tokens["total_tokens"]
+        payload_total_cost = float(payload.get("total_cost_usd", 0.0) or 0.0)
         combined_tokens["input_tokens"] += tokens["input_tokens"]
         combined_tokens["output_tokens"] += tokens["output_tokens"]
-        combined_tokens["total_tokens"] += tokens["total_tokens"]
+        combined_tokens["total_tokens"] += payload_total_tokens
         total_input_cost += float(payload.get("input_cost_usd", 0.0) or 0.0)
         total_output_cost += float(payload.get("output_cost_usd", 0.0) or 0.0)
         aggregate_model_ids.append(payload.get("model_id"))
@@ -702,27 +706,50 @@ def combine_cost_payloads(payloads: Iterable[dict[str, Any]]) -> dict[str, Any]:
         aggregate_output_prices.append(payload.get("output_per_million_usd"))
         aggregate_cached_input_prices.append(payload.get("cached_input_per_million_usd"))
 
-        payload_tokens = tokens["total_tokens"]
-        pricing_found = pricing_found and bool(payload.get("pricing_found", False) or payload_tokens == 0)
-        pricing_complete = pricing_complete and bool(payload.get("pricing_complete", False) or payload_tokens == 0)
+        payload_model_id = payload.get("model_id")
+        is_contributing_payload = payload_total_tokens > 0 or payload_total_cost > 0
+        if is_contributing_payload:
+            if payload_model_id is None:
+                has_unknown_contributing_model = True
+            else:
+                contributing_non_null_model_ids.append(str(payload_model_id))
+
+        pricing_found = pricing_found and bool(payload.get("pricing_found", False) or payload_total_tokens == 0)
+        pricing_complete = pricing_complete and bool(payload.get("pricing_complete", False) or payload_total_tokens == 0)
         missing_pricing_models.extend(payload.get("missing_pricing_models", []))
         if isinstance(payload.get("llm_cost_breakdown"), list):
             cost_breakdown.extend(deepcopy(payload["llm_cost_breakdown"]))
 
+    distinct_contributing_models = sorted(set(contributing_non_null_model_ids))
+    aggregate_model_id = _single_non_null_value(aggregate_model_ids)
+    aggregate_pricing_lookup_key = _single_non_null_value(aggregate_pricing_lookup_keys)
+    aggregate_input_price = _single_non_null_value(aggregate_input_prices)
+    aggregate_output_price = _single_non_null_value(aggregate_output_prices)
+    aggregate_cached_input_price = _single_non_null_value(aggregate_cached_input_prices)
+
+    if has_unknown_contributing_model or len(distinct_contributing_models) > 1:
+        aggregate_model_id = None
+        aggregate_pricing_lookup_key = None
+        aggregate_input_price = None
+        aggregate_output_price = None
+        aggregate_cached_input_price = None
+
     result = {
-        "model_id": _single_non_null_value(aggregate_model_ids),
-        "pricing_lookup_key": _single_non_null_value(aggregate_pricing_lookup_keys),
+        "model_id": aggregate_model_id,
+        "pricing_lookup_key": aggregate_pricing_lookup_key,
         "pricing_found": pricing_found,
         "pricing_complete": pricing_complete,
         "tokens": combined_tokens,
-        "input_per_million_usd": _single_non_null_value(aggregate_input_prices),
-        "output_per_million_usd": _single_non_null_value(aggregate_output_prices),
-        "cached_input_per_million_usd": _single_non_null_value(aggregate_cached_input_prices),
+        "input_per_million_usd": aggregate_input_price,
+        "output_per_million_usd": aggregate_output_price,
+        "cached_input_per_million_usd": aggregate_cached_input_price,
         "input_cost_usd": _round_money(total_input_cost),
         "output_cost_usd": _round_money(total_output_cost),
         "total_cost_usd": _round_money(total_input_cost + total_output_cost),
         "missing_pricing_models": sorted({model for model in missing_pricing_models if model}),
     }
+    if distinct_contributing_models:
+        result["contributing_model_ids"] = distinct_contributing_models
     if cost_breakdown:
         result["llm_cost_breakdown"] = cost_breakdown
     return result

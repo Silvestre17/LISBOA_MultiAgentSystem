@@ -825,11 +825,13 @@ class BaseAgent:
 
     def _safe_llm_invoke(self, llm, messages: list, retries: int = 2, verbose: bool = False):
         """
-        Invokes the LLM with targeted retry logic for Azure content-filter false positives.
+        Invokes the LLM with targeted retry logic for transient Azure failures.
 
         Azure OpenAI may probabilistically flag benign prompts as "jailbreak".
-        This method retries the call with exponential backoff since the same
-        request often succeeds on a second attempt.
+        Azure-hosted models can also intermittently reject valid requests with
+        transient 429 capacity errors. This method retries those narrow cases
+        with exponential backoff since the same request often succeeds on a
+        subsequent attempt.
 
         Args:
             llm: The LLM instance (with or without tools bound).
@@ -842,8 +844,8 @@ class BaseAgent:
             The LLM response object.
 
         Raises:
-            The original exception if all retries fail and it's not a
-            content filter issue, or re-raises after exhausting retries.
+            The original exception if all retries fail and it's not a handled
+            transient issue, or re-raises after exhausting retries.
         """
         last_exception = None
         prepared_messages = (
@@ -863,9 +865,28 @@ class BaseAgent:
                     or "responsibleaipolicyviolation" in error_str
                     or "jailbreak" in error_str
                 )
+                is_transient_rate_limit = (
+                    "429" in error_str
+                    or "rate limit" in error_str
+                    or "too many requests" in error_str
+                    or "maximum concurrent capacity" in error_str
+                    or "concurrent capacity" in error_str
+                )
                 if is_content_filter and attempt < retries:
                     wait = 1.5 * (attempt + 1)
-                    print(f"      [RETRY] Azure content filter triggered (attempt {attempt + 1}/{retries + 1}). Retrying in {wait}s...")
+                    print(
+                        f"      [RETRY] Azure content filter triggered "
+                        f"(attempt {attempt + 1}/{retries + 1}). Retrying in {wait}s..."
+                    )
+                    time_module.sleep(wait)
+                    last_exception = e
+                    continue
+                if is_transient_rate_limit and attempt < retries:
+                    wait = 2.0 * (attempt + 1)
+                    print(
+                        f"      [RETRY] Transient model capacity/rate-limit failure "
+                        f"(attempt {attempt + 1}/{retries + 1}). Retrying in {wait}s..."
+                    )
                     time_module.sleep(wait)
                     last_exception = e
                     continue
