@@ -43,10 +43,10 @@ except Exception:
 
 sys.path.insert(0, ".")
 
-from agent.utils.langsmith_tracing import (
-    get_langsmith_display_state,
-    get_langsmith_project_name,
-)
+# from agent.utils.langsmith_tracing import (
+#     get_langsmith_display_state,
+#     get_langsmith_project_name,
+# )
 from agent.utils.startup_resources import (
     pre_warm_transport_networks as _pre_warm_transport_networks_impl,
     pre_warm_vector_store as _pre_warm_vector_store_impl,
@@ -1279,30 +1279,30 @@ def display_banner():
         unsafe_allow_html=True,
     )
 
-
-def render_tracing_panel() -> None:
-    """Render LangSmith tracing status for the production sidebar."""
-    st.markdown(f"#### 🧭 {t('tracing')}")
-
-    tracing_display = get_langsmith_display_state()
-    langsmith_project = get_langsmith_project_name()
-
-    if tracing_display["state"] == "active":
-        st.success(t("tracing_active"))
-        st.caption(f"{t('project')}: {langsmith_project}")
-        return
-
-    if tracing_display["state"] == "auto_disabled_invalid_credentials":
-        st.warning(t("tracing_auto_disabled_invalid_credentials"))
-    elif tracing_display["state"] == "auto_disabled_invalid_configuration":
-        st.warning(t("tracing_auto_disabled_invalid_configuration"))
-    elif tracing_display["state"].startswith("auto_disabled"):
-        st.warning(t("tracing_auto_disabled"))
-    else:
-        st.warning(t("tracing_disabled"))
-
-    if tracing_display["state"].startswith("auto_disabled") and tracing_display.get("reason"):
-        st.caption(f"{t('tracing_reason')}: {tracing_display['reason']}")
+# def render_tracing_panel() -> None:
+#     """Render LangSmith tracing status for the production sidebar."""
+#     st.markdown(f"#### 🧭 {t('tracing')}")
+#
+#     tracing_display = get_langsmith_display_state()
+#     langsmith_project = get_langsmith_project_name()
+#
+#     if tracing_display["state"] == "active":
+#         st.success(t("tracing_active"))
+#         st.caption(f"{t('project')}: {langsmith_project}")
+#         return
+#
+#     if tracing_display["state"] == "auto_disabled_invalid_credentials":
+#         st.warning(t("tracing_auto_disabled_invalid_credentials"))
+#     elif tracing_display["state"] == "auto_disabled_invalid_configuration":
+#         st.warning(t("tracing_auto_disabled_invalid_configuration"))
+#     elif tracing_display["state"].startswith("auto_disabled"):
+#         st.warning(t("tracing_auto_disabled"))
+#     else:
+#         st.warning(t("tracing_disabled"))
+#
+#     if tracing_display["state"].startswith("auto_disabled") and tracing_display.get("reason"):
+#         st.caption(f"{t('tracing_reason')}: {tracing_display['reason']}")
+#
 
 
 def build_sidebar():
@@ -1561,8 +1561,8 @@ def build_sidebar():
                     st.session_state.assistant.reset()
                 st.rerun()
 
-        st.divider()
-        render_tracing_panel()
+        # LangSmith tracing sidebar panel intentionally disabled in the UI.
+        # render_tracing_panel()
 
         st.markdown(
             f"""
