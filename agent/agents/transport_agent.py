@@ -348,6 +348,7 @@ def _build_carris_urban_tool_spec(user_message: str) -> Optional[Dict[str, Any]]
 
     stop_search_patterns = [
         r"(?:search|find|lookup|show)\s+(?:carris\s+)?stops?\s+(?:for|near|named)\s+(?P<term>.+?)(?:[\?\!\.,;]|$)",
+        r"(?:what|which)\s+(?:bus|tram|carris)?\s*stops?\s+(?:are\s+)?(?:for|near|around|named)\s+(?P<term>.+?)(?:[\?\!\.,;]|$)",
         r"(?:paragens?|stops?)\s+(?:da\s+carris\s+)?(?:em|na|no|para|perto de)\s+(?P<term>.+?)(?:[\?\!\.,;]|$)",
     ]
     for pattern in stop_search_patterns:
@@ -2486,6 +2487,7 @@ def _build_cp_tool_spec(user_message: str) -> Optional[Dict[str, Any]]:
 
     station_search_patterns = [
         r"(?:cp|train)\s+stations?\s+(?:for|near|named)\s+(?P<term>.+?)(?:[\?\!\.,;]|$)",
+        r"(?:which|what)\s+train\s+stations?\s+(?:are\s+)?(?:closest\s+to|near|around)\s+(?P<term>.+?)(?:[\?\!\.,;]|$)",
         r"esta[cç][õo]es?\s+cp\s+(?:para|de)\s+(?P<term>.+?)(?:[\?\!\.,;]|$)",
     ]
     for pattern in station_search_patterns:
@@ -2569,6 +2571,11 @@ def _build_carris_metropolitana_tool_spec(user_message: str) -> Optional[Dict[st
 
     stop_id_match = re.search(r"\b(?:stop id|stop|paragem)\s+(?P<stop_id>\d{3,})\b", query_lower)
     line_id_match = re.search(r"\b(?:line|linha)\s+(?P<line_id>\d{3,4}[a-z]?)\b", query_lower)
+    if not line_id_match and re.search(
+        r"\b(waiting for|waiting|esperar|esperando|bus|buses|autocarro|autocarros)\b",
+        query_lower,
+    ):
+        line_id_match = re.search(r"\b(?P<line_id>\d{3,4}[a-z]?)\b", query_lower)
 
     if stop_id_match and re.search(r"\b(info|information|details|detalhes?)\b", query_lower):
         return {
@@ -2602,10 +2609,22 @@ def _build_carris_metropolitana_tool_spec(user_message: str) -> Optional[Dict[st
         query,
         flags=re.IGNORECASE,
     )
+    if not near_match and re.search(r"\b(nearby|por perto)\b", query_lower):
+        near_match = re.search(
+            r"(?:i(?:'m| am)|estou)\s+(?:at|in|em|na|no)\s+(?P<location>.+?)(?:[\?\!\.,;]|$)",
+            query,
+            flags=re.IGNORECASE,
+        )
     if near_match and re.search(r"\b(bus|buses|autocarro|autocarros)\b", query_lower):
+        location_fragment = re.sub(
+            r"\b(right now|agora)\b",
+            "",
+            near_match.group("location"),
+            flags=re.IGNORECASE,
+        )
         return {
             "name": "get_real_time_bus_positions",
-            "args": {"location": _clean_query_fragment(near_match.group("location")), "radius_km": 1.0},
+            "args": {"location": _clean_query_fragment(location_fragment), "radius_km": 1.0},
         }
 
     if endpoints and re.search(r"\b(bus|buses|autocarro|autocarros)\b", query_lower):
@@ -2621,6 +2640,7 @@ def _build_carris_metropolitana_tool_spec(user_message: str) -> Optional[Dict[st
 
     line_search_patterns = [
         r"carris metropolitana\s+lines?\s+(?:for|to|near)\s+(?P<term>.+?)(?:[\?\!\.,;]|$)",
+        r"(?:which|what)\s+(?:bus\s+)?lines?\s+(?:serve|servem|go to|run to|go through|run through)\s+(?P<term>.+?)(?:[\?\!\.,;]|$)",
         r"linhas?\s+da\s+carris\s+metropolitana\s+(?:para|de)\s+(?P<term>.+?)(?:[\?\!\.,;]|$)",
     ]
     for pattern in line_search_patterns:

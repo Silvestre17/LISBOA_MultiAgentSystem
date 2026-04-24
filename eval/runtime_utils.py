@@ -766,26 +766,101 @@ def compute_tool_registry_fingerprint(tool_names: Optional[Iterable[str]] = None
     return fingerprint_payload(registry)
 
 
-def compute_tool_metrics(expected: list[str], actual: list[str]) -> dict[str, float]:
-    """Compute deterministic Precision, Recall, F1 for tool usage."""
-    if not expected and not actual:
-        return {"tool_precision": 1.0, "tool_recall": 1.0, "tool_f1": 1.0}
-    if not expected:
-        return {"tool_precision": 0.0, "tool_recall": 1.0, "tool_f1": 0.0}
-    if not actual:
-        return {"tool_precision": 1.0, "tool_recall": 0.0, "tool_f1": 0.0}
-
+def _compute_single_tool_match(expected: Sequence[str], actual: Sequence[str]) -> tuple[float, float, float]:
+    """Return Precision, Recall, F1 for one expected-tool set."""
     expected_set = set(expected)
     actual_set = set(actual)
-    tp = len(expected_set & actual_set)
-    precision = tp / len(actual_set) if actual_set else 0.0
-    recall = tp / len(expected_set) if expected_set else 0.0
-    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
 
+    if not expected_set and not actual_set:
+        return 1.0, 1.0, 1.0
+    if not expected_set:
+        return 0.0, 1.0, 0.0
+    if not actual_set:
+        return 1.0, 0.0, 0.0
+
+    true_positives = len(expected_set & actual_set)
+    precision = true_positives / len(actual_set) if actual_set else 0.0
+    recall = true_positives / len(expected_set) if expected_set else 0.0
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if (precision + recall) > 0
+        else 0.0
+    )
+    return precision, recall, f1
+
+
+def _normalize_tool_sets(tool_sets: Optional[Sequence[Sequence[str]]]) -> list[list[str]]:
+    """Return unique tool sets with deterministic ordering."""
+    normalized: list[list[str]] = []
+    for tool_set in tool_sets or []:
+        candidate = sorted(set(tool_set))
+        if candidate not in normalized:
+            normalized.append(candidate)
+    return normalized
+
+
+def compute_tool_metrics(
+    expected: list[str],
+    actual: list[str],
+    *,
+    acceptable_tool_sets: Optional[Sequence[Sequence[str]]] = None,
+    tool_expectation: str = "strict",
+) -> dict[str, Any]:
+    """Compute deterministic tool metrics for strict expectations only.
+
+    In ``strict`` mode, the best match across ``expected`` and any
+    ``acceptable_tool_sets`` is scored. In ``flexible`` mode, the dataset only
+    records reference tools and deterministic tool scoring is skipped.
+    """
+    normalized_expected = sorted(set(expected))
+    normalized_actual = sorted(set(actual))
+    normalized_alternatives = _normalize_tool_sets(acceptable_tool_sets)
+
+    if tool_expectation == "flexible":
+        return {
+            "tool_precision": None,
+            "tool_recall": None,
+            "tool_f1": None,
+            "tool_metric_scored": False,
+            "tool_expectation": tool_expectation,
+            "matched_expected_tools": normalized_expected,
+        }
+
+    candidate_sets = _normalize_tool_sets(
+        [normalized_expected] if (normalized_expected or not normalized_alternatives) else []
+    )
+    for candidate in normalized_alternatives:
+        if candidate not in candidate_sets:
+            candidate_sets.append(candidate)
+
+    if not candidate_sets:
+        candidate_sets = [[]]
+
+    best_expected = candidate_sets[0]
+    best_scores = _compute_single_tool_match(best_expected, normalized_actual)
+    best_key = (best_scores[2], best_scores[1], best_scores[0], -len(best_expected))
+
+    for candidate in candidate_sets[1:]:
+        candidate_scores = _compute_single_tool_match(candidate, normalized_actual)
+        candidate_key = (
+            candidate_scores[2],
+            candidate_scores[1],
+            candidate_scores[0],
+            -len(candidate),
+        )
+        if candidate_key > best_key:
+            best_expected = candidate
+            best_scores = candidate_scores
+            best_key = candidate_key
+
+    precision, recall, f1 = best_scores
     return {
         "tool_precision": round(precision, 3),
         "tool_recall": round(recall, 3),
         "tool_f1": round(f1, 3),
+        "tool_metric_scored": True,
+        "tool_expectation": tool_expectation,
+        "matched_expected_tools": best_expected,
     }
 
 
