@@ -842,8 +842,12 @@ def structure_weather_markdown(text: str) -> str:
     # should be returned unchanged so callers do not see a spurious leading
     # ``- `` prefix.
     raw_lines = [line for line in text.splitlines() if line.strip()]
+    normalized_anchor_lines = [
+        _unwrap_full_line_bold(re.sub(r"^(?:[-*•]\s+)", "", line.strip()))
+        for line in raw_lines
+    ]
     has_structural_anchor = any(
-        _is_section_line(line) or _is_day_line(line) for line in raw_lines
+        _is_section_line(line) or _is_day_line(line) for line in normalized_anchor_lines
     )
     if not has_structural_anchor:
         return text.strip()
@@ -919,7 +923,7 @@ def structure_weather_markdown(text: str) -> str:
             continue
 
         if _is_detail_line(stripped):
-            prefix = "  - " if inside_day_block else "- "
+            prefix = "    - " if inside_day_block else "- "
             structured_lines.append(f"{prefix}{stripped}")
             continue
 
@@ -934,6 +938,32 @@ def structure_weather_markdown(text: str) -> str:
         inside_day_block = False
 
     structured = clean_newlines("\n".join(structured_lines)).strip()
+    renested_lines: list[str] = []
+    inside_day_parent = False
+    for line in structured.splitlines():
+        stripped = line.strip()
+        candidate = re.sub(r"^(?:-\s+)", "", stripped)
+        candidate = _unwrap_full_line_bold(candidate)
+
+        if _is_day_line(candidate):
+            renested_lines.append(stripped)
+            inside_day_parent = True
+            continue
+        detail_candidate = re.sub(r"^(?:-\s+)", "", stripped)
+        if inside_day_parent and stripped.startswith("- ") and _is_detail_line(detail_candidate):
+            renested_lines.append(f"    {stripped}")
+            continue
+        renested_lines.append(line)
+        if (
+            not stripped
+            or stripped == "---"
+            or stripped.startswith("**")
+            or _SOURCE_LINE_RE.match(stripped)
+            or (stripped.startswith("- ") and not _is_detail_line(detail_candidate))
+        ):
+            inside_day_parent = False
+
+    structured = "\n".join(renested_lines).strip()
     structured = re.sub(
         r"(?m)^\*\*([✅⚠️🟡🟠🔴🌊][^*]+)\*\*$",
         r"\1",
@@ -3180,6 +3210,7 @@ def _researcher_card_labels(language: str) -> dict[str, str]:
         return {
             "description": "Descrição",
             "category": "Categoria",
+            "lisboa_card": "Lisboa Card",
             "address": "Morada",
             "phone": "Telefone",
             "rating": "Avaliação",
@@ -3194,6 +3225,7 @@ def _researcher_card_labels(language: str) -> dict[str, str]:
     return {
         "description": "Description",
         "category": "Category",
+        "lisboa_card": "Lisboa Card",
         "address": "Address",
         "phone": "Phone",
         "rating": "Rating",
@@ -3207,22 +3239,173 @@ def _researcher_card_labels(language: str) -> dict[str, str]:
     }
 
 
-def _render_researcher_link_value(value: str, label: str) -> str:
+def _extract_valid_public_url(value: str) -> str:
+    """Return the first valid public URL found in a raw or markdown-link string."""
+    stripped = (value or "").strip()
+    if not stripped:
+        return ""
+
+    markdown_match = re.match(r"^\[(?P<label>[^\]]+)\]\((?P<target>.+)\)$", stripped)
+    candidate = markdown_match.group("target").strip() if markdown_match else _extract_first_url(stripped)
+    if not candidate:
+        return ""
+
+    candidate = candidate.rstrip(").,;")
+    if not re.match(r"^https?://", candidate, re.IGNORECASE):
+        return ""
+    return candidate
+
+
+def _looks_like_missing_researcher_value(value: str) -> bool:
+    """Return whether a parsed researcher field is just a placeholder or missing-data marker."""
+    normalized = _strip_accents_compat(_strip_markdown_formatting(value or "")).lower()
+    normalized = re.sub(
+        r"^(?:tickets?|bilhetes|buy tickets|comprar bilhetes|website|site oficial|official page|url|more details|mais detalhes|buy)\s*:?\s*",
+        "",
+        normalized,
+        flags=re.IGNORECASE,
+    ).strip(" -:.;")
+    if not normalized:
+        return True
+
+    placeholder_values = {
+        "n/a",
+        "na",
+        "unknown",
+        "not available",
+        "not available in source",
+        "not available in the source",
+        "not available in data",
+        "not available in the data",
+        "nao disponivel",
+        "não disponível",
+        "nao disponivel nos dados",
+        "não disponível nos dados",
+        "nao disponivel na fonte",
+        "não disponível na fonte",
+        "indisponivel",
+        "indisponível",
+        "link unavailable",
+        "ticket link unavailable",
+        "sem link de compra indicado na fonte",
+        "no purchase link provided in the source",
+        "buy",
+        "tickets",
+        "ticket",
+        "bilhetes",
+        "bilhete",
+        "info",
+        "+ info",
+        "more info",
+        "mais info",
+    }
+    if normalized in placeholder_values:
+        return True
+
+    return bool(
+        re.fullmatch(
+            r"(?:not\s+available|nao\s+disponivel|não\s+disponível|indisponivel|indisponível)(?:\s+(?:nos\s+dados|na\s+fonte|in\s+the\s+(?:data|source)))?",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _ticket_link_unavailable_note(language: str) -> str:
+    """Return the canonical fallback note when the source has no usable ticket URL."""
+    return "Sem link de compra indicado na fonte" if language == "pt" else "No purchase link provided in the source"
+
+
+def _render_researcher_label_link(
+    label: str,
+    value: str,
+    language: str = "en",
+    fallback_note: Optional[str] = None,
+) -> str:
+    """Render a label-based markdown link, with an optional plain-text fallback note."""
+    stripped = (value or "").strip()
+    if not stripped:
+        return ""
+
+    url = _extract_valid_public_url(value)
+    if url:
+        return f"[{label}]({url})"
+    if fallback_note is None:
+        return ""
+    return f"**{label}:** {fallback_note}"
+
+
+def _render_researcher_link_value(value: str, label: str, language: str = "en") -> str:
     """Render website or ticket values as markdown links when possible."""
     stripped = (value or "").strip()
     if not stripped:
         return stripped
-    if "](" in stripped:
-        return stripped
-    url_match = re.search(r"https?://\S+", stripped)
-    if not url_match:
-        return stripped
-    url = url_match.group(0).rstrip(").,;")
+
+    if label.lower() in {"tickets", "bilhetes"}:
+        return _render_researcher_label_link(
+            label,
+            stripped,
+            language=language,
+            fallback_note=_ticket_link_unavailable_note(language),
+        )
+
+    url = _extract_valid_public_url(stripped)
+    if not url:
+        plain_value = _strip_markdown_formatting(stripped).strip()
+        return "" if _looks_like_missing_researcher_value(plain_value) else plain_value
+
     parsed = urlparse(url)
     netloc = (parsed.netloc or url).replace("www.", "")
-    if label.lower() in {"tickets", "bilhetes"}:
-        return f"[{label}]({url})"
     return f"[{netloc}]({url})"
+
+
+def _clean_place_field_value(value: str, field_key: str) -> str:
+    """Normalize raw place-card field values before canonical rendering."""
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return ""
+
+    cleaned = re.sub(r"^(?:[\U0001F300-\U0001FAFF\u2300-\u27BF\uFE0F\u200D]\s*)+", "", cleaned).strip()
+    label_aliases = {
+        "description": ("descricao", "descrição", "description", "brief description"),
+        "category": ("categoria", "category"),
+        "lisboa_card": ("lisboa card",),
+        "address": ("morada", "address", "location", "localizacao", "localização"),
+        "phone": ("telefone", "phone", "contacto", "contact"),
+        "rating": ("tripadvisor", "rating", "avaliacao", "avaliação", "reviews", "avaliações", "avaliacoes"),
+        "price": ("preco", "preço", "price", "prices", "precos", "preços"),
+        "website": ("website", "site oficial", "official page", "url", "more details", "mais detalhes", "details"),
+        "tickets": ("tickets", "ticket", "bilhetes", "bilhete", "buy tickets", "comprar bilhetes", "buy"),
+        "today": ("today", "hoje"),
+        "hours": ("hours", "horario", "horário", "opening hours"),
+        "distance": ("distance", "distancia", "distância"),
+        "coordinates": ("coordinates", "coordenadas"),
+    }
+    aliases = label_aliases.get(field_key, ())
+    if aliases:
+        cleaned = re.sub(
+            rf"^(?:\*\*)?(?:{'|'.join(re.escape(alias) for alias in aliases)})(?:\*\*)?:?\s*",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+
+    cleaned = _strip_markdown_formatting(cleaned).strip()
+    cleaned = re.sub(r"^\*+\s*", "", cleaned).strip(" -")
+
+    if field_key == "price":
+        cleaned = re.sub(r"\s*\+\s*info(?:rma(?:tion|coes|ções))?\s*$", "", cleaned, flags=re.IGNORECASE)
+        if _looks_like_missing_researcher_value(cleaned):
+            return ""
+    elif field_key == "description":
+        normalized = _strip_accents_compat(cleaned).lower()
+        if "lisboa card" in normalized or _looks_like_missing_researcher_value(cleaned):
+            return ""
+    elif field_key in {"website", "tickets", "today", "hours", "distance", "coordinates", "rating", "address", "category", "lisboa_card"}:
+        if _looks_like_missing_researcher_value(cleaned):
+            return ""
+
+    return cleaned.strip()
 
 
 def _extract_first_url(value: str) -> str:
@@ -3833,10 +4016,17 @@ def reconcile_researcher_event_response(
             rendered_lines.append(f"- 🕐 **{schedule_label}:** {event['schedule']}")
         if event.get("highlights"):
             rendered_lines.append(f"- ✨ **{highlights_label}:** {event['highlights']}")
-        if event.get("details_url"):
-            rendered_lines.append(f"- 🌐 [{details_label}]({str(event['details_url']).strip()})")
-        if event.get("tickets_url"):
-            rendered_lines.append(f"- 🎟️ [{tickets_label}]({str(event['tickets_url']).strip()})")
+        details_link = _render_researcher_label_link(details_label, str(event.get("details_url") or "").strip())
+        if details_link:
+            rendered_lines.append(f"- 🌐 {details_link}")
+        tickets_link = _render_researcher_label_link(
+            tickets_label,
+            str(event.get("tickets_url") or "").strip(),
+            language=language,
+            fallback_note=_ticket_link_unavailable_note(language),
+        )
+        if tickets_link:
+            rendered_lines.append(f"- 🎟️ {tickets_link}")
         for extra_line in list(event.get("extra_lines") or []):
             if extra_line and not _event_has_note_like_description(str(extra_line)) and not str(extra_line).strip().startswith(("⚠️", "🔎", "💡")):
                 rendered_lines.append(f"- {str(extra_line).strip()}")
@@ -4081,14 +4271,6 @@ def format_researcher_event_cards(text: str, language: str = "en", user_query: s
             return
         event["extra_lines"].append(plain)
 
-    def _render_link(label: str, url: str) -> str:
-        cleaned_url = (url or "").strip()
-        if not cleaned_url:
-            return ""
-        if cleaned_url.startswith("[") and "](" in cleaned_url:
-            return cleaned_url
-        return f"[{label}]({cleaned_url})"
-
     def _flush_event(event: Optional[dict[str, object]], output_lines: list[str]) -> None:
         if not event:
             return
@@ -4117,10 +4299,17 @@ def format_researcher_event_cards(text: str, language: str = "en", user_query: s
             output_lines.append(f"- 🕐 **{schedule_label}:** {event['schedule']}")
         if event["highlights"]:
             output_lines.append(f"- ✨ **{highlights_label}:** {event['highlights']}")
-        if event["details_url"]:
-            output_lines.append(f"- 🌐 {_render_link(details_label, str(event['details_url']))}")
-        if event["tickets_url"]:
-            output_lines.append(f"- 🎟️ {_render_link(tickets_label, str(event['tickets_url']))}")
+        details_link = _render_researcher_label_link(details_label, str(event.get("details_url") or ""))
+        if details_link:
+            output_lines.append(f"- 🌐 {details_link}")
+        tickets_link = _render_researcher_label_link(
+            tickets_label,
+            str(event.get("tickets_url") or ""),
+            language=language,
+            fallback_note=_ticket_link_unavailable_note(language),
+        )
+        if tickets_link:
+            output_lines.append(f"- 🎟️ {tickets_link}")
         for extra_line in event["extra_lines"]:
             if not _event_has_note_like_description(str(extra_line)) and not str(extra_line).strip().startswith(("⚠️", "🔎", "💡")):
                 output_lines.append(f"- {str(extra_line)}")
@@ -4260,10 +4449,11 @@ def format_researcher_card(text: str, language: str = "en", user_query: str = ""
         field_order = [
             ("description", "📝"),
             ("category", "📂"),
+            ("lisboa_card", "🎫"),
             ("address", "📍"),
             ("phone", "📞"),
             ("rating", "⭐"),
-            ("price", "💶"),
+            ("price", "💰"),
             ("today", "🕐"),
             ("hours", "🕐"),
             ("website", "🌐"),
@@ -4282,7 +4472,9 @@ def format_researcher_card(text: str, language: str = "en", user_query: str = ""
             elif key == "phone":
                 value = linkify_phone_numbers(value)
             elif key in {"website", "tickets"}:
-                value = _render_researcher_link_value(value, label)
+                value = _render_researcher_link_value(value, label, language=language)
+                if not value:
+                    continue
             card_lines.append(f"- {emoji} **{label}:** {value}")
 
         extra_lines = current_card.get("extra_lines", [])
@@ -4311,6 +4503,7 @@ def format_researcher_card(text: str, language: str = "en", user_query: str = ""
                 "title": title,
                 "description": "",
                 "category": "",
+                "lisboa_card": "",
                 "address": "",
                 "phone": "",
                 "rating": "",
@@ -4341,56 +4534,135 @@ def format_researcher_card(text: str, language: str = "en", user_query: str = ""
             continue
 
         content_line = re.sub(r"^(?:[-*]\s+)?", "", stripped)
-        normalized_line = re.sub(r"^[📂📍🕐⭐📞🔗🌐💶🎟️📝🗺️📏]\s*", "", content_line).strip()
+        normalized_line = re.sub(r"^[📂📍🕐⭐📞🔗🌐💶💰🎟️🎫📝🗺️📏]\s*", "", content_line).strip()
         field_match = re.match(r"^\*\*(?P<label>[^*]+?)\*\*:?[ \t]*(?P<value>.*)$", normalized_line)
+        plain_label_match = None if field_match else re.match(r"^(?P<label>[^:]{2,40}):\s*(?P<value>.+)$", normalized_line)
+        recognized_plain_labels = {
+            "category",
+            "categoria",
+            "description",
+            "descricao",
+            "descrição",
+            "address",
+            "morada",
+            "location",
+            "localizacao",
+            "localização",
+            "phone",
+            "telefone",
+            "contacto",
+            "contact",
+            "tripadvisor",
+            "rating",
+            "avaliacao",
+            "avaliação",
+            "reviews",
+            "avaliacoes",
+            "avaliações",
+            "price",
+            "preco",
+            "preço",
+            "prices",
+            "precos",
+            "preços",
+            "website",
+            "site oficial",
+            "official page",
+            "url",
+            "more info",
+            "mais detalhes",
+            "details",
+            "tickets",
+            "ticket",
+            "bilhetes",
+            "bilhete",
+            "buy tickets",
+            "comprar bilhetes",
+            "buy",
+            "today",
+            "hoje",
+            "hours",
+            "horario",
+            "horário",
+            "opening hours",
+            "distance",
+            "distancia",
+            "distância",
+            "coordinates",
+            "coordenadas",
+            "lisboa card",
+        }
 
         label = ""
         value = normalized_line
         if field_match:
             label = field_match.group("label").strip().rstrip(":")
             value = field_match.group("value").strip()
+        elif plain_label_match:
+            candidate_label = plain_label_match.group("label").strip().rstrip(":")
+            candidate_key = _strip_accents_compat(candidate_label).lower()
+            if candidate_key in recognized_plain_labels:
+                label = candidate_label
+                value = plain_label_match.group("value").strip()
+            else:
+                plain_label_match = None
 
         label_key = _strip_accents_compat(label).lower()
-        value_lower = _strip_accents_compat(value).lower()
+        normalized_lower = _strip_accents_compat(normalized_line).lower()
 
-        if label_key in {"category", "categoria"}:
-            current_card["category"] = value
+        if label_key in {"lisboa card"} or (content_line.startswith("🎫") and "lisboa card" in normalized_lower):
+            current_card["lisboa_card"] = _clean_place_field_value(
+                value if (field_match or plain_label_match) else normalized_line,
+                "lisboa_card",
+            )
+        elif label_key in {"category", "categoria"}:
+            current_card["category"] = _clean_place_field_value(value, "category")
         elif label_key in {"description", "descricao", "descrição"}:
-            current_card["description"] = value
+            current_card["description"] = _clean_place_field_value(value, "description")
         elif label_key in {"address", "morada", "location", "localizacao", "localização"}:
-            current_card["address"] = value
+            current_card["address"] = _clean_place_field_value(value, "address")
         elif label_key in {"phone", "telefone", "contacto", "contact"}:
-            current_card["phone"] = value
+            current_card["phone"] = _clean_place_field_value(value, "phone")
         elif label_key in {"tripadvisor", "rating", "avaliacao", "avaliação", "reviews", "avaliacoes", "avaliações"}:
-            current_card["rating"] = value
+            current_card["rating"] = _clean_place_field_value(value, "rating")
         elif label_key in {"price", "preco", "preço", "prices", "precos", "preços"}:
-            current_card["price"] = value
-        elif label_key in {"website", "site oficial", "official page", "url"}:
-            current_card["website"] = value or normalized_line
-        elif label_key in {"tickets", "bilhetes", "buy tickets", "comprar bilhetes"}:
-            current_card["tickets"] = value or normalized_line
+            current_card["price"] = _clean_place_field_value(value, "price")
+        elif label_key in {"website", "site oficial", "official page", "url", "more info", "mais detalhes", "details"}:
+            current_card["website"] = _clean_place_field_value(value or normalized_line, "website")
+        elif label_key in {"tickets", "ticket", "bilhetes", "bilhete", "buy tickets", "comprar bilhetes", "buy"}:
+            current_card["tickets"] = _clean_place_field_value(value or normalized_line, "tickets")
         elif label_key in {"today", "hoje"}:
-            current_card["today"] = value
+            current_card["today"] = _clean_place_field_value(value, "today")
         elif label_key in {"hours", "horario", "horário", "opening hours"}:
-            current_card["hours"] = value
+            current_card["hours"] = _clean_place_field_value(value, "hours")
         elif label_key in {"distance", "distancia", "distância"}:
-            current_card["distance"] = value
+            current_card["distance"] = _clean_place_field_value(value, "distance")
         elif label_key in {"coordinates", "coordenadas"}:
-            current_card["coordinates"] = value
-        elif normalized_line.startswith("http") or "visitlisboa.com" in value_lower:
-            current_card["website"] = normalized_line
+            current_card["coordinates"] = _clean_place_field_value(value, "coordinates")
+        elif normalized_line.startswith("http") or "visitlisboa.com" in normalized_lower:
+            current_card["website"] = _clean_place_field_value(normalized_line, "website")
         elif content_line.startswith("📞") or re.search(r"(?:\+?351|00351)\s*\d{3}\s*\d{3}\s*\d{3}", normalized_line):
-            current_card["phone"] = normalized_line
+            current_card["phone"] = _clean_place_field_value(normalized_line, "phone")
         elif content_line.startswith("📍"):
-            current_card["address"] = value if field_match else normalized_line
+            current_card["address"] = _clean_place_field_value(value if (field_match or plain_label_match) else normalized_line, "address")
         elif content_line.startswith("⭐"):
-            current_card["rating"] = value if field_match else normalized_line
+            current_card["rating"] = _clean_place_field_value(value if (field_match or plain_label_match) else normalized_line, "rating")
         elif content_line.startswith("🕐"):
-            current_card["today"] = value if field_match else normalized_line
+            current_card["today"] = _clean_place_field_value(value if (field_match or plain_label_match) else normalized_line, "today")
+        elif content_line.startswith(("💰", "💶")):
+            current_card["price"] = _clean_place_field_value(value if (field_match or plain_label_match) else normalized_line, "price")
+        elif content_line.startswith("🎟️"):
+            current_card["tickets"] = _clean_place_field_value(value if (field_match or plain_label_match) else normalized_line, "tickets")
+        elif content_line.startswith("🎫") or ("lisboa card" in normalized_lower and not current_card.get("lisboa_card")):
+            current_card["lisboa_card"] = _clean_place_field_value(normalized_line, "lisboa_card")
         elif not str(current_card.get("description") or "").strip():
-            current_card["description"] = normalized_line
+            description_value = _clean_place_field_value(normalized_line, "description")
+            if description_value:
+                current_card["description"] = description_value
         else:
-            current_card["extra_lines"].append(normalized_line)
+            extra_line = _clean_place_field_value(normalized_line, "extra")
+            if extra_line and extra_line not in current_card["extra_lines"]:
+                current_card["extra_lines"].append(extra_line)
 
     flush_card()
 

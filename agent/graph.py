@@ -1475,10 +1475,11 @@ class MultiAgentAssistant:
             if note and note not in final_output:
                 final_output = f"{note}\n\n{final_output}"
 
+        planner_involved = "planner" in effective_agents
         single_domain_agents = [
             agent_name for agent_name in effective_agents if agent_name in {"weather", "researcher", "transport"}
         ]
-        if len(single_domain_agents) == 1:
+        if not planner_involved and len(single_domain_agents) == 1:
             final_output = finalize_worker_response(
                 final_output,
                 agent_name=single_domain_agents[0],
@@ -1511,7 +1512,7 @@ class MultiAgentAssistant:
                     final_output = normalize_transport_notes_block(final_output)
                     final_output = final_visual_pass(final_output)
 
-        if len(single_domain_agents) == 1:
+        if not planner_involved and len(single_domain_agents) == 1:
             final_output = finalize_worker_response(
                 final_output,
                 agent_name=single_domain_agents[0],
@@ -1519,7 +1520,11 @@ class MultiAgentAssistant:
                 language=language,
             )
 
-        if single_domain_agents == ["researcher"] and isinstance(agent_outputs.get("researcher"), str):
+        if (
+            not planner_involved
+            and single_domain_agents == ["researcher"]
+            and isinstance(agent_outputs.get("researcher"), str)
+        ):
             final_output = reconcile_researcher_place_response(
                 final_output,
                 agent_outputs["researcher"],
@@ -1534,7 +1539,8 @@ class MultiAgentAssistant:
             )
 
         if (
-            single_domain_agents == ["researcher"]
+            not planner_involved
+            and single_domain_agents == ["researcher"]
             and infer_researcher_source_kind(user_query=message, text=final_output) == "events"
             and (
                 "**Categoria:**" not in final_output

@@ -7,7 +7,13 @@
 
 from unittest.mock import MagicMock, patch
 
-from app import count_user_interactions, render_assistant_markdown, select_new_request
+from app import (
+    count_user_interactions,
+    render_assistant_markdown,
+    runtime_auto_initialize_enabled,
+    select_new_request,
+    should_attempt_startup_auto_initialization,
+)
 
 
 def test_count_user_interactions_counts_only_user_turns() -> None:
@@ -77,3 +83,48 @@ def test_render_assistant_markdown_rerenders_original_full_text_after_streaming(
         "### 🎭 Evento\n- 📍 **Morada:** Lisboa\n- 📅 **Data/Hora:** Hoje\n"
     )
     assert final_text == "### 🎭 Evento\n- 📍 **Morada:** Lisboa\n- 📅 **Data/Hora:** Hoje\n"
+
+
+def test_runtime_auto_initialize_enabled_only_in_locked_production_mode() -> None:
+    """Startup auto-initialization should only activate when provider and credential editing are both disabled."""
+    with patch("app.Config.ENABLE_PROVIDER_SELECTOR", False), patch(
+        "app.Config.ENABLE_PROVIDER_CREDENTIAL_INPUTS", False
+    ):
+        assert runtime_auto_initialize_enabled() is True
+
+    with patch("app.Config.ENABLE_PROVIDER_SELECTOR", True), patch(
+        "app.Config.ENABLE_PROVIDER_CREDENTIAL_INPUTS", False
+    ):
+        assert runtime_auto_initialize_enabled() is False
+
+
+def test_should_attempt_startup_auto_initialization_stops_after_same_provider_failure() -> None:
+    """The app should not retry automatic startup initialization endlessly after a failed attempt for the same provider."""
+    with patch("app.runtime_auto_initialize_enabled", return_value=True):
+        assert (
+            should_attempt_startup_auto_initialization(
+                initialized=False,
+                current_provider="azure",
+                selected_provider="azure",
+                credentials_ready=True,
+                attempted_provider="azure",
+                last_error="probe failed",
+            )
+            is False
+        )
+
+
+def test_should_attempt_startup_auto_initialization_runs_for_fresh_locked_session() -> None:
+    """A fresh locked production session with valid credentials should auto-initialize immediately."""
+    with patch("app.runtime_auto_initialize_enabled", return_value=True):
+        assert (
+            should_attempt_startup_auto_initialization(
+                initialized=False,
+                current_provider="azure",
+                selected_provider="azure",
+                credentials_ready=True,
+                attempted_provider=None,
+                last_error=None,
+            )
+            is True
+        )
