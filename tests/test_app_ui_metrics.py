@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 from app import (
     count_user_interactions,
     render_assistant_markdown,
+    request_capture_locked,
     runtime_auto_initialize_enabled,
     runtime_settings_panel_visible,
     select_new_request,
@@ -63,6 +64,13 @@ def test_select_new_request_keeps_chat_priority_without_pending_request() -> Non
     )
 
     assert selected == "typed question"
+
+
+def test_request_capture_locked_only_when_pending_request_exists() -> None:
+    """Quick actions and chat input should lock only while one request is already pending."""
+    assert request_capture_locked(None) is False
+    assert request_capture_locked("") is False
+    assert request_capture_locked("Estado dos Transportes") is True
 
 
 def test_render_assistant_markdown_rerenders_original_full_text_after_streaming() -> None:
