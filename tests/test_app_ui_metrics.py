@@ -11,6 +11,7 @@ from app import (
     count_user_interactions,
     render_assistant_markdown,
     runtime_auto_initialize_enabled,
+    runtime_settings_panel_visible,
     select_new_request,
     should_attempt_startup_auto_initialization,
 )
@@ -96,6 +97,27 @@ def test_runtime_auto_initialize_enabled_only_in_locked_production_mode() -> Non
         "app.Config.ENABLE_PROVIDER_CREDENTIAL_INPUTS", False
     ):
         assert runtime_auto_initialize_enabled() is False
+
+    with patch("app.Config.ENABLE_PROVIDER_SELECTOR", False), patch(
+        "app.Config.ENABLE_PROVIDER_CREDENTIAL_INPUTS", True
+    ):
+        assert runtime_auto_initialize_enabled() is False
+
+
+def test_runtime_settings_panel_visible_when_credential_inputs_are_enabled() -> None:
+    """The settings panel must stay visible when credentials are editable, even if provider selection is locked."""
+    with patch("app.Config.ENABLE_PROVIDER_SELECTOR", False), patch(
+        "app.Config.ENABLE_PROVIDER_CREDENTIAL_INPUTS", True
+    ):
+        assert runtime_settings_panel_visible() is True
+
+
+def test_runtime_settings_panel_visible_when_provider_selector_is_enabled() -> None:
+    """The settings panel must stay visible when provider selection is editable."""
+    with patch("app.Config.ENABLE_PROVIDER_SELECTOR", True), patch(
+        "app.Config.ENABLE_PROVIDER_CREDENTIAL_INPUTS", False
+    ):
+        assert runtime_settings_panel_visible() is True
 
 
 def test_should_attempt_startup_auto_initialization_stops_after_same_provider_failure() -> None:

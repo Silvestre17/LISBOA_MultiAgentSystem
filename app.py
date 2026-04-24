@@ -880,9 +880,14 @@ def runtime_credential_inputs_enabled() -> bool:
     return bool(getattr(Config, "ENABLE_PROVIDER_CREDENTIAL_INPUTS", True))
 
 
+def runtime_settings_panel_visible() -> bool:
+    """Return whether the settings panel should be visible in the sidebar."""
+    return runtime_provider_selector_enabled() or runtime_credential_inputs_enabled()
+
+
 def runtime_auto_initialize_enabled() -> bool:
     """Return whether the app should auto-initialize the assistant on startup."""
-    return not runtime_provider_selector_enabled() and not runtime_credential_inputs_enabled()
+    return not runtime_settings_panel_visible()
 
 
 def provider_configuration_hint(language: str) -> str:
@@ -1341,173 +1346,178 @@ def build_sidebar():
             st.session_state.language = new_lang_key
             st.rerun()
 
-        st.divider()
+        provider_labels = {
+            "openai": "OpenAI",
+            "azure": "Azure OpenAI",
+            "lmstudio": "LM Studio",
+        }
+        manual_connect_visible = runtime_settings_panel_visible()
+        locked_provider = Config.MODEL_PROVIDER
+        if not runtime_provider_selector_enabled():
+            st.session_state.provider = locked_provider
+            st.session_state.last_provider = locked_provider
+            selected_provider = locked_provider
+        else:
+            selected_provider = st.session_state.provider
 
-        with st.expander(
-            "⚙️ " + t("settings"), expanded=False
-        ):
-            provider_labels = {
-                "openai": "OpenAI",
-                "azure": "Azure OpenAI",
-                "lmstudio": "LM Studio",
-            }
-            manual_connect_visible = not runtime_auto_initialize_enabled()
-            locked_provider = Config.MODEL_PROVIDER
-            if not runtime_provider_selector_enabled():
-                st.session_state.provider = locked_provider
-                st.session_state.last_provider = locked_provider
-                selected_provider = locked_provider
-            else:
-                selected_provider = st.selectbox(
-                    t("select_provider"),
-                    options=list(provider_labels.keys()),
-                    format_func=lambda key: provider_labels[key],
-                    index=list(provider_labels.keys()).index(st.session_state.provider),
-                )
+        if manual_connect_visible:
+            st.divider()
 
-            credentials_changed = False
-            if runtime_credential_inputs_enabled() and selected_provider == "openai":
-                if st.session_state.credentials["openai"].get("api_key"):
-                    st.caption(
-                        "🔐 Chave OpenAI detetada no ambiente. O valor nunca é mostrado."
-                        if st.session_state.language == "pt"
-                        else "🔐 OpenAI key detected in the environment. The value is never shown."
-                    )
-
-                ui_value = st.session_state.ui_api_key_values.get("openai", "")
-                new_value = st.text_input(
-                    "OpenAI API Key",
-                    value=ui_value,
-                    type="password",
-                    placeholder=t("api_key_placeholder"),
-                )
-                if new_value != ui_value:
-                    st.session_state.ui_api_key_values["openai"] = new_value
-                    st.session_state.credentials["openai"]["api_key"] = new_value
-                    credentials_changed = True
-
-            elif runtime_credential_inputs_enabled() and selected_provider == "azure":
-                configured_items = []
-                if st.session_state.credentials["azure"].get("api_key"):
-                    configured_items.append("API Key")
-                if st.session_state.credentials["azure"].get("endpoint"):
-                    configured_items.append("Endpoint")
-                effective_azure_model = (
-                    normalized_value(st.session_state.credentials["azure"].get("model"))
-                    or normalized_value(Config.AZURE_OPENAI_DEPLOYMENT_NAME)
-                    or normalized_value(Config.DEFAULT_GPT_MODEL_NAME)
-                )
-                if effective_azure_model:
-                    configured_items.append("Deployment")
-                if configured_items:
-                    configured_text = ", ".join(configured_items)
-                    st.caption(
-                        f"🔐 Configurado no ambiente: {configured_text}. Os valores nunca são mostrados."
-                        if st.session_state.language == "pt"
-                        else f"🔐 Configured in the environment: {configured_text}. Values are never shown."
-                    )
-
-                ui_key = st.session_state.ui_api_key_values.get("azure_api_key", "")
-                ui_endpoint = st.session_state.ui_api_key_values.get("azure_endpoint", "")
-                ui_model = st.session_state.ui_api_key_values.get("azure_model", "")
-
-                new_key = st.text_input(
-                    "Azure API Key",
-                    value=ui_key,
-                    type="password",
-                    placeholder="Insira a chave Azure OpenAI..."
-                    if st.session_state.language == "pt"
-                    else "Enter your Azure OpenAI key...",
-                )
-                new_endpoint = st.text_input(
-                    "Azure Endpoint",
-                    value=ui_endpoint,
-                    placeholder="https://your-resource.openai.azure.com",
-                )
-                new_model = st.text_input(
-                    "Deployment Name",
-                    value=ui_model,
-                    placeholder=effective_azure_model,
-                )
-
-                if new_key != ui_key:
-                    st.session_state.ui_api_key_values["azure_api_key"] = new_key
-                    st.session_state.credentials["azure"]["api_key"] = new_key
-                    credentials_changed = True
-                if new_endpoint != ui_endpoint:
-                    st.session_state.ui_api_key_values["azure_endpoint"] = new_endpoint
-                    st.session_state.credentials["azure"]["endpoint"] = new_endpoint
-                    credentials_changed = True
-                if new_model != ui_model:
-                    st.session_state.ui_api_key_values["azure_model"] = new_model
-                    st.session_state.credentials["azure"]["model"] = new_model
-                    credentials_changed = True
-
-            elif runtime_credential_inputs_enabled():
-                current_base_url = st.session_state.credentials["lmstudio"].get(
-                    "base_url", Config.LMSTUDIO_BASE_URL
-                )
-                current_model = st.session_state.credentials["lmstudio"].get(
-                    "model", Config.LMSTUDIO_MODEL_NAME
-                )
-                new_base_url = st.text_input(
-                    t("local_url"),
-                    value=current_base_url,
-                    placeholder=t("local_url_placeholder"),
-                )
-                new_model = st.text_input(
-                    t("model_name"),
-                    value=current_model,
-                    placeholder=Config.LMSTUDIO_MODEL_NAME,
-                )
-                if new_base_url != current_base_url:
-                    st.session_state.credentials["lmstudio"]["base_url"] = new_base_url
-                    credentials_changed = True
-                if new_model != current_model:
-                    st.session_state.credentials["lmstudio"]["model"] = new_model
-                    credentials_changed = True
-
-            if manual_connect_visible and st.button(
-                t("save_credentials"),
-                use_container_width=True,
-                type="primary",
-                key="connect_system_button",
+            with st.expander(
+                "⚙️ " + t("settings"), expanded=False
             ):
-                with st.spinner(
-                    "🔌 A ligar o assistente ao motor de IA..."
-                    if st.session_state.language == "pt"
-                    else "🔌 Connecting assistant to AI engine..."
+                if runtime_provider_selector_enabled():
+                    selected_provider = st.selectbox(
+                        t("select_provider"),
+                        options=list(provider_labels.keys()),
+                        format_func=lambda key: provider_labels[key],
+                        index=list(provider_labels.keys()).index(st.session_state.provider),
+                    )
+
+                credentials_changed = False
+                if runtime_credential_inputs_enabled() and selected_provider == "openai":
+                    if st.session_state.credentials["openai"].get("api_key"):
+                        st.caption(
+                            "🔐 Chave OpenAI detetada no ambiente. O valor nunca é mostrado."
+                            if st.session_state.language == "pt"
+                            else "🔐 OpenAI key detected in the environment. The value is never shown."
+                        )
+
+                    ui_value = st.session_state.ui_api_key_values.get("openai", "")
+                    new_value = st.text_input(
+                        "OpenAI API Key",
+                        value=ui_value,
+                        type="password",
+                        placeholder=t("api_key_placeholder"),
+                    )
+                    if new_value != ui_value:
+                        st.session_state.ui_api_key_values["openai"] = new_value
+                        st.session_state.credentials["openai"]["api_key"] = new_value
+                        credentials_changed = True
+
+                elif runtime_credential_inputs_enabled() and selected_provider == "azure":
+                    configured_items = []
+                    if st.session_state.credentials["azure"].get("api_key"):
+                        configured_items.append("API Key")
+                    if st.session_state.credentials["azure"].get("endpoint"):
+                        configured_items.append("Endpoint")
+                    effective_azure_model = (
+                        normalized_value(st.session_state.credentials["azure"].get("model"))
+                        or normalized_value(Config.AZURE_OPENAI_DEPLOYMENT_NAME)
+                        or normalized_value(Config.DEFAULT_GPT_MODEL_NAME)
+                    )
+                    if effective_azure_model:
+                        configured_items.append("Deployment")
+                    if configured_items:
+                        configured_text = ", ".join(configured_items)
+                        st.caption(
+                            f"🔐 Configurado no ambiente: {configured_text}. Os valores nunca são mostrados."
+                            if st.session_state.language == "pt"
+                            else f"🔐 Configured in the environment: {configured_text}. Values are never shown."
+                        )
+
+                    ui_key = st.session_state.ui_api_key_values.get("azure_api_key", "")
+                    ui_endpoint = st.session_state.ui_api_key_values.get("azure_endpoint", "")
+                    ui_model = st.session_state.ui_api_key_values.get("azure_model", "")
+
+                    new_key = st.text_input(
+                        "Azure API Key",
+                        value=ui_key,
+                        type="password",
+                        placeholder="Insira a chave Azure OpenAI..."
+                        if st.session_state.language == "pt"
+                        else "Enter your Azure OpenAI key...",
+                    )
+                    new_endpoint = st.text_input(
+                        "Azure Endpoint",
+                        value=ui_endpoint,
+                        placeholder="https://your-resource.openai.azure.com",
+                    )
+                    new_model = st.text_input(
+                        "Deployment Name",
+                        value=ui_model,
+                        placeholder=effective_azure_model,
+                    )
+
+                    if new_key != ui_key:
+                        st.session_state.ui_api_key_values["azure_api_key"] = new_key
+                        st.session_state.credentials["azure"]["api_key"] = new_key
+                        credentials_changed = True
+                    if new_endpoint != ui_endpoint:
+                        st.session_state.ui_api_key_values["azure_endpoint"] = new_endpoint
+                        st.session_state.credentials["azure"]["endpoint"] = new_endpoint
+                        credentials_changed = True
+                    if new_model != ui_model:
+                        st.session_state.ui_api_key_values["azure_model"] = new_model
+                        st.session_state.credentials["azure"]["model"] = new_model
+                        credentials_changed = True
+
+                elif runtime_credential_inputs_enabled():
+                    current_base_url = st.session_state.credentials["lmstudio"].get(
+                        "base_url", Config.LMSTUDIO_BASE_URL
+                    )
+                    current_model = st.session_state.credentials["lmstudio"].get(
+                        "model", Config.LMSTUDIO_MODEL_NAME
+                    )
+                    new_base_url = st.text_input(
+                        t("local_url"),
+                        value=current_base_url,
+                        placeholder=t("local_url_placeholder"),
+                    )
+                    new_model = st.text_input(
+                        t("model_name"),
+                        value=current_model,
+                        placeholder=Config.LMSTUDIO_MODEL_NAME,
+                    )
+                    if new_base_url != current_base_url:
+                        st.session_state.credentials["lmstudio"]["base_url"] = new_base_url
+                        credentials_changed = True
+                    if new_model != current_model:
+                        st.session_state.credentials["lmstudio"]["model"] = new_model
+                        credentials_changed = True
+
+                if manual_connect_visible and st.button(
+                    t("save_credentials"),
+                    use_container_width=True,
+                    type="primary",
+                    key="connect_system_button",
                 ):
-                    success, error = initialize_assistant(selected_provider)
-                if success:
-                    st.session_state.startup_auto_init_attempted_provider = selected_provider
-                    st.session_state.startup_auto_init_error = None
-                    st.success(t("assistant_ready"))
-                    st.rerun()
-                else:
-                    st.session_state.startup_auto_init_attempted_provider = selected_provider
-                    st.session_state.startup_auto_init_error = error or t("initialization_failed")
-                    st.error(error or t("initialization_failed"))
-            elif (
-                st.session_state.initialized
-                and st.session_state.provider == selected_provider
-                and not credentials_changed
-            ):
-                st.success(t("assistant_ready"))
-            else:
-                provider_ready, provider_msg = provider_has_required_credentials(
-                    selected_provider
-                )
-                if provider_ready and manual_connect_visible:
-                    st.info(
-                        "Credenciais prontas. Clique em **Ligar Sistema** para iniciar."
+                    with st.spinner(
+                        "🔌 A ligar o assistente ao motor de IA..."
                         if st.session_state.language == "pt"
-                        else "Credentials are ready. Click **Connect System** to start."
+                        else "🔌 Connecting assistant to AI engine..."
+                    ):
+                        success, error = initialize_assistant(selected_provider)
+                    if success:
+                        st.session_state.startup_auto_init_attempted_provider = selected_provider
+                        st.session_state.startup_auto_init_error = None
+                        st.success(t("assistant_ready"))
+                        st.rerun()
+                    else:
+                        st.session_state.startup_auto_init_attempted_provider = selected_provider
+                        st.session_state.startup_auto_init_error = error or t("initialization_failed")
+                        st.error(error or t("initialization_failed"))
+                elif (
+                    manual_connect_visible
+                    and st.session_state.initialized
+                    and st.session_state.provider == selected_provider
+                    and not credentials_changed
+                ):
+                    st.success(t("assistant_ready"))
+                else:
+                    provider_ready, provider_msg = provider_has_required_credentials(
+                        selected_provider
                     )
-                elif provider_msg:
-                    st.caption(provider_msg)
+                    if provider_ready and manual_connect_visible:
+                        st.info(
+                            "Credenciais prontas. Clique em **Ligar Sistema** para iniciar."
+                            if st.session_state.language == "pt"
+                            else "Credentials are ready. Click **Connect System** to start."
+                        )
+                    elif provider_msg:
+                        st.caption(provider_msg)
 
-        st.divider()
+            st.divider()
 
         # Quick Actions
         st.markdown(f"#### ⚡ {t('quick_actions')}")
