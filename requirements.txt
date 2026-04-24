@@ -1,5 +1,5 @@
 # ==========================================================================
-# Master Thesis - Dependencies
+# Master Thesis - Production App Dependencies
 #   - André Filipe Gomes Silvestre, 20240502
 #
 # LISBOA: Lisbon Itenerary System Based On AI
@@ -7,6 +7,10 @@
 # and Mobility Itinerary Planning
 #
 # Installation: pip install -r requirements.txt
+#
+# This file is intentionally limited to the Streamlit runtime. Scraping-only
+# and eval-only packages stay in pyproject.toml optional extras so Community
+# Cloud does not try to compile unnecessary Linux dependencies during deploy.
 # ==========================================================================
 
 # -----------------------------------------------------------------------------
@@ -44,19 +48,23 @@ opentelemetry-exporter-otlp-proto-grpc==1.40.0
 opentelemetry-exporter-otlp-proto-common==1.40.0
 
 # -----------------------------------------------------------------------------
-# Data Processing and Web Scraping
+# Data Processing
 # -----------------------------------------------------------------------------
 pandas==2.3.3                 # DataFrame operations, compatible with NumPy 2.x on Python 3.10
-numpy==2.2.6                  # Numerical support used by eval/human_calibration
+pandas==2.3.3                 # DataFrame operations used by municipal/open-data tooling
 requests==2.32.5              # HTTP client for API calls
-beautifulsoup4==4.12.3        # HTML parsing for web scraping
-lxml==5.3.0                   # Fast XML/HTML parser
+# beautifulsoup4==4.12.3        # HTML parsing for web scraping
+# lxml==5.3.0                   # Fast XML/HTML parser
 tqdm==4.67.3                  # Progress bars
 protobuf==6.33.5              # Protocol Buffers for data serialization
 gtfs-realtime-bindings==2.0.0 # GTFS real-time protocol bindings
 urllib3==2.6.3                # Explicit transport dependency used by Metro tool
 certifi==2026.1.4             # SSL certificate bundle used by Metro tool
 cryptography==44.0.1          # X.509 parsing for dynamic Metro TLS chain completion
+
+# Scraping extras such as beautifulsoup4/lxml are kept out of the production
+# deploy path because the Streamlit app does not import the webscraping scripts
+# at runtime.
 
 # -----------------------------------------------------------------------------
 # Document Processing (for RAG ingestion)

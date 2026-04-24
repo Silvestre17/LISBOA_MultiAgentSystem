@@ -126,7 +126,7 @@ TRANSLATIONS = {
         "error_generic": "Service temporarily unavailable. Please try again later.",
         "history_window_notice": "Showing the last {count} messages to keep the interface responsive. The full conversation is still kept for the assistant.",
         "thinking": "Analyzing live city data...",
-        "footer_version": "LISBOA System",
+        "footer_version": "LISBOA | AI Assistant",
         "footer_made": "André Filipe Gomes Silvestre • NOVA IMS",
         "info_title": "About LISBOA",
         "info_subtitle": "Discover the Multi-Agent Urban System",
@@ -235,7 +235,7 @@ NOVA IMS - Universidade NOVA de Lisboa
         "error_generic": "Serviço temporariamente indisponível. Tente novamente mais tarde.",
         "history_window_notice": "A mostrar apenas as últimas {count} mensagens para manter a interface fluida. A conversa completa continua disponível para o assistente.",
         "thinking": "A processar dados urbanos...",
-        "footer_version": "Sistema LISBOA",
+        "footer_version": "LISBOA | Assistente IA",
         "footer_made": "André Filipe Gomes Silvestre • NOVA IMS",
         "info_title": "Sobre o LISBOA",
         "info_subtitle": "Descubra o Sistema Urbano Multi-Agente",
@@ -870,6 +870,36 @@ def normalized_value(value: Optional[str]) -> str:
     return value.strip()
 
 
+def runtime_provider_selector_enabled() -> bool:
+    """Return whether the sidebar should allow live provider switching."""
+    return bool(getattr(Config, "ENABLE_PROVIDER_SELECTOR", True))
+
+
+def runtime_credential_inputs_enabled() -> bool:
+    """Return whether the sidebar should allow live credential editing."""
+    return bool(getattr(Config, "ENABLE_PROVIDER_CREDENTIAL_INPUTS", True))
+
+
+def runtime_auto_initialize_enabled() -> bool:
+    """Return whether the app should auto-initialize the assistant on startup."""
+    return not runtime_provider_selector_enabled() and not runtime_credential_inputs_enabled()
+
+
+def provider_configuration_hint(language: str) -> str:
+    """Explain where credentials should be configured for the active runtime."""
+    if runtime_credential_inputs_enabled():
+        return (
+            "Configure-o nas definições laterais."
+            if language == "pt"
+            else "Configure it in the sidebar."
+        )
+    return (
+        "Configure-o nas variáveis de ambiente ou nos Streamlit secrets."
+        if language == "pt"
+        else "Configure it in environment variables or Streamlit secrets."
+    )
+
+
 def init_system_state():
     """Initialise session state with secure defaults."""
     defaults = {
@@ -905,6 +935,8 @@ def init_system_state():
         "startup_resources_ok": None,
         "startup_resources_status": {},
         "transport_db_status": None,
+        "startup_auto_init_attempted_provider": None,
+        "startup_auto_init_error": None,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -1020,9 +1052,9 @@ def provider_has_required_credentials(provider: str) -> Tuple[bool, Optional[str
     if provider == "openai" and not openai_key:
         return (
             False,
-            "Falta a chave da API OpenAI. Configure-a nas definições laterais."
+            f"Falta a chave da API OpenAI. {provider_configuration_hint(lang)}"
             if lang == "pt"
-            else "Missing OpenAI API key. Configure it in the sidebar.",
+            else f"Missing OpenAI API key. {provider_configuration_hint(lang)}",
         )
 
     if provider == "azure":
@@ -1319,15 +1351,22 @@ def build_sidebar():
                 "azure": "Azure OpenAI",
                 "lmstudio": "LM Studio",
             }
-            selected_provider = st.selectbox(
-                t("select_provider"),
-                options=list(provider_labels.keys()),
-                format_func=lambda key: provider_labels[key],
-                index=list(provider_labels.keys()).index(st.session_state.provider),
-            )
+            manual_connect_visible = not runtime_auto_initialize_enabled()
+            locked_provider = Config.MODEL_PROVIDER
+            if not runtime_provider_selector_enabled():
+                st.session_state.provider = locked_provider
+                st.session_state.last_provider = locked_provider
+                selected_provider = locked_provider
+            else:
+                selected_provider = st.selectbox(
+                    t("select_provider"),
+                    options=list(provider_labels.keys()),
+                    format_func=lambda key: provider_labels[key],
+                    index=list(provider_labels.keys()).index(st.session_state.provider),
+                )
 
             credentials_changed = False
-            if selected_provider == "openai":
+            if runtime_credential_inputs_enabled() and selected_provider == "openai":
                 if st.session_state.credentials["openai"].get("api_key"):
                     st.caption(
                         "🔐 Chave OpenAI detetada no ambiente. O valor nunca é mostrado."
@@ -1347,7 +1386,7 @@ def build_sidebar():
                     st.session_state.credentials["openai"]["api_key"] = new_value
                     credentials_changed = True
 
-            elif selected_provider == "azure":
+            elif runtime_credential_inputs_enabled() and selected_provider == "azure":
                 configured_items = []
                 if st.session_state.credentials["azure"].get("api_key"):
                     configured_items.append("API Key")
@@ -1404,7 +1443,7 @@ def build_sidebar():
                     st.session_state.credentials["azure"]["model"] = new_model
                     credentials_changed = True
 
-            else:
+            elif runtime_credential_inputs_enabled():
                 current_base_url = st.session_state.credentials["lmstudio"].get(
                     "base_url", Config.LMSTUDIO_BASE_URL
                 )
@@ -1428,7 +1467,12 @@ def build_sidebar():
                     st.session_state.credentials["lmstudio"]["model"] = new_model
                     credentials_changed = True
 
-            if st.button(t("save_credentials"), use_container_width=True, type="primary", key="connect_system_button"):
+            if manual_connect_visible and st.button(
+                t("save_credentials"),
+                use_container_width=True,
+                type="primary",
+                key="connect_system_button",
+            ):
                 with st.spinner(
                     "🔌 A ligar o assistente ao motor de IA..."
                     if st.session_state.language == "pt"
@@ -1436,9 +1480,13 @@ def build_sidebar():
                 ):
                     success, error = initialize_assistant(selected_provider)
                 if success:
+                    st.session_state.startup_auto_init_attempted_provider = selected_provider
+                    st.session_state.startup_auto_init_error = None
                     st.success(t("assistant_ready"))
                     st.rerun()
                 else:
+                    st.session_state.startup_auto_init_attempted_provider = selected_provider
+                    st.session_state.startup_auto_init_error = error or t("initialization_failed")
                     st.error(error or t("initialization_failed"))
             elif (
                 st.session_state.initialized
@@ -1450,7 +1498,7 @@ def build_sidebar():
                 provider_ready, provider_msg = provider_has_required_credentials(
                     selected_provider
                 )
-                if provider_ready:
+                if provider_ready and manual_connect_visible:
                     st.info(
                         "Credenciais prontas. Clique em **Ligar Sistema** para iniciar."
                         if st.session_state.language == "pt"
@@ -1631,15 +1679,74 @@ def count_user_interactions(messages: list[dict[str, Any]]) -> int:
     )
 
 
+def startup_gate_allows_requests(
+    startup_ok: bool,
+    startup_status: Dict[str, Any],
+    *,
+    use_multi_agent: bool,
+) -> bool:
+    """Return whether the startup readiness gate is open for new user requests."""
+    if not startup_ok or not bool(startup_status.get("ok", False)):
+        return False
+    if not bool(startup_status.get("transport_ok", False)):
+        return False
+    if use_multi_agent and not bool(startup_status.get("kb_ok", False)):
+        return False
+    return True
+
+
+def should_attempt_startup_auto_initialization(
+    *,
+    initialized: bool,
+    current_provider: str,
+    selected_provider: str,
+    credentials_ready: bool,
+    attempted_provider: Optional[str],
+    last_error: Optional[str],
+) -> bool:
+    """Return whether the startup flow should auto-initialize the assistant."""
+    if not runtime_auto_initialize_enabled() or not credentials_ready:
+        return False
+    if initialized and current_provider == selected_provider:
+        return False
+    if attempted_provider == selected_provider and last_error:
+        return False
+    return True
+
+
+def build_startup_gate_message(
+    startup_status: Dict[str, Any],
+    *,
+    language: str,
+    use_multi_agent: bool,
+) -> str:
+    """Build a concise readiness message listing the startup checks that failed."""
+    if language == "pt":
+        lines = ["As verificações de arranque ainda não estão completas."]
+    else:
+        lines = ["Startup checks are incomplete."]
+
+    transport_status = str(startup_status.get("transport_status") or "").strip()
+    if not bool(startup_status.get("transport_ok", False)) and transport_status:
+        lines.append(transport_status)
+
+    kb_status = str(startup_status.get("kb_status") or "").strip()
+    if use_multi_agent and not bool(startup_status.get("kb_ok", False)) and kb_status:
+        lines.append(kb_status)
+
+    return "\n\n".join(lines)
+
+
 def select_new_request(
     *,
     sidebar_request: Optional[str],
     welcome_request: Optional[str],
     chat_request: Optional[str],
     pending_request: Optional[str],
+    allow_requests: bool = True,
 ) -> Optional[str]:
     """Choose the next new request while preventing duplicate consumption across reruns."""
-    if pending_request:
+    if pending_request or not allow_requests:
         return None
     return chat_request or welcome_request or sidebar_request
 
@@ -1864,6 +1971,28 @@ def main():
         show_spinner=not bool(st.session_state.get("startup_resources_attempted", False))
     )
 
+    bootstrap_provider = (
+        Config.MODEL_PROVIDER
+        if not runtime_provider_selector_enabled()
+        else st.session_state.get("provider", Config.MODEL_PROVIDER)
+    )
+    credentials_ready, _ = provider_has_required_credentials(bootstrap_provider)
+    if should_attempt_startup_auto_initialization(
+        initialized=bool(st.session_state.get("initialized", False)),
+        current_provider=str(st.session_state.get("provider", "")),
+        selected_provider=bootstrap_provider,
+        credentials_ready=credentials_ready,
+        attempted_provider=st.session_state.get("startup_auto_init_attempted_provider"),
+        last_error=st.session_state.get("startup_auto_init_error"),
+    ):
+        success, error = initialize_assistant(bootstrap_provider)
+        st.session_state.startup_auto_init_attempted_provider = bootstrap_provider
+        st.session_state.startup_auto_init_error = (
+            None if success else error or t("initialization_failed")
+        )
+        if success:
+            st.session_state.error = None
+
     display_banner()
     selected_provider, q_act = build_sidebar()
 
@@ -1900,7 +2029,7 @@ def main():
     if new_request:
         queue_pending_request(new_request)
         st.rerun()
-
+    
     # Stage 2: If a request is pending, ensure the assistant is initialized and
     # execute the LLM call. The user message has already been appended during
     # the previous rerun, so the sidebar counter is already in sync.
@@ -1926,7 +2055,10 @@ def main():
 
     if not st.session_state.initialized:
         credentials_ready, _ = provider_has_required_credentials(selected_provider)
-        if credentials_ready:
+        auto_init_error = st.session_state.get("startup_auto_init_error")
+        if runtime_auto_initialize_enabled() and auto_init_error:
+            st.error(auto_init_error)
+        elif credentials_ready and not runtime_auto_initialize_enabled():
             st.info(
                 "As credenciais já estão prontas. Pode clicar em **Ligar Sistema** na barra lateral ou enviar uma pergunta para iniciar automaticamente."
                 if st.session_state.language == "pt"
@@ -1934,7 +2066,11 @@ def main():
             )
         else:
             st.info(
-                "Configure o fornecedor de IA nas definições laterais para começar."
+                "Configure as credenciais de produção nas variáveis de ambiente ou nos Streamlit secrets para começar."
+                if st.session_state.language == "pt" and not runtime_credential_inputs_enabled()
+                else "Configure the production credentials in environment variables or Streamlit secrets to get started."
+                if not runtime_credential_inputs_enabled()
+                else "Configure o fornecedor de IA nas definições laterais para começar."
                 if st.session_state.language == "pt"
                 else "Configure the AI provider in the sidebar settings to get started."
             )

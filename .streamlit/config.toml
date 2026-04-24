@@ -5,8 +5,11 @@ secondaryBackgroundColor = "#fafafa"
 textColor = "#18181b"
 font = "sans serif"
 
+[client]
+showErrorDetails = "none"
+
 [server]
-enableCORS = false
-enableXsrfProtection = false
+enableCORS = true
+enableXsrfProtection = true
 # Use "none" to avoid PyTorch compatibility issues with file watcher
 fileWatcherType = "none"

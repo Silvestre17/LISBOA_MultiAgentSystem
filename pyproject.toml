@@ -5,8 +5,11 @@
 # LISBOA: Lisbon Itinerary System Based On AI
 # A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon
 #
-# Enables editable install ("pip install -e .") so all project modules are
-# importable from anywhere (REPL, tests, eval scripts) without sys.path hacks.
+# Keeps only the minimal setuptools metadata needed for editable installs and
+# local package discovery.
+# Streamlit Community Cloud uses requirements.txt before pyproject.toml when
+# both files are present, so dependency pins live in requirements.txt instead
+# of being duplicated here.
 # ==========================================================================
 
 [build-system]
@@ -16,14 +19,24 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "lisboa"
 version = "1.0.0"
-description = "LISBOA: Lisbon Itenerary System Based On AI - Multi-Agent AI for Personalized Tourism and Urban Mobility in Lisbon"
+description = "Multi-agent assistant for Lisbon tourism and resident mobility, grounded in live APIs, municipal open data, and retrieval."
 authors = [
     { name = "André Filipe Gomes Silvestre", email = "20240502@novaims.unl.pt" },
 ]
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.10"
-keywords = ["Multi-Agent", "LLM", "tourism", "Lisbon", "LangGraph", "RAG"]
+requires-python = ">=3.10,<3.14"
+keywords = [
+    "lisbon",
+    "tourism",
+    "urban-mobility",
+    "public-transport",
+    "municipal-open-data",
+    "multi-agent",
+    "rag",
+    "langgraph",
+    "streamlit",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -33,63 +46,6 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-dependencies = [
-    "langchain==1.2.10",
-    "langchain-core==1.2.18",
-    "langgraph==1.0.10",
-    "langchain-openai==1.1.11",
-    "langchain-chroma==1.1.0",
-    "langchain-huggingface==1.2.1",
-    "langchain-community==0.4.1",
-    "langchain-text-splitters==1.1.1",
-    "chromadb==1.5.5",
-    "sentence-transformers==5.2.3",
-    "transformers==5.3.0",
-    "streamlit==1.55.0",
-    "requests==2.32.5",
-    "python-dotenv==1.2.2",
-    "langsmith==0.7.16",
-    "pandas==2.3.3",
-    "tqdm==4.67.3",
-    "pypdf==6.4.2",
-    "wikipedia==1.4.0",
-    "duckduckgo-search==8.1.1",
-    "protobuf==6.33.5",
-    "gtfs-realtime-bindings==2.0.0",
-    "urllib3==2.6.3",
-    "certifi==2026.1.4",
-    "cryptography==44.0.1",
-    "pydantic==2.12.4",
-]
-
-[project.optional-dependencies]
-eval = [
-    "pandas==2.3.3",
-    "numpy==2.2.6",
-]
-scraping = [
-    "beautifulsoup4==4.12.3",
-    "lxml==5.3.0",
-    "tqdm==4.67.3",
-]
-transport = [
-    "protobuf==6.33.5",
-    "gtfs-realtime-bindings==2.0.0",
-    "urllib3==2.6.3",
-    "certifi==2026.1.4",
-    "cryptography==44.0.1",
-]
-docs = [
-    "pypdf==6.4.2",
-]
-search = [
-    "wikipedia==1.4.0",
-    "duckduckgo-search==8.1.1",
-]
-dev = [
-    "pytest==8.3.4",
-    "black==24.10.0",
-]
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -98,39 +54,3 @@ exclude = ["tests*", "data*", "docs*", "_*", "__pycache__*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.json", "*.yaml", "*.yml", "*.md", "*.pem"]
-
-# ==========================================================================
-# Ruff Linting Configuration
-# ==========================================================================
-[tool.ruff]
-line-length = 100
-target-version = "py310"
-
-[tool.ruff.lint]
-select = ["E", "F", "W", "I"]
-ignore = ["E501"]  # Line too long - handled by formatter
-
-[tool.ruff.lint.isort]
-known-first-party = ["agent", "tools", "config", "eval"]
-
-# ==========================================================================
-# Pytest Configuration
-# ==========================================================================
-[tool.pytest.ini_options]
-testpaths = ["tests", "eval/tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-addopts = "-v --tb=short -ra"
-norecursedirs = [".*", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist", "*.egg-info"]
-markers = [
-    "fast: deterministic tests with no live API or LLM dependency",
-    "smoke: lightweight end-to-end sanity checks",
-    "live: tests that require real credentials and external services",
-    "coverage: exhaustive prompt or tool coverage suites",
-    "eval: evaluation-framework specific tests",
-]
-filterwarnings = [
-    "ignore:The `construct` method is deprecated; use `model_construct` instead\\..*:pydantic.warnings.PydanticDeprecatedSince20:langchain_core\\.tracers\\.langchain",
-    "ignore:The `dict` method is deprecated; use `model_dump` instead\\..*:pydantic.warnings.PydanticDeprecatedSince20:langchain_core\\.tracers\\.langchain",
-]

@@ -732,6 +732,101 @@ def test_researcher_worker_formats_place_cards_with_links_and_english_labels() -
     assert "**Morada:**" not in output
 
 
+def test_researcher_worker_keeps_lisboa_card_and_price_fields_out_of_place_description() -> None:
+    """Place cards should keep Lisboa Card benefits and ticket-offer pricing out of the description field."""
+    raw = (
+        "🏛️ **Found 2 Places/Attractions in Lisbon:**\n\n"
+        "1. 🏛️ **Museum of Lisbon – Pimenta Palace**\n"
+        "   📂 Category: Museums\n"
+        "   🎫 Free with Lisboa Card\n"
+        "   Discover the various lives of the city of Lisbon, from the Roman age onwards.\n"
+        "   📍 Lisboa\n"
+        "   🕐 **Today**: Closed\n"
+        "   💰 Children Free until (age): 12 Adult: 3 € + info\n"
+        "   📞 +351 217 513 200\n"
+        "   🔗 https://www.visitlisboa.com/en/places/museum-of-lisbon-pimenta-palace\n\n"
+        "2. 🏛️ **Arco da Rua Augusta**\n"
+        "   📂 Category: Monuments\n"
+        "   Climb up one of Lisbon’s iconic buildings for a unique view of the city.\n"
+        "   📍 Rua Augusta, 2, 1100-053, Lisboa\n"
+        "   🕐 **Today**: 10:00 - 19:00\n"
+        "   🔗 https://www.visitlisboa.com/en/places/arco-da-rua-augusta\n\n"
+        "📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places) | **Updated:** 14:00"
+    )
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="researcher",
+        user_query="Lista as atrações imperdíveis para quem visita Lisboa pela primeira vez.",
+        language="pt",
+    )
+
+    assert "### 🏛️ Museum of Lisbon – Pimenta Palace" in output
+    assert "- 🎫 **Lisboa Card:** Free with Lisboa Card" in output
+    assert "- 📝 **Descrição:** Discover the various lives of the city of Lisbon, from the Roman age onwards." in output
+    assert "- 💰 **Preço:** Children Free until (age): 12 Adult: 3 €" in output
+    assert "- 📝 **Descrição:** Free with Lisboa Card" not in output
+    assert "+ info" not in output
+
+
+def test_researcher_worker_drops_plain_buy_ticket_placeholder_from_generic_place_lists() -> None:
+    """Generic attraction lists should not leak raw `BUY:` ticket placeholders into the final UI."""
+    raw = (
+        "🏛️ **Found 2 Places/Attractions in Lisbon:**\n\n"
+        "1. 🏛️ **Palace of Belém**\n"
+        "   📂 Category: Monuments\n"
+        "   Pretend you’re on a state visit as you tour the Palace of Belém.\n"
+        "   📍 Praça Afonso de Albuquerque, 1349-022, Lisboa\n"
+        "   🕐 **Today**: Closed\n"
+        "   🎟️ BUY: https://www.visitlisboa.com/en/places/palace-of-belem#tickets\n"
+        "   🔗 https://www.visitlisboa.com/en/places/palace-of-belem\n\n"
+        "2. 🏛️ **Arco da Rua Augusta**\n"
+        "   📂 Category: Monuments\n"
+        "   Climb up one of Lisbon’s iconic buildings for a unique view of the city.\n"
+        "   📍 Rua Augusta, 2, 1100-053, Lisboa\n"
+        "   🕐 **Today**: 10:00 - 19:00\n"
+        "   🔗 https://www.visitlisboa.com/en/places/arco-da-rua-augusta\n\n"
+        "📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places) | **Updated:** 14:00"
+    )
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="researcher",
+        user_query="Lista as atrações imperdíveis para quem visita Lisboa pela primeira vez.",
+        language="pt",
+    )
+
+    assert "BUY" not in output
+    assert "#tickets" not in output
+    assert "**Preço:** BUY" not in output
+    assert "**Website:** [visitlisboa.com](https://www.visitlisboa.com/en/places/palace-of-belem#tickets)" not in output
+
+
+def test_researcher_worker_replaces_invalid_ticket_placeholder_with_source_note() -> None:
+    """Malformed or non-URL ticket placeholders must never survive as nested markdown links."""
+    raw = (
+        "### 🎬 Jazz at the Cinema São Jorge\n\n"
+        "- 📝 **Descrição:** Ciclo de quatro concertos com propostas de jazz originais e variadas.\n"
+        "- 📍 **Morada:** [Cinema São Jorge, Avenida da Liberdade, 175, 1250-141, Lisboa](https://www.google.com/maps/search/?api=1&query=Cinema+S%C3%A3o+Jorge%2C+Avenida+da+Liberdade%2C+175%2C+1250-141%2C+Lisboa)\n"
+        "- 📅 **Data/Hora:** 23 a 24 de abril\n"
+        "- 💰 **Preço:** Gratuito\n"
+        "- 🌐 [Mais detalhes](https://www.visitlisboa.com/en/events/jazz-at-the-cinema-sao-jorge)\n"
+        "- 🎟️ [Bilhetes]([Bilhetes](Bilhetes: indisponíveis))\n\n"
+        "📌 **Fonte:** [*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos)"
+    )
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="researcher",
+        user_query="Quero explorar a cultura local. Que grandes eventos temos esta semana?",
+        language="pt",
+    )
+
+    assert "- 🎟️ **Bilhetes:** Sem link de compra indicado na fonte" in output
+    assert "[Bilhetes]([Bilhetes](Bilhetes: indisponíveis))" not in output
+    assert "[Bilhetes](Não disponível)" not in output
+
+
 def test_researcher_mixed_museum_and_event_query_skips_event_only_shortcut() -> None:
     """Mixed place+event requests should not be swallowed by the deterministic event-only shortcut."""
     with patch.object(ResearcherAgent, "__init__", lambda self: None):

@@ -95,12 +95,23 @@ class Config:
     # =========================================================================
     # MODEL PROVIDER SELECTION
     # =========================================================================
+    # Production deploy keeps a single provider active.
     # Available options:
-    #   - 'openai'   : OpenAI API (GPT models)
     #   - 'azure'    : Azure OpenAI Service
+    #   - 'openai'   : OpenAI API (GPT models)
     #   - 'lmstudio' : Local server (OpenAI-compatible API on port 1234)
     MODEL_PROVIDER = "azure"
+    # MODEL_PROVIDER = "openai"
     # MODEL_PROVIDER = "lmstudio"
+
+    # Production sidebar guardrails.
+    # Keep these False on Streamlit Cloud so the app only exposes the selected
+    # provider/model and reads credentials from environment variables or
+    # Streamlit secrets.
+    ENABLE_PROVIDER_SELECTOR = False
+    # ENABLE_PROVIDER_SELECTOR = True
+    ENABLE_PROVIDER_CREDENTIAL_INPUTS = False
+    # ENABLE_PROVIDER_CREDENTIAL_INPUTS = True
 
     # =========================================================================
     # API KEYS (Environment Variables)
@@ -129,7 +140,10 @@ class Config:
     # Options: gpt-5.4-mini, gpt-5.4, gpt-5.2 (see https://platform.openai.com/docs/models)
     # Can be set via environment variable OPENAI_MODEL_NAME
     # Default is set to a valid model name to avoid runtime errors.
+    # > SUPER IMPORTANT: Choose model
     DEFAULT_GPT_MODEL_NAME = "gpt-5.4-mini"
+    # DEFAULT_GPT_MODEL_NAME = "gpt-5.4"
+    # DEFAULT_GPT_MODEL_NAME = "gpt-5.2"
     OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", DEFAULT_GPT_MODEL_NAME)
 
     # LM Studio model (Local server on port 1234)
@@ -165,7 +179,7 @@ class Config:
     # Debug/Development Settings
     # Show raw markdown responses in terminal for debugging/copying
     SHOW_MARKDOWN_RESPONSE_IN_TERMINAL = (
-        True  # Set to True to print AI responses to terminal
+        False  # Set to True locally when debugging response formatting
     )
 
     # =========================================================================
