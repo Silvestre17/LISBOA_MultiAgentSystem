@@ -132,6 +132,10 @@ def test_multiagent_direct_response_records_history_and_prints_execution_summary
         __import__("agent.graph", fromlist=["Config"]).Config,
         "SHOW_MARKDOWN_RESPONSE_IN_TERMINAL",
         False,
+    ), patch.object(
+        __import__("agent.graph", fromlist=["Config"]).Config,
+        "SHOW_DETAILED_EXECUTION_LOGS",
+        False,
     ), patch(
         "agent.graph.get_langsmith_request_tracking_status",
         return_value={
@@ -158,49 +162,54 @@ def test_multiagent_direct_response_records_history_and_prints_execution_summary
     assert "Execution: direct" in captured
     assert re.search(r"Total Cost: \(0\.\d{3,6}\$\)", captured)
     assert "Pricing Snapshot: 2026-04-17" in captured
-    assert "LangSmith: disabled | Run context: not-attached | Persistence: disabled" in captured
+    assert "LangSmith:" not in captured
 
 
 def test_execution_summary_prints_active_langsmith_save_attempt(capsys) -> None:
     """The terminal summary should expose whether the current request is being traced."""
     assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
 
-    assistant._print_execution_summary(
-        {
-            "elapsed_time": 1.23,
-            "execution_type": "hybrid",
-            "worker_mode": "parallel",
-            "qa_path": "validated",
-            "langsmith": {
-                "tracking_state": "tracking_request",
-                "status_label": "enabled",
-                "save_attempted": True,
-                "persistence_state": "unconfirmed",
-                "current_run_attached": True,
-                "project_name": "LISBOA Chat",
-                "run_id": "run_123",
-                "reason": "LangSmith tracing enabled",
-                "note": "Run context is attached locally. LangSmith persistence remains unconfirmed and may fail asynchronously, for example because of remote quota or ingestion limits.",
-            },
-            "usage": {
-                "call_count": 2,
-                "tokens": {
-                    "input_tokens": 100,
-                    "output_tokens": 20,
-                    "total_tokens": 120,
+    with patch.object(
+        __import__("agent.graph", fromlist=["Config"]).Config,
+        "SHOW_DETAILED_EXECUTION_LOGS",
+        True,
+    ):
+        assistant._print_execution_summary(
+            {
+                "elapsed_time": 1.23,
+                "execution_type": "hybrid",
+                "worker_mode": "parallel",
+                "qa_path": "validated",
+                "langsmith": {
+                    "tracking_state": "tracking_request",
+                    "status_label": "enabled",
+                    "save_attempted": True,
+                    "persistence_state": "unconfirmed",
+                    "current_run_attached": True,
+                    "project_name": "LISBOA Chat",
+                    "run_id": "run_123",
+                    "reason": "LangSmith tracing enabled",
+                    "note": "Run context is attached locally. LangSmith persistence remains unconfirmed and may fail asynchronously, for example because of remote quota or ingestion limits.",
                 },
-            },
-            "pricing_metadata": {"pricing_snapshot_date": "2026-03-19"},
-            "total_cost": {"total_cost_usd": 0.0015, "missing_pricing_models": []},
-            "models_used": ["azure::gpt-5-mini"],
-            "relevant_agents": [],
-            "agent_usage": {},
-            "agent_costs": {},
-            "agent_tool_logs": {},
-            "total_tool_invocations": 0,
-            "retry_agents_used": [],
-        }
-    )
+                "usage": {
+                    "call_count": 2,
+                    "tokens": {
+                        "input_tokens": 100,
+                        "output_tokens": 20,
+                        "total_tokens": 120,
+                    },
+                },
+                "pricing_metadata": {"pricing_snapshot_date": "2026-03-19"},
+                "total_cost": {"total_cost_usd": 0.0015, "missing_pricing_models": []},
+                "models_used": ["azure::gpt-5-mini"],
+                "relevant_agents": [],
+                "agent_usage": {},
+                "agent_costs": {},
+                "agent_tool_logs": {},
+                "total_tool_invocations": 0,
+                "retry_agents_used": [],
+            }
+        )
 
     captured = capsys.readouterr().out
     assert "LangSmith: enabled | Run context: attached | Persistence: unconfirmed | Project: LISBOA Chat" in captured
@@ -212,52 +221,57 @@ def test_execution_summary_marks_tool_only_agents_and_prints_tool_args(capsys) -
     """Tool-only workers should be labeled clearly and print their logged arguments."""
     assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
 
-    assistant._print_execution_summary(
-        {
-            "elapsed_time": 2.01,
-            "user_request": "Give me the next 5 events that match",
-            "routing_reasoning": "Follow-up domain override from previous user query (researcher)",
-            "selected_agents": ["researcher"],
-            "execution_type": "single-worker",
-            "worker_mode": "sequential",
-            "qa_path": "validated",
-            "langsmith": {
-                "tracking_state": "disabled",
-                "status_label": "disabled",
-                "save_attempted": False,
-                "persistence_state": "disabled",
-                "current_run_attached": False,
-                "project_name": None,
-                "run_id": None,
-                "reason": "LangSmith tracing is disabled by environment",
-                "note": "LangSmith tracing is disabled by environment",
-            },
-            "usage": {
-                "call_count": 0,
-                "tokens": {
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                    "total_tokens": 0,
+    with patch.object(
+        __import__("agent.graph", fromlist=["Config"]).Config,
+        "SHOW_DETAILED_EXECUTION_LOGS",
+        True,
+    ):
+        assistant._print_execution_summary(
+            {
+                "elapsed_time": 2.01,
+                "user_request": "Give me the next 5 events that match",
+                "routing_reasoning": "Follow-up domain override from previous user query (researcher)",
+                "selected_agents": ["researcher"],
+                "execution_type": "single-worker",
+                "worker_mode": "sequential",
+                "qa_path": "validated",
+                "langsmith": {
+                    "tracking_state": "disabled",
+                    "status_label": "disabled",
+                    "save_attempted": False,
+                    "persistence_state": "disabled",
+                    "current_run_attached": False,
+                    "project_name": None,
+                    "run_id": None,
+                    "reason": "LangSmith tracing is disabled by environment",
+                    "note": "LangSmith tracing is disabled by environment",
                 },
-            },
-            "pricing_metadata": {"pricing_snapshot_date": "2026-03-19"},
-            "total_cost": {"total_cost_usd": 0.0, "missing_pricing_models": []},
-            "models_used": [],
-            "relevant_agents": ["researcher"],
-            "agent_usage": {"researcher": _make_usage_summary(agent_name="researcher")},
-            "agent_costs": {"researcher": {"total_cost_usd": 0.0, "missing_pricing_models": []}},
-            "agent_tool_logs": {
-                "researcher": [
-                    {
-                        "tool_name": "search_cultural_events",
-                        "args": {"date_filter": "this week", "max_results": 5, "offset": 5},
-                    }
-                ]
-            },
-            "total_tool_invocations": 1,
-            "retry_agents_used": [],
-        }
-    )
+                "usage": {
+                    "call_count": 0,
+                    "tokens": {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "total_tokens": 0,
+                    },
+                },
+                "pricing_metadata": {"pricing_snapshot_date": "2026-03-19"},
+                "total_cost": {"total_cost_usd": 0.0, "missing_pricing_models": []},
+                "models_used": [],
+                "relevant_agents": ["researcher"],
+                "agent_usage": {"researcher": _make_usage_summary(agent_name="researcher")},
+                "agent_costs": {"researcher": {"total_cost_usd": 0.0, "missing_pricing_models": []}},
+                "agent_tool_logs": {
+                    "researcher": [
+                        {
+                            "tool_name": "search_cultural_events",
+                            "args": {"date_filter": "this week", "max_results": 5, "offset": 5},
+                        }
+                    ]
+                },
+                "total_tool_invocations": 1,
+                "retry_agents_used": [],
+            }
+        )
 
     captured = capsys.readouterr().out
     assert "User request: Give me the next 5 events that match" in captured
