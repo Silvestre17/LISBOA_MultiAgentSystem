@@ -8,6 +8,7 @@ ThesisCode.md
 test_**.txt
 logs_**.txt
 .flake8
+logs_tests_app_21.04.2026.png
 
 # Specific Folders
 _/
@@ -37,6 +38,7 @@ ENV/
 
 # Jupyter Notebook
 .ipynb_checkpoints/
+*.executed.ipynb
 
 # idea folder, uncomment if you don't need it
 .idea/
