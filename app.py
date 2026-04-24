@@ -1307,6 +1307,8 @@ def display_banner():
 
 def build_sidebar():
     with st.sidebar:
+        request_locked = request_capture_locked(st.session_state.get("pending_request"))
+
         # Show custom Logo if exists
         if logo_url:
             st.markdown(
@@ -1531,7 +1533,12 @@ def build_sidebar():
 
         q_act = None
         for idx, (icon, label, qt) in enumerate(quick_acts):
-            if st.button(f"{icon} {label}", use_container_width=True, key=f"sidebar_qact_{idx}"):
+            if st.button(
+                f"{icon} {label}",
+                use_container_width=True,
+                key=f"sidebar_qact_{idx}",
+                disabled=request_locked,
+            ):
                 q_act = qt
 
         st.divider()
@@ -1759,6 +1766,11 @@ def select_new_request(
     if pending_request or not allow_requests:
         return None
     return chat_request or welcome_request or sidebar_request
+
+
+def request_capture_locked(pending_request: Optional[str]) -> bool:
+    """Return whether the UI should temporarily block new requests."""
+    return bool(pending_request)
 
 
 def build_user_error_message(error: Exception) -> str:
@@ -2011,6 +2023,7 @@ def main():
         return
 
     pending = st.session_state.get("pending_request")
+    request_locked = request_capture_locked(pending)
 
     # Stage 1: Capture a new request from quick-action, chat input, or welcome
     # button. Queue it and append the user turn immediately, then rerun once so
@@ -2023,10 +2036,10 @@ def main():
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    if not pending and not st.session_state.messages:
+    if not request_locked and not st.session_state.messages:
         welcome_request = build_welcome()
 
-    if not pending and (in_text := st.chat_input(t("chat_placeholder"))):
+    if not request_locked and (in_text := st.chat_input(t("chat_placeholder"))):
         chat_request = in_text
 
     new_request = select_new_request(
