@@ -1270,6 +1270,9 @@ class MultiAgentAssistant:
         langsmith = summary.get("langsmith", {}) if isinstance(summary, dict) else {}
         pricing_metadata = summary.get("pricing_metadata", {}) if isinstance(summary, dict) else {}
         total_cost = summary.get("total_cost", {}) if isinstance(summary, dict) else {}
+        show_detailed_terminal_logs = bool(
+            getattr(Config, "SHOW_DETAILED_EXECUTION_LOGS", False)
+        )
 
         print("\n" + "=" * 80)
         print("📊 EXECUTION SUMMARY")
@@ -1311,7 +1314,7 @@ class MultiAgentAssistant:
             f"Pricing Snapshot: {pricing_snapshot}"
         )
 
-        if isinstance(langsmith, dict) and langsmith:
+        if show_detailed_terminal_logs and isinstance(langsmith, dict) and langsmith:
             project_name = str(langsmith.get("project_name") or "").strip()
             run_id = str(langsmith.get("run_id") or "").strip()
             run_context_label = "attached" if langsmith.get("current_run_attached") else "not-attached"
@@ -1336,7 +1339,7 @@ class MultiAgentAssistant:
             print(f"⚠️  Missing pricing: {', '.join(missing_pricing)}")
 
         relevant_agents = summary.get("relevant_agents", []) if isinstance(summary, dict) else []
-        if relevant_agents:
+        if show_detailed_terminal_logs and relevant_agents:
             print("🧩  Agent breakdown:")
             agent_usage = summary.get("agent_usage", {})
             agent_costs = summary.get("agent_costs", {})
@@ -1367,7 +1370,7 @@ class MultiAgentAssistant:
                 )
 
         agent_tool_logs = summary.get("agent_tool_logs", {}) if isinstance(summary, dict) else {}
-        if agent_tool_logs:
+        if show_detailed_terminal_logs and agent_tool_logs:
             print("🔧  Tool calls:")
             for agent_name, tool_log in agent_tool_logs.items():
                 display_name = "QA" if agent_name == "qa" else agent_name.title()
@@ -1381,7 +1384,7 @@ class MultiAgentAssistant:
                         args_str = args_str[:137] + "..."
                     print(f"    ├──> {item.get('tool_name', 'unknown')}({args_str})")
             print(f"    ╰── Total Tool Invocations: {summary.get('total_tool_invocations', 0)}")
-        else:
+        elif show_detailed_terminal_logs:
             print("🔧  Tool calls: 0")
 
     def _finalize_chat_response(
