@@ -19,6 +19,7 @@
 langchain==1.2.10             # Latest validated LangChain package for this repository as of 2026-03, on Python 3.10
 langchain-core==1.2.18        # Core runtime aligned with LangChain 1.2 and LangGraph 1.0.10
 langgraph==1.0.10             # Latest validated LangGraph release for this repository as of 2026-03, used by the worker subgraphs
+langgraph-prebuilt==1.0.8     # Pin 2026-04 stable prebuilt build; newer 1.0.x releases can fail importing ExecutionInfo/ServerInfo on cloud deploys
 langchain-text-splitters==1.1.1  # Text splitting utilities aligned with the LangChain 1.2 stack
 
 # -----------------------------------------------------------------------------
@@ -50,7 +51,6 @@ opentelemetry-exporter-otlp-proto-common==1.40.0
 # -----------------------------------------------------------------------------
 # Data Processing
 # -----------------------------------------------------------------------------
-pandas==2.3.3                 # DataFrame operations, compatible with NumPy 2.x on Python 3.10
 pandas==2.3.3                 # DataFrame operations used by municipal/open-data tooling
 requests==2.32.5              # HTTP client for API calls
 # beautifulsoup4==4.12.3        # HTML parsing for web scraping
