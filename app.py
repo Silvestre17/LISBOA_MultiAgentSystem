@@ -1842,14 +1842,14 @@ def run_interaction(user_input: str, user_message_already_rendered: bool = False
         except Exception as error:
             # Log the FULL traceback to the terminal for debugging
             import traceback
-            print(f"\n{'='*70}")
+            print(f"\n{'=' * 70}")
             print("ERROR during chat interaction:")
             print(f"  Query: {user_input}")
             print(f"  Error type: {type(error).__name__}")
             print(f"  Error message: {error}")
-            print(f"{'='*70}")
+            print(f"{'=' * 70}")
             traceback.print_exc()
-            print(f"{'='*70}\n")
+            print(f"{'=' * 70}\n")
 
             friendly_message = build_user_error_message(error)
             st.error(f"⚠️ {friendly_message}")
