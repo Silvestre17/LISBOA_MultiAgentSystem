@@ -51,6 +51,7 @@ EXPECTED_TOOL_COUNT = 45
 VALID_DOMAINS = {"weather", "transport", "researcher", "multi_agent", "greeting", "out_of_scope"}
 VALID_COVERAGE_DOMAINS = {"weather", "transport", "researcher"}
 VALID_LANGUAGES = {"en", "pt", "fr", "de", "mixed"}
+VALID_TOOL_EXPECTATIONS = {"strict", "flexible"}
 VALID_EDGE_TYPES = {
     "temporal_out_of_bounds",
     "geographic_out_of_bounds",
@@ -151,6 +152,34 @@ class TestDatasetIntegrity:
         assert not invalid_refs, (
             "Invalid tool references found:\n" + "\n".join(invalid_refs)
         )
+
+    def test_acceptable_tool_sets_reference_real_tools(self, dataset):
+        """Alternative tool sets must point at real exported tools."""
+        invalid_refs = []
+        for item in dataset:
+            acceptable_tool_sets = item.get("acceptable_tool_sets", [])
+            assert isinstance(acceptable_tool_sets, list), (
+                f"{item['id']}: acceptable_tool_sets must be a list"
+            )
+            for tool_set in acceptable_tool_sets:
+                assert isinstance(tool_set, list), (
+                    f"{item['id']}: each acceptable tool set must be a list"
+                )
+                for tool_name in tool_set:
+                    if tool_name not in VALID_TOOL_NAMES:
+                        invalid_refs.append(f"{item['id']}: {tool_name}")
+        assert not invalid_refs, (
+            "Invalid acceptable tool references found:\n" + "\n".join(invalid_refs)
+        )
+
+    def test_tool_expectations_are_valid(self, dataset):
+        """Optional tool expectation metadata must use a recognized policy."""
+        invalid = []
+        for item in dataset:
+            expectation = item.get("tool_expectation", "strict")
+            if expectation not in VALID_TOOL_EXPECTATIONS:
+                invalid.append(f"{item['id']}: {expectation}")
+        assert not invalid, "Invalid tool_expectation values found:\n" + "\n".join(invalid)
 
     def test_edge_cases_have_edge_type(self, dataset):
         """Entries marked as edge_case=true should have an edge_type field."""

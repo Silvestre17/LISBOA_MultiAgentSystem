@@ -45,3 +45,8 @@ ENV/
 .idea/
 .venv/
 .vscode/
+
+# Streamlit local files
+.streamlit/*.toml
+!.streamlit/config.toml
+!.streamlit/secrets.example.toml

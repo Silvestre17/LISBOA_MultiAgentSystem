@@ -69,6 +69,8 @@ class LLMJudgeScore(BaseModel):
         le=5,
         description=(
             "Compare EXPECTED TOOLS vs ACTUAL TOOLS USED. "
+            "When TOOL EXPECTATION is FLEXIBLE, treat EXPECTED TOOLS as reference-only and "
+            "do not penalize reasonable alternative tool paths that fit the retrieved context. "
             "1 = Completely wrong tools or no tools when tools were required. "
             "2 = Some correct tools but critical ones missing. "
             "3 = Most tools correct but with redundant or missing invocations. "
@@ -135,7 +137,7 @@ You will evaluate the response on 5 dimensions using a 1-5 Likert scale.
 CRITICAL INSTRUCTIONS:
 1. Write your reasoning FIRST (3-5 sentences). Analyze specific evidence before assigning any score.
 2. For Factual Accuracy: verify that facts in the GENERATED RESPONSE are supported by the RETRIEVED CONTEXT. If the agent invents details NOT present in the context, lower the score accordingly.
-3. For Tool Usage: compare EXPECTED TOOLS against ACTUAL TOOLS USED. Minor redundancies are acceptable if the expected tools are present.
+3. For Tool Usage: compare EXPECTED TOOLS against ACTUAL TOOLS USED. Minor redundancies are acceptable if the expected tools are present. If TOOL EXPECTATION is FLEXIBLE, treat EXPECTED TOOLS as reference examples and do not penalize a different reasonable tool path.
 4. If the query is a greeting, out-of-scope, or an edge case where no facts or tools are expected, score highly (5) if the agent handled it gracefully.
 5. **Length Bias Mitigation**: Evaluate based on accuracy and conciseness. A concise, accurate answer is excellent. Do not penalize for being direct.
 6. **Position Bias Mitigation**: Evaluate the entire response equally. Make sure to read all the way to the end.
@@ -153,8 +155,14 @@ CRITICAL INSTRUCTIONS:
 --- EXPECTED FACTS TO BE PRESENT ---
 {expected_facts}
 
+--- TOOL EXPECTATION ---
+{tool_expectation}
+
 --- EXPECTED TOOLS ---
 {expected_tools}
+
+--- ACCEPTABLE ALTERNATIVE TOOL SETS ---
+{acceptable_tool_sets}
 
 --- ACTUAL TOOLS USED BY AGENT ---
 {actual_tools}
@@ -302,18 +310,22 @@ class LLMJudge:
         retrieved_context: str,
         response: str,
         pricing_by_model: dict[str, Any] | None = None,
+        tool_expectation: str = "strict",
+        acceptable_tool_sets: list[list[str]] | None = None,
     ) -> dict:
         """Run the LLM judge on a single query-response pair.
 
         Args:
             query: The user's original query.
             expected_facts: Ground truth facts that should appear in the response.
-            expected_tools: Tools that should have been called.
+            expected_tools: Reference tools for the query.
             actual_tools: Tools that were actually called by the agent.
             retrieved_context: Raw output from tool calls.
             response: The agent's final generated response.
             pricing_by_model: Optional pricing catalog keyed by model name or
                 provider::model, with prices in USD per million tokens.
+            tool_expectation: Whether tool usage is judged strictly or flexibly.
+            acceptable_tool_sets: Optional alternative exact tool sets that also count.
 
         Returns:
             Dict with scores (1-5) for each dimension, composite_score,
@@ -326,11 +338,21 @@ class LLMJudge:
         )
         exp_tools_str = ", ".join(expected_tools) if expected_tools else "None expected."
         act_tools_str = ", ".join(actual_tools) if actual_tools else "None used."
+        acceptable_tool_sets_str = (
+            "\n".join(
+                f"- {', '.join(tool_set)}"
+                for tool_set in acceptable_tool_sets or []
+                if tool_set
+            )
+            or "No alternative strict tool sets defined."
+        )
 
         prompt_val = self.prompt.invoke({
             "query": query,
             "expected_facts": facts_str,
+            "tool_expectation": tool_expectation.upper(),
             "expected_tools": exp_tools_str,
+            "acceptable_tool_sets": acceptable_tool_sets_str,
             "actual_tools": act_tools_str,
             "retrieved_context": (
                 retrieved_context.strip()

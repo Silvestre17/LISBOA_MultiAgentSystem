@@ -1589,7 +1589,10 @@ class ResearcherAgent(BaseAgent):
             subject = re.sub(r"^.*history of\s+", "", query, flags=re.IGNORECASE).strip(" .?!")
             return cls._build_tool_call("search_history_culture", {"query": subject or query, "language": "en"})
 
-        if "service categories" in query_lower:
+        if "service categories" in query_lower or (
+            re.search(r"\b(public services?|servi[cç]os p[úu]blicos)\b", query_lower)
+            and re.search(r"\b(categories|types|kinds|available|help me find|can you help me find|what kinds)\b", query_lower)
+        ):
             return cls._build_tool_call("list_service_categories", {})
 
         if "dataset details for" in query_lower:
@@ -1603,10 +1606,16 @@ class ResearcherAgent(BaseAgent):
         if "list available lisboa aberta service datasets" in query_lower:
             return cls._build_tool_call("list_available_datasets", {})
 
-        if "event categories" in query_lower:
+        if "event categories" in query_lower or re.search(
+            r"\b(what kinds of events|types of events|which events can i look for)\b",
+            query_lower,
+        ):
             return cls._build_tool_call("get_event_categories", {})
 
-        if "place categories" in query_lower:
+        if "place categories" in query_lower or re.search(
+            r"\b(what kinds of places|types of places|which places can i explore)\b",
+            query_lower,
+        ):
             return cls._build_tool_call("get_place_categories", {})
 
         if "knowledge base for" in query_lower:

@@ -250,6 +250,36 @@ class TestLLMJudgeEvaluate:
         assert result["composite_score"] == 5.0
 
     @patch("eval.llm_judge.LLMFactory")
+    def test_evaluate_accepts_flexible_tool_expectations(self, mock_factory):
+        """Flexible tool-expectation metadata should flow through evaluation."""
+        mock_llm = MagicMock()
+        mock_structured = MagicMock()
+        mock_structured.invoke.return_value = LLMJudgeScore(
+            factual_accuracy=4,
+            tool_usage=4,
+            completeness=4,
+            relevance=4,
+            response_quality=4,
+            reasoning="Alternative tool path was still grounded and appropriate.",
+        )
+        mock_llm.with_structured_output.return_value = mock_structured
+        mock_factory.get_llm.return_value = mock_llm
+
+        judge = LLMJudge()
+        result = judge.evaluate(
+            query="Which bus lines serve Cacilhas?",
+            expected_facts=["Relevant bus-line suggestions"],
+            expected_tools=["search_carris_metropolitana_lines"],
+            acceptable_tool_sets=[["find_direct_bus_lines"]],
+            tool_expectation="flexible",
+            actual_tools=["find_direct_bus_lines"],
+            retrieved_context="Line suggestions for Cacilhas.",
+            response="Here are the relevant bus lines for Cacilhas.",
+        )
+
+        assert result["composite_score"] == 4.0
+
+    @patch("eval.llm_judge.LLMFactory")
     def test_evaluate_formats_prompt_correctly(self, mock_factory):
         """Check that the prompt is formatted with all fields."""
         mock_llm = MagicMock()
@@ -270,6 +300,8 @@ class TestLLMJudgeEvaluate:
             query="Test query",
             expected_facts=["Fact A", "Fact B"],
             expected_tools=["tool_a", "tool_b"],
+            acceptable_tool_sets=[["tool_c"]],
+            tool_expectation="strict",
             actual_tools=["tool_a"],
             retrieved_context="Some context data",
             response="Some response",

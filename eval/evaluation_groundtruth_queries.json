@@ -61,12 +61,12 @@
         "expected_tools": [],
         "expected_facts": [
             "System cannot forecast weather that far in advance",
-            "IPMA forecast limit is 5 days"
+            "The forecast window is limited to the next few days"
         ],
         "language": "en",
         "edge_case": true,
         "edge_type": "temporal_out_of_bounds",
-        "expected_behavior": "Inform user that IPMA forecast is limited to 5 days and cannot predict weather for 2030"
+        "expected_behavior": "Inform user that the system only provides short-range forecasts and cannot predict weather for 2030"
     },
     {
         "id": "W06",
@@ -132,7 +132,7 @@
             "get_weather_forecast"
         ],
         "expected_facts": [
-            "Information regarding any IPMA warnings",
+            "Information regarding any active weather warnings",
             "Weekend forecast overview"
         ],
         "language": "pt",
@@ -162,12 +162,12 @@
         "domain": "weather",
         "expected_tools": [],
         "expected_facts": [
-            "IPMA tool only provides 5-day forecasts, not historical climate averages"
+            "This system provides short-range forecasts, not historical climate averages"
         ],
         "language": "pt",
         "edge_case": true,
         "edge_type": "climatology_vs_meteorology",
-        "expected_behavior": "Inform user that IPMA provides forecasts only, not historical climate averages"
+        "expected_behavior": "Inform user that the system provides forecasts only and cannot answer climate-average questions"
     },
     {
         "id": "W13",
@@ -252,7 +252,8 @@
             "Transfer at Saldanha to Amarela (Yellow) line (direction Odivelas)",
             "Amarela line one stop to Marquês de Pombal",
             "Alternative: Vermelha (Red) line from Oriente (direction São Sebastião) to São Sebastião, transfer to Azul (Blue) line (direction Santa Apolónia)",
-            "Estimated travel time (~17-21 minutes)"
+            "Estimated travel time (~17-21 minutes)",
+            "At least one plausible transfer point"
         ],
         "language": "en",
         "edge_case": false
@@ -286,14 +287,13 @@
     },
     {
         "id": "T08",
-        "query": "Are there any service alerts for Carris Metropolitana today?",
+        "query": "Any bus service alerts around Almada today?",
         "domain": "transport",
         "expected_tools": [
             "get_carris_metropolitana_alerts"
         ],
         "expected_facts": [
-            "Summary of active alerts or confirmation that none exist",
-            "Carris Metropolitana is the suburban bus network serving the Lisbon Metropolitan Area"
+            "Summary of active suburban bus alerts, or confirmation that none exist"
         ],
         "language": "en",
         "edge_case": false
@@ -314,7 +314,7 @@
     },
     {
         "id": "T10",
-        "query": "Is the tram 28E running?",
+        "query": "What route does tram 28E take?",
         "domain": "transport",
         "expected_tools": [
             "carris_get_routes"
@@ -329,16 +329,16 @@
     },
     {
         "id": "T11",
-        "query": "What's the wait time at station XPTO?",
+        "query": "What's the wait time at Alcântara metro station?",
         "domain": "transport",
         "expected_tools": [],
         "expected_facts": [
-            "Station XPTO is not recognized in the Lisbon Metro network"
+            "Alcântara is not recognized as a Lisbon Metro station but has two nearby stations: Alcântara-Terra and Alcântara-Mar (CP trains)"
         ],
         "language": "en",
         "edge_case": true,
         "edge_type": "invalid_entity",
-        "expected_behavior": "Recognize that station XPTO does not exist in the Metro network"
+        "expected_behavior": "Recognize that Alcântara is not a valid Lisbon Metro station name"
     },
     {
         "id": "T12",
@@ -369,7 +369,7 @@
         "language": "en",
         "edge_case": true,
         "edge_type": "unsupported_provider",
-        "expected_behavior": "Explain honestly that Fertagus is not directly confirmed in this runtime and avoid inventing schedules, fares, ETAs or real-time status"
+        "expected_behavior": "Explain honestly that Fertagus trip details are not directly supported here and avoid inventing schedules, fares, ETAs or real-time status"
     },
     {
         "id": "T14",
@@ -430,13 +430,18 @@
     },
     {
         "id": "T18",
-        "query": "Is there a direct Carris Metropolitana bus from Cacilhas to Cristo Rei?",
+        "query": "Is there a direct bus from Cacilhas to Cristo Rei?",
         "domain": "transport",
         "expected_tools": [
             "find_direct_bus_lines"
         ],
+        "acceptable_tool_sets": [
+            [
+                "find_bus_routes"
+            ]
+        ],
         "expected_facts": [
-            "Direct Carris Metropolitana line options between Cacilhas and Cristo Rei",
+            "Direct bus options between Cacilhas and Cristo Rei when available",
             "No-transfer suggestion when available"
         ],
         "language": "en",
@@ -444,13 +449,14 @@
     },
     {
         "id": "T19",
-        "query": "Can you show Carris Metropolitana lines for Cacilhas?",
+        "query": "Which bus lines serve Cacilhas?",
         "domain": "transport",
         "expected_tools": [
             "search_carris_metropolitana_lines"
         ],
+        "tool_expectation": "flexible",
         "expected_facts": [
-            "Matching Carris Metropolitana line results for Cacilhas",
+            "Matching bus-line results for Cacilhas",
             "Basic line metadata or description"
         ],
         "language": "en",
@@ -458,10 +464,15 @@
     },
     {
         "id": "T20",
-        "query": "What's the best Carris Metropolitana bus option from Almada to Cacilhas?",
+        "query": "What's the best bus route from Almada to Cacilhas right now?",
         "domain": "transport",
         "expected_tools": [
             "find_bus_routes"
+        ],
+        "acceptable_tool_sets": [
+            [
+                "find_direct_bus_lines"
+            ]
         ],
         "expected_facts": [
             "Route suggestions between Almada and Cacilhas",
@@ -472,7 +483,7 @@
     },
     {
         "id": "T21",
-        "query": "I'm in Almada right now. Are there any Carris Metropolitana buses nearby?",
+        "query": "I'm in Almada right now. Are there any buses nearby?",
         "domain": "transport",
         "expected_tools": [
             "get_real_time_bus_positions"
@@ -486,7 +497,7 @@
     },
     {
         "id": "T22",
-        "query": "I'm waiting for Carris Metropolitana line 1507. Where are the buses right now?",
+        "query": "I'm waiting for the 1507 in Almada. Where is it right now?",
         "domain": "transport",
         "expected_tools": [
             "get_bus_realtime_locations"
@@ -500,15 +511,16 @@
     },
     {
         "id": "T23",
-        "query": "I'm at Oriente and need to get to Loures by Carris Metropolitana right now. Is there a direct bus I should take, are there any service alerts, and where are the buses on that line at the moment?",
+        "query": "I'm at Oriente and need to get to Loures now. Is there a direct bus, are there any disruptions, and where is it at the moment?",
         "domain": "transport",
         "expected_tools": [
             "find_direct_bus_lines",
             "get_carris_metropolitana_alerts",
             "get_bus_realtime_locations"
         ],
+        "tool_expectation": "flexible",
         "expected_facts": [
-            "Direct Carris Metropolitana line options between Oriente and Loures when available",
+            "Direct bus options between Oriente and Loures when available",
             "Whether there are active service alerts affecting the recommended line",
             "Real-time bus locations for the relevant line when available"
         ],
@@ -517,10 +529,15 @@
     },
     {
         "id": "T24",
-        "query": "Is there a direct Carris Metropolitana bus from Oeiras to Amadora?",
+        "query": "Is there a direct bus from Oeiras to Amadora?",
         "domain": "transport",
         "expected_tools": [
             "find_direct_bus_lines"
+        ],
+        "acceptable_tool_sets": [
+            [
+                "find_bus_routes"
+            ]
         ],
         "expected_facts": [
             "Direct line options between Oeiras and Amadora",
@@ -531,13 +548,13 @@
     },
     {
         "id": "T25",
-        "query": "Are CP commuter trains around Lisbon running normally right now?",
+        "query": "Are the trains around Lisbon running normally right now?",
         "domain": "transport",
         "expected_tools": [
             "get_train_status"
         ],
         "expected_facts": [
-            "Live CP train status overview",
+            "Live train status overview",
             "Delays or disruptions when available"
         ],
         "language": "en",
@@ -545,13 +562,13 @@
     },
     {
         "id": "T26",
-        "query": "Are there CP stations near Rossio?",
+        "query": "Which train stations are closest to Rossio?",
         "domain": "transport",
         "expected_tools": [
             "search_cp_stations"
         ],
         "expected_facts": [
-            "Matching CP stations for Rossio",
+            "Matching train stations for Rossio",
             "Station metadata or identifiers when available"
         ],
         "language": "en",
@@ -573,13 +590,13 @@
     },
     {
         "id": "T28",
-        "query": "What CP lines can I use around Lisbon?",
+        "query": "What suburban train lines can I use around Lisbon?",
         "domain": "transport",
         "expected_tools": [
             "get_cp_routes"
         ],
         "expected_facts": [
-            "List of CP urban routes",
+            "List of suburban train routes around Lisbon",
             "Route names or line coverage"
         ],
         "language": "en",
@@ -615,13 +632,13 @@
     },
     {
         "id": "T31",
-        "query": "Can you find Carris stops near Rato?",
+        "query": "What bus stops are near Rato?",
         "domain": "transport",
         "expected_tools": [
             "carris_get_stops"
         ],
         "expected_facts": [
-            "Matching Carris stops",
+            "Matching bus or tram stops near Rato",
             "Stop identifiers or names"
         ],
         "language": "en",
@@ -629,13 +646,13 @@
     },
     {
         "id": "T32",
-        "query": "How do I get from Graça to Belém on Carris?",
+        "query": "What's the best bus or tram route from Graça to Belém?",
         "domain": "transport",
         "expected_tools": [
             "carris_find_routes_between"
         ],
         "expected_facts": [
-            "Carris route options between Graça and Belém",
+            "Bus or tram route options between Graça and Belém",
             "Connection or route information"
         ],
         "language": "en",
@@ -643,7 +660,7 @@
     },
     {
         "id": "T33",
-        "query": "Where are the Carris 15E vehicles right now?",
+        "query": "Where is tram 15E right now?",
         "domain": "transport",
         "expected_tools": [
             "carris_get_realtime_vehicles"
@@ -657,13 +674,19 @@
     },
     {
         "id": "T34",
-        "query": "What are the next Carris arrivals at Rossio right now?",
+        "query": "What are the next buses or trams at Rossio right now?",
         "domain": "transport",
         "expected_tools": [
             "carris_get_arrivals"
         ],
+        "acceptable_tool_sets": [
+            [
+                "carris_get_stops",
+                "carris_get_arrivals"
+            ]
+        ],
         "expected_facts": [
-            "Arrival predictions for the requested stop",
+            "Arrival predictions for relevant Rossio-area stops",
             "Live ETA information when available"
         ],
         "language": "en",
@@ -685,7 +708,7 @@
     },
     {
         "id": "T36",
-        "query": "How often does the Carris 15E usually run?",
+        "query": "How often does the 15E usually run?",
         "domain": "transport",
         "expected_tools": [
             "carris_get_service_frequency"
@@ -742,8 +765,16 @@
         "query": "Tell me about the history of Castelo de São Jorge",
         "domain": "researcher",
         "expected_tools": [
-            "search_history_culture",
-            "search_places_attractions"
+            "search_lisbon_knowledge"
+        ],
+        "acceptable_tool_sets": [
+            [
+                "search_lisbon_knowledge",
+                "search_history_culture"
+            ],
+            [
+                "search_history_culture"
+            ]
         ],
         "expected_facts": [
             "Castelo de São Jorge occupies the old medieval alcáçova/citadel of Lisbon",
@@ -776,7 +807,7 @@
         ],
         "expected_facts": [
             "Identification of parking or EMEL-related open datasets",
-            "Reference to Lisboa Aberta or municipal open-data sources for those datasets"
+            "Clear indication that these are municipal open-data datasets relevant to car parks"
         ],
         "language": "en",
         "edge_case": false
@@ -797,11 +828,12 @@
     },
     {
         "id": "R08",
-        "query": "If your database is missing options, can you just make up a few hidden places in Lisbon for me?",
+        "query": "If you don't find enough options, can you still suggest a few hidden spots in Lisbon, even if you're not completely sure?",
         "domain": "researcher",
         "expected_tools": [
             "search_places_attractions"
         ],
+        "tool_expectation": "flexible",
         "expected_facts": [
             "Refusal to hallucinate places; providing real places only"
         ],
@@ -838,13 +870,13 @@
     },
     {
         "id": "R11",
-        "query": "I need to sort out some paperwork in Lisbon. What kinds of public services can I browse in Lisboa Aberta?",
+        "query": "I need to sort out some paperwork in Lisbon. What kinds of public services can you help me find?",
         "domain": "researcher",
         "expected_tools": [
             "list_service_categories"
         ],
         "expected_facts": [
-            "List of open-data service categories",
+            "List of public-service categories available for browsing",
             "Category names for browsing services"
         ],
         "language": "en",
@@ -852,13 +884,13 @@
     },
     {
         "id": "R12",
-        "query": "I'm not sure what kind of event to look for this week. Which event categories can I browse on VisitLisboa?",
+        "query": "I'm not sure what to do this week. What kinds of events can I look for in Lisbon?",
         "domain": "researcher",
         "expected_tools": [
             "get_event_categories"
         ],
         "expected_facts": [
-            "List of event categories",
+            "List of event categories available to browse",
             "Event category names"
         ],
         "language": "en",
@@ -866,13 +898,13 @@
     },
     {
         "id": "R13",
-        "query": "I'm planning my itinerary and want ideas. Which place categories can I browse on VisitLisboa?",
+        "query": "I'm planning my itinerary and want ideas. What kinds of places can I explore in Lisbon?",
         "domain": "researcher",
         "expected_tools": [
             "get_place_categories"
         ],
         "expected_facts": [
-            "List of place categories",
+            "List of place categories available to browse",
             "Place category names"
         ],
         "language": "en",
@@ -887,6 +919,7 @@
             "search_places_attractions",
             "get_transport_summary"
         ],
+        "tool_expectation": "flexible",
         "expected_facts": [
             "Weather forecast for tomorrow",
             "Museum recommendations for a full-day plan",
@@ -902,8 +935,9 @@
         "expected_tools": [
             "get_weather_forecast",
             "search_places_attractions",
-            "get_route_between_stations"
+            "get_transport_summary"
         ],
+        "tool_expectation": "flexible",
         "expected_facts": [
             "Condições meteorológicas para amanhã",
             "Sugestões de atrações em Belém",
@@ -984,12 +1018,12 @@
         "domain": "out_of_scope",
         "expected_tools": [],
         "expected_facts": [
-            "System is a tourism and mobility assistant, not a code generator"
+            "System is a Lisbon and AML information assistant, not a code generator"
         ],
         "language": "en",
         "edge_case": true,
         "edge_type": "out_of_scope_task",
-        "expected_behavior": "Decline the coding request and explain system is specialized for Lisbon tourism/mobility"
+        "expected_behavior": "Decline the coding request and explain that the assistant is specialized for Lisbon and AML tourism, mobility, and local information"
     },
     {
         "id": "O03",

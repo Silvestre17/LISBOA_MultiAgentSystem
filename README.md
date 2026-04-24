@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://github.com/Silvestre17/Thesis2025-26_AFGS">
+  <a href="https://github.com/Silvestre17/LISBOA_MultiAgentSystem">
     <img src="./img/BannerLSIBOA_21-9.png" alt="LISBOA Project Banner" style="width: 100%; height: 300px; object-fit: cover; object-position: center bottom;">
   </a>
 </p>
@@ -7,7 +7,7 @@
 # 🗺️ LISBOA: Lisbon Itinerary System Based On AI 🤖
 
 <p align="center">
-  <a href="https://github.com/Silvestre17/Thesis2025-26_AFGS"><img src="https://img.shields.io/badge/Project_Repo-100000?style=for-the-badge&logo=github&logoColor=white" alt="GitHub Repo"></a>
+  <a href="https://github.com/Silvestre17/LISBOA_MultiAgentSystem"><img src="https://img.shields.io/badge/Project_Repo-100000?style=for-the-badge&logo=github&logoColor=white" alt="GitHub Repo"></a>
   <a href="#"><img src="https://img.shields.io/badge/Streamlit_App-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white" alt="Streamlit App"></a>
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/LangGraph-Multi--Agent-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white" alt="LangGraph Multi-Agent">
@@ -233,7 +233,7 @@ The companion evaluation guide also documents optional coverage and calibration 
 ## 🧱 Repository Structure
 
 ```text
-Thesis2025-26_AFGS/
+LISBOA_MultiAgentSystem/
 ├── agent/                          # Multi-agent orchestration, prompts, utilities
 ├── tools/                          # 45 exported LangChain tools + vector store internals
 ├── data_collection/                # Scrapers and data acquisition scripts
@@ -286,8 +286,8 @@ Need a guided reading order? Open [`docs/00_INDEX.md`](./docs/00_INDEX.md).
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/Silvestre17/Thesis2025-26_AFGS.git
-   cd Thesis2025-26_AFGS
+   git clone https://github.com/Silvestre17/LISBOA_MultiAgentSystem.git
+   cd LISBOA_MultiAgentSystem
    ```
 
 2. **Install dependencies**
