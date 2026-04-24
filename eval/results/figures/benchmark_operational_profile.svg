@@ -1,0 +1,550 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="1568.294456pt" height="503.424pt" viewBox="0 0 1568.294456 503.424" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-04-24T11:48:14.700680</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.0, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 503.424 
+L 1568.294456 503.424 
+L 1568.294456 -0 
+L 0 -0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 46.315406 460.1544 
+L 427.472464 460.1544 
+L 427.472464 101.3952 
+L 46.315406 101.3952 
+z
+" style="fill: #ffffff"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="text_1">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: middle; fill: #262626" x="236.893935" y="478.0244" transform="rotate(-0 236.893935 478.0244)">Transport</text>
+     </g>
+    </g>
+    <g id="text_2">
+     <text style="font-weight: 700; font-size: 12px; font-family: 'Borna'; text-anchor: middle; fill: #262626" x="236.893935" y="493.704" transform="rotate(-0 236.893935 493.704)">Domain</text>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2">
+    <g id="ytick_1">
+     <g id="line2d_1">
+      <path d="M 46.315406 460.1544 
+L 427.472464 460.1544 
+" clip-path="url(#p64e4f813c5)" style="fill: none; stroke-dasharray: 2.4,1.6; stroke-dashoffset: 0; stroke: #eceff3; stroke-opacity: 0.7; stroke-width: 0.8"/>
+     </g>
+     <g id="text_3">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: end; fill: #262626" x="38.015406" y="464.9394" transform="rotate(-0 38.015406 464.9394)">0</text>
+     </g>
+    </g>
+    <g id="ytick_2">
+     <g id="line2d_2">
+      <path d="M 46.315406 383.358941 
+L 427.472464 383.358941 
+" clip-path="url(#p64e4f813c5)" style="fill: none; stroke-dasharray: 2.4,1.6; stroke-dashoffset: 0; stroke: #eceff3; stroke-opacity: 0.7; stroke-width: 0.8"/>
+     </g>
+     <g id="text_4">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: end; fill: #262626" x="38.015406" y="388.143941" transform="rotate(-0 38.015406 388.143941)">20</text>
+     </g>
+    </g>
+    <g id="ytick_3">
+     <g id="line2d_3">
+      <path d="M 46.315406 306.563483 
+L 427.472464 306.563483 
+" clip-path="url(#p64e4f813c5)" style="fill: none; stroke-dasharray: 2.4,1.6; stroke-dashoffset: 0; stroke: #eceff3; stroke-opacity: 0.7; stroke-width: 0.8"/>
+     </g>
+     <g id="text_5">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: end; fill: #262626" x="38.015406" y="311.348483" transform="rotate(-0 38.015406 311.348483)">40</text>
+     </g>
+    </g>
+    <g id="ytick_4">
+     <g id="line2d_4">
+      <path d="M 46.315406 229.768024 
+L 427.472464 229.768024 
+" clip-path="url(#p64e4f813c5)" style="fill: none; stroke-dasharray: 2.4,1.6; stroke-dashoffset: 0; stroke: #eceff3; stroke-opacity: 0.7; stroke-width: 0.8"/>
+     </g>
+     <g id="text_6">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: end; fill: #262626" x="38.015406" y="234.553024" transform="rotate(-0 38.015406 234.553024)">60</text>
+     </g>
+    </g>
+    <g id="ytick_5">
+     <g id="line2d_5">
+      <path d="M 46.315406 152.972566 
+L 427.472464 152.972566 
+" clip-path="url(#p64e4f813c5)" style="fill: none; stroke-dasharray: 2.4,1.6; stroke-dashoffset: 0; stroke: #eceff3; stroke-opacity: 0.7; stroke-width: 0.8"/>
+     </g>
+     <g id="text_7">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: end; fill: #262626" x="38.015406" y="157.757566" transform="rotate(-0 38.015406 157.757566)">80</text>
+     </g>
+    </g>
+    <g id="text_8">
+     <text style="font-weight: 700; font-size: 12px; font-family: 'Borna'; text-anchor: middle; fill: #262626" x="16.715625" y="280.7748" transform="rotate(-90 16.715625 280.7748)">Average latency (s)</text>
+    </g>
+   </g>
+   <g id="patch_3">
+    <path d="M 236.893935 460.1544 
+L 236.893935 460.1544 
+L 236.893935 460.1544 
+L 236.893935 460.1544 
+z
+" clip-path="url(#p64e4f813c5)" style="fill: #e1532f"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 236.893935 460.1544 
+L 236.893935 460.1544 
+L 236.893935 460.1544 
+L 236.893935 460.1544 
+z
+" clip-path="url(#p64e4f813c5)" style="fill: #db8442"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 117.972933 460.1544 
+L 203.352114 460.1544 
+Q 236.893935 460.1544 236.893935 459.8165 
+L 236.893935 156.45908 
+Q 236.893935 156.12118 203.352114 156.12118 
+L 117.972933 156.12118 
+Q 84.431112 156.12118 84.431112 156.45908 
+L 84.431112 459.8165 
+Q 84.431112 460.1544 117.972933 460.1544 
+z
+" clip-path="url(#p64e4f813c5)" style="fill: #e1532f"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 270.435756 460.1544 
+L 355.814937 460.1544 
+Q 389.356758 460.1544 389.356758 459.8165 
+L 389.356758 450.470493 
+Q 389.356758 450.132593 355.814937 450.132593 
+L 270.435756 450.132593 
+Q 236.893935 450.132593 236.893935 450.470493 
+L 236.893935 459.8165 
+Q 236.893935 460.1544 270.435756 460.1544 
+z
+" clip-path="url(#p64e4f813c5)" style="fill: #db8442"/>
+   </g>
+   <g id="line2d_6">
+    <path clip-path="url(#p64e4f813c5)" style="fill: none; stroke: #424242; stroke-width: 1.8; stroke-linecap: round"/>
+   </g>
+   <g id="line2d_7">
+    <path clip-path="url(#p64e4f813c5)" style="fill: none; stroke: #424242; stroke-width: 1.8; stroke-linecap: round"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 46.315406 460.1544 
+L 427.472464 460.1544 
+" style="fill: none; stroke: #262626; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_9">
+    <text style="font-weight: 700; font-size: 16px; font-family: 'Borna'; text-anchor: middle; fill: #262626" x="236.893935" y="83.3952" transform="rotate(-0 236.893935 83.3952)">Latency by domain</text>
+   </g>
+   <g id="legend_1">
+    <g id="patch_8">
+     <path d="M 440.216035 168.6056 
+L 558.704597 168.6056 
+Q 561.256597 168.6056 561.256597 166.0536 
+L 561.256597 110.3272 
+Q 561.256597 107.7752 558.704597 107.7752 
+L 440.216035 107.7752 
+Q 437.664035 107.7752 437.664035 110.3272 
+L 437.664035 166.0536 
+Q 437.664035 168.6056 440.216035 168.6056 
+z
+" style="fill: #ffffff; opacity: 0.98; stroke: #eceff3; stroke-linejoin: miter"/>
+    </g>
+    <g id="text_10">
+     <text style="font-weight: 700; font-size: 13.92px; font-family: 'Borna'; text-anchor: start; fill: #262626" x="445.234303" y="123.3192" transform="rotate(-0 445.234303 123.3192)">Response model</text>
+    </g>
+    <g id="patch_9">
+     <path d="M 442.768035 142.1924 
+L 468.288035 142.1924 
+L 468.288035 133.2604 
+L 442.768035 133.2604 
+z
+" style="fill: #e1532f"/>
+    </g>
+    <g id="text_11">
+     <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: start; fill: #262626" x="478.496035" y="142.1924" transform="rotate(-0 478.496035 142.1924)">GPT-5.4 Mini</text>
+    </g>
+    <g id="patch_10">
+     <path d="M 442.768035 160.822 
+L 468.288035 160.822 
+L 468.288035 151.89 
+L 442.768035 151.89 
+z
+" style="fill: #db8442"/>
+    </g>
+    <g id="text_12">
+     <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: start; fill: #262626" x="478.496035" y="160.822" transform="rotate(-0 478.496035 160.822)">Kimi K2.5</text>
+    </g>
+   </g>
+   <g id="text_13">
+    <text style="font-weight: 700; font-size: 9.5px; font-family: 'Borna'; text-anchor: middle; fill: #1f2328" x="160.662524" y="146.950996" transform="rotate(-0 160.662524 146.950996)">79.2</text>
+   </g>
+   <g id="text_14">
+    <text style="font-weight: 700; font-size: 9.5px; font-family: 'Borna'; text-anchor: middle; fill: #1f2328" x="313.125347" y="440.962409" transform="rotate(-0 313.125347 440.962409)">2.6</text>
+   </g>
+  </g>
+  <g id="axes_2">
+   <g id="patch_11">
+    <path d="M 613.126402 460.1544 
+L 994.28346 460.1544 
+L 994.28346 101.3952 
+L 613.126402 101.3952 
+z
+" style="fill: #ffffff"/>
+   </g>
+   <g id="matplotlib.axis_3">
+    <g id="xtick_2">
+     <g id="text_15">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: middle; fill: #262626" x="803.704931" y="478.0244" transform="rotate(-0 803.704931 478.0244)">Transport</text>
+     </g>
+    </g>
+    <g id="text_16">
+     <text style="font-weight: 700; font-size: 12px; font-family: 'Borna'; text-anchor: middle; fill: #262626" x="803.704931" y="493.704" transform="rotate(-0 803.704931 493.704)">Domain</text>
+    </g>
+   </g>
+   <g id="matplotlib.axis_4">
+    <g id="ytick_6">
+     <g id="line2d_8">
+      <path d="M 613.126402 460.1544 
+L 994.28346 460.1544 
+" clip-path="url(#pcda0b211c2)" style="fill: none; stroke-dasharray: 2.4,1.6; stroke-dashoffset: 0; stroke: #eceff3; stroke-opacity: 0.7; stroke-width: 0.8"/>
+     </g>
+     <g id="text_17">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: end; fill: #262626" x="604.826402" y="464.9394" transform="rotate(-0 604.826402 464.9394)">0</text>
+     </g>
+    </g>
+    <g id="ytick_7">
+     <g id="line2d_9">
+      <path d="M 613.126402 417.561531 
+L 994.28346 417.561531 
+" clip-path="url(#pcda0b211c2)" style="fill: none; stroke-dasharray: 2.4,1.6; stroke-dashoffset: 0; stroke: #eceff3; stroke-opacity: 0.7; stroke-width: 0.8"/>
+     </g>
+     <g id="text_18">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: end; fill: #262626" x="604.826402" y="422.346531" transform="rotate(-0 604.826402 422.346531)">2</text>
+     </g>
+    </g>
+    <g id="ytick_8">
+     <g id="line2d_10">
+      <path d="M 613.126402 374.968663 
+L 994.28346 374.968663 
+" clip-path="url(#pcda0b211c2)" style="fill: none; stroke-dasharray: 2.4,1.6; stroke-dashoffset: 0; stroke: #eceff3; stroke-opacity: 0.7; stroke-width: 0.8"/>
+     </g>
+     <g id="text_19">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: end; fill: #262626" x="604.826402" y="379.753663" transform="rotate(-0 604.826402 379.753663)">4</text>
+     </g>
+    </g>
+    <g id="ytick_9">
+     <g id="line2d_11">
+      <path d="M 613.126402 332.375794 
+L 994.28346 332.375794 
+" clip-path="url(#pcda0b211c2)" style="fill: none; stroke-dasharray: 2.4,1.6; stroke-dashoffset: 0; stroke: #eceff3; stroke-opacity: 0.7; stroke-width: 0.8"/>
+     </g>
+     <g id="text_20">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: end; fill: #262626" x="604.826402" y="337.160794" transform="rotate(-0 604.826402 337.160794)">6</text>
+     </g>
+    </g>
+    <g id="ytick_10">
+     <g id="line2d_12">
+      <path d="M 613.126402 289.782926 
+L 994.28346 289.782926 
+" clip-path="url(#pcda0b211c2)" style="fill: none; stroke-dasharray: 2.4,1.6; stroke-dashoffset: 0; stroke: #eceff3; stroke-opacity: 0.7; stroke-width: 0.8"/>
+     </g>
+     <g id="text_21">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: end; fill: #262626" x="604.826402" y="294.567926" transform="rotate(-0 604.826402 294.567926)">8</text>
+     </g>
+    </g>
+    <g id="ytick_11">
+     <g id="line2d_13">
+      <path d="M 613.126402 247.190057 
+L 994.28346 247.190057 
+" clip-path="url(#pcda0b211c2)" style="fill: none; stroke-dasharray: 2.4,1.6; stroke-dashoffset: 0; stroke: #eceff3; stroke-opacity: 0.7; stroke-width: 0.8"/>
+     </g>
+     <g id="text_22">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: end; fill: #262626" x="604.826402" y="251.975057" transform="rotate(-0 604.826402 251.975057)">10</text>
+     </g>
+    </g>
+    <g id="ytick_12">
+     <g id="line2d_14">
+      <path d="M 613.126402 204.597188 
+L 994.28346 204.597188 
+" clip-path="url(#pcda0b211c2)" style="fill: none; stroke-dasharray: 2.4,1.6; stroke-dashoffset: 0; stroke: #eceff3; stroke-opacity: 0.7; stroke-width: 0.8"/>
+     </g>
+     <g id="text_23">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: end; fill: #262626" x="604.826402" y="209.382188" transform="rotate(-0 604.826402 209.382188)">12</text>
+     </g>
+    </g>
+    <g id="ytick_13">
+     <g id="line2d_15">
+      <path d="M 613.126402 162.00432 
+L 994.28346 162.00432 
+" clip-path="url(#pcda0b211c2)" style="fill: none; stroke-dasharray: 2.4,1.6; stroke-dashoffset: 0; stroke: #eceff3; stroke-opacity: 0.7; stroke-width: 0.8"/>
+     </g>
+     <g id="text_24">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: end; fill: #262626" x="604.826402" y="166.78932" transform="rotate(-0 604.826402 166.78932)">14</text>
+     </g>
+    </g>
+    <g id="ytick_14">
+     <g id="line2d_16">
+      <path d="M 613.126402 119.411451 
+L 994.28346 119.411451 
+" clip-path="url(#pcda0b211c2)" style="fill: none; stroke-dasharray: 2.4,1.6; stroke-dashoffset: 0; stroke: #eceff3; stroke-opacity: 0.7; stroke-width: 0.8"/>
+     </g>
+     <g id="text_25">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: end; fill: #262626" x="604.826402" y="124.196451" transform="rotate(-0 604.826402 124.196451)">16</text>
+     </g>
+    </g>
+    <g id="text_26">
+     <text style="font-weight: 700; font-size: 12px; font-family: 'Borna'; text-anchor: middle; fill: #262626" x="585.582177" y="280.7748" transform="rotate(-90 585.582177 280.7748)">Average combined cost (mUSD)</text>
+    </g>
+   </g>
+   <g id="patch_12">
+    <path d="M 803.704931 460.1544 
+L 803.704931 460.1544 
+L 803.704931 460.1544 
+L 803.704931 460.1544 
+z
+" clip-path="url(#pcda0b211c2)" style="fill: #e1532f"/>
+   </g>
+   <g id="patch_13">
+    <path d="M 803.704931 460.1544 
+L 803.704931 460.1544 
+L 803.704931 460.1544 
+L 803.704931 460.1544 
+z
+" clip-path="url(#pcda0b211c2)" style="fill: #db8442"/>
+   </g>
+   <g id="patch_14">
+    <path d="M 684.783929 460.1544 
+L 770.16311 460.1544 
+Q 803.704931 460.1544 803.704931 458.280314 
+L 803.704931 187.291706 
+Q 803.704931 185.41762 770.16311 185.41762 
+L 684.783929 185.41762 
+Q 651.242108 185.41762 651.242108 187.291706 
+L 651.242108 458.280314 
+Q 651.242108 460.1544 684.783929 460.1544 
+z
+" clip-path="url(#pcda0b211c2)" style="fill: #e1532f"/>
+   </g>
+   <g id="patch_15">
+    <path d="M 837.246752 460.1544 
+L 922.625933 460.1544 
+Q 956.167754 460.1544 956.167754 458.280314 
+L 956.167754 157.995266 
+Q 956.167754 156.12118 922.625933 156.12118 
+L 837.246752 156.12118 
+Q 803.704931 156.12118 803.704931 157.995266 
+L 803.704931 458.280314 
+Q 803.704931 460.1544 837.246752 460.1544 
+z
+" clip-path="url(#pcda0b211c2)" style="fill: #db8442"/>
+   </g>
+   <g id="line2d_17">
+    <path clip-path="url(#pcda0b211c2)" style="fill: none; stroke: #424242; stroke-width: 1.8; stroke-linecap: round"/>
+   </g>
+   <g id="line2d_18">
+    <path clip-path="url(#pcda0b211c2)" style="fill: none; stroke: #424242; stroke-width: 1.8; stroke-linecap: round"/>
+   </g>
+   <g id="patch_16">
+    <path d="M 613.126402 460.1544 
+L 994.28346 460.1544 
+" style="fill: none; stroke: #262626; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_27">
+    <text style="font-weight: 700; font-size: 16px; font-family: 'Borna'; text-anchor: middle; fill: #262626" x="803.704931" y="83.3952" transform="rotate(-0 803.704931 83.3952)">Combined cost by domain</text>
+   </g>
+   <g id="text_28">
+    <text style="font-weight: 700; font-size: 9.5px; font-family: 'Borna'; text-anchor: middle; fill: #1f2328" x="727.47352" y="176.247436" transform="rotate(-0 727.47352 176.247436)">12.90</text>
+   </g>
+   <g id="text_29">
+    <text style="font-weight: 700; font-size: 9.5px; font-family: 'Borna'; text-anchor: middle; fill: #1f2328" x="879.936343" y="146.950996" transform="rotate(-0 879.936343 146.950996)">14.28</text>
+   </g>
+  </g>
+  <g id="axes_3">
+   <g id="patch_17">
+    <path d="M 1179.937398 460.1544 
+L 1561.094456 460.1544 
+L 1561.094456 101.3952 
+L 1179.937398 101.3952 
+z
+" style="fill: #ffffff"/>
+   </g>
+   <g id="matplotlib.axis_5">
+    <g id="xtick_3">
+     <g id="text_30">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: middle; fill: #262626" x="1370.515927" y="478.0244" transform="rotate(-0 1370.515927 478.0244)">Transport</text>
+     </g>
+    </g>
+    <g id="text_31">
+     <text style="font-weight: 700; font-size: 12px; font-family: 'Borna'; text-anchor: middle; fill: #262626" x="1370.515927" y="493.704" transform="rotate(-0 1370.515927 493.704)">Domain</text>
+    </g>
+   </g>
+   <g id="matplotlib.axis_6">
+    <g id="ytick_15">
+     <g id="line2d_19">
+      <path d="M 1179.937398 460.1544 
+L 1561.094456 460.1544 
+" clip-path="url(#pfe49976ecd)" style="fill: none; stroke-dasharray: 2.4,1.6; stroke-dashoffset: 0; stroke: #eceff3; stroke-opacity: 0.7; stroke-width: 0.8"/>
+     </g>
+     <g id="text_32">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: end; fill: #262626" x="1171.637398" y="464.9394" transform="rotate(-0 1171.637398 464.9394)">0.0</text>
+     </g>
+    </g>
+    <g id="ytick_16">
+     <g id="line2d_20">
+      <path d="M 1179.937398 389.809459 
+L 1561.094456 389.809459 
+" clip-path="url(#pfe49976ecd)" style="fill: none; stroke-dasharray: 2.4,1.6; stroke-dashoffset: 0; stroke: #eceff3; stroke-opacity: 0.7; stroke-width: 0.8"/>
+     </g>
+     <g id="text_33">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: end; fill: #262626" x="1171.637398" y="394.594459" transform="rotate(-0 1171.637398 394.594459)">0.2</text>
+     </g>
+    </g>
+    <g id="ytick_17">
+     <g id="line2d_21">
+      <path d="M 1179.937398 319.464518 
+L 1561.094456 319.464518 
+" clip-path="url(#pfe49976ecd)" style="fill: none; stroke-dasharray: 2.4,1.6; stroke-dashoffset: 0; stroke: #eceff3; stroke-opacity: 0.7; stroke-width: 0.8"/>
+     </g>
+     <g id="text_34">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: end; fill: #262626" x="1171.637398" y="324.249518" transform="rotate(-0 1171.637398 324.249518)">0.4</text>
+     </g>
+    </g>
+    <g id="ytick_18">
+     <g id="line2d_22">
+      <path d="M 1179.937398 249.119576 
+L 1561.094456 249.119576 
+" clip-path="url(#pfe49976ecd)" style="fill: none; stroke-dasharray: 2.4,1.6; stroke-dashoffset: 0; stroke: #eceff3; stroke-opacity: 0.7; stroke-width: 0.8"/>
+     </g>
+     <g id="text_35">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: end; fill: #262626" x="1171.637398" y="253.904576" transform="rotate(-0 1171.637398 253.904576)">0.6</text>
+     </g>
+    </g>
+    <g id="ytick_19">
+     <g id="line2d_23">
+      <path d="M 1179.937398 178.774635 
+L 1561.094456 178.774635 
+" clip-path="url(#pfe49976ecd)" style="fill: none; stroke-dasharray: 2.4,1.6; stroke-dashoffset: 0; stroke: #eceff3; stroke-opacity: 0.7; stroke-width: 0.8"/>
+     </g>
+     <g id="text_36">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: end; fill: #262626" x="1171.637398" y="183.559635" transform="rotate(-0 1171.637398 183.559635)">0.8</text>
+     </g>
+    </g>
+    <g id="ytick_20">
+     <g id="line2d_24">
+      <path d="M 1179.937398 108.429694 
+L 1561.094456 108.429694 
+" clip-path="url(#pfe49976ecd)" style="fill: none; stroke-dasharray: 2.4,1.6; stroke-dashoffset: 0; stroke: #eceff3; stroke-opacity: 0.7; stroke-width: 0.8"/>
+     </g>
+     <g id="text_37">
+      <text style="font-size: 12.76px; font-family: 'Borna'; text-anchor: end; fill: #262626" x="1171.637398" y="113.214694" transform="rotate(-0 1171.637398 113.214694)">1.0</text>
+     </g>
+    </g>
+    <g id="text_38">
+     <text style="font-weight: 700; font-size: 12px; font-family: 'Borna'; text-anchor: middle; fill: #262626" x="1147.28718" y="280.7748" transform="rotate(-90 1147.28718 280.7748)">Average tool F1</text>
+    </g>
+   </g>
+   <g id="patch_18">
+    <path d="M 1370.515927 460.1544 
+L 1370.515927 460.1544 
+L 1370.515927 460.1544 
+L 1370.515927 460.1544 
+z
+" clip-path="url(#pfe49976ecd)" style="fill: #e1532f"/>
+   </g>
+   <g id="patch_19">
+    <path d="M 1370.515927 460.1544 
+L 1370.515927 460.1544 
+L 1370.515927 460.1544 
+L 1370.515927 460.1544 
+z
+" clip-path="url(#pfe49976ecd)" style="fill: #db8442"/>
+   </g>
+   <g id="patch_20">
+    <path d="M 1251.594925 460.1544 
+L 1336.974106 460.1544 
+Q 1370.515927 460.1544 1370.515927 429.202626 
+L 1370.515927 315.243821 
+Q 1370.515927 284.292047 1336.974106 284.292047 
+L 1251.594925 284.292047 
+Q 1218.053104 284.292047 1218.053104 315.243821 
+L 1218.053104 429.202626 
+Q 1218.053104 460.1544 1251.594925 460.1544 
+z
+" clip-path="url(#pfe49976ecd)" style="fill: #e1532f"/>
+   </g>
+   <g id="patch_21">
+    <path d="M 1404.057748 460.1544 
+L 1489.436929 460.1544 
+Q 1522.97875 460.1544 1522.97875 429.202626 
+L 1522.97875 315.243821 
+Q 1522.97875 284.292047 1489.436929 284.292047 
+L 1404.057748 284.292047 
+Q 1370.515927 284.292047 1370.515927 315.243821 
+L 1370.515927 429.202626 
+Q 1370.515927 460.1544 1404.057748 460.1544 
+z
+" clip-path="url(#pfe49976ecd)" style="fill: #db8442"/>
+   </g>
+   <g id="line2d_25">
+    <path clip-path="url(#pfe49976ecd)" style="fill: none; stroke: #424242; stroke-width: 1.8; stroke-linecap: round"/>
+   </g>
+   <g id="line2d_26">
+    <path clip-path="url(#pfe49976ecd)" style="fill: none; stroke: #424242; stroke-width: 1.8; stroke-linecap: round"/>
+   </g>
+   <g id="patch_22">
+    <path d="M 1179.937398 460.1544 
+L 1561.094456 460.1544 
+" style="fill: none; stroke: #262626; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_39">
+    <text style="font-weight: 700; font-size: 16px; font-family: 'Borna'; text-anchor: middle; fill: #262626" x="1370.515927" y="83.3952" transform="rotate(-0 1370.515927 83.3952)">Grounded tool F1 by domain</text>
+   </g>
+   <g id="text_40">
+    <text style="font-weight: 700; font-size: 9.5px; font-family: 'Borna'; text-anchor: middle; fill: #1f2328" x="1294.284516" y="275.121863" transform="rotate(-0 1294.284516 275.121863)">0.50</text>
+   </g>
+   <g id="text_41">
+    <text style="font-weight: 700; font-size: 9.5px; font-family: 'Borna'; text-anchor: middle; fill: #1f2328" x="1446.747339" y="275.121863" transform="rotate(-0 1446.747339 275.121863)">0.50</text>
+   </g>
+  </g>
+  <g id="text_42">
+   <text style="font-weight: 700; font-size: 20px; font-family: 'Borna'; text-anchor: start; fill: #262626" x="23.808056" y="22.2" transform="rotate(-0 23.808056 22.2)">Benchmark operational appendix</text>
+  </g>
+  <g id="text_43">
+   <text style="font-size: 11px; font-family: 'Borna'; text-anchor: start; fill: #1f2328" x="23.808056" y="41.472" transform="rotate(-0 23.808056 41.472)">Latency, cost, and tool F1 remain visible, but they do not replace the primary judged quality view above.</text>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p64e4f813c5">
+   <rect x="46.315406" y="101.3952" width="381.157058" height="358.7592"/>
+  </clipPath>
+  <clipPath id="pcda0b211c2">
+   <rect x="613.126402" y="101.3952" width="381.157058" height="358.7592"/>
+  </clipPath>
+  <clipPath id="pfe49976ecd">
+   <rect x="1179.937398" y="101.3952" width="381.157058" height="358.7592"/>
+  </clipPath>
+ </defs>
+</svg>
