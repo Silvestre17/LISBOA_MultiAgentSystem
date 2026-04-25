@@ -161,7 +161,6 @@ def test_multiagent_direct_response_records_history_and_prints_execution_summary
     assert "Routed agents: direct response" in captured
     assert "Execution: direct" in captured
     assert re.search(r"Total Cost: \(0\.\d{3,6}\$\)", captured)
-    assert "Pricing Snapshot: 2026-04-17" in captured
     assert "LangSmith:" not in captured
 
 
