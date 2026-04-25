@@ -1,0 +1,31 @@
+# ==========================================================================
+# Master Thesis - Local GPU Conda Environment
+#   - Andre Filipe Gomes Silvestre, 20240502
+#
+# Creates a full local environment for development, evaluation, scraping,
+# notebooks, and Streamlit runtime work.
+#
+# Usage:
+#   conda env create -f environment_local_gpu.yml
+#   conda activate lisboa_thesis2026
+#
+# Notes:
+#   - Python 3.12 is supported by this repository and keeps parity with the
+#     current local migration target.
+#   - PyTorch is installed from the official CUDA 13.0 wheel index. The NVIDIA
+#     driver can expose CUDA 13.2 support in nvidia-smi while the official
+#     PyTorch wheel matrix still tops out at CUDA 13.0, so cu130 is the
+#     closest supported match for this machine.
+# ==========================================================================
+
+name: lisboa_thesis2026
+channels:
+  - defaults
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - --index-url https://download.pytorch.org/whl/cu130
+      - --extra-index-url https://pypi.org/simple
+      - torch==2.10.0
+      - -r requirements_all.txt
