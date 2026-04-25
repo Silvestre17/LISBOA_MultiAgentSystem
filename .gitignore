@@ -50,4 +50,3 @@ ENV/
 .streamlit/*.toml
 !.streamlit/config.toml
 !.streamlit/secrets.example.toml
-.streamlit/runtime_fingerprint.json

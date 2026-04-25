@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any, Iterable, Optional, Sequence
 
 RUNTIME_MARKER_SCHEMA_VERSION = 1
-DEFAULT_MARKER_RELATIVE_PATH = Path(".streamlit") / "runtime_fingerprint.json"
 DEFAULT_WATCHED_RELATIVE_PATHS = (
     "app.py",
     "config.py",
@@ -177,70 +176,6 @@ def compute_deployment_fingerprint(
     }
     encoded = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return {**manifest, "fingerprint": hashlib.sha256(encoded).hexdigest()}
-
-
-def runtime_marker_path(
-    root_dir: str | os.PathLike[str],
-    marker_path: Optional[str | os.PathLike[str]] = None,
-) -> Path:
-    """Return the file used to persist the loaded deployment fingerprint.
-
-    Args:
-        root_dir: Repository root directory.
-        marker_path: Optional explicit marker path.
-
-    Returns:
-        Absolute marker path.
-    """
-    if marker_path is not None:
-        return Path(marker_path).resolve()
-    return (Path(root_dir).resolve() / DEFAULT_MARKER_RELATIVE_PATH).resolve()
-
-
-def read_runtime_marker(marker_path: str | os.PathLike[str]) -> dict[str, Any]:
-    """Read the persisted runtime marker.
-
-    Args:
-        marker_path: Marker JSON path.
-
-    Returns:
-        Parsed marker dictionary, or an empty dict when unavailable.
-    """
-    try:
-        payload = json.loads(Path(marker_path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-
-def write_runtime_marker(
-    marker_path: str | os.PathLike[str],
-    fingerprint_payload: dict[str, Any],
-) -> bool:
-    """Persist the deployment fingerprint marker.
-
-    Args:
-        marker_path: Marker JSON path.
-        fingerprint_payload: Current fingerprint payload.
-
-    Returns:
-        True when the marker was written successfully.
-    """
-    marker = Path(marker_path)
-    payload = {
-        "schema_version": RUNTIME_MARKER_SCHEMA_VERSION,
-        "fingerprint": fingerprint_payload.get("fingerprint"),
-        "git_commit": fingerprint_payload.get("git_commit"),
-    }
-    try:
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(
-            json.dumps(payload, sort_keys=True, indent=2),
-            encoding="utf-8",
-        )
-    except OSError:
-        return False
-    return True
 
 
 def fingerprint_changed(
