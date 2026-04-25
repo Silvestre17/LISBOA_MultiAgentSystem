@@ -42,6 +42,10 @@ except Exception:
 
 sys.path.insert(0, ".")
 
+from agent.utils.langsmith_tracing import (
+    get_langsmith_display_state,
+    get_langsmith_project_name,
+)
 from agent.utils.startup_resources import (
     pre_warm_transport_networks as _pre_warm_transport_networks_impl,
     pre_warm_vector_store as _pre_warm_vector_store_impl,
