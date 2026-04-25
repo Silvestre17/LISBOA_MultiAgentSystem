@@ -1,0 +1,42 @@
+# ==========================================================================
+# Master Thesis - Full Local Environment Dependencies
+#   - Andre Filipe Gomes Silvestre, 20240502
+#
+# LISBOA: Lisbon Itinerary System Based On AI
+# A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon
+#
+# Installation: pip install -r requirements_all.txt
+#
+# This file extends requirements.txt with local-only extras needed for
+# scraping, tests, evaluation, and notebooks. It is intentionally separate
+# from the production Streamlit runtime used on Community Cloud.
+#
+# IMPORTANT:
+#   PyTorch is intentionally NOT pinned here. Install it explicitly with the
+#   correct CUDA or CPU wheel before this file. For the default local NVIDIA
+#   setup in this repository, use environment_local_gpu.yml.
+# ==========================================================================
+
+-r requirements.txt
+
+# -----------------------------------------------------------------------------
+# Web Scraping Extras
+# -----------------------------------------------------------------------------
+beautifulsoup4==4.12.3
+lxml==5.3.0
+
+# -----------------------------------------------------------------------------
+# Testing and Evaluation Extras
+# -----------------------------------------------------------------------------
+pytest==9.0.2
+numpy==2.2.5
+
+# -----------------------------------------------------------------------------
+# Notebook and Plotting Extras
+# -----------------------------------------------------------------------------
+jupyterlab==4.5.6
+notebook==7.5.5
+ipykernel==6.31.0
+ipywidgets==8.1.7
+matplotlib==3.10.0
+seaborn==0.13.2

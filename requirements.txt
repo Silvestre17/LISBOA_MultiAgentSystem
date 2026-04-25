@@ -77,7 +77,7 @@ duckduckgo-search==8.1.1      # DuckDuckGo search tool
 # -----------------------------------------------------------------------------
 # Web Interface
 # -----------------------------------------------------------------------------
-streamlit==1.55.0             # Interactive web application
+streamlit==1.56.0             # Interactive web application
 
 # -----------------------------------------------------------------------------
 # Monitoring and Evaluation

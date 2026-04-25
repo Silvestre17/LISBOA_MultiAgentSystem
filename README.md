@@ -244,7 +244,7 @@ LISBOA_MultiAgentSystem/
 ├── .github/workflows/              # Scraping and vector sync automation
 ├── app.py                          # Supported Streamlit entrypoint
 ├── config.py                       # Runtime configuration and provider selection
-├── pyproject.toml                  # Package metadata and optional extras
+├── pyproject.toml                  # Package metadata and local package discovery
 └── README.md                       # Project overview
 ```
 
@@ -291,13 +291,21 @@ Need a guided reading order? Open [`docs/00_INDEX.md`](./docs/00_INDEX.md).
    ```
 
 2. **Install dependencies**
+
+  Production or Streamlit-only runtime:
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **Optional editable install for tests and evaluation**
+  Full local environment with scraping, tests, evaluation, notebooks, and CUDA-enabled PyTorch on NVIDIA systems:
    ```bash
-   pip install -e ".[eval,dev]"
+  conda env create -f environment_local_gpu.yml
+  conda activate lisboa_thesis2026
+  ```
+
+  If you already created the environment manually and only need the local-only extras:
+  ```bash
+  pip install -r requirements_all.txt
    ```
 
 ### Environment Setup

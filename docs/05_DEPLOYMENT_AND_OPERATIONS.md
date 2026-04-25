@@ -92,10 +92,29 @@ Legacy `LANGCHAIN_*` tracing aliases are still accepted by the runtime for backw
 
 ## 🚀 First Run
 
+For the production-style Streamlit runtime:
+
 ```bash
 pip install -r requirements.txt
 python tools/vector_store.py
 streamlit run app.py
+```
+
+For the full local environment with scraping, tests, evaluation, notebooks,
+and CUDA-enabled PyTorch on NVIDIA systems:
+
+```bash
+conda env create -f environment_local_gpu.yml
+conda activate lisboa_thesis2026
+python tools/vector_store.py
+streamlit run app.py
+```
+
+If you already created the environment manually, install the extra local-only
+packages with:
+
+```bash
+pip install -r requirements_all.txt
 ```
 
 When `app.py` starts, it also:
