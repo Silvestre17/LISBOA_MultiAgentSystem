@@ -577,7 +577,7 @@ class ResearcherAgent(BaseAgent):
 
     def _get_tool_by_name(self, tool_name: str):
         """Returns a loaded tool by name, or None if not found."""
-        for tool in self.tools:
+        for tool in getattr(self, "tools", []):
             if getattr(tool, "name", "") == tool_name:
                 return tool
         return None
@@ -607,7 +607,13 @@ class ResearcherAgent(BaseAgent):
 
         focus_query = self._extract_place_focus_query(user_message)
         args = {"query": focus_query or user_message, "max_results": 5, "offset": 0, "language": language}
-        if _extract_specific_place_lookup_phrase(user_message):
+        specific_lookup = _extract_specific_place_lookup_phrase(user_message)
+        specific_tokens = re.findall(r"[a-z0-9]+", (specific_lookup or "").lower())
+        broad_type_tokens = {"museum", "museums", "museu", "museus", "monument", "monuments"}
+        broad_category_lookup = len(specific_tokens) <= 2 and any(
+            token in broad_type_tokens for token in specific_tokens
+        )
+        if specific_lookup and not broad_category_lookup:
             args["specific_lookup"] = True
         category_hint = self._infer_place_category_hint(user_message) or self._infer_place_category_hint(focus_query or "")
         if category_hint:
@@ -1125,6 +1131,7 @@ class ResearcherAgent(BaseAgent):
         event_keywords = [
             "event", "events", "evento", "eventos", "concert", "concerto",
             "festival", "exhibition", "exposição", "exposicao", "show",
+            "fair", "fairs", "feira", "feiras", "book fair",
         ]
         directed_lookup_markers = [
             "where is", "where's", "onde fica", "onde é", "onde e", "tell me about", "what about",
@@ -1260,8 +1267,9 @@ class ResearcherAgent(BaseAgent):
                 service_types.append(tool_label)
         nearby_location = self._normalize_structured_plan_text(structured_plan.get("near_location")) if structured_plan else None
         nearby_location = nearby_location or self._extract_near_location_name(user_message)
+        is_broad_attractions = self._is_broad_attractions_query(user_message)
 
-        if places_tool and place_focus_query and specific_lookup:
+        if places_tool and place_focus_query and specific_lookup and not is_broad_attractions:
             exact_args = {
                 "query": place_focus_query,
                 "max_results": 5,
@@ -1276,7 +1284,7 @@ class ResearcherAgent(BaseAgent):
             exact_result = str(self._invoke_tool(places_tool, exact_args, tool_name="search_places_attractions")).strip()
             # Accept the specific-lookup result when either (a) it is a clean exact
             # match, or (b) it is a "specific not found, here are alternatives"
-            # response that nevertheless surfaces ranked alternatives. 
+            # response that nevertheless surfaces ranked alternatives.
             # Falling through to the broad lookup in case (b) would re-call the tool with
             # weaker arguments and return less useful data, while doubling the tool-call cost.
             if exact_result and not exact_result.startswith("Error:"):
@@ -1353,14 +1361,14 @@ class ResearcherAgent(BaseAgent):
 
         query_text = place_focus_query or user_message
         max_results = 5
-        if self._is_broad_attractions_query(user_message):
+        if is_broad_attractions:
             query_text = f"{user_message} iconic monuments museums palaces castles historic sites"
             max_results = 6
 
         args = {"query": query_text, "max_results": max_results, "offset": 0, "language": language}
-        if specific_lookup:
+        if specific_lookup and not is_broad_attractions:
             args["specific_lookup"] = True
-        if self._is_broad_attractions_query(user_message):
+        if is_broad_attractions:
             args["category"] = "Museums & Monuments"
         else:
             category_hint = self._infer_place_category_hint(user_message)
@@ -1368,6 +1376,10 @@ class ResearcherAgent(BaseAgent):
                 args["category"] = category_hint
 
         result = str(self._invoke_tool(places_tool, args, tool_name="search_places_attractions")).strip()
+        if is_broad_attractions and language == "pt":
+            rewrite_result = getattr(self, "_rewrite_broad_attractions_result", None)
+            if callable(rewrite_result):
+                result = str(rewrite_result(result, user_message, language)).strip()
         shown_count = self._count_ranked_results(result)
         remembered_page_size = shown_count if (specific_lookup and shown_count and self._has_specific_lookup_fallback_intro(result)) else int(args["max_results"])
         base_args = {key: value for key, value in args.items() if key not in {"max_results", "offset"}}

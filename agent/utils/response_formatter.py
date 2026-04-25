@@ -2306,7 +2306,7 @@ def localize_local_information_values(text: str, language: str = "en") -> str:
                 flags=re.IGNORECASE,
             )
 
-        if "Quando" in updated_line or "When" in updated_line:
+        if any(label in updated_line for label in ("Quando", "When", "Data/Hora", "Date/Time")):
             updated_line = re.sub(r"\bat\s+(\d{1,2}:\d{2})\b", r"às \1", updated_line)
 
         if "📍" in updated_line or "**Local" in updated_line or "**Location" in updated_line:
@@ -2333,6 +2333,9 @@ def localize_local_information_values(text: str, language: str = "en") -> str:
         updated_line = re.sub(r"(?i)\bSchedule\b", "Horário", updated_line)
         updated_line = re.sub(r"(?i)\bTip\b", "Dica", updated_line)
         updated_line = re.sub(r"(?i)\bPrice\b", "Preço", updated_line)
+        updated_line = re.sub(r"(?i)\bPhone\b", "Telefone", updated_line)
+        updated_line = re.sub(r"(?i)\bRating\b", "Avaliação", updated_line)
+        updated_line = re.sub(r"(?i)\bTickets\b", "Bilhetes", updated_line)
         updated_line = re.sub(r"(?i)\bAccessibility\b", "Acessibilidade", updated_line)
         updated_line = re.sub(r"(?i)\bParking\b", "Estacionamento", updated_line)
         updated_line = re.sub(r"(?i)\bPublic\s+transport\s+access\b", "Acessos por transportes públicos", updated_line)
@@ -2395,6 +2398,8 @@ def localize_local_information_values(text: str, language: str = "en") -> str:
         updated_line = re.sub(r"\bnext week\b", "próxima semana", updated_line, flags=re.IGNORECASE)
         updated_line = re.sub(r"\bthis month\b", "este mês", updated_line, flags=re.IGNORECASE)
         updated_line = re.sub(r"\bnext month\b", "próximo mês", updated_line, flags=re.IGNORECASE)
+        updated_line = re.sub(r"\bwith Lisboa Card\b", "com Lisboa Card", updated_line, flags=re.IGNORECASE)
+        updated_line = re.sub(r"\bNot available\b", "Não disponível", updated_line, flags=re.IGNORECASE)
         updated_line = re.sub(
             r"(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})",
             r"\1 a \2",
@@ -3408,6 +3413,38 @@ def _clean_place_field_value(value: str, field_key: str) -> str:
     return cleaned.strip()
 
 
+def _localize_lisboa_card_benefit(value: str, language: str = "en") -> str:
+    """Return a compact Lisboa Card benefit phrase in the response language."""
+    cleaned = _strip_markdown_formatting(value or "").strip()
+    if not cleaned or _looks_like_missing_researcher_value(cleaned):
+        return ""
+
+    normalized = _strip_accents_compat(cleaned).lower()
+    if "lisboa card" not in normalized:
+        return cleaned
+    if language == "pt" and any(token in normalized for token in ("free", "gratis", "gratuito")):
+        return "Gratuito com Lisboa Card"
+    if language != "pt" and any(token in normalized for token in ("gratis", "gratuito")):
+        return "Free with Lisboa Card"
+    return cleaned
+
+
+def _merge_price_and_lisboa_card(price: str, lisboa_card: str, language: str = "en") -> str:
+    """Merge Lisboa Card benefits into the price field to keep place cards compact."""
+    cleaned_price = _clean_place_field_value(price or "", "price")
+    benefit = _localize_lisboa_card_benefit(lisboa_card, language=language)
+    if not benefit:
+        return cleaned_price
+    if not cleaned_price:
+        return benefit
+
+    normalized_price = _strip_accents_compat(cleaned_price).lower()
+    normalized_benefit = _strip_accents_compat(benefit).lower()
+    if normalized_benefit in normalized_price or "lisboa card" in normalized_price:
+        return cleaned_price
+    return f"{cleaned_price}; {benefit}"
+
+
 def _extract_first_url(value: str) -> str:
     """Return the first URL found in a string, trimmed of trailing punctuation."""
     match = re.search(r"https?://\S+", value or "")
@@ -3707,6 +3744,12 @@ def _is_researcher_place_meta_line(text: str) -> bool:
     )
 
 
+def _is_researcher_result_window_line(text: str) -> bool:
+    """Return whether a line only describes the current pagination window."""
+    normalized = _strip_accents_compat(_strip_markdown_formatting(text or "")).lower().strip()
+    return normalized.startswith(("janela de resultados", "results window"))
+
+
 def _build_researcher_place_intro_lines(
     cards: list[dict[str, object]],
     user_query: str,
@@ -3726,6 +3769,11 @@ def _build_researcher_place_intro_lines(
     )
     museum_markers = ("museum", "museu", "monument", "monumento", "palacio", "palácio")
     dining_markers = ("restaurant", "restaurante", "seafood", "marisco", "food", "gastronomia", "dining")
+    must_see_markers = (
+        "imperdiveis", "imperdíveis", "primeira vez", "first time", "must see",
+        "must-see", "first visit", "visita a lisboa pela primeira", "top attractions",
+        "principais atracoes", "principais atrações",
+    )
 
     if len(cards) == 1 and not any(marker in normalized_query for marker in general_markers):
         if is_pt:
@@ -3739,12 +3787,22 @@ def _build_researcher_place_intro_lines(
         ]
 
     if is_pt:
+        if any(marker in normalized_query for marker in must_see_markers):
+            return [
+                "### 🏛️ Atrações Imperdíveis",
+                "Aqui tens uma seleção compacta de locais essenciais para uma primeira visita a Lisboa:",
+            ]
         if any(marker in normalized_query for marker in dining_markers) or "restaurant" in category or "restaurante" in category:
             return ["### 🍽️ Locais Recomendados", "Aqui tens locais de restauração em Lisboa que correspondem ao que pediste:"]
         if any(marker in normalized_query for marker in museum_markers) or any(marker in category for marker in museum_markers):
             return ["### 🏛️ Locais Recomendados", "Aqui tens uma seleção de museus e locais culturais em Lisboa que correspondem ao pedido:"]
         return ["### 📍 Locais Recomendados", "Aqui tens os principais locais que encontrei em Lisboa para o que pediste:"]
 
+    if any(marker in normalized_query for marker in must_see_markers):
+        return [
+            "### 🏛️ Must-See Attractions",
+            "Here is a compact selection of essential places for a first visit to Lisbon:",
+        ]
     if any(marker in normalized_query for marker in dining_markers) or "restaurant" in category:
         return ["### 🍽️ Recommended Places", "Here are dining spots in Lisbon that match your request:"]
     if any(marker in normalized_query for marker in museum_markers) or any(marker in category for marker in museum_markers):
@@ -4155,6 +4213,8 @@ def format_researcher_event_cards(text: str, language: str = "en", user_query: s
         title = (title_match.group("title_bold") or title_match.group("title_plain") or "").strip()
         if not title:
             return None
+        if len(title.split()) >= 2:
+            title = re.sub(r"\s+0\d{2,3}$", "", title).strip()
         return emoji, title
 
     def _normalize_segments(raw_line: str) -> list[str]:
@@ -4257,6 +4317,8 @@ def format_researcher_event_cards(text: str, language: str = "en", user_query: s
         if plain.startswith("✨"):
             event["highlights"] = _clean_event_field_value(plain.removeprefix("✨").strip(), "highlights")
             return
+        if plain.startswith("⭐"):
+            return
         bare_url = _extract_url(plain)
         if bare_url:
             if not event["details_url"]:
@@ -4341,8 +4403,20 @@ def format_researcher_event_cards(text: str, language: str = "en", user_query: s
                 transformed = True
                 continue
             field_heading_prefixes = (
+                "when",
+                "quando",
                 "data/hora",
                 "date/time",
+                "category",
+                "categoria",
+                "address",
+                "morada",
+                "location",
+                "localizacao",
+                "localização",
+                "description",
+                "descricao",
+                "descrição",
                 "preco",
                 "preço",
                 "price",
@@ -4445,11 +4519,16 @@ def format_researcher_card(text: str, language: str = "en", user_query: str = ""
         if not current_card:
             return
 
+        current_card["price"] = _merge_price_and_lisboa_card(
+            str(current_card.get("price") or ""),
+            str(current_card.get("lisboa_card") or ""),
+            language=language,
+        )
+
         card_lines = [f"### {current_card['emoji']} {current_card['title']}", ""]
         field_order = [
             ("description", "📝"),
             ("category", "📂"),
-            ("lisboa_card", "🎫"),
             ("address", "📍"),
             ("phone", "📞"),
             ("rating", "⭐"),
@@ -4492,6 +4571,7 @@ def format_researcher_card(text: str, language: str = "en", user_query: str = ""
 
     for raw_line in lines:
         stripped = raw_line.strip()
+        result_window_line = _is_researcher_result_window_line(stripped)
         start_match = _RESEARCHER_CARD_START_RE.match(stripped)
 
         if start_match:
@@ -4522,7 +4602,7 @@ def format_researcher_card(text: str, language: str = "en", user_query: str = ""
         if not current_card:
             if not _is_researcher_place_meta_line(stripped):
                 output_lines.append(raw_line)
-                if stripped and not _SOURCE_LINE_RE.match(stripped):
+                if stripped and not _SOURCE_LINE_RE.match(stripped) and not result_window_line:
                     saw_intro_text = True
             continue
 
@@ -5140,6 +5220,15 @@ def finalize_worker_response(
             researcher_kind == "events"
             and re.search(r"(?m)^###\s+[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s+.+$", finalized)
         )
+        if researcher_kind == "events" and not already_structured_event_cards:
+            event_structured = format_researcher_event_cards(
+                finalized,
+                language=preferred_language,
+                user_query=user_query,
+            )
+            if event_structured != finalized:
+                finalized = event_structured
+                already_structured_event_cards = True
         service_structured = structure_service_lookup_markdown(
             finalized,
             language=preferred_language,
@@ -5195,6 +5284,7 @@ def finalize_worker_response(
             finalized = canonicalize_transport_terms(finalized, language=preferred_language)
             finalized = ensure_transport_notes_heading(finalized, language=preferred_language)
             finalized = normalize_transport_notes_block(finalized)
+            finalized = strip_redundant_transport_status_notes(finalized)
         else:
             finalized = structure_planner_markdown(finalized)
             finalized = soften_internal_markdown_headers(
@@ -6239,6 +6329,51 @@ def normalize_transport_notes_block(text: str) -> str:
     return "\n".join(normalized_lines)
 
 
+def strip_redundant_transport_status_notes(text: str) -> str:
+    """Remove generic caveats from aggregate transport-status summaries."""
+    if not text:
+        return text
+
+    normalized_text = _strip_accents_compat(_strip_markdown_formatting(text)).lower()
+    is_status_summary = (
+        ("situacao dos transportes" in normalized_text or "transport status" in normalized_text)
+        and "metro" in normalized_text
+        and "carris" in normalized_text
+        and ("cp" in normalized_text or "comboios" in normalized_text or "trains" in normalized_text)
+    )
+    if not is_status_summary:
+        return text
+
+    generic_patterns = (
+        "a lista de fontes esta incompleta",
+        "source list is incomplete",
+        "os numeros das linhas e os horarios da carris devem ser confirmados",
+        "os numeros de linha e horarios da carris devem ser confirmados",
+        "carris bus route numbers and schedules should be",
+        "gtfs data may",
+        "dados gtfs podem",
+        "os dados apresentados parecem ser um resumo agregado",
+        "os dados apresentados incluem metricas agregadas",
+        "os dados de transportes em tempo real podem mudar rapidamente",
+        "for a complete response to the transport status request",
+        "the data shown include aggregate metrics",
+        "real-time transport data can change quickly",
+        "para uma resposta completa ao pedido de ponto de situacao",
+        "a contagem de alertas da carris metropolitana e os atrasos da cp",
+        "the carris metropolitana alert count and cp delay counts",
+    )
+    kept_lines: list[str] = []
+    for line in text.splitlines():
+        normalized_line = _strip_accents_compat(_strip_markdown_formatting(line)).lower()
+        if any(pattern in normalized_line for pattern in generic_patterns):
+            continue
+        kept_lines.append(line)
+
+    cleaned = "\n".join(kept_lines)
+    cleaned = re.sub(r"\n### ⚠️ (?:Notas Úteis|Helpful Notes)\n\n(?=\n?📌)", "\n", cleaned)
+    return clean_newlines(cleaned).strip()
+
+
 def _reorder_marker_before_source(text: str, marker: str) -> str:
     """Shared helper: move any line containing ``marker`` and appearing AFTER the
     source footer back to just before the footer.
@@ -6296,10 +6431,17 @@ def final_visual_pass(text: str) -> str:
     text = reorder_warnings_before_source(text)
     text = reorder_tips_before_source(text)
     text = repair_known_live_typos(text)
+    text = re.sub(
+        r"(?mi)^\*\*-\s*para evitar inventar informação,\s*"
+        r"não vou indicar horários, frequências, tarifas, etas nem estado em tempo real para ([^.]+)\.\*\*$",
+        r"- Para evitar inventar informação, não vou indicar horários, frequências, tarifas, ETAs nem estado em tempo real para \1.",
+        text,
+    )
+    text = re.sub(r"(?m)^[-*]\s*⚠️\s*$\n?", "", text)
     text = re.sub(r"(?<=\S)[ \t]{2,}(?=\S)", " ", text)
     # Collapse triple blank lines that may have been reintroduced.
     text = re.sub(r"\n{3,}", "\n\n", text)
-    return text
+    return text.strip()
 
 
 # ==========================================================================
@@ -6338,7 +6480,15 @@ _LABEL_TRANSLATIONS: List[tuple] = [
     ("Dica", "Tip", True),
     ("Dica rápida", "Quick tip", True),
     ("Nota", "Note", True),
+    ("Atenção", "Note", True),
     ("Aviso", "Warning", True),
+    ("Próximos metros", "Next departures", True),
+    ("Tempo estimado", "Estimated time", True),
+    ("Trajeto", "Route", True),
+    ("Transfere em", "Transfer at", True),
+    ("Embarca em", "Board at", True),
+    ("Sai em", "Exit at", True),
+    ("Segue a pé", "Walk to", True),
     ("Duração", "Duration", True),
     ("Data", "Date", True),
     ("Local", "Venue", True),
@@ -6449,7 +6599,7 @@ Too many blank lines above should be reduced.
     print("-" * 40)
     print(test_input[:200] + "...")
 
-    print(f"\n📤 OUTPUT ({len(output)} chars, {elapsed*1000:.1f}ms):")
+    print(f"\n📤 OUTPUT ({len(output)} chars, {elapsed * 1000:.1f}ms):")
     print("-" * 40)
     print(output)
 

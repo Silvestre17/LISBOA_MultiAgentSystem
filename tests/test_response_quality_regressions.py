@@ -761,10 +761,11 @@ def test_researcher_worker_keeps_lisboa_card_and_price_fields_out_of_place_descr
         language="pt",
     )
 
+    assert output.startswith("### 🏛️ Atrações Imperdíveis")
     assert "### 🏛️ Museum of Lisbon – Pimenta Palace" in output
-    assert "- 🎫 **Lisboa Card:** Free with Lisboa Card" in output
+    assert "- 🎫 **Lisboa Card:**" not in output
     assert "- 📝 **Descrição:** Discover the various lives of the city of Lisbon, from the Roman age onwards." in output
-    assert "- 💰 **Preço:** Children Free until (age): 12 Adult: 3 €" in output
+    assert "- 💰 **Preço:** Children Free until (age): 12 Adult: 3 €; Gratuito com Lisboa Card" in output
     assert "- 📝 **Descrição:** Free with Lisboa Card" not in output
     assert "+ info" not in output
 

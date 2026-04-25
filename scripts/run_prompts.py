@@ -89,8 +89,7 @@ SMOKE_PROMPTS = [
     ("Fala-me do Web Summit", "pt", "event"),
     ("Onde fica o Museu do Livro?", "pt", "researcher"),
     ("Fala-me do Mosteiro dos Jerónimos", "pt", "researcher"),
-    
-    
+
     # Additional test prompts (2026-03)
     ("Qual o próximo autocarro do Marquês para Belém?", "pt", "test"),
     ("Quero ir de metro ou comboio entre Entrecampos e Sete Rios? Qual o mais rápido e o mais barato?", "pt", "test"),
@@ -98,7 +97,7 @@ SMOKE_PROMPTS = [
     ("Qual o hospital e a farmácia mais perto do Saldanha?", "pt", "test"),
     ("Quero ir de transportes públicos entre o ISCTE e a Zara do Rossio", "pt", "test"),
     ("Qual museu ou monumento recomendas ir neste domingo sendo que apenas tenho das 19 às 20h para visitar?", "pt", "test"),
-    
+
     # CRITICAL end-to-end prompts
     (
         "Quais os próximos autocarros da Carris no Rossio para seguir para Belém agora?",

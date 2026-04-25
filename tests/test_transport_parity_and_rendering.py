@@ -857,10 +857,9 @@ def test_multiagent_finalize_chat_response_localizes_live_transport_summary_to_p
     assert "Comboios com atrasos superiores a 1 minuto: 24 comboios" in output
     assert "Os dados disponíveis não especificam quais as rotas afetadas" in output
     assert "Os dados disponíveis não especificam as linhas, direções ou pontos de transbordo afetados" in output
-    assert "### ⚠️ Notas Úteis" in output
-    assert "A lista de fontes está incompleta" in output
-    assert "Os números das linhas e os horários da Carris devem ser confirmados" in output
-    assert "A contagem de alertas da Carris Metropolitana e os atrasos da CP" in output
+    assert "A lista de fontes está incompleta" not in output
+    assert "Os números das linhas e os horários da Carris devem ser confirmados" not in output
+    assert "A contagem de alertas da Carris Metropolitana e os atrasos da CP" not in output
     assert "GGTFS" not in output
     assert "Lisbon Transport Status" not in output
     assert "Urban buses" not in output

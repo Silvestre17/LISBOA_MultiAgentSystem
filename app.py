@@ -128,18 +128,49 @@ TRANSLATIONS = {
         "footer_version": "LISBOA | AI Assistant",
         "footer_made": "André Filipe Gomes Silvestre • NOVA IMS",
         "info_title": "About LISBOA",
-        "info_subtitle": "Discover the Multi-Agent Urban System",
-        "info_intro": "Explore how the system is built, the integrated networks, and how it protects your privacy while delivering top-tier urban assistance.",
-        "info_f1_title": "City Exploration",
-        "info_f1_desc": "Historical sites and modern attractions powered by RAG.",
+        "info_subtitle": "A Multi-Agent Assistant for Lisbon",
+        "info_intro": "A Lisbon-focused assistant that integrates urban data, live mobility, weather conditions, and local knowledge to deliver practical, context-aware answers.",
+        "info_badge": "Master's Thesis Project",
+        "info_stat_agents_value": "6",
+        "info_stat_agents_label": "Coordinated Agents",
+        "info_stat_tools_value": "45",
+        "info_stat_tools_label": "Grounded Tools",
+        "info_stat_scope_value": "2",
+        "info_stat_scope_label": "User Groups",
+        "info_f1_title": "Tourism and Culture",
+        "info_f1_desc": "Attractions, events, points of interest, and local context grounded in VisitLisboa and municipal data.",
         "info_f2_title": "Mobility",
-        "info_f2_desc": "Live Metro, Carris, and Train updates across five networks.",
+        "info_f2_desc": "Route support across Metro, Carris Urban, Carris Metropolitana, CP, and multimodal transport logic.",
         "info_f3_title": "Weather",
-        "info_f3_desc": "Integrated IPMA forecast and warnings.",
+        "info_f3_desc": "IPMA forecasts, weather classes, and warnings used to adapt daily recommendations.",
         "info_f4_title": "Essential Services",
-        "info_f4_desc": "Pharmacies, hospitals, and real-time open data services.",
+        "info_f4_desc": "Nearby services, pharmacies, hospitals, and practical municipal information.",
         "info_architecture_title": "System Architecture",
-        "info_architecture_desc": "Advanced multi-agent network orchestrated by LangGraph.",
+        "info_architecture_desc": "A *supervisor-worker* architecture routes each request to specialised agents, validates the result, and uses itinerary synthesis only when planning is needed.",
+        "info_flow_title": "From urban data to a useful answer",
+        "info_flow_1_title": "Data Sources",
+        "info_flow_1_desc": "VisitLisboa, IPMA, Lisboa Aberta, and transport feeds keep the assistant anchored in local evidence.",
+        "info_flow_2_title": "Tools and Context",
+        "info_flow_2_desc": "Knowledge retrieval, open-data search, weather, and mobility tools turn source data into verifiable context.",
+        "info_flow_3_title": "Agent Coordination",
+        "info_flow_3_desc": "The supervisor delegates to weather, transport, and researcher agents before the quality layer checks the answer.",
+        "info_flow_4_title": "Final Response",
+        "info_flow_4_desc": "The interface presents the answer in the format that best fits the request, from route steps to full itineraries.",
+        "info_audience_title": "Designed for Tourists and Residents",
+        "info_audience_desc": "The same pipeline serves two city contexts; what changes is the evidence it prioritises and the response format it produces.",
+        "info_tourists_title": "Tourists",
+        "info_tourists_desc": "Prioritises sequencing, cultural context, weather-aware trade-offs, and movement between points of interest.",
+        "info_residents_title": "Residents",
+        "info_residents_desc": "Prioritises service proximity, disruption awareness, municipal context, and practical daily decisions.",
+        "info_framework_title": "Technical Map",
+        "info_framework_desc": "The diagram presents the implemented data sources, tool layer, agent orchestration, user interface, and evaluation layer.",
+        "info_source_visitlisboa_desc": "Tourism, events, and cultural knowledge",
+        "info_source_ipma_desc": "Official forecasts and weather warnings",
+        "info_source_metro_desc": "Metro service status and operational information",
+        "info_source_carris_desc": "Lisbon buses and trams",
+        "info_source_cm_desc": "Metropolitan bus network",
+        "info_source_cp_desc": "Railway stations and service data",
+        "info_source_lisboa_aberta_desc": "Municipal open data and services",
         "back_to_chat": "Back to Chat",
         "feat_atmosfera": "🌤️ Atmosphere",
         "feat_mobilidade": "🚇 Mobility",
@@ -147,22 +178,30 @@ TRANSLATIONS = {
         "feat_mapa": "📍 Places",
         "feat_roteiros": "🗺️ Itineraries",
         "info_objective": "System Capabilities",
-        "info_objective_text": "LISBOA (Lisbon Itinerary System Based On AI) is a state-of-the-art intelligent platform serving both tourists and residents. It seamlessly integrates real-time mobility APIs, detailed meteorological forecasts, and a rich, dynamically updated database of cultural events and local landmarks to provide highly personalized, context-aware assistance.",
-        "info_data_sources": "Integrated Networks",
-        "info_data_sources_text": """- **IPMA API** - Live meteorological updates
-- **Metro de Lisboa** - Real-time subway status
-- **Carris & Carris Metropolitana** - Surface transport tracking
-- **CP (Comboios de Portugal)** - Railway networks
-- **Lisboa Aberta** - Essential local services
-- **VisitLisboa** - Tourism and cultural repositories""",
-        "info_privacy": "Privacy First",
-        "info_privacy_text": "- Your API credentials are stored locally in your browser session only\n- No conversation data is stored permanently on any server\n- Geolocation data is strictly processed per query",
+        "info_objective_text": "LISBOA (Lisbon Itinerary System Based On AI) is a Lisbon-focused proof of concept for personalised tourism and urban mobility support. It integrates transport, weather, tourism, and municipal data while keeping planning, retrieval, validation, and final synthesis as separate stages.",
+        "info_data_sources": "Integrated Sources and Networks",
+        "info_data_sources_text": """- **IPMA API** - Official weather forecasts and warnings
+    - **Metro de Lisboa** - Line status and, when configured, official real-time endpoints
+    - **Carris Urban** - Lisbon buses and trams
+    - **Carris Metropolitana** - Metropolitan bus network
+    - **CP (Comboios de Portugal)** - Train stations and service data
+    - **Lisboa Aberta** - Municipal open-data services
+    - **VisitLisboa** - Tourism and cultural knowledge""",
+        "info_privacy": "Privacy and Runtime Safety",
+        "info_privacy_text": "- API credentials entered in the interface are kept in the active Streamlit session\n- The app does not add a permanent conversation store\n- Location data is used only to answer the current request",
         "info_how_to_use": "How to Use",
-        "info_how_to_use_text": """1. **Select your AI Provider** - Choose from OpenAI, Azure, or LM Studio
- 2. **Enter your credentials** - Provide the required API key or server URL
- 3. **Ask questions** - Type your questions in natural language
- 4. **Use Quick Actions** - Click sidebar buttons for common queries""",
+        "info_how_to_use_text": """1. **Select an AI Provider** - Choose OpenAI, Azure OpenAI, or LM Studio
+    2. **Enter the required settings** - Provide the API key, endpoint, model, or local server URL
+    3. **Ask in natural language** - Describe the trip, service, event, or mobility question you have
+    4. **Use Quick Actions** - Start common workflows directly from the sidebar""",
         "info_author": "Author",
+        "info_author_project": "LISBOA: Lisbon Itinerary System Based On AI",
+        "info_author_role": "Master's Student",
+        "info_author_degree": "Data Science and Advanced Analytics",
+        "info_author_affiliation": "NOVA IMS - Universidade NOVA de Lisboa",
+        "info_author_year": "Academic year 2025/2026",
+        "info_author_github": "GitHub",
+        "info_author_linkedin": "LinkedIn",
         "info_author_text": """**André Filipe Gomes Silvestre**
 Master's Student in Data Science and Advanced Analytics
 NOVA IMS - Universidade NOVA de Lisboa
@@ -224,7 +263,7 @@ NOVA IMS - Universidade NOVA de Lisboa
         "query_transport": "Dá-me o ponto de situação do Metro, autocarros e comboios em Lisboa.",
         "query_events": "Quero explorar a cultura local. Que grandes eventos temos esta semana?",
         "query_attractions": "Lista as atrações imperdíveis para quem visita Lisboa pela primeira vez.",
-        "query_plan": "Cria um roteiro otimizado de 1 dia combinando monumentos históricos e comida tradicional.",
+        "query_plan": "Cria um roteiro otimizado de 1 dia com monumentos históricos e gastronomia tradicional.",
         "ex_query_weather": "Qual é a previsão do tempo para os próximos 3 dias?",
         "ex_query_metro": "Existem perturbações nas linhas do metro de Lisboa?",
         "ex_query_events": "Encontra eventos de música ao vivo para este fim de semana.",
@@ -237,18 +276,49 @@ NOVA IMS - Universidade NOVA de Lisboa
         "footer_version": "LISBOA | Assistente IA",
         "footer_made": "André Filipe Gomes Silvestre • NOVA IMS",
         "info_title": "Sobre o LISBOA",
-        "info_subtitle": "Descubra o Sistema Urbano Multi-Agente",
-        "info_intro": "Explore como o sistema é construído, as redes integradas e como protege a sua privacidade enquanto fornece assistência urbana de excelência.",
-        "info_f1_title": "Exploração da Cidade",
-        "info_f1_desc": "Locais históricos e atrações modernas.",
+        "info_subtitle": "Um Assistente Multi-Agente para Lisboa",
+        "info_intro": "Um assistente centrado em Lisboa que integra dados urbanos, mobilidade em tempo real, meteorologia e conhecimento local para responder com contexto e utilidade.",
+        "info_badge": "Projeto de Tese de Mestrado",
+        "info_stat_agents_value": "6",
+        "info_stat_agents_label": "Agentes Coordenados",
+        "info_stat_tools_value": "45",
+        "info_stat_tools_label": "Ferramentas Especializadas",
+        "info_stat_scope_value": "2",
+        "info_stat_scope_label": "Grupos de Utilização",
+        "info_f1_title": "Turismo e Cultura",
+        "info_f1_desc": "Atrações, eventos, pontos de interesse e contexto local ancorados no VisitLisboa e em dados municipais.",
         "info_f2_title": "Mobilidade",
-        "info_f2_desc": "Atualizações em tempo real do Metro, Carris e Comboios.",
+        "info_f2_desc": "Apoio a percursos com Metro, Carris Urban, Carris Metropolitana, CP e lógica multimodal.",
         "info_f3_title": "Meteorologia",
-        "info_f3_desc": "Previsões e avisos meteorológicos integrados do IPMA.",
+        "info_f3_desc": "Previsões IPMA, classes meteorológicas e avisos usados para adaptar recomendações ao dia.",
         "info_f4_title": "Serviços Essenciais",
-        "info_f4_desc": "Farmácias, hospitais e serviços em tempo real.",
+        "info_f4_desc": "Serviços próximos, farmácias, hospitais e informação municipal prática.",
         "info_architecture_title": "Arquitetura do Sistema",
-        "info_architecture_desc": "Rede multi-agente avançada orquestrada por LangGraph.",
+        "info_architecture_desc": "Uma arquitetura *supervisor-worker* encaminha cada pedido para agentes especializados, valida o resultado e usa síntese de itinerários apenas quando o planeamento é necessário.",
+        "info_flow_title": "Dos dados urbanos à resposta útil",
+        "info_flow_1_title": "Fontes de Dados",
+        "info_flow_1_desc": "VisitLisboa, IPMA, Lisboa Aberta e feeds de transporte mantêm o assistente ancorado em evidência local.",
+        "info_flow_2_title": "Ferramentas e Contexto",
+        "info_flow_2_desc": "A recuperação de conhecimento, a pesquisa em dados abertos, a meteorologia e a mobilidade transformam fontes brutas em contexto verificável.",
+        "info_flow_3_title": "Coordenação por Agentes",
+        "info_flow_3_desc": "O supervisor encaminha o pedido para agentes de meteorologia, transporte e investigação antes da validação de qualidade.",
+        "info_flow_4_title": "Resposta Final",
+        "info_flow_4_desc": "A interface apresenta o formato mais adequado ao pedido, desde passos de percurso até itinerários completos.",
+        "info_audience_title": "Pensado para Turistas e Residentes",
+        "info_audience_desc": "A mesma pipeline serve dois contextos urbanos; muda a evidência que prioriza e o formato de resposta que entrega.",
+        "info_tourists_title": "Turistas",
+        "info_tourists_desc": "Prioriza sequência de visita, contexto cultural, compromissos com a meteorologia e deslocações entre pontos de interesse.",
+        "info_residents_title": "Residentes",
+        "info_residents_desc": "Prioriza proximidade de serviços, perturbações de mobilidade, contexto municipal e decisões práticas do dia a dia.",
+        "info_framework_title": "Mapa Técnico",
+        "info_framework_desc": "O diagrama apresenta as fontes de dados implementadas, a camada de ferramentas, a orquestração por agentes, a interface e a avaliação.",
+        "info_source_visitlisboa_desc": "Turismo, eventos e conhecimento cultural",
+        "info_source_ipma_desc": "Previsões e avisos meteorológicos oficiais",
+        "info_source_metro_desc": "Estado do serviço e informação operacional do Metro",
+        "info_source_carris_desc": "Autocarros e elétricos de Lisboa",
+        "info_source_cm_desc": "Rede metropolitana de autocarros",
+        "info_source_cp_desc": "Estações e dados de serviço ferroviário",
+        "info_source_lisboa_aberta_desc": "Dados abertos e serviços municipais",
         "back_to_chat": "Voltar ao Chat",
         "feat_atmosfera": "🌤️ Atmosfera",
         "feat_mobilidade": "🚇 Mobilidade",
@@ -256,22 +326,30 @@ NOVA IMS - Universidade NOVA de Lisboa
         "feat_mapa": "📍 Locais",
         "feat_roteiros": "🗺️ Roteiros",
         "info_objective": "Capacidades do Sistema",
-        "info_objective_text": "LISBOA (Lisbon Itinerary System Based On AI) é uma plataforma de ponta destinada a residentes e turistas. Integra perfeitamente APIs de mobilidade em tempo real, dados meteorológicos e um repositório dinâmico de eventos culturais para garantir recomendações personalizadas sempre atualizadas.",
-        "info_data_sources": "Redes Integradas",
-        "info_data_sources_text": """- **API IPMA** - Atualizações meteorológicas
-- **Metro de Lisboa** - Tempos de espera e estado
-- **Carris & Carris Metropolitana** - Posições GPS e paragens
-- **CP (Comboios de Portugal)** - Horários e serviços
-- **Lisboa Aberta** - Dados essenciais da cidade
-- **VisitLisboa** - Hub oficial de turismo""",
-        "info_privacy": "Privacidade e Segurança",
-        "info_privacy_text": "- As suas credenciais API são guardadas localmente apenas na sua sessão\n- Nenhum dado de conversa é guardado permanentemente\n- Operações de geolocalização descartadas após o uso",
+        "info_objective_text": "LISBOA (Lisbon Itinerary System Based On AI) é um protótipo centrado em Lisboa para apoio personalizado ao turismo e à mobilidade urbana. Integra dados de transporte, meteorologia, turismo e serviços municipais, mantendo separadas as etapas de planeamento, pesquisa, validação e síntese final.",
+        "info_data_sources": "Fontes e Redes Integradas",
+        "info_data_sources_text": """- **API IPMA** - Previsões e avisos meteorológicos oficiais
+    - **Metro de Lisboa** - Estado das linhas e, quando configurado, endpoints oficiais em tempo real
+    - **Carris Urban** - Autocarros e elétricos de Lisboa
+    - **Carris Metropolitana** - Rede metropolitana de autocarros
+    - **CP (Comboios de Portugal)** - Estações e dados de serviço ferroviário
+    - **Lisboa Aberta** - Serviços e dados municipais abertos
+    - **VisitLisboa** - Conhecimento turístico e cultural""",
+        "info_privacy": "Privacidade e Segurança em Execução",
+        "info_privacy_text": "- As credenciais introduzidas na interface ficam na sessão Streamlit em execução\n- A app não acrescenta armazenamento permanente da conversa\n- A localização é usada apenas para responder ao pedido atual",
         "info_how_to_use": "Como Utilizar",
-        "info_how_to_use_text": """1. **Selecione o Motor de IA** - Escolha entre OpenAI, Azure ou LM Studio
- 2. **Introduza as credenciais** - Forneça a chave API ou URL do servidor
- 3. **Faça perguntas** - Escreva as suas perguntas em linguagem natural
- 4. **Use Ações Rápidas** - Clique nos botões da barra lateral para consultas frequentes""",
+        "info_how_to_use_text": """1. **Selecione o motor de IA** - Escolha OpenAI, Azure OpenAI ou LM Studio
+    2. **Introduza a configuração necessária** - Indique a chave API, endpoint, modelo ou URL do servidor local
+    3. **Pergunte em linguagem natural** - Descreva a viagem, serviço, evento ou dúvida de mobilidade
+    4. **Use as ações rápidas** - Inicie fluxos comuns diretamente pela barra lateral""",
         "info_author": "Autor",
+        "info_author_project": "LISBOA: Lisbon Itinerary System Based On AI",
+        "info_author_role": "Mestrando",
+        "info_author_degree": "Data Science and Advanced Analytics",
+        "info_author_affiliation": "NOVA IMS - Universidade NOVA de Lisboa",
+        "info_author_year": "Ano letivo 2025/2026",
+        "info_author_github": "GitHub",
+        "info_author_linkedin": "LinkedIn",
         "info_author_text": """**André Filipe Gomes Silvestre**
 Mestrando em Data Science e Advanced Analytics
 NOVA IMS - Universidade NOVA de Lisboa
@@ -286,8 +364,9 @@ def t(key: str) -> str:
 
 
 def md_to_html(text: str) -> str:
-    """Convert markdown bold syntax to HTML <strong> for use in unsafe_allow_html blocks."""
-    return re.sub(r"\*\*(.*?)\*\*", r"<strong>\1</strong>", text)
+    """Convert minimal inline markdown to safe HTML for use in rendered blocks."""
+    html_text = re.sub(r"\*\*(.*?)\*\*", r"<strong>\1</strong>", text)
+    return re.sub(r"(?<!\*)\*(?!\*)([^*]+?)(?<!\*)\*(?!\*)", r"<em>\1</em>", html_text)
 
 
 def rich_text_to_html(text: str) -> str:
@@ -348,24 +427,45 @@ def render_html_block(content: str) -> None:
     st.markdown(content, unsafe_allow_html=True)
 
 
-def build_info_feature_card_html(icon: str, title: str, description: str) -> str:
+def build_info_feature_card_html(
+    icon: str,
+    title: str,
+    description: str,
+    tone: str,
+) -> str:
     """Build a feature card used on the Info page."""
+    safe_tone = re.sub(r"[^a-z0-9_-]", "", tone.lower()) or "red"
     return (
-        '<div class="info-card">'
+        f'<article class="info-card info-card-{safe_tone}">'
         f'<div class="info-card-icon">{html.escape(icon)}</div>'
         f'<div class="info-card-title">{html.escape(title)}</div>'
         f'<div class="info-card-desc">{html.escape(description)}</div>'
-        '</div>'
+        '</article>'
     )
 
 
-def build_info_detail_card_html(icon: str, title: str, body: str) -> str:
+def build_info_detail_card_html(icon: str, title: str, body: str, tone: str) -> str:
     """Build a detail card used on the Info page."""
+    safe_tone = re.sub(r"[^a-z0-9_-]", "", tone.lower()) or "red"
     return (
-        '<div class="info-detail-card">'
+        f'<article class="info-detail-card info-detail-{safe_tone}">'
         f'<div class="info-detail-title">{html.escape(icon)} <span>{html.escape(title)}</span></div>'
         f'<div class="info-detail-body">{body}</div>'
-        '</div>'
+        '</article>'
+    )
+
+
+def build_info_source_link_html(label: str, description: str, url: str) -> str:
+    """Build a compact external source link used on the Info page."""
+    return (
+        '<a class="info-source-link" '
+        f'href="{html.escape(url, quote=True)}" target="_blank" rel="noopener noreferrer">'
+        '<span>'
+        f'<strong>{html.escape(label)}</strong>'
+        f'<small>{html.escape(description)}</small>'
+        '</span>'
+        '<span aria-hidden="true">↗</span>'
+        '</a>'
     )
 
 
@@ -375,23 +475,40 @@ def build_info_detail_card_html(icon: str, title: str, body: str) -> str:
 
 
 @st.cache_data(show_spinner=False)
-def get_base64_image(image_path):
+def get_base64_image(image_path: str) -> str:
+    """Return a base64-encoded image file for inline UI assets."""
     try:
         with open(image_path, "rb") as img_file:
             return base64.b64encode(img_file.read()).decode()
-    except Exception:
+    except OSError:
         return ""
 
 
+def build_image_data_uri(image_path: str) -> str:
+    """Build a browser-ready data URI for a local image asset."""
+    image_b64 = get_base64_image(image_path)
+    if not image_b64:
+        return ""
+
+    suffix = os.path.splitext(image_path)[1].lower()
+    mime_type = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+        ".svg": "image/svg+xml",
+    }.get(suffix, "image/png")
+    return f"data:{mime_type};base64,{image_b64}"
+
+
 # Auto load assets
-banner_path = os.path.join(os.path.dirname(__file__), "img", "BannerLSIBOA_21-9.png")
+banner_path = os.path.join(os.path.dirname(__file__), "img", "BannerLSIBOA_21-9_optimized.webp")
 logo_path = os.path.join(os.path.dirname(__file__), "img", "Logo_1-1_WithoutBG.png")
+framework_path = os.path.join(os.path.dirname(__file__), "img", "LISBOA_Framework.svg")
 
-banner_b64 = get_base64_image(banner_path)
-logo_b64 = get_base64_image(logo_path)
-
-banner_url = f"data:image/png;base64,{banner_b64}" if banner_b64 else ""
-logo_url = f"data:image/png;base64,{logo_b64}" if logo_b64 else ""
+banner_url = build_image_data_uri(banner_path)
+logo_url = build_image_data_uri(logo_path)
+framework_url = build_image_data_uri(framework_path)
 
 CSS = f"""
 <style>
@@ -906,6 +1023,22 @@ def init_system_state():
             st.session_state[k] = v
 
 
+def sync_page_from_query_params() -> None:
+    """Apply a supported page query parameter to the current UI tab."""
+    try:
+        raw_page_value = st.query_params.get("page", "")
+    except Exception:
+        raw_page_value = ""
+
+    if isinstance(raw_page_value, list):
+        raw_page_value = raw_page_value[0] if raw_page_value else ""
+
+    page_value = str(raw_page_value).strip().lower()
+
+    if page_value in {"chat", "info"}:
+        st.session_state.current_page = page_value
+
+
 @st.cache_resource(show_spinner=False)
 def pre_warm_vector_store() -> bool:
     """Load the vector store once per server process."""
@@ -1285,6 +1418,7 @@ def build_sidebar():
             disabled=request_locked,
         ):
             st.session_state.current_page = "chat"
+            st.query_params["page"] = "chat"
             st.rerun()
         if col2.button(
             "ℹ️ Info",
@@ -1293,6 +1427,7 @@ def build_sidebar():
             disabled=request_locked,
         ):
             st.session_state.current_page = "info"
+            st.query_params["page"] = "info"
             st.rerun()
 
         st.divider()
@@ -1857,85 +1992,804 @@ def queue_pending_request(user_input: str) -> None:
     st.session_state.messages.append({"role": "user", "content": user_input})
 
 
-def run_info_page():
+def run_info_page() -> None:
+    """Render the visual project information page."""
     render_html_block("""
         <style>
-        .info-main-container { padding: 1rem 0; animation: fadeIn 0.8s ease; }
-        .info-header { text-align: center; margin-bottom: 3.5rem; }
-        .info-header h2 { font-size: 3rem; font-weight: 800; background: linear-gradient(135deg, var(--primary-red) 0%, #ff6b6b 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.5rem; letter-spacing: -1px; }
-        .info-header h4 { color: var(--text-muted); font-weight: 500; font-size: 1.15rem; margin-bottom: 1.5rem; }
-        .info-header p { color: var(--text-main); font-size: 1.15rem; max-width: 820px; margin: 0 auto; line-height: 1.7; }
+        .info-main-container {
+            max-width: 1240px;
+            margin: 0 auto;
+            padding: 0.4rem 0 0.5rem 0;
+            animation: fadeIn 0.7s ease;
+            container-type: inline-size;
+        }
 
-        .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem; margin-bottom: 2.5rem; }
-        .info-card { background: white; border: 1px solid var(--border-color); border-radius: 16px; padding: 2rem; transition: all 0.3s ease; box-shadow: var(--shadow-sm); position: relative; overflow: hidden; }
-        .info-card::before { content: ""; position: absolute; top: 0; left: 0; width: 4px; height: 100%; background: var(--primary-red); opacity: 0.45; transition: opacity 0.3s ease; }
-        .info-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-md); border-color: rgba(255, 64, 17, 0.28); }
-        .info-card:hover::before { opacity: 1; }
-        .info-card-icon { font-size: 2.2rem; margin-bottom: 1.2rem; display: inline-block; background: var(--gray-50); padding: 0.75rem 1rem; border-radius: 12px; }
-        .info-card-title { font-weight: 700; font-size: 1.25rem; color: var(--text-main); margin-bottom: 0.75rem; }
-        .info-card-desc { color: var(--text-muted); line-height: 1.65; font-size: 1rem; }
+        .info-hero {
+            position: relative;
+            overflow: hidden;
+            display: block;
+            min-height: clamp(420px, 54vh, 585px);
+            padding: clamp(1.4rem, 4vw, 3.7rem);
+            margin-bottom: 1.2rem;
+            border-radius: 8px;
+            background:
+                linear-gradient(90deg, rgba(13, 18, 32, 0.88) 0%, rgba(13, 18, 32, 0.62) 45%, rgba(13, 18, 32, 0.22) 100%),
+                linear-gradient(180deg, rgba(13, 18, 32, 0.12) 0%, rgba(13, 18, 32, 0.75) 100%),
+                var(--info-hero-image, linear-gradient(135deg, #111827, #334155));
+            background-position: center;
+            background-size: cover;
+            box-shadow: 0 22px 60px rgba(15, 23, 42, 0.18);
+            isolation: isolate;
+        }
 
-        .info-architecture { background: linear-gradient(120deg, #ffffff 0%, var(--gray-50) 100%); border: 1px solid var(--border-color); border-left: 5px solid var(--primary-red); border-radius: 18px; padding: 2.25rem; margin-bottom: 2rem; box-shadow: var(--shadow-sm); }
-        .info-arch-title { font-weight: 800; font-size: 1.55rem; margin-bottom: 0.9rem; color: var(--text-main); display: flex; align-items: center; gap: 0.75rem; }
-        .info-arch-desc { color: var(--text-main); font-size: 1.08rem; line-height: 1.75; }
+        .info-hero-copy {
+            position: relative;
+            z-index: 1;
+        }
 
-        .info-details-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; margin-bottom: 2.25rem; }
-        .info-detail-card { background: linear-gradient(180deg, #ffffff 0%, #fffdf8 100%); border: 1px solid var(--border-color); border-radius: 16px; padding: 1.6rem 1.7rem; box-shadow: var(--shadow-sm); }
-        .info-detail-title { display: flex; align-items: center; gap: 0.6rem; font-weight: 800; color: var(--text-main); font-size: 1.08rem; margin-bottom: 0.9rem; }
-        .info-detail-body { color: var(--text-main); line-height: 1.7; }
+        .info-hero-copy {
+            max-width: min(860px, 100%);
+            padding-top: clamp(0.25rem, 3vh, 2.25rem);
+        }
+
+        .info-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            width: fit-content;
+            padding: 0.48rem 0.72rem;
+            margin-bottom: 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.36);
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.14);
+            color: #ffffff;
+            font-size: 0.82rem;
+            font-weight: 800;
+            backdrop-filter: blur(10px);
+        }
+
+        .info-hero-copy h2 {
+            max-width: 850px;
+            margin: 0 0 0.65rem 0;
+            color: #ffffff;
+            font-size: clamp(2.75rem, 6.4vw, 6.5rem);
+            line-height: 1;
+            letter-spacing: 0;
+            font-weight: 800;
+            text-shadow: 0 18px 46px rgba(0, 0, 0, 0.34);
+        }
+
+        .info-hero-copy h3 {
+            max-width: 760px;
+            margin: 0 0 1.05rem 0;
+            color: #fff3b0;
+            font-size: clamp(1.12rem, 2.25vw, 1.55rem);
+            font-weight: 800;
+            letter-spacing: 0;
+        }
+
+        .info-hero-copy p {
+            max-width: 760px;
+            margin: 0;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 1.08rem;
+            line-height: 1.75;
+        }
+
+        .info-stat-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.8rem;
+            max-width: 780px;
+            margin-top: 1.45rem;
+        }
+
+        .info-stat {
+            min-height: 96px;
+            padding: 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.13);
+            backdrop-filter: blur(12px);
+        }
+
+        .info-stat:nth-child(2) {
+            background: rgba(55, 119, 255, 0.18);
+        }
+
+        .info-stat:nth-child(3) {
+            background: rgba(14, 224, 113, 0.16);
+        }
+
+        .info-stat-value {
+            display: block;
+            color: #ffffff;
+            font-size: 1.75rem;
+            line-height: 1;
+            font-weight: 800;
+        }
+
+        .info-stat-label {
+            display: block;
+            margin-top: 0.42rem;
+            color: rgba(255, 255, 255, 0.78);
+            font-size: 0.88rem;
+            font-weight: 700;
+        }
+
+        .info-layer-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.75rem;
+            margin: -2.1rem auto 1.4rem auto;
+            position: relative;
+            z-index: 2;
+        }
+
+        .info-card {
+            min-height: 205px;
+            padding: 1.15rem;
+            border: 1px solid rgba(255, 255, 255, 0.68);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.94);
+            box-shadow: 0 16px 34px rgba(15, 23, 42, 0.1);
+            transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+        }
+
+        .info-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 22px 52px rgba(15, 23, 42, 0.1);
+        }
+
+        .info-card-red { border-top: 4px solid var(--primary-red); }
+        .info-card-blue { border-top: 4px solid #3777ff; }
+        .info-card-green { border-top: 4px solid #0ee071; }
+        .info-card-yellow { border-top: 4px solid var(--primary-yellow); }
+
+        .info-card-red:hover { border-color: rgba(255, 64, 17, 0.3); }
+        .info-card-blue:hover { border-color: rgba(55, 119, 255, 0.3); }
+        .info-card-green:hover { border-color: rgba(14, 224, 113, 0.32); }
+        .info-card-yellow:hover { border-color: rgba(246, 218, 0, 0.42); }
+
+        .info-card-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 2.9rem;
+            height: 2.9rem;
+            margin-bottom: 1rem;
+            border-radius: 8px;
+            background: #f8fafc;
+            font-size: 1.6rem;
+        }
+
+        .info-card-title {
+            margin-bottom: 0.55rem;
+            color: #111827;
+            font-weight: 800;
+            font-size: 1.05rem;
+        }
+
+        .info-card-desc {
+            color: #5f6f82;
+            font-size: 0.94rem;
+            line-height: 1.65;
+        }
+
+        .info-system-band,
+        .info-framework-section,
+        .info-audience-section {
+            margin: 1.5rem 0;
+            padding: clamp(1.35rem, 2.4vw, 2.15rem);
+            border-radius: 8px;
+        }
+
+        .info-section-heading {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: flex-end;
+            margin-bottom: 1.15rem;
+        }
+
+        .info-section-heading h3,
+        .info-system-title {
+            margin: 0;
+            color: #111827;
+            font-size: clamp(1.25rem, 2.2vw, 1.75rem);
+            font-weight: 800;
+            letter-spacing: 0;
+        }
+
+        .info-section-heading p,
+        .info-system-desc {
+            max-width: 780px;
+            margin: 0.45rem 0 0 0;
+            color: #526273;
+            font-size: 0.98rem;
+            line-height: 1.65;
+        }
+
+        .info-system-band {
+            display: grid;
+            grid-template-columns: minmax(250px, 0.5fr) minmax(0, 1fr);
+            gap: clamp(1rem, 3vw, 2rem);
+            align-items: stretch;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            background:
+                linear-gradient(135deg, rgba(255, 64, 17, 0.08), rgba(55, 119, 255, 0.08)),
+                #ffffff;
+            box-shadow: 0 16px 40px rgba(15, 23, 42, 0.07);
+        }
+
+        .info-system-copy {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 0.35rem;
+        }
+
+        .info-system-badge {
+            display: inline-flex;
+            width: fit-content;
+            margin-bottom: 0.9rem;
+            padding: 0.42rem 0.68rem;
+            border-radius: 999px;
+            color: #9a2a0c;
+            background: rgba(255, 64, 17, 0.1);
+            font-size: 0.78rem;
+            font-weight: 800;
+        }
+
+        .info-flow-track {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.75rem;
+        }
+
+        .info-flow-step {
+            min-height: 190px;
+            padding: 1rem;
+            border-radius: 8px;
+            background: #ffffff;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+        }
+
+        .info-flow-number {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 2.35rem;
+            height: 2.35rem;
+            margin-bottom: 0.85rem;
+            border-radius: 8px;
+            color: #ffffff;
+            background: #111827;
+            font-weight: 800;
+        }
+
+        .info-flow-red .info-flow-number { background: #c8320e; }
+        .info-flow-yellow .info-flow-number { background: #705900; }
+        .info-flow-blue .info-flow-number { background: #1f5fcf; }
+        .info-flow-green .info-flow-number { background: #056f4b; }
+
+        .info-flow-step h3 {
+            margin: 0 0 0.45rem 0;
+            color: #111827;
+            font-size: 1rem;
+            font-weight: 800;
+        }
+
+        .info-flow-step p {
+            margin: 0;
+            color: #5f6f82;
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        .info-framework-viewport {
+            overflow: hidden;
+            padding: 0.85rem;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            border-radius: 8px;
+            background: #ffffff;
+            box-shadow: 0 16px 40px rgba(15, 23, 42, 0.07);
+        }
+
+        .info-framework-image {
+            display: block;
+            width: 100%;
+            min-width: 0;
+            height: auto;
+            max-height: none;
+            object-fit: contain;
+            border-radius: 8px;
+        }
+
+        .info-source-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.65rem;
+        }
+
+        .info-source-link {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            min-height: 76px;
+            padding: 0.8rem 0.9rem;
+            border: 1px solid rgba(55, 119, 255, 0.14);
+            border-radius: 8px;
+            background: linear-gradient(135deg, rgba(55, 119, 255, 0.06), rgba(14, 224, 113, 0.05));
+            color: #111827;
+            text-decoration: none;
+            transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .info-source-link:hover {
+            transform: translateY(-2px);
+            border-color: rgba(55, 119, 255, 0.32);
+            box-shadow: 0 12px 26px rgba(15, 23, 42, 0.08);
+            color: #111827;
+        }
+
+        .info-source-link strong {
+            display: block;
+            color: #111827;
+            font-size: 0.96rem;
+            line-height: 1.2;
+        }
+
+        .info-source-link small {
+            display: block;
+            margin-top: 0.18rem;
+            color: #5f6f82;
+            font-size: 0.78rem;
+            line-height: 1.35;
+        }
+
+        .info-audience-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1rem;
+        }
+
+        .info-audience-card {
+            min-height: 190px;
+            padding: 1.3rem;
+            border-radius: 8px;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            background:
+                linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.9)),
+                radial-gradient(circle at top right, rgba(246, 218, 0, 0.2), transparent 38%);
+            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+        }
+
+        .info-audience-card strong {
+            display: block;
+            margin-bottom: 0.45rem;
+            color: #111827;
+            font-size: 1.08rem;
+        }
+
+        .info-audience-card p {
+            margin: 0;
+            color: #5f6f82;
+            line-height: 1.65;
+        }
+
+        .info-audience-card p::before {
+            content: "";
+            display: block;
+            width: 2.6rem;
+            height: 3px;
+            margin-bottom: 0.8rem;
+            border-radius: 999px;
+            background: linear-gradient(90deg, var(--primary-red), var(--primary-yellow));
+        }
+
+        .info-details-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1rem;
+            margin: 1.5rem 0;
+        }
+
+        .info-detail-card {
+            padding: 1.35rem;
+            border-radius: 8px;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            background: #ffffff;
+            box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
+        }
+
+        .info-detail-red { border-left: 4px solid var(--primary-red); }
+        .info-detail-blue { border-left: 4px solid #3777ff; }
+        .info-detail-green { border-left: 4px solid #0ee071; }
+        .info-detail-yellow { border-left: 4px solid var(--primary-yellow); }
+
+        .info-detail-title {
+            display: flex;
+            gap: 0.6rem;
+            align-items: center;
+            margin-bottom: 0.9rem;
+            color: #111827;
+            font-size: 1.05rem;
+            font-weight: 800;
+        }
+
+        .info-detail-body {
+            color: #334155;
+            font-size: 0.94rem;
+            line-height: 1.68;
+        }
+
         .info-detail-body p { margin: 0 0 0.75rem 0; }
         .info-detail-body p:last-child { margin-bottom: 0; }
-        .info-detail-body ul, .info-detail-body ol { margin: 0; padding-left: 1.25rem; }
-        .info-detail-body li { margin-bottom: 0.45rem; color: var(--text-muted); }
-        .info-detail-body strong { color: var(--text-main); }
+        .info-detail-body ul,
+        .info-detail-body ol { margin: 0; padding-left: 1.2rem; }
+        .info-detail-body li { margin-bottom: 0.42rem; color: #5f6f82; }
+        .info-detail-body strong { color: #111827; }
 
-        .info-footer { display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 1rem; padding-top: 2.2rem; border-top: 1px solid var(--border-color); }
-        .info-author-box { background: var(--gray-50); border-radius: 16px; padding: 2rem 2.5rem; border: 1px solid var(--gray-100); text-align: center; max-width: 760px; box-shadow: var(--shadow-sm); }
-        .info-author-label { text-transform: uppercase; font-size: 0.85rem; letter-spacing: 1.5px; color: var(--text-muted); margin-bottom: 0.8rem; display: block; font-weight: 700; }
-        .info-author-text { color: var(--text-main); line-height: 1.75; font-size: 1.04rem; }
-        .info-author-text p { margin: 0 0 0.5rem 0; }
-        .info-author-text p:last-child { margin-bottom: 0; }
+        .info-footer {
+            margin-top: 1.75rem;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 1.2rem;
+            align-items: center;
+            padding: clamp(1.2rem, 2.4vw, 1.7rem);
+            border: 1px solid rgba(246, 218, 0, 0.3);
+            border-radius: 8px;
+            background:
+                linear-gradient(135deg, rgba(255, 64, 17, 0.07), rgba(246, 218, 0, 0.16)),
+                #ffffff;
+            box-shadow: 0 18px 42px rgba(15, 23, 42, 0.08);
+            text-align: left;
+        }
 
-        .back-btn-container { margin-top: 3rem; display: flex; justify-content: center; }
+        .info-author-label {
+            display: inline-flex;
+            margin-bottom: 0.35rem;
+            color: #a8320f;
+            font-size: 0.82rem;
+            font-weight: 800;
+            letter-spacing: 0;
+            text-transform: uppercase;
+        }
+
+        .info-author-name {
+            margin: 0;
+            color: #1f2937;
+            font-size: clamp(1.35rem, 2.4vw, 1.75rem);
+            line-height: 1.15;
+            font-weight: 800;
+            letter-spacing: 0;
+        }
+
+        .info-author-project {
+            margin: 0.45rem 0 0 0;
+            color: #526273;
+            font-size: 0.98rem;
+            line-height: 1.45;
+        }
+
+        .info-author-meta {
+            margin: 0.65rem 0 0 0;
+            color: #334155;
+            font-size: 0.9rem;
+            line-height: 1.55;
+        }
+
+        .info-author-links {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 0.6rem;
+        }
+
+        .info-author-link {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.45rem;
+            min-height: 44px;
+            padding: 0.62rem 0.86rem;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 64, 17, 0.18);
+            background: rgba(255, 255, 255, 0.86);
+            color: #111827;
+            font-size: 0.9rem;
+            font-weight: 800;
+            text-decoration: none;
+            transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .info-author-link:hover {
+            transform: translateY(-2px);
+            border-color: rgba(255, 64, 17, 0.24);
+            box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
+            color: #111827;
+        }
+
+        .info-author-icon {
+            width: 1rem;
+            height: 1rem;
+            flex: 0 0 auto;
+        }
+
+        .back-btn-container { margin-top: 2rem; display: flex; justify-content: center; }
+
+        @media (max-width: 980px) {
+            .info-layer-grid,
+            .info-system-band,
+            .info-flow-track {
+                grid-template-columns: 1fr 1fr;
+            }
+            .info-source-grid { grid-template-columns: 1fr 1fr; }
+            .info-details-grid { grid-template-columns: 1fr; }
+            .info-system-band { grid-template-columns: 1fr; }
+            .info-footer {
+                grid-template-columns: 1fr;
+            }
+            .info-author-links {
+                justify-content: flex-start;
+            }
+        }
+
+        @media (max-width: 720px) {
+            .info-main-container { padding-top: 0.25rem; }
+            .info-layer-grid,
+            .info-system-band,
+            .info-flow-track,
+            .info-audience-grid,
+            .info-details-grid,
+            .info-stat-grid {
+                grid-template-columns: 1fr;
+            }
+            .info-source-grid { grid-template-columns: 1fr; }
+            .info-hero { min-height: 530px; }
+            .info-hero-copy { max-width: 100%; padding-top: 0; }
+            .info-layer-grid { margin-top: 0.8rem; }
+            .info-footer { grid-template-columns: 1fr; }
+        }
+
+        @container (max-width: 900px) {
+            .info-hero {
+                min-height: auto;
+                padding: 1.65rem;
+            }
+
+            .info-hero-copy {
+                max-width: 100%;
+                padding-top: 0;
+            }
+
+            .info-hero-copy h2 {
+                font-size: clamp(3.25rem, 10cqw, 4.9rem);
+            }
+
+            .info-layer-grid,
+            .info-flow-track {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .info-layer-grid {
+                margin-top: 0.95rem;
+            }
+
+            .info-flow-step,
+            .info-card {
+                min-height: auto;
+            }
+        }
+
+        @container (max-width: 700px) {
+            .info-hero {
+                min-height: 530px;
+                padding: 1.35rem;
+            }
+
+            .info-hero-copy {
+                max-width: 100%;
+                padding-top: 0;
+            }
+
+            .info-hero-copy h2 {
+                font-size: clamp(2.35rem, 12cqw, 3.15rem);
+            }
+
+            .info-hero-copy h3 {
+                font-size: 1.08rem;
+            }
+
+            .info-hero-copy p {
+                font-size: 0.98rem;
+            }
+
+            .info-layer-grid,
+            .info-system-band,
+            .info-flow-track,
+            .info-audience-grid,
+            .info-details-grid,
+            .info-source-grid,
+            .info-stat-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .info-layer-grid {
+                margin-top: 0.85rem;
+            }
+
+            .info-card,
+            .info-flow-step {
+                min-height: auto;
+            }
+
+            .info-details-grid {
+                gap: 0.85rem;
+            }
+        }
+
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         </style>
     """)
 
+    hero_style = (
+        f' style="--info-hero-image: url(&quot;{html.escape(banner_url, quote=True)}&quot;);"'
+        if banner_url
+        else ""
+    )
+
+    stat_items = [
+        (t("info_stat_agents_value"), t("info_stat_agents_label")),
+        (t("info_stat_tools_value"), t("info_stat_tools_label")),
+        (t("info_stat_scope_value"), t("info_stat_scope_label")),
+    ]
+    stat_cards = "".join(
+        "<div class=\"info-stat\">"
+        f"<span class=\"info-stat-value\">{html.escape(value)}</span>"
+        f"<span class=\"info-stat-label\">{html.escape(label)}</span>"
+        "</div>"
+        for value, label in stat_items
+    )
+
     feature_cards = "".join(
         [
-            build_info_feature_card_html("🏛️", t("info_f1_title"), t("info_f1_desc")),
-            build_info_feature_card_html("🚇", t("info_f2_title"), t("info_f2_desc")),
-            build_info_feature_card_html("🌤️", t("info_f3_title"), t("info_f3_desc")),
-            build_info_feature_card_html("🏥", t("info_f4_title"), t("info_f4_desc")),
+            build_info_feature_card_html("🏛️", t("info_f1_title"), t("info_f1_desc"), "red"),
+            build_info_feature_card_html("🚇", t("info_f2_title"), t("info_f2_desc"), "blue"),
+            build_info_feature_card_html("🌤️", t("info_f3_title"), t("info_f3_desc"), "yellow"),
+            build_info_feature_card_html("🏥", t("info_f4_title"), t("info_f4_desc"), "green"),
         ]
+    )
+
+    flow_items = [
+        ("01", t("info_flow_1_title"), t("info_flow_1_desc"), "red"),
+        ("02", t("info_flow_2_title"), t("info_flow_2_desc"), "yellow"),
+        ("03", t("info_flow_3_title"), t("info_flow_3_desc"), "blue"),
+        ("04", t("info_flow_4_title"), t("info_flow_4_desc"), "green"),
+    ]
+    flow_cards = "".join(
+        f'<article class="info-flow-step info-flow-{tone}">'
+        f'<span class="info-flow-number">{number}</span>'
+        f'<h3>{html.escape(title)}</h3>'
+        f'<p>{html.escape(description)}</p>'
+        '</article>'
+        for number, title, description, tone in flow_items
+    )
+
+    source_items = [
+        ("VisitLisboa", t("info_source_visitlisboa_desc"), "https://www.visitlisboa.com/"),
+        ("IPMA", t("info_source_ipma_desc"), "https://api.ipma.pt/"),
+        ("Metro", t("info_source_metro_desc"), "https://www.metrolisboa.pt/"),
+        ("Carris", t("info_source_carris_desc"), "https://www.carris.pt/"),
+        ("CM", t("info_source_cm_desc"), "https://www.carrismetropolitana.pt/"),
+        ("CP", t("info_source_cp_desc"), "https://www.cp.pt/"),
+        ("Lisboa Aberta", t("info_source_lisboa_aberta_desc"), "https://dados.cm-lisboa.pt/"),
+    ]
+    source_links = (
+        '<div class="info-source-grid">'
+        + "".join(build_info_source_link_html(label, description, url) for label, description, url in source_items)
+        + "</div>"
     )
 
     detail_cards = "".join(
         [
-            build_info_detail_card_html("🎯", t("info_objective"), rich_text_to_html(t("info_objective_text"))),
-            build_info_detail_card_html("🧩", t("info_data_sources"), rich_text_to_html(t("info_data_sources_text"))),
-            build_info_detail_card_html("🔒", t("info_privacy"), rich_text_to_html(t("info_privacy_text"))),
-            build_info_detail_card_html("🛠️", t("info_how_to_use"), rich_text_to_html(t("info_how_to_use_text"))),
+            build_info_detail_card_html(
+                "🧩",
+                t("info_data_sources"),
+                source_links,
+                "blue",
+            ),
+            build_info_detail_card_html(
+                "🔒",
+                t("info_privacy"),
+                rich_text_to_html(t("info_privacy_text")),
+                "green",
+            ),
+            build_info_detail_card_html(
+                "🛠️",
+                t("info_how_to_use"),
+                rich_text_to_html(t("info_how_to_use_text")),
+                "yellow",
+            ),
         ]
+    )
+
+    framework_markup = ""
+    if framework_url:
+        framework_markup = (
+            '<section class="info-framework-section">'
+            '<div class="info-section-heading">'
+            '<div>'
+            f'<h3>🧭 {html.escape(t("info_framework_title"))}</h3>'
+            f'<p>{html.escape(t("info_framework_desc"))}</p>'
+            '</div>'
+            '</div>'
+            '<div class="info-framework-viewport">'
+            f'<img class="info-framework-image" src="{framework_url}" '
+            'alt="LISBOA multi-agent system architecture diagram">'
+            '</div>'
+            '</section>'
+        )
+
+    audience_markup = (
+        '<section class="info-audience-section">'
+        '<div class="info-section-heading">'
+        '<div>'
+        f'<h3>👥 {html.escape(t("info_audience_title"))}</h3>'
+        f'<p>{html.escape(t("info_audience_desc"))}</p>'
+        '</div>'
+        '</div>'
+        '<div class="info-audience-grid">'
+        '<article class="info-audience-card">'
+        f'<strong>🧳 {html.escape(t("info_tourists_title"))}</strong>'
+        f'<p>{html.escape(t("info_tourists_desc"))}</p>'
+        '</article>'
+        '<article class="info-audience-card">'
+        f'<strong>🏠 {html.escape(t("info_residents_title"))}</strong>'
+        f'<p>{html.escape(t("info_residents_desc"))}</p>'
+        '</article>'
+        '</div>'
+        '</section>'
     )
 
     html_content = (
         '<div class="info-main-container">'
-        '<div class="info-header">'
+        f'<section class="info-hero"{hero_style}>'
+        '<div class="info-hero-copy">'
+        f'<span class="info-kicker">✦ {html.escape(t("info_badge"))}</span>'
         f'<h2>{html.escape(t("info_title"))}</h2>'
-        f'<h4>{html.escape(t("info_subtitle"))}</h4>'
+        f'<h3>{html.escape(t("info_subtitle"))}</h3>'
         f'<p>{html.escape(t("info_intro"))}</p>'
+        f'<div class="info-stat-grid">{stat_cards}</div>'
         '</div>'
-        f'<div class="info-grid">{feature_cards}</div>'
-        '<div class="info-architecture">'
-        f'<div class="info-arch-title">⚙️ <span>{html.escape(t("info_architecture_title"))}</span></div>'
-        f'<div class="info-arch-desc">{html.escape(t("info_architecture_desc"))}</div>'
+        '</section>'
+        f'<div class="info-layer-grid">{feature_cards}</div>'
+        '<section class="info-system-band">'
+        '<div class="info-system-copy">'
+        f'<span class="info-system-badge">⚙️ {html.escape(t("info_architecture_title"))}</span>'
+        f'<h3 class="info-system-title">{html.escape(t("info_flow_title"))}</h3>'
+        f'<p class="info-system-desc">{md_to_html(html.escape(t("info_architecture_desc")))}</p>'
         '</div>'
+        f'<div class="info-flow-track">{flow_cards}</div>'
+        '</section>'
+        f'{framework_markup}'
         f'<div class="info-details-grid">{detail_cards}</div>'
+        f'{audience_markup}'
         '<div class="info-footer">'
-        '<div class="info-author-box">'
+        '<div class="info-author-mark" aria-hidden="true">AS</div>'
+        '<div class="info-author-copy">'
         f'<span class="info-author-label">🎓 {html.escape(t("info_author"))}</span>'
-        f'<div class="info-author-text">{rich_text_to_html(t("info_author_text"))}</div>'
+        '<h3 class="info-author-name">André Filipe Gomes Silvestre</h3>'
+        f'<p class="info-author-project">{html.escape(t("info_author_project"))}</p>'
+        f'<p class="info-author-meta"><strong>{html.escape(t("info_author_role"))}</strong> · '
+        f'{html.escape(t("info_author_degree"))}<br>{html.escape(t("info_author_affiliation"))}<br>'
+        f'{html.escape(t("info_author_year"))}</p>'
+        '</div>'
+        '<div class="info-author-links">'
+        f'<a class="info-author-link" href="https://github.com/Silvestre17" target="_blank" rel="noopener noreferrer">{html.escape(t("info_author_github"))}</a>'
+        f'<a class="info-author-link" href="https://www.linkedin.com/in/andrefgsilvestre/" target="_blank" rel="noopener noreferrer">{html.escape(t("info_author_linkedin"))}</a>'
         '</div>'
         '</div>'
         '</div>'
@@ -1949,6 +2803,7 @@ def run_info_page():
     with col2:
         if st.button(f"💬 {back_text}", type="primary", use_container_width=True):
             st.session_state.current_page = "chat"
+            st.query_params["page"] = "chat"
             st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1961,39 +2816,15 @@ def run_info_page():
 def main():
     st.markdown(CSS, unsafe_allow_html=True)
     init_system_state()
+    sync_page_from_query_params()
 
-    ensure_startup_resources(
-        show_spinner=not bool(st.session_state.get("startup_resources_attempted", False))
-    )
-
-    bootstrap_provider = (
-        Config.MODEL_PROVIDER
-        if not runtime_provider_selector_enabled()
-        else st.session_state.get("provider", Config.MODEL_PROVIDER)
-    )
-    credentials_ready, _ = provider_has_required_credentials(bootstrap_provider)
-    if should_attempt_startup_auto_initialization(
-        initialized=bool(st.session_state.get("initialized", False)),
-        current_provider=str(st.session_state.get("provider", "")),
-        selected_provider=bootstrap_provider,
-        credentials_ready=credentials_ready,
-        attempted_provider=st.session_state.get("startup_auto_init_attempted_provider"),
-        last_error=st.session_state.get("startup_auto_init_error"),
-    ):
-        success, error = initialize_assistant(bootstrap_provider)
-        st.session_state.startup_auto_init_attempted_provider = bootstrap_provider
-        st.session_state.startup_auto_init_error = (
-            None if success else error or t("initialization_failed")
-        )
-        if success:
-            st.session_state.error = None
-
-    display_banner()
     selected_provider, q_act = build_sidebar()
 
     if st.session_state.current_page == "info":
         run_info_page()
         return
+
+    display_banner()
 
     pending = st.session_state.get("pending_request")
     request_locked = request_capture_locked(
@@ -2029,7 +2860,7 @@ def main():
     if new_request:
         queue_pending_request(new_request)
         st.rerun()
-    
+
     # Stage 2: If a request is pending, ensure the assistant is initialized and
     # execute the LLM call. The user message has already been appended during
     # the previous rerun, so the sidebar counter is already in sync.
@@ -2065,12 +2896,19 @@ def main():
         auto_init_error = st.session_state.get("startup_auto_init_error")
         if runtime_auto_initialize_enabled() and auto_init_error:
             st.error(auto_init_error)
-        elif credentials_ready and not runtime_auto_initialize_enabled():
-            st.info(
-                "As credenciais já estão prontas. Pode clicar em **Ligar Sistema** na barra lateral ou enviar uma pergunta para iniciar automaticamente."
+        elif credentials_ready:
+            ready_message = (
+                "As credenciais já estão prontas. Envie uma pergunta para iniciar o assistente."
                 if st.session_state.language == "pt"
-                else "Your credentials are ready. Click **Connect System** in the sidebar or send a prompt to start automatically."
+                else "Your credentials are ready. Send a prompt to start the assistant."
             )
+            if not runtime_auto_initialize_enabled():
+                ready_message = (
+                    "As credenciais já estão prontas. Pode clicar em **Ligar Sistema** na barra lateral ou enviar uma pergunta para iniciar automaticamente."
+                    if st.session_state.language == "pt"
+                    else "Your credentials are ready. Click **Connect System** in the sidebar or send a prompt to start automatically."
+                )
+            st.info(ready_message)
         else:
             st.info(
                 "Configure as credenciais de produção nas variáveis de ambiente ou nos Streamlit secrets para começar."
