@@ -1197,6 +1197,11 @@ _EVENT_SPECIFIC_LOOKUP_NOISE_TOKENS = {
     "this", "week", "today", "tomorrow", "next", "year",
     "ano", "esta", "semana", "este", "proxima", "proximo",
 }
+_EVENT_SPECIFIC_LOOKUP_HINT_TOKENS = {
+    "book", "fair", "feira", "fado", "concert", "concerto", "festival", "exhibition",
+    "exposicao", "exposição", "music", "musica", "música", "theatre", "teatro",
+    "summit", "conference", "congress", "forum", "expo",
+}
 
 
 def _extract_specific_event_lookup_phrase(query: Optional[str]) -> Optional[str]:
@@ -1219,9 +1224,9 @@ def _extract_specific_event_lookup_phrase(query: Optional[str]) -> Optional[str]
         if token not in _EVENT_SPECIFIC_LOOKUP_NOISE_TOKENS
     ]
     has_year_marker = bool(re.search(r"(?:'\d{2}\b|\b(?:19|20)\d{2}\b)", raw_query))
-    has_title_like_casing = any(char.isupper() for char in raw_query)
 
-    if meaningful_tokens and len(meaningful_tokens) <= 6 and (has_year_marker or has_title_like_casing):
+    has_event_hint = any(token in _EVENT_SPECIFIC_LOOKUP_HINT_TOKENS for token in meaningful_tokens)
+    if meaningful_tokens and len(meaningful_tokens) <= 6 and (has_year_marker or has_event_hint):
         return " ".join(meaningful_tokens)
 
     return None

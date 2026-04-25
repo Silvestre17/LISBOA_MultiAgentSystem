@@ -28,7 +28,6 @@ from agent.utils.langsmith_tracing import traceable
 from agent.state import AgentState
 from agent.utils.langgraph_compat import ToolNode
 from agent.utils.response_formatter import (
-    extract_update_time,
     finalize_worker_response,
     has_source_line,
     infer_response_language,

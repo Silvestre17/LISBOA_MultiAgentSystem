@@ -44,6 +44,8 @@ from agent.agents.transport_agent import (
 from agent.agents.weather_agent import WeatherAgent
 from agent.graph import MultiAgentAssistant
 from agent.utils.response_formatter import (
+    canonicalize_local_information_terms,
+    final_visual_pass,
     finalize_worker_response,
     repair_known_live_typos,
     strip_unsupported_closing_offers,
@@ -536,7 +538,7 @@ Short Description: Major public museum in Lisbon.
 
 
 def test_researcher_worker_finalization_structures_ranked_results_into_nested_lists() -> None:
-    """Numbered researcher outputs should render as nested markdown lists, not dense paragraphs."""
+    """Numbered researcher event outputs should render as canonical cards, not dense paragraphs."""
     raw = """1. 📅 **Artur Pizarro Prokofiev 2**
    🗓️ **When:** 14 Mar at 19:00
    📂 **Category**: Music
@@ -555,10 +557,10 @@ def test_researcher_worker_finalization_structures_ranked_results_into_nested_li
         language="pt",
     )
 
-    assert "- 📅 **Artur Pizarro Prokofiev 2**" in output
-    assert "    - 🗓️ **Quando:** 14 Mar às 19:00" in output
-    assert "    - 📂 **Categoria**: Música" in output
-    assert "- 🏛️ **Mosteiro dos Jerónimos**" in output
+    assert "### 🎵 Artur Pizarro Prokofiev 2" in output
+    assert "- 📅 **Data/Hora:** 14 Mar às 19:00" in output
+    assert "- 📂 **Categoria:** Música" in output
+    assert "### 🏛️ Mosteiro dos Jerónimos" in output
 
 
 def test_researcher_worker_finalization_localizes_common_metadata_values_for_pt() -> None:
@@ -580,12 +582,12 @@ def test_researcher_worker_finalization_localizes_common_metadata_values_for_pt(
         language="pt",
     )
 
-    assert "**Quando:** 14 Mar às 19:00" in output
+    assert "**Data/Hora:** 14 Mar às 19:00" in output
     assert "**Duração:** 🎯 Um só dia" in output
-    assert "**Categoria**: Música" in output
-    assert "📍 Lisboa" in output
-    assert "**Preço**: de €15 a €35" in output
-    assert "(197 avaliações)" in output
+    assert "**Categoria:** Música" in output
+    assert "**Morada:** [Lisboa]" in output
+    assert "**Preço:** de €15 a €35" in output
+    assert "TripAdvisor" not in output
     assert "Single day" not in output
     assert " reviews" not in output
 
@@ -610,11 +612,10 @@ def test_researcher_worker_finalization_localizes_event_summary_notes_for_pt() -
         language="pt",
     )
 
-    assert "- 🧾 **Resumo da pesquisa**" in output
-    assert "    - 🧭 **Filtro aplicado:** esta semana (2026-03-11 a 2026-03-16), todas as categorias, pesquisa geral de eventos." in output
-    assert "    - 📊 **Resultado do filtro:** 26 evento(s) com data confirmada correspondem a este filtro." in output
-    assert "    - ✨ **Destaques mostrados:** 5 resultado(s) mais relevantes." in output
-    assert "**Nota sobre a completude da fonte:** 30 registo(s) adicional(is) compatíveis foram excluídos" in output
+    assert "### 🎭 Artur Pizarro Prokofiev 2" in output
+    assert "- 📅 **Data/Hora:** 14 Mar às 19:00" in output
+    assert "Resumo da pesquisa" not in output
+    assert "Nota sobre a completude da fonte" not in output
     assert "Evento sem nome" not in output
     assert "Unknown event" not in output
 
@@ -667,6 +668,33 @@ def test_researcher_named_event_lookup_uses_cleaned_specific_subject() -> None:
                 "offset": 0,
                 "category": "Fairs",
                 "query": "feira do livro",
+                "specific_lookup": True,
+            }
+        )
+        assert "Book Fair" in output
+
+
+def test_researcher_english_book_fair_lookup_uses_event_tool() -> None:
+    """English Book Fair lookups should use events, not similarly named place records."""
+    with patch.object(ResearcherAgent, "__init__", lambda self: None):
+        agent = ResearcherAgent()
+        agent.system_prompt = "PRIMARY PROMPT"
+
+        events_tool = MagicMock()
+        events_tool.name = "search_cultural_events"
+        events_tool.invoke = MagicMock(return_value="1. 📅 **Book Fair'26**")
+        agent.tools = [events_tool]
+        agent.execute_react_loop = MagicMock(side_effect=AssertionError("LLM flow should be skipped"))
+
+        output = agent.invoke("Tell me about Book Fair 2026", context="", verbose=False)
+
+        events_tool.invoke.assert_called_once_with(
+            {
+                "max_results": 5,
+                "language": "en",
+                "offset": 0,
+                "category": "Fairs",
+                "query": "book fair 2026",
                 "specific_lookup": True,
             }
         )
@@ -1481,7 +1509,7 @@ def test_researcher_named_event_followup_reuses_previous_event_domain() -> None:
         assert called_args["language"] == "pt"
         assert called_args["offset"] == 0
         assert called_args["category"] == "Fairs"
-        assert called_args["query"] == "Feira do Livro'26"
+        assert called_args["query"] == "feira do livro 26"
         assert "date_filter" not in called_args
         assert "Book Fair" in output
 
@@ -1553,6 +1581,8 @@ def test_transport_worker_finalization_localizes_multimodal_summary_for_pt() -> 
 
 - ⚠️ Carris Metropolitana has active alerts, but the nature of the disruptions and the affected routes are not specified here.
 - ⚠️ Carris route numbers and schedules should be verified at carris.pt, as GTFS data may not reflect the most recent changes.
+- ⚠️ Os dados apresentados incluem métricas agregadas, mas não detalham perturbações por linha, rota ou serviço.
+- ⚠️ Os dados de transportes em tempo real podem mudar rapidamente; confirma na fonte oficial antes de viajar.
 
 📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Updated:** 17:47"""
 
@@ -1570,7 +1600,9 @@ def test_transport_worker_finalization_localizes_multimodal_summary_for_pt() -> 
     assert "34 comboios" in output
     assert "25 comboios" in output
     assert "A Carris Metropolitana tem alertas ativos" in output
-    assert "Os números de linha e horários da Carris devem ser confirmados" in output
+    assert "Os números de linha e horários da Carris devem ser confirmados" not in output
+    assert "métricas agregadas" not in output
+    assert "tempo real podem mudar" not in output
     assert "Lisbon Transport Status" not in output
 
 
@@ -3092,6 +3124,41 @@ def test_repair_known_live_typos_fixes_repeated_letter_glitches() -> None:
     cleaned = repair_known_live_typos(text)
 
     assert cleaned == "coerente confirmados tradicional tradicional resposta refletir entre"
+
+
+def test_final_visual_pass_repairs_bolded_unsupported_transport_bullet() -> None:
+    """Final visual cleanup should recover malformed QA bullets in unsupported transport replies."""
+    raw = (
+        "**- para Evitar Inventar Informação, Não Vou Indicar Horários, Frequências, "
+        "Tarifas, Etas Nem Estado em Tempo Real para Fertagus ou Transtejo/Soflusa.**\n"
+        "- ⚠️"
+    )
+
+    cleaned = final_visual_pass(raw)
+
+    assert "- ⚠️" not in cleaned
+    assert cleaned == (
+        "- Para evitar inventar informação, não vou indicar horários, frequências, "
+        "tarifas, ETAs nem estado em tempo real para Fertagus ou Transtejo/Soflusa."
+    )
+
+
+def test_pt_local_information_normalizer_translates_repair_metadata_labels() -> None:
+    """PT-PT researcher answers should not keep English labels after QA repair."""
+    raw = """- 📞 **Phone**: [+351 913 491 610](tel:+351913491610)
+- ⭐ **Rating**: 4.1/5
+- 💶 **Preço**: Gratuito with Lisboa Card
+- 🎟️ **Tickets**: Not available"""
+
+    cleaned = canonicalize_local_information_terms(raw, language="pt")
+
+    assert "**Telefone**" in cleaned
+    assert "**Avaliação**" in cleaned
+    assert "Gratuito com Lisboa Card" in cleaned
+    assert "**Bilhetes**: Não disponível" in cleaned
+    assert "Phone" not in cleaned
+    assert "Tickets" not in cleaned
+    assert "with Lisboa Card" not in cleaned
 
 
 def test_transport_clean_query_fragment_strips_using_the_metro_suffix() -> None:

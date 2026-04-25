@@ -401,8 +401,8 @@ def test_multiagent_simple_weather_surfaces_lightweight_qa_disclaimers() -> None
     assistant.qa_agent.validate.assert_not_called()
 
 
-def test_multiagent_blocks_planner_synthesis_when_qa_is_still_incomplete() -> None:
-    """Planner synthesis should be skipped, but QA may still repair the grounded fallback draft."""
+def test_multiagent_runs_planner_synthesis_with_noncritical_qa_caveats() -> None:
+    """Planner synthesis should run when QA only reports non-critical missing details."""
     assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
     assistant.state = {"messages": [], "user_context": None}
 
@@ -476,9 +476,8 @@ def test_multiagent_blocks_planner_synthesis_when_qa_is_still_incomplete() -> No
             verbose=False,
         )
 
-    assistant.agents["planner"].synthesize.assert_not_called()
+    assistant.agents["planner"].synthesize.assert_called_once()
     assistant.qa_agent.repair_final_response.assert_called_once()
-    assert "PLANNER OUTPUT" not in output
     assert "REPAIRED SYNTHESIS" in output
 
 

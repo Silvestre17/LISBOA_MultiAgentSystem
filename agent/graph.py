@@ -1431,6 +1431,7 @@ class MultiAgentAssistant:
             infer_researcher_source_kind,
             reconcile_researcher_event_response,
             normalize_transport_notes_block,
+            strip_redundant_transport_status_notes,
             strip_technical_output_artifacts,
         )
 
@@ -1455,6 +1456,7 @@ class MultiAgentAssistant:
             formatted = strip_technical_output_artifacts(formatted)
             formatted = ensure_transport_notes_heading(formatted, language=language)
             formatted = normalize_transport_notes_block(formatted)
+            formatted = strip_redundant_transport_status_notes(formatted)
 
         if effective_agents:
             title = generate_response_title(effective_agents, message, language)
@@ -1464,6 +1466,7 @@ class MultiAgentAssistant:
                 final_output = strip_technical_output_artifacts(final_output)
                 final_output = ensure_transport_notes_heading(final_output, language=language)
                 final_output = normalize_transport_notes_block(final_output)
+                final_output = strip_redundant_transport_status_notes(final_output)
         else:
             final_output = formatted
 
@@ -1496,6 +1499,7 @@ class MultiAgentAssistant:
             final_output = canonicalize_transport_terms(final_output, language=language)
             final_output = ensure_transport_notes_heading(final_output, language=language)
             final_output = normalize_transport_notes_block(final_output)
+            final_output = strip_redundant_transport_status_notes(final_output)
             final_output = final_visual_pass(final_output)
 
         if agent_outputs:
@@ -1513,6 +1517,7 @@ class MultiAgentAssistant:
                     final_output = canonicalize_transport_terms(final_output, language=language)
                     final_output = ensure_transport_notes_heading(final_output, language=language)
                     final_output = normalize_transport_notes_block(final_output)
+                    final_output = strip_redundant_transport_status_notes(final_output)
                     final_output = final_visual_pass(final_output)
 
         if not planner_involved and len(single_domain_agents) == 1:
@@ -1657,17 +1662,13 @@ class MultiAgentAssistant:
     ) -> bool:
         """Return whether planner synthesis should be suppressed after QA.
 
-        If the grounded worker evidence is still incomplete after the QA pass,
-        publishing a confident itinerary is worse than falling back to the
-        structured worker outputs plus explicit caveats.
+        Missing optional details should become compact caveats inside the
+        planner answer. Only critical factual issues should force the graph to
+        publish the grounded worker fallback instead of a synthesized itinerary.
         """
         if not qa_result:
             return False
-        if qa_result.get("complete") is False:
-            return True
-        if qa_result.get("needs_repair"):
-            return True
-        if qa_result.get("missing_data"):
+        if qa_result.get("critical_issues"):
             return True
 
         fact_check = qa_result.get("fact_check", {})
