@@ -20,6 +20,7 @@ import re
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import streamlit as st
@@ -46,6 +47,15 @@ sys.path.insert(0, ".")
 #     get_langsmith_display_state,
 #     get_langsmith_project_name,
 # )
+from agent.utils.deployment_freshness import (
+    clear_known_runtime_caches,
+    compute_deployment_fingerprint,
+    fingerprint_changed,
+    purge_lisboa_import_cache,
+    read_runtime_marker,
+    runtime_marker_path,
+    write_runtime_marker,
+)
 from agent.utils.startup_resources import (
     pre_warm_transport_networks as _pre_warm_transport_networks_impl,
     pre_warm_vector_store as _pre_warm_vector_store_impl,
@@ -136,7 +146,7 @@ TRANSLATIONS = {
         "info_stat_tools_value": "45",
         "info_stat_tools_label": "Grounded Tools",
         "info_stat_scope_value": "2",
-        "info_stat_scope_label": "User Groups",
+        "info_stat_scope_label": "Urban Contexts",
         "info_f1_title": "Tourism and Culture",
         "info_f1_desc": "Attractions, events, points of interest, and local context grounded in VisitLisboa and municipal data.",
         "info_f2_title": "Mobility",
@@ -179,7 +189,7 @@ TRANSLATIONS = {
         "feat_roteiros": "🗺️ Itineraries",
         "info_objective": "System Capabilities",
         "info_objective_text": "LISBOA (Lisbon Itinerary System Based On AI) is a Lisbon-focused proof of concept for personalised tourism and urban mobility support. It integrates transport, weather, tourism, and municipal data while keeping planning, retrieval, validation, and final synthesis as separate stages.",
-        "info_data_sources": "Integrated Sources and Networks",
+        "info_data_sources": "Integrated Sources",
         "info_data_sources_text": """- **IPMA API** - Official weather forecasts and warnings
     - **Metro de Lisboa** - Line status and, when configured, official real-time endpoints
     - **Carris Urban** - Lisbon buses and trams
@@ -187,13 +197,6 @@ TRANSLATIONS = {
     - **CP (Comboios de Portugal)** - Train stations and service data
     - **Lisboa Aberta** - Municipal open-data services
     - **VisitLisboa** - Tourism and cultural knowledge""",
-        "info_privacy": "Privacy and Runtime Safety",
-        "info_privacy_text": "- API credentials entered in the interface are kept in the active Streamlit session\n- The app does not add a permanent conversation store\n- Location data is used only to answer the current request",
-        "info_how_to_use": "How to Use",
-        "info_how_to_use_text": """1. **Select an AI Provider** - Choose OpenAI, Azure OpenAI, or LM Studio
-    2. **Enter the required settings** - Provide the API key, endpoint, model, or local server URL
-    3. **Ask in natural language** - Describe the trip, service, event, or mobility question you have
-    4. **Use Quick Actions** - Start common workflows directly from the sidebar""",
         "info_author": "Author",
         "info_author_project": "LISBOA: Lisbon Itinerary System Based On AI",
         "info_author_role": "Master's Student",
@@ -284,7 +287,7 @@ NOVA IMS - Universidade NOVA de Lisboa
         "info_stat_tools_value": "45",
         "info_stat_tools_label": "Ferramentas Especializadas",
         "info_stat_scope_value": "2",
-        "info_stat_scope_label": "Grupos de Utilização",
+        "info_stat_scope_label": "Contextos Urbanos",
         "info_f1_title": "Turismo e Cultura",
         "info_f1_desc": "Atrações, eventos, pontos de interesse e contexto local ancorados no VisitLisboa e em dados municipais.",
         "info_f2_title": "Mobilidade",
@@ -327,7 +330,7 @@ NOVA IMS - Universidade NOVA de Lisboa
         "feat_roteiros": "🗺️ Roteiros",
         "info_objective": "Capacidades do Sistema",
         "info_objective_text": "LISBOA (Lisbon Itinerary System Based On AI) é um protótipo centrado em Lisboa para apoio personalizado ao turismo e à mobilidade urbana. Integra dados de transporte, meteorologia, turismo e serviços municipais, mantendo separadas as etapas de planeamento, pesquisa, validação e síntese final.",
-        "info_data_sources": "Fontes e Redes Integradas",
+        "info_data_sources": "Fontes Integradas",
         "info_data_sources_text": """- **API IPMA** - Previsões e avisos meteorológicos oficiais
     - **Metro de Lisboa** - Estado das linhas e, quando configurado, endpoints oficiais em tempo real
     - **Carris Urban** - Autocarros e elétricos de Lisboa
@@ -335,13 +338,6 @@ NOVA IMS - Universidade NOVA de Lisboa
     - **CP (Comboios de Portugal)** - Estações e dados de serviço ferroviário
     - **Lisboa Aberta** - Serviços e dados municipais abertos
     - **VisitLisboa** - Conhecimento turístico e cultural""",
-        "info_privacy": "Privacidade e Segurança em Execução",
-        "info_privacy_text": "- As credenciais introduzidas na interface ficam na sessão Streamlit em execução\n- A app não acrescenta armazenamento permanente da conversa\n- A localização é usada apenas para responder ao pedido atual",
-        "info_how_to_use": "Como Utilizar",
-        "info_how_to_use_text": """1. **Selecione o motor de IA** - Escolha OpenAI, Azure OpenAI ou LM Studio
-    2. **Introduza a configuração necessária** - Indique a chave API, endpoint, modelo ou URL do servidor local
-    3. **Pergunte em linguagem natural** - Descreva a viagem, serviço, evento ou dúvida de mobilidade
-    4. **Use as ações rápidas** - Inicie fluxos comuns diretamente pela barra lateral""",
         "info_author": "Autor",
         "info_author_project": "LISBOA: Lisbon Itinerary System Based On AI",
         "info_author_role": "Mestrando",
@@ -1021,6 +1017,80 @@ def init_system_state():
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
+
+
+def reset_session_for_runtime_refresh() -> None:
+    """Drop session objects that can hold stale code, data, or credentials."""
+    for key in (
+        "assistant",
+        "provider",
+        "last_provider",
+        "credentials",
+        "ui_api_key_values",
+        "initialized",
+        "error",
+        "startup_resources_attempted",
+        "startup_resources_ok",
+        "startup_resources_status",
+        "transport_db_status",
+        "startup_auto_init_attempted_provider",
+        "startup_auto_init_error",
+        "pending_request",
+        "pending_request_user_appended",
+        "request_running",
+    ):
+        st.session_state.pop(key, None)
+
+
+def ensure_fresh_runtime_after_deploy(
+    root_dir: Optional[str | os.PathLike[str]] = None,
+    marker_path: Optional[str | os.PathLike[str]] = None,
+    rerun_on_refresh: bool = True,
+) -> bool:
+    """Clear stale runtime state when the checked-out deployment changes.
+
+    Args:
+        root_dir: Optional repository root. Defaults to this app directory.
+        marker_path: Optional marker file path used for tests or overrides.
+        rerun_on_refresh: Whether to immediately rerun after clearing state.
+
+    Returns:
+        True when a deployment refresh was detected and handled.
+    """
+    root_path = Path(root_dir or Path(__file__).resolve().parent).resolve()
+    current = compute_deployment_fingerprint(root_path)
+    current_fingerprint = str(current.get("fingerprint") or "").strip()
+    if not current_fingerprint:
+        return False
+
+    marker = runtime_marker_path(root_path, marker_path)
+    stored = read_runtime_marker(marker)
+    session_fingerprint = str(st.session_state.get("deployment_fingerprint") or "").strip()
+    marker_changed = fingerprint_changed(current, stored)
+    session_changed = bool(session_fingerprint and session_fingerprint != current_fingerprint)
+
+    if not marker_changed and not session_changed:
+        st.session_state.deployment_fingerprint = current_fingerprint
+        return False
+
+    cleared = clear_known_runtime_caches(st)
+    marker_written = write_runtime_marker(marker, current)
+    reset_session_for_runtime_refresh()
+    st.session_state.deployment_fingerprint = current_fingerprint
+    st.session_state.deployment_refresh_details = {
+        "git_commit": current.get("git_commit"),
+        "marker_changed": marker_changed,
+        "session_changed": session_changed,
+        "marker_written": marker_written,
+        "cleared": cleared,
+    }
+
+    if rerun_on_refresh and marker_written:
+        purge_lisboa_import_cache()
+        st.rerun()
+
+    init_system_state()
+    return True
 
 
 def sync_page_from_query_params() -> None:
@@ -2094,11 +2164,11 @@ def run_info_page() -> None:
         }
 
         .info-stat:nth-child(2) {
-            background: rgba(55, 119, 255, 0.18);
+            background: rgba(246, 218, 0, 0.2);
         }
 
         .info-stat:nth-child(3) {
-            background: rgba(14, 224, 113, 0.16);
+            background: rgba(255, 64, 17, 0.18);
         }
 
         .info-stat-value {
@@ -2512,10 +2582,22 @@ def run_info_page() -> None:
             color: #111827;
         }
 
-        .info-author-icon {
+        .info-author-link::before {
+            content: "";
             width: 1rem;
             height: 1rem;
             flex: 0 0 auto;
+            background-repeat: no-repeat;
+            background-position: center;
+            background-size: contain;
+        }
+
+        .info-author-link-github::before {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23111827' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5 .08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4'/%3E%3Cpath d='M9 18c-4.51 2-5-2-7-2'/%3E%3C/svg%3E");
+        }
+
+        .info-author-link-linkedin::before {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23111827' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-4 0v7h-4v-7a6 6 0 0 1 6-6z'/%3E%3Crect width='4' height='12' x='2' y='9'/%3E%3Ccircle cx='4' cy='4' r='2'/%3E%3C/svg%3E");
         }
 
         .back-btn-container { margin-top: 2rem; display: flex; justify-content: center; }
@@ -2693,27 +2775,11 @@ def run_info_page() -> None:
         + "</div>"
     )
 
-    detail_cards = "".join(
-        [
-            build_info_detail_card_html(
-                "🧩",
-                t("info_data_sources"),
-                source_links,
-                "blue",
-            ),
-            build_info_detail_card_html(
-                "🔒",
-                t("info_privacy"),
-                rich_text_to_html(t("info_privacy_text")),
-                "green",
-            ),
-            build_info_detail_card_html(
-                "🛠️",
-                t("info_how_to_use"),
-                rich_text_to_html(t("info_how_to_use_text")),
-                "yellow",
-            ),
-        ]
+    detail_cards = build_info_detail_card_html(
+        "🧩",
+        t("info_data_sources"),
+        source_links,
+        "blue",
     )
 
     framework_markup = ""
@@ -2778,7 +2844,6 @@ def run_info_page() -> None:
         f'<div class="info-details-grid">{detail_cards}</div>'
         f'{audience_markup}'
         '<div class="info-footer">'
-        '<div class="info-author-mark" aria-hidden="true">AS</div>'
         '<div class="info-author-copy">'
         f'<span class="info-author-label">🎓 {html.escape(t("info_author"))}</span>'
         '<h3 class="info-author-name">André Filipe Gomes Silvestre</h3>'
@@ -2788,8 +2853,8 @@ def run_info_page() -> None:
         f'{html.escape(t("info_author_year"))}</p>'
         '</div>'
         '<div class="info-author-links">'
-        f'<a class="info-author-link" href="https://github.com/Silvestre17" target="_blank" rel="noopener noreferrer">{html.escape(t("info_author_github"))}</a>'
-        f'<a class="info-author-link" href="https://www.linkedin.com/in/andrefgsilvestre/" target="_blank" rel="noopener noreferrer">{html.escape(t("info_author_linkedin"))}</a>'
+        f'<a class="info-author-link info-author-link-github" href="https://github.com/Silvestre17" target="_blank" rel="noopener noreferrer"><span>{html.escape(t("info_author_github"))}</span></a>'
+        f'<a class="info-author-link info-author-link-linkedin" href="https://www.linkedin.com/in/andrefgsilvestre/" target="_blank" rel="noopener noreferrer"><span>{html.escape(t("info_author_linkedin"))}</span></a>'
         '</div>'
         '</div>'
         '</div>'
@@ -2814,8 +2879,9 @@ def run_info_page() -> None:
 
 
 def main():
-    st.markdown(CSS, unsafe_allow_html=True)
     init_system_state()
+    ensure_fresh_runtime_after_deploy()
+    st.markdown(CSS, unsafe_allow_html=True)
     sync_page_from_query_params()
 
     selected_provider, q_act = build_sidebar()

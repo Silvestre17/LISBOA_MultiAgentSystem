@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -755,7 +754,6 @@ def combine_cost_payloads(payloads: Iterable[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
-@lru_cache(maxsize=4)
 def load_pricing_catalog(catalog_path: str | Path | None = None) -> dict[str, Any]:
     """Load a versioned local pricing catalog from disk.
 

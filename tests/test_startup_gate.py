@@ -11,8 +11,11 @@
 #     > python -m pytest tests/test_startup_gate.py -q
 # ===========================================================================
 
+from contextlib import contextmanager
+
 from app import build_startup_gate_message, select_new_request, startup_gate_allows_requests
 from agent.utils import startup_resources
+import agent.utils.langsmith_tracing as langsmith_tracing
 
 
 def test_startup_gate_allows_requests_requires_transport_and_kb() -> None:
@@ -87,6 +90,64 @@ def test_run_startup_preload_fails_closed_when_transport_layer_is_incomplete(mon
     assert not preload_status["transport_ok"]
     assert not preload_status["ok"]
     assert "Transport layer incomplete" in preload_status["transport_status"]
+
+
+def test_startup_tool_invocation_disables_langsmith_tracing(monkeypatch) -> None:
+    """Startup-only LangChain tool checks must not create standalone LangSmith traces."""
+    events = []
+
+    @contextmanager
+    def fake_tracing_context(**kwargs):
+        events.append(("enter", kwargs))
+        yield
+        events.append(("exit", kwargs))
+
+    class FakeTool:
+        def invoke(self, args):
+            events.append(("invoke", dict(args)))
+            return "status-ok"
+
+    monkeypatch.setattr(langsmith_tracing, "tracing_context", fake_tracing_context)
+
+    result = startup_resources._invoke_startup_tool_without_tracing(FakeTool(), {})
+
+    assert result == "status-ok"
+    assert events == [
+        ("enter", {"enabled": False}),
+        ("invoke", {}),
+        ("exit", {"enabled": False}),
+    ]
+
+
+def test_metro_readiness_uses_untraced_status_tool(monkeypatch) -> None:
+    """Metro readiness should call get_metro_status through the untraced startup helper."""
+    from tools import metrolisboa_api
+
+    class FakeTool:
+        pass
+
+    fake_tool = FakeTool()
+    captured = {}
+
+    def fake_invoke(tool, args):
+        captured["tool"] = tool
+        captured["args"] = args
+        return "Metro de Lisboa Status (Official API)\n✅ All lines operating normally."
+
+    monkeypatch.setattr(metrolisboa_api, "get_metro_status", fake_tool)
+    monkeypatch.setattr(
+        metrolisboa_api,
+        "load_metro_stations",
+        lambda force_reload=False: {"BL": {}, "AM": {}},
+    )
+    monkeypatch.setattr(startup_resources, "_invoke_startup_tool_without_tracing", fake_invoke)
+
+    detail = startup_resources._check_metro_readiness()
+
+    assert captured == {"tool": fake_tool, "args": {}}
+    assert detail["ok"] is True
+    assert detail["mode"] == "live"
+    assert detail["stations"] == 2
 
 
 def test_format_transport_layer_summary_reports_modes_and_counts() -> None:

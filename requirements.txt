@@ -78,6 +78,7 @@ duckduckgo-search==8.1.1      # DuckDuckGo search tool
 # Web Interface
 # -----------------------------------------------------------------------------
 streamlit==1.56.0             # Interactive web application
+watchdog==6.0.0               # File-watching backend used by Streamlit to detect updated code/data files
 
 # -----------------------------------------------------------------------------
 # Monitoring and Evaluation
