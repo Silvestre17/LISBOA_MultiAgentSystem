@@ -1268,7 +1268,6 @@ class MultiAgentAssistant:
         usage = summary.get("usage", {}) if isinstance(summary, dict) else {}
         tokens = usage.get("tokens", {}) if isinstance(usage, dict) else {}
         langsmith = summary.get("langsmith", {}) if isinstance(summary, dict) else {}
-        pricing_metadata = summary.get("pricing_metadata", {}) if isinstance(summary, dict) else {}
         total_cost = summary.get("total_cost", {}) if isinstance(summary, dict) else {}
         show_detailed_terminal_logs = bool(
             getattr(Config, "SHOW_DETAILED_EXECUTION_LOGS", False)
@@ -1304,14 +1303,8 @@ class MultiAgentAssistant:
         models_used = summary.get("models_used", []) if isinstance(summary, dict) else []
         print(f"🧠  Models: {', '.join(models_used) if models_used else 'No LLM call'}")
 
-        pricing_snapshot = (
-            pricing_metadata.get("pricing_snapshot_date")
-            or pricing_metadata.get("pricing_updated_at")
-            or "n/a"
-        )
         print(
-            f"💵  Total Cost: {self._format_usd_cost_label(total_cost)} | "
-            f"Pricing Snapshot: {pricing_snapshot}"
+            f"💵  Total Cost: {self._format_usd_cost_label(total_cost)}"
         )
 
         if show_detailed_terminal_logs and isinstance(langsmith, dict) and langsmith:
