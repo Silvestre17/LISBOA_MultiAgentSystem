@@ -1420,6 +1420,14 @@ def _get_vector_store():
 initialize_vector_store = _get_vector_store
 
 
+def reset_visitlisboa_runtime_cache() -> None:
+    """Reset VisitLisboa singletons after repository data changes."""
+    global _vector_store, _places_cache
+    with _vector_store_lock:
+        _vector_store = None
+    _places_cache = None
+
+
 # ==========================================================================
 # Hybrid Search: VisitLisboa + Dados Abertos
 # ==========================================================================

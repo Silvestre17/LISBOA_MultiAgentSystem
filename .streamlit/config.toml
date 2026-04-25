@@ -11,5 +11,6 @@ showErrorDetails = "none"
 [server]
 enableCORS = true
 enableXsrfProtection = true
-# Use "none" to avoid PyTorch compatibility issues with file watcher
-fileWatcherType = "none"
+# Keep file watching active so GitHub updates trigger reruns on Community Cloud.
+# The PyTorch watcher workaround is handled in app.py.
+fileWatcherType = "auto"

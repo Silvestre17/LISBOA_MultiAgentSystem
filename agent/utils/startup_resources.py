@@ -34,6 +34,18 @@ def _count_sqlite_rows(db_path: str, table_name: str) -> int:
     return int(row[0]) if row and row[0] is not None else 0
 
 
+def _invoke_startup_tool_without_tracing(tool: Any, args: Optional[Dict[str, Any]] = None) -> Any:
+    """Invoke a LangChain tool for startup checks without creating a LangSmith trace."""
+    resolved_args = args if isinstance(args, dict) else {}
+    try:
+        from agent.utils.langsmith_tracing import tracing_context
+
+        with tracing_context(enabled=False):
+            return tool.invoke(resolved_args)
+    except ImportError:
+        return tool.invoke(resolved_args)
+
+
 def format_transport_layer_summary(details: Dict[str, Dict[str, Any]], overall_ok: bool) -> str:
     """Build a compact transport-layer readiness summary for app and scripts."""
     metro_detail = details.get("metro", {})
@@ -86,7 +98,7 @@ def _check_metro_readiness() -> Dict[str, Any]:
 
         stations = load_metro_stations(force_reload=False)
         station_count = len(stations)
-        status_snapshot = str(get_metro_status.invoke({}) or "").strip()
+        status_snapshot = str(_invoke_startup_tool_without_tracing(get_metro_status, {}) or "").strip()
         metro_mode = "live" if "Official API" in status_snapshot else "fallback"
         ok = bool(station_count > 0 and status_snapshot and not status_snapshot.startswith("❌"))
         message = (
