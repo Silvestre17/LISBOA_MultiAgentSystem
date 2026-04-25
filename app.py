@@ -20,7 +20,6 @@ import re
 import sys
 import time
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import streamlit as st
@@ -43,15 +42,6 @@ except Exception:
 
 sys.path.insert(0, ".")
 
-# from agent.utils.langsmith_tracing import (
-#     get_langsmith_display_state,
-#     get_langsmith_project_name,
-# )
-from agent.utils.deployment_freshness import (
-    clear_known_runtime_caches,
-    compute_deployment_fingerprint,
-    purge_lisboa_import_cache,
-)
 from agent.utils.startup_resources import (
     pre_warm_transport_networks as _pre_warm_transport_networks_impl,
     pre_warm_vector_store as _pre_warm_vector_store_impl,
@@ -1013,75 +1003,6 @@ def init_system_state():
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
-
-
-def reset_session_for_runtime_refresh() -> None:
-    """Drop session objects that can hold stale code, data, or credentials."""
-    for key in (
-        "assistant",
-        "provider",
-        "last_provider",
-        "credentials",
-        "ui_api_key_values",
-        "initialized",
-        "error",
-        "startup_resources_attempted",
-        "startup_resources_ok",
-        "startup_resources_status",
-        "transport_db_status",
-        "startup_auto_init_attempted_provider",
-        "startup_auto_init_error",
-        "pending_request",
-        "pending_request_user_appended",
-        "request_running",
-    ):
-        st.session_state.pop(key, None)
-
-
-def ensure_fresh_runtime_after_deploy(
-    root_dir: Optional[str | os.PathLike[str]] = None,
-    rerun_on_refresh: bool = True,
-) -> bool:
-    """Clear stale runtime state when the checked-out deployment changes.
-
-    Args:
-        root_dir: Optional repository root. Defaults to this app directory.
-        rerun_on_refresh: Whether to immediately rerun after clearing state for
-            an already-loaded session.
-
-    Returns:
-        True when a deployment refresh was detected and handled.
-    """
-    root_path = Path(root_dir or Path(__file__).resolve().parent).resolve()
-    current = compute_deployment_fingerprint(root_path)
-    current_fingerprint = str(current.get("fingerprint") or "").strip()
-    if not current_fingerprint:
-        return False
-
-    session_fingerprint = str(st.session_state.get("deployment_fingerprint") or "").strip()
-    if not session_fingerprint:
-        st.session_state.deployment_fingerprint = current_fingerprint
-        return False
-
-    if session_fingerprint == current_fingerprint:
-        st.session_state.deployment_fingerprint = current_fingerprint
-        return False
-
-    cleared = clear_known_runtime_caches(st)
-    reset_session_for_runtime_refresh()
-    st.session_state.deployment_fingerprint = current_fingerprint
-    st.session_state.deployment_refresh_details = {
-        "git_commit": current.get("git_commit"),
-        "previous_fingerprint": session_fingerprint,
-        "cleared": cleared,
-    }
-
-    if rerun_on_refresh:
-        purge_lisboa_import_cache()
-        st.rerun()
-
-    init_system_state()
-    return True
 
 
 def sync_page_from_query_params() -> None:
@@ -2871,7 +2792,6 @@ def run_info_page() -> None:
 
 def main():
     init_system_state()
-    ensure_fresh_runtime_after_deploy()
     st.markdown(CSS, unsafe_allow_html=True)
     sync_page_from_query_params()
 
