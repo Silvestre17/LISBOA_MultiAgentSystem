@@ -70,6 +70,7 @@ def test_request_capture_locked_only_when_pending_request_exists() -> None:
     """Quick actions and chat input should lock only while one request is already pending."""
     assert request_capture_locked(None) is False
     assert request_capture_locked("") is False
+    assert request_capture_locked(None, request_running=True) is True
     assert request_capture_locked("Estado dos Transportes") is True
 
 

@@ -197,16 +197,20 @@ class LLMFactory:
                 return ChatOpenAI(
                     model=model_name,
                     api_key=Config.OPENAI_API_KEY,
-                    streaming=True,  # Enable streaming for lower latency
+                    streaming=True,     # Enable streaming for lower latency
                     stream_usage=True,  # Report token usage for LangSmith cost tracking
+                    timeout=180,
+                    max_retries=2,
                 )
             else:
                 return ChatOpenAI(
                     model=model_name,
                     temperature=temperature,
                     api_key=Config.OPENAI_API_KEY,
-                    streaming=True,  # Enable streaming for lower latency
+                    streaming=True,     # Enable streaming for lower latency
                     stream_usage=True,  # Report token usage for LangSmith cost tracking
+                    timeout=180,
+                    max_retries=2,
                 )
 
         # =====================================================================
@@ -249,7 +253,7 @@ class LLMFactory:
                     max_completion_tokens=16384,  # Optimal token limit
                     streaming=True,  # Enable streaming by default
                     stream_usage=True,  # Report token usage for LangSmith cost tracking
-                    timeout=60,  # 60 second timeout for faster failure detection
+                    timeout=180,  # Long enough for planning and QA synthesis
                     max_retries=2,  # Reduced retries for faster failure
                     reasoning_effort="minimal",  # Minimal for lower latency
                 )
@@ -263,7 +267,7 @@ class LLMFactory:
                     max_completion_tokens=16384,  # Optimal token limit
                     streaming=True,  # Enable streaming by default
                     stream_usage=True,  # Report token usage for LangSmith cost tracking
-                    timeout=60,  # 60 second timeout for faster failure detection
+                    timeout=180,  # Long enough for planning and QA synthesis
                     max_retries=2,  # Reduced retries for faster failure
                 )
 
