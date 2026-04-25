@@ -2071,14 +2071,34 @@ class MultiAgentAssistant:
                 ]
                 if len(messages_list) > 1 else None
             )
-            qa_result = self.qa_agent.validate(
-                user_query=message,
-                agent_outputs=agent_outputs,
-                agents_called=workers,
-                language=effective_language,
-                user_context=self.state.get("user_context"),
-                conversation_history=qa_history,
-            )
+            try:
+                qa_result = self.qa_agent.validate(
+                    user_query=message,
+                    agent_outputs=agent_outputs,
+                    agents_called=workers,
+                    language=effective_language,
+                    user_context=self.state.get("user_context"),
+                    conversation_history=qa_history,
+                )
+            except Exception as e:
+                if verbose:
+                    print(f"   [QA] Validation failed; continuing with worker outputs: {e}")
+                qa_result = {
+                    "complete": True,
+                    "missing_data": [],
+                    "required_agents": [],
+                    "reasoning": "QA validation was unavailable; preserved worker outputs.",
+                    "disclaimers": [],
+                    "critical_issues": [],
+                    "repairable_agents": [],
+                    "needs_repair": False,
+                    "fact_check": {
+                        "disclaimers": [],
+                        "critical_issues": [],
+                        "repairable_agents": [],
+                        "per_agent": {},
+                    },
+                }
 
             if verbose:
                 print(f"   [QA] Complete: {qa_result['complete']}")
@@ -2186,14 +2206,19 @@ class MultiAgentAssistant:
                     if verbose:
                         print("   [QA] Post-retry re-validation...")
 
-                    qa_result_2 = self.qa_agent.validate(
-                        user_query=message,
-                        agent_outputs=agent_outputs,
-                        agents_called=workers + retry_agents,
-                        language=effective_language,
-                        user_context=self.state.get("user_context"),
-                        conversation_history=qa_history,
-                    )
+                    try:
+                        qa_result_2 = self.qa_agent.validate(
+                            user_query=message,
+                            agent_outputs=agent_outputs,
+                            agents_called=workers + retry_agents,
+                            language=effective_language,
+                            user_context=self.state.get("user_context"),
+                            conversation_history=qa_history,
+                        )
+                    except Exception as e:
+                        if verbose:
+                            print(f"   [QA] Post-retry validation failed; keeping previous QA result: {e}")
+                        qa_result_2 = qa_result
 
                     if verbose:
                         print(f"   [QA] Post-retry complete: {qa_result_2['complete']}")

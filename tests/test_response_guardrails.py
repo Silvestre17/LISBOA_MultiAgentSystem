@@ -3302,6 +3302,47 @@ def test_multiagent_local_worker_batches_run_sequentially_without_threadpool() -
     assert output == "combined"
 
 
+def test_multiagent_qa_timeout_preserves_worker_response() -> None:
+    """A transient QA timeout must not replace a completed worker response with a generic app error."""
+    assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
+    assistant.state = {"messages": [], "user_context": None}
+
+    assistant.supervisor = MagicMock()
+    assistant.supervisor.route = MagicMock(
+        return_value={"agents": ["weather", "transport"], "direct_response": None, "reasoning": "hybrid request"}
+    )
+
+    weather_agent = MagicMock()
+    weather_agent.llm_provider = "azure"
+    weather_agent._is_current_weather_query = MagicMock(return_value=False)
+    weather_agent._is_simple_forecast_query = MagicMock(return_value=False)
+    weather_agent.invoke = MagicMock(return_value="🌤️ Meteorologia recolhida.")
+
+    transport_agent = MagicMock()
+    transport_agent.llm_provider = "azure"
+    transport_agent.invoke = MagicMock(return_value="🚇 Mobilidade recolhida.")
+
+    assistant.agents = {"weather": weather_agent, "transport": transport_agent}
+    assistant.qa_agent = MagicMock()
+    assistant.qa_agent.validate = MagicMock(side_effect=TimeoutError("qa timeout"))
+    assistant._combine_outputs = MagicMock(return_value="Resposta combinada preservada")
+
+    with patch("agent.graph.LANGSMITH_AVAILABLE", False), patch(
+        "agent.graph.clean_response", side_effect=lambda text: text
+    ), patch("agent.graph.format_response", side_effect=lambda text: text), patch(
+        "agent.graph.generate_response_title", return_value=None
+    ), patch("agent.graph.ensure_response_title", side_effect=lambda text, title: text):
+        output = assistant.chat(
+            "Planeia a minha tarde considerando meteorologia e transportes.",
+            language="pt",
+            verbose=False,
+        )
+
+    assistant.qa_agent.validate.assert_called_once()
+    assistant._combine_outputs.assert_called_once()
+    assert "Resposta combinada preservada" in output
+
+
 def test_multiagent_retries_worker_when_qa_flags_repairable_critical_issue() -> None:
     """QA critical issues should trigger a focused retry of the offending worker even when completeness is otherwise fine."""
     assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)

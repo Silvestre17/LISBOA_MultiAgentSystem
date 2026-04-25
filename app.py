@@ -15,7 +15,6 @@ for _ls_logger_name in ("langsmith.client", "langsmith.utils", "langsmith"):
 
 import base64
 import html
-import json
 import os
 import re
 import sys
@@ -821,48 +820,6 @@ st.set_page_config(
 )
 
 
-def inject_meta_description() -> None:
-    """Ensure a stable meta description exists in the document head for SEO audits.
-
-    Uses ``streamlit.components.v1.html`` so the injected ``<script>`` actually
-    executes inside an iframe sibling that mutates the parent document head.
-    ``st.html`` sanitises script tags in current Streamlit releases, so it
-    cannot perform DOM mutations.
-    """
-
-    description = (
-        "LISBOA is a bilingual AI assistant for Lisbon weather, transport, events, "
-        "places, and itinerary planning across the Lisbon Metropolitan Area."
-    )
-    # Imported lazily so test collection (which runs ``import app``) does not
-    # require a live Streamlit runtime to evaluate this side-effect helper.
-    from streamlit.components.v1 import html as components_html
-
-    components_html(
-        f"""
-        <script>
-        (() => {{
-            const descriptionText = {json.dumps(description)};
-            const doc = window.parent ? window.parent.document : window.document;
-            let meta = doc.querySelector('meta[name="description"]');
-            if (!meta) {{
-                meta = doc.createElement('meta');
-                meta.name = 'description';
-                doc.head.appendChild(meta);
-            }}
-            if (meta.getAttribute('content') !== descriptionText) {{
-                meta.setAttribute('content', descriptionText);
-            }}
-        }})();
-        </script>
-        """,
-        height=0,
-    )
-
-
-inject_meta_description()
-
-
 def normalized_value(value: Optional[str]) -> str:
     """Normalize optional text values loaded from env or UI."""
     if not isinstance(value, str):
@@ -942,6 +899,7 @@ def init_system_state():
         "transport_db_status": None,
         "startup_auto_init_attempted_provider": None,
         "startup_auto_init_error": None,
+        "request_running": False,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -1307,7 +1265,10 @@ def display_banner():
 
 def build_sidebar():
     with st.sidebar:
-        request_locked = request_capture_locked(st.session_state.get("pending_request"))
+        request_locked = request_capture_locked(
+            st.session_state.get("pending_request"),
+            st.session_state.get("request_running", False),
+        )
 
         # Show custom Logo if exists
         if logo_url:
@@ -1321,6 +1282,7 @@ def build_sidebar():
             "🗺️ Chat",
             use_container_width=True,
             type="primary" if st.session_state.current_page == "chat" else "secondary",
+            disabled=request_locked,
         ):
             st.session_state.current_page = "chat"
             st.rerun()
@@ -1328,6 +1290,7 @@ def build_sidebar():
             "ℹ️ Info",
             use_container_width=True,
             type="primary" if st.session_state.current_page == "info" else "secondary",
+            disabled=request_locked,
         ):
             st.session_state.current_page = "info"
             st.rerun()
@@ -1343,6 +1306,7 @@ def build_sidebar():
             options=list(langs.keys()),
             format_func=lambda x: langs[x],
             index=lang_idx,
+            disabled=request_locked,
         )
         if new_lang_key != cur_lang:
             st.session_state.language = new_lang_key
@@ -1483,6 +1447,7 @@ def build_sidebar():
                     use_container_width=True,
                     type="primary",
                     key="connect_system_button",
+                    disabled=request_locked,
                 ):
                     with st.spinner(
                         "🔌 A ligar o assistente ao motor de IA..."
@@ -1562,7 +1527,11 @@ def build_sidebar():
                 st.caption(f"🤖 {model_name}")
 
         if st.session_state.messages:
-            if st.button("🗑️ " + t("clear_conversation"), use_container_width=True):
+            if st.button(
+                "🗑️ " + t("clear_conversation"),
+                use_container_width=True,
+                disabled=request_locked,
+            ):
                 st.session_state.messages = []
                 if st.session_state.assistant and hasattr(st.session_state.assistant, "reset"):
                     st.session_state.assistant.reset()
@@ -1768,9 +1737,12 @@ def select_new_request(
     return chat_request or welcome_request or sidebar_request
 
 
-def request_capture_locked(pending_request: Optional[str]) -> bool:
+def request_capture_locked(
+    pending_request: Optional[str],
+    request_running: bool = False,
+) -> bool:
     """Return whether the UI should temporarily block new requests."""
-    return bool(pending_request)
+    return bool(pending_request) or bool(request_running)
 
 
 def build_user_error_message(error: Exception) -> str:
@@ -1881,6 +1853,7 @@ def queue_pending_request(user_input: str) -> None:
 
     st.session_state.pending_request = user_input
     st.session_state.pending_request_user_appended = True
+    st.session_state.request_running = True
     st.session_state.messages.append({"role": "user", "content": user_input})
 
 
@@ -2023,7 +1996,10 @@ def main():
         return
 
     pending = st.session_state.get("pending_request")
-    request_locked = request_capture_locked(pending)
+    request_locked = request_capture_locked(
+        pending,
+        st.session_state.get("request_running", False),
+    )
 
     # Stage 1: Capture a new request from quick-action, chat input, or welcome
     # button. Queue it and append the user turn immediately, then rerun once so
@@ -2039,7 +2015,7 @@ def main():
     if not request_locked and not st.session_state.messages:
         welcome_request = build_welcome()
 
-    if not request_locked and (in_text := st.chat_input(t("chat_placeholder"))):
+    if in_text := st.chat_input(t("chat_placeholder"), disabled=request_locked):
         chat_request = in_text
 
     new_request = select_new_request(
@@ -2047,6 +2023,7 @@ def main():
         welcome_request=welcome_request,
         chat_request=chat_request,
         pending_request=pending,
+        allow_requests=not request_locked,
     )
 
     if new_request:
@@ -2058,6 +2035,7 @@ def main():
     # the previous rerun, so the sidebar counter is already in sync.
     pending = st.session_state.get("pending_request")
     if pending:
+        st.session_state.request_running = True
         if (
             not st.session_state.initialized
             or st.session_state.provider != selected_provider
@@ -2067,11 +2045,17 @@ def main():
                 run_connection_probe=False,
             )
             if not success:
+                st.session_state.request_running = False
+                st.session_state.pop("pending_request", None)
+                st.session_state.pop("pending_request_user_appended", None)
                 st.error(error or t("initialization_failed"))
                 return
         already_appended = bool(st.session_state.pop("pending_request_user_appended", False))
         st.session_state.pop("pending_request", None)
-        run_interaction(pending, user_message_already_rendered=already_appended)
+        try:
+            run_interaction(pending, user_message_already_rendered=already_appended)
+        finally:
+            st.session_state.request_running = False
         # Trigger one final rerun so the sidebar counter picks up the assistant
         # turn immediately instead of waiting for the next user action.
         st.rerun()
