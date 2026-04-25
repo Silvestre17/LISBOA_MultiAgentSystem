@@ -14,3 +14,4 @@ enableXsrfProtection = true
 # Keep file watching active so GitHub updates trigger reruns on Community Cloud.
 # The PyTorch watcher workaround is handled in app.py.
 fileWatcherType = "auto"
+folderWatchBlacklist = [".git", "__pycache__", ".pytest_cache", ".ruff_cache"]

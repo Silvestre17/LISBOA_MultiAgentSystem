@@ -50,11 +50,7 @@ sys.path.insert(0, ".")
 from agent.utils.deployment_freshness import (
     clear_known_runtime_caches,
     compute_deployment_fingerprint,
-    fingerprint_changed,
     purge_lisboa_import_cache,
-    read_runtime_marker,
-    runtime_marker_path,
-    write_runtime_marker,
 )
 from agent.utils.startup_resources import (
     pre_warm_transport_networks as _pre_warm_transport_networks_impl,
@@ -1044,15 +1040,14 @@ def reset_session_for_runtime_refresh() -> None:
 
 def ensure_fresh_runtime_after_deploy(
     root_dir: Optional[str | os.PathLike[str]] = None,
-    marker_path: Optional[str | os.PathLike[str]] = None,
     rerun_on_refresh: bool = True,
 ) -> bool:
     """Clear stale runtime state when the checked-out deployment changes.
 
     Args:
         root_dir: Optional repository root. Defaults to this app directory.
-        marker_path: Optional marker file path used for tests or overrides.
-        rerun_on_refresh: Whether to immediately rerun after clearing state.
+        rerun_on_refresh: Whether to immediately rerun after clearing state for
+            an already-loaded session.
 
     Returns:
         True when a deployment refresh was detected and handled.
@@ -1063,29 +1058,25 @@ def ensure_fresh_runtime_after_deploy(
     if not current_fingerprint:
         return False
 
-    marker = runtime_marker_path(root_path, marker_path)
-    stored = read_runtime_marker(marker)
     session_fingerprint = str(st.session_state.get("deployment_fingerprint") or "").strip()
-    marker_changed = fingerprint_changed(current, stored)
-    session_changed = bool(session_fingerprint and session_fingerprint != current_fingerprint)
+    if not session_fingerprint:
+        st.session_state.deployment_fingerprint = current_fingerprint
+        return False
 
-    if not marker_changed and not session_changed:
+    if session_fingerprint == current_fingerprint:
         st.session_state.deployment_fingerprint = current_fingerprint
         return False
 
     cleared = clear_known_runtime_caches(st)
-    marker_written = write_runtime_marker(marker, current)
     reset_session_for_runtime_refresh()
     st.session_state.deployment_fingerprint = current_fingerprint
     st.session_state.deployment_refresh_details = {
         "git_commit": current.get("git_commit"),
-        "marker_changed": marker_changed,
-        "session_changed": session_changed,
-        "marker_written": marker_written,
+        "previous_fingerprint": session_fingerprint,
         "cleared": cleared,
     }
 
-    if rerun_on_refresh and marker_written:
+    if rerun_on_refresh:
         purge_lisboa_import_cache()
         st.rerun()
 
