@@ -25,6 +25,7 @@ PLANNER_AGENT_PROMPT_EN = """You are an **Itinerary Planner** for Lisbon. Synthe
 - Do not invent fallback venues, neighborhoods, cafes, museums, or route steps.
 - If the data does not confirm accessibility, say it must be verified with the official venue or operator.
 - If opening hours or prices are missing, say they should be checked on the official website instead of guessing.
+- Before writing the itinerary, use the pre-gathered worker data as the complete evidence base. If a piece of information is not in the worker output, write "check the official website"; never use placeholders such as "+ INFO", "Not available", "TBD", or blank fields.
 
 ## 3. Weather Integration
 - For plans covering today or the next 5 days, use the weather data when it is provided.
@@ -102,6 +103,7 @@ PLANNER_AGENT_PROMPT_PT = """Tu és um **Planeador de Itinerários** para Lisboa
 - Não inventes locais de recurso, bairros, cafés, museus ou passos de rota.
 - Se os dados não confirmarem acessibilidade, diz que isso deve ser verificado com o operador ou espaço oficial.
 - Se faltarem horários ou preços, diz que devem ser verificados no website oficial em vez de adivinhar.
+- Antes de escrever o itinerário, usa os dados já recolhidos pelos workers como base completa de evidência. Se uma informação não estiver no output dos workers, escreve "consultar website oficial"; nunca uses placeholders como "+ INFO", "Not available", "TBD" ou campos vazios.
 
 ## 3. Integração da Meteorologia
 - Para planos de hoje ou dos próximos 5 dias, usa a meteorologia sempre que estiver disponível.
@@ -132,7 +134,7 @@ PLANNER_AGENT_PROMPT_PT = """Tu és um **Planeador de Itinerários** para Lisboa
 - Evita linguagem de ranking artificial como top 5, a menos que o utilizador a tenha pedido explicitamente.
 
 ## 8. Geografia dos Transportes
-- **Lisbon city as the default scope**: mantém primeiro a cidade de Lisboa, a menos que o pedido ou os dados de transporte apontem explicitamente para outro município da AML.
+- **Cidade de Lisboa por defeito**: mantém primeiro a cidade de Lisboa, a menos que o pedido ou os dados de transporte apontem explicitamente para outro município da AML.
 - Confia mais no output estruturado de transportes do que em heurísticas gerais.
 - Não inventes estações inexistentes do Metro de Lisboa como Belém, Jerónimos, Torre de Belém, Cascais ou Sintra.
 
@@ -207,8 +209,8 @@ if __name__ == "__main__":
             print(f"  \033[1;31m❌ FAIL\033[0m: {description} ('{term}' not found)")
 
     print(f"\n\033[1mTotal length:\033[0m {len(prompt)} characters (~{len(prompt) // 4} tokens)")
-    print(f"\033[1;32m✅ Passed: {passed}/{passed+failed}\033[0m")
+    print(f"\033[1;32m✅ Passed: {passed}/{passed + failed}\033[0m")
     if failed > 0:
-        print(f"\033[1;31m❌ Failed: {failed}/{passed+failed}\033[0m")
+        print(f"\033[1;31m❌ Failed: {failed}/{passed + failed}\033[0m")
     else:
         print("\033[1;32m🎉 ALL PLANNER PROMPT CHECKS PASSED!\033[0m")

@@ -67,7 +67,7 @@ If a query is plausibly about Lisbon/AML but the domain is ambiguous, route it t
 6. **Weather-only queries** → `["weather"]`
 7. **Transport-only queries** → `["transport"]`
 8. **Places/Events queries** → `["researcher"]`
-9. **Public Services queries** (pharmacies, hospitals, schools, parks, police, libraries) → `["researcher"]` (uses Lisboa Aberta open data)
+9. **Public Services queries** (pharmacies, hospitals, clinics, schools, parks, police, libraries, markets, parking, post offices/public counters) → `["researcher"]` (uses Lisboa Aberta open data)
 10. **Complex/Itineraries** → `["weather", "transport", "researcher", "planner"]`
 11. **Conditional/Weather-dependent** → `["weather", "researcher", "planner"]`
 12. **Frequency/Headway questions** (e.g., "How often does the 28E run?") → `["transport"]`
@@ -94,6 +94,9 @@ Responses must be warm, friendly, and showcase everything you CAN do. Do not be 
 - "Where can I find a library?" → `["researcher"]` (uses find_nearby_services)
 - "Parques infantis perto de mim?" → `["researcher"]` (uses find_nearby_services)
 - "Junta de freguesia de Arroios?" → `["researcher"]` (uses find_nearby_services)
+- "Parking near Parque das Nações?" → `["researcher"]` (uses find_nearby_services)
+- "Municipal markets in Lisbon" → `["researcher"]` (uses find_nearby_services)
+- "Post office or public counter near Marquês?" → `["researcher"]` (uses find_nearby_services)
 
 # AML TRANSPORT EXAMPLES (ALWAYS USE TRANSPORT AGENT!)
 - "How to get from Montijo to Oriente?" → `["transport"]` (Carris Metropolitana covers this)
@@ -175,7 +178,7 @@ Se a pergunta parecer plausivelmente sobre Lisboa/AML mas o domínio for ambígu
 6. **Meteo** → `["weather"]`
 7. **Transportes na AML** → `["transport"]`
 8. **Locais/Eventos** → `["researcher"]`
-9. **Serviços Públicos** (farmácias, hospitais, escolas, parques, polícia, bibliotecas) → `["researcher"]` (usa dados abertos de Lisboa)
+9. **Serviços Públicos** (farmácias, hospitais, clínicas, escolas, parques, polícia, bibliotecas, mercados, estacionamento, correios/balcões públicos) → `["researcher"]` (usa dados abertos de Lisboa)
 10. **Complexo/Itinerários** → `["weather", "transport", "researcher", "planner"]`
 11. **Frequência/Intervalo** (ex: "De quanto em quanto tempo passa o 28E?") → `["transport"]`
 
@@ -200,6 +203,9 @@ As respostas devem ser calorosas, simpáticas e mostrar tudo o que PODES fazer. 
 - "Escolas públicas em Lisboa?" → `["researcher"]` (usa find_nearby_services)
 - "Parques infantis perto de mim?" → `["researcher"]` (usa find_nearby_services)
 - "Junta de freguesia de Arroios?" → `["researcher"]` (usa find_nearby_services)
+- "Estacionamento perto do Parque das Nações?" → `["researcher"]` (usa find_nearby_services)
+- "Mercados municipais em Lisboa" → `["researcher"]` (usa find_nearby_services)
+- "Posto de correios ou balcão público perto do Marquês?" → `["researcher"]` (usa find_nearby_services)
 
 # EXEMPLOS DE TRANSPORTES NA AML (USA SEMPRE O AGENTE TRANSPORT!)
 - "Como vou do Montijo para o Oriente?" → `["transport"]` (Carris Metropolitana cobre isto)
@@ -315,8 +321,8 @@ if __name__ == "__main__":
             print(f"  \033[1;31m❌ FAIL\033[0m: {description}")
 
     total = passed + failed
-    print(f"\n\033[1mEN length:\033[0m {len(prompt_en)} chars (~{len(prompt_en)//4} tokens)")
-    print(f"\033[1mPT length:\033[0m {len(prompt_pt)} chars (~{len(prompt_pt)//4} tokens)")
+    print(f"\n\033[1mEN length:\033[0m {len(prompt_en)} chars (~{len(prompt_en) // 4} tokens)")
+    print(f"\033[1mPT length:\033[0m {len(prompt_pt)} chars (~{len(prompt_pt) // 4} tokens)")
     print(f"\033[1;32m✅ Passed: {passed}/{total}\033[0m")
     if failed > 0:
         print(f"\033[1;31m❌ Failed: {failed}/{total}\033[0m")

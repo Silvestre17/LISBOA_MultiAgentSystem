@@ -106,6 +106,17 @@ _CURATED_QUERY_VARIANTS = {
     "campo de ourique": ["Campo de Ourique, Lisboa, Portugal"],
     "ajuda": ["Ajuda, Lisboa, Portugal"],
     "oeiras": ["Oeiras, Portugal"],
+    "tour de belem": ["Torre de Belém, Lisboa, Portugal"],
+    "tour de belém": ["Torre de Belém, Lisboa, Portugal"],
+    "le chateau de sao jorge": ["Castelo de São Jorge, Lisboa, Portugal"],
+    "le château de são jorge": ["Castelo de São Jorge, Lisboa, Portugal"],
+    "jeronimos": ["Mosteiro dos Jerónimos, Lisboa, Portugal"],
+    "jeronimos monastery": ["Mosteiro dos Jerónimos, Lisboa, Portugal"],
+    "mosteiro dos jeronimos": ["Mosteiro dos Jerónimos, Lisboa, Portugal"],
+    "gulbenkiam": ["Museu Calouste Gulbenkian, Lisboa, Portugal"],
+    "gulbenkian": ["Museu Calouste Gulbenkian, Lisboa, Portugal"],
+    "maat": ["MAAT, Lisboa, Portugal", "Museu de Arte, Arquitetura e Tecnologia, Lisboa, Portugal"],
+    "ccb": ["Centro Cultural de Belém, Lisboa, Portugal"],
 }
 
 _CURATED_DISPLAY_NAMES = {
@@ -129,6 +140,17 @@ _CURATED_DISPLAY_NAMES = {
     "campo de ourique": "Campo de Ourique",
     "ajuda": "Ajuda",
     "oeiras": "Oeiras",
+    "tour de belem": "Torre de Belém",
+    "tour de belém": "Torre de Belém",
+    "le chateau de sao jorge": "Castelo de São Jorge",
+    "le château de são jorge": "Castelo de São Jorge",
+    "jeronimos": "Mosteiro dos Jerónimos",
+    "jeronimos monastery": "Mosteiro dos Jerónimos",
+    "mosteiro dos jeronimos": "Mosteiro dos Jerónimos",
+    "gulbenkiam": "Museu Calouste Gulbenkian",
+    "gulbenkian": "Museu Calouste Gulbenkian",
+    "maat": "MAAT",
+    "ccb": "Centro Cultural de Belém",
 }
 
 

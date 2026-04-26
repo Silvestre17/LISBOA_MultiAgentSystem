@@ -72,3 +72,26 @@ def test_find_nearby_services_prefers_service_matches_over_broad_category_noise(
 
     assert "Hospital de São José" in result
     assert "Alvarás de Obras" not in result
+
+
+def test_fetch_geojson_caches_unavailable_4xx_dataset_urls(monkeypatch) -> None:
+    """A 4xx Lisboa Aberta dataset URL should be marked unavailable and not retried."""
+    dados_abertos._UNAVAILABLE_DATASET_URLS.clear()
+    calls = {"count": 0}
+
+    class FakeResponse:
+        status_code = 400
+
+        def raise_for_status(self) -> None:
+            raise AssertionError("raise_for_status should not be called for cached 4xx handling")
+
+    def fake_get(url: str, timeout: int):
+        calls["count"] += 1
+        return FakeResponse()
+
+    monkeypatch.setattr(dados_abertos.requests, "get", fake_get)
+
+    assert dados_abertos.fetch_geojson_with_retry("https://services.arcgis.com/broken") is None
+    assert dados_abertos.fetch_geojson_with_retry("https://services.arcgis.com/broken") is None
+    assert calls["count"] == 1
+    assert dados_abertos._UNAVAILABLE_DATASET_URLS["https://services.arcgis.com/broken"] == "HTTP 400"

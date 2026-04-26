@@ -1269,7 +1269,7 @@ class ResearcherAgent(BaseAgent):
         nearby_location = nearby_location or self._extract_near_location_name(user_message)
         is_broad_attractions = self._is_broad_attractions_query(user_message)
 
-        if places_tool and place_focus_query and specific_lookup and not is_broad_attractions:
+        if places_tool and place_focus_query and specific_lookup and not is_broad_attractions and not service_types:
             exact_args = {
                 "query": place_focus_query,
                 "max_results": 5,
@@ -1310,7 +1310,7 @@ class ResearcherAgent(BaseAgent):
                     source_line = self._build_places_source_line(exact_result, language)
                     return f"{exact_result}\n\n{source_line}".strip()
 
-        if nearby_tool and service_types and (nearby_location or not place_focus_query or structured_plan):
+        if nearby_tool and service_types:
             service_blocks: List[str] = []
             missing_services: List[str] = []
 
@@ -1506,11 +1506,17 @@ class ResearcherAgent(BaseAgent):
         normalized_query = normalized_query.encode("ascii", "ignore").decode("ascii").lower()
         service_catalog = [
             (("pharmacy", "pharmacies", "farm", "pharmac"), "farm\u00e1cias"),
-            (("hospital", "hospitals", "hospit"), "hospitais"),
+            (("hospital", "hospitals", "hospit", "clinic", "clinica", "clinicas", "cl\u00ednica", "cl\u00ednicas"), "hospitais"),
             (("school", "schools", "escola", "escolas", "sch"), "escolas"),
             (("library", "libraries", "bibliot", "librar"), "bibliotecas"),
-            (("park", "parks", "garden", "gardens", "jardim", "jardins"), "jardins"),
+            (("park", "parks", "garden", "gardens", "jardim", "jardins", "parque infantil", "parques infantis", "playground", "infantil"), "jardins"),
             (("police", "polic"), "pol\u00edcia"),
+            (("parking", "estacion", "car park", "parque de estacionamento"), "estacionamento"),
+            (("market", "markets", "mercado", "mercados", "feira", "feiras"), "mercados"),
+            (("firefighter", "firefighters", "bombeiro", "bombeiros"), "bombeiros"),
+            (("restroom", "restrooms", "toilet", "toilets", "casa de banho", "sanitario", "sanitarios"), "sanit\u00e1rios"),
+            (("embassy", "embassies", "embaixada", "embaixadas"), "embaixadas"),
+            (("citizen shop", "loja do cidadao", "loja do cidad\u00e3o", "servi\u00e7os", "servicos", "posto de correios", "correios"), "Loja do Cidad\u00e3o"),
         ]
 
         extracted: List[str] = []
@@ -1538,6 +1544,12 @@ class ResearcherAgent(BaseAgent):
             return "cultura"
         if normalized == "jardins":
             return "ambiente"
+        if normalized in {"policia", "bombeiros"}:
+            return "seguran\u00e7a"
+        if normalized in {"estacionamento", "sanitarios", "loja do cidadao"}:
+            return "servi\u00e7os"
+        if normalized == "mercados":
+            return "com\u00e9rcio"
         return None
 
     @staticmethod

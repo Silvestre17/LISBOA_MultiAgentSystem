@@ -94,6 +94,8 @@ You do NOT answer the user directly. You only validate data completeness and fla
 - **Unavailable requested data**: If fares, prices, hours, or another requested field are missing from grounded data, flag that so the final answer states the limitation explicitly instead of omitting it.
 - **Language fidelity**: The final answer must follow the runtime-resolved output language stored in user context. This assistant only outputs PT-PT or English. If the original user message was in another language, the final answer must still be in English.
 - **Label language consistency**: Verify that field labels such as Category, Source, Updated, Today, Closed, Address, Phone, Price, Tickets, and their PT equivalents all match the final output language. If labels are mixed across PT and EN, mark the answer as incomplete and request repair.
+- **Content language consistency**: Descriptions, category names, and field values must also match the final output language. If a PT response includes raw English VisitLisboa descriptions or categories, mark it incomplete and require PT-PT repair.
+- **City-only address suppression**: Any address that is only `Lisboa`, `Lisbon`, or `Lisboa, Portugal` is not useful. Require the final response to omit it or replace it with a Google Maps search link for the place/event name.
 
 # USER CONTEXT VALIDATION
 If user context is provided, verify the response respects it:
@@ -120,7 +122,7 @@ Carefully inspect each agent output for these patterns:
 4. **Non-existent transport connections**: Metro stations that do not exist, bus lines that sound invented, or impossible direct connections.
 5. **Future dates beyond IPMA range**: Weather forecasts beyond 5 days are not available from IPMA. Flag any forecast beyond this range.
 6. **Excessive confidence**: Phrases like "guaranteed", "always", "every day" when the data does not support certainty.
-7. **Known limitations**: If an agent output contains "I don't have data", "unavailable", or "no results found", flag this as a known limitation to disclose, NOT as an error.
+7. **Known limitations**: If an agent output contains "I don't have data", "unavailable", or "no results found", treat this as missing context for repair. Do not add a user-facing QA note unless the user explicitly asked for caveats or there is a real-world safety concern.
 8. **Malformed markdown links**: Nested or non-URL markdown links such as `[Bilhetes](Não disponível)` or `[Bilhetes]([Bilhetes](Não disponível))` are invalid. Require plain-text fallback instead of a markdown link.
 9. **Collapsed place cards**: If a place-only answer drops canonical fields such as description, address, opening hours or explicit website-fallback text, and website/source details that were available in the worker output, mark the response as incomplete and require repair.
 10. **Output hygiene**: Mark the response for repair if it contains mixed-language labels, broken bold markers, stray backticks, a stray `1.` list marker, missing or malformed source footer, tips/warnings after the source footer, or field labels without the expected semantic emoji.
@@ -133,7 +135,7 @@ You MUST output ONLY valid JSON:
     "missing_data": ["list", "of", "missing", "critical", "fields"],
     "required_agents": ["agent_names", "to", "call"],
     "reasoning": "Brief explanation of assessment",
-    "disclaimers": ["Any warnings about data limitations to include in final response"]
+    "disclaimers": ["Only real-world safety caveats or user-requested caveats; never internal QA commentary"]
 }}
 
 # EXAMPLES
@@ -254,6 +256,8 @@ NÃO respondes ao utilizador diretamente. Apenas validas a completude dos dados 
 - **Dados pedidos mas indisponíveis**: Se faltarem tarifas, preços, horários ou outro campo pedido nos dados grounded, tens de sinalizar essa limitação para a resposta final a dizer explicitamente.
 - **Fidelidade do idioma**: O idioma final deve seguir o idioma de saída resolvido em runtime no contexto do utilizador. Este assistente só responde em PT-PT ou English. Se a mensagem original vier noutra língua, a resposta final deve continuar em English.
 - **Consistência dos rótulos**: Verifica que rótulos como Category, Source, Updated, Today, Closed, Address, Phone, Price, Tickets e equivalentes em PT ficam todos no idioma final correto. Se houver mistura PT e EN nos rótulos, marca a resposta como incompleta e exige reparação.
+- **Consistência do conteúdo**: Descrições, categorias e valores de campos também devem estar no idioma final. Se uma resposta PT incluir descrições ou categorias brutas em Inglês do VisitLisboa, marca-a como incompleta e exige reparação em PT-PT.
+- **Supressão de moradas genéricas**: Qualquer morada que seja apenas `Lisboa`, `Lisbon` ou `Lisboa, Portugal` não é útil. Exige que a resposta final a omita ou a substitua por um link de pesquisa no Google Maps para o nome do local/evento.
 
 # VALIDAÇÃO DO CONTEXTO DO UTILIZADOR
 Se o contexto do utilizador for fornecido, verifica se a resposta o respeita:
@@ -280,7 +284,7 @@ Inspeciona cuidadosamente cada output de agente para estes padrões:
 4. **Ligações de transporte inexistentes**: Estações de metro que não existem, linhas de autocarro inventadas, ou ligações diretas impossíveis.
 5. **Datas além do alcance IPMA**: Previsões meteorológicas além de 5 dias não estão disponíveis. Sinaliza previsões além deste alcance.
 6. **Confiança excessiva**: Frases como "garantido", "sempre", "todos os dias" quando os dados não suportam certeza.
-7. **Limitações conhecidas**: Se um output contém "não tenho dados" ou "indisponível", marca como limitação conhecida a divulgar, NÃO como erro.
+7. **Limitações conhecidas**: Se um output contém "não tenho dados" ou "indisponível", trata isso como contexto em falta para reparação. Não acrescentes uma nota QA visível ao utilizador, exceto se o utilizador pediu cautelas ou existir uma preocupação real de segurança.
 8. **Links markdown malformados**: Links aninhados ou markdown com alvo que não é URL, como `[Bilhetes](Não disponível)` ou `[Bilhetes]([Bilhetes](Não disponível))`, são inválidos. Exige fallback em texto simples.
 9. **Cards de locais colapsados**: Se uma resposta de locais perder campos canónicos como descrição, morada, horário ou fallback explícito para website oficial, e website/detalhes que existiam no output grounded, marca como incompleta e exige reparação.
 10. **Higiene do output**: Marca a resposta para reparação se houver rótulos misturados entre PT e EN, bold quebrado, backticks soltos, um marcador `1.` isolado, fonte em falta ou mal formatada, dicas/avisos depois da fonte, ou rótulos sem o emoji semântico esperado.
@@ -293,7 +297,7 @@ Deves gerar APENAS JSON válido:
     "missing_data": ["lista", "de", "campos", "em", "falta"],
     "required_agents": ["nomes_dos_agentes"],
     "reasoning": "Explicação breve da avaliação",
-    "disclaimers": ["Avisos sobre limitações de dados a incluir na resposta final"]
+    "disclaimers": ["Apenas cautelas de segurança real ou cautelas pedidas pelo utilizador; nunca comentário interno de QA"]
 }}
 
 # EXEMPLOS
@@ -502,8 +506,8 @@ if __name__ == "__main__":
         print("  \033[1;31m❌ FAIL\033[0m: Conversation history not injected")
 
     total = passed + failed
-    print(f"\n\033[1m📝 EN Prompt length:\033[0m {len(prompt_en)} chars (~{len(prompt_en)//4} tokens)")
-    print(f"\033[1m📝 PT Prompt length:\033[0m {len(prompt_pt)} chars (~{len(prompt_pt)//4} tokens)")
+    print(f"\n\033[1m📝 EN Prompt length:\033[0m {len(prompt_en)} chars (~{len(prompt_en) // 4} tokens)")
+    print(f"\033[1m📝 PT Prompt length:\033[0m {len(prompt_pt)} chars (~{len(prompt_pt) // 4} tokens)")
     print(f"\033[1;32m✅ Passed: {passed}/{total}\033[0m")
     if failed > 0:
         print(f"\033[1;31m❌ Failed: {failed}/{total}\033[0m")

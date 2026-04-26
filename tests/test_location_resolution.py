@@ -175,6 +175,15 @@ def test_city_centre_aliases_resolve_to_stable_central_lisbon_queries() -> None:
     assert get_location_display_name("centre") == "Rossio"
 
 
+def test_foreign_place_aliases_resolve_to_curated_lisbon_queries() -> None:
+    """Common foreign place names should resolve through curated Lisbon aliases before geocoding."""
+    belem_variants = _build_query_variants("Tour de Belém")
+    castle_variants = _build_query_variants("Le château de São Jorge")
+
+    assert belem_variants[0] == "Torre de Belém, Lisboa, Portugal"
+    assert castle_variants[0] == "Castelo de São Jorge, Lisboa, Portugal"
+
+
 def test_nominatim_requests_are_bounded_to_portugal_and_the_aml() -> None:
     """Live geocoding should stay scoped to Portugal and the AML viewbox to reduce false positives."""
 
