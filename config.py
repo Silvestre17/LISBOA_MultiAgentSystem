@@ -179,13 +179,13 @@ class Config:
     # Debug/Development Settings
     # Show raw markdown responses in terminal for debugging/copying
     SHOW_MARKDOWN_RESPONSE_IN_TERMINAL = (
-        # False  # Set to True locally when debugging response formatting
-        True
+        False  # Set to True locally when debugging response formatting
+        # True
     )
     # Show detailed execution sections in the terminal summary.
     # This controls the verbose LangSmith, agent breakdown, and tool-call blocks.
-    # SHOW_DETAILED_EXECUTION_LOGS = False
-    SHOW_DETAILED_EXECUTION_LOGS = True
+    SHOW_DETAILED_EXECUTION_LOGS = False
+    # SHOW_DETAILED_EXECUTION_LOGS = True
 
     # =========================================================================
     # LISBON GEOGRAPHIC PARAMETERS (IPMA)
