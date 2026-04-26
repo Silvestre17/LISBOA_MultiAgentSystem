@@ -529,6 +529,100 @@ def _localize_event_category(category: Optional[str], language: str = "en") -> s
     return mapping.get(raw, raw)
 
 
+def _localize_place_category(category: Optional[str], language: str = "en") -> str:
+    """Localizes common VisitLisboa place categories."""
+    raw = (category or "").strip()
+    if not raw or language != "pt":
+        return raw
+    mapping = {
+        "General": "Geral",
+        "Museums & Monuments": "Museus e Monumentos",
+        "Museums": "Museus",
+        "Monuments": "Monumentos",
+        "Restaurants": "Restaurantes",
+        "Restaurant": "Restaurante",
+        "Attractions": "Atrações",
+        "Attraction": "Atração",
+        "Hotels": "Hotéis",
+        "View Points": "Miradouros",
+        "Parks & Gardens": "Parques e Jardins",
+        "Shopping": "Compras",
+        "Nightlife": "Vida noturna",
+        "Tours": "Tours",
+        "Beaches": "Praias",
+    }
+    return mapping.get(raw, raw)
+
+
+def _localize_visitlisboa_description(
+    description: Optional[str],
+    language: str = "en",
+    *,
+    content_kind: str = "place",
+) -> str:
+    """Avoid leaking raw English scraped descriptions into PT-PT answers."""
+    raw = re.sub(r"\s+", " ", (description or "").strip())
+    if not raw or language != "pt":
+        return raw
+
+    english_markers = [
+        " the ",
+        " and ",
+        " with ",
+        " from ",
+        " here",
+        " world ",
+        " visitors ",
+        " experience",
+        " innovation",
+        " discover",
+        " located",
+        " offers ",
+    ]
+    padded = f" {raw.lower()} "
+    if any(marker in padded for marker in english_markers):
+        if content_kind == "event":
+            return "Descrição disponível na página oficial do evento."
+        return "Descrição disponível na página oficial do local."
+    return raw
+
+
+def _localize_place_value_text(value: Optional[str], language: str = "en") -> str:
+    """Localizes common VisitLisboa place field values for PT-PT output."""
+    raw = re.sub(r"\s+", " ", (value or "").strip())
+    if not raw or language != "pt":
+        return raw
+
+    localized = raw
+    localized = re.sub(r"\bFree\s+with\s+Lisboa\s+Card\b", "Gratuito com Lisboa Card", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bwith\s+Lisboa\s+Card\b", "com Lisboa Card", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bChildren\s+Free\s+until\s*\(age\)\s*:", "Crianças grátis até aos", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bAdult\s*:", "Adulto:", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bSenior\s*:", "Sénior:", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bFree\b", "Gratuito", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\+\s*info\b", "consultar website oficial", localized, flags=re.IGNORECASE)
+    return localized
+
+
+def _is_generic_lisbon_location(value: Optional[str]) -> bool:
+    """Return whether a VisitLisboa location is only a city-level stub."""
+    normalized = _normalize_lookup_text(value)
+    return normalized in {"lisboa", "lisbon", "lisboa portugal", "lisbon portugal"}
+
+
+def _format_visitlisboa_location_line(location: Optional[str], title: str, language: str = "en") -> str:
+    """Format VisitLisboa location output, replacing city-only stubs with Maps search."""
+    loc = re.sub(r"\s+", " ", (location or "").strip())
+    if _is_generic_lisbon_location(loc):
+        from urllib.parse import quote_plus
+
+        label = "Morada" if language == "pt" else "Address"
+        link_label = "Pesquisar no Maps" if language == "pt" else "Search on Maps"
+        query = quote_plus(f"{title} Lisboa")
+        return f"   📍 **{label}:** [{link_label}](https://www.google.com/maps/search/?api=1&query={query})"
+    return f"   📍 {loc}" if loc else ""
+
+
 def _localize_event_date_filter(date_filter: Optional[str], language: str = "en") -> str:
     """Localizes common date-filter labels for user-facing summaries."""
     raw = (date_filter or "all available dates").strip()
@@ -747,6 +841,37 @@ def _normalize_lookup_text(text: Optional[str]) -> str:
     normalized = normalized.lower()
     normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
     return re.sub(r"\s+", " ", normalized).strip()
+
+
+_KNOWN_PLACE_LOOKUP_ALIASES = {
+    "jeronimos": "Jerónimos Monastery",
+    "jeronimos monastery": "Jerónimos Monastery",
+    "mosteiro dos jeronimos": "Jerónimos Monastery",
+    "mosteiro jeronimos": "Jerónimos Monastery",
+    "gulbenkiam": "Gulbenkian Museum",
+    "gulbenkian": "Gulbenkian Museum",
+    "ccb": "Centro Cultural de Belém",
+    "centro cultural de belem": "Centro Cultural de Belém",
+    "maat": "Museu de Arte, Arquitetura e Tecnologia",
+    "panteao": "Panteão Nacional",
+    "panteao nacional": "Panteão Nacional",
+    "torre": "Torre de Belém",
+    "torre de belem": "Torre de Belém",
+    "tour de belem": "Torre de Belém",
+}
+
+
+def _apply_known_place_lookup_alias(query: Optional[str]) -> Optional[str]:
+    """Map common PT/EN aliases and typos to VisitLisboa canonical names."""
+    normalized = _normalize_lookup_text(query)
+    if not normalized:
+        return query
+    if normalized in _KNOWN_PLACE_LOOKUP_ALIASES:
+        return _KNOWN_PLACE_LOOKUP_ALIASES[normalized]
+    for alias, canonical in _KNOWN_PLACE_LOOKUP_ALIASES.items():
+        if len(alias) >= 4 and re.search(rf"\b{re.escape(alias)}\b", normalized):
+            return canonical
+    return query
 
 
 def _extract_lookup_tokens(text: Optional[str]) -> List[str]:
@@ -2522,7 +2647,8 @@ def _fallback_search(query: str, category: str, data: List[Dict], max_results: i
             item.get('short_description', ''),
         ])
 
-        if not _place_within_requested_geography(item.get('location', ''), query):
+        geography_text = " ".join([item.get('title', ''), item.get('url', ''), item.get('location', '')])
+        if not _place_within_requested_geography(geography_text, query):
             continue
 
         if not _matches_required_service_terms(service_anchor_text, required_service_terms):
@@ -2891,7 +3017,11 @@ def search_cultural_events(
             dates_str = format_event_dates(event, language=render_language)
             duration = event.get('_duration_days', get_event_duration_days(event))
             duration_label = _format_event_duration_label(duration, language=render_language)
-            description_summary = _summarize_event_description(event.get('full_description'))
+            description_summary = _localize_visitlisboa_description(
+                _summarize_event_description(event.get('full_description')),
+                language=render_language,
+                content_kind="event",
+            )
             price_text = _localize_event_price(event.get('price'), language=render_language)
 
             output_parts.append(f"{i}. 📅 **{title}**")
@@ -2910,7 +3040,9 @@ def search_cultural_events(
                 else:
                     output_parts.append(f"   📝 **Description:** {description_summary}")
 
-            output_parts.append(f"   📍 {loc}")
+            location_line = _format_visitlisboa_location_line(loc, title, language=render_language)
+            if location_line:
+                output_parts.append(location_line)
 
             # Show price information if available
             if price_text:
@@ -3029,7 +3161,9 @@ def search_places_attractions(
         specific_lookup_query = _extract_specific_place_lookup_phrase(query)
         if specific_lookup and query and not specific_lookup_query:
             specific_lookup_query = _normalize_lookup_text(query)
-        effective_query = specific_lookup_query or query
+        effective_query = _apply_known_place_lookup_alias(specific_lookup_query or query)
+        if specific_lookup_query:
+            specific_lookup_query = _apply_known_place_lookup_alias(specific_lookup_query) or specific_lookup_query
         query_intent = _infer_place_query_intent(effective_query or query, category)
 
         logger.info(
@@ -3075,9 +3209,13 @@ def search_places_attractions(
 
                 logger.info(f"search_places_attractions: searching VisitLisboa for '{search_query}'")
 
+                search_k = requested_window * 2
+                if query_intent in {"top_attractions", "museum_monument"} and not specific_lookup_query:
+                    search_k = max(search_k, requested_window * 5, 15)
+
                 results_with_scores = kb.search_with_scores(
                     query=search_query,
-                    k=requested_window * 2,
+                    k=search_k,
                     collections=[COLLECTION_PLACES]
                 )
 
@@ -3114,7 +3252,8 @@ def search_places_attractions(
                         cleaned_doc_description,
                     ])
 
-                    if not _place_within_requested_geography(raw_location, query):
+                    geography_text = " ".join([metadata.get('title', ''), metadata.get('url', ''), raw_location])
+                    if not _place_within_requested_geography(geography_text, query):
                         continue
 
                     if not _matches_required_service_terms(service_anchor_text, required_service_terms):
@@ -3412,7 +3551,7 @@ def search_places_attractions(
 
         if render_language == "pt":
             output_parts = [
-                f"🏛️ **Found {len(final_results)} Places/Attractions in Lisbon:**\n",
+                f"🏛️ **{len(final_results)} locais/atrações encontrados em Lisboa:**\n",
                 f"🧭 **Janela de resultados:** {offset + 1}-{offset + len(final_results)} de {len(all_results)}.",
             ]
         else:
@@ -3426,7 +3565,7 @@ def search_places_attractions(
 
         for i, place in enumerate(final_results, 1):
             title = place.get('title', 'Unknown')
-            cat = place.get('category', 'General')
+            cat = _localize_place_category(place.get('category', 'General'), language=render_language)
             loc = place.get('location', 'Lisbon')
             source = place.get('source', 'unknown')
 
@@ -3441,18 +3580,23 @@ def search_places_attractions(
             else:
                 output_parts.append(f"\n{i}. 🏛️ **{title}**")  # VisitLisboa icon
 
-            output_parts.append(f"   📂 Category: {cat}")
+            output_parts.append(f"   📂 {'Categoria' if render_language == 'pt' else 'Category'}: {cat}")
 
             # Lisboa Card benefit (from enriched data)
             lisboa_card_benefit = None
             if full_data:
                 lisboa_card_benefit = full_data.get('lisboa_card_benefit') or full_data.get('lisboa_card_discount')
             if lisboa_card_benefit:
-                output_parts.append(f"   🎫 {lisboa_card_benefit}")
+                output_parts.append(f"   🎫 {_localize_place_value_text(lisboa_card_benefit, language=render_language)}")
 
             description_text = _clean_place_description_text(
                 (full_data.get('short_description') if full_data else None) or place.get('short_description'),
                 title,
+            )
+            description_text = _localize_visitlisboa_description(
+                description_text,
+                language=render_language,
+                content_kind="place",
             )
             if description_text:
                 desc = description_text[:200]
@@ -3460,7 +3604,9 @@ def search_places_attractions(
                     desc += "..."
                 output_parts.append(f"   {desc}")
 
-            output_parts.append(f"   📍 {loc}")
+            location_line = _format_visitlisboa_location_line(loc, title, language=render_language)
+            if location_line:
+                output_parts.append(location_line)
 
             # Schedule/opening hours (from enriched data)
             if full_data and full_data.get('schedules'):
@@ -3474,6 +3620,7 @@ def search_places_attractions(
                     price_desc = tickets['description'][:80]
                     if len(tickets['description']) > 80:
                         price_desc += "..."
+                    price_desc = _localize_place_value_text(price_desc, language=render_language)
                     output_parts.append(f"   💰 {price_desc}")
                 elif tickets.get('links'):
                     first_link = tickets['links'][0]
@@ -3485,7 +3632,8 @@ def search_places_attractions(
             if full_data and full_data.get('tripadvisor'):
                 ta = full_data['tripadvisor']
                 if ta.get('rating'):
-                    output_parts.append(f"   ⭐ TripAdvisor: {ta['rating']}/5 ({ta.get('reviews_count', '?')} reviews)")
+                    reviews_label = "avaliações" if render_language == "pt" else "reviews"
+                    output_parts.append(f"   ⭐ TripAdvisor: {ta['rating']}/5 ({ta.get('reviews_count', '?')} {reviews_label})")
 
             # Contact info (from enriched data)
             if full_data and full_data.get('contact_info'):

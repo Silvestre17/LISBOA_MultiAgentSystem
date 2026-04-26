@@ -24,6 +24,7 @@ from agent.utils.response_formatter import (
     _LABEL_TRANSLATIONS,
     _count_structured_place_cards,
     _place_response_missing_required_fields,
+    final_visual_pass,
     infer_response_language,
 )
 
@@ -797,13 +798,14 @@ class QualityAssuranceAgent(BaseAgent):
                 "REGRAS:\n"
                 "- Usa apenas factos presentes no rascunho e nos outputs dos agentes.\n"
                 "- Nunca inventes locais, horários, preços, acessibilidade, estações, ligações, ou URLs.\n"
-                "- Se algo não estiver confirmado, diz explicitamente que deve ser verificado.\n"
+                "- Se algo não estiver confirmado e o utilizador o pediu, diz brevemente que deve ser verificado. Caso contrário, omite o campo.\n"
                 "- Remove referências internas a QA, validação, fact-checking, reasoning, ou agentes.\n"
                 "- Preserva o idioma de saída exigido pelo runtime, o estilo visual, os emojis úteis e a estrutura markdown.\n"
                 "- Todas as tuas edições, avisos e aditamentos de texto devem ser estritamente em Português (PT-PT).\n"
                 "- Mantém ou melhora a linha de fonte final se ela já existir.\n"
                 "- Preserva quaisquer perguntas interativas ao utilizador que estejam no final do texto (ex: perguntar se o utilizador quer planear o Dia 2).\n"
-                "- Formata qualquer nota ou aviso de QA no final da resposta usando explicitamente listas com bullets iniciados por ⚠️ (ex: - ⚠️ Nota...).\n"
+                "- Não acrescentes notas ou avisos de QA ao output do utilizador. Repara silenciosamente ou omite campos sem suporte.\n"
+                "- Só mantém um aviso ⚠️ quando houver uma preocupação real de segurança ou quando o utilizador tiver pedido cautelas.\n"
                 "- Devolve apenas a resposta final reparada, sem prefácio nem explicações."
             )
             task_prefix = "# TAREFA DE REPARAÇÃO FINAL"
@@ -821,13 +823,14 @@ class QualityAssuranceAgent(BaseAgent):
                 "RULES:\n"
                 "- Use only facts present in the draft and worker outputs.\n"
                 "- Never invent venues, times, prices, accessibility claims, stations, links, or URLs.\n"
-                "- If something is not confirmed, say it should be verified.\n"
+                "- If something is not confirmed and the user asked for it, briefly say it should be verified. Otherwise omit the field.\n"
                 "- Remove any references to QA, validation, fact-checking, reasoning, or internal agents.\n"
                 "- Preserve the required runtime output language, visual style, helpful emojis, and markdown structure.\n"
                 "- All edits, warnings, and added text must be strictly in English.\n"
                 "- Keep or improve the final source line if one already exists.\n"
                 "- Preserve any interactive questions to the user at the end of the text (e.g., asking if they want to plan Day 2).\n"
-                "- Format any QA disclaimer or note at the bottom of the response explicitly using bullet points starting with ⚠️ (e.g., - ⚠️ Note...).\n"
+                "- Do not add QA notes or QA warnings to the user output. Repair silently or omit unsupported fields.\n"
+                "- Keep a ⚠️ warning only for a real-world safety concern or when the user explicitly asked for caveats.\n"
                 "- Return only the repaired final answer, with no preface or explanation."
             )
             task_prefix = "# FINAL REPAIR TASK"
@@ -881,6 +884,7 @@ class QualityAssuranceAgent(BaseAgent):
                 ]
             ):
                 return draft_response
+            repaired = final_visual_pass(repaired)
             return repaired or draft_response
         except Exception as exc:
             logger.warning("QA final repair pass failed, keeping draft response: %s", exc)

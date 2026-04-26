@@ -63,3 +63,32 @@ def test_search_cultural_events_filters_free_event_queries() -> None:
 
     assert "Free Jazz Night" in result
     assert "Paid Club Night" not in result
+
+
+def test_known_place_aliases_cover_diacritics_typos_and_abbreviations() -> None:
+    """VisitLisboa place lookups should normalize common PT/EN aliases and typos."""
+    assert visitlisboa_api._apply_known_place_lookup_alias("Mosteiro dos Jerónimos") == "Jerónimos Monastery"
+    assert visitlisboa_api._apply_known_place_lookup_alias("Jeronimos") == "Jerónimos Monastery"
+    assert visitlisboa_api._apply_known_place_lookup_alias("Gulbenkiam") == "Gulbenkian Museum"
+    assert visitlisboa_api._apply_known_place_lookup_alias("MAAT") == "Museu de Arte, Arquitetura e Tecnologia"
+    assert visitlisboa_api._apply_known_place_lookup_alias("CCB") == "Centro Cultural de Belém"
+
+
+def test_pt_visitlisboa_description_and_value_helpers_do_not_leak_raw_english() -> None:
+    """PT tool output should not expose raw English scraped descriptions or values."""
+    description = "The global world of innovation converges here with visitors from many countries."
+
+    assert visitlisboa_api._localize_visitlisboa_description(description, "pt", content_kind="event") == (
+        "Descrição disponível na página oficial do evento."
+    )
+    assert visitlisboa_api._localize_place_value_text("Free with Lisboa Card", "pt") == "Gratuito com Lisboa Card"
+    assert "with Lisboa Card" not in visitlisboa_api._localize_place_value_text("20% with Lisboa Card", "pt")
+
+
+def test_generic_visitlisboa_location_becomes_maps_search_link() -> None:
+    """Generic Lisbon-only locations should become Maps searches for the specific place."""
+    line = visitlisboa_api._format_visitlisboa_location_line("Lisbon", "Gulbenkian Museum", language="pt")
+
+    assert "Lisbon" not in line
+    assert "Pesquisar no Maps" in line
+    assert "Gulbenkian+Museum+Lisboa" in line

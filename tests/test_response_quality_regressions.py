@@ -38,6 +38,56 @@ def test_infer_response_language_keeps_short_pt_transport_overview_query_in_pt()
     ) == "pt"
 
 
+def test_final_visual_pass_strips_internal_qa_annotations_and_pt_technical_terms() -> None:
+    """Final rendering must remove QA leakage and localize recurring English technical words in PT responses."""
+    raw = (
+        "### Resultado\n"
+        "- ⚠️ Os horários de funcionamento não foram fornecidos pelo QA.\n"
+        "- O runtime não conseguiu confirmar este detalhe no backend.\n"
+        "📌 **Fonte:** [*VisitLisboa*](https://www.visitlisboa.com)"
+    )
+
+    output = final_visual_pass(raw)
+
+    assert "QA" not in output
+    assert "horários de funcionamento não foram fornecidos" not in output.lower()
+    assert "runtime" not in output.lower()
+    assert "backend" not in output.lower()
+    assert "sistema" in output.lower()
+
+
+def test_final_visual_pass_removes_generic_city_only_address_lines() -> None:
+    """City-only address stubs should not survive final card rendering."""
+    raw = "### Local\n- 📍 **Morada:** Lisboa\n- 🌐 **Website:** [site](https://example.com)"
+
+    output = final_visual_pass(raw)
+
+    assert "**Morada:** Lisboa" not in output
+    assert "Website" in output
+
+
+def test_final_visual_pass_splits_adjacent_warning_blocks() -> None:
+    """Adjacent warning blocks should render as separate Streamlit paragraphs."""
+    raw = "⚠️ **Aviso:** primeiro aviso ⚠️ **Nota:** segundo aviso\n📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt)"
+
+    output = final_visual_pass(raw)
+
+    assert "primeiro aviso\n\n⚠️ **Nota:** segundo aviso" in output
+    assert "segundo aviso\n\n📌 **Fonte:**" in output
+
+
+def test_researcher_prompt_requires_restaurant_criteria_extraction() -> None:
+    """Restaurant queries should preserve criteria such as views, price, and touristiness."""
+    from agent.prompts.researcher import get_researcher_prompt
+
+    prompt = get_researcher_prompt(language="en")
+
+    assert "Criteria Extraction" in prompt
+    assert "river or Tagus view" in prompt
+    assert "touristiness" in prompt
+    assert "curated from available data" in prompt
+
+
 def test_multiagent_chat_routes_using_effective_query_language() -> None:
     """Multi-agent orchestration should route and finalize using the detected query language."""
     assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
@@ -823,7 +873,7 @@ def test_researcher_worker_replaces_invalid_ticket_placeholder_with_source_note(
         language="pt",
     )
 
-    assert "- 🎟️ **Bilhetes:** Sem link de compra indicado na fonte" in output
+    assert "- 🎟️ **Bilhetes:** Não disponível" in output
     assert "[Bilhetes]([Bilhetes](Bilhetes: indisponíveis))" not in output
     assert "[Bilhetes](Não disponível)" not in output
 
@@ -881,36 +931,56 @@ def test_researcher_direct_place_lookup_covers_multiple_requested_services() -> 
         assert "Lisboa Aberta" in result
 
 
-def test_researcher_named_service_lookup_prefers_place_search_over_generic_nearby_results() -> None:
-    """Named service queries should search by the facility name instead of returning generic nearby-service lists."""
+def test_researcher_named_service_lookup_uses_open_data_services_not_visitlisboa() -> None:
+    """Named service queries should stay on Lisboa Aberta instead of VisitLisboa attractions."""
     with patch.object(ResearcherAgent, "__init__", lambda self: None):
         agent = ResearcherAgent()
 
         places_tool = MagicMock()
         places_tool.name = "search_places_attractions"
-        places_tool.invoke = MagicMock(
-            return_value=(
-                "### \U0001F4CD Hospital Santa Maria\n\n"
-                "- \U0001F4CD **Morada:** Avenida Professor Egas Moniz, Lisboa"
-            )
-        )
+        places_tool.invoke = MagicMock(side_effect=AssertionError("VisitLisboa should not handle service queries"))
         nearby_tool = MagicMock()
         nearby_tool.name = "find_nearby_services"
-        nearby_tool.invoke = MagicMock(side_effect=AssertionError("generic nearby lookup should be skipped"))
+        nearby_tool.invoke = MagicMock(
+            return_value=(
+                "\U0001F4CD Found 1 results from 'Hospitais':\n\n"
+                "1. Hospital Santa Maria\n   \U0001F4CD Avenida Professor Egas Moniz, Lisboa"
+            )
+        )
         agent.tools = [places_tool, nearby_tool]
 
         result = agent._run_direct_place_lookup("Onde fica o Hospital Santa Maria?", "pt")
 
-        places_tool.invoke.assert_called_once_with(
-            {
-                "query": "Hospital Santa Maria",
-                "max_results": 5,
-                "offset": 0,
-                "language": "pt",
-                "specific_lookup": True,
-            }
-        )
+        places_tool.invoke.assert_not_called()
+        nearby_tool.invoke.assert_called_once()
         assert "Hospital Santa Maria" in result
+        assert "Lisboa Aberta" in result
+
+
+def test_researcher_pharmacy_nearby_query_uses_lisboa_aberta_only() -> None:
+    """Pharmacy-near-place queries must not return VisitLisboa attractions or restaurants."""
+    with patch.object(ResearcherAgent, "__init__", lambda self: None):
+        agent = ResearcherAgent()
+
+        places_tool = MagicMock()
+        places_tool.name = "search_places_attractions"
+        places_tool.invoke = MagicMock(side_effect=AssertionError("VisitLisboa should not be called for pharmacy queries"))
+        nearby_tool = MagicMock()
+        nearby_tool.name = "find_nearby_services"
+        nearby_tool.invoke = MagicMock(
+            return_value=(
+                "\U0001F4CD Found 1 results from 'Farmácias e Parafarmácias (near Parque das Nações)':\n\n"
+                "1. Farmácia Expo\n   \U0001F4CD Alameda dos Oceanos"
+            )
+        )
+        agent.tools = [places_tool, nearby_tool]
+
+        result = agent._run_direct_place_lookup("Farmácia perto do Parque das Nações", "pt")
+
+        places_tool.invoke.assert_not_called()
+        nearby_tool.invoke.assert_called_once()
+        assert "Farmácia Expo" in result
+        assert "Lisboa Aberta" in result
 
 
 def test_transport_agent_compares_metro_and_train_and_states_fare_limitation() -> None:

@@ -116,6 +116,25 @@ def test_smoke_suite_can_append_prompt_transcript(tmp_path, capsys) -> None:
     assert "Single response body" in transcript
 
 
+def test_append_transcript_block_strips_ansi_escape_sequences(tmp_path) -> None:
+    """Prompt transcripts should be persisted as plain text without ANSI console codes."""
+    transcript_path = tmp_path / "test_queries_15.04.2026.txt"
+    run_prompts._initialize_transcript(transcript_path, overwrite=True)
+
+    run_prompts._append_transcript_block(
+        transcript_path,
+        "CUSTOM SMOKE | Language: PT | Prompt: teste",
+        "\033[1;34m--- 🕵️ INTERMEDIATE STEPS & TOOLS ---\033[0m\n"
+        "  \033[1;35m[METADATA]\033[0m Tools used: 2 | Latency: 5.48s\n",
+    )
+
+    transcript = transcript_path.read_text(encoding="utf-8")
+
+    assert "\x1b[" not in transcript
+    assert "--- 🕵️ INTERMEDIATE STEPS & TOOLS ---" in transcript
+    assert "[METADATA] Tools used: 2 | Latency: 5.48s" in transcript
+
+
 def test_stream_tee_supports_reconfigure_passthrough() -> None:
     """Transcript tee streams should tolerate code that reconfigures stdout/stderr."""
 

@@ -53,6 +53,7 @@ import argparse
 import io
 import json
 import os
+import re
 import sys
 import time
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
@@ -79,6 +80,7 @@ COVERAGE_MANIFEST_PATH = Path(PROJECT_ROOT) / "tests" / "fixtures" / "tool_cover
 SUPPORTED_MODEL_PROVIDERS = {"azure", "openai", "lmstudio"}
 SUPPORTED_COVERAGE_DOMAINS = {"weather", "transport", "researcher"}
 DEFAULT_TRANSCRIPT_FILENAME = "test_queries_15.04.2026.txt"
+ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
 # Each prompt is a tuple: (prompt_text, language_code, category)
 SMOKE_PROMPTS = [
@@ -274,13 +276,14 @@ def _initialize_transcript(path: Path, overwrite: bool = False) -> None:
 
 def _append_transcript_block(path: Path, title: str, body: str) -> None:
     """Append a captured execution block to the transcript artifact."""
+    sanitized_body = ANSI_ESCAPE_RE.sub("", body).replace("\r\n", "\n").replace("\r", "\n")
     divider = "=" * 80
     block = (
         f"{divider}\n"
         f"{title}\n"
         f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
         f"{divider}\n"
-        f"{body.rstrip()}\n\n"
+        f"{sanitized_body.rstrip()}\n\n"
     )
     with path.open("a", encoding="utf-8") as handle:
         handle.write(block)

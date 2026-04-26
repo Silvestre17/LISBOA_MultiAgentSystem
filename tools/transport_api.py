@@ -387,8 +387,8 @@ _KNOWN_AMBIGUITIES: Dict[str, Dict[str, str]] = {
     "madeira": {
         "urban_name": "Rua Humberto Madeira",
         "alternate_name": "Ilha da Madeira",
-        "alternate_hint": "Se te referes à **Ilha da Madeira**, este planeador de metro/autocarro não cobre a ilha; deves confirmar voo.",
-        "urban_hint": "Se te referes a **Rua Humberto Madeira**, o trajeto de metro mais próximo fica em Encarnação (Linha Vermelha).",
+        "alternate_hint": "A) 🏝️ **Ilha da Madeira** — não é acessível de metro; precisas de avião.",
+        "urban_hint": "B) 🚇 **Rua Humberto Madeira / Av. Ilha da Madeira, em Lisboa** — sigo abaixo com a opção urbana mais próxima.",
     },
     "oriente": {
         "urban_name": "Estação Oriente / Gare do Oriente",
@@ -435,12 +435,10 @@ def _build_ambiguity_preamble(origin: str, destination: str) -> str:
         return ""
 
     name = hit["raw"].title()
-    alternate_name = hit["alternate_name"]
-    urban_name = hit["urban_name"]
     alternate_hint = hit["alternate_hint"]
     urban_hint = hit["urban_hint"]
     return (
-        f"⚠️ **Ambiguidade no destino**: **{name}** pode referir-se à **{alternate_name}** ou a **{urban_name}**, em Lisboa.\n"
+        f"⚠️ **Ambiguidade no destino:** estás a perguntar sobre **{name}**?\n"
         f"- {alternate_hint}\n"
         f"- {urban_hint}\n"
         "- Assumo a interpretação urbana abaixo. Se não for isso, reformula o pedido com o nome completo do destino."

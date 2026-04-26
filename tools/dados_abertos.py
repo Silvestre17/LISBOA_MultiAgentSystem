@@ -47,6 +47,7 @@ except ImportError:
 REQUEST_TIMEOUT = 15  # seconds
 MAX_RETRIES = 3
 BACKOFF_FACTOR = 2
+_UNAVAILABLE_DATASET_URLS: Dict[str, str] = {}
 
 # ==========================================================================
 # Data Loading
@@ -122,11 +123,20 @@ def fetch_geojson_with_retry(url: str) -> Optional[Dict[str, Any]]:
         - Implements exponential backoff (2s, 4s, 8s)
         - Validates GeoJSON structure
     """
+    if url in _UNAVAILABLE_DATASET_URLS:
+        logger.warning("Skipping unavailable Lisboa Aberta dataset URL: %s (%s)", url, _UNAVAILABLE_DATASET_URLS[url])
+        return None
+
     for attempt in range(MAX_RETRIES):
         try:
             logger.info(f"Fetching GeoJSON (attempt {attempt + 1}/{MAX_RETRIES}): {url[:80]}...")
 
             response = requests.get(url, timeout=REQUEST_TIMEOUT)
+            if response.status_code >= 400:
+                reason = f"HTTP {response.status_code}"
+                _UNAVAILABLE_DATASET_URLS[url] = reason
+                logger.warning("Lisboa Aberta dataset unavailable: %s -> %s", url, reason)
+                return None
             response.raise_for_status()
 
             data = response.json()
@@ -617,7 +627,10 @@ def find_nearby_services(
 
         geojson_data = fetch_geojson_with_retry(stable_url)
         if not geojson_data:
-            dataset_errors.append(f"{title}: fetch failed")
+            if stable_url in _UNAVAILABLE_DATASET_URLS:
+                dataset_errors.append(f"{title}: dataset temporarily unavailable")
+            else:
+                dataset_errors.append(f"{title}: fetch failed")
             continue
 
         features = geojson_data.get('features', [])

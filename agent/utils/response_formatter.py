@@ -3318,7 +3318,7 @@ def _looks_like_missing_researcher_value(value: str) -> bool:
 
 def _ticket_link_unavailable_note(language: str) -> str:
     """Return the canonical fallback note when the source has no usable ticket URL."""
-    return "Sem link de compra indicado na fonte" if language == "pt" else "No purchase link provided in the source"
+    return "Não disponível" if language == "pt" else "Not available"
 
 
 def _render_researcher_label_link(
@@ -4059,9 +4059,13 @@ def reconcile_researcher_event_response(
             rendered_lines.append(f"- 📝 **{description_label}:** {event['description']}")
         if event.get("address"):
             address_value = str(event["address"]).strip()
-            if "](" not in address_value:
-                address_value = f"[{address_value}]({_gmaps_link(address_value)})"
-            rendered_lines.append(f"- 📍 **{address_label}:** {address_value}")
+            address_value = _render_researcher_address_value(
+                address_value,
+                title=str(event.get("title") or ""),
+                language=language,
+            )
+            if address_value:
+                rendered_lines.append(f"- 📍 **{address_label}:** {address_value}")
         if event.get("when"):
             rendered_lines.append(f"- 📅 **{date_label}:** {event['when']}")
         if event.get("duration"):
@@ -4530,24 +4534,33 @@ def format_researcher_card(text: str, language: str = "en", user_query: str = ""
             ("description", "📝"),
             ("category", "📂"),
             ("address", "📍"),
+            ("today", "🕐"),
+            ("hours", "🕐"),
             ("phone", "📞"),
             ("rating", "⭐"),
             ("price", "💰"),
-            ("today", "🕐"),
-            ("hours", "🕐"),
             ("website", "🌐"),
             ("tickets", "🎟️"),
             ("distance", "📏"),
             ("coordinates", "🗺️"),
         ]
 
+        if not str(current_card.get("hours") or "").strip() and not str(current_card.get("today") or "").strip():
+            current_card["hours"] = "Consultar website oficial" if language == "pt" else "Check official website"
+
         for key, emoji in field_order:
             value = str(current_card.get(key) or "").strip()
             if not value:
                 continue
             label = labels[key]
-            if key == "address" and "](" not in value:
-                value = f"[{value}]({_gmaps_link(value)})"
+            if key == "address":
+                value = _render_researcher_address_value(
+                    value,
+                    title=str(current_card.get("title") or ""),
+                    language=language,
+                )
+                if not value:
+                    continue
             elif key == "phone":
                 value = linkify_phone_numbers(value)
             elif key in {"website", "tickets"}:
@@ -6061,6 +6074,35 @@ def _gmaps_link(address: str) -> str:
     return f"https://www.google.com/maps/search/?api=1&query={quote_plus(clean)}"
 
 
+def _is_generic_city_address(value: str) -> bool:
+    """Return whether an address is only a Lisbon city stub."""
+    if not value:
+        return False
+    plain = _strip_markdown_formatting(value)
+    plain = re.sub(r"\[[^\]]+\]\(([^)]+)\)", r"\1", plain)
+    plain = re.sub(r"https?://\S+", "", plain)
+    normalized = _strip_accents_compat(plain).lower()
+    normalized = re.sub(r"[^a-z\s,]", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip(" ,.;:-")
+    return bool(re.fullmatch(r"(?:lisboa|lisbon)(?:\s*,?\s*portugal)?", normalized))
+
+
+def _render_researcher_address_value(value: str, *, title: str = "", language: str = "en") -> str:
+    """Render a place/event address, replacing city-only stubs with a Maps search."""
+    stripped = (value or "").strip()
+    if not stripped:
+        return ""
+    if _is_generic_city_address(stripped):
+        if not title:
+            return ""
+        search_label = "Pesquisar no Maps" if language == "pt" else "Search on Maps"
+        search_query = f"{title} Lisboa"
+        return f"[{search_label}]({_gmaps_link(search_query)})"
+    if "](" in stripped:
+        return stripped
+    return f"[{stripped}]({_gmaps_link(stripped)})"
+
+
 def _gmaps_coordinate_link(lat: str, lon: str) -> str:
     """Return a Google Maps search URL for a latitude/longitude pair."""
     return f"https://www.google.com/maps/search/?api=1&query={lat}%2C{lon}"
@@ -6111,6 +6153,8 @@ def linkify_address_lines(text: str) -> str:
         stripped_value = value.strip()
         if not stripped_value or stripped_value.startswith("[") or "](" in stripped_value:
             return match.group(0)
+        if _is_generic_city_address(stripped_value):
+            return ""
         link = _gmaps_link(stripped_value)
         return f"{lead}{bullet_prefix}{label}[{stripped_value}]({link})"
 
@@ -6199,6 +6243,70 @@ def strip_orphan_bold_markers(text: str) -> str:
     return clean_newlines(text).rstrip("\n")
 
 
+def strip_internal_qa_annotations(text: str) -> str:
+    """Remove internal QA notes that must never be shown to users."""
+    if not text:
+        return text
+
+    internal_patterns = [
+        re.compile(r"\[(?:QA|verificado|verified|validation|valida(?:ç|c)[aã]o)[^\]]*\]", re.IGNORECASE),
+        re.compile(r"^(?:[-*•]\s*)?(?:⚠️\s*)?(?:Aviso interno|Internal note)\s*:", re.IGNORECASE),
+        re.compile(r"^(?:[-*•]\s*)?⚠️.*(?:QA|valida(?:ç|c)[aã]o|validation|fact-check|link n[aã]o (?:é )?clic[aá]vel|not clickable|address n[aã]o verificado|morada n[aã]o verificada|hor[aá]rios? .*n[aã]o (?:foram )?fornecid)", re.IGNORECASE),
+        re.compile(r".*(?:Os hor[aá]rios de funcionamento n[aã]o foram fornecidos|Opening hours were not provided|O link n[aã]o (?:é )?clic[aá]vel|The link is not clickable).*", re.IGNORECASE),
+    ]
+
+    kept_lines: list[str] = []
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if any(pattern.search(stripped) for pattern in internal_patterns):
+            continue
+        kept_lines.append(raw_line)
+    return clean_newlines("\n".join(kept_lines)).strip()
+
+
+def strip_generic_city_address_lines(text: str) -> str:
+    """Remove user-facing address lines that only say Lisboa/Lisbon."""
+    if not text or "📍" not in text:
+        return text
+
+    kept_lines: list[str] = []
+    address_line_re = re.compile(
+        r"^\s*(?:[-*•]\s*)?📍\s*(?:\*\*(?:Morada|Address|Location|Localiza(?:ç|c)[ãa]o|Endere[çc]o)\s*:?\*\*:?\s*)?(?P<value>.+?)\s*$",
+        re.IGNORECASE,
+    )
+    for raw_line in text.splitlines():
+        match = address_line_re.match(raw_line.strip())
+        if match and _is_generic_city_address(match.group("value")):
+            continue
+        kept_lines.append(raw_line)
+    return "\n".join(kept_lines)
+
+
+def replace_pt_technical_vocabulary(text: str) -> str:
+    """Replace recurring English technical words when the response is PT-PT."""
+    if not text:
+        return text
+    language = infer_response_language(context_text=text, default="en")
+    pt_markers = re.search(
+        r"\b(?:Fonte|Morada|Bilhetes|Hor[aá]rio|Atualizado|Transportes|Dica|Resposta)\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if language != "pt" and not pt_markers:
+        return text
+
+    replacements = [
+        (r"\bruntime\b(?:\s+do\s+sistema)?", "sistema"),
+        (r"\bserver\b", "servidor"),
+        (r"\bbackend\b", "sistema"),
+        (r"\bfrontend\b", "interface"),
+    ]
+    updated = text
+    for pattern, replacement in replacements:
+        updated = re.sub(pattern, replacement, updated, flags=re.IGNORECASE)
+    return updated
+
+
 def ensure_blank_lines_before_emoji_fields(text: str) -> str:
     """Insert a blank line before dense emoji-prefixed field lines when needed."""
     if not text:
@@ -6216,6 +6324,28 @@ def ensure_blank_lines_before_emoji_fields(text: str) -> str:
         output_lines.append(line)
 
     return "\n".join(output_lines)
+
+
+def ensure_blank_lines_around_warning_blocks(text: str) -> str:
+    """Ensure each user-facing warning renders as a separate paragraph."""
+    if not text or "⚠" not in text:
+        return text
+
+    text = re.sub(r"(?<![-*•\n])(\s+)(⚠️?\s*\*\*)", r"\n\n\2", text)
+    text = re.sub(r"(?<![-*•\n])(\s+)(⚠️?\s+)", r"\n\n\2", text)
+
+    lines = text.splitlines()
+    output_lines: list[str] = []
+    for line in lines:
+        stripped = line.lstrip()
+        is_warning = stripped.startswith(("⚠️", "⚠")) or re.match(r"^[-*•]\s*⚠️?", stripped)
+        if is_warning and output_lines and output_lines[-1].strip():
+            output_lines.append("")
+        output_lines.append(line)
+        if is_warning:
+            output_lines.append("")
+
+    return clean_newlines("\n".join(output_lines)).strip()
 
 
 def reorder_warnings_before_source(text: str) -> str:
@@ -6424,10 +6554,14 @@ def final_visual_pass(text: str) -> str:
         return text or ""
     text = repair_bold_time_spacing(text)
     text = strip_orphan_bold_markers(text)
+    text = strip_internal_qa_annotations(text)
+    text = replace_pt_technical_vocabulary(text)
     text = linkify_phone_numbers(text)
     text = linkify_address_lines(text)
+    text = strip_generic_city_address_lines(text)
     text = strip_stray_leading_enumerator(text)
     text = ensure_blank_lines_before_emoji_fields(text)
+    text = ensure_blank_lines_around_warning_blocks(text)
     text = reorder_warnings_before_source(text)
     text = reorder_tips_before_source(text)
     text = repair_known_live_typos(text)
@@ -6438,6 +6572,7 @@ def final_visual_pass(text: str) -> str:
         text,
     )
     text = re.sub(r"(?m)^[-*]\s*⚠️\s*$\n?", "", text)
+    text = re.sub(r"(?m)^[-*•]\s*$\n?", "", text)
     text = re.sub(r"(?<=\S)[ \t]{2,}(?=\S)", " ", text)
     # Collapse triple blank lines that may have been reintroduced.
     text = re.sub(r"\n{3,}", "\n\n", text)
