@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "collection_name": "lisbon_places",
+  "source_tag": "VisitLisboa_Places",
+  "source_fingerprint": "f6210b2c2c1f0fdc",
+  "mode": "incremental",
+  "pending_ids": [
+    "VisitLisboa_Places_70a73e3ba41e",
+    "VisitLisboa_Places_94d4709f2b98"
+  ],
+  "total_candidates": 202,
+  "created_at": "2026-04-27T07:48:52.747032",
+  "updated_at": "2026-04-27T08:57:30.767414"
+}
