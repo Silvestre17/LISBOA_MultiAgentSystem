@@ -375,7 +375,7 @@ def scrape_place_details(session, place_url):
             return place_data
 
         except requests.exceptions.RequestException as e:
-            logging.warning(f"Attempt {attempt+1} failed for {place_url}: {e}")
+            logging.warning(f"Attempt {attempt + 1} failed for {place_url}: {e}")
             time.sleep(2)
 
     logging.error(f"Failed to scrape {place_url}")
@@ -422,7 +422,13 @@ def main():
         sys.exit(1)
 
     if len(existing_places) > 0 and len(all_urls) < len(existing_places) * 0.5:
-        logging.warning("WARNING: Significant drop in places count. Verify manually.")
+        logging.error(
+            "CRITICAL: Harvested places dropped from %s to %s. "
+            "Possible blocking or VisitLisboa schema drift. Aborting save to protect existing JSON.",
+            len(existing_places),
+            len(all_urls),
+        )
+        sys.exit(1)
 
     # 3. Delta Logic
     existing_urls = set(existing_places.keys())
@@ -463,6 +469,14 @@ def main():
 
     # 4. Save
     if len(final_list) > 0:
+        if len(existing_places) > 0 and len(final_list) < len(existing_places) * 0.5:
+            logging.error(
+                "CRITICAL: Final places list dropped from %s to %s after detail scraping. "
+                "Aborting save to protect existing JSON.",
+                len(existing_places),
+                len(final_list),
+            )
+            sys.exit(1)
         with open(output_filepath, 'w', encoding='utf-8') as f:
             json.dump(final_list, f, indent=4, ensure_ascii=False)
         logging.info(f"Successfully saved {len(final_list)} places.")

@@ -1373,6 +1373,23 @@ def search_gtfs_stop(query: str, limit: int = 10) -> List[Dict[str, Any]]:
         return []
 
 
+def _cp_gtfs_database_available() -> bool:
+    """Return whether the CP GTFS SQLite database can be opened and queried."""
+    manager = get_gtfs_manager()
+    conn = manager.get_db_connection()
+    if not conn:
+        return False
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM stops")
+        return int(cursor.fetchone()[0]) > 0
+    except sqlite3.Error as exc:
+        logger.error("CP GTFS database readiness check failed: %s", exc)
+        return False
+    finally:
+        conn.close()
+
+
 def get_routes_at_stop(stop_id: str) -> List[Dict[str, Any]]:
     """
     Gets all routes that serve a specific stop.
@@ -1541,18 +1558,27 @@ def search_cp_stations(query: str) -> str:
     Returns:
         str: List of matching stations with details.
     """
-    # Try GTFS database first
-    gtfs_matches = search_gtfs_stop(query, limit=15)
+    # Try GTFS database first, but keep outage state distinct from no-match state.
+    gtfs_available = _cp_gtfs_database_available()
+    gtfs_matches = search_gtfs_stop(query, limit=15) if gtfs_available else []
 
     # Fall back to real-time API if GTFS not available
     if not gtfs_matches:
         rt_matches = search_cp_station(query)
         if not rt_matches:
+            if not gtfs_available:
+                return (
+                    "⚠️ CP GTFS schedule database is temporarily unavailable, "
+                    "so station lookup cannot be verified right now.\n\n"
+                    "💡 Try again after startup finishes or check CP directly at https://www.cp.pt/."
+                )
             return (f"❌ No CP stations found matching '{query}' in the AML region.\n\n"
                     "💡 Try searching for: Oriente, Rossio, Cais do Sodré, Cascais, Sintra, Entrecampos")
 
         response = f"🚉 **CP Stations matching '{query}'** ({len(rt_matches)} found)\n"
         response += "=" * 50 + "\n\n"
+        if not gtfs_available:
+            response += "⚠️ GTFS schedule database unavailable; showing fallback live-station matches only.\n\n"
 
         for i, station in enumerate(rt_matches[:10], 1):
             name = station.get('name', 'Unknown')

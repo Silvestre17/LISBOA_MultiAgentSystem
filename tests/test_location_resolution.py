@@ -24,6 +24,7 @@ from tools.location_resolver import (
     AML_BOUNDS,
     _build_query_variants,
     _fetch_nominatim_results_cached,
+    build_location_ambiguity_preamble,
     build_dynamic_landmark_info,
     get_location_display_name,
 )
@@ -114,6 +115,26 @@ def test_get_location_display_name_still_restores_accents_when_normalized_forms_
         label = get_location_display_name("Cidade Universitaria")
 
     assert label == "Cidade Universitária"
+
+
+def test_build_location_ambiguity_preamble_flags_bare_madeira() -> None:
+    """Bare Madeira should surface island-vs-Lisbon ambiguity before routing continues."""
+    preamble = build_location_ambiguity_preamble("Rossio", "Madeira", language="pt")
+
+    assert "Ambiguidade" in preamble
+    assert "Ilha da Madeira" in preamble
+    assert "Rua Humberto Madeira" in preamble
+
+
+def test_build_location_ambiguity_preamble_ignores_explicit_madeira_address() -> None:
+    """Explicit Madeira street/address wording should not trigger bare-name disambiguation."""
+    preamble = build_location_ambiguity_preamble(
+        "Rossio",
+        "Avenida da Ilha da Madeira",
+        language="pt",
+    )
+
+    assert preamble == ""
 
 
 def test_prompt_alignment_reflects_hybrid_scope_and_accessibility_verification() -> None:

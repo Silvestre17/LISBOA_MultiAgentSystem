@@ -83,6 +83,7 @@ def test_pt_visitlisboa_description_and_value_helpers_do_not_leak_raw_english() 
     )
     assert visitlisboa_api._localize_place_value_text("Free with Lisboa Card", "pt") == "Gratuito com Lisboa Card"
     assert "with Lisboa Card" not in visitlisboa_api._localize_place_value_text("20% with Lisboa Card", "pt")
+    assert visitlisboa_api._localize_place_category("Attractions", "pt") == "Atrações"
 
 
 def test_generic_visitlisboa_location_becomes_maps_search_link() -> None:
@@ -92,3 +93,20 @@ def test_generic_visitlisboa_location_becomes_maps_search_link() -> None:
     assert "Lisbon" not in line
     assert "Pesquisar no Maps" in line
     assert "Gulbenkian+Museum+Lisboa" in line
+
+
+def test_lisbon_scoped_place_geography_checks_title_url_and_location() -> None:
+    """Lisbon-only place queries should filter obvious AML candidates even with generic locations."""
+    sintra_text = "Sintra Myths and Legends Interactive Centre https://www.visitlisboa.com/en/places/sintra-myths Lisbon"
+    lisbon_text = "Miradouro de Santa Luzia https://www.visitlisboa.com/en/places/miradouro-de-santa-luzia Lisbon"
+
+    assert visitlisboa_api._place_within_requested_geography(lisbon_text, "atrações imperdíveis em Lisboa")
+    assert not visitlisboa_api._place_within_requested_geography(sintra_text, "atrações imperdíveis em Lisboa")
+    assert visitlisboa_api._place_within_requested_geography(sintra_text, "atrações em Sintra")
+
+
+def test_plain_torre_does_not_force_belem_alias() -> None:
+    """Only explicit Belém tower aliases should map to Torre de Belém."""
+    assert visitlisboa_api._apply_known_place_lookup_alias("Torre Vasco da Gama") == "Torre Vasco da Gama"
+    assert visitlisboa_api._apply_known_place_lookup_alias("Torre do Tombo") == "Torre do Tombo"
+    assert visitlisboa_api._apply_known_place_lookup_alias("Tour de Belém") == "Torre de Belém"

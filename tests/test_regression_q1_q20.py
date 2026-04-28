@@ -163,6 +163,19 @@ def test_q8_cp_search_gtfs_stop_common_control_stations_return_results() -> None
         assert any(expected_token in str(stop.get("stop_name", "")).lower() for stop in results)
 
 
+def test_q8_cp_station_search_reports_gtfs_outage_not_station_miss(monkeypatch) -> None:
+    """CP GTFS outages should not be rendered as ordinary station-not-found misses."""
+    from tools import cp_api
+
+    monkeypatch.setattr(cp_api, "_cp_gtfs_database_available", lambda: False)
+    monkeypatch.setattr(cp_api, "search_cp_station", lambda query: [])
+
+    response = str(cp_api.search_cp_stations.invoke({"query": "Cais do Sodré"}))
+
+    assert "GTFS schedule database is temporarily unavailable" in response
+    assert "No CP stations found" not in response
+
+
 def test_q8_plan_train_trip_handles_cais_do_sodre_to_cascais() -> None:
     """The full CP planning path should return a train trip, not a station-not-found fallback."""
     from tools.cp_api import plan_train_trip

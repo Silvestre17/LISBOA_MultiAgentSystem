@@ -25,6 +25,7 @@
 # Required libraries:
 # pip install langchain-core langchain-openai
 
+import re
 from typing import Any, Dict, Optional
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -85,8 +86,9 @@ class LLMFactory:
         """
         model_lower = model_name.lower()
 
-        # Check for o-series models (o1, o3, o4)
-        is_o_series = any(x in model_lower for x in ["o1", "o3", "o4", "o-"])
+        # Check for o-series models (o1, o3, o4) without misclassifying
+        # chat models such as gpt-4o-mini, where the o is part of 4o.
+        is_o_series = bool(re.search(r"(^|[^a-z0-9])o(?:1|3|4)(?:$|[^a-z0-9])", model_lower))
 
         # Check for gpt-5 (but NOT gpt-5-chat which supports temperature)
         is_gpt5_reasoning = (
@@ -239,7 +241,13 @@ class LLMFactory:
             # Build the v1 API base URL
             # Format: https://YOUR-RESOURCE.openai.azure.com/openai/v1/
             endpoint = Config.AZURE_OPENAI_ENDPOINT.rstrip("/")
-            base_url = f"{endpoint}/openai/v1/"
+            endpoint_lower = endpoint.lower()
+            if endpoint_lower.endswith("/openai/v1"):
+                base_url = f"{endpoint}/"
+            elif endpoint_lower.endswith("/openai"):
+                base_url = f"{endpoint}/v1/"
+            else:
+                base_url = f"{endpoint}/openai/v1/"
 
             # Check if it's a reasoning-style deployment using helper function
             if LLMFactory._is_reasoning_model(model_name):
@@ -453,6 +461,8 @@ class LLMFactory:
 
         provider = agent_config.get("provider", Config.MODEL_PROVIDER)
         model = agent_config.get("model", None)  # Get specific model name
+        if provider == "azure" and Config.AZURE_OPENAI_DEPLOYMENT_NAME:
+            model = Config.AZURE_OPENAI_DEPLOYMENT_NAME
         temperature = agent_config.get("temperature", Config.TEMPERATURE)
 
         # Create LLM with the agent's configured provider/temperature/model

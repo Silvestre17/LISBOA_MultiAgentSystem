@@ -2073,11 +2073,22 @@ def canonicalize_transport_terms(text: str, language: str = "en") -> str:
             (r"\bBoard at\b", "Apanha em"),
             (r"\bExit at\b", "Sai em"),
             (r"\bTransfer at\b", "Transferência em"),
+            (r"\bTransfer to\b", "Transfere para"),
             (r"\bWalk from\b", "Caminha desde"),
             (r"\bWalk to\b", "Caminha até"),
+            (r"(Caminha desde[^\n]+?)\s+to\s+(\*\*[^*]+\*\*)", r"\1 até \2"),
             (r"\bReal time\b", "Tempo real"),
             (r"\bEstimated travel time\b", "Tempo estimado de viagem"),
+            (r"\b(\d+)\s+stations?\s+\+\s+1\s+transfer\b", r"\1 estações + 1 transferência"),
+            (r"\b(\d+)\s+stations?\s+\+\s+(\d+)\s+transfers\b", r"\1 estações + \2 transferências"),
             (r"\bNext departures\b", "Próximas partidas"),
+            (r"\bRed Linha\b", "Linha Vermelha"),
+            (r"\bGreen Linha\b", "Linha Verde"),
+            (r"\bVerde Linha\b", "Linha Verde"),
+            (r"\bVermelha Linha\b", "Linha Vermelha"),
+            (r"\bRed Line\b", "Linha Vermelha"),
+            (r"\bCais Do Sodré\b", "Cais do Sodré"),
+            (r"\*\*(\d+)\.\*\*", r"\1."),
             (r"\(stop\s+", "(paragem "),
             (r"\(Live\)", "(em tempo real)"),
             (r"\bLive\b", "Em tempo real"),
@@ -2323,27 +2334,41 @@ def localize_local_information_values(text: str, language: str = "en") -> str:
         updated_line = re.sub(r"\bSaturday:", "Sábado:", updated_line, flags=re.IGNORECASE)
         updated_line = re.sub(r"\bSunday:", "Domingo:", updated_line, flags=re.IGNORECASE)
 
-        # Handle English labels from VisitLisboa / Researcher outputs by targeting words directly
-        # preserving entirely the surrounding bold (**), emojis, spaces, or colons used by the LLM
-        updated_line = re.sub(r"(?i)\bBrief\s+description\b", "Descrição", updated_line)
-        updated_line = re.sub(r"(?i)\bDescription\b", "Descrição", updated_line)
-        updated_line = re.sub(r"(?i)\bAddress\b", "Morada", updated_line)
-        updated_line = re.sub(r"(?i)\bLocation\b", "Localização", updated_line)
-        updated_line = re.sub(r"(?i)\bOpening\s+hours\b", "Horário", updated_line)
-        updated_line = re.sub(r"(?i)\bSchedule\b", "Horário", updated_line)
-        updated_line = re.sub(r"(?i)\bTip\b", "Dica", updated_line)
-        updated_line = re.sub(r"(?i)\bPrice\b", "Preço", updated_line)
-        updated_line = re.sub(r"(?i)\bPhone\b", "Telefone", updated_line)
-        updated_line = re.sub(r"(?i)\bRating\b", "Avaliação", updated_line)
-        updated_line = re.sub(r"(?i)\bTickets\b", "Bilhetes", updated_line)
-        updated_line = re.sub(r"(?i)\bAccessibility\b", "Acessibilidade", updated_line)
-        updated_line = re.sub(r"(?i)\bParking\b", "Estacionamento", updated_line)
-        updated_line = re.sub(r"(?i)\bPublic\s+transport\s+access\b", "Acessos por transportes públicos", updated_line)
-        updated_line = re.sub(r"(?i)\bContact\b", "Contacto", updated_line)
-        updated_line = re.sub(r"(?i)\bTemporary\s+requirements\b", "Exigências temporárias", updated_line)
-        updated_line = re.sub(r"(?i)\bReservations\b", "reservas", updated_line)
-        updated_line = re.sub(r"(?i)\bEducational\s+programs\b", "Programas educativos", updated_line)
-        updated_line = re.sub(r"(?i)\bGuided\s+tours\b", "visitas guiadas", updated_line)
+        # Keep label localization scoped to label positions. Broad word
+        # replacement can corrupt URLs such as ``/tickets`` or ``/location``.
+        label_translations = [
+            ("Brief description", "Descrição"),
+            ("Description", "Descrição"),
+            ("Address", "Morada"),
+            ("Location", "Localização"),
+            ("Opening hours", "Horário"),
+            ("Schedule", "Horário"),
+            ("Tip", "Dica"),
+            ("Price", "Preço"),
+            ("Phone", "Telefone"),
+            ("Rating", "Avaliação"),
+            ("Tickets", "Bilhetes"),
+            ("Accessibility", "Acessibilidade"),
+            ("Parking", "Estacionamento"),
+            ("Public transport access", "Acessos por transportes públicos"),
+            ("Contact", "Contacto"),
+            ("Temporary requirements", "Exigências temporárias"),
+            ("Reservations", "reservas"),
+            ("Educational programs", "Programas educativos"),
+            ("Guided tours", "visitas guiadas"),
+        ]
+        for source_label, target_label in label_translations:
+            escaped_label = re.escape(source_label).replace(r"\ ", r"\s+")
+            updated_line = re.sub(
+                rf"(?i)(\*\*\s*)\b{escaped_label}\b(\s*\*\*)(?=\s*:)",
+                lambda match: f"{match.group(1)}{target_label}{match.group(2)}",
+                updated_line,
+            )
+            updated_line = re.sub(
+                rf"(?i)(^|[^\w/\-])\b{escaped_label}\b(?=\s*:)",
+                lambda match: f"{match.group(1)}{target_label}",
+                updated_line,
+            )
 
         updated_line = re.sub(
             r"\*\*Total matching events:\*\*",
@@ -3082,17 +3107,17 @@ def structure_service_lookup_markdown(text: str, language: str = "en") -> str:
 
         if "farm" in normalized_title:
             heading = (
-                f"Farmácias Perto de {location}" if is_pt and location else
+                f"Farmácias perto de {location}" if is_pt and location else
                 "Farmácias Próximas" if is_pt else
                 f"Pharmacies Near {location}" if location else
                 "Nearby Pharmacies"
             )
-            return f"#### \U0001F48A {heading}", "\U0001F48A"
+            return f"### 💊 {heading}", "💊"
         if "hospit" in normalized_title:
             is_public_hospital = any(marker in normalized_title for marker in ("public", "publico", "publicos", "publica", "publicas"))
             heading = (
-                f"Hospitais Públicos Perto de {location}" if is_pt and is_public_hospital and location else
-                f"Hospitais Perto de {location}" if is_pt and location else
+                f"Hospitais públicos perto de {location}" if is_pt and is_public_hospital and location else
+                f"Hospitais perto de {location}" if is_pt and location else
                 "Hospitais Públicos Próximos" if is_pt and is_public_hospital else
                 "Hospitais Próximos" if is_pt else
                 f"Public Hospitals Near {location}" if is_public_hospital and location else
@@ -3100,16 +3125,16 @@ def structure_service_lookup_markdown(text: str, language: str = "en") -> str:
                 "Nearby Public Hospitals" if is_public_hospital else
                 "Nearby Hospitals"
             )
-            return f"#### \U0001F3E5 {heading}", "\U0001F3E5"
+            return f"### 🏥 {heading}", "🏥"
         if "polic" in normalized_title:
             heading = (
-                f"Polícia Perto de {location}" if is_pt and location else
+                f"Polícia perto de {location}" if is_pt and location else
                 "Polícia Próxima" if is_pt else
                 f"Police Near {location}" if location else
                 "Nearby Police"
             )
-            return f"#### \U0001F46E {heading}", "\U0001F46E"
-        return f"#### \U0001F4CD {dataset_title.strip()}", "\U0001F4CD"
+            return f"### 👮 {heading}", "👮"
+        return f"### 📍 {dataset_title.strip()}", "📍"
 
     lines = text.splitlines()
     structured_lines: list[str] = []
@@ -3128,8 +3153,9 @@ def structure_service_lookup_markdown(text: str, language: str = "en") -> str:
             index += 1
             continue
 
-        normalized_header = _strip_accents_compat(_strip_markdown_formatting(stripped))
-        header_match = header_re.search(normalized_header)
+        plain_header = _strip_markdown_formatting(stripped)
+        normalized_header = _strip_accents_compat(plain_header)
+        header_match = header_re.search(plain_header) or header_re.search(normalized_header)
         if not header_match:
             if pending_heading:
                 structured_lines.extend([pending_heading, ""])
@@ -3155,7 +3181,8 @@ def structure_service_lookup_markdown(text: str, language: str = "en") -> str:
                 continue
 
             normalized_current = _strip_accents_compat(_strip_markdown_formatting(current_line))
-            if re.match(r"^#{3,4}\s+", current_line) or header_re.search(normalized_current):
+            plain_current_header = _strip_markdown_formatting(current_line)
+            if re.match(r"^#{3,4}\s+", current_line) or header_re.search(plain_current_header) or header_re.search(normalized_current):
                 break
 
             plain_line = _strip_markdown_formatting(current_line).strip()
@@ -3183,8 +3210,8 @@ def structure_service_lookup_markdown(text: str, language: str = "en") -> str:
 
             index += 1
 
-        for item_number, entry in enumerate(entries, 1):
-            structured_lines.append(f"{item_number}. {item_icon} **{entry['name']}**")
+        for entry in entries:
+            structured_lines.append(f"- {item_icon} **{entry['name']}**")
             if entry["address"]:
                 structured_lines.append(f"   \U0001F4CD **{address_label}:** {entry['address']}")
             if entry["distance"]:
@@ -6348,6 +6375,39 @@ def ensure_blank_lines_around_warning_blocks(text: str) -> str:
     return clean_newlines("\n".join(output_lines)).strip()
 
 
+def compact_service_lookup_spacing(text: str) -> str:
+    """Keep nearby-service result fields grouped under each service item."""
+    if not text or not re.search(r"(?m)^-\s+(?:💊|🏥|👮|📍)\s+\*\*", text):
+        return text or ""
+
+    compacted = re.sub(
+        r"(?m)^\s*\n(?=(?:📍|📏|🗺️)\s+\*\*)",
+        "",
+        text,
+    )
+    compacted = re.sub(
+        r"(?m)^((?:📍|📏|🗺️)\s+\*\*(?:Morada|Address|Distância|Distance|Coordenadas|Coordinates):\*\*.*)$",
+        r"   \1",
+        compacted,
+    )
+    compacted = re.sub(
+        r"(?m)^(-\s+(?:💊|🏥|👮|📍)\s+\*\*.+?\*\*)\n\s*\n(?=\s{3}(?:📍|📏|🗺️))",
+        r"\1\n",
+        compacted,
+    )
+    compacted = re.sub(
+        r"(?m)^(\s{3}(?:📍|📏|🗺️)\s+\*\*.+)$\n\s*\n(?=\s{3}(?:📍|📏|🗺️))",
+        r"\1\n",
+        compacted,
+    )
+    compacted = re.sub(
+        r"(?m)^(\s{3}🗺️\s+\*\*.+)$\n(?=-\s+(?:💊|🏥|👮|📍)\s+\*\*)",
+        r"\1\n\n",
+        compacted,
+    )
+    return compacted
+
+
 def reorder_warnings_before_source(text: str) -> str:
     """Move ``⚠️`` warning lines that appear AFTER the final source footer
     to immediately before the footer (Q3 regression).
@@ -6561,6 +6621,7 @@ def final_visual_pass(text: str) -> str:
     text = strip_generic_city_address_lines(text)
     text = strip_stray_leading_enumerator(text)
     text = ensure_blank_lines_before_emoji_fields(text)
+    text = compact_service_lookup_spacing(text)
     text = ensure_blank_lines_around_warning_blocks(text)
     text = reorder_warnings_before_source(text)
     text = reorder_tips_before_source(text)
@@ -6571,6 +6632,16 @@ def final_visual_pass(text: str) -> str:
         r"- Para evitar inventar informação, não vou indicar horários, frequências, tarifas, ETAs nem estado em tempo real para \1.",
         text,
     )
+    # The QA repair pass can emit an empty heading for caveats, which Streamlit
+    # renders as a visible blank section. Drop the orphan heading and duplicate
+    # fare caveat when the conclusion already states the limitation.
+    text = re.sub(r"(?m)^#{1,6}\s*$\n?", "", text)
+    if re.search(r"(?is)Mais barato:.*não foi possível confirmar.*tarifa", text):
+        text = re.sub(
+            r"(?is)\n\s*---\s*\n\s*[-*•]\s*(?:O preço exato do bilhete|A tarifa|O preço).*?fontes disponíveis\.\s*(?=\n\s*📌)",
+            "\n",
+            text,
+        )
     text = re.sub(r"(?m)^[-*]\s*⚠️\s*$\n?", "", text)
     text = re.sub(r"(?m)^[-*•]\s*$\n?", "", text)
     text = re.sub(r"(?<=\S)[ \t]{2,}(?=\S)", " ", text)

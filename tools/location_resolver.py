@@ -194,6 +194,87 @@ def normalize_location_text(text: str) -> str:
     return normalized
 
 
+_AMBIGUOUS_LOCATION_HINTS = {
+    "madeira": {
+        "pt": [
+            "A) 🏝️ **Ilha da Madeira** — não é acessível por transportes urbanos de Lisboa; requer avião.",
+            "B) 🚇 **Rua Humberto Madeira / Av. Ilha da Madeira, em Lisboa** — continuo abaixo com a opção urbana.",
+        ],
+        "en": [
+            "A) 🏝️ **Madeira island** — not reachable by Lisbon urban transport; it requires a flight.",
+            "B) 🚇 **Rua Humberto Madeira / Avenida da Ilha da Madeira, Lisbon** — continuing below with the urban option.",
+        ],
+    },
+    "oriente": {
+        "pt": [
+            "A) 🚉 **Estação do Oriente** — interface Metro, CP e autocarros.",
+            "B) 📍 **Parque das Nações / zona do Oriente** — área envolvente, não apenas a estação.",
+        ],
+        "en": [
+            "A) 🚉 **Oriente station** — Metro, CP, and bus interchange.",
+            "B) 📍 **Parque das Nações / Oriente area** — surrounding district, not only the station.",
+        ],
+    },
+    "marques": {
+        "pt": [
+            "A) 🚇 **Estação Marquês de Pombal** — ligação Metro Azul e Amarela.",
+            "B) 📍 **Praça/Rotunda do Marquês de Pombal** — superfície e avenida envolvente.",
+        ],
+        "en": [
+            "A) 🚇 **Marquês de Pombal station** — Blue and Yellow Metro lines.",
+            "B) 📍 **Marquês de Pombal square/roundabout** — surface area and nearby avenues.",
+        ],
+    },
+    "roma": {
+        "pt": [
+            "A) 🚇 **Estação Roma** — Metro Linha Verde.",
+            "B) 📍 **Avenida de Roma / zona de Roma** — área urbana envolvente.",
+        ],
+        "en": [
+            "A) 🚇 **Roma station** — Green Metro line.",
+            "B) 📍 **Avenida de Roma / Roma area** — surrounding urban area.",
+        ],
+    },
+    "odivelas": {
+        "pt": [
+            "A) 🚇 **Estação Odivelas** — terminal do Metro Amarelo.",
+            "B) 📍 **Município de Odivelas** — zona mais ampla fora de Lisboa cidade.",
+        ],
+        "en": [
+            "A) 🚇 **Odivelas station** — Yellow Metro terminus.",
+            "B) 📍 **Odivelas municipality** — wider area outside Lisbon city.",
+        ],
+    },
+}
+
+
+def build_location_ambiguity_preamble(
+    origin: str = "",
+    destination: str = "",
+    *,
+    language: str = "pt",
+) -> str:
+    """Build a user-facing disambiguation note for bare ambiguous locations."""
+    selected_language = "pt" if language == "pt" else "en"
+    blocks: list[str] = []
+    seen: set[str] = set()
+
+    for raw_location in (origin, destination):
+        token = normalize_location_text(raw_location)
+        if token not in _AMBIGUOUS_LOCATION_HINTS or token in seen:
+            continue
+        seen.add(token)
+        hints = _AMBIGUOUS_LOCATION_HINTS[token][selected_language]
+        heading = (
+            f"⚠️ **Ambiguidade em '{raw_location}':** posso estar a interpretar uma destas opções:"
+            if selected_language == "pt"
+            else f"⚠️ **Ambiguity in '{raw_location}':** I may be interpreting one of these options:"
+        )
+        blocks.append("\n".join([heading, *hints]))
+
+    return "\n\n".join(blocks)
+
+
 def _looks_like_acronym_label(text: str) -> bool:
     """Returns whether a label looks like an acronym that should preserve casing.
 
@@ -1027,3 +1108,60 @@ def get_location_display_name(location_name: str, detailed: bool = False) -> str
         return str(resolved.get("display_name") or raw).strip()
 
     return raw.title()
+
+
+if __name__ == "__main__":
+    # ========================
+    # Test Block
+    # ========================
+    import sys
+
+    PASS = "\033[1;32m✅\033[0m"
+    FAIL = "\033[1;31m❌\033[0m"
+    errors = 0
+
+    # --- Test: normalize_location_text with Portuguese diacritics ---
+    normalized = normalize_location_text("Marquês de Pombal")
+    if normalized == "marques de pombal":
+        print(f"{PASS} normalizes Portuguese diacritics")
+    else:
+        print(f"{FAIL} normalizes Portuguese diacritics — got: {normalized!r}")
+        errors += 1
+
+    # --- Edge case: empty input ---
+    empty = normalize_location_text("")
+    if empty == "":
+        print(f"{PASS} handles empty input")
+    else:
+        print(f"{FAIL} handles empty input — got: {empty!r}")
+        errors += 1
+
+    # --- Edge case: ambiguous destination ---
+    ambiguity = build_location_ambiguity_preamble("Rossio", "Madeira", language="pt")
+    if "Ilha da Madeira" in ambiguity and "Rua Humberto Madeira" in ambiguity:
+        print(f"{PASS} surfaces Madeira ambiguity")
+    else:
+        print(f"{FAIL} surfaces Madeira ambiguity — got: {ambiguity!r}")
+        errors += 1
+
+    # --- Edge case: explicit address should not trigger ambiguity ---
+    explicit = build_location_ambiguity_preamble(
+        "Rossio",
+        "Avenida da Ilha da Madeira",
+        language="pt",
+    )
+    if explicit == "":
+        print(f"{PASS} avoids false ambiguity for explicit Madeira address")
+    else:
+        print(f"{FAIL} avoids false ambiguity for explicit address — got: {explicit!r}")
+        errors += 1
+
+    # --- Test: acronym display labels are preserved ---
+    acronym = get_location_display_name("NOVA IMS")
+    if acronym == "NOVA IMS":
+        print(f"{PASS} preserves acronym labels")
+    else:
+        print(f"{FAIL} preserves acronym labels — got: {acronym!r}")
+        errors += 1
+
+    sys.exit(errors)

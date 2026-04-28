@@ -59,6 +59,11 @@ try:
 except ImportError:
     from utils import haversine_distance
 
+try:
+    from tools.location_resolver import build_location_ambiguity_preamble
+except ImportError:
+    from location_resolver import build_location_ambiguity_preamble
+
 # ==========================================================================
 # Configuration
 # ==========================================================================
@@ -1815,6 +1820,9 @@ def carris_find_routes_between(
 
         response = f"Routes: {origin} -> {destination}\n"
         response += "=" * 55 + "\n\n"
+        ambiguity_note = build_location_ambiguity_preamble(origin, destination, language="pt")
+        if ambiguity_note:
+            response += f"{ambiguity_note}\n\n"
 
         response += "Resolving locations...\n"
 

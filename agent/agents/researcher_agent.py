@@ -1661,6 +1661,14 @@ class ResearcherAgent(BaseAgent):
             search_query = re.sub(r"^.*attractions related to\s+", "", query, flags=re.IGNORECASE).strip(" .?!")
             return cls._build_tool_call("search_places_attractions", {"query": search_query or query, "max_results": 5})
 
+        service_types = cls._extract_service_types(query)
+        if service_types:
+            args: Dict[str, Any] = {"service_type": service_types[0], "max_results": 5}
+            nearby_location = cls._extract_near_location_name(query)
+            if nearby_location:
+                args["near_location_name"] = nearby_location
+            return cls._build_tool_call("find_nearby_services", args)
+
         place_keywords = [
             "museum", "museu", "monument", "monumento", "restaurant", "restaurante",
             "hotel", "viewpoint", "miradouro", "beach", "praia", "garden", "jardim",

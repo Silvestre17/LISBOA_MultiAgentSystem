@@ -459,8 +459,10 @@ def _build_planner_fallback_source_line(
     sources: List[str] = []
     if weather_data or "ipma" in combined:
         sources.append("[*IPMA*](https://www.ipma.pt)")
-    if "visitlisboa" in combined or places_data or events_data:
+    if "visitlisboa" in combined:
         sources.append("[*VisitLisboa*](https://www.visitlisboa.com)")
+    if "lisboa aberta" in combined or "dados abertos" in combined:
+        sources.append("[*Lisboa Aberta*](https://dados.cm-lisboa.pt)")
     if "metrolisboa" in combined:
         sources.append("[*Metro de Lisboa*](https://www.metrolisboa.pt)")
     if "carris" in combined or transport_data:
@@ -470,6 +472,8 @@ def _build_planner_fallback_source_line(
 
     timestamp = "**Atualizado:**" if language == "pt" else "**Updated:**"
     source_label = "📌 **Fonte:**" if language == "pt" else "📌 **Source:**"
+    if not sources:
+        sources.append("[*LISBOA*](https://github.com/Silvestre17/LISBOA_MultiAgentSystem)")
     return f"{source_label} {' | '.join(sources)} | {timestamp} {datetime.now().strftime('%H:%M')}"
 
 
@@ -638,6 +642,8 @@ class PlannerAgent(BaseAgent):
         Returns:
             str: Formatted itinerary.
         """
+        language = infer_response_language(user_query=user_message, default="en")
+
         # Build context from agent outputs
         context_parts = []
         if weather_data:
@@ -683,9 +689,15 @@ class PlannerAgent(BaseAgent):
         # Inject QA disclaimers so the planner transparently communicates limitations
         if qa_disclaimers:
             disclaimer_text = "\n".join(f"- ⚠️ {d}" for d in qa_disclaimers)
+            heading = "## ⚠️ Limitações dos Dados" if language == "pt" else "## ⚠️ Data Limitations"
+            instruction = (
+                "Inclui estas cautelas apenas quando forem úteis para o utilizador:"
+                if language == "pt"
+                else "Include these caveats only where useful for the user:"
+            )
             context_parts.append(
-                f"## ⚠️ Data Limitations (from QA validation)\n"
-                f"Include these caveats in your response where relevant:\n{disclaimer_text}"
+                f"{heading}\n"
+                f"{instruction}\n{disclaimer_text}"
             )
 
         context = "\n\n---\n\n".join(context_parts) if context_parts else "No additional data provided."
@@ -701,7 +713,6 @@ class PlannerAgent(BaseAgent):
             accessibility_requested=accessibility_requested,
             accessibility_confirmed=accessibility_confirmed,
         )
-        language = infer_response_language(user_query=user_message, default="en")
         requested_days = _extract_requested_day_count(user_message)
         multi_day_instruction = _build_multi_day_planner_instruction(
             language=language,

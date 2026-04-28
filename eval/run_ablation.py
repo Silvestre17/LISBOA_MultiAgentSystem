@@ -78,6 +78,19 @@ DEFAULT_ZERO_SHOT_MODEL = "gpt-5.4-mini"
 DEFAULT_OPEN_PROVIDER = "azure"
 DEFAULT_OPEN_MODEL = "Kimi-K2.5"
 DEFAULT_ABLATION_DOMAINS = ("weather", "transport", "researcher", "multi_agent")
+
+
+def _average_tool_f1(blocks: list[dict]) -> float:
+    """Return the mean deterministic tool F1 over blocks where tool scoring applies."""
+    values = []
+    for block in blocks:
+        metrics = block.get("tool_metrics") or {}
+        value = metrics.get("tool_f1")
+        if value is not None and metrics.get("tool_metric_scored", True):
+            values.append(float(value))
+    return round(sum(values) / len(values), 3) if values else 0
+
+
 DEFAULT_JUDGE_MODELS = [
     {"provider": DEFAULT_ZERO_SHOT_PROVIDER, "model": DEFAULT_ZERO_SHOT_MODEL, "temperature": 0.0},
     {"provider": DEFAULT_OPEN_PROVIDER, "model": DEFAULT_OPEN_MODEL, "temperature": 0.0},
@@ -313,6 +326,8 @@ def _evaluate_with_judges(
     response: str,
     response_error: str | None,
     pricing_by_model: dict | None,
+    tool_expectation: str = "strict",
+    acceptable_tool_sets: list[list[str]] | None = None,
 ) -> tuple[list[dict], dict[str, object]]:
     """Evaluate one response with every configured judge and average the scores."""
     judge_runs: list[dict] = []
@@ -350,6 +365,8 @@ def _evaluate_with_judges(
                     retrieved_context=retrieved_context,
                     response=response,
                     pricing_by_model=pricing_by_model,
+                    tool_expectation=tool_expectation,
+                    acceptable_tool_sets=acceptable_tool_sets,
                 )
                 evaluation_usage = judge_result.get("evaluation_usage", empty_eval_usage)
                 evaluation_cost = judge_result.get("evaluation_cost_usd", empty_eval_cost)
@@ -676,14 +693,8 @@ def _build_profile_summary(results: list[dict], profile_key: str) -> dict[str, o
         "total_comparisons": len(comparison_blocks),
         "zero_shot_avg": round(sum(zs_scores) / len(zs_scores), 3) if zs_scores else 0,
         "lisboa_avg": round(sum(ls_scores) / len(ls_scores), 3) if ls_scores else 0,
-        "zero_shot_avg_tool_f1": round(
-            sum(block["tool_metrics"]["tool_f1"] for block in zero_shot_blocks) / len(zero_shot_blocks),
-            3,
-        ) if zero_shot_blocks else 0,
-        "lisboa_avg_tool_f1": round(
-            sum(block["tool_metrics"]["tool_f1"] for block in lisboa_blocks) / len(lisboa_blocks),
-            3,
-        ) if lisboa_blocks else 0,
+        "zero_shot_avg_tool_f1": _average_tool_f1(zero_shot_blocks),
+        "lisboa_avg_tool_f1": _average_tool_f1(lisboa_blocks),
         "lisboa_improvement": round(
             (sum(ls_scores) / len(ls_scores)) - (sum(zs_scores) / len(zs_scores)), 3
         ) if zs_scores and ls_scores else 0,
@@ -762,14 +773,8 @@ def _build_profile_summary(results: list[dict], profile_key: str) -> dict[str, o
             "count": len(domain_blocks),
             "zero_shot_avg": round(sum(domain_zs_scores) / len(domain_zs_scores), 3) if domain_zs_scores else 0,
             "lisboa_avg": round(sum(domain_ls_scores) / len(domain_ls_scores), 3) if domain_ls_scores else 0,
-            "zero_shot_avg_tool_f1": round(
-                sum(block["tool_metrics"]["tool_f1"] for block in domain_zero_shot) / len(domain_zero_shot),
-                3,
-            ) if domain_zero_shot else 0,
-            "lisboa_avg_tool_f1": round(
-                sum(block["tool_metrics"]["tool_f1"] for block in domain_lisboa) / len(domain_lisboa),
-                3,
-            ) if domain_lisboa else 0,
+            "zero_shot_avg_tool_f1": _average_tool_f1(domain_zero_shot),
+            "lisboa_avg_tool_f1": _average_tool_f1(domain_lisboa),
             "zero_shot_counts": {
                 "total": len(domain_zero_shot),
                 "successful_responses": sum(1 for block in domain_zero_shot if block.get("error") is None),
@@ -1007,7 +1012,7 @@ def run_ablation(
                 }
 
                 for idx, item in enumerate(groundtruth_queries):
-                    print(f"\n[{idx+1}/{len(groundtruth_queries)}] [{profile_key}] ABLATING: {item['query']}")
+                    print(f"\n[{idx + 1}/{len(groundtruth_queries)}] [{profile_key}] ABLATING: {item['query']}")
 
                     zs_resp, zs_tools, zs_ctx, zs_lat, zs_err, zs_response_usage = run_zero_shot(
                         item["query"],
@@ -1022,6 +1027,8 @@ def run_ablation(
                     zs_tool_metrics = compute_tool_metrics(
                         expected=item.get("expected_tools", []),
                         actual=zs_tools,
+                        acceptable_tool_sets=item.get("acceptable_tool_sets"),
+                        tool_expectation=item.get("tool_expectation", "strict"),
                     )
                     zs_heuristics = None if zs_err is not None else run_all_heuristics(
                         response=zs_resp,
@@ -1038,6 +1045,8 @@ def run_ablation(
                         response=zs_resp,
                         response_error=zs_err,
                         pricing_by_model=pricing_by_model,
+                        tool_expectation=item.get("tool_expectation", "strict"),
+                        acceptable_tool_sets=item.get("acceptable_tool_sets"),
                     )
                     zs_score = dict(zs_aggregated_judges.get("scores", {}))
                     zs_evaluation_usage = zs_aggregated_judges.get(
@@ -1075,6 +1084,8 @@ def run_ablation(
                     ls_tool_metrics = compute_tool_metrics(
                         expected=item.get("expected_tools", []),
                         actual=ls_tools,
+                        acceptable_tool_sets=item.get("acceptable_tool_sets"),
+                        tool_expectation=item.get("tool_expectation", "strict"),
                     )
                     ls_heuristics = None if ls_err is not None else run_all_heuristics(
                         response=ls_resp,
@@ -1091,6 +1102,8 @@ def run_ablation(
                         response=ls_resp,
                         response_error=ls_err,
                         pricing_by_model=pricing_by_model,
+                        tool_expectation=item.get("tool_expectation", "strict"),
+                        acceptable_tool_sets=item.get("acceptable_tool_sets"),
                     )
                     ls_score = dict(ls_aggregated_judges.get("scores", {}))
                     ls_evaluation_usage = ls_aggregated_judges.get(

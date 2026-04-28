@@ -70,6 +70,17 @@ BENCHMARK_LANGSMITH_SCOPE_LABEL = "Benchmark"
 SUPPORTED_MODEL_PROVIDERS = {"azure", "openai", "lmstudio"}
 
 
+def _average_tool_f1(records: list[dict]) -> float:
+    """Return the mean deterministic tool F1 over rows where tool scoring applies."""
+    values = []
+    for record in records:
+        metrics = record.get("tool_metrics") or {}
+        value = metrics.get("tool_f1")
+        if value is not None and metrics.get("tool_metric_scored", True):
+            values.append(float(value))
+    return round(sum(values) / len(values), 3) if values else 0
+
+
 # TEST: Define the per-agent response-model benchmark matrix here.
 # These defaults mirror the active evaluation setup on this machine:
 # Azure GPT-5.4-mini for the closed model and Azure Kimi-K2.5 for the
@@ -251,6 +262,8 @@ def _evaluate_with_judges(
     response: str,
     response_error: str | None,
     pricing_by_model: dict | None,
+    tool_expectation: str = "strict",
+    acceptable_tool_sets: list[list[str]] | None = None,
 ) -> tuple[list[dict], dict[str, object]]:
     """Evaluate one response with every configured judge and average the scores."""
     judge_runs: list[dict] = []
@@ -288,6 +301,8 @@ def _evaluate_with_judges(
                     retrieved_context=retrieved_context,
                     response=response,
                     pricing_by_model=pricing_by_model,
+                    tool_expectation=tool_expectation,
+                    acceptable_tool_sets=acceptable_tool_sets,
                 )
                 evaluation_usage = judge_result.get("evaluation_usage", empty_eval_usage)
                 evaluation_cost = judge_result.get("evaluation_cost_usd", empty_eval_cost)
@@ -526,7 +541,7 @@ def run_benchmark(
             model_consecutive_errors = 0
 
             for idx, item in enumerate(groundtruth_queries):
-                print(f"  [{idx+1}/{len(groundtruth_queries)}] [{item['domain'].upper()}] {item['query'][:50]}...")
+                print(f"  [{idx + 1}/{len(groundtruth_queries)}] [{item['domain'].upper()}] {item['query'][:50]}...")
 
                 response, tools, retrieved_context, latency, error, response_usage = run_isolated_agent(
                     domain=item['domain'],
@@ -554,6 +569,8 @@ def run_benchmark(
                     response=response,
                     response_error=error,
                     pricing_by_model=pricing_by_model,
+                    tool_expectation=item.get("tool_expectation", "strict"),
+                    acceptable_tool_sets=item.get("acceptable_tool_sets"),
                 )
 
                 evaluation_usage = aggregated_judges.get("evaluation_usage", build_usage_payload({}, model_id=evaluation_model_id, call_count=0))
@@ -571,6 +588,8 @@ def run_benchmark(
                 tool_metrics = compute_tool_metrics(
                     expected=item.get("expected_tools", []),
                     actual=tools,
+                    acceptable_tool_sets=item.get("acceptable_tool_sets"),
+                    tool_expectation=item.get("tool_expectation", "strict"),
                 )
                 heuristics = None if error is not None else run_all_heuristics(
                     response=response,
@@ -741,9 +760,7 @@ def _build_summary(results: list) -> dict:
             "error_categories": summarize_error_categories(results),
             "avg_composite_score": round(sum(scores) / len(scores), 3) if scores else 0,
             "avg_latency_s": round(sum(latencies) / len(latencies), 3) if latencies else 0,
-            "avg_tool_f1": round(
-                sum(r.get("tool_metrics", {}).get("tool_f1", 0) for r in results) / len(results), 3
-            ) if results else 0,
+            "avg_tool_f1": _average_tool_f1(results),
             "heuristics_pass_count": heuristics_pass_count,
             "heuristics_pass_rate": round(
                 heuristics_pass_count / len(results), 3
@@ -783,9 +800,7 @@ def _build_summary(results: list) -> dict:
             "scored_responses": sum(1 for r in domain_results if r.get("scores", {}).get("composite_score") is not None),
             "avg_composite_score": round(sum(domain_scores) / len(domain_scores), 3) if domain_scores else 0,
             "avg_factual_accuracy": round(sum(factual_scores) / len(factual_scores), 3) if factual_scores else 0,
-            "avg_tool_f1": round(
-                sum(r.get("tool_metrics", {}).get("tool_f1", 0) for r in domain_results) / max(1, len(domain_results)), 3
-            ),
+            "avg_tool_f1": _average_tool_f1(domain_results),
             "heuristics_pass_count": sum(
                 1 for r in domain_results if (r.get("heuristics") or {}).get("overall_pass", False)
             ),
