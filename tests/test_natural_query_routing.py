@@ -83,6 +83,18 @@ def test_researcher_service_categories_accept_generic_help_query() -> None:
     assert tool_call.tool_calls[0]["name"] == "list_service_categories"
 
 
+def test_researcher_service_queries_use_lisboa_aberta_in_subgraph() -> None:
+    """Deterministic researcher subgraph routing must not send services to VisitLisboa."""
+    tool_call = ResearcherAgent._build_deterministic_subgraph_tool_call(
+        "Hospital mais próximo do Marquês de Pombal"
+    )
+
+    assert tool_call is not None
+    assert tool_call.tool_calls[0]["name"] == "find_nearby_services"
+    assert tool_call.tool_calls[0]["args"]["service_type"] == "hospitais"
+    assert tool_call.tool_calls[0]["args"]["near_location_name"] == "Marquês de Pombal"
+
+
 def test_researcher_event_categories_accept_generic_browsing_query() -> None:
     """Event-category routing should accept natural browsing language."""
     tool_call = ResearcherAgent._build_deterministic_subgraph_tool_call(

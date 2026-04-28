@@ -42,6 +42,18 @@ def pytest_addoption(parser) -> None:  # type: ignore[no-untyped-def]
     )
 
 
+def pytest_configure(config) -> None:  # type: ignore[no-untyped-def]
+    """Register project-specific markers used by integration and coverage tests."""
+    config.addinivalue_line(
+        "markers",
+        "coverage: tests that validate tool and prompt coverage manifests",
+    )
+    config.addinivalue_line(
+        "markers",
+        "live: tests that may call live external APIs or local runtime resources",
+    )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _disable_langsmith_tracing_for_pytest() -> None:  # type: ignore[no-untyped-def]
     """Disable LangSmith tracing across pytest unless explicitly re-enabled."""

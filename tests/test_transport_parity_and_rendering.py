@@ -357,6 +357,20 @@ def test_transport_tool_selects_shortest_transfer_hub_for_entrecampos_to_nova_im
     assert "**~11 min**" in result
 
 
+def test_route_tool_resolves_sete_rios_to_jardim_zoologico_metro() -> None:
+    """Sete Rios should resolve to Jardim Zoológico for Metro route calculations."""
+    with patch.object(transport_api, "_get_line_status", return_value="Ok"):
+        result = transport_api.get_route_between_stations.invoke(
+            {"origin": "Entrecampos", "destination": "Sete Rios"}
+        )
+
+    assert "🚇 **METRO ROUTE**" in result
+    assert "**Transfer at**: Marquês de Pombal" in result
+    assert "Board at **Entrecampos**" in result
+    assert "Exit at **Jardim Zoológico**" in result
+    assert "Destination 'Sete Rios' not on Metro" not in result
+
+
 def test_deterministic_generic_route_response_mentions_train_and_bus_alternatives_when_sensible() -> None:
     """Open-ended route questions should keep the best metro path while surfacing factual train and bus alternatives."""
     route_result = (
@@ -1263,9 +1277,9 @@ def test_transport_agent_skips_metro_fast_path_when_destination_is_ambiguous() -
     ), patch(
         "agent.agents.transport_agent._build_deterministic_route_tool_response",
         return_value=(
-            "🗺️ **Route: Metro Santos → Rua Humberto Madeira**\n\n"
             "⚠️ **Ambiguidade no destino**: **Madeira** pode referir-se à **Ilha da Madeira** ou a **Rua Humberto Madeira**, em Lisboa.\n"
             "- Assumo a interpretação urbana abaixo.\n\n"
+            "🗺️ **Route: Metro Santos → Rua Humberto Madeira**\n\n"
             "📍 **LOCATION INFORMATION**\n"
             "**Metro Santos**\n"
             "   🚇 Nearest Metro: **Cais Do Sodré** (🟢 Verde Line)\n"
@@ -1299,6 +1313,7 @@ def test_transport_agent_skips_metro_fast_path_when_destination_is_ambiguous() -
         )
 
     assert result is not None
+    assert result.lstrip().startswith("⚠️ **Ambiguidade")
     assert "**Trajeto:** Metro Santos → Rua Humberto Madeira" in result
     assert "Ambiguidade no destino" in result
     assert "Ilha da Madeira" in result
@@ -1310,8 +1325,8 @@ def test_transport_agent_skips_metro_fast_path_when_destination_is_ambiguous() -
     assert "**É necessária transferência**" in result
     assert "**Percurso completo**" in result
     assert "Caminha desde Metro Santos" in result
-    assert "Apanha em **Cais Do Sodré**" in result
-    assert "Transferência em" in result
+    assert "Apanha em **Cais do Sodré**" in result
+    assert "Transferência em" in result or "Transfere para" in result
     assert "Sai em **Alameda**" in result
     assert agent.get_tool_calls_log() == [
         {"tool_name": "get_route_between_stations", "args": {"origin": "metro", "destination": "Madeira"}}

@@ -497,8 +497,10 @@ def test_researcher_worker_finalization_localizes_service_lookup_sections_in_pt(
         language="pt",
     )
 
-    assert "#### 💊 Farmácias Perto de Saldanha" in output
-    assert "#### 🏥 Hospitais Públicos Perto de Saldanha" in output
+    assert "### 💊 Farmácias perto de Saldanha" in output
+    assert "### 🏥 Hospitais públicos perto de Saldanha" in output
+    assert "- 💊 **Farmácia Dalva**" in output
+    assert "1. 💊" not in output
     assert "📍 **Morada:** [Avenida Duque d'Ávila, 125](https://www.google.com/maps/search/?api=1&query=Avenida+Duque+d%27%C3%81vila%2C+125)" in output
     assert "📏 **Distância:** 0.07 km" in output
     assert "km away" not in output
@@ -3676,7 +3678,8 @@ def test_multiagent_always_finalizes_single_worker_output_even_without_final_qa_
 
     assistant.qa_agent.repair_final_response.assert_not_called()
     researcher_agent.invoke.assert_called_once()
-    assert "#### 💊 Farmácias Perto de Saldanha" in output
+    assert "### 💊 Farmácias perto de Saldanha" in output
+    assert "1. 💊" not in output
     assert "km away" not in output
 
 

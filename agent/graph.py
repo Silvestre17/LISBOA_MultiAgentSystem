@@ -925,6 +925,17 @@ class MultiAgentAssistant:
         if "some urls reference unverified domains" in lowered or "domínios não verificados" in lowered:
             return None
 
+        if any(
+            marker in lowered
+            for marker in (
+                "qa validation structure could not be confirmed",
+                "qa validation could not parse",
+                "quality validation could not produce",
+                "valid structured result after retry",
+            )
+        ):
+            return None
+
         if "event details (dates, times, ticket prices) should be confirmed at visitlisboa.com" in lowered:
             return None
 
@@ -1563,6 +1574,81 @@ class MultiAgentAssistant:
                         language=language,
                         user_query=message,
                     )
+
+        if "transport" in effective_agents and isinstance(agent_outputs.get("transport"), str):
+            transport_output = str(agent_outputs.get("transport") or "")
+            ambiguous_transport_route = (
+                "Ilha da Madeira" in transport_output
+                and "Rua Humberto Madeira" in transport_output
+                and (
+                    "🗺️ **Trajeto" in transport_output
+                    or "🗺️ **Route" in transport_output
+                    or "**Trajeto:**" in transport_output
+                    or "**Route:" in transport_output
+                    or "Percurso de metro" in transport_output
+                    or "METRO ROUTE" in transport_output
+                )
+            )
+            final_dropped_route = not any(
+                marker in final_output
+                for marker in (
+                    "🗺️ **Trajeto",
+                    "🗺️ **Route",
+                    "**Trajeto:**",
+                    "**Route:",
+                    "Percurso de metro",
+                    "METRO ROUTE",
+                )
+            )
+            if ambiguous_transport_route and final_dropped_route:
+                final_output = finalize_worker_response(
+                    transport_output,
+                    agent_name="transport",
+                    user_query=message,
+                    language=language,
+                )
+                final_output = enforce_language_labels(final_output, language)
+                final_output = canonicalize_transport_terms(final_output, language=language)
+                final_output = final_visual_pass(final_output)
+
+        final_output = self._move_location_ambiguity_preamble_first(
+            response=final_output,
+            user_query=message,
+            language=language,
+        )
+
+        if "transport" in effective_agents:
+            from agent.utils.response_formatter import operators_from_tool_names, rebuild_transport_source_line
+
+            tool_names = [
+                call.get("tool_name")
+                for call in self.agents["transport"].get_tool_calls_log()
+                if isinstance(call, dict)
+            ]
+            operators_used = operators_from_tool_names(tool_names)
+            if (
+                "get_route_between_stations" in {str(name or "") for name in tool_names}
+                and "metro" not in operators_used
+                and any(
+                    marker in final_output.lower()
+                    for marker in [
+                        "metro de lisboa",
+                        "trajeto metro",
+                        "linha amarela",
+                        "linha azul",
+                        "linha verde",
+                        "linha vermelha",
+                    ]
+                )
+            ):
+                operators_used = ["metro", *operators_used]
+            if operators_used:
+                final_output = rebuild_transport_source_line(
+                    final_output,
+                    operators_used,
+                    language=language,
+                )
+                final_output = final_visual_pass(final_output)
 
         self._append_assistant_message(final_output)
 
@@ -2348,7 +2434,11 @@ class MultiAgentAssistant:
             )
             response = finalize_worker_response(response, "planner", message, effective_language)
         elif len(response_agents_to_call) == 1 and response_agents_to_call[0] in {"researcher", "transport"}:
-            from agent.utils.response_formatter import finalize_worker_response
+            from agent.utils.response_formatter import (
+                finalize_worker_response,
+                operators_from_tool_names,
+                rebuild_transport_source_line,
+            )
 
             response = finalize_worker_response(
                 response,
@@ -2356,6 +2446,35 @@ class MultiAgentAssistant:
                 message,
                 effective_language,
             )
+            if response_agents_to_call[0] == "transport":
+                tool_names = [
+                    call.get("tool_name")
+                    for call in self.agents["transport"].get_tool_calls_log()
+                    if isinstance(call, dict)
+                ]
+                operators_used = operators_from_tool_names(tool_names)
+                if (
+                    "get_route_between_stations" in {str(name or "") for name in tool_names}
+                    and "metro" not in operators_used
+                    and any(
+                        marker in response.lower()
+                        for marker in [
+                            "metro de lisboa",
+                            "trajeto metro",
+                            "linha amarela",
+                            "linha azul",
+                            "linha verde",
+                            "linha vermelha",
+                        ]
+                    )
+                ):
+                    operators_used = ["metro", *operators_used]
+                if operators_used:
+                    response = rebuild_transport_source_line(
+                        response,
+                        operators_used,
+                        language=effective_language,
+                    )
         elif len(response_agents_to_call) == 1 and response_agents_to_call[0] == "weather":
             from agent.utils.response_formatter import finalize_worker_response
 
@@ -2369,6 +2488,12 @@ class MultiAgentAssistant:
             from agent.utils.response_formatter import canonicalize_local_information_terms
 
             response = canonicalize_local_information_terms(response, effective_language)
+
+        response = self._move_location_ambiguity_preamble_first(
+            response=response,
+            user_query=message,
+            language=effective_language,
+        )
 
         return self._finalize_chat_response(
             response=response,
@@ -2386,6 +2511,94 @@ class MultiAgentAssistant:
             final_repair_ran=final_repair_ran,
             simple_weather_fact_check=simple_weather_fact_check,
         )
+
+    @staticmethod
+    def _move_location_ambiguity_preamble_first(
+        response: str,
+        user_query: str,
+        language: str,
+    ) -> str:
+        """Move bare ambiguous-location warnings before generic response headings."""
+        if not response or not user_query:
+            return response
+
+        try:
+            from agent.agents.transport_agent import _extract_route_endpoints
+            from tools.location_resolver import build_location_ambiguity_preamble
+
+            endpoints = _extract_route_endpoints(user_query)
+            if not endpoints:
+                return response
+            preamble = build_location_ambiguity_preamble(
+                endpoints[0],
+                endpoints[1],
+                language=language,
+            )
+        except Exception:
+            return response
+
+        if not preamble:
+            return response
+
+        stripped_response = response.lstrip()
+        if stripped_response.startswith("⚠️") and (
+            "Ambiguidade" in stripped_response[:160]
+            or "Ambiguity" in stripped_response[:160]
+        ):
+            return response
+
+        cleaned_lines: List[str] = []
+        skipping_ambiguity = False
+        for line in response.splitlines():
+            stripped_line = line.strip()
+            if not skipping_ambiguity and (
+                "Ambiguidade" in stripped_line or "Ambiguity" in stripped_line
+            ):
+                skipping_ambiguity = True
+                continue
+
+            if skipping_ambiguity:
+                if not stripped_line:
+                    skipping_ambiguity = False
+                    continue
+                if (
+                    stripped_line.startswith(("A)", "B)", "- A)", "- B)"))
+                    or "Ilha da Madeira" in stripped_line
+                    or "Rua Humberto Madeira" in stripped_line
+                    or "Madeira island" in stripped_line
+                    or "Avenida da Ilha da Madeira" in stripped_line
+                    or "Assumo" in stripped_line
+                    or "continu" in stripped_line.lower()
+                ):
+                    continue
+                skipping_ambiguity = False
+
+            lowered_line = stripped_line.lower()
+            if stripped_line in {"###", "---"}:
+                continue
+            if (
+                stripped_line.startswith(("A)", "- A)"))
+                and "Ilha da Madeira" in stripped_line
+            ):
+                continue
+            if (
+                stripped_line.startswith(("B)", "- B)"))
+                and (
+                    "Rua Humberto Madeira" in stripped_line
+                    or "Av. Ilha da Madeira" in stripped_line
+                    or "Avenida da Ilha da Madeira" in stripped_line
+                )
+            ):
+                continue
+            if lowered_line.startswith("- se não for") and "destino" in lowered_line:
+                continue
+            if "se o destino pretendido for a ilha da madeira" in lowered_line:
+                continue
+
+            cleaned_lines.append(line)
+
+        body = "\n".join(cleaned_lines).strip()
+        return f"{preamble}\n\n{body}".strip()
 
     @staticmethod
     def _extract_structured_section_parts(text: str) -> tuple[str, List[str], Optional[str]]:

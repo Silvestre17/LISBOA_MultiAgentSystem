@@ -16,6 +16,7 @@ from agent.utils.response_formatter import (
     final_visual_pass,
     finalize_worker_response,
     infer_response_language,
+    localize_local_information_values,
     reconcile_researcher_event_response,
     resolve_output_language,
     structure_weather_markdown,
@@ -74,6 +75,20 @@ def test_final_visual_pass_splits_adjacent_warning_blocks() -> None:
 
     assert "primeiro aviso\n\n⚠️ **Nota:** segundo aviso" in output
     assert "segundo aviso\n\n📌 **Fonte:**" in output
+
+
+def test_pt_label_localizer_does_not_corrupt_url_paths() -> None:
+    """PT label localization must not translate URL path segments such as tickets/location."""
+    raw = (
+        "🌐 **Website:** [visitlisboa.com](https://www.visitlisboa.com/en/events/foo#tickets)\n"
+        "📍 **Location:** Rua Augusta, Lisboa"
+    )
+
+    output = localize_local_information_values(raw, language="pt")
+
+    assert "https://www.visitlisboa.com/en/events/foo#tickets" in output
+    assert "#bilhetes" not in output.lower()
+    assert "📍 **Localização:** Rua Augusta, Lisboa" in output
 
 
 def test_researcher_prompt_requires_restaurant_criteria_extraction() -> None:

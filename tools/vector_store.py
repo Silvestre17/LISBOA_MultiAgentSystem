@@ -57,6 +57,7 @@ import argparse
 import gc
 import hashlib
 import json
+import logging
 import time
 import warnings
 from dataclasses import dataclass
@@ -120,6 +121,7 @@ COLLECTION_EVENTS = "lisbon_events"
 SYNC_STATE_VERSION = 1
 SYNC_STATE_DIRNAME = "_sync_state"
 DEFAULT_BATCH_SIZE = 10
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -391,7 +393,8 @@ class KnowledgeBase:
                     if metadata:
                         doc_hashes[doc_id] = metadata.get("content_hash", "")
             return doc_hashes
-        except Exception:
+        except Exception as exc:
+            logger.warning("Could not read existing vector hashes for %s: %s", collection_name, exc)
             return {}
 
     def _delete_collection(self, collection_name: str) -> None:
@@ -408,8 +411,8 @@ class KnowledgeBase:
                 f"   \033[1;33m🗑️ Deleted collection: {collection_name}\033[0m",
                 flush=True,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Could not delete vector collection %s: %s", collection_name, exc)
 
     def _extract_title(self, item: Dict[str, Any], source_tag: str) -> str:
         """
@@ -948,7 +951,8 @@ class KnowledgeBase:
                     "pending_sync": len(state.pending_ids) if state else 0,
                     "sync_mode": state.mode if state else None,
                 }
-            except Exception:
+            except Exception as exc:
+                logger.debug("Vector collection %s is not ready: %s", col_name, exc)
                 stats[col_name] = {"status": "not_built", "count": 0}
         stats["total"] = sum(
             s.get("count", 0) for s in stats.values() if isinstance(s, dict)
@@ -985,7 +989,8 @@ class KnowledgeBase:
                 vectorstore = self._get_collection(col_name)
                 results = vectorstore.similarity_search_with_score(query, k=k)
                 all_results.extend(results)
-            except Exception:
+            except Exception as exc:
+                logger.warning("Vector search skipped collection %s: %s", col_name, exc)
                 continue
         all_results.sort(key=lambda x: x[1])
 
@@ -1021,7 +1026,8 @@ class KnowledgeBase:
                 vectorstore = self._get_collection(col_name)
                 results = vectorstore.similarity_search_with_score(query, k=k)
                 all_results.extend(results)
-            except Exception:
+            except Exception as exc:
+                logger.warning("Vector search skipped collection %s: %s", col_name, exc)
                 continue
         all_results.sort(key=lambda x: x[1])
         return all_results[:k]

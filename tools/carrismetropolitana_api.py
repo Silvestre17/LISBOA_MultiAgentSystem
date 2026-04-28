@@ -47,6 +47,11 @@ try:
 except ImportError:
     from utils import fetch_json_with_retry, haversine_distance
 
+try:
+    from tools.location_resolver import build_location_ambiguity_preamble
+except ImportError:
+    from location_resolver import build_location_ambiguity_preamble
+
 # Request configuration
 REQUEST_TIMEOUT = 15  # seconds
 MAX_RETRIES = 3  # number of retries for API calls
@@ -2047,6 +2052,9 @@ def find_bus_routes(
     response += f"📍 From: {origin}\n"
     response += f"📍 To: {destination}\n"
     response += "=" * 50 + "\n\n"
+    ambiguity_note = build_location_ambiguity_preamble(origin, destination, language="pt")
+    if ambiguity_note:
+        response += f"{ambiguity_note}\n\n"
 
     # Resolve origin
     response += "🔍 **Resolving origin location...**\n"

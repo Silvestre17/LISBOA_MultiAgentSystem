@@ -8,7 +8,10 @@
 
 from __future__ import annotations
 
+import logging
+
 import pandas as pd
+import requests
 
 import tools.dados_abertos as dados_abertos
 
@@ -94,4 +97,40 @@ def test_fetch_geojson_caches_unavailable_4xx_dataset_urls(monkeypatch) -> None:
     assert dados_abertos.fetch_geojson_with_retry("https://services.arcgis.com/broken") is None
     assert dados_abertos.fetch_geojson_with_retry("https://services.arcgis.com/broken") is None
     assert calls["count"] == 1
-    assert dados_abertos._UNAVAILABLE_DATASET_URLS["https://services.arcgis.com/broken"] == "HTTP 400"
+    assert dados_abertos._get_unavailable_dataset_reason("https://services.arcgis.com/broken") == "HTTP 400"
+
+
+def test_transient_unavailable_dataset_cache_expires(monkeypatch) -> None:
+    """Transient 5xx/429 dataset failures should not poison a process forever."""
+    dados_abertos._UNAVAILABLE_DATASET_URLS.clear()
+    times = iter([1000.0, 1001.0, 2000.0])
+
+    monkeypatch.setattr(dados_abertos.time, "time", lambda: next(times))
+    dados_abertos._mark_dataset_url_unavailable("https://transient.example", "HTTP 503", 503)
+
+    assert dados_abertos._get_unavailable_dataset_reason("https://transient.example") == "HTTP 503"
+    assert dados_abertos._get_unavailable_dataset_reason("https://transient.example") is None
+
+
+def test_fetch_geojson_caches_network_failures_without_raw_request_error(
+    monkeypatch,
+    caplog,
+) -> None:
+    """Network failures should be cached without leaking raw Request error text."""
+    dados_abertos._UNAVAILABLE_DATASET_URLS.clear()
+    calls = {"count": 0}
+
+    def fake_get(url: str, timeout: int):
+        calls["count"] += 1
+        raise requests.exceptions.ConnectionError("DNS exploded")
+
+    monkeypatch.setattr(dados_abertos.requests, "get", fake_get)
+
+    with caplog.at_level(logging.WARNING, logger=dados_abertos.logger.name):
+        assert dados_abertos.fetch_geojson_with_retry("https://services.arcgis.com/transient") is None
+        assert dados_abertos.fetch_geojson_with_retry("https://services.arcgis.com/transient") is None
+
+    assert calls["count"] == 1
+    assert dados_abertos._get_unavailable_dataset_reason("https://services.arcgis.com/transient") == "network unavailable"
+    assert "Request error" not in caplog.text
+    assert "DNS exploded" not in caplog.text

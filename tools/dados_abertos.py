@@ -47,7 +47,31 @@ except ImportError:
 REQUEST_TIMEOUT = 15  # seconds
 MAX_RETRIES = 3
 BACKOFF_FACTOR = 2
-_UNAVAILABLE_DATASET_URLS: Dict[str, str] = {}
+TRANSIENT_DATASET_UNAVAILABLE_TTL_SECONDS = 15 * 60
+_UNAVAILABLE_DATASET_URLS: Dict[str, Dict[str, Any] | str] = {}
+
+
+def _get_unavailable_dataset_reason(url: str) -> Optional[str]:
+    """Return cached unavailability reason, expiring transient failures when needed."""
+    cached = _UNAVAILABLE_DATASET_URLS.get(url)
+    if cached is None:
+        return None
+    if isinstance(cached, str):
+        return cached
+
+    expires_at = cached.get("expires_at")
+    if isinstance(expires_at, (int, float)) and expires_at <= time.time():
+        _UNAVAILABLE_DATASET_URLS.pop(url, None)
+        return None
+    return str(cached.get("reason") or "unavailable")
+
+
+def _mark_dataset_url_unavailable(url: str, reason: str, status_code: Optional[int] = None) -> None:
+    """Cache unavailable dataset URLs while allowing transient HTTP failures to recover."""
+    cache_entry: Dict[str, Any] = {"reason": reason, "status_code": status_code}
+    if status_code == 429 or (status_code is not None and status_code >= 500):
+        cache_entry["expires_at"] = time.time() + TRANSIENT_DATASET_UNAVAILABLE_TTL_SECONDS
+    _UNAVAILABLE_DATASET_URLS[url] = cache_entry
 
 # ==========================================================================
 # Data Loading
@@ -123,8 +147,9 @@ def fetch_geojson_with_retry(url: str) -> Optional[Dict[str, Any]]:
         - Implements exponential backoff (2s, 4s, 8s)
         - Validates GeoJSON structure
     """
-    if url in _UNAVAILABLE_DATASET_URLS:
-        logger.warning("Skipping unavailable Lisboa Aberta dataset URL: %s (%s)", url, _UNAVAILABLE_DATASET_URLS[url])
+    unavailable_reason = _get_unavailable_dataset_reason(url)
+    if unavailable_reason:
+        logger.warning("Skipping unavailable Lisboa Aberta dataset URL: %s (%s)", url, unavailable_reason)
         return None
 
     for attempt in range(MAX_RETRIES):
@@ -134,7 +159,7 @@ def fetch_geojson_with_retry(url: str) -> Optional[Dict[str, Any]]:
             response = requests.get(url, timeout=REQUEST_TIMEOUT)
             if response.status_code >= 400:
                 reason = f"HTTP {response.status_code}"
-                _UNAVAILABLE_DATASET_URLS[url] = reason
+                _mark_dataset_url_unavailable(url, reason, response.status_code)
                 logger.warning("Lisboa Aberta dataset unavailable: %s -> %s", url, reason)
                 return None
             response.raise_for_status()
@@ -150,19 +175,17 @@ def fetch_geojson_with_retry(url: str) -> Optional[Dict[str, Any]]:
             return data
 
         except requests.exceptions.Timeout:
-            wait_time = BACKOFF_FACTOR ** attempt
-            logger.warning(f"Timeout after {REQUEST_TIMEOUT}s. Retrying in {wait_time}s...")
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(wait_time)
+            reason = "network timeout"
+            _mark_dataset_url_unavailable(url, reason, 503)
+            logger.warning("Lisboa Aberta dataset temporarily unavailable: %s -> %s", url, reason)
+            return None
 
         except requests.exceptions.RequestException as e:
-            wait_time = BACKOFF_FACTOR ** attempt
-            logger.warning(f"Request error: {e}")
-            if attempt < MAX_RETRIES - 1:
-                logger.info(f"Retrying in {wait_time}s...")
-                time.sleep(wait_time)
-            else:
-                logger.error(f"Failed after {MAX_RETRIES} attempts")
+            reason = "network unavailable"
+            _mark_dataset_url_unavailable(url, reason, 503)
+            logger.warning("Lisboa Aberta dataset temporarily unavailable: %s -> %s", url, reason)
+            logger.debug("Lisboa Aberta request exception for %s: %s", url, e)
+            return None
 
         except json.JSONDecodeError:
             logger.error("Response is not valid JSON")
@@ -627,7 +650,7 @@ def find_nearby_services(
 
         geojson_data = fetch_geojson_with_retry(stable_url)
         if not geojson_data:
-            if stable_url in _UNAVAILABLE_DATASET_URLS:
+            if _get_unavailable_dataset_reason(stable_url):
                 dataset_errors.append(f"{title}: dataset temporarily unavailable")
             else:
                 dataset_errors.append(f"{title}: fetch failed")

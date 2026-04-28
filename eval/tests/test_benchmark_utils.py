@@ -158,6 +158,127 @@ class TestComputeToolMetrics:
             val = result[key]
             assert round(val, 3) == val, f"{key} not rounded to 3 decimals: {val}"
 
+    def test_flexible_tool_expectations_are_unscored(self):
+        """Flexible rows should carry metadata but not produce numeric tool F1."""
+        result = compute_tool_metrics(
+            expected=["search_places_attractions"],
+            actual=["search_cultural_events"],
+            tool_expectation="flexible",
+            acceptable_tool_sets=[["search_cultural_events"]],
+        )
+
+        assert result["tool_f1"] is None
+        assert result["tool_metric_scored"] is False
+        assert result["tool_expectation"] == "flexible"
+
+
+def test_benchmark_summary_skips_unscored_flexible_tool_rows() -> None:
+    """Summary averages should ignore flexible rows where deterministic tool F1 is None."""
+    base_record = {
+        "domain": "researcher",
+        "response_model": "azure::gpt-5.4-mini",
+        "error": None,
+        "latency_s": 1.0,
+        "scores": {"composite_score": 4.0, "factual_accuracy": 4.0},
+        "heuristics": {"overall_pass": True},
+        "sla_met": True,
+        "response_usage": {},
+        "evaluation_usage": {},
+        "combined_usage": {},
+        "response_cost_usd": {},
+        "evaluation_cost_usd": {},
+        "combined_cost_usd": {},
+    }
+    strict_record = {
+        **base_record,
+        "tool_metrics": {"tool_f1": 1.0, "tool_metric_scored": True},
+    }
+    flexible_record = {
+        **base_record,
+        "tool_metrics": {"tool_f1": None, "tool_metric_scored": False},
+    }
+
+    summary = _build_summary([strict_record, flexible_record])
+
+    assert summary["overall"]["avg_tool_f1"] == 1.0
+    assert summary["per_domain"]["researcher"]["avg_tool_f1"] == 1.0
+
+
+def test_benchmark_judge_receives_flexible_tool_metadata() -> None:
+    """Benchmark judge calls should receive flexible-tool metadata from the dataset row."""
+    captured = {}
+
+    class FakeJudge:
+        def evaluate(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "factual_accuracy": 4,
+                "tool_usage": 4,
+                "completeness": 4,
+                "relevance": 4,
+                "response_quality": 4,
+                "composite_score": 4.0,
+                "reasoning": "ok",
+                "evaluation_usage": {},
+                "evaluation_cost_usd": {},
+            }
+
+    benchmark_module._evaluate_with_judges(
+        judges=[FakeJudge()],
+        judge_model_manifests=[{"model_id": "test::judge"}],
+        query="q",
+        expected_facts=[],
+        expected_tools=["a"],
+        actual_tools=["b"],
+        retrieved_context="ctx",
+        response="resp",
+        response_error=None,
+        pricing_by_model=None,
+        tool_expectation="flexible",
+        acceptable_tool_sets=[["b"]],
+    )
+
+    assert captured["tool_expectation"] == "flexible"
+    assert captured["acceptable_tool_sets"] == [["b"]]
+
+
+def test_ablation_judge_receives_flexible_tool_metadata() -> None:
+    """Ablation judge calls should receive flexible-tool metadata for both arms."""
+    captured = {}
+
+    class FakeJudge:
+        def evaluate(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "factual_accuracy": 4,
+                "tool_usage": 4,
+                "completeness": 4,
+                "relevance": 4,
+                "response_quality": 4,
+                "composite_score": 4.0,
+                "reasoning": "ok",
+                "evaluation_usage": {},
+                "evaluation_cost_usd": {},
+            }
+
+    ablation_module._evaluate_with_judges(
+        judges=[FakeJudge()],
+        judge_model_manifests=[{"model_id": "test::judge"}],
+        query="q",
+        expected_facts=[],
+        expected_tools=["a"],
+        actual_tools=["b"],
+        retrieved_context="ctx",
+        response="resp",
+        response_error=None,
+        pricing_by_model=None,
+        tool_expectation="flexible",
+        acceptable_tool_sets=[["b"]],
+    )
+
+    assert captured["tool_expectation"] == "flexible"
+    assert captured["acceptable_tool_sets"] == [["b"]]
+
 
 # ==========================================================================
 # Tests for SLA_THRESHOLDS

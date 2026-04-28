@@ -16,6 +16,10 @@
 
 name: Update Lisbon Data
 
+concurrency:
+  group: update-lisbon-data-${{ github.ref }}
+  cancel-in-progress: false
+
 on:
   schedule:
     # Daily at 04:00 AM UTC
@@ -111,5 +115,6 @@ jobs:
             echo "No changes to commit."
           else
             git commit -m "Data Auto-Update: $(date +'%Y-%m-%d')"
+            git pull --rebase origin "${GITHUB_REF_NAME:-main}"
             git push
           fi

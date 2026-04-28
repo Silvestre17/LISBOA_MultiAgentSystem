@@ -601,7 +601,7 @@ def scrape_event_details(session, event_url):
             return event_data
 
         except requests.exceptions.RequestException as e:
-            logging.warning(f"Attempt {attempt+1} failed for {event_url}: {e}")
+            logging.warning(f"Attempt {attempt + 1} failed for {event_url}: {e}")
             time.sleep(2)
 
     logging.error(f"Failed to scrape {event_url}")
@@ -648,7 +648,13 @@ def main():
         sys.exit(1)
 
     if len(existing_events) > 0 and len(all_urls) < len(existing_events) * 0.5:
-        logging.warning("WARNING: Significant drop in events count. Verify manually.")
+        logging.error(
+            "CRITICAL: Harvested events dropped from %s to %s. "
+            "Possible blocking or VisitLisboa schema drift. Aborting save to protect existing JSON.",
+            len(existing_events),
+            len(all_urls),
+        )
+        sys.exit(1)
 
     # 3. Delta Logic
     existing_urls = set(existing_events.keys())
@@ -689,6 +695,14 @@ def main():
 
     # 4. Save
     if len(final_list) > 0:
+        if len(existing_events) > 0 and len(final_list) < len(existing_events) * 0.5:
+            logging.error(
+                "CRITICAL: Final events list dropped from %s to %s after detail scraping. "
+                "Aborting save to protect existing JSON.",
+                len(existing_events),
+                len(final_list),
+            )
+            sys.exit(1)
         with open(output_filepath, 'w', encoding='utf-8') as f:
             json.dump(final_list, f, indent=4, ensure_ascii=False)
         logging.info(f"Successfully saved {len(final_list)} events.")

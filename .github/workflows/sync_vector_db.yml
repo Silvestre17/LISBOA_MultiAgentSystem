@@ -227,6 +227,7 @@ jobs:
             fi
 
             git commit -m "$commit_msg"
+            git pull --rebase origin "${GITHUB_REF_NAME:-main}"
             git push
             echo "✅ Progress committed: $commit_msg"
           }
@@ -354,6 +355,7 @@ jobs:
             fi
             
             git commit -m "$COMMIT_MSG"
+            git pull --rebase origin "${GITHUB_REF_NAME:-main}"
             git push
             echo "✅ Vector database committed and pushed"
           fi

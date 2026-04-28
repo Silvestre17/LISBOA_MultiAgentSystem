@@ -42,10 +42,6 @@ except Exception:
 
 sys.path.insert(0, ".")
 
-from agent.utils.langsmith_tracing import (
-    get_langsmith_display_state,
-    get_langsmith_project_name,
-)
 from agent.utils.startup_resources import (
     pre_warm_transport_networks as _pre_warm_transport_networks_impl,
     pre_warm_vector_store as _pre_warm_vector_store_impl,
@@ -1280,7 +1276,6 @@ def initialize_assistant(
             force_retry=bool(st.session_state.get("startup_resources_attempted"))
             and not bool(st.session_state.get("startup_resources_ok")),
         )
-        transport_ok = bool(startup_status.get("transport_ok", False))
         transport_status = str(
             startup_status.get("transport_status")
             or st.session_state.get("transport_db_status")
@@ -1288,15 +1283,18 @@ def initialize_assistant(
         )
         st.session_state.transport_db_status = transport_status
 
-        if Config.USE_MULTI_AGENT and not bool(startup_status.get("kb_ok", False)):
+        if not startup_gate_allows_requests(
+            startup_ok,
+            startup_status,
+            use_multi_agent=Config.USE_MULTI_AGENT,
+        ):
             st.session_state.initialized = False
             return (
                 False,
-                startup_status.get("kb_status")
-                or (
-                    "Não foi possível carregar a base de conhecimento."
-                    if lang == "pt"
-                    else "Could not load the knowledge base."
+                build_startup_gate_message(
+                    startup_status,
+                    language=lang,
+                    use_multi_agent=Config.USE_MULTI_AGENT,
                 ),
             )
 
@@ -1320,9 +1318,6 @@ def initialize_assistant(
         st.session_state.initialized = True
         st.session_state.provider = provider
         st.session_state.error = None
-
-        if not transport_ok:
-            st.toast(transport_status, icon="⚠️")
 
         return True, None
     except Exception as exc:

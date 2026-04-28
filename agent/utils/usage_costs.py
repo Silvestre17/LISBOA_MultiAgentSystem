@@ -165,6 +165,7 @@ def normalize_token_usage(usage: Any) -> dict[str, int]:
     input_tokens = 0
     output_tokens = 0
     total_tokens = 0
+    cached_input_tokens = 0
 
     for candidate in candidates:
         input_tokens = max(
@@ -192,6 +193,38 @@ def normalize_token_usage(usage: Any) -> dict[str, int]:
             total_tokens,
             _coerce_int(candidate.get("total_tokens", candidate.get("total_token_count"))),
         )
+        cached_input_tokens = max(
+            cached_input_tokens,
+            _coerce_int(
+                candidate.get(
+                    "cached_input_tokens",
+                    candidate.get(
+                        "input_cached_tokens",
+                        candidate.get(
+                            "cache_read_input_tokens",
+                            candidate.get("prompt_cache_hit_tokens"),
+                        ),
+                    ),
+                )
+            ),
+        )
+        prompt_details = candidate.get("prompt_tokens_details")
+        if isinstance(prompt_details, dict):
+            cached_input_tokens = max(
+                cached_input_tokens,
+                _coerce_int(prompt_details.get("cached_tokens")),
+            )
+        input_details = candidate.get("input_token_details")
+        if isinstance(input_details, dict):
+            cached_input_tokens = max(
+                cached_input_tokens,
+                _coerce_int(
+                    input_details.get(
+                        "cache_read",
+                        input_details.get("cached", input_details.get("cache_read_tokens")),
+                    )
+                ),
+            )
 
     if total_tokens == 0:
         total_tokens = input_tokens + output_tokens
@@ -200,6 +233,7 @@ def normalize_token_usage(usage: Any) -> dict[str, int]:
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
+        "cached_input_tokens": min(cached_input_tokens, input_tokens),
     }
 
 
@@ -274,6 +308,7 @@ def combine_usage_payloads(
         "input_tokens": 0,
         "output_tokens": 0,
         "total_tokens": 0,
+        "cached_input_tokens": 0,
     }
     call_count = 0
     usage_available = False
@@ -284,6 +319,7 @@ def combine_usage_payloads(
         combined_tokens["input_tokens"] += tokens["input_tokens"]
         combined_tokens["output_tokens"] += tokens["output_tokens"]
         combined_tokens["total_tokens"] += tokens["total_tokens"]
+        combined_tokens["cached_input_tokens"] += tokens.get("cached_input_tokens", 0)
         call_count += _coerce_int(payload.get("call_count", 0))
         usage_available = usage_available or bool(payload.get("usage_available", False))
         if isinstance(payload.get("llm_usage_breakdown"), list):
@@ -467,7 +503,14 @@ def _build_single_model_cost_payload(
     output_price = pricing.get("output") if pricing else None
     cached_price = pricing.get("input_cached") if pricing else None
 
-    input_cost = (tokens["input_tokens"] / 1_000_000) * input_price if input_price is not None else 0.0
+    cached_input_tokens = tokens.get("cached_input_tokens", 0)
+    uncached_input_tokens = max(tokens["input_tokens"] - cached_input_tokens, 0)
+    cached_effective_price = cached_price if cached_price is not None else input_price
+    input_cost = 0.0
+    if input_price is not None:
+        input_cost += (uncached_input_tokens / 1_000_000) * input_price
+    if cached_effective_price is not None:
+        input_cost += (cached_input_tokens / 1_000_000) * cached_effective_price
     output_cost = (tokens["output_tokens"] / 1_000_000) * output_price if output_price is not None else 0.0
     total_tokens = tokens["total_tokens"]
     pricing_complete = total_tokens == 0 or (input_price is not None and output_price is not None)
@@ -525,6 +568,7 @@ def build_cost_payload(
             "input_tokens": 0,
             "output_tokens": 0,
             "total_tokens": 0,
+            "cached_input_tokens": 0,
         }
 
         for entry in breakdown:
@@ -532,6 +576,7 @@ def build_cost_payload(
             attributed_tokens["input_tokens"] += entry_tokens["input_tokens"]
             attributed_tokens["output_tokens"] += entry_tokens["output_tokens"]
             attributed_tokens["total_tokens"] += entry_tokens["total_tokens"]
+            attributed_tokens["cached_input_tokens"] += entry_tokens.get("cached_input_tokens", 0)
             entry_model_id = resolve_usage_model_id(
                 entry,
                 usage_payload.get("model_id"),
@@ -580,6 +625,11 @@ def build_cost_payload(
                 aggregate_tokens["total_tokens"] - attributed_tokens["total_tokens"],
                 max(aggregate_tokens["input_tokens"] - attributed_tokens["input_tokens"], 0)
                 + max(aggregate_tokens["output_tokens"] - attributed_tokens["output_tokens"], 0),
+            ),
+            "cached_input_tokens": max(
+                aggregate_tokens.get("cached_input_tokens", 0)
+                - attributed_tokens.get("cached_input_tokens", 0),
+                0,
             ),
         }
         if remainder_tokens["total_tokens"] > 0:
@@ -675,6 +725,7 @@ def combine_cost_payloads(payloads: Iterable[dict[str, Any]]) -> dict[str, Any]:
         "input_tokens": 0,
         "output_tokens": 0,
         "total_tokens": 0,
+        "cached_input_tokens": 0,
     }
     total_input_cost = 0.0
     total_output_cost = 0.0
@@ -697,6 +748,7 @@ def combine_cost_payloads(payloads: Iterable[dict[str, Any]]) -> dict[str, Any]:
         combined_tokens["input_tokens"] += tokens["input_tokens"]
         combined_tokens["output_tokens"] += tokens["output_tokens"]
         combined_tokens["total_tokens"] += payload_total_tokens
+        combined_tokens["cached_input_tokens"] += tokens.get("cached_input_tokens", 0)
         total_input_cost += float(payload.get("input_cost_usd", 0.0) or 0.0)
         total_output_cost += float(payload.get("output_cost_usd", 0.0) or 0.0)
         aggregate_model_ids.append(payload.get("model_id"))

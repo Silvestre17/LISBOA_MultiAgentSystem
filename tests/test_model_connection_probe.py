@@ -28,10 +28,12 @@ from __future__ import annotations
 from typing import Any, Dict
 
 import agent.utils.model_connection_probe as model_connection_probe
+from agent.llm_factory import LLMFactory
 from agent.utils.model_connection_probe import (
     build_connection_probe_request,
     perform_raw_model_connection_probe,
 )
+from config import Config
 
 
 class _SecretValue:
@@ -95,6 +97,36 @@ def test_build_connection_probe_request_for_standard_model() -> None:
     assert request_data["payload"]["max_tokens"] == 1
     assert request_data["payload"]["temperature"] == 0
     assert "max_completion_tokens" not in request_data["payload"]
+
+
+def test_gpt_4o_models_are_not_treated_as_reasoning_models() -> None:
+    """The o-series heuristic must not classify gpt-4o chat models as reasoning-only."""
+    assert not LLMFactory._is_reasoning_model("gpt-4o-mini")
+    assert not LLMFactory._is_reasoning_model("azure-gpt-4o")
+    assert LLMFactory._is_reasoning_model("o3-mini")
+    assert LLMFactory._is_reasoning_model("gpt-5.4-mini")
+
+
+def test_azure_agent_llm_uses_deployment_name_fallback(monkeypatch) -> None:
+    """Azure agent creation should prefer the configured deployment alias over public model names."""
+    captured: Dict[str, Any] = {}
+
+    def fake_get_llm(provider: str, temperature: float, model: str | None = None):
+        captured.update({"provider": provider, "temperature": temperature, "model": model})
+        return object()
+
+    monkeypatch.setattr(Config, "AZURE_OPENAI_DEPLOYMENT_NAME", "my-prod-deployment")
+    monkeypatch.setattr(Config, "MODEL_PROVIDER", "azure")
+    monkeypatch.setattr(
+        Config,
+        "AGENT_MODELS",
+        staticmethod(lambda: {"weather": {"provider": "azure", "model": "gpt-4o-mini", "temperature": 0.2}}),
+    )
+    monkeypatch.setattr(LLMFactory, "get_llm", staticmethod(fake_get_llm))
+
+    LLMFactory.get_agent_llm("weather")
+
+    assert captured == {"provider": "azure", "temperature": 0.2, "model": "my-prod-deployment"}
 
 
 def test_perform_raw_model_connection_probe_uses_requests_post(monkeypatch) -> None:

@@ -57,6 +57,21 @@ class TestUsagePayloads:
         assert payload["tokens"]["total_tokens"] == 125
         assert payload["usage_available"]
 
+    def test_build_usage_payload_extracts_cached_input_tokens(self):
+        """Provider cache-hit token fields should normalize to cached_input_tokens."""
+        payload = build_usage_payload(
+            {
+                "prompt_tokens": 1000,
+                "completion_tokens": 100,
+                "prompt_tokens_details": {"cached_tokens": 400},
+            },
+            model_id="azure::gpt-5.4-mini",
+            call_count=1,
+        )
+
+        assert payload["tokens"]["input_tokens"] == 1000
+        assert payload["tokens"]["cached_input_tokens"] == 400
+
     def test_combine_usage_payloads_sums_tokens_and_calls(self):
         """Combined usage should sum token totals and call counts."""
         first = build_usage_payload(
@@ -211,6 +226,35 @@ class TestCostPayloads:
         assert cost["output_cost_usd"] == pytest.approx(0.0006)
         assert cost["total_cost_usd"] == pytest.approx(0.0009)
 
+    def test_build_cost_payload_charges_cached_tokens_at_cached_rate(self):
+        """Cached prompt tokens should use cached-input pricing when reported."""
+        usage = build_usage_payload(
+            {
+                "input_tokens": 1000,
+                "output_tokens": 100,
+                "total_tokens": 1100,
+                "cached_input_tokens": 400,
+            },
+            model_id="azure::gpt-5.4-mini",
+            call_count=1,
+        )
+
+        cost = build_cost_payload(
+            usage,
+            {
+                "azure::gpt-5.4-mini": {
+                    "input": 1.0,
+                    "input_cached": 0.1,
+                    "output": 2.0,
+                }
+            },
+        )
+
+        assert cost["tokens"]["cached_input_tokens"] == 400
+        assert cost["input_cost_usd"] == pytest.approx(0.00064)
+        assert cost["output_cost_usd"] == pytest.approx(0.0002)
+        assert cost["total_cost_usd"] == pytest.approx(0.00084)
+
     def test_build_cost_payload_for_multi_model_breakdown(self):
         """Multi-agent usage breakdown should price each call with its own model."""
         usage = build_usage_payload(
@@ -257,6 +301,7 @@ class TestCostPayloads:
             "total_cost_usd": 0.003,
             "missing_pricing_models": [],
         }
+        response_cost["tokens"]["cached_input_tokens"] = 40
         evaluation_cost = {
             "model_id": "azure::gpt-5-mini",
             "pricing_lookup_key": "azure::gpt-5-mini",
@@ -271,11 +316,13 @@ class TestCostPayloads:
             "total_cost_usd": 0.0015,
             "missing_pricing_models": [],
         }
+        evaluation_cost["tokens"]["cached_input_tokens"] = 10
 
         combined = combine_cost_payloads([response_cost, evaluation_cost])
         assert combined["tokens"]["input_tokens"] == 150
         assert combined["tokens"]["output_tokens"] == 30
         assert combined["tokens"]["total_tokens"] == 180
+        assert combined["tokens"]["cached_input_tokens"] == 50
         assert combined["model_id"] == "azure::gpt-5-mini"
         assert combined["pricing_lookup_key"] == "azure::gpt-5-mini"
         assert combined["output_per_million_usd"] == pytest.approx(2.0)

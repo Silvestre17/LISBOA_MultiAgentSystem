@@ -855,7 +855,6 @@ _KNOWN_PLACE_LOOKUP_ALIASES = {
     "maat": "Museu de Arte, Arquitetura e Tecnologia",
     "panteao": "Panteão Nacional",
     "panteao nacional": "Panteão Nacional",
-    "torre": "Torre de Belém",
     "torre de belem": "Torre de Belém",
     "tour de belem": "Torre de Belém",
 }

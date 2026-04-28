@@ -37,6 +37,20 @@ DIMENSIONS = [
 ]
 
 
+def _has_complete_numeric_scores(scores: dict[str, Any]) -> bool:
+    """Return whether all calibration dimensions contain usable numeric scores."""
+    for dimension in DIMENSIONS:
+        value = scores.get(dimension)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+    return True
+
+
+def _rounded_ordinal_scores(values: list[float]) -> list[int]:
+    """Round continuous judge averages to the nearest 1-5 ordinal score for Kappa."""
+    return [min(5, max(1, int(round(value)))) for value in values]
+
+
 def load_human_scores(filepath: str) -> dict[str, dict[str, int]]:
     """Load human calibration scores from filled template.
 
@@ -88,12 +102,13 @@ def load_judge_scores(
                     judge_run
                     for judge_run in entry.get("judge_runs", [])
                     if judge_run.get("judge_model") == judge_source
+                    and not judge_run.get("error")
                 ),
                 None,
             )
             judge = selected_run.get("scores", {}) if isinstance(selected_run, dict) else {}
-        if all(d in judge for d in DIMENSIONS):
-            scores[entry_id] = {d: judge[d] for d in DIMENSIONS}
+        if _has_complete_numeric_scores(judge):
+            scores[entry_id] = {d: float(judge[d]) for d in DIMENSIONS}
 
     return scores
 
@@ -143,12 +158,14 @@ def pearson_correlation(x: list[float], y: list[float]) -> float:
     Returns:
         Pearson r (-1 to 1).
     """
-    if len(x) < 2:
+    if len(x) < 2 or len(y) < 2:
+        return 0.0
+    if float(np.std(x)) == 0.0 or float(np.std(y)) == 0.0:
         return 0.0
     return round(float(np.corrcoef(x, y)[0, 1]), 4)
 
 
-def mean_absolute_error(human: list[int], judge: list[int]) -> float:
+def mean_absolute_error(human: list[float], judge: list[float]) -> float:
     """Compute Mean Absolute Error between human and judge scores.
 
     Args:
@@ -207,9 +224,9 @@ def run_calibration(
 
     for dim in DIMENSIONS:
         h_vals = [human_scores[eid][dim] for eid in sorted(matched_ids)]
-        j_vals = [int(judge_scores[eid][dim]) for eid in sorted(matched_ids)]
+        j_vals = [float(judge_scores[eid][dim]) for eid in sorted(matched_ids)]
 
-        kappa = cohens_kappa(h_vals, j_vals)
+        kappa = cohens_kappa(h_vals, _rounded_ordinal_scores(j_vals))
         pearson = pearson_correlation(h_vals, j_vals)
         mae = mean_absolute_error(h_vals, j_vals)
 
@@ -243,9 +260,9 @@ def run_calibration(
         all_judge.extend(j_vals)
 
     # Overall
-    overall_kappa = cohens_kappa(all_human, [int(j) for j in all_judge])
+    overall_kappa = cohens_kappa(all_human, _rounded_ordinal_scores(all_judge))
     overall_pearson = pearson_correlation(all_human, all_judge)
-    overall_mae = mean_absolute_error(all_human, [int(j) for j in all_judge])
+    overall_mae = mean_absolute_error(all_human, all_judge)
 
     results["overall"] = {
         "cohens_kappa": overall_kappa,
