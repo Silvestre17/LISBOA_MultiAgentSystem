@@ -92,8 +92,8 @@ for f in files:
         print(f"FAIL: {f} -> {e}")
         failed += 1
 
-print(f"\n{'='*50}")
-print(f"Passed: {passed}/{passed+failed}  Failed: {failed}/{passed+failed}")
+print(f"\n{'=' * 50}")
+print(f"Passed: {passed}/{passed + failed}  Failed: {failed}/{passed + failed}")
 if failed == 0:
     print("ALL SYNTAX CHECKS PASSED")
 else:

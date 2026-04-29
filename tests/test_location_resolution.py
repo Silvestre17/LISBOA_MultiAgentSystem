@@ -137,6 +137,13 @@ def test_build_location_ambiguity_preamble_ignores_explicit_madeira_address() ->
     assert preamble == ""
 
 
+def test_build_location_ambiguity_preamble_does_not_flag_marques() -> None:
+    """Marquês should not be treated as ambiguous because station and roundabout share the same practical area."""
+    preamble = build_location_ambiguity_preamble("Marquês", "Belém", language="pt")
+
+    assert preamble == ""
+
+
 def test_prompt_alignment_reflects_hybrid_scope_and_accessibility_verification() -> None:
     """Planner, researcher, and QA prompts should align with hybrid Lisbon/AML scope and cautious accessibility wording."""
     planner_prompt = get_planner_prompt()
