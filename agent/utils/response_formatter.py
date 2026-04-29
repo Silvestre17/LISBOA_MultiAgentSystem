@@ -57,6 +57,11 @@ _PT_LANGUAGE_HINTS_RE = re.compile(
     r"\b(olá|ola|bom dia|boa tarde|boa noite|como|qual|quais|quero|preciso|planeia|planejar|plano|roteiro|sugere|visitar|passeio|museu|museus|evento|eventos|hoje|amanhã|amanha|previsão|tempo|locais|morada|fonte|autocarro|autocarros|comboio|comboios|transportes?|situa[cç][aã]o|d[aá]-?me|bairro|perto)\b",
     re.IGNORECASE,
 )
+_STRONG_PT_QUERY_RE = re.compile(
+    r"\b(quero|preciso|vou|como|qual|quais|d[aá]-?me|fala[- ]?me|fale[- ]?me|"
+    r"tenho|recomendas?|sugeres?|para|entre|perto|amanh[aã]|hoje)\b",
+    re.IGNORECASE,
+)
 _EN_LANGUAGE_HINTS_RE = re.compile(
     r"\b(hello|hi|good morning|good afternoon|good evening|what|where|when|which|who|why|how|tell me|plan|afternoon|evening|night|trip|visit|around|can you|could you|would you|i want|i need|please|today|tomorrow|weather|forecast|museum|museums|event|events|book fair|train|bus|metro|source|address)\b",
     re.IGNORECASE,
@@ -417,6 +422,8 @@ def resolve_output_language(
         return "pt", False, "pt"
     if en_hint and not pt_hint:
         return "en", False, "en"
+    if pt_hint and en_hint and _STRONG_PT_QUERY_RE.search(query):
+        return "pt", False, "pt"
     if has_pt_unique and not en_hint:
         return "pt", False, "pt"
 
@@ -3309,7 +3316,8 @@ def _extract_valid_public_url(value: str) -> str:
 
 def _looks_like_missing_researcher_value(value: str) -> bool:
     """Return whether a parsed researcher field is just a placeholder or missing-data marker."""
-    normalized = _strip_accents_compat(_strip_markdown_formatting(value or "")).lower()
+    visible_value = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", value or "")
+    normalized = _strip_accents_compat(_strip_markdown_formatting(visible_value)).lower()
     normalized = re.sub(
         r"^(?:tickets?|bilhetes|buy tickets|comprar bilhetes|website|site oficial|official page|url|more details|mais detalhes|buy)\s*:?\s*",
         "",
@@ -3328,6 +3336,8 @@ def _looks_like_missing_researcher_value(value: str) -> bool:
         "not available in the source",
         "not available in data",
         "not available in the data",
+        "nao disponivel in data",
+        "não disponível in data",
         "nao disponivel",
         "não disponível",
         "nao disponivel nos dados",
@@ -4658,6 +4668,10 @@ def format_researcher_card(text: str, language: str = "en", user_query: str = ""
 
         if not stripped:
             continue
+        if stripped == "---" or stripped.startswith("### "):
+            flush_card()
+            output_lines.append(raw_line)
+            continue
         if _SOURCE_LINE_RE.match(stripped):
             flush_card()
             output_lines.append(raw_line)
@@ -4826,6 +4840,10 @@ def repair_planner_markdown_contract(text: str, language: str = "en") -> str:
 
     def canonical_planner_section(value: str) -> Optional[str]:
         normalized_value = _strip_accents_compat(_strip_leading_section_emoji(value)).lower()
+        plain_value = _strip_markdown_formatting(_strip_leading_section_emoji(value)).strip()
+        word_count = len(re.findall(r"\w+", plain_value))
+        if word_count > 8 and re.search(r"[.!?]$", plain_value):
+            return None
         if ("condic" in normalized_value and "meteorolog" in normalized_value) or (
             "weather" in normalized_value and "condition" in normalized_value
         ):
@@ -5070,6 +5088,9 @@ def repair_planner_markdown_contract(text: str, language: str = "en") -> str:
             icon = icon_heading_match.group("icon").strip()
             title = icon_heading_match.group("title").strip()
             if icon in section_icons and ":" not in title:
+                if icon == "💡" and len(re.findall(r"\w+", title)) > 8:
+                    repaired_lines.append(f"{icon} {title}")
+                    continue
                 repaired_lines.append(f"**{icon} {title}**")
                 continue
 
@@ -5179,6 +5200,11 @@ def repair_planner_markdown_contract(text: str, language: str = "en") -> str:
     repaired = re.sub(
         r"(?m)^-\s+🚌\s+Transporte:\s*(.+)$",
         r"- 🚌 **Transporte**: \1",
+        repaired,
+    )
+    repaired = re.sub(
+        r"(?m)^(💡)\s+(Dica|Tip):\s*(.+)$",
+        r"\1 **\2**: \3",
         repaired,
     )
 
@@ -6405,11 +6431,13 @@ def split_inline_emoji_fields(text: str) -> str:
     """Split adjacent emoji-labelled fields that an LLM placed on one line."""
     if not text:
         return text or ""
-    markers = "📍|📡|🚆|✅|🧭|ℹ️|🕐|⏱️|🔄|🎯"
+    markers = "📍|📡|🚆|🚇|✅|🧭|ℹ️|🕐|⏱️|🔄|🎯"
     output_lines: list[str] = []
     label_words = (
         r"(?:\*\*)?(?:Percurso|Route|Ligaç[aã]o|Connection|Tempo real|Real time|Linhas|Lines|"
-        r"Estado|Status|Trajeto|Route|Pr[oó]ximas|Next|Tempo estimado|Estimated time)"
+        r"Estado|Status|Trajeto|Route|Pr[oó]ximas|Next|Tempo estimado|Estimated time|"
+        r"Metro Mais Pr[oó]ximo|Nearest Metro|Como Usar|How to Use|Destino Prov[aá]vel|Likely destination|"
+        r"Op[cç][aã]o urbana|Urban option)"
     )
     for line in text.splitlines():
         stripped = line.strip()
@@ -6549,12 +6577,14 @@ def normalize_municipal_service_field_lines(text: str) -> str:
 
 def normalize_transport_option_indentation(text: str) -> str:
     """Indent timetable/status fields under transport option bullets consistently."""
-    if not text or not re.search(r"(?m)^-\s+(?:🚌|🚋|🚆|🚇|↔️|📍|📋)\s+\*\*", text):
+    if not text or not re.search(r"(?m)^-\s+(?:🚌|🚋|🚆|🚇|↔️|📋)\s+\*\*", text):
         return text or ""
+    if "Ambiguidade em 'Madeira'" in text:
+        return text
 
     output_lines: list[str] = []
     inside_transport_option = False
-    option_parent_re = re.compile(r"^-\s+(?:🚌|🚋|🚆|🚇|↔️|📍|📋)\s+\*\*", re.IGNORECASE)
+    option_parent_re = re.compile(r"^-\s+(?:🚌|🚋|🚆|🚇|↔️|📋)\s+\*\*", re.IGNORECASE)
     child_field_re = re.compile(
         r"^(?:[-*]\s+)?(?:🕐|🕕|ℹ️|⏱️|📡|📍|⚠️|💡|🗓️|📅)\s+|^(?:[-*]\s+)?\*\*[^*]+\*\*:",
         re.IGNORECASE,
@@ -6785,13 +6815,16 @@ def repair_malformed_heading_bullets(text: str) -> str:
 
     repaired_lines: list[str] = []
     malformed_re = re.compile(r"^(?:#{1,6}\s+)+[-*]\s+(?P<body>.+)$")
+    double_bullet_re = re.compile(r"^[-*•]\s+[-*•]\s+(?P<body>.+)$")
     field_prefixes = ("📍", "📏", "🗺️", "📞", "🕐", "⏱️", "🌐", "💰", "💶", "⭐")
     for raw_line in text.splitlines():
         stripped = raw_line.strip()
         match = malformed_re.match(stripped)
         if not match:
-            repaired_lines.append(raw_line)
-            continue
+            match = double_bullet_re.match(stripped)
+            if not match:
+                repaired_lines.append(raw_line)
+                continue
         body = match.group("body").strip()
         prefix = "  - " if body.startswith(field_prefixes) else "- "
         repaired_lines.append(f"{prefix}{body}")
@@ -6853,6 +6886,159 @@ def compact_nested_list_spacing(text: str) -> str:
             continue
         output_lines.append(raw_line)
     return "\n".join(output_lines)
+
+
+def normalize_duplicate_heading_markers(text: str) -> str:
+    """Collapse repeated markdown heading markers such as ``### ### Title``."""
+    if not text:
+        return text or ""
+    return re.sub(r"(?m)^#{1,6}\s+(#{1,6}\s+)", r"\1", text)
+
+
+def normalize_practical_tip_blocks(text: str) -> str:
+    """Render practical-tip section prose as bullets instead of oversized headings."""
+    if not text or not re.search(r"(?i)(dicas pr[aá]ticas|practical tips)", text):
+        return text or ""
+
+    lines = text.splitlines()
+    output_lines: list[str] = []
+    inside_tip_section = False
+
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        tip_heading = re.match(
+            r"^(?:💡\s*)?(?:\*\*)?(?:Dicas Pr[aá]ticas|Practical Tips)(?:\*\*)?\s*$",
+            stripped,
+            flags=re.IGNORECASE,
+        )
+        if tip_heading:
+            inside_tip_section = True
+            output_lines.append(stripped if stripped.startswith("💡") else f"💡 **{stripped.strip('*')}**")
+            continue
+
+        if inside_tip_section:
+            if not stripped:
+                output_lines.append(raw_line)
+                continue
+            if stripped == "---":
+                continue
+            if stripped.startswith(("### ", "📌 ")) or _SOURCE_LINE_RE.match(stripped):
+                inside_tip_section = False
+                output_lines.append(raw_line)
+                continue
+            sentence_heading = re.match(r"^#{1,6}\s+(?P<body>[^#].+)$", stripped)
+            if sentence_heading:
+                stripped = sentence_heading.group("body").strip()
+            if not stripped.startswith(("- ", "* ", "• ")):
+                output_lines.append(f"- {stripped}")
+                continue
+
+        output_lines.append(raw_line)
+
+    return "\n".join(output_lines)
+
+
+def demote_sentence_headings(text: str) -> str:
+    """Demote accidental sentence-like headings produced by QA repair passes."""
+    if not text:
+        return text or ""
+
+    allowed_heading_starts = (
+        "🌤️", "☔", "🚇", "🚌", "🚆", "🚋", "🏛️", "🎭", "📍", "📜", "📅",
+        "📊", "🥐", "🍽️", "💊", "🏥", "⚠️", "ℹ️", "✅", "🛍️", "🎵", "🧭",
+    )
+    output_lines: list[str] = []
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        match = re.match(r"^#{1,6}\s+(?P<body>.+)$", stripped)
+        if not match:
+            output_lines.append(raw_line)
+            continue
+        body = match.group("body").strip()
+        body = re.sub(r"^\*{2,}(?P<inner>.+?)\*{2,}$", r"\g<inner>", body).strip()
+        word_count = len(re.findall(r"\w+", _strip_markdown_formatting(body)))
+        if body.startswith(allowed_heading_starts) or word_count <= 8:
+            output_lines.append(f"### {body}")
+            continue
+        output_lines.append(f"- {body}")
+
+    return "\n".join(output_lines)
+
+
+def strip_weak_tip_lines(text: str) -> str:
+    """Remove generic or unfinished tips that add no actionable guidance."""
+    if not text:
+        return text or ""
+
+    weak_patterns = (
+        r"funciona\s+bem\.?$",
+        r"boa\s+paragem\s+extra\.?$",
+        r"ideal\s+para\s+come[çc]ar\s+um\s+passeio\s+relaxado\s+e\s+diferente\.?$",
+        r"works\s+well\.?$",
+        r"good\s+extra\s+stop\.?$",
+    )
+    kept_lines: list[str] = []
+    for raw_line in text.splitlines():
+        normalized = _strip_accents_compat(_strip_markdown_formatting(raw_line)).lower().strip(" -:.;")
+        is_tip = "💡" in raw_line and re.search(r"\b(?:dica|tip)\b", normalized)
+        if is_tip and any(re.search(pattern, normalized, flags=re.IGNORECASE) for pattern in weak_patterns):
+            continue
+        kept_lines.append(raw_line)
+    return "\n".join(kept_lines)
+
+
+def normalize_location_ambiguity_layout(text: str) -> str:
+    """Keep ambiguous-location route cards as clean field bullets."""
+    if not text or "Ambiguidade em 'Madeira'" not in text:
+        return text or ""
+    field_re = re.compile(
+        r"^(?:🚇\s+\*\*Op[cç][aã]o urbana em Lisboa:\*\*|📍\s+\*\*Destino Prov[aá]vel:\*\*|"
+        r"🚇\s+\*\*Metro Mais Pr[oó]ximo:\*\*|🎯\s+\*\*Como Usar o Metro:\*\*)",
+        flags=re.IGNORECASE,
+    )
+    output_lines: list[str] = []
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        field_line = re.sub(r"^#{1,6}\s+", "", stripped).strip()
+        field_line = re.sub(r"^\*{2,}(?P<inner>.+?)\*{2,}$", r"\g<inner>", field_line).strip()
+        field_line = re.sub(r"\*{2,}", "**", field_line)
+        if field_re.match(field_line):
+            output_lines.append(f"- {field_line}")
+        else:
+            output_lines.append(raw_line)
+    return "\n".join(output_lines)
+
+
+def normalize_event_card_field_indentation(text: str) -> str:
+    """Keep event date and duration fields aligned with address/category fields."""
+    if not text or not re.search(r"(?i)(Data/Hora|Date/Time|Dura[cç][aã]o|Duration)", text):
+        return text or ""
+    return re.sub(
+        r"(?m)^\s{2,}-\s+((?:📅|⏱️)\s+\*\*(?:Data/Hora|Date/Time|Dura[cç][aã]o|Duration):\*\*.*)$",
+        r"- \1",
+        text,
+    )
+
+
+def normalize_transport_comparison_info_notes(text: str) -> str:
+    """Render comparison info notes as paragraphs instead of oversized headings."""
+    if not text or not re.search(r"(?i)(Comparação|Comparison)", text):
+        return text or ""
+
+    lines = text.splitlines()
+    output_lines: list[str] = []
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        match = re.match(r"^#{1,6}\s+\*{0,4}\s*(ℹ️\s+.+?)\*{0,4}\s*$", stripped)
+        if match:
+            note = _strip_markdown_formatting(match.group(1)).strip()
+            output_lines.append(f"**{note}**")
+            continue
+        output_lines.append(raw_line)
+
+    cleaned = "\n".join(output_lines)
+    cleaned = re.sub(r"(?m)^---\s*\n\s*(\*\*ℹ️[^\n]+\*\*)\s*\n\s*---\s*$", r"\1", cleaned)
+    return cleaned
 
 
 def normalize_transport_comparison_sections(text: str) -> str:
@@ -6963,11 +7149,31 @@ def ensure_transport_comparison_conclusion_separator(text: str) -> str:
     return separated
 
 
+def ensure_transport_comparison_mode_separator(text: str) -> str:
+    """Separate Metro and train mode blocks in transport comparison answers."""
+    if not text or not re.search(r"(?i)(Comparação|Comparison)", text):
+        return text or ""
+
+    return re.sub(
+        r"\n{1,2}(?=(?:#{1,6}\s+|\*\*)[^\n]*(?:Comboio|Train)\b)",
+        "\n\n---\n\n",
+        text,
+        count=1,
+    )
+
+
 def ensure_blank_lines_before_headers(text: str) -> str:
     """Ensure markdown h3 sections do not attach to the previous paragraph."""
     if not text:
         return text or ""
     return re.sub(r"(?<!\n\n)\n(###\s+)", r"\n\n\1", text)
+
+
+def ensure_blank_lines_after_horizontal_rules(text: str) -> str:
+    """Ensure Markdown horizontal rules render as separate paragraphs."""
+    if not text:
+        return text or ""
+    return re.sub(r"(?m)^---\n(?!\n)", "---\n\n", text)
 
 
 def clean_planner_loose_sections(text: str) -> str:
@@ -7227,6 +7433,13 @@ def final_visual_pass(text: str) -> str:
     text = strip_single_researcher_result_meta(text)
     text = strip_stray_leading_enumerator(text)
     text = split_inline_emoji_fields(text)
+    text = normalize_duplicate_heading_markers(text)
+    text = normalize_practical_tip_blocks(text)
+    text = demote_sentence_headings(text)
+    text = strip_weak_tip_lines(text)
+    text = normalize_location_ambiguity_layout(text)
+    text = normalize_event_card_field_indentation(text)
+    text = normalize_transport_comparison_info_notes(text)
     text = repair_malformed_heading_bullets(text)
     text = strip_list_internal_horizontal_rules(text)
     text = compact_nested_list_spacing(text)
@@ -7241,8 +7454,16 @@ def final_visual_pass(text: str) -> str:
     text = normalize_coordinate_link_wrappers(text)
     text = strip_artificial_horizontal_rules(text)
     text = normalize_transport_comparison_sections(text)
+    text = ensure_transport_comparison_mode_separator(text)
     text = ensure_transport_comparison_conclusion_separator(text)
     text = ensure_blank_lines_before_headers(text)
+    text = normalize_duplicate_heading_markers(text)
+    text = normalize_practical_tip_blocks(text)
+    text = demote_sentence_headings(text)
+    text = strip_weak_tip_lines(text)
+    text = normalize_location_ambiguity_layout(text)
+    text = normalize_event_card_field_indentation(text)
+    text = normalize_transport_comparison_info_notes(text)
     text = repair_malformed_heading_bullets(text)
     text = strip_list_internal_horizontal_rules(text)
     text = compact_nested_list_spacing(text)
@@ -7276,6 +7497,8 @@ def final_visual_pass(text: str) -> str:
     text = re.sub(r"(?m)^[-*•]\s*$\n?", "", text)
     text = ensure_transport_time_route_paragraph_breaks(text)
     text = ensure_transport_comparison_conclusion_separator(text)
+    text = ensure_blank_lines_before_headers(text)
+    text = ensure_blank_lines_after_horizontal_rules(text)
     text = re.sub(r"(?<=\S)[ \t]{2,}(?=\S)", " ", text)
     # Collapse triple blank lines that may have been reintroduced.
     text = re.sub(r"\n{3,}", "\n\n", text)

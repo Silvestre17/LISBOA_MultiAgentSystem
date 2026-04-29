@@ -1743,14 +1743,14 @@ def _build_unsupported_transport_scope_response(
     if language == "pt":
         return "\n".join(
             [
-                "### ⚠️ Modo de transporte ainda não confirmado neste runtime",
+                "### ⚠️ Modo de transporte ainda não confirmado neste sistema",
                 "",
-                f"- Não consigo confirmar {unsupported_label} neste runtime.",
+                f"- Não consigo confirmar {unsupported_label} neste sistema.",
                 "- Neste momento, só consigo validar diretamente Metro de Lisboa, Carris Urban, Carris Metropolitana e comboios CP.",
                 "- Para evitar alucinações, prefiro não inventar horários, frequências, tarifas, ETAs ou estado em tempo real para esse modo.",
                 "- Se a viagem também puder ser formulada com as redes suportadas acima, respondo com base nesses operadores confirmados.",
                 "",
-                f"📌 **Fonte:** Redes suportadas neste runtime: {supported_links} | **Atualizado:** {timestamp}",
+                f"📌 **Fonte:** Redes suportadas neste sistema: {supported_links} | **Atualizado:** {timestamp}",
             ]
         ).strip()
 
@@ -2865,7 +2865,8 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
     if _normalize_token(endpoints[0]) == _normalize_token(endpoints[1]):
         return route_result
 
-    if "METRO ROUTE" in route_result:
+    is_metro_route = "METRO ROUTE" in route_result
+    if is_metro_route and not _is_generic_public_transport_route_query(user_message):
         return route_result
 
     try:
@@ -2889,7 +2890,7 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
         ]
     )
 
-    if valid_carris_result and _is_generic_public_transport_route_query(user_message) and "METRO ROUTE" in route_result:
+    if valid_carris_result and _is_generic_public_transport_route_query(user_message) and is_metro_route:
         updated_label = "Atualizado" if _infer_language(user_message, "") == "pt" else "Updated"
         source_label = "Fonte" if _infer_language(user_message, "") == "pt" else "Source"
         title = "### 🚇 🚌 Opções de transporte público" if _infer_language(user_message, "") == "pt" else "### 🚇 🚌 Public Transport Options"
@@ -3287,7 +3288,7 @@ class TransportAgent(BaseAgent):
             lines = [
                 f"**Compara\u00e7\u00e3o:** {origin} {arrow} {destination}",
                 "",
-                "#### \U0001F687 Metro de Lisboa",
+                "**\U0001F687 Metro de Lisboa**",
                 f"\u23F1\uFE0F **Tempo estimado:** {metro_minutes} min"
                 if metro_minutes is not None
                 else "\u23F1\uFE0F **Tempo estimado:** n\u00e3o foi poss\u00edvel confirmar com os dados dispon\u00edveis",
@@ -3305,7 +3306,9 @@ class TransportAgent(BaseAgent):
                 lines.append("⚠️ **Trajeto Metro:** não foi possível confirmar as linhas e saídas com os dados disponíveis")
             lines.extend([
                 "",
-                "#### \U0001F686 Comboio",
+                "---",
+                "",
+                "**\U0001F686 Comboio**",
                 f"\u23F1\uFE0F **Tempo estimado:** {train_minutes} min"
                 if train_minutes is not None
                 else "\u23F1\uFE0F **Tempo estimado:** n\u00e3o foi poss\u00edvel confirmar com os dados dispon\u00edveis",
@@ -3319,7 +3322,7 @@ class TransportAgent(BaseAgent):
             if train_departures:
                 lines.append(f"\U0001F550 **Pr\u00f3ximas sa\u00eddas mostradas:** {', '.join(train_departures)}")
 
-            lines.extend(["", "#### \u2705 Conclus\u00e3o"])
+            lines.extend(["", "---", "", "**\u2705 Conclus\u00e3o**"])
             if metro_minutes is not None and train_minutes is not None:
                 faster_label = "Comboio" if train_minutes < metro_minutes else "Metro de Lisboa"
                 lines.append(f"- **Mais r\u00e1pido:** {faster_label}")
@@ -3331,7 +3334,7 @@ class TransportAgent(BaseAgent):
             lines = [
                 f"**Comparison:** {origin} {arrow} {destination}",
                 "",
-                "#### \U0001F687 Lisbon Metro",
+                "**\U0001F687 Lisbon Metro**",
                 f"\u23F1\uFE0F **Estimated time:** {metro_minutes} min"
                 if metro_minutes is not None
                 else "\u23F1\uFE0F **Estimated time:** could not be confirmed from the available data",
@@ -3349,7 +3352,9 @@ class TransportAgent(BaseAgent):
                 lines.append("⚠️ **Metro route:** lines and exits could not be confirmed from the available data")
             lines.extend([
                 "",
-                "#### \U0001F686 Train",
+                "---",
+                "",
+                "**\U0001F686 Train**",
                 f"\u23F1\uFE0F **Estimated time:** {train_minutes} min"
                 if train_minutes is not None
                 else "\u23F1\uFE0F **Estimated time:** could not be confirmed from the available data",
@@ -3363,7 +3368,7 @@ class TransportAgent(BaseAgent):
             if train_departures:
                 lines.append(f"\U0001F550 **Next departures shown:** {', '.join(train_departures)}")
 
-            lines.extend(["", "#### \u2705 Verdict"])
+            lines.extend(["", "---", "", "**\u2705 Verdict**"])
             if metro_minutes is not None and train_minutes is not None:
                 faster_label = "Train" if train_minutes < metro_minutes else "Lisbon Metro"
                 lines.append(f"- **Faster:** {faster_label}")
