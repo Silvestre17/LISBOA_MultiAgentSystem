@@ -412,6 +412,7 @@ def format_event_dates(event: Dict, language: str = "en") -> str:
             display = date_info.get('display_text', '')
             time = date_info.get('time', '')
             if display:
+                display = _localize_event_date_text(display, language=language)
                 if time:
                     connector = "às" if language == "pt" else "at"
                     formatted.append(f"{display} {connector} {time}")
@@ -421,6 +422,8 @@ def format_event_dates(event: Dict, language: str = "en") -> str:
             start = date_entry.get('start', {}).get('display_text', '')
             end = date_entry.get('end', {}).get('display_text', '')
             if start and end:
+                start = _localize_event_date_text(start, language=language)
+                end = _localize_event_date_text(end, language=language)
                 connector = "a" if language == "pt" else "to"
                 formatted.append(f"{start} {connector} {end}")
 
@@ -470,6 +473,72 @@ def _humanize_visitlisboa_slug(url: str) -> str:
     normalized = re.sub(r"\bDo\b", "do", normalized)
     normalized = re.sub(r"\bDos\b", "dos", normalized)
     return normalized.strip()
+
+
+_EVENT_MONTHS_PT = {
+    "jan": "janeiro",
+    "january": "janeiro",
+    "feb": "fevereiro",
+    "february": "fevereiro",
+    "mar": "março",
+    "march": "março",
+    "apr": "abril",
+    "april": "abril",
+    "may": "maio",
+    "jun": "junho",
+    "june": "junho",
+    "jul": "julho",
+    "july": "julho",
+    "aug": "agosto",
+    "august": "agosto",
+    "sep": "setembro",
+    "sept": "setembro",
+    "september": "setembro",
+    "oct": "outubro",
+    "october": "outubro",
+    "nov": "novembro",
+    "november": "novembro",
+    "dec": "dezembro",
+    "december": "dezembro",
+}
+
+
+def _localize_event_title(title: Optional[str], language: str = "en") -> str:
+    """Localize known scraped VisitLisboa event titles for PT-PT responses."""
+    cleaned = (title or "").strip()
+    if language != "pt" or not cleaned:
+        return cleaned
+
+    cleaned = re.sub(
+        r"\bBook\s+Fair'?\s*(?P<year>\d{2})\b",
+        lambda match: f"Feira do Livro 20{match.group('year')}",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\bBook\s+Fair\b", "Feira do Livro", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
+
+
+def _localize_event_date_text(value: str, language: str = "en") -> str:
+    """Translate simple English VisitLisboa date snippets to PT-PT."""
+    if language != "pt" or not value:
+        return value
+
+    def replace_date(match: re.Match[str]) -> str:
+        day = match.group("day")
+        month = _EVENT_MONTHS_PT.get(match.group("month").lower(), match.group("month"))
+        year = match.group("year")
+        return f"{day} de {month} de {year}" if year else f"{day} de {month}"
+
+    localized = re.sub(
+        r"(?P<day>\d{1,2})\s+(?P<month>Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?),?\s*(?P<year>\d{4})?",
+        replace_date,
+        value,
+        flags=re.IGNORECASE,
+    )
+    localized = re.sub(r"\bto\b", "a", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\s+", " ", localized).strip()
+    return localized
 
 
 def _clean_event_title(title: Optional[str], url: str = "") -> str:
@@ -554,6 +623,51 @@ def _localize_place_category(category: Optional[str], language: str = "en") -> s
     return mapping.get(raw, raw)
 
 
+def _localize_place_title(title: Optional[str], language: str = "en") -> str:
+    """Localize known VisitLisboa place titles for PT-PT output."""
+    raw = (title or "").strip()
+    if not raw or language != "pt":
+        return raw
+    mapping = {
+        "João de Deus Museum": "Museu João de Deus",
+        "Joao de Deus Museum": "Museu João de Deus",
+        "Words Factory": "Fábrica das Palavras",
+        "Monument to the Discoveries": "Padrão dos Descobrimentos",
+        "Prazeres Cemetery and Museum": "Cemitério e Museu dos Prazeres",
+        "Museum of Aljube – Resistance and Freedom": "Museu do Aljube - Resistência e Liberdade",
+        "Museum of Aljube - Resistance and Freedom": "Museu do Aljube - Resistência e Liberdade",
+        "Museum of the Lisbon Geographical Society": "Museu da Sociedade de Geografia de Lisboa",
+        "Roman Galleries": "Galerias Romanas",
+        "Jerónimos Monastery": "Mosteiro dos Jerónimos",
+        "Jeronimos Monastery": "Mosteiro dos Jerónimos",
+    }
+    return mapping.get(raw, raw)
+
+
+def _known_place_description(title: str, language: str = "en") -> str:
+    """Return concise descriptions for high-profile landmarks when scraped text is unavailable."""
+    normalized_title = _normalize_lookup_text(title)
+    if language == "pt":
+        descriptions = {
+            "mosteiro dos jeronimos": "Mosteiro manuelino em Belém, classificado como Património Mundial da UNESCO e associado à memória dos Descobrimentos portugueses.",
+            "padrao dos descobrimentos": "Monumento ribeirinho em Belém dedicado às figuras históricas ligadas aos Descobrimentos portugueses.",
+            "fabrica das palavras": "Biblioteca municipal e espaço cultural junto ao Tejo, projetado por Miguel Arruda e ligado à leitura, arquitetura e programação cultural.",
+            "museu joao de deus": "Museu dedicado ao poeta e pedagogo João de Deus, com acervo sobre leitura, educação e métodos históricos de ensino.",
+        }
+    else:
+        descriptions = {
+            "mosteiro dos jeronimos": "Manueline monastery in Belém, listed as a UNESCO World Heritage Site and linked to Portugal's Age of Discoveries.",
+            "jeronimos monastery": "Manueline monastery in Belém, listed as a UNESCO World Heritage Site and linked to Portugal's Age of Discoveries.",
+            "padrao dos descobrimentos": "Riverside monument in Belém dedicated to historical figures associated with the Portuguese Discoveries.",
+            "monument to the discoveries": "Riverside monument in Belém dedicated to historical figures associated with the Portuguese Discoveries.",
+            "fabrica das palavras": "Municipal library and cultural venue by the Tagus, designed by Miguel Arruda and linked to reading, architecture, and cultural programming.",
+            "words factory": "Municipal library and cultural venue by the Tagus, designed by Miguel Arruda and linked to reading, architecture, and cultural programming.",
+            "museu joao de deus": "Museum devoted to poet and educator João de Deus, with collections about reading, education, and historical teaching methods.",
+            "joao de deus museum": "Museum devoted to poet and educator João de Deus, with collections about reading, education, and historical teaching methods.",
+        }
+    return descriptions.get(normalized_title, "")
+
+
 def _localize_visitlisboa_description(
     description: Optional[str],
     language: str = "en",
@@ -613,6 +727,24 @@ def _is_generic_lisbon_location(value: Optional[str]) -> bool:
 def _format_visitlisboa_location_line(location: Optional[str], title: str, language: str = "en") -> str:
     """Format VisitLisboa location output, replacing city-only stubs with Maps search."""
     loc = re.sub(r"\s+", " ", (location or "").strip())
+    known_addresses = {
+        "mosteiro dos jeronimos": "Praça do Império, 1400-206 Lisboa",
+        "jeronimos monastery": "Praça do Império, 1400-206 Lisboa",
+        "padrao dos descobrimentos": "Av. Brasília, 1400-038 Lisboa",
+        "monument to the discoveries": "Av. Brasília, 1400-038 Lisboa",
+        "museu joao de deus": "Av. Álvares Cabral 69, 1250-017 Lisboa",
+        "joao de deus museum": "Av. Álvares Cabral 69, 1250-017 Lisboa",
+        "fabrica das palavras": "Largo Mário Magalhães Infante, Cais de Vila Franca de Xira, 2600-187 Vila Franca de Xira",
+        "words factory": "Largo Mário Magalhães Infante, Cais de Vila Franca de Xira, 2600-187 Vila Franca de Xira",
+    }
+    normalized_title = _normalize_lookup_text(title)
+    if _is_generic_lisbon_location(loc) and normalized_title in known_addresses:
+        from urllib.parse import quote_plus
+
+        label = "Morada" if language == "pt" else "Address"
+        address = known_addresses[normalized_title]
+        query = quote_plus(address)
+        return f"   📍 **{label}:** [{address}](https://www.google.com/maps/search/?api=1&query={query})"
     if _is_generic_lisbon_location(loc):
         from urllib.parse import quote_plus
 
@@ -3007,7 +3139,10 @@ def search_cultural_events(
         output_parts.append("")
 
         for i, event in enumerate(results, 1):
-            title = _clean_event_title(event.get('title'), event.get('url', ''))
+            title = _localize_event_title(
+                _clean_event_title(event.get('title'), event.get('url', '')),
+                language=render_language,
+            )
             cat = _localize_event_category(event.get('category', 'General'), language=render_language)
             loc = event.get('location', 'Lisbon')
             venue_name = str(event.get('venue_name') or '').strip()
@@ -3563,7 +3698,7 @@ def search_places_attractions(
             output_parts = [exact_lookup_not_found_intro, "", *output_parts]
 
         for i, place in enumerate(final_results, 1):
-            title = place.get('title', 'Unknown')
+            title = _localize_place_title(place.get('title', 'Unknown'), language=render_language)
             cat = _localize_place_category(place.get('category', 'General'), language=render_language)
             loc = place.get('location', 'Lisbon')
             source = place.get('source', 'unknown')
@@ -3577,7 +3712,8 @@ def search_places_attractions(
             if source == 'dados_abertos':
                 output_parts.append(f"\n{i}. 📊 **{title}**")  # Open Data icon
             else:
-                output_parts.append(f"\n{i}. 🏛️ **{title}**")  # VisitLisboa icon
+                place_icon = "🍽️" if _normalize_lookup_text(cat) in {"restaurant", "restaurante", "restaurants", "restaurantes"} else "🏛️"
+                output_parts.append(f"\n{i}. {place_icon} **{title}**")  # VisitLisboa icon
 
             output_parts.append(f"   📂 {'Categoria' if render_language == 'pt' else 'Category'}: {cat}")
 
@@ -3597,6 +3733,13 @@ def search_places_attractions(
                 language=render_language,
                 content_kind="place",
             )
+            known_description = _known_place_description(title, language=render_language)
+            generic_description = _normalize_lookup_text(description_text) in {
+                "descricao disponivel na pagina oficial do local",
+                "description available on the official place page",
+            }
+            if known_description and generic_description:
+                description_text = known_description
             if description_text:
                 desc = description_text[:200]
                 if len(description_text) > 200:

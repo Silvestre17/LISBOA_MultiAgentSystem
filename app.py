@@ -1768,8 +1768,11 @@ def render_assistant_markdown(text: str) -> str:
 
 def clean_response_for_display(text: str) -> str:
     """Remove obvious citation artefacts before rendering the final response."""
+    from agent.utils.response_formatter import final_visual_pass
+
     cleaned = re.sub(r"【.*?】", "", text or "")
-    return cleaned.replace("\x00", "").strip()
+    cleaned = cleaned.replace("\x00", "").strip()
+    return final_visual_pass(cleaned)
 
 
 def count_user_interactions(messages: list[dict[str, Any]]) -> int:

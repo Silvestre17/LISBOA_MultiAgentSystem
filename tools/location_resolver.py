@@ -215,16 +215,6 @@ _AMBIGUOUS_LOCATION_HINTS = {
             "B) 📍 **Parque das Nações / Oriente area** — surrounding district, not only the station.",
         ],
     },
-    "marques": {
-        "pt": [
-            "A) 🚇 **Estação Marquês de Pombal** — ligação Metro Azul e Amarela.",
-            "B) 📍 **Praça/Rotunda do Marquês de Pombal** — superfície e avenida envolvente.",
-        ],
-        "en": [
-            "A) 🚇 **Marquês de Pombal station** — Blue and Yellow Metro lines.",
-            "B) 📍 **Marquês de Pombal square/roundabout** — surface area and nearby avenues.",
-        ],
-    },
     "roma": {
         "pt": [
             "A) 🚇 **Estação Roma** — Metro Linha Verde.",

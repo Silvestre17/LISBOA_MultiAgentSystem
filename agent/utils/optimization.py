@@ -394,7 +394,7 @@ if __name__ == "__main__":
     start = time.time()
     for i in range(3):
         resp = http_pool.get("https://api.ipma.pt/open-data/distrits-islands.json")
-        print(f"   Request {i+1}: {resp.status_code} ({(time.time()-start)*1000:.0f}ms)")
+        print(f"   Request {i + 1}: {resp.status_code} ({(time.time() - start) * 1000:.0f}ms)")
 
     # Test Cache
     print("\n💾 Testing TTL Cache...")
@@ -411,11 +411,11 @@ if __name__ == "__main__":
     # First call (not cached)
     start = time.time()
     data1 = fetch_json_optimized(url, cache=static_cache, cache_ttl=60)
-    print(f"   First call: {(time.time()-start)*1000:.0f}ms (network)")
+    print(f"   First call: {(time.time() - start) * 1000:.0f}ms (network)")
 
     # Second call (cached)
     start = time.time()
     data2 = fetch_json_optimized(url, cache=static_cache, cache_ttl=60)
-    print(f"   Second call: {(time.time()-start)*1000:.0f}ms (cached)")
+    print(f"   Second call: {(time.time() - start) * 1000:.0f}ms (cached)")
 
     print("\n✅ All optimization utilities working!")

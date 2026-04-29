@@ -1783,6 +1783,13 @@ def _structure_transport_route_dump_markdown(text: str) -> Optional[str]:
     if summary.get("feed_status"):
         feed_status = str(summary["feed_status"])
         if is_pt:
+            feed_status = re.sub(
+                r"Carris GTFS-RT:\s*cached live snapshot in use \(([^)]+) old\)\.?",
+                r"snapshot em tempo real em cache (idade: \1).",
+                feed_status,
+                flags=re.IGNORECASE,
+            )
+            feed_status = feed_status.replace("Carris GTFS-RT: live vehicle feed active.", "feed em tempo real ativo.")
             feed_status = feed_status.replace("live active", "tempo real ativo")
             output_lines.append(f"📡 **Tempo real:** {feed_status}")
         else:
@@ -1795,7 +1802,7 @@ def _structure_transport_route_dump_markdown(text: str) -> Optional[str]:
         if not entries:
             continue
         output_lines.extend([mode_titles[language_key][mode_name], ""])
-        for item_number, entry in enumerate(entries, 1):
+        for entry in entries:
             line_label = "Linha" if is_pt else "Line"
             departures_label = "Próximas saídas" if is_pt else "Next departures"
             realtime_label = "Tempo real" if is_pt else "Real time"
@@ -1804,7 +1811,7 @@ def _structure_transport_route_dump_markdown(text: str) -> Optional[str]:
             icon = mode_icons.get(mode_name, "🚌")
 
             output_lines.append(
-                f"{item_number}. {icon} **{line_label} {entry.get('line', '')}** — {entry.get('destination', '')}"
+                f"- {icon} **{line_label} {entry.get('line', '')}** — {entry.get('destination', '')}"
             )
             if entry.get("next"):
                 output_lines.append(f"   🕐 **{departures_label}:** {entry['next']}")
@@ -3265,7 +3272,7 @@ def _researcher_card_labels(language: str) -> dict[str, str]:
         "website": "Website",
         "tickets": "Tickets",
         "today": "Today",
-        "hours": "Hours",
+        "hours": "Opening hours",
         "distance": "Distance",
         "coordinates": "Coordinates",
     }
@@ -6146,6 +6153,8 @@ def linkify_phone_numbers(text: str) -> str:
     if not text or "351" not in text:
         return text
 
+    text = re.sub(r"(?<!\d)00351\s*(\d{3})\s*(\d{3})\s*(\d{3})(?!\d)", r"+351 \1 \2 \3", text)
+
     def _sub(match: re.Match) -> str:
         g1, g2, g3 = match.group(2), match.group(3), match.group(4)
         digits = f"{g1}{g2}{g3}"
@@ -6280,6 +6289,8 @@ def strip_internal_qa_annotations(text: str) -> str:
         re.compile(r"^(?:[-*•]\s*)?(?:⚠️\s*)?(?:Aviso interno|Internal note)\s*:", re.IGNORECASE),
         re.compile(r"^(?:[-*•]\s*)?⚠️.*(?:QA|valida(?:ç|c)[aã]o|validation|fact-check|link n[aã]o (?:é )?clic[aá]vel|not clickable|address n[aã]o verificado|morada n[aã]o verificada|hor[aá]rios? .*n[aã]o (?:foram )?fornecid)", re.IGNORECASE),
         re.compile(r".*(?:Os hor[aá]rios de funcionamento n[aã]o foram fornecidos|Opening hours were not provided|O link n[aã]o (?:é )?clic[aá]vel|The link is not clickable).*", re.IGNORECASE),
+        re.compile(r".*(?:map links use Google domains|Google domains|unverified domains|domínios não verificados).*(?:verify|verificar|visiting|visitar).*", re.IGNORECASE),
+        re.compile(r".*(?:gratuidade|gratuitidade).*(?:museus|museums).*(?:verific|confirm).*(?:site oficial|official).*", re.IGNORECASE),
     ]
 
     kept_lines: list[str] = []
@@ -6292,7 +6303,7 @@ def strip_internal_qa_annotations(text: str) -> str:
 
 
 def strip_generic_city_address_lines(text: str) -> str:
-    """Remove user-facing address lines that only say Lisboa/Lisbon."""
+    """Remove user-facing address lines that only say Lisboa/Lisbon or a placeholder."""
     if not text or "📍" not in text:
         return text
 
@@ -6303,8 +6314,13 @@ def strip_generic_city_address_lines(text: str) -> str:
     )
     for raw_line in text.splitlines():
         match = address_line_re.match(raw_line.strip())
-        if match and _is_generic_city_address(match.group("value")):
-            continue
+        if match:
+            value = match.group("value")
+            normalized_value = _strip_accents_compat(_strip_markdown_formatting(value)).lower()
+            if _is_generic_city_address(value) or _looks_like_missing_researcher_value(value):
+                continue
+            if any(marker in normalized_value for marker in ("address not available", "morada nao disponivel", "por confirmar")):
+                continue
         kept_lines.append(raw_line)
     return "\n".join(kept_lines)
 
@@ -6338,7 +6354,36 @@ def ensure_blank_lines_before_emoji_fields(text: str) -> str:
     """Insert a blank line before dense emoji-prefixed field lines when needed."""
     if not text:
         return text
-    field_prefixes = ("📍", "📅", "⏱️", "📞", "🌐", "⭐", "💶", "💰", "🎟️", "📝", "📂", "🕐", "🗺️", "📏")
+    field_prefixes = (
+        "📍",
+        "📅",
+        "⏱️",
+        "📞",
+        "🌐",
+        "⭐",
+        "💶",
+        "💰",
+        "🎟️",
+        "📝",
+        "📂",
+        "🕐",
+        "🕒",
+        "🗺️",
+        "📏",
+        "📊",
+        "📡",
+        "✅",
+        "🧭",
+        "🚇",
+        "🚆",
+        "🟡",
+        "🔵",
+        "🔴",
+        "🟢",
+        "🔄",
+        "🎯",
+        "ℹ️",
+    )
     lines = text.splitlines()
     output_lines: list[str] = []
 
@@ -6353,26 +6398,78 @@ def ensure_blank_lines_before_emoji_fields(text: str) -> str:
     return "\n".join(output_lines)
 
 
+def split_inline_emoji_fields(text: str) -> str:
+    """Split adjacent emoji-labelled fields that an LLM placed on one line."""
+    if not text:
+        return text or ""
+    markers = "📍|📡|🚆|✅|🧭|ℹ️|🕐|⏱️|🔄|🎯"
+    output_lines: list[str] = []
+    label_words = (
+        r"(?:\*\*)?(?:Percurso|Route|Ligaç[aã]o|Connection|Tempo real|Real time|Linhas|Lines|"
+        r"Estado|Status|Trajeto|Route|Pr[oó]ximas|Next|Tempo estimado|Estimated time)"
+    )
+    for line in text.splitlines():
+        stripped = line.strip()
+        if re.match(r"^(?:[-*•]\s*)?[AB]\)", stripped):
+            output_lines.append(line)
+            continue
+        output_lines.append(
+            re.sub(
+                rf"(?<=[^\s-])\s+(?=(?:{markers})\s+{label_words})",
+                "\n\n",
+                line,
+                flags=re.IGNORECASE,
+            )
+        )
+    split_text = "\n".join(output_lines)
+    return re.sub(
+        r"(?m)(\S)\s+(✅\s+(?:\*\*)?(?:Conclus[aã]o|Conclusion))",
+        r"\1\n\n\2",
+        split_text,
+        flags=re.IGNORECASE,
+    )
+
+
+def ensure_transport_time_route_paragraph_breaks(text: str) -> str:
+    """Keep transport time and route fields as separate Streamlit paragraphs."""
+    if not text:
+        return text or ""
+    return re.sub(
+        r"(?m)^(\s*⏱️\s+(?:\*\*)?Tempo estimado.*?\S)[ \t]*\n(\s*📍\s+(?:\*\*)?Percurso)",
+        r"\1\n\n\2",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+
 def ensure_blank_lines_around_warning_blocks(text: str) -> str:
-    """Ensure each user-facing warning renders as a separate paragraph."""
-    if not text or "⚠" not in text:
+    """Ensure user-facing warning and tip blocks render as separate paragraphs."""
+    if not text or ("⚠" not in text and "💡" not in text):
         return text
 
     text = re.sub(r"(?<![-*•\n])(\s+)(⚠️?\s*\*\*)", r"\n\n\2", text)
     text = re.sub(r"(?<![-*•\n])(\s+)(⚠️?\s+)", r"\n\n\2", text)
+    text = re.sub(r"(?<![-*•\n])(\s+)(💡\s*\*\*)", r"\n\n\2", text)
 
     lines = text.splitlines()
     output_lines: list[str] = []
     for line in lines:
         stripped = line.lstrip()
-        is_warning = stripped.startswith(("⚠️", "⚠")) or re.match(r"^[-*•]\s*⚠️?", stripped)
-        if is_warning and output_lines and output_lines[-1].strip():
+        is_signal_block = stripped.startswith(("⚠️", "⚠", "💡")) or re.match(r"^[-*•]\s*(?:⚠️?|💡)", stripped)
+        if is_signal_block and output_lines and output_lines[-1].strip():
             output_lines.append("")
         output_lines.append(line)
-        if is_warning:
+        if is_signal_block:
             output_lines.append("")
 
     return clean_newlines("\n".join(output_lines)).strip()
+
+
+def normalize_signal_bullets_to_blocks(text: str) -> str:
+    """Convert warning/tip bullets into standalone signal paragraphs."""
+    if not text or not re.search(r"(?m)^\s*[-*•]\s*(?:⚠️?|💡)", text):
+        return text or ""
+    return re.sub(r"(?m)^\s*[-*•]\s*((?:⚠️?|💡)\s+.+)$", r"\1", text)
 
 
 def compact_service_lookup_spacing(text: str) -> str:
@@ -6406,6 +6503,299 @@ def compact_service_lookup_spacing(text: str) -> str:
         compacted,
     )
     return compacted
+
+
+def normalize_municipal_service_field_lines(text: str) -> str:
+    """Split municipal service name/address/distance fields into readable lines."""
+    if not text or not any(marker in text for marker in ("💊", "🏥", "📏", "🗺️")):
+        return text or ""
+
+    lines: list[str] = []
+    service_line_re = re.compile(r"^(?P<icon>💊|🏥|👮)\s+(?P<name>.+?)\s+(?=📍\s+(?:\*\*)?(?:Morada|Address):)")
+    field_split_re = re.compile(r"\s+(?=(?:📍|📏|🗺️)\s+(?:\*\*)?(?:Morada|Address|Distância|Distance|Coordenadas|Coordinates):)")
+    service_bullet_re = re.compile(r"^-\s+(?:💊|🏥|👮)\s+\*\*.+?\*\*")
+    field_line_re = re.compile(r"^(?:📍|📏|🗺️)\s+(?:\*\*)?(?:Morada|Address|Distância|Distance|Coordenadas|Coordinates):")
+    inside_service_bullet = False
+
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if service_bullet_re.match(stripped):
+            inside_service_bullet = True
+            lines.append(stripped)
+            continue
+        if inside_service_bullet and field_line_re.match(stripped):
+            lines.append(f"    - {stripped}")
+            continue
+        if stripped.startswith(("### ", "#### ", "📌 ", "⚠️")):
+            inside_service_bullet = False
+        service_match = service_line_re.match(stripped)
+        if service_match:
+            icon = service_match.group("icon")
+            name = service_match.group("name").strip()
+            inside_service_bullet = True
+            lines.append(f"- {icon} **{name}**")
+            rest = stripped[service_match.end():].strip()
+            for field in field_split_re.split(rest):
+                if field.strip():
+                    lines.append(f"    - {field.strip()}")
+            continue
+        lines.append(raw_line)
+
+    return "\n".join(lines)
+
+
+def normalize_transport_option_indentation(text: str) -> str:
+    """Indent timetable/status fields under transport option bullets consistently."""
+    if not text or not re.search(r"(?m)^-\s+(?:🚌|🚋|🚆|🚇)\s+\*\*", text):
+        return text or ""
+
+    output_lines: list[str] = []
+    inside_transport_option = False
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if re.match(r"^-\s+(?:🚌|🚋|🚆|🚇)\s+\*\*", stripped):
+            inside_transport_option = True
+            output_lines.append(stripped)
+            continue
+        if stripped.startswith(("### ", "#### ", "📌 ", "⚠️", "---")):
+            inside_transport_option = False
+            output_lines.append(raw_line)
+            continue
+        if inside_transport_option and stripped.startswith(("🕐", "🕕", "ℹ️", "⏱️", "📡", "📍")):
+            output_lines.append(f"  - {stripped}")
+            continue
+        if not stripped:
+            inside_transport_option = False
+        output_lines.append(raw_line)
+
+    return "\n".join(output_lines)
+
+
+def normalize_transport_timing_artifacts(text: str) -> str:
+    """Clean compact GTFS timing phrases before user display."""
+    if not text:
+        return text or ""
+    cleaned = re.sub(r"\b(\d+)m late\b", r"atraso de \1 min", text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"~\s*(\d+)\s*min\b", r"~\1 min", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(
+        r"Carris GTFS-RT em snapshot em cache",
+        "snapshot Carris em cache",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"📡 \*\*Tempo real:\*\*\s*📡\s*Carris GTFS-RT:\s*tempo real ativo\.?",
+        "📡 **Tempo real:** Carris em tempo real ativo.",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"Carris GTFS-RT ativo\.?", "Carris em tempo real ativo.", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(
+        r"\((Sem informação em tempo real nesta paragem)\)",
+        r"\1",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    return cleaned
+
+
+def normalize_weather_day_indentation(text: str) -> str:
+    """Indent weather day detail lines consistently under the day bullet."""
+    if not text or "Previsão Meteorológica" not in text and "Weather Forecast" not in text:
+        return text or ""
+    output_lines: list[str] = []
+    inside_weather_day = False
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if re.match(r"^-\s+\*\*📅", stripped):
+            inside_weather_day = True
+            output_lines.append(raw_line)
+            continue
+        if stripped.startswith(("###", "💡", "📌", "⚠️")):
+            inside_weather_day = False
+            output_lines.append(raw_line)
+            continue
+        if inside_weather_day and stripped.startswith(("🌡️", "☁️", "🌤️", "💧", "💨", "☀️")):
+            field = stripped[2:].lstrip() if stripped.startswith("- ") else stripped
+            output_lines.append(f"    - {field}")
+            continue
+        output_lines.append(raw_line)
+    return "\n".join(output_lines)
+
+
+def normalize_coordinate_link_wrappers(text: str) -> str:
+    """Remove redundant parentheses around linked latitude/longitude pairs."""
+    if not text:
+        return text or ""
+    return re.sub(
+        r"\(\[(-?\d{1,2}\.\d+\s*,\s*-?\d{1,3}\.\d+)\]\((https://www\.google\.com/maps/search/\?api=1&query=[^)]+)\)\)",
+        r"[\1](\2)",
+        text,
+    )
+
+
+def strip_artificial_horizontal_rules(text: str) -> str:
+    """Remove decorative horizontal rules that create noisy Streamlit gaps."""
+    if not text:
+        return text or ""
+    return re.sub(r"(?m)^\s*---\s*$\n?", "", text)
+
+
+def normalize_transport_comparison_sections(text: str) -> str:
+    """Render train option details in route comparisons as compact bullets."""
+    if not text or "Comparação:" not in text and "Comparison:" not in text:
+        return text or ""
+
+    train_heading_re = re.compile(
+        r"^(?:#{1,6}\s+)?(?:\*\*)?(?:🚆\s+)?(?:Comboio|Train)(?:\*\*)?$",
+        re.IGNORECASE,
+    )
+    train_field_re = re.compile(
+        r"^(?:⏱️|📍|🚆|📡|🕐)\s+(?:\*\*)?(?:Tempo estimado|Estimated time|Percurso|Route|"
+        r"Ligação|Connection|Tempo real CP|CP real time|Tempo real|Real time|Linhas|Lines|"
+        r"Próximas saídas mostradas|Next departures shown|Próximas saídas|Next departures)",
+        re.IGNORECASE,
+    )
+    section_end_re = re.compile(r"^(?:#{1,6}\s+|(?:\*\*)?(?:✅|🚇|🚌|🚋|📌))")
+
+    output_lines: list[str] = []
+    inside_train = False
+    saw_metro_section = False
+    last_emitted_train_field = False
+
+    def last_non_empty_line() -> str:
+        for existing in reversed(output_lines):
+            if existing.strip():
+                return existing.strip()
+        return ""
+
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+
+        if re.match(r"^(?:#{1,6}\s+)?(?:\*\*)?(?:🚇\s+)?Metro(?: de Lisboa)?", stripped, re.IGNORECASE):
+            saw_metro_section = True
+            inside_train = False
+            last_emitted_train_field = False
+            output_lines.append(raw_line)
+            continue
+
+        if train_heading_re.match(stripped):
+            inside_train = True
+            last_emitted_train_field = False
+            if saw_metro_section and last_non_empty_line() != "---":
+                if output_lines and output_lines[-1].strip():
+                    output_lines.append("")
+                output_lines.extend(["---", ""])
+            output_lines.append(raw_line)
+            continue
+
+        if inside_train:
+            if not stripped:
+                continue
+            if section_end_re.match(stripped) and not train_field_re.match(stripped):
+                inside_train = False
+                if last_emitted_train_field:
+                    if re.match(r"^(?:\*\*)?✅\s+(?:Conclus[aã]o|Conclusion)", stripped, re.IGNORECASE):
+                        output_lines.extend(["", "---", ""])
+                        raw_line = "**✅ Conclusion**" if re.search(r"Conclusion", stripped, re.IGNORECASE) else "**✅ Conclusão**"
+                    else:
+                        output_lines.append("")
+                output_lines.append(raw_line)
+                last_emitted_train_field = False
+                continue
+            if train_field_re.match(stripped):
+                output_lines.append(f"- {stripped.lstrip('-*• ')}")
+                last_emitted_train_field = True
+                continue
+
+        output_lines.append(raw_line)
+
+    return "\n".join(output_lines)
+
+
+def ensure_transport_comparison_conclusion_separator(text: str) -> str:
+    """Keep the comparison conclusion outside the train-detail bullet list."""
+    if not text or "Comparação:" not in text and "Comparison:" not in text:
+        return text or ""
+
+    conclusion_pattern = r"(?:\*\*)?✅\s*(?:Conclus[aã]o|Conclusion)(?:\*\*)?"
+    field_pattern = r"-\s*(?:🕐|⏱️|📍|🚆|📡)[^\n]*?"
+
+    def _rewrite(match: re.Match[str]) -> str:
+        heading = match.group("heading")
+        label = "Conclusion" if re.search(r"Conclusion", heading, re.IGNORECASE) else "Conclusão"
+        return f"{match.group('field')}\n\n---\n\n**✅ {label}**"
+
+    separated = re.sub(
+        rf"(?m)^(?P<field>{field_pattern})\s+(?P<heading>{conclusion_pattern})\s*$",
+        _rewrite,
+        text,
+    )
+    separated = re.sub(
+        rf"(?m)^(?P<field>{field_pattern})\n+(?P<heading>{conclusion_pattern})\s*$",
+        _rewrite,
+        separated,
+    )
+    separated = re.sub(
+        r"(?m)^---\s*\n\s*---\s*$",
+        "---",
+        separated,
+    )
+    separated = re.sub(
+        r"(?m)^(?:\*\*)?✅\s*(Conclus[aã]o|Conclusion)(?:\*\*)?\s*$",
+        lambda match: "**✅ Conclusion**" if re.search(r"Conclusion", match.group(1), re.IGNORECASE) else "**✅ Conclusão**",
+        separated,
+    )
+    return separated
+
+
+def ensure_blank_lines_before_headers(text: str) -> str:
+    """Ensure markdown h3 sections do not attach to the previous paragraph."""
+    if not text:
+        return text or ""
+    return re.sub(r"(?<!\n\n)\n(###\s+)", r"\n\n\1", text)
+
+
+def clean_planner_loose_sections(text: str) -> str:
+    """Remove unavailable-weather filler and promote loose planner tip labels."""
+    if not text:
+        return text or ""
+    cleaned = re.sub(
+        r"(?ms)^###\s+⛅\s+(?:Condições Meteorológicas|Weather Conditions)\s*\n\s*-\s*(?:Dados meteorológicos não disponíveis|Weather data unavailable).*?(?=\n###\s+|\n📌\s+|\Z)",
+        "",
+        text,
+    )
+    cleaned = re.sub(
+        r"(?m)^-\s*✨\s*(Dicas de Especialista|Expert Tips)\s*$",
+        r"### ✨ \1",
+        cleaned,
+    )
+    return clean_newlines(cleaned).strip()
+
+
+def dedupe_location_ambiguity_blocks(text: str) -> str:
+    """Remove duplicated Marquês A/B ambiguity options after the heading."""
+    if not text or "Ambiguidade em 'Marquês'" not in text:
+        return text or ""
+    cleaned = re.sub(
+        r"(?ms)(###\s+🚇\s+Mobilidade em Lisboa\s*)\n+\s*A\)\s+🚇\s+\*\*Estação Marquês de Pombal\*\*.*?\n\s*B\)\s+📍\s+\*\*Praça/Rotunda do Marquês de Pombal\*\*.*?\n+",
+        r"\1\n",
+        text,
+    )
+    cleaned = re.sub(
+        r"(?ms)((?:###\s+)?🚇\s+Mobilidade em Lisboa\s*)\n+\s*A\)\s+🚇\s+(?:\*\*)?Estação Marquês de Pombal(?:\*\*)?.*?\n\s*B\)\s+📍\s+(?:\*\*)?Praça/Rotunda do Marquês de Pombal(?:\*\*)?.*?\n+",
+        r"\1\n",
+        cleaned,
+    )
+    return cleaned
+
+
+def normalize_ambiguity_options_for_markdown(text: str) -> str:
+    """Render A/B ambiguity choices as bullets so Streamlit keeps line breaks."""
+    if not text or not re.search(r"(?m)^\s*[AB]\)", text):
+        return text or ""
+    normalized = re.sub(r"(?m)^\s*([AB]\)\s+)", r"- \1", text)
+    return normalized
 
 
 def reorder_warnings_before_source(text: str) -> str:
@@ -6620,11 +7010,27 @@ def final_visual_pass(text: str) -> str:
     text = linkify_address_lines(text)
     text = strip_generic_city_address_lines(text)
     text = strip_stray_leading_enumerator(text)
+    text = split_inline_emoji_fields(text)
+    text = normalize_transport_option_indentation(text)
     text = ensure_blank_lines_before_emoji_fields(text)
+    text = ensure_transport_time_route_paragraph_breaks(text)
+    text = normalize_municipal_service_field_lines(text)
     text = compact_service_lookup_spacing(text)
+    text = normalize_transport_timing_artifacts(text)
+    text = normalize_weather_day_indentation(text)
+    text = normalize_coordinate_link_wrappers(text)
+    text = strip_artificial_horizontal_rules(text)
+    text = normalize_transport_comparison_sections(text)
+    text = ensure_transport_comparison_conclusion_separator(text)
+    text = ensure_blank_lines_before_headers(text)
+    text = clean_planner_loose_sections(text)
+    text = dedupe_location_ambiguity_blocks(text)
+    text = normalize_ambiguity_options_for_markdown(text)
+    text = normalize_signal_bullets_to_blocks(text)
     text = ensure_blank_lines_around_warning_blocks(text)
     text = reorder_warnings_before_source(text)
     text = reorder_tips_before_source(text)
+    text = normalize_signal_bullets_to_blocks(text)
     text = repair_known_live_typos(text)
     text = re.sub(
         r"(?mi)^\*\*-\s*para evitar inventar informação,\s*"
@@ -6644,6 +7050,8 @@ def final_visual_pass(text: str) -> str:
         )
     text = re.sub(r"(?m)^[-*]\s*⚠️\s*$\n?", "", text)
     text = re.sub(r"(?m)^[-*•]\s*$\n?", "", text)
+    text = ensure_transport_time_route_paragraph_breaks(text)
+    text = ensure_transport_comparison_conclusion_separator(text)
     text = re.sub(r"(?<=\S)[ \t]{2,}(?=\S)", " ", text)
     # Collapse triple blank lines that may have been reintroduced.
     text = re.sub(r"\n{3,}", "\n\n", text)

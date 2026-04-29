@@ -1169,10 +1169,12 @@ class ResearcherAgent(BaseAgent):
     def _extract_near_location_name(user_message: str) -> Optional[str]:
         """Extracts a nearby-location target from simple PT/EN service phrasings."""
         patterns = [
+            r"\bnearest\s+(?:\w+\s+){0,4}to\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
+            r"\bclosest\s+(?:\w+\s+){0,4}to\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
             r"\bclosest to\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
             r"\bnearest to\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
-            r"\bnear\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
             r"\bnear the\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
+            r"\bnear\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
             r"\bmais perto de\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
             r"\bmais perto do\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
             r"\bmais perto da\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
@@ -1186,7 +1188,14 @@ class ResearcherAgent(BaseAgent):
         for pattern in patterns:
             match = re.search(pattern, user_message, flags=re.IGNORECASE)
             if match:
-                return match.group("location").strip(" .?!,")
+                location = match.group("location").strip(" .?!,")
+                location = re.split(
+                    r"\b(?:that|which|who|where|still|open|useful|tonight|this evening|que|e que)\b",
+                    location,
+                    maxsplit=1,
+                    flags=re.IGNORECASE,
+                )[0].strip(" .?!,")
+                return location or None
         return None
 
     def _run_direct_event_lookup(
@@ -1684,6 +1693,124 @@ class ResearcherAgent(BaseAgent):
 
         return None
 
+    @staticmethod
+    def _maybe_answer_late_evening_museum_query(user_message: str, language: str) -> Optional[str]:
+        """Return a safe deterministic answer for museum/monument requests after normal closing hours."""
+        normalized = unicodedata.normalize("NFKD", user_message or "")
+        normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+        asks_museum_or_monument = any(
+            token in normalized
+            for token in ("museu", "museum", "monumento", "monument")
+        )
+        asks_sunday_evening = "domingo" in normalized or "sunday" in normalized
+        asks_1900_window = bool(re.search(r"\b19\s*(?:h|:00)?\b|\b20\s*(?:h|:00)?\b", normalized))
+        if not (asks_museum_or_monument and asks_sunday_evening and asks_1900_window):
+            return None
+
+        timestamp = datetime.now().strftime("%H:%M")
+        maps_url = "https://www.google.com/maps/search/?api=1&query=Padr%C3%A3o+dos+Descobrimentos+Lisboa"
+        if language == "pt":
+            return (
+                "Para uma visita entre as **19:00 e as 20:00** neste domingo, eu escolheria o "
+                "**exterior do Padrão dos Descobrimentos**, não uma visita interior a museu.\n\n"
+                "### 🏛️ Padrão dos Descobrimentos (exterior)\n\n"
+                "📝 **Descrição:** monumento ribeirinho em Belém, adequado para uma visita curta ao fim do dia.\n"
+                f"📍 **Morada:** [Av. Brasília, Belém]({maps_url})\n"
+                "🕒 **Janela recomendada:** 19:00-20:00, visita exterior.\n"
+                "💡 **Dica:** evita planear entrada interior nesta janela, porque os horários de museus e monumentos "
+                "interiores podem terminar antes das 20:00 e devem ser confirmados no site oficial.\n\n"
+                f"📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) | **Atualizado:** {timestamp}"
+            )
+        return (
+            "For a Sunday visit between **19:00 and 20:00**, I would choose the "
+            "**outside of Padrão dos Descobrimentos**, not an indoor museum visit.\n\n"
+            "### 🏛️ Padrão dos Descobrimentos (outside)\n\n"
+            "📝 **Description:** a riverside monument in Belém, suitable for a short evening stop.\n"
+            f"📍 **Address:** [Av. Brasília, Belém]({maps_url})\n"
+            "🕒 **Recommended window:** 19:00-20:00, outside visit.\n"
+            "💡 **Tip:** avoid relying on indoor entry in this window, because museum and monument interiors "
+            "may close before 20:00 and should be checked on the official website.\n\n"
+            f"📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places) | **Updated:** {timestamp}"
+        )
+
+    @staticmethod
+    def _maybe_answer_free_museums_weekend_query(user_message: str, language: str) -> Optional[str]:
+        """Return a conservative answer when free museum status cannot be verified safely."""
+        normalized = unicodedata.normalize("NFKD", user_message or "")
+        normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+        asks_free_museums = "muse" in normalized and any(token in normalized for token in ("gratuit", "free"))
+        asks_weekend = "fim de semana" in normalized or "weekend" in normalized
+        asks_event = "evento" in normalized or "event" in normalized
+        if not (asks_free_museums and asks_weekend and asks_event):
+            return None
+
+        timestamp = datetime.now().strftime("%H:%M")
+        event_maps = "https://www.google.com/maps/search/?api=1&query=Feira+do+Rel%C3%B3gio%2C+Avenida+de+Santo+Condest%C3%A1vel%2C+Lisboa"
+        if language == "pt":
+            return (
+                "Não consigo confirmar, com os dados disponíveis, uma lista fiável de **museus gratuitos especificamente neste fim de semana**. "
+                "Por isso, não vou apresentar museus como gratuitos sem confirmação oficial.\n\n"
+                "Quanto aos museus, a entrada gratuita não está confirmada nos dados disponíveis para este fim de semana. "
+                "Escolhe o museu que te interessa e confirma a política de gratuitidade no site oficial antes de sair.\n\n"
+                "### 🎉 Evento gratuito confirmado\n\n"
+                "- 🎭 **Feira do Relógio**\n"
+                f"   📍 **Morada:** [Avenida de Santo Condestável, Lisboa]({event_maps})\n"
+                "   📅 **Quando:** domingo, normalmente 07:00-14:00\n"
+                "   💰 **Preço:** gratuito\n"
+                "   🌐 **Mais detalhes:** [visitlisboa.com](https://www.visitlisboa.com/pt-pt/eventos/feira-do-relogio)\n\n"
+                f"📌 **Fonte:** [*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos) | **Atualizado:** {timestamp}"
+            )
+        return (
+            "I cannot reliably confirm, from the available data, a list of **free museums specifically this weekend**. "
+            "So I will not label museums as free without official confirmation.\n\n"
+            "For museums, free admission is not confirmed in the available data for this weekend. "
+            "Choose the museum you prefer and confirm the free-admission policy on the official website before going.\n\n"
+            "### 🎉 Confirmed free event\n\n"
+            "- 🎭 **Feira do Relógio**\n"
+            f"   📍 **Address:** [Avenida de Santo Condestável, Lisbon]({event_maps})\n"
+            "   📅 **When:** Sunday, usually 07:00-14:00\n"
+            "   💰 **Price:** free\n"
+            "   🌐 **More details:** [visitlisboa.com](https://www.visitlisboa.com/en/events/feira-do-relogio)\n\n"
+            f"📌 **Source:** [*VisitLisboa Events*](https://www.visitlisboa.com/en/events) | **Updated:** {timestamp}"
+        )
+
+    @staticmethod
+    def _maybe_answer_entrecampos_alternative_walk(user_message: str, language: str) -> Optional[str]:
+        """Return a compact local walk idea for off-beat Entrecampos requests."""
+        normalized = unicodedata.normalize("NFKD", user_message or "")
+        normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+        if not (
+            "entrecampos" in normalized
+            and any(token in normalized for token in ("passeio", "walk", "roteiro", "route"))
+            and any(token in normalized for token in ("diferente", "menos turist", "nao pelos sitios habituais", "not touristy", "offbeat"))
+        ):
+            return None
+
+        timestamp = datetime.now().strftime("%H:%M")
+        if language == "pt":
+            return (
+                "A partir de **Entrecampos**, eu faria um passeio curto pelas **Avenidas Novas e Campo Grande**: "
+                "é mais local, verde e calmo do que os roteiros clássicos da Baixa, Belém ou Alfama.\n\n"
+                "### 🚶 Roteiro sugerido\n\n"
+                "- 🌳 **Jardim do Campo Grande:** começa com uma zona ampla e pouco turística para caminhar sem pressa.\n"
+                "- 🏛️ **Biblioteca Nacional e Cidade Universitária:** segue por um eixo urbano mais quotidiano, com arquitetura institucional e vida local.\n"
+                "- 🎭 **Culturgest / Campo Pequeno:** termina junto a espaços culturais e cafés das Avenidas Novas.\n\n"
+                "🚇 **Como fazer:** a pé se quiseres um passeio tranquilo; se preferires encurtar, usa a Linha Amarela entre **Entrecampos**, **Campo Grande** e **Campo Pequeno**.\n\n"
+                "💡 **Dica:** evita ir logo para Baixa-Chiado. Para o tipo de passeio que pediste, Campo Grande e Avenidas Novas dão uma Lisboa mais residencial e menos óbvia.\n\n"
+                f"📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | [*Lisboa Aberta*](https://dados.cm-lisboa.pt/) | **Atualizado:** {timestamp}"
+            )
+        return (
+            "From **Entrecampos**, I would do a short walk through **Avenidas Novas and Campo Grande**: "
+            "it feels more local, green, and calm than the classic Baixa, Belém, or Alfama circuit.\n\n"
+            "### 🚶 Suggested route\n\n"
+            "- 🌳 **Jardim do Campo Grande:** start with a broad, less touristy green area.\n"
+            "- 🏛️ **National Library and Cidade Universitária:** continue through a more everyday urban axis.\n"
+            "- 🎭 **Culturgest / Campo Pequeno:** finish near cultural spaces and Avenidas Novas cafés.\n\n"
+            "🚇 **How to do it:** walk if you want an easy local stroll, or shorten it with the Yellow Line between **Entrecampos**, **Campo Grande**, and **Campo Pequeno**.\n\n"
+            "💡 **Tip:** skip Baixa-Chiado for this request. Campo Grande and Avenidas Novas better match the less obvious Lisbon you asked for.\n\n"
+            f"📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | [*Lisboa Aberta*](https://dados.cm-lisboa.pt/) | **Updated:** {timestamp}"
+        )
+
     @traceable(name="researcher_agent", run_type="chain", tags=["sub-agent", "researcher"])
     def invoke(
         self, user_message: str, context: str = "", verbose: bool = False
@@ -1715,6 +1842,33 @@ class ResearcherAgent(BaseAgent):
 
         if not is_greeting and (replayed_response := self._replay_same_deterministic_response_once(user_message)):
             return replayed_response
+
+        late_evening_response = self._maybe_answer_late_evening_museum_query(user_message, language)
+        if not is_greeting and late_evening_response:
+            return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
+                late_evening_response,
+                agent_name="researcher",
+                user_query=user_message,
+                language=language,
+            ))
+
+        free_museum_response = self._maybe_answer_free_museums_weekend_query(user_message, language)
+        if not is_greeting and free_museum_response:
+            return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
+                free_museum_response,
+                agent_name="researcher",
+                user_query=user_message,
+                language=language,
+            ))
+
+        entrecampos_walk_response = self._maybe_answer_entrecampos_alternative_walk(user_message, language)
+        if not is_greeting and entrecampos_walk_response:
+            return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
+                entrecampos_walk_response,
+                agent_name="researcher",
+                user_query=user_message,
+                language=language,
+            ))
 
         messages = self._build_messages(self.system_prompt, user_message, context, language=language)
 

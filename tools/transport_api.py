@@ -60,6 +60,13 @@ logger = logging.getLogger(__name__)
 # Metro fallback URL
 METRO_STATUS_URL = "https://app.metrolisboa.pt/status/getLinhas.php"
 
+# User-facing interchanges are often named after the rail/bus hub rather than
+# the official Metro station. Keep these aliases canonical for route math.
+_METRO_STATION_ALIASES: Dict[str, str] = {
+    "sete rios": "jardim zoológico",
+    "terminal sete rios": "jardim zoológico",
+}
+
 
 # ==========================================================================
 # Helper Functions
@@ -68,6 +75,12 @@ METRO_STATUS_URL = "https://app.metrolisboa.pt/status/getLinhas.php"
 def _normalize_station(text: str) -> str:
     """Normalizes station or place text for comparison."""
     return normalize_location_text(text)
+
+
+def _canonical_metro_station_name(station_name: str) -> str:
+    """Return the official Metro station name for known user-facing aliases."""
+    raw = str(station_name or "").strip()
+    return _METRO_STATION_ALIASES.get(_normalize_station(raw), raw)
 
 
 def _format_location_display_name(location: str, detailed: bool = False) -> str:
@@ -396,12 +409,6 @@ _KNOWN_AMBIGUITIES: Dict[str, Dict[str, str]] = {
         "alternate_hint": "Se te referes à **zona do Parque das Nações**, indica o local exacto (por exemplo Altice Arena, FIL ou Oceanário).",
         "urban_hint": "Se te referes à **Estação Oriente / Gare do Oriente**, assumo a estação como destino abaixo.",
     },
-    "marquês": {
-        "urban_name": "Estação Marquês de Pombal",
-        "alternate_name": "Avenida / rotunda Marquês de Pombal",
-        "alternate_hint": "Se te referes à **Avenida / rotunda Marquês de Pombal**, indica o ponto exacto porque a zona tem várias saídas e paragens.",
-        "urban_hint": "Se te referes à **Estação Marquês de Pombal**, assumo a estação como destino abaixo.",
-    },
     "roma": {
         "urban_name": "Estação Roma",
         "alternate_name": "Avenida de Roma / zona envolvente",
@@ -469,19 +476,17 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     Returns:
         str: Multi-modal route suggestions with Metro, train, and bus options.
     """
-    origin_display = _format_location_display_name(origin)
-    destination_display = _format_location_display_name(destination)
-    response = f"🗺️ **Route: {origin_display} → {destination_display}**\n\n"
-    sources_used: List[str] = []
-
     # Phase 1.4 ambiguity preamble: when a bare island/region name (currently
     # "Madeira") is used as origin or destination, Nominatim would silently
     # resolve it to "Rua Humberto Madeira" in Lisbon and we would render a
     # Metro route as if the user meant a street. That is misleading. Surface
     # the ambiguity explicitly so the user can disambiguate.
     ambiguity_note = _build_ambiguity_preamble(origin, destination)
-    if ambiguity_note:
-        response += ambiguity_note + "\n\n"
+    origin_display = _format_location_display_name(origin)
+    destination_display = _format_location_display_name(destination)
+    route_heading = f"🗺️ **Route: {origin_display} → {destination_display}**"
+    response = f"{ambiguity_note}\n\n{route_heading}\n\n" if ambiguity_note else f"{route_heading}\n\n"
+    sources_used: List[str] = []
 
     if _normalize_station(origin) == _normalize_station(destination):
         response += "✅ **You are already at the destination.**\n"
@@ -492,9 +497,12 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     origin_landmark = get_landmark_info(origin)
     dest_landmark = get_landmark_info(destination)
 
-    # Check if both are Metro stations
-    origin_lines = get_station_lines(origin)
-    dest_lines = get_station_lines(destination)
+    # Check if both are Metro stations. Resolve common interchange aliases
+    # before station-count and transfer calculations.
+    metro_origin = _canonical_metro_station_name(origin)
+    metro_destination = _canonical_metro_station_name(destination)
+    origin_lines = get_station_lines(metro_origin)
+    dest_lines = get_station_lines(metro_destination)
 
     # Check if they are CP train stations
     origin_cp = get_cp_station_info(origin)
@@ -529,8 +537,8 @@ def get_route_between_stations(origin: str, destination: str) -> str:
             response += f"   ℹ️ {dest_landmark.get('description', '')}\n\n"
 
     # Resolve effective Metro stations (Handle Landmarks -> Stations)
-    eff_origin = origin
-    eff_dest = destination
+    eff_origin = metro_origin if origin_lines else origin
+    eff_dest = metro_destination if dest_lines else destination
     eff_origin_lines = origin_lines
     eff_dest_lines = dest_lines
 
