@@ -7526,7 +7526,6 @@ _LABEL_TRANSLATIONS: List[tuple] = [
     ("Horário de funcionamento", "Opening hours", True),
     ("Contacto", "Contact", True),
     ("Telefone", "Phone", True),
-    ("Sítio", "Website", True),
     ("Website", "Website", True),
     ("Preço", "Price", True),
     ("Bilhetes", "Tickets", True),

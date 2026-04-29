@@ -206,8 +206,8 @@ if __name__ == "__main__":
             print(f"  \033[1;31m❌ FAIL\033[0m: {description} ('{term}' not found)")
 
     print(f"\n\033[1mTotal length:\033[0m {len(prompt)} characters (~{len(prompt) // 4} tokens)")
-    print(f"\033[1;32m✅ Passed: {passed}/{passed+failed}\033[0m")
+    print(f"\033[1;32m✅ Passed: {passed}/{passed + failed}\033[0m")
     if failed > 0:
-        print(f"\033[1;31m❌ Failed: {failed}/{passed+failed}\033[0m")
+        print(f"\033[1;31m❌ Failed: {failed}/{passed + failed}\033[0m")
     else:
         print("\033[1;32m🎉 ALL WEATHER PROMPT CHECKS PASSED!\033[0m")
