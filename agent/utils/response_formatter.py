@@ -974,6 +974,18 @@ def structure_weather_markdown(text: str) -> str:
         r"- \1",
         structured,
     )
+    structured = re.sub(
+        r"(?ms)(?P<warnings>(?:^-\s+[🟡🟠🔴].+\n)+)\s*(?P<day>^-\s+\*\*📅)",
+        lambda match: f"{match.group('warnings').rstrip()}\n\n---\n\n{match.group('day')}",
+        structured,
+        count=1,
+    )
+    structured = re.sub(
+        r"(?m)^-\s+(⚠️\s+(?:Avisos meteorológicos ativos|Active weather warnings)[^\n]*:?)$",
+        r"\1",
+        structured,
+        flags=re.IGNORECASE,
+    )
     return structured.strip()
 
 
@@ -3795,7 +3807,6 @@ def _build_researcher_place_intro_lines(
 
     normalized_query = _strip_accents_compat(user_query or "").lower()
     is_pt = language == "pt"
-    title = str(cards[0].get("title") or "").strip()
     category = _strip_accents_compat(str(cards[0].get("category") or "")).lower()
     general_markers = (
         "museus", "museums", "restaurants", "restaurantes", "atrações", "atracoes",
@@ -3810,15 +3821,7 @@ def _build_researcher_place_intro_lines(
     )
 
     if len(cards) == 1 and not any(marker in normalized_query for marker in general_markers):
-        if is_pt:
-            return [
-                "### 📍 Local em Lisboa",
-                f"Aqui estão as informações disponíveis sobre **{title}**:",
-            ]
-        return [
-            "### 📍 Place in Lisbon",
-            f"Here is the information I have available about **{title}**:",
-        ]
+        return []
 
     if is_pt:
         if any(marker in normalized_query for marker in must_see_markers):
@@ -6546,14 +6549,19 @@ def normalize_municipal_service_field_lines(text: str) -> str:
 
 def normalize_transport_option_indentation(text: str) -> str:
     """Indent timetable/status fields under transport option bullets consistently."""
-    if not text or not re.search(r"(?m)^-\s+(?:🚌|🚋|🚆|🚇)\s+\*\*", text):
+    if not text or not re.search(r"(?m)^-\s+(?:🚌|🚋|🚆|🚇|↔️|📍|📋)\s+\*\*", text):
         return text or ""
 
     output_lines: list[str] = []
     inside_transport_option = False
+    option_parent_re = re.compile(r"^-\s+(?:🚌|🚋|🚆|🚇|↔️|📍|📋)\s+\*\*", re.IGNORECASE)
+    child_field_re = re.compile(
+        r"^(?:[-*]\s+)?(?:🕐|🕕|ℹ️|⏱️|📡|📍|⚠️|💡|🗓️|📅)\s+|^(?:[-*]\s+)?\*\*[^*]+\*\*:",
+        re.IGNORECASE,
+    )
     for raw_line in text.splitlines():
         stripped = raw_line.strip()
-        if re.match(r"^-\s+(?:🚌|🚋|🚆|🚇)\s+\*\*", stripped):
+        if option_parent_re.match(stripped):
             inside_transport_option = True
             output_lines.append(stripped)
             continue
@@ -6561,11 +6569,58 @@ def normalize_transport_option_indentation(text: str) -> str:
             inside_transport_option = False
             output_lines.append(raw_line)
             continue
-        if inside_transport_option and stripped.startswith(("🕐", "🕕", "ℹ️", "⏱️", "📡", "📍")):
+        if inside_transport_option and child_field_re.match(stripped):
+            child = re.sub(r"^[-*]\s+", "", stripped).strip()
+            output_lines.append(f"  - {child}")
+            continue
+        if inside_transport_option and stripped.startswith("- "):
+            inside_transport_option = False
+        output_lines.append(raw_line)
+
+    return "\n".join(output_lines)
+
+
+def normalize_flat_cp_train_response(text: str) -> str:
+    """Convert flat CP train summaries into a nested list that Streamlit keeps readable."""
+    if not text or "Next 8 Departures" not in text and "Próximas" not in text:
+        return text or ""
+
+    output_lines: list[str] = []
+    inside_departures = False
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            output_lines.append(raw_line)
+            continue
+        if stripped.startswith("📊 **TRIP SUMMARY"):
+            output_lines.append("### 📊 Trip Summary")
+            continue
+        if re.match(r"^(?:🚆\s+Line|⏱️\s+Duration|📊\s+Remaining departures)", stripped, re.IGNORECASE):
+            output_lines.append(f"- {stripped}")
+            inside_departures = False
+            continue
+        if stripped.startswith("📍 **Status"):
+            output_lines.append(f"- {stripped}")
+            inside_departures = False
+            continue
+        if stripped.startswith("⚠️") and output_lines and output_lines[-1].strip().startswith("- 📍 **Status"):
             output_lines.append(f"  - {stripped}")
             continue
-        if not stripped:
-            inside_transport_option = False
+        if stripped.startswith("📋 **Next"):
+            output_lines.append(f"- {stripped}")
+            inside_departures = True
+            continue
+        if inside_departures and stripped.startswith("🕐"):
+            output_lines.append(f"  - {stripped}")
+            continue
+        if inside_departures and stripped.startswith("..."):
+            output_lines.append(f"  - {stripped}")
+            inside_departures = False
+            continue
+        if stripped.startswith(("📅 ", "💡 **Schedules")):
+            output_lines.append(f"- {stripped}")
+            inside_departures = False
+            continue
         output_lines.append(raw_line)
 
     return "\n".join(output_lines)
@@ -6601,7 +6656,7 @@ def normalize_transport_timing_artifacts(text: str) -> str:
 
 def normalize_weather_day_indentation(text: str) -> str:
     """Indent weather day detail lines consistently under the day bullet."""
-    if not text or "Previsão Meteorológica" not in text and "Weather Forecast" not in text:
+    if not text or not re.search(r"(?m)^-\s+\*\*📅", text):
         return text or ""
     output_lines: list[str] = []
     inside_weather_day = False
@@ -6615,9 +6670,9 @@ def normalize_weather_day_indentation(text: str) -> str:
             inside_weather_day = False
             output_lines.append(raw_line)
             continue
-        if inside_weather_day and stripped.startswith(("🌡️", "☁️", "🌤️", "💧", "💨", "☀️")):
-            field = stripped[2:].lstrip() if stripped.startswith("- ") else stripped
-            output_lines.append(f"    - {field}")
+        detail_text = stripped[2:].lstrip() if stripped.startswith("- ") else stripped
+        if inside_weather_day and detail_text.startswith(("🌡️", "☁️", "🌤️", "💧", "💨", "☀️")):
+            output_lines.append(f"    - {detail_text}")
             continue
         output_lines.append(raw_line)
     return "\n".join(output_lines)
@@ -6635,10 +6690,169 @@ def normalize_coordinate_link_wrappers(text: str) -> str:
 
 
 def strip_artificial_horizontal_rules(text: str) -> str:
-    """Remove decorative horizontal rules that create noisy Streamlit gaps."""
+    """Collapse duplicate horizontal rules while preserving intentional section breaks."""
     if not text:
         return text or ""
-    return re.sub(r"(?m)^\s*---\s*$\n?", "", text)
+    cleaned = re.sub(r"(?m)^\s*---\s*$", "---", text)
+    cleaned = re.sub(r"(?:\n\s*---\s*){2,}", "\n\n---", cleaned)
+    return cleaned
+
+
+def strip_single_researcher_result_meta(text: str) -> str:
+    """Remove raw result-count/window lines when a specific lookup rendered one card."""
+    if not text:
+        return text or ""
+    lines: list[str] = []
+    for raw_line in text.splitlines():
+        normalized = _strip_accents_compat(_strip_markdown_formatting(raw_line)).lower().strip()
+        if re.search(r"\b1\s+(?:locais?|atracoes|atrações|places?|attractions?)\b", normalized):
+            continue
+        if re.search(r"\b(?:janela de resultados|results window)\b.*\b1\s*-\s*1\s+(?:de|of)\s+1\b", normalized):
+            continue
+        lines.append(raw_line)
+    return "\n".join(lines)
+
+
+def unwrap_metro_station_maps_links(text: str) -> str:
+    """Keep Metro route station names as plain text instead of inconsistent Maps links."""
+    if not text:
+        return text or ""
+    route_markers = (
+        "Your Metro Route",
+        "O seu Trajeto de Metro",
+        "O seu Trajecto de Metro",
+        "Percurso de metro",
+        "Metro Route",
+        "Trajeto de Metro",
+        "Metro mais próximo",
+        "Nearest Metro",
+        "Opção urbana em Lisboa",
+    )
+    if not any(marker in text for marker in route_markers):
+        return text
+
+    action_markers = (
+        "Board at",
+        "Transfer at",
+        "Exit at",
+        "Walk to",
+        "Embarque",
+        "Embarca",
+        "Transferência",
+        "Transfere",
+        "Saia",
+        "Sai em",
+        "Siga a pé",
+        "Segue a pé",
+    )
+    maps_link_re = re.compile(
+        r"\[([^\]]+)\]\(https://(?:www\.)?google\.com/maps/search/\?api=1&query=[^)]+\)",
+        re.IGNORECASE,
+    )
+    output_lines = [
+        maps_link_re.sub(r"\1", raw_line)
+        if any(marker in raw_line for marker in action_markers) or "Metro de Lisboa" in text
+        else raw_line
+        for raw_line in text.splitlines()
+    ]
+    return "\n".join(output_lines)
+
+
+def strip_orphan_warning_headings(text: str) -> str:
+    """Drop empty caution headings that QA sometimes leaves before the source footer."""
+    if not text:
+        return text or ""
+    lines = text.splitlines()
+    output_lines: list[str] = []
+    for index, raw_line in enumerate(lines):
+        stripped = raw_line.strip()
+        if re.match(r"^⚠️\s*(?:Helpful Notes?|Notas úteis|Notas|Notes?|Avisos?)\s*:?$", stripped, re.IGNORECASE):
+            next_nonblank = ""
+            for candidate in lines[index + 1:]:
+                if candidate.strip():
+                    next_nonblank = candidate.strip()
+                    break
+            if not next_nonblank or next_nonblank.startswith("📌"):
+                continue
+        output_lines.append(raw_line)
+    return "\n".join(output_lines)
+
+
+def repair_malformed_heading_bullets(text: str) -> str:
+    """Demote accidental heading bullets such as ``### - 📍`` back to list items."""
+    if not text:
+        return text or ""
+
+    repaired_lines: list[str] = []
+    malformed_re = re.compile(r"^(?:#{1,6}\s+)+[-*]\s+(?P<body>.+)$")
+    field_prefixes = ("📍", "📏", "🗺️", "📞", "🕐", "⏱️", "🌐", "💰", "💶", "⭐")
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        match = malformed_re.match(stripped)
+        if not match:
+            repaired_lines.append(raw_line)
+            continue
+        body = match.group("body").strip()
+        prefix = "  - " if body.startswith(field_prefixes) else "- "
+        repaired_lines.append(f"{prefix}{body}")
+
+    return "\n".join(repaired_lines)
+
+
+def strip_list_internal_horizontal_rules(text: str) -> str:
+    """Remove horizontal rules inserted between a list parent and its fields."""
+    if not text:
+        return text or ""
+
+    lines = text.splitlines()
+    output_lines: list[str] = []
+
+    def _nearest_nonblank(start: int, step: int) -> str:
+        index = start
+        while 0 <= index < len(lines):
+            candidate = lines[index].strip()
+            if candidate:
+                return candidate
+            index += step
+        return ""
+
+    for index, raw_line in enumerate(lines):
+        stripped = raw_line.strip()
+        if stripped != "---":
+            output_lines.append(raw_line)
+            continue
+        previous_line = _nearest_nonblank(index - 1, -1)
+        next_line = _nearest_nonblank(index + 1, 1)
+        next_is_list_item = next_line.startswith(("- ", "* ", "  - ", "    - "))
+        previous_is_list_item = previous_line.startswith(("- ", "* ", "  - ", "    - "))
+        previous_is_heading = previous_line.startswith("### ")
+        if next_is_list_item and (previous_is_list_item or previous_is_heading):
+            continue
+        output_lines.append(raw_line)
+
+    return "\n".join(output_lines)
+
+
+def compact_nested_list_spacing(text: str) -> str:
+    """Remove blank lines between a list item and its nested field bullets."""
+    if not text:
+        return text or ""
+    lines = text.splitlines()
+    output_lines: list[str] = []
+    for index, raw_line in enumerate(lines):
+        if raw_line.strip():
+            output_lines.append(raw_line)
+            continue
+        previous_line = output_lines[-1].rstrip() if output_lines else ""
+        next_line = ""
+        for candidate in lines[index + 1:]:
+            if candidate.strip():
+                next_line = candidate.rstrip()
+                break
+        if previous_line.lstrip().startswith(("- ", "* ")) and next_line.startswith(("  - ", "    - ")):
+            continue
+        output_lines.append(raw_line)
+    return "\n".join(output_lines)
 
 
 def normalize_transport_comparison_sections(text: str) -> str:
@@ -7008,9 +7222,15 @@ def final_visual_pass(text: str) -> str:
     text = replace_pt_technical_vocabulary(text)
     text = linkify_phone_numbers(text)
     text = linkify_address_lines(text)
+    text = unwrap_metro_station_maps_links(text)
     text = strip_generic_city_address_lines(text)
+    text = strip_single_researcher_result_meta(text)
     text = strip_stray_leading_enumerator(text)
     text = split_inline_emoji_fields(text)
+    text = repair_malformed_heading_bullets(text)
+    text = strip_list_internal_horizontal_rules(text)
+    text = compact_nested_list_spacing(text)
+    text = normalize_flat_cp_train_response(text)
     text = normalize_transport_option_indentation(text)
     text = ensure_blank_lines_before_emoji_fields(text)
     text = ensure_transport_time_route_paragraph_breaks(text)
@@ -7023,10 +7243,14 @@ def final_visual_pass(text: str) -> str:
     text = normalize_transport_comparison_sections(text)
     text = ensure_transport_comparison_conclusion_separator(text)
     text = ensure_blank_lines_before_headers(text)
+    text = repair_malformed_heading_bullets(text)
+    text = strip_list_internal_horizontal_rules(text)
+    text = compact_nested_list_spacing(text)
     text = clean_planner_loose_sections(text)
     text = dedupe_location_ambiguity_blocks(text)
     text = normalize_ambiguity_options_for_markdown(text)
     text = normalize_signal_bullets_to_blocks(text)
+    text = strip_orphan_warning_headings(text)
     text = ensure_blank_lines_around_warning_blocks(text)
     text = reorder_warnings_before_source(text)
     text = reorder_tips_before_source(text)

@@ -205,36 +205,6 @@ _AMBIGUOUS_LOCATION_HINTS = {
             "B) 🚇 **Rua Humberto Madeira / Avenida da Ilha da Madeira, Lisbon** — continuing below with the urban option.",
         ],
     },
-    "oriente": {
-        "pt": [
-            "A) 🚉 **Estação do Oriente** — interface Metro, CP e autocarros.",
-            "B) 📍 **Parque das Nações / zona do Oriente** — área envolvente, não apenas a estação.",
-        ],
-        "en": [
-            "A) 🚉 **Oriente station** — Metro, CP, and bus interchange.",
-            "B) 📍 **Parque das Nações / Oriente area** — surrounding district, not only the station.",
-        ],
-    },
-    "roma": {
-        "pt": [
-            "A) 🚇 **Estação Roma** — Metro Linha Verde.",
-            "B) 📍 **Avenida de Roma / zona de Roma** — área urbana envolvente.",
-        ],
-        "en": [
-            "A) 🚇 **Roma station** — Green Metro line.",
-            "B) 📍 **Avenida de Roma / Roma area** — surrounding urban area.",
-        ],
-    },
-    "odivelas": {
-        "pt": [
-            "A) 🚇 **Estação Odivelas** — terminal do Metro Amarelo.",
-            "B) 📍 **Município de Odivelas** — zona mais ampla fora de Lisboa cidade.",
-        ],
-        "en": [
-            "A) 🚇 **Odivelas station** — Yellow Metro terminus.",
-            "B) 📍 **Odivelas municipality** — wider area outside Lisbon city.",
-        ],
-    },
 }
 
 

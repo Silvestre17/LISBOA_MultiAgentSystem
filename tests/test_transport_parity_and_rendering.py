@@ -1058,13 +1058,12 @@ def test_parse_metro_wait_request_handles_short_station_forms() -> None:
 
 
 def test_build_ambiguity_preamble_handles_new_bare_place_tokens() -> None:
-    """Bare ambiguous route endpoints should surface a clarification preamble before routing."""
+    """Only genuinely ambiguous bare endpoints should surface a clarification preamble."""
     oriente_note = _build_ambiguity_preamble("Rossio", "Oriente")
     madeira_note = _build_ambiguity_preamble("Cais do Sodré", "Madeira")
     explicit_street = _build_ambiguity_preamble("Cais do Sodré", "Rua Humberto Madeira")
 
-    assert "Parque das Nações" in oriente_note
-    assert "Estação Oriente / Gare do Oriente" in oriente_note
+    assert oriente_note == ""
     assert "Ilha da Madeira" in madeira_note
     assert explicit_street == ""
 
