@@ -1248,7 +1248,7 @@ class QualityAssuranceAgent(BaseAgent):
             add_critical_issue("Markdown links must only wrap valid URLs or tel: targets.")
 
         if re.search(
-            r"(?m)^[^\n]*(?:📍\s*\*\*(?:Address|Morada|Endereço|Localização|Location)|📞\s*\*\*(?:Phone|Telefone)|🌐\s*\*\*(?:Website|Sítio)|🎟️\s*\*\*(?:Tickets|Bilhetes)).+",
+            r"(?m)^[^\n]*(?:📍\s*\*\*(?:Address|Morada|Endereço|Localização|Location)|📞\s*\*\*(?:Phone|Telefone)|🌐\s*\*\*(?:Website)|🎟️\s*\*\*(?:Tickets|Bilhetes)).+",
             combined_output,
         ) and re.search(
             r"(?m)^.+\S\s+(?:📍\s*\*\*|📞\s*\*\*|🌐\s*\*\*|🎟️\s*\*\*)",
