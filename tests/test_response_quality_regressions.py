@@ -117,6 +117,188 @@ def test_malformed_service_heading_bullets_are_repaired() -> None:
     assert "\n  - 📏 **Distância:** 0.07 km" in output
 
 
+def test_event_card_date_and_duration_stay_aligned_with_address() -> None:
+    """Event date/duration fields must not be nested below the address field."""
+    raw = (
+        "### 🛍️ Feira do Livro 2026\n\n"
+        "- 📍 **Morada:** [Parque Eduardo VII, Lisboa](https://www.google.com/maps/search/?api=1&query=Parque)\n"
+        "  - 📅 **Data/Hora:** 27 de maio a 14 de junho de 2026\n"
+        "  - ⏱️ **Duração:** Cerca de 1 mês\n"
+        "- 📂 **Categoria:** Feiras"
+    )
+
+    output = final_visual_pass(raw)
+
+    assert "\n- 📅 **Data/Hora:** 27 de maio" in output
+    assert "\n- ⏱️ **Duração:** Cerca de 1 mês" in output
+    assert "\n  - 📅 **Data/Hora:**" not in output
+    assert "\n  - ⏱️ **Duração:**" not in output
+
+
+def test_place_focus_extraction_uses_actual_pt_subject() -> None:
+    """PT contractions such as 'Fala-me do X' should extract X, not the whole question."""
+    assert ResearcherAgent._extract_place_focus_query(
+        "Fala-me do Mosteiro dos Jerónimos"
+    ) == "Mosteiro dos Jerónimos"
+
+
+def test_history_compaction_filters_unrelated_web_results() -> None:
+    """Historical context should not leak unrelated broad-history snippets into place cards."""
+    unrelated = (
+        "📚 **Wikipédia: História da humanidade**\n"
+        "História da humanidade é a história dos seres humanos como determinada pelos estudos arqueológicos."
+    )
+    related = (
+        "📚 **Wikipédia: Mosteiro dos Jerónimos**\n"
+        "O Mosteiro dos Jerónimos é um mosteiro manuelino situado em Belém, Lisboa. "
+        "Foi mandado construir por D. Manuel I e está associado aos Descobrimentos portugueses."
+    )
+
+    unrelated_output = ResearcherAgent._compact_history_result(
+        unrelated,
+        "pt",
+        "Mosteiro dos Jerónimos",
+    )
+    related_output = ResearcherAgent._compact_history_result(
+        related,
+        "pt",
+        "Mosteiro dos Jerónimos",
+    )
+
+    assert "História da humanidade" not in unrelated_output
+    assert "seres humanos" not in unrelated_output
+    assert "Mosteiro dos Jerónimos" in related_output
+    assert "Descobrimentos portugueses" in related_output
+
+
+def test_transport_comparison_note_and_conclusion_layout_is_clean() -> None:
+    """Metro/CP comparison notes and conclusions should not render as broken headings."""
+    raw = (
+        "### 🚇 Mobilidade em Lisboa\n\n"
+        "**Comparação:** Entrecampos → Sete Rios\n\n"
+        "**🚇 Metro de Lisboa**\n\n"
+        "🧭 **Trajeto Metro:**\n"
+        "- 📍 **Embarque na estação Entrecampos**\n"
+        "- 🔵 **Linha Azul** - direção **Reboleira**\n\n"
+        "- 🎯 **Saia na estação Jardim Zoológico**\n"
+        "---\n\n"
+        "### ****ℹ️ **Sete Rios no Metro:** a Estação Que Serve Sete Rios Chama-Se **Jardim Zoológico**.****\n"
+        "---\n"
+        "**🚆 Comboio**\n"
+        "- ⏱️ **Tempo estimado:** 2 min\n"
+        "- 🕐 **Próximas saídas mostradas:** 14:52, 15:07, 15:22\n"
+        "**✅ Conclusão**\n"
+        "- **Mais rápido:** Comboio"
+    )
+
+    output = final_visual_pass(raw)
+
+    assert "### ****" not in output
+    assert "**ℹ️ Sete Rios no Metro:" in output
+    assert "\n---\n\n**🚆 Comboio**" in output
+    assert "\n---\n\n**✅ Conclusão**" in output
+
+
+def test_practical_tips_and_sentence_headings_do_not_become_hero_headers() -> None:
+    """Planner/weather practical-tip prose should stay as bullets, not sentence headings between rules."""
+    raw = (
+        "💡 **Practical Tips** \n\n"
+        "---\n\n"
+        "### Expect a wet afternoon, so choose indoor or mixed indoor-outdoor stops in Belém and carry an umbrella.\n"
+        "---\n\n"
+        "### 🚇 Mobility and Connections"
+    )
+
+    output = final_visual_pass(raw)
+
+    assert "### Expect" not in output
+    assert "\n- Expect a wet afternoon" in output
+    assert "💡 **Practical Tips**" in output
+
+
+def test_cp_train_duplicate_heading_markers_are_removed() -> None:
+    """CP train answers must not display literal duplicated heading markers in Streamlit."""
+    raw = "### ### 🚆 **Train: Cais do Sodré → Cascais**\n**📊 Trip Summary**"
+
+    output = final_visual_pass(raw)
+
+    assert output.startswith("### 🚆 **Train: Cais do Sodré → Cascais**")
+    assert "### ###" not in output
+
+
+def test_missing_address_placeholder_link_is_removed() -> None:
+    """Missing address placeholders must not survive as Google Maps links."""
+    raw = "- 📍 **Morada:** [Não disponível in data](https://www.google.com/maps/search/?api=1&query=N%C3%A3o)\n- 💰 **Preço:** Gratuito"
+
+    output = final_visual_pass(raw)
+
+    assert "Não disponível in data" not in output
+    assert "google.com/maps" not in output
+    assert "- 💰 **Preço:** Gratuito" in output
+
+
+def test_madeira_ambiguity_route_card_fields_are_separate_bullets() -> None:
+    """Madeira ambiguity follow-up fields should not collapse into one oversized paragraph."""
+    raw = (
+        "⚠️ **Ambiguidade em 'Madeira':** posso estar a interpretar uma destas opções:\n\n"
+        "A) 🏝️ **Ilha da Madeira** — requer avião.\n"
+        "B) 🚇 **Rua Humberto Madeira / Av. Ilha da Madeira, em Lisboa** — sigo abaixo.\n\n"
+        "### 🚇 Mobilidade em Lisboa\n\n"
+        "🚇 **Opção urbana em Lisboa:** Rua Humberto Madeira / Av. Ilha da Madeira\n\n"
+        "📍 **Destino Provável:** Rua Humberto Madeira, Lisboa\n\n"
+        "🚇 **Metro Mais Próximo:** Encarnação (🔴 Linha Vermelha) 🎯 **Como Usar o Metro:** Segue pela Linha Vermelha."
+    )
+
+    output = final_visual_pass(raw)
+
+    assert "\n- 🚇 **Opção urbana em Lisboa:**" in output
+    assert "\n- 📍 **Destino Provável:**" in output
+    assert "\n- 🚇 **Metro Mais Próximo:**" in output
+    assert "\n- 🎯 **Como Usar o Metro:**" in output
+
+
+def test_pt_metro_oriente_query_is_not_detected_as_spanish() -> None:
+    """Short PT transport phrases containing 'metro' should remain PT, not Spanish fallback."""
+    assert resolve_output_language("Quero ir de metro para Oriente.", "en") == ("pt", False, "pt")
+
+
+def test_generic_public_transport_route_composes_bus_and_metro_options() -> None:
+    """Open-ended public-transport route questions should surface bus and Metro options when both exist."""
+    from agent.agents.transport_agent import _build_deterministic_route_tool_response
+
+    metro_result = "🗺️ **Route: ISCTE → Zara do Rossio**\n\n🚇 **METRO ROUTE**\n   1. Board at **Entrecampos**\n   2. Exit at **Rossio**\n\n📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt)"
+    carris_result = "🚌 **Autocarros**\n\nBUSES\n----\n732: para Caselas\nNext: 15:00 (stop Faculdade Farmácia)\n~37min travel\n\n📌 **Fonte:** [*Carris*](https://www.carris.pt)"
+
+    with patch("tools.transport_api.get_route_between_stations.func", side_effect=lambda **_: metro_result), patch(
+        "tools.carris_api.carris_find_routes_between.func",
+        side_effect=lambda **_: carris_result,
+    ):
+        output = _build_deterministic_route_tool_response(
+            "Quero ir de transportes públicos entre o ISCTE e a Zara do Rossio"
+        )
+
+    assert output is not None
+    assert "Opções de transporte público" in output
+    assert "**🚌 Autocarros**" in output
+    assert "**🚇 Metro**" in output
+    assert "[*Carris*]" in output
+    assert "[*Metro de Lisboa*]" in output
+
+
+def test_after_hours_culture_recommendation_avoids_closed_indoor_museums() -> None:
+    """Late museum/monument requests should not recommend venues closed before the requested window."""
+    response = ResearcherAgent._maybe_answer_after_hours_culture_query(
+        "Qual museu ou monumento recomendas ir neste domingo sendo que apenas tenho das 19 às 20h para visitar?",
+        "pt",
+    )
+
+    assert response is not None
+    assert "evitaria recomendar **museus interiores**" in response
+    assert "Padrão dos Descobrimentos" in response
+    assert "09:30" not in response
+    assert "17:30" not in response
+
+
 def test_final_visual_pass_strips_internal_qa_annotations_and_pt_technical_terms() -> None:
     """Final rendering must remove QA leakage and localize recurring English technical words in PT responses."""
     raw = (
@@ -830,7 +1012,8 @@ def test_researcher_worker_formats_nearby_services_as_structured_cards() -> None
         language="pt",
     )
 
-    assert "####" in output
+    assert "### 💊 Farmácias perto de Saldanha" in output
+    assert "- 💊 **Farmácia Dalva**" in output
     assert "**Farm\u00e1cia Dalva**" in output
     assert "**Morada:**" in output
     # The formatter normalizes the raw "0.07 km away" into the cleaner PT form

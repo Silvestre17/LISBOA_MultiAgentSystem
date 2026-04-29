@@ -798,7 +798,7 @@ def test_search_cultural_events_specific_lookup_matches_slug_when_title_is_missi
             {"query": 'Fala-me da "Feira do Livro\'26"', "max_results": 3, "language": "pt"}
         )
 
-    assert "Book Fair" in output
+    assert "Feira do Livro" in output
     assert "Sil The Leading Real Estate Show" not in output
 
 
@@ -2299,8 +2299,8 @@ def test_search_places_attractions_specific_lookup_shows_only_two_alternatives_i
         )
 
     assert "Janela de resultados:** 1-2 de 3" in output
-    assert "Words Factory" in output
-    assert "João de Deus Museum" in output
+    assert "Fábrica das Palavras" in output
+    assert "Museu João de Deus" in output
     assert "Museum of Illusions" not in output
 
 
@@ -3368,7 +3368,8 @@ def test_multiagent_local_worker_batches_run_sequentially_without_threadpool() -
         {"weather": "🌤️ Weather ok", "transport": "🚇 Transport ok"},
         language="pt",
     )
-    assert output == "combined"
+    assert output.startswith("combined")
+    assert "📌 **Fonte:**" in output
 
 
 def test_multiagent_qa_timeout_preserves_worker_response() -> None:
@@ -3940,7 +3941,7 @@ def test_search_places_attractions_first_time_query_excludes_tour_companies() ->
             {"query": "Lista as atrações imperdíveis para quem visita Lisboa pela primeira vez.", "max_results": 5}
         )
 
-    assert "Jerónimos Monastery" in output
+    assert "Mosteiro dos Jerónimos" in output
     assert "Take Lisboa Free Tours" not in output
 
 

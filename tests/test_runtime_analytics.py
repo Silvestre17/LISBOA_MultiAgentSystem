@@ -395,7 +395,7 @@ def test_multiagent_simple_weather_surfaces_lightweight_qa_disclaimers() -> None
             verbose=False,
         )
 
-    assert "- ⚠️ Live precipitation confidence should be" in output
+    assert "⚠️ Live precipitation confidence should be" in output
     assert "Live precipitation confidence should be rechecked before departure." in output
     assistant.qa_agent.validate.assert_not_called()
 

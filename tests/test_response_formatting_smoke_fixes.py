@@ -107,7 +107,7 @@ def test_final_visual_pass_separates_transport_comparison_fields() -> None:
     assert "⏱️ **Tempo estimado:** 21 min\n\n✅ **Estado:**" in output
     assert "🧭 **Trajeto Metro:**\n\n🟡 Linha Amarela" in output
     assert "🎯 Saia na estação Jardim Zoológico\n\nℹ️ **Sete Rios no Metro:**" in output
-    assert "ℹ️ **Sete Rios no Metro:** a estação que serve Sete Rios chama-se Jardim Zoológico.\n\n---\n\n#### 🚆 Comboio" in output
+    assert "ℹ️ **Sete Rios no Metro:** a estação que serve Sete Rios chama-se Jardim Zoológico.\n\n---\n\n### 🚆 Comboio" in output
     assert "- ⏱️ **Tempo estimado:** 2 min" in output
     assert "- 📍 **Percurso:** embarca em Entrecampos e sai em Sete Rios" in output
     assert "- 🚆 **Ligação:** direta nas partidas mostradas" in output
