@@ -403,24 +403,6 @@ _KNOWN_AMBIGUITIES: Dict[str, Dict[str, str]] = {
         "alternate_hint": "A) 🏝️ **Ilha da Madeira** — não é acessível de metro; precisas de avião.",
         "urban_hint": "B) 🚇 **Rua Humberto Madeira / Av. Ilha da Madeira, em Lisboa** — sigo abaixo com a opção urbana mais próxima.",
     },
-    "oriente": {
-        "urban_name": "Estação Oriente / Gare do Oriente",
-        "alternate_name": "zona do Parque das Nações",
-        "alternate_hint": "Se te referes à **zona do Parque das Nações**, indica o local exacto (por exemplo Altice Arena, FIL ou Oceanário).",
-        "urban_hint": "Se te referes à **Estação Oriente / Gare do Oriente**, assumo a estação como destino abaixo.",
-    },
-    "roma": {
-        "urban_name": "Estação Roma",
-        "alternate_name": "Avenida de Roma / zona envolvente",
-        "alternate_hint": "Se te referes à **Avenida de Roma / zona envolvente**, indica o ponto exacto porque a área é extensa.",
-        "urban_hint": "Se te referes à **Estação Roma**, assumo a estação como destino abaixo.",
-    },
-    "odivelas": {
-        "urban_name": "Estação Odivelas",
-        "alternate_name": "município de Odivelas",
-        "alternate_hint": "Se te referes ao **município de Odivelas**, indica o local exacto porque a estação não cobre toda a zona.",
-        "urban_hint": "Se te referes à **Estação Odivelas**, assumo a estação como destino abaixo.",
-    },
 }
 
 
@@ -731,7 +713,7 @@ def get_transport_summary() -> str:
         str: Combined transport status summary.
     """
     now_str = datetime.now().strftime('%H:%M')
-    response = f"🚇 🚌 🚆 **Situação dos Transportes de Lisboa** — Atualizado: {now_str}\n\n"
+    response = f"### 🚇 🚌 🚆 **Situação dos Transportes de Lisboa** — Atualizado: {now_str}\n\n"
 
     # 1. Metro Status
     response += "🚇 **Metro de Lisboa**\n"

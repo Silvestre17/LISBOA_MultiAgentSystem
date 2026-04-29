@@ -39,6 +39,84 @@ def test_infer_response_language_keeps_short_pt_transport_overview_query_in_pt()
     ) == "pt"
 
 
+def test_nearest_service_query_is_not_treated_as_pagination() -> None:
+    """Comparative service queries with 'mais perto' must not replay the previous search page."""
+    assert ResearcherAgent._extract_pagination_request(
+        "Qual o hospital e a farmácia mais perto do Saldanha?"
+    ) is None
+    assert ResearcherAgent._extract_pagination_request("Give me the next 2 events that match") == {"count": 2}
+
+
+def test_weather_warnings_are_separated_from_forecast_day() -> None:
+    """Weather warnings should not visually run into the first forecast day in Streamlit."""
+    raw = """### 🌤️ Previsão Meteorológica
+
+⚠️ Avisos meteorológicos ativos para Lisboa:
+
+- 🟡 🌧️ PRECIPITAÇÃO — Nível: Atenção — Até 29 Abr, 10:00 — Aguaceiros.
+- 🟡 ⛈️ TROVOADA — Nível: Atenção — Até 29 Abr, 10:00 — Trovoadas.
+- **📅 Quinta-feira, 30 de Abril**
+    - 🌡️ Temperatura: 12,9°C a 20,5°C"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="weather",
+        user_query="Vai chover amahna em Lisboa?",
+        language="pt",
+    )
+
+    assert "⚠️ Avisos meteorológicos ativos para Lisboa:" in output
+    assert "\n\n---\n\n- **📅 Quinta-feira, 30 de Abril**" in output
+    assert "- ⚠️ Avisos meteorológicos ativos" not in output
+
+
+def test_transport_one_space_child_bullets_are_nested_for_streamlit() -> None:
+    """One-space child bullets from tools should become valid nested Markdown bullets."""
+    raw = """- 🚌 **Linha 732** — para Caselas
+ - 🕐 **Próximas partidas:** 10:53, 11:06
+ - ⏱️ **Tempo estimado de viagem:** ~43 min"""
+
+    output = final_visual_pass(raw)
+
+    assert "\n  - 🕐 **Próximas partidas:**" in output
+    assert "\n  - ⏱️ **Tempo estimado de viagem:**" in output
+
+
+def test_metro_route_steps_do_not_keep_google_maps_links() -> None:
+    """Metro station names in route steps should render uniformly without Maps links."""
+    raw = """🗺️ **Your Metro Route:**
+
+📍 **Board at** [Aeroporto](https://www.google.com/maps/search/?api=1&query=Aeroporto)
+🔁 **Transfer at** [Alameda](https://www.google.com/maps/search/?api=1&query=Alameda)"""
+
+    output = final_visual_pass(raw)
+
+    assert "google.com/maps" not in output
+    assert "Board at** Aeroporto" in output
+    assert "Transfer at** Alameda" in output
+
+
+def test_malformed_service_heading_bullets_are_repaired() -> None:
+    """QA repair must not leave service list items as visible heading bullets."""
+    raw = """### 💊 Farmácia mais perto de Saldanha
+---
+
+### - 💊 **Farmácia Dalva**
+---
+
+### ### - 📍 **Morada:** [Avenida Duque d'Ávila, 125](https://www.google.com/maps/search/?api=1&query=Avenida)
+---
+
+### ### ### - 📏 **Distância:** 0.07 km"""
+
+    output = final_visual_pass(raw)
+
+    assert "### -" not in output
+    assert "### ###" not in output
+    assert "\n- 💊 **Farmácia Dalva**\n  - 📍 **Morada:**" in output
+    assert "\n  - 📏 **Distância:** 0.07 km" in output
+
+
 def test_final_visual_pass_strips_internal_qa_annotations_and_pt_technical_terms() -> None:
     """Final rendering must remove QA leakage and localize recurring English technical words in PT responses."""
     raw = (

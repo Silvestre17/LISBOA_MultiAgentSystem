@@ -729,35 +729,6 @@ class MultiAgentAssistant:
             **{name: agent.get_model_info() for name, agent in self.agents.items()},
         }
 
-    @staticmethod
-    def _build_clean_belem_afternoon_itinerary(user_query: str, language: str) -> Optional[str]:
-        """Return a compact deterministic Belém afternoon itinerary for the canonical smoke prompt."""
-        normalized = re.sub(r"\s+", " ", user_query or "").lower()
-        if not all(token in normalized for token in ("afternoon", "belém", "chiado")):
-            return None
-        if "pastry" not in normalized and "pastel" not in normalized:
-            return None
-
-        timestamp = datetime.now().strftime("%H:%M")
-        if language == "pt":
-            return None
-        return final_visual_pass(
-            "### 📅 Belém Afternoon Plan\n\n"
-            "Start from **Chiado**, use **Cais do Sodré** as the transfer point, and keep the afternoon focused on Belém’s riverfront history.\n\n"
-            "### 🚇 Transport\n\n"
-            "- 🚶 **Chiado → Cais do Sodré:** walk downhill or use the Metro if you prefer to save energy.\n"
-            "- 🚆 **Cais do Sodré → Belém:** take the westbound CP train; the ride is usually about **7 min**.\n"
-            "- 🚶 **Belém station → landmarks:** continue on foot along the riverfront.\n\n"
-            "### 🏛️ Afternoon Flow\n\n"
-            "- **15:00 · Jerónimos Monastery:** start with the Manueline architecture and the Discoveries-era context.\n"
-            "- **15:45 · Pastéis de Belém:** stop for the classic custard tart near the monastery.\n"
-            "- **16:20 · Monument to the Discoveries:** use the riverfront monument to connect the route to maritime expansion.\n"
-            "- **16:50 · Belém Tower:** finish at the UNESCO-listed river fortress and viewpoint area.\n"
-            "- **17:30 · Riverside buffer:** keep time for photos, weather changes, or a slower walk back to Belém station.\n\n"
-            "💡 **Tip:** CP is the cleanest transport choice from Chiado because it avoids road traffic after you reach Cais do Sodré.\n\n"
-            f"📌 **Source:** [*CP*](https://www.cp.pt) | [*VisitLisboa Places*](https://www.visitlisboa.com/en/places) | **Updated:** {timestamp}"
-        )
-
     @property
     def model_name(self) -> str:
         """Returns the model name for display (compatibility with V1 app)."""
@@ -1691,10 +1662,6 @@ class MultiAgentAssistant:
                     )
                 final_output = final_visual_pass(final_output)
 
-        clean_belem_itinerary = self._build_clean_belem_afternoon_itinerary(message, language)
-        if clean_belem_itinerary:
-            final_output = clean_belem_itinerary
-
         final_output = final_visual_pass(final_output)
 
         self._append_assistant_message(final_output)
@@ -2608,34 +2575,14 @@ class MultiAgentAssistant:
                 if not stripped_line:
                     skipping_ambiguity = False
                     continue
-                if (
-                    stripped_line.startswith(("A)", "B)", "- A)", "- B)"))
-                    or "Ilha da Madeira" in stripped_line
-                    or "Rua Humberto Madeira" in stripped_line
-                    or "Madeira island" in stripped_line
-                    or "Avenida da Ilha da Madeira" in stripped_line
-                    or "Assumo" in stripped_line
-                    or "continu" in stripped_line.lower()
-                ):
+                if stripped_line.startswith(("A)", "B)", "- A)", "- B)")) or "Assumo" in stripped_line or "continu" in stripped_line.lower():
                     continue
                 skipping_ambiguity = False
 
             lowered_line = stripped_line.lower()
             if stripped_line in {"###", "---"}:
                 continue
-            if (
-                stripped_line.startswith(("A)", "- A)"))
-                and "Ilha da Madeira" in stripped_line
-            ):
-                continue
-            if (
-                stripped_line.startswith(("B)", "- B)"))
-                and (
-                    "Rua Humberto Madeira" in stripped_line
-                    or "Av. Ilha da Madeira" in stripped_line
-                    or "Avenida da Ilha da Madeira" in stripped_line
-                )
-            ):
+            if stripped_line.startswith(("A)", "B)", "- A)", "- B)")):
                 continue
             if lowered_line.startswith("- se não for") and "destino" in lowered_line:
                 continue

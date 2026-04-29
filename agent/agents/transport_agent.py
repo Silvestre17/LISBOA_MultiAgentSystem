@@ -986,6 +986,31 @@ def _query_has_route_mode_constraints(user_message: str) -> bool:
     return any(preferences.values())
 
 
+def _is_generic_public_transport_route_query(user_message: str) -> bool:
+    """Return whether a route asks for public transport without choosing a specific mode."""
+    normalized = _normalize_token(user_message)
+    if _query_has_route_mode_constraints(user_message):
+        return False
+    generic_markers = [
+        "transportes publicos",
+        "transporte publico",
+        "public transport",
+        "public transit",
+        "transit",
+    ]
+    return any(marker in normalized for marker in generic_markers)
+
+
+def _strip_transport_source_lines(text: str) -> str:
+    """Remove per-tool source footers before composing multi-mode route sections."""
+    lines = [
+        raw_line.rstrip()
+        for raw_line in str(text or "").splitlines()
+        if not re.match(r"^\s*📌\s+\*\*(?:Fonte|Source):", raw_line.strip(), flags=re.IGNORECASE)
+    ]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
 def _tool_result_indicates_no_match(result: str) -> bool:
     """Detects tool outputs that mean no valid route or line was found."""
     normalized = _normalize_token(result or "")
@@ -2854,7 +2879,7 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
     except Exception:
         carris_result = ""
 
-    if carris_result and not any(
+    valid_carris_result = carris_result and not any(
         marker in carris_result
         for marker in [
             "No direct Carris route found",
@@ -2862,7 +2887,26 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
             "Sem rota direta",
             "Não foi possível localizar",
         ]
-    ):
+    )
+
+    if valid_carris_result and _is_generic_public_transport_route_query(user_message) and "METRO ROUTE" in route_result:
+        updated_label = "Atualizado" if _infer_language(user_message, "") == "pt" else "Updated"
+        source_label = "Fonte" if _infer_language(user_message, "") == "pt" else "Source"
+        title = "### 🚇 🚌 Opções de transporte público" if _infer_language(user_message, "") == "pt" else "### 🚇 🚌 Public Transport Options"
+        bus_title = "**🚌 Autocarros**" if _infer_language(user_message, "") == "pt" else "**🚌 Buses**"
+        metro_title = "**🚇 Metro**"
+        timestamp = datetime.now().strftime("%H:%M")
+        return (
+            f"{title}\n\n"
+            f"{bus_title}\n\n"
+            f"{_strip_transport_source_lines(carris_result)}\n\n"
+            "---\n\n"
+            f"{metro_title}\n\n"
+            f"{_strip_transport_source_lines(route_result)}\n\n"
+            f"📌 **{source_label}:** [*Carris*](https://www.carris.pt) | [*Metro de Lisboa*](https://www.metrolisboa.pt) | **{updated_label}:** {timestamp}"
+        )
+
+    if valid_carris_result:
         return carris_result
 
     return route_result
