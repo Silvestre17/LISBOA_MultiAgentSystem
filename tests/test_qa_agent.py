@@ -89,6 +89,70 @@ def test_repair_final_response_uses_runtime_output_language_in_prompt() -> None:
     assert "**Required output language:** English" in captured["human"]
 
 
+def test_repair_final_response_filters_internal_disclaimers_before_prompt() -> None:
+    """Internal QA warnings must guide repair silently, never become user-facing caveats."""
+    from agent.agents.qa_agent import QualityAssuranceAgent
+
+    agent = object.__new__(QualityAssuranceAgent)
+    agent.llm = MagicMock()
+
+    captured: dict[str, str] = {}
+
+    def _fake_safe_invoke(_llm, messages):
+        captured["human"] = messages[1].content
+        response = MagicMock()
+        response.content = "### Resposta\n\nRota revista.\n\n📌 **Fonte:** [*Carris*](https://www.carris.pt)"
+        return response
+
+    agent._safe_llm_invoke = _fake_safe_invoke
+
+    repaired = agent.repair_final_response(
+        user_query="Como vou de autocarro para Belém?",
+        draft_response="Rota inicial.",
+        agent_outputs={"transport": "Linha 15E para Algés."},
+        qa_result={
+            "missing_data": [],
+            "critical_issues": ["Technical transport identifiers leaked into user-facing output."],
+            "disclaimers": [
+                "Quality validation could not produce a valid structured result after retry",
+                "Source footer is missing or malformed.",
+                "Carris bus route numbers and schedules should be verified at carris.pt, as GTFS data may not reflect the most recent changes.",
+            ],
+        },
+        language="pt",
+    )
+
+    assert "Quality validation" not in captured["human"]
+    assert "Source footer" not in captured["human"]
+    assert "Os números das linhas e os horários da Carris devem ser confirmados" in captured["human"]
+    assert "Quality validation" not in repaired
+    assert "Source footer" not in repaired
+
+
+def test_guard_final_response_strips_residual_qa_sections_and_keeps_source_last() -> None:
+    """The deterministic final QA guard should clean post-synthesis QA leakage."""
+    from agent.agents.qa_agent import QualityAssuranceAgent
+
+    agent = object.__new__(QualityAssuranceAgent)
+
+    guarded = agent.guard_final_response(
+        (
+            "### Resultado\n\n"
+            "Rota confirmada.\n\n"
+            "📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt)\n\n"
+            "### QA Findings\n\n"
+            "- Missing data: source footer is malformed\n"
+            "- Reasoning: internal validation note"
+        ),
+        language="pt",
+    )
+
+    assert "QA Findings" not in guarded
+    assert "Missing data" not in guarded
+    assert "Reasoning" not in guarded
+    assert guarded.rstrip().endswith("[*Metro de Lisboa*](https://www.metrolisboa.pt)")
+
+
 def test_validate_marks_double_json_parse_failure_as_incomplete() -> None:
     """If QA cannot parse valid JSON twice, it should fail closed and trigger repair."""
     from agent.agents.qa_agent import QualityAssuranceAgent

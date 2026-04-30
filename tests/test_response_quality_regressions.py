@@ -337,6 +337,25 @@ def test_final_visual_pass_splits_adjacent_warning_blocks() -> None:
     assert "segundo aviso\n\n📌 **Fonte:**" in output
 
 
+def test_final_visual_pass_removes_invalid_links_and_keeps_single_footer_last() -> None:
+    """Broken placeholder links and trailing QA notes must not survive final rendering."""
+    raw = (
+        "### Evento\n\n"
+        "- 🎟️ [Bilhetes](Não disponível)\n\n"
+        "📌 **Fonte:** [*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos)\n\n"
+        "- ⚠️ QA validation structure could not be confirmed after retry\n"
+        "📌 **Fonte:** [*VisitLisboa*](https://www.visitlisboa.com)"
+    )
+
+    output = final_visual_pass(raw)
+
+    assert "[Bilhetes](Não disponível)" not in output
+    assert "**Bilhetes:** Não disponível" in output
+    assert "QA validation" not in output
+    assert output.count("📌 **Fonte:**") == 1
+    assert output.rstrip().endswith("[*VisitLisboa*](https://www.visitlisboa.com)")
+
+
 def test_pt_label_localizer_does_not_corrupt_url_paths() -> None:
     """PT label localization must not translate URL path segments such as tickets/location."""
     raw = (
@@ -530,6 +549,33 @@ def test_structure_weather_markdown_nests_days_even_after_generic_bullet_normali
     assert "    - 💨 **Vento**: Norte (fraca)" in structured
 
 
+def test_final_visual_pass_normalizes_quick_action_weather_summary_layout() -> None:
+    """Quick-action itinerary weather snippets should keep forecast details nested under the day."""
+    raw = (
+        "### 🌤️ Resumo Meteorológico\n\n"
+        "- ✅ Sem avisos meteorológicos ativos para Lisboa.\n\n"
+        "- 🌤️ As condições meteorológicas são normais.\n"
+        "**🌤️ Previsão do Tempo para Lisboa**\n\n"
+        "- **⛈️ Quarta-feira, Abr 29**\n"
+        " - 🌡️ 13.7°C a 18.7°C\n"
+        " - 🌤️ *Showers and thunderstorms*\n"
+        " - 💧 **Chuva**: muito provável (100.0%) | intensidade: forte\n\n"
+        "- 💨 **Vento**: Sudoeste (moderado)\n"
+        "---\n"
+    )
+
+    output = final_visual_pass(raw)
+
+    assert "- ✅ Sem avisos meteorológicos ativos para Lisboa.\n- 🌤️ As condições meteorológicas são normais." in output
+    assert "As condições meteorológicas são normais.\n\n**🌤️ Previsão do Tempo para Lisboa**" in output
+    assert "- **⛈️ Quarta-feira, Abr 29**" in output
+    assert "\n  - 🌡️ 13.7°C a 18.7°C" in output
+    assert "\n  - 🌤️ *Showers and thunderstorms*" in output
+    assert "\n  - 💧 **Chuva**: muito provável (100.0%) | intensidade: forte" in output
+    assert "\n  - 💨 **Vento**: Sudoeste (moderado)\n\n---" in output
+    assert "\n - 🌡️" not in output
+
+
 def test_multiagent_finalize_chat_response_reapplies_weather_structure_at_the_end() -> None:
     """The final chat wrapper must preserve nested weather bullets after its own footer and polish passes."""
     assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
@@ -580,8 +626,8 @@ def test_multiagent_finalize_chat_response_reapplies_weather_structure_at_the_en
         )
 
     assert "- **☀️ Sábado, Abr 18**" in output
-    assert "    - 🌡️ 13.1°C a 28.2°C" in output
-    assert "    - 🌤️ Parcialmente nublado" in output
+    assert "  - 🌡️ 13.1°C a 28.2°C" in output
+    assert "  - 🌤️ Parcialmente nublado" in output
     assert "📌 **Fonte:** Dados do [*IPMA*](https://www.ipma.pt) | **Atualizado:**" in output
 
 

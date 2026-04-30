@@ -24,6 +24,7 @@ from agent.utils.response_formatter import (
     _LABEL_TRANSLATIONS,
     _count_structured_place_cards,
     _place_response_missing_required_fields,
+    enforce_language_labels,
     final_visual_pass,
     infer_response_language,
 )
@@ -519,6 +520,108 @@ class QualityAssuranceAgent(BaseAgent):
                 deduped.append(item)
         return deduped
 
+    @staticmethod
+    def _sanitize_repair_disclaimer(disclaimer: object, language: str) -> Optional[str]:
+        """Return a user-facing caveat for final repair, or ``None`` for QA-only notes."""
+        if not disclaimer:
+            return None
+
+        normalized = re.sub(r"\s+", " ", str(disclaimer)).strip()
+        if not normalized:
+            return None
+
+        lowered = normalized.lower()
+        internal_markers = (
+            "qa",
+            "quality validation",
+            "validation structure",
+            "structured result",
+            "reasoning",
+            "final response",
+            "final answer",
+            "repair",
+            "worker",
+            "agent ",
+            "source footer",
+            "markdown",
+            "field labels",
+            "semantic emoji",
+            "canonical layout",
+            "collapsed",
+            "technical identifiers",
+            "known domains",
+            "unverified domains",
+            "domínios conhecidos",
+            "dominios conhecidos",
+            "domínios não verificados",
+            "dominios nao verificados",
+            "validação",
+            "validacao",
+            "controlo de qualidade",
+            "raciocínio",
+            "raciocinio",
+            "resposta final",
+            "reparação",
+            "reparacao",
+            "agente ",
+            "linha de fonte",
+            "rótulos",
+            "rotulos",
+            "identificadores técnicos",
+            "identificadores tecnicos",
+        )
+        if any(marker in lowered for marker in internal_markers):
+            return None
+
+        if "event details (dates, times, ticket prices) should be confirmed at visitlisboa.com" in lowered:
+            return None
+
+        if "carris bus route numbers and schedules should be verified at carris.pt" in lowered:
+            if language == "pt":
+                return "Os números das linhas e os horários da Carris devem ser confirmados em carris.pt, porque os dados GTFS podem não refletir alterações muito recentes."
+            return "Carris line numbers and schedules should be confirmed at carris.pt, because GTFS data may miss very recent changes."
+
+        if "real-time" in lowered or "tempo real" in lowered:
+            if language == "pt":
+                return "Dados em tempo real podem sofrer alterações rápidas."
+            return "Real-time data can change quickly."
+
+        if "accessibility" in lowered or "acessibilidade" in lowered or "mobilidade reduzida" in lowered:
+            if language == "pt":
+                return "A acessibilidade deve ser confirmada junto do operador ou do espaço oficial."
+            return "Accessibility should be confirmed with the official operator or venue."
+
+        if (
+            "horário" in lowered
+            or "horario" in lowered
+            or "opening hours" in lowered
+            or re.search(r"\bhours?\b", lowered)
+        ) and any(marker in lowered for marker in ("verificar", "confirm", "confirmar", "check")):
+            if language == "pt":
+                return "Confirma os horários na fonte oficial antes de ir."
+            return "Check opening hours with the official source before going."
+
+        if "fare data" in lowered or "tarifa" in lowered or "preço" in lowered or "price" in lowered:
+            if language == "pt":
+                return "A tarifa exata não foi confirmada nas fontes disponíveis."
+            return "The exact fare was not confirmed in the available sources."
+
+        return None
+
+    @classmethod
+    def _sanitize_repair_disclaimers(
+        cls,
+        disclaimers: List[object],
+        language: str,
+    ) -> List[str]:
+        """Filter QA disclaimers before they can influence user-facing repair text."""
+        sanitized: List[str] = []
+        for disclaimer in disclaimers:
+            cleaned = cls._sanitize_repair_disclaimer(disclaimer, language)
+            if cleaned and cleaned not in sanitized:
+                sanitized.append(cleaned)
+        return sanitized
+
     @classmethod
     def _merge_fact_check_results(
         cls,
@@ -785,10 +888,11 @@ class QualityAssuranceAgent(BaseAgent):
             list(qa_result.get("critical_issues", []))
             + list(fact_check.get("critical_issues", []))
         )
-        disclaimers = self._dedupe_preserve_order(
+        raw_disclaimers = self._dedupe_preserve_order(
             list(qa_result.get("disclaimers", []))
             + list(fact_check.get("disclaimers", []))
         )
+        disclaimers = self._sanitize_repair_disclaimers(raw_disclaimers, language)
 
         if not critical_issues and not disclaimers and not missing_data:
             return draft_response
@@ -893,6 +997,21 @@ class QualityAssuranceAgent(BaseAgent):
         except Exception as exc:
             logger.warning("QA final repair pass failed, keeping draft response: %s", exc)
             return draft_response
+
+    def guard_final_response(self, final_response: str, language: str = "en") -> str:
+        """Run the deterministic last-mile guard on the final user-facing answer.
+
+        This is deliberately non-generative. It removes residual internal QA
+        wording, repairs common markdown defects, enforces PT/EN labels, and
+        makes the source footer visually stable after all synthesis steps.
+        """
+        if not final_response:
+            return final_response or ""
+
+        guarded = final_visual_pass(final_response)
+        guarded = enforce_language_labels(guarded, language)
+        guarded = final_visual_pass(guarded)
+        return guarded
 
     @staticmethod
     def _repair_collapsed_structured_draft(draft_response: str, repaired_response: str) -> bool:
