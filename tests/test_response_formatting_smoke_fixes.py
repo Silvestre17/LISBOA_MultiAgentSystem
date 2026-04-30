@@ -36,7 +36,7 @@ Leva guarda-chuva.
 
     output = final_visual_pass(raw)
 
-    assert "    - ☁️ **Condições**: Aguaceiros/fraca chuva" in output
+    assert "  - ☁️ **Condições**: Aguaceiros/fraca chuva" in output
     assert "\n\n💡 **Dicas Práticas**\n" in output
 
 

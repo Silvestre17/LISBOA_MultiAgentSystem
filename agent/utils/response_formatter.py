@@ -5716,7 +5716,7 @@ def strip_internal_sections(text: str) -> str:
         r'observa[çc][õo]es\s+e\s+disclaimers',
         r'checklist\s+de\s+completude',
         r'quality\s+(check|assurance)',
-        r'qa[\s_]+(results?|validation|disclaimers?)',
+        r'qa[\s_]+(results?|validation|disclaimers?|findings?)',
         r'data\s+validation',
         r'completeness\s+check',
         r'disclaimers?\s*$',
@@ -6308,6 +6308,74 @@ def strip_orphan_bold_markers(text: str) -> str:
     return clean_newlines(text).rstrip("\n")
 
 
+def normalize_invalid_markdown_links(text: str) -> str:
+    """Replace malformed or non-clickable markdown links with plain labels.
+
+    The QA repair pass can occasionally emit links such as
+    ``[Bilhetes](Não disponível)`` or nested placeholders. Streamlit renders
+    those as broken UI affordances, so keep the information as text unless the
+    target is a real URL or a supported URI scheme.
+    """
+    if not text or "](" not in text:
+        return text or ""
+
+    def _is_valid_target(target: str) -> bool:
+        normalized = (target or "").strip().lower()
+        return normalized.startswith(("http://", "https://", "mailto:", "tel:"))
+
+    def _plain_target(target: str) -> str:
+        cleaned = _strip_markdown_formatting(target or "").strip()
+        cleaned = re.sub(r"^\[([^\]]+)\]\(([^()]*)\)$", r"\2", cleaned).strip()
+        cleaned = re.sub(
+            r"(?i)^(?:bilhetes|tickets|comprar bilhetes|buy tickets)\s*:?\s*",
+            "",
+            cleaned,
+        ).strip(" .:-")
+        return cleaned
+
+    def _fallback(label: str, target: str) -> str:
+        label_clean = _strip_markdown_formatting(label or "").strip()
+        label_norm = _strip_accents_compat(label_clean).lower()
+        target_clean = _plain_target(target)
+        target_norm = _strip_accents_compat(target_clean).lower()
+
+        if "bilhete" in label_norm:
+            value = "Não disponível" if not target_clean or "indispon" in target_norm else target_clean
+            return f"**Bilhetes:** {value}"
+        if "ticket" in label_norm:
+            value = "Not available" if not target_clean or "unavailable" in target_norm else target_clean
+            return f"**Tickets:** {value}"
+        if label_norm in {
+            "website",
+            "site oficial",
+            "official page",
+            "more details",
+            "mais detalhes",
+            "details",
+        }:
+            return target_clean or label_clean
+        return target_clean or label_clean
+
+    nested_re = re.compile(r"\[([^\]]+)\]\(\[([^\]]+)\]\(([^()]*)\)\)")
+
+    def _replace_nested(match: re.Match) -> str:
+        outer_label = match.group(1)
+        inner_label = match.group(2)
+        target = match.group(3)
+        if _is_valid_target(target):
+            return f"[{outer_label}]({target})"
+        return _fallback(outer_label or inner_label, target)
+
+    text = nested_re.sub(_replace_nested, text)
+
+    invalid_link_re = re.compile(r"\[([^\]]+)\]\((?!https?://|mailto:|tel:)([^)\n]+)\)")
+
+    def _replace_invalid(match: re.Match) -> str:
+        return _fallback(match.group(1), match.group(2))
+
+    return invalid_link_re.sub(_replace_invalid, text)
+
+
 def strip_internal_qa_annotations(text: str) -> str:
     """Remove internal QA notes that must never be shown to users."""
     if not text:
@@ -6320,6 +6388,11 @@ def strip_internal_qa_annotations(text: str) -> str:
         re.compile(r".*(?:Os hor[aá]rios de funcionamento n[aã]o foram fornecidos|Opening hours were not provided|O link n[aã]o (?:é )?clic[aá]vel|The link is not clickable).*", re.IGNORECASE),
         re.compile(r".*(?:map links use Google domains|Google domains|unverified domains|domínios não verificados).*(?:verify|verificar|visiting|visitar).*", re.IGNORECASE),
         re.compile(r".*(?:gratuidade|gratuitidade).*(?:museus|museums).*(?:verific|confirm).*(?:site oficial|official).*", re.IGNORECASE),
+        re.compile(r"^(?:[-*•]\s*)?(?:critical issues?|problemas críticos|missing data|dados em falta|required agents?|agentes necessários|reasoning|raciocínio|fact[- ]?check|qa findings?|achados do qa)\s*:", re.IGNORECASE),
+        re.compile(r".*\b(?:qa validation|quality validation|validation structure|structured result after retry|repair pass|final repair|internal check|internal validation)\b.*", re.IGNORECASE),
+        re.compile(r".*\b(?:valida(?:ç|c)[aã]o qa|controlo de qualidade|estrutura de valida(?:ç|c)[aã]o|resultado estruturado|repara(?:ç|c)[aã]o final|verifica(?:ç|c)[aã]o interna)\b.*", re.IGNORECASE),
+        re.compile(r".*(?:source footer is missing|source footer|field labels|semantic emoji|broken bold|stray backticks|collapsed into summary|canonical layout|technical identifiers leaked).*", re.IGNORECASE),
+        re.compile(r".*(?:linha de fonte|r[oó]tulos|emoji sem[aâ]ntico|bold quebrado|backticks|identificadores t[eé]cnicos|layout can[oó]nico).*", re.IGNORECASE),
     ]
 
     kept_lines: list[str] = []
@@ -6329,6 +6402,40 @@ def strip_internal_qa_annotations(text: str) -> str:
             continue
         kept_lines.append(raw_line)
     return clean_newlines("\n".join(kept_lines)).strip()
+
+
+def ensure_single_source_footer_at_end(text: str) -> str:
+    """Keep one source footer and make it the final rendered line."""
+    if not text or "📌" not in text:
+        return text or ""
+
+    source_line_re = re.compile(
+        r"^\s*(?:[-*•]\s*)?📌\s*\*\*(?:Fonte|Source):\*\*.*$",
+        re.IGNORECASE,
+    )
+    lines = text.splitlines()
+    source_indices: list[int] = []
+    source_lines: list[str] = []
+
+    for index, line in enumerate(lines):
+        if source_line_re.match(line.strip()):
+            source_indices.append(index)
+            source_lines.append(line.strip())
+
+    if not source_lines:
+        return text
+
+    footer = source_lines[-1]
+    kept_lines = [
+        line for index, line in enumerate(lines)
+        if index not in set(source_indices)
+    ]
+
+    while kept_lines and not kept_lines[-1].strip():
+        kept_lines.pop()
+
+    body = "\n".join(kept_lines).rstrip()
+    return f"{body}\n\n{footer}".strip() if body else footer
 
 
 def strip_generic_city_address_lines(text: str) -> str:
@@ -6686,26 +6793,49 @@ def normalize_transport_timing_artifacts(text: str) -> str:
 
 def normalize_weather_day_indentation(text: str) -> str:
     """Indent weather day detail lines consistently under the day bullet."""
-    if not text or not re.search(r"(?m)^-\s+\*\*📅", text):
+    weather_day_re = re.compile(
+        r"(?im)^-\s+\*\*(?:📅|☀️|☁️|🌧️|⛈️|🌫️|❄️|🌦️)\s*"
+        r".*\b(?:segunda-feira|terça-feira|quarta-feira|quinta-feira|sexta-feira|"
+        r"sábado|domingo|monday|tuesday|wednesday|thursday|friday|saturday|"
+        r"sunday|hoje|today|amanhã|amanha|tomorrow)\b.*\*\*$"
+    )
+    if not text or not weather_day_re.search(text):
         return text or ""
     output_lines: list[str] = []
     inside_weather_day = False
     for raw_line in text.splitlines():
         stripped = raw_line.strip()
-        if re.match(r"^-\s+\*\*📅", stripped):
+        if weather_day_re.match(stripped):
             inside_weather_day = True
             output_lines.append(raw_line)
             continue
-        if stripped.startswith(("###", "💡", "📌", "⚠️")):
+        if stripped == "---" or stripped.startswith(("###", "**", "💡", "📌", "⚠️")):
             inside_weather_day = False
             output_lines.append(raw_line)
             continue
-        detail_text = stripped[2:].lstrip() if stripped.startswith("- ") else stripped
+        detail_text = re.sub(r"^(?:[-*•]\s+)", "", stripped).lstrip()
         if inside_weather_day and detail_text.startswith(("🌡️", "☁️", "🌤️", "💧", "💨", "☀️")):
-            output_lines.append(f"    - {detail_text}")
+            output_lines.append(f"  - {detail_text}")
             continue
         output_lines.append(raw_line)
     return "\n".join(output_lines)
+
+
+def normalize_weather_summary_spacing(text: str) -> str:
+    """Keep weather summary bullets and forecast headings visually grouped."""
+    if not text or not re.search(r"(?i)(Resumo Meteorol[oó]gico|Weather Summary|Previs[aã]o do Tempo|Weather Forecast)", text):
+        return text or ""
+    cleaned = re.sub(
+        r"(?m)^(-\s+✅[^\n]+)\n\n(?=-\s+🌤️\s+)",
+        r"\1\n",
+        text,
+    )
+    cleaned = re.sub(
+        r"(?m)^(-\s+🌤️[^\n]+)\n(?=\*\*🌤️\s+(?:Previs[aã]o do Tempo|Weather Forecast))",
+        r"\1\n\n",
+        cleaned,
+    )
+    return cleaned
 
 
 def normalize_coordinate_link_wrappers(text: str) -> str:
@@ -7176,6 +7306,13 @@ def ensure_blank_lines_after_horizontal_rules(text: str) -> str:
     return re.sub(r"(?m)^---\n(?!\n)", "---\n\n", text)
 
 
+def ensure_blank_lines_before_horizontal_rules(text: str) -> str:
+    """Ensure Markdown horizontal rules do not attach to the previous line."""
+    if not text:
+        return text or ""
+    return re.sub(r"(?m)(?<!\n)\n---$", "\n\n---", text)
+
+
 def clean_planner_loose_sections(text: str) -> str:
     """Remove unavailable-weather filler and promote loose planner tip labels."""
     if not text:
@@ -7424,6 +7561,8 @@ def final_visual_pass(text: str) -> str:
         return text or ""
     text = repair_bold_time_spacing(text)
     text = strip_orphan_bold_markers(text)
+    text = normalize_invalid_markdown_links(text)
+    text = strip_internal_sections(text)
     text = strip_internal_qa_annotations(text)
     text = replace_pt_technical_vocabulary(text)
     text = linkify_phone_numbers(text)
@@ -7451,6 +7590,7 @@ def final_visual_pass(text: str) -> str:
     text = compact_service_lookup_spacing(text)
     text = normalize_transport_timing_artifacts(text)
     text = normalize_weather_day_indentation(text)
+    text = normalize_weather_summary_spacing(text)
     text = normalize_coordinate_link_wrappers(text)
     text = strip_artificial_horizontal_rules(text)
     text = normalize_transport_comparison_sections(text)
@@ -7476,6 +7616,10 @@ def final_visual_pass(text: str) -> str:
     text = reorder_warnings_before_source(text)
     text = reorder_tips_before_source(text)
     text = normalize_signal_bullets_to_blocks(text)
+    text = normalize_invalid_markdown_links(text)
+    text = strip_internal_sections(text)
+    text = strip_internal_qa_annotations(text)
+    text = ensure_single_source_footer_at_end(text)
     text = repair_known_live_typos(text)
     text = re.sub(
         r"(?mi)^\*\*-\s*para evitar inventar informação,\s*"
@@ -7498,7 +7642,9 @@ def final_visual_pass(text: str) -> str:
     text = ensure_transport_time_route_paragraph_breaks(text)
     text = ensure_transport_comparison_conclusion_separator(text)
     text = ensure_blank_lines_before_headers(text)
+    text = ensure_blank_lines_before_horizontal_rules(text)
     text = ensure_blank_lines_after_horizontal_rules(text)
+    text = ensure_single_source_footer_at_end(text)
     text = re.sub(r"(?<=\S)[ \t]{2,}(?=\S)", " ", text)
     # Collapse triple blank lines that may have been reintroduced.
     text = re.sub(r"\n{3,}", "\n\n", text)

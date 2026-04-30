@@ -1664,6 +1664,14 @@ class MultiAgentAssistant:
 
         final_output = final_visual_pass(final_output)
 
+        qa_agent = getattr(self, "qa_agent", None)
+        final_guard = getattr(type(qa_agent), "guard_final_response", None) if qa_agent is not None else None
+        if callable(final_guard):
+            guarded_output = final_guard(qa_agent, final_output, language=language)
+            if guarded_output != final_output:
+                final_repair_ran = True
+            final_output = guarded_output
+
         self._append_assistant_message(final_output)
 
         execution_summary = self._collect_execution_summary(
