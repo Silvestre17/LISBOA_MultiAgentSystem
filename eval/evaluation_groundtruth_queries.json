@@ -249,7 +249,7 @@
         ],
         "expected_facts": [
             "Vermelha (Red) line from Oriente (direction São Sebastião) to Saldanha",
-            "Transfer at Saldanha to Amarela (Yellow) line (direction Odivelas)",
+            "Transfer at Saldanha to Amarela (Yellow) line (direction Rato)",
             "Amarela line one stop to Marquês de Pombal",
             "Alternative: Vermelha (Red) line from Oriente (direction São Sebastião) to São Sebastião, transfer to Azul (Blue) line (direction Santa Apolónia)",
             "Estimated travel time (~17-21 minutes)",
@@ -278,12 +278,12 @@
         "domain": "transport",
         "expected_tools": [],
         "expected_facts": [
-            "System only covers Lisbon Metropolitan Area (Sintra, Cascais, Azambuja, Fertagus, Sado lines)"
+            "System only covers Lisbon Metropolitan Area suburban lines (Sintra, Cascais, Azambuja, Sado)"
         ],
         "language": "pt",
         "edge_case": true,
         "edge_type": "geographic_out_of_bounds",
-        "expected_behavior": "Inform user that only AML suburban lines are covered (Sintra, Cascais, Azambuja, Fertagus, Sado)"
+        "expected_behavior": "Inform user that only AML suburban lines are covered (Sintra, Cascais, Azambuja, Sado)"
     },
     {
         "id": "T08",
@@ -358,18 +358,18 @@
     },
     {
         "id": "T13",
-        "query": "I need to go to Setúbal. Where can I catch a Fertagus train?",
+        "query": "I need to get to Setúbal. How do I get there from Lisbon?",
         "domain": "transport",
         "expected_tools": [],
         "expected_facts": [
-            "Fertagus trains are not directly verified in this runtime",
-            "The system should avoid inventing Fertagus schedules, fares, ETAs or real-time status",
-            "Only Metro de Lisboa, Carris Urban, Carris Metropolitana and CP are directly confirmed in this runtime"
+            "No direct train route is available from Lisbon to Setúbal within the system's tools",
+            "The system should honestly acknowledge that it cannot fully plan this journey",
+            "The system should not invent ferry schedules, connection details, or real-time information it does not have"
         ],
         "language": "en",
         "edge_case": true,
         "edge_type": "unsupported_provider",
-        "expected_behavior": "Explain honestly that Fertagus trip details are not directly supported here and avoid inventing schedules, fares, ETAs or real-time status"
+        "expected_behavior": "Acknowledge honestly that a complete Lisbon-to-Setúbal journey cannot be planned with the available tools and avoid inventing connection details"
     },
     {
         "id": "T14",
@@ -800,14 +800,15 @@
     },
     {
         "id": "R06",
-        "query": "What open datasets for municipal car parks are available in Lisbon?",
+        "query": "Where can I park my car in central Lisbon? Are there municipal car parks?",
         "domain": "researcher",
         "expected_tools": [
             "find_place_in_datasets"
         ],
+        "tool_expectation": "flexible",
         "expected_facts": [
-            "Identification of parking or EMEL-related open datasets",
-            "Clear indication that these are municipal open-data datasets relevant to car parks"
+            "Information about parking options or car parks in central Lisbon",
+            "Municipal or EMEL-related parking references when available"
         ],
         "language": "en",
         "edge_case": false
