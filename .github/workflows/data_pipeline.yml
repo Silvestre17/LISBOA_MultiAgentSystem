@@ -22,10 +22,11 @@ concurrency:
 
 on:
   schedule:
-    # Daily at 04:00 AM UTC
+    # Daily at 04:00 AM Europe/Lisbon time
     # - Events: Every day
     # - Places: Only on Mondays (controlled by if logic below)
     - cron: "0 4 * * *"
+      timezone: "Europe/Lisbon"
 
   # Allows manual run via GitHub "Run workflow" button
   workflow_dispatch:
