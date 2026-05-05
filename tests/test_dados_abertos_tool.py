@@ -16,12 +16,12 @@ import requests
 import tools.dados_abertos as dados_abertos
 
 
-def _point_feature(name: str, address: str) -> dict:
+def _point_feature(name: str, address: str, coordinates: list[float] | None = None) -> dict:
     """Build a minimal GeoJSON point feature for nearby-service tests."""
     return {
         "type": "Feature",
         "properties": {"name": name, "address": address},
-        "geometry": {"type": "Point", "coordinates": [-9.14, 38.72]},
+        "geometry": {"type": "Point", "coordinates": coordinates or [-9.14, 38.72]},
     }
 
 
@@ -134,3 +134,37 @@ def test_fetch_geojson_caches_network_failures_without_raw_request_error(
     assert dados_abertos._get_unavailable_dataset_reason("https://services.arcgis.com/transient") == "network unavailable"
     assert "Request error" not in caplog.text
     assert "DNS exploded" not in caplog.text
+
+
+def test_find_nearby_services_resolves_rossio_as_landmark_before_dataset_search(monkeypatch) -> None:
+    """Named-location proximity must use landmark geocoding before noisy service dataset hits."""
+    service_matches = pd.DataFrame(
+        [{"title": "FarmÃ¡cias", "description": "FarmÃ¡cias", "stable_url": "https://good.example"}]
+    )
+
+    monkeypatch.setattr(dados_abertos, "search_datasets", lambda service_type: service_matches)
+    monkeypatch.setattr(dados_abertos, "get_datasets_for_category", lambda category: pd.DataFrame())
+    monkeypatch.setattr(
+        dados_abertos,
+        "_search_places_raw",
+        lambda query, max_results=1: [{"name": "FarmÃ¡cia BelÃ©m", "lat": 38.6975, "lon": -9.2063}],
+    )
+    monkeypatch.setattr(
+        dados_abertos,
+        "fetch_geojson_with_retry",
+        lambda url: {
+            "features": [
+                _point_feature("FarmÃ¡cia Rossio", "PraÃ§a Dom Pedro IV", [-9.1394, 38.7139]),
+                _point_feature("FarmÃ¡cia BelÃ©m", "Rua de BelÃ©m", [-9.2063, 38.6975]),
+            ]
+        },
+    )
+
+    result = str(
+        dados_abertos.find_nearby_services.invoke(
+            {"service_type": "farmÃ¡cias", "near_location_name": "Rossio", "max_results": 2}
+        )
+    )
+
+    assert result.index("FarmÃ¡cia Rossio") < result.index("FarmÃ¡cia BelÃ©m")
+    assert "0.00 km away" in result

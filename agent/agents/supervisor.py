@@ -170,13 +170,20 @@ class SupervisorAgent(BaseAgent):
             r"\bweather\b",
             r"\brain\b",
             r"\btemperature\b",
+            r"\bwind\b",
             r"\bforecast\b",
+            r"\bumbrella\b",
             r"\bmeteo\b",
             r"\bchover\b",
             r"\bprevis[aã]o\b",
             r"\bchuva\b",
             r"\btemperatura\b",
+            r"\bvento\b",
             r"\bsol\b",
+            r"\bsailing\b",
+            r"\bsail\b",
+            r"\bsea conditions\b",
+            r"\bmarine forecast\b",
             r"\bcomo est[aá] o tempo\b",
             r"\bqual (?:é|e) o tempo\b",
             r"\btempo em\b",
@@ -186,21 +193,7 @@ class SupervisorAgent(BaseAgent):
         if any(re.search(pattern, normalized) for pattern in weather_patterns):
             return True
 
-        return cls._contains_domain_keyword(
-            normalized,
-            [
-                "weather",
-                "forecast",
-                "temperature",
-                "meteo",
-                "rain",
-                "chover",
-                "previsao",
-                "chuva",
-                "temperatura",
-            ],
-            minimum_ratio=0.85,
-        )
+        return False
 
     @classmethod
     def _looks_like_transport_query(cls, message_lower: str) -> bool:
@@ -227,6 +220,10 @@ class SupervisorAgent(BaseAgent):
             r"\bintervalo\b",
             r"\bde quanto em quanto\b",
             r"\bhow often\b",
+            r"\bhow long\b.*\bwait\b",
+            r"\bwait\b.*\b(?:metro|line|station|platform)\b",
+            r"\b(?:red|green|yellow|blue)\s+line\b",
+            r"\blinha\s+(?:vermelha|verde|amarela|azul)\b",
             r"\bhow to get\b",
             r"\bhow do i get\b",
             r"\bhow can i get\b",
@@ -295,6 +292,56 @@ class SupervisorAgent(BaseAgent):
         ]
         return any(re.search(pattern, message_lower) for pattern in out_of_scope_patterns)
 
+    @classmethod
+    def _is_geographic_out_of_scope_route(cls, user_message: str) -> bool:
+        """Detects point-to-point route requests wholly outside the Lisbon/AML scope."""
+        normalized = cls._normalize_query(user_message)
+        if not cls._looks_like_transport_query(normalized):
+            return False
+        outside_places = [
+            "madrid",
+            "barcelona",
+            "seville",
+            "sevilla",
+            "paris",
+            "london",
+            "porto",
+            "coimbra",
+            "faro",
+        ]
+        mentioned = [place for place in outside_places if re.search(rf"\b{re.escape(place)}\b", normalized)]
+        return len(mentioned) >= 2 and not cls._has_lisbon_context(normalized)
+
+    @classmethod
+    def _is_unsupported_action_request(cls, user_message: str) -> bool:
+        """Detects transactional actions that LISBOA can explain but cannot perform."""
+        normalized = cls._normalize_query(user_message)
+        unsupported_patterns = [
+            r"\b(book|reserve)\s+(?:me\s+)?(?:a\s+)?(?:table|restaurant|ticket|tickets|seat|seats|hotel|room)\b",
+            r"\bmake\s+(?:me\s+)?(?:a\s+)?reservation\b",
+            r"\bbuy\s+(?:me\s+)?(?:a\s+)?(?:ticket|tickets)\b",
+            r"\breservar\s+(?:uma\s+)?(?:mesa|bilhetes?|hotel|quarto)\b",
+            r"\bmarcar\s+(?:uma\s+)?(?:mesa|reserva|bilhetes?|hotel|quarto)\b",
+            r"\bfazer\s+(?:uma\s+)?reserva\b",
+            r"\bcomprar\s+(?:bilhetes?|entradas?)\s+(?:por mim|para mim)\b",
+        ]
+        return any(re.search(pattern, normalized) for pattern in unsupported_patterns)
+
+    @staticmethod
+    def _build_unsupported_action_response(language: str) -> str:
+        """Builds a concise limitation response for unsupported booking actions."""
+        if language == "pt":
+            return (
+                "Não consigo fazer reservas, compras ou marcações diretamente. "
+                "Posso ajudar-te a encontrar opções em Lisboa, confirmar informação disponível "
+                "e indicar o que deves verificar no canal oficial."
+            )
+        return (
+            "I can't make bookings, purchases, or reservations directly. "
+            "I can help you find Lisbon options, summarize available information, "
+            "and point out what to verify through the official channel."
+        )
+
     @staticmethod
     def _build_greeting_response(language: str) -> str:
         """Builds a lightweight greeting response."""
@@ -346,6 +393,20 @@ class SupervisorAgent(BaseAgent):
                 "reasoning": "Direct greeting override",
                 "agents": [],
                 "direct_response": self._sanitize_direct_response(self._build_greeting_response(language)),
+            }
+
+        if self._is_unsupported_action_request(user_message):
+            return {
+                "reasoning": "Direct unsupported transactional action override",
+                "agents": [],
+                "direct_response": self._sanitize_direct_response(self._build_unsupported_action_response(language)),
+            }
+
+        if self._is_geographic_out_of_scope_route(user_message):
+            return {
+                "reasoning": "Direct geographic out-of-scope route override",
+                "agents": [],
+                "direct_response": self._sanitize_direct_response(self._build_out_of_scope_response(language)),
             }
 
         if self._is_obvious_out_of_scope(user_message):
@@ -422,14 +483,64 @@ class SupervisorAgent(BaseAgent):
             transport_terms,
             minimum_ratio=0.85,
         )
-        event_hit = cls._contains_domain_keyword(message_lower, event_terms, minimum_ratio=0.84)
-        place_hit = cls._contains_domain_keyword(message_lower, place_terms, minimum_ratio=0.82)
+        exact_event_hit = any(
+            re.search(pattern, message_lower)
+            for pattern in (
+                r"\bevents?\b",
+                r"\beventos?\b",
+                r"\bconcerts?\b",
+                r"\bconcertos?\b",
+                r"\bfestivals?\b",
+                r"\bexhibitions?\b",
+                r"\bexposi[cç][aã]o\b",
+                r"\bexposi[cç][oõ]es\b",
+                r"\bwhat's on\b",
+                r"\bo que h[aá]\b",
+            )
+        )
+        event_hit = exact_event_hit or cls._contains_domain_keyword(message_lower, event_terms, minimum_ratio=0.84)
+        if weather_hit and event_hit and not re.search(
+            r"\b(?:weather|forecast|rain|temperature|wind|umbrella|tempo|meteo|previs[aã]o|chuva|temperatura|vento|guarda[-\s]?chuva)\b",
+            message_lower,
+        ):
+            weather_hit = False
+        if weather_hit and re.search(r"\b(?:wind|vento)\b", message_lower) and not exact_event_hit:
+            event_hit = False
+        exact_place_hit = any(
+            re.search(pattern, message_lower)
+            for pattern in (
+                r"\battractions?\b",
+                r"\batra[cç][oõ]es?\b",
+                r"\batra[cç][aã]o\b",
+                r"\bmuseums?\b",
+                r"\bmuseus?\b",
+                r"\bmonuments?\b",
+                r"\bmonumentos?\b",
+                r"\bmiradouro\b",
+                r"\bplaces\b",
+                r"\blocais\b",
+                r"\brestaurants?\b",
+                r"\brestaurantes?\b",
+                r"\bwhat to visit\b",
+                r"\bo que visitar\b",
+            )
+        )
+        place_hit = exact_place_hit or cls._contains_domain_keyword(message_lower, place_terms, minimum_ratio=0.82)
+        if transport_hit and not exact_place_hit:
+            place_hit = False
         service_hit = cls._contains_domain_keyword(message_lower, service_terms, minimum_ratio=0.84)
 
         if weather_hit and not any([transport_hit, event_hit, place_hit, service_hit]):
             return {
                 "reasoning": "Direct standalone weather override",
                 "agents": ["weather"],
+                "direct_response": None,
+            }
+
+        if weather_hit and event_hit and not any([transport_hit, place_hit, service_hit]):
+            return {
+                "reasoning": "Direct weather-aware event override",
+                "agents": ["weather", "researcher"],
                 "direct_response": None,
             }
 
@@ -560,11 +671,7 @@ class SupervisorAgent(BaseAgent):
         if any(re.search(pattern, message_lower) for pattern in planning_patterns):
             return True
 
-        return cls._contains_domain_keyword(
-            message_lower,
-            ["plan", "itinerary", "roteiro", "plano", "agenda", "schedule"],
-            minimum_ratio=0.86,
-        )
+        return False
 
     @staticmethod
     def _planning_query_mentions_weather(user_message: str) -> bool:

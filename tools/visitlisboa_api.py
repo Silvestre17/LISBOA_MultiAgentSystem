@@ -718,6 +718,46 @@ def _localize_place_value_text(value: Optional[str], language: str = "en") -> st
     return localized
 
 
+def _compact_place_ticket_price_text(value: Optional[str], language: str = "en", max_chars: int = 115) -> str:
+    """Return a compact user-facing summary of scraped VisitLisboa ticket prices."""
+    cleaned = re.sub(r"\s+", " ", (value or "").strip())
+    if not cleaned:
+        return ""
+
+    cleaned = re.sub(r"^(?:link|links)\s+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(
+        r"\bChildren\s+Free\s+until\s*\(age\)\s*:\s*(\d+)",
+        r"Children free until age \1",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\s+(?=(?:Children(?:\s*\([^)]*\))?|Adult|Adults|Family|Senior|Seniors|Student|Students)\s*:)",
+        "; ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\s*;\s*", "; ", cleaned).strip(" ;")
+    cleaned = re.sub(r"(?:;\s*){2,}", "; ", cleaned).strip(" ;")
+
+    if len(cleaned) > max_chars:
+        parts = [part.strip() for part in cleaned.split(";") if part.strip()]
+        compact_parts: List[str] = []
+        total_len = 0
+        for part in parts:
+            projected_len = total_len + len(part) + (2 if compact_parts else 0)
+            if projected_len > max_chars:
+                break
+            compact_parts.append(part)
+            total_len = projected_len
+        if compact_parts:
+            cleaned = "; ".join(compact_parts)
+        else:
+            cleaned = cleaned[:max_chars].rsplit(" ", 1)[0].strip(" ;,.") + "..."
+
+    return _localize_place_value_text(cleaned, language=language)
+
+
 def _is_generic_lisbon_location(value: Optional[str]) -> bool:
     """Return whether a VisitLisboa location is only a city-level stub."""
     normalized = _normalize_lookup_text(value)
@@ -1600,6 +1640,8 @@ _EVENT_QUERY_SYNONYMS = {
     'livro': ['book', 'literature', 'literary', 'reading'],
     'fair': ['feira', 'market', 'salon'],
     'feira': ['fair', 'market', 'salon'],
+    'outdoor': ['outdoors', 'open', 'air', 'park', 'parque', 'garden', 'jardim', 'grass', 'picnic'],
+    'outdoors': ['outdoor', 'open', 'air', 'park', 'parque', 'garden', 'jardim', 'grass', 'picnic'],
 }
 
 
@@ -2461,6 +2503,33 @@ def _event_within_requested_geography(event: Dict[str, Any], query: Optional[str
     return _place_within_requested_geography(location_text, query)
 
 
+_OUTDOOR_EVENT_QUERY_TERMS = [
+    "outdoor", "outdoors", "open air", "open-air", "outside", "ao ar livre",
+    "ar livre", "exterior", "outdoor event", "outdoor events",
+]
+
+_OUTDOOR_EVENT_EVIDENCE_TERMS = [
+    "outdoor", "outdoors", "open air", "open-air", "ao ar livre", "ar livre",
+    "park", "parks", "parque", "parques", "garden", "gardens", "jardim", "jardins",
+    "grass", "picnic", "beach", "praia", "waterfront", "riverside", "riverfront",
+    "miradouro", "viewpoint", "belvedere", "terrace", "terraço", "terraco",
+]
+
+
+def _query_requests_outdoor_events(query: Optional[str]) -> bool:
+    """Returns whether the user explicitly asks for outdoor events."""
+    normalized_query = _normalize_lookup_text(query)
+    if not normalized_query:
+        return False
+    return any(term in normalized_query for term in _OUTDOOR_EVENT_QUERY_TERMS)
+
+
+def _event_has_outdoor_context(event: Dict[str, Any]) -> bool:
+    """Returns whether an event has textual evidence that it is outdoors."""
+    searchable_text = _normalize_lookup_text(_build_event_searchable_text(event))
+    return any(term in searchable_text for term in _OUTDOOR_EVENT_EVIDENCE_TERMS)
+
+
 def _normalize_place_result_key(place: Dict[str, Any]) -> str:
     """Builds a robust deduplication key for place results."""
     url = place.get("url") or ""
@@ -2879,6 +2948,7 @@ def search_cultural_events(
             specific_lookup_phrase = _normalize_lookup_text(query)
         effective_query = specific_lookup_phrase or query
         free_filter_requested = _query_requests_free_events(effective_query or query)
+        outdoor_filter_requested = _query_requests_outdoor_events(effective_query or query)
         if free_filter_requested and effective_query:
             effective_query = re.sub(
                 r"\b(?:free(?:\s+entry|\s+admission)?|gratuit[oa]s?|gratis|gr[aá]tis|entrada\s+gratuita)\b",
@@ -2944,6 +3014,11 @@ def search_cultural_events(
             events_data = [event for event in events_data if _event_matches_free_filter(event)]
             undated_candidates = [event for event in undated_candidates if _event_matches_free_filter(event)]
             logger.info(f"After free-event filter: {len(events_data)} events")
+
+        if outdoor_filter_requested:
+            events_data = [event for event in events_data if _event_has_outdoor_context(event)]
+            undated_candidates = [event for event in undated_candidates if _event_has_outdoor_context(event)]
+            logger.info(f"After outdoor-event filter: {len(events_data)} events")
 
         category_filtered_pool = list(events_data)
 
@@ -3759,10 +3834,7 @@ def search_places_attractions(
             if full_data and full_data.get('tickets_offers'):
                 tickets = full_data['tickets_offers']
                 if tickets.get('description'):
-                    price_desc = tickets['description'][:80]
-                    if len(tickets['description']) > 80:
-                        price_desc += "..."
-                    price_desc = _localize_place_value_text(price_desc, language=render_language)
+                    price_desc = _compact_place_ticket_price_text(tickets['description'], language=render_language)
                     output_parts.append(f"   💰 {price_desc}")
                 elif tickets.get('links'):
                     first_link = tickets['links'][0]

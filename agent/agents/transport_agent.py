@@ -36,6 +36,12 @@ from agent.utils.response_formatter import (
 )
 
 
+_CP_LONG_DISTANCE_DESTINATION_RE = re.compile(
+    r"\b(?:porto|campanha|campanh[aã]|sao bento|são bento|coimbra|aveiro|braga|guimaraes|guimar[aã]es|faro|algarve)\b",
+    re.IGNORECASE,
+)
+
+
 def _normalize_token(text: str) -> str:
     """Normalizes station and direction tokens for robust matching."""
     import unicodedata
@@ -229,7 +235,9 @@ def _get_cp_station_name_map() -> Dict[str, str]:
 
     extra_aliases = {
         "cais do sodre": "Cais do Sodré",
-        "lisboa oriente": "Lisboa - Oriente",
+        "oriente": "Oriente",
+        "lisboa oriente": "Oriente",
+        "lisboa - oriente": "Oriente",
         "santa apolonia": "Santa Apolónia",
         "belem": "Belém",
     }
@@ -287,7 +295,7 @@ def _build_metro_tool_spec(user_message: str) -> Optional[Dict[str, Any]]:
         return {"name": "get_metro_status", "args": {}}
 
     if has_metro_context and re.search(
-        r"\b(all|list|show|every|todas?|listar|quais)\b.*\b(stations|esta[cç][õo]es|estacoes)\b|\b(stations|esta[cç][õo]es|estacoes)\b.*\bmetro\b",
+        r"\b(all|list|show|every|what|which|todas?|listar|quais)\b.*\b(stations|esta[cç][õo]es|estacoes)\b|\bmetro\s+(?:stations|esta[cç][õo]es|estacoes)\b|\b(stations|esta[cç][õo]es|estacoes)\b.*\bmetro\b",
         query_lower,
     ):
         return {"name": "get_all_metro_stations", "args": {}}
@@ -1131,12 +1139,12 @@ def _summarize_carris_frequency_result(
     if no_service_match:
         if language == "pt":
             return [
-                "  - **Serviço programado hoje:** não foram encontradas partidas na base GTFS.",
-                "  - **Como confirmar:** peça-me as próximas partidas numa paragem específica desta linha ou confirme em carris.pt.",
+                "    - **Serviço programado hoje:** não foram encontradas partidas na base GTFS.",
+                "    - **Como confirmar:** peça-me as próximas partidas numa paragem específica desta linha ou confirme em carris.pt.",
             ]
         return [
-            "  - **Scheduled service today:** no departures were found in the GTFS timetable.",
-            "  - **How to confirm:** ask me for departures at a specific stop on this line or check carris.pt.",
+            "    - **Scheduled service today:** no departures were found in the GTFS timetable.",
+            "    - **How to confirm:** ask me for departures at a specific stop on this line or check carris.pt.",
         ]
 
     total_match = re.search(r"Total de passagens hoje:\s*(\d+)", frequency_result, flags=re.IGNORECASE)
@@ -1234,11 +1242,11 @@ def _summarize_carris_frequency_result(
     if total_match:
         total = total_match.group(1)
         if language == "pt":
-            summary_lines.append(f"  - **Passagens programadas hoje:** {total}")
+            summary_lines.append(f"    - **Passagens programadas hoje:** {total}")
         else:
-            summary_lines.append(f"  - **Scheduled departures today:** {total}")
+            summary_lines.append(f"    - **Scheduled departures today:** {total}")
     if selected_summary:
-        summary_lines.append(f"  - {selected_summary}")
+        summary_lines.append(f"    - {selected_summary}")
 
     return summary_lines
 
@@ -1261,12 +1269,12 @@ def _format_carris_route_detail(
             return frequency_summary
         if language == "pt":
             return [
-                "  - **Horário detalhado:** esta rota não devolveu uma paragem específica para calcular partidas exatas.",
-                "  - **Como confirmar:** peça-me horários numa paragem concreta desta linha.",
+                "    - **Horário detalhado:** esta rota não devolveu uma paragem específica para calcular partidas exatas.",
+                "    - **Como confirmar:** peça-me horários numa paragem concreta desta linha.",
             ]
         return [
-            "  - **Detailed timetable:** this route result did not include a specific stop for exact departures.",
-            "  - **How to confirm:** ask me for departures at a specific stop on this line.",
+            "    - **Detailed timetable:** this route result did not include a specific stop for exact departures.",
+            "    - **How to confirm:** ask me for departures at a specific stop on this line.",
         ]
 
     next_match = re.match(r"^(?:\*\*)?Next(?:\*\*)?:\s*(.+)$", stripped, re.IGNORECASE)
@@ -1278,24 +1286,24 @@ def _format_carris_route_detail(
         lines: List[str] = []
         if times_text:
             if language == "pt":
-                lines.append(f"  - **Próximas partidas:** {times_text}")
+                lines.append(f"    - **Próximas partidas:** {times_text}")
             else:
-                lines.append(f"  - **Next departures:** {times_text}")
+                lines.append(f"    - **Next departures:** {times_text}")
         if stop_name:
             if language == "pt":
-                lines.append(f"  - **Paragem:** {stop_name}")
+                lines.append(f"    - **Paragem:** {stop_name}")
             else:
-                lines.append(f"  - **Stop:** {stop_name}")
+                lines.append(f"    - **Stop:** {stop_name}")
         return lines
 
     travel_match = re.match(r"^~\s*(\d+)\s*min(?:\s*travel)?$", stripped, re.IGNORECASE)
     if travel_match:
         travel_text = f"~{travel_match.group(1)} min"
         if language == "pt":
-            return [f"  - **Tempo estimado:** {travel_text}"]
-        return [f"  - **Estimated travel time:** {travel_text}"]
+            return [f"    - **Tempo estimado:** {travel_text}"]
+        return [f"    - **Estimated travel time:** {travel_text}"]
 
-    return [f"  - {stripped}"]
+    return [f"    - {stripped}"]
 
 
 def _format_carris_mode_section_markdown(
@@ -1690,6 +1698,12 @@ def _detect_unsupported_transport_modes(user_message: str) -> List[str]:
         _append("fertagus")
 
     if (
+        re.search(r"\b(cp|comboio|comboios|train|trains)\b", normalized)
+        and _CP_LONG_DISTANCE_DESTINATION_RE.search(normalized)
+    ):
+        _append("long_distance_cp")
+
+    if (
         re.search(
             r"\b(gira|bike|bikes|bicycle|bicycles|bicicleta|bicicletas|scooter|scooters|e-scooter|e-scooters|e scooter|e scooters|trotinete|trotinetes)\b",
             normalized,
@@ -1718,12 +1732,14 @@ def _build_unsupported_transport_scope_response(
     labels_en = {
         "ferries": "Transtejo/Soflusa ferries",
         "fertagus": "Fertagus trains",
+        "long_distance_cp": "long-distance CP services outside the Lisbon Metropolitan Area",
         "micromobility": "Gira bikes or shared e-scooters",
         "ride_hailing": "ride-hailing or taxi pricing details",
     }
     labels_pt = {
         "ferries": "ferries Transtejo/Soflusa",
         "fertagus": "comboios Fertagus",
+        "long_distance_cp": "serviços CP de longo curso fora da Área Metropolitana de Lisboa",
         "micromobility": "bicicletas Gira ou trotinetes partilhadas",
         "ride_hailing": "preços ou tempos de espera de Uber, Bolt ou táxi",
     }
@@ -1743,10 +1759,11 @@ def _build_unsupported_transport_scope_response(
     if language == "pt":
         return "\n".join(
             [
-                "### ⚠️ Modo de transporte ainda não confirmado neste sistema",
+                "### ⚠️ Ligação ferroviária fora do âmbito confirmado",
                 "",
                 f"- Não consigo confirmar {unsupported_label} neste sistema.",
-                "- Neste momento, só consigo validar diretamente Metro de Lisboa, Carris Urban, Carris Metropolitana e comboios CP.",
+                "- Neste momento, só consigo validar diretamente Metro de Lisboa, Carris Urban, Carris Metropolitana e comboios CP suburbanos/AML.",
+                "- Para comboios CP de longo curso, como Alfa Pendular ou Intercidades, confirma horários e bilhetes diretamente na CP.",
                 "- Para evitar alucinações, prefiro não inventar horários, frequências, tarifas, ETAs ou estado em tempo real para esse modo.",
                 "- Se a viagem também puder ser formulada com as redes suportadas acima, respondo com base nesses operadores confirmados.",
                 "",
@@ -1756,10 +1773,11 @@ def _build_unsupported_transport_scope_response(
 
     return "\n".join(
         [
-            "### ⚠️ Transport mode not yet confirmed in this runtime",
+            "### ⚠️ Rail trip outside confirmed scope",
             "",
             f"- I can't directly verify {unsupported_label} in this runtime.",
-            "- Right now I can only validate Metro de Lisboa, Carris Urban, Carris Metropolitana, and CP trains.",
+            "- Right now I can only validate Metro de Lisboa, Carris Urban, Carris Metropolitana, and CP suburban/AML trains.",
+            "- For long-distance CP trains, such as Alfa Pendular or Intercidades, confirm schedules and tickets directly with CP.",
             "- To avoid hallucinating details, I won't invent schedules, frequencies, fares, ETAs, or real-time status for that mode.",
             "- If the trip can also be phrased with the supported networks above, I can answer using those confirmed operators.",
             "",
@@ -1866,6 +1884,30 @@ def _localize_wait_times(wait_times: str, language: str) -> str:
     return wait_times.replace("arriving", "a chegar") if language == "pt" else wait_times
 
 
+def _localize_metro_status_text(status: str, language: str) -> str:
+    """Localizes common Metro status messages emitted by the official feed."""
+    raw_status = str(status or "").strip()
+    normalized = _normalize_token(raw_status)
+    if not raw_status:
+        return "estado em tempo real indisponível" if language == "pt" else "real-time status unavailable"
+
+    if normalized == "ok":
+        return "circulação normal" if language == "pt" else "normal service"
+    if normalized == "unknown":
+        return "estado em tempo real indisponível" if language == "pt" else "real-time status unavailable"
+
+    interrupted_match = re.search(
+        r"circulacao esta interrompida entre as estacoes (?P<start>.+?) e (?P<end>.+?)\.?$",
+        normalized,
+    )
+    if interrupted_match and language == "en":
+        start = interrupted_match.group("start").strip().title()
+        end = interrupted_match.group("end").strip().title()
+        return f"service is interrupted between {start} and {end}"
+
+    return raw_status
+
+
 def _build_route_state_lines(line_ids: List[str], language: str) -> List[str]:
     """Builds route-specific real-time line status bullets."""
     from tools.metrolisboa_api import METRO_LINES
@@ -1882,16 +1924,7 @@ def _build_route_state_lines(line_ids: List[str], language: str) -> List[str]:
         line_name = _line_display_name(line_id, language)
         status = _get_line_status(line_id)
 
-        if status.lower() == "ok":
-            status_text = "circulação normal" if language == "pt" else "normal service"
-        elif status.lower() == "unknown":
-            status_text = (
-                "estado em tempo real indisponível"
-                if language == "pt"
-                else "real-time status unavailable"
-            )
-        else:
-            status_text = status
+        status_text = _localize_metro_status_text(status, language)
 
         status_lines.append(f"- {emoji} **{line_name}**: {status_text}")
 
@@ -2591,7 +2624,13 @@ def _build_carris_metropolitana_tool_spec(user_message: str) -> Optional[Dict[st
         return None
 
     if re.search(r"\b(alerts?|alertas?|disruptions?)\b", query_lower):
-        return {"name": "get_carris_metropolitana_alerts", "args": {}}
+        area_match = re.search(
+            r"\b(?:around|near|in|for|em|na|no|perto de|junto de)\s+(?P<area>.+?)(?:\s+today|\s+hoje|[\?\!\.,;]|$)",
+            query,
+            flags=re.IGNORECASE,
+        )
+        args = {"area": _clean_query_fragment(area_match.group("area"))} if area_match else {}
+        return {"name": "get_carris_metropolitana_alerts", "args": args}
 
     stop_id_match = re.search(r"\b(?:stop id|stop|paragem)\s+(?P<stop_id>\d{3,})\b", query_lower)
     line_id_match = re.search(r"\b(?:line|linha)\s+(?P<line_id>\d{3,4}[a-z]?)\b", query_lower)
@@ -3535,17 +3574,81 @@ class TransportAgent(BaseAgent):
                 for destination, count in sorted(direction_counts.items(), key=lambda item: (-item[1], item[0])):
                     stop_note = sample_stops.get(destination)
                     if language == "pt":
-                        bullet = f"  - **{destination}**: {count} veículo(s)"
+                        bullet = f"    - **{destination}**: {count} veículo(s)"
                         if stop_note:
                             bullet += f" · próxima paragem observada: {stop_note}"
                     else:
-                        bullet = f"  - **{destination}**: {count} vehicle(s)"
+                        bullet = f"    - **{destination}**: {count} vehicle(s)"
                         if stop_note:
                             bullet += f" · sample next stop: {stop_note}"
                     output_lines.append(bullet)
 
                 output_lines.extend([limitation_line, fallback_line])
                 return "\n".join(output_lines).strip()
+
+        if tool_name in {"get_real_time_bus_positions", "get_bus_realtime_locations"}:
+            if "### 🚌 **Carris Metropolitana" in cleaned_result:
+                return re.split(
+                    r"\n\n⚠️\s+Scope:\s+Carris Metropolitana covers",
+                    cleaned_result,
+                    maxsplit=1,
+                    flags=re.IGNORECASE,
+                )[0].strip()
+
+            title = (
+                f"### 🚌 Carris Metropolitana live buses near {tool_args.get('location')}"
+                if tool_name == "get_real_time_bus_positions" and tool_args.get("location")
+                else f"### 🚌 Carris Metropolitana live buses - line {tool_args.get('line_id')}"
+                if tool_args.get("line_id")
+                else "### 🚌 Carris Metropolitana live buses"
+            )
+            output_lines = [title, ""]
+            vehicle_cards = 0
+            inside_vehicle = False
+
+            for raw_line in cleaned_result.splitlines():
+                stripped = raw_line.strip()
+                if not stripped or set(stripped) <= {"=", "-"}:
+                    continue
+                if stripped.startswith(("🚌 Real-Time", "🚌 **Real-Time")):
+                    continue
+                if stripped.startswith("🕐 Updated:"):
+                    continue
+                if stripped.startswith("📍 Radius:"):
+                    output_lines.append(f"- {stripped}")
+                    continue
+                if stripped.startswith("📊 Active buses:"):
+                    output_lines.append(f"- {stripped}")
+                    continue
+                if stripped.startswith("ℹ️ Broad area fallback:"):
+                    output_lines.append(f"- {stripped}")
+                    continue
+                if stripped.startswith("ℹ️") and "omitted" in stripped.lower():
+                    output_lines.append(f"- {stripped}")
+                    continue
+                if stripped.startswith("📡 Data freshness:"):
+                    output_lines.append(f"- {stripped}")
+                    continue
+                if re.match(r"^-\s*(?:🚌|🛑|🚏|📍)\s*\*\*Line\s+", stripped) or re.match(r"^-\s*\*\*🚌\s*Bus\s+", stripped):
+                    vehicle_cards += 1
+                    if vehicle_cards > 5:
+                        inside_vehicle = False
+                        continue
+                    output_lines.append("")
+                    output_lines.append(stripped)
+                    inside_vehicle = True
+                    continue
+                if inside_vehicle and stripped.startswith("- "):
+                    if vehicle_cards <= 5:
+                        output_lines.append("    " + stripped)
+                    continue
+                if stripped.startswith("... and"):
+                    output_lines.append(stripped)
+
+            if vehicle_cards > 5:
+                output_lines.append(f"... and {vehicle_cards - 5} more shown by the live feed.")
+
+            return "\n".join(output_lines).strip()
 
         if tool_name == "find_direct_bus_lines":
             origin = str(tool_args.get("origin") or "Origin").strip()
@@ -4040,7 +4143,8 @@ class TransportAgent(BaseAgent):
             return with_ambiguity_preamble(finalized_response)
 
         deterministic_response = None
-        if not ambiguity_preamble:
+        cp_tool_spec = _build_cp_tool_spec(user_message)
+        if not ambiguity_preamble and not cp_tool_spec:
             deterministic_response = _build_deterministic_metro_route_response(
                 user_message=user_message,
                 context=context,
@@ -4102,7 +4206,6 @@ class TransportAgent(BaseAgent):
                 language=resolved_language,
             )
 
-        cp_tool_spec = _build_cp_tool_spec(user_message)
         carris_metropolitana_tool_spec = _build_carris_metropolitana_tool_spec(user_message)
 
         if not cp_tool_spec and not carris_metropolitana_tool_spec:

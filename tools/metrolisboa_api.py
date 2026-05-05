@@ -2328,6 +2328,12 @@ def find_nearest_metro(
     Returns:
         str: Formatted list of nearest metro stations with distances.
     """
+    curated_station_name = None
+    if near_location_name:
+        landmark_info = get_landmark_info(near_location_name)
+        if landmark_info and landmark_info.get("metro"):
+            curated_station_name = _normalize_metro_text(str(landmark_info["metro"]))
+
     # Resolve location if name provided
     if near_location_name and (latitude is None or longitude is None):
         from tools.carrismetropolitana_api import geocode_location
@@ -2343,6 +2349,13 @@ def find_nearest_metro(
         return "❌ Please provide either coordinates or a location name."
 
     nearest = find_nearest_metro_station(latitude, longitude, max_results=5)
+    if curated_station_name:
+        nearest.sort(
+            key=lambda station: (
+                0 if _normalize_metro_text(str(station.get("stop_name", ""))) == curated_station_name else 1,
+                station.get("distance_m", 0),
+            )
+        )
 
     if not nearest:
         return (
@@ -2350,8 +2363,7 @@ def find_nearest_metro(
             "Make sure coordinates are within Lisbon area."
         )
 
-    response = "🚇 Nearest Metro Stations\n"
-    response += "=" * 45 + "\n\n"
+    response = "🚇 Nearest Metro Stations\n\n"
 
     for i, station in enumerate(nearest, 1):
         name = station.get("stop_name", "Unknown")
@@ -2377,9 +2389,9 @@ def find_nearest_metro(
 
         lines_clean = lines.replace("[", "").replace("]", "")
 
-        response += f"{i}. {line_emoji} {name}\n"
-        response += f"   📏 Distance: {dist_str} (~{walk_min} min walk)\n"
-        response += f"   🚇 Lines: {lines_clean}\n\n"
+        response += f"- {line_emoji} **{name}**\n"
+        response += f"    - 📏 **Distance:** {dist_str} (~{walk_min} min walk)\n"
+        response += f"    - 🚇 **Lines:** {lines_clean}\n\n"
 
     return response
 
@@ -2438,9 +2450,8 @@ def get_metro_frequency(line: str, day_type: str = "weekday") -> str:
     emoji = line_info.get("emoji", "🚇")
     name = line_info.get("name", line_normalized)
 
-    response = f"{emoji} {name}\n"
-    response += f"📅 Service Frequency ({day_label})\n"
-    response += "=" * 50 + "\n\n"
+    response = f"{emoji} **{name}**\n\n"
+    response += f"📅 **Service frequency ({day_label})**\n\n"
 
     for interval in intervals:
         start = interval.get("HoraInicio", "")
@@ -2451,17 +2462,16 @@ def get_metro_frequency(line: str, day_type: str = "weekday") -> str:
             parts = freq.split(":")
             minutes = int(parts[0])
             seconds = int(parts[1]) if len(parts) > 1 else 0
-            freq_str = f"{minutes}:{seconds:02d}" if seconds else f"{minutes} min"
+            freq_str = f"{minutes} min {seconds} sec" if seconds else f"{minutes} min"
         except Exception:
             freq_str = freq
 
         start_short = start[:5] if start else ""
         end_short = end[:5] if end else ""
 
-        response += f"⏰ {start_short} - {end_short}\n"
-        response += f"   🚇 Train every {freq_str}\n\n"
+        response += f"- ⏰ **{start_short} - {end_short}:** every **{freq_str}**\n"
 
-    response += "💡 Tip: Trains are more frequent during rush hours (7:15-9:30 and 16:45-19:00)."
+    response += "\n💡 **Tip:** Trains are more frequent during rush hours (07:15-09:30 and 16:45-19:00)."
 
     return response
 
@@ -2479,35 +2489,66 @@ def get_all_metro_stations() -> str:
     if not stations:
         return "❌ Failed to load Metro stations data."
 
-    response = "🚇 Metro de Lisboa - All Stations\n"
-    response += "=" * 50 + "\n\n"
+    display_names = {
+        "baixa-chiado": "Baixa/Chiado",
+        "cais do sodré": "Cais do Sodré",
+        "cidade universitária": "Cidade Universitária",
+        "colégio militar/luz": "Colégio Militar/Luz",
+        "entrecampos": "Entre Campos",
+        "alto dos moinhos": "Alto dos Moinhos",
+        "marquês de pombal": "Marquês de Pombal",
+        "praça de espanha": "Praça de Espanha",
+        "quinta das conchas": "Quinta das Conchas",
+        "santa apolónia": "Santa Apolónia",
+        "são sebastião": "São Sebastião",
+        "terreiro do paço": "Terreiro do Paço",
+    }
+    interchange_prefixes = {
+        "campo grande": "🟡🟢",
+        "alameda": "🟢🔴",
+        "saldanha": "🔴🟡",
+        "marquês de pombal": "🟡🔵",
+        "baixa-chiado": "🔵🟢",
+        "são sebastião": "🔵🔴",
+    }
+    rail_prefixes = {
+        "santa apolónia": "🚆",
+        "cais do sodré": "🚆",
+        "rossio": "🚆",
+        "areeiro": "🚆",
+        "oriente": "🚆",
+    }
 
-    line_stations = {"Amarela": [], "Azul": [], "Verde": [], "Vermelha": []}
-
-    for station in stations:
-        name = station.get("stop_name", "")
-        lines = station.get("linha", "[]")
-
-        for line in ["Amarela", "Azul", "Verde", "Vermelha"]:
-            if line in lines:
-                line_stations[line].append(name)
+    def _station_label(station_key: str) -> str:
+        display_name = display_names.get(station_key, station_key.title())
+        prefix = interchange_prefixes.get(station_key) or rail_prefixes.get(station_key)
+        return f"{prefix} {display_name}" if prefix else display_name
 
     line_display = [
-        ("Amarela", "🟡", "Yellow Line (Rato ↔ Odivelas)"),
-        ("Azul", "🔵", "Blue Line (Santa Apolónia ↔ Reboleira)"),
-        ("Verde", "🟢", "Green Line (Cais do Sodré ↔ Telheiras)"),
-        ("Vermelha", "🔴", "Red Line (São Sebastião ↔ Aeroporto)"),
+        ("amarela", "🟡 Yellow Line — Rato ↔ Odivelas", False),
+        ("azul", "🔵 Blue Line — Reboleira ↔ Santa Apolónia", True),
+        ("verde", "🟢 Green Line — Cais do Sodré ↔ Telheiras", False),
+        ("vermelha", "🔴 Red Line — São Sebastião ↔ Aeroporto", False),
     ]
 
-    for line_key, emoji, description in line_display:
-        stations_list = sorted(line_stations[line_key])
-        response += f"{emoji} {description}\n"
-        response += f"   {', '.join(stations_list)}\n\n"
+    response_lines = ["### 🚇 **Lisbon Metro**", ""]
 
-    response += f"📊 Total: {len(stations)} stations across 4 lines\n"
-    response += "💡 Interchange stations: Campo Grande, Alameda, Saldanha, Marquês de Pombal, Baixa-Chiado, São Sebastião"
+    for line_key, title, reverse_order in line_display:
+        station_keys = list(METRO_LINES[line_key]["stations"])
+        if reverse_order:
+            station_keys.reverse()
+        station_text = " · ".join(_station_label(station_key) for station_key in station_keys)
+        response_lines.extend([f"**{title}**", f"    - {station_text}", "", "---", ""])
 
-    return response
+    response_lines.extend(
+        [
+            "💡 **Quick Tip:**",
+            "    - Main interchange stations — 🟡🟢 Campo Grande · 🟢🔴 Alameda · 🔴🟡 Saldanha · 🟡🔵 Marquês de Pombal · 🔵🟢 Baixa/Chiado · 🔵🔴 São Sebastião",
+            "    - 🚆 = station also served by national rail or directly connected rail services",
+        ]
+    )
+
+    return "\n".join(response_lines).strip()
 
 
 # ==========================================================================

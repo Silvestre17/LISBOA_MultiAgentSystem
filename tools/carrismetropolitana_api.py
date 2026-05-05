@@ -42,6 +42,17 @@ else:
 
 logger = logging.getLogger(__name__)
 
+CARRIS_METROPOLITANA_CITY_FALLBACKS = {
+    "almada": (38.6765, -9.1654),
+    "amadora": (38.7597, -9.2397),
+    "oeiras": (38.6970, -9.3017),
+    "loures": (38.8309, -9.1685),
+    "setubal": (38.5244, -8.8882),
+    "setúbal": (38.5244, -8.8882),
+    "sintra": (38.8029, -9.3817),
+    "cascais": (38.6979, -9.4215),
+}
+
 try:
     from tools.utils import fetch_json_with_retry, haversine_distance
 except ImportError:
@@ -144,7 +155,7 @@ def _update_vehicle_feed_meta(
     )
 
 
-def _build_vehicle_freshness_note() -> str:
+def _build_vehicle_freshness_note(include_missing_coordinates: bool = True) -> str:
     """Formats a short freshness note for realtime vehicle responses."""
     source = _vehicle_feed_meta.get("source")
     age = _vehicle_feed_meta.get("data_age_seconds")
@@ -154,7 +165,7 @@ def _build_vehicle_freshness_note() -> str:
     lines = []
 
     if source == "live":
-        lines.append("📡 Data freshness: live Carris Metropolitana vehicle snapshot.")
+        lines.append("📡 Data freshness: live Carris Metropolitana feed snapshot.")
     elif source == "cache":
         age_text = f"{int(age)}s" if age is not None else "unknown age"
         lines.append(f"📡 Data freshness: cached Carris Metropolitana vehicle snapshot ({age_text} old).")
@@ -166,7 +177,7 @@ def _build_vehicle_freshness_note() -> str:
     elif source == "unavailable":
         lines.append("⚠️ Data freshness: live Carris Metropolitana vehicle data is temporarily unavailable.")
 
-    if missing_coordinates:
+    if include_missing_coordinates and missing_coordinates:
         lines.append(
             f"ℹ️ {missing_coordinates} vehicle(s) were omitted because the API response did not include usable GPS coordinates."
         )
@@ -226,6 +237,15 @@ def _normalize_carris_display_value(text: str) -> str:
     normalized = re.sub(r"([a-z])\1+", r"\1", normalized)
     normalized = re.sub(r"\s+", " ", normalized).strip()
     return normalized
+
+
+def _normalize_area_key(text: str) -> str:
+    """Normalize a municipality or area name for fallback matching."""
+    normalized = unicodedata.normalize("NFKD", text or "")
+    normalized = "".join(c for c in normalized if not unicodedata.combining(c))
+    normalized = normalized.lower()
+    normalized = re.sub(r"[^a-z0-9\s-]", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 def _clean_carris_display_list(
@@ -1159,6 +1179,30 @@ def get_real_time_bus_positions(
     lines = load_carris_metropolitana_lines()
 
     if not vehicles:
+        if location:
+            matched_stops = find_stops_by_name(location, max_results=6)
+            if matched_stops:
+                stop_lines = sorted(
+                    {line for stop in matched_stops for line in stop.get("lines", []) if line}
+                )
+                response = f"🚌 **Buses in {location.title()}**\n\n"
+                response += (
+                    f"ℹ️ **{location.title()} is a broad area, not an exact GPS point.** "
+                    "Live vehicle data is temporarily unavailable, but I found Carris Metropolitana stops and lines matching the area.\n\n"
+                )
+                response += "🚏 **Matching stops:**\n"
+                for stop in matched_stops[:5]:
+                    response += f"- **{stop['name']}**"
+                    if stop.get("lines"):
+                        response += f" · Lines: {', '.join(stop.get('lines', [])[:6])}"
+                    response += "\n"
+                if stop_lines:
+                    response += f"\n🚌 **Lines found in area:** {', '.join(stop_lines[:12])}"
+                    if len(stop_lines) > 12:
+                        response += f" ... and {len(stop_lines) - 12} more"
+                    response += "\n"
+                response += "\n💡 **Tip:** Send a street, stop name, neighbourhood, or GPS point for a precise live nearby-bus check.\n"
+                return _append_carris_scope_footer(response, include_freshness=True)
         return _append_carris_scope_footer(
             "❌ Live Carris Metropolitana vehicle data is temporarily unavailable.",
             include_freshness=True,
@@ -1175,14 +1219,56 @@ def get_real_time_bus_positions(
             return f"❌ No active vehicles found for line {line_id}."
 
     if location:
+        area_key = _normalize_area_key(location)
+        matched_stops = find_stops_by_name(location, max_results=6)
+        city_center = CARRIS_METROPOLITANA_CITY_FALLBACKS.get(area_key)
+
         geocoded = geocode_location(location)
+        if city_center:
+            geocoded = {"lat": city_center[0], "lon": city_center[1], "name": location}
         if not geocoded:
+            if matched_stops:
+                stop_lines = sorted(
+                    {line for stop in matched_stops for line in stop.get("lines", []) if line}
+                )
+                response = f"🚌 **Buses in {location.title()}**\n\n"
+                response += (
+                    f"ℹ️ **{location.title()} is a broad area, not an exact GPS point.** "
+                    "I found Carris Metropolitana stops and lines matching the area, but I need a street, stop, neighbourhood, or GPS point for live nearby buses.\n\n"
+                )
+                response += "🚏 **Matching stops:**\n"
+                for stop in matched_stops[:5]:
+                    response += f"- **{stop['name']}**"
+                    if stop.get("lines"):
+                        response += f" · Lines: {', '.join(stop.get('lines', [])[:6])}"
+                    response += "\n"
+                if stop_lines:
+                    response += f"\n🚌 **Lines found in area:** {', '.join(stop_lines[:12])}"
+                    if len(stop_lines) > 12:
+                        response += f" ... and {len(stop_lines) - 12} more"
+                    response += "\n"
+                return _append_carris_scope_footer(response)
             return f"❌ Could not geocode location: {location}"
 
         nearby = get_vehicles_near_location(
             geocoded["lat"], geocoded["lon"], radius_km=radius_km, max_results=15
         )
         if not nearby:
+            if matched_stops or city_center:
+                response = f"🚌 **Buses near {location.title()}**\n\n"
+                response += (
+                    f"ℹ️ **{location.title()} is a broad area, not an exact stop.** "
+                    f"I checked a central fallback point within {radius_km} km and did not find live buses with usable GPS right there.\n\n"
+                )
+                if matched_stops:
+                    response += "🚏 **Area stop matches:**\n"
+                    for stop in matched_stops[:5]:
+                        response += f"- **{stop['name']}**"
+                        if stop.get("lines"):
+                            response += f" · Lines: {', '.join(stop.get('lines', [])[:6])}"
+                        response += "\n"
+                response += "\n💡 **Tip:** Send a street, stop name, neighbourhood, or GPS point for a precise live nearby-bus check.\n"
+                return _append_carris_scope_footer(response)
             return f"❌ No buses found within {radius_km}km of {location}."
         filtered_vehicles = nearby
 
@@ -1197,12 +1283,14 @@ def get_real_time_bus_positions(
     elif location:
         response = f"🚌 Real-Time Buses Near {location.title()}\n"
         response += f"📍 Radius: {radius_km}km | {len(filtered_vehicles)} buses found\n"
+        if CARRIS_METROPOLITANA_CITY_FALLBACKS.get(_normalize_area_key(location)):
+            response += "ℹ️ Broad area fallback: using the municipality centre. Send a street, stop, neighbourhood, or GPS point for higher precision.\n"
     else:
         response = "🚌 Real-Time Bus Positions - All Lines\n"
         response += f"📊 {len(filtered_vehicles)} active vehicles\n"
 
     response += "=" * 50 + "\n\n"
-    freshness_note = _build_vehicle_freshness_note()
+    freshness_note = _build_vehicle_freshness_note(include_missing_coordinates=not line_id)
     if freshness_note:
         response += freshness_note + "\n\n"
 
@@ -1237,28 +1325,28 @@ def get_real_time_bus_positions(
         if timestamp_stale:
             stale_vehicle_timestamps += 1
 
-        response += f"{i}. {status_icon} Line {line_short}\n"
-        response += f"   🚗 {license_plate}"
+        response += f"- {status_icon} **Line {line_short}**\n"
+        response += f"    - 🚗 **Vehicle:** {license_plate}"
         if vehicle_model:
             response += f" ({vehicle_model})"
         response += "\n"
-        response += f"   📍 GPS: {lat:.5f}, {lon:.5f}\n"
+        response += f"    - 📍 **Position:** ({lat:.5f}, {lon:.5f})\n"
         if speed is not None:
-            response += f"   💨 Speed: {speed} km/h | Bearing: {bearing}°\n"
+            response += f"    - 💨 **Speed:** {float(speed):.1f} km/h · **Bearing:** {bearing}°\n"
         if time_str:
-            response += f"   📡 Last update: {time_str}\n"
+            response += f"    - 📡 **Last update:** {time_str}\n"
 
         if status == "STOPPED_AT":
-            response += "   🛑 Currently stopped"
+            response += "    - 🛑 **Currently stopped**"
             if door_status:
                 response += f" (Doors: {door_status})"
             response += "\n"
         elif status == "INCOMING_AT":
-            response += "   🚏 Approaching next stop\n"
+            response += "    - 🚏 **Approaching next stop**\n"
 
         if "distance_km" in vehicle:
             response += (
-                f"   📏 Distance from search point: {vehicle['distance_km']} km\n"
+                f"    - 📏 **Distance from search point:** {vehicle['distance_km']} km\n"
             )
 
         response += "\n"
@@ -1274,10 +1362,22 @@ def get_real_time_bus_positions(
     return _append_carris_scope_footer(response)
 
 
+def _normalize_alert_area(text: str) -> str:
+    """Normalizes alert text for municipality/area filtering."""
+    normalized = unicodedata.normalize("NFKD", text or "")
+    normalized = "".join(c for c in normalized if not unicodedata.combining(c))
+    normalized = normalized.lower()
+    normalized = re.sub(r"[^a-z0-9\s-]", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
 @tool
-def get_carris_metropolitana_alerts() -> str:
+def get_carris_metropolitana_alerts(area: Optional[str] = None) -> str:
     """
     Gets current service alerts from Carris Metropolitana (suburban buses).
+
+    Args:
+        area: Optional municipality or area filter, such as "Almada".
 
     Returns:
         str: Formatted list of active service alerts.
@@ -1293,10 +1393,27 @@ def get_carris_metropolitana_alerts() -> str:
     if not alerts:
         return "✅ No active alerts from Carris Metropolitana."
 
-    response = "⚠️ **Carris Metropolitana Service Alerts**\n"
-    response += "=" * 45 + "\n\n"
+    if area:
+        area_norm = _normalize_alert_area(area)
+        filtered_alerts = []
+        for alert in alerts:
+            alert_data = alert.get("alert", alert)
+            header_text = alert_data.get("header_text", {})
+            header = header_text.get("translation", [{}])[0].get("text", "")
+            desc_text = alert_data.get("description_text", {})
+            desc = desc_text.get("translation", [{}])[0].get("text", "")
+            combined = _normalize_alert_area(f"{header} {desc}")
+            if area_norm and area_norm in combined:
+                filtered_alerts.append(alert)
+        alerts = filtered_alerts
+        if not alerts:
+            return f"✅ No active Carris Metropolitana service alerts found for {area}."
 
-    for i, alert in enumerate(alerts[:10], 1):
+    scope = f" — {area}" if area else ""
+    response = f"⚠️ **Carris Metropolitana Service Alerts{scope}**\n\n"
+
+    visible_alert_limit = 5
+    for i, alert in enumerate(alerts[:visible_alert_limit], 1):
         # Handle both old format (nested under 'alert') and new format (flat)
         alert_data = alert.get("alert", alert)
 
@@ -1319,17 +1436,28 @@ def get_carris_metropolitana_alerts() -> str:
 
         # Affected routes
         informed_entity = alert_data.get("informed_entity", [])
-        routes = [e.get("route_id", "") for e in informed_entity if e.get("route_id")]
-        routes_str = ", ".join(routes[:5]) if routes else "All routes"
+        route_ids = []
+        for entity in informed_entity:
+            route_id = str(entity.get("route_id", "") or "").strip()
+            if not route_id:
+                continue
+            clean_route = route_id.split("_", 1)[0]
+            if clean_route and clean_route not in route_ids:
+                route_ids.append(clean_route)
+        if not route_ids:
+            for route_id in re.findall(r"\b\d{4}[A-Z]?\b", header):
+                if route_id not in route_ids:
+                    route_ids.append(route_id)
+        routes_str = ", ".join(route_ids[:8]) if route_ids else "All routes"
 
-        response += f"**{i}. {header}**\n"
-        response += f"   📝 {desc[:200]}{'...' if len(desc) > 200 else ''}\n"
-        response += f"   🚌 Routes: {routes_str}\n"
-        response += f"   ⚠️ Cause: {cause} | Effect: {effect}\n"
-        response += f"   ⏰ Period: {start} - {end}\n\n"
+        response += f"- ⚠️ **{header}**\n"
+        response += f"    - 📝 {desc[:200]}{'...' if len(desc) > 200 else ''}\n"
+        response += f"    - 🚌 **Routes:** {routes_str}\n"
+        response += f"    - ⚠️ **Cause/Effect:** {cause} / {effect}\n"
+        response += f"    - ⏰ **Period:** {start} - {end}\n\n"
 
-    if len(alerts) > 10:
-        response += f"... and {len(alerts) - 10} more alerts.\n"
+    if len(alerts) > visible_alert_limit:
+        response += f"... and {len(alerts) - visible_alert_limit} more alerts.\n"
 
     return response
 
@@ -1592,19 +1720,18 @@ def find_direct_bus_lines(origin: str, destination: str) -> str:
                     )
 
     # Build response - RESPECT the user's direction: origin → destination
-    response = f"🚌 **Autocarros: {origin.title()} → {destination.title()}**\n"
-    response += "=" * 50 + "\n\n"
+    response = f"🚌 **Autocarros: {origin.title()} → {destination.title()}**\n\n"
 
     # Show alerts first if any
     if relevant_alerts:
-        response += "⚠️ **ALERTAS DE SERVIÇO:**\n"
+        response += "⚠️ **Alertas de serviço:**\n"
         for alert in relevant_alerts[:3]:
-            response += f"   • {alert['header']}\n"
+            response += f"- {alert['header']}\n"
         response += "\n"
 
-    response += f"✅ **{len(direct_lines)} linha(s) direta(s) encontrada(s):**\n\n"
+    response += f"✅ **{len(direct_lines)} linha(s) direta(s) encontrada(s)**\n\n"
 
-    for i, line in enumerate(direct_lines[:6], 1):
+    for line in direct_lines[:6]:
         short_name = line["short_name"]
         long_name = line["long_name"]
         localities = line["localities"]
@@ -1614,13 +1741,13 @@ def find_direct_bus_lines(origin: str, destination: str) -> str:
         has_alert = line_id in affected_lines or short_name in affected_lines
         alert_icon = " ⚠️" if has_alert else ""
 
-        response += f"**{i}. 🚍 Linha {short_name}**{alert_icon}\n"
+        response += f"- 🚍 **Linha {short_name}**{alert_icon}\n"
 
         # Show the official route terminals (not direction, just terminals served)
         if long_name:
             # Replace " - " with " ↔ " to show it's bidirectional
             display_name = long_name.replace(" - ", " ↔ ")
-            response += f"   📍 Terminais: {display_name}\n"
+            response += f"    - 📍 **Terminais:** {display_name}\n"
 
         # Show localities if available, ordered from origin to destination when possible
         if localities:
@@ -1645,13 +1772,13 @@ def find_direct_bus_lines(origin: str, destination: str) -> str:
                 if len(key_stops) > 6:
                     display_stops = key_stops[:6]
                     response += (
-                        f"   🚏 {' → '.join(display_stops)} (+{len(key_stops) - 6})\n"
+                        f"    - 🚏 **Percurso:** {' → '.join(display_stops)} (+{len(key_stops) - 6})\n"
                     )
                 else:
-                    response += f"   🚏 {' → '.join(key_stops)}\n"
+                    response += f"    - 🚏 **Percurso:** {' → '.join(key_stops)}\n"
             else:
                 key_stops = cleaned_localities[:6]
-                response += f"   🚏 Passa por: {', '.join(key_stops)}"
+                response += f"    - 🚏 **Passa por:** {', '.join(key_stops)}"
                 if len(cleaned_localities) > 6:
                     response += f" (+{len(cleaned_localities) - 6})"
                 response += "\n"
@@ -1661,11 +1788,10 @@ def find_direct_bus_lines(origin: str, destination: str) -> str:
         other_lines = [line_data["short_name"] for line_data in direct_lines[6:]]
         response += f"📋 Outras linhas: {', '.join(other_lines)}\n\n"
 
-    response += "-" * 50 + "\n"
     response += "💡 **Como usar:**\n"
-    response += f"   • Procure pelo número da linha (ex: **{direct_lines[0]['short_name']}**) na paragem\n"
-    response += f"   • Verifique a direção do autocarro ({origin.title()} → {destination.title()})\n"
-    response += "   • Horários e paragens: carrismetropolitana.pt\n"
+    response += f"- Procure pelo número da linha, por exemplo **{direct_lines[0]['short_name']}**, na paragem.\n"
+    response += f"- Verifique a direção do autocarro: **{origin.title()} → {destination.title()}**.\n"
+    response += "- Horários e paragens: carrismetropolitana.pt\n"
 
     return _append_carris_scope_footer(response)
 
@@ -1822,35 +1948,51 @@ def get_bus_realtime_locations(line_id: Optional[str] = None) -> str:
             include_freshness=True,
         )
 
-    if line_id:
-        filtered = [v for v in data if v.get("line_id") == line_id]
+    normalized_line_id = str(line_id or "").strip().upper() or None
+
+    if normalized_line_id:
+        filtered = [v for v in data if str(v.get("line_id") or "").upper() == normalized_line_id]
         if not filtered:
             return _append_carris_scope_footer(
-                f"ℹ️ No active buses found on line {line_id} at this time.\n\n"
+                f"ℹ️ No active buses found on line {normalized_line_id} at this time.\n\n"
                 f"💡 The line may not be operating right now.",
             )
         buses = filtered
-        response = f"🚌 **Real-Time Bus Locations - Line {line_id}**\n"
     else:
         buses = data
-        response = "🚌 **Real-Time Bus Locations Overview**\n"
 
-    response += "=" * 50 + "\n"
-    response += f"📊 Active buses: {len(buses)}\n"
-    response += f"🕐 Updated: {datetime.now().strftime('%H:%M:%S')}\n"
-    response += "=" * 50 + "\n\n"
-    freshness_note = _build_vehicle_freshness_note()
-    if freshness_note:
-        response += freshness_note + "\n\n"
+    lines_data = load_carris_metropolitana_lines()
+    stops_data = load_carris_metropolitana_stops()
+    line_map = {
+        str(line.get("id") or line.get("short_name") or "").upper(): line
+        for line in lines_data
+    }
+    stop_map = {str(stop.get("id") or ""): stop for stop in stops_data}
+    freshness_note = _build_vehicle_freshness_note(include_missing_coordinates=not normalized_line_id)
+    updated_at = datetime.now().strftime("%H:%M")
 
-    if line_id:
-        for i, bus in enumerate(buses[:15], 1):
+    if normalized_line_id:
+        line_info = line_map.get(normalized_line_id, {})
+        route_name = line_info.get("long_name") or "route terminals not available in the live feed"
+        response = f"### 🚌 **Carris Metropolitana Line {normalized_line_id} - Live Buses**\n\n"
+        response += f"**Short answer:** I found **{len(buses)} active bus{'es' if len(buses) != 1 else ''}** currently reported on line **{normalized_line_id}**.\n\n"
+        response += "**Current snapshot**\n"
+        response += f"    - 🧭 **Route:** {route_name}\n"
+        response += f"    - 📊 **Active buses:** {len(buses)}\n"
+        response += f"    - 🕐 **Updated:** {updated_at}\n"
+        if freshness_note:
+            response += f"    - {freshness_note.splitlines()[0]}\n"
+        response += "\n**Live vehicles**\n"
+
+        for bus in buses[:5]:
             lat = bus.get("lat", 0)
             lon = bus.get("lon", 0)
             speed = bus.get("speed", 0)
             bearing = bus.get("bearing", 0)
             status = bus.get("current_status", "UNKNOWN")
-            stop_id = bus.get("stop_id", "N/A")
+            stop_id = str(bus.get("stop_id") or "").strip()
+            stop_info = stop_map.get(stop_id, {}) if stop_id else {}
+            stop_name = stop_info.get("name") or "not reported by the live feed"
 
             status_emoji = {
                 "IN_TRANSIT_TO": "🚌➡️",
@@ -1861,32 +2003,36 @@ def get_bus_realtime_locations(line_id: Optional[str] = None) -> str:
             directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
             dir_idx = int((bearing + 22.5) % 360 / 45)
             direction = directions[dir_idx] if bearing else "?"
+            maps_link = f"https://www.google.com/maps/search/?api=1&query={lat:.5f}%2C{lon:.5f}"
+            vehicle_id = str(bus.get("id", "N/A"))[:20]
 
-            response += f"**{i}. Bus {bus.get('id', 'N/A')[:20]}**\n"
-            response += (
-                f"   {status_emoji} Status: {status.replace('_', ' ').title()}\n"
-            )
-            response += f"   📍 Position: ({lat:.5f}, {lon:.5f})\n"
-            response += f"   🧭 Direction: {direction} | Speed: {speed:.1f} km/h\n"
-            response += f"   🚏 Next stop ID: {stop_id}\n\n"
+            response += f"- **🚌 Bus {vehicle_id}**\n"
+            response += f"    - {status_emoji} **Status:** {status.replace('_', ' ').title()}\n"
+            response += f"    - 📍 **Live position:** [Open map]({maps_link})\n"
+            response += f"    - 🧭 **Direction:** {direction} · **Speed:** {speed:.1f} km/h\n"
+            response += f"    - 🚏 **Next stop:** {stop_name}\n"
+            response += "\n"
 
-        if len(buses) > 15:
-            response += f"... and {len(buses) - 15} more buses on this line.\n"
+        if len(buses) > 5:
+            response += f"... and {len(buses) - 5} more buses on this line.\n\n"
+
+        response += "💡 **Tip:** If you tell me your exact stop, I can narrow this to the most relevant vehicle and direction.\n"
     else:
         from collections import Counter
 
         line_counts = Counter(v.get("line_id", "Unknown") for v in buses)
 
-        response += "**Top 15 lines by active buses:**\n\n"
+        response = "### 🚌 **Carris Metropolitana Live Buses**\n\n"
+        response += f"    - 📊 **Active buses:** {len(buses)}\n"
+        response += f"    - 🕐 **Updated:** {updated_at}\n"
+        if freshness_note:
+            response += f"    - {freshness_note.splitlines()[0]}\n"
+        response += "\n**Top lines by active buses**\n"
         for line, count in line_counts.most_common(15):
-            response += f"   🚌 Line **{line}**: {count} buses\n"
+            response += f"- 🚌 **Line {line}:** {count} buses\n"
 
         response += f"\n... {len(line_counts)} lines total with active buses.\n"
-
-    response += "\n" + "-" * 40 + "\n"
-    response += (
-        "💡 Podes perguntar pela localização em tempo real de uma linha específica.\n"
-    )
+        response += "\n💡 **Tip:** Ask for a line number, stop, street, or GPS point for a narrower live view.\n"
 
     return _append_carris_scope_footer(response)
 
@@ -2198,6 +2344,17 @@ def find_bus_routes(
     route_options = find_common_routes(origin_stop_ids, dest_stop_ids)
 
     if route_options:
+        def _coord_suffix(stop: Dict[str, Any]) -> str:
+            """Return an internal coordinate suffix for downstream linkification."""
+            lat = stop.get("lat")
+            lon = stop.get("lon")
+            if lat is None or lon is None:
+                return ""
+            try:
+                return f" | coords: {float(lat):.6f},{float(lon):.6f}"
+            except (TypeError, ValueError):
+                return ""
+
         grouped_routes = {}
         for route in route_options:
             origin_stop = route.get("origin_stop", {})
@@ -2221,8 +2378,8 @@ def find_bus_routes(
             lines_str = ", ".join(sorted(group["lines"]))
 
             response += f"🚌 **Option {i}**\n"
-            response += f"   🚏 Board at: {origin_name}\n"
-            response += f"   🚏 Alight at: {dest_name}\n"
+            response += f"   🚏 Board at: {origin_name}{_coord_suffix(group['origin_stop'])}\n"
+            response += f"   🚏 Alight at: {dest_name}{_coord_suffix(group['dest_stop'])}\n"
             response += f"   🚍 Lines: **{lines_str}**\n"
             response += "\n"
 

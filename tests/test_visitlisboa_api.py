@@ -65,6 +65,41 @@ def test_search_cultural_events_filters_free_event_queries() -> None:
     assert "Paid Club Night" not in result
 
 
+def test_search_cultural_events_filters_confirmed_outdoor_events() -> None:
+    """Outdoor-event queries should not keep indoor events just because their address has a street."""
+    event_day = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    sample_events = [
+        {
+            "title": "Picnic Concert",
+            "category": "Music",
+            "full_description": "Blankets on the grass with live music.",
+            "venue_name": "Parque Eduardo VII",
+            "location": "Parque Eduardo VII, Lisboa",
+            "url": "https://example.com/picnic-concert",
+            "dates": [{"date": {"datetime_iso": event_day}}],
+        },
+        {
+            "title": "Indoor Theatre",
+            "category": "Theater Opera & Dance",
+            "full_description": "A theatre performance indoors.",
+            "venue_name": "Teatro Aberto",
+            "location": "Teatro Aberto, Rua Armando Cortez, Lisboa",
+            "url": "https://example.com/indoor-theatre",
+            "dates": [{"date": {"datetime_iso": event_day}}],
+        },
+    ]
+
+    with patch.object(visitlisboa_api, "_load_events_json", return_value=sample_events):
+        result = str(
+            visitlisboa_api.search_cultural_events.invoke(
+                {"query": "outdoor events", "date_filter": "tomorrow", "language": "en", "max_results": 5}
+            )
+        )
+
+    assert "Picnic Concert" in result
+    assert "Indoor Theatre" not in result
+
+
 def test_known_place_aliases_cover_diacritics_typos_and_abbreviations() -> None:
     """VisitLisboa place lookups should normalize common PT/EN aliases and typos."""
     assert visitlisboa_api._apply_known_place_lookup_alias("Mosteiro dos Jerónimos") == "Jerónimos Monastery"
@@ -84,6 +119,19 @@ def test_pt_visitlisboa_description_and_value_helpers_do_not_leak_raw_english() 
     assert visitlisboa_api._localize_place_value_text("Free with Lisboa Card", "pt") == "Gratuito com Lisboa Card"
     assert "with Lisboa Card" not in visitlisboa_api._localize_place_value_text("20% with Lisboa Card", "pt")
     assert visitlisboa_api._localize_place_category("Attractions", "pt") == "Atrações"
+
+
+def test_place_ticket_price_compaction_removes_scraper_scaffolding() -> None:
+    """VisitLisboa place prices should be compacted before truncation or rendering."""
+    raw = "link Children Free until (age): 3 Children (4-12): 4 € Adult: 8 € Family: 21 € Senior: 5 € Student: 5 €"
+
+    result = visitlisboa_api._compact_place_ticket_price_text(raw, language="en")
+
+    assert result.startswith("Children free until age 3")
+    assert "link Children" not in result
+    assert "; Adult: 8 €" in result
+    assert "; ;" not in result
+    assert "S..." not in result
 
 
 def test_generic_visitlisboa_location_becomes_maps_search_link() -> None:

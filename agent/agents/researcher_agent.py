@@ -937,6 +937,9 @@ class ResearcherAgent(BaseAgent):
     def _is_direct_event_lookup_query(user_message: str) -> bool:
         """Detects event-discovery queries that are safer to answer directly from tools."""
         query = (user_message or "").lower()
+        if any(term in query for term in ["history", "história", "historia", "culture", "cultura"]):
+            return False
+
         specific_lookup = _extract_specific_event_lookup_phrase(user_message)
         planning_terms = [
             "plan", "plano", "roteiro", "itinerary", "agenda",
@@ -1014,6 +1017,20 @@ class ResearcherAgent(BaseAgent):
         return None
 
     @staticmethod
+    def _is_outdoor_event_query(user_message: str) -> bool:
+        """Detects explicit outdoor-event discovery requests."""
+        normalized_query = unicodedata.normalize("NFKD", user_message or "")
+        normalized_query = normalized_query.encode("ascii", "ignore").decode("ascii").lower()
+        outdoor_terms = [
+            "outdoor", "outdoors", "open air", "open-air", "outside",
+            "ao ar livre", "ar livre", "exterior",
+        ]
+        event_terms = ["event", "events", "evento", "eventos", "festival", "concert", "concerto"]
+        return any(term in normalized_query for term in outdoor_terms) and any(
+            term in normalized_query for term in event_terms
+        )
+
+    @staticmethod
     def _extract_event_focus_query(user_message: str) -> Optional[str]:
         """Drops generic event phrasing so broad date-based event searches keep high recall."""
         specific_lookup = _extract_specific_event_lookup_phrase(user_message)
@@ -1053,6 +1070,7 @@ class ResearcherAgent(BaseAgent):
             "child", "miúdos", "miudos", "crianças", "criancas", "night",
             "nightlife", "evening", "noite", "food", "gastronomia",
             "sports", "desporto", "desportos", "market", "mercado", "fair", "feira",
+            "outdoor", "outdoors", "open air", "open-air", "outside", "ar livre",
         ]
         if not any(term in query for term in specific_interest_terms):
             return None
@@ -1067,6 +1085,7 @@ class ResearcherAgent(BaseAgent):
             "fim", "de", "semana", "local", "locais", "culture", "cultura", "cultural",
             "explore", "explorar", "lisbon", "lisboa", "temos", "there", "happening", "have",
             "algo", "interessante", "fazer", "para", "perto", "near", "around", "theres",
+            "are", "should", "bring", "umbrella", "weather", "rain", "chuva",
         }
         tokens = [token for token in re.findall(r"[a-zA-ZÀ-ÿ0-9]+", query) if len(token) >= 3]
         meaningful_tokens = [token for token in tokens if token not in generic_terms]
@@ -1170,6 +1189,14 @@ class ResearcherAgent(BaseAgent):
 
         has_place_hint = ResearcherAgent._infer_place_category_hint(user_message) is not None
         has_directional_lookup = any(marker in query for marker in directed_lookup_markers)
+        has_recommendation_lookup = bool(
+            re.search(
+                r"\b(?:best|top|recommended|recommend|suggest|suggested|good|melhores|principais|recomenda|sugere)\b",
+                query,
+            )
+            or re.search(r"\bwhat are\b.*\b(?:museums?|monuments?|restaurants?|hotels?|viewpoints?)\b", query)
+            or re.search(r"\bquais s(?:ã|a)o\b.*\b(?:museus|monumentos|restaurantes|hot[eé]is|miradouros)\b", query)
+        )
 
         if focus_query and any(marker in query for marker in [
             "where is", "where's", "onde fica", "onde é", "onde e", "tell me about", "what about", "more about",
@@ -1181,8 +1208,17 @@ class ResearcherAgent(BaseAgent):
 
         if has_place_hint and has_directional_lookup:
             return True
+        if has_place_hint and has_recommendation_lookup:
+            return True
 
         return False
+
+    @staticmethod
+    def _is_history_culture_query(user_message: str) -> bool:
+        """Detects history/culture questions that should use the dedicated grounded lookup path."""
+        normalized = unicodedata.normalize("NFKD", user_message or "")
+        normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+        return bool(re.search(r"\b(history|historical|historia|culture|cultura)\b", normalized))
 
     @staticmethod
     def _extract_near_location_name(user_message: str) -> Optional[str]:
@@ -1200,6 +1236,9 @@ class ResearcherAgent(BaseAgent):
             r"\bmais próximo de\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
             r"\bmais próximo do\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
             r"\bmais próximo da\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
+            r"\bmais próxima de\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
+            r"\bmais próxima do\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
+            r"\bmais próxima da\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
             r"\bperto de\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
             r"\bperto do\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
             r"\bperto da\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
@@ -1238,7 +1277,13 @@ class ResearcherAgent(BaseAgent):
             user_message,
         ) if structured_plan else self._extract_event_date_filter(user_message)
         category_hint = self._infer_event_category_hint(user_message)
-        broad_date_discovery = not structured_plan and bool(date_filter) and category_hint is None
+        outdoor_event_query = self._is_outdoor_event_query(user_message)
+        broad_date_discovery = (
+            not structured_plan
+            and bool(date_filter)
+            and category_hint is None
+            and not outdoor_event_query
+        )
         specific_lookup = None if structured_plan else _extract_specific_event_lookup_phrase(user_message)
         focus_query = self._normalize_structured_plan_text(structured_plan.get("subject")) if structured_plan else None
         extracted_focus_query = None if broad_date_discovery else self._extract_event_focus_query(user_message)
@@ -1247,6 +1292,8 @@ class ResearcherAgent(BaseAgent):
         elif not structured_plan and date_filter and not extracted_focus_query:
             specific_lookup = None
         focus_query = focus_query or specific_lookup or extracted_focus_query
+        if outdoor_event_query and not focus_query:
+            focus_query = "outdoor events"
 
         if date_filter:
             args["date_filter"] = date_filter
@@ -1492,10 +1539,10 @@ class ResearcherAgent(BaseAgent):
                 "Para essa janela, eu evitaria recomendar **museus interiores**, porque muitos fecham antes ou perto das 18:00. "
                 "A escolha mais segura é um **monumento exterior** em Belém.\n\n"
                 "- 🏛️ **Padrão dos Descobrimentos (exterior)**\n"
-                "  - 📝 **Porque faz sentido:** é visitável por fora sem depender de bilheteira aberta e mantém contexto histórico forte sobre os Descobrimentos portugueses.\n"
-                f"  - 📍 **Morada:** [Av. Brasília, Belém]({maps_url})\n"
-                "  - 🕐 **Janela recomendada:** 19:00-20:00, visita exterior.\n"
-                "  - 💡 **Nota prática:** se quiseres entrada interior noutro museu ou monumento, confirma primeiro o horário oficial do próprio dia.\n\n"
+                "    - 📝 **Porque faz sentido:** é visitável por fora sem depender de bilheteira aberta e mantém contexto histórico forte sobre os Descobrimentos portugueses.\n"
+                f"    - 📍 **Morada:** [Av. Brasília, Belém]({maps_url})\n"
+                "    - 🕐 **Janela recomendada:** 19:00-20:00, visita exterior.\n"
+                "    - 💡 **Nota prática:** se quiseres entrada interior noutro museu ou monumento, confirma primeiro o horário oficial do próprio dia.\n\n"
                 f"📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) | **Atualizado:** {timestamp}"
             )
         return (
@@ -1503,10 +1550,10 @@ class ResearcherAgent(BaseAgent):
             "For that time window, I would avoid recommending **indoor museums**, because many close before or around 18:00. "
             "The safest choice is an **outdoor monument** in Belém.\n\n"
             "- 🏛️ **Padrão dos Descobrimentos (outside)**\n"
-            "  - 📝 **Why it fits:** it can be visited from outside without relying on ticket-office hours and still gives strong historical context on Portuguese maritime expansion.\n"
-            f"  - 📍 **Address:** [Av. Brasília, Belém]({maps_url})\n"
-            "  - 🕐 **Recommended window:** 19:00-20:00, outside visit.\n"
-            "  - 💡 **Practical note:** if you want indoor entry somewhere else, confirm the official opening hours for that exact day first.\n\n"
+            "    - 📝 **Why it fits:** it can be visited from outside without relying on ticket-office hours and still gives strong historical context on Portuguese maritime expansion.\n"
+            f"    - 📍 **Address:** [Av. Brasília, Belém]({maps_url})\n"
+            "    - 🕐 **Recommended window:** 19:00-20:00, outside visit.\n"
+            "    - 💡 **Practical note:** if you want indoor entry somewhere else, confirm the official opening hours for that exact day first.\n\n"
             f"📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places) | **Updated:** {timestamp}"
         )
 
@@ -1732,13 +1779,29 @@ class ResearcherAgent(BaseAgent):
         if any(keyword in message_lower for keyword in history_keywords):
             tool = self._get_tool_by_name("search_history_culture")
             if tool:
-                return str(
+                subject = self._extract_history_culture_subject(user_message) or user_message
+                raw_history = str(
                     self._invoke_tool(
                         tool,
-                        {"query": user_message, "language": language},
+                        {"query": subject, "language": language},
                         tool_name="search_history_culture",
                     )
                 )
+                compact_history = self._compact_history_result(raw_history, language, subject)
+                if compact_history:
+                    has_external_source = bool(
+                        re.search(r"https?://", raw_history, flags=re.IGNORECASE)
+                    )
+                    if language == "pt":
+                        heading = f"### 📚 Contexto histórico: {subject}"
+                        source = "📌 **Fonte:** [*Wikipedia/Web*](https://www.wikipedia.org/)"
+                    else:
+                        heading = f"### 📚 Historical Context: {subject}"
+                        source = "📌 **Source:** [*Wikipedia/Web*](https://www.wikipedia.org/)"
+                    if has_external_source:
+                        return f"{heading}\n\n{compact_history}\n\n{source}"
+                    return f"{heading}\n\n{compact_history}"
+                return raw_history
 
         if any(keyword in message_lower for keyword in event_keywords):
             return self._run_direct_event_lookup(user_message, language)
@@ -1833,6 +1896,60 @@ class ResearcherAgent(BaseAgent):
             return f"\U0001F4CC **Fonte:** [*Lisboa Aberta*](https://dados.cm-lisboa.pt/) | **Atualizado:** {timestamp}"
         return f"\U0001F4CC **Source:** [*Lisboa Aberta*](https://dados.cm-lisboa.pt/) | **Updated:** {timestamp}"
 
+    @classmethod
+    def _is_event_category_query(cls, user_message: str) -> bool:
+        """Return whether the user is asking for event categories, not event instances."""
+        normalized = cls._normalize_for_deterministic_routing(user_message)
+        return bool(
+            re.search(
+                r"\b(?:what kinds?|types?|categories?|which kinds?)\b.*\bevents?\b",
+                normalized,
+            )
+            or re.search(r"\bevents?\b.*\b(?:can i look for|can i find|available categories|categories)\b", normalized)
+        )
+
+    @classmethod
+    def _is_place_category_query(cls, user_message: str) -> bool:
+        """Return whether the user is asking for place categories, not place cards."""
+        normalized = cls._normalize_for_deterministic_routing(user_message)
+        return bool(
+            re.search(
+                r"\b(?:what kinds?|types?|categories?|which kinds?)\b.*\b(?:places?|locais|attractions?)\b",
+                normalized,
+            )
+            or re.search(
+                r"\b(?:places?|locais|attractions?)\b.*\b(?:can i explore|can i visit|available categories|categories)\b",
+                normalized,
+            )
+        )
+
+    @classmethod
+    def _is_service_category_query(cls, user_message: str) -> bool:
+        """Return whether the user is asking to browse public-service categories."""
+        normalized = cls._normalize_for_deterministic_routing(user_message)
+        return bool(
+            re.search(r"\b(?:what kinds?|types?|categories?)\b.*\b(?:public )?services?\b", normalized)
+            or re.search(r"\b(?:public )?services?\b.*\b(?:can you help me find|available categories|categories)\b", normalized)
+        )
+
+    def _run_category_lookup(self, user_message: str, language: str) -> Optional[str]:
+        """Runs deterministic category lookups for broad browse-intent queries."""
+        category_specs = [
+            (self._is_event_category_query, "get_event_categories", lambda _result, lang: self._build_events_source_line(lang)),
+            (self._is_place_category_query, "get_place_categories", self._build_places_source_line),
+            (self._is_service_category_query, "list_service_categories", lambda _result, lang: self._build_open_data_services_source_line(lang)),
+        ]
+        for detector, tool_name, source_builder in category_specs:
+            if not detector(user_message):
+                continue
+            tool = self._get_tool_by_name(tool_name)
+            if not tool:
+                return None
+            result = str(self._invoke_tool(tool, {}, tool_name=tool_name)).strip()
+            source_line = source_builder(result, language)
+            return f"{result}\n\n{source_line}".strip()
+        return None
+
     @staticmethod
     def _build_tool_call(name: str, args: dict) -> AIMessage:
         """Creates a deterministic tool call message for the subgraph."""
@@ -1849,12 +1966,84 @@ class ResearcherAgent(BaseAgent):
         )
 
     @staticmethod
+    def _normalize_for_deterministic_routing(user_message: str) -> str:
+        """Normalize user text for accent-insensitive deterministic routing checks."""
+        normalized = unicodedata.normalize("NFKD", user_message or "")
+        normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+        return re.sub(r"\s+", " ", normalized).strip()
+
+    @classmethod
+    def _extract_history_culture_subject(cls, user_message: str) -> str:
+        """Extract the likely subject from a history/culture lookup query."""
+        query = (user_message or "").strip()
+        normalized = cls._normalize_for_deterministic_routing(query)
+        subject = query
+        subject_patterns = [
+            r"^.*?\bhistory\s+(?:of|about)\s+",
+            r"^.*?\bhistorical\s+(?:facts\s+)?(?:about|on)\s+",
+            r"^.*?\bhistoria\s+(?:de|do|da|dos|das|sobre)\s+",
+            r"^.*?\bcultura\s+(?:de|do|da|dos|das|sobre)\s+",
+            r"^.*?\bculture\s+(?:of|about)\s+",
+        ]
+        for pattern in subject_patterns:
+            match = re.search(pattern, normalized)
+            if match:
+                subject = query[match.end():]
+                break
+        return subject.strip(" .?!") or query
+
+    @staticmethod
     def _build_language_instruction(language: str) -> str:
         """Builds a compact language instruction for subgraph LLM steps."""
         return (
             "Respond ENTIRELY in Portuguese (PT-PT)."
             if language == "pt"
             else "Respond ENTIRELY in English."
+        )
+
+    @staticmethod
+    def _is_auto_category_tool_result(messages: list) -> bool:
+        """Return whether the latest ToolMessage is a deterministic category lookup."""
+        if len(messages) < 2 or not isinstance(messages[-1], ToolMessage):
+            return False
+        latest_tool_name = str(getattr(messages[-1], "name", "") or "")
+        if latest_tool_name in {"get_event_categories", "get_place_categories", "list_service_categories"}:
+            return True
+        previous_message = messages[-2]
+        if not isinstance(previous_message, AIMessage) or not getattr(previous_message, "tool_calls", None):
+            return False
+        tool_call = previous_message.tool_calls[0]
+        tool_call_id = str(tool_call.get("id") or "")
+        tool_name = str(tool_call.get("name") or "")
+        return tool_call_id.startswith("auto_") and tool_name in {
+            "get_event_categories",
+            "get_place_categories",
+            "list_service_categories",
+        }
+
+    def _finalize_auto_category_tool_result(
+        self,
+        messages: list,
+        user_message: str,
+        language: str,
+    ) -> str:
+        """Finalize deterministic category results without allowing a second free-form lookup."""
+        previous_message = messages[-2]
+        tool_name = str(getattr(messages[-1], "name", "") or "")
+        if not tool_name and isinstance(previous_message, AIMessage) and getattr(previous_message, "tool_calls", None):
+            tool_name = str(previous_message.tool_calls[0].get("name") or "")
+        result = str(messages[-1].content or "").strip()
+        if tool_name == "get_event_categories":
+            result = f"{result}\n\n{self._build_events_source_line(language)}"
+        elif tool_name == "get_place_categories":
+            result = f"{result}\n\n{self._build_places_source_line(result, language)}"
+        elif tool_name == "list_service_categories":
+            result = f"{result}\n\n{self._build_open_data_services_source_line(language)}"
+        return finalize_worker_response(
+            result,
+            agent_name="researcher",
+            user_query=user_message,
+            language=language,
         )
 
     def _ensure_subgraph_messages(self, messages: list, language: str) -> list:
@@ -1881,10 +2070,15 @@ class ResearcherAgent(BaseAgent):
         """Routes obvious researcher queries to their canonical tool in the subgraph."""
         query = user_message.strip()
         query_lower = query.lower()
+        normalized_query = cls._normalize_for_deterministic_routing(query)
 
-        if "search the web for the history of" in query_lower:
-            subject = re.sub(r"^.*history of\s+", "", query, flags=re.IGNORECASE).strip(" .?!")
-            return cls._build_tool_call("search_history_culture", {"query": subject or query, "language": "en"})
+        if "lisboa card" in normalized_query or "lisbon card" in normalized_query:
+            return cls._build_tool_call("search_lisbon_knowledge", {"query": query, "max_results": 5})
+
+        if re.search(r"\b(history|historical|historia|culture|cultura)\b", normalized_query):
+            subject = cls._extract_history_culture_subject(query)
+            language = infer_response_language(user_query=query, default="en")
+            return cls._build_tool_call("search_history_culture", {"query": subject, "language": language})
 
         if "service categories" in query_lower or (
             re.search(r"\b(public services?|servi[cç]os p[úu]blicos)\b", query_lower)
@@ -2009,6 +2203,18 @@ class ResearcherAgent(BaseAgent):
             ))
 
         if not is_greeting:
+            category_response = self._run_category_lookup(user_message, language)
+            if category_response:
+                if verbose:
+                    print("      [RESEARCHER] Using deterministic category lookup...")
+                return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
+                    category_response,
+                    agent_name="researcher",
+                    user_query=user_message,
+                    language=language,
+                ))
+
+        if not is_greeting:
             after_hours_response = self._maybe_answer_after_hours_culture_query(user_message, language)
             if after_hours_response:
                 if verbose:
@@ -2069,6 +2275,18 @@ class ResearcherAgent(BaseAgent):
                     user_query=user_message,
                     language=language,
                 ))
+
+        if not is_greeting and self._is_history_culture_query(user_message):
+            if verbose:
+                print("      [RESEARCHER] Using deterministic history/culture lookup...")
+
+            response = self._run_direct_tool_fallback(user_message, language)
+            return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
+                response,
+                agent_name="researcher",
+                user_query=user_message,
+                language=language,
+            ))
 
         if not is_greeting and self._is_direct_event_lookup_query(user_message) and not self._is_mixed_event_place_query(user_message):
             if verbose:
@@ -2162,6 +2380,14 @@ class ResearcherAgent(BaseAgent):
 
             last_message = messages[-1] if messages else None
             if isinstance(last_message, ToolMessage):
+                if self._is_auto_category_tool_result(messages):
+                    finalized_response = self._finalize_auto_category_tool_result(
+                        messages,
+                        user_message or "",
+                        language,
+                    )
+                    return {"messages": [AIMessage(content=finalized_response)]}
+
                 response = self._safe_llm_invoke(
                     self.llm_with_tools,
                     self._ensure_subgraph_messages(messages, language),

@@ -1424,8 +1424,7 @@ def carris_get_stops(query: str = "", limit: Optional[int] = None) -> str:
                 response += f"   GPS: {row['stop_lat']:.5f}, {row['stop_lon']:.5f}\n"
             response += "\n"
 
-        response += f"A mostrar {len(rows)} paragens\n"
-        response += "Usa o ID da paragem com carris_get_arrivals para ver chegadas em tempo real.\n"
+        response += f"A mostrar {len(rows)} paragens.\n"
         return response
 
     except Exception as e:
@@ -1482,6 +1481,27 @@ def carris_get_routes(route_type: str = "", route_id: str = "", limit: int = 50)
         if not rows:
             filter_msg = f" (tipo: {route_type})" if route_type else ""
             return f"Nenhuma rota Carris encontrada{filter_msg}"
+
+        if route_id:
+            variants = []
+            route_short_names = []
+            for route in rows:
+                short_name = route["route_short_name"]
+                long_name = route["route_long_name"] or "Sem designação na fonte"
+                if short_name not in route_short_names:
+                    route_short_names.append(short_name)
+                if long_name not in variants:
+                    variants.append(long_name)
+
+            title_route = ", ".join(route_short_names) or route_id
+            response = f"🚋 Carris Urban Route {title_route}\n\n"
+            response += "- **Operator:** Carris Urban\n"
+            response += "- **Route variants in GTFS:**\n"
+            for variant in variants[:6]:
+                response += f"    - {variant}\n"
+            if len(variants) > 6:
+                response += f"    - ... and {len(variants) - 6} more variants\n"
+            return response.strip()
 
         trams = [r for r in rows if r["route_short_name"].endswith("E")]
         buses = [r for r in rows if not r["route_short_name"].endswith("E")]
@@ -1541,7 +1561,7 @@ def carris_get_arrivals(stop_id: str, limit: int = 10) -> str:
 
         if not stop_row:
             conn.close()
-            return f"Paragem '{stop_id}' não encontrada. Usa carris_get_stops para pesquisar."
+            return f"Paragem '{stop_id}' não encontrada."
 
         stop_name = stop_row["stop_name"]
         conn.close()
@@ -1824,7 +1844,6 @@ def carris_find_routes_between(
         if ambiguity_note:
             response += f"{ambiguity_note}\n\n"
 
-        response += "Resolving locations...\n"
 
         origin_lat, origin_lon, origin_name = geocode_location(origin)
         dest_lat, dest_lon, dest_name = geocode_location(destination)

@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from agent.agents.qa_agent import QualityAssuranceAgent
 from agent.agents.researcher_agent import ResearcherAgent
 from agent.agents.transport_agent import TransportAgent
+from agent.agents.weather_agent import WeatherAgent
 from agent.graph import MultiAgentAssistant
 from agent.utils.langsmith_tracing import get_langsmith_request_tracking_status
 from agent.utils.response_formatter import (
@@ -37,6 +38,12 @@ def test_infer_response_language_keeps_short_pt_transport_overview_query_in_pt()
         user_query="Dá-me o ponto de situação do Metro, autocarros e comboios em Lisboa.",
         default="en",
     ) == "pt"
+
+
+def test_weather_wind_today_query_uses_current_summary_path() -> None:
+    """Wind-only current weather prompts should use grounded current IPMA data, not free-form synthesis."""
+    assert WeatherAgent._is_current_weather_query("Como está o vento hoje?") is True
+    assert WeatherAgent._is_current_weather_query("How is the wind right now?") is True
 
 
 def test_nearest_service_query_is_not_treated_as_pagination() -> None:
@@ -78,8 +85,8 @@ def test_transport_one_space_child_bullets_are_nested_for_streamlit() -> None:
 
     output = final_visual_pass(raw)
 
-    assert "\n  - 🕐 **Próximas partidas:**" in output
-    assert "\n  - ⏱️ **Tempo estimado de viagem:**" in output
+    assert "\n    - 🕐 **Próximas partidas:**" in output
+    assert "\n    - ⏱️ **Tempo estimado de viagem:**" in output
 
 
 def test_metro_route_steps_do_not_keep_google_maps_links() -> None:
@@ -113,8 +120,8 @@ def test_malformed_service_heading_bullets_are_repaired() -> None:
 
     assert "### -" not in output
     assert "### ###" not in output
-    assert "\n- 💊 **Farmácia Dalva**\n  - 📍 **Morada:**" in output
-    assert "\n  - 📏 **Distância:** 0.07 km" in output
+    assert "\n- 💊 **Farmácia Dalva**\n    - 📍 **Morada:**" in output
+    assert "\n    - 📏 **Distância:** 0.07 km" in output
 
 
 def test_event_card_date_and_duration_stay_aligned_with_address() -> None:
@@ -299,6 +306,70 @@ def test_after_hours_culture_recommendation_avoids_closed_indoor_museums() -> No
     assert "17:30" not in response
 
 
+def test_after_hours_culture_recommendation_bypasses_planner_rewrite() -> None:
+    """Grounded single-answer researcher shortcuts should not be rewritten as itineraries."""
+    response = ResearcherAgent._maybe_answer_after_hours_culture_query(
+        "Qual museu ou monumento recomendas ir neste domingo sendo que apenas tenho das 19 às 20h para visitar?",
+        "pt",
+    )
+
+    assert response is not None
+    assert MultiAgentAssistant._should_preserve_direct_researcher_answer(
+        {"researcher": response}
+    ) is True
+    assert MultiAgentAssistant._should_preserve_direct_researcher_answer(
+        {"researcher": response, "transport": "Metro route"}
+    ) is False
+
+
+def test_final_visual_pass_removes_empty_tip_labels_and_pt_missing_values() -> None:
+    """Final rendering should omit empty tips and PT missing-value field rows."""
+    raw = (
+        "### 🏛️ Recomendação\n\n"
+        "- Nota prática:\n"
+        "- 🕒 **Horário de funcionamento:** Deve ser verificado no website oficial\n"
+        "- 💰 **Preço:** Não indicado na base de dados\n"
+        "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais)"
+    )
+
+    output = final_visual_pass(raw)
+
+    assert "Nota prática" not in output
+    assert "Deve ser verificado" not in output
+    assert "VisitLisboa Locais" in output
+
+
+def test_final_visual_pass_repairs_detached_transport_delayed_metric() -> None:
+    """QA-repaired CP status rows should not leave warning metrics as standalone paragraphs."""
+    raw = """### 🚆 **CP Trains - Lisbon Metropolitan Area (AML)**
+
+**Current situation**
+- 📊 **Tracked suburban trains:** 32
+- ✅ **Shown without delay:** 11
+
+⚠️ **Delayed:** 21
+
+📌 **Source:** [*CP*](https://www.cp.pt) | **Updated:** 20:55"""
+
+    output = final_visual_pass(raw)
+
+    assert "\n- ⚠️ **Delayed:** 21" in output
+    assert "\n\n⚠️ **Delayed:**" not in output
+
+
+def test_pt_local_information_values_localizes_event_date_fragments() -> None:
+    """PT event metadata should not keep English month abbreviations or date-count text."""
+    raw = "- 📅 **Data/Hora:** 09 May | 16 May | (+49 more dates)"
+
+    output = localize_local_information_values(raw, language="pt")
+
+    assert "09 Mai" in output
+    assert "16 Mai" in output
+    assert "+49 datas adicionais" in output
+    assert "May" not in output
+    assert "more dates" not in output
+
+
 def test_final_visual_pass_strips_internal_qa_annotations_and_pt_technical_terms() -> None:
     """Final rendering must remove QA leakage and localize recurring English technical words in PT responses."""
     raw = (
@@ -350,7 +421,7 @@ def test_final_visual_pass_removes_invalid_links_and_keeps_single_footer_last() 
     output = final_visual_pass(raw)
 
     assert "[Bilhetes](Não disponível)" not in output
-    assert "**Bilhetes:** Não disponível" in output
+    assert "**Bilhetes:** Não disponível" not in output
     assert "QA validation" not in output
     assert output.count("📌 **Fonte:**") == 1
     assert output.rstrip().endswith("[*VisitLisboa*](https://www.visitlisboa.com)")
@@ -569,10 +640,10 @@ def test_final_visual_pass_normalizes_quick_action_weather_summary_layout() -> N
     assert "- ✅ Sem avisos meteorológicos ativos para Lisboa.\n- 🌤️ As condições meteorológicas são normais." in output
     assert "As condições meteorológicas são normais.\n\n**🌤️ Previsão do Tempo para Lisboa**" in output
     assert "- **⛈️ Quarta-feira, Abr 29**" in output
-    assert "\n  - 🌡️ 13.7°C a 18.7°C" in output
-    assert "\n  - 🌤️ *Showers and thunderstorms*" in output
-    assert "\n  - 💧 **Chuva**: muito provável (100.0%) | intensidade: forte" in output
-    assert "\n  - 💨 **Vento**: Sudoeste (moderado)\n\n---" in output
+    assert "\n    - 🌡️ 13.7°C a 18.7°C" in output
+    assert "\n    - 🌤️ *Showers and thunderstorms*" in output
+    assert "\n    - 💧 **Chuva**: muito provável (100.0%) | intensidade: forte" in output
+    assert "\n    - 💨 **Vento**: Sudoeste (moderado)\n\n---" in output
     assert "\n - 🌡️" not in output
 
 
@@ -626,9 +697,9 @@ def test_multiagent_finalize_chat_response_reapplies_weather_structure_at_the_en
         )
 
     assert "- **☀️ Sábado, Abr 18**" in output
-    assert "  - 🌡️ 13.1°C a 28.2°C" in output
-    assert "  - 🌤️ Parcialmente nublado" in output
-    assert "📌 **Fonte:** Dados do [*IPMA*](https://www.ipma.pt) | **Atualizado:**" in output
+    assert "    - 🌡️ 13.1°C a 28.2°C" in output
+    assert "    - 🌤️ Parcialmente nublado" in output
+    assert "📌 **Fonte:** [*IPMA*](https://www.ipma.pt) | **Atualizado:**" in output
 
 
 def test_multiagent_finalize_chat_response_rehydrates_event_metadata_from_deterministic_lookup() -> None:
@@ -1137,7 +1208,8 @@ def test_researcher_worker_keeps_lisboa_card_and_price_fields_out_of_place_descr
     assert "### 🏛️ Museum of Lisbon – Pimenta Palace" in output
     assert "- 🎫 **Lisboa Card:**" not in output
     assert "- 📝 **Descrição:** Discover the various lives of the city of Lisbon, from the Roman age onwards." in output
-    assert "- 💰 **Preço:** Children Free until (age): 12 Adult: 3 €; Gratuito com Lisboa Card" in output
+    assert "Children Free until (age)" not in output
+    assert "- 💰 **Preço:** Children free until age 12; Adult: 3 €; Gratuito com Lisboa Card" in output
     assert "- 📝 **Descrição:** Free with Lisboa Card" not in output
     assert "+ info" not in output
 
@@ -1195,7 +1267,7 @@ def test_researcher_worker_replaces_invalid_ticket_placeholder_with_source_note(
         language="pt",
     )
 
-    assert "- 🎟️ **Bilhetes:** Não disponível" in output
+    assert "Bilhetes" not in output
     assert "[Bilhetes]([Bilhetes](Bilhetes: indisponíveis))" not in output
     assert "[Bilhetes](Não disponível)" not in output
 
