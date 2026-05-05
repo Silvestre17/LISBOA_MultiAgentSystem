@@ -32,11 +32,11 @@ def test_final_visual_pass_indents_weather_conditions_and_tips() -> None:
 💡 **Dicas Práticas**
 Leva guarda-chuva.
 
-📌 **Fonte:** Dados do [*IPMA*](https://www.ipma.pt) | **Atualizado:** 17:54"""
+📌 **Fonte:** [*IPMA*](https://www.ipma.pt) | **Atualizado:** 17:54"""
 
     output = final_visual_pass(raw)
 
-    assert "  - ☁️ **Condições**: Aguaceiros/fraca chuva" in output
+    assert "    - ☁️ **Condições**: Aguaceiros/fraca chuva" in output
     assert "\n\n💡 **Dicas Práticas**\n" in output
 
 
@@ -76,8 +76,23 @@ def test_final_visual_pass_nests_transport_option_fields() -> None:
     output = final_visual_pass(raw)
 
     assert "- 🚌 **Linha 723** — para Algés" in output
-    assert "  - 🕐 **Próximas partidas:** 19:45, 19:59" in output
-    assert "  - ⏱️ **Tempo estimado de viagem:** ~31 min" in output
+    assert "    - 🕐 **Próximas partidas:** 19:45, 19:59" in output
+    assert "    - ⏱️ **Tempo estimado de viagem:** ~31 min" in output
+
+
+def test_final_visual_pass_normalizes_two_space_nested_bullets_for_streamlit() -> None:
+    """Two-space child bullets should be upgraded before Streamlit rendering."""
+    raw = """- 🚍 **Linha 1501**
+    - 📍 **Terminals:** Reboleira
+    - 🚏 **Route:** Oeiras → Amadora
+
+📌 **Source:** [*Carris Metropolitana*](https://www.carrismetropolitana.pt) | **Updated:** 20:00"""
+
+    output = final_visual_pass(raw)
+
+    assert "\n    - 📍 **Terminals:** Reboleira" in output
+    assert "\n    - 🚏 **Route:** Oeiras → Amadora" in output
+    assert "\n  - 📍" not in output
 
 
 def test_final_visual_pass_separates_transport_comparison_fields() -> None:

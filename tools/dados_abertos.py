@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import time
+import unicodedata
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -49,6 +50,56 @@ MAX_RETRIES = 3
 BACKOFF_FACTOR = 2
 TRANSIENT_DATASET_UNAVAILABLE_TTL_SECONDS = 15 * 60
 _UNAVAILABLE_DATASET_URLS: Dict[str, Dict[str, Any] | str] = {}
+
+_KNOWN_REFERENCE_COORDINATES: Dict[str, Tuple[float, float]] = {
+    "rossio": (38.7139, -9.1394),
+    "praca dom pedro iv": (38.7139, -9.1394),
+    "praça dom pedro iv": (38.7139, -9.1394),
+    "marques de pombal": (38.7257, -9.1490),
+    "marquês de pombal": (38.7257, -9.1490),
+    "belem": (38.6975, -9.2063),
+    "belém": (38.6975, -9.2063),
+    "oriente": (38.7688, -9.0988),
+    "rato": (38.7168, -9.1527),
+    "saldanha": (38.7351, -9.1457),
+    "baixa chiado": (38.7106, -9.1401),
+    "baixa-chiado": (38.7106, -9.1401),
+}
+
+
+def _normalize_reference_location_name(location_name: str) -> str:
+    """Normalize a reference place name for deterministic coordinate lookup."""
+    normalized = unicodedata.normalize("NFKD", str(location_name or ""))
+    normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+    return " ".join(normalized.replace("-", " ").split())
+
+
+def _resolve_reference_coordinates(location_name: str) -> Optional[Tuple[float, float]]:
+    """Resolve a named Lisbon reference point without using service datasets.
+
+    Open-data service datasets are useful for finding the target services, but
+    they are a poor geocoder for landmarks such as Rossio because the first
+    matching service record may be kilometres away. This helper keeps common
+    central anchors deterministic and then falls back to the shared location
+    resolver before using the older service-data lookup.
+    """
+    key = _normalize_reference_location_name(location_name)
+    if not key:
+        return None
+
+    if key in _KNOWN_REFERENCE_COORDINATES:
+        return _KNOWN_REFERENCE_COORDINATES[key]
+
+    try:
+        from tools.location_resolver import geocode_location_name
+
+        resolved = geocode_location_name(location_name, prefer_city=True, allow_aml=True)
+        if resolved and resolved.get("lat") is not None and resolved.get("lon") is not None:
+            return float(resolved["lat"]), float(resolved["lon"])
+    except Exception as exc:
+        logger.info("Shared geocoder could not resolve '%s': %s", location_name, exc)
+
+    return None
 
 
 def _get_unavailable_dataset_reason(url: str) -> Optional[str]:
@@ -576,6 +627,12 @@ def find_nearby_services(
         return "❌ Error: Metadata not loaded. Check if lisbon_datasets_clean.json exists."
 
     # Geocoding Logic: Resolve location name if coordinates missing
+    if near_location_name and (user_lat is None or user_lon is None):
+        resolved_reference = _resolve_reference_coordinates(near_location_name)
+        if resolved_reference:
+            user_lat, user_lon = resolved_reference
+            logger.info("Resolved '%s' to (%s, %s)", near_location_name, user_lat, user_lon)
+
     if near_location_name and (user_lat is None or user_lon is None):
         logger.info(f"Geocoding '{near_location_name}' via Open Data...")
         places = _search_places_raw(near_location_name, max_results=1)

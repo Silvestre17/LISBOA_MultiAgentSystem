@@ -219,7 +219,7 @@ def test_weather_worker_finalization_localizes_summary_labels_for_pt() -> None:
 
     assert "Resumo Meteorológico de Lisboa" in output
     assert "- **📅 Hoje (2026-03-10)**" in output
-    assert "  - 🌡️ **Temperatura**: 8.4°C a 15.5°C" in output
+    assert "    - 🌡️ **Temperatura**: 8.4°C a 15.5°C" in output
     assert "Períodos de céu limpo" in output
     assert "Probabilidade de chuva" in output
     assert "- ✅ Sem avisos meteorológicos ativos." in output
@@ -411,7 +411,34 @@ def test_supervisor_planning_query_forces_research_transport_and_weather_when_ne
             language="pt",
         )
 
-        assert decision["agents"] == ["planner", "researcher", "transport", "weather"]
+    assert decision["agents"] == ["planner", "researcher", "transport", "weather"]
+
+
+def test_multiagent_planner_not_blocked_by_missing_route_or_hours_caveats() -> None:
+    """Planner synthesis should absorb missing route/hour details as caveats instead of falling back to worker dumps."""
+    qa_result = {
+        "critical_issues": [
+            "Missing exact address for one museum",
+            "Route details could not be resolved for one leg",
+            "Opening hours not confirmed for tomorrow",
+        ],
+        "fact_check": {
+            "critical_issues": [
+                "Transport details not verified for one transfer",
+                "Some URLs reference unverified domains: www.google.com",
+                "Carris bus route numbers and schedules should be confirmed at carris.pt",
+            ]
+        },
+    }
+
+    assert MultiAgentAssistant._should_block_planner_publication(qa_result) is False
+
+
+def test_multiagent_planner_still_blocked_by_factual_hallucination() -> None:
+    """Planner publication should still be blocked for factual hallucinations."""
+    qa_result = {"critical_issues": ["Draft invents an unsupported venue outside the gathered evidence"]}
+
+    assert MultiAgentAssistant._should_block_planner_publication(qa_result) is True
 
 
 def test_researcher_worker_finalization_uses_places_source_label_en() -> None:
@@ -448,6 +475,27 @@ def test_researcher_worker_finalization_uses_events_source_label_pt() -> None:
         user_query="Eventos hoje em Lisboa",
     )
 
+    assert "[*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos)" in output
+
+
+def test_researcher_worker_finalization_uses_mixed_visitlisboa_sources_pt() -> None:
+    """Mixed place and event answers should cite both VisitLisboa sections."""
+    raw = """### 🏛️ Museu do Aljube
+- 🌐 [Mais detalhes](https://www.visitlisboa.com/en/places/museum-of-aljube-resistance-and-freedom)
+
+### 🎭 Morabeza LX
+- 🌐 [Mais detalhes](https://www.visitlisboa.com/en/events/morabeza-lx)
+
+📌 **Fonte:** [*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos)"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="researcher",
+        user_query="Quais são os museus gratuitos este fim de semana em Lisboa e algum evento interessante igualmente gratuito?",
+        language="pt",
+    )
+
+    assert "[*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais)" in output
     assert "[*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos)" in output
 
 
@@ -2613,6 +2661,68 @@ def test_weather_forecast_query_uses_direct_tool_path_with_requested_days() -> N
         assert "**Atualizado:** 15:22" in output
 
 
+def test_weather_portugal_overview_query_uses_country_tool() -> None:
+    """Country-level weather requests should not collapse to a Lisbon-only current summary."""
+    with patch.object(WeatherAgent, "__init__", lambda self: None):
+        agent = WeatherAgent()
+        agent.system_prompt = "PRIMARY WEATHER PROMPT"
+
+        overview_tool = MagicMock()
+        overview_tool.name = "get_portugal_weather_overview"
+        overview_tool.invoke = MagicMock(
+            return_value="🇵🇹 Portugal Weather Overview - Today\n\n📍 Lisbon: light rain\n📍 Porto: clear"
+        )
+
+        current_tool = MagicMock()
+        current_tool.name = "get_current_weather_summary"
+        current_tool.invoke = MagicMock(side_effect=AssertionError("Lisbon-only summary should be skipped"))
+
+        agent.tools = [overview_tool, current_tool]
+        agent.execute_react_loop = MagicMock(side_effect=AssertionError("LLM path should be skipped"))
+
+        output = agent.invoke("Give me a Portugal-wide weather overview for today.")
+
+        overview_tool.invoke.assert_called_once_with({"day": 0})
+        current_tool.invoke.assert_not_called()
+        assert "Portugal Weather Overview" in output
+        assert "Porto" in output
+
+
+def test_weather_specific_unsupported_city_does_not_use_lisbon_summary() -> None:
+    """City-specific weather outside Lisbon should not be answered with Lisbon forecast data."""
+    with patch.object(WeatherAgent, "__init__", lambda self: None):
+        agent = WeatherAgent()
+        agent.system_prompt = "PRIMARY WEATHER PROMPT"
+
+        current_tool = MagicMock()
+        current_tool.name = "get_current_weather_summary"
+        current_tool.invoke = MagicMock(side_effect=AssertionError("Lisbon summary should be skipped"))
+
+        agent.tools = [current_tool]
+        agent.execute_react_loop = MagicMock(side_effect=AssertionError("LLM path should be skipped"))
+
+        output = agent.invoke("What's the weather in Porto?")
+
+        current_tool.invoke.assert_not_called()
+        assert "Porto" in output
+        assert "Lisbon" in output
+        assert "check IPMA directly" in output
+
+
+def test_weather_activity_advice_query_does_not_use_simple_forecast_shortcut() -> None:
+    """Safety/advice weather questions should keep the synthesis path instead of dumping raw forecast."""
+    with patch.object(WeatherAgent, "__init__", lambda self: None):
+        agent = WeatherAgent()
+        agent.system_prompt = "PRIMARY WEATHER PROMPT"
+        agent.tools = []
+        agent.execute_react_loop = MagicMock(return_value="Sailing is possible only if official sea warnings stay clear.")
+
+        output = agent.invoke("Is it safe to go sailing in Lisbon tomorrow?")
+
+        agent.execute_react_loop.assert_called_once()
+        assert "Sailing is possible" in output
+
+
 def test_weather_beyond_horizon_query_returns_limit_message_without_tool_calls_in_en() -> None:
     """Queries that clearly exceed IPMA's forecast horizon should return a limit message instead of a fake 7-day forecast."""
     with patch.object(WeatherAgent, "__init__", lambda self: None):
@@ -2662,6 +2772,48 @@ def test_weather_beyond_horizon_query_returns_limit_message_without_tool_calls_i
         forecast_tool.invoke.assert_not_called()
         assert "5 dias" in output.lower()
         assert "não consigo confirmar" in output.lower() or "nao consigo confirmar" in output.lower()
+        assert "IPMA" in output
+
+
+def test_weather_climate_average_query_returns_capability_limit_without_tools_in_pt() -> None:
+    """Climate-average questions should not be answered as if weather tools had climatology data."""
+    with patch.object(WeatherAgent, "__init__", lambda self: None):
+        agent = WeatherAgent()
+        agent.system_prompt = "PRIMARY WEATHER PROMPT"
+
+        forecast_tool = MagicMock()
+        forecast_tool.name = "get_weather_forecast"
+        forecast_tool.invoke = MagicMock(side_effect=AssertionError("Forecast tool should be skipped"))
+
+        agent.tools = [forecast_tool]
+        agent.execute_react_loop = MagicMock(side_effect=AssertionError("LLM path should be skipped"))
+
+        output = agent.invoke("Qual é a temperatura média em agosto?")
+
+        forecast_tool.invoke.assert_not_called()
+        assert "dados climatol" in output.lower()
+        assert "5 dias" in output.lower()
+        assert "IPMA" in output
+
+
+def test_weather_climate_average_query_returns_capability_limit_without_tools_in_en() -> None:
+    """Historical weather averages should produce an explicit data-limit response."""
+    with patch.object(WeatherAgent, "__init__", lambda self: None):
+        agent = WeatherAgent()
+        agent.system_prompt = "PRIMARY WEATHER PROMPT"
+
+        current_tool = MagicMock()
+        current_tool.name = "get_current_weather_summary"
+        current_tool.invoke = MagicMock(side_effect=AssertionError("Current summary tool should be skipped"))
+
+        agent.tools = [current_tool]
+        agent.execute_react_loop = MagicMock(side_effect=AssertionError("LLM path should be skipped"))
+
+        output = agent.invoke("What is the average temperature in Lisbon in August?")
+
+        current_tool.invoke.assert_not_called()
+        assert "historical weather averages" in output.lower()
+        assert "up to 5 days" in output.lower()
         assert "IPMA" in output
 
 
@@ -2766,6 +2918,33 @@ def test_researcher_history_response_keeps_non_visitlisboa_source_space() -> Non
 
     assert "VisitLisboa" not in output
     assert "If you’d like" not in output
+
+
+def test_researcher_history_fallback_uses_extracted_subject_and_compacts_result() -> None:
+    """History fallback should query the named place, not the full user sentence."""
+    with patch.object(ResearcherAgent, "__init__", lambda self: None):
+        agent = ResearcherAgent()
+
+        history_tool = MagicMock()
+        history_tool.name = "search_history_culture"
+        history_tool.invoke = MagicMock(
+            return_value=(
+                "📚 **Wikipédia: São Jorge Castle**\n"
+                "São Jorge Castle is a historic castle in Lisbon. "
+                "Human occupation of the castle hill dates to at least the 8th century BC."
+            )
+        )
+        agent.tools = [history_tool]
+
+        output = agent._run_direct_tool_fallback(
+            "Tell me about the history of Castelo de São Jorge",
+            "en",
+        )
+
+        history_tool.invoke.assert_called_once_with({"query": "Castelo de São Jorge", "language": "en"})
+        assert "Historical Context: Castelo de São Jorge" in output
+        assert "8th century" in output or "Islamic rule" in output
+        assert "Fortaleza de São José da Amura" not in output
 
 
 def test_transport_direct_status_fallback_prefers_metro_tool() -> None:
@@ -3143,6 +3322,227 @@ def test_final_visual_pass_repairs_bolded_unsupported_transport_bullet() -> None
         "- Para evitar inventar informação, não vou indicar horários, frequências, "
         "tarifas, ETAs nem estado em tempo real para Fertagus ou Transtejo/Soflusa."
     )
+
+
+def test_transport_finalization_compacts_carris_metropolitana_line_search() -> None:
+    """Carris Metropolitana line-search dumps should render as compact bullets."""
+    raw = """🚌 **Carris Metropolitana lines matching "Cacilhas"** (3 found)
+
+1. **Line 3001**
+   📍 Almada (Cristo Rei) - Cacilhas (Terminal)
+   📌 Localities: Almada, Cacilhas
+
+2. **Line 3003**
+   📍 Almada Forum - Cacilhas (Terminal)
+   📌 Localities: Almada, Feijó, Cacilhas"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="transport",
+        user_query="Which bus lines serve Cacilhas?",
+        language="en",
+    )
+
+    assert "Carris Metropolitana lines serving" in output
+    assert "1. **Line" not in output
+    assert "\n    - " in output
+    assert "\n - " not in output
+    assert "- 🚌 **Line 3001**" in output
+
+
+def test_transport_finalization_removes_carris_route_finder_debug_trace() -> None:
+    """Route-finder resolution traces should not leak into user-facing bus answers."""
+    raw = """🚌 **BUS ROUTE FINDER**
+==================================================
+📍 From: Almada
+📍 To: Cacilhas
+
+🔍 **Resolving origin location...**
+   ✅ Found 10 stops matching 'Almada'
+      • ALMADA (LARGO CRISTO REI) TERMINAL
+
+🔍 **Finding direct bus routes...**
+
+✅ **1 ROUTE OPTION(S) FOUND** (1 lines total)
+
+🚌 **Option 1**
+   🚏 Board at: ALMADA (LARGO CRISTO REI) TERMINAL
+   🚏 Alight at: Cacilhas (Terminal)
+   🚍 Lines: **3001**"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="transport",
+        user_query="What's the best bus route from Almada to Cacilhas right now?",
+        language="en",
+    )
+
+    assert "BUS ROUTE FINDER" not in output
+    assert "Resolving origin" not in output
+    assert "Found 10 stops" not in output
+    assert "Line(s):" in output
+    assert "3001" in output
+    assert "\n    - " in output
+    assert "\n - " not in output
+
+
+def test_researcher_finalization_strips_missing_value_placeholders_from_bold_numbered_cards() -> None:
+    """Researcher cards with bold enumerators should be canonicalized and drop missing fields."""
+    raw = """### 📍 Places & Attractions
+
+**1.** 🏛️ **Museum Example**
+- 📝 **Description**: A grounded museum.
+- 📍 **Location / Address**: Check official website
+- 🕐 **Opening hours**: Check official website
+- 💶 **Price**: + info
+- 🌐 **Website**: [Official website](https://www.visitlisboa.com/en/places/example)
+- 🎟️ **Tickets**: Not available"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="researcher",
+        user_query="What are the best museums in Lisbon?",
+        language="en",
+    )
+
+    assert "### 🏛️ Museum Example" in output
+    assert "Check official website" not in output
+    assert "+ info" not in output.lower()
+    assert "Not available" not in output
+    assert "visitlisboa.com" in output
+
+
+def test_researcher_finalization_does_not_duplicate_existing_tel_links() -> None:
+    """Place-card phone fields should not become nested or duplicated tel links."""
+    raw = """### Places & Attractions
+
+**1.** 🏛️ **Museum Example**
+- 📝 **Description**: A grounded museum.
+- 📞 **Phone**: [+351 213 425 401](tel:+351213425401)
+- 🌐 **Website**: https://www.visitlisboa.com/en/places/example"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="researcher",
+        user_query="What are the best museums in Lisbon?",
+        language="en",
+    )
+
+    assert "[+351 213 425 401](tel:+351213425401)" in output
+    assert "](tel:+351213425401)](tel:+351213425401)" not in output
+
+
+def test_researcher_finalization_compacts_scraped_ticket_price_text() -> None:
+    """Raw scraped price scaffolding should be compact before rendering place cards."""
+    raw = """### Places & Attractions
+
+**1.** 🏛️ **Maritime Museum**
+- 📝 **Description**: A grounded museum.
+- 💰 **Price**: link Children Free until (age): 3 Children (4-12): 4 € Adult: 8 € Family: 21 € Senior: 5 € Student: 5 €
+- 🌐 **Website**: https://www.visitlisboa.com/en/places/maritime-museum"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="researcher",
+        user_query="What are the best museums in Lisbon?",
+        language="en",
+    )
+
+    assert "link Children" not in output
+    assert "Children free until age 3" in output
+    assert "; Adult: 8 €" in output
+    assert len(next(line for line in output.splitlines() if "**Price:**" in line)) < 170
+
+
+def test_planner_finalization_labels_unconfirmed_routes_and_drops_raw_worker_dump() -> None:
+    """Planner synthesis should not publish raw researcher dumps or invented Rossio rail legs."""
+    raw = """### 🌤️ Weather Snapshot
+- Rain likely.
+
+### 🚇 Mobility and Connections
+
+🗓️ **Museum Day in Lisbon**
+- **Start point:** Rossio
+- **Best overall transport mix:** metro and CP
+
+🏛️ **1) National Coach Museum**
+- **How to get there from Rossio:**
+ - **Board CP at Rossio**
+ - **CP train** — direction **Cascais**
+ - **Exit at** **Belém**
+
+---
+
+### 📍 Local Highlights
+
+**1.** 🏛️ **Raw Museum**
+- 🕐 **Opening hours**: Check official website
+- 💶 **Price**: + INFO
+- 🎟️ **Tickets**: Not available
+
+📌 **Source:** [*IPMA*](https://www.ipma.pt/en/) | [*VisitLisboa Places*](https://www.visitlisboa.com/en/places) | **Updated:** 10:00"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="planner",
+        user_query="Plan a full museum day in Lisbon for tomorrow, starting in Rossio and using public transport.",
+        language="en",
+    )
+
+    assert "Local Highlights" not in output
+    assert "Raw Museum" not in output
+    assert "Board CP at Rossio" not in output
+    assert "Unconfirmed Transport Leg" in output or "Unconfirmed transport leg" in output
+    assert "Check official website" not in output
+    assert "+ INFO" not in output
+
+
+def test_planner_finalization_strips_city_only_addresses_and_unasked_fare_note() -> None:
+    """Planner cards should not show city-only addresses or unrelated fare caveats."""
+    raw = """### 📅 Itinerary for Monday, May 04, 2026
+
+### 🏛️ 09:30 · Museum Example
+- 📍 **Location**: [Museum Example](https://www.visitlisboa.com/en/places/example)
+- 🏠 **Address / Location**: Lisbon, Portugal
+- 🌐 **Website**: [Official website](https://www.visitlisboa.com/en/places/example)
+- 🚌 **Transport from Rossio**: Use metro and bus; confirm the exact transfer before departure.
+
+- 🔎 **The Exact Fare Was Not Confirmed in the Available Sources.**
+
+📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places) | **Updated:** 15:42"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="planner",
+        user_query="Plan a full museum day in Lisbon for tomorrow, starting in Rossio and using public transport.",
+        language="en",
+    )
+
+    assert "Address / Location" not in output
+    assert "Lisbon, Portugal" not in output
+    assert "Exact Fare" not in output
+    assert "Museum Example" in output
+    assert "VisitLisboa" in output
+    assert "CP" not in output
+
+
+def test_planner_source_canonicalization_does_not_recredit_footer_only_cp() -> None:
+    """Planner source cleanup should ignore CP when it appears only in the old footer."""
+    raw = """### 📅 Itinerary
+- Light showers are expected.
+- Visit [Museum Example](https://www.visitlisboa.com/en/places/example).
+- Carris line numbers should be confirmed at carris.pt.
+
+📌 **Source:** [*IPMA*](https://www.ipma.pt/en/) | [*VisitLisboa Places*](https://www.visitlisboa.com/en/places) | [*Carris*](https://www.carris.pt) | [*CP*](https://www.cp.pt) | **Updated:** 15:42"""
+
+    from agent.utils.response_formatter import canonicalize_planner_source_line
+
+    output = canonicalize_planner_source_line(raw, language="en")
+
+    assert "IPMA" in output
+    assert "VisitLisboa" in output
+    assert "Carris" in output
+    assert "CP" not in output
 
 
 def test_pt_local_information_normalizer_translates_repair_metadata_labels() -> None:
@@ -3898,6 +4298,12 @@ def test_search_places_attractions_best_query_prefers_stronger_social_proof() ->
     assert output.index("Money Museum") < output.index("Museum of the Lisbon Geographical Society")
 
 
+def test_researcher_routes_best_museums_to_deterministic_place_lookup() -> None:
+    """Broad museum recommendation prompts should not depend on free-form researcher synthesis."""
+    assert ResearcherAgent._is_direct_place_lookup_query("What are the best museums in Lisbon?") is True
+    assert ResearcherAgent._is_direct_place_lookup_query("Recommend good museums in Lisbon") is True
+
+
 def test_search_places_attractions_first_time_query_excludes_tour_companies() -> None:
     """First-time attraction lists should prioritize attractions, not guided-tour providers."""
 
@@ -4022,6 +4428,33 @@ def test_qa_place_only_query_does_not_require_weather_or_transport_retries() -> 
     assert normalized["required_agents"] == []
     assert normalized["missing_data"] == []
     assert normalized["disclaimers"] == []
+
+
+# ===========================================================================
+# QA domain-boundary guardrail tests
+# ===========================================================================
+
+
+def test_qa_weather_only_query_does_not_require_researcher_retry() -> None:
+    """Standalone weather safety queries should not be expanded into local event/place search."""
+    normalized = QualityAssuranceAgent._normalize_weather_query_validation(
+        user_query="Is it safe to go sailing in Lisbon tomorrow?",
+        agents_called=["weather"],
+        llm_result={
+            "complete": False,
+            "missing_data": ["researcher should provide local highlights", "marine forecast missing"],
+            "required_agents": ["researcher"],
+            "reasoning": "LLM QA over-requested event context.",
+            "disclaimers": [
+                "VisitLisboa events could enrich the answer.",
+                "Marine forecast is not available in the weather tool.",
+            ],
+        },
+    )
+
+    assert normalized["required_agents"] == []
+    assert normalized["missing_data"] == ["marine forecast missing"]
+    assert normalized["disclaimers"] == ["Marine forecast is not available in the weather tool."]
 
 
 # ===========================================================================

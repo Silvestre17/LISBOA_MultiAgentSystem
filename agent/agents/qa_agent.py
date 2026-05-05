@@ -405,6 +405,74 @@ class QualityAssuranceAgent(BaseAgent):
 
         return llm_result
 
+    @staticmethod
+    def _is_cross_domain_weather_requirement(text: str) -> bool:
+        """Returns whether a QA gap incorrectly asks for non-weather workers in a weather-only query."""
+        lower = (text or "").lower()
+        cross_domain_patterns = [
+            r"\bresearcher\b",
+            r"\bplaces?\b",
+            r"\battractions?\b",
+            r"\bevents?\b",
+            r"\beventos?\b",
+            r"\bvisitlisboa\b",
+            r"\btransport\b",
+            r"\btransporte\b",
+            r"\bmetro\b",
+            r"\bbus\b",
+            r"\bautocarro\b",
+            r"\btrain\b",
+            r"\bcomboio\b",
+            r"\broute\b",
+            r"\brota\b",
+            r"\bhow to get\b",
+            r"\bcomo chegar\b",
+        ]
+        return any(re.search(pattern, lower) for pattern in cross_domain_patterns)
+
+    @classmethod
+    def _normalize_weather_query_validation(
+        cls,
+        user_query: str,
+        agents_called: List[str],
+        llm_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Prevents weather-only queries from being expanded into researcher or transport retries."""
+        called_workers = {agent for agent in agents_called if agent}
+        if not called_workers or not called_workers.issubset({"weather"}):
+            return llm_result
+
+        filtered_required_agents = [
+            agent for agent in llm_result.get("required_agents", [])
+            if agent == "weather"
+        ]
+        filtered_missing_data = [
+            item for item in llm_result.get("missing_data", [])
+            if not cls._is_cross_domain_weather_requirement(item)
+        ]
+        filtered_disclaimers = [
+            item for item in llm_result.get("disclaimers", [])
+            if not cls._is_cross_domain_weather_requirement(item)
+        ]
+
+        llm_result["required_agents"] = filtered_required_agents
+        llm_result["missing_data"] = filtered_missing_data
+        llm_result["disclaimers"] = filtered_disclaimers
+
+        if not filtered_required_agents and not filtered_missing_data:
+            llm_result["complete"] = True
+
+        normalization_note = (
+            "Normalized QA for weather-only query: researcher and transport are optional and must not trigger retries."
+        )
+        reasoning = llm_result.get("reasoning", "")
+        if normalization_note not in reasoning:
+            llm_result["reasoning"] = (
+                f"{reasoning} | {normalization_note}".strip(" |")
+            )
+
+        return llm_result
+
     @classmethod
     def _augment_query_specific_validation(
         cls,
@@ -804,6 +872,11 @@ class QualityAssuranceAgent(BaseAgent):
             llm_result=llm_result,
         )
         llm_result = self._normalize_place_query_validation(
+            user_query=user_query,
+            agents_called=agents_called,
+            llm_result=llm_result,
+        )
+        llm_result = self._normalize_weather_query_validation(
             user_query=user_query,
             agents_called=agents_called,
             llm_result=llm_result,

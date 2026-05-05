@@ -7,6 +7,7 @@
 # ==========================================================================
 
 import re
+import unicodedata
 import uuid
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Optional
@@ -164,8 +165,13 @@ class WeatherAgent(BaseAgent):
     def _is_current_weather_query(user_message: str) -> bool:
         """Detects simple current-weather queries that should use the summary tool directly."""
         query = (user_message or "").lower()
+        asks_current_wind = bool(
+            re.search(r"\b(?:wind|vento)\b", query)
+            and re.search(r"\b(?:today|hoje|now|agora|current|atual)\b", query)
+        )
         return bool(
-            "right now" in query
+            asks_current_wind
+            or "right now" in query
             or "current weather summary" in query
             or "current temperature" in query
             or "agora" in query
@@ -209,6 +215,163 @@ class WeatherAgent(BaseAgent):
             except ValueError:
                 continue
         return None
+
+    @staticmethod
+    def _normalize_weather_query(user_message: str) -> str:
+        """Normalize weather query text for accent-insensitive capability checks."""
+        normalized = unicodedata.normalize("NFKD", user_message or "")
+        normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+        return re.sub(r"\s+", " ", normalized).strip()
+
+    @classmethod
+    def _is_portugal_overview_query(cls, user_message: str) -> bool:
+        """Return whether the user asks for a country-level Portugal weather overview."""
+        normalized = cls._normalize_weather_query(user_message)
+        return bool(
+            "portugal-wide" in normalized
+            or "portugal wide" in normalized
+            or "portugal overview" in normalized
+            or "country-wide" in normalized
+            or "country wide" in normalized
+            or re.search(r"\bportugal\b.*\b(weather|tempo|forecast|previsao|overview|resumo)\b", normalized)
+            or re.search(r"\b(weather|tempo|forecast|previsao|overview|resumo)\b.*\bportugal\b", normalized)
+        )
+
+    @classmethod
+    def _extract_unsupported_weather_location(cls, user_message: str) -> str | None:
+        """Detect non-Lisbon city-specific weather requests that should not use Lisbon forecast data."""
+        normalized = cls._normalize_weather_query(user_message)
+        if cls._is_portugal_overview_query(user_message):
+            return None
+
+        unsupported_locations = {
+            "porto": "Porto",
+            "braga": "Braga",
+            "coimbra": "Coimbra",
+            "aveiro": "Aveiro",
+            "faro": "Faro",
+            "evora": "Évora",
+            "madeira": "Madeira",
+            "funchal": "Funchal",
+            "acores": "Açores",
+            "azores": "Açores",
+            "ponta delgada": "Ponta Delgada",
+        }
+        weather_terms = [
+            "weather",
+            "tempo",
+            "forecast",
+            "previsao",
+            "rain",
+            "chuva",
+            "temperature",
+            "temperatura",
+            "wind",
+            "vento",
+        ]
+        if not any(term in normalized for term in weather_terms):
+            return None
+
+        for token, label in unsupported_locations.items():
+            if re.search(rf"\b{re.escape(token)}\b", normalized):
+                return label
+        return None
+
+    @staticmethod
+    def _build_unsupported_location_message(location: str, language: str) -> str:
+        """Build a localized response for city-specific weather outside LISBOA's grounded scope."""
+        if language == "pt":
+            return (
+                f"⚠️ Não consigo fornecer uma previsão meteorológica específica para {location} neste sistema. "
+                "As ferramentas meteorológicas do LISBOA estão configuradas para previsões IPMA de curto prazo em Lisboa "
+                "e, quando pedido, para uma visão geral de Portugal. Para essa localidade, consulta diretamente o IPMA."
+            )
+        return (
+            f"⚠️ I can't provide a city-specific forecast for {location} in this system. "
+            "LISBOA's weather tools are grounded for short-range IPMA forecasts in Lisbon and, when requested, "
+            "a Portugal-wide overview. For that location, check IPMA directly."
+        )
+
+    @classmethod
+    def _is_climate_average_query(cls, user_message: str) -> bool:
+        """Return whether the query asks for historical climate averages, not forecasts."""
+        normalized = cls._normalize_weather_query(user_message)
+        climate_terms = [
+            "climate",
+            "climatology",
+            "climatological",
+            "historical weather",
+            "weather history",
+            "clima",
+            "climatologia",
+            "historico meteorologico",
+        ]
+        average_terms = [
+            "average",
+            "mean",
+            "typical",
+            "usual",
+            "normal",
+            "media",
+            "medio",
+            "tipica",
+            "tipico",
+            "normalmente",
+        ]
+        month_or_season_terms = [
+            "january",
+            "february",
+            "march",
+            "april",
+            "may",
+            "june",
+            "july",
+            "august",
+            "september",
+            "october",
+            "november",
+            "december",
+            "janeiro",
+            "fevereiro",
+            "marco",
+            "abril",
+            "maio",
+            "junho",
+            "julho",
+            "agosto",
+            "setembro",
+            "outubro",
+            "novembro",
+            "dezembro",
+            "summer",
+            "winter",
+            "spring",
+            "autumn",
+            "verao",
+            "inverno",
+            "primavera",
+            "outono",
+        ]
+        has_climate_term = any(term in normalized for term in climate_terms)
+        has_average_term = any(term in normalized for term in average_terms)
+        has_month_or_season = any(term in normalized for term in month_or_season_terms)
+        asks_temperature = bool(re.search(r"\b(temperature|temperatura|temp)\b", normalized))
+        return has_climate_term or (has_average_term and has_month_or_season and asks_temperature)
+
+    @staticmethod
+    def _build_climate_average_limit_message(language: str) -> str:
+        """Builds a localized message for unsupported climatology-average requests."""
+        if language == "pt":
+            return (
+                "⚠️ Não tenho dados climatológicos ou médias históricas neste sistema. "
+                "A cobertura meteorológica disponível é previsão IPMA de curto prazo para Lisboa, "
+                "até 5 dias, e avisos atuais."
+            )
+        return (
+            "⚠️ I don't have climatology data or historical weather averages in this system. "
+            "The available weather coverage is short-range IPMA forecasts for Lisbon, "
+            "up to 5 days, plus current warnings."
+        )
 
     @classmethod
     def _is_beyond_forecast_horizon_query(cls, user_message: str) -> bool:
@@ -258,6 +421,8 @@ class WeatherAgent(BaseAgent):
         planning_terms = [
             "plan", "itinerary", "roteiro", "plano", "activity", "activities",
             "visit", "visitar", "museum", "museu", "restaurant", "restaurante",
+            "sailing", "vela", "sail", "boat", "barco", "jacket", "casaco",
+            "umbrella", "guarda-chuva", "safe", "seguro",
         ]
 
         if any(term in query for term in planning_terms):
@@ -281,10 +446,18 @@ class WeatherAgent(BaseAgent):
         model call.
         """
         language = self._infer_weather_query_language(user_message)
+        if self._is_climate_average_query(user_message):
+            return self._build_climate_average_limit_message(language)
+
         if self._is_beyond_forecast_horizon_query(user_message):
             return self._build_forecast_horizon_limit_message(language)
 
+        unsupported_location = self._extract_unsupported_weather_location(user_message)
+        if unsupported_location:
+            return self._build_unsupported_location_message(unsupported_location, language)
+
         query = user_message.lower()
+        wants_portugal_overview = self._is_portugal_overview_query(user_message)
         requested_forecast_days = force_forecast_days or self._extract_requested_forecast_days(user_message)
         wants_warnings = include_warnings or any(term in query for term in ["warning", "warnings", "aviso", "avisos"])
         wants_forecast = requested_forecast_days is not None
@@ -293,6 +466,13 @@ class WeatherAgent(BaseAgent):
         )
 
         sections = []
+
+        if wants_portugal_overview:
+            overview_tool = self._get_tool_by_name("get_portugal_weather_overview")
+            if overview_tool:
+                sections.append(self._invoke_tool(overview_tool, {"day": 0}))
+            if sections:
+                return "\n\n---\n\n".join(section for section in sections if section).strip()
 
         if (wants_warnings or (wants_forecast and not wants_current)) and not wants_current:
             warnings_tool = self._get_tool_by_name("get_weather_warnings")
@@ -366,7 +546,7 @@ class WeatherAgent(BaseAgent):
         """Routes obvious weather queries to their canonical tool in the subgraph."""
         query = user_message.lower().strip()
 
-        if "portugal-wide" in query or "portugal wide" in query or "portugal-wide weather overview" in query:
+        if cls._is_portugal_overview_query(user_message):
             return cls._build_tool_call("get_portugal_weather_overview", {"day": 0})
 
         if "warning" in query or "warnings" in query or "avisos" in query:
@@ -376,7 +556,15 @@ class WeatherAgent(BaseAgent):
         if forecast_days:
             return cls._build_tool_call("get_weather_forecast", {"days": forecast_days})
 
-        if "current weather summary" in query or "right now" in query or ("weather" in query and "today" in query):
+        if (
+            "current weather summary" in query
+            or "right now" in query
+            or ("weather" in query and "today" in query)
+            or (
+                re.search(r"\b(?:wind|vento)\b", query)
+                and re.search(r"\b(?:today|hoje|now|agora|current|atual)\b", query)
+            )
+        ):
             return cls._build_tool_call("get_current_weather_summary", {})
 
         return None
@@ -403,9 +591,35 @@ class WeatherAgent(BaseAgent):
             language = language_match.group(1).lower()
         else:
             language = self._infer_weather_query_language(user_message)
+        if self._is_climate_average_query(user_message):
+            return finalize_worker_response(
+                self._build_climate_average_limit_message(language),
+                agent_name="weather",
+                user_query=user_message,
+                language=language,
+            )
+
         if self._is_beyond_forecast_horizon_query(user_message):
             return finalize_worker_response(
                 self._build_forecast_horizon_limit_message(language),
+                agent_name="weather",
+                user_query=user_message,
+                language=language,
+            )
+
+        unsupported_location = self._extract_unsupported_weather_location(user_message)
+        if unsupported_location:
+            return finalize_worker_response(
+                self._build_unsupported_location_message(unsupported_location, language),
+                agent_name="weather",
+                user_query=user_message,
+                language=language,
+            )
+
+        if self._is_portugal_overview_query(user_message):
+            response = self._run_direct_tool_fallback(user_message)
+            return finalize_worker_response(
+                response,
                 agent_name="weather",
                 user_query=user_message,
                 language=language,
@@ -494,6 +708,15 @@ class WeatherAgent(BaseAgent):
                     break
 
             language = self._infer_weather_query_language(user_message or "")
+
+            if user_message and self._is_climate_average_query(user_message):
+                return {
+                    "messages": [
+                        AIMessage(
+                            content=self._build_climate_average_limit_message(language)
+                        )
+                    ]
+                }
 
             if user_message and self._is_beyond_forecast_horizon_query(user_message):
                 return {

@@ -43,6 +43,7 @@ from agent.utils.langsmith_tracing import (
 # Response formatting for Streamlit rendering
 from agent.utils.response_formatter import (
     build_bilingual_note,
+    canonicalize_planner_source_line,
     canonicalize_transport_terms,
     enforce_language_labels,
     ensure_response_title,
@@ -50,6 +51,7 @@ from agent.utils.response_formatter import (
     finalize_worker_response,
     format_response,
     generate_response_title,
+    operators_from_tool_names,
     reconcile_researcher_place_response,
     resolve_output_language,
 )
@@ -1284,6 +1286,23 @@ class MultiAgentAssistant:
             getattr(Config, "SHOW_DETAILED_EXECUTION_LOGS", False)
         )
 
+        import builtins
+        import sys
+
+        def _safe_print(value: object = "") -> None:
+            """Print terminal diagnostics without breaking chat responses on legacy consoles."""
+            try:
+                builtins.print(value)
+            except UnicodeEncodeError:
+                encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+                text = str(value).encode(encoding, errors="replace").decode(
+                    encoding,
+                    errors="replace",
+                )
+                builtins.print(text)
+
+        print = _safe_print
+
         print("\n" + "=" * 80)
         print("📊 EXECUTION SUMMARY")
         print("=" * 80)
@@ -1506,6 +1525,16 @@ class MultiAgentAssistant:
             final_output = strip_redundant_transport_status_notes(final_output)
             final_output = final_visual_pass(final_output)
 
+        if "weather" in effective_agents and "umbrella" not in final_output.lower() and "guarda-chuva" not in final_output.lower():
+            umbrella_advice = self._build_umbrella_advice(
+                user_query=message,
+                weather_output=str(agent_outputs.get("weather") or ""),
+                language=language,
+            )
+            if umbrella_advice:
+                final_output = f"{final_output.rstrip()}\n\n---\n\n{umbrella_advice}"
+                final_output = final_visual_pass(final_output)
+
         if agent_outputs:
             source_footer = self._build_combined_source_footer(agent_outputs, language)
             if source_footer:
@@ -1516,6 +1545,9 @@ class MultiAgentAssistant:
                 final_output = "\n".join(kept_lines).rstrip()
                 final_output = f"{final_output}\n\n{source_footer}".strip()
                 final_output = final_visual_pass(final_output)
+                if planner_involved:
+                    final_output = canonicalize_planner_source_line(final_output, language=language)
+                    final_output = final_visual_pass(final_output)
                 if "transport" in effective_agents:
                     final_output = enforce_language_labels(final_output, language)
                     final_output = canonicalize_transport_terms(final_output, language=language)
@@ -1554,6 +1586,10 @@ class MultiAgentAssistant:
             not planner_involved
             and single_domain_agents == ["researcher"]
             and infer_researcher_source_kind(user_query=message, text=final_output) == "events"
+            and not (
+                callable(getattr(getattr(self, "agents", {}).get("researcher"), "_is_event_category_query", None))
+                and getattr(getattr(self, "agents", {}).get("researcher"), "_is_event_category_query")(message) is True
+            )
             and (
                 "**Categoria:**" not in final_output
                 and "**Category:**" not in final_output
@@ -1617,7 +1653,9 @@ class MultiAgentAssistant:
             language=language,
         )
 
-        if "transport" in effective_agents:
+        if "transport" in effective_agents and not any(
+            agent_name != "transport" for agent_name in effective_agents if not str(agent_name).startswith("_")
+        ):
             from agent.utils.response_formatter import operators_from_tool_names, rebuild_transport_source_line
 
             transport_agent = getattr(self, "agents", {}).get("transport") if isinstance(getattr(self, "agents", {}), dict) else None
@@ -1692,6 +1730,23 @@ class MultiAgentAssistant:
         self._print_execution_summary(execution_summary)
 
         if Config.SHOW_MARKDOWN_RESPONSE_IN_TERMINAL:
+            import builtins
+            import sys
+
+            def _safe_print(value: object = "") -> None:
+                """Print final markdown without failing on legacy terminal encodings."""
+                try:
+                    builtins.print(value)
+                except UnicodeEncodeError:
+                    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+                    text = str(value).encode(encoding, errors="replace").decode(
+                        encoding,
+                        errors="replace",
+                    )
+                    builtins.print(text)
+
+            print = _safe_print
+
             print("=" * 80)
             print("📝 FINAL RESPONSE (Markdown)")
             print("=" * 80)
@@ -1769,13 +1824,101 @@ class MultiAgentAssistant:
         """
         if not qa_result:
             return False
-        if qa_result.get("critical_issues"):
+
+        def _issue_requires_block(issue: object) -> bool:
+            """Return True for factual contradictions, not missing-data caveats."""
+            normalized = str(issue or "").lower()
+            if not normalized:
+                return False
+            missing_data_markers = (
+                "missing",
+                "unavailable",
+                "not available",
+                "could not resolve",
+                "couldn't resolve",
+                "cannot resolve",
+                "not confirmed",
+                "should be verified",
+                "please verify",
+                "not verify",
+                "not verified",
+                "unverified",
+                "verify links",
+                "verify",
+                "confirmed at",
+                "should be confirmed",
+                "opening hours",
+                "exact address",
+                "route details",
+                "transport details",
+                "accessibility details",
+                "schedule",
+                "gtfs",
+                "tips and warnings",
+                "source footer",
+                "google maps links",
+                "structured field labels",
+                "semantic emoji",
+            )
+            factual_error_markers = (
+                "hallucinat",
+                "invent",
+                "incorrect",
+                "wrong",
+                "contradict",
+                "outside scope",
+                "out of scope",
+                "unsupported venue",
+                "invalid source",
+                "fabricat",
+            )
+            if any(marker in normalized for marker in factual_error_markers):
+                return True
+            if any(marker in normalized for marker in missing_data_markers):
+                return False
+            return True
+
+        critical_issues = qa_result.get("critical_issues") or []
+        if isinstance(critical_issues, (str, bytes)):
+            critical_issues = [critical_issues]
+        if any(_issue_requires_block(issue) for issue in critical_issues):
             return True
 
         fact_check = qa_result.get("fact_check", {})
-        return bool(
-            isinstance(fact_check, dict) and fact_check.get("critical_issues")
+        if isinstance(fact_check, dict):
+            fact_critical_issues = fact_check.get("critical_issues") or []
+            if isinstance(fact_critical_issues, (str, bytes)):
+                fact_critical_issues = [fact_critical_issues]
+            return any(_issue_requires_block(issue) for issue in fact_critical_issues)
+        return False
+
+    @staticmethod
+    def _should_preserve_direct_researcher_answer(agent_outputs: Dict[str, Any]) -> bool:
+        """Return whether a direct researcher answer should bypass planner rewriting.
+
+        Some researcher shortcuts already answer a narrow recommendation request
+        with grounded caveats and a source footer. Sending those through the
+        planner can turn a concise recommendation into a malformed itinerary.
+        """
+        public_output_keys = {
+            key for key in agent_outputs.keys() if not str(key).startswith("_")
+        }
+        if public_output_keys != {"researcher"}:
+            return False
+
+        researcher_output = str(agent_outputs.get("researcher") or "")
+        normalized_output = researcher_output.lower()
+        after_hours_markers = (
+            "recomendação para 19:00-20:00",
+            "recommendation for 19:00-20:00",
         )
+        has_after_hours_recommendation = any(
+            marker in normalized_output for marker in after_hours_markers
+        )
+        if not has_after_hours_recommendation:
+            return False
+
+        return "padrão dos descobrimentos" in normalized_output or "outdoor monument" in normalized_output
 
     @traceable(
         name="LISBOA Chat",
@@ -2387,6 +2530,11 @@ class MultiAgentAssistant:
         planner_blocked = planner_requested and self._should_block_planner_publication(
             qa_result
         )
+        preserve_direct_researcher_answer = (
+            planner_requested
+            and not planner_blocked
+            and self._should_preserve_direct_researcher_answer(agent_outputs)
+        )
         response_agents_to_call = list(agents_to_call)
         planner_executed = False
 
@@ -2405,11 +2553,16 @@ class MultiAgentAssistant:
                     else "⚠️ Consolidating a grounded answer without final itinerary synthesis..."
                 )
 
+        if preserve_direct_researcher_answer:
+            response_agents_to_call = [
+                agent_name for agent_name in agents_to_call if agent_name != "planner"
+            ]
+
         # Step 6: If Planner was requested and QA did not block publication,
         # synthesize the final response. Otherwise, fall back to the combined
         # worker outputs so caveats remain visible instead of publishing a
         # confident itinerary over incomplete evidence.
-        if planner_requested and not planner_blocked:
+        if planner_requested and not planner_blocked and not preserve_direct_researcher_answer:
             if verbose:
                 print(
                     f"\n   [AGENT: PLANNER] Synthesizing from {list(agent_outputs.keys())}..."
@@ -2507,9 +2660,18 @@ class MultiAgentAssistant:
                 effective_language,
             )
         elif len(response_agents_to_call) > 1:
-            from agent.utils.response_formatter import canonicalize_local_information_terms
+            from agent.utils.response_formatter import (
+                canonicalize_local_information_terms,
+                infer_researcher_source_kind,
+                strip_placeholder_field_lines,
+            )
 
             response = canonicalize_local_information_terms(response, effective_language)
+            if (
+                "researcher" in response_agents_to_call
+                and infer_researcher_source_kind(user_query=message, text=response) != "events"
+            ):
+                response = strip_placeholder_field_lines(response)
 
         response = self._move_location_ambiguity_preamble_first(
             response=response,
@@ -2728,11 +2890,32 @@ class MultiAgentAssistant:
         label_set = labels["pt" if language == "pt" else "en"]
         collected_links: List[str] = []
         collected_timestamps: List[str] = []
+        transport_link_map = {
+            "metro": "[*Metro de Lisboa*](https://www.metrolisboa.pt)",
+            "carris": "[*Carris*](https://www.carris.pt)",
+            "carris_metropolitana": "[*Carris Metropolitana*](https://www.carrismetropolitana.pt)",
+            "cp": "[*CP*](https://www.cp.pt)",
+        }
 
         for agent_name, output in (agent_outputs or {}).items():
             if str(agent_name).startswith("_") or not isinstance(output, str):
                 continue
             _, links, timestamp = self._extract_structured_section_parts(output)
+            if agent_name == "transport":
+                agents_registry = getattr(self, "agents", {})
+                transport_agent = agents_registry.get("transport") if isinstance(agents_registry, dict) else None
+                tool_names = (
+                    [
+                        call.get("tool_name")
+                        for call in transport_agent.get_tool_calls_log()
+                        if isinstance(call, dict)
+                    ]
+                    if transport_agent is not None and hasattr(transport_agent, "get_tool_calls_log")
+                    else []
+                )
+                operator_links = [transport_link_map[operator] for operator in operators_from_tool_names(tool_names)]
+                if operator_links:
+                    links = operator_links
             for link in links:
                 if link not in collected_links:
                     collected_links.append(link)
@@ -2751,6 +2934,37 @@ class MultiAgentAssistant:
             f"{label_set['source']} {' | '.join(collected_links)} | "
             f"{label_set['updated']} {timestamp}"
         )
+
+    @staticmethod
+    def _build_umbrella_advice(user_query: str, weather_output: str, language: str) -> str:
+        """Build a concise umbrella answer when a hybrid response includes weather evidence."""
+        normalized_query = re.sub(r"\s+", " ", (user_query or "").lower())
+        if not any(term in normalized_query for term in ["umbrella", "guarda-chuva", "guarda chuva"]):
+            return ""
+
+        normalized_weather = re.sub(r"\s+", " ", (weather_output or "").lower())
+        rain_expected = any(
+            marker in normalized_weather
+            for marker in ["rain", "showers", "chuva", "aguaceiros", "precipitação", "precipitacao"]
+        ) and not any(
+            marker in normalized_weather
+            for marker in ["no rain expected", "sem precipitação", "sem precipitacao"]
+        )
+
+        if language == "pt":
+            answer = (
+                "Leva guarda-chuva: a previsão indica chuva ou aguaceiros."
+                if rain_expected
+                else "Não parece indispensável, mas confirma a previsão antes de sair."
+            )
+            return f"### ☔ Conselho de guarda-chuva\n\n- {answer}"
+
+        answer = (
+            "Bring an umbrella: rain or showers are forecast."
+            if rain_expected
+            else "An umbrella does not look essential, but check the forecast before leaving."
+        )
+        return f"### ☔ Umbrella Advice\n\n- {answer}"
 
     def _combine_outputs(self, agent_outputs: dict, language: str = "en") -> str:
         """

@@ -49,10 +49,16 @@ from agent.utils.response_formatter import (
     normalize_transport_notes_block,
     operators_from_tool_names,
     rebuild_transport_source_line,
+    structure_transport_markdown,
 )
 from tools.transport_api import _build_ambiguity_preamble
-from tools.carrismetropolitana_api import find_bus_routes, find_direct_bus_lines, resolve_location
-from tools import carris_api, cp_api, metrolisboa_api, transport_api
+from tools.carrismetropolitana_api import (
+    find_bus_routes,
+    find_direct_bus_lines,
+    get_real_time_bus_positions,
+    resolve_location,
+)
+from tools import carris_api, carrismetropolitana_api, cp_api, metrolisboa_api, transport_api
 
 
 def _extract_tool_call_spec(message) -> dict:
@@ -80,6 +86,30 @@ def test_transport_tool_call_builder_maps_cp_trip_query() -> None:
 
     assert spec["name"] == "plan_train_trip"
     assert spec["args"] == {"origin": "Rossio", "destination": "Sintra"}
+
+
+def test_transport_tool_call_builder_keeps_oriente_alias_accepted_by_cp_tool() -> None:
+    """Explicit train queries to Oriente should use the station alias accepted by CP GTFS search."""
+    spec = _extract_tool_call_spec(
+        _build_deterministic_transport_tool_call(
+            "How do I get by train from Sete Rios to Oriente?"
+        )
+    )
+
+    assert spec["name"] == "plan_train_trip"
+    assert spec["args"] == {"origin": "Sete Rios", "destination": "Oriente"}
+
+
+def test_cp_routes_output_filters_long_distance_and_hex_metadata() -> None:
+    """CP route listings should expose only LISBOA AML suburban rail scope."""
+    output = cp_api.get_cp_routes.invoke({})
+
+    assert "Linha de Sintra" in output
+    assert "Linha de Cascais" in output
+    assert "**AP**" not in output
+    assert "**IC**" not in output
+    assert "Color:" not in output
+    assert "#" not in output
 
 
 def test_transport_tool_call_builder_maps_combios_cascais_to_cascais_line() -> None:
@@ -225,6 +255,18 @@ def test_transport_tool_call_builder_maps_metro_status_paraphrase() -> None:
     assert spec["args"] == {}
 
 
+def test_transport_tool_call_builder_maps_natural_metro_station_catalogue_query() -> None:
+    """Natural 'what metro stations are there' wording should use the deterministic catalogue tool."""
+    spec = _extract_tool_call_spec(
+        _build_deterministic_transport_tool_call(
+            "I'm new to Lisbon. What metro stations are there?"
+        )
+    )
+
+    assert spec["name"] == "get_all_metro_stations"
+    assert spec["args"] == {}
+
+
 def test_transport_tool_call_builder_maps_nearest_metro_coordinates_query() -> None:
     """Nearest-metro routing should extract coordinates from natural GPS phrasings."""
     spec = _extract_tool_call_spec(
@@ -247,6 +289,33 @@ def test_transport_tool_call_builder_maps_carris_route_info_paraphrase() -> None
 
     assert spec["name"] == "carris_get_routes"
     assert spec["args"] == {"route_id": "28E"}
+
+
+def test_transport_scope_detects_long_distance_cp_requests() -> None:
+    """LISBOA should not imply support for long-distance CP trips outside AML suburban rail."""
+    assert "long_distance_cp" in transport_agent_module._detect_unsupported_transport_modes(
+        "Quero ir para o Porto de comboio a partir de Santa Apolónia."
+    )
+
+
+def test_nearest_metro_prioritizes_curated_landmark_station() -> None:
+    """Known landmarks should not let geocoding drift outrank the curated metro station."""
+    output = metrolisboa_api.find_nearest_metro.invoke(
+        {"near_location_name": "Jardim Zoologico de Lisboa"}
+    )
+
+    assert "**Jardim Zoológico**" in output
+    assert output.index("**Jardim Zoológico**") < output.index("**Laranjeiras**")
+    assert not any(line.startswith("1.") for line in output.splitlines())
+
+
+def test_carris_route_details_render_compact_variant_cards() -> None:
+    """Carris route lookups should avoid all-caps dumps and expose route variants compactly."""
+    output = carris_api.carris_get_routes.invoke({"route_id": "28E"})
+
+    assert "Carris Urban Route 28E" in output
+    assert "Route variants in GTFS" in output
+    assert "ELÉTRICOS" not in output
 
 
 def test_parse_metro_wait_request_fuzzy_resolves_station_typos() -> None:
@@ -625,6 +694,30 @@ def test_transport_agent_invoke_uses_cp_trip_tool_from_natural_query() -> None:
 
         trip_tool.invoke.assert_called_once_with({"origin": "Rossio", "destination": "Sintra"})
         assert "Rossio → Sintra" in result
+
+
+def test_transport_agent_invoke_train_query_does_not_fall_back_to_metro_route() -> None:
+    """Explicit train requests between rail hubs must call CP before any Metro route shortcut."""
+    with patch.object(TransportAgent, "__init__", lambda self: None):
+        agent = TransportAgent()
+        agent.system_prompt = "TRANSPORT PROMPT"
+        agent.execute_react_loop = MagicMock(side_effect=AssertionError("LLM path should be skipped"))
+
+        trip_tool = MagicMock()
+        trip_tool.name = "plan_train_trip"
+        trip_tool.invoke = MagicMock(
+            return_value="🚆 **Comboio: Sete Rios -> Lisboa Oriente**\n⏱️ Duração: **13 minutos**"
+        )
+
+        agent.tools = [trip_tool]
+
+        result = agent.invoke("How do I get by train from Sete Rios to Oriente?")
+
+        trip_tool.invoke.assert_called_once_with({"origin": "Sete Rios", "destination": "Oriente"})
+        assert "Sete Rios" in result
+        assert "Lisboa Oriente" in result
+        assert "Jardim Zoológico" not in result
+        assert "Metro Route" not in result
 
 
 def test_transport_agent_invoke_uses_cm_direct_bus_tool_from_natural_query() -> None:
@@ -1126,6 +1219,258 @@ def test_normalize_transport_notes_block_detaches_footer_from_warning_items() ->
     assert normalized.rstrip().endswith(
         "📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Atualizado:** 23:35"
     )
+
+
+def test_normalize_transport_notes_block_deduplicates_generic_operator_site_caveats() -> None:
+    """Duplicate generic operator-site caveats should not survive in Helpful Notes."""
+    raw = (
+        "⚠️ Confirm the timetable and operating direction on the official operator site before travelling.\n\n"
+        "### ⚠️ Helpful Notes\n\n"
+        "- ⚠️ Timetable and operating direction should still be confirmed on the official operator site before travelling.\n"
+        "- ⚠️ Timetables and service status should be confirmed on the official operator site before travelling.\n\n"
+        "📌 **Source:** [*Carris Metropolitana*](https://www.carrismetropolitana.pt) | **Updated:** 23:35"
+    )
+
+    normalized = normalize_transport_notes_block(raw)
+
+    assert "### ⚠️ Helpful Notes" not in normalized
+    assert normalized.count("official operator site before travelling") == 1
+    assert "📌 **Source:**" in normalized
+
+
+def test_carris_route_finder_structures_stop_coordinate_links() -> None:
+    """Structured Carris route options should preserve verified stop-coordinate map links."""
+    raw = (
+        "🚌 **BUS ROUTE FINDER**\n"
+        "📍 From: Almada\n"
+        "📍 To: Cacilhas\n\n"
+        "✅ **1 ROUTE OPTION(S) FOUND** (1 lines total)\n\n"
+        "🚌 **Option 1**\n"
+        "   🚏 Board at: ALMADA (LARGO CRISTO REI) TERMINAL | coords: 38.679100,-9.158300\n"
+        "   🚏 Alight at: CACILHAS AV 25 ABRIL 45C (SEG SOCIAL) | coords: 38.687200,-9.148600\n"
+        "   🚍 Lines: **3001**\n"
+    )
+
+    output = structure_transport_markdown(raw)
+
+    assert "[ALMADA (LARGO CRISTO REI) TERMINAL](https://www.google.com/maps/search/?api=1&query=38.679100%2C-9.158300)" in output
+    assert "[CACILHAS AV 25 ABRIL 45C (SEG SOCIAL)](https://www.google.com/maps/search/?api=1&query=38.687200%2C-9.148600)" in output
+
+
+def test_flat_carris_line_cards_are_nested_for_streamlit() -> None:
+    """Synthesized Carris line cards should be repaired into nested bullet cards."""
+    raw = (
+        "- 🚍 **Linha 1501**\n"
+        "- 📍 **Terminals:** Reboleira (Estação) | Circular\n"
+        "- 🚏 **Percurso:** Oeiras → Amadora\n"
+        "- 🚍 **Linha 1502**\n"
+        "- 📍 **Terminals:** Algés (Estação) ↔ Amadora\n"
+        "- 🚏 **Percurso:** Oeiras → Linda-a-Velha → Amadora\n"
+    )
+
+    output = structure_transport_markdown(raw)
+
+    assert "- 🚍 **Linha 1501**\n    - 📍 **Terminals:**" in output
+    assert "- 🚍 **Linha 1502**\n    - 📍 **Terminals:**" in output
+
+
+def test_carris_city_location_fallback_does_not_claim_no_buses_in_almada() -> None:
+    """Broad city names should show area context instead of a misleading no-buses radius miss."""
+    with patch("tools.carrismetropolitana_api.load_carris_metropolitana_vehicles", return_value=[]), patch(
+        "tools.carrismetropolitana_api.load_carris_metropolitana_stops",
+        return_value=[
+            {"id": "1", "name": "ALMADA CENTRO", "lat": 38.676, "lon": -9.165, "lines": ["3001", "3011"]},
+            {"id": "2", "name": "ALMADA FORUM", "lat": 38.660, "lon": -9.175, "lines": ["3020"]},
+        ],
+    ):
+        output = get_real_time_bus_positions.invoke({"location": "Almada", "radius_km": 1.0})
+
+    assert "No buses found within" not in output
+    assert "Almada is a broad area" in output
+    assert "ALMADA CENTRO" in output
+
+
+def test_cp_status_filters_long_distance_services() -> None:
+    """CP live status should exclude long-distance trains from the AML suburban view."""
+    fake_trains = [
+        {
+            "trainNumber": "18062",
+            "delay": 1200,
+            "status": "IN_TRANSIT",
+            "service": {"designation": "Urbanos Lisboa"},
+            "origin": {"designation": "Alverca"},
+            "destination": {"designation": "Sintra"},
+            "latitude": 38.75,
+            "longitude": -9.25,
+        },
+        {
+            "trainNumber": "523",
+            "delay": 2200,
+            "status": "IN_TRANSIT",
+            "service": {"designation": "Intercidades"},
+            "origin": {"designation": "Lisboa Santa Apolónia"},
+            "destination": {"designation": "Porto Campanhã"},
+        },
+    ]
+
+    with patch.object(cp_api, "get_cp_aml_trains", return_value=fake_trains), patch.object(
+        cp_api,
+        "load_cp_aml_stations",
+        return_value=[{"stop_name": "Rossio"}],
+    ):
+        output = cp_api.get_train_status.invoke({})
+
+    assert "Urbanos Lisboa" in output
+    assert "Intercidades" not in output
+    assert "Alfa Pendular" not in output
+    assert "Long-distance services" in output
+
+
+def test_metro_station_catalog_uses_compact_coloured_line_layout() -> None:
+    """All-station Metro output should use route order, line colours, and compact interchange hints."""
+    with patch.object(metrolisboa_api, "load_metro_stations", return_value=[{"stop_name": "Rato"}]):
+        output = metrolisboa_api.get_all_metro_stations.invoke({})
+
+    assert output.startswith("### 🚇 **Lisbon Metro**")
+    assert "**🟡 Yellow Line — Rato ↔ Odivelas**" in output
+    assert "Rato · 🟡🔵 Marquês de Pombal · Picoas" in output
+    assert "**🔵 Blue Line — Reboleira ↔ Santa Apolónia**" in output
+    assert "Reboleira · Amadora Este · Alfornelos" in output
+    assert "🟢🔴 Alameda" in output
+    assert "🚆 = station also served by national rail" in output
+    assert not any(line.lstrip().startswith("1.") for line in output.splitlines())
+
+
+def test_carris_metropolitana_line_realtime_output_hides_raw_feed_artifacts() -> None:
+    """Line-level live bus output should show useful vehicle details without separators or raw stop IDs."""
+    fake_buses = [
+        {
+            "id": "vehicle-1507-a",
+            "lat": 38.6765,
+            "lon": -9.1654,
+            "speed": 17.2,
+            "bearing": 90,
+            "current_status": "IN_TRANSIT_TO",
+            "stop_id": "050001",
+            "line_id": "1507",
+        },
+        {
+            "id": "vehicle-1507-b",
+            "lat": 38.6812,
+            "lon": -9.1502,
+            "speed": 0,
+            "bearing": 0,
+            "current_status": "STOPPED_AT",
+            "stop_id": "050002",
+            "line_id": "1507",
+        },
+    ]
+    fake_lines = [{"id": "1507", "short_name": "1507", "long_name": "Almada ↔ Cacilhas"}]
+    fake_stops = [
+        {"id": "050001", "name": "ALMADA CENTRO"},
+        {"id": "050002", "name": "CACILHAS TERMINAL"},
+    ]
+
+    with patch.object(carrismetropolitana_api, "load_carris_metropolitana_vehicles", return_value=fake_buses), patch.object(
+        carrismetropolitana_api,
+        "load_carris_metropolitana_lines",
+        return_value=fake_lines,
+    ), patch.object(
+        carrismetropolitana_api,
+        "load_carris_metropolitana_stops",
+        return_value=fake_stops,
+    ), patch.object(
+        carrismetropolitana_api,
+        "_build_vehicle_freshness_note",
+        return_value="📡 Data freshness: live Carris Metropolitana vehicle snapshot.",
+    ):
+        output = carrismetropolitana_api.get_bus_realtime_locations.invoke({"line_id": "1507"})
+
+    assert "### 🚌 **Carris Metropolitana Line 1507 - Live Buses**" in output
+    assert "Short answer" in output
+    assert "==================================================" not in output
+    assert "Next stop ID" not in output
+    assert "**Next stop:** ALMADA CENTRO" in output
+    assert "[Open map](https://www.google.com/maps/search/?api=1&query=38.67650%2C-9.16540)" in output
+
+
+def test_transport_deterministic_formatter_preserves_structured_live_bus_snapshot() -> None:
+    """Deterministic finalization should keep live-bus summaries, not reduce them to cards only."""
+    raw = """### 🚌 **Carris Metropolitana Line 1507 - Live Buses**
+
+**Short answer:** I found **2 active buses** currently reported on line **1507**.
+
+**Current snapshot**
+    - 🧭 **Route:** Caxias (Estação) - Reboleira (Metro)
+    - 📊 **Active buses:** 2
+    - 🕐 **Updated:** 20:42
+
+**Live vehicles**
+- **🚌 Bus 41|1125**
+    - 🚏 **Status:** Stopped At
+    - 📍 **Live position:** [Open map](https://www.google.com/maps/search/?api=1&query=38.74164%2C-9.21379)
+    - 🚏 **Next stop:** R João XXI (Igreja)
+
+⚠️ Scope: Carris Metropolitana covers AML metropolitan / intermunicipal buses."""
+
+    with patch.object(TransportAgent, "__init__", lambda self: None):
+        agent = TransportAgent()
+        output = agent._format_deterministic_tool_result(
+            "get_bus_realtime_locations",
+            {"line_id": "1507"},
+            raw,
+            "en",
+        )
+
+    assert "**Short answer:** I found **2 active buses**" in output
+    assert "**Current snapshot**" in output
+    assert "Caxias (Estação) - Reboleira (Metro)" in output
+    assert "⚠️ Scope:" not in output
+
+
+def test_cp_status_answers_directly_and_caps_delay_examples() -> None:
+    """CP status output should answer the normality question first and cap noisy delay details."""
+    fake_trains = []
+    for index, delay_minutes in enumerate([45, 32, 21, 15, 8, 4, 2], start=1):
+        fake_trains.append(
+            {
+                "trainNumber": f"18{index:03d}",
+                "delay": delay_minutes * 60,
+                "status": "IN_TRANSIT",
+                "hasDisruptions": index <= 2,
+                "service": {"designation": "Urbanos Lisboa"},
+                "origin": {"designation": "Cais do Sodré"},
+                "destination": {"designation": "Cascais"},
+                "latitude": 38.7,
+                "longitude": -9.3,
+            }
+        )
+    fake_trains.append(
+        {
+            "trainNumber": "19001",
+            "delay": 0,
+            "status": "IN_TRANSIT",
+            "service": {"designation": "Urbanos Lisboa"},
+            "origin": {"designation": "Rossio"},
+            "destination": {"designation": "Sintra"},
+        }
+    )
+
+    with patch.object(cp_api, "get_cp_aml_trains", return_value=fake_trains), patch.object(
+        cp_api,
+        "load_cp_aml_stations",
+        return_value=[{"stop_name": "Rossio"}, {"stop_name": "Cais do Sodré"}],
+    ):
+        output = cp_api.get_train_status.invoke({})
+
+    assert output.startswith("### 🚆 **CP Trains - Lisbon Metropolitan Area (AML)**")
+    assert "**Short answer:** No" in output
+    assert output.index("**Short answer:**") < output.index("**Current situation**")
+    assert "==================================================" not in output
+    assert "📍 **Position:**" not in output
+    assert "— ⚠️" not in output
+    assert "... and 2 more delayed Urbanos Lisboa trains" in output
+    assert "Long-distance services are excluded" in output
 
 
 def test_find_direct_bus_lines_falls_back_to_route_finder_for_poi_destinations() -> None:

@@ -195,6 +195,10 @@ TRANSLATIONS = {
 Master's Student in Data Science and Advanced Analytics
 NOVA IMS - Universidade NOVA de Lisboa
 2025/2026""",
+        "discover_eyebrow": "New here?",
+        "discover_title": "Discover how LISBOA works",
+        "discover_subtitle": "A multi-agent system grounding live transport, weather, events and tourism data into feasible itineraries for Lisbon.",
+        "discover_cta": "Explore the system",
     },
     "pt": {
         "app_title": "LISBOA",
@@ -336,6 +340,10 @@ NOVA IMS - Universidade NOVA de Lisboa
 Mestrando em Data Science e Advanced Analytics
 NOVA IMS - Universidade NOVA de Lisboa
 2025/2026""",
+        "discover_eyebrow": "Primeira visita?",
+        "discover_title": "Descubra como o LISBOA funciona",
+        "discover_subtitle": "Um sistema multi-agente que combina dados ao vivo de transportes, meteorologia, eventos e turismo em roteiros viáveis para Lisboa.",
+        "discover_cta": "Explorar o sistema",
     },
 }
 
@@ -760,6 +768,98 @@ button[kind="secondary"]:hover {{
 }}
 [data-testid="stChatMessage"] ul li::before {{
     content: "";
+}}
+
+/* Welcome Discover CTA */
+.welcome-discover {{
+    position: relative;
+    margin: 28px auto 18px;
+    padding: clamp(20px, 3vw, 32px) clamp(22px, 3.5vw, 40px);
+    border-radius: 22px;
+    background:
+        radial-gradient(circle at 12% 18%, rgba(246, 218, 0, 0.32), transparent 55%),
+        radial-gradient(circle at 92% 82%, rgba(255, 64, 17, 0.28), transparent 60%),
+        linear-gradient(135deg, #fff7d6 0%, #ffe6df 100%);
+    border: 1px solid rgba(255, 64, 17, 0.18);
+    box-shadow: 0 18px 38px -22px rgba(255, 64, 17, 0.45);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: clamp(16px, 3vw, 32px);
+    overflow: hidden;
+}}
+.welcome-discover::before {{
+    content: "";
+    position: absolute;
+    top: -40px;
+    right: -40px;
+    width: 180px;
+    height: 180px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,255,255,0.55), transparent 70%);
+    pointer-events: none;
+}}
+.welcome-discover-eyebrow {{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #c4321c;
+    background: rgba(255, 255, 255, 0.65);
+    padding: 4px 10px;
+    border-radius: 999px;
+    margin-bottom: 10px;
+}}
+.welcome-discover h3 {{
+    margin: 0 0 6px;
+    font-size: clamp(1.25rem, 2.4vw, 1.65rem);
+    font-weight: 800;
+    color: #1f2937;
+    line-height: 1.25;
+}}
+.welcome-discover p {{
+    margin: 0;
+    font-size: 0.97rem;
+    color: #3a4252;
+    line-height: 1.55;
+    max-width: 56ch;
+}}
+.welcome-discover-cta {{
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 24px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #ff4011 0%, #ff7e3d 100%);
+    color: #fff !important;
+    font-weight: 700;
+    font-size: 1rem;
+    letter-spacing: 0.01em;
+    text-decoration: none !important;
+    box-shadow: 0 12px 26px -10px rgba(255, 64, 17, 0.6);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    white-space: nowrap;
+}}
+.welcome-discover-cta:hover {{
+    transform: translateY(-2px);
+    box-shadow: 0 18px 32px -12px rgba(255, 64, 17, 0.7);
+    color: #fff !important;
+}}
+.welcome-discover-cta svg {{
+    width: 18px;
+    height: 18px;
+}}
+@media (max-width: 760px) {{
+    .welcome-discover {{
+        grid-template-columns: 1fr;
+        text-align: left;
+    }}
+    .welcome-discover-cta {{
+        justify-self: start;
+    }}
 }}
 
 /* Features Grid */
@@ -1682,6 +1782,26 @@ def build_welcome():
 
     st.markdown(
         f"""
+        <div class="welcome-discover">
+            <div>
+                <span class="welcome-discover-eyebrow">✨ {t('discover_eyebrow')}</span>
+                <h3>{t('discover_title')}</h3>
+                <p>{t('discover_subtitle')}</p>
+            </div>
+            <a class="welcome-discover-cta" href="?page=info" target="_self" rel="noopener">
+                <span>ℹ️ {t('discover_cta')}</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="5" y1="12" x2="19" y2="12"/>
+                    <polyline points="13 6 19 12 13 18"/>
+                </svg>
+            </a>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        f"""
         <div class="features-grid">
             <div class="feature-card"><div>{t("feat_atmosfera")}</div><p>{md_to_html(t('weather_desc'))}</p></div>
             <div class="feature-card"><div>{t("feat_mobilidade")}</div><p>{md_to_html(t('transport_desc'))}</p></div>
@@ -2196,8 +2316,8 @@ def run_info_page() -> None:
 
         .info-system-band {
             display: grid;
-            grid-template-columns: minmax(250px, 0.5fr) minmax(0, 1fr);
-            gap: clamp(1rem, 3vw, 2rem);
+            grid-template-columns: minmax(0, 1fr);
+            gap: clamp(1rem, 2.4vw, 1.6rem);
             align-items: stretch;
             border: 1px solid rgba(15, 23, 42, 0.08);
             background:
@@ -2211,6 +2331,7 @@ def run_info_page() -> None:
             flex-direction: column;
             justify-content: center;
             padding: 0.35rem;
+            max-width: 880px;
         }
 
         .info-system-badge {
@@ -2679,7 +2800,7 @@ def run_info_page() -> None:
         ("IPMA", t("info_source_ipma_desc"), "https://api.ipma.pt/"),
         ("Metro", t("info_source_metro_desc"), "https://www.metrolisboa.pt/"),
         ("Carris", t("info_source_carris_desc"), "https://www.carris.pt/"),
-        ("CM", t("info_source_cm_desc"), "https://www.carrismetropolitana.pt/"),
+        ("Carris Metropolitana", t("info_source_cm_desc"), "https://www.carrismetropolitana.pt/"),
         ("CP", t("info_source_cp_desc"), "https://www.cp.pt/"),
         ("Lisboa Aberta", t("info_source_lisboa_aberta_desc"), "https://dados.cm-lisboa.pt/"),
     ]

@@ -164,6 +164,47 @@ CP_KEY_STATIONS = {
 # Alias for backward compatibility with transport_api.py
 CP_STATIONS = CP_KEY_STATIONS
 
+# User-facing LISBOA coverage is limited to Lisbon Metropolitan Area suburban rail.
+# Keep long-distance GTFS routes such as AP, IC, IR, R and regional branches out of
+# answers unless a dedicated tool is added for them.
+CP_AML_SUBURBAN_ROUTE_NAMES = {
+    "linha de sintra",
+    "linha de cascais",
+    "linha da azambuja",
+    "linha de azambuja",
+    "linha do sado",
+    "fertagus",
+}
+
+
+def _normalize_cp_route_name(route_name: str) -> str:
+    """Normalize a CP route name for AML-suburban scope checks."""
+    normalized = unicodedata.normalize("NFKD", str(route_name or ""))
+    normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+    return " ".join(normalized.split())
+
+
+def _is_aml_suburban_route(route_name: str) -> bool:
+    """Return whether a route is inside LISBOA's AML suburban rail scope."""
+    normalized = _normalize_cp_route_name(route_name)
+    return normalized in CP_AML_SUBURBAN_ROUTE_NAMES
+
+
+def _format_cp_station_designation(station_name: str) -> str:
+    """Normalize common CP station names before rendering them to users."""
+    cleaned = str(station_name or "").strip()
+    normalized = _normalize_cp_route_name(cleaned)
+    replacements = {
+        "cais do sodre": "Cais do Sodré",
+        "lisboa santa apolonia": "Lisboa Santa Apolónia",
+        "santa apolonia": "Santa Apolónia",
+        "lisboa oriente": "Lisboa Oriente",
+        "sao bento": "São Bento",
+        "porto campanha": "Porto Campanhã",
+    }
+    return replacements.get(normalized, cleaned)
+
+
 _PT_WEEKDAY_NAMES = {
     0: "Segunda-feira",
     1: "Terça-feira",
@@ -1449,27 +1490,41 @@ def get_train_status() -> str:
 
     aml_stations = load_cp_aml_stations()
 
-    response = "🚆 **CP Trains - Lisbon Metropolitan Area (AML)**\n"
-    response += "=" * 50 + "\n\n"
-
-    # Group trains by service type
+    # Group trains by service type. Long-distance services may pass AML stations,
+    # but they are outside LISBOA's supported CP scope.
     by_service = defaultdict(list)
 
     for train in aml_trains:
         service_name = train.get('service', {}).get('designation', 'Unknown')
+        if service_name != 'Urbanos Lisboa':
+            continue
         by_service[service_name].append(train)
 
     # Count stats
-    total_trains = len(aml_trains)
-    delayed_trains = sum(1 for t in aml_trains if (t.get('delay') or 0) > 0)
+    visible_trains = [train for trains in by_service.values() for train in trains]
+    total_trains = len(visible_trains)
+    delayed_trains = sum(1 for t in visible_trains if (t.get('delay') or 0) > 0)
+    on_time_trains = max(total_trains - delayed_trains, 0)
 
-    response += f"📊 **{total_trains} trains** serving AML\n"
+    response = "### 🚆 **CP Trains - Lisbon Metropolitan Area (AML)**\n\n"
     if delayed_trains > 0:
-        response += f"⚠️ **{delayed_trains} trains** with delays\n"
-    response += "\n"
+        response += (
+            f"**Short answer:** No — CP suburban trains around Lisbon are **not running normally right now**. "
+            f"The live snapshot shows **{total_trains} trains** serving AML, with **{delayed_trains} delayed**.\n\n"
+        )
+    else:
+        response += (
+            f"**Short answer:** Yes — the supported CP suburban trains around Lisbon are currently shown without delays "
+            f"in the live snapshot (**{total_trains} trains** serving AML).\n\n"
+        )
+
+    response += "**Current situation**\n"
+    response += f"    - 📊 **Tracked suburban trains:** {total_trains}\n"
+    response += f"    - ✅ **Shown without delay:** {on_time_trains}\n"
+    response += f"    - ⚠️ **Delayed:** {delayed_trains}\n\n"
 
     # Display by service type
-    service_order = ['Urbanos Lisboa', 'Regionais', 'Intercidades', 'Alfa Pendular']
+    service_order = ['Urbanos Lisboa']
 
     for service_name in service_order:
         if service_name not in by_service:
@@ -1485,28 +1540,36 @@ def get_train_status() -> str:
             'Alfa Pendular': '🚅'
         }.get(service_name, '🚆')
 
-        response += f"\n{service_emoji} **{service_name}** ({len(trains)} trains)\n"
-        response += "-" * 40 + "\n"
+        delayed_service_trains = [train for train in trains if (train.get('delay') or 0) > 0]
+        on_time_service_count = len(trains) - len(delayed_service_trains)
 
-        for train in trains[:5]:
+        response += f"{service_emoji} **{service_name}**\n"
+        response += f"    - ✅ **Shown without delay:** {on_time_service_count}\n"
+        response += f"    - ⚠️ **Delayed:** {len(delayed_service_trains)}\n"
+
+        if not delayed_service_trains:
+            response += "\n"
+            continue
+
+        response += "    - **Main delays:**\n"
+
+        for train in delayed_service_trains[:5]:
             train_number = train.get('trainNumber', 'N/A')
             delay = train.get('delay') or 0
             status = train.get('status', 'Unknown')
             has_disruptions = train.get('hasDisruptions', False)
-            lat = train.get('latitude')
-            lon = train.get('longitude')
 
             origin = train.get('origin', {})
             destination = train.get('destination', {})
-            origin_name = origin.get('designation', 'N/A') if origin else 'N/A'
-            dest_name = destination.get('designation', 'N/A') if destination else 'N/A'
+            origin_name = _format_cp_station_designation(origin.get('designation', 'N/A') if origin else 'N/A')
+            dest_name = _format_cp_station_designation(destination.get('designation', 'N/A') if destination else 'N/A')
 
             # Delay in seconds, convert to minutes
             delay_minutes = delay // 60 if delay else 0
             if delay_minutes == 0:
                 delay_str = "✅ On time"
             elif delay_minutes > 0:
-                delay_str = f"⚠️ {delay_minutes} min late"
+                delay_str = f"{delay_minutes} min late"
             else:
                 delay_str = "✅ Ahead"
 
@@ -1516,27 +1579,20 @@ def get_train_status() -> str:
                 'STOPPED': '⏸️'
             }.get(status, '❓')
 
-            response += f"\n   {status_emoji} **#{train_number}**: {origin_name} → {dest_name}\n"
-            response += f"      {delay_str}"
+            disruption_note = " (with disruptions)" if has_disruptions else ""
+            response += (
+                f"        - {status_emoji} **#{train_number}:** {origin_name} → {dest_name}, "
+                f"**{delay_str}**{disruption_note}\n"
+            )
 
-            if has_disruptions:
-                response += " | ⚠️ Disruptions"
+        if len(delayed_service_trains) > 5:
+            response += f"    - ... and {len(delayed_service_trains) - 5} more delayed {service_name} trains.\n"
+        response += "\n"
 
-            if lat and lon:
-                try:
-                    response += f"\n      📍 Position: ({float(lat):.4f}, {float(lon):.4f})"
-                except (ValueError, TypeError):
-                    pass
-
-            response += "\n"
-
-        if len(trains) > 5:
-            response += f"\n   ... and {len(trains) - 5} more {service_name} trains.\n"
-
-    response += "\n" + "-" * 50 + "\n"
-    response += f"📍 **AML Coverage**: {len(aml_stations)} stations\n"
-    response += "🔗 Lines: Cascais, Sintra, Azambuja, Fertagus\n"
-    response += "💡 Podes perguntar por uma estação específica para mais detalhes.\n"
+    response += f"📍 **AML Coverage:** {len(aml_stations)} stations\n"
+    response += "🔗 **Supported lines:** Cascais, Sintra, Azambuja, Sado/Fertagus\n"
+    response += "💡 **Quick Tip:** Ask about a specific station or line for departure-level detail.\n"
+    response += "ℹ️ Long-distance services are excluded from this LISBOA CP view.\n"
 
     return response
 
@@ -1697,47 +1753,41 @@ def get_cp_routes() -> str:
     """
     routes = get_gtfs_routes()
 
-    if not routes:
-        # Fall back to static list
-        response = "🚆 **CP Lines - Lisbon Metropolitan Area**\n"
-        response += "=" * 50 + "\n\n"
-
-        for line_id, info in CP_LINES.items():
-            response += f"**{info['name']}**\n"
-            response += f"   📍 {info['terminal_a']} ↔ {info['terminal_b']}\n"
-            response += f"   📝 {info['description']}\n\n"
-
-        return response
-
-    response = "🚆 **CP Routes from GTFS Data**\n"
-    response += "=" * 50 + "\n\n"
-
-    # Deduplicate routes by short name (GTFS has multiple entries per route)
-    seen = set()
-    unique_routes = []
+    route_lookup: Dict[str, Dict[str, Any]] = {}
     for route in routes:
-        key = route['route_short_name'] or route['route_id']
-        if key not in seen:
-            seen.add(key)
-            unique_routes.append(route)
+        route_name = route.get("route_short_name") or route.get("route_long_name") or route.get("route_id") or ""
+        if not _is_aml_suburban_route(route_name):
+            continue
+        normalized = _normalize_cp_route_name(route_name)
+        route_lookup.setdefault(normalized, route)
 
-    # Group by route type
-    rail_types = {0: 'Tram', 1: 'Metro', 2: 'Rail', 3: 'Bus',
-                  7: 'Funicular', 11: 'Trolleybus', 12: 'Monorail'}
+    response = "🚆 **CP suburban lines around Lisbon (AML)**\n\n"
 
-    for route in unique_routes:
-        route_type = rail_types.get(route['route_type'], 'Other')
-        name = route['route_short_name'] or route['route_long_name'] or route['route_id']
-        long_name = route['route_long_name'] or ''
-        color = route.get('route_color', '')
+    curated_lines = [
+        ("linha de sintra", "Linha de Sintra", "Rossio / Oriente ↔ Sintra"),
+        ("linha de cascais", "Linha de Cascais", "Cais do Sodré ↔ Cascais"),
+        ("linha da azambuja", "Linha de Azambuja", "Santa Apolónia / Oriente ↔ Azambuja"),
+        ("linha do sado", "Linha do Sado", "Barreiro ↔ Setúbal"),
+    ]
 
-        response += f"🚆 **{name}**"
-        if long_name and long_name != name:
-            response += f" - {long_name}"
-        response += f"\n   📋 Type: {route_type}\n"
-        if color:
-            response += f"   🎨 Color: #{color}\n"
-        response += "\n"
+    visible_count = 0
+    for lookup_key, display_name, terminals in curated_lines:
+        if routes and lookup_key not in route_lookup:
+            continue
+        response += f"🚆 **{display_name}**\n"
+        response += f"   📍 {terminals}\n\n"
+        visible_count += 1
+
+    if visible_count == 0:
+        response += (
+            "⚠️ No AML suburban CP lines were found in the local GTFS snapshot. "
+            "Try again after refreshing the CP GTFS data.\n"
+        )
+
+    response += (
+        "ℹ️ LISBOA covers AML suburban rail here. Long-distance services such as "
+        "Alfa Pendular, Intercidades, InterRegional and Regional routes are outside this tool scope."
+    )
 
     return response
 
@@ -1820,7 +1870,10 @@ def plan_train_trip(origin: str, destination: str) -> str:
         """
 
         cursor.execute(query, [origin_id, dest_id] + active_services + [current_time])
-        trips = cursor.fetchall()
+        trips = [
+            trip for trip in cursor.fetchall()
+            if _is_aml_suburban_route(trip["route_short_name"] or trip["route_long_name"] or "")
+        ]
         conn.close()
 
         if not trips:
@@ -1828,22 +1881,27 @@ def plan_train_trip(origin: str, destination: str) -> str:
             conn = manager.get_db_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT COUNT(*)
+                SELECT r.route_short_name, r.route_long_name
                 FROM stop_times st_origin
                 JOIN stop_times st_dest ON st_origin.trip_id = st_dest.trip_id
                 JOIN trips t ON st_origin.trip_id = t.trip_id
+                JOIN routes r ON t.route_id = r.route_id
                 WHERE st_origin.stop_id = ?
                 AND st_dest.stop_id = ?
                 AND st_origin.stop_sequence < st_dest.stop_sequence
             """, (origin_id, dest_id))
-            total_trips = cursor.fetchone()[0]
+            all_route_rows = cursor.fetchall()
             conn.close()
+            total_trips = sum(
+                1
+                for row in all_route_rows
+                if _is_aml_suburban_route(row["route_short_name"] or row["route_long_name"] or "")
+            )
 
             if total_trips == 0:
                 return (f"❌ No direct train service found between **{origin_name}** and **{dest_name}**.\n\n"
-                        "💡 These stations may be on different lines. Consider:\n"
-                        "   • Transfer at a connecting station (e.g., Oriente, Entrecampos)\n"
-                        "   • Podes perguntar por informação sobre uma estação específica")
+                        "💡 No supported AML suburban CP trip was confirmed for this station pair. "
+                        "Long-distance CP services are outside LISBOA's current rail scope.")
             else:
                 return (f"⏰ No more trains today from **{origin_name}** to **{dest_name}**.\n\n"
                         f"There are {total_trips} trips on other days. Try again tomorrow or check schedules online.")
@@ -1934,11 +1992,11 @@ def plan_train_trip(origin: str, destination: str) -> str:
 
         response += "-" * 50 + "\n"
 
-        # Show up to 8 departures
-        display_count = min(8, len(trips))
+        # Show a compact set of departures; the full list is too noisy in Streamlit.
+        display_count = min(3, len(trips))
         response += f"📋 **Próximas {display_count} Partidas:**\n\n"
 
-        for i, trip in enumerate(trips[:8], 1):
+        for i, trip in enumerate(trips[:display_count], 1):
             origin_dep = trip['origin_departure']
             dest_arr = trip['dest_arrival']
             trip_route = trip['route_short_name'] or trip['route_long_name'] or 'CP'
@@ -1956,8 +2014,9 @@ def plan_train_trip(origin: str, destination: str) -> str:
                 response += f" [{trip_route}]"
             response += "\n"
 
-        if len(trips) > 8:
-            response += f"\n   ... e mais {len(trips) - 8} partidas restantes hoje.\n"
+        if len(trips) > display_count:
+            response += f"\n   ... e mais {len(trips) - display_count} partidas restantes hoje.\n"
+            response += "   💡 Se quiseres, indica o intervalo horário e mostro partidas mais específicas.\n"
 
         response += "\n" + "-" * 50 + "\n"
         response += f"📅 {_format_pt_datetime(now, include_time=True)}\n"
