@@ -167,4 +167,11 @@ def test_find_nearby_services_resolves_rossio_as_landmark_before_dataset_search(
     )
 
     assert result.index("FarmÃ¡cia Rossio") < result.index("FarmÃ¡cia BelÃ©m")
-    assert "0.00 km away" in result
+    assert "**Distance:** 0.00 km" in result
+
+
+def test_find_nearby_services_resolves_central_lisbon_as_stable_anchor(monkeypatch) -> None:
+    """City-centre service searches should not drift to unrelated geocoder matches."""
+    assert dados_abertos._resolve_reference_coordinates("central Lisbon") == (38.7139, -9.1394)
+    assert dados_abertos._resolve_reference_coordinates("Lisbon city centre") == (38.7139, -9.1394)
+    assert dados_abertos._resolve_reference_coordinates("downtown Lisbon") == (38.7139, -9.1394)

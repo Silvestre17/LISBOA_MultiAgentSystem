@@ -708,6 +708,7 @@ def _localize_place_value_text(value: Optional[str], language: str = "en") -> st
         return raw
 
     localized = raw
+    localized = re.sub(r"^Price\s*:", "Preço:", localized, flags=re.IGNORECASE)
     localized = re.sub(r"\bFree\s+with\s+Lisboa\s+Card\b", "Gratuito com Lisboa Card", localized, flags=re.IGNORECASE)
     localized = re.sub(r"\bwith\s+Lisboa\s+Card\b", "com Lisboa Card", localized, flags=re.IGNORECASE)
     localized = re.sub(r"\bChildren\s+Free\s+until\s*\(age\)\s*:", "Crianças grátis até aos", localized, flags=re.IGNORECASE)
@@ -765,7 +766,7 @@ def _is_generic_lisbon_location(value: Optional[str]) -> bool:
 
 
 def _format_visitlisboa_location_line(location: Optional[str], title: str, language: str = "en") -> str:
-    """Format VisitLisboa location output, replacing city-only stubs with Maps search."""
+    """Format VisitLisboa location output only when it contains a specific address."""
     loc = re.sub(r"\s+", " ", (location or "").strip())
     known_addresses = {
         "mosteiro dos jeronimos": "Praça do Império, 1400-206 Lisboa",
@@ -786,13 +787,14 @@ def _format_visitlisboa_location_line(location: Optional[str], title: str, langu
         query = quote_plus(address)
         return f"   📍 **{label}:** [{address}](https://www.google.com/maps/search/?api=1&query={query})"
     if _is_generic_lisbon_location(loc):
+        return ""
+    if loc:
         from urllib.parse import quote_plus
 
         label = "Morada" if language == "pt" else "Address"
-        link_label = "Pesquisar no Maps" if language == "pt" else "Search on Maps"
-        query = quote_plus(f"{title} Lisboa")
-        return f"   📍 **{label}:** [{link_label}](https://www.google.com/maps/search/?api=1&query={query})"
-    return f"   📍 {loc}" if loc else ""
+        query = quote_plus(loc)
+        return f"   📍 **{label}:** [{loc}](https://www.google.com/maps/search/?api=1&query={query})"
+    return ""
 
 
 def _localize_event_date_filter(date_filter: Optional[str], language: str = "en") -> str:
@@ -2140,6 +2142,7 @@ _EXPLICIT_MUSEUM_MARKERS = {
 }
 _NON_MUSEUM_MONUMENT_MARKERS = {
     "monument", "monastery", "castle", "palace", "church", "tower", "cemetery", "aqueduct",
+    "planetarium", "planetario", "planetário",
     "monumento", "mosteiro", "castelo", "palacio", "igreja", "torre", "cemiterio", "aqueduto",
 }
 _PUBLIC_SERVICE_FOCUS_TERMS = {
@@ -2192,13 +2195,86 @@ def _query_requests_ranked_places(query: Optional[str]) -> bool:
     return _text_contains_fuzzy_term(query, ["best", "top", "recommended", "recommend", "must-see", "must see"])
 
 
+_PROMINENT_MUSEUM_MARKER_WEIGHTS: Tuple[Tuple[str, float], ...] = (
+    ("gulbenkian", 0.52),
+    ("maat", 0.42),
+    ("azulejo", 0.38),
+    ("arte antiga", 0.36),
+    ("ancient art", 0.36),
+    ("national coach", 0.30),
+    ("coches", 0.30),
+    ("maritime", 0.22),
+)
+
+
+def _coerce_ranking_float(value: Any, default: float = 0.0) -> float:
+    """Convert scraped ranking fields to floats without raising on sparse data."""
+    try:
+        if value is None or value == "":
+            return default
+        return float(str(value).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def _score_ranked_place_result(result: Dict[str, Any], query_intent: Optional[str]) -> float:
+    """Score broad recommendation results with data-backed popularity signals."""
+    full_data = _get_place_by_url(result.get("url", "")) if result.get("url") else None
+    title = result.get("title", "")
+    category = result.get("category", "")
+    description = result.get("short_description", "")
+    haystack = _normalize_place_hint_text(
+        " ".join(
+            [
+                title,
+                category,
+                result.get("url", ""),
+                description,
+                (full_data or {}).get("short_description", ""),
+                (full_data or {}).get("full_description", ""),
+            ]
+        )
+    )
+
+    score = float(result.get("ranking_score") or 0.0)
+    if query_intent == "museum_only":
+        score *= 0.35
+    tripadvisor = (full_data or {}).get("tripadvisor") or {}
+    rating = _coerce_ranking_float(result.get("rating"), default=0.0) or _coerce_ranking_float(
+        tripadvisor.get("rating"), default=0.0
+    )
+    reviews = _coerce_ranking_float(result.get("reviews"), default=0.0) or _coerce_ranking_float(
+        tripadvisor.get("reviews_count"), default=0.0
+    )
+    if rating:
+        score += min(0.45, (rating / 5.0) * 0.45)
+    if reviews:
+        score += min(0.42, math.log10(reviews + 1) / 4.5)
+
+    if query_intent == "museum_only" and _is_explicit_museum_candidate(title, result.get("url", ""), haystack):
+        score += 0.28
+        for marker, weight in _PROMINENT_MUSEUM_MARKER_WEIGHTS:
+            if marker in haystack:
+                score += weight
+                break
+
+    if _is_service_like_place_category(category):
+        score -= 0.60
+    return score
+
+
 def _is_explicit_museum_candidate(title: str, url: str = "", extra_text: str = "") -> bool:
     """Returns whether a candidate is explicitly museum-like rather than just monument-like."""
     extra_text_clean = re.sub(r"category\s*:\s*[^\n]+", " ", extra_text or "", flags=re.IGNORECASE)
     extra_text_clean = re.sub(r"museums?\s*&\s*monuments?", " ", extra_text_clean, flags=re.IGNORECASE)
     haystack = _normalize_place_hint_text(" ".join([title or "", url or "", extra_text_clean]))
+    title_url_haystack = _normalize_place_hint_text(" ".join([title or "", url or ""]))
     compact_haystack = haystack.replace(" ", "")
 
+    if any(marker in title_url_haystack for marker in _NON_MUSEUM_MONUMENT_MARKERS) and not any(
+        marker in title_url_haystack for marker in _EXPLICIT_MUSEUM_MARKERS
+    ):
+        return False
     if any(marker in haystack for marker in _EXPLICIT_MUSEUM_MARKERS):
         return True
     if any(marker in compact_haystack for marker in {"mac/ccb", "macccb"}):
@@ -3569,7 +3645,14 @@ def search_places_attractions(
                 for item in scored_candidates[:requested_window]:
                     metadata = item['metadata']
                     # Attempt to get real address/location
-                    real_location = metadata.get('address') or metadata.get('location') or 'Lisbon'
+                    full_place_data = _get_place_by_url(metadata.get('url', '')) if metadata.get('url') else None
+                    real_location = (
+                        (full_place_data or {}).get('address')
+                        or (full_place_data or {}).get('location')
+                        or metadata.get('address')
+                        or metadata.get('location')
+                        or 'Lisbon'
+                    )
                     visitlisboa_results.append({
                         'title': metadata.get('title', 'Unknown'),
                         'category': metadata.get('category', 'General'),
@@ -3580,6 +3663,38 @@ def search_places_attractions(
                         'score': item['vector_score'],  # Keep original for debug if needed
                         'ranking_score': item['final_score']
                     })
+
+                has_catalog_backing = any(
+                    bool(_get_place_by_url(str(result.get("url") or "")))
+                    for result in visitlisboa_results
+                    if result.get("url")
+                )
+                if ranking_requested and query_intent == "museum_only" and not location_hints and has_catalog_backing:
+                    json_candidates = _fallback_search(
+                        query=None,
+                        category=category or "Museums & Monuments",
+                        data=_load_places_json(),
+                        max_results=5000,
+                    )
+                    json_candidates = [
+                        item
+                        for item in json_candidates
+                        if _is_explicit_museum_candidate(
+                            item.get("title", ""),
+                            item.get("url", ""),
+                            _build_place_searchable_text(item),
+                        )
+                    ]
+                    json_results = [_convert_raw_place_to_result(item) for item in json_candidates]
+                    merged_ranked_results: List[Dict[str, Any]] = []
+                    seen_ranked_keys: set[str] = set()
+                    _append_unique_place_results(merged_ranked_results, visitlisboa_results, seen_ranked_keys)
+                    _append_unique_place_results(merged_ranked_results, json_results, seen_ranked_keys)
+                    visitlisboa_results = sorted(
+                        merged_ranked_results,
+                        key=lambda result: _score_ranked_place_result(result, query_intent),
+                        reverse=True,
+                    )[:requested_window]
 
             except Exception as e:
                 logger.warning(f"Vector search failed: {e}")
@@ -3775,13 +3890,19 @@ def search_places_attractions(
         for i, place in enumerate(final_results, 1):
             title = _localize_place_title(place.get('title', 'Unknown'), language=render_language)
             cat = _localize_place_category(place.get('category', 'General'), language=render_language)
-            loc = place.get('location', 'Lisbon')
             source = place.get('source', 'unknown')
 
             # Try to get full data from JSON for richer output
             full_data = None
             if place.get('url') and source == 'visitlisboa':
                 full_data = _get_place_by_url(place['url'])
+            loc = (
+                (full_data or {}).get('address')
+                or (full_data or {}).get('location')
+                or place.get('address')
+                or place.get('location')
+                or 'Lisbon'
+            )
 
             # Source indicator
             if source == 'dados_abertos':
@@ -3875,9 +3996,12 @@ def search_places_attractions(
 
 
 @tool
-def get_event_categories() -> str:
+def get_event_categories(language: str = "en") -> str:
     """
     Get all available event categories from VisitLisboa data.
+
+    Args:
+        language: Output language, either ``"en"`` or ``"pt"``.
 
     Use this tool to discover what types of events are available
     before searching for specific events.
@@ -3902,12 +4026,40 @@ def get_event_categories() -> str:
         # Sort by count
         sorted_categories = sorted(category_counts.items(), key=lambda x: x[1], reverse=True)
 
-        output_parts = ["🎭 **Event Categories in Lisbon:**\n"]
-        for cat, count in sorted_categories:
-            output_parts.append(f"  • {cat}: {count} events")
+        is_pt = str(language or "en").lower().startswith("pt")
+        event_word = "evento" if is_pt else "event"
+        event_word_plural = "eventos" if is_pt else "events"
+        title = "Categorias de Eventos em Lisboa" if is_pt else "Event Categories in Lisbon"
+        emoji_map = {
+            "music": "🎵",
+            "exhibitions": "🖼️",
+            "main events": "🎟️",
+            "fairs": "🎪",
+            "festivals": "🎉",
+            "others": "📌",
+            "theater opera & dance": "🎭",
+            "theatre opera & dance": "🎭",
+            "sports": "⚽",
+            "cinema": "🎬",
+            "uncategorized": "📁",
+        }
 
-        output_parts.append(f"\n📊 **Total events:** {len(events_data)}")
-        output_parts.append("\n💡 Podes perguntar-me sobre um tipo de evento específico para pesquisa detalhada.")
+        output_parts = [f"### 🎭 **{title}**\n"]
+        for cat, count in sorted_categories:
+            normalized_cat = _normalize_lookup_text(cat)
+            emoji = emoji_map.get(normalized_cat, "📌")
+            label = str(cat).strip() or ("Sem categoria" if is_pt else "Uncategorized")
+            noun = event_word if count == 1 else event_word_plural
+            output_parts.append(f"- {emoji} **{label}:** {count} {noun}")
+
+        total_label = "Total de eventos" if is_pt else "Total events"
+        tip = (
+            "💡 **Dica:** Podes perguntar por uma categoria específica para resultados com datas e locais."
+            if is_pt
+            else "💡 **Tip:** Ask for a specific category to get dated events and venues."
+        )
+        output_parts.append(f"\n📊 **{total_label}:** {len(events_data)}")
+        output_parts.append(f"\n{tip}")
 
         return "\n".join(output_parts)
 
@@ -3917,9 +4069,12 @@ def get_event_categories() -> str:
 
 
 @tool
-def get_place_categories() -> str:
+def get_place_categories(language: str = "en") -> str:
     """
     Get all available place categories from VisitLisboa data.
+
+    Args:
+        language: Output language, either ``"en"`` or ``"pt"``.
 
     Use this tool to discover what types of places/attractions are available
     before searching for specific places.
@@ -3935,25 +4090,102 @@ def get_place_categories() -> str:
         if not places_data:
             return "❌ Places data not available."
 
+        is_pt = str(language or "en").lower().startswith("pt")
         category_counts = {}
-        output_parts = ["🏛️ **Available Place Categories:**\n"]
+        title = "Categorias de Locais Disponíveis" if is_pt else "Available Place Categories"
+        place_word = "local" if is_pt else "place"
+        place_word_plural = "locais" if is_pt else "places"
+        category_groups = [
+            {
+                "keys": {"museums", "museums & monuments", "monuments"},
+                "emoji": "🏛️",
+                "en": "Museums & Monuments",
+                "pt": "Museus e Monumentos",
+                "en_examples": "Museums, monuments, heritage sites.",
+                "pt_examples": "Museus, monumentos e património histórico.",
+            },
+            {
+                "keys": {"tours", "only in lisbon", "attractions"},
+                "emoji": "✨",
+                "en": "Tours & Experiences",
+                "pt": "Visitas e Experiências",
+                "en_examples": "Guided tours, classic Lisbon experiences, attractions.",
+                "pt_examples": "Visitas guiadas, experiências clássicas de Lisboa e atrações.",
+            },
+            {
+                "keys": {"view points", "nature", "gardens & parks", "parks"},
+                "emoji": "🌅",
+                "en": "Viewpoints & Nature",
+                "pt": "Miradouros e Natureza",
+                "en_examples": "Viewpoints, parks, gardens, open-air places.",
+                "pt_examples": "Miradouros, parques, jardins e espaços ao ar livre.",
+            },
+            {
+                "keys": {"restaurants", "restaurant"},
+                "emoji": "🍽️",
+                "en": "Food & Restaurants",
+                "pt": "Restaurantes e Gastronomia",
+                "en_examples": "Restaurants and food-focused places.",
+                "pt_examples": "Restaurantes e locais ligados à gastronomia.",
+            },
+            {
+                "keys": {"shopping", "tourist offices"},
+                "emoji": "🛍️",
+                "en": "Shopping & Visitor Services",
+                "pt": "Compras e Apoio ao Visitante",
+                "en_examples": "Shopping areas and tourist information offices.",
+                "pt_examples": "Zonas de compras e postos de informação turística.",
+            },
+            {
+                "keys": {"tejo cruises"},
+                "emoji": "⛵",
+                "en": "River Cruises",
+                "pt": "Cruzeiros no Tejo",
+                "en_examples": "Tagus river cruise options.",
+                "pt_examples": "Opções de cruzeiros no rio Tejo.",
+            },
+        ]
+        output_parts = [f"### 🏛️ **{title}**\n"]
 
         # Count places by category
         for place in places_data:
             cat = place.get('category', 'Uncategorized')
             category_counts[cat] = category_counts.get(cat, 0) + 1
 
-        # Sort by count
-        sorted_categories = sorted(category_counts.items(), key=lambda x: x[1], reverse=True)
+        normalized_counts = {
+            _normalize_lookup_text(cat): count
+            for cat, count in category_counts.items()
+            if _normalize_lookup_text(cat) not in {"uncategorized", "dmcs & pcos", "18 holes"}
+        }
 
-        for cat, count in sorted_categories[:20]:  # Top 20
-            output_parts.append(f"  • {cat}: {count} places")
+        covered_keys: set[str] = set()
+        for group in category_groups:
+            count = sum(normalized_counts.get(key, 0) for key in group["keys"])
+            if count <= 0:
+                continue
+            covered_keys.update(group["keys"])
+            noun = place_word if count == 1 else place_word_plural
+            label = group["pt"] if is_pt else group["en"]
+            examples = group["pt_examples"] if is_pt else group["en_examples"]
+            output_parts.append(f"- {group['emoji']} **{label}:** {count} {noun}")
+            output_parts.append(f"    - {examples}")
 
-        if len(sorted_categories) > 20:
-            output_parts.append(f"  ... and {len(sorted_categories) - 20} more categories")
+        remaining_count = sum(
+            count for key, count in normalized_counts.items()
+            if key not in covered_keys and count > 0
+        )
+        if remaining_count:
+            label = "Outras categorias especializadas" if is_pt else "Other specialist categories"
+            output_parts.append(f"- 📌 **{label}:** {remaining_count} {place_word_plural}")
 
-        output_parts.append(f"\n📊 **Total places:** {len(places_data)}")
-        output_parts.append("\n💡 Podes perguntar-me sobre um tipo de local específico para pesquisa detalhada.")
+        total_label = "Total de locais" if is_pt else "Total places"
+        tip = (
+            "💡 **Dica:** Podes perguntar por uma categoria específica para receber locais concretos e verificados."
+            if is_pt
+            else "💡 **Tip:** Ask for a specific category to get concrete, verified places."
+        )
+        output_parts.append(f"\n📊 **{total_label}:** {len(places_data)}")
+        output_parts.append(f"\n{tip}")
 
         return "\n".join(output_parts)
 

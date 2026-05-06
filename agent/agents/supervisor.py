@@ -332,14 +332,16 @@ class SupervisorAgent(BaseAgent):
         """Builds a concise limitation response for unsupported booking actions."""
         if language == "pt":
             return (
-                "Não consigo fazer reservas, compras ou marcações diretamente. "
-                "Posso ajudar-te a encontrar opções em Lisboa, confirmar informação disponível "
-                "e indicar o que deves verificar no canal oficial."
+                "### 🚫 **Ação não disponível**\n\n"
+                "Não consigo fazer reservas, compras ou marcações diretamente.\n\n"
+                "- 🌐 O website oficial, contactos e horários disponíveis são o canal mais seguro.\n"
+                "- ✅ Podes pedir informação sobre o local em Lisboa para saberes o que confirmar antes de reservares."
             )
         return (
-            "I can't make bookings, purchases, or reservations directly. "
-            "I can help you find Lisbon options, summarize available information, "
-            "and point out what to verify through the official channel."
+            "### 🚫 **Action Not Available**\n\n"
+            "I can't make bookings, purchases, or reservations directly.\n\n"
+            "- 🌐 The official website, contact details, and opening information are the safest next step.\n"
+            "- ✅ Ask for local Lisbon venue details if you want to know what to verify before booking."
         )
 
     @staticmethod
@@ -348,11 +350,11 @@ class SupervisorAgent(BaseAgent):
         if language == "en":
             return (
                 "Hello! 👋 I'm your Lisbon Urban Assistant. "
-                "How can I help you today? I can help with weather, transport, places, events, and itineraries around Lisbon."
+                "How can I help you today?"
             )
         return (
             "Olá! 👋 Sou o teu Assistente Urbano de Lisboa. "
-            "Em que te posso ajudar hoje? Posso ajudar com meteorologia, transportes, locais, eventos e itinerários em Lisboa."
+            "Em que te posso ajudar hoje?"
         )
 
     @staticmethod
@@ -454,7 +456,10 @@ class SupervisorAgent(BaseAgent):
     @classmethod
     def _single_domain_override(cls, user_message: str) -> Optional[Dict[str, Any]]:
         """Routes obvious standalone single-domain queries without letting history or the LLM over-expand them."""
-        if cls._looks_like_follow_up(user_message) or cls._is_planning_query(user_message):
+        if cls._looks_like_follow_up(user_message):
+            return None
+        direct_weather_transport = cls._is_direct_weather_transport_query(user_message)
+        if cls._is_planning_query(user_message) and not direct_weather_transport:
             return None
 
         message_lower = cls._normalize_query(user_message)
@@ -541,6 +546,16 @@ class SupervisorAgent(BaseAgent):
             return {
                 "reasoning": "Direct weather-aware event override",
                 "agents": ["weather", "researcher"],
+                "direct_response": None,
+            }
+
+        if weather_hit and transport_hit and not any([event_hit, service_hit]):
+            agents = ["weather", "transport"]
+            if cls._direct_weather_transport_query_needs_local_context(message_lower):
+                agents.append("researcher")
+            return {
+                "reasoning": "Direct weather and transport override",
+                "agents": agents,
                 "direct_response": None,
             }
 
@@ -650,6 +665,10 @@ class SupervisorAgent(BaseAgent):
     def _is_planning_query(cls, user_message: str) -> bool:
         """Detects itinerary/planning intent without over-matching words like `today`."""
         message_lower = cls._normalize_query(user_message)
+        if cls._is_category_browse_query(user_message):
+            return False
+        if cls._is_direct_weather_transport_query(user_message):
+            return False
         planning_patterns = [
             r"\bplan\b",
             r"\bplan my day\b",
@@ -672,6 +691,53 @@ class SupervisorAgent(BaseAgent):
             return True
 
         return False
+
+    @classmethod
+    def _is_direct_weather_transport_query(cls, user_message: str) -> bool:
+        """Detects operational weather-plus-route requests that should not become itineraries."""
+        normalized = cls._normalize_query(user_message)
+        if not normalized:
+            return False
+
+        full_planning_markers = [
+            r"\bfull\s+(?:day|itinerary)\b",
+            r"\bplan\s+(?:a|my|the)?\s*(?:full\s+)?(?:day|itinerary)\b",
+            r"\bitinerary\b",
+            r"\broteiro\b",
+            r"\bplano\s+(?:do|de)?\s*dia\b",
+            r"\b(?:varios|vários|multiple)\s+(?:locais|places|stops)\b",
+        ]
+        if any(re.search(pattern, normalized) for pattern in full_planning_markers):
+            return False
+
+        route_markers = [
+            r"\bhow\s+(?:do|can)\s+i\s+(?:get|go)\b.*\b(?:from|to)\b",
+            r"\bcomo\s+(?:vou|chego|posso ir)\b.*\b(?:de|do|da|para)\b",
+            r"\b(?:from|de|do|da)\s+.+\b(?:to|para)\s+.+\b(?:public transport|transportes publicos|transportes públicos)",
+            r"\b(?:public transport|transportes publicos|transportes públicos)\b",
+        ]
+        has_route_request = any(re.search(pattern, normalized) for pattern in route_markers)
+        return cls._looks_like_weather_query(normalized) and cls._looks_like_transport_query(normalized) and has_route_request
+
+    @staticmethod
+    def _direct_weather_transport_query_needs_local_context(normalized_message: str) -> bool:
+        """Returns whether a direct weather-route request also asks for visit context."""
+        return bool(
+            re.search(r"\b(?:visit|visiting|visitar|conhecer|explore|explorar)\b", normalized_message)
+        )
+
+    @classmethod
+    def _is_category_browse_query(cls, user_message: str) -> bool:
+        """Detects category-browsing questions that should not become itinerary plans."""
+        normalized = cls._normalize_query(user_message)
+        category_patterns = [
+            r"\bwhat kinds? of\b.*\b(?:places?|events?|public services?|services?)\b",
+            r"\bwhat types? of\b.*\b(?:places?|events?|public services?|services?)\b",
+            r"\b(?:places?|events?|public services?|services?)\b.*\b(?:can i explore|can i look for|can you help me find|available categories|categories)\b",
+            r"\bque tipos? de\b.*\b(?:locais|eventos|servi[cç]os)\b",
+            r"\b(?:locais|eventos|servi[cç]os)\b.*\b(?:posso procurar|posso explorar|categorias disponiveis|categorias)\b",
+        ]
+        return any(re.search(pattern, normalized) for pattern in category_patterns)
 
     @staticmethod
     def _planning_query_mentions_weather(user_message: str) -> bool:

@@ -117,6 +117,7 @@ def test_pt_visitlisboa_description_and_value_helpers_do_not_leak_raw_english() 
         "Descrição disponível na página oficial do evento."
     )
     assert visitlisboa_api._localize_place_value_text("Free with Lisboa Card", "pt") == "Gratuito com Lisboa Card"
+    assert visitlisboa_api._localize_place_value_text("Price: Free", "pt") == "Preço: Gratuito"
     assert "with Lisboa Card" not in visitlisboa_api._localize_place_value_text("20% with Lisboa Card", "pt")
     assert visitlisboa_api._localize_place_category("Attractions", "pt") == "Atrações"
 
@@ -134,13 +135,24 @@ def test_place_ticket_price_compaction_removes_scraper_scaffolding() -> None:
     assert "S..." not in result
 
 
-def test_generic_visitlisboa_location_becomes_maps_search_link() -> None:
-    """Generic Lisbon-only locations should become Maps searches for the specific place."""
+def test_generic_visitlisboa_location_is_omitted_instead_of_maps_search() -> None:
+    """Generic Lisbon-only locations should not become ungrounded Maps searches."""
     line = visitlisboa_api._format_visitlisboa_location_line("Lisbon", "Gulbenkian Museum", language="pt")
 
-    assert "Lisbon" not in line
-    assert "Pesquisar no Maps" in line
-    assert "Gulbenkian+Museum+Lisboa" in line
+    assert line == ""
+
+
+def test_specific_visitlisboa_location_is_labelled_and_linked() -> None:
+    """Specific VisitLisboa locations should render as address fields with map links."""
+    line = visitlisboa_api._format_visitlisboa_location_line(
+        "Rua Ivens, 62, 1200-227, Lisboa",
+        "Museum of Illusions",
+        language="pt",
+    )
+
+    assert "📍 **Morada:**" in line
+    assert "Rua Ivens, 62, 1200-227, Lisboa" in line
+    assert "https://www.google.com/maps/search/?api=1&query=Rua+Ivens" in line
 
 
 def test_lisbon_scoped_place_geography_checks_title_url_and_location() -> None:

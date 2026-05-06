@@ -38,7 +38,7 @@ The authoritative exported tool registry is `tools/__init__.py`, which currently
 | Tool | Purpose |
 |------|---------|
 | `get_weather_warnings` | retrieve active meteorological warnings |
-| `get_weather_forecast` | retrieve the Lisbon forecast window used by the app |
+| `get_weather_forecast` | retrieve a focused Lisbon forecast window, with `days` and optional `day_offset` within the 5-day IPMA horizon |
 | `get_current_weather_summary` | summarize current conditions for Lisbon |
 | `get_portugal_weather_overview` | compare weather across Portugal locations |
 

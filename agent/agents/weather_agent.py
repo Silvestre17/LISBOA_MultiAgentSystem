@@ -10,7 +10,7 @@ import re
 import unicodedata
 import uuid
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, StateGraph
@@ -27,6 +27,73 @@ from agent.utils.response_formatter import (
     finalize_worker_response,
     infer_response_language,
 )
+
+FORECAST_HORIZON_DAYS = 5
+FORECAST_MAX_OFFSET = FORECAST_HORIZON_DAYS - 1
+
+_MONTH_NAME_TO_NUMBER = {
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
+    "janeiro": 1,
+    "fevereiro": 2,
+    "marco": 3,
+    "março": 3,
+    "abril": 4,
+    "maio": 5,
+    "junho": 6,
+    "julho": 7,
+    "agosto": 8,
+    "setembro": 9,
+    "outubro": 10,
+    "novembro": 11,
+    "dezembro": 12,
+}
+
+_WEEKDAY_NAME_TO_INDEX = {
+    "monday": 0,
+    "segunda": 0,
+    "segunda feira": 0,
+    "tuesday": 1,
+    "terca": 1,
+    "terça": 1,
+    "terca feira": 1,
+    "terça feira": 1,
+    "wednesday": 2,
+    "quarta": 2,
+    "quarta feira": 2,
+    "thursday": 3,
+    "quinta": 3,
+    "quinta feira": 3,
+    "friday": 4,
+    "sexta": 4,
+    "sexta feira": 4,
+    "saturday": 5,
+    "sabado": 5,
+    "sábado": 5,
+    "sunday": 6,
+    "domingo": 6,
+}
+
+_WARNING_QUERY_TERMS = [
+    "warning",
+    "warnings",
+    "aviso",
+    "avisos",
+    "alert",
+    "alerts",
+    "alerta",
+    "alertas",
+]
 
 
 class WeatherAgent(BaseAgent):
@@ -199,9 +266,95 @@ class WeatherAgent(BaseAgent):
 
         return None
 
+    @classmethod
+    def _resolve_forecast_window(cls, user_message: str) -> Optional[dict[str, Any]]:
+        """Resolve the smallest grounded forecast window implied by a query.
+
+        Returns a dictionary containing ``day_offset`` and ``days`` for the
+        IPMA forecast tool. The helper intentionally keeps the output window
+        focused: tomorrow means only tomorrow, a named weekday means only that
+        weekday, and weekend means the available Saturday/Sunday subset.
+        """
+        normalized = cls._normalize_weather_query(user_message)
+        today = datetime.now().date()
+
+        explicit_date = cls._extract_explicit_forecast_date(user_message)
+        if explicit_date is not None:
+            day_offset = (explicit_date.date() - today).days
+            if 0 <= day_offset <= FORECAST_MAX_OFFSET:
+                return {"day_offset": day_offset, "days": 1, "label": "explicit_date"}
+            return None
+
+        if any(term in normalized for term in ["tomorrow", "amanha"]):
+            return {"day_offset": 1, "days": 1, "label": "tomorrow"}
+
+        if any(term in normalized for term in ["tonight", "esta noite", "hoje a noite"]):
+            return {"day_offset": 0, "days": 1, "label": "tonight"}
+
+        if any(term in normalized for term in ["weekend", "fim de semana"]):
+            return cls._resolve_weekend_forecast_window()
+
+        weekday_offset = cls._extract_named_weekday_offset(user_message)
+        if weekday_offset is not None and 0 <= weekday_offset <= FORECAST_MAX_OFFSET:
+            return {"day_offset": weekday_offset, "days": 1, "label": "weekday"}
+
+        explicit_days = re.search(r"\b([1-5])\s*(?:-|\s)?\s*(?:day|days|dia|dias)\b", normalized)
+        if explicit_days:
+            return {"day_offset": 0, "days": int(explicit_days.group(1)), "label": "range"}
+
+        if any(term in normalized for term in ["week", "this week", "semana", "esta semana"]):
+            return {"day_offset": 0, "days": FORECAST_HORIZON_DAYS, "label": "range"}
+
+        if any(term in normalized for term in ["forecast", "previsao", "next days", "proximos dias"]):
+            return {"day_offset": 0, "days": 3, "label": "range"}
+
+        return None
+
+    @staticmethod
+    def _resolve_weekend_forecast_window() -> Optional[dict[str, Any]]:
+        """Return the available Saturday/Sunday forecast subset within IPMA's horizon."""
+        weekday = datetime.now().date().weekday()
+        if weekday == 5:
+            start_offset = 0
+            desired_days = 2
+        elif weekday == 6:
+            start_offset = 0
+            desired_days = 1
+        else:
+            start_offset = (5 - weekday) % 7
+            desired_days = 2
+
+        if start_offset > FORECAST_MAX_OFFSET:
+            return None
+
+        available_days = min(desired_days, FORECAST_HORIZON_DAYS - start_offset)
+        if available_days <= 0:
+            return None
+
+        return {
+            "day_offset": start_offset,
+            "days": available_days,
+            "label": "weekend",
+            "partial": available_days < desired_days,
+        }
+
+    @classmethod
+    def _extract_named_weekday_offset(cls, user_message: str) -> Optional[int]:
+        """Return the next occurrence offset for a named weekday in PT or EN."""
+        normalized = cls._normalize_weather_query(user_message)
+        today_index = datetime.now().date().weekday()
+        for weekday_name, target_index in sorted(_WEEKDAY_NAME_TO_INDEX.items(), key=lambda item: -len(item[0])):
+            if not re.search(rf"\b{re.escape(cls._normalize_weather_query(weekday_name))}\b", normalized):
+                continue
+            offset = (target_index - today_index) % 7
+            if re.search(rf"\bnext\s+{re.escape(cls._normalize_weather_query(weekday_name))}\b", normalized) and offset == 0:
+                offset = 7
+            return offset
+        return None
+
     @staticmethod
     def _extract_explicit_forecast_date(user_message: str) -> Optional[datetime]:
-        """Extracts an explicit forecast date from common ISO or DD/MM/YYYY forms."""
+        """Extracts an explicit forecast date from common numeric or month-name forms."""
         query = user_message or ""
         for pattern, fmt in (
             (r"\b(\d{4}-\d{2}-\d{2})\b", "%Y-%m-%d"),
@@ -212,6 +365,30 @@ class WeatherAgent(BaseAgent):
                 continue
             try:
                 return datetime.strptime(match.group(1), fmt)
+            except ValueError:
+                continue
+
+        normalized = WeatherAgent._normalize_weather_query(query)
+        month_pattern = "|".join(re.escape(month) for month in sorted(_MONTH_NAME_TO_NUMBER, key=len, reverse=True))
+        month_first = re.search(
+            rf"\b({month_pattern})\s+(\d{{1,2}})(?:st|nd|rd|th)?(?:,)?\s+(\d{{4}})\b",
+            normalized,
+        )
+        day_first = re.search(
+            rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+(?:de\s+)?({month_pattern})(?:\s+de)?\s+(\d{{4}})\b",
+            normalized,
+        )
+        for match, month_group, day_group, year_group in (
+            (month_first, 1, 2, 3),
+            (day_first, 2, 1, 3),
+        ):
+            if not match:
+                continue
+            month = _MONTH_NAME_TO_NUMBER.get(match.group(month_group))
+            if not month:
+                continue
+            try:
+                return datetime(int(match.group(year_group)), month, int(match.group(day_group)))
             except ValueError:
                 continue
         return None
@@ -282,13 +459,15 @@ class WeatherAgent(BaseAgent):
         """Build a localized response for city-specific weather outside LISBOA's grounded scope."""
         if language == "pt":
             return (
+                "### 🌤️ **Âmbito Meteorológico**\n\n"
                 f"⚠️ Não consigo fornecer uma previsão meteorológica específica para {location} neste sistema. "
-                "As ferramentas meteorológicas do LISBOA estão configuradas para previsões IPMA de curto prazo em Lisboa "
-                "e, quando pedido, para uma visão geral de Portugal. Para essa localidade, consulta diretamente o IPMA."
+                "O **LISBOA está focado em Lisboa/AML**, com previsões IPMA de curto prazo para Lisboa "
+                "e, quando pedido, uma visão geral de Portugal. Para essa localidade, consulta diretamente o IPMA."
             )
         return (
+            "### 🌤️ **Weather Scope**\n\n"
             f"⚠️ I can't provide a city-specific forecast for {location} in this system. "
-            "LISBOA's weather tools are grounded for short-range IPMA forecasts in Lisbon and, when requested, "
+            "**LISBOA is focused on Lisbon/AML**, with short-range IPMA forecasts for Lisbon and, when requested, "
             "a Portugal-wide overview. For that location, check IPMA directly."
         )
 
@@ -363,14 +542,51 @@ class WeatherAgent(BaseAgent):
         """Builds a localized message for unsupported climatology-average requests."""
         if language == "pt":
             return (
+                "### 🌤️ **Âmbito Meteorológico**\n\n"
                 "⚠️ Não tenho dados climatológicos ou médias históricas neste sistema. "
                 "A cobertura meteorológica disponível é previsão IPMA de curto prazo para Lisboa, "
                 "até 5 dias, e avisos atuais."
             )
         return (
+            "### 🌤️ **Weather Scope**\n\n"
             "⚠️ I don't have climatology data or historical weather averages in this system. "
             "The available weather coverage is short-range IPMA forecasts for Lisbon, "
             "up to 5 days, plus current warnings."
+        )
+
+    @classmethod
+    def _is_unsupported_weather_data_query(cls, user_message: str) -> bool:
+        """Return whether the user asks for a weather field unavailable in current tools."""
+        normalized = cls._normalize_weather_query(user_message)
+        unsupported_terms = [
+            "uv index",
+            "indice uv",
+            "indice ultravioleta",
+            "ultraviolet",
+            "air quality",
+            "qualidade do ar",
+            "pollen",
+            "polen",
+            "humidity",
+            "humidade",
+        ]
+        return any(term in normalized for term in unsupported_terms)
+
+    @staticmethod
+    def _build_unsupported_weather_data_message(language: str) -> str:
+        """Build a concise localized response for unsupported weather fields."""
+        if language == "pt":
+            return (
+                "### 🌤️ **Âmbito Meteorológico**\n\n"
+                "⚠️ Não consigo confirmar esse indicador com as ferramentas meteorológicas disponíveis. "
+                "Neste sistema, tenho acesso a previsões IPMA de curto prazo para Lisboa, avisos meteorológicos, "
+                "temperatura, precipitação, condições e vento."
+            )
+        return (
+            "### 🌤️ **Weather Scope**\n\n"
+            "⚠️ I can't confirm that indicator with the available weather tools. "
+            "In this system, I have access to short-range IPMA forecasts for Lisbon, weather warnings, "
+            "temperature, rain, conditions, and wind."
         )
 
     @classmethod
@@ -395,7 +611,7 @@ class WeatherAgent(BaseAgent):
         explicit_date = cls._extract_explicit_forecast_date(user_message)
         if explicit_date is not None:
             delta_days = (explicit_date.date() - datetime.now().date()).days
-            if delta_days > 4:
+            if delta_days < 0 or delta_days > FORECAST_MAX_OFFSET:
                 return True
 
         return False
@@ -403,13 +619,15 @@ class WeatherAgent(BaseAgent):
     @staticmethod
     def _build_forecast_horizon_limit_message(language: str) -> str:
         """Builds a localized message when the user asks beyond the 5-day forecast horizon."""
-        max_supported_date = (datetime.now() + timedelta(days=4)).strftime("%Y-%m-%d")
+        max_supported_date = (datetime.now() + timedelta(days=FORECAST_MAX_OFFSET)).strftime("%Y-%m-%d")
         if language == "pt":
             return (
+                "### 🌤️ **Previsão Meteorológica**\n\n"
                 "⚠️ Só tenho previsão meteorológica fiável do IPMA para Lisboa para os próximos 5 dias, "
                 f"por isso não consigo confirmar o tempo para esse horizonte. O limite atual vai até {max_supported_date}."
             )
         return (
+            "### 🌤️ **Weather Forecast**\n\n"
             "⚠️ I only have reliable IPMA weather forecast data for Lisbon for the next 5 days, "
             f"so I can't confirm the weather for that time horizon. The current reliable limit runs through {max_supported_date}."
         )
@@ -421,17 +639,36 @@ class WeatherAgent(BaseAgent):
         planning_terms = [
             "plan", "itinerary", "roteiro", "plano", "activity", "activities",
             "visit", "visitar", "museum", "museu", "restaurant", "restaurante",
-            "sailing", "vela", "sail", "boat", "barco", "jacket", "casaco",
-            "umbrella", "guarda-chuva", "safe", "seguro",
         ]
 
         if any(term in query for term in planning_terms):
             return False
 
         return bool(
-            cls._extract_requested_forecast_days(user_message)
-            or any(term in query for term in ["warning", "warnings", "aviso", "avisos"])
+            cls._resolve_forecast_window(user_message)
+            or any(term in query for term in _WARNING_QUERY_TERMS)
+            or cls._is_weather_advice_query(user_message)
         )
+
+    @classmethod
+    def _is_weather_advice_query(cls, user_message: str) -> bool:
+        """Return whether a weather query asks for practical advice based on forecast data."""
+        normalized = cls._normalize_weather_query(user_message)
+        advice_terms = [
+            "jacket",
+            "coat",
+            "casaco",
+            "umbrella",
+            "guarda chuva",
+            "sailing",
+            "sail",
+            "vela",
+            "boat",
+            "barco",
+            "safe",
+            "seguro",
+        ]
+        return any(term in normalized for term in advice_terms)
 
     def _run_direct_tool_fallback(
         self,
@@ -456,12 +693,29 @@ class WeatherAgent(BaseAgent):
         if unsupported_location:
             return self._build_unsupported_location_message(unsupported_location, language)
 
-        query = user_message.lower()
+        if self._is_unsupported_weather_data_query(user_message):
+            if any(term in self._normalize_weather_query(user_message) for term in ["today", "hoje", "now", "agora"]):
+                current_tool = self._get_tool_by_name("get_current_weather_summary")
+                if current_tool:
+                    self._invoke_tool(current_tool, {})
+            return self._build_unsupported_weather_data_message(language)
+
+        query = self._normalize_weather_query(user_message)
         wants_portugal_overview = self._is_portugal_overview_query(user_message)
-        requested_forecast_days = force_forecast_days or self._extract_requested_forecast_days(user_message)
-        wants_warnings = include_warnings or any(term in query for term in ["warning", "warnings", "aviso", "avisos"])
-        wants_forecast = requested_forecast_days is not None
-        wants_current = any(term in query for term in ["today", "current", "now", "hoje", "agora"]) or (
+        forecast_window = self._resolve_forecast_window(user_message)
+        if force_forecast_days is not None:
+            forecast_window = {"day_offset": 0, "days": force_forecast_days, "label": "range"}
+        requested_forecast_days = forecast_window["days"] if forecast_window else None
+        wants_warnings = include_warnings or any(term in query for term in _WARNING_QUERY_TERMS)
+        wants_advice = self._is_weather_advice_query(user_message)
+        wants_warnings = wants_warnings or any(term in query for term in ["sailing", "sail", "vela", "boat", "barco"])
+        wants_forecast = requested_forecast_days is not None or wants_advice
+        wants_warnings = wants_warnings or bool(
+            wants_forecast and forecast_window and forecast_window.get("label") == "range"
+        )
+        wants_current = not wants_warnings and not wants_forecast and (
+            any(term in query for term in ["today", "current", "now", "hoje", "agora"])
+        ) or (
             any(term in query for term in ["weather", "tempo"]) and not wants_warnings and not wants_forecast
         )
 
@@ -472,9 +726,14 @@ class WeatherAgent(BaseAgent):
             if overview_tool:
                 sections.append(self._invoke_tool(overview_tool, {"day": 0}))
             if sections:
-                return "\n\n---\n\n".join(section for section in sections if section).strip()
+                return self._compose_direct_weather_response(
+                    user_message=user_message,
+                    sections=[str(section) for section in sections if section],
+                    language=language,
+                    forecast_window=forecast_window,
+                )
 
-        if (wants_warnings or (wants_forecast and not wants_current)) and not wants_current:
+        if wants_warnings:
             warnings_tool = self._get_tool_by_name("get_weather_warnings")
             if warnings_tool:
                 sections.append(self._invoke_tool(warnings_tool, {"area": "LSB"}))
@@ -486,7 +745,15 @@ class WeatherAgent(BaseAgent):
 
         forecast_tool = self._get_tool_by_name("get_weather_forecast")
         if forecast_tool and wants_forecast and requested_forecast_days:
-            sections.append(self._invoke_tool(forecast_tool, {"days": requested_forecast_days}))
+            sections.append(
+                self._invoke_tool(
+                    forecast_tool,
+                    {
+                        "days": requested_forecast_days,
+                        "day_offset": int(forecast_window.get("day_offset", 0)) if forecast_window else 0,
+                    },
+                )
+            )
 
         if not sections:
             current_tool = self._get_tool_by_name("get_current_weather_summary")
@@ -496,7 +763,254 @@ class WeatherAgent(BaseAgent):
         if not sections:
             return "Unable to retrieve weather data at the moment."
 
-        return "\n\n---\n\n".join(section for section in sections if section).strip()
+        return self._compose_direct_weather_response(
+            user_message=user_message,
+            sections=[str(section) for section in sections if section],
+            language=language,
+            forecast_window=forecast_window,
+        )
+
+    @classmethod
+    def _compose_direct_weather_response(
+        cls,
+        *,
+        user_message: str,
+        sections: list[str],
+        language: str,
+        forecast_window: Optional[dict[str, Any]] = None,
+    ) -> str:
+        """Prepend a query-specific answer before grounded weather details."""
+        body = "\n\n---\n\n".join(section for section in sections if section).strip()
+        direct_answer = cls._build_direct_weather_answer(user_message, body, language, forecast_window)
+        title = cls._weather_title_for_query(user_message, language)
+        if not direct_answer:
+            return f"{title}\n\n{body}".strip()
+        if not body:
+            return f"{title}\n\n{direct_answer}".strip()
+        if cls._is_redundant_clear_warning_body(user_message, direct_answer, body):
+            return f"{title}\n\n{direct_answer}".strip()
+        return f"{title}\n\n{direct_answer}\n\n---\n\n{body}".strip()
+
+    @classmethod
+    def _is_redundant_clear_warning_body(cls, user_message: str, direct_answer: str, body: str) -> bool:
+        """Return whether a warning tool body only repeats the direct answer."""
+        normalized_query = cls._normalize_weather_query(user_message)
+        if not any(term in normalized_query for term in _WARNING_QUERY_TERMS):
+            return False
+
+        combined_direct = cls._normalize_weather_query(direct_answer)
+        combined_body = cls._normalize_weather_query(body)
+        clear_warning_pattern = r"no active weather warnings|sem avisos meteorol|n[aã]o h[aá] avisos meteorol"
+        direct_says_clear = bool(re.search(clear_warning_pattern, combined_direct))
+        body_says_clear = bool(re.search(clear_warning_pattern, combined_body))
+        body_has_active_details = bool(re.search(r"yellow|orange|red|amarelo|laranja|vermelho|rough sea|vento|chuva|agita", combined_body))
+        return direct_says_clear and body_says_clear and not body_has_active_details
+
+    @classmethod
+    def _weather_title_for_query(cls, user_message: str, language: str) -> str:
+        """Build the canonical H3 weather title for the query intent."""
+        normalized = cls._normalize_weather_query(user_message)
+        if cls._is_portugal_overview_query(user_message):
+            title = "Visão Meteorológica de Portugal" if language == "pt" else "Portugal Weather Overview"
+        elif any(term in normalized for term in _WARNING_QUERY_TERMS):
+            title = "Avisos Meteorológicos" if language == "pt" else "Weather Warnings"
+        elif cls._is_current_weather_query(user_message):
+            title = "Resumo Meteorológico de Lisboa" if language == "pt" else "Lisbon Weather Summary"
+        else:
+            title = "Previsão Meteorológica" if language == "pt" else "Weather Forecast"
+        return f"### 🌤️ **{title}**"
+
+    @classmethod
+    def _build_direct_weather_answer(
+        cls,
+        user_message: str,
+        tool_text: str,
+        language: str,
+        forecast_window: Optional[dict[str, Any]],
+    ) -> str:
+        """Build a concise first answer tailored to the user's weather question."""
+        normalized = cls._normalize_weather_query(user_message)
+        is_pt = language == "pt"
+        no_warnings = bool(
+            re.search(
+                r"no active weather warnings|sem avisos meteorol|n[aã]o h[aá] avisos meteorol",
+                tool_text,
+                re.IGNORECASE,
+            )
+        )
+
+        if any(term in normalized for term in _WARNING_QUERY_TERMS):
+            if "weekend" in normalized or "fim de semana" in normalized:
+                coverage = cls._weekend_coverage_sentence(forecast_window, is_pt)
+                warning_answer = (
+                    "✅ Não há **avisos meteorológicos ativos** para Lisboa neste momento."
+                    if is_pt and no_warnings
+                    else "✅ No, there are **no active weather warnings** for Lisbon right now."
+                    if no_warnings
+                    else "⚠️ Há avisos meteorológicos ativos para Lisboa."
+                    if is_pt
+                    else "⚠️ There are active weather warnings for Lisbon."
+                )
+                return f"{warning_answer}\n\n{coverage}".strip()
+            out_of_horizon_day = cls._named_day_outside_horizon_sentence(user_message, is_pt)
+            if no_warnings:
+                warning_answer = (
+                    "✅ Não, não há **avisos meteorológicos ativos** para Lisboa neste momento."
+                    if is_pt
+                    else "✅ No, there are **no active weather warnings** for Lisbon right now."
+                )
+                return f"{warning_answer}\n\n{out_of_horizon_day}".strip()
+            warning_answer = (
+                "⚠️ Sim, há **avisos meteorológicos ativos** para Lisboa neste momento."
+                if is_pt
+                else "⚠️ Yes, there are **active weather warnings** for Lisbon right now."
+            )
+            return f"{warning_answer}\n\n{out_of_horizon_day}".strip()
+
+        if "tonight" in normalized or "esta noite" in normalized or "hoje a noite" in normalized:
+            minimum = cls._extract_temperature_min(tool_text)
+            if minimum:
+                return (
+                    f"🌙 Esta noite, Lisboa deverá descer até cerca de **{minimum}°C**."
+                    if is_pt
+                    else f"🌙 Tonight should get down to about **{minimum}°C** in Lisbon."
+                )
+
+        if "wind" in normalized or "vento" in normalized:
+            wind = cls._extract_wind_summary(tool_text)
+            if wind:
+                return (
+                    f"💨 Hoje, o vento em Lisboa está de **{wind}**."
+                    if is_pt
+                    else f"💨 Today, Lisbon's wind is **{wind}**."
+                )
+
+        if "rain" in normalized or "chuva" in normalized or "chover" in normalized:
+            rain = cls._extract_rain_summary(tool_text)
+            if rain:
+                return cls._rain_direct_answer(rain, is_pt)
+
+        if any(term in normalized for term in ["jacket", "coat", "casaco"]):
+            minimum = cls._extract_temperature_min(tool_text)
+            rain = cls._extract_rain_summary(tool_text)
+            if is_pt:
+                return f"🧥 Sim, leva um **casaco leve**{cls._jacket_reason(minimum, rain, is_pt)}."
+            return f"🧥 Yes, bring a **light jacket**{cls._jacket_reason(minimum, rain, is_pt)}."
+
+        if any(term in normalized for term in ["sailing", "sail", "vela", "boat", "barco", "safe", "seguro"]):
+            wind = cls._extract_wind_summary(tool_text)
+            if is_pt:
+                return (
+                    "⛵ A saída parece **razoável apenas como leitura meteorológica geral**, "
+                    f"com base em avisos, chuva e vento{f' ({wind})' if wind else ''}. Confirma sempre a previsão marítima oficial antes de sair."
+                )
+            return (
+                "⛵ Sailing looks **reasonable only as a general weather read**, "
+                f"based on warnings, rain, and wind{f' ({wind})' if wind else ''}. Check the official marine forecast before departing."
+            )
+
+        if cls._is_portugal_overview_query(user_message):
+            return (
+                "🇵🇹 Aqui está uma visão geral meteorológica de Portugal com Lisboa destacada."
+                if is_pt
+                else "🇵🇹 Here is a bounded Portugal-wide weather overview, with Lisbon highlighted."
+            )
+
+        return (
+            "🌤️ Aqui está a informação meteorológica grounded para Lisboa."
+            if is_pt
+            else "🌤️ Here is the grounded weather information for Lisbon."
+        )
+
+    @staticmethod
+    def _weekend_coverage_sentence(forecast_window: Optional[dict[str, Any]], is_pt: bool) -> str:
+        """Explain weekend forecast coverage when Saturday/Sunday are partly outside the horizon."""
+        if not forecast_window:
+            return (
+                "⚠️ A previsão para sábado/domingo ainda está fora do horizonte IPMA de 5 dias."
+                if is_pt
+                else "⚠️ The Saturday/Sunday forecast is still outside IPMA's 5-day horizon."
+            )
+        if forecast_window.get("partial"):
+            return (
+                "⚠️ O IPMA só cobre parte do fim de semana neste momento; o restante fica fora do horizonte de 5 dias."
+                if is_pt
+                else "⚠️ IPMA only covers part of the weekend right now; the rest is outside the 5-day horizon."
+            )
+        return (
+            "✅ A previsão disponível cobre o fim de semana dentro do horizonte IPMA."
+            if is_pt
+            else "✅ The available forecast covers the weekend within IPMA's horizon."
+        )
+
+    @classmethod
+    def _named_day_outside_horizon_sentence(cls, user_message: str, is_pt: bool) -> str:
+        """Explain when a requested named day is outside IPMA's forecast horizon."""
+        weekday_offset = cls._extract_named_weekday_offset(user_message)
+        if weekday_offset is None or weekday_offset <= FORECAST_MAX_OFFSET:
+            return ""
+        return (
+            "⚠️ O dia pedido ainda está fora do horizonte IPMA de 5 dias, por isso não consigo confirmar avisos específicos para essa data."
+            if is_pt
+            else "⚠️ The requested day is still outside IPMA's 5-day horizon, so I can't confirm date-specific warnings yet."
+        )
+
+    @staticmethod
+    def _extract_temperature_min(tool_text: str) -> Optional[str]:
+        """Extract the minimum temperature from a weather tool response."""
+        match = re.search(r"(?:Temperature|Temperatura)?\D*(\d+(?:\.\d+)?)°C\s+(?:to|a)\s+\d+(?:\.\d+)?°C", tool_text, re.IGNORECASE)
+        return match.group(1) if match else None
+
+    @staticmethod
+    def _extract_wind_summary(tool_text: str) -> Optional[str]:
+        """Extract a compact wind summary from a weather tool response."""
+        match = re.search(r"💨\s*(?:\*\*)?(?:Wind|Vento)(?:\*\*)?:\s*([^\n]+)", tool_text, re.IGNORECASE)
+        if not match:
+            return None
+        return match.group(1).strip().rstrip(".")
+
+    @staticmethod
+    def _extract_rain_summary(tool_text: str) -> Optional[dict[str, Any]]:
+        """Extract rain probability and qualitative wording from a weather response."""
+        match = re.search(
+            r"💧\s*(?:\*\*)?(?:Rain|Chuva|Rain probability|Probabilidade de chuva)(?:\*\*)?:\s*([^\n]*?)(\d+(?:\.\d+)?)%([^\n]*)",
+            tool_text,
+            re.IGNORECASE,
+        )
+        if not match:
+            return None
+        return {
+            "label": re.sub(r"[()|]", " ", f"{match.group(1)} {match.group(3)}").strip(),
+            "probability": float(match.group(2)),
+        }
+
+    @staticmethod
+    def _rain_direct_answer(rain: dict[str, Any], is_pt: bool) -> str:
+        """Build a direct rain answer from probability data."""
+        probability = rain["probability"]
+        if is_pt:
+            if probability < 20:
+                return f"☔ Não deverá chover em Lisboa; a probabilidade é **{probability:g}%**."
+            if probability < 60:
+                return f"☔ Pode chover em Lisboa; a probabilidade é **{probability:g}%**."
+            return f"☔ Sim, a chuva é provável em Lisboa; a probabilidade é **{probability:g}%**."
+        if probability < 20:
+            return f"☔ Rain is unlikely in Lisbon; the probability is **{probability:g}%**."
+        if probability < 60:
+            return f"☔ Rain is possible in Lisbon; the probability is **{probability:g}%**."
+        return f"☔ Yes, rain is likely in Lisbon; the probability is **{probability:g}%**."
+
+    @staticmethod
+    def _jacket_reason(minimum: Optional[str], rain: Optional[dict[str, Any]], is_pt: bool) -> str:
+        """Build a short jacket rationale from minimum temperature and rain probability."""
+        reasons = []
+        if minimum:
+            reasons.append(f"mínima de cerca de {minimum}°C" if is_pt else f"a low around {minimum}°C")
+        if rain and rain["probability"] >= 40:
+            reasons.append("chuva possível" if is_pt else "possible rain")
+        if not reasons:
+            return ""
+        return " porque há " + " e ".join(reasons) if is_pt else " because there is " + " and ".join(reasons)
 
     @staticmethod
     def _build_tool_call(name: str, args: dict) -> AIMessage:
@@ -549,12 +1063,18 @@ class WeatherAgent(BaseAgent):
         if cls._is_portugal_overview_query(user_message):
             return cls._build_tool_call("get_portugal_weather_overview", {"day": 0})
 
-        if "warning" in query or "warnings" in query or "avisos" in query:
+        if any(term in query for term in _WARNING_QUERY_TERMS):
             return cls._build_tool_call("get_weather_warnings", {"area": "LSB"})
 
-        forecast_days = cls._extract_requested_forecast_days(user_message)
-        if forecast_days:
-            return cls._build_tool_call("get_weather_forecast", {"days": forecast_days})
+        forecast_window = cls._resolve_forecast_window(user_message)
+        if forecast_window:
+            return cls._build_tool_call(
+                "get_weather_forecast",
+                {
+                    "days": int(forecast_window.get("days", 1)),
+                    "day_offset": int(forecast_window.get("day_offset", 0)),
+                },
+            )
 
         if (
             "current weather summary" in query
@@ -594,6 +1114,14 @@ class WeatherAgent(BaseAgent):
         if self._is_climate_average_query(user_message):
             return finalize_worker_response(
                 self._build_climate_average_limit_message(language),
+                agent_name="weather",
+                user_query=user_message,
+                language=language,
+            )
+
+        if self._is_unsupported_weather_data_query(user_message):
+            return finalize_worker_response(
+                self._run_direct_tool_fallback(user_message),
                 agent_name="weather",
                 user_query=user_message,
                 language=language,
@@ -714,6 +1242,15 @@ class WeatherAgent(BaseAgent):
                     "messages": [
                         AIMessage(
                             content=self._build_climate_average_limit_message(language)
+                        )
+                    ]
+                }
+
+            if user_message and self._is_unsupported_weather_data_query(user_message):
+                return {
+                    "messages": [
+                        AIMessage(
+                            content=self._build_unsupported_weather_data_message(language)
                         )
                     ]
                 }

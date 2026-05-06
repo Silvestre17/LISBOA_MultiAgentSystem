@@ -379,14 +379,14 @@ class TestQAPrompt:
         ]:
             assert section in prompt, f"PT prompt missing section: {section}"
 
-    def test_researcher_prompt_mentions_plain_text_ticket_fallback_for_non_urls(self):
-        """Researcher prompt should forbid markdown links for non-URL ticket placeholders."""
+    def test_researcher_prompt_omits_ticket_field_for_non_urls(self):
+        """Researcher prompt should omit ticket placeholders when no real URL exists."""
         from agent.prompts.researcher import get_researcher_prompt
 
         prompt = get_researcher_prompt()
 
         assert "only render a markdown link when the value is a real URL" in prompt
-        assert "Não disponível" in prompt
+        assert "otherwise omit the field" in prompt
 
     def test_user_context_injection(self):
         """User context dict should be rendered into the prompt."""

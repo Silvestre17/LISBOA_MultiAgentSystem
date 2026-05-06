@@ -864,6 +864,30 @@ def compute_tool_metrics(
     }
 
 
+def build_reference_context(
+    *,
+    expected_facts: Sequence[str] | None = None,
+    expected_behavior: str | None = None,
+) -> str:
+    """Build a symmetric judge reference from dataset facts and behavior notes.
+
+    This reference is passed to the judge for both zero-shot and grounded
+    LISBOA responses. Retrieved tool context can add evidence, but absence of
+    retrieved context should not leave zero-shot factuality without a benchmark
+    reference.
+    """
+    sections: list[str] = []
+    facts = [str(fact).strip() for fact in expected_facts or [] if str(fact).strip()]
+    if facts:
+        sections.append("Expected facts:\n" + "\n".join(f"- {fact}" for fact in facts))
+
+    behavior = str(expected_behavior or "").strip()
+    if behavior:
+        sections.append(f"Expected behavior or limitation:\n- {behavior}")
+
+    return "\n\n".join(sections) if sections else "No explicit reference facts or behavior were provided."
+
+
 def select_balanced_subset(
     records: list[dict[str, Any]],
     limit: int | None,

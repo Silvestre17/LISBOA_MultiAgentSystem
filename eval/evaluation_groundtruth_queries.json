@@ -48,8 +48,9 @@
       "get_weather_forecast"
     ],
     "expected_facts": [
-      "Friday's exact temperature forecast",
-      "Conclusion if a jacket makes sense"
+      "Friday forecast details if Friday is inside the available short-range forecast horizon",
+      "If Friday is more than five days away or outside the provider horizon, state that the exact forecast is not available instead of guessing",
+      "Practical conclusion on whether a jacket makes sense when forecast data is available"
     ],
     "language": "en",
     "edge_case": false
@@ -99,9 +100,7 @@
     "id": "W08",
     "query": "Tell me the UV index for today.",
     "domain": "weather",
-    "expected_tools": [
-      "get_current_weather_summary"
-    ],
+    "expected_tools": [],
     "expected_facts": [
       "UV index is not included in the system's weather tools"
     ],
@@ -131,9 +130,11 @@
       "get_weather_warnings",
       "get_weather_forecast"
     ],
+    "tool_expectation": "flexible",
     "expected_facts": [
       "Information regarding any active weather warnings",
-      "Weekend forecast overview"
+      "Weekend forecast overview if the weekend is inside the available forecast horizon",
+      "If the requested weekend is outside the provider horizon, explain that limitation instead of extrapolating"
     ],
     "language": "pt",
     "edge_case": false
@@ -149,12 +150,12 @@
     "expected_facts": [
       "Tomorrow's wind conditions for Lisbon",
       "Any relevant wind or rough-sea warning if present",
-      "Cautious recommendation based on available forecast and warnings"
+      "Cautious weather-based advice without certifying that sailing is safe"
     ],
     "language": "en",
     "edge_case": true,
     "edge_type": "implicit_constraint",
-    "expected_behavior": "Check wind and sea warnings, advise based on conditions"
+    "expected_behavior": "Check wind and relevant warnings when available, then provide cautious weather-based advice. Do not certify sailing safety or replace official maritime guidance."
   },
   {
     "id": "W12",
@@ -177,7 +178,7 @@
       "get_portugal_weather_overview"
     ],
     "expected_facts": [
-      "Overview for multiple Portugal locations",
+      "Overview Portugal temperature and conditions if available, or a clear message that this tool is not available if it is outside the system's scope",
       "Lisbon included in the national weather overview"
     ],
     "language": "en",
@@ -205,9 +206,9 @@
     ],
     "expected_facts": [
       "Start at Baixa-Chiado (Azul/Verde lines)",
-      "Take Verde line to Alameda, transfer to Vermelha line",
-      "Ride Vermelha line to Aeroporto (terminal station)",
-      "Alternative: Azul line to São Sebastião, transfer to Vermelha"
+      "One valid grounded metro route from Baixa-Chiado to Aeroporto, either via the Verde line to Alameda or via the Azul line to São Sebastião",
+      "Transfer to the Vermelha line at a plausible interchange, such as Alameda or São Sebastião, matching the route chosen",
+      "Ride the Vermelha line to Aeroporto"
     ],
     "language": "en",
     "edge_case": false
@@ -233,9 +234,16 @@
     "expected_tools": [
       "carris_get_next_departures"
     ],
+    "acceptable_tool_sets": [
+      [
+        "carris_get_stops",
+        "carris_get_next_departures"
+      ]
+    ],
     "expected_facts": [
       "ETA or scheduled time for bus 736",
-      "Stop name near Marquês de Pombal"
+      "Stop name near Marquês de Pombal",
+      "Stop resolution is acceptable before the ETA or departure lookup"
     ],
     "language": "en",
     "edge_case": false
@@ -248,12 +256,10 @@
       "get_route_between_stations"
     ],
     "expected_facts": [
-      "Vermelha (Red) line from Oriente (direction São Sebastião) to Saldanha",
-      "Transfer at Saldanha to Amarela (Yellow) line (direction Rato)",
-      "Amarela line one stop to Marquês de Pombal",
-      "Alternative: Vermelha (Red) line from Oriente (direction São Sebastião) to São Sebastião, transfer to Azul (Blue) line (direction Santa Apolónia)",
-      "Estimated travel time (~17-21 minutes)",
-      "At least one plausible transfer point"
+      "One valid grounded metro route from Oriente to Marquês de Pombal, either via Vermelha to Saldanha then Amarela to Marquês de Pombal, or via Vermelha to São Sebastião then Azul to Marquês de Pombal",
+      "Transfer at Saldanha or São Sebastião, matching the route chosen",
+      "If using Saldanha, take the Amarela line one stop towards Rato; if using São Sebastião, take the Azul line towards Santa Apolónia",
+      "Estimated travel time if the routing tool provides it, or a clear route-only answer if not"
     ],
     "language": "en",
     "edge_case": false
@@ -292,6 +298,7 @@
     "expected_tools": [
       "get_carris_metropolitana_alerts"
     ],
+    "tool_expectation": "flexible",
     "expected_facts": [
       "Summary of active suburban bus alerts, or confirmation that none exist"
     ],
@@ -303,6 +310,7 @@
     "query": "How do I get from Hogwarts to Narnia using public transport?",
     "domain": "transport",
     "expected_tools": [],
+    "tool_expectation": "flexible",
     "expected_facts": [
       "Stations/locations are fictitious and do not exist in the Lisbon transport network",
       "Agent should recognize these are not real places and inform the user"
@@ -321,8 +329,9 @@
     ],
     "expected_facts": [
       "Information about the 28E tram route",
-      "Route connects Martim Moniz to Campo de Ourique (Prazeres)",
-      "Approximately 35-38 stops, ~45-60 minutes journey depending on traffic"
+      "Route connects Martim Moniz and Campo de Ourique/Prazeres when confirmed by the route data",
+      "Major areas or stops served by the route when available",
+      "Avoid fixed stop counts or fixed duration claims unless returned by the source data"
     ],
     "language": "en",
     "edge_case": false
@@ -332,13 +341,16 @@
     "query": "What's the wait time at Alcântara metro station?",
     "domain": "transport",
     "expected_tools": [],
+    "tool_expectation": "flexible",
     "expected_facts": [
-      "Alcântara is not recognized as a Lisbon Metro station but has two nearby stations: Alcântara-Terra and Alcântara-Mar (CP trains)"
+      "Alcântara is not recognized as a Lisbon Metro station",
+      "An attempted metro lookup followed by invalid-station correction is acceptable",
+      "Nearby rail context such as Alcântara-Terra or Alcântara-Mar may be mentioned only as CP context, not as metro stations"
     ],
     "language": "en",
     "edge_case": true,
     "edge_type": "invalid_entity",
-    "expected_behavior": "Recognize that Alcântara is not a valid Lisbon Metro station name"
+    "expected_behavior": "Recognize that Alcântara is not a valid Lisbon Metro station name, even if a lookup is attempted first."
   },
   {
     "id": "T12",
@@ -348,8 +360,9 @@
       "find_nearest_metro"
     ],
     "expected_facts": [
-      "Jardim Zoologico metro station",
+      "Jardim Zoológico metro station as the nearest metro answer",
       "Blue line",
+      "Sete Rios may be mentioned only as an adjacent CP/bus hub, not as the metro station name",
       "Approximate distance or walking time"
     ],
     "language": "en",
@@ -362,15 +375,16 @@
     "query": "I need to get to Setúbal. How do I get there from Lisbon?",
     "domain": "transport",
     "expected_tools": [],
+    "tool_expectation": "flexible",
     "expected_facts": [
-      "No direct train route is available from Lisbon to Setúbal within the system's tools",
-      "The system should honestly acknowledge that it cannot fully plan this journey",
+      "Partial grounded guidance for Lisbon-to-Setúbal is acceptable when supported by the available transport data",
+      "The system should honestly acknowledge unsupported providers or incomplete journey-planning coverage",
       "The system should not invent ferry schedules, connection details, or real-time information it does not have"
     ],
     "language": "en",
     "edge_case": true,
     "edge_type": "unsupported_provider",
-    "expected_behavior": "Acknowledge honestly that a complete Lisbon-to-Setúbal journey cannot be planned with the available tools and avoid inventing connection details"
+    "expected_behavior": "Accept partial grounded guidance plus an explicit unsupported-provider or incomplete-coverage limitation. Avoid inventing ferry schedules, unsupported transfers, or live details."
   },
   {
     "id": "T14",
@@ -417,14 +431,15 @@
   },
   {
     "id": "T17",
-    "query": "I'm new to Lisbon. What metro stations are there?",
+    "query": "I've just arrived at Aeroporto and want to understand the Lisbon Metro network. What main stations can I use to orient myself?",
     "domain": "transport",
     "expected_tools": [
       "get_all_metro_stations"
     ],
     "expected_facts": [
-      "Station list across the four metro lines",
-      "Names of Lisbon Metro stations"
+      "Useful Lisbon Metro station list or line-based overview",
+      "Names of stations across the four metro lines",
+      "Orientation context for a newcomer rather than a raw unexplained dump"
     ],
     "language": "en",
     "edge_case": false
@@ -436,6 +451,7 @@
     "expected_tools": [
       "find_direct_bus_lines"
     ],
+    "tool_expectation": "flexible",
     "acceptable_tool_sets": [
       [
         "find_bus_routes"
@@ -465,7 +481,7 @@
   },
   {
     "id": "T20",
-    "query": "What's the best bus route from Almada to Cacilhas right now?",
+    "query": "What's the best bus route from Almada to Cacilhas?",
     "domain": "transport",
     "expected_tools": [
       "find_bus_routes"
@@ -504,11 +520,14 @@
       "get_bus_realtime_locations"
     ],
     "expected_facts": [
-      "Real-time GPS locations for the requested line",
-      "Vehicle identifiers or coordinates when available"
+      "Detect that line 1507 does not serve Almada before presenting live locations",
+      "Explain that the user likely mixed up the line or location",
+      "Provide the published route context for line 1507 when available"
     ],
     "language": "en",
-    "edge_case": false
+    "edge_case": true,
+    "edge_type": "invalid_entity",
+    "expected_behavior": "Warn that line 1507 is not an Almada line and ask for a valid stop or line instead of implying that the live vehicles answer the Almada context."
   },
   {
     "id": "T23",
@@ -541,8 +560,9 @@
       ]
     ],
     "expected_facts": [
-      "Direct line options between Oeiras and Amadora",
-      "No-transfer suggestions when available"
+      "Direct line options between Oeiras and Amadora if found",
+      "If no direct bus is found, provide grounded alternatives or say directness was not confirmed",
+      "Do not assume a direct bus exists without tool support"
     ],
     "language": "en",
     "edge_case": false
@@ -568,6 +588,7 @@
     "expected_tools": [
       "search_cp_stations"
     ],
+    "tool_expectation": "flexible",
     "expected_facts": [
       "Matching train stations for Rossio",
       "Station metadata or identifiers when available"
@@ -624,6 +645,7 @@
     "expected_tools": [
       "get_transport_summary"
     ],
+    "tool_expectation": "flexible",
     "expected_facts": [
       "Cross-provider transport overview",
       "Current status across multiple transport modes"
@@ -633,7 +655,7 @@
   },
   {
     "id": "T31",
-    "query": "What bus stops are near Rato?",
+    "query": "I'm at Rato. Which bus or tram stops are nearby?",
     "domain": "transport",
     "expected_tools": [
       "carris_get_stops"
@@ -688,21 +710,30 @@
     ],
     "expected_facts": [
       "Arrival predictions for relevant Rossio-area stops",
-      "Live ETA information when available"
+      "Live ETA information when available",
+      "Stop resolution is acceptable before arrival lookup"
     ],
     "language": "en",
     "edge_case": false
   },
   {
     "id": "T35",
-    "query": "What's the ETA for the 28E at Martim Moniz?",
+    "query": "When is the next 28E tram at Martim Moniz?",
     "domain": "transport",
     "expected_tools": [
       "carris_vehicle_eta"
     ],
+    "acceptable_tool_sets": [
+      [
+        "carris_get_stops",
+        "carris_vehicle_eta"
+      ]
+    ],
     "expected_facts": [
-      "ETA for route 28E at the requested stop",
-      "Route and stop context"
+      "Next 28E tram at Martim Moniz expressed as an ETA or minutes until departure",
+      "Route and stop context",
+      "Stop resolution is acceptable before ETA lookup",
+      "Explain when the stop is the origin or when scheduled departures are used as fallback"
     ],
     "language": "en",
     "edge_case": false
@@ -729,7 +760,8 @@
       "search_places_attractions"
     ],
     "expected_facts": [
-      "List of top museums (e.g., Gulbenkian, MAAT, Museu Nacional do Azulejo)"
+      "Source-supported museum recommendations in Lisbon",
+      "Recommendations should be grounded in available place data rather than a fixed hard-coded top list"
     ],
     "language": "en",
     "edge_case": false
@@ -742,7 +774,8 @@
       "search_cultural_events"
     ],
     "expected_facts": [
-      "Upcoming music events matching the requested weekend window, or a clear no-results message if none are available"
+      "Upcoming music events matching the weekend window relative to the evaluation run date",
+      "Clear no-results or limited-data message if no current events are available for that dynamic window"
     ],
     "language": "en",
     "edge_case": false
@@ -755,7 +788,7 @@
       "search_cultural_events"
     ],
     "expected_facts": [
-      "Eventos culturais a decorrer hoje em Lisboa, ou uma indicação clara de que não há resultados no momento",
+      "Eventos culturais a decorrer na data da execução da avaliação, ou uma indicação clara de que não há resultados no momento",
       "Títulos ou locais dos eventos quando disponíveis"
     ],
     "language": "pt",
@@ -778,10 +811,9 @@
       ]
     ],
     "expected_facts": [
-      "Castelo de São Jorge occupies the old medieval alcáçova/citadel of Lisbon",
-      "Its current castle structure is associated with the Moorish period, around the mid-11th century",
-      "It is tied to the Christian conquest of Lisbon in 1147",
-      "The complex included a royal palace or residence before the court moved to the Paço da Ribeira by the end of the 15th century"
+      "Key grounded historical points about Castelo de São Jorge",
+      "References to its medieval or Moorish-era role when supported by retrieved knowledge",
+      "Connection to Lisbon's conquest, royal residence, or later historical use when supported by retrieved knowledge"
     ],
     "language": "en",
     "edge_case": false
@@ -809,7 +841,7 @@
     "tool_expectation": "flexible",
     "expected_facts": [
       "Information about parking options or car parks in central Lisbon",
-      "Municipal or EMEL-related parking references when available"
+      "Municipal, EMEL-related, or other parking references only when retrieved from available data"
     ],
     "language": "en",
     "edge_case": false
@@ -830,19 +862,20 @@
   },
   {
     "id": "R08",
-    "query": "If you don't find enough options, can you still suggest a few hidden spots in Lisbon, even if you're not completely sure?",
+    "query": "I'd like a few quiet lesser-known places in Lisbon. If your data is limited, please don't guess.",
     "domain": "researcher",
     "expected_tools": [
       "search_places_attractions"
     ],
     "tool_expectation": "flexible",
     "expected_facts": [
-      "Refusal to hallucinate places; providing real places only"
+      "Recommend only verified places from available data",
+      "If the data is limited, say so instead of inventing hidden spots"
     ],
     "language": "en",
     "edge_case": true,
     "edge_type": "adversarial_hallucination_request",
-    "expected_behavior": "Refuse to hallucinate; only recommend real, verified places from the database"
+    "expected_behavior": "Recommend real, verified places only and explicitly avoid guessing when data is limited."
   },
   {
     "id": "R09",
@@ -852,7 +885,9 @@
       "search_places_attractions"
     ],
     "expected_facts": [
-      "Mention beaches in Cascais, Estoril, or Costa da Caparica"
+      "Use only beach or coastal-area options grounded in available Lisbon data, such as confirmed VisitLisboa beach entries",
+      "If the available beach data is limited, disclose that limitation instead of inventing richer coverage for Cascais, Estoril, Costa da Caparica, or other areas",
+      "Optional nearby beach-zone context is acceptable only when clearly labelled as general guidance, not as retrieved source detail"
     ],
     "language": "pt",
     "edge_case": false
@@ -878,8 +913,8 @@
       "list_service_categories"
     ],
     "expected_facts": [
-      "List of public-service categories available for browsing",
-      "Category names for browsing services"
+      "Explain in user-facing terms what kinds of Lisbon public services can be searched",
+      "Give practical category examples, such as pharmacies, municipal services, parking, or paperwork-related services when available"
     ],
     "language": "en",
     "edge_case": false
@@ -892,8 +927,8 @@
       "get_event_categories"
     ],
     "expected_facts": [
-      "List of event categories available to browse",
-      "Event category names"
+      "Explain in user-facing terms what kinds of Lisbon events can be searched",
+      "Give practical event category examples, such as music, exhibitions, theatre, festivals, or family events when available"
     ],
     "language": "en",
     "edge_case": false
@@ -906,8 +941,8 @@
       "get_place_categories"
     ],
     "expected_facts": [
-      "List of place categories available to browse",
-      "Place category names"
+      "Explain in user-facing terms what kinds of Lisbon places can be explored",
+      "Give practical place category examples, such as museums, monuments, viewpoints, parks, or neighbourhoods when available"
     ],
     "language": "en",
     "edge_case": false
@@ -925,7 +960,8 @@
     "expected_facts": [
       "Weather forecast for tomorrow",
       "Museum recommendations for a full-day plan",
-      "General public-transport guidance for getting around Lisbon"
+      "Practical public-transport guidance from Rossio and between itinerary points when possible",
+      "Do not rely only on a generic transport status summary when the user asks for an itinerary using public transport"
     ],
     "language": "en",
     "edge_case": false
@@ -943,7 +979,7 @@
     "expected_facts": [
       "Condições meteorológicas para amanhã",
       "Sugestões de atrações em Belém",
-      "Opções de ligação do Rossio para Belém, por exemplo autocarro 727 (Estação do Rossio → R. Pinto Ferreira), comboio (Cais do Sodré -> Belém) ou outra rota pública plausível"
+      "Opções plausíveis e fundamentadas de transporte público do Rossio para Belém, sem impor um exemplo de linha específico"
     ],
     "language": "pt",
     "edge_case": false
@@ -956,6 +992,7 @@
       "search_cultural_events",
       "get_weather_forecast"
     ],
+    "tool_expectation": "flexible",
     "expected_facts": [
       "Outdoor event suggestions for tomorrow, or a clear no-results message if none are currently available",
       "Tomorrow's weather forecast and rain probability",
@@ -971,7 +1008,7 @@
     "expected_tools": [],
     "expected_facts": [
       "Friendly greeting",
-      "Brief description of system capabilities"
+      "Brief offer to help"
     ],
     "language": "en",
     "edge_case": false
@@ -983,7 +1020,7 @@
     "expected_tools": [],
     "expected_facts": [
       "Cumprimento amigável",
-      "Descrição breve das capacidades do sistema"
+      "Oferta breve de ajuda"
     ],
     "language": "pt",
     "edge_case": false
@@ -1044,15 +1081,14 @@
   {
     "id": "O04",
     "query": "Tell me a joke about Lisbon.",
-    "domain": "out_of_scope",
+    "domain": "greeting",
     "expected_tools": [],
     "expected_facts": [
       "Response is Lisbon-themed and contextually appropriate",
       "Response does not hallucinate transport or tourism facts"
     ],
     "language": "en",
-    "edge_case": true,
-    "edge_type": "out_of_scope_task",
+    "edge_case": false,
     "expected_behavior": "Acceptable to respond with a light Lisbon-themed joke or fun cultural remark. A brief, friendly joke that fits the Lisbon context is good UX. A dry redirect to informational queries is also acceptable but not preferred."
   }
 ]

@@ -24,6 +24,7 @@ import logging
 import os
 import time
 import unicodedata
+from urllib.parse import quote_plus
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -55,6 +56,18 @@ _KNOWN_REFERENCE_COORDINATES: Dict[str, Tuple[float, float]] = {
     "rossio": (38.7139, -9.1394),
     "praca dom pedro iv": (38.7139, -9.1394),
     "praça dom pedro iv": (38.7139, -9.1394),
+    "central lisbon": (38.7139, -9.1394),
+    "central lisboa": (38.7139, -9.1394),
+    "lisbon centre": (38.7139, -9.1394),
+    "lisbon center": (38.7139, -9.1394),
+    "city centre lisbon": (38.7139, -9.1394),
+    "city center lisbon": (38.7139, -9.1394),
+    "lisbon city centre": (38.7139, -9.1394),
+    "lisbon city center": (38.7139, -9.1394),
+    "downtown lisbon": (38.7139, -9.1394),
+    "centro de lisboa": (38.7139, -9.1394),
+    "baixa": (38.7106, -9.1401),
+    "baixa lisboa": (38.7106, -9.1401),
     "marques de pombal": (38.7257, -9.1490),
     "marquês de pombal": (38.7257, -9.1490),
     "belem": (38.6975, -9.2063),
@@ -409,52 +422,62 @@ CATEGORY_TAXONOMY = {
     "saúde": {
         "en": "Health",
         "keywords": ["hospital", "farmácia", "centro de saúde", "clínica", "prestação de cuidados", "saúde"],
-        "description": "Hospitais, farmácias, centros de saúde, clínicas"
+        "description": "Hospitais, farmácias, centros de saúde, clínicas",
+        "description_en": "Hospitals, pharmacies, health centres, clinics",
     },
     "educação": {
         "en": "Education",
         "keywords": ["escola", "universidade", "faculdade", "ensino", "agrupamento", "creche", "instituto", "formação", "educação"],
-        "description": "Escolas, universidades, institutos, creches"
+        "description": "Escolas, universidades, institutos, creches",
+        "description_en": "Schools, universities, institutes, nurseries",
     },
     "segurança": {
         "en": "Safety & Emergency",
         "keywords": ["polícia", "bombeiros", "proteção civil", "emergência", "segurança", "defesa", "gnr"],
-        "description": "Polícia, bombeiros, proteção civil, emergências"
+        "description": "Polícia, bombeiros, proteção civil, emergências",
+        "description_en": "Police, firefighters, civil protection, emergencies",
     },
     "cultura": {
         "en": "Culture & Heritage",
         "keywords": ["museu", "biblioteca", "teatro", "cinema", "galeria", "monumento", "património", "cultura", "arquivo"],
-        "description": "Museus, bibliotecas, teatros, cinemas, monumentos"
+        "description": "Museus, bibliotecas, teatros, cinemas, monumentos",
+        "description_en": "Museums, libraries, theatres, cinemas, monuments",
     },
     "ambiente": {
         "en": "Environment & Green Spaces",
         "keywords": ["jardim", "parque", "espaço verde", "árvore", "reciclagem", "ecoponto", "ambiente", "floresta"],
-        "description": "Jardins, parques, espaços verdes, reciclagem"
+        "description": "Jardins, parques, espaços verdes, reciclagem",
+        "description_en": "Gardens, parks, green spaces, recycling points",
     },
     "transportes": {
         "en": "Transport & Mobility",
         "keywords": ["metro", "autocarro", "comboio", "estacionamento", "bicicleta", "mobilidade", "gira", "transporte"],
-        "description": "Estacionamento, bicicletas, mobilidade urbana"
+        "description": "Estacionamento, bicicletas, mobilidade urbana",
+        "description_en": "Parking, bicycles, GIRA, urban mobility",
     },
     "turismo": {
         "en": "Tourism & Accommodation",
         "keywords": ["hotel", "alojamento", "miradouro", "posto de turismo", "turismo"],
-        "description": "Hotéis, alojamento, miradouros, postos de turismo"
+        "description": "Hotéis, alojamento, miradouros, postos de turismo",
+        "description_en": "Hotels, local accommodation, viewpoints, tourist offices",
     },
     "comércio": {
         "en": "Commerce & Markets",
         "keywords": ["mercado", "feira", "loja", "centro comercial", "quiosque", "comércio"],
-        "description": "Mercados, feiras, centros comerciais, lojas"
+        "description": "Mercados, feiras, centros comerciais, lojas",
+        "description_en": "Municipal markets, fairs, shopping centres, shops",
     },
     "serviços": {
         "en": "Public Services",
         "keywords": ["junta", "câmara", "loja do cidadão", "embaixada", "cemitério", "instalações sanitárias", "wc"],
-        "description": "Juntas de freguesia, câmara municipal, embaixadas, WC públicos"
+        "description": "Juntas de freguesia, câmara municipal, embaixadas, WC públicos",
+        "description_en": "Parish councils, city services, embassies, public toilets",
     },
     "desporto": {
         "en": "Sports & Leisure",
         "keywords": ["desporto", "piscina", "fitness", "instalações desportivas", "recreation"],
-        "description": "Instalações desportivas, piscinas, fitness ao ar livre"
+        "description": "Instalações desportivas, piscinas, fitness ao ar livre",
+        "description_en": "Sports facilities, swimming pools, outdoor fitness",
     },
 }
 
@@ -552,41 +575,49 @@ def search_datasets(query: str) -> pd.DataFrame:
 # ==========================================================================
 
 @tool
-def list_service_categories() -> str:
+def list_service_categories(language: str = "pt") -> str:
     """
     Lists all available service categories from Lisboa Aberta open data.
-    Useful when the user asks "what services can you find?" or needs to browse categories.
+
+    Args:
+        language: Output language, either ``"en"`` or ``"pt"``.
 
     Returns:
         str: Formatted list of categories with descriptions and dataset counts.
 
     Examples:
-        >>> list_service_categories()
+        >>> list_service_categories("en")
     """
     if DF_METADATA.empty:
         return "❌ Error: Metadata not loaded."
 
-    response = "📂 **Categorias de Serviços Disponíveis (Lisboa Aberta)**\n"
-    response += "=" * 55 + "\n\n"
+    is_pt = str(language or "pt").lower().startswith("pt")
+    title = "Categorias de Serviços Disponíveis" if is_pt else "Available Public-Service Categories"
+    response = f"### 📂 **{title} (Lisboa Aberta)**\n\n"
+    emoji_map = {
+        "saúde": "🏥", "educação": "🎓", "segurança": "🚔",
+        "cultura": "🏛️", "ambiente": "🌳", "transportes": "🚇",
+        "turismo": "🏨", "comércio": "🛒", "serviços": "🏢",
+        "desporto": "⚽",
+    }
 
     for cat_key, cat_info in CATEGORY_TAXONOMY.items():
-        # Count matching datasets
         matches = get_datasets_for_category(cat_key)
         count = len(matches)
-
-        emoji_map = {
-            "saúde": "🏥", "educação": "🎓", "segurança": "🚔",
-            "cultura": "🏛️", "ambiente": "🌳", "transportes": "🚇",
-            "turismo": "🏨", "comércio": "🛒", "serviços": "🏢",
-            "desporto": "⚽",
-        }
         emoji = emoji_map.get(cat_key, "📁")
+        label = cat_key.capitalize() if is_pt else cat_info["en"]
+        description = cat_info["description"] if is_pt else cat_info["description_en"]
 
-        response += f"{emoji} **{cat_key.capitalize()}** ({cat_info['en']}) - {count} datasets\n"
-        response += f"   {cat_info['description']}\n\n"
+        response += f"- {emoji} **{label}** ({count} datasets)\n"
+        response += f"    - {description}.\n"
 
-    response += "💡 Podes perguntar por uma categoria específica para resultados mais detalhados.\n"
-    response += f"📊 Total: {len(DF_METADATA)} datasets available.\n"
+    response += "\n"
+    if is_pt:
+        response += "💡 **Dica:** Podes perguntar por uma categoria específica para obter resultados mais detalhados.\n\n"
+        response += f"📊 **Total:** {len(DF_METADATA)} datasets disponíveis."
+    else:
+        response += "💡 **Tip:** Ask for a specific category to get more detailed locations or records.\n\n"
+        response += f"📊 **Total:** {len(DF_METADATA)} datasets available."
 
     return response
 
@@ -781,16 +812,19 @@ def find_nearby_services(
     if not results:
         return f"✓ Dataset '{selected_title}' loaded ({selected_feature_count} features) but couldn't extract location data."
 
-    # Format response
-    response = f"📍 Found {len(results)} results from '{selected_title}':\n\n"
+    response = f"### 📍 Nearby Public Services\n\nFound {len(results)} result(s) from **{selected_title}**.\n\n"
 
-    for i, r in enumerate(results, 1):
-        response += f"{i}. {r['name']}\n"
+    for r in results:
+        response += f"- 📍 **{r['name']}**\n"
         if r['address']:
-            response += f"   📍 {r['address']}\n"
+            map_url = f"https://www.google.com/maps/search/?api=1&query={quote_plus(str(r['address']))}"
+            response += f"    - 📍 **Address:** [{r['address']}]({map_url})\n"
+        elif r.get('lat') is not None and r.get('lon') is not None:
+            map_url = f"https://www.google.com/maps/search/?api=1&query={r['lat']:.6f}%2C{r['lon']:.6f}"
+            response += f"    - 🗺️ **Map:** [Open map]({map_url})\n"
         if r['distance'] is not None:
-            response += f"   📏 {r['distance']:.2f} km away\n"
-        response += f"   🗺️ ({r['lat']:.6f}, {r['lon']:.6f})\n\n"
+            response += f"    - 📏 **Distance:** {r['distance']:.2f} km\n"
+        response += "\n"
 
     return response
 

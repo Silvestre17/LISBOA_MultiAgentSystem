@@ -1908,17 +1908,28 @@ class MultiAgentAssistant:
 
         researcher_output = str(agent_outputs.get("researcher") or "")
         normalized_output = researcher_output.lower()
-        after_hours_markers = (
-            "recomendação para 19:00-20:00",
-            "recommendation for 19:00-20:00",
+        has_timed_recommendation = bool(
+            re.search(
+                r"(?:recomenda(?:ção|cao)|recommendation)\s+(?:para|for)\s+\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2}",
+                normalized_output,
+            )
         )
-        has_after_hours_recommendation = any(
-            marker in normalized_output for marker in after_hours_markers
-        )
-        if not has_after_hours_recommendation:
+        if not has_timed_recommendation:
             return False
 
-        return "padrão dos descobrimentos" in normalized_output or "outdoor monument" in normalized_output
+        return "📌" in researcher_output and any(
+            marker in normalized_output
+            for marker in (
+                "open-air",
+                "outdoor",
+                "exterior",
+                "monument",
+                "miradouro",
+                "viewpoint",
+                "fachada",
+                "ao ar livre",
+            )
+        )
 
     @traceable(
         name="LISBOA Chat",
@@ -2796,6 +2807,67 @@ class MultiAgentAssistant:
 
         return "\n".join(body_lines).strip(), deduped_links, timestamp
 
+    @staticmethod
+    def _strip_cross_domain_hybrid_lines(agent_name: str, body: str, available_agents: Set[str]) -> str:
+        """Remove lines where one worker repeats another worker's domain in hybrid output."""
+        if not body:
+            return body
+
+        weather_has_transport_leak = agent_name == "weather" and "transport" in available_agents
+        researcher_has_weather_transport_leak = agent_name == "researcher" and bool(
+            {"weather", "transport"} & available_agents
+        )
+        if not weather_has_transport_leak and not researcher_has_weather_transport_leak:
+            return body
+
+        transport_markers = [
+            "transport",
+            "transportes",
+            "public transport",
+            "metro",
+            "autocarro",
+            "autocarros",
+            "comboio",
+            "comboio +",
+            "carris",
+            "cp",
+            "route",
+            "rota",
+            "trajeto",
+            "percurso",
+            "rossio",
+        ]
+        weather_markers = [
+            "tempo",
+            "weather",
+            "meteorolog",
+            "chuva",
+            "rain",
+            "temperatura",
+            "temperature",
+            "vento",
+            "wind",
+            "céu",
+            "ceo",
+            "sky",
+        ]
+
+        cleaned_lines: List[str] = []
+        for line in body.splitlines():
+            normalized = re.sub(r"\s+", " ", line.strip().lower())
+            if weather_has_transport_leak and any(marker in normalized for marker in transport_markers):
+                continue
+            if researcher_has_weather_transport_leak and (
+                any(marker in normalized for marker in weather_markers)
+                or any(marker in normalized for marker in transport_markers)
+            ):
+                continue
+            cleaned_lines.append(line)
+
+        cleaned = "\n".join(cleaned_lines)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+        return cleaned
+
     def _render_structured_hybrid_response(self, agent_outputs: dict, language: str) -> str:
         """Builds a deterministic multi-section response for hybrid multi-agent answers."""
         filtered = {k: v for k, v in agent_outputs.items() if not k.startswith("_")}
@@ -2852,6 +2924,7 @@ class MultiAgentAssistant:
 
         for agent_name in ordered_agents:
             body, links, timestamp = self._extract_structured_section_parts(str(filtered[agent_name]))
+            body = self._strip_cross_domain_hybrid_lines(agent_name, body, set(filtered.keys()))
             if not body:
                 continue
             if links:

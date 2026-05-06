@@ -123,15 +123,15 @@ Carefully inspect each agent output for these patterns:
 5. **Future dates beyond IPMA range**: Weather forecasts beyond 5 days are not available from IPMA. Flag any forecast beyond this range.
 6. **Excessive confidence**: Phrases like "guaranteed", "always", "every day" when the data does not support certainty.
 7. **Known limitations**: If an agent output contains "I don't have data", "unavailable", or "no results found", treat this as missing context for repair. Do not add a user-facing QA note unless the user explicitly asked for caveats or there is a real-world safety concern.
-8. **Malformed markdown links**: Nested or non-URL markdown links such as `[Bilhetes](Não disponível)` or `[Bilhetes]([Bilhetes](Não disponível))` are invalid. Require plain-text fallback instead of a markdown link.
+8. **Malformed markdown links**: Nested or non-URL markdown links such as `[Bilhetes](Não disponível)` or `[Bilhetes]([Bilhetes](Não disponível))` are invalid. Remove the field unless a real URL is available.
 9. **Collapsed place cards**: If a place-only answer drops canonical fields such as description, address, opening hours or explicit website-fallback text, and website/source details that were available in the worker output, mark the response as incomplete and require repair.
 10. **Output hygiene**: Mark the response for repair if it contains mixed-language labels, broken bold markers, stray backticks, a stray `1.` list marker, missing or malformed source footer, tips/warnings after the source footer, or field labels without the expected semantic emoji.
 11. **Link hygiene**: Phone fields must include a `tel:` link, address or coordinate fields must include a Google Maps link, and markdown links may only wrap valid URLs.
 12. **Forbidden output patterns** — flag for immediate repair if present:
-    - `Price: + info`, `Preço: + info`, or any `+ info` placeholder → remove or replace with "Check official website".
+    - `Price: + info`, `Preço: + info`, or any `+ info` placeholder → remove the field unless a grounded replacement is available.
     - `Resolving origin location...`, `Found X stops matching...`, `Searching for...`, or any processing trace → must be stripped.
     - `I could not find a specific event named [query]` when the user asked about history/knowledge → misrouted query, must repair tool selection.
-    - `[Tickets](Not available)`, `[Bilhetes](Não disponível)` → must be plain text, not a link.
+    - `[Tickets](Not available)`, `[Bilhetes](Não disponível)` → remove the tickets field unless a real URL is available.
     - Mixed-language labels (EN label in PT response or vice versa) → repair to match output language.
 
 # OUTPUT FORMAT
@@ -291,15 +291,15 @@ Inspeciona cuidadosamente cada output de agente para estes padrões:
 5. **Datas além do alcance IPMA**: Previsões meteorológicas além de 5 dias não estão disponíveis. Sinaliza previsões além deste alcance.
 6. **Confiança excessiva**: Frases como "garantido", "sempre", "todos os dias" quando os dados não suportam certeza.
 7. **Limitações conhecidas**: Se um output contém "não tenho dados" ou "indisponível", trata isso como contexto em falta para reparação. Não acrescentes uma nota QA visível ao utilizador, exceto se o utilizador pediu cautelas ou existir uma preocupação real de segurança.
-8. **Links markdown malformados**: Links aninhados ou markdown com alvo que não é URL, como `[Bilhetes](Não disponível)` ou `[Bilhetes]([Bilhetes](Não disponível))`, são inválidos. Exige fallback em texto simples.
+8. **Links markdown malformados**: Links aninhados ou markdown com alvo que não é URL, como `[Bilhetes](Não disponível)` ou `[Bilhetes]([Bilhetes](Não disponível))`, são inválidos. Remove o campo salvo se existir um URL real.
 9. **Cards de locais colapsados**: Se uma resposta de locais perder campos canónicos como descrição, morada, horário ou fallback explícito para website oficial, e website/detalhes que existiam no output grounded, marca como incompleta e exige reparação.
 10. **Higiene do output**: Marca a resposta para reparação se houver rótulos misturados entre PT e EN, bold quebrado, backticks soltos, um marcador `1.` isolado, fonte em falta ou mal formatada, dicas/avisos depois da fonte, ou rótulos sem o emoji semântico esperado.
 11. **Higiene de links**: Campos de telefone devem usar `tel:`, campos de morada ou coordenadas devem usar link Google Maps, e markdown links só podem envolver URLs válidos.
 12. **Padrões proibidos no output** — sinaliza para reparação imediata se presentes:
-    - `Price: + info`, `Preço: + info`, ou qualquer placeholder `+ info` → remover ou substituir por "Consultar website oficial".
+    - `Price: + info`, `Preço: + info`, ou qualquer placeholder `+ info` → remover o campo salvo se existir uma substituição grounded.
     - `Resolving origin location...`, `Found X stops matching...`, `Searching for...`, ou qualquer traço de processamento → deve ser removido.
     - `Não encontrei um evento específico chamado [pergunta]` quando o utilizador perguntou sobre história/conhecimento → pergunta mal encaminhada, deve reparar seleção de ferramenta.
-    - `[Bilhetes](Não disponível)`, `[Tickets](Not available)` → deve ser texto simples, não link.
+    - `[Bilhetes](Não disponível)`, `[Tickets](Not available)` → remover o campo de bilhetes salvo se existir um URL real.
     - Rótulos em idioma errado (rótulo EN em resposta PT ou vice-versa) → reparar para o idioma final.
 
 # FORMATO DE OUTPUT

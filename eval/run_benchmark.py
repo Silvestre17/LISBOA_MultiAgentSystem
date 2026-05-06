@@ -41,6 +41,7 @@ from agent.utils.langsmith_tracing import (
 from eval.llm_judge import LLMJudge
 from eval.runtime_utils import (
     aggregate_judge_runs,
+    build_reference_context,
     build_cost_payload,
     build_model_id,
     build_model_manifest,
@@ -259,6 +260,7 @@ def _evaluate_with_judges(
     expected_tools: list[str],
     actual_tools: list[str],
     retrieved_context: str,
+    reference_context: str,
     response: str,
     response_error: str | None,
     pricing_by_model: dict | None,
@@ -299,6 +301,7 @@ def _evaluate_with_judges(
                     expected_tools=expected_tools,
                     actual_tools=actual_tools,
                     retrieved_context=retrieved_context,
+                    reference_context=reference_context,
                     response=response,
                     pricing_by_model=pricing_by_model,
                     tool_expectation=tool_expectation,
@@ -566,6 +569,10 @@ def run_benchmark(
                     expected_tools=item.get('expected_tools', []),
                     actual_tools=tools,
                     retrieved_context=retrieved_context,
+                    reference_context=build_reference_context(
+                        expected_facts=item.get('expected_facts', []),
+                        expected_behavior=item.get('expected_behavior'),
+                    ),
                     response=response,
                     response_error=error,
                     pricing_by_model=pricing_by_model,
@@ -618,6 +625,10 @@ def run_benchmark(
                     "tools_used": tools,
                     "expected_tools": item.get("expected_tools", []),
                     "expected_facts": item.get("expected_facts", []),
+                    "reference_context": build_reference_context(
+                        expected_facts=item.get('expected_facts', []),
+                        expected_behavior=item.get('expected_behavior'),
+                    ),
                     "retrieved_context": retrieved_context,
                     "scores": judge_scores,
                     "judge_runs": judge_runs,

@@ -252,7 +252,7 @@ def test_weather_worker_finalization_localizes_follow_up_warning_summary_for_pt(
     )
 
     assert "Sem avisos meteorológicos ativos para Lisboa." in output
-    assert "As condições meteorológicas são normais" in output
+    assert "As condições meteorológicas são normais" not in output
     assert "- **☀️ Quarta-feira, Mar 11**" in output
     assert "Weather conditions are normal" not in output
     assert "for area 'LSB'" not in output
@@ -270,6 +270,7 @@ def test_get_weather_warnings_tool_hides_internal_lisbon_area_code_when_clear() 
 
     assert "LSB" not in output
     assert "No active weather warnings for Lisbon." in output
+    assert "Weather conditions are normal" not in output
 
 
 def test_get_weather_warnings_tool_hides_internal_lisbon_area_code_when_active() -> None:
@@ -370,7 +371,7 @@ def test_supervisor_lmstudio_route_uses_same_llm_path_as_other_providers() -> No
         )
 
         decision = agent.route(
-            "Tell me the weather today and how I get from Rossio to Belém.",
+            "Tell me the weather today and what museums are open in Lisbon.",
             language="en",
         )
 
@@ -1686,6 +1687,32 @@ def test_transport_worker_finalization_strips_embedded_stop_and_vehicle_ids_from
     assert "Horário" in output
 
 
+def test_transport_worker_finalization_hides_live_vehicle_card_ids() -> None:
+    """Live vehicle card titles should not expose internal operator IDs."""
+    raw = """### 🚌 **Live buses**
+
+**📡 Live snapshot**
+- **🚌 Bus 42|85**
+    - 🚏 **Status:** Stopped At
+    - 📍 **Live position:** [Open map](https://www.google.com/maps/search/?api=1&query=38.80090%2C-9.11016)
+    - 🧭 **Direction:** ? · **Speed:** 0.0 km/h
+    - 🚏 **Next stop:** R Miguel Bombarda (RL)
+
+📌 **Source:** [*Carris Metropolitana*](https://www.carrismetropolitana.pt) | **Updated:** 20:45"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="transport",
+        user_query="Where is the bus now?",
+        language="en",
+    )
+
+    assert "42|85" not in output
+    assert "**🚌 Active vehicle**" in output
+    assert "Direction:** ?" not in output
+    assert "**Speed:** 0.0 km/h" in output
+
+
 def test_planner_worker_finalization_rebuilds_timed_sections_cleanly() -> None:
     """Planner finalization should convert malformed pseudo-headers into clean timed activity sections."""
     raw = """📅 Itinerário sugerido para uma tarde em Belém
@@ -2542,7 +2569,7 @@ def test_weather_double_content_filter_falls_back_to_direct_tools() -> None:
 
         assert call_counter["count"] == 2
         warnings_tool.invoke.assert_called_once_with({"area": "LSB"})
-        forecast_tool.invoke.assert_called_once_with({"days": 5})
+        forecast_tool.invoke.assert_called_once_with({"days": 5, "day_offset": 0})
         assert "[*IPMA*](https://www.ipma.pt/en/)" in output
 
 
@@ -2657,7 +2684,7 @@ def test_weather_forecast_query_uses_direct_tool_path_with_requested_days() -> N
         output = agent.invoke("Qual é a previsão do tempo para os próximos 3 dias?")
 
         warnings_tool.invoke.assert_called_once_with({"area": "LSB"})
-        forecast_tool.invoke.assert_called_once_with({"days": 3})
+        forecast_tool.invoke.assert_called_once_with({"days": 3, "day_offset": 0})
         assert "**Atualizado:** 15:22" in output
 
 
@@ -2709,18 +2736,39 @@ def test_weather_specific_unsupported_city_does_not_use_lisbon_summary() -> None
         assert "check IPMA directly" in output
 
 
-def test_weather_activity_advice_query_does_not_use_simple_forecast_shortcut() -> None:
-    """Safety/advice weather questions should keep the synthesis path instead of dumping raw forecast."""
+def test_weather_activity_advice_query_uses_focused_forecast_and_warning_tools() -> None:
+    """Safety/advice weather questions should use focused grounded tools and answer directly first."""
     with patch.object(WeatherAgent, "__init__", lambda self: None):
         agent = WeatherAgent()
         agent.system_prompt = "PRIMARY WEATHER PROMPT"
-        agent.tools = []
-        agent.execute_react_loop = MagicMock(return_value="Sailing is possible only if official sea warnings stay clear.")
+
+        warnings_tool = MagicMock()
+        warnings_tool.name = "get_weather_warnings"
+        warnings_tool.invoke = MagicMock(return_value="✅ No active weather warnings for Lisbon.")
+
+        forecast_tool = MagicMock()
+        forecast_tool.name = "get_weather_forecast"
+        forecast_tool.invoke = MagicMock(
+            return_value=(
+                "🌤️ Weather Forecast for Lisbon\n"
+                "📅 Updated: 2026-03-09T15:22:00\n"
+                "☀️ Tuesday, Mar 10\n"
+                "   🌡️ 10°C to 18°C\n"
+                "   💧 Rain: Very unlikely (2.0%)\n"
+                "   💨 Wind: Northwest (Moderate)"
+            )
+        )
+
+        agent.tools = [warnings_tool, forecast_tool]
+        agent.execute_react_loop = MagicMock(side_effect=AssertionError("LLM path should be skipped"))
 
         output = agent.invoke("Is it safe to go sailing in Lisbon tomorrow?")
 
-        agent.execute_react_loop.assert_called_once()
-        assert "Sailing is possible" in output
+        warnings_tool.invoke.assert_called_once_with({"area": "LSB"})
+        forecast_tool.invoke.assert_called_once_with({"days": 1, "day_offset": 1})
+        agent.execute_react_loop.assert_not_called()
+        assert "Sailing looks" in output
+        assert "Check the official marine forecast" in output
 
 
 def test_weather_beyond_horizon_query_returns_limit_message_without_tool_calls_in_en() -> None:
@@ -4156,7 +4204,11 @@ def test_search_places_attractions_respects_category_and_excludes_service_like_r
         visitlisboa_api,
         "_should_search_dados_abertos",
         return_value=False,
-    ), patch.object(visitlisboa_api, "_get_place_by_url", return_value=None):
+    ), patch.object(visitlisboa_api, "_get_place_by_url", return_value=None), patch.object(
+        visitlisboa_api,
+        "_load_places_json",
+        return_value=[],
+    ):
         output = visitlisboa_api.search_places_attractions.invoke(
             {"query": "best museums in lisbon", "category": "Museums & Monuments", "max_results": 5}
         )
@@ -4200,7 +4252,11 @@ def test_search_places_attractions_museum_query_filters_pure_monuments() -> None
         visitlisboa_api,
         "_should_search_dados_abertos",
         return_value=False,
-    ), patch.object(visitlisboa_api, "_get_place_by_url", return_value=None):
+    ), patch.object(visitlisboa_api, "_get_place_by_url", return_value=None), patch.object(
+        visitlisboa_api,
+        "_load_places_json",
+        return_value=[],
+    ):
         output = visitlisboa_api.search_places_attractions.invoke(
             {"query": "best museums in lisbon", "category": "Museums & Monuments", "max_results": 5}
         )
@@ -4290,12 +4346,96 @@ def test_search_places_attractions_best_query_prefers_stronger_social_proof() ->
         visitlisboa_api,
         "_should_search_dados_abertos",
         return_value=False,
-    ), patch.object(visitlisboa_api, "_get_place_by_url", return_value=None):
+    ), patch.object(visitlisboa_api, "_get_place_by_url", return_value=None), patch.object(
+        visitlisboa_api,
+        "_load_places_json",
+        return_value=[],
+    ):
         output = visitlisboa_api.search_places_attractions.invoke(
             {"query": "best museums in lisbon", "category": "Museums & Monuments", "max_results": 5}
         )
 
     assert output.index("Money Museum") < output.index("Museum of the Lisbon Geographical Society")
+
+
+def test_search_places_attractions_best_museums_uses_dynamic_iconic_catalog() -> None:
+    """Broad museum recommendations should combine vector results with current high-signal catalog records."""
+
+    small_museum = {
+        "url": "https://www.visitlisboa.com/en/places/museum-of-the-lisbon-geographical-society",
+        "title": "Museum of the Lisbon Geographical Society",
+        "category": "Museums",
+        "short_description": "Small geography museum.",
+        "location": "Lisboa",
+        "tripadvisor": {"rating": "4.6", "reviews_count": "18"},
+    }
+    gulbenkian = {
+        "url": "https://www.visitlisboa.com/en/places/gulbenkian-museum",
+        "title": "Gulbenkian Museum",
+        "category": "Museums",
+        "short_description": "Major art museum and cultural venue.",
+        "location": "Av. Berna, Lisboa",
+        "tripadvisor": {"rating": "4.6", "reviews_count": "8711"},
+    }
+    maat = {
+        "url": "https://www.visitlisboa.com/en/places/maat-museum-of-art-architecture-and-technology",
+        "title": "MAAT - Museum of Art, Architecture and Technology",
+        "category": "Museums",
+        "short_description": "Museum of art, architecture and technology.",
+        "location": "Belém, Lisboa",
+        "tripadvisor": {"rating": "3.9", "reviews_count": "1232"},
+    }
+
+    class DummyKB:
+        def search_with_scores(self, query, k, collections):
+            return [
+                (
+                    Document(
+                        page_content="Name: Museum of the Lisbon Geographical Society\nCategory: Museums\nShort Description: Geography museum.",
+                        metadata={
+                            "title": small_museum["title"],
+                            "category": small_museum["category"],
+                            "url": small_museum["url"],
+                            "rating": 4.6,
+                            "reviews": 18,
+                        },
+                    ),
+                    0.30,
+                ),
+                (
+                    Document(
+                        page_content="Name: Museum of Illusions\nCategory: Museums\nShort Description: Interactive museum.",
+                        metadata={
+                            "title": "Museum of Illusions",
+                            "category": "Museums",
+                            "url": "https://www.visitlisboa.com/en/places/museum-of-illusions",
+                            "rating": 4.1,
+                            "reviews": 25,
+                        },
+                    ),
+                    0.32,
+                ),
+            ]
+
+    def fake_place_by_url(url: str):
+        return {item["url"]: item for item in [small_museum, gulbenkian, maat]}.get(url)
+
+    with patch.object(visitlisboa_api, "_get_vector_store", return_value=DummyKB()), patch.object(
+        visitlisboa_api,
+        "_should_search_dados_abertos",
+        return_value=False,
+    ), patch.object(visitlisboa_api, "_load_places_json", return_value=[small_museum, gulbenkian, maat]), patch.object(
+        visitlisboa_api,
+        "_get_place_by_url",
+        side_effect=fake_place_by_url,
+    ):
+        output = visitlisboa_api.search_places_attractions.invoke(
+            {"query": "best museums in lisbon", "category": "Museums & Monuments", "max_results": 3}
+        )
+
+    assert "Gulbenkian Museum" in output
+    assert "MAAT" in output
+    assert output.index("Gulbenkian Museum") < output.index("Museum of the Lisbon Geographical Society")
 
 
 def test_researcher_routes_best_museums_to_deterministic_place_lookup() -> None:
