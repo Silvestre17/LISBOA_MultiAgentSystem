@@ -59,7 +59,6 @@ files = [
     "eval/run_benchmark.py",
     "eval/run_ablation.py",
     "eval/statistical_analysis.py",
-    "eval/tests/test_llm_judge.py",
     "eval/tests/test_dataset_integrity.py",
     r"agent\llm_factory.py",
     r"agent\utils\usage_costs.py",
@@ -72,10 +71,6 @@ files = [
     "eval/runtime_utils.py",
     "eval/validators/transport_validator.py",
     "eval/validators/response_heuristics.py",
-    "eval/tests/test_benchmark_utils.py",
-    "eval/tests/test_cost_accounting.py",
-    "eval/tests/test_human_calibration.py",
-    "eval/tests/test_statistical_analysis.py",
     "eval/tests/test_validators.py",
 ]
 
