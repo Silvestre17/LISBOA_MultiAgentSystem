@@ -19,19 +19,15 @@
 </p>
 
 <p align="center">
-  <a href="https://www.visitlisboa.com/"><img src="https://img.shields.io/badge/VisitLisboa-FF6B35?style=for-the-badge" alt="VisitLisboa"></a>
-  <a href="https://api.ipma.pt/"><img src="https://img.shields.io/badge/IPMA-0052CC?style=for-the-badge" alt="IPMA"></a>
-  <a href="https://www.metrolisboa.pt/"><img src="https://img.shields.io/badge/Metro_de_Lisboa-E60000?style=for-the-badge" alt="Metro de Lisboa"></a>
-  <a href="https://www.carrismetropolitana.pt/"><img src="https://img.shields.io/badge/Carris_Metropolitana-00A859?style=for-the-badge" alt="Carris Metropolitana"></a>
-  <a href="https://www.cp.pt/"><img src="https://img.shields.io/badge/CP-003DA5?style=for-the-badge" alt="CP"></a>
+  <a href="https://www.visitlisboa.com/"><img src="https://img.shields.io/badge/VisitLisboa-FED30E?style=for-the-badge" alt="VisitLisboa"></a>
+  <a href="https://dados.gov.pt/"><img src="https://img.shields.io/badge/Lisboa_Aberta-EF7E22?style=for-the-badge" alt="Lisboa Aberta"></a>
+  <a href="https://api.ipma.pt/"><img src="https://img.shields.io/badge/IPMA-257ABA?style=for-the-badge" alt="IPMA"></a>
+  <a href="https://www.metrolisboa.pt/"><img src="https://img.shields.io/badge/Metro_de_Lisboa-EF5A34?style=for-the-badge" alt="Metro de Lisboa"></a>
+  <a href="https://www.carrismetropolitana.pt/"><img src="https://img.shields.io/badge/Carris_Metropolitana-FFDD00?style=for-the-badge" alt="Carris Metropolitana"></a>
+  <a href="https://www.carris.pt/"><img src="https://img.shields.io/badge/Carris-00468F?style=for-the-badge" alt="Carris"></a>
+  <a href="https://www.cp.pt/"><img src="https://img.shields.io/badge/CP-388344?style=for-the-badge" alt="CP"></a>
 </p>
 
-<p align="center">
-  <a href="./docs/00_INDEX.md"><img src="https://img.shields.io/badge/Docs_Index-0A66C2?style=for-the-badge" alt="Docs Index"></a>
-  <a href="./docs/02_SYSTEM_ARCHITECTURE.md"><img src="https://img.shields.io/badge/System_Architecture-6A1B9A?style=for-the-badge" alt="System Architecture"></a>
-  <a href="./docs/03_TOOLS_REFERENCE.md"><img src="https://img.shields.io/badge/Tools_Reference-8E24AA?style=for-the-badge" alt="Tools Reference"></a>
-  <a href="./eval/README.md"><img src="https://img.shields.io/badge/Evaluation_Pipeline-C77800?style=for-the-badge" alt="Evaluation Pipeline"></a>
-</p>
 
 <a id="overview"></a>
 ## 📍 Overview
