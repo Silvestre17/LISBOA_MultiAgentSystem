@@ -7,44 +7,21 @@ This document describes the runtime architecture implemented in the repository t
 
 ## 🖼️ Conceptual Framework Figure
 
-The latest thesis-facing framework figure stored in the repository is shown below.
-
-![LISBOA framework figure](../img/LISBOA_Framework_fev2026.png)
+<p align="center">
+  <img src="../img/LISBOA_Framework.png" alt="LISBOA framework figure" width="720">
+</p>
 
 
 ## 🧩 High-Level Components
 
 | Layer | Main files | Responsibility |
 |------|------------|----------------|
-| UI | `app.py` | Streamlit chat interface, provider selection, session state, quick actions |
-| Orchestration | `agent/graph.py` | routing, parallel worker execution, QA pass, final response assembly |
+| UI | `app.py` | Streamlit chat, provider/model selection, session state, quick actions, info pages, startup warmup of Carris Urban DB, Metro station cache, CP GTFS + AML support, Carris Metropolitana caches, and (in multi-agent mode) the vector store |
+| Orchestration | `agent/graph.py` | supervisor routing, parallel worker execution, QA pass, planner synthesis or direct response |
 | State | `agent/state.py` | shared `AgentState` and user-context schema |
-| LLM provider factory | `agent/llm_factory.py` | provider-specific model creation and binding |
+| LLM provider factory | `agent/llm_factory.py` | provider creation and per-agent binding (Azure OpenAI, OpenAI, LM Studio) |
 | Specialized agents | `agent/agents/` | domain routing, retrieval, validation, synthesis |
-| Tool and data layer | `tools/` | live APIs, open data access, vector search, support utilities |
-
-## 🧱 Architecture Layers
-
-### 🎨 UI Layer
-
-- Streamlit chat experience through `app.py`
-- runtime provider and model selection
-- session state, quick actions, info pages, and status updates
-- startup warmup of the Carris Urban support database, Metro station cache, CP GTFS plus AML station support data, Carris Metropolitana caches, and optionally the vector store when multi-agent mode is enabled
-
-### 🤖 Orchestration Layer
-
-- `SupervisorAgent` classifies the query and decides which workers to call
-- worker agents execute domain-specific retrieval
-- `QualityAssuranceAgent` validates completeness and factual consistency
-- `PlannerAgent` synthesizes itinerary-style answers when planning is required
-
-### 🔌 Tool and Data Layer
-
-- live APIs for weather and transport
-- VisitLisboa semantic retrieval over ChromaDB
-- Lisboa Aberta on-demand geospatial discovery
-- web fallback for history and culture
+| Tool & data layer | `tools/` | live APIs, ChromaDB semantic search, Lisboa Aberta on-demand discovery, web fallback |
 
 ## 🔁 End-to-End Runtime Flow
 
@@ -138,22 +115,13 @@ The QA step happens **after** worker execution and **before** final synthesis or
 
 ## ⚙️ Provider and Model Selection
 
-`agent/llm_factory.py` supports the following provider families:
-
-- **LM Studio**
-- **OpenAI**
-- **Azure OpenAI**
-
-Per-agent model selection is controlled in `config.py` through `AGENT_MODELS_LMSTUDIO`, `AGENT_MODELS_OPENAI`, and `AGENT_MODELS_AZURE`. The Streamlit sidebar in `app.py` can override provider-level and per-agent model choices at runtime.
+`agent/llm_factory.py` supports **LM Studio**, **OpenAI**, and **Azure OpenAI**. Per-agent model selection lives in `config.py` (`AGENT_MODELS_LMSTUDIO`, `AGENT_MODELS_OPENAI`, `AGENT_MODELS_AZURE`); the Streamlit sidebar can override provider and per-agent choices at runtime.
 
 ## 🛡️ Reliability and Control Mechanisms
 
-The implemented architecture includes:
-
-- loop detection for repeated tool calls
+- loop detection for repeated tool calls and forced response generation
 - safe LLM invocation with Azure content-filter retry handling
 - parallel worker execution with context propagation
-- a single QA-guided retry path when required
+- single QA-guided retry path; deterministic validation in QA stage
 - response cleanup and formatting before Streamlit rendering
-- deterministic validation in the QA stage
 - per-agent usage and latency tracking hooks

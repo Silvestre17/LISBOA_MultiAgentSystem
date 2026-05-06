@@ -137,13 +137,10 @@ The tool layer integrates with the following source families:
 
 ## 🛡️ Reliability Patterns in the Tool Layer
 
-The runtime tool layer is designed around a few repeatable patterns:
-
 - readable failure messages instead of hard crashes at tool level
-- targeted retries and caching for network-heavy sources
-- public fallback endpoints where available
+- targeted retries and caching for network-heavy sources; public fallback endpoints where available
 - local reference stores for Carris and CP support workflows
-- transport answers rebuild one canonical localized source footer from the operators actually invoked, collapse duplicate transport footers, and avoid citing operators that were not used in that response
+- transport answers rebuild one canonical localized source footer from the operators actually invoked, collapsing duplicate footers and avoiding citation of operators that were not used
 - strict manifest coverage so every exported tool is represented in evaluation assets
 
 ## 🧠 Vector-Store CLI Support

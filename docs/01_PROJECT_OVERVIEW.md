@@ -38,50 +38,17 @@ LISBOA is a Master's thesis project for the Lisbon Metropolitan Area that combin
 
 ## ✨ Core Capabilities
 
-### 🌦️ Weather and Alerts
-
-- current weather summaries
-- 5-day forecasts
-- Portugal-wide weather overview
-- active meteorological warning retrieval
-
-### 🚇 Mobility
-
-- Metro de Lisboa status, wait times, frequencies, and nearest stations
-- Carris Metropolitana alerts, routes, live locations, and departures
-- Carris Urban buses and trams through GTFS and GTFS-RT
-- CP schedules, routes, trip planning, and frequency support
-- multimodal summaries and routing across providers
-
-### 📚 Knowledge and Local Services
-
-- semantic search over VisitLisboa places, events, and tourism knowledge
-- on-demand Lisboa Aberta service discovery
-- web fallback for history and culture queries
-
-### 🧭 Planning and Synthesis
-
-- constraint-aware itinerary synthesis
-- integration of weather, transport, and local knowledge
-- user-context support for interests, mobility, location, and available time
-
-### 🧪 Evaluation and Research Support
-
-- benchmark and ablation runners under `eval/`
-- strict live coverage for the exported tool registry
-- calibration support for human-vs-judge comparison
-- reproducibility metadata and optional cost accounting
+| Domain | What it covers |
+|--------|----------------|
+| 🌦️ **Weather & alerts** | current summary, 5-day forecast, Portugal-wide overview, active IPMA warnings |
+| 🚇 **Mobility** | Metro de Lisboa status / wait times / nearest station; Carris Metropolitana alerts, routes, live positions, departures; Carris Urban GTFS + GTFS-RT; CP schedules, routes, trip planning; multimodal summaries and routing |
+| 📚 **Knowledge & local services** | semantic search over VisitLisboa places & events; on-demand Lisboa Aberta service discovery; web fallback for history & culture |
+| 🧭 **Planning & synthesis** | constraint-aware itineraries integrating weather, transport, and user context (interests, mobility, location, available time) |
+| 🧪 **Evaluation & research** | benchmark and ablation runners under `eval/`; strict live coverage for the exported tool registry; human ↔ judge calibration; reproducibility metadata and optional cost accounting |
 
 ## 🤖 Why the System is Multi-Agent
 
-*LISBOA* is no longer documented as a single monolithic ReAct agent. The supported runtime separates responsibilities into clearer layers:
-
-- **Supervisor** for routing and direct handling of simple cases
-- **Worker agents** for weather, transport, and research retrieval
-- **QA validation** for completeness and factual safeguards
-- **Planner synthesis** for itinerary-style responses
-
-This reduces tool overload per worker, keeps domain prompts narrower, and makes final response assembly easier to control and evaluate.
+The supported runtime separates responsibilities into clearer layers — **Supervisor** (routing and direct handling), **worker agents** (weather, transport, research), **QA validation** (completeness and factual safeguards), and **Planner synthesis** (itinerary responses). This reduces tool overload per worker, keeps domain prompts narrower, and makes final response assembly easier to control and evaluate.
 
 ## 🧱 Repository Highlights
 
