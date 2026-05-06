@@ -1,0 +1,53 @@
+name: Deploy Hugging Face Space
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "app.py"
+      - "config.py"
+      - "requirements.txt"
+      - "pyproject.toml"
+      - ".streamlit/config.toml"
+      - "agent/**"
+      - "tools/**"
+      - "img/**"
+      - "data/cp/**"
+      - "data/pricing/**"
+      - "README.md"
+
+  workflow_run:
+    workflows: ["Sync Vector Database"]
+    types: [completed]
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-huggingface-space
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          lfs: true
+
+      - name: Sync to Hugging Face Space
+        uses: huggingface/hub-sync@v0.1.0
+        with:
+          github_repo_id: ${{ github.repository }}
+          huggingface_repo_id: AndreSilvestre17/lisboa
+          hf_token: ${{ secrets.HF_TOKEN }}
+          repo_type: space
+          space_sdk: docker
+          private: true

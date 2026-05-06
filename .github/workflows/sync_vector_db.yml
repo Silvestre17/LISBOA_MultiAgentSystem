@@ -118,6 +118,7 @@ jobs:
         with:
           # Fetch all history for proper git operations
           fetch-depth: 0
+          lfs: true
 
       - name: Setup Python
         uses: actions/setup-python@v6
