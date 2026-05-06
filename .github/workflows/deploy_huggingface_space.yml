@@ -27,6 +27,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
   group: deploy-huggingface-space
   cancel-in-progress: true
@@ -42,6 +45,47 @@ jobs:
         with:
           lfs: true
 
+      - name: Prepare Hugging Face deploy bundle
+        run: |
+          set -euo pipefail
+
+          rm -rf hf_space_build
+          mkdir -p hf_space_build/.streamlit
+          mkdir -p hf_space_build/data/cp
+          mkdir -p hf_space_build/data/pricing
+          mkdir -p hf_space_build/data/vector_db
+          mkdir -p hf_space_build/data_collection/webscraping
+
+          cp Dockerfile hf_space_build/
+          cp .dockerignore hf_space_build/
+          cp app.py hf_space_build/
+          cp config.py hf_space_build/
+          cp requirements.txt hf_space_build/
+          cp pyproject.toml hf_space_build/
+          cp LICENSE hf_space_build/
+          cp .streamlit/config.toml hf_space_build/.streamlit/config.toml
+
+          rsync -a agent hf_space_build/
+          rsync -a tools hf_space_build/
+          rsync -a img hf_space_build/
+          rsync -a data/cp/ hf_space_build/data/cp/
+          rsync -a data/pricing/ hf_space_build/data/pricing/
+          rsync -a data/vector_db/ hf_space_build/data/vector_db/
+          rsync -a data_collection/webscraping/ hf_space_build/data_collection/webscraping/
+
+          cat > hf_space_build/README.md <<'EOF'
+          ---
+          title: LISBOA
+          sdk: docker
+          app_port: 8501
+          license: mit
+          ---
+
+          # LISBOA
+
+          Private Hugging Face Space deployment for the LISBOA thesis prototype.
+          EOF
+
       - name: Sync to Hugging Face Space
         uses: huggingface/hub-sync@v0.1.0
         with:
@@ -51,3 +95,4 @@ jobs:
           repo_type: space
           space_sdk: docker
           private: true
+          subdirectory: hf_space_build
