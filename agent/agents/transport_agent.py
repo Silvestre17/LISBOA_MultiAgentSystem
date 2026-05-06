@@ -1020,7 +1020,7 @@ def _strip_transport_source_lines(text: str) -> str:
     lines = [
         raw_line.rstrip()
         for raw_line in str(text or "").splitlines()
-        if not re.match(r"^\s*📌\s+\*\*(?:Fonte|Source):", raw_line.strip(), flags=re.IGNORECASE)
+        if not re.match(r"^\s*📌\s+\*\*(?:Fontes?|Sources?):", raw_line.strip(), flags=re.IGNORECASE)
     ]
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
@@ -1757,12 +1757,15 @@ def _build_unsupported_transport_scope_response(
     supported_scope_pt = "Metro, Carris Urban, Carris Metropolitana e CP suburbanos/AML"
     supported_scope_en = "Metro, Carris Urban, Carris Metropolitana, and CP suburban/AML services"
     is_long_distance_only = unsupported_modes == ["long_distance_cp"]
-    source_link = "[*CP*](https://www.cp.pt)" if is_long_distance_only else (
-        "[*Metro de Lisboa*](https://www.metrolisboa.pt) | "
-        "[*Carris*](https://www.carris.pt) | "
-        "[*Carris Metropolitana*](https://www.carrismetropolitana.pt) | "
-        "[*CP*](https://www.cp.pt)"
-    )
+    unsupported_sources = {
+        "ferries": "[*Transtejo/Soflusa*](https://ttsl.pt)",
+        "fertagus": "[*Fertagus*](https://www.fertagus.pt)",
+        "long_distance_cp": "[*CP*](https://www.cp.pt)",
+        "micromobility": "[*Gira*](https://www.gira-bicicletasdelisboa.pt)",
+        "ride_hailing": "[*LISBOA*](https://github.com/Silvestre17/LISBOA_MultiAgentSystem)",
+    }
+    source_tokens = [unsupported_sources[mode] for mode in unsupported_modes if mode in unsupported_sources]
+    source_link = " | ".join(dict.fromkeys(source_tokens)) or "[*LISBOA*](https://github.com/Silvestre17/LISBOA_MultiAgentSystem)"
     timestamp = datetime.now().strftime("%H:%M")
 
     if language == "pt":
@@ -4097,9 +4100,9 @@ class TransportAgent(BaseAgent):
                     else "- ⚠️ This feed shows vehicles in service and their next stop, but it does not confirm whether the line is on time, delayed, or disrupted."
                 )
                 fallback_line = (
-                    f"- 💡 Se me disseres a tua origem e destino no {route_short_name}, posso sugerir um fallback grounded se esta linha não te servir."
+                    "- 💡 **Fallback:** sem origem e destino não dá para validar uma alternativa porta-a-porta. Em zonas centrais, usa a estação de Metro mais próxima para evitar troços íngremes e pede-me uma rota com origem/destino para eu calcular a ligação concreta."
                     if language == "pt"
-                    else f"- 💡 If you tell me your origin and destination on the {route_short_name}, I can suggest a grounded fallback if this line is not suitable."
+                    else "- 💡 **Fallback:** without an origin and destination I cannot validate a door-to-door alternative. In central Lisbon, use the nearest Metro station to avoid steep tram segments, then ask me with both endpoints so I can calculate the concrete route."
                 )
 
                 output_lines = [title, "", summary_line, active_line, direction_header]
@@ -4282,72 +4285,19 @@ class TransportAgent(BaseAgent):
             and _normalize_token(destination) == "madeira"
         ):
             timestamp = datetime.now().strftime("%H:%M")
-            has_real_origin = _normalize_token(origin) not in {"metro", "o metro", "de metro"}
-            self._record_tool_call(
-                "get_route_between_stations",
-                {"origin": origin, "destination": destination},
-            )
-            if language == "pt" and not has_real_origin:
-                return (
-                    "🚇 **Opção urbana em Lisboa:** Rua Humberto Madeira / Av. Ilha da Madeira\n\n"
-                    "📍 **Destino provável:** Rua Humberto Madeira, Lisboa\n"
-                    "🚇 **Metro mais próximo:** **Encarnação** (🔴 Linha Vermelha)\n"
-                    "🎯 **Como usar o Metro:** segue pela Linha Vermelha até **Encarnação**; a partir daí, confirma a caminhada final no mapa.\n\n"
-                    "💡 **Nota:** se quiseres um percurso porta-a-porta, diz-me a tua estação ou ponto de partida.\n\n"
-                    f"📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Atualizado:** {timestamp}"
-                )
             if language == "pt":
                 return (
-                    "🗺️ **Trajeto:** Metro Santos → Rua Humberto Madeira\n\n"
-                    "📍 **Informação de localização**\n"
-                    "**Metro Santos**\n"
-                    "🚇 Metro mais próximo: **Cais do Sodré** (🟢 Linha Verde)\n"
-                    "ℹ️ Resolvido dinamicamente via OpenStreetMap/Nominatim\n\n"
-                    "**Rua Humberto Madeira**\n"
-                    "🚇 Metro mais próximo: **Encarnação** (🔴 Linha Vermelha)\n"
-                    "ℹ️ Resolvido dinamicamente via OpenStreetMap/Nominatim\n\n"
-                    "🚇 **Percurso de metro**\n"
-                    "🔄 **É necessária transferência**\n\n"
-                    "💡 **Transferência em**: Alameda (🟢 ↔ 🔴)\n\n"
-                    "⏱️ Tempo estimado de viagem: **~35 min** (15 estações + 1 transferência)\n\n"
-                    "**Percurso completo**:\n"
-                    "- 🚶 Caminha desde **Metro Santos** até **Cais do Sodré**\n"
-                    "- 🟢 Apanha em **Cais do Sodré** → direção **Telheiras**\n"
-                    "- 🔄 Sai em **Alameda** e transfere para a Linha Vermelha\n"
-                    "- 🔴 Segue na **Linha Vermelha** → direção **Aeroporto**\n"
-                    "- 🎯 Sai em **Encarnação**\n"
-                    "- 🚶 Caminha até **Rua Humberto Madeira**\n\n"
+                    "### ⚠️ **Destino ambíguo: Madeira**\n\n"
+                    "- 🏝️ Se queres dizer **Ilha da Madeira**, não existe ligação por metro urbano a partir de Lisboa; é uma deslocação aérea/marítima fora da rede Metro.\n"
+                    "- 🚇 Se queres dizer **Rua Humberto Madeira / Avenida da Ilha da Madeira, em Lisboa**, a estação de metro de referência é **Encarnação** (🔴 Linha Vermelha).\n"
+                    "- Para um percurso porta-a-porta, indica o ponto de partida e confirma que te referes à morada em Lisboa.\n\n"
                     f"📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Atualizado:** {timestamp}"
                 )
-            if not has_real_origin:
-                return (
-                    "🚇 **Urban option in Lisbon:** Rua Humberto Madeira / Av. Ilha da Madeira\n\n"
-                    "📍 **Likely destination:** Rua Humberto Madeira, Lisbon\n"
-                    "🚇 **Nearest Metro:** **Encarnação** (🔴 Red Line)\n"
-                    "🎯 **How to use the Metro:** take the Red Line to **Encarnação**, then confirm the final walk on the map.\n\n"
-                    "💡 **Note:** for a door-to-door route, tell me your starting station or location.\n\n"
-                    f"📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Updated:** {timestamp}"
-                )
             return (
-                "🗺️ **Route:** Metro Santos → Rua Humberto Madeira\n\n"
-                "📍 **Location information**\n"
-                "**Metro Santos**\n"
-                "🚇 Nearest Metro: **Cais do Sodré** (🟢 Green Line)\n"
-                "ℹ️ Resolved dynamically via OpenStreetMap/Nominatim\n\n"
-                "**Rua Humberto Madeira**\n"
-                "🚇 Nearest Metro: **Encarnação** (🔴 Red Line)\n"
-                "ℹ️ Resolved dynamically via OpenStreetMap/Nominatim\n\n"
-                "🚇 **Metro route**\n"
-                "🔄 **Transfer required**\n\n"
-                "💡 **Transfer at**: Alameda (🟢 ↔ 🔴)\n\n"
-                "⏱️ Estimated travel time: **~35 min** (15 stations + 1 transfer)\n\n"
-                "**Full route**:\n"
-                "- 🚶 Walk from **Metro Santos** to **Cais do Sodré**\n"
-                "- 🟢 Board at **Cais do Sodré** → direction **Telheiras**\n"
-                "- 🔄 Exit at **Alameda** and transfer to the Red Line\n"
-                "- 🔴 Continue on the **Red Line** → direction **Aeroporto**\n"
-                "- 🎯 Exit at **Encarnação**\n"
-                "- 🚶 Walk to **Rua Humberto Madeira**\n\n"
+                "### ⚠️ **Ambiguous destination: Madeira**\n\n"
+                "- 🏝️ If you mean **Madeira island**, Lisbon's urban metro cannot get you there; that is outside the Metro network.\n"
+                "- 🚇 If you mean **Rua Humberto Madeira / Avenida da Ilha da Madeira in Lisbon**, the reference metro station is **Encarnação** (🔴 Red Line).\n"
+                "- For a door-to-door route, provide your starting point and confirm that you mean the Lisbon address.\n\n"
                 f"📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Updated:** {timestamp}"
             )
 

@@ -52,7 +52,7 @@ _PT_DURATION_VALUE_MAP = {
     "permanent": "Permanente",
 }
 
-_SOURCE_LINE_RE = re.compile(r'^(?:[-*•]\s*)?(?:📌\s*)?(?:\*\*)?(?:Fonte|Source)(?:\*\*)?:.*$', re.IGNORECASE)
+_SOURCE_LINE_RE = re.compile(r'^(?:[-*•]\s*)?(?:📌\s*)?(?:\*\*)?(?:Fontes?|Sources?)(?:\*\*)?:.*$', re.IGNORECASE)
 _PT_LANGUAGE_HINTS_RE = re.compile(
     r"\b(olá|ola|bom dia|boa tarde|boa noite|como|qual|quais|quero|preciso|planeia|planejar|plano|roteiro|sugere|visitar|passeio|museu|museus|evento|eventos|hoje|amanhã|amanha|previsão|tempo|locais|morada|fonte|autocarro|autocarros|comboio|comboios|transportes?|situa[cç][aã]o|d[aá]-?me|bairro|perto)\b",
     re.IGNORECASE,
@@ -3061,16 +3061,32 @@ def _infer_service_heading_from_dataset(
     near_location = near_match.group(1).strip() if near_match else ""
 
     service_catalog = [
-        ("💊", "Farmácias", "Pharmacies", ("farm", "parafarm")),
-        ("🏥", "Hospitais", "Hospitals", ("hospital",)),
-        ("📚", "Bibliotecas", "Libraries", ("bibliot", "library")),
-        ("🎓", "Escolas", "Schools", ("escola", "school")),
-        ("🌿", "Jardins", "Gardens", ("jardim", "garden", "park", "parque")),
-        ("👮", "Polícia", "Police", ("polic",)),
+        ("🅿️", "Estacionamento", "Parking", ("parking", "estacion", "car park", "parques de estacionamento")),
+        ("💊", "Farmácias", "Pharmacies", ("farm", "pharmac", "parafarm")),
+        ("🏥", "Hospitais", "Hospitals", ("hospital", "hospit")),
+        ("🏥", "Serviços de saúde", "Health services", ("cuidados", "saude", "health", "clinica", "clinic")),
+        ("🎓", "Serviços de educação", "Education services", ("escola", "school", "educa", "universidade", "faculdade")),
+        ("📚", "Bibliotecas", "Libraries", ("bibliot", "library", "leitura")),
+        ("🏛️", "Equipamentos culturais", "Cultural venues", ("museu", "museum", "cultura", "cultural", "teatro", "theatre", "theater")),
+        ("🌳", "Jardins e parques", "Gardens and parks", ("jardim", "garden", "green space", "espaco verde", "espaço verde", "parque", "park")),
+        ("👮", "Serviços de segurança", "Public safety services", ("polic", "psp", "seguranca", "segurança")),
+        ("🚒", "Bombeiros", "Fire services", ("bombeir", "fire")),
+        ("🛒", "Mercados", "Markets", ("mercado", "market", "feira")),
+        ("✉️", "Serviços postais", "Postal services", ("correio", "postal", "ctt")),
+        ("🏢", "Serviços municipais", "Municipal services", ("loja cidadao", "loja cidadão", "citizen", "atendimento", "municipal")),
+        ("🚰", "Fontanários e água", "Fountains and water points", ("fontan", "bebedouro", "fountain", "water")),
+        ("📶", "Pontos Wi-Fi", "Wi-Fi points", ("wifi", "wi-fi", "internet")),
+        ("🚻", "Instalações sanitárias", "Restrooms", ("wc", "sanitario", "sanitário", "toilet", "restroom")),
+        ("🚇", "Transportes", "Transport services", ("metro", "transport", "transporte", "paragem", "stop")),
     ]
 
     for icon, pt_label, en_label, markers in service_catalog:
         if any(marker in lowered_title for marker in markers):
+            if pt_label == "Hospitais" and any(
+                marker in lowered_title for marker in ("public", "publico", "publicos", "publica", "publicas")
+            ):
+                pt_label = "Hospitais públicos"
+                en_label = "Public hospitals"
             label = pt_label if language == "pt" else en_label
             if near_location:
                 if language == "pt":
@@ -3078,7 +3094,7 @@ def _infer_service_heading_from_dataset(
                 return f"#### {icon} {label} near {near_location}", icon
             return f"#### {icon} {label}", icon
 
-    generic_label = "Serviços próximos" if language == "pt" else "Nearby services"
+    generic_label = "Serviços públicos" if language == "pt" else "Public services"
     if near_location:
         if language == "pt":
             return f"#### 📍 {generic_label} perto de {near_location}", "📍"
@@ -3567,7 +3583,9 @@ def structure_service_lookup_markdown(text: str, language: str = "en") -> str:
     is_pt = language == "pt"
     mojibake = _looks_like_mojibake(text)
     header_re = re.compile(r"Found\s+\d+\s+results?\s+from\s+'(?P<title>[^']+)':", re.IGNORECASE)
-    item_re = re.compile(r"^(?:\*\*)?(?P<num>\d+)\.?(?:\*\*)?\s+(?P<name>.+?)\s*$")
+    item_re = re.compile(
+        r"^(?:(?:[-*•]\s+)|(?:\*\*)?(?P<num>\d+)\.?(?:\*\*)?\s+)(?P<name>.+?)\s*$"
+    )
 
     address_label = "Morada" if is_pt else "Address"
     distance_label = "DistÃ¢ncia" if (is_pt and mojibake) else ("Distância" if is_pt else "Distance")
@@ -3593,27 +3611,42 @@ def structure_service_lookup_markdown(text: str, language: str = "en") -> str:
         raw_location_match = re.search(r"\((?:near|perto de)\s+([^)]+)\)", dataset_title, re.IGNORECASE)
         location = raw_location_match.group(1).strip() if raw_location_match else ""
 
-        if "farm" in normalized_title:
-            heading = (
-                f"Farmácias perto de {location}" if is_pt and location else
-                "Farmácias Próximas" if is_pt else
-                f"Pharmacies Near {location}" if location else
-                "Nearby Pharmacies"
-            )
-            return f"### 💊 {heading}", "💊"
-        if "hospit" in normalized_title:
-            is_public_hospital = any(marker in normalized_title for marker in ("public", "publico", "publicos", "publica", "publicas"))
-            heading = (
-                f"Hospitais públicos perto de {location}" if is_pt and is_public_hospital and location else
-                f"Hospitais perto de {location}" if is_pt and location else
-                "Hospitais Públicos Próximos" if is_pt and is_public_hospital else
-                "Hospitais Próximos" if is_pt else
-                f"Public Hospitals Near {location}" if is_public_hospital and location else
-                f"Hospitals Near {location}" if location else
-                "Nearby Public Hospitals" if is_public_hospital else
-                "Nearby Hospitals"
-            )
-            return f"### 🏥 {heading}", "🏥"
+        service_catalog = [
+            ("🅿️", "Estacionamento", "Parking", ("parking", "estacion", "car park", "parques de estacionamento")),
+            ("💊", "Farmácias", "Pharmacies", ("farm", "pharmac", "parafarm")),
+            ("🏥", "Hospitais", "Hospitals", ("hospital", "hospit")),
+            ("🏥", "Serviços de saúde", "Health services", ("cuidados", "saude", "health", "clinica", "clinic")),
+            ("🎓", "Serviços de educação", "Education services", ("escola", "school", "educa", "universidade", "faculdade")),
+            ("📚", "Bibliotecas", "Libraries", ("bibliot", "library", "leitura")),
+            ("🏛️", "Equipamentos culturais", "Cultural venues", ("museu", "museum", "cultura", "cultural", "teatro", "theatre", "theater")),
+            ("🌳", "Jardins e parques", "Gardens and parks", ("jardim", "garden", "green space", "espaco verde", "parque", "park")),
+            ("👮", "Serviços de segurança", "Public safety services", ("polic", "psp", "seguranca")),
+            ("🚒", "Bombeiros", "Fire services", ("bombeir", "fire")),
+            ("🛒", "Mercados", "Markets", ("mercado", "market", "feira")),
+            ("✉️", "Serviços postais", "Postal services", ("correio", "postal", "ctt")),
+            ("🏢", "Serviços municipais", "Municipal services", ("loja cidadao", "citizen", "atendimento", "municipal")),
+            ("🚰", "Fontanários e água", "Fountains and water points", ("fontan", "bebedouro", "fountain", "water")),
+            ("📶", "Pontos Wi-Fi", "Wi-Fi points", ("wifi", "wi-fi", "internet")),
+            ("🚻", "Instalações sanitárias", "Restrooms", ("wc", "sanitario", "toilet", "restroom")),
+            ("🚇", "Transportes", "Transport services", ("metro", "transport", "transporte", "paragem", "stop")),
+        ]
+
+        for icon, pt_label, en_label, markers in service_catalog:
+            if any(marker in normalized_title for marker in markers):
+                if pt_label == "Hospitais" and any(
+                    marker in normalized_title for marker in ("public", "publico", "publicos", "publica", "publicas")
+                ):
+                    pt_label = "Hospitais públicos"
+                    en_label = "Public hospitals"
+                label = pt_label if is_pt else en_label
+                heading = (
+                    f"{label} perto de {location}" if is_pt and location else
+                    f"{label} próximos" if is_pt else
+                    f"{label} near {location}" if location else
+                    f"Nearby {label.lower()}"
+                )
+                return f"### {icon} {heading}", icon
+
         if "polic" in normalized_title:
             heading = (
                 f"Polícia perto de {location}" if is_pt and location else
@@ -7029,27 +7062,51 @@ def strip_internal_qa_annotations(text: str) -> str:
 
 
 def ensure_single_source_footer_at_end(text: str) -> str:
-    """Keep one source footer and make it the final rendered line."""
-    if not text or "📌" not in text:
+    """Merge source footers, dedupe links, and keep the footer as the final line."""
+    if not text:
         return text or ""
 
-    source_line_re = re.compile(
-        r"^\s*(?:[-*•]\s*)?📌\s*\*\*(?:Fonte|Source):\*\*.*$",
-        re.IGNORECASE,
-    )
     lines = text.splitlines()
     source_indices: list[int] = []
     source_lines: list[str] = []
 
     for index, line in enumerate(lines):
-        if source_line_re.match(line.strip()):
+        if _SOURCE_LINE_RE.match(line.strip()):
             source_indices.append(index)
             source_lines.append(line.strip())
 
     if not source_lines:
         return text
 
-    footer = source_lines[-1]
+    footer_blob = "\n".join(source_lines)
+    is_pt = bool(re.search(r"\bFonte\b|\bFontes\b|\bAtualizado\b", footer_blob, re.IGNORECASE))
+    label = "Fonte" if is_pt else "Source"
+    updated_label = "Atualizado" if is_pt else "Updated"
+
+    links: list[str] = []
+    seen_links: set[str] = set()
+    for source_line in source_lines:
+        for link in re.findall(r"\[[^\]]+\]\([^)]+\)", source_line):
+            normalized_link = _strip_markdown_formatting(link).lower()
+            if normalized_link in seen_links:
+                continue
+            links.append(link)
+            seen_links.add(normalized_link)
+
+    timestamp_matches = re.findall(
+        r"\*\*(?:Atualizado|Updated):\*\*\s*([^|\n]+)",
+        footer_blob,
+        flags=re.IGNORECASE,
+    )
+    timestamp = timestamp_matches[-1].strip() if timestamp_matches else ""
+
+    if links:
+        footer = f"📌 **{label}:** {' | '.join(links)}"
+        if timestamp:
+            footer = f"{footer} | **{updated_label}:** {timestamp}"
+    else:
+        footer = source_lines[-1]
+
     kept_lines = [
         line for index, line in enumerate(lines)
         if index not in set(source_indices)
@@ -8292,7 +8349,7 @@ def ensure_transport_notes_heading(text: str, language: str = "en") -> str:
     if not text:
         return text
 
-    heading = "### ⚠️ Notas Úteis" if language == "pt" else "### ⚠️ Helpful Notes"
+    heading = "**⚠️ Notas úteis**" if language == "pt" else "**⚠️ Helpful notes**"
     if heading in text:
         return text
 
@@ -8337,9 +8394,11 @@ def normalize_transport_notes_block(text: str) -> str:
             "### ⚠️ Helpful Notes",
             "⚠️ Notas Úteis",
             "⚠️ Helpful Notes",
+            "**⚠️ Notas úteis**",
+            "**⚠️ Helpful notes**",
         }:
             inside_notes = True
-            pending_heading = "### ⚠️ Notas Úteis" if "Notas" in stripped else "### ⚠️ Helpful Notes"
+            pending_heading = "**⚠️ Notas úteis**" if "Notas" in stripped else "**⚠️ Helpful notes**"
             pending_notes = []
             continue
 
@@ -8467,14 +8526,14 @@ def strip_redundant_helpful_notes(text: str) -> str:
             body_text = "\n".join(kept)
             unique_notes = [line for line in note_lines if not _is_duplicate_note(line, body_text)]
             if unique_notes:
-                kept.append("### ⚠️ Notas Úteis" if any("Notas" in line for line in note_lines[:1]) else "### ⚠️ Helpful Notes")
+                kept.append("**⚠️ Notas úteis**" if any("Notas" in line for line in note_lines[:1]) else "**⚠️ Helpful notes**")
                 kept.append("")
                 kept.extend(unique_notes)
         note_lines = []
 
     for line in lines:
         stripped = line.strip()
-        if stripped in {"### ⚠️ Helpful Notes", "⚠️ Helpful Notes", "### ⚠️ Notas Úteis", "⚠️ Notas Úteis"}:
+        if stripped in {"### ⚠️ Helpful Notes", "⚠️ Helpful Notes", "**⚠️ Helpful notes**", "### ⚠️ Notas Úteis", "⚠️ Notas Úteis", "**⚠️ Notas úteis**"}:
             inside_notes = True
             note_lines = []
             continue
@@ -8820,7 +8879,7 @@ def _reorder_marker_before_source(text: str, marker: str) -> str:
     if not text or "📌" not in text or marker not in text:
         return text
 
-    source_re = re.compile(r"(?m)^(📌\s*\*\*(?:Fonte|Source):\*\*.*)$")
+    source_re = re.compile(r"(?m)^(📌\s*\*\*(?:Fontes?|Sources?):\*\*.*)$")
     source_match = source_re.search(text)
     if not source_match:
         return text
@@ -9041,15 +9100,98 @@ def final_visual_pass(text: str) -> str:
 
     def _strip_split_source_heading_blocks(value: str) -> str:
         return re.sub(
-            r"(?mis)^###\s*📌\s*(?:Fonte|Source)\s*\n"
-            r"(?:(?!^📌\s*\*\*(?:Fonte|Source):\*\*).)*?"
-            r"(?=\n\s*📌\s*\*\*(?:Fonte|Source):\*\*)",
+            r"(?mis)^###\s*📌\s*(?:Fontes?|Sources?)\s*\n"
+            r"(?:(?!^📌\s*\*\*(?:Fontes?|Sources?):\*\*).)*?"
+            r"(?=\n\s*📌\s*\*\*(?:Fontes?|Sources?):\*\*)",
+            "",
+            value,
+        )
+
+    def _normalize_malformed_source_footers(value: str) -> str:
+        """Canonicalize source-footer variants before footer deduplication."""
+        value = re.sub(
+            r"(?mi)^\s*(?:[-*•]\s*)?📌\s*\*\*fontes\s*:\s*\*\*\s*",
+            "📌 **Fonte:** ",
+            value,
+        )
+        value = re.sub(
+            r"(?mi)^\s*(?:[-*•]\s*)?📌\s*\*\*sources\s*:\s*\*\*\s*",
+            "📌 **Source:** ",
+            value,
+        )
+        value = re.sub(
+            r"(?mi)^\s*(?:[-*•]\s*)?📌\s*(?:fontes|fonte)\s*:\s*",
+            "📌 **Fonte:** ",
+            value,
+        )
+        value = re.sub(
+            r"(?mi)^\s*(?:[-*•]\s*)?📌\s*(?:sources|source)\s*:\s*",
+            "📌 **Source:** ",
+            value,
+        )
+        return value
+
+    def _strip_duplicate_semantic_bullets(value: str) -> str:
+        """Remove repeated caveat bullets while preserving distinct cards."""
+        kept_lines: list[str] = []
+        seen_semantic_bullets: set[str] = set()
+        for line in value.splitlines():
+            stripped = line.strip()
+            if stripped.startswith(('-', '*', '•')):
+                semantic = _strip_accents_compat(_strip_markdown_formatting(stripped)).lower()
+                semantic = re.sub(r"https?://\S+", "", semantic)
+                semantic = re.sub(r"[^a-z0-9\s]", " ", semantic)
+                semantic = re.sub(r"\s+", " ", semantic).strip()
+                if semantic and semantic in seen_semantic_bullets:
+                    continue
+                if semantic:
+                    seen_semantic_bullets.add(semantic)
+            kept_lines.append(line)
+        return "\n".join(kept_lines)
+
+    def _strip_duplicate_weather_summary_heading(value: str) -> str:
+        """Remove raw tool section headings repeated below the canonical title."""
+        lines = value.splitlines()
+        if not lines:
+            return value
+        first = _strip_accents_compat(_strip_markdown_formatting(lines[0])).lower()
+        if "weather summary" not in first and "resumo meteorologico" not in first:
+            return value
+        kept: list[str] = []
+        removed = False
+        for index, line in enumerate(lines):
+            visible = _strip_accents_compat(_strip_markdown_formatting(line)).strip().lower()
+            if index > 0 and not removed and (
+                "lisbon weather summary" in visible
+                or "resumo meteorologico de lisboa" in visible
+            ):
+                removed = True
+                continue
+            kept.append(line)
+        return "\n".join(kept)
+
+    def _normalize_numbered_markdown_artifacts(value: str) -> str:
+        """Remove numbered-list artefacts from final Streamlit Markdown."""
+        value = re.sub(
+            r"(?m)^(###\s+(?:[^\w*]+\s*)?)\d+[.)]\s*(\*\*.+)$",
+            r"\1\2",
+            value,
+        )
+        value = re.sub(r"(?m)^(\s*)\d+[.)]\s+", r"\1- ", value)
+        return value
+
+    def _strip_orphan_note_headings(value: str) -> str:
+        """Remove empty note headings left before source footers."""
+        return re.sub(
+            r"(?mi)^###\s*(?:ℹ️\s*)?(?:Nota|Note)\s*:?\s*\n+(?=\s*📌\s*\*\*)",
             "",
             value,
         )
 
     text = re.sub(r"(?m)^Here's what\s*$", "Here's what I can help you with:", text)
     text = re.sub(r"(?m)^Olha o que posso fazer por ti\s*$", "Posso ajudar-te com:", text)
+    text = _normalize_malformed_source_footers(text)
+    text = _normalize_numbered_markdown_artifacts(text)
     text = normalize_carris_realtime_feed_phrasing(text)
     text = repair_bold_time_spacing(text)
     text = strip_orphan_bold_markers(text)
@@ -9091,6 +9233,7 @@ def final_visual_pass(text: str) -> str:
     text = _normalize_inline_parking_service_cards(text)
     text = _clean_open_data_place_noise(text)
     text = _strip_split_source_heading_blocks(text)
+    text = _strip_duplicate_semantic_bullets(text)
     text = strip_redundant_status_lines(text)
     text = strip_redundant_helpful_notes(text)
     text = normalize_weather_day_indentation(text)
@@ -9125,6 +9268,8 @@ def final_visual_pass(text: str) -> str:
     text = normalize_invalid_markdown_links(text)
     text = strip_internal_sections(text)
     text = strip_internal_qa_annotations(text)
+    service_language = "pt" if re.search(r"\b(?:perto de|Fonte|Morada|Distância|Não)\b", text) else "en"
+    text = structure_service_lookup_markdown(text, language=service_language)
     text = strip_placeholder_field_lines(text)
     text = strip_redundant_coordinate_lines_when_address_present(text)
     text = strip_redundant_helpful_notes(text)
@@ -9170,6 +9315,10 @@ def final_visual_pass(text: str) -> str:
     text = _normalize_inline_parking_service_cards(text)
     text = _clean_open_data_place_noise(text)
     text = _strip_split_source_heading_blocks(text)
+    text = _strip_duplicate_semantic_bullets(text)
+    text = _strip_duplicate_weather_summary_heading(text)
+    text = _strip_orphan_note_headings(text)
+    text = _normalize_numbered_markdown_artifacts(text)
     text = ensure_transport_comparison_conclusion_separator(text)
     text = ensure_blank_lines_before_headers(text)
     text = ensure_blank_lines_before_horizontal_rules(text)

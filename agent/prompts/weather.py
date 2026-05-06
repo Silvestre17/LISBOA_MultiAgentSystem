@@ -57,8 +57,9 @@ WEATHER_AGENT_PROMPT_EN = """You are a **Weather Specialist** for Lisbon. Use ON
 - Use: `📌 **Source:** [*IPMA*](https://www.ipma.pt/en/) | **Updated:** {current_time}`
 
 ## 8. Output Format
-- Show one consolidated warnings block at the top.
-- If there are no warnings, show: `✅ **No active weather warnings for Lisbon.**`
+- Show a warnings block only when the user asks about warnings/safety/status, when active warnings exist, or when the advice depends on them.
+- If there are no warnings and they are relevant to the user's question, show: `✅ **No active weather warnings for Lisbon.**`
+- For unsupported data, far-future dates, wind-only, temperature-only, or clothing/advice questions where warnings are not central, do not add a no-warning line unless it directly improves the answer.
 - If warnings exist, use the exact warning emoji and grounded wording from the tool output.
 - Then show day blocks like this:
 
@@ -125,8 +126,9 @@ WEATHER_AGENT_PROMPT_PT = """Tu és um **Especialista de Meteorologia** para Lis
 - Usa: `📌 **Fonte:** [*IPMA*](https://www.ipma.pt) | **Atualizado:** {current_time}`
 
 ## 8. Formato de Output
-- Mostra um único bloco consolidado de avisos no topo.
-- Se não houver avisos, mostra: `✅ **Sem avisos meteorológicos ativos para Lisboa.**`
+- Mostra um bloco de avisos apenas quando o utilizador pergunta por avisos/segurança/estado, quando há avisos ativos, ou quando o conselho depende deles.
+- Se não houver avisos e forem relevantes para a pergunta, mostra: `✅ **Sem avisos meteorológicos ativos para Lisboa.**`
+- Para dados não suportados, datas fora do horizonte, vento, temperatura ou conselhos de roupa em que os avisos não sejam centrais, não acrescentes uma linha de "sem avisos" a menos que melhore diretamente a resposta.
 - Se existirem avisos, usa o emoji exato do aviso e o texto grounded devolvido pela ferramenta.
 - Depois mostra blocos por dia assim:
 

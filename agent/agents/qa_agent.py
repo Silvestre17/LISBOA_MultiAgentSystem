@@ -474,6 +474,57 @@ class QualityAssuranceAgent(BaseAgent):
         return llm_result
 
     @classmethod
+    def _normalize_transport_query_validation(
+        cls,
+        user_query: str,
+        agent_outputs: Dict[str, str],
+        agents_called: List[str],
+        llm_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Downgrade impossible transport gaps when the answer states a grounded limitation.
+
+        QA should flag missing data that can be repaired by another worker/tool.
+        It should not keep retrying when the available transport layer has
+        already answered with an explicit limitation, for example unavailable
+        official fare data or no CP real-time feed for a timetable result.
+        """
+        called_workers = {agent for agent in agents_called if agent}
+        if not called_workers or "transport" not in called_workers:
+            return llm_result
+
+        combined_output = "\n".join(
+            str(value) for key, value in agent_outputs.items()
+            if not str(key).startswith("_") and isinstance(value, str)
+        )
+        normalized_output = cls._normalize_query(combined_output)
+
+        limitation_patterns = {
+            "fare": r"(tarifa|preco|price|fare).{0,120}(nao foi possivel|not possible|not confirmed|nao confirmad|not available)",
+            "cp_realtime": r"(cp|comboio|train).{0,160}(sem dados em tempo real|no real time|real time.*(?:unavailable|not available|not confirmed))",
+            "delay_unknown": r"(nao confirma|does not confirm|cannot confirm).{0,120}(atras|delay|on time|pontual)",
+        }
+
+        def _is_satisfied_limitation(item: object) -> bool:
+            normalized_item = cls._normalize_query(str(item or ""))
+            if any(token in normalized_item for token in ("tarifa", "preco", "price", "fare")):
+                return bool(re.search(limitation_patterns["fare"], normalized_output))
+            if "tempo real" in normalized_item or "real time" in normalized_item:
+                return bool(re.search(limitation_patterns["cp_realtime"], normalized_output))
+            if any(token in normalized_item for token in ("on time", "delayed", "disrupted", "atras", "perturb")):
+                return bool(re.search(limitation_patterns["delay_unknown"], normalized_output))
+            return False
+
+        filtered_missing = [
+            item for item in llm_result.get("missing_data", [])
+            if not _is_satisfied_limitation(item)
+        ]
+        llm_result["missing_data"] = filtered_missing
+        if not filtered_missing and not llm_result.get("critical_issues"):
+            llm_result["complete"] = True
+            llm_result["required_agents"] = []
+        return llm_result
+
+    @classmethod
     def _augment_query_specific_validation(
         cls,
         user_query: str,
@@ -577,6 +628,102 @@ class QualityAssuranceAgent(BaseAgent):
             note = " | ".join(reasoning_notes)
             llm_result["reasoning"] = f"{reasoning} | {note}".strip(" |")
 
+        return llm_result
+
+    @classmethod
+    def _normalize_stated_limitations(
+        cls,
+        agent_outputs: Dict[str, str],
+        llm_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Treat explicit, non-repairable limitations as complete answers.
+
+        The QA layer should keep flagging gaps that another worker can fill. It
+        should not continue to request retries for facts the final answer has
+        already scoped honestly, such as unavailable fare data, unsupported
+        operators, unconfirmed opening hours, or missing real-time feeds.
+        """
+        combined_output = "\n".join(
+            str(value) for key, value in agent_outputs.items()
+            if not str(key).startswith("_") and isinstance(value, str)
+        )
+        normalized_output = cls._normalize_query(combined_output)
+        if not normalized_output:
+            return llm_result
+
+        limitation_markers = (
+            "not confirmed",
+            "not available",
+            "unavailable",
+            "not possible",
+            "could not confirm",
+            "cannot confirm",
+            "can't confirm",
+            "i cannot confirm",
+            "i can't confirm",
+            "outside confirmed scope",
+            "unsupported",
+            "no real time",
+            "no live",
+            "não confirmado",
+            "não confirmada",
+            "não confirmados",
+            "não está confirmado",
+            "não foi possível",
+            "não consigo confirmar",
+            "nao confirmado",
+            "nao confirmada",
+            "nao confirmados",
+            "nao esta confirmado",
+            "nao foi possivel",
+            "nao consigo confirmar",
+            "indisponivel",
+            "sem dados em tempo real",
+            "fora do ambito",
+            "sem cobertura",
+        )
+
+        limitation_categories = [
+            (("tarifa", "preco", "price", "fare", "barato", "cheapest"), ("tarifa", "preco", "price", "fare")),
+            (("tempo real", "real time", "real-time", "live", "on time", "delay", "atras", "pontual", "perturb"), ("tempo real", "real time", "real-time", "live", "delay", "atras", "pontual", "perturb")),
+            (("horario", "opening", "hours", "evening", "tonight", "availability", "disponibilidade", "aberto", "fechado"), ("horario", "opening", "hours", "evening", "tonight", "availability", "disponibilidade", "aberto", "fechado")),
+            (("gratuito", "gratuita", "free", "gratuit"), ("gratuito", "gratuita", "free", "gratuit")),
+            (("fertagus", "ferry", "barreiro", "transtejo", "soflusa", "operator", "operador", "ambito", "scope"), ("fertagus", "ferry", "barreiro", "transtejo", "soflusa", "operator", "operador", "ambito", "scope")),
+            (("partida", "departure", "eta", "arrival", "route", "rota", "linha", "ligacao"), ("partida", "departure", "eta", "arrival", "route", "rota", "linha", "ligacao")),
+        ]
+
+        def _has_stated_limitation(output_tokens: tuple[str, ...]) -> bool:
+            for token in output_tokens:
+                start = 0
+                while True:
+                    index = normalized_output.find(token, start)
+                    if index == -1:
+                        break
+                    window_start = max(0, index - 140)
+                    window_end = min(len(normalized_output), index + len(token) + 220)
+                    window = normalized_output[window_start:window_end]
+                    if any(marker in window for marker in limitation_markers):
+                        return True
+                    start = index + len(token)
+            return False
+
+        def _is_satisfied_gap(item: object) -> bool:
+            normalized_item = cls._normalize_query(str(item or ""))
+            if not normalized_item:
+                return False
+            for missing_tokens, output_tokens in limitation_categories:
+                if any(token in normalized_item for token in missing_tokens):
+                    return _has_stated_limitation(output_tokens)
+            return False
+
+        filtered_missing = [
+            item for item in llm_result.get("missing_data", [])
+            if not _is_satisfied_gap(item)
+        ]
+        llm_result["missing_data"] = cls._dedupe_preserve_order(filtered_missing)
+        if not filtered_missing and not llm_result.get("critical_issues"):
+            llm_result["required_agents"] = []
+            llm_result["complete"] = True
         return llm_result
 
     @staticmethod
@@ -881,11 +1028,21 @@ class QualityAssuranceAgent(BaseAgent):
             agents_called=agents_called,
             llm_result=llm_result,
         )
+        llm_result = self._normalize_transport_query_validation(
+            user_query=user_query,
+            agent_outputs=agent_outputs,
+            agents_called=agents_called,
+            llm_result=llm_result,
+        )
         llm_result = self._augment_query_specific_validation(
             user_query=user_query,
             agent_outputs=agent_outputs,
             llm_result=llm_result,
             language=language,
+        )
+        llm_result = self._normalize_stated_limitations(
+            agent_outputs=agent_outputs,
+            llm_result=llm_result,
         )
 
         # ── Phase 2: Deterministic fact verification ─────────────────
@@ -1382,7 +1539,7 @@ class QualityAssuranceAgent(BaseAgent):
         )
         structured_output = "### " in combined_output or structured_label_count >= 3
         source_footer_match = re.search(
-            r"(?m)^📌\s*\*\*(?:Fonte|Source):\*\*.*$",
+            r"(?m)^📌\s*\*\*(?:Fontes?|Sources?):\*\*.*$",
             combined_output,
         )
 

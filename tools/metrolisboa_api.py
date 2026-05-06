@@ -680,28 +680,6 @@ LISBON_LANDMARKS = {
         "walking_hint_en": "to the campus",
         "metro_walk_minutes": 6,
     },
-    "zara do rossio": {
-        "name": "Zara do Rossio",
-        "short_name": "Zara do Rossio",
-        "display_name": "Zara do Rossio",
-        "metro": "rossio",
-        "line": "verde",
-        "description": "Retail store in the Rossio/Baixa area",
-        "walking_hint_pt": "à zona comercial do Rossio",
-        "walking_hint_en": "to the Rossio shopping area",
-        "metro_walk_minutes": 3,
-    },
-    "zara rossio": {
-        "name": "Zara do Rossio",
-        "short_name": "Zara do Rossio",
-        "display_name": "Zara do Rossio",
-        "metro": "rossio",
-        "line": "verde",
-        "description": "Retail store in the Rossio/Baixa area",
-        "walking_hint_pt": "à zona comercial do Rossio",
-        "walking_hint_en": "to the Rossio shopping area",
-        "metro_walk_minutes": 3,
-    },
     "estádio da luz": {
         "name": "Estádio da Luz",
         "short_name": "Estádio da Luz",
@@ -1890,6 +1868,13 @@ def _format_wait_time(seconds: int) -> str:
 
 def _normalize_metro_text(text: str) -> str:
     """Normalizes metro station/direction text for robust comparisons."""
+    if text:
+        try:
+            repaired_text = text.encode("latin1").decode("utf-8")
+            if "Ã" in text or "Â" in text:
+                text = repaired_text
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            pass
     normalized = unicodedata.normalize("NFKD", text or "")
     normalized = "".join(c for c in normalized if not unicodedata.combining(c))
     normalized = normalized.lower().strip()
@@ -1897,6 +1882,69 @@ def _normalize_metro_text(text: str) -> str:
     normalized = re.sub(r"[^a-z0-9\s/-]", " ", normalized)
     normalized = re.sub(r"\s+", " ", normalized).strip()
     return normalized
+
+
+def _resolve_named_metro_reference(location_name: str) -> Optional[tuple[float, float]]:
+    """Resolve known Lisbon metro stations and landmarks without external geocoding."""
+    query = _normalize_metro_text(location_name)
+    if not query:
+        return None
+
+    place_centroids = {
+        "jardim zoologico de lisboa": (38.7470, -9.1717),
+        "lisbon zoo": (38.7470, -9.1717),
+        "zoo de lisboa": (38.7470, -9.1717),
+    }
+    for alias, coordinates in place_centroids.items():
+        if query == alias or alias in query:
+            return coordinates
+
+    stations = load_metro_stations()
+
+    def _station_coordinates(station_name_or_id: str) -> Optional[tuple[float, float]]:
+        target = _normalize_metro_text(station_name_or_id)
+        for station in stations:
+            station_name = _normalize_metro_text(str(station.get("stop_name", "")))
+            station_id = _normalize_metro_text(str(station.get("stop_id", "")))
+            if target in {station_name, station_id} or target in station_name or station_name in target:
+                try:
+                    return float(station["stop_lat"]), float(station["stop_lon"])
+                except (KeyError, TypeError, ValueError):
+                    return None
+        return None
+
+    direct_station = _station_coordinates(query)
+    if direct_station:
+        return direct_station
+
+    landmark_to_station: dict[str, str] = {}
+    for key, info in LISBON_LANDMARKS.items():
+        metro_station = info.get("metro") if isinstance(info, dict) else None
+        if not metro_station:
+            continue
+        aliases = [key, str(info.get("name", "")), str(info.get("description", ""))]
+        for alias in aliases:
+            normalized_alias = _normalize_metro_text(alias)
+            if normalized_alias:
+                landmark_to_station[normalized_alias] = str(metro_station)
+
+    landmark_to_station.update(
+        {
+            "jardim zoologico de lisboa": "jardim zoologico",
+            "lisbon zoo": "jardim zoologico",
+            "zoo de lisboa": "jardim zoologico",
+            "aeroporto humberto delgado": "aeroporto",
+            "lisbon airport": "aeroporto",
+            "fundacao calouste gulbenkian": "sao sebastiao",
+            "museu gulbenkian": "sao sebastiao",
+        }
+    )
+
+    for alias, station_name in landmark_to_station.items():
+        if query == alias or query in alias or alias in query:
+            return _station_coordinates(station_name)
+
+    return None
 
 
 def _find_station_index_on_line(line_id: str, station_name: str) -> Optional[int]:
@@ -2329,6 +2377,11 @@ def find_nearest_metro(
         str: Formatted list of nearest metro stations with distances.
     """
     # Resolve location if name provided
+    if near_location_name and (latitude is None or longitude is None):
+        local_reference = _resolve_named_metro_reference(near_location_name)
+        if local_reference:
+            latitude, longitude = local_reference
+
     if near_location_name and (latitude is None or longitude is None):
         from tools.carrismetropolitana_api import geocode_location
 

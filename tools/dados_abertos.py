@@ -22,8 +22,10 @@
 import json
 import logging
 import os
+import re
 import time
 import unicodedata
+from html import unescape
 from urllib.parse import quote_plus
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -629,7 +631,8 @@ def find_nearby_services(
     user_lon: Optional[float] = None,
     near_location_name: Optional[str] = None,
     max_results: int = 5,
-    category: Optional[str] = None
+    category: Optional[str] = None,
+    language: Optional[str] = None,
 ) -> str:
     """
     Search for public services in Lisbon (pharmacies, hospitals, schools, etc.)
@@ -645,6 +648,8 @@ def find_nearby_services(
         max_results (int): Maximum number of results to return (default: 5).
         category (str, optional): Filter by taxonomy category (e.g., 'saúde', 'educação', 'cultura').
                                  Use list_service_categories() to see all categories.
+        language (str, optional): Output language. Use ``"pt"`` for PT-PT labels,
+            ``"en"`` for English labels. If omitted, inferred from the query text.
 
     Returns:
         str: Formatted list of services with names, addresses, and distances.
@@ -654,8 +659,186 @@ def find_nearby_services(
         >>> find_nearby_services("hospitais", near_location_name="Martim Moniz")
         >>> find_nearby_services("museu", category="cultura")
     """
+    def _fold_text(value: object) -> str:
+        """Return accent-insensitive lowercase text for matching."""
+        normalized = unicodedata.normalize("NFKD", str(value or ""))
+        return normalized.encode("ascii", "ignore").decode("ascii").lower()
+
+    normalized_language = (language or "").lower().strip()
+    if normalized_language not in {"pt", "en"}:
+        language_probe = f"{service_type} {near_location_name or ''} {category or ''}"
+        probe_norm = _fold_text(language_probe)
+        pt_service_markers = (
+            "perto",
+            "farmacia",
+            "farmacias",
+            "hospital",
+            "hospitais",
+            "saude",
+            "escola",
+            "escolas",
+            "biblioteca",
+            "bibliotecas",
+            "jardim",
+            "jardins",
+            "parque",
+            "parques",
+            "fontanario",
+            "fontanarios",
+            "estacionamento",
+            "municipal",
+            "municipais",
+        )
+        normalized_language = "pt" if any(marker in probe_norm for marker in pt_service_markers) else "en"
+    is_pt = normalized_language == "pt"
+
     if DF_METADATA.empty:
-        return "❌ Error: Metadata not loaded. Check if lisbon_datasets_clean.json exists."
+        return "❌ Erro: metadados não carregados. Verifica o ficheiro lisbon_datasets_clean.json." if is_pt else "❌ Error: Metadata not loaded. Check if lisbon_datasets_clean.json exists."
+
+    def _clean_display_address(raw_address: object) -> str:
+        """Return a one-line address suitable for Markdown links and maps."""
+        cleaned = unescape(str(raw_address or ""))
+        cleaned = re.sub(r"(?i)<br\s*/?>", ", ", cleaned)
+        cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,;\n\t")
+        cleaned = re.sub(r"\s+,", ",", cleaned)
+        return cleaned
+
+    def _record_matches_requested_service(
+        *,
+        name: object,
+        address: object,
+        properties: Dict[str, Any],
+        requested_service: str,
+    ) -> bool:
+        """Filter mixed cultural datasets without leaking unrelated records."""
+        requested_norm = _fold_text(requested_service)
+        cultural_policies = [
+            (
+                ("biblioteca", "bibliotecas", "library", "libraries"),
+                ("bibliot", "library"),
+                ("museu", "museum", "arquivo", "archive"),
+            ),
+            (
+                ("museu", "museus", "museum", "museums"),
+                ("museu", "museum"),
+                ("bibliot", "library", "arquivo", "archive"),
+            ),
+            (
+                ("arquivo", "arquivos", "archive", "archives"),
+                ("arquivo", "archive"),
+                ("bibliot", "library", "museu", "museum"),
+            ),
+        ]
+
+        required_markers: tuple[str, ...] = ()
+        excluded_markers: tuple[str, ...] = ()
+        for request_markers, candidate_required, candidate_excluded in cultural_policies:
+            if any(marker in requested_norm for marker in request_markers):
+                required_markers = candidate_required
+                excluded_markers = candidate_excluded
+                break
+
+        if not required_markers:
+            return True
+
+        record_text = _fold_text(f"{name or ''} {address or ''}")
+        if any(marker in record_text for marker in required_markers):
+            return True
+        if any(marker in record_text for marker in excluded_markers):
+            return False
+        return False
+
+    def _service_icon_and_heading(dataset_title: str, requested_service: str) -> tuple[str, str]:
+        """Build a localized heading for any selected municipal service dataset."""
+        normalized_basis = unicodedata.normalize(
+            "NFKD",
+            f"{dataset_title or ''} {requested_service or ''} {category or ''}",
+        )
+        normalized_basis = normalized_basis.encode("ascii", "ignore").decode("ascii").lower()
+        location = near_location_name.strip() if near_location_name else ""
+
+        service_families = [
+            (("parking", "estacion", "car park", "parques de estacionamento"), "🅿️", "Estacionamento", "Parking"),
+            (("farm", "pharmac"), "💊", "Farmácias", "Pharmacies"),
+            (("hospit",), "🏥", "Hospitais", "Hospitals"),
+            (("cuidados", "saude", "health", "clinica", "clinic"), "🏥", "Serviços de saúde", "Health services"),
+            (("escola", "school", "educa", "universidade", "faculdade"), "🎓", "Serviços de educação", "Education services"),
+            (("biblioteca", "library", "leitura"), "📚", "Bibliotecas", "Libraries"),
+            (("museu", "museum", "cultura", "cultural"), "🏛️", "Equipamentos culturais", "Cultural venues"),
+            (("jardim", "parque", "garden", "green space", "verde"), "🌳", "Jardins e parques", "Gardens and parks"),
+            (("policia", "police", "psp", "seguranca"), "👮", "Serviços de segurança", "Public safety services"),
+            (("bombeir", "fire"), "🚒", "Bombeiros", "Fire services"),
+            (("mercado", "market", "feira"), "🛒", "Mercados", "Markets"),
+            (("correio", "postal", "ctt"), "✉️", "Serviços postais", "Postal services"),
+            (("loja cidadao", "citizen", "atendimento"), "🏢", "Serviços municipais", "Municipal services"),
+            (("fontan", "bebedouro", "fountain", "water"), "🚰", "Fontanários e água", "Fountains and water points"),
+            (("wifi", "internet"), "📶", "Pontos Wi-Fi", "Wi-Fi points"),
+            (("wc", "sanitario", "toilet", "restroom"), "🚻", "Instalações sanitárias", "Restrooms"),
+            (("metro", "transport", "transporte", "paragem", "stop"), "🚇", "Transportes", "Transport services"),
+        ]
+
+        icon = "📍"
+        pt_label = "Serviços públicos"
+        en_label = "Public services"
+        for markers, candidate_icon, candidate_pt, candidate_en in service_families:
+            if any(marker in normalized_basis for marker in markers):
+                icon = candidate_icon
+                pt_label = candidate_pt
+                en_label = candidate_en
+                if candidate_pt == "Hospitais" and any(
+                    public_marker in normalized_basis
+                    for public_marker in ("public", "publico", "publicos", "publica", "publicas")
+                ):
+                    pt_label = "Hospitais públicos"
+                    en_label = "Public hospitals"
+                break
+
+        if is_pt:
+            return icon, f"{pt_label} perto de {location}" if location else f"{pt_label} próximos"
+        return icon, f"{en_label} near {location}" if location else f"Nearby {en_label.lower()}"
+
+    def _rank_service_datasets(candidate_matches: pd.DataFrame, requested_service: str) -> pd.DataFrame:
+        """Sort service datasets by semantic fit before trying GeoJSON URLs."""
+        if candidate_matches.empty:
+            return candidate_matches
+
+        requested_norm = unicodedata.normalize("NFKD", requested_service or "")
+        requested_norm = requested_norm.encode("ascii", "ignore").decode("ascii").lower()
+        requested_tokens = {
+            token for token in re.split(r"[^a-z0-9]+", requested_norm)
+            if len(token) > 3 and token not in {"near", "perto", "para", "with"}
+        }
+        parking_request = bool(
+            re.search(r"\b(parking|estacion|car\s*park|parque\s+de\s+estacionamento)\b", requested_norm)
+        )
+
+        def _score(row: pd.Series) -> int:
+            basis = unicodedata.normalize(
+                "NFKD",
+                f"{row.get('title', '')} {row.get('description', '')}",
+            )
+            basis = basis.encode("ascii", "ignore").decode("ascii").lower()
+            title = unicodedata.normalize("NFKD", str(row.get("title", "")))
+            title = title.encode("ascii", "ignore").decode("ascii").lower()
+            score = 0
+            for token in requested_tokens:
+                if token in title:
+                    score += 18
+                elif token in basis:
+                    score += 8
+            if parking_request:
+                if re.search(r"\b(parques?\s+de\s+estacionamento|car\s*parks?|parking\s+facilit)", basis):
+                    score += 100
+                if re.search(r"\b(lugares?\s+de\s+estacionamento|zonas?\s+reguladas?\s+de\s+estacionamento)\b", basis):
+                    score += 60
+                if re.search(r"\b(tuktuk|tuk\s*tuk|bicic|bike|bicycle|motocicl|scooter)\b", basis):
+                    score -= 80
+            return score
+
+        ranked = candidate_matches.copy()
+        ranked["_service_rank"] = ranked.apply(_score, axis=1)
+        return ranked.sort_values("_service_rank", ascending=False, kind="mergesort").drop(columns=["_service_rank"])
 
     # Geocoding Logic: Resolve location name if coordinates missing
     if near_location_name and (user_lat is None or user_lon is None):
@@ -684,8 +867,12 @@ def find_nearby_services(
                     user_lon = loc['lon']
                     logger.info(f"✅ Geocoded '{near_location_name}' via Nominatim to ({user_lat}, {user_lon})")
                 else:
-                    return f"❌ Could not resolve location '{near_location_name}'. Tried Open Data and Geocoding service. Please provide coordinates."
+                    if is_pt:
+                        return f"❌ Não consegui resolver a localização '{near_location_name}'. Tentei Lisboa Aberta e geocodificação. Indica coordenadas ou uma referência mais específica."
+                    return f"❌ Could not resolve location '{near_location_name}'. Tried Open Data and geocoding. Please provide coordinates."
             except ImportError:
+                if is_pt:
+                    return f"❌ Não consegui resolver a localização '{near_location_name}' na Lisboa Aberta. O geocoder externo está indisponível."
                 return f"❌ Could not resolve location '{near_location_name}' in Open Data. External geocoder unavailable."
 
     # Search for matching datasets (with optional category filtering)
@@ -722,7 +909,11 @@ def find_nearby_services(
         matches = search_datasets(alt_term)
 
     if matches.empty:
-        return f"❌ No datasets found for: '{service_type}'\n💡 Try: farmácias, hospitais, escolas, jardins, metro, fontanários"
+        if is_pt:
+            return f"❌ Não encontrei datasets para: '{service_type}'\n💡 Experimenta: farmácias, hospitais, escolas, jardins, metro, fontanários"
+        return f"❌ No datasets found for: '{service_type}'\n💡 Try: pharmacies, hospitals, schools, parks, metro, fountains"
+
+    matches = _rank_service_datasets(matches.drop_duplicates(subset="stable_url"), service_type)
 
     selected_title = ""
     selected_feature_count = 0
@@ -768,6 +959,14 @@ def find_nearby_services(
                 name = extract_name(properties)
                 address = extract_address(properties)
 
+                if not _record_matches_requested_service(
+                    name=name,
+                    address=address,
+                    properties=properties,
+                    requested_service=service_type,
+                ):
+                    continue
+
                 candidate_results.append({
                     'name': name,
                     'address': address,
@@ -796,34 +995,69 @@ def find_nearby_services(
     if not results:
         if dataset_errors:
             return (
-                f"❌ Could not load usable data for '{service_type}'.\n"
-                f"🧪 Tried datasets: {', '.join(dataset_errors[:3])}"
+                (
+                    f"❌ Não consegui carregar dados utilizáveis para '{service_type}'.\n"
+                    f"🧪 Datasets tentados: {', '.join(dataset_errors[:3])}"
+                ) if is_pt else (
+                    f"❌ Could not load usable data for '{service_type}'.\n"
+                    f"🧪 Tried datasets: {', '.join(dataset_errors[:3])}"
+                )
             )
-        return f"❌ No datasets found for: '{service_type}'"
+        return f"❌ Não encontrei datasets para: '{service_type}'" if is_pt else f"❌ No datasets found for: '{service_type}'"
 
     # Sort by distance if coordinates provided
     if user_lat is not None and user_lon is not None and results:
         # Add header about proximity
         if near_location_name:
-            selected_title += f" (near {near_location_name})"
+            selected_title += f" ({'perto de' if is_pt else 'near'} {near_location_name})"
         else:
-            selected_title += " (sorted by distance)"
+            selected_title += " (ordenado por distância)" if is_pt else " (sorted by distance)"
 
     if not results:
+        if is_pt:
+            return f"✓ Dataset '{selected_title}' carregado ({selected_feature_count} registos), mas não foi possível extrair dados de localização."
         return f"✓ Dataset '{selected_title}' loaded ({selected_feature_count} features) but couldn't extract location data."
 
-    response = f"### 📍 Nearby Public Services\n\nFound {len(results)} result(s) from **{selected_title}**.\n\n"
+    item_icon, heading = _service_icon_and_heading(selected_title, service_type)
+    count_label = "resultado" if len(results) == 1 else "resultados"
+    response = f"### {item_icon} **{heading}**\n\n"
+    if is_pt:
+        response += f"- 🧭 **Fonte do dataset:** {selected_title}\n"
+        response += f"- 📊 **Resultados:** {len(results)} {count_label}\n\n"
+    else:
+        response += f"- 🧭 **Dataset:** {selected_title}\n"
+        response += f"- 📊 **Results:** {len(results)} result(s)\n\n"
+
+    if near_location_name and results:
+        nearest = results[0]
+        nearest_distance = nearest.get("distance")
+        if nearest_distance is not None:
+            if is_pt:
+                response += (
+                    f"- ✅ **Mais perto:** {nearest['name']} "
+                    f"({nearest_distance:.2f} km de {near_location_name})\n\n"
+                )
+            else:
+                response += (
+                    f"- ✅ **Nearest:** {nearest['name']} "
+                    f"({nearest_distance:.2f} km from {near_location_name})\n\n"
+                )
 
     for r in results:
-        response += f"- 📍 **{r['name']}**\n"
-        if r['address']:
-            map_url = f"https://www.google.com/maps/search/?api=1&query={quote_plus(str(r['address']))}"
-            response += f"    - 📍 **Address:** [{r['address']}]({map_url})\n"
+        response += f"- {item_icon} **{r['name']}**\n"
+        cleaned_address = _clean_display_address(r.get('address'))
+        if cleaned_address:
+            map_url = f"https://www.google.com/maps/search/?api=1&query={quote_plus(cleaned_address)}"
+            address_label = "Morada" if is_pt else "Address"
+            response += f"    - 📍 **{address_label}:** [{cleaned_address}]({map_url})\n"
         elif r.get('lat') is not None and r.get('lon') is not None:
             map_url = f"https://www.google.com/maps/search/?api=1&query={r['lat']:.6f}%2C{r['lon']:.6f}"
-            response += f"    - 🗺️ **Map:** [Open map]({map_url})\n"
+            map_label = "Mapa" if is_pt else "Map"
+            open_label = "Abrir mapa" if is_pt else "Open map"
+            response += f"    - 🗺️ **{map_label}:** [{open_label}]({map_url})\n"
         if r['distance'] is not None:
-            response += f"    - 📏 **Distance:** {r['distance']:.2f} km\n"
+            distance_label = "Distância" if is_pt else "Distance"
+            response += f"    - 📏 **{distance_label}:** {r['distance']:.2f} km\n"
         response += "\n"
 
     return response
