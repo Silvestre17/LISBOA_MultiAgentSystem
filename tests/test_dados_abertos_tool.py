@@ -167,7 +167,7 @@ def test_find_nearby_services_resolves_rossio_as_landmark_before_dataset_search(
     )
 
     assert result.index("FarmÃ¡cia Rossio") < result.index("FarmÃ¡cia BelÃ©m")
-    assert "**Distance:** 0.00 km" in result
+    assert "**Distância:** 0.00 km" in result
 
 
 def test_find_nearby_services_resolves_central_lisbon_as_stable_anchor(monkeypatch) -> None:
@@ -175,3 +175,76 @@ def test_find_nearby_services_resolves_central_lisbon_as_stable_anchor(monkeypat
     assert dados_abertos._resolve_reference_coordinates("central Lisbon") == (38.7139, -9.1394)
     assert dados_abertos._resolve_reference_coordinates("Lisbon city centre") == (38.7139, -9.1394)
     assert dados_abertos._resolve_reference_coordinates("downtown Lisbon") == (38.7139, -9.1394)
+
+
+def test_find_nearby_services_formats_parking_as_parking_not_gardens(monkeypatch) -> None:
+    """Parking datasets must not be classified as gardens because of the word 'park'."""
+    service_matches = pd.DataFrame(
+        [{"title": "Parking facilities", "description": "Public parking", "stable_url": "https://good.example"}]
+    )
+
+    monkeypatch.setattr(dados_abertos, "search_datasets", lambda service_type: service_matches)
+    monkeypatch.setattr(dados_abertos, "get_datasets_for_category", lambda category: pd.DataFrame())
+    monkeypatch.setattr(
+        dados_abertos,
+        "fetch_geojson_with_retry",
+        lambda url: {"features": [_point_feature("Car park Rossio", "Praça Dom Pedro IV", [-9.1394, 38.7139])]},
+    )
+
+    result = str(
+        dados_abertos.find_nearby_services.invoke(
+            {
+                "service_type": "parking",
+                "near_location_name": "Rossio",
+                "max_results": 1,
+                "language": "en",
+            }
+        )
+    )
+
+    assert "Parking near Rossio" in result
+    assert "Gardens and parks" not in result
+    assert "Car park Rossio" in result
+
+
+def test_find_nearby_services_prefers_car_parking_dataset_over_tuktuk_parking(monkeypatch) -> None:
+    """Car-parking queries should prefer general parking datasets over niche parking datasets."""
+    service_matches = pd.DataFrame(
+        [
+            {
+                "title": "TukTuk - Estacionamentos",
+                "description": "Estacionamentos para TukTuk",
+                "stable_url": "https://tuktuk.example",
+            },
+            {
+                "title": "Parques de estacionamento na via pública",
+                "description": "Parques de estacionamento automóvel",
+                "stable_url": "https://parking.example",
+            },
+        ]
+    )
+
+    monkeypatch.setattr(dados_abertos, "search_datasets", lambda service_type: service_matches)
+    monkeypatch.setattr(dados_abertos, "get_datasets_for_category", lambda category: pd.DataFrame())
+
+    def fake_fetch(url: str):
+        if url == "https://tuktuk.example":
+            return {"features": [_point_feature("TukTuk stand", "Rua A", [-9.1394, 38.7139])]}
+        return {"features": [_point_feature("Car park Campo Pequeno", "Campo Pequeno", [-9.1469, 38.7411])]}
+
+    monkeypatch.setattr(dados_abertos, "fetch_geojson_with_retry", fake_fetch)
+
+    result = str(
+        dados_abertos.find_nearby_services.invoke(
+            {
+                "service_type": "parking",
+                "near_location_name": "Campo Pequeno",
+                "max_results": 1,
+                "language": "en",
+            }
+        )
+    )
+
+    assert "Parques de estacionamento na via pública" in result
+    assert "Car park Campo Pequeno" in result
+    assert "TukTuk stand" not in result
