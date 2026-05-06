@@ -693,6 +693,24 @@ class SupervisorAgent(BaseAgent):
         return False
 
     @classmethod
+    def _planning_query_has_origin_anchor(cls, user_message: str) -> bool:
+        """Return whether a planning request names a starting point that affects feasibility."""
+        normalized = cls._normalize_query(user_message)
+        origin_patterns = [
+            r"\bstarting from\b",
+            r"\bstart(?:ing)? at\b",
+            r"\bfrom\b.+\bto\b",
+            r"\ba partir de\b",
+            r"\bdesde\b",
+            r"\bestou em\b",
+            r"\bsaindo de\b",
+            r"\bpartindo de\b",
+            r"\bcome[cç]ar em\b",
+            r"\bcome[cç]ando em\b",
+        ]
+        return any(re.search(pattern, normalized) for pattern in origin_patterns)
+
+    @classmethod
     def _is_direct_weather_transport_query(cls, user_message: str) -> bool:
         """Detects operational weather-plus-route requests that should not become itineraries."""
         normalized = cls._normalize_query(user_message)
@@ -840,9 +858,12 @@ class SupervisorAgent(BaseAgent):
                     agents.append("researcher")
                     reasoning += " (Added researcher agent: planning needs place/activity grounding)"
 
-                if self._looks_like_transport_query(message_lower) and "transport" not in agents:
+                if (
+                    self._looks_like_transport_query(message_lower)
+                    or self._planning_query_has_origin_anchor(user_message)
+                ) and "transport" not in agents:
                     agents.append("transport")
-                    reasoning += " (Added transport agent: planning query includes route/transport intent)"
+                    reasoning += " (Added transport agent: planning query includes route/origin feasibility)"
 
             # Force weather agent for near-future planning
             if is_planning_query and (
@@ -1096,7 +1117,10 @@ class SupervisorAgent(BaseAgent):
                 or self._planning_query_mentions_weather(user_message)
             ) and "weather" not in agents:
                 agents.append("weather")
-            if self._looks_like_transport_query(message_lower) and "transport" not in agents:
+            if (
+                self._looks_like_transport_query(message_lower)
+                or self._planning_query_has_origin_anchor(user_message)
+            ) and "transport" not in agents:
                 agents.append("transport")
             if "researcher" not in agents:
                 agents.append("researcher")

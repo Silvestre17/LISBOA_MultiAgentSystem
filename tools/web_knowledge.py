@@ -18,8 +18,9 @@ import os
 import re
 from datetime import datetime
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
+import requests
 import wikipedia
 from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_community.tools.tavily_search import TavilySearchResults
@@ -355,10 +356,25 @@ def _search_wikipedia(query: str, language: str = "pt") -> Optional[str]:
     Returns:
         str: Comprehensive search results from the best available source.
     """
+    normalized_language = language if language in {"pt", "en"} else "pt"
+
     try:
-        wikipedia.set_lang(language)
-        # Search for the page matching the query
+        wikipedia.set_lang(normalized_language)
         search_results = wikipedia.search(query, results=1)
+    except Exception as exc:
+        logger.warning("Wikipedia library search failed for %r (%s): %s", query, normalized_language, exc)
+        search_results = []
+
+    if search_results:
+        page_title = search_results[0]
+        rest_result = _fetch_wikipedia_rest_summary(page_title, normalized_language)
+        if rest_result:
+            return rest_result
+
+    try:
+        wikipedia.set_lang(normalized_language)
+        # Search for the page matching the query
+        search_results = search_results or wikipedia.search(query, results=1)
 
         if not search_results:
             return None
@@ -382,6 +398,38 @@ def _search_wikipedia(query: str, language: str = "pt") -> Optional[str]:
     except Exception as e:
         logger.warning(f"Wikipedia search failed: {e}")
         return None
+
+
+def _fetch_wikipedia_rest_summary(page_title: str, language: str = "pt") -> Optional[str]:
+    """Fetch a Wikipedia summary through the stable REST endpoint.
+
+    The ``wikipedia`` Python package sometimes fails when the legacy search API
+    returns an HTML or empty body. The REST summary endpoint is simpler and keeps
+    the history/culture waterfall useful when that library path is temporarily
+    brittle.
+    """
+    normalized_language = language if language in {"pt", "en"} else "pt"
+    title = (page_title or "").strip()
+    if not title:
+        return None
+
+    url = f"https://{normalized_language}.wikipedia.org/api/rest_v1/page/summary/{quote(title, safe='')}"
+    headers = {"User-Agent": "LISBOA-Thesis-Agent/1.0 (academic research; contact via repository)"}
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        logger.warning("Wikipedia REST summary failed for %r (%s): %s", title, normalized_language, exc)
+        return None
+
+    summary = str(payload.get("extract") or "").strip()
+    resolved_title = str(payload.get("title") or title).strip()
+    page_url = str(payload.get("content_urls", {}).get("desktop", {}).get("page") or "").strip()
+    if not summary:
+        return None
+    url_line = f"🔗 URL: {page_url}" if page_url else f"🔗 URL: https://{normalized_language}.wikipedia.org/wiki/{quote(resolved_title.replace(' ', '_'), safe='_')}"
+    return f"📚 **Wikipédia: {resolved_title}**\n{url_line}\n\n{summary}\n"
 
 # ==========================================================================
 # Exported Tool

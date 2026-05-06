@@ -657,7 +657,18 @@ class WeatherAgent(BaseAgent):
         advice_terms = [
             "jacket",
             "coat",
+            "wear",
+            "wearing",
+            "clothes",
+            "clothing",
+            "walking",
+            "walk outdoors",
+            "outdoors",
             "casaco",
+            "vestir",
+            "roupa",
+            "caminhar",
+            "ar livre",
             "umbrella",
             "guarda chuva",
             "sailing",
@@ -890,6 +901,27 @@ class WeatherAgent(BaseAgent):
             if rain:
                 return cls._rain_direct_answer(rain, is_pt)
 
+        if any(term in normalized for term in ["wear", "wearing", "clothes", "clothing", "walking", "walk outdoors", "outdoors", "vestir", "roupa", "caminhar", "andar ao ar livre", "ar livre"]):
+            minimum = cls._extract_temperature_min(tool_text)
+            maximum = cls._extract_temperature_max(tool_text)
+            rain = cls._extract_rain_summary(tool_text)
+            wind = cls._extract_wind_summary(tool_text)
+            if is_pt:
+                advice_parts = ["leva **casaco leve**"]
+                if rain and float(rain.get("probability", 0) or 0) >= 35:
+                    advice_parts.append("guarda-chuva compacto ou impermeável")
+                if wind:
+                    advice_parts.append("uma camada que corte o vento")
+                temperature_note = f" porque a previsão fica entre **{minimum}°C e {maximum}°C**" if minimum and maximum else ""
+                return f"👟 Para caminhar ao ar livre, {', '.join(advice_parts)}{temperature_note}."
+            advice_parts = ["wear a **light jacket**"]
+            if rain and float(rain.get("probability", 0) or 0) >= 35:
+                advice_parts.append("carry a compact umbrella or rain shell")
+            if wind:
+                advice_parts.append("add a wind-resistant layer")
+            temperature_note = f" because the forecast is around **{minimum}°C to {maximum}°C**" if minimum and maximum else ""
+            return f"👟 For walking outdoors, {', '.join(advice_parts)}{temperature_note}."
+
         if any(term in normalized for term in ["jacket", "coat", "casaco"]):
             minimum = cls._extract_temperature_min(tool_text)
             rain = cls._extract_rain_summary(tool_text)
@@ -959,6 +991,12 @@ class WeatherAgent(BaseAgent):
     def _extract_temperature_min(tool_text: str) -> Optional[str]:
         """Extract the minimum temperature from a weather tool response."""
         match = re.search(r"(?:Temperature|Temperatura)?\D*(\d+(?:\.\d+)?)°C\s+(?:to|a)\s+\d+(?:\.\d+)?°C", tool_text, re.IGNORECASE)
+        return match.group(1) if match else None
+
+    @staticmethod
+    def _extract_temperature_max(tool_text: str) -> Optional[str]:
+        """Extract the maximum temperature from a weather tool response."""
+        match = re.search(r"(?:Temperature|Temperatura)?\D*\d+(?:\.\d+)?°C\s+(?:to|a)\s+(\d+(?:\.\d+)?)°C", tool_text, re.IGNORECASE)
         return match.group(1) if match else None
 
     @staticmethod

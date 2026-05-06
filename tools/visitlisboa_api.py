@@ -641,7 +641,19 @@ def _localize_place_title(title: Optional[str], language: str = "en") -> str:
         "Jerónimos Monastery": "Mosteiro dos Jerónimos",
         "Jeronimos Monastery": "Mosteiro dos Jerónimos",
     }
-    return mapping.get(raw, raw)
+    if raw in mapping:
+        return mapping[raw]
+    generic_replacements = [
+        (r"^Atelier-Museum\s+(.+)$", r"Atelier-Museu \1"),
+        (r"^House-Museum\s+(.+)$", r"Casa-Museu \1"),
+        (r"^Museum of Lisbon\s+(.+)$", r"Museu de Lisboa - \1"),
+        (r"^Museum of the\s+(.+)$", r"Museu da \1"),
+        (r"^Museum of\s+(.+)$", r"Museu de \1"),
+    ]
+    localized = raw
+    for pattern, replacement in generic_replacements:
+        localized = re.sub(pattern, replacement, localized)
+    return localized
 
 
 def _known_place_description(title: str, language: str = "en") -> str:

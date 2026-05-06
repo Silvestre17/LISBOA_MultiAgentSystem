@@ -85,7 +85,7 @@ _PLANNER_ACCESSIBILITY_RE = re.compile(
     re.IGNORECASE,
 )
 _PLANNER_SOURCE_LINE_RE = re.compile(
-    r"^(?:[-*•]\s*)?(?:📌\s*)?(?:\*\*)?(?:Fonte|Source)(?:\*\*)?:.*$",
+    r"^(?:[-*•]\s*)?(?:📌\s*)?(?:\*\*)?(?:Fontes?|Sources?)(?:\*\*)?:.*$",
     re.IGNORECASE,
 )
 
@@ -584,6 +584,50 @@ def _planner_response_requires_fallback(cleaned_response: str) -> bool:
     return any(marker in normalized for marker in failure_markers)
 
 
+def _planner_response_has_markdown_contract_defects(cleaned_response: str) -> bool:
+    """Return whether a planner draft is structurally unsafe to render.
+
+    This catches classes of failures observed in live planner synthesis: repeated
+    pseudo-card headings, raw place-card fragments injected as itinerary steps,
+    and loose key-stop dumps rendered as top-level bullets. These are repaired by
+    falling back to the deterministic planner template instead of letting QA
+    rewrite a malformed structure after the fact.
+    """
+    if not cleaned_response:
+        return True
+
+    headings = [line.strip() for line in cleaned_response.splitlines() if line.strip().startswith("### ")]
+    normalized_headings = [_normalize_planner_text(heading) for heading in headings]
+    if len(normalized_headings) != len(set(normalized_headings)):
+        return True
+
+    raw_lower = (cleaned_response or "").lower()
+    normalized = _normalize_planner_text(cleaned_response)
+    if re.search(r"(?m)^\s*\d+[.)]\s+", cleaned_response):
+        return True
+    if len(re.findall(r"(?im)^\s*(?:[-*]\s*)?📌\s*\*\*(?:Source|Sources|Fonte|Fontes):\*\*", cleaned_response)) > 1:
+        return True
+    defect_patterns = [
+        r"\bkey stop cards\b",
+        r"\bif the showers continue, this is the best moment\b",
+        r"\bphone\b\s*:\s*\+351.*\brating\b",
+        r"\bhelpful notes\b",
+        r"\bnotas uteis\b",
+        r"\bsource footer\b",
+        r"\bplace card\b",
+    ]
+    unsafe_heading_patterns = [
+        r"^###\s*(?:⚠️\s*)?(?:helpful notes|notas úteis|notas uteis|notes)\b",
+        r"^###\s+[^\n]*\b\d{1,2}:\d{2}\b\s*[·\-]\s*(?:today|hoje)\s*:",
+        r"^###\s*(?:ℹ️\s*)?(?:note|nota)\s*:?\s*$",
+    ]
+    if any(re.search(pattern, heading, flags=re.IGNORECASE) for heading in headings for pattern in unsafe_heading_patterns):
+        return True
+    if re.search(r"(?m)^###\s+[^\n]*\b\d{1,2}:\d{2}\b\s*[·\-]\s*(?:today|hoje)\s*:", raw_lower):
+        return True
+    return any(re.search(pattern, normalized, flags=re.IGNORECASE) for pattern in defect_patterns)
+
+
 class PlannerAgent(BaseAgent):
     """
     Itinerary planner agent that synthesizes outputs from other agents.
@@ -765,7 +809,7 @@ class PlannerAgent(BaseAgent):
                 language=language,
             )
 
-        if _planner_response_requires_fallback(cleaned_response):
+        if _planner_response_requires_fallback(cleaned_response) or _planner_response_has_markdown_contract_defects(cleaned_response):
             cleaned_response = _build_deterministic_planner_fallback(
                 user_message=user_message,
                 language=language,
@@ -812,7 +856,7 @@ class PlannerAgent(BaseAgent):
                 accessibility_confirmed=accessibility_confirmed,
             )
 
-        if _planner_response_requires_fallback(cleaned_response):
+        if _planner_response_requires_fallback(cleaned_response) or _planner_response_has_markdown_contract_defects(cleaned_response):
             cleaned_response = _build_deterministic_planner_fallback(
                 user_message=user_message,
                 language=language,

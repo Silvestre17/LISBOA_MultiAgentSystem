@@ -1538,7 +1538,7 @@ class MultiAgentAssistant:
         if agent_outputs:
             source_footer = self._build_combined_source_footer(agent_outputs, language)
             if source_footer:
-                footer_line_re = re.compile(r"^(?:[-*•]\s*)?📌\s*\*\*(?:Fonte|Source):\*\*.*$", re.IGNORECASE)
+                footer_line_re = re.compile(r"^(?:[-*•]\s*)?📌\s*\*\*(?:Fontes?|Sources?):\*\*.*$", re.IGNORECASE)
                 kept_lines = [line for line in final_output.splitlines() if not footer_line_re.match(line.strip())]
                 while kept_lines and not kept_lines[-1].strip():
                     kept_lines.pop()
@@ -2779,7 +2779,7 @@ class MultiAgentAssistant:
     def _extract_structured_section_parts(text: str) -> tuple[str, List[str], Optional[str]]:
         """Removes per-section source lines while collecting links and timestamps for a combined footer."""
         source_line_re = re.compile(
-            r"^(?:[-*•]\s*)?(?:📌\s*)?(?:\*\*)?(?:Fonte|Source)(?:\*\*)?:.*$",
+            r"^(?:[-*•]\s*)?(?:📌\s*)?(?:\*\*)?(?:Fontes?|Sources?)(?:\*\*)?:.*$",
             re.IGNORECASE,
         )
         timestamp_re = re.compile(r"(?:Atualizado|Updated):\s*(\d{2}:\d{2})", re.IGNORECASE)
@@ -2880,7 +2880,7 @@ class MultiAgentAssistant:
                 "weather": "### 🌤️ Resumo Meteorológico",
                 "transport": "### 🚇 Mobilidade e Ligações",
                 "researcher": "### 📍 Destaques Locais",
-                "notes": "### ⚠️ Notas Úteis",
+                "notes": "**⚠️ Notas úteis**",
                 "source": "📌 **Fonte:**",
                 "updated": "**Atualizado:**",
             },
@@ -2888,7 +2888,7 @@ class MultiAgentAssistant:
                 "weather": "### 🌤️ Weather Snapshot",
                 "transport": "### 🚇 Mobility and Connections",
                 "researcher": "### 📍 Local Highlights",
-                "notes": "### ⚠️ Helpful Notes",
+                "notes": "**⚠️ Helpful notes**",
                 "source": "📌 **Source:**",
                 "updated": "**Updated:**",
             },

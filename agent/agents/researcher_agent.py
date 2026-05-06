@@ -1323,14 +1323,29 @@ class ResearcherAgent(BaseAgent):
             match = re.search(pattern, user_message, flags=re.IGNORECASE)
             if match:
                 location = match.group("location").strip(" .?!,")
-                location = re.split(
-                    r"\b(?:that|which|who|where|still|open|useful|tonight|this evening|que|e que)\b",
-                    location,
-                    maxsplit=1,
-                    flags=re.IGNORECASE,
-                )[0].strip(" .?!,")
+                location = ResearcherAgent._clean_nearby_location_text(location)
                 return location or None
         return None
+
+    @staticmethod
+    def _clean_nearby_location_text(location: object) -> Optional[str]:
+        """Remove temporal or intent suffixes from a nearby-location phrase."""
+        if location is None:
+            return None
+        cleaned = re.sub(r"\s+", " ", str(location or "")).strip(" .?!,;:")
+        if not cleaned:
+            return None
+
+        split_patterns = (
+            r"\b(?:that|which|who|where|still|open|useful|que|e que)\b",
+            r"\b(?:esta\s+noite|ao\s+fim\s+do\s+dia|mais\s+tarde|hoje|amanh[ãa]|agora|tonight|this\s+evening|today|tomorrow|now|later)\b",
+            r"\b(?:para|to)\s+(?:usar|use|ir|go|chegar|reach|esta\s+noite|hoje|amanh[ãa]|agora|mais\s+tarde|tonight|this\s+evening|today|tomorrow|now|later)\b",
+            r"\b(?:for|during)\s+(?:tonight|this\s+evening|today|tomorrow|later|the\s+evening)\b",
+        )
+        for pattern in split_patterns:
+            parts = re.split(pattern, cleaned, maxsplit=1, flags=re.IGNORECASE)
+            cleaned = parts[0].strip(" .?!,;:")
+        return cleaned or None
 
     def _run_direct_event_lookup(
         self,
@@ -1527,7 +1542,7 @@ class ResearcherAgent(BaseAgent):
             for token in re.findall(r"[a-z0-9]+", unicodedata.normalize("NFKD", subject or "").encode("ascii", "ignore").decode("ascii").lower())
             if len(token) >= 4 and token not in {"historia", "history", "lisboa", "portugal"}
         }
-        text = re.sub(r"(?m)^\s*📌\s+\*\*(?:Fonte|Source):.*$", "", text)
+        text = re.sub(r"(?m)^\s*📌\s+\*\*(?:Fontes?|Sources?):.*$", "", text)
         text = re.sub(
             r"(?im)^\s*[📚🌐🔎]*\s*(?:\*\*)?(?:Wikip[eé]dia|Wikipedia):\s*[^*\n]+(?:\*\*)?\s*",
             "",
@@ -1632,10 +1647,25 @@ class ResearcherAgent(BaseAgent):
 
         places = _load_places_json()
         candidate_scores: list[tuple[int, Dict[str, Any]]] = []
+        outside_lisbon_markers = (
+            "vila franca de xira", "sintra", "cascais", "oeiras", "mafra",
+            "loures", "odivelas", "almada", "seixal", "barreiro", "setubal",
+            "setubal", "montijo", "alcochete", "palmela", "sesimbra",
+        )
+        preferred_outdoor_titles = (
+            "torre de belem", "padrao dos descobrimentos", "arco da rua augusta",
+            "se de lisboa", "castelo de sao jorge", "praca do comercio",
+        )
         for place in places:
             title = str(place.get("title") or "")
             category = normalize(place.get("category"))
+            address_text = normalize(" ".join(str(place.get(key) or "") for key in ("address", "location")))
             text = normalize(" ".join(str(place.get(key) or "") for key in ("title", "category", "short_description", "description")))
+            normalized_title = normalize(title)
+            if any(marker in address_text for marker in outside_lisbon_markers):
+                continue
+            if address_text and "lisboa" not in address_text and "belem" not in address_text:
+                continue
             if any(proxy in category or proxy in normalize(title) for proxy in ("tram", "tour", "cruise", "hotel", "restaurant", "shopping")):
                 continue
             if "museum" in category or "museu" in category:
@@ -1643,10 +1673,14 @@ class ResearcherAgent(BaseAgent):
             if "monument" not in category and "monumento" not in category:
                 continue
             score = 0
+            if any(preferred in normalized_title for preferred in preferred_outdoor_titles):
+                score += 80
             if any(term in text for term in ("outdoor", "exterior", "view", "vista", "river", "tejo", "tagus", "miradouro", "panoramic")):
                 score += 35
             if any(term in text for term in ("façade", "facade", "fachada", "monument", "monumento", "square", "praça")):
                 score += 20
+            if any(term in text for term in ("events", "eventos", "available for events", "palace halls")):
+                score -= 20
             if place.get("address") or place.get("location"):
                 score += 10
             if place.get("url"):
@@ -1663,19 +1697,24 @@ class ResearcherAgent(BaseAgent):
         url = str(selected.get("url") or "").strip()
         if len(description) > 220:
             description = description[:217].rsplit(" ", 1)[0] + "..."
+        pt_description = (
+            "Monumento visitável por fora, adequado para uma janela curta ao fim do dia quando a entrada interior em museus pode já não estar disponível."
+        )
+        en_description = (
+            "Outdoor-viewable monument, suitable for a short evening window when indoor museum entry may no longer be available."
+        )
 
         timestamp = datetime.now().strftime("%H:%M")
         maps_url = f"https://www.google.com/maps/search/?api=1&query={address.replace(' ', '+')}" if address else ""
         if language == "pt":
             lines = [
-                f"### 🏛️ Recomendação Para {requested_window}",
+                f"### 🏛️ **Recomendação para {requested_window}**",
                 "",
                 "Para essa janela, eu evitaria recomendar **museus interiores**, porque muitos fecham antes ou perto das 18:00. A opção mais segura é um monumento exterior ou visitável por fora.",
                 "",
                 f"- 🏛️ **{title} (exterior)**",
             ]
-            if description:
-                lines.append(f"    - 📝 **Porque faz sentido:** {description}")
+            lines.append(f"    - 📝 **Porque faz sentido:** {pt_description}")
             if address and maps_url:
                 lines.append(f"    - 📍 **Morada:** [{address}]({maps_url})")
             if url:
@@ -1689,14 +1728,13 @@ class ResearcherAgent(BaseAgent):
             return "\n".join(lines)
 
         lines = [
-            f"### 🏛️ Recommendation For {requested_window}",
+            f"### 🏛️ **Recommendation for {requested_window}**",
             "",
             "For that window, I would avoid recommending **indoor museums**, because many close before or around 18:00. The safer option is an outdoor monument or a place that still works from outside.",
             "",
             f"- 🏛️ **{title} (outside)**",
         ]
-        if description:
-            lines.append(f"    - 📝 **Why it fits:** {description}")
+        lines.append(f"    - 📝 **Why it fits:** {en_description}")
         if address and maps_url:
             lines.append(f"    - 📍 **Address:** [{address}]({maps_url})")
         if url:
@@ -1729,6 +1767,7 @@ class ResearcherAgent(BaseAgent):
             if tool_label and tool_label not in service_types:
                 service_types.append(tool_label)
         nearby_location = self._normalize_structured_plan_text(structured_plan.get("near_location")) if structured_plan else None
+        nearby_location = self._clean_nearby_location_text(nearby_location)
         nearby_location = nearby_location or self._extract_near_location_name(user_message)
         is_broad_attractions = self._is_broad_attractions_query(user_message)
 
@@ -1790,6 +1829,7 @@ class ResearcherAgent(BaseAgent):
                 service_args = {
                     "service_type": service_type,
                     "max_results": 5,
+                    "language": language,
                 }
                 if nearby_location:
                     service_args["near_location_name"] = nearby_location
@@ -1818,15 +1858,48 @@ class ResearcherAgent(BaseAgent):
 
             if service_blocks:
                 combined = "\n\n".join(service_blocks).strip()
+                combined = self._strip_lisboa_aberta_source_lines(combined)
+                nearest_summary = self._build_nearby_services_direct_summary(
+                    service_blocks,
+                    language=language,
+                )
+                if nearest_summary:
+                    combined = f"{nearest_summary}\n\n---\n\n{combined}"
+                evening_requested = bool(re.search(
+                    r"\b(evening|tonight|late|after\s+hours|this\s+evening|noite|esta\s+noite|ao\s+fim\s+do\s+dia|mais\s+tarde)\b",
+                    user_message,
+                    re.IGNORECASE,
+                ))
+                if evening_requested:
+                    health_requested = bool(re.search(
+                        r"\b(pharmacy|pharmacies|farm[áa]cia|farm[áa]cias|hospital|hospitais|health|sa[úu]de)\b",
+                        user_message,
+                        re.IGNORECASE,
+                    ))
+                    if language == "pt":
+                        if health_requested:
+                            combined += "\n\n⚠️ A Lisboa Aberta confirma localização e proximidade, mas não confirma horário atual, turno de farmácia ou disponibilidade clínica. Em urgência, contacta o 112; para farmácia, confirma por telefone antes de te deslocares."
+                        else:
+                            combined += "\n\n⚠️ A Lisboa Aberta confirma localização e proximidade, mas não confirma horário atual nem disponibilidade ao fim do dia. Confirma diretamente antes de te deslocares."
+                    else:
+                        if health_requested:
+                            combined += "\n\n⚠️ Lisboa Aberta confirms location and proximity, but not current opening hours, pharmacy duty status, or clinical availability. For emergencies call 112; for pharmacies, confirm by phone before going."
+                        else:
+                            combined += "\n\n⚠️ Lisboa Aberta confirms location and proximity, but not current opening hours or evening availability. Confirm directly before going."
                 if missing_services:
                     missing_label = ", ".join(missing_services)
                     if language == "pt":
                         combined += f"\n\n⚠️ Não foi possível confirmar resultados para: {missing_label}."
                     else:
                         combined += f"\n\n⚠️ I could not confirm results for: {missing_label}."
-                if "Lisboa Aberta" not in combined:
-                    combined += f"\n\n{self._build_open_data_services_source_line(language)}"
+                combined += f"\n\n{self._build_open_data_services_source_line(language)}"
                 return combined.strip()
+            if missing_services:
+                return self._build_missing_services_limitation(
+                    service_types=missing_services,
+                    nearby_location=nearby_location,
+                    language=language,
+                )
 
         if not places_tool:
             return self._run_direct_tool_fallback(user_message, language)
@@ -1895,7 +1968,9 @@ class ResearcherAgent(BaseAgent):
         if service_types:
             tool = self._get_tool_by_name("find_nearby_services")
             if tool:
-                nearby_location = self._extract_near_location_name(user_message)
+                nearby_location = self._clean_nearby_location_text(
+                    self._extract_near_location_name(user_message)
+                )
                 blocks: List[str] = []
                 missing_services: List[str] = []
 
@@ -1924,6 +1999,7 @@ class ResearcherAgent(BaseAgent):
 
                 if blocks:
                     combined = "\n\n".join(blocks)
+                    combined = self._strip_lisboa_aberta_source_lines(combined)
                     if "parking" in service_types and re.search(
                         r"\b(municipal|car\s+parks?|park\s+my\s+car|municipais|carro|viatura)\b",
                         message_lower,
@@ -1941,8 +2017,25 @@ class ResearcherAgent(BaseAgent):
                             combined += f"\n\n⚠️ Não foi possível confirmar resultados para: {', '.join(missing_services)}."
                         else:
                             combined += f"\n\n⚠️ I could not confirm results for: {', '.join(missing_services)}."
+                    evening_requested = bool(re.search(
+                        r"\b(evening|tonight|late|after\s+hours|this\s+evening|noite|esta\s+noite|ao\s+fim\s+do\s+dia|mais\s+tarde)\b",
+                        user_message,
+                        re.IGNORECASE,
+                    ))
+                    if evening_requested:
+                        if language == "pt":
+                            combined += "\n\nâš ï¸ A Lisboa Aberta confirma localizaÃ§Ã£o e proximidade, mas nÃ£o confirma horÃ¡rio atual nem disponibilidade ao fim do dia. Confirma diretamente antes de te deslocares."
+                        else:
+                            combined += "\n\nâš ï¸ Lisboa Aberta confirms location and proximity, but not current opening hours or evening availability. Confirm directly before going."
                     combined += f"\n\n{self._build_open_data_services_source_line(language)}"
                     return combined.strip()
+
+                if missing_services:
+                    return self._build_missing_services_limitation(
+                        service_types=missing_services,
+                        nearby_location=nearby_location,
+                        language=language,
+                    )
 
         if any(keyword in message_lower for keyword in history_keywords):
             tool = self._get_tool_by_name("search_history_culture")
@@ -2065,12 +2158,90 @@ class ResearcherAgent(BaseAgent):
         return None
 
     @staticmethod
+    def _build_nearby_services_direct_summary(service_blocks: List[str], language: str) -> str:
+        """Build a direct nearest-service summary from Lisboa Aberta blocks.
+
+        Multi-service questions such as "nearest hospital and pharmacy" should
+        answer the requested nearest items first, then show the detailed cards.
+        The parser intentionally uses only rendered block structure so every
+        service type produced by the shared Lisboa Aberta tool inherits the same
+        behaviour.
+        """
+        if len(service_blocks) < 2:
+            return ""
+
+        is_pt = language == "pt"
+        heading = "### 📍 **Serviços mais próximos**" if is_pt else "### 📍 **Nearest services**"
+        summary_lines: List[str] = [heading, ""]
+        seen_labels: set[str] = set()
+
+        for block in service_blocks:
+            normalized_block = unicodedata.normalize("NFKD", block or "")
+            normalized_block = normalized_block.encode("ascii", "ignore").decode("ascii").lower()
+            if "farm" in normalized_block or "pharmac" in normalized_block:
+                icon = "💊"
+                label = "Farmácia" if is_pt else "Pharmacy"
+            elif "hospit" in normalized_block or "cuidados" in normalized_block:
+                icon = "🏥"
+                label = "Hospital"
+            else:
+                icon = "📍"
+                label = "Serviço" if is_pt else "Service"
+            if label in seen_labels:
+                continue
+
+            item_match = re.search(r"(?m)^-\s*(?:[^\w*]+\s*)?\*\*(?P<name>[^*]+)\*\*", block or "")
+            if not item_match:
+                continue
+            name = item_match.group("name").strip()
+            tail = (block or "")[item_match.end(): item_match.end() + 500]
+            distance_match = re.search(r"\*\*(?:Distância|Distance):\*\*\s*(?P<distance>[0-9]+(?:\.[0-9]+)?\s*km)", tail, re.IGNORECASE)
+            distance = f" ({distance_match.group('distance')})" if distance_match else ""
+            summary_lines.append(f"- {icon} **{label}:** {name}{distance}")
+            seen_labels.add(label)
+
+        return "\n".join(summary_lines).strip() if len(summary_lines) > 2 else ""
+
+    @staticmethod
     def _build_open_data_services_source_line(language: str) -> str:
         """Builds a stable Lisboa Aberta source line for nearby-service answers."""
         timestamp = datetime.now().strftime("%H:%M")
         if language == "pt":
             return f"\U0001F4CC **Fonte:** [*Lisboa Aberta*](https://dados.cm-lisboa.pt/) | **Atualizado:** {timestamp}"
         return f"\U0001F4CC **Source:** [*Lisboa Aberta*](https://dados.cm-lisboa.pt/) | **Updated:** {timestamp}"
+
+    @staticmethod
+    def _strip_lisboa_aberta_source_lines(text: str) -> str:
+        """Remove embedded Lisboa Aberta source footers before final caveats."""
+        kept_lines = [
+            line for line in str(text or "").splitlines()
+            if not ("Lisboa Aberta" in line and re.search(r"\*\*(Fonte|Source):\*\*", line))
+        ]
+        return "\n".join(kept_lines).strip()
+
+    @staticmethod
+    def _build_missing_services_limitation(
+        service_types: List[str],
+        nearby_location: Optional[str],
+        language: str,
+    ) -> str:
+        """Build a scoped limitation when a municipal service lookup has no reliable result."""
+        services = ", ".join(service_types)
+        location = f" perto de {nearby_location}" if language == "pt" and nearby_location else ""
+        location_en = f" near {nearby_location}" if language != "pt" and nearby_location else ""
+        if language == "pt":
+            body = (
+                f"⚠️ Não consegui confirmar resultados fiáveis para **{services}**{location} "
+                "nos dados disponíveis da Lisboa Aberta. "
+                "Para manter a resposta correta, não vou substituir isto por atrações ou locais de outra categoria."
+            )
+        else:
+            body = (
+                f"⚠️ I could not confirm reliable results for **{services}**{location_en} "
+                "in the available Lisboa Aberta data. "
+                "To keep the answer accurate, I will not replace this with attractions or another unrelated category."
+            )
+        return f"{body}\n\n{ResearcherAgent._build_open_data_services_source_line(language)}"
 
     @classmethod
     def _is_event_category_query(cls, user_message: str) -> bool:
@@ -2422,7 +2593,7 @@ class ResearcherAgent(BaseAgent):
         service_types = cls._extract_service_types(query)
         if service_types:
             args: Dict[str, Any] = {"service_type": service_types[0], "max_results": 5}
-            nearby_location = cls._extract_near_location_name(query)
+            nearby_location = cls._clean_nearby_location_text(cls._extract_near_location_name(query))
             if nearby_location:
                 args["near_location_name"] = nearby_location
             return cls._build_tool_call("find_nearby_services", args)
