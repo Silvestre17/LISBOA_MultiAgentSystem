@@ -19,33 +19,21 @@ This page documents what is live, what is periodically refreshed, and what is st
 
 ## ⏱️ Refresh and Staleness Model
 
-> [!NOTE]
-> Not all LISBOA data layers age in the same way. Some are live on request, some are refreshed daily or weekly into repository artefacts, and some are generated locally to speed up transport support workflows.
+Not every source ages the same way. The runtime mixes **live-on-request** queries, **scheduled repository snapshots**, and **local support stores**.
 
 ### Live on Request
 
-These sources are queried at runtime and are not versioned as scraped repository snapshots:
-
-- IPMA
-- Metro de Lisboa
-- Carris Metropolitana
-- Carris GTFS-RT
-- Comboios.live
-- Lisboa Aberta dataset contents when a specific dataset is fetched on demand
+Queried at runtime, not versioned as scraped repository snapshots:
+IPMA · Metro de Lisboa · Carris Metropolitana · Carris GTFS-RT · Comboios.live · Lisboa Aberta dataset contents (when a specific dataset is fetched on demand).
 
 ### Scheduled Repository Refresh
 
 | Workflow | Schedule or trigger | What it updates |
 |----------|---------------------|-----------------|
-| `data_pipeline.yml` | daily at **04:00 UTC**, plus manual selector | VisitLisboa event JSON every day and place JSON on Mondays; manual runs can target events, places, or both |
-| `sync_vector_db.yml` | `workflow_run` after successful data update, plus manual trigger | incremental ChromaDB sync for changed collections |
+| `data_pipeline.yml` | daily at **04:00 UTC**, plus manual selector | VisitLisboa events daily, places weekly on Mondays; manual runs target events, places, or both |
+| `sync_vector_db.yml` | `workflow_run` after a successful data update, plus manual trigger | incremental ChromaDB sync for changed collections |
 
-In practice:
-
-- VisitLisboa **events** are scraped daily
-- VisitLisboa **places** are scraped weekly on Mondays during scheduled runs
-- manual runs can choose **events**, **places**, or **both**
-- vector collections are then updated incrementally instead of being rebuilt from scratch every time
+Vector collections are updated **incrementally** rather than rebuilt from scratch.
 
 ## 🗂️ Scraped JSON Artefacts
 

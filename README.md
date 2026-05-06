@@ -40,9 +40,9 @@ LISBOA is a Master's thesis project at NOVA IMS that implements an intelligent m
 
 The supported user-facing entrypoint is `app.py`. The current runtime is multi-agent by default (`Config.USE_MULTI_AGENT = True`).
 
-> Start here for the guided repo tour: [`docs/00_INDEX.md`](./docs/00_INDEX.md)
-
-> Conceptual thesis/framework figure: [`img/LISBOA_Framework_fev2026.png`](./img/LISBOA_Framework_fev2026.png)
+<p align="center">
+  <img src="./img/LISBOA_Framework.png" alt="LISBOA framework figure" width="720">
+</p>
 
 <a id="quick-links"></a>
 ## 🔗 Quick Links
@@ -50,7 +50,7 @@ The supported user-facing entrypoint is `app.py`. The current runtime is multi-a
 - [👥 Who the System Serves](#who-the-system-serves)
 - [📊 Current System Snapshot](#current-system-snapshot)
 - [🏗️ System Architecture](#system-architecture)
-- [🖼️ Framework Figure](./img/LISBOA_Framework_fev2026.png)
+- [🖼️ Framework Figure](./img/LISBOA_Framework.png)
 - [🌐 Data Sources and Tool Inventory](#data-sources-and-tool-inventory)
 - [🧪 Evaluation and Research Workflow](#evaluation-and-research-workflow)
 - [📚 Documentation Hub](#documentation-hub)
@@ -97,14 +97,11 @@ The supported user-facing entrypoint is `app.py`. The current runtime is multi-a
 
 ## ✨ Core Capabilities
 
-LISBOA currently supports:
-
-- 🌦️ Real-Time Weather queries through IPMA
-- 🚇 Real-Time Transport queries across Metro de Lisboa, Carris Metropolitana, Carris Urban, CP, and multimodal routing
-- 📚 Real-Time Tourism and local knowledge retrieval via *VisitLisboa*, *Lisboa Aberta*, semantic vector search, and web fallback search
-- 🧭 Itinerary synthesis that combines user preferences, timing, mobility constraints, and live operational context
-- ✅ Quality Assurance validation before final multi-step responses are returned
-- 🧪 Evaluation workflows for benchmark, ablation, strict live tool coverage, and calibration
+- 🌦️ **Weather** (IPMA): warnings, 5-day forecast, current summary, Portugal-wide overview
+- 🚇 **Mobility**: Metro de Lisboa, Carris Metropolitana, Carris Urban, CP, and multimodal routing
+- 📚 **Local knowledge**: VisitLisboa events/places, Lisboa Aberta open data, indexed Lisbon guide PDF, web fallback
+- 🧭 **Itinerary synthesis** with weather, transport, and preference grounding
+- ✅ **QA validation** before final answers; **strict live coverage** of the exported tool registry
 
 <a id="system-architecture"></a>
 ## 🏗️ System Architecture
@@ -134,13 +131,12 @@ User query
 
 ### Response Flow
 
-1. `SupervisorAgent.route()` decides whether the request should be handled directly or forwarded to worker agents.
-2. Worker agents run in parallel when the query spans multiple domains.
-3. `QualityAssuranceAgent.validate()` checks completeness, factual consistency, and user-context alignment.
-4. If the route includes planning, `PlannerAgent.synthesize()` creates the final itinerary.
-5. Simple or single-domain requests may bypass the planner and return directly from the supervisor or from combined worker outputs.
+1. `SupervisorAgent.route()` decides whether to answer directly or invoke workers.
+2. Workers run **in parallel** when the query spans multiple domains.
+3. `QualityAssuranceAgent.validate()` enforces completeness, factual consistency, and language alignment.
+4. For planning queries, `PlannerAgent.synthesize()` writes the final itinerary; otherwise the supervisor or combined worker output is returned directly.
 
-This means the planner is **not** the universal final responder. It is the final synthesizer **for planning queries**.
+> The planner is **not** the universal final responder — it only synthesizes itineraries.
 
 ## 🧰 Technology Stack
 
@@ -162,73 +158,42 @@ This means the planner is **not** the universal final responder. It is the final
 <a id="data-sources-and-tool-inventory"></a>
 ## 🌐 Data Sources and Tool Inventory
 
-### Live APIs
+**45 exported LangChain tools** (`tools/__init__.py`), grouped by domain:
 
-| Source | Tools | Coverage |
-|--------|------:|----------|
-| IPMA | 4 | warnings, 5-day forecast, current summary, Portugal-wide overview |
-| Metro de Lisboa | 6 | line status, station wait times, line wait times, nearest station, frequencies, station list |
-| Carris Metropolitana | 8 | alerts, stops, lines, route discovery, live positions, departures |
-| Carris Urban | 8 | GTFS and GTFS-RT routes, stops, arrivals, realtime vehicles, ETA, frequency |
-| CP / Comboios.live | 6 | train status, station search, schedules, routes, trip planning, frequency |
-| Multi-modal transport | 2 | cross-provider status and routing |
+| Domain | Tools | Source |
+|--------|------:|--------|
+| Weather | **4** | IPMA |
+| Metro de Lisboa | **6** | Official API + public fallback |
+| Carris Metropolitana | **8** | REST API |
+| Carris Urban | **8** | GTFS + GTFS-RT |
+| CP / Comboios.live | **6** | Live API + local GTFS |
+| Multimodal routing | **2** | Composed cross-provider |
+| VisitLisboa | **5** | Scraped JSON + ChromaDB |
+| Lisboa Aberta | **5** | GeoJSON open data |
+| Web fallback | **1** | Tavily search |
 
-### Indexed and On-Demand Knowledge
+The Lisbon guide PDF is served through internal vector search (not a separate exported tool). Strict live coverage in `tests/fixtures/tool_coverage_manifest.json` ensures every exported tool is exercised.
 
-| Source | Tools | Coverage |
-|--------|------:|----------|
-| VisitLisboa | 5 | places, attractions, events, categories, semantic tourism search |
-| Lisboa Aberta | 5 | nearby services, dataset metadata, category browsing, place search |
-| Lisbon guide PDF | internal vector search | semantic retrieval from the indexed guide |
-| Web knowledge fallback | 1 | Lisbon history and culture search |
-
-The authoritative export registry lives in `tools/__init__.py`, and the strict live coverage manifest in `tests/fixtures/tool_coverage_manifest.json` ensures every exported tool is referenced at least once in evaluation assets.
-
-More detail:
-
-- [`docs/03_TOOLS_REFERENCE.md`](./docs/03_TOOLS_REFERENCE.md)
-- [`docs/04_DATA_SOURCES_AND_SCHEMAS.md`](./docs/04_DATA_SOURCES_AND_SCHEMAS.md)
+→ Detail: [`docs/03_TOOLS_REFERENCE.md`](./docs/03_TOOLS_REFERENCE.md) · [`docs/04_DATA_SOURCES_AND_SCHEMAS.md`](./docs/04_DATA_SOURCES_AND_SCHEMAS.md)
 
 <a id="evaluation-and-research-workflow"></a>
 ## 🧪 Evaluation and Research Workflow
 
-The evaluation stack lives in `eval/` and combines LLM judgment, deterministic metrics, strict live coverage, and calibration support.
+Research-grade stack under `eval/` combining LLM-as-a-Judge, deterministic metrics, strict live coverage, and human calibration.
 
-> Full workflow and output schema details: [`eval/README.md`](./eval/README.md)
+| Layer | Entrypoint | Output |
+|------|-----------|--------|
+| Fast deterministic checks | `eval/tests/` | test output only |
+| Benchmark (isolated workers) | `eval/run_benchmark.py` | `eval/results/benchmark/` |
+| Ablation (zero-shot vs LISBOA) | `eval/run_ablation.py` | `eval/results/ablation/` |
+| Strict live tool coverage | `tests/test_tool_prompt_coverage.py` | `eval/results/coverage/` |
+| Human ↔ judge calibration | `eval/human_calibration/run_calibration.py` | `eval/results/calibration/` |
 
-The companion evaluation guide also documents optional coverage and calibration artefacts created on demand, the latest CSV exports from the analysis notebook, and figure outputs under `eval/results/figures/`.
+**Ground truth**: 72 entries across 6 domains — weather (13), transport (36), researcher (13), multi-agent (3), greeting (3), out-of-scope (4).
 
-### Evaluation Layers
+**Measured**: factual accuracy, tool usage, completeness, relevance, response quality (LLM-as-a-Judge); tool *P/R/F1*, response heuristics, deterministic Metro route validation; reproducibility metadata, token usage, and optional cost accounting.
 
-| Layer | Purpose | Main entrypoints | Output location |
-|------|---------|------------------|-----------------|
-| Fast deterministic checks | validate datasets, utilities, validators, judge helpers, and the coverage manifest | `eval/tests/`, especially `eval/tests/test_dataset_integrity.py` | test output only |
-| Benchmark | evaluate isolated worker agents | `eval/run_benchmark.py` | `eval/results/benchmark/` |
-| Ablation | compare zero-shot vs LISBOA pipeline | `eval/run_ablation.py` | `eval/results/ablation/` |
-| Strict live coverage | verify real use of the exported tool registry | `tests/test_tool_prompt_coverage.py` | `eval/results/coverage/` |
-| Calibration | compare human scores vs judge scores | `eval/human_calibration/run_calibration.py` | `eval/results/calibration/` |
-
-### Ground Truth Coverage
-
-72 evaluation entries across 6 domains:
-
-| Domain | Count |
-|--------|------:|
-| `weather` | 13 |
-| `transport` | 36 |
-| `researcher` | 13 |
-| `multi_agent` | 3 |
-| `greeting` | 3 |
-| `out_of_scope` | 4 |
-
-### What the Pipeline Measures
-
-- 📏 LLM-as-a-Judge scoring for factual accuracy, tool usage, completeness, relevance, and response quality
-- 🧮 Deterministic tool *Precision*, *Recall*, and *F1*
-- 🛡️ Response heuristics such as tool leaks, language compliance, response length, hallucinated feature detection, and emoji density
-- 🚇 deterministic Metro route validation for transport answers
-- 💰 reproducibility metadata, token usage, and optional cost accounting
-- 📓 benchmark and ablation analysis via [`eval/benchmark_ablation_analysis.ipynb`](./eval/benchmark_ablation_analysis.ipynb)
+→ Full schema and methodology: [`eval/README.md`](./eval/README.md) · Notebook: [`eval/benchmark_ablation_analysis.ipynb`](./eval/benchmark_ablation_analysis.ipynb)
 
 ## 🧱 Repository Structure
 
@@ -261,7 +226,6 @@ Need a guided reading order? Open [`docs/00_INDEX.md`](./docs/00_INDEX.md).
 | [`docs/03_TOOLS_REFERENCE.md`](./docs/03_TOOLS_REFERENCE.md) | Exact tool inventory and agent-to-tool mapping |
 | [`docs/04_DATA_SOURCES_AND_SCHEMAS.md`](./docs/04_DATA_SOURCES_AND_SCHEMAS.md) | Data sources, refresh cadences, schemas, and vector collections |
 | [`docs/05_DEPLOYMENT_AND_OPERATIONS.md`](./docs/05_DEPLOYMENT_AND_OPERATIONS.md) | Environment setup, automation, troubleshooting, and operations |
-| [`docs/06_FUTURE_ENHANCEMENTS.md`](./docs/06_FUTURE_ENHANCEMENTS.md) | Roadmap and next-step ideas |
 | [`eval/README.md`](./eval/README.md) | Evaluation pipeline, benchmark logic, live coverage, and artefact structure |
 | [`eval/benchmark_ablation_analysis.ipynb`](./eval/benchmark_ablation_analysis.ipynb) | Analysis notebook for benchmark and ablation outputs |
 
@@ -275,105 +239,47 @@ Need a guided reading order? Open [`docs/00_INDEX.md`](./docs/00_INDEX.md).
 <a id="getting-started"></a>
 ## 🚀 Getting Started
 
-### Prerequisites
+**Prerequisites**: Python 3.10+, Git, and one configured LLM provider (***Azure OpenAI***, ***OpenAI***, or ***LM Studio***). ***Metro*** credentials and a ***Tavily API*** key are optional.
 
-- **Python 3.10+**
-- **Git**
-- **One configured LLM provider**, either Azure OpenAI, OpenAI, or LM Studio
-- **Optional Metro credentials** for the official Metro de Lisboa realtime endpoints
+```bash
+# 1. Clone
+git clone https://github.com/Silvestre17/LISBOA_MultiAgentSystem.git
+cd LISBOA_MultiAgentSystem
 
-### Installation
+# 2. Install (production runtime)
+pip install -r requirements.txt
+# ...or full local env (scraping, eval, notebooks, CUDA-enabled PyTorch):
+# conda env create -f environment_local_gpu.yml && conda activate lisboa_thesis2026
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/Silvestre17/LISBOA_MultiAgentSystem.git
-   cd LISBOA_MultiAgentSystem
-   ```
+# 3. Configure secrets
+copy .env.example .env   # edit with your provider keys
 
-2. **Install dependencies**
+# 4. Build vector store and launch
+python tools/vector_store.py
+streamlit run app.py
+```
 
-  Production or Streamlit-only runtime:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-  Full local environment with scraping, tests, evaluation, notebooks, and CUDA-enabled PyTorch on NVIDIA systems:
-   ```bash
-  conda env create -f environment_local_gpu.yml
-  conda activate lisboa_thesis2026
-  ```
-
-  If you already created the environment manually and only need the local-only extras:
-  ```bash
-  pip install -r requirements_all.txt
-   ```
-
-### Environment Setup
-
-Copy [`.env.example`](./.env.example) to `.env` and fill in only the providers and services you plan to use.
-
-Common entries:
-
-- `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT_NAME`
-- or `OPENAI_API_KEY`, `OPENAI_MODEL_NAME`
-- `METRO_CONSUMER_KEY`, `METRO_CONSUMER_SECRET` for official Metro realtime data
-- `TAVILY_API_KEY` for web search
-- `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, `LANGSMITH_ENDPOINT` for optional LangSmith tracing
-- optionally `LANGSMITH_WORKSPACE_ID` if the LangSmith API key is linked to multiple workspaces
-
-LM Studio can also be used locally with no API key, as documented in [`.env.example`](./.env.example) and [`config.py`](./config.py).
-
-Notes for tracing:
-
-- the code still accepts legacy `LANGCHAIN_*` tracing aliases for backward compatibility, but `LANGSMITH_*` is now the recommended setup
-- each real user message should produce exactly one top-level LangSmith trace, with supervisor, worker agents, and tool spans nested inside it
-- the `Save & Connect` or provider health-check flows use raw HTTP requests on purpose and do **not** create LangSmith traces, so they do not consume the free-tier tracing quota
-
-### First Run
-
-1. **Build or refresh the vector store**
-   ```bash
-   python tools/vector_store.py
-   ```
-
-2. **Run the application**
-   ```bash
-   streamlit run app.py
-   ```
-
-More operational detail is available in [`docs/05_DEPLOYMENT_AND_OPERATIONS.md`](./docs/05_DEPLOYMENT_AND_OPERATIONS.md).
+Full provider, tracing, and TLS notes: [`docs/05_DEPLOYMENT_AND_OPERATIONS.md`](./docs/05_DEPLOYMENT_AND_OPERATIONS.md).
 
 ## ✅ Testing and Evaluation
 
-### Fast Validation
-
 ```bash
+# Fast deterministic checks
 python scripts/syntax_check.py
-python -m pytest eval/tests/test_dataset_integrity.py eval/tests/test_benchmark_utils.py eval/tests/test_cost_accounting.py eval/tests/test_llm_judge.py eval/tests/test_validators.py -v
-python -m pytest tests/test_qa_agent.py tests/test_audit_fixes.py tests/test_response_guardrails.py tests/test_transport_parity_and_rendering.py tests/test_langsmith_tracing.py tests/test_metro_api_fallback_messaging.py -q
+python -m pytest tests/ eval/tests/ -q
+
+# Single-prompt smoke test
 python scripts/run_prompts.py --suite smoke
-```
 
-### Main Evaluation Commands
-
-```bash
+# Benchmark / ablation (module form required)
 python -m eval.run_benchmark --mode run_test
-python -m eval.run_benchmark --mode full
-python -m eval.run_benchmark --limit 5
-python -m eval.run_ablation --mode run_test
-python -m eval.run_ablation --mode full
+python -m eval.run_ablation  --mode run_test
+
+# Strict live coverage of all 45 exported tools
 python -m pytest tests/test_tool_prompt_coverage.py --run-live -m "live and coverage" -v
 ```
 
-### Artefact Locations
-
-- benchmark outputs: `eval/results/benchmark/`
-- ablation outputs: `eval/results/ablation/`
-- strict live coverage outputs: `eval/results/coverage/` (created when the live suite runs)
-- calibration outputs: `eval/results/calibration/` (created when calibration runs)
-- notebook figure exports: `eval/results/figures/`
-
-See [`eval/README.md`](./eval/README.md) for the complete evaluation workflow, output schemas, and environment prerequisites.
+Artefacts land under `eval/results/{benchmark,ablation,coverage,calibration,figures}/`. See [`eval/README.md`](./eval/README.md) for full output schemas.
 
 ## ⚙️ Automation
 

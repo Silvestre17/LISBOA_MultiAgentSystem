@@ -6,7 +6,7 @@ This documentation set describes the repository as it exists in code today. It h
 > Public setup, runtime, and validation instructions support `app.py` as the documented entrypoint.
 
 > [!NOTE]
-> The latest conceptual thesis/framework figure stored in the repository is [`../img/LISBOA_Framework_fev2026.png`](../img/LISBOA_Framework_fev2026.png).
+> Conceptual thesis framework figure: [`../img/LISBOA_Framework.png`](../img/LISBOA_Framework.png) (vector source: [`../img/LISBOA_Framework.svg`](../img/LISBOA_Framework.svg)).
 
 ## 🔎 At a Glance
 
@@ -62,7 +62,6 @@ The following files are treated as the source of truth when counts, roles, or wo
 
 ## 📝 Notes
 
-- Some tool outputs and upstream payloads can contain Portuguese text because several Lisbon public sources publish in Portuguese.
-- As implemented in the 2026-04 runtime, final user-facing answers are emitted only in PT-PT or English. Inputs detected in other languages receive an English answer with a short bilingual note.
-- `tools/vector_store.py` is operational infrastructure and CLI support. It is important, but it is not counted as one of the 45 exported runtime tools.
-- The `docs/` set intentionally focuses on the supported public application path centered on `app.py`. Auxiliary thesis material may still exist in the repository, but it is not part of the public operating path unless explicitly stated.
+- Some upstream payloads are in Portuguese because Lisbon public sources publish in Portuguese; final user-facing answers are emitted only in **PT-PT or English** (other input languages get an English answer with a short bilingual note).
+- `tools/vector_store.py` is operational infrastructure and is **not** counted among the 45 exported runtime tools.
+- The `docs/` set documents the supported public path centered on `app.py`. Auxiliary thesis material may exist but is not part of the public operating path unless explicitly stated.

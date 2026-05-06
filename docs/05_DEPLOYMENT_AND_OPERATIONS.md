@@ -77,10 +77,10 @@ Legacy `LANGCHAIN_*` tracing aliases are still accepted by the runtime for backw
 
 ### Provider Behavior Notes
 
-- The default runtime mode is multi-agent.
-- Per-agent model mappings are configured in `config.py` through `AGENT_MODELS_AZURE`, `AGENT_MODELS_OPENAI`, and `AGENT_MODELS_LMSTUDIO`.
-- The Streamlit sidebar in `app.py` can override the active provider and per-agent model selection at runtime.
-- The UI provider connection tests intentionally use raw HTTP requests instead of LangChain or LangGraph invocation paths, so these health checks do not create LangSmith traces.
+- Default runtime mode is **multi-agent** (`Config.USE_MULTI_AGENT = True`).
+- Per-agent model mappings: `AGENT_MODELS_AZURE`, `AGENT_MODELS_OPENAI`, `AGENT_MODELS_LMSTUDIO` in `config.py`.
+- The Streamlit sidebar can override active provider and per-agent model at runtime.
+- UI provider connection tests use raw HTTP requests (not LangChain), so health checks do **not** create LangSmith traces.
 
 ### LangSmith Tracing Notes
 
