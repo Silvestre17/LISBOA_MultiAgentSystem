@@ -146,6 +146,8 @@ The dataset is designed so that `expected_tools` collectively reference the expo
 - relevance
 - response quality
 
+For the isolated worker benchmark, the persisted `composite_score` remains the mean of all five dimensions because tool selection is part of the worker-agent contract. For the ablation study, the primary persisted `composite_score` is the four-dimension `ablation_quality_score`, the mean of factual accuracy, completeness, relevance, and response quality. `tool_usage` is excluded from the ablation primary score because the zero-shot arm is not allowed to use tools. Tool usage and deterministic Tool F1 remain reported separately as LISBOA grounding evidence.
+
 As of 2026-04, the benchmark and ablation runners can evaluate the same response with more than one judge model, persist every raw `judge_runs` entry, and store an averaged compatibility `scores` block so downstream readers do not need to recompute the mean manually.
 
 If one judge fails, that failed run is still persisted in `judge_runs` and flagged in `judge_summary`, but it is excluded from the averaged compatibility `scores` block.
@@ -163,6 +165,7 @@ Bias controls already present in the judge flow include:
 - explicit rubric descriptors
 - anti-mean-reversion guidance
 - expected vs actual tool comparison in the prompt
+- symmetric reference context from `expected_facts` and `expected_behavior`, used for zero-shot and LISBOA factuality judgment alongside retrieved tool context
 - `temperature = 0` for deterministic judgment
 
 ### 🧮 Deterministic metrics and validators
@@ -244,6 +247,8 @@ Current benchmark records also persist `response_generation_mode`, `response_usa
 - an **open-model pair**, where zero-shot and LISBOA both use the open response profile
 
 Within each pair, the zero-shot and LISBOA arms are judged by the same multi-judge matrix. By default, ablation runs focus on `weather`, `transport`, `researcher`, and `multi_agent` queries, excluding `greeting` and `out_of_scope` shortcuts because LISBOA handles those through supervisor-level direct responses rather than the grounded pipeline under study. Persisted ablation records keep the primary compatibility `metrics` block for the primary profile and store every profile-specific comparison under `comparisons`.
+
+The zero-shot arm is a **no-tool LISBOA-instructed baseline**, not a generic raw LLM call. It receives the same high-level Lisbon/AML scope and limitation instructions, but it cannot access tools, APIs, retrieval, live feeds, or web search.
 
 The run-level ablation summary also persists `zero_shot_counts`, `lisboa_counts`, `winner_counts`, and per-domain arm counts so failed runs are visible instead of disappearing into averaged metrics.
 
@@ -339,6 +344,18 @@ python -m eval.human_calibration.run_calibration --human eval/human_calibration/
 ```
 
 Use `--judge-source average` (default) to read the compatibility-average `scores` block, or pass a specific judge model id from `judge_runs` to calibrate one judge independently.
+
+### Paired statistical analysis
+
+```bash
+python -m eval.statistical_analysis --benchmark eval/results/benchmark/benchmark_results_YYYYMMDD_HHMMSS.json --ablation eval/results/ablation/ablation_results_YYYYMMDD_HHMMSS.json
+```
+
+The statistical analysis emits JSON and CSV artefacts under `eval/results/statistics/`. It computes paired Wilcoxon signed-rank tests, paired bootstrap confidence intervals for mean differences, and rank-biserial effect sizes for:
+
+- GPT-5.4-mini versus Kimi-K2.5 per isolated benchmark agent/domain.
+- LISBOA versus zero-shot per ablation response profile/model.
+- Each judged dimension, with ablation quality using the four non-tool primary dimensions and `tool_usage` retained as a supporting dimension.
 
 ## 🔐 Environment requirements
 

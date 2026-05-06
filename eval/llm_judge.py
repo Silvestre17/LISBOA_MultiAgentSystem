@@ -45,9 +45,9 @@ class LLMJudgeScore(BaseModel):
         ...,
         description=(
             "Write a 3-5 sentence analysis BEFORE assigning scores. "
-            "For each dimension, note specific evidence from the RETRIEVED "
-            "CONTEXT and GENERATED RESPONSE. Mention any hallucinated facts, "
-            "missing tools, or quality issues you found."
+            "For each dimension, note specific evidence from the REFERENCE "
+            "CONTEXT, RETRIEVED CONTEXT, and GENERATED RESPONSE. Mention any "
+            "hallucinated facts, missing tools, or quality issues you found."
         ),
     )
     factual_accuracy: int = Field(
@@ -55,12 +55,12 @@ class LLMJudgeScore(BaseModel):
         ge=1,
         le=5,
         description=(
-            "1 = Response contains fabricated facts NOT in RETRIEVED CONTEXT "
-            "(hallucinated stations, temperatures, events). "
+            "1 = Response contains fabricated facts not supported by retrieved "
+            "context, reference facts, expected behavior, or explicit limitations. "
             "2 = Multiple factual errors or unsupported claims. "
             "3 = Mostly accurate but with minor unsupported details. "
-            "4 = All major facts are grounded in context with trivial omissions. "
-            "5 = Every fact and route is strictly supported by RETRIEVED CONTEXT."
+            "4 = All major facts are grounded in the available evidence with trivial omissions. "
+            "5 = Every fact, route, and limitation is strictly supported by the available evidence."
         ),
     )
     tool_usage: int = Field(
@@ -136,7 +136,7 @@ You will evaluate the response on 5 dimensions using a 1-5 Likert scale.
 
 CRITICAL INSTRUCTIONS:
 1. Write your reasoning FIRST (3-5 sentences). Analyze specific evidence before assigning any score.
-2. For Factual Accuracy: verify that facts in the GENERATED RESPONSE are supported by the RETRIEVED CONTEXT. If the agent invents details NOT present in the context, lower the score accordingly.
+2. For Factual Accuracy: verify facts against the RETRIEVED CONTEXT when available and against the REFERENCE CONTEXT in every case. The REFERENCE CONTEXT includes expected facts and explicit limitations from the dataset. Do not penalize zero-shot only because no tools were called; penalize unsupported claims, invented live data, or contradictions with the reference.
 3. For Tool Usage: compare EXPECTED TOOLS against ACTUAL TOOLS USED. Minor redundancies are acceptable if the expected tools are present. If TOOL EXPECTATION is FLEXIBLE, treat EXPECTED TOOLS as reference examples and do not penalize a different reasonable tool path.
 4. If the query is a greeting, out-of-scope, or an edge case where no facts or tools are expected, score highly (5) if the agent handled it gracefully.
 5. **Length Bias Mitigation**: Evaluate based on accuracy and conciseness. A concise, accurate answer is excellent. Do not penalize for being direct.
@@ -154,6 +154,9 @@ CRITICAL INSTRUCTIONS:
 
 --- EXPECTED FACTS TO BE PRESENT ---
 {expected_facts}
+
+--- REFERENCE CONTEXT FOR FACTUALITY ---
+{reference_context}
 
 --- TOOL EXPECTATION ---
 {tool_expectation}
@@ -309,6 +312,7 @@ class LLMJudge:
         actual_tools: list[str],
         retrieved_context: str,
         response: str,
+        reference_context: str | None = None,
         pricing_by_model: dict[str, Any] | None = None,
         tool_expectation: str = "strict",
         acceptable_tool_sets: list[list[str]] | None = None,
@@ -322,6 +326,8 @@ class LLMJudge:
             actual_tools: Tools that were actually called by the agent.
             retrieved_context: Raw output from tool calls.
             response: The agent's final generated response.
+            reference_context: Symmetric benchmark reference used for factuality,
+                usually built from expected facts and expected behavior.
             pricing_by_model: Optional pricing catalog keyed by model name or
                 provider::model, with prices in USD per million tokens.
             tool_expectation: Whether tool usage is judged strictly or flexibly.
@@ -346,10 +352,16 @@ class LLMJudge:
             )
             or "No alternative strict tool sets defined."
         )
+        reference_context_str = (
+            reference_context.strip()
+            if reference_context and reference_context.strip()
+            else facts_str
+        )
 
         prompt_val = self.prompt.invoke({
             "query": query,
             "expected_facts": facts_str,
+            "reference_context": reference_context_str,
             "tool_expectation": tool_expectation.upper(),
             "expected_tools": exp_tools_str,
             "acceptable_tool_sets": acceptable_tool_sets_str,
@@ -438,12 +450,12 @@ class LLMJudge:
                 else build_usage_payload({}, model_id=evaluation_model_id, call_count=1)
             )
             return {
-                "factual_accuracy": 0,
-                "tool_usage": 0,
-                "completeness": 0,
-                "relevance": 0,
-                "response_quality": 0,
-                "composite_score": 0.0,
+                "factual_accuracy": None,
+                "tool_usage": None,
+                "completeness": None,
+                "relevance": None,
+                "response_quality": None,
+                "composite_score": None,
                 "reasoning": f"Judge Failed: {str(e)}",
                 "evaluation_usage": empty_usage,
                 "evaluation_cost_usd": build_cost_payload(

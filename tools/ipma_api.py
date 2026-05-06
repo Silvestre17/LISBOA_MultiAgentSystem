@@ -401,7 +401,7 @@ def get_weather_warnings(area: str = "LSB") -> str:
 
     if not active_warnings:
         suffix = f" for {area_label}" if area_label else ""
-        return f"✅ No active weather warnings{suffix}.\n\n🌤️ Weather conditions are normal."
+        return f"✅ No active weather warnings{suffix}."
 
     # Sort by severity (red > orange > yellow), then by start time
     active_warnings.sort(
@@ -450,7 +450,7 @@ def get_weather_warnings(area: str = "LSB") -> str:
 
 
 @tool
-def get_weather_forecast(days: int = 3) -> str:
+def get_weather_forecast(days: int = 3, day_offset: int = 0) -> str:
     """
     Gets the daily weather forecast for Lisbon from IPMA.
 
@@ -462,6 +462,8 @@ def get_weather_forecast(days: int = 3) -> str:
 
     Args:
         days (int): Number of days to forecast (1-5, default: 3).
+        day_offset (int): Number of days from today to start the forecast window.
+            Use 0 for today, 1 for tomorrow, up to 4 for the last available day.
 
     Returns:
         str: Formatted weather forecast with temperatures, precipitation,
@@ -472,7 +474,14 @@ def get_weather_forecast(days: int = 3) -> str:
         >>> get_weather_forecast(5)
     """
 
-    if days > 5:
+    if day_offset < 0 or day_offset > 4:
+        max_supported_date = (datetime.now() + timedelta(days=4)).strftime("%Y-%m-%d")
+        return (
+            "⚠️ Lisbon weather forecast from IPMA is only available for the next 5 days. "
+            f"I can't confirm conditions beyond {max_supported_date}."
+        )
+
+    if days > 5 or days + day_offset > 5:
         max_supported_date = (datetime.now() + timedelta(days=4)).strftime("%Y-%m-%d")
         return (
             "⚠️ Lisbon weather forecast from IPMA is only available for the next 5 days. "
@@ -490,9 +499,12 @@ def get_weather_forecast(days: int = 3) -> str:
     if not forecast_data:
         return "❌ No forecast data available."
 
-    # Limit to requested days
-    days = min(max(1, days), len(forecast_data), 5)
-    forecast_data = forecast_data[:days]
+    # Limit to requested window.
+    days = min(max(1, days), len(forecast_data) - day_offset, 5 - day_offset)
+    forecast_data = forecast_data[day_offset:day_offset + days]
+
+    if not forecast_data:
+        return "❌ No forecast data available for the requested forecast window."
 
     # Get update time
     update_time = data.get('dataUpdate', 'N/A')
@@ -589,10 +601,9 @@ def get_portugal_weather_overview(day: int = 0) -> str:
     forecast_date = data.get('forecastDate', 'N/A')
 
     response = f"🇵🇹 Portugal Weather Overview - {day_names[day]}\n"
-    response += f"{'=' * 50}\n"
-    response += f"📅 Forecast Date: {forecast_date}\n"
+    response += f"📅 Forecast date — {forecast_date}\n"
     response += f"🔄 Updated: {update_time}\n"
-    response += f"📊 Locations: {len(forecast_data)}\n\n"
+    response += f"📊 Locations — {len(forecast_data)}\n\n"
 
     # Find Lisbon in the data (globalIdLocal = 1110600)
     lisbon_data = None
@@ -602,8 +613,7 @@ def get_portugal_weather_overview(day: int = 0) -> str:
             break
 
     if lisbon_data:
-        response += "🏙️ **LISBON (Focus Area)**\n"
-        response += "-" * 30 + "\n"
+        response += "🏙️ Lisbon (focus area)\n"
 
         weather_type = lisbon_data.get('idWeatherType', 0)
         weather_desc = get_weather_description(weather_type)
@@ -613,8 +623,8 @@ def get_portugal_weather_overview(day: int = 0) -> str:
         wind_dir = lisbon_data.get('predWindDir', '')
         wind_dir_desc = WIND_DIRECTIONS.get(wind_dir, wind_dir)
 
-        response += f"   🌤️ {weather_desc}\n"
-        response += f"   🌡️ {t_min}°C to {t_max}°C\n"
+        response += f"   🌤️ Conditions: {weather_desc}\n"
+        response += f"   🌡️ Temperature: {t_min}°C to {t_max}°C\n"
         response += f"   💧 Precipitation: {precip_prob}%\n"
         response += f"   💨 Wind: {wind_dir_desc}\n\n"
 
@@ -623,10 +633,8 @@ def get_portugal_weather_overview(day: int = 0) -> str:
     temps_max = [float(loc.get('tMax', 0)) for loc in forecast_data if loc.get('tMax')]
 
     if temps_min and temps_max:
-        response += "📈 **Portugal Summary**\n"
-        response += "-" * 30 + "\n"
+        response += "📈 Portugal summary\n"
         response += f"   🌡️ Temperature range: {min(temps_min):.0f}°C to {max(temps_max):.0f}°C\n"
-        response += f"   📍 Coldest: {min(temps_min):.0f}°C | Warmest: {max(temps_max):.0f}°C\n"
 
     return response
 

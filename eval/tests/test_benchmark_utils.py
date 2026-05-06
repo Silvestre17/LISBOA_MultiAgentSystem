@@ -231,6 +231,7 @@ def test_benchmark_judge_receives_flexible_tool_metadata() -> None:
         expected_tools=["a"],
         actual_tools=["b"],
         retrieved_context="ctx",
+        reference_context="Expected facts:\n- fact",
         response="resp",
         response_error=None,
         pricing_by_model=None,
@@ -240,6 +241,7 @@ def test_benchmark_judge_receives_flexible_tool_metadata() -> None:
 
     assert captured["tool_expectation"] == "flexible"
     assert captured["acceptable_tool_sets"] == [["b"]]
+    assert captured["reference_context"] == "Expected facts:\n- fact"
 
 
 def test_ablation_judge_receives_flexible_tool_metadata() -> None:
@@ -269,6 +271,7 @@ def test_ablation_judge_receives_flexible_tool_metadata() -> None:
         expected_tools=["a"],
         actual_tools=["b"],
         retrieved_context="ctx",
+        reference_context="Expected facts:\n- fact",
         response="resp",
         response_error=None,
         pricing_by_model=None,
@@ -278,6 +281,32 @@ def test_ablation_judge_receives_flexible_tool_metadata() -> None:
 
     assert captured["tool_expectation"] == "flexible"
     assert captured["acceptable_tool_sets"] == [["b"]]
+    assert captured["reference_context"] == "Expected facts:\n- fact"
+
+
+def test_ablation_quality_score_excludes_tool_usage() -> None:
+    """Primary ablation score should average equal non-tool dimensions for both arms."""
+    scores = ablation_module._with_ablation_primary_score(
+        {
+            "factual_accuracy": 5,
+            "tool_usage": 1,
+            "completeness": 4,
+            "relevance": 4,
+            "response_quality": 3,
+            "composite_score": 3.4,
+            "reasoning": "Tool use should not drive ablation quality.",
+        }
+    )
+
+    assert scores["ablation_quality_score"] == pytest.approx(4.0)
+    assert scores["composite_score"] == pytest.approx(4.0)
+    assert scores["tool_inclusive_composite_score"] == pytest.approx(3.4)
+    assert scores["ablation_score_dimensions"] == [
+        "factual_accuracy",
+        "completeness",
+        "relevance",
+        "response_quality",
+    ]
 
 
 # ==========================================================================
@@ -556,12 +585,12 @@ class TestBenchmarkSummaryCostAccounting:
                 {
                     "judge_model": "azure::Kimi-K2.5",
                     "scores": {
-                        "factual_accuracy": 0,
-                        "tool_usage": 0,
-                        "completeness": 0,
-                        "relevance": 0,
-                        "response_quality": 0,
-                        "composite_score": 0.0,
+                        "factual_accuracy": None,
+                        "tool_usage": None,
+                        "completeness": None,
+                        "relevance": None,
+                        "response_quality": None,
+                        "composite_score": None,
                         "reasoning": "Judge Failed: empty content.",
                     },
                     "evaluation_usage": {"tokens": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}, "call_count": 1, "usage_available": False},
@@ -704,3 +733,27 @@ class TestAblationZeroShotRetries:
         assert usage["tokens"]["total_tokens"] == 15
         assert attempts["count"] == 2
         mocked_sleep.assert_called_once_with(2.0)
+
+    def test_run_zero_shot_uses_lisboa_no_tool_system_prompt(self, monkeypatch):
+        """Zero-shot should be instruction-matched to LISBOA scope while remaining tool-free."""
+        captured_messages = []
+
+        class FakeLLM:
+            def invoke(self, messages):
+                captured_messages.extend(messages)
+                return SimpleNamespace(content="Scoped baseline response")
+
+        monkeypatch.setattr(ablation_module.LLMFactory, "get_llm", lambda **_kwargs: FakeLLM())
+        monkeypatch.setattr(ablation_module.LLMFactory, "extract_usage_metadata", lambda _response: {})
+
+        response, tools, retrieved_context, _latency, error, _usage = ablation_module.run_zero_shot(
+            "Tell me about Lisbon transport",
+        )
+
+        assert response == "Scoped baseline response"
+        assert tools == []
+        assert retrieved_context == ""
+        assert error is None
+        assert len(captured_messages) == 2
+        assert "no-tool baseline" in captured_messages[0].content
+        assert captured_messages[1].content == "Tell me about Lisbon transport"

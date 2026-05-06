@@ -2328,12 +2328,6 @@ def find_nearest_metro(
     Returns:
         str: Formatted list of nearest metro stations with distances.
     """
-    curated_station_name = None
-    if near_location_name:
-        landmark_info = get_landmark_info(near_location_name)
-        if landmark_info and landmark_info.get("metro"):
-            curated_station_name = _normalize_metro_text(str(landmark_info["metro"]))
-
     # Resolve location if name provided
     if near_location_name and (latitude is None or longitude is None):
         from tools.carrismetropolitana_api import geocode_location
@@ -2349,13 +2343,6 @@ def find_nearest_metro(
         return "❌ Please provide either coordinates or a location name."
 
     nearest = find_nearest_metro_station(latitude, longitude, max_results=5)
-    if curated_station_name:
-        nearest.sort(
-            key=lambda station: (
-                0 if _normalize_metro_text(str(station.get("stop_name", ""))) == curated_station_name else 1,
-                station.get("distance_m", 0),
-            )
-        )
 
     if not nearest:
         return (
@@ -2363,7 +2350,7 @@ def find_nearest_metro(
             "Make sure coordinates are within Lisbon area."
         )
 
-    response = "🚇 Nearest Metro Stations\n\n"
+    response = "### 🚇 **Nearest Metro Stations**\n\n"
 
     for i, station in enumerate(nearest, 1):
         name = station.get("stop_name", "Unknown")

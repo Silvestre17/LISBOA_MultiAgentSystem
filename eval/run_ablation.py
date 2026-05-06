@@ -31,7 +31,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Sequence
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent.graph import MultiAgentAssistant  # For the LISBOA full pipeline comparison
 from agent.llm_factory import LLMFactory
@@ -46,6 +46,7 @@ from config import Config
 from eval.llm_judge import LLMJudge
 from eval.runtime_utils import (
     aggregate_judge_runs,
+    build_reference_context,
     build_cost_payload,
     build_model_id,
     build_model_manifest,
@@ -78,6 +79,15 @@ DEFAULT_ZERO_SHOT_MODEL = "gpt-5.4-mini"
 DEFAULT_OPEN_PROVIDER = "azure"
 DEFAULT_OPEN_MODEL = "Kimi-K2.5"
 DEFAULT_ABLATION_DOMAINS = ("weather", "transport", "researcher", "multi_agent")
+ABLATION_PRIMARY_SCORE_FIELDS = (
+    "factual_accuracy",
+    "completeness",
+    "relevance",
+    "response_quality",
+)
+ZERO_SHOT_BASELINE_SYSTEM_PROMPT = """You are LISBOA's no-tool baseline for an academic ablation study.
+
+Answer as the LISBOA assistant for Lisbon and the Lisbon Metropolitan Area, but do not call or pretend to call tools, APIs, retrieval, live transport feeds, weather services, booking systems, or web search. Keep the same user-facing scope as LISBOA: Lisbon tourism, local services, weather, and urban mobility. If the user asks for live, current, unsupported, or out-of-scope information, state the limitation explicitly instead of inventing data. Match the user's language and keep the response concise, practical, and grounded in general knowledge only."""
 
 
 def _average_tool_f1(blocks: list[dict]) -> float:
@@ -89,6 +99,30 @@ def _average_tool_f1(blocks: list[dict]) -> float:
         if value is not None and metrics.get("tool_metric_scored", True):
             values.append(float(value))
     return round(sum(values) / len(values), 3) if values else 0
+
+
+def _compute_ablation_quality_score(scores: dict[str, object]) -> float | None:
+    """Return the ablation primary score, excluding tool-usage by design."""
+    values = []
+    for field in ABLATION_PRIMARY_SCORE_FIELDS:
+        value = scores.get(field)
+        if value is None:
+            return None
+        values.append(float(value))
+    return round(sum(values) / len(values), 4)
+
+
+def _with_ablation_primary_score(scores: dict[str, object]) -> dict[str, object]:
+    """Attach the four-dimension ablation score while preserving raw judge composite."""
+    updated = dict(scores)
+    tool_inclusive = updated.get("composite_score")
+    if tool_inclusive is not None:
+        updated["tool_inclusive_composite_score"] = tool_inclusive
+    ablation_quality_score = _compute_ablation_quality_score(updated)
+    updated["ablation_quality_score"] = ablation_quality_score
+    updated["ablation_score_dimensions"] = list(ABLATION_PRIMARY_SCORE_FIELDS)
+    updated["composite_score"] = ablation_quality_score
+    return updated
 
 
 DEFAULT_JUDGE_MODELS = [
@@ -323,6 +357,7 @@ def _evaluate_with_judges(
     expected_tools: list[str],
     actual_tools: list[str],
     retrieved_context: str,
+    reference_context: str,
     response: str,
     response_error: str | None,
     pricing_by_model: dict | None,
@@ -363,6 +398,7 @@ def _evaluate_with_judges(
                     expected_tools=expected_tools,
                     actual_tools=actual_tools,
                     retrieved_context=retrieved_context,
+                    reference_context=reference_context,
                     response=response,
                     pricing_by_model=pricing_by_model,
                     tool_expectation=tool_expectation,
@@ -418,7 +454,7 @@ def run_zero_shot(
     provider: str = DEFAULT_ZERO_SHOT_PROVIDER,
     model_name: str = DEFAULT_ZERO_SHOT_MODEL,
 ):
-    """Run the raw zero-shot baseline without LISBOA tool grounding."""
+    """Run the no-tool LISBOA-instructed zero-shot baseline."""
     llm = LLMFactory.get_llm(provider=provider, model=model_name, temperature=0.0)
     model_id = build_model_id(provider, model_name)
 
@@ -427,7 +463,10 @@ def run_zero_shot(
     max_attempts = 3
     for attempt in range(max_attempts):
         try:
-            response = llm.invoke([HumanMessage(content=query)])
+            response = llm.invoke([
+                SystemMessage(content=ZERO_SHOT_BASELINE_SYSTEM_PROMPT),
+                HumanMessage(content=query),
+            ])
             latency = time.time() - start
             response_usage = build_usage_payload(
                 LLMFactory.extract_usage_metadata(response),
@@ -969,6 +1008,10 @@ def run_ablation(
                 "expected_behavior": item.get("expected_behavior"),
                 "expected_facts": item.get("expected_facts", []),
                 "expected_tools": item.get("expected_tools", []),
+                "reference_context": build_reference_context(
+                    expected_facts=item.get("expected_facts", []),
+                    expected_behavior=item.get("expected_behavior"),
+                ),
                 "primary_comparison_profile": primary_profile_key,
                 "comparisons": {},
             }
@@ -1042,13 +1085,17 @@ def run_ablation(
                         expected_tools=item.get("expected_tools", []),
                         actual_tools=zs_tools,
                         retrieved_context=zs_ctx,
+                        reference_context=build_reference_context(
+                            expected_facts=item.get("expected_facts", []),
+                            expected_behavior=item.get("expected_behavior"),
+                        ),
                         response=zs_resp,
                         response_error=zs_err,
                         pricing_by_model=pricing_by_model,
                         tool_expectation=item.get("tool_expectation", "strict"),
                         acceptable_tool_sets=item.get("acceptable_tool_sets"),
                     )
-                    zs_score = dict(zs_aggregated_judges.get("scores", {}))
+                    zs_score = _with_ablation_primary_score(dict(zs_aggregated_judges.get("scores", {})))
                     zs_evaluation_usage = zs_aggregated_judges.get(
                         "evaluation_usage",
                         build_usage_payload({}, model_id=evaluation_model_id, call_count=0),
@@ -1099,13 +1146,17 @@ def run_ablation(
                         expected_tools=item.get("expected_tools", []),
                         actual_tools=ls_tools,
                         retrieved_context=ls_ctx,
+                        reference_context=build_reference_context(
+                            expected_facts=item.get("expected_facts", []),
+                            expected_behavior=item.get("expected_behavior"),
+                        ),
                         response=ls_resp,
                         response_error=ls_err,
                         pricing_by_model=pricing_by_model,
                         tool_expectation=item.get("tool_expectation", "strict"),
                         acceptable_tool_sets=item.get("acceptable_tool_sets"),
                     )
-                    ls_score = dict(ls_aggregated_judges.get("scores", {}))
+                    ls_score = _with_ablation_primary_score(dict(ls_aggregated_judges.get("scores", {})))
                     ls_evaluation_usage = ls_aggregated_judges.get(
                         "evaluation_usage",
                         build_usage_payload({}, model_id=evaluation_model_id, call_count=0),
@@ -1151,6 +1202,8 @@ def run_ablation(
 
                     comparison_block = {
                         "profile": deepcopy(profile_metadata[profile_key]),
+                        "profile_id": str(profile["profile_id"]),
+                        "paradigm": str(profile["paradigm"]),
                         "comparison_usage": comparison_usage,
                         "comparison_cost_usd": comparison_cost,
                         "comparison_summary": {
@@ -1181,6 +1234,10 @@ def run_ablation(
                                 "response": zs_resp,
                                 "tools_used": zs_tools,
                                 "retrieved_context": zs_ctx,
+                                "reference_context": build_reference_context(
+                                    expected_facts=item.get("expected_facts", []),
+                                    expected_behavior=item.get("expected_behavior"),
+                                ),
                                 "response_usage": zs_response_usage,
                                 "response_cost_usd": zs_response_cost,
                                 "agent_usage": {"zero_shot": deepcopy(zs_response_usage)},
@@ -1213,6 +1270,10 @@ def run_ablation(
                                 "response": ls_resp,
                                 "tools_used": ls_tools,
                                 "retrieved_context": ls_ctx,
+                                "reference_context": build_reference_context(
+                                    expected_facts=item.get("expected_facts", []),
+                                    expected_behavior=item.get("expected_behavior"),
+                                ),
                                 "response_usage": ls_response_usage,
                                 "response_cost_usd": ls_response_cost,
                                 "agent_usage": ls_agent_usage,
@@ -1252,6 +1313,12 @@ def run_ablation(
             for profile in comparison_profiles
         }
         summary = deepcopy(profile_summaries.get(primary_profile_key, {}))
+        summary["primary_score"] = {
+            "name": "ablation_quality_score",
+            "dimensions": list(ABLATION_PRIMARY_SCORE_FIELDS),
+            "excluded_dimensions": ["tool_usage"],
+            "note": "Ablation primary means exclude Tool Usage so zero-shot and LISBOA are averaged over identical non-tool quality dimensions. Tool metrics are reported separately for LISBOA.",
+        }
         summary["comparison_profiles"] = profile_summaries
         summary["primary_comparison_profile"] = primary_profile_key
         summary["comparison_profile_order"] = [str(profile["profile_name"]) for profile in comparison_profiles]
@@ -1289,6 +1356,12 @@ def run_ablation(
                         "run_finished_at": run_finished_at.isoformat(),
                         "total_runtime_s": total_runtime_s,
                         "comparison": "zero_shot_vs_lisboa_dual_paradigm",
+                        "primary_score": {
+                            "name": "ablation_quality_score",
+                            "dimensions": list(ABLATION_PRIMARY_SCORE_FIELDS),
+                            "excluded_dimensions": ["tool_usage"],
+                        },
+                        "zero_shot_baseline": "lisboa_instruction_no_tools",
                         "real_services": True,
                         "ablation_domains": active_domains,
                         "pricing_model_count": len(pricing_catalog),

@@ -201,7 +201,7 @@ class TestLLMJudgeEvaluate:
 
     @patch("eval.llm_judge.LLMFactory")
     def test_evaluate_handles_llm_error(self, mock_factory):
-        """Evaluate should return zeros when LLM fails."""
+        """Evaluate should return None scores when LLM judgment fails."""
         mock_llm = MagicMock()
         mock_structured = MagicMock()
         mock_structured.invoke.side_effect = Exception("API Error: rate limit")
@@ -218,7 +218,9 @@ class TestLLMJudgeEvaluate:
             response="Test response",
         )
 
-        assert result["composite_score"] == 0.0
+        assert result["composite_score"] is None
+        assert result["factual_accuracy"] is None
+        assert result["tool_usage"] is None
         assert "Judge Failed" in result["reasoning"]
 
     @patch("eval.llm_judge.LLMFactory")
@@ -300,6 +302,7 @@ class TestLLMJudgeEvaluate:
             query="Test query",
             expected_facts=["Fact A", "Fact B"],
             expected_tools=["tool_a", "tool_b"],
+            reference_context="Expected facts:\n- Fact A\n- Fact B\n\nExpected behavior or limitation:\n- Do not invent live data.",
             acceptable_tool_sets=[["tool_c"]],
             tool_expectation="strict",
             actual_tools=["tool_a"],
@@ -309,3 +312,7 @@ class TestLLMJudgeEvaluate:
 
         # Verify invoke was called (prompt was built and sent)
         assert mock_structured.invoke.called
+        prompt_value = mock_structured.invoke.call_args.args[0]
+        prompt_text = prompt_value.to_string() if hasattr(prompt_value, "to_string") else str(prompt_value)
+        assert "REFERENCE CONTEXT FOR FACTUALITY" in prompt_text
+        assert "Do not invent live data" in prompt_text

@@ -1472,6 +1472,15 @@ def get_routes_at_stop(stop_id: str) -> List[Dict[str, Any]]:
 # ==========================================================================
 
 
+def _format_gtfs_clock(total_minutes: int) -> str:
+    """Format GTFS minutes, marking after-midnight times explicitly."""
+    hour = total_minutes // 60
+    minute = total_minutes % 60
+    if hour >= 24:
+        return f"{hour % 24:02d}:{minute:02d} (next day)"
+    return f"{hour:02d}:{minute:02d}"
+
+
 @tool
 def get_train_status() -> str:
     """
@@ -1647,18 +1656,17 @@ def search_cp_stations(query: str) -> str:
 
         return response
 
-    response = f"🚉 **CP Stations matching '{query}'** ({len(gtfs_matches)} found)\n"
-    response += "=" * 50 + "\n\n"
+    response = f"### 🚉 **CP stations near or matching '{query}'** ({min(len(gtfs_matches), 5)} shown)\n\n"
 
-    for i, stop in enumerate(gtfs_matches[:10], 1):
+    for stop in gtfs_matches[:5]:
         name = stop.get('stop_name', 'Unknown')
         stop_id = stop.get('stop_id', '')
         lat = stop.get('stop_lat', 0)
         lon = stop.get('stop_lon', 0)
 
-        response += f"{i}. **{name}**\n"
-        response += f"   🆔 {stop_id}\n"
-        response += f"   📍 ({lat:.4f}, {lon:.4f})\n"
+        response += f"**🚉 {name}**\n"
+        if lat and lon:
+            response += f"    - 📍 [Open map](https://www.google.com/maps/search/?api=1&query={lat:.4f}%2C{lon:.4f})\n"
 
         # Get routes at this stop
         routes = get_routes_at_stop(stop_id)
@@ -1667,12 +1675,12 @@ def search_cp_stations(query: str) -> str:
                 r.get('route_short_name') or r.get('route_long_name') for r in routes
             ))
             route_names = [n for n in route_names if n]
-            response += f"   🚆 Routes: {', '.join(route_names[:8])}\n"
+            response += f"    - 🚆 **Routes:** {', '.join(route_names[:5])}\n"
 
         response += "\n"
 
-    if len(gtfs_matches) > 10:
-        response += f"... and {len(gtfs_matches) - 10} more stations.\n"
+    if len(gtfs_matches) > 5:
+        response += f"... and {len(gtfs_matches) - 5} more stations.\n"
 
     return response
 
@@ -1761,7 +1769,7 @@ def get_cp_routes() -> str:
         normalized = _normalize_cp_route_name(route_name)
         route_lookup.setdefault(normalized, route)
 
-    response = "🚆 **CP suburban lines around Lisbon (AML)**\n\n"
+    response = "### 🚆 **CP suburban lines around Lisbon (AML)**\n\n"
 
     curated_lines = [
         ("linha de sintra", "Linha de Sintra", "Rossio / Oriente ↔ Sintra"),
@@ -1774,20 +1782,14 @@ def get_cp_routes() -> str:
     for lookup_key, display_name, terminals in curated_lines:
         if routes and lookup_key not in route_lookup:
             continue
-        response += f"🚆 **{display_name}**\n"
-        response += f"   📍 {terminals}\n\n"
+        response += f"**🚆 {display_name}**\n"
+        response += f"    - 📍 {terminals}\n\n"
         visible_count += 1
 
     if visible_count == 0:
-        response += (
-            "⚠️ No AML suburban CP lines were found in the local GTFS snapshot. "
-            "Try again after refreshing the CP GTFS data.\n"
-        )
+        response += "⚠️ No AML suburban CP lines were found in the local GTFS snapshot.\n"
 
-    response += (
-        "ℹ️ LISBOA covers AML suburban rail here. Long-distance services such as "
-        "Alfa Pendular, Intercidades, InterRegional and Regional routes are outside this tool scope."
-    )
+    response += "ℹ️ LISBOA covers AML suburban rail here; long-distance CP services are outside this tool scope."
 
     return response
 
@@ -1964,39 +1966,37 @@ def plan_train_trip(origin: str, destination: str) -> str:
                     route_delay_mins = max(route_delay_mins, delay_mins)
 
         # Build response
-        response = f"🚆 **Comboio: {origin_name} → {dest_name}**\n"
-        response += "=" * 50 + "\n\n"
+        response = f"### 🚆 **Comboio: {origin_name} → {dest_name}**\n\n"
+        response += f"- 📅 **Data:** {_format_pt_datetime(now, include_time=False)}\n\n"
 
         # Summary box at top
-        response += "📊 **RESUMO DA VIAGEM**\n"
+        response += "📊 **Resumo da viagem**\n"
         if multi_route:
             routes_str = ", ".join(distinct_routes)
-            response += f"   🚆 Linhas: **{routes_str}**\n"
+            response += f"    - 🚆 **Linhas:** {routes_str}\n"
         else:
-            response += f"   🚆 Linha: **{route_name}**\n"
+            response += f"    - 🚆 **Linha:** {route_name}\n"
         # Show duration range if trips vary, otherwise single value
         if min_duration == max_duration:
-            response += f"   ⏱️ Duração: **{min_duration} minutos**\n"
+            response += f"    - ⏱️ **Duração:** {min_duration} min\n"
         else:
-            response += f"   ⏱️ Duração: **{min_duration}-{max_duration} minutos**\n"
+            response += f"    - ⏱️ **Duração:** {min_duration}-{max_duration} min\n"
         # Only show delay status if we have real-time info
         if realtime_trains:
             if route_has_delays:
-                response += f"   📍 Estado: ⚠️ Alguns comboios com +{route_delay_mins}min atraso\n"
+                response += f"    - ⚠️ **Estado:** alguns comboios com +{route_delay_mins} min de atraso\n"
             else:
-                response += "   📍 Estado: ✅ Comboios a horas (tempo real)\n"
+                response += "    - ✅ **Estado:** comboios a horas no feed em tempo real\n"
         else:
-            response += "   📍 Estado: ℹ️ Sem dados em tempo real\n"
-        response += f"   📊 Partidas restantes hoje: **{len(trips)}**\n"
+            response += "    - ℹ️ **Estado:** sem dados em tempo real\n"
+        response += f"    - 📊 **Partidas restantes hoje:** {len(trips)}\n"
         response += "\n"
-
-        response += "-" * 50 + "\n"
 
         # Show a compact set of departures; the full list is too noisy in Streamlit.
         display_count = min(3, len(trips))
-        response += f"📋 **Próximas {display_count} Partidas:**\n\n"
+        response += f"📋 **Próximas {display_count} partidas**\n"
 
-        for i, trip in enumerate(trips[:display_count], 1):
+        for trip in trips[:display_count]:
             origin_dep = trip['origin_departure']
             dest_arr = trip['dest_arrival']
             trip_route = trip['route_short_name'] or trip['route_long_name'] or 'CP'
@@ -2008,19 +2008,16 @@ def plan_train_trip(origin: str, destination: str) -> str:
             dep_display = format_time(origin_dep)
             arr_display = format_time(dest_arr)
 
-            response += f"   🕐 **{dep_display}** → {arr_display} ({trip_travel_mins}min)"
+            response += f"    - 🕐 **{dep_display}** → {arr_display} ({trip_travel_mins} min)"
             # Show route label per departure if multiple routes
             if multi_route:
-                response += f" [{trip_route}]"
+                response += f" — {trip_route}"
             response += "\n"
 
         if len(trips) > display_count:
-            response += f"\n   ... e mais {len(trips) - display_count} partidas restantes hoje.\n"
-            response += "   💡 Se quiseres, indica o intervalo horário e mostro partidas mais específicas.\n"
+            response += f"    - ... e mais {len(trips) - display_count} partidas hoje.\n"
 
-        response += "\n" + "-" * 50 + "\n"
-        response += f"📅 {_format_pt_datetime(now, include_time=True)}\n"
-        response += "💡 Horários: cp.pt | Bilhetes: app CP ou estação\n"
+        response += "\n💡 **Horários:** cp.pt | **Bilhetes:** app CP ou estação\n"
 
         return response
 
@@ -2289,10 +2286,9 @@ def get_train_frequency(
             ("🌃 Night (23:00-01:59)", 1380, 1560),
         ]
 
-        response = f"🚆 **Frequência: {route_display}**\n"
-        response += f"📍 Estação: {stop_display}\n"
-        response += "=" * 50 + "\n\n"
-        response += f"📊 Total de comboios hoje: {len(departures)}\n\n"
+        response = f"### 🚆 **{route_display} service frequency**\n\n"
+        response += f"- 📍 **Station:** {stop_display}\n"
+        response += f"- 📊 **Total trains today:** {len(departures)}\n\n"
 
         for window_name, start_min, end_min in windows:
             window_deps = [d for d in departures if start_min <= d < end_min]
@@ -2300,9 +2296,11 @@ def get_train_frequency(
             if len(window_deps) < 2:
                 if len(window_deps) == 1:
                     t = window_deps[0]
-                    response += f"{window_name}: 1 comboio ({t // 60:02d}:{t % 60:02d})\n"
+                    response += f"**{window_name}**\n"
+                    response += f"    - 🕒 One train: {_format_gtfs_clock(t)}\n"
                 else:
-                    response += f"{window_name}: Sem serviço\n"
+                    response += f"**{window_name}**\n"
+                    response += "    - Sem serviço\n"
                 continue
 
             # Calculate headways between consecutive departures
@@ -2314,14 +2312,11 @@ def get_train_frequency(
             first_dep = window_deps[0]
             last_dep = window_deps[-1]
 
-            response += f"{window_name}\n"
-            response += f"   ⏱️ Frequência média: **{avg_headway:.0f} min**\n"
-            response += f"   📏 Min/Max: {min_headway}-{max_headway} min\n"
-            response += f"   🕒 Primeiro: {first_dep // 60:02d}:{first_dep % 60:02d} | Último: {last_dep // 60:02d}:{last_dep % 60:02d}\n"
-            response += f"   📈 Comboios: {len(window_deps)}\n\n"
+            response += f"**{window_name}**\n"
+            response += f"    - ⏱️ **Avg frequency:** {avg_headway:.0f} min · **Min/Max:** {min_headway}-{max_headway} min\n"
+            response += f"    - 🕒 **First:** {_format_gtfs_clock(first_dep)} · **Last:** {_format_gtfs_clock(last_dep)} · 🚆 **Trains:** {len(window_deps)}\n\n"
 
-        response += "📌 **Fonte:** Dados GTFS CP (horários programados)\n"
-        response += "⚠️ Consulte cp.pt para informação em tempo real.\n"
+        response += "⚠️ Check CP for real-time service status and disruptions.\n"
 
         return response
 

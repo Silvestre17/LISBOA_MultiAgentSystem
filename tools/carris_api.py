@@ -178,6 +178,29 @@ def time_str_to_minutes(time_str: str) -> int:
     return hours * 60 + minutes
 
 
+def _format_service_clock(total_minutes: int) -> str:
+    """Format service minutes, marking GTFS after-midnight times clearly."""
+    hour = total_minutes // 60
+    minute = total_minutes % 60
+    if hour >= 24:
+        return f"{hour % 24:02d}:{minute:02d} (next day)"
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _minutes_until_clock_time(clock_text: str) -> Optional[int]:
+    """Return minutes from now until the next HH:MM clock occurrence."""
+    try:
+        target_minutes = time_str_to_minutes(clock_text)
+    except (ValueError, IndexError):
+        return None
+    now = datetime.now()
+    current_minutes = now.hour * 60 + now.minute
+    delta = target_minutes - current_minutes
+    if delta < 0:
+        delta += 24 * 60
+    return delta
+
+
 def minutes_to_time_str(minutes: int) -> str:
     """
     Convert minutes since midnight to HH:MM format.
@@ -1412,19 +1435,20 @@ def carris_get_stops(query: str = "", limit: Optional[int] = None) -> str:
         if not rows:
             return f"Nenhuma paragem Carris encontrada para '{query}'"
 
-        response = f"Paragens Carris (pesquisa: '{query}')\n"
-        response += "=" * 45 + "\n\n"
+        shown_rows = rows[:5]
+        response = f"### 🚌 **Carris stops near '{query}'** ({len(shown_rows)} shown)\n\n"
 
-        for row in rows:
-            response += f"PARAGEM: {row['stop_name']}\n"
-            response += (
-                f"   ID: {row['stop_id']} | Código: {row['stop_code'] or 'N/A'}\n"
-            )
+        for row in shown_rows:
+            response += f"**🚏 {row['stop_name']}**\n"
             if row["stop_lat"] and row["stop_lon"]:
-                response += f"   GPS: {row['stop_lat']:.5f}, {row['stop_lon']:.5f}\n"
+                response += (
+                    "    - 📍 "
+                    f"[Open map](https://www.google.com/maps/search/?api=1&query={row['stop_lat']:.5f}%2C{row['stop_lon']:.5f})\n"
+                )
             response += "\n"
 
-        response += f"A mostrar {len(rows)} paragens.\n"
+        if len(rows) > len(shown_rows):
+            response += f"... and {len(rows) - len(shown_rows)} more stops.\n"
         return response
 
     except Exception as e:
@@ -1494,7 +1518,8 @@ def carris_get_routes(route_type: str = "", route_id: str = "", limit: int = 50)
                     variants.append(long_name)
 
             title_route = ", ".join(route_short_names) or route_id
-            response = f"🚋 Carris Urban Route {title_route}\n\n"
+            icon = "🚋" if any(name.endswith("E") for name in route_short_names) else "🚌"
+            response = f"### {icon} **Carris Urban route {title_route}**\n\n"
             response += "- **Operator:** Carris Urban\n"
             response += "- **Route variants in GTFS:**\n"
             for variant in variants[:6]:
@@ -1844,7 +1869,6 @@ def carris_find_routes_between(
         if ambiguity_note:
             response += f"{ambiguity_note}\n\n"
 
-
         origin_lat, origin_lon, origin_name = geocode_location(origin)
         dest_lat, dest_lon, dest_name = geocode_location(destination)
 
@@ -1959,7 +1983,7 @@ def carris_find_routes_between(
         for route in routes_found:
             unique_routes.setdefault(route["route_short_name"], dict(route))
 
-        response += f"Found {len(unique_routes)} direct routes!\n\n"
+        response += f"✅ **Direct routes found:** {len(unique_routes)}\n\n"
 
         now = datetime.now()
         current_time = now.strftime("%H:%M:%S")
@@ -1985,7 +2009,7 @@ def carris_find_routes_between(
 
             if not departures:
                 line = f"   {r['route_short_name']}: {r['route_long_name']}\n"
-                line += "     (Sem informação em tempo real nesta paragem)\n\n"
+                line += "     ℹ️ Real-time departure details are unavailable at this stop.\n\n"
                 return line
 
             first_dep = departures[0]
@@ -2106,14 +2130,13 @@ def carris_get_realtime_vehicles(
         buses = [v for v in filtered if not v.get("is_tram", False)]
 
         def format_vehicle(v: Dict) -> str:
-            route = v.get("route_short_name", "N/A")
-            # Proper fallback chain: trip_headsign -> route_long_name -> 'N/A'
-            headsign = _clean_carris_headsign(v.get("trip_headsign") or v.get("route_long_name") or "N/A")
+            route = v.get("route_short_name") or "Unknown line"
+            headsign = _clean_carris_headsign(v.get("trip_headsign") or v.get("route_long_name") or "direction unavailable")
             lat = v.get("latitude", 0)
             lon = v.get("longitude", 0)
             stop = v.get("stop_name", "Em trânsito")
             plate = v.get("license_plate", "")
-            status = v.get("current_status", "N/A")
+            status = v.get("current_status", "UNKNOWN")
 
             status_text = (
                 "Em trânsito"
@@ -2204,14 +2227,10 @@ def carris_vehicle_eta(route_short_name: str, stop_name: str) -> str:
                 )
 
             # Route exists but no vehicles: fall back to scheduled data
-            response = (
-                f"No real-time vehicles found for route {route_short_name}. "
-                f"The Carris GTFS-RT feed was queried "
-                f"({REALTIME_MAX_RETRIES} attempts) but no active vehicles "
-                f"were detected. This may indicate the service is not running "
-                f"at this time, or real-time data is temporarily unavailable.\n\n"
-                f"Scheduled departures from {target_stop_name}:\n"
-            )
+            vehicle_icon = "🚋" if route_short_name.upper().endswith("E") else "🚌"
+            response = f"### {vehicle_icon} **{route_short_name} at {target_stop_name}**\n\n"
+            response += "- ℹ️ **Live ETA:** no active real-time vehicle was detected for this line right now.\n"
+            response += "- 🕒 **Scheduled fallback:**\n"
 
             now_dt = datetime.now()
             active_services = _get_active_services(conn, now_dt)
@@ -2236,25 +2255,31 @@ def carris_vehicle_eta(route_short_name: str, stop_name: str) -> str:
                     ),
                 )
                 deps = cursor.fetchall()
-                for d in deps:
-                    response += (
-                        f"   {d['departure_time'][:5]} -> "
-                        f"{d['trip_headsign'] or 'N/A'}\n"
+                for departure in deps:
+                    departure_clock = _format_service_clock(
+                        time_str_to_minutes(departure["departure_time"])
                     )
+                    headsign = _clean_carris_headsign(
+                        departure["trip_headsign"] or ""
+                    )
+                    response += f"    - {departure_clock}"
+                    if headsign:
+                        response += f" → {headsign}"
+                    response += "\n"
                 if not deps:
-                    response += "   No more departures scheduled for today.\n"
+                    response += "    - No more departures scheduled for today.\n"
             else:
                 response += "   No active services found for today.\n"
 
             conn.close()
             return response
 
-        response = f"ETA: Linha {route_short_name} -> {target_stop_name}\n"
-        response += "=" * 55 + "\n"
-        response += f"Hora atual: {datetime.now().strftime('%H:%M')}\n\n"
+        vehicle_icon = "🚋" if route_short_name.upper().endswith("E") else "🚌"
+        response = f"### {vehicle_icon} **{route_short_name} at {target_stop_name}**\n\n"
+        response += f"- 🕒 **Updated:** {datetime.now().strftime('%H:%M')}\n"
         freshness_note = _build_gtfs_rt_freshness_note()
         if freshness_note:
-            response += freshness_note + "\n\n"
+            response += f"- {freshness_note}\n"
 
         etas = []
         for v in vehicles:
@@ -2270,8 +2295,8 @@ def carris_vehicle_eta(route_short_name: str, stop_name: str) -> str:
                 )
 
         if not etas:
-            response += "Nenhum veículo da linha a caminho desta paragem.\n\n"
-            response += "Próximas partidas (horário):\n"
+            response += "- ℹ️ **Live ETA:** no active vehicle is currently matched to this stop.\n"
+            response += "- 🕒 **Scheduled fallback:**\n"
 
             now = datetime.now()
             active_services = _get_active_services(conn, now)
@@ -2297,35 +2322,42 @@ def carris_vehicle_eta(route_short_name: str, stop_name: str) -> str:
                 )
 
                 deps = cursor.fetchall()
-                for d in deps:
-                    response += f"   {d['departure_time'][:5]} -> {d['trip_headsign'] or 'N/A'}\n"
+                for departure in deps:
+                    departure_clock = _format_service_clock(
+                        time_str_to_minutes(departure["departure_time"])
+                    )
+                    headsign = _clean_carris_headsign(
+                        departure["trip_headsign"] or ""
+                    )
+                    response += f"    - {departure_clock}"
+                    if headsign:
+                        response += f" → {headsign}"
+                    response += "\n"
 
             conn.close()
             return response
 
         etas.sort(key=lambda x: time_str_to_minutes(x["estimated_arrival"]))
 
-        response += f"{len(etas)} veículos a caminho:\n" + "-" * 40 + "\n\n"
+        response += f"- ✅ **Live vehicles approaching:** {len(etas)}\n"
 
-        for i, eta in enumerate(etas[:5], 1):
+        for eta in etas[:5]:
             delay_str = ""
             if eta["current_delay_mins"] > 0:
                 delay_str = f" (atrasado +{eta['current_delay_mins']} min)"
             elif eta["current_delay_mins"] < 0:
                 delay_str = f" (adiantado {abs(eta['current_delay_mins'])} min)"
 
-            response += (
-                f"{i}. Chegada estimada: {eta['estimated_arrival']}{delay_str}\n"
-            )
-            response += f"   Posição atual: {eta['current_stop']}\n"
-            response += f"   Faltam {eta['stops_remaining']} paragens\n"
+            minutes_until = max(_minutes_until_clock_time(eta["estimated_arrival"]) or 0, 0)
+            response += f"**{vehicle_icon} {route_short_name}**\n"
+            response += f"    - ⏱️ **ETA:** {eta['estimated_arrival']} ({minutes_until} min){delay_str}\n"
+            response += f"    - 📍 **Current position:** {eta['current_stop']}\n"
+            response += f"    - 🚏 **Stops remaining:** {eta['stops_remaining']}\n"
 
             if eta.get("license_plate"):
-                response += f"   Matrícula: {eta['license_plate']}\n"
+                response += f"    - 🚗 **Vehicle:** {eta['license_plate']}\n"
 
-            response += (
-                f"   Tempo viagem estimado: ~{eta['scheduled_travel_mins']} min\n\n"
-            )
+            response += f"    - 🧭 **Scheduled travel from current position:** ~{eta['scheduled_travel_mins']} min\n\n"
 
         if len(etas) > 5:
             response += f"   ... e mais {len(etas) - 5} veículos\n"
@@ -2458,10 +2490,10 @@ def carris_get_service_frequency(
             ("🌃 Night (23:00-05:59)", 1380, 1800),
         ]
 
-        response = f"🚌 **Frequência da Linha {route_short_name}**\n"
-        response += f"📍 Paragem: {stop_display}\n"
-        response += "=" * 50 + "\n\n"
-        response += f"📊 Total de passagens hoje: {len(departures)}\n\n"
+        icon = "🚋" if route_short_name.upper().endswith("E") else "🚌"
+        response = f"### {icon} **Route {route_short_name} service frequency**\n\n"
+        response += f"- 📍 **Stop:** {stop_display}\n"
+        response += f"- 📊 **Total departures today:** {len(departures)}\n\n"
 
         for window_name, start_min, end_min in windows:
             window_deps = [d for d in departures if start_min <= d < end_min]
@@ -2469,9 +2501,11 @@ def carris_get_service_frequency(
             if len(window_deps) < 2:
                 if len(window_deps) == 1:
                     t = window_deps[0]
-                    response += f"{window_name}: 1 passagem ({t // 60:02d}:{t % 60:02d})\n"
+                    response += f"**{window_name}**\n"
+                    response += f"    - 🕒 One departure: {_format_service_clock(t)}\n"
                 else:
-                    response += f"{window_name}: Sem serviço\n"
+                    response += f"**{window_name}**\n"
+                    response += "    - No service\n"
                 continue
 
             # Calculate headways between consecutive departures
@@ -2483,14 +2517,11 @@ def carris_get_service_frequency(
             first_dep = window_deps[0]
             last_dep = window_deps[-1]
 
-            response += f"{window_name}\n"
-            response += f"   ⏱️ Frequência média: **{avg_headway:.0f} min**\n"
-            response += f"   📏 Min/Max: {min_headway}-{max_headway} min\n"
-            response += f"   🕒 Primeiro: {first_dep // 60:02d}:{first_dep % 60:02d} | Último: {last_dep // 60:02d}:{last_dep % 60:02d}\n"
-            response += f"   📈 Passagens: {len(window_deps)}\n\n"
+            response += f"**{window_name}**\n"
+            response += f"    - ⏱️ **Avg frequency:** {avg_headway:.0f} min · **Min/Max:** {min_headway}-{max_headway} min\n"
+            response += f"    - 🕒 **First:** {_format_service_clock(first_dep)} · **Last:** {_format_service_clock(last_dep)} · {icon} **Departures:** {len(window_deps)}\n\n"
 
-        response += "📌 **Fonte:** Dados GTFS Carris (horários programados)\n"
-        response += "⚠️ Frequências reais podem variar com o tráfego.\n"
+        response += "⚠️ Frequencies can vary with traffic and service changes.\n"
 
         return response
 

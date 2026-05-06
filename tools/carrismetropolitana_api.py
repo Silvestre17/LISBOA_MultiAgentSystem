@@ -1304,7 +1304,7 @@ def get_real_time_bus_positions(
 
     # Show vehicles
     for i, vehicle in enumerate(filtered_vehicles[:10], 1):
-        v_line_id = vehicle.get("line_id", "N/A")
+        v_line_id = vehicle.get("line_id") or "unknown line"
         line_info = line_map.get(v_line_id, {})
         line_short = line_info.get("short_name", v_line_id)
 
@@ -1315,7 +1315,7 @@ def get_real_time_bus_positions(
         lon = vehicle.get("lon", 0)
         speed = vehicle.get("speed")
         bearing = vehicle.get("bearing", 0)
-        license_plate = vehicle.get("license_plate", "N/A")
+        license_plate = vehicle.get("license_plate") or "vehicle id unavailable"
         vehicle_model = vehicle.get("vehicle_model", "")
         door_status = vehicle.get("door_status", "")
 
@@ -1410,7 +1410,8 @@ def get_carris_metropolitana_alerts(area: Optional[str] = None) -> str:
             return f"✅ No active Carris Metropolitana service alerts found for {area}."
 
     scope = f" — {area}" if area else ""
-    response = f"⚠️ **Carris Metropolitana Service Alerts{scope}**\n\n"
+    response = f"### ⚠️ **Carris Metropolitana service alerts{scope}**\n\n"
+    response += f"- 📊 **Active alerts shown:** {min(len(alerts), 5)} of {len(alerts)}\n\n"
 
     visible_alert_limit = 5
     for i, alert in enumerate(alerts[:visible_alert_limit], 1):
@@ -1430,10 +1431,6 @@ def get_carris_metropolitana_alerts(area: Optional[str] = None) -> str:
         start = format_timestamp(active_period.get("start", 0))
         end = format_timestamp(active_period.get("end", 0))
 
-        # Cause and effect
-        cause = alert_data.get("cause", "UNKNOWN").replace("_", " ").title()
-        effect = alert_data.get("effect", "UNKNOWN").replace("_", " ").title()
-
         # Affected routes
         informed_entity = alert_data.get("informed_entity", [])
         route_ids = []
@@ -1450,11 +1447,12 @@ def get_carris_metropolitana_alerts(area: Optional[str] = None) -> str:
                     route_ids.append(route_id)
         routes_str = ", ".join(route_ids[:8]) if route_ids else "All routes"
 
-        response += f"- ⚠️ **{header}**\n"
-        response += f"    - 📝 {desc[:200]}{'...' if len(desc) > 200 else ''}\n"
+        response += f"**⚠️ {header}**\n"
+        response += f"    - 📝 {desc[:220]}{'...' if len(desc) > 220 else ''}\n"
         response += f"    - 🚌 **Routes:** {routes_str}\n"
-        response += f"    - ⚠️ **Cause/Effect:** {cause} / {effect}\n"
-        response += f"    - ⏰ **Period:** {start} - {end}\n\n"
+        if start != "N/A" or end != "N/A":
+            response += f"    - ⏰ **Period:** {start} - {end}\n"
+        response += "\n"
 
     if len(alerts) > visible_alert_limit:
         response += f"... and {len(alerts) - visible_alert_limit} more alerts.\n"
@@ -1616,6 +1614,7 @@ def find_direct_bus_lines(origin: str, destination: str) -> str:
         return any(marker in normalized for marker in place_markers)
 
     direct_lines = []
+    broad_lines = []
 
     for line in data:
         short_name = line.get("short_name", "")
@@ -1629,30 +1628,36 @@ def find_direct_bus_lines(origin: str, destination: str) -> str:
         localities_norm = [normalize(loc) for loc in localities if loc]
         muni_norm = [normalize(m) for m in municipalities if m]
 
-        # Check if origin is served
-        origin_match = (
-            origin_norm in long_name_norm
-            or any(origin_norm in loc for loc in localities_norm)
-            or any(origin_norm in m for m in muni_norm)
-        )
+        origin_precise = origin_norm in long_name_norm or any(origin_norm in loc for loc in localities_norm)
+        dest_precise = dest_norm in long_name_norm or any(dest_norm in loc for loc in localities_norm)
+        origin_broad = origin_precise or any(origin_norm in m for m in muni_norm)
+        dest_broad = dest_precise or any(dest_norm in m for m in muni_norm)
 
-        # Check if destination is served
-        dest_match = (
-            dest_norm in long_name_norm
-            or any(dest_norm in loc for loc in localities_norm)
-            or any(dest_norm in m for m in muni_norm)
-        )
+        line_record = {
+            "id": line_id,
+            "short_name": short_name,
+            "long_name": long_name,
+            "localities": [loc for loc in localities if loc],
+            "municipalities": [m for m in municipalities if m],
+        }
+        if origin_precise and dest_precise:
+            direct_lines.append(line_record)
+        elif origin_broad and dest_broad:
+            broad_lines.append(line_record)
 
-        if origin_match and dest_match:
-            direct_lines.append(
-                {
-                    "id": line_id,
-                    "short_name": short_name,
-                    "long_name": long_name,
-                    "localities": [loc for loc in localities if loc],
-                    "municipalities": [m for m in municipalities if m],
-                }
-            )
+    if not direct_lines and broad_lines:
+        response = f"🚌 **Broad Carris Metropolitana candidates: {origin.title()} → {destination.title()}**\n\n"
+        response += "ℹ️ I found lines serving both requested municipalities/areas, but not enough stop-level evidence to call them direct door-to-door options. Use a specific stop or street for a precise board/alight route.\n\n"
+        for line in broad_lines[:5]:
+            response += f"- 🚍 **Line {line['short_name']}**\n"
+            if line["long_name"]:
+                response += f"    - 📍 **Terminals:** {line['long_name'].replace(' - ', ' ↔ ')}\n"
+            municipalities = _clean_carris_display_list(line.get("municipalities") or [], max_items=4, drop_numeric_only=True)
+            if municipalities:
+                response += f"    - 🏘️ **Municipalities:** {', '.join(municipalities)}\n"
+        if len(broad_lines) > 5:
+            response += f"... and {len(broad_lines) - 5} more broad matches.\n"
+        return _append_carris_scope_footer(response)
 
     if not direct_lines:
         if _should_fallback_to_route_finder(origin) or _should_fallback_to_route_finder(destination):
@@ -1729,9 +1734,9 @@ def find_direct_bus_lines(origin: str, destination: str) -> str:
             response += f"- {alert['header']}\n"
         response += "\n"
 
-    response += f"✅ **{len(direct_lines)} linha(s) direta(s) encontrada(s)**\n\n"
+    response += f"✅ **{len(direct_lines)} direct line(s) found**\n\n"
 
-    for line in direct_lines[:6]:
+    for line in direct_lines[:5]:
         short_name = line["short_name"]
         long_name = line["long_name"]
         localities = line["localities"]
@@ -1747,7 +1752,7 @@ def find_direct_bus_lines(origin: str, destination: str) -> str:
         if long_name:
             # Replace " - " with " ↔ " to show it's bidirectional
             display_name = long_name.replace(" - ", " ↔ ")
-            response += f"    - 📍 **Terminais:** {display_name}\n"
+            response += f"    - 📍 **Terminals:** {display_name}\n"
 
         # Show localities if available, ordered from origin to destination when possible
         if localities:
@@ -1771,27 +1776,22 @@ def find_direct_bus_lines(origin: str, destination: str) -> str:
 
                 if len(key_stops) > 6:
                     display_stops = key_stops[:6]
-                    response += (
-                        f"    - 🚏 **Percurso:** {' → '.join(display_stops)} (+{len(key_stops) - 6})\n"
-                    )
+                    response += f"    - 🚏 **Path:** {' → '.join(display_stops)} (+{len(key_stops) - 6})\n"
                 else:
-                    response += f"    - 🚏 **Percurso:** {' → '.join(key_stops)}\n"
+                    response += f"    - 🚏 **Path:** {' → '.join(key_stops)}\n"
             else:
                 key_stops = cleaned_localities[:6]
-                response += f"    - 🚏 **Passa por:** {', '.join(key_stops)}"
+                response += f"    - 🚏 **Passes through:** {', '.join(key_stops)}"
                 if len(cleaned_localities) > 6:
                     response += f" (+{len(cleaned_localities) - 6})"
                 response += "\n"
         response += "\n"
 
-    if len(direct_lines) > 6:
-        other_lines = [line_data["short_name"] for line_data in direct_lines[6:]]
-        response += f"📋 Outras linhas: {', '.join(other_lines)}\n\n"
+    if len(direct_lines) > 5:
+        other_lines = [line_data["short_name"] for line_data in direct_lines[5:]]
+        response += f"... and {len(other_lines)} more direct lines: {', '.join(other_lines[:10])}\n\n"
 
-    response += "💡 **Como usar:**\n"
-    response += f"- Procure pelo número da linha, por exemplo **{direct_lines[0]['short_name']}**, na paragem.\n"
-    response += f"- Verifique a direção do autocarro: **{origin.title()} → {destination.title()}**.\n"
-    response += "- Horários e paragens: carrismetropolitana.pt\n"
+    response += "💡 **How to use it:** check the direction shown at the stop before boarding.\n"
 
     return _append_carris_scope_footer(response)
 
@@ -1833,7 +1833,7 @@ def search_carris_metropolitana_lines(query: str) -> str:
         .replace("ç", "c")
     )
 
-    matches = []
+    scored_matches = []
 
     for line in data:
         short_name = line.get("short_name", "")
@@ -1861,15 +1861,27 @@ def search_carris_metropolitana_lines(query: str) -> str:
             .replace("ç", "c")
         )
 
-        # Search in all fields: short_name, long_name, line_id, municipalities, localities
-        if (
-            query_lower in short_name.lower()
-            or query_normalized in long_name_norm
-            or query_lower in line_id.lower()
-            or query_lower in muni_str
-            or query_normalized in localities_norm
-        ):
-            matches.append(line)
+        score = 0
+        if query_lower == short_name.lower() or query_lower == line_id.lower():
+            score = 100
+        elif query_normalized in long_name_norm:
+            score = 80
+        elif any(query_normalized == _normalize_alert_area(loc) for loc in localities if loc):
+            score = 60
+        elif query_normalized in localities_norm:
+            score = 45
+        elif query_lower in muni_str:
+            score = 25
+        if score:
+            scored_matches.append((score, line))
+
+    scored_matches.sort(
+        key=lambda item: (
+            -item[0],
+            str(item[1].get("short_name") or item[1].get("id") or ""),
+        )
+    )
+    matches = [line for _, line in scored_matches]
 
     if not matches:
         urban_keywords = [
@@ -1891,11 +1903,10 @@ def search_carris_metropolitana_lines(query: str) -> str:
         return f"❌ No lines found matching: '{query}'\n\n💡 Try searching by area: Sintra, Cascais, Almada, Oeiras, Loures, Montijo, Oriente"
 
     response = (
-        f"🚌 **Carris Metropolitana lines matching '{query}'** ({len(matches)} found)\n"
+        f"### 🚌 **Carris Metropolitana lines serving '{query}'** ({min(len(matches), 5)} shown of {len(matches)})\n"
     )
-    response += "=" * 50 + "\n\n"
 
-    for i, line in enumerate(matches[:15], 1):
+    for line in matches[:5]:
         short_name = line.get("short_name", "N/A")
         long_name = line.get("long_name") or "N/A"
         municipalities = _clean_carris_display_list(
@@ -1909,19 +1920,18 @@ def search_carris_metropolitana_lines(query: str) -> str:
             drop_numeric_only=True,
         )
 
-        response += f"{i}. **Line {short_name}**\n"
-        response += f"   📍 {long_name}\n"
+        response += f"**🚌 Line {short_name}**\n"
+        response += f"    - 📍 {long_name}\n"
         if municipalities:
-            response += f"   🏘️ Municipalities: {', '.join(municipalities)}\n"
+            response += f"    - 🏘️ **Municipalities:** {', '.join(municipalities)}\n"
         if localities:
-            response += f"   📌 Localities: {', '.join(localities)}\n"
+            response += f"    - 📌 **Localities:** {', '.join(localities)}\n"
         response += "\n"
 
-    if len(matches) > 15:
-        response += f"... and {len(matches) - 15} more lines.\n"
+    if len(matches) > 5:
+        response += f"... and {len(matches) - 5} more lines.\n"
 
-    response += "\n" + "-" * 40 + "\n"
-    response += "💡 Podes perguntar por rotas diretas entre dois locais ou horários de uma linha específica.\n"
+    response += "\n💡 Ask for a direct route between two stops/places if you need board and alight points.\n"
 
     return _append_carris_scope_footer(response)
 
@@ -2075,7 +2085,7 @@ def get_bus_next_departures(
 
     response = f"🚌 **Line {line_info.get('short_name', line_id)} Schedule**\n"
     response += "=" * 50 + "\n"
-    response += f"📍 {line_info.get('long_name', 'N/A')}\n"
+    response += f"📍 {line_info.get('long_name') or 'route details unavailable in the live feed'}\n"
     response += "=" * 50 + "\n\n"
 
     pattern_id = patterns[0]
@@ -2085,7 +2095,7 @@ def get_bus_next_departures(
     if not pattern_data:
         return f"❌ Failed to fetch schedule for pattern {pattern_id}."
 
-    headsign = pattern_data.get("headsign", "N/A")
+    headsign = pattern_data.get("headsign") or "direction unavailable"
     trips = pattern_data.get("trips", [])
 
     response += f"**Direction**: {headsign}\n\n"
@@ -2113,8 +2123,9 @@ def get_bus_next_departures(
         for trip in today_trips:
             schedule = trip.get("schedule", [])
             if schedule:
-                first_time = schedule[0].get("arrival_time", "N/A")
-                departures.append(first_time)
+                first_time = schedule[0].get("arrival_time")
+                if first_time:
+                    departures.append(first_time)
 
         departures.sort()
 
@@ -2146,8 +2157,9 @@ def get_bus_next_departures(
                 for trip in today_trips:
                     schedule = trip.get("schedule", [])
                     if len(schedule) > stop_idx:
-                        time_at = schedule[stop_idx].get("arrival_time", "N/A")
-                        stop_times.append(time_at)
+                        time_at = schedule[stop_idx].get("arrival_time")
+                        if time_at:
+                            stop_times.append(time_at)
 
                 stop_times.sort()
                 upcoming_at = [t for t in stop_times if t > ref_time]
@@ -2193,60 +2205,22 @@ def find_bus_routes(
     Returns:
         str: Bus route options including direct lines connecting locations.
     """
-    response = "🚌 **BUS ROUTE FINDER**\n"
-    response += "=" * 50 + "\n"
-    response += f"📍 From: {origin}\n"
-    response += f"📍 To: {destination}\n"
-    response += "=" * 50 + "\n\n"
+    header = f"### 🚌 **Carris Metropolitana: {origin} → {destination}**\n\n"
+    response = header
     ambiguity_note = build_location_ambiguity_preamble(origin, destination, language="pt")
     if ambiguity_note:
         response += f"{ambiguity_note}\n\n"
-
-    # Resolve origin
-    response += "🔍 **Resolving origin location...**\n"
 
     if origin_lat is not None and origin_lon is not None:
         origin_stops = find_stops_near_coordinates(
             origin_lat, origin_lon, radius_km=search_radius_km, max_results=10
         )
         if origin_stops:
-            response += f"   ✅ Using provided coordinates ({origin_lat:.4f}, {origin_lon:.4f})\n"
-            response += (
-                f"   📍 Found {len(origin_stops)} stops within {search_radius_km}km\n"
-            )
-            for stop in origin_stops[:3]:
-                response += (
-                    f"      • {stop['name']} ({stop['distance_km'] * 1000:.0f}m)\n"
-                )
             origin_resolved = {"stops": origin_stops, "method": "gps_provided"}
         else:
-            response += f"   ⚠️ No stops within {search_radius_km}km of coordinates\n"
             origin_resolved = {"stops": [], "method": "gps_provided", "success": False}
     else:
         origin_resolved = resolve_location(origin, search_radius_km, max_stops=10)
-
-        if origin_resolved["success"]:
-            method = origin_resolved["method"]
-            stops = origin_resolved["stops"]
-
-            if method == "geocoding" or method == "geocoding_expanded":
-                loc = origin_resolved.get("location", {})
-                response += (
-                    f"   🌍 Geocoded '{origin}' → {loc.get('name', 'Unknown')[:60]}\n"
-                )
-                response += f"   📍 Coordinates: ({loc.get('lat', 0):.4f}, {loc.get('lon', 0):.4f})\n"
-                response += f"   ✅ Found {len(stops)} bus stops nearby\n"
-            else:
-                response += f"   ✅ Found {len(stops)} stops matching '{origin}'\n"
-
-            for stop in stops[:3]:
-                dist = stop.get("distance_km")
-                if dist:
-                    response += f"      • {stop['name']} ({dist * 1000:.0f}m)\n"
-                else:
-                    response += f"      • {stop['name']}\n"
-        else:
-            response += f"   ❌ Could not resolve '{origin}'\n"
 
     origin_stops = origin_resolved.get("stops", [])
 
@@ -2255,88 +2229,37 @@ def find_bus_routes(
         if origin_loc and is_within_lisbon_city(
             origin_loc.get("lat"), origin_loc.get("lon")
         ):
-            response += f"\n📍 **'{origin}' is inside Lisbon city**\n"
             response += (
-                "   🚋 No nearby Carris Metropolitana stops were found here, so this point may be better served by **Carris Urbana** (carris.pt).\n\n"
+                f"ℹ️ **{origin}** appears to be inside Lisbon city, where this trip may be better served by **Carris Urbana** / Carris Urban (carris.pt) instead of Carris Metropolitana.\n"
             )
         else:
-            response += f"\n❌ **No bus stops found near '{origin}'**\n"
-            response += "   💡 Try adding 'Lisboa' to your search.\n"
+            response += f"❌ **No Carris Metropolitana stops found near {origin}.**\n"
+            response += "\n💡 **Tip:** try a more specific street, stop, neighbourhood, or GPS point.\n"
         return response
-
-    response += "\n"
-
-    # Resolve destination
-    response += "🔍 **Resolving destination location...**\n"
 
     if dest_lat is not None and dest_lon is not None:
         dest_stops = find_stops_near_coordinates(
             dest_lat, dest_lon, radius_km=search_radius_km, max_results=10
         )
         if dest_stops:
-            response += (
-                f"   ✅ Using provided coordinates ({dest_lat:.4f}, {dest_lon:.4f})\n"
-            )
-            response += (
-                f"   📍 Found {len(dest_stops)} stops within {search_radius_km}km\n"
-            )
-            for stop in dest_stops[:3]:
-                response += (
-                    f"      • {stop['name']} ({stop['distance_km'] * 1000:.0f}m)\n"
-                )
             dest_resolved = {"stops": dest_stops, "method": "gps_provided"}
         else:
-            response += f"   ⚠️ No stops within {search_radius_km}km of coordinates\n"
             dest_resolved = {"stops": [], "method": "gps_provided", "success": False}
     else:
         dest_resolved = resolve_location(destination, search_radius_km, max_stops=10)
-
-        if dest_resolved["success"]:
-            method = dest_resolved["method"]
-            stops = dest_resolved["stops"]
-
-            if method == "geocoding" or method == "geocoding_expanded":
-                loc = dest_resolved.get("location", {})
-                response += f"   🌍 Geocoded '{destination}' → {loc.get('name', 'Unknown')[:60]}\n"
-                response += f"   📍 Coordinates: ({loc.get('lat', 0):.4f}, {loc.get('lon', 0):.4f})\n"
-                response += f"   ✅ Found {len(stops)} bus stops nearby\n"
-            else:
-                response += f"   ✅ Found {len(stops)} stops matching '{destination}'\n"
-
-            for stop in stops[:3]:
-                dist = stop.get("distance_km")
-                if dist:
-                    response += f"      • {stop['name']} ({dist * 1000:.0f}m)\n"
-                else:
-                    response += f"      • {stop['name']}\n"
-        else:
-            dest_loc = dest_resolved.get("location")
-            if dest_loc and is_within_lisbon_city(dest_loc.get("lat"), dest_loc.get("lon")):
-                response += (
-                    f"   ℹ️ Geocoded '{destination}' inside Lisbon city, but no nearby Carris Metropolitana stops "
-                    f"were found within {search_radius_km}km\n"
-                )
-            else:
-                response += f"   ❌ Could not resolve '{destination}'\n"
 
     dest_stops = dest_resolved.get("stops", [])
 
     if not dest_stops:
         dest_loc = dest_resolved.get("location")
         if dest_loc and is_within_lisbon_city(dest_loc.get("lat"), dest_loc.get("lon")):
-            response += f"\n📍 **'{destination}' is inside Lisbon city**\n"
             response += (
-                "   🚋 No nearby Carris Metropolitana stops were found here, so this point may be better served by **Carris Urbana** (carris.pt).\n\n"
+                f"ℹ️ **{destination}** appears to be inside Lisbon city, where this trip may be better served by **Carris Urbana** / Carris Urban (carris.pt) instead of Carris Metropolitana.\n"
             )
         else:
-            response += f"\n❌ **No bus stops found near '{destination}'**\n"
-            response += "   💡 Try using a more specific name or address.\n"
+            response += f"❌ **No Carris Metropolitana stops found near {destination}.**\n"
+            response += "\n💡 **Tip:** try a more specific name, address, stop, or GPS point.\n"
         return response
-
-    response += "\n"
-
-    # Find common routes
-    response += "🔍 **Finding direct bus routes...**\n\n"
 
     origin_stop_ids = [s["id"] for s in origin_stops]
     dest_stop_ids = [s["id"] for s in dest_stops]
@@ -2369,32 +2292,31 @@ def find_bus_routes(
                 }
             grouped_routes[key]["lines"].append(route.get("short_name", "?"))
 
-        response += f"✅ **{len(grouped_routes)} ROUTE OPTION(S) FOUND** ({len(route_options)} lines total)\n"
-        response += "-" * 40 + "\n\n"
+        response += f"✅ **{len(grouped_routes)} direct route option(s) found** ({len(route_options)} line match(es)).\n\n"
 
         for i, ((origin_name, dest_name), group) in enumerate(
             list(grouped_routes.items())[:5], 1
         ):
             lines_str = ", ".join(sorted(group["lines"]))
 
-            response += f"🚌 **Option {i}**\n"
-            response += f"   🚏 Board at: {origin_name}{_coord_suffix(group['origin_stop'])}\n"
-            response += f"   🚏 Alight at: {dest_name}{_coord_suffix(group['dest_stop'])}\n"
-            response += f"   🚍 Lines: **{lines_str}**\n"
+            response += f"- 🚌 **Option {i}**\n"
+            response += f"    - 🚏 **Board at:** {origin_name}{_coord_suffix(group['origin_stop'])}\n"
+            response += f"    - 🚏 **Alight at:** {dest_name}{_coord_suffix(group['dest_stop'])}\n"
+            response += f"    - 🚍 **Lines:** {lines_str}\n"
             response += "\n"
 
         if len(grouped_routes) > 5:
-            response += f"   ... and {len(grouped_routes) - 5} more route options available.\n\n"
+            response += f"... and {len(grouped_routes) - 5} more route options available.\n\n"
 
-        response += "⚠️ **Note:** Verify that buses run in your intended direction. Check schedules at carrismetropolitana.pt\n\n"
+        response += "⚠️ **Note:** verify that the bus runs in your intended direction on carrismetropolitana.pt.\n\n"
     else:
         response += "❌ **No direct bus routes found**\n\n"
         response += "💡 **Suggestions:**\n"
-        response += "   • You may need to transfer buses\n"
-        response += "   • Consider using Metro + Bus combination\n"
-        response += "   • Check routes from a nearby major stop\n\n"
+        response += "    - You may need to transfer buses.\n"
+        response += "    - Consider a Metro + bus combination.\n"
+        response += "    - Try a nearby major stop or a more precise address.\n\n"
 
-        response += "📊 **Lines available near your locations:**\n\n"
+        response += "📊 **Lines available near your locations:**\n"
 
         origin_all_lines = set()
         for stop in origin_stops:
@@ -2406,7 +2328,7 @@ def find_bus_routes(
 
         if origin_all_lines:
             response += (
-                f"   At {origin}: {', '.join(sorted(list(origin_all_lines))[:10])}"
+                f"- **Near {origin}:** {', '.join(sorted(list(origin_all_lines))[:10])}"
             )
             if len(origin_all_lines) > 10:
                 response += f" (+{len(origin_all_lines) - 10} more)"
@@ -2414,7 +2336,7 @@ def find_bus_routes(
 
         if dest_all_lines:
             response += (
-                f"   At {destination}: {', '.join(sorted(list(dest_all_lines))[:10])}"
+                f"- **Near {destination}:** {', '.join(sorted(list(dest_all_lines))[:10])}"
             )
             if len(dest_all_lines) > 10:
                 response += f" (+{len(dest_all_lines) - 10} more)"
@@ -2443,16 +2365,13 @@ def find_bus_routes(
         d_lat, d_lon = None, None
 
     if not route_options and both_locations_in_lisbon_city(o_lat, o_lon, d_lat, d_lon):
-        response += "\n" + "-" * 50 + "\n"
+        response += "\n"
         response += CARRIS_LIMITATION_NOTICE
         response += "\n"
 
-    response += "\n" + "-" * 40 + "\n"
-    response += "💡 **Tips:**\n"
-    response += (
-        "   • Check carrismetropolitana.pt or carris.pt for detailed schedules\n"
-    )
-    response += "   • Metro may be faster for longer trips\n"
+    response += "\n💡 **Tips:**\n"
+    response += "    - Check carrismetropolitana.pt or carris.pt for detailed schedules.\n"
+    response += "    - Metro may be faster for longer trips.\n"
 
     return response
 

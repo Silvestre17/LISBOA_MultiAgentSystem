@@ -41,11 +41,13 @@ from agent.agents.transport_agent import (
     _extract_route_endpoints,
     _parse_route_mode_preferences,
     _parse_metro_wait_request,
+    _parse_carris_line_stop_query,
     _query_has_status_intent,
 )
 from agent.graph import MultiAgentAssistant
 from agent.state import create_initial_state
 from agent.utils.response_formatter import (
+    finalize_worker_response,
     normalize_transport_notes_block,
     operators_from_tool_names,
     rebuild_transport_source_line,
@@ -109,7 +111,7 @@ def test_cp_routes_output_filters_long_distance_and_hex_metadata() -> None:
     assert "**AP**" not in output
     assert "**IC**" not in output
     assert "Color:" not in output
-    assert "#" not in output
+    assert "#00" not in output
 
 
 def test_transport_tool_call_builder_maps_combios_cascais_to_cascais_line() -> None:
@@ -298,14 +300,14 @@ def test_transport_scope_detects_long_distance_cp_requests() -> None:
     )
 
 
-def test_nearest_metro_prioritizes_curated_landmark_station() -> None:
-    """Known landmarks should not let geocoding drift outrank the curated metro station."""
+def test_nearest_metro_ranks_named_locations_by_computed_distance() -> None:
+    """Named-location nearest metro results should keep true distance ordering."""
     output = metrolisboa_api.find_nearest_metro.invoke(
         {"near_location_name": "Jardim Zoologico de Lisboa"}
     )
 
     assert "**Jardim Zoológico**" in output
-    assert output.index("**Jardim Zoológico**") < output.index("**Laranjeiras**")
+    assert output.index("**Laranjeiras**") < output.index("**Jardim Zoológico**")
     assert not any(line.startswith("1.") for line in output.splitlines())
 
 
@@ -313,7 +315,7 @@ def test_carris_route_details_render_compact_variant_cards() -> None:
     """Carris route lookups should avoid all-caps dumps and expose route variants compactly."""
     output = carris_api.carris_get_routes.invoke({"route_id": "28E"})
 
-    assert "Carris Urban Route 28E" in output
+    assert "Carris Urban route 28E" in output
     assert "Route variants in GTFS" in output
     assert "ELÉTRICOS" not in output
 
@@ -397,6 +399,135 @@ def test_deterministic_metro_route_response_uses_landmark_aware_tip_and_two_wait
     assert "**Estação Entrecampos:** Direção Rato" in response
     assert "**Estação Saldanha:** Direção São Sebastião" in response
     assert "Outras opções" not in response
+
+
+def test_metro_route_avoids_interrupted_green_segment_when_alternative_exists() -> None:
+    """Routes crossing an interrupted Green-line segment should return a feasible alternative."""
+    route_result = (
+        "🗺️ **Route: Baixa-Chiado → Aeroporto**\n\n"
+        "🚇 **METRO ROUTE**\n"
+        "🔄 **Transfer Required**\n\n"
+        "   💡 **Transfer at**: Alameda (🟢 ↔ 🔴)\n"
+        "   ⏱️ Estimated travel time: **~35 min**\n\n"
+        "   **Full Route**:\n"
+        "   1. 🟢 Board at **Baixa-Chiado** → direction **Telheiras**\n"
+        "   2. Exit at **Alameda**\n"
+        "   3. 🔴 Transfer to **Red Line** → direction **Aeroporto**\n"
+        "   4. Exit at **Aeroporto**\n"
+    )
+
+    route_tool = MagicMock()
+    route_tool.invoke = MagicMock(return_value=route_result)
+
+    wait_tool = MagicMock()
+    wait_tool.invoke = MagicMock(return_value="🚇 Metro Wait Times\n⏱️ Next train: 3 min")
+
+    def fake_status(line_id: str) -> str:
+        if line_id == "verde":
+            return "Circulação interrompida entre Martim Moniz e Cais do Sodré"
+        return "Ok"
+
+    with patch.object(transport_api, "get_route_between_stations", route_tool), patch.object(
+        transport_api,
+        "_get_line_status",
+        side_effect=fake_status,
+    ), patch.object(metrolisboa_api, "get_metro_wait_time", wait_tool):
+        response = _build_deterministic_metro_route_response(
+            "How do I get from Baixa-Chiado to Aeroporto?",
+            "",
+        )
+
+    assert response is not None
+    assert "Feasibility note" in response
+    assert "Blue Line" in response
+    assert "São Sebastião" in response
+    assert "Red Line" in response
+    assert "**Martim Moniz**" in response
+    assert "**Cais do Sodré**" in response
+    assert "Transfer at Alameda" not in response
+
+
+def test_transport_finalizer_keeps_metro_route_sections_on_separate_paragraphs() -> None:
+    """Streamlit should not merge the estimated-time line with the route heading."""
+    raw = """### 🚇 **Baixa-Chiado → Aeroporto**
+
+⏳ **Estimated total time:** ~35-40 min
+🗺️ **Recommended route:**
+- 📍 **Board at Baixa-Chiado**
+- 🔵 **Blue Line** — direction **Reboleira**
+
+🗓️ **Next Metros** (real time):
+- **Station Baixa-Chiado:** Direction Reboleira — **⏱️ Next Metro in:** 3 min
+
+📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Updated:** 13:27"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="transport",
+        user_query="How do I get from Baixa-Chiado to Aeroporto?",
+        language="en",
+    )
+
+    assert "~35-40 min\n\n🗺️ **Recommended route:**\n- 📍" in output
+    assert "real time):\n\n- **Station Baixa-Chiado:**" in output
+
+
+def test_transport_finalizer_splits_bullet_estimated_time_before_route_heading() -> None:
+    """Bullet-prefixed time fields also need a paragraph break before route headings."""
+    raw = """### 🚇 **Baixa-Chiado → Aeroporto**
+
+⚠️ **Line Status:**
+
+- 🔵 **Blue Line**: normal service
+- 🔴 **Red Line**: normal service
+- ⏳ **Estimated total time:** ~35 min
+🗺️ **Route:**
+- 📍 **Board at:** Baixa-Chiado
+
+📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Updated:** 10:05"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="transport",
+        user_query="How do I get from Baixa-Chiado to Aeroporto?",
+        language="en",
+    )
+
+    assert "- ⏳ **Estimated total time:** ~35 min\n\n🗺️ **Route:**\n- 📍" in output
+
+
+def test_transport_finalizer_does_not_reclassify_metro_route_as_arrivals() -> None:
+    """Metro route blocks must not be compacted into Carris next-arrival cards."""
+    raw = """### 🚇 Metro Route
+
+- 🚇 **Baixa** → Chiado → Aeroporto Humberto Delgado
+
+⚠️ **Line Status:**
+
+- 🟢 **Green Line**: normal service
+- 🔴 **Red Line**: normal service
+- ⏳ Estimated total time: ~35 min
+
+🗺️ **Route:**
+- 📍 Board at Baixa-Chiado
+- 🟢 Green Line — direction Telheiras
+- 🔄 Transfer at Alameda
+- 🔴 Red Line — direction Aeroporto
+- 🎯 Exit at Aeroporto
+
+📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Updated:** 10:18"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="transport",
+        user_query="How do I get from Baixa-Chiado to Aeroporto?",
+        language="en",
+    )
+
+    assert "Next Arrivals" not in output
+    assert "**Scheduled times**" not in output
+    assert "**Baixa-Chiado** → Aeroporto Humberto Delgado" in output
+    assert "Baixa** → Chiado" not in output
 
 
 def test_route_tool_recognizes_common_hospital_and_stadium_landmarks() -> None:
@@ -1000,12 +1131,12 @@ def test_transport_agent_finalizes_cp_trip_output_cleanly_in_english() -> None:
         result = agent.invoke("How do I get from Rossio to Sintra by train?")
 
         assert "**Train: Lisboa Rossio → Sintra**" in result
-        assert "**TRIP SUMMARY**" in result
+        assert "**Trip summary**" in result
         assert "Line: **Linha de Sintra**" in result
         assert "Duration: **40 min**" in result
         assert "Some trains are delayed by 9 min" in result
         assert "Remaining departures today" in result
-        assert "**Next 5 Departures:**" in result
+        assert "**Next 5 departures:**" in result
         assert "**Schedules**" in result
         assert "Tickets:" in result
         assert "comboios" not in result.lower()
@@ -1426,6 +1557,61 @@ def test_transport_deterministic_formatter_preserves_structured_live_bus_snapsho
     assert "**Current snapshot**" in output
     assert "Caxias (Estação) - Reboleira (Metro)" in output
     assert "⚠️ Scope:" not in output
+
+
+def test_transport_formatter_flags_line_location_mismatch_before_live_snapshot() -> None:
+    """A line that does not serve the user's stated area should be corrected before live data is shown."""
+    raw = """### 🚌 **Carris Metropolitana Line 1507 - Live Buses**
+
+**Short answer:** I found **2 active buses** currently reported on line **1507**.
+
+**Current snapshot**
+- 🧭 **Route:** Caxias (Estação) - Reboleira (Metro)
+"""
+    fake_lines = [
+        {
+            "id": "1507",
+            "short_name": "1507",
+            "long_name": "Caxias (Estação) - Reboleira (Metro)",
+            "localities": ["Caxias", "Reboleira"],
+            "municipalities": ["Oeiras", "Amadora"],
+        }
+    ]
+
+    with patch.object(TransportAgent, "__init__", lambda self: None), patch.object(
+        carrismetropolitana_api,
+        "load_carris_metropolitana_lines",
+        return_value=fake_lines,
+    ):
+        agent = TransportAgent()
+        output = agent._format_deterministic_tool_result(
+            "get_bus_realtime_locations",
+            {"line_id": "1507", "location": "Almada"},
+            raw,
+            "en",
+        )
+
+    assert "does not appear to serve Almada" in output
+    assert "Caxias (Estação) - Reboleira (Metro)" in output
+    assert "active buses" not in output
+
+
+def test_carris_eta_parser_accepts_natural_next_tram_wording() -> None:
+    """The Carris parser should treat natural next-tram questions as ETA requests."""
+    parsed = _parse_carris_line_stop_query("When is the next 28E tram at Martim Moniz?")
+
+    assert parsed == {
+        "kind": "eta",
+        "line": "28E",
+        "stop_name": "Martim Moniz",
+        "stop_id": None,
+    }
+
+
+def test_gtfs_clock_helpers_normalize_after_midnight_times() -> None:
+    """Frequency renderers should not leak GTFS 24:xx timestamps to users."""
+    assert cp_api._format_gtfs_clock(24 * 60 + 25) == "00:25 (next day)"
+    assert carris_api._format_service_clock(24 * 60 + 22) == "00:22 (next day)"
 
 
 def test_cp_status_answers_directly_and_caps_delay_examples() -> None:

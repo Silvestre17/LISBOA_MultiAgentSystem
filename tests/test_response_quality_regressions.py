@@ -1,5 +1,6 @@
 import os
 import sys
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,6 +15,7 @@ from agent.graph import MultiAgentAssistant
 from agent.utils.langsmith_tracing import get_langsmith_request_tracking_status
 from agent.utils.response_formatter import (
     build_bilingual_note,
+    canonicalize_local_information_terms,
     final_visual_pass,
     finalize_worker_response,
     infer_response_language,
@@ -40,10 +42,531 @@ def test_infer_response_language_keeps_short_pt_transport_overview_query_in_pt()
     ) == "pt"
 
 
+def test_lisboa_aberta_service_categories_follow_requested_language() -> None:
+    """Public-service category browsing should not mix PT headings into English answers."""
+    from tools.dados_abertos import list_service_categories
+
+    english = list_service_categories.invoke({"language": "en"})
+    portuguese = list_service_categories.invoke({"language": "pt"})
+
+    assert "Available Public-Service Categories" in english
+    assert "**Health**" in english
+    assert "Categorias de Serviços" not in english
+    assert "Categorias de Serviços Disponíveis" in portuguese
+    assert "**Saúde**" in portuguese
+
+
+def test_visitlisboa_categories_are_compact_language_aware_lists() -> None:
+    """Event/place category tools should return category lists, not pseudo cards or placeholders."""
+    from tools.visitlisboa_api import get_event_categories, get_place_categories
+
+    events = get_event_categories.invoke({"language": "en"})
+    places = get_place_categories.invoke({"language": "en"})
+
+    assert events.startswith("### 🎭 **Event Categories in Lisbon**")
+    assert "event" in events
+    assert "**Theater" in events or "**Theatre" in events
+    assert "1 events" not in events
+    assert places.startswith("### 🏛️ **Available Place Categories**")
+    assert "**Museums & Monuments:**" in places
+    assert "Guided tours" in places
+    assert "Uncategorized" not in places
+    assert "DMCS" not in places
+    assert "Verify on the official website" not in places
+    assert "google.com/maps" not in places
+
+
+def test_hybrid_renderer_keeps_weather_transport_and_local_sections_separate() -> None:
+    """Hybrid output should not let one worker repeat another worker's domain."""
+    assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
+
+    output = assistant._combine_outputs(
+        {
+            "weather": (
+                "Amanhã o tempo está agradável.\n"
+                "- 🌡️ **Temperatura**: 11°C a 21°C\n"
+                "- Para ir do Rossio a Belém de transportes públicos, usa autocarro.\n\n"
+                "📌 **Fonte:** [*IPMA*](https://www.ipma.pt) | **Atualizado:** 10:00"
+            ),
+            "transport": (
+                "**Trajeto:** Rossio → Belém\n"
+                "- 🚌 **Linha 732** — para Caselas\n\n"
+                "📌 **Fonte:** [*Carris*](https://www.carris.pt) | **Atualizado:** 10:01"
+            ),
+            "researcher": (
+                "### 🏛️ Mosteiro dos Jerónimos\n"
+                "- 📝 **Descrição:** Monumento em Belém.\n"
+                "- O tempo amanhã estará agradável.\n\n"
+                "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) | **Atualizado:** 10:02"
+            ),
+        },
+        language="pt",
+    )
+
+    assert "Para ir do Rossio" not in output
+    assert "O tempo amanhã" not in output
+    assert "Linha 732" in output
+    assert "Mosteiro dos Jerónimos" in output
+
+
+def test_final_visual_pass_repairs_truncated_scope_intro() -> None:
+    """Out-of-scope templates must not leak the old truncated 'Here's what' line."""
+    output = final_visual_pass("Oops.\n\nHere's what\n\n- 🌤️ Weather")
+
+    assert "Here's what I can help you with:" in output
+    assert "\nHere's what\n" not in output
+
+
+def test_final_visual_pass_normalizes_carris_realtime_feed_phrase() -> None:
+    """PT transport answers should not show mixed-language cached snapshot phrases."""
+    raw = "📡 **Tempo real:** 📡 Carris GTFS-RT: cached — em tempo real snapshot in use (0s old)."
+
+    output = final_visual_pass(raw)
+
+    assert output == "📡 **Tempo real:** Carris GTFS-RT com snapshot em cache (0s)."
+
+
+def test_final_visual_pass_hides_coordinates_when_address_exists() -> None:
+    """Service cards should not show raw coordinates when an address is already available."""
+    raw = """- 💊 **Farmácia Azevedo**
+    - 📍 **Morada:** [Praça D. Pedro IV, 31](https://maps.example)
+    - 📏 **Distância:** 0.08 km
+    - 🗺️ **Coordenadas:** [38.713326, -9.139880](https://maps.example)
+
+- 🏛️ **Torre de Belém**
+    - 📍 **Morada:** [Avenida de Brasília](https://maps.example)
+    - 🗺️ **GPS**: [38.69159, -9.21593](https://maps.example)
+
+- 💊 **Sem morada**
+    - 🗺️ **Coordenadas:** [38.700000, -9.100000](https://maps.example)
+"""
+
+    output = final_visual_pass(raw)
+
+    assert "Farmácia Azevedo" in output
+    assert "Praça D. Pedro IV" in output
+    assert "38.713326" not in output
+    assert "38.69159" not in output
+    assert "38.700000" in output
+
+
+class _FakeResearcherTool:
+    """Tool stub for deterministic ResearcherAgent tests."""
+
+    def __init__(self, name: str, response: str = "ok") -> None:
+        self.name = name
+        self.response = response
+        self.calls: list[dict] = []
+
+    def invoke(self, args: dict) -> str:
+        """Record the call and return the configured response."""
+        self.calls.append(args)
+        return self.response
+
+
+def test_researcher_lisboa_card_lookup_uses_knowledge_not_events() -> None:
+    """Lisboa Card attraction questions should never be answered as event alternatives."""
+    knowledge = _FakeResearcherTool("search_lisbon_knowledge", "knowledge")
+    events = _FakeResearcherTool("search_cultural_events", "events")
+    agent = ResearcherAgent.__new__(ResearcherAgent)
+    agent.tools = [knowledge, events]
+    agent._tool_calls_log = []
+
+    response = agent._run_lisboa_card_lookup("Is the Oceanário included in the Lisboa Card?", "en")
+
+    assert knowledge.calls == [{"query": "Is the Oceanário included in the Lisboa Card?", "max_results": 5}]
+    assert events.calls == []
+    assert "Oceanário de Lisboa" in response
+    assert "discount" in response.lower()
+    assert "not free entry" in response.lower()
+
+
 def test_weather_wind_today_query_uses_current_summary_path() -> None:
     """Wind-only current weather prompts should use grounded current IPMA data, not free-form synthesis."""
     assert WeatherAgent._is_current_weather_query("Como está o vento hoje?") is True
     assert WeatherAgent._is_current_weather_query("How is the wind right now?") is True
+
+
+class _FakeWeatherTool:
+    """Small tool stub for deterministic WeatherAgent routing tests."""
+
+    def __init__(self, name: str, response: str) -> None:
+        self.name = name
+        self.response = response
+        self.calls: list[dict] = []
+
+    def invoke(self, args: dict) -> str:
+        """Record the call and return the configured response."""
+        self.calls.append(args)
+        return self.response
+
+
+def _build_weather_agent_with_tools(*tools: _FakeWeatherTool) -> WeatherAgent:
+    """Build a WeatherAgent instance without initializing an LLM provider."""
+    agent = WeatherAgent.__new__(WeatherAgent)
+    agent.tools = list(tools)
+    agent._tool_calls_log = []
+    return agent
+
+
+def test_weather_warning_query_uses_warning_tool_even_when_user_says_right_now() -> None:
+    """Warning status prompts should not be swallowed by the current-summary route."""
+    warnings = _FakeWeatherTool(
+        "get_weather_warnings",
+        "✅ No active weather warnings for Lisbon.\n\n🌤️ Weather conditions are normal.",
+    )
+    current = _FakeWeatherTool("get_current_weather_summary", "SHOULD NOT BE USED")
+    agent = _build_weather_agent_with_tools(warnings, current)
+
+    output = agent._run_direct_tool_fallback("Are there any weather warnings active right now?")
+
+    assert warnings.calls == [{"area": "LSB"}]
+    assert current.calls == []
+    assert output.startswith("### 🌤️ **Weather Warnings**")
+    assert "No, there are **no active weather warnings**" in output
+    assert "Weather conditions are normal" not in output
+    assert output.count("No active weather warnings") + output.count("no active weather warnings") == 1
+
+
+def test_weather_warning_finalization_removes_semantic_clear_status_duplicates() -> None:
+    """Final weather output should not repeat equivalent clear-warning statements."""
+    raw = """### 🌤️ **Weather Warnings**
+
+✅ No, there are **no active weather warnings** for Lisbon right now.
+
+---
+
+✅ No active weather warnings for Lisbon.
+
+🌤️ Weather conditions are normal.
+"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="weather",
+        user_query="Are there any weather warnings active right now?",
+        language="en",
+    )
+
+    assert output.count("weather warnings") == 1
+    assert "Weather conditions are normal" not in output
+    assert "---\n\n📌 **Source:**" not in output
+    assert output.endswith("**Updated:** " + output.rsplit("**Updated:** ", 1)[1])
+
+
+def test_weather_warning_finalization_removes_pt_clear_status_variants() -> None:
+    """PT warning answers must treat 'não há' and 'sem avisos' as the same status."""
+    raw = """### 🌤️ **Avisos Meteorológicos**
+
+✅ Não, não há **avisos meteorológicos ativos** para Lisboa neste momento.
+
+---
+
+✅ Sem avisos meteorológicos ativos para Lisboa.
+"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="weather",
+        user_query="Há avisos meteorológicos ativos agora?",
+        language="pt",
+    )
+
+    assert "não há **avisos meteorológicos ativos**" in output
+    assert "Sem avisos meteorológicos ativos" not in output
+    assert "---\n\n📌 **Fonte:**" not in output
+
+
+def test_weather_alertas_query_uses_warning_tool_and_horizon_note_for_named_day() -> None:
+    """PT alertas wording should route as warnings and disclose named days outside horizon."""
+    warnings = _FakeWeatherTool(
+        "get_weather_warnings",
+        "✅ No active weather warnings for Lisbon.\n\n🌤️ Weather conditions are normal.",
+    )
+    agent = _build_weather_agent_with_tools(warnings)
+
+    with patch("agent.agents.weather_agent.datetime") as fake_datetime:
+        fake_datetime.now.return_value = datetime(2026, 5, 5, 10, 0)
+        fake_datetime.strptime.side_effect = datetime.strptime
+        output = agent._run_direct_tool_fallback("Há alertas meteorológicos para domingo?")
+
+    assert warnings.calls == [{"area": "LSB"}]
+    assert "Avisos Meteorológicos" in output
+    assert "fora do horizonte IPMA de 5 dias" in output
+
+
+def test_weather_tonight_query_uses_forecast_tool_and_answers_temperature_first() -> None:
+    """Tonight/cold prompts should use forecast data and put the low temperature first."""
+    forecast = _FakeWeatherTool(
+        "get_weather_forecast",
+        "🌤️ Weather Forecast for Lisbon\n📅 Updated: 2026-05-05T21:00:00\n\n"
+        "☀️ Tuesday, May 05\n   🌡️ 11.1°C to 20.2°C\n   🌤️ Partly cloudy\n"
+        "   💧 Rain: Very unlikely (2.0%)\n   💨 Wind: Northwest (Moderate)",
+    )
+    agent = _build_weather_agent_with_tools(forecast)
+
+    output = agent._run_direct_tool_fallback("How cold will it get tonight?")
+
+    assert forecast.calls == [{"days": 1, "day_offset": 0}]
+    assert "Tonight should get down to about **11.1°C**" in output
+    assert output.index("Tonight should") < output.index("Weather Forecast for Lisbon")
+
+
+def test_weather_tomorrow_rain_query_uses_only_tomorrow_forecast_window() -> None:
+    """Tomorrow rain prompts should not include today's forecast block."""
+    forecast = _FakeWeatherTool(
+        "get_weather_forecast",
+        "🌤️ Weather Forecast for Lisbon\n📅 Updated: 2026-05-05T21:00:00\n\n"
+        "☀️ Wednesday, May 06\n   🌡️ 11.3°C to 20.5°C\n   🌤️ Sunny intervals\n"
+        "   💧 Rain: Very unlikely (14.0%)\n   💨 Wind: Northwest (Moderate)",
+    )
+    agent = _build_weather_agent_with_tools(forecast)
+
+    output = agent._run_direct_tool_fallback("Vai chover amanhã em Lisboa?")
+
+    assert forecast.calls == [{"days": 1, "day_offset": 1}]
+    assert "Não deverá chover" in output
+    assert "14%" in output
+
+
+def test_weather_unsupported_uv_logs_current_context_without_dumping_forecast() -> None:
+    """Unsupported weather fields should stay concise while preserving expected current-summary coverage."""
+    current = _FakeWeatherTool(
+        "get_current_weather_summary",
+        "🌤️ Lisbon Weather Summary\n📅 Updated: 2026-05-05T21:00:00\n📅 Today: 11°C to 20°C",
+    )
+    agent = _build_weather_agent_with_tools(current)
+
+    output = agent._run_direct_tool_fallback("Tell me the UV index for today.")
+
+    assert current.calls == [{}]
+    assert "can't confirm that indicator" in output
+    assert "11°C to 20°C" not in output
+
+
+def test_weather_portugal_overview_uses_country_title_not_today_summary_title() -> None:
+    """Portugal-wide overview prompts should not inherit the Lisbon current-weather title."""
+    overview = _FakeWeatherTool(
+        "get_portugal_weather_overview",
+        "🇵🇹 Portugal Weather Overview - Today\n📅 Forecast date: 2026-05-05\n📊 Locations: 27",
+    )
+    agent = _build_weather_agent_with_tools(overview)
+
+    output = agent._run_direct_tool_fallback("Give me a Portugal-wide weather overview for today.")
+
+    assert overview.calls == [{"day": 0}]
+    assert output.startswith("### 🌤️ **Portugal Weather Overview**")
+    assert "Lisbon Weather Summary" not in output
+
+
+def test_weather_finalization_normalizes_precipitation_intensity_label_in_pt() -> None:
+    """PT weather intensity should be a bold sibling label, not a lowercase inline fragment."""
+    raw = (
+        "### 🌤️ **Avisos Meteorológicos**\n\n"
+        "**🌤️ Previsão do Tempo para Lisboa**\n\n"
+        "- **🌧️ Sábado, Mai 09**\n"
+        "- 💧 **Chuva**: Muito provável (100.0%) | intensidade: moderado\n"
+    )
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="weather",
+        user_query="Há alertas meteorológicos para o fim de semana?",
+        language="pt",
+    )
+
+    assert "| **Intensidade:** moderada" in output
+    assert "| intensidade:" not in output
+
+
+def test_final_visual_pass_keeps_route_fields_on_separate_streamlit_lines() -> None:
+    """Standalone route fields need blank separation so Streamlit does not join them inline."""
+    raw = """### 🚇 **Baixa-Chiado → Aeroporto**
+
+⏳ **Estimated total time:** ~35–40 min
+🗺️ **Recommended route:**
+
+- 📍 **Board at** Baixa-Chiado
+
+📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Updated:** 17:00
+"""
+
+    output = final_visual_pass(raw)
+
+    assert "~35–40 min\n\n🗺️ **Recommended route:**" in output
+
+
+def test_final_visual_pass_nests_planner_transport_flow_children() -> None:
+    """Planner transport-flow child bullets should be indented under their parent section."""
+    raw = """### 📅 **Suggested Itinerary**
+
+- 🚌 **Transport**:
+- From Rossio, take tram 15E toward Belém.
+- Exact times should be checked on the travel day.
+
+⚠️ 💡 Tip: Keep the museum order compact.
+
+📌 **Source:** [*Carris*](https://www.carris.pt) | **Updated:** 17:00
+"""
+
+    output = final_visual_pass(raw)
+
+    assert "- 🚌 **Transport**:\n    - From Rossio" in output
+    assert "\n    - Exact times should be checked" in output
+    assert "⚠️ 💡 Tip" not in output
+    assert "💡 **Tip:** Keep the museum order compact." in output
+
+
+def test_planner_tourism_cards_keep_visitlisboa_source_footer() -> None:
+    """Tourism itineraries that contain place cards should retain VisitLisboa attribution."""
+    raw = """### 📅 **Itinerary for Tuesday, May 05, 2026**
+
+### 🏛️ **Carris Museum**
+- 📍 **Address:** Rua 1.º de Maio, Lisboa
+- 🌐 **Website:** [Official website](https://www.visitlisboa.com/en/places/carris-museum)
+
+- 🚌 **Transport**:
+- From Rossio, use Carris toward Belém.
+
+📌 **Source:** [*IPMA*](https://www.ipma.pt) | [*Carris*](https://www.carris.pt) | **Updated:** 17:00
+"""
+
+    output = finalize_worker_response(
+        raw,
+        agent_name="planner",
+        user_query="Plan a full museum day in Lisbon for tomorrow, starting in Rossio and using public transport.",
+        language="en",
+    )
+
+    assert "[*VisitLisboa" in output
+    assert "[*Carris*](https://www.carris.pt)" in output
+
+
+def test_final_visual_pass_does_not_prefix_parking_heading_with_museum_icon() -> None:
+    """Service headings that already have a domain icon should not receive a generic place icon."""
+    raw = """**🅿️ Praça da Figueira**
+- 📍 **Address:** Praça da Figueira
+
+📌 **Source:** [*Lisboa Aberta*](https://dados.cm-lisboa.pt/) | **Updated:** 17:00
+"""
+
+    output = final_visual_pass(raw)
+
+    assert "**🅿️ Praça da Figueira**" in output
+    assert "🏛️ 🅿️" not in output
+
+
+def test_final_visual_pass_structures_inline_parking_service_results() -> None:
+    """QA compact parking bullets should become aligned cards with address and distance fields."""
+    raw = """You can park in central Lisbon at these nearby car parks:
+
+- **Praça da Figueira** — **0.17 km** from the queried central Lisbon area
+**Address:** [Praça da Figueira](https://www.google.com/maps/search/?api=1&query=Pra%C3%A7a+da+Figueira)
+
+📌 **Source:** [*Lisboa Aberta*](https://dados.cm-lisboa.pt/) | **Updated:** 17:00
+"""
+
+    output = final_visual_pass(raw)
+
+    assert "**🅿️ Praça da Figueira**" in output
+    assert "- 📏 **Distance:** 0.17 km from the queried central Lisbon area" in output
+    assert "- 📍 **Address:** [Praça da Figueira]" in output
+    assert "\n**Address:**" not in output
+
+
+def test_researcher_parking_service_extraction_does_not_return_gardens() -> None:
+    """Parking/car-park wording should stay in the parking service lane, not parks/gardens."""
+    services = ResearcherAgent._extract_service_types(
+        "Where can I park my car in central Lisbon? Are there municipal car parks?"
+    )
+
+    assert services == ["parking"]
+    assert ResearcherAgent._service_category_for_type("parking") == "transportes"
+    assert ResearcherAgent._extract_near_location_name(
+        "Where can I park my car in central Lisbon? Are there municipal car parks?"
+    ) == "central Lisbon"
+
+
+def test_final_visual_pass_removes_open_data_place_noise() -> None:
+    """Open-data place cards should not expose internal source prefixes or placeholder descriptions."""
+    raw = """- 📊 **Torre de Belém**
+    - 📂 **Categoria**: 📊 Open Data: Monumentos Nacionais
+    - Descrição disponível na página oficial do local.
+    - 📍 **Morada:** Avenida de Brasília
+
+📌 **Fonte:** [*Lisboa Aberta*](https://dados.cm-lisboa.pt/) | **Atualizado:** 17:00
+"""
+
+    output = final_visual_pass(raw)
+
+    assert "Open Data:" not in output
+    assert "Descrição disponível" not in output
+    assert "- 📂 **Categoria:** Monumentos Nacionais" in output
+
+
+def test_final_visual_pass_removes_split_source_heading_block() -> None:
+    """QA should not leave a separate source heading plus a canonical source footer."""
+    raw = """### 🌤️ Resumo Meteorológico
+
+- ✅ Sem avisos.
+
+### 📌 Fonte
+[*IPMA*](https://www.ipma.pt) | **Atualizado:** 17:00
+
+📌 **Fonte:** [*IPMA*](https://www.ipma.pt) | **Atualizado:** 17:00
+"""
+
+    output = final_visual_pass(raw)
+
+    assert "### 📌 Fonte" not in output
+    assert output.count("📌 **Fonte:**") == 1
+
+
+def test_weather_far_future_month_name_date_is_outside_forecast_horizon() -> None:
+    """Natural month-name dates such as December 25th 2030 must not reach forecast tools."""
+    assert WeatherAgent._is_beyond_forecast_horizon_query(
+        "What will the weather be like in Lisbon on December 25th 2030?"
+    ) is True
+
+
+def test_final_visual_pass_removes_duplicate_forecast_horizon_notes() -> None:
+    """QA-added helpful notes must not repeat the direct horizon-limit answer."""
+    raw = """### 🌤️ **Weather Forecast**
+
+⚠️ I only have reliable IPMA weather forecast data for Lisbon for the next 5 days, so I can't confirm the weather for December 25th, 2030.
+
+---
+
+⚠️ Helpful Notes
+
+⚠️ IPMA weather forecasts are only reliable for up to 5 days ahead, so a forecast for December 25th, 2030 is not available.
+
+📌 **Source:** [*IPMA*](https://www.ipma.pt/en/) | **Updated:** 20:29"""
+
+    output = final_visual_pass(raw)
+
+    assert "Helpful Notes" not in output
+    assert output.count("5 days") == 1
+    assert "December 25th, 2030" in output
+
+
+def test_weather_forecast_tool_supports_focused_day_offset_window() -> None:
+    """The IPMA forecast tool should support focused windows instead of only day-0 dumps."""
+    from tools import ipma_api
+
+    fake_payload = {
+        "dataUpdate": "2026-05-05T21:00:00",
+        "data": [
+            {"forecastDate": "2026-05-05", "tMin": "10", "tMax": "20", "precipitaProb": "80", "predWindDir": "NW", "idWeatherType": 7, "classWindSpeed": 2, "classPrecInt": 1},
+            {"forecastDate": "2026-05-06", "tMin": "11", "tMax": "21", "precipitaProb": "5", "predWindDir": "N", "idWeatherType": 2, "classWindSpeed": 1, "classPrecInt": 0},
+        ],
+    }
+
+    with patch.object(ipma_api, "fetch_json", return_value=fake_payload):
+        output = ipma_api.get_weather_forecast.invoke({"days": 1, "day_offset": 1})
+
+    assert "Wednesday, May 06" in output
+    assert "Tuesday, May 05" not in output
 
 
 def test_nearest_service_query_is_not_treated_as_pagination() -> None:
@@ -244,6 +767,67 @@ def test_missing_address_placeholder_link_is_removed() -> None:
     assert "- 💰 **Preço:** Gratuito" in output
 
 
+def test_generic_maps_search_address_line_is_removed() -> None:
+    """Generic Maps search labels are not grounded addresses and must be omitted."""
+    raw = (
+        "**🏛️ Museu Exemplo**\n"
+        "- 📍 **Morada:** [Pesquisar no Maps](https://www.google.com/maps/search/?api=1&query=Museu+Exemplo+Lisboa)\n"
+        "- 🌐 **Website:** [Página do local](https://example.com)"
+    )
+
+    output = final_visual_pass(raw)
+
+    assert "Pesquisar no Maps" not in output
+    assert "google.com/maps" not in output
+    assert "Página do local" in output
+
+
+def test_address_verification_placeholder_link_is_removed() -> None:
+    """Address verification placeholders must not survive as Maps links."""
+    raw = (
+        "**🏛️ Museu Exemplo**\n"
+        "- 📍 **Morada:** [Deve ser verificada.](https://www.google.com/maps/search/?api=1&query=Deve+ser+verificada)\n"
+        "- 🌐 **Website:** [Página oficial](https://example.com)"
+    )
+
+    output = final_visual_pass(raw)
+
+    assert "Deve ser verificada" not in output
+    assert "google.com/maps" not in output
+    assert "Página oficial" in output
+
+
+def test_lisboa_card_ticket_field_moves_to_price() -> None:
+    """Lisboa Card benefits must not be rendered as ticket fields without URLs."""
+    raw = (
+        "**🏛️ Museu da Marioneta**\n"
+        "- 🎟️ **Bilhetes:** Gratuito com Lisboa Card\n"
+        "- 🌐 **Website:** [Página oficial](https://example.com)"
+    )
+
+    output = final_visual_pass(raw)
+
+    assert "🎟️" not in output
+    assert "**Bilhetes:**" not in output
+    assert "💶 **Preço:** Gratuito com Lisboa Card" in output
+    assert "Página oficial" in output
+
+
+def test_researcher_bare_item_headings_gain_place_emoji_and_pt_link_label() -> None:
+    """Researcher place cards should keep emoji item headers and PT link text."""
+    raw = (
+        "**Museu Exemplo**\n"
+        "- 📝 **Descrição:** Museu em Lisboa.\n"
+        "- 🌐 **Website:** [Official website](https://example.com)"
+    )
+
+    output = final_visual_pass(canonicalize_local_information_terms(raw, language="pt"))
+
+    assert "**🏛️ Museu Exemplo**" in output
+    assert "[Página oficial](https://example.com)" in output
+    assert "Official website" not in output
+
+
 def test_madeira_ambiguity_route_card_fields_are_separate_bullets() -> None:
     """Madeira ambiguity follow-up fields should not collapse into one oversized paragraph."""
     raw = (
@@ -292,6 +876,27 @@ def test_generic_public_transport_route_composes_bus_and_metro_options() -> None
     assert "[*Metro de Lisboa*]" in output
 
 
+def test_portuguese_public_transport_endpoint_drops_mode_suffix() -> None:
+    """Destination names should not absorb 'de transportes públicos' into the place name."""
+    from agent.agents.transport_agent import _build_deterministic_route_tool_response
+
+    metro_result = "No Metro route for Belém."
+    carris_result = "🚌 **Autocarros**\n\n- 🚌 **15E** — Praça da Figueira → Belém\n    - 🚏 **Embarque:** Praça da Figueira\n    - 🚏 **Saída:** Belém"
+
+    with patch("tools.transport_api.get_route_between_stations.func", side_effect=lambda **_: metro_result) as metro, patch(
+        "tools.carris_api.carris_find_routes_between.func",
+        side_effect=lambda **_: carris_result,
+    ) as carris:
+        output = _build_deterministic_route_tool_response(
+            "Como vou do Rossio para Belém de transportes públicos?"
+        )
+
+    assert output is not None
+    metro.assert_called_once_with(origin="Rossio", destination="Belém")
+    carris.assert_called_once_with(origin="Rossio", destination="Belém")
+    assert "15E" in output
+
+
 def test_after_hours_culture_recommendation_avoids_closed_indoor_museums() -> None:
     """Late museum/monument requests should not recommend venues closed before the requested window."""
     response = ResearcherAgent._maybe_answer_after_hours_culture_query(
@@ -301,7 +906,8 @@ def test_after_hours_culture_recommendation_avoids_closed_indoor_museums() -> No
 
     assert response is not None
     assert "evitaria recomendar **museus interiores**" in response
-    assert "Padrão dos Descobrimentos" in response
+    assert "### 🏛️ Recomendação Para 19:00-20:00" in response
+    assert "📍 **Morada:**" in response
     assert "09:30" not in response
     assert "17:30" not in response
 
@@ -621,7 +1227,7 @@ def test_structure_weather_markdown_nests_days_even_after_generic_bullet_normali
 
 
 def test_final_visual_pass_normalizes_quick_action_weather_summary_layout() -> None:
-    """Quick-action itinerary weather snippets should keep forecast details nested under the day."""
+    """Quick-action weather snippets should stay nested without duplicate clear-status lines."""
     raw = (
         "### 🌤️ Resumo Meteorológico\n\n"
         "- ✅ Sem avisos meteorológicos ativos para Lisboa.\n\n"
@@ -637,13 +1243,15 @@ def test_final_visual_pass_normalizes_quick_action_weather_summary_layout() -> N
 
     output = final_visual_pass(raw)
 
-    assert "- ✅ Sem avisos meteorológicos ativos para Lisboa.\n- 🌤️ As condições meteorológicas são normais." in output
-    assert "As condições meteorológicas são normais.\n\n**🌤️ Previsão do Tempo para Lisboa**" in output
+    assert "- ✅ Sem avisos meteorológicos ativos para Lisboa." in output
+    assert "As condições meteorológicas são normais" not in output
+    assert "Sem avisos meteorológicos ativos para Lisboa.\n\n**🌤️ Previsão do Tempo para Lisboa**" in output
     assert "- **⛈️ Quarta-feira, Abr 29**" in output
     assert "\n    - 🌡️ 13.7°C a 18.7°C" in output
     assert "\n    - 🌤️ *Showers and thunderstorms*" in output
     assert "\n    - 💧 **Chuva**: muito provável (100.0%) | intensidade: forte" in output
-    assert "\n    - 💨 **Vento**: Sudoeste (moderado)\n\n---" in output
+    assert "\n    - 💨 **Vento**: Sudoeste (moderado)" in output
+    assert not output.endswith("---")
     assert "\n - 🌡️" not in output
 
 

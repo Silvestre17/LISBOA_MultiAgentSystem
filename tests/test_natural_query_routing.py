@@ -60,7 +60,17 @@ def test_carris_metropolitana_realtime_line_accepts_bare_line_number() -> None:
 
     assert spec == {
         "name": "get_bus_realtime_locations",
-        "args": {"line_id": "1507"},
+        "args": {"line_id": "1507", "location": "Almada"},
+    }
+
+
+def test_carris_urban_natural_next_tram_uses_eta_tool() -> None:
+    """Natural 'next tram at stop' phrasing should request an ETA, not a departure dump."""
+    spec = _build_carris_urban_tool_spec("When is the next 28E tram at Martim Moniz?")
+
+    assert spec == {
+        "name": "carris_vehicle_eta",
+        "args": {"route_short_name": "28E", "stop_name": "Martim Moniz"},
     }
 
 
@@ -74,6 +84,15 @@ def test_carris_metropolitana_alert_queries_preserve_area_filter() -> None:
         "name": "get_carris_metropolitana_alerts",
         "args": {"area": "Almada"},
     }
+
+
+def test_carris_metropolitana_multipart_route_keeps_get_to_endpoint() -> None:
+    """Multi-part CM prompts using 'need to get to' should preserve origin and destination."""
+    spec = _build_carris_metropolitana_tool_spec(
+        "I'm at Oriente and need to get to Loures now. Is there a direct bus, are there any disruptions, and where is it at the moment?"
+    )
+
+    assert spec is None
 
 
 def test_cp_station_search_accepts_closest_station_wording() -> None:
@@ -127,6 +146,7 @@ def test_supervisor_booking_request_gets_direct_unsupported_capability_reply() -
     assert decision is not None
     assert decision["agents"] == []
     assert "can't make bookings" in decision["direct_response"]
+    assert "official website" in decision["direct_response"]
 
 
 def test_supervisor_weather_aware_event_query_does_not_route_transport() -> None:
@@ -189,6 +209,7 @@ def test_researcher_service_categories_accept_generic_help_query() -> None:
 
     assert tool_call is not None
     assert tool_call.tool_calls[0]["name"] == "list_service_categories"
+    assert tool_call.tool_calls[0]["args"] == {"language": "en"}
 
 
 def test_researcher_service_queries_use_lisboa_aberta_in_subgraph() -> None:
@@ -223,6 +244,7 @@ def test_researcher_event_categories_accept_generic_browsing_query() -> None:
 
     assert tool_call is not None
     assert tool_call.tool_calls[0]["name"] == "get_event_categories"
+    assert tool_call.tool_calls[0]["args"] == {"language": "en"}
 
 
 def test_researcher_place_categories_accept_generic_exploration_query() -> None:
@@ -233,6 +255,54 @@ def test_researcher_place_categories_accept_generic_exploration_query() -> None:
 
     assert tool_call is not None
     assert tool_call.tool_calls[0]["name"] == "get_place_categories"
+    assert tool_call.tool_calls[0]["args"] == {"language": "en"}
+
+
+def test_researcher_visit_area_context_uses_place_search() -> None:
+    """Visit-area context in hybrid prompts should return local places, not weather or route prose."""
+    prompt = "Quero visitar Belém amanhã. Como está o tempo e como vou do Rossio para Belém de transportes públicos?"
+    tool_call = ResearcherAgent._build_deterministic_subgraph_tool_call(prompt)
+
+    assert ResearcherAgent._extract_place_focus_query(prompt) == "Belém"
+    assert ResearcherAgent._is_visit_place_context_query(prompt) is True
+    assert tool_call is not None
+    assert tool_call.tool_calls[0]["name"] == "search_places_attractions"
+    assert tool_call.tool_calls[0]["args"] == {
+        "query": "attractions monuments museums in Belém",
+        "category": "Museums & Monuments",
+        "max_results": 5,
+        "language": "pt",
+    }
+
+
+def test_supervisor_place_category_browse_is_not_planner_query() -> None:
+    """Category-browsing language with 'planning my itinerary' should stay researcher-only."""
+    prompt = "I'm planning my itinerary and want ideas. What kinds of places can I explore in Lisbon?"
+
+    assert SupervisorAgent._is_planning_query(prompt) is False
+    decision = SupervisorAgent._single_domain_override(prompt)
+
+    assert decision is not None
+    assert decision["agents"] == ["researcher"]
+
+
+def test_supervisor_direct_weather_transport_visit_query_bypasses_planner() -> None:
+    """A direct Belém weather-and-route question should not become a vague itinerary."""
+    prompt = "Quero visitar Belém amanhã. Como está o tempo e como vou do Rossio para Belém de transportes públicos?"
+
+    assert SupervisorAgent._is_planning_query(prompt) is False
+    decision = SupervisorAgent._single_domain_override(prompt)
+
+    assert decision is not None
+    assert decision["agents"] == ["weather", "transport", "researcher"]
+
+
+def test_supervisor_full_museum_day_still_uses_planner() -> None:
+    """Full-day itinerary requests should keep the planner path."""
+    prompt = "Plan a full museum day in Lisbon for tomorrow, starting in Rossio and using public transport."
+
+    assert SupervisorAgent._is_planning_query(prompt) is True
+    assert SupervisorAgent._single_domain_override(prompt) is None
 
 
 def test_researcher_history_query_uses_history_or_knowledge_tool() -> None:
@@ -251,6 +321,13 @@ def test_researcher_history_query_is_not_event_lookup() -> None:
     assert ResearcherAgent._is_direct_event_lookup_query(
         "Tell me about the history of Castelo de São Jorge."
     ) is False
+
+
+def test_researcher_music_weekend_query_is_category_date_discovery() -> None:
+    """Music weekend browsing should not be framed as a missing named event."""
+    prompt = "Any music events happening this weekend?"
+
+    assert ResearcherAgent._is_category_date_event_discovery(prompt) is True
 
 
 def test_researcher_lisboa_card_named_attraction_uses_knowledge_base() -> None:
