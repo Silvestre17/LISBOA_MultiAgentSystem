@@ -54,3 +54,9 @@ exclude = ["tests*", "data*", "docs*", "_*", "__pycache__*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.json", "*.yaml", "*.yml", "*.md", "*.pem"]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests",
+    "eval/tests",
+]

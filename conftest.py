@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,7 @@ if not _ENABLE_TEST_LANGSMITH:
     os.environ["LANGCHAIN_TRACING_V2"] = "false"
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+PYTEST_CACHE_DIR = Path(tempfile.gettempdir()) / "lisboa_pytest_cache"
 _ALLOWED_TEST_ROOTS = (
     PROJECT_ROOT / "tests",
     PROJECT_ROOT / "eval" / "tests",
@@ -42,8 +44,10 @@ def pytest_addoption(parser) -> None:  # type: ignore[no-untyped-def]
     )
 
 
+@pytest.hookimpl(trylast=True)
 def pytest_configure(config) -> None:  # type: ignore[no-untyped-def]
     """Register project-specific markers used by integration and coverage tests."""
+    _redirect_pytest_cache(config)
     config.addinivalue_line(
         "markers",
         "coverage: tests that validate tool and prompt coverage manifests",
@@ -52,6 +56,22 @@ def pytest_configure(config) -> None:  # type: ignore[no-untyped-def]
         "markers",
         "live: tests that may call live external APIs or local runtime resources",
     )
+
+
+def _redirect_pytest_cache(config: pytest.Config) -> None:
+    """Keep pytest cache files out of the OneDrive-backed repository root.
+
+    Pytest's cacheprovider stages a temporary `pytest-cache-files-*` directory
+    beside `cache_dir` before renaming it. On Windows/OneDrive that cleanup can
+    leave root-level directories behind, so the cache is pinned to the system
+    temp directory and created upfront.
+    """
+    cache = getattr(config, "cache", None)
+    if cache is None:
+        return
+
+    PYTEST_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache._cachedir = PYTEST_CACHE_DIR  # noqa: SLF001 - pytest exposes no setter.
 
 
 @pytest.fixture(scope="session", autouse=True)
