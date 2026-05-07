@@ -21,6 +21,7 @@ import sys
 import time
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
+from urllib.parse import quote
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -50,9 +51,75 @@ from agent.utils.startup_resources import (
 )
 from config import Config
 
+PORTUGAL_FLAG_SVG = """
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 20">
+  <defs>
+    <clipPath id="pt-flag-clip">
+      <rect width="30" height="20" rx="1.2"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#pt-flag-clip)">
+    <rect width="30" height="20" fill="#ff0000"/>
+    <rect width="12" height="20" fill="#006600"/>
+  </g>
+  <g transform="translate(12 10)">
+    <g fill="none" stroke="#1f1f1f" stroke-linecap="round" stroke-linejoin="round" stroke-width=".32">
+      <circle r="3.95"/>
+      <ellipse rx="3.95" ry="1.18"/>
+      <ellipse rx="1.18" ry="3.95"/>
+      <path d="M-3.38-2.1c1.56.82 4.9 2.86 6.76 4.2M3.38-2.1c-1.56.82-4.9 2.86-6.76 4.2"/>
+    </g>
+    <g fill="none" stroke="#fff200" stroke-linecap="round" stroke-linejoin="round" stroke-width=".76">
+      <circle r="3.95"/>
+      <ellipse rx="3.95" ry="1.18"/>
+      <ellipse rx="1.18" ry="3.95"/>
+      <path d="M-3.38-2.1c1.56.82 4.9 2.86 6.76 4.2M3.38-2.1c-1.56.82-4.9 2.86-6.76 4.2"/>
+    </g>
+    <path d="M-2.16-2.45h4.32v3.72c0 1.52-.94 2.72-2.16 3.16-1.22-.44-2.16-1.64-2.16-3.16z" fill="#f00000" stroke="#fff" stroke-width=".5"/>
+    <path d="M-1.08-1.28h2.16v2.38c0 .96-.45 1.68-1.08 1.96-.63-.28-1.08-1-1.08-1.96z" fill="#fff" stroke="#1f1f1f" stroke-width=".18"/>
+    <g fill="#0032a0">
+      <circle cx="0" cy="-.78" r=".22"/>
+      <circle cx="-.56" cy=".02" r=".22"/>
+      <circle cx=".56" cy=".02" r=".22"/>
+      <circle cx="0" cy=".78" r=".22"/>
+      <circle cx="0" cy="1.48" r=".22"/>
+    </g>
+    <g fill="#fff">
+      <circle cx="0" cy="-.78" r=".06"/>
+      <circle cx="-.56" cy=".02" r=".06"/>
+      <circle cx=".56" cy=".02" r=".06"/>
+      <circle cx="0" cy=".78" r=".06"/>
+      <circle cx="0" cy="1.48" r=".06"/>
+    </g>
+  </g>
+</svg>
+""".strip()
+
+UK_FLAG_SVG = """
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 20">
+  <rect width="30" height="20" fill="#012169"/>
+  <path d="M0 0l30 20M30 0L0 20" stroke="#fff" stroke-width="4"/>
+  <path d="M0 0l30 20M30 0L0 20" stroke="#c8102e" stroke-width="2"/>
+  <path d="M15 0v20M0 10h30" stroke="#fff" stroke-width="6"/>
+  <path d="M15 0v20M0 10h30" stroke="#c8102e" stroke-width="3.4"/>
+</svg>
+""".strip()
+
+FLAG_IMAGE_URIS = {
+    "pt": f"data:image/svg+xml;charset=utf-8,{quote(PORTUGAL_FLAG_SVG)}",
+    "en": f"data:image/svg+xml;charset=utf-8,{quote(UK_FLAG_SVG)}",
+}
+
+
+LANGUAGE_OPTIONS = {
+    "pt": {"label": "Português", "short": "PT"},
+    "en": {"label": "English", "short": "EN"},
+}
+
 # ==========================================================================
 # TRANSLATIONS / INTERNATIONALIZATION
 # ==========================================================================
+
 
 TRANSLATIONS = {
     "en": {
@@ -617,6 +684,73 @@ footer {{ visibility: hidden; }}
     drop-shadow: 0px 5px 15px rgba(0,0,0,0.1);
 }}
 
+/* Language selector: avoids OS emoji flag rendering and Streamlit widget truncation */
+.language-selector-label {{
+    margin: 0 0 0.45rem 0;
+    color: var(--text-main);
+    font-size: 0.88rem;
+    font-weight: 500;
+}}
+.language-toggle {{
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.55rem;
+    width: 100%;
+    margin: 0.15rem 0 0.9rem;
+}}
+.language-toggle a,
+.language-toggle span.language-option {{
+    min-width: 0;
+    min-height: 2.7rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.42rem 0.56rem;
+    border: 1px solid #d9dee8;
+    border-radius: 12px;
+    background: #fff;
+    color: var(--text-main);
+    text-decoration: none !important;
+    font-size: 0.88rem;
+    font-weight: 700;
+    line-height: 1.05;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    overflow: hidden;
+    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}}
+.language-toggle a:hover {{
+    border-color: var(--primary-red);
+    background: #fff7f4;
+    color: var(--text-main);
+    box-shadow: 0 6px 16px rgba(255, 64, 17, 0.1);
+    transform: translateY(-1px);
+}}
+.language-toggle .language-option.active {{
+    border-color: var(--primary-red);
+    background: #fff4ef;
+    color: #c53114;
+    box-shadow: inset 0 0 0 1px rgba(255, 64, 17, 0.22);
+}}
+.language-toggle .language-option.disabled {{
+    cursor: not-allowed;
+    opacity: 0.82;
+}}
+.language-toggle img {{
+    width: 1.72rem;
+    height: 1.15rem;
+    flex: 0 0 auto;
+    border-radius: 3px;
+    object-fit: cover;
+    box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.16);
+}}
+.language-toggle .language-text {{
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}}
+
 /* Buttons */
 button {{
     border-radius: 12px !important;
@@ -859,6 +993,22 @@ button[kind="secondary"]:hover {{
     }}
     .welcome-discover-cta {{
         justify-self: start;
+    }}
+}}
+
+@media (max-width: 420px) {{
+    .language-toggle {{
+        gap: 0.45rem;
+    }}
+    .language-toggle a,
+    .language-toggle span.language-option {{
+        min-height: 2.55rem;
+        padding: 0.4rem 0.42rem;
+        font-size: 0.82rem;
+    }}
+    .language-toggle img {{
+        width: 1.45rem;
+        height: 0.97rem;
     }}
 }}
 
@@ -1106,19 +1256,76 @@ def init_system_state():
 
 
 def sync_page_from_query_params() -> None:
-    """Apply a supported page query parameter to the current UI tab."""
+    """Apply supported query parameters to the current UI state."""
     try:
         raw_page_value = st.query_params.get("page", "")
+        raw_language_value = st.query_params.get("lang", "")
     except Exception:
         raw_page_value = ""
+        raw_language_value = ""
 
     if isinstance(raw_page_value, list):
         raw_page_value = raw_page_value[0] if raw_page_value else ""
+    if isinstance(raw_language_value, list):
+        raw_language_value = raw_language_value[0] if raw_language_value else ""
 
     page_value = str(raw_page_value).strip().lower()
+    language_value = str(raw_language_value).strip().lower()
 
     if page_value in {"chat", "info"}:
         st.session_state.current_page = page_value
+    if language_value in LANGUAGE_OPTIONS:
+        st.session_state.language = language_value
+
+
+def build_sidebar_url(page: str, language: str) -> str:
+    """Build a safe sidebar navigation URL preserving page and language."""
+    safe_page = page if page in {"chat", "info"} else "chat"
+    safe_language = language if language in LANGUAGE_OPTIONS else "pt"
+    return f"?page={safe_page}&lang={safe_language}"
+
+
+def render_language_selector(request_locked: bool) -> None:
+    """Render a responsive language selector that does not depend on emoji flags."""
+    current_language = st.session_state.get("language", "pt")
+    current_page = st.session_state.get("current_page", "chat")
+
+    items = []
+    for language_key, option in LANGUAGE_OPTIONS.items():
+        is_active = language_key == current_language
+        css_classes = ["language-option"]
+        if is_active:
+            css_classes.append("active")
+        if request_locked:
+            css_classes.append("disabled")
+
+        label = html.escape(option["label"])
+        short_label = html.escape(option["short"])
+        image_uri = html.escape(FLAG_IMAGE_URIS[language_key], quote=True)
+        content = (
+            f'<img src="{image_uri}" alt="{short_label} flag" loading="lazy" />'
+            f'<span class="language-text">{label}</span>'
+        )
+
+        class_attr = " ".join(css_classes)
+        if request_locked:
+            items.append(f'<span class="{class_attr}" aria-disabled="true">{content}</span>')
+            continue
+
+        href = html.escape(build_sidebar_url(current_page, language_key), quote=True)
+        aria_current = ' aria-current="true"' if is_active else ""
+        items.append(f'<a class="{class_attr}" href="{href}"{aria_current}>{content}</a>')
+
+    selector_label = html.escape(t("language"))
+    st.markdown(
+        f"""
+        <p class="language-selector-label">{selector_label}</p>
+        <div class="language-toggle" role="group" aria-label="{selector_label}">
+            {''.join(items)}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 @st.cache_resource(show_spinner=False)
@@ -1513,20 +1720,7 @@ def build_sidebar():
 
         st.divider()
 
-        # Simple Language Selection
-        cur_lang = st.session_state.language
-        langs = {"pt": "🇵🇹 Português", "en": "🇬🇧 English"}
-        lang_idx = 0 if cur_lang == "pt" else 1
-        new_lang_key = st.selectbox(
-            t("language"),
-            options=list(langs.keys()),
-            format_func=lambda x: langs[x],
-            index=lang_idx,
-            disabled=request_locked,
-        )
-        if new_lang_key != cur_lang:
-            st.session_state.language = new_lang_key
-            st.rerun()
+        render_language_selector(request_locked=request_locked)
 
         provider_labels = {
             "openai": "OpenAI",
