@@ -1939,6 +1939,50 @@ def should_attempt_startup_auto_initialization(
     return True
 
 
+def attempt_startup_auto_initialization(selected_provider: str) -> bool:
+    """Initialize the assistant automatically when production credentials are ready.
+
+    Returns:
+        True when initialization was attempted and the app requested a rerun.
+        False when no startup initialization is needed.
+    """
+    credentials_ready, _ = provider_has_required_credentials(selected_provider)
+    should_initialize = should_attempt_startup_auto_initialization(
+        initialized=bool(st.session_state.get("initialized", False)),
+        current_provider=str(st.session_state.get("provider") or ""),
+        selected_provider=selected_provider,
+        credentials_ready=credentials_ready,
+        attempted_provider=st.session_state.get("startup_auto_init_attempted_provider"),
+        last_error=st.session_state.get("startup_auto_init_error"),
+    )
+    if not should_initialize:
+        return False
+
+    st.session_state.request_running = True
+    spinner_text = (
+        "🚀 A preparar o LISBOA para a primeira pergunta..."
+        if st.session_state.get("language", "pt") == "pt"
+        else "🚀 Preparing LISBOA for the first prompt..."
+    )
+    try:
+        with st.spinner(spinner_text):
+            success, error = initialize_assistant(
+                selected_provider,
+                run_connection_probe=False,
+            )
+    finally:
+        st.session_state.request_running = False
+
+    st.session_state.startup_auto_init_attempted_provider = selected_provider
+    if success:
+        st.session_state.startup_auto_init_error = None
+    else:
+        st.session_state.startup_auto_init_error = error or t("initialization_failed")
+
+    st.rerun()
+    return True
+
+
 def build_startup_gate_message(
     startup_status: Dict[str, Any],
     *,
@@ -2925,6 +2969,7 @@ def main():
         return
 
     display_banner()
+    attempt_startup_auto_initialization(selected_provider)
 
     pending = st.session_state.get("pending_request")
     request_locked = request_capture_locked(
