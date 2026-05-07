@@ -33,7 +33,7 @@ LISBOA is a Master's thesis project for the Lisbon Metropolitan Area that combin
 | Knowledge base | ChromaDB with `BAAI/bge-m3` embeddings |
 | Indexed collections | `lisbon_pdf`, `lisbon_places`, `lisbon_events` |
 | Evaluation corpus | 72 benchmark queries across 6 domains |
-| Evaluation artefacts | benchmark, ablation, coverage, and calibration outputs under `eval/results/` |
+| Evaluation artefacts | benchmark, ablation, coverage, and statistics outputs under `eval/results/` |
 | Automation | daily scraping plus workflow-triggered vector sync |
 
 ## ✨ Core Capabilities
@@ -44,7 +44,7 @@ LISBOA is a Master's thesis project for the Lisbon Metropolitan Area that combin
 | 🚇 **Mobility** | Metro de Lisboa status / wait times / nearest station; Carris Metropolitana alerts, routes, live positions, departures; Carris Urban GTFS + GTFS-RT; CP schedules, routes, trip planning; multimodal summaries and routing |
 | 📚 **Knowledge & local services** | semantic search over VisitLisboa places & events; on-demand Lisboa Aberta service discovery; web fallback for history & culture |
 | 🧭 **Planning & synthesis** | constraint-aware itineraries integrating weather, transport, and user context (interests, mobility, location, available time) |
-| 🧪 **Evaluation & research** | benchmark and ablation runners under `eval/`; strict live coverage for the exported tool registry; human ↔ judge calibration; reproducibility metadata and optional cost accounting |
+| 🧪 **Evaluation & research** | benchmark and ablation runners under `eval/`; strict live coverage for the exported tool registry; statistical analysis; reproducibility metadata and optional cost accounting |
 
 ## 🤖 Why the System is Multi-Agent
 
@@ -59,7 +59,7 @@ The supported runtime separates responsibilities into clearer layers — **Super
 | `tools/` | exported tool registry plus vector-store internals |
 | `data_collection/` | scrapers and source-acquisition scripts |
 | `data/` | vector store and local transport support data |
-| `eval/` | benchmarking, ablation, validators, and calibration assets |
+| `eval/` | benchmarking, ablation, validators, and statistical analysis assets |
 | `tests/` | smoke checks, QA integration tests, and coverage validation |
 
 ## 📌 Documentation Boundary
