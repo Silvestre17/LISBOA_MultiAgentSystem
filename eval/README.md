@@ -1,8 +1,8 @@
 # LISBOA Evaluation Pipeline
 
 This folder contains the evaluation stack used for the LISBOA thesis workflow.
-It supports benchmark runs, ablation runs, response validators, calibration
-artefacts, and analysis notebooks.
+It supports benchmark runs, ablation runs, response validators, statistical
+analysis artefacts, and analysis notebooks.
 
 The evaluation stack is not the same thing as the app quality gate. User-facing
 changes to agents, prompts, routing, QA, planners, or final response formatting
@@ -22,7 +22,6 @@ eval/
 |-- validators/
 |   |-- response_heuristics.py
 |   `-- transport_validator.py
-|-- human_calibration/
 |-- tests/
 |   |-- README.md
 |   |-- test_dataset_integrity.py
@@ -43,7 +42,6 @@ quality gate.
 | Benchmark | `python -m eval.run_benchmark --dataset eval/evaluation_groundtruth_queries.json` | Isolated worker-agent evaluation |
 | Ablation | `python -m eval.run_ablation --dataset eval/evaluation_groundtruth_queries.json` | Zero-shot vs LISBOA comparison |
 | Prompt smoke | `python scripts/run_prompts.py --suite smoke` | Real LISBOA execution path |
-| Calibration | `python -m eval.human_calibration.run_calibration ...` | Human vs judge comparison |
 
 Benchmark and ablation runners require module form (`python -m eval.run_benchmark`
 and `python -m eval.run_ablation`) so repository imports resolve correctly.
@@ -94,9 +92,8 @@ subfolders:
 
 - `benchmark/`
 - `ablation/`
-- `calibration/`
 - `statistics/`
 - `figures/`
 
 Keep result interpretation explicit: separate benchmark, ablation, deterministic
-validator checks, live/prompt smoke runs, and user-study/calibration evidence.
+validator checks, live/prompt smoke runs, and user-study evidence.

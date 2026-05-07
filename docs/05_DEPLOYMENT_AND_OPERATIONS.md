@@ -205,7 +205,7 @@ For the evaluation model, refer to `eval/README.md` for judge-specific details a
 | benchmark JSON outputs | `eval/results/benchmark/` | produced by `eval/run_benchmark.py` |
 | ablation JSON outputs | `eval/results/ablation/` | produced by `eval/run_ablation.py` |
 | strict live coverage JSON outputs | `eval/results/coverage/` | produced by live coverage runs |
-| calibration JSON outputs | `eval/results/calibration/` | produced by `eval/human_calibration/run_calibration.py` |
+| statistical analysis JSON/CSV outputs | `eval/results/statistics/` | produced by `eval/statistical_analysis.py` |
 
 The analysis notebook `eval/benchmark_ablation_analysis.ipynb` also exports latest CSV summaries through `flatten_benchmark_results()` and `flatten_ablation_results()`:
 

@@ -88,7 +88,7 @@ The supported user-facing entrypoint is `app.py`. The current runtime is multi-a
 | Researcher tool set | 11 tools |
 | Vector collections | 3: `lisbon_pdf`, `lisbon_places`, `lisbon_events` |
 | Evaluation ground truth | 72 benchmark queries across 6 domains |
-| Evaluation artefacts | benchmark, ablation, calibration, statistics, and figure outputs under `eval/results/` |
+| Evaluation artefacts | benchmark, ablation, statistics, and figure outputs under `eval/results/` |
 | Automation workflows | `data_pipeline.yml` and `sync_vector_db.yml` |
 
 ## ✨ Core Capabilities
@@ -175,7 +175,7 @@ The Lisbon guide PDF is served through internal vector search (not a separate ex
 <a id="evaluation-and-research-workflow"></a>
 ## 🧪 Evaluation and Research Workflow
 
-Research-grade stack under `eval/` combining LLM-as-a-Judge, deterministic metrics, prompt smoke validation, and human calibration.
+Research-grade stack under `eval/` combining LLM-as-a-Judge, deterministic metrics, prompt smoke validation, and statistical analysis.
 
 | Layer | Entrypoint | Output |
 |------|-----------|--------|
@@ -183,7 +183,6 @@ Research-grade stack under `eval/` combining LLM-as-a-Judge, deterministic metri
 | Benchmark (isolated workers) | `eval/run_benchmark.py` | `eval/results/benchmark/` |
 | Ablation (zero-shot vs LISBOA) | `eval/run_ablation.py` | `eval/results/ablation/` |
 | Prompt smoke validation | `scripts/run_prompts.py` | terminal output / chosen artefacts |
-| Human ↔ judge calibration | `eval/human_calibration/run_calibration.py` | `eval/results/calibration/` |
 
 **Ground truth**: 72 entries across 6 domains — weather (13), transport (36), researcher (13), multi-agent (3), greeting (3), out-of-scope (4).
 
@@ -200,7 +199,7 @@ LISBOA_MultiAgentSystem/
 ├── data_collection/                # Scrapers and data acquisition scripts
 ├── data/                           # Persistent vector DB and local transport data
 ├── docs/                           # Repository documentation
-├── eval/                           # Benchmarking, ablation, judge, validators, calibration
+├── eval/                           # Benchmarking, ablation, judge, validators, statistics
 ├── tests/                          # Lean deterministic checks and optional live smoke tests
 ├── .github/workflows/              # Scraping and vector sync automation
 ├── app.py                          # Supported Streamlit entrypoint
@@ -275,7 +274,7 @@ python -m eval.run_ablation  --mode run_test
 python -m pytest tests/test_lisbon_transport.py -q --run-live -m live
 ```
 
-Artefacts land under `eval/results/{benchmark,ablation,calibration,figures}/` or the output path selected by the runner. See [`eval/README.md`](./eval/README.md) for the current validation policy.
+Artefacts land under `eval/results/{benchmark,ablation,statistics,figures}/` or the output path selected by the runner. See [`eval/README.md`](./eval/README.md) for the current validation policy.
 
 ## ⚙️ Automation
 

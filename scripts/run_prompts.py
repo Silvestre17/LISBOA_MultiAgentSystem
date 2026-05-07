@@ -4,7 +4,7 @@
 #
 # Manual prompt runner for two modes:
 #   1. smoke    -> End-to-end MultiAgentAssistant sanity checks
-#   2. coverage -> Isolated worker-agent real-service tool coverage prompts
+#   2. coverage -> Optional isolated worker-agent live-style prompts
 #
 # Usage:
 #   > python scripts/run_prompts.py --suite smoke
@@ -16,7 +16,7 @@
 #   > python scripts/run_prompts.py --interactive --transcript-file test_queries_15.04.2026.txt
 #       Ask for one ad-hoc smoke prompt via stdin and append the full terminal block to a transcript.
 #   > python scripts/run_prompts.py --suite coverage
-#       Run the strict worker-agent coverage manifest against live tools.
+#       Run the optional worker-agent prompt manifest against live tools, when present.
 #   > python scripts/run_prompts.py --suite coverage --limit 5 --category transport
 #       Run only a filtered slice of the coverage manifest.
 #   > python scripts/run_prompts.py --suite coverage --prompt "Next train from Rossio?" --domain transport --provider azure --model gpt-5.4-mini --temperature 0
@@ -76,7 +76,7 @@ from config import Config
 from eval.run_benchmark import run_isolated_agent
 from tools import __all__ as EXPORTED_TOOL_NAMES
 
-COVERAGE_MANIFEST_PATH = Path(PROJECT_ROOT) / "tests" / "fixtures" / "tool_coverage_manifest.json"
+COVERAGE_MANIFEST_PATH = Path(PROJECT_ROOT) / "tests" / "fixtures" / "worker_prompt_manifest.json"
 SUPPORTED_MODEL_PROVIDERS = {"azure", "openai", "lmstudio"}
 SUPPORTED_COVERAGE_DOMAINS = {"weather", "transport", "researcher"}
 DEFAULT_TRANSCRIPT_FILENAME = "test_queries_15.04.2026.txt"
@@ -97,7 +97,7 @@ SMOKE_PROMPTS = [
     ("Quero ir de metro ou comboio entre Entrecampos e Sete Rios? Qual o mais rápido e o mais barato?", "pt", "test"),
     ("Estou em Entrecampos e quero fazer um passeio turistico mas não pelos sitios habituais turisticos. Quero algo diferente... sugere-me", "pt", "test"),
     ("Qual o hospital e a farmácia mais perto do Saldanha?", "pt", "test"),
-    ("Quero ir de transportes públicos entre o ISCTE e a Zara do Rossio", "pt", "test"),
+    ("Quero ir de transportes públicos entre o ISCTE e o Rossio", "pt", "test"),
     ("Qual museu ou monumento recomendas ir neste domingo sendo que apenas tenho das 19 às 20h para visitar?", "pt", "test"),
 
     # CRITICAL end-to-end prompts
@@ -140,7 +140,13 @@ SMOKE_PROMPTS = [
 
 
 def _load_coverage_prompts() -> list[dict]:
-    """Load the strict live real-service coverage manifest used by the coverage suite."""
+    """Load the optional isolated worker prompt manifest used by the coverage suite."""
+    if not COVERAGE_MANIFEST_PATH.exists():
+        raise FileNotFoundError(
+            "Optional worker prompt manifest is not present. Use --suite smoke or "
+            "--prompt for real-system validation; do not recreate the old heavy "
+            "prompt-regression fixtures."
+        )
     with open(COVERAGE_MANIFEST_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 

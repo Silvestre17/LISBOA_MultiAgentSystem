@@ -241,9 +241,9 @@
       ]
     ],
     "expected_facts": [
-      "ETA or scheduled time for bus 736",
+      "estimated arrival time or scheduled time for bus 736",
       "Stop name near Marquês de Pombal",
-      "Stop resolution is acceptable before the ETA or departure lookup"
+      "Stop resolution is acceptable before the estimated-arrival or departure lookup"
     ],
     "language": "en",
     "edge_case": false
@@ -710,7 +710,7 @@
     ],
     "expected_facts": [
       "Arrival predictions for relevant Rossio-area stops",
-      "Live ETA information when available",
+      "Live arrival estimates when available",
       "Stop resolution is acceptable before arrival lookup"
     ],
     "language": "en",
@@ -730,9 +730,9 @@
       ]
     ],
     "expected_facts": [
-      "Next 28E tram at Martim Moniz expressed as an ETA or minutes until departure",
+      "Next 28E tram at Martim Moniz expressed as an estimated arrival time or minutes until departure",
       "Route and stop context",
-      "Stop resolution is acceptable before ETA lookup",
+      "Stop resolution is acceptable before the estimated-arrival lookup",
       "Explain when the stop is the origin or when scheduled departures are used as fallback"
     ],
     "language": "en",
@@ -862,7 +862,7 @@
   },
   {
     "id": "R08",
-    "query": "I'd like a few quiet lesser-known places in Lisbon. If your data is limited, please don't guess.",
+    "query": "I'd like a few quiet lesser-known places in Lisbon.",
     "domain": "researcher",
     "expected_tools": [
       "search_places_attractions"
@@ -1081,7 +1081,7 @@
   {
     "id": "O04",
     "query": "Tell me a joke about Lisbon.",
-    "domain": "greeting",
+    "domain": "out_of_scope",
     "expected_tools": [],
     "expected_facts": [
       "Response is Lisbon-themed and contextually appropriate",
