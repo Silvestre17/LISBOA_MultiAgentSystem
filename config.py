@@ -33,6 +33,26 @@ __all__ = ["Config"]
 BASE_DIR = Path(__file__).parent.resolve()
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    """Return a boolean setting from an environment variable.
+
+    Accepted truthy values are case-insensitive: ``true``, ``1``, ``yes``,
+    ``y``, and ``on``. Accepted falsey values are ``false``, ``0``, ``no``,
+    ``n``, and ``off``. Any missing or unrecognized value falls back to the
+    provided default.
+    """
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+
+    normalized = raw_value.strip().lower()
+    if normalized in {"true", "1", "yes", "y", "on"}:
+        return True
+    if normalized in {"false", "0", "no", "n", "off"}:
+        return False
+    return default
+
+
 class Config:
     """
     Global configuration settings for the Lisbon Urban Assistant.
@@ -178,14 +198,16 @@ class Config:
 
     # Debug/Development Settings
     # Show raw markdown responses in terminal for debugging/copying
-    SHOW_MARKDOWN_RESPONSE_IN_TERMINAL = (
-        False  # Set to True locally when debugging response formatting
-        # True
+    SHOW_MARKDOWN_RESPONSE_IN_TERMINAL = _env_bool(
+        "SHOW_MARKDOWN_RESPONSE_IN_TERMINAL",
+        default=True,
     )
     # Show detailed execution sections in the terminal summary.
     # This controls the verbose LangSmith, agent breakdown, and tool-call blocks.
-    SHOW_DETAILED_EXECUTION_LOGS = False
-    # SHOW_DETAILED_EXECUTION_LOGS = True
+    SHOW_DETAILED_EXECUTION_LOGS = _env_bool(
+        "SHOW_DETAILED_EXECUTION_LOGS",
+        default=True,
+    )
 
     # =========================================================================
     # LISBON GEOGRAPHIC PARAMETERS (IPMA)
