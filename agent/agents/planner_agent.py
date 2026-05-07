@@ -614,6 +614,263 @@ def _build_planner_evidence_packet(
     return "\n\n".join(section for section in sections if section.strip())
 
 
+def _extract_plan_constraints(user_message: str, conversation_context: str, language: str) -> List[str]:
+    """Extract reusable itinerary constraints from the current and previous turns."""
+    combined = _normalize_planner_text(f"{conversation_context}\n{user_message}")
+    is_pt = language == "pt"
+    constraints: List[str] = []
+
+    def add(pt: str, en: str) -> None:
+        value = pt if is_pt else en
+        if value not in constraints:
+            constraints.append(value)
+
+    if re.search(r"\b(rain|rainy|chuva|guarda chuva|indoor|interior|covered|coberto)\b", combined):
+        add("plano seguro para chuva/interior", "rain-safe or indoor backup")
+    if re.search(r"\b(low walking|low walk|little walking|pouca caminhada|baixo declive|sem grandes caminhadas|reduced mobility)\b", combined):
+        add("pouca caminhada", "low walking")
+    if re.search(r"\b(public transport|transportes publicos|metro|carris|cp|bus|tram|autocarro|comboio)\b", combined):
+        add("usar transporte público", "use public transport")
+    if re.search(r"\b(cheap|cheaper|budget|barato|barata|baixo custo|econ[oó]mico)\b", combined):
+        add("manter custos baixos", "keep costs low")
+    avoid_match = re.search(
+        r"\b(?:do not repeat|avoid|não repetir|nao repetir|evitar)\s+(?P<areas>[A-Za-zÀ-ÿ\s,/&-]+)",
+        user_message,
+        flags=re.IGNORECASE,
+    )
+    if avoid_match:
+        areas = re.sub(r"\s+", " ", avoid_match.group("areas")).strip(" .?!,;:")
+        add(f"evitar {areas}", f"avoid {areas}")
+    return constraints[:6] or (["restrições não especificadas"] if is_pt else ["no explicit constraints beyond the requested plan"])
+
+
+def _planner_response_matches_schema(response: str) -> bool:
+    """Return whether a planner draft follows the required safe plan schema."""
+    if not response:
+        return False
+    headings = [line.strip() for line in response.splitlines() if line.strip().startswith("### ")]
+    normalized_headings = [_normalize_planner_text(heading) for heading in headings]
+    if len(headings) < 6 or len(normalized_headings) != len(set(normalized_headings)):
+        return False
+    if re.search(r"(?im)^\s*(?:place cards?|raw cards?|visit suggestions)\s*$", response):
+        return False
+    if re.search(r"(?mi)^\s*[-*]\s*[🔹•-]?\s*\*\*(?:Category|Description|Location|Transport Note|Area|Why This Day|Categoria|Descrição|Localização)\*\*\s*:", response):
+        return False
+    if len(re.findall(r"(?im)^\s*(?:[-*]\s*)?📌\s*\*\*(?:Source|Sources|Fonte|Fontes):\*\*", response)) > 1:
+        return False
+    if re.search(
+        r"(?mi)^\s*[-*]\s*(?:[^\w\s]\s*)?\*\*(?:Location|Address|Website|Phone|Morada|Telefone)\*\*\s*:",
+        response,
+    ):
+        return False
+    normalized = _normalize_planner_text(response)
+    required_en = (
+        "direct answer",
+        "constraints used",
+        "plan blocks",
+        "movement logic",
+        "weather strategy",
+        "limitations",
+    )
+    has_english_schema = all(section in normalized for section in required_en)
+    has_portuguese_schema = all(
+        any(alias in normalized for alias in aliases)
+        for aliases in (
+            ("resposta direta",),
+            ("restrições usadas", "restricoes usadas"),
+            ("blocos do plano",),
+            ("lógica de movimento", "logica de movimento"),
+            ("estratégia meteorológica", "estrategia meteorologica"),
+            ("limitações", "limitacoes"),
+        )
+    )
+    if not (has_english_schema or has_portuguese_schema):
+        return False
+
+    unsafe_patterns = (
+        r"\bMuseum:\*\*",
+        r"\bRestaurant:\*\*",
+        r"\bEvent:\*\*",
+        r"\bguaranteed\b",
+        r"\bbooked\b",
+        r"\breserved\b",
+        r"\+ info\b",
+        r"not provided",
+    )
+    if any(re.search(pattern, response, flags=re.IGNORECASE) for pattern in unsafe_patterns):
+        return False
+
+    for line in response.splitlines():
+        if re.search(r"\bexact\s+(?:route|routes|price|prices|ticket|tickets|weather)\b", line, flags=re.IGNORECASE):
+            if not re.search(r"\b(?:not|no|without|unconfirmed|do not|did not|não|nao|sem)\b", line, flags=re.IGNORECASE):
+                return False
+    return True
+
+
+def _build_structured_plan_fallback(
+    *,
+    user_message: str,
+    language: str,
+    weather_data: str,
+    transport_data: str,
+    places_data: str,
+    events_data: str,
+    qa_disclaimers: list[str] | None,
+    conversation_context: str = "",
+) -> str:
+    """Build a conservative itinerary from a small explicit plan schema.
+
+    The fallback avoids prompt-specific templates. It derives duration,
+    constraints, blocks, movement, weather strategy, and sources from the user
+    request plus available worker evidence.
+    """
+    is_pt = language == "pt"
+    requested_days = _extract_requested_day_count(user_message) or 1
+    visible_days = min(requested_days, 5)
+    constraints = _extract_plan_constraints(user_message, conversation_context, language)
+    combined_places = "\n".join([places_data or "", events_data or ""])
+    cards = _extract_visitlisboa_place_cards(combined_places, max_items=10)
+    clean_cards = [
+        {**card, "name": clean_name}
+        for card in cards
+        for clean_name in [_sanitize_planner_place_name(card.get("name", ""))]
+        if clean_name
+    ]
+    weather_bullets = _extract_weather_safety_bullets(weather_data, language)
+    transport_bullets = _extract_planner_fallback_bullets(transport_data, max_items=4)
+    source_line = _build_planner_fallback_source_line(
+        language,
+        weather_data,
+        transport_data,
+        places_data,
+        events_data,
+    )
+
+    if not weather_bullets:
+        weather_bullets = [
+            "- Estratégia meteorológica: mantém alternativas interiores e confirma a previsão IPMA se a data for futura."
+            if is_pt
+            else "- Weather strategy: keep indoor alternatives and confirm the IPMA forecast if the date is in the future."
+        ]
+    if not transport_bullets:
+        transport_bullets = [
+            "- As pernas exatas de transporte não ficaram confirmadas; usa o plano como ordem geográfica, não como horário."
+            if is_pt
+            else "- Exact transport legs were not confirmed; use this as geographic order, not as a timetable."
+        ]
+
+    title = (
+        f"### 📅 Plano estruturado de {visible_days} dia{'s' if visible_days > 1 else ''}"
+        if is_pt
+        else f"### 📅 Structured {visible_days}-Day Lisbon Plan"
+    )
+    if requested_days > 5:
+        direct = (
+            "Vou limitar o pedido aos primeiros 5 dias para manter verificabilidade; rotas, preços, bilhetes, restaurantes e meteorologia futura não devem ser tratados como confirmados."
+            if is_pt
+            else "I’m limiting this to the first 5 days to keep it verifiable; routes, prices, tickets, restaurants, and future weather are not treated as confirmed."
+        )
+    elif visible_days > 1:
+        direct = (
+            "Segue um plano de alto nível por dias, com exemplos ancorados nos dados disponíveis e limitações explícitas."
+            if is_pt
+            else "Here is a high-level day-by-day plan with examples anchored in the available data and explicit limits."
+        )
+    else:
+        direct = (
+            "Segue um plano curto e ordenado, com 3 a 4 blocos e sem inventar horários, preços ou disponibilidade."
+            if is_pt
+            else "Here is a short ordered plan with 3 to 4 blocks, without inventing opening hours, prices, or availability."
+        )
+
+    lines: List[str] = [
+        title,
+        "",
+        "### ✅ Resposta direta" if is_pt else "### ✅ Direct Answer",
+        direct,
+        "",
+        "### 🧭 Restrições usadas" if is_pt else "### 🧭 Constraints Used",
+        *[f"- {constraint}" for constraint in constraints],
+        "",
+        "### 📍 Blocos do plano" if is_pt else "### 📍 Plan Blocks",
+    ]
+
+    if visible_days == 1:
+        block_count = 0
+        for card in clean_cards[:3]:
+            block_count += 1
+            label = f"Bloco {block_count}" if is_pt else f"Block {block_count}"
+            lines.extend([f"- **{label}: {card['name']}**"])
+            if card.get("category"):
+                lines.append(f"    - **{'Categoria' if is_pt else 'Category'}:** {card['category']}")
+            if card.get("description"):
+                lines.append(f"    - **{'Nota' if is_pt else 'Note'}:** {card['description'][:180].rstrip()}")
+        while block_count < 3:
+            block_count += 1
+            if block_count == 1:
+                generic = "paragem cultural confirmável" if is_pt else "confirmable cultural stop"
+            elif block_count == 2:
+                generic = "pausa curta para comida/café sem assumir reserva" if is_pt else "short food/coffee break without assuming a booking"
+            else:
+                generic = "backup interior ou regresso" if is_pt else "indoor backup or return leg"
+            lines.append(f"- **{'Bloco' if is_pt else 'Block'} {block_count}:** {generic}.")
+    else:
+        themes_en = [
+            "historic core with low walking",
+            "riverfront or Belém-style heritage day",
+            "modern Lisbon / Oriente-style indoor day",
+            "museums and viewpoints with short transfers",
+            "flexible rainy backup and cheap-food day",
+        ]
+        themes_pt = [
+            "centro histórico com pouca caminhada",
+            "frente ribeirinha ou património tipo Belém",
+            "Lisboa moderna / Oriente com opção interior",
+            "museus e miradouros com transferes curtos",
+            "backup de chuva e comida económica",
+        ]
+        themes = themes_pt if is_pt else themes_en
+        for day_index in range(visible_days):
+            anchor = clean_cards[day_index]["name"] if day_index < len(clean_cards) else None
+            label = f"Dia {day_index + 1}" if is_pt else f"Day {day_index + 1}"
+            theme = themes[day_index % len(themes)]
+            if anchor:
+                lines.append(f"- **{label}:** {theme}; exemplo ancorado: **{anchor}**." if is_pt else f"- **{label}:** {theme}; grounded example: **{anchor}**.")
+            else:
+                lines.append(f"- **{label}:** {theme}; escolher locais concretos só após confirmação." if is_pt else f"- **{label}:** {theme}; choose concrete venues only after confirmation.")
+
+    lines.extend([
+        "",
+        "### 🚇 Lógica de movimento" if is_pt else "### 🚇 Movement Logic",
+        *transport_bullets[:4],
+        "",
+        "### ⛅ Estratégia meteorológica" if is_pt else "### ⛅ Weather Strategy",
+        *weather_bullets[:4],
+        "",
+        "### ⚠️ Limitações" if is_pt else "### ⚠️ Limitations",
+    ])
+    limitations = [
+        "Não confirmei horários, preços, bilhetes, reservas, lotação ou disponibilidade em tempo real."
+        if is_pt
+        else "I did not confirm opening hours, prices, tickets, bookings, crowding, or real-time availability.",
+        "Não uses partidas live recolhidas agora como horário para planos futuros."
+        if is_pt
+        else "Do not use live departures captured now as a schedule for future plans.",
+    ]
+    if requested_days > 5:
+        limitations.append(
+            "Limitei a resposta aos primeiros 5 dias; os restantes dias devem ser planeados numa segunda iteração."
+            if is_pt
+            else "I limited the answer to the first 5 days; remaining days should be planned in a second iteration."
+        )
+    if qa_disclaimers:
+        limitations.extend(str(item) for item in qa_disclaimers[:2] if item)
+    lines.extend(f"- {item}" for item in limitations)
+    if source_line:
+        lines.extend(["", source_line])
+    return "\n".join(lines).strip()
+
+
 def _extract_planner_fallback_bullets(text: str, *, max_items: int = 4) -> List[str]:
     """Extract compact user-facing bullets from worker outputs for deterministic planner fallback."""
     bullets: List[str] = []
@@ -749,11 +1006,13 @@ def _build_planner_fallback_source_line(
         )
     if "lisboa aberta" in combined or "dados abertos" in combined:
         sources.append("[*Lisboa Aberta*](https://dados.cm-lisboa.pt)")
-    if "metrolisboa" in combined:
+    if "metrolisboa" in combined or "metro de lisboa" in combined:
         sources.append("[*Metro de Lisboa*](https://www.metrolisboa.pt)")
-    if "carris" in combined or transport_data:
+    if "carrismetropolitana" in combined or "carris metropolitana" in combined:
+        sources.append("[*Carris Metropolitana*](https://www.carrismetropolitana.pt)")
+    if "carris.pt" in combined or "carris urban" in combined or "carris line" in combined or "linha carris" in combined:
         sources.append("[*Carris*](https://www.carris.pt)")
-    if "cp.pt" in combined or "comboio" in combined or "train" in combined:
+    if "cp.pt" in combined or "cp trains" in combined or "comboios de portugal" in combined:
         sources.append("[*CP*](https://www.cp.pt)")
 
     timestamp = "**Atualizado:**" if language == "pt" else "**Updated:**"
@@ -3615,10 +3874,13 @@ class PlannerAgent(BaseAgent):
             *([SystemMessage(content=public_transport_instruction)] if public_transport_instruction else []),
             SystemMessage(
                 content=(
-                    "OUTPUT BUDGET:\n"
+                    "OUTPUT BUDGET AND STRUCTURE:\n"
                     "- Target 450-650 words for rich cross-domain itineraries; stay shorter for simple requests.\n"
+                    "- Use this exact top-level schema: title, Direct Answer, Constraints Used, Plan Blocks, Movement Logic, Weather Strategy, Limitations.\n"
+                    "- Make Plan Blocks ordered and useful; use at most 4 blocks for one-day plans.\n"
                     "- Include the useful evidence the workers gathered: weather consequence, realistic movement, grounded stops, and user preferences.\n"
-                    "- Use compact sections instead of a loose bullet dump: weather/pacing, transport, ordered plan, and one short tips/limits block.\n"
+                    "- Do not include raw place cards, empty sections, malformed labels, or placeholder fields.\n"
+                    "- Do not include restaurants, events, exact prices, tickets, exact routes, or exact weather unless confirmed in the provided data.\n"
                     "- Do not include current live departure times in an itinerary unless the user explicitly asked for next departures or live status.\n"
                     "- Prefer short factual sentences over long explanations."
                 )
@@ -3632,7 +3894,7 @@ class PlannerAgent(BaseAgent):
             response = self._safe_llm_invoke(self.llm, messages)
             cleaned_response = clean_response(response.content)
         except Exception:
-            fallback = _build_deterministic_planner_fallback(
+            fallback = _build_structured_plan_fallback(
                 user_message=user_message,
                 language=language,
                 weather_data=weather_data,
@@ -3640,20 +3902,17 @@ class PlannerAgent(BaseAgent):
                 places_data=places_data,
                 events_data=events_data,
                 qa_disclaimers=qa_disclaimers,
+                conversation_context=conversation_context,
             )
             fallback = enforce_multi_day_quality_mode(fallback, user_message, language)
-            return finalize_worker_response(
-                fallback,
-                agent_name="planner",
-                user_query=user_message,
-                language=language,
-            )
+            return fallback
 
         if (
             _planner_response_requires_fallback(cleaned_response)
             or _planner_response_has_markdown_contract_defects(cleaned_response)
+            or not _planner_response_matches_schema(cleaned_response)
         ):
-            cleaned_response = _build_deterministic_planner_fallback(
+            cleaned_response = _build_structured_plan_fallback(
                 user_message=user_message,
                 language=language,
                 weather_data=weather_data,
@@ -3661,6 +3920,7 @@ class PlannerAgent(BaseAgent):
                 places_data=places_data,
                 events_data=events_data,
                 qa_disclaimers=qa_disclaimers,
+                conversation_context=conversation_context,
             )
 
         grounding_issues = _find_planner_grounding_issues(
@@ -3712,12 +3972,15 @@ class PlannerAgent(BaseAgent):
                 user_message,
                 transport_data,
             )
+            if not _planner_response_matches_schema(cleaned_response):
+                grounding_issues.append("Planner response does not follow the required structured schema.")
 
         if (
             _planner_response_requires_fallback(cleaned_response)
             or _planner_response_has_markdown_contract_defects(cleaned_response)
+            or not _planner_response_matches_schema(cleaned_response)
         ):
-            cleaned_response = _build_deterministic_planner_fallback(
+            cleaned_response = _build_structured_plan_fallback(
                 user_message=user_message,
                 language=language,
                 weather_data=weather_data,
@@ -3725,6 +3988,7 @@ class PlannerAgent(BaseAgent):
                 places_data=places_data,
                 events_data=events_data,
                 qa_disclaimers=qa_disclaimers,
+                conversation_context=conversation_context,
             )
         elif _planner_response_has_transport_quality_defects(
             cleaned_response,
@@ -3751,12 +4015,7 @@ class PlannerAgent(BaseAgent):
             language,
         )
 
-        return finalize_worker_response(
-            cleaned_response,
-            agent_name="planner",
-            user_query=user_message,
-            language=language,
-        )
+        return cleaned_response
 
     def synthesize(self, user_message: str, agent_outputs: Dict[str, str]) -> str:
         """

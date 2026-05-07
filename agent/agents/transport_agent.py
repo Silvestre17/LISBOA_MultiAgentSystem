@@ -3887,6 +3887,100 @@ class TransportAgent(BaseAgent):
             )
         return f"{body}\n\n{self._build_transport_source_line(language, ['[*Metro de Lisboa*](https://www.metrolisboa.pt)'])}"
 
+    def _build_non_station_nearest_metro_response(
+        self,
+        user_message: str,
+        language: str,
+    ) -> Optional[str]:
+        """Answer POI/neighbourhood nearest-metro questions without dumping the full network."""
+        normalized = _normalize_token(user_message)
+        if "metro" not in normalized:
+            return None
+        if not re.search(r"\b(?:nearest|closest|nearby|mais proxima|mais proximo|perto|perto de)\b", normalized):
+            return None
+
+        place_match = re.search(
+            r"\bis\s+(?P<place>[A-Za-zÀ-ÿ' -]{2,60}?)\s+a\s+metro\s+station\b",
+            user_message,
+            flags=re.IGNORECASE,
+        )
+        if not place_match:
+            place_match = re.search(
+                r"\b(?P<place>[A-Za-zÀ-ÿ' -]{2,60}?)\s+(?:é|e)\s+(?:uma\s+)?esta[cç][aã]o\s+de\s+metro\b",
+                user_message,
+                flags=re.IGNORECASE,
+            )
+        if not place_match:
+            place_match = re.search(
+                r"\b(?:near|nearby|closest to|nearest to|perto de|junto a)\s+(?P<place>[A-Za-zÀ-ÿ' -]{2,60})",
+                user_message,
+                flags=re.IGNORECASE,
+            )
+        if not place_match:
+            return None
+
+        place_name = place_match.group("place").strip(" .?!,;:")
+        if not place_name:
+            return None
+
+        try:
+            from tools.location_resolver import resolve_location_query
+
+            resolved = resolve_location_query(place_name)
+        except Exception:
+            return None
+
+        if resolved.get("match_source") == "metro_station":
+            return None
+
+        nearest_tool = self._get_tool_by_name("find_nearest_metro")
+        if nearest_tool:
+            nearest_result = str(
+                self._invoke_tool(
+                    nearest_tool,
+                    {"near_location_name": place_name},
+                    tool_name="find_nearest_metro",
+                )
+            ).strip()
+        else:
+            from tools.metrolisboa_api import find_nearest_metro
+
+            nearest_result = str(
+                find_nearest_metro.invoke({"near_location_name": place_name})
+            ).strip()
+        nearest_result = re.sub(
+            r"(?mis)^###\s+🚇\s+\*\*?Nearest Metro Stations\*\*?\s*\n+",
+            "",
+            nearest_result,
+        ).strip()
+
+        display_name = str(resolved.get("display_name") or place_name).strip()
+        if language == "pt":
+            intro = (
+                f"**{display_name} não é uma estação do Metro de Lisboa.** "
+                "Estas são as estações de metro mais próximas que consegui calcular a partir da localização resolvida:"
+            )
+        else:
+            intro = (
+                f"**{display_name} is not a Lisbon Metro station.** "
+                "These are the nearest metro stations I can calculate from the resolved location:"
+            )
+
+        return "\n".join(
+            [
+                "### 🚇 Estações de metro mais próximas" if language == "pt" else "### 🚇 Nearest Metro Stations",
+                "",
+                intro,
+                "",
+                nearest_result,
+                "",
+                self._build_transport_source_line(
+                    language,
+                    ["[*Metro de Lisboa*](https://www.metrolisboa.pt)"],
+                ),
+            ]
+        ).strip()
+
     @staticmethod
     def _build_transport_source_line(language: str, source_links: List[str]) -> str:
         """Builds a localized transport source line for combined deterministic answers."""
@@ -4814,6 +4908,17 @@ class TransportAgent(BaseAgent):
                 language=resolved_language,
             )
 
+        non_station_metro_response = self._build_non_station_nearest_metro_response(
+            user_message=user_message,
+            language=resolved_language,
+        )
+        if non_station_metro_response:
+            return self._finalize_transport_response(
+                non_station_metro_response,
+                user_message=user_message,
+                language=resolved_language,
+            )
+
         comparison_response = self._build_mode_comparison_response(
             user_message=user_message,
             context=context,
@@ -5154,6 +5259,11 @@ class TransportAgent(BaseAgent):
                     f"{finalized}\n\n"
                     f"{self._build_transport_source_line(language, [source_links[op] for op in operators_used if op in source_links])}"
                 ).strip()
+        else:
+            # Transport source footers must reflect checked operators. If a
+            # deterministic limitation path did not invoke a transport tool,
+            # keep the answer but remove inherited/static operator citations.
+            finalized = _strip_transport_source_lines(finalized)
 
         return finalized
 

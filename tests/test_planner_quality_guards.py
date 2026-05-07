@@ -10,6 +10,8 @@ from types import SimpleNamespace
 from agent.agents.planner_agent import (
     PlannerAgent,
     _build_deterministic_planner_fallback,
+    _build_structured_plan_fallback,
+    _planner_response_matches_schema,
     _build_next_day_historic_food_transport_fallback,
     _build_public_transport_synthesis_instruction,
     _build_resident_service_plan_fallback,
@@ -25,9 +27,12 @@ from agent.agents.planner_agent import (
 from agent.agents.researcher_agent import ResearcherAgent
 from agent.agents.supervisor import SupervisorAgent
 from agent.agents.transport_agent import _build_unsupported_transport_scope_response
+from agent.agents.transport_agent import TransportAgent
 from agent.graph import MultiAgentAssistant
 from agent.utils.response_formatter import (
+    canonicalize_planner_source_line,
     final_visual_pass,
+    final_post_qa_guard,
     strip_internal_repository_source_links,
 )
 
@@ -56,16 +61,35 @@ def _build_planner_with_fake_llm(response_text: str) -> PlannerAgent:
 def test_planner_invoke_uses_llm_before_multiday_fallback() -> None:
     """Normal multi-day requests should not bypass dynamic synthesis with templates."""
     planner = _build_planner_with_fake_llm(
-        "### 📅 Custom Dynamic 3-Day Plan\n\n"
-        "### 📍 Day 1 · Alfama\n- Use the grounded first stop.\n\n"
-        "### 📍 Day 2 · Belém\n- Use the grounded second stop."
+        """### 📅 Custom Dynamic 3-Day Plan
+
+### ✅ Direct Answer
+Use a grounded 3-day sequence.
+
+### 🧭 Constraints Used
+- Public transport and rain backups.
+
+### 📍 Plan Blocks
+- **Day 1 · Alfama:** Use the grounded first stop.
+- **Day 2 · Belém:** Use the grounded second stop.
+
+### 🚇 Movement Logic
+Use Metro de Lisboa and Carris where grounded.
+
+### ⛅ Weather Strategy
+Keep indoor backups.
+
+### ⚠️ Limitations
+Exact prices and opening hours are not confirmed."""
     )
 
     response = planner.invoke(
         "Plan 3 days in Lisbon with public transport and rain backups.",
         weather_data="No active weather warnings for Lisbon.",
         transport_data="Metro de Lisboa and Carris data available.",
-        places_data="### 🏛️ Grounded stop\n- Belém Tower\n- Alfama viewpoint",
+        places_data="""### 🏛️ Grounded stop
+- Belém Tower
+- Alfama viewpoint""",
     )
 
     assert "Custom Dynamic 3-Day Plan" in response
@@ -76,15 +100,35 @@ def test_planner_invoke_uses_llm_before_multiday_fallback() -> None:
 def test_planner_invoke_uses_llm_for_conversation_follow_up() -> None:
     """Follow-up planning should preserve dynamic synthesis and conversation context."""
     planner = _build_planner_with_fake_llm(
-        "### 📅 Dynamic Follow-Up Plan\n\n"
-        "### 🏛️ New Area\n- Use Estrela and Campo de Ourique to avoid repeating the previous route."
+        """### 📅 Dynamic Follow-Up Plan
+
+### ✅ Direct Answer
+Use Estrela and Campo de Ourique to avoid repeating the previous route.
+
+### 🧭 Constraints Used
+- Previous route exclusions and transport.
+
+### 📍 Plan Blocks
+- **Estrela:** Keep the plan compact and rain-safe.
+- **Campo de Ourique:** Add a second nearby anchor.
+
+### 🚇 Movement Logic
+Use Metro de Lisboa and Carris where grounded.
+
+### ⛅ Weather Strategy
+Prioritise indoor backup due light rain.
+
+### ⚠️ Limitations
+Exact live departures are not confirmed."""
     )
 
     response = planner.invoke(
         "PLANEIA O DIA SEGUINTE E DIZ-ME TRANSPORTES",
         weather_data="Chuva fraca amanhã.",
         transport_data="Metro de Lisboa e Carris disponíveis.",
-        places_data="### 🏛️ Estrela\n- Jardim da Estrela\n- Basílica da Estrela",
+        places_data="""### 🏛️ Estrela
+- Jardim da Estrela
+- Basílica da Estrela""",
         conversation_context="Plano anterior: Baixa, Sé, Carmo e Belém.",
     )
 
@@ -330,7 +374,7 @@ def test_short_coffee_culture_fallback_uses_known_local_anchor_when_retrieval_is
 
 
 def test_short_coffee_culture_visual_pass_removes_leading_separator() -> None:
-    """Short planner output should not start with a redundant separator after the title."""
+    """Short planner cleanup must not infer extra sources from body keywords."""
     response = final_visual_pass(
         "### 📅 Short Coffee And Culture Plan\n\n"
         "---\n\n"
@@ -346,7 +390,7 @@ def test_short_coffee_culture_visual_pass_removes_leading_separator() -> None:
     )
 
     assert "Short Coffee And Culture Plan\n\n---\n\n### ⛅" not in response
-    assert "[*Lisboa Aberta*]" in response
+    assert "[*Lisboa Aberta*]" not in response
 
 
 def test_multi_day_fallback_builds_bounded_itinerary() -> None:
@@ -686,7 +730,7 @@ def test_resident_service_fallback_explains_generic_recycling_names() -> None:
 
 
 def test_resident_plan_footer_keeps_all_material_sources() -> None:
-    """Final cleanup must not drop weather or metro sources from resident plans."""
+    """Final cleanup must preserve explicit sources without adding inferred ones."""
     response = final_visual_pass(
         "### 📅 Resident Plan: Areeiro → Alvalade\n\n"
         "### ⛅ Tomorrow Conditions\n"
@@ -698,9 +742,9 @@ def test_resident_plan_footer_keeps_all_material_sources() -> None:
         "📌 **Source:** [*Lisboa Aberta*](https://dados.cm-lisboa.pt/) | **Updated:** 12:00"
     )
 
-    assert "[*IPMA*]" in response
+    assert "[*IPMA*]" not in response
     assert "[*Lisboa Aberta*]" in response
-    assert "[*Metro de Lisboa*]" in response
+    assert "[*Metro de Lisboa*]" not in response
     assert "github.com/Silvestre17" not in response
 
 
@@ -731,6 +775,104 @@ def test_internal_repository_only_source_footer_is_removed() -> None:
     cleaned = strip_internal_repository_source_links(response)
 
     assert cleaned == "Answer first."
+
+
+def test_final_visual_pass_does_not_inject_cp_source_from_text_cues() -> None:
+    """Source footers must come from tool provenance, not route words in prose."""
+    response = (
+        "Take the train from Cais do Sodré to Belém if you confirm the timetable.\n\n"
+        "📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Updated:** 12:00"
+    )
+
+    cleaned = final_visual_pass(response)
+
+    assert "[*CP*]" not in cleaned
+    assert "[*Metro de Lisboa*](https://www.metrolisboa.pt)" in cleaned
+
+
+def test_final_visual_pass_keeps_public_service_source_municipal_only() -> None:
+    """Municipal services such as recycling must not gain tourism source footers."""
+    response = (
+        "### ♻️ Ecopontos perto de Avenida da Igreja\n\n"
+        "- Ponto de reciclagem confirmado no dataset municipal.\n\n"
+        "📌 **Fonte:** [*Lisboa Aberta*](https://dados.cm-lisboa.pt/) | **Atualizado:** 12:00"
+    )
+
+    cleaned = final_visual_pass(response)
+
+    assert "[*Lisboa Aberta*](https://dados.cm-lisboa.pt/)" in cleaned
+    assert "VisitLisboa" not in cleaned
+
+
+def test_planner_source_canonicalizer_does_not_infer_from_body_keywords() -> None:
+    """Planner source cleanup should preserve existing sources, not infer from final prose."""
+    response = (
+        "Use the train only if it is confirmed later; keep weather backups in mind.\n\n"
+        "📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places) | **Updated:** 12:00"
+    )
+
+    cleaned = canonicalize_planner_source_line(response, language="en")
+
+    assert "[*VisitLisboa Places*](https://www.visitlisboa.com/en/places)" in cleaned
+    assert "[*CP*]" not in cleaned
+    assert "[*IPMA*]" not in cleaned
+
+
+def test_transport_finalizer_strips_operator_sources_without_tool_calls() -> None:
+    """Transport limitation text must not cite operators that were not checked."""
+    agent = TransportAgent.__new__(TransportAgent)
+    agent._tool_calls_log = []
+    response = (
+        "Não consegui confirmar aqui uma ligação direta entre Cacilhas e Cristo Rei.\n\n"
+        "📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | [*Carris*](https://www.carris.pt) | **Atualizado:** 12:00"
+    )
+
+    cleaned = agent._finalize_transport_response(
+        response,
+        user_message="Estou em Cacilhas e quero ir ao Cristo Rei. Há ligação direta?",
+        language="pt",
+    )
+
+    assert "Fonte:" not in cleaned
+    assert "Metro de Lisboa" not in cleaned
+    assert "Carris" not in cleaned
+
+
+def test_final_visual_pass_removes_unlinked_source_claims() -> None:
+    """Unlinked source notes are not acceptable final provenance footers."""
+    response = (
+        "Não foi confirmada aqui uma ligação direta específica.\n\n"
+        "**Fonte:** dados de transporte apresentados na resposta anterior."
+    )
+
+    cleaned = final_visual_pass(response)
+
+    assert "Fonte:" not in cleaned
+    assert "dados de transporte" not in cleaned
+
+
+def test_final_visual_pass_restores_missing_nearest_metro_line_field() -> None:
+    """Nearest-Metro cards must keep line metadata even after QA repair."""
+    response = final_visual_pass(
+        "🚇 Nearest Metro Stations\n\n"
+        "- 🔵 **Restauradores**\n"
+        "    - 📏 **Distance:** 3.1km (~36 min walk)\n\n"
+        "📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Updated:** 22:55"
+    )
+
+    assert "- 🚇 **Lines:** Azul" in response
+
+
+def test_final_visual_pass_links_explicit_carris_snapshot_source() -> None:
+    """Explicit Carris GTFS-RT tool-source lines should become linked footers."""
+    response = final_visual_pass(
+        "### 🚇 Lisbon Mobility\n\n"
+        "- 🚋 **Line 15E** — To Algés\n\n"
+        "**Source:** Carris GTFS-RT cached snapshot (0s old)."
+    )
+
+    assert "[*Carris*](https://www.carris.pt)" in response
+    assert "Carris GTFS-RT cached snapshot" not in response
 
 
 def test_ride_hailing_queries_route_to_transport_limitations() -> None:
@@ -1205,3 +1347,52 @@ def test_planner_rejects_live_departures_in_non_live_itinerary() -> None:
         "I am in Chiado this afternoon and want a useful Belém route with history and a pastry stop.",
         "CP Cascais line details are available.",
     )
+
+
+def test_final_post_qa_guard_removes_bad_qa_footer_after_clean_transport_answer() -> None:
+    """The final deterministic guard must clean corruption added after QA repair."""
+    response = (
+        "### 🚇 Nearest Metro Stations\n\n"
+        "- 🟡 **Rato**\n"
+        "    - 📏 **Distance:** 2.4 km\n"
+        "    - 🚇 **Lines:** Yellow line\n\n"
+        "📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Updated:** 12:00\n\n"
+        "Fonte: dados de transporte apresentados na resposta anterior\n"
+        "- 📏 **Distance:** not provided\n"
+        "- 🚇 **Lines:** not provided\n"
+        "###    \n"
+        "⚠️ ⚠️ Check operator updates."
+    )
+
+    guarded = final_post_qa_guard(response, language="en")
+
+    assert "dados de transporte apresentados" not in guarded
+    assert "not provided" not in guarded
+    assert guarded.count("https://www.metrolisboa.pt") == 1
+    assert "###    " not in guarded
+    assert "⚠️ ⚠️" not in guarded
+
+
+def test_structured_planner_fallback_is_schema_valid_and_limits_overlong_requests() -> None:
+    """Planner safety fallback is a reusable schema, not a prompt-specific answer."""
+    response = _build_structured_plan_fallback(
+        user_message=(
+            "Plan 7 days in Lisbon with exact routes, restaurants, tickets, prices, "
+            "weather, beaches, museums, nightlife, and no repeated neighbourhoods."
+        ),
+        language="en",
+        weather_data="",
+        transport_data="",
+        places_data="",
+        events_data="",
+        qa_disclaimers=None,
+    )
+
+    assert _planner_response_matches_schema(response)
+    assert "first 5 days" in response.lower()
+    assert "not confirmed" in response.lower() or "did not confirm" in response.lower()
+    assert "prices" in response.lower()
+    assert "tickets" in response.lower()
+    assert "Restaurant:**" not in response
+    assert "Museum:**" not in response
+

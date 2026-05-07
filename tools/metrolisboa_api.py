@@ -2417,15 +2417,16 @@ def find_nearest_metro(
 
         walk_min = max(1, distance_m // 83)
 
-        line_emoji = "🚇"
-        if "Amarela" in lines:
-            line_emoji = "🟡"
-        elif "Azul" in lines:
-            line_emoji = "🔵"
-        elif "Verde" in lines:
-            line_emoji = "🟢"
-        elif "Vermelha" in lines:
-            line_emoji = "🔴"
+        line_emoji = "".join(
+            emoji
+            for line_name, emoji in [
+                ("Amarela", "🟡"),
+                ("Azul", "🔵"),
+                ("Verde", "🟢"),
+                ("Vermelha", "🔴"),
+            ]
+            if line_name in lines
+        ) or "🚇"
 
         lines_clean = lines.replace("[", "").replace("]", "")
 

@@ -25,6 +25,7 @@ from agent.utils.response_formatter import (
     _count_structured_place_cards,
     _place_response_missing_required_fields,
     enforce_language_labels,
+    final_post_qa_guard,
     final_visual_pass,
     infer_response_language,
 )
@@ -1238,10 +1239,7 @@ class QualityAssuranceAgent(BaseAgent):
         if not final_response:
             return final_response or ""
 
-        guarded = final_visual_pass(final_response)
-        guarded = enforce_language_labels(guarded, language)
-        guarded = final_visual_pass(guarded)
-        return guarded
+        return final_post_qa_guard(final_response, language=language)
 
     @staticmethod
     def _repair_collapsed_structured_draft(draft_response: str, repaired_response: str) -> bool:
