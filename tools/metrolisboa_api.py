@@ -1891,9 +1891,9 @@ def _resolve_named_metro_reference(location_name: str) -> Optional[tuple[float, 
         return None
 
     place_centroids = {
-        "jardim zoologico de lisboa": (38.7470, -9.1717),
-        "lisbon zoo": (38.7470, -9.1717),
-        "zoo de lisboa": (38.7470, -9.1717),
+        "jardim zoologico de lisboa": (38.7422, -9.16872),
+        "lisbon zoo": (38.7422, -9.16872),
+        "zoo de lisboa": (38.7422, -9.16872),
     }
     for alias, coordinates in place_centroids.items():
         if query == alias or alias in query:

@@ -65,6 +65,10 @@ METRO_STATUS_URL = "https://app.metrolisboa.pt/status/getLinhas.php"
 _METRO_STATION_ALIASES: Dict[str, str] = {
     "sete rios": "jardim zoológico",
     "terminal sete rios": "jardim zoológico",
+    "marques pombal": "Marquês de Pombal",
+    "marques de pombal": "Marquês de Pombal",
+    "rotunda do marques": "Marquês de Pombal",
+    "rotunda marques": "Marquês de Pombal",
 }
 
 
@@ -387,7 +391,7 @@ def _build_route_source_line(sources: List[str]) -> str:
             deduped_sources.append(source)
 
     if not deduped_sources:
-        deduped_sources.append("[*Metro de Lisboa*](https://www.metrolisboa.pt)")
+        return ""
 
     updated = datetime.now().strftime('%H:%M')
     return f"\n📌 **Fonte:** {' e '.join(deduped_sources)} **| Atualizado:** {updated}\n"
@@ -713,10 +717,19 @@ def get_transport_summary() -> str:
         str: Combined transport status summary.
     """
     now_str = datetime.now().strftime('%H:%M')
-    response = f"### 🚇 🚌 🚆 **Situação dos Transportes de Lisboa** — Atualizado: {now_str}\n\n"
+    response = "\n".join(
+        [
+            "### 🚇 Situação dos Transportes em Lisboa",
+            "",
+            f"Resumo rápido atualizado às **{now_str}**.",
+            "",
+            "---",
+            "",
+        ]
+    )
 
     # 1. Metro Status
-    response += "🚇 **Metro de Lisboa**\n"
+    response += "**🚇 Metro de Lisboa**\n"
 
     metro_data = fetch_json_with_retry(METRO_STATUS_URL)
     if metro_data and metro_data.get('resposta'):
@@ -726,34 +739,34 @@ def get_transport_summary() -> str:
             status = resp.get(line_key, 'Unknown').strip()
             if status.lower() != 'ok':
                 all_ok = False
-                response += f"- {line_info['emoji']} **{line_key.title()}**: ⚠️ {status}\n"
+            response += f"- {line_info['emoji']} **{line_key.title()}**: {status}\n"
 
         if all_ok:
-            response += "- 🟢 **Estado**: Circulação normal em todas as linhas\n"
+            response += "- 🟢 **Estado:** Circulação normal em todas as linhas\n"
     else:
-        response += "- ❌ **Estado**: Indisponível\n"
+        response += "- ❌ **Estado:** Dados Indisponíveis\n"
 
     response += "\n"
 
     # 2. Carris (Urban Lisbon)
-    response += "🚋 **Carris (Urbano)**\n"
+    response += "**🚌 Carris Urban**\n"
 
     try:
         from tools.carris_api import fetch_gtfs_rt_vehicles
 
         vehicles = fetch_gtfs_rt_vehicles()
         if vehicles:
-            response += f"- 🟢 **Veículos em serviço**: {len(vehicles)} veículos\n"
+            response += f"- 🟢 **Veículos em serviço:** {len(vehicles)} veículos\n"
         else:
-            response += "- ⚠️ **Estado**: Dados em tempo real indisponíveis\n"
+            response += "- ⚠️ **Estado:** Dados em tempo real indisponíveis\n"
     except Exception as e:
         logger.warning(f"Carris Urban data failed: {e}")
-        response += "- ⚠️ **Estado**: Dados indisponíveis\n"
+        response += "- ⚠️ **Estado:** Dados indisponíveis\n"
 
     response += "\n"
 
-    # 3. Carris Metropolitana (Suburban)
-    response += "🚌 **Carris Metropolitana (Suburbano)**\n"
+    # 3. Carris Metropolitana (AML metropolitan buses)
+    response += "**🚌 Carris Metropolitana**\n"
 
     try:
         from tools.carrismetropolitana_api import (
@@ -765,19 +778,19 @@ def get_transport_summary() -> str:
             # API returns a list directly, not a dict with 'entity' key
             alerts = alerts_data if isinstance(alerts_data, list) else alerts_data.get('entity', [])
             if alerts:
-                response += f"- ⚠️ **Alertas ativos**: {len(alerts)} alertas\n"
+                response += f"- ⚠️ **Alertas ativos:** {len(alerts)} alertas\n"
             else:
-                response += "- 🟢 **Estado**: Sem alertas ativos\n"
+                response += "- 🟢 **Estado:** Sem alertas ativos\n"
         else:
-            response += "- ⚠️ **Estado**: Dados de alertas indisponíveis\n"
+            response += "- ⚠️ **Estado:** Dados de alertas indisponíveis\n"
     except Exception as e:
         logger.warning(f"Carris Metropolitana alerts failed: {e}")
-        response += "- ⚠️ **Estado**: Dados indisponíveis\n"
+        response += "- ⚠️ **Estado:** Dados indisponíveis\n"
 
     response += "\n"
 
-    # 4. CP Trains (AML)
-    response += "🚆 **CP Comboios (AML)**\n"
+    # 4. CP suburban trains
+    response += "**🚆 CP Suburban Trains in Lisbon/AML**\n"
 
     try:
         aml_trains = get_cp_aml_trains()
@@ -785,21 +798,25 @@ def get_transport_summary() -> str:
             total = len(aml_trains)
             delayed = sum(1 for t in aml_trains if (t.get('delay') or 0) > 60)
 
-            response += f"- 📊 **Comboios a circular na AML**: {total} comboios\n"
+            response += f"- 📊 **Comboios a circular na AML:** {total} comboios\n"
             if delayed > 0:
-                response += f"- ⚠️ **Comboios com atrasos > 1 min**: {delayed} comboios\n"
+                response += f"- ⚠️ **Atrasos superiores a 1 min:** {delayed} comboios\n"
             else:
-                response += "- 🟢 **Estado**: Comboios a operar normalmente\n"
+                response += "- 🟢 **Estado:** Comboios a operar normalmente\n"
         else:
-            response += "- ⚠️ **Estado**: Dados indisponíveis\n"
+            response += "- ⚠️ **Estado:** Dados indisponíveis\n"
     except Exception as e:
         logger.warning(f"CP train data failed: {e}")
-        response += "- ⚠️ **Estado**: Dados indisponíveis\n"
+        response += "- ⚠️ **Estado:** Dados indisponíveis\n"
 
-    response += "\n"
+    response += "\n---\n\n"
+    response += (
+        "💡 **Antes de sair**\n"
+        "- Se vais usar Carris Metropolitana ou CP, confirma a partida específica pouco antes de sair, porque alertas e atrasos agregados não identificam sempre a tua linha.\n\n"
+    )
 
     # Footer with proper italic source links
-    response += f"📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt), [*Carris*](https://www.carris.pt), [*Carris Metropolitana*](https://www.carrismetropolitana.pt) e [*CP*](https://www.cp.pt) **| Atualizado:** {now_str}\n"
+    response += f"📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | [*Carris*](https://www.carris.pt) | [*Carris Metropolitana*](https://www.carrismetropolitana.pt) | [*CP*](https://www.cp.pt) | **Atualizado:** {now_str}\n"
 
     return response
 

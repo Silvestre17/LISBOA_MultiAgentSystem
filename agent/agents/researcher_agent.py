@@ -640,12 +640,17 @@ class ResearcherAgent(BaseAgent):
         return f"{result}\n\n{source_line}".strip()
 
     @staticmethod
-    def _infer_place_category_hint(user_message: str) -> Optional[str]:
-        """Infers a high-level VisitLisboa place category from common PT/EN query terms."""
+    def _infer_place_category_signals(user_message: str) -> List[str]:
+        """Extract all recognized place-category hints from the query.
+
+        Returns all possible category matches so callers can avoid over-filtering when
+        a query asks for multiple types (for example one museum + one viewpoint).
+        """
         query = (user_message or "").lower()
+        signals: List[str] = []
 
         if any(term in query for term in ["museum", "museu", "monument", "monumento"]):
-            return "Museums & Monuments"
+            signals.append("Museums & Monuments")
         if any(
             term in query
             for term in [
@@ -668,13 +673,53 @@ class ResearcherAgent(BaseAgent):
                 "café",
             ]
         ):
-            return "Restaurants"
+            signals.append("Restaurants")
         if any(term in query for term in ["hotel", "hotels", "accommodation", "lodging", "stay", "alojamento"]):
-            return "Hotels"
+            signals.append("Hotels")
         if any(term in query for term in ["viewpoint", "view point", "miradouro", "scenic view"]):
-            return "View Points"
+            signals.append("View Points")
+        if any(term in query for term in ["garden", "jardim", "parque", "park"]):
+            signals.append("Parks & Gardens")
 
-        return None
+        return signals
+
+    @classmethod
+    def _infer_place_category_hint(cls, user_message: str) -> Optional[str]:
+        """Return a single category hint only when intent is unambiguous.
+
+        Mixed-category requests (e.g., one museum + one viewpoint) skip category filtering
+        so retrieval remains broader and can return the requested mix.
+        """
+        signals = cls._infer_place_category_signals(user_message)
+        if len(signals) != 1:
+            return None
+        return signals[0]
+
+    @classmethod
+    def _is_generic_research_discovery_query(cls, user_message: str) -> bool:
+        """Detect broad, non-specific Lisbon discovery prompts that still need tool-backed output."""
+        normalized = cls._normalize_for_deterministic_routing(user_message)
+        if "lisbon" not in normalized and "lisboa" not in normalized:
+            return False
+        discovery_markers = [
+            "tell me",
+            "what should",
+            "what can i do",
+            "what can i recommend",
+            "recommend something",
+            "something useful",
+            "some useful",
+            "ideas",
+            "what is worth",
+            "worth seeing",
+            "what to do",
+            "what to see",
+            "places to go",
+            "places i should",
+            "suggestions",
+            "good options",
+        ]
+        return any(marker in normalized for marker in discovery_markers)
 
     @staticmethod
     def _build_places_source_line(result: str, language: str) -> str:
@@ -1222,7 +1267,7 @@ class ResearcherAgent(BaseAgent):
     def _is_direct_place_lookup_query(user_message: str) -> bool:
         """Detects straightforward place and service lookups that are safer to answer directly from tools."""
         query = (user_message or "").lower()
-        history_keywords = ["history", "história", "historia", "culture", "cultura"]
+        history_keywords = ["history", "historical", "história", "historia", "culture", "cultura"]
         event_keywords = [
             "event", "events", "evento", "eventos", "concert", "concerto",
             "festival", "exhibition", "exposição", "exposicao", "show",
@@ -1300,6 +1345,10 @@ class ResearcherAgent(BaseAgent):
             return central_match.group("location").strip()
 
         patterns = [
+            r"\bstart(?:ing)?\s+(?:in|from|at)\s+(?P<location>.+?)(?:\s*,|\s+and\b|\s+then\b|\s+to\b|[\?\!\.]|$)",
+            r"\bfrom\s+(?P<location>.+?)\s+(?:i|we)\s+(?:need|want|have)\b",
+            r"\bcome(?:çar|car)\s+(?:em|no|na|do|da)\s+(?P<location>.+?)(?:\s*,|\s+e\b|\s+depois\b|\s+para\b|[\?\!\.]|$)",
+            r"\ba\s+partir\s+(?:de|do|da)\s+(?P<location>.+?)(?:\s*,|\s+e\b|\s+depois\b|\s+para\b|[\?\!\.]|$)",
             r"\bnearest\s+(?:\w+\s+){0,4}to\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
             r"\bclosest\s+(?:\w+\s+){0,4}to\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
             r"\bclosest to\s+(?P<location>.+?)(?:[\?\!\.,]|$)",
@@ -1337,6 +1386,7 @@ class ResearcherAgent(BaseAgent):
             return None
 
         split_patterns = (
+            r"\b(?:if|when|se|quando)\b",
             r"\b(?:that|which|who|where|still|open|useful|que|e que)\b",
             r"\b(?:esta\s+noite|ao\s+fim\s+do\s+dia|mais\s+tarde|hoje|amanh[ãa]|agora|tonight|this\s+evening|today|tomorrow|now|later)\b",
             r"\b(?:para|to)\s+(?:usar|use|ir|go|chegar|reach|esta\s+noite|hoje|amanh[ãa]|agora|mais\s+tarde|tonight|this\s+evening|today|tomorrow|now|later)\b",
@@ -1952,7 +2002,7 @@ class ResearcherAgent(BaseAgent):
         """
         message_lower = user_message.lower()
 
-        history_keywords = ["history", "história", "historia", "culture", "cultura"]
+        history_keywords = ["history", "historical", "história", "historia", "culture", "cultura"]
         event_keywords = [
             "event", "events", "evento", "eventos", "concert", "concerto",
             "festival", "exhibition", "exposição", "exposicao", "show",
@@ -1978,6 +2028,7 @@ class ResearcherAgent(BaseAgent):
                     args = {
                         "service_type": service_type,
                         "max_results": 5,
+                        "language": language,
                     }
                     if nearby_location:
                         args["near_location_name"] = nearby_location
@@ -2000,7 +2051,7 @@ class ResearcherAgent(BaseAgent):
                 if blocks:
                     combined = "\n\n".join(blocks)
                     combined = self._strip_lisboa_aberta_source_lines(combined)
-                    if "parking" in service_types and re.search(
+                    if any("parking" in service_type for service_type in service_types) and re.search(
                         r"\b(municipal|car\s+parks?|park\s+my\s+car|municipais|carro|viatura)\b",
                         message_lower,
                     ):
@@ -2017,16 +2068,29 @@ class ResearcherAgent(BaseAgent):
                             combined += f"\n\n⚠️ Não foi possível confirmar resultados para: {', '.join(missing_services)}."
                         else:
                             combined += f"\n\n⚠️ I could not confirm results for: {', '.join(missing_services)}."
-                    evening_requested = bool(re.search(
-                        r"\b(evening|tonight|late|after\s+hours|this\s+evening|noite|esta\s+noite|ao\s+fim\s+do\s+dia|mais\s+tarde)\b",
+                    normalized_services = " ".join(
+                        unicodedata.normalize("NFKD", service or "")
+                        .encode("ascii", "ignore")
+                        .decode("ascii")
+                        .lower()
+                        for service in service_types
+                    )
+                    health_requested = bool(re.search(r"\b(farmacia|farmacias|hospital|hospitais)\b", normalized_services))
+                    time_sensitive_requested = bool(re.search(
+                        r"\b(evening|tonight|late|after\s+hours|this\s+evening|now|right\s+now|availability|available|open|still\s+useful|noite|esta\s+noite|ao\s+fim\s+do\s+dia|mais\s+tarde|agora|disponibilidade|disponivel|abert[ao]s?|funciona)\b",
                         user_message,
                         re.IGNORECASE,
                     ))
-                    if evening_requested:
+                    if time_sensitive_requested:
                         if language == "pt":
-                            combined += "\n\nâš ï¸ A Lisboa Aberta confirma localizaÃ§Ã£o e proximidade, mas nÃ£o confirma horÃ¡rio atual nem disponibilidade ao fim do dia. Confirma diretamente antes de te deslocares."
+                            if health_requested:
+                                combined += "\n\nAviso: a Lisboa Aberta confirma localização e proximidade, mas não confirma disponibilidade em tempo real, urgência, atendimento atual ou farmácias de serviço. Confirma diretamente antes de te deslocares."
+                            else:
+                                combined += "\n\nAviso: a Lisboa Aberta confirma localização e proximidade, mas não confirma horário atual nem disponibilidade ao fim do dia. Confirma diretamente antes de te deslocares."
+                        elif health_requested:
+                            combined += "\n\nNote: Lisboa Aberta confirms location and proximity, but not real-time availability, emergency capacity, current attendance, or duty-pharmacy status. Confirm directly before going."
                         else:
-                            combined += "\n\nâš ï¸ Lisboa Aberta confirms location and proximity, but not current opening hours or evening availability. Confirm directly before going."
+                            combined += "\n\nNote: Lisboa Aberta confirms location and proximity, but not current opening hours or evening availability. Confirm directly before going."
                     combined += f"\n\n{self._build_open_data_services_source_line(language)}"
                     return combined.strip()
 
@@ -2105,11 +2169,16 @@ class ResearcherAgent(BaseAgent):
             r"\b(?:parking|car\s+parks?|park\s+my\s+car|estacionamento|estacionar|parques?\s+de\s+estacionamento)\b",
             normalized_query,
         ))
+        car_parking_context = bool(re.search(
+            r"\b(?:car|cars|carro|carros|automovel|automoveis|viatura|viaturas|automobile|vehicle)\b",
+            normalized_query,
+        ))
         service_catalog = [
             (("pharmacy", "pharmacies", "farm", "pharmac"), "farm\u00e1cias"),
             (("hospital", "hospitals", "hospit", "clinic", "clinica", "clinicas", "cl\u00ednica", "cl\u00ednicas"), "hospitais"),
             (("school", "schools", "escola", "escolas", "sch"), "escolas"),
             (("library", "libraries", "bibliot", "librar"), "bibliotecas"),
+            (("ecoponto", "ecopontos", "reciclag", "recycling", "recycle", "residuo", "residuos", "waste"), "ecopontos"),
             (("park", "parks", "garden", "gardens", "jardim", "jardins", "parque infantil", "parques infantis", "playground", "infantil"), "jardins"),
             (("police", "polic"), "pol\u00edcia"),
             (("parking", "estacion", "car park", "park my car", "parque de estacionamento"), "parking"),
@@ -2125,6 +2194,8 @@ class ResearcherAgent(BaseAgent):
             if normalized_service == "jardins" and parking_context:
                 continue
             if any(marker in normalized_query for marker in markers) and normalized_service not in extracted:
+                if normalized_service == "parking" and car_parking_context:
+                    normalized_service = "car parking"
                 extracted.append(normalized_service)
         return extracted
 
@@ -2145,11 +2216,11 @@ class ResearcherAgent(BaseAgent):
             return "educa\u00e7\u00e3o"
         if normalized == "bibliotecas":
             return "cultura"
-        if normalized == "jardins":
+        if normalized in {"jardins", "ecopontos"}:
             return "ambiente"
         if normalized in {"policia", "bombeiros"}:
             return "seguran\u00e7a"
-        if normalized == "parking":
+        if "parking" in normalized:
             return "transportes"
         if normalized in {"estacionamento", "sanitarios", "loja do cidadao"}:
             return "servi\u00e7os"
@@ -2226,20 +2297,27 @@ class ResearcherAgent(BaseAgent):
         language: str,
     ) -> str:
         """Build a scoped limitation when a municipal service lookup has no reliable result."""
-        services = ", ".join(service_types)
+        display_names_pt = {
+            "car parking": "estacionamento automóvel",
+            "ecopontos": "ecopontos",
+        }
+        display_names_en = {
+            "car parking": "car parking",
+            "ecopontos": "recycling points",
+        }
+        display_names = display_names_pt if language == "pt" else display_names_en
+        services = ", ".join(display_names.get(service, service) for service in service_types)
         location = f" perto de {nearby_location}" if language == "pt" and nearby_location else ""
         location_en = f" near {nearby_location}" if language != "pt" and nearby_location else ""
         if language == "pt":
             body = (
-                f"⚠️ Não consegui confirmar resultados fiáveis para **{services}**{location} "
-                "nos dados disponíveis da Lisboa Aberta. "
-                "Para manter a resposta correta, não vou substituir isto por atrações ou locais de outra categoria."
+                f"⚠️ Não encontrei resultados municipais fiáveis para **{services}**{location} "
+                "nos dados disponíveis da Lisboa Aberta."
             )
         else:
             body = (
-                f"⚠️ I could not confirm reliable results for **{services}**{location_en} "
-                "in the available Lisboa Aberta data. "
-                "To keep the answer accurate, I will not replace this with attractions or another unrelated category."
+                f"⚠️ I could not confirm reliable municipal results for **{services}**{location_en} "
+                "in the available Lisboa Aberta data."
             )
         return f"{body}\n\n{ResearcherAgent._build_open_data_services_source_line(language)}"
 
@@ -2297,6 +2375,24 @@ class ResearcherAgent(BaseAgent):
             return f"{result}\n\n{source_line}".strip()
         return None
 
+    def _run_discovery_lookup(self, user_message: str, language: str) -> str:
+        """Returns grounded suggestions for broad Lisbon discovery prompts."""
+        tool = self._get_tool_by_name("search_places_attractions")
+        if not tool:
+            if language == "pt":
+                return "Posso ajudar com Lisboa, mas a ferramenta de procura de locais está indisponível no momento."
+            return "I can help with Lisbon places, but the places search tool is currently unavailable."
+
+        args: Dict[str, Any] = {
+            "query": "recommended places and activities in Lisbon",
+            "max_results": 5,
+            "offset": 0,
+            "language": language,
+        }
+        result = str(self._invoke_tool(tool, args, tool_name="search_places_attractions")).strip()
+        source_line = self._build_places_source_line(result, language)
+        return f"{result}\n\n{source_line}".strip()
+
     @classmethod
     def _is_lisboa_card_query(cls, user_message: str) -> bool:
         """Return whether the query asks about Lisboa Card benefits or inclusion."""
@@ -2305,6 +2401,7 @@ class ResearcherAgent(BaseAgent):
         benefit_terms = (
             "included", "include", "free", "discount", "benefit", "benefits",
             "entrada", "incluido", "incluida", "gratuito", "desconto", "beneficio", "beneficios",
+            "relevant", "relevance", "apply", "applicable", "suitable", "works", "good for", "for visiting",
         )
         return any(term in normalized for term in card_terms) and any(term in normalized for term in benefit_terms)
 
@@ -2312,9 +2409,17 @@ class ResearcherAgent(BaseAgent):
     def _extract_lisboa_card_subject(cls, user_message: str) -> str:
         """Extract the likely attraction name from a Lisboa Card benefit query."""
         subject = str(user_message or "")
-        subject = re.sub(r"(?i)\b(?:is|are|does|do|o|a|os|as|est[aá]|fica|inclu[ií]d[oa]s?)\b", " ", subject)
-        subject = re.sub(r"(?i)\b(?:included|include|free|discount|benefit|benefits|entrada|gratuito|desconto|benef[ií]cios?)\b", " ", subject)
-        subject = re.sub(r"(?i)\b(?:in|with|on|no|na|nos|nas|com|the|lisboa card|lisbon card|card)\b", " ", subject)
+        subject = re.sub(
+            r"(?i)\b(?:is|are|does|do|isn't|aren't|the|a|an|o|os|as|um|uma|est[aá]|fica|fica-se|para|with|in|on|no|na|nos|nas|com|can|can't|cannot|o|a|os|as)\b",
+            " ",
+            subject,
+        )
+        subject = re.sub(
+            r"(?i)\b(?:included|include|free|discount|benefit|benefits|entrada|gratuito|desconto|benef[ií]cios?|relevant|relevante|apply|applicable|suitable|works|for|visiting)\b",
+            " ",
+            subject,
+        )
+        subject = re.sub(r"(?i)\b(?:lisboa card|lisbon card|card)\b", " ", subject)
         subject = re.sub(r"[^\wÀ-ÿ\s'-]+", " ", subject)
         subject = re.sub(r"\s+", " ", subject).strip()
         return subject or user_message
@@ -2521,9 +2626,25 @@ class ResearcherAgent(BaseAgent):
         if cls._is_lisboa_card_query(query):
             return cls._build_tool_call("search_lisbon_knowledge", {"query": query, "max_results": 5})
 
+        if cls._is_generic_research_discovery_query(query):
+            language = cls._infer_research_query_language(query)
+            return cls._build_tool_call(
+                "search_places_attractions",
+                {
+                    "query": "recommended places and activities in Lisbon",
+                    "max_results": 5,
+                    "language": language,
+                },
+            )
+
         if re.search(r"\b(history|historical|historia|culture|cultura)\b", normalized_query):
             subject = cls._extract_history_culture_subject(query)
-            language = infer_response_language(user_query=query, default="en")
+            language = cls._infer_research_query_language(query)
+            if re.search(
+                r"\b(give me|summari[sz]e|historical importance|only use|supported details|without inventing|context for)\b",
+                query_lower,
+            ):
+                language = "en"
             return cls._build_tool_call("search_history_culture", {"query": subject, "language": language})
 
         if "service categories" in query_lower or (
@@ -2592,10 +2713,18 @@ class ResearcherAgent(BaseAgent):
 
         service_types = cls._extract_service_types(query)
         if service_types:
-            args: Dict[str, Any] = {"service_type": service_types[0], "max_results": 5}
+            language = infer_response_language(user_query=query, default="en")
+            args: Dict[str, Any] = {
+                "service_type": service_types[0],
+                "max_results": 5,
+                "language": language,
+            }
             nearby_location = cls._clean_nearby_location_text(cls._extract_near_location_name(query))
             if nearby_location:
                 args["near_location_name"] = nearby_location
+            category_hint = cls._service_category_for_type(service_types[0])
+            if category_hint:
+                args["category"] = category_hint
             return cls._build_tool_call("find_nearby_services", args)
 
         place_keywords = [
@@ -2635,6 +2764,11 @@ class ResearcherAgent(BaseAgent):
             language = language_match.group(1).lower()
         else:
             language = self._infer_research_query_language(user_message)
+        if language == "pt" and re.search(
+            r"\b(give me|summari[sz]e|historical importance|only use|supported details|without inventing|context for)\b",
+            user_message.lower(),
+        ):
+            language = "en"
 
         # Skip tool enforcement for greetings/thanks
         is_greeting = any(
@@ -2669,6 +2803,18 @@ class ResearcherAgent(BaseAgent):
                 print("      [RESEARCHER] Using deterministic Lisboa Card benefit lookup...")
 
             response = self._run_lisboa_card_lookup(user_message, language)
+            return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
+                response,
+                agent_name="researcher",
+                user_query=user_message,
+                language=language,
+            ))
+
+        if not is_greeting and self._is_history_culture_query(user_message):
+            if verbose:
+                print("      [RESEARCHER] Using deterministic history/culture lookup...")
+
+            response = self._run_direct_tool_fallback(user_message, language)
             return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
                 response,
                 agent_name="researcher",
@@ -2746,6 +2892,17 @@ class ResearcherAgent(BaseAgent):
                     user_query=user_message,
                     language=language,
                 ))
+
+        if not is_greeting and self._is_generic_research_discovery_query(user_message):
+            if verbose:
+                print("      [RESEARCHER] Using deterministic discovery lookup for broad Lisbon query...")
+            response = self._run_discovery_lookup(user_message, language)
+            return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
+                response,
+                agent_name="researcher",
+                user_query=user_message,
+                language=language,
+            ))
 
         last_search_context = getattr(self, "_last_search_context", None)
         if not is_greeting and last_search_context and self._is_named_lookup_followup(user_message):
