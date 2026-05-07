@@ -922,8 +922,17 @@ class SupervisorAgent(BaseAgent):
             reasoning = decision.get("reasoning", "")
             message_lower = user_message.lower()
 
-            # Check if this is a planning query that requires weather
+            # Check if this is a planning query that requires weather.
             is_planning_query = self._is_planning_query(user_message)
+            if re.search(r"\b(?:plan|itinerary|roteiro|planeia|planejar)\b", user_message, flags=re.IGNORECASE) and re.search(
+                r"\b(?:[2-9]\s*(?:days?|dias?)|seven days|five days|7 days|5 days|weekend|fim de semana)\b",
+                user_message,
+                flags=re.IGNORECASE,
+            ):
+                is_planning_query = True
+                agents = [agent for agent in ["weather", "transport", "researcher", "planner", *agents] if agent]
+                agents = [agent for index, agent in enumerate(agents) if agent not in agents[:index]]
+                reasoning += " (Deterministic override: multi-day planning requires full planning route)"
 
             weather_only_outdoor_decision = self._is_weather_only_outdoor_decision_query(user_message)
             if weather_only_outdoor_decision:

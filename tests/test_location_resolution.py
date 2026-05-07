@@ -309,6 +309,38 @@ def test_poi_name_containing_station_name_does_not_resolve_as_station() -> None:
     assert round(float(resolved["lon"]), 4) == -9.1733
 
 
+def test_street_and_poi_queries_do_not_fuzzy_match_station_names() -> None:
+    """Street and venue-like names must resolve as places, not nearby same-token stations."""
+    with patch("tools.location_resolver._fetch_nominatim_results_cached", return_value=[]):
+        zoo = resolve_location_query("Jardim Zoologico de Lisboa")
+        avenue = resolve_location_query("Avenida de Roma")
+        alcantara = resolve_location_query("Alcântara")
+
+    assert zoo["match_source"] == "curated_gazetteer"
+    assert zoo["display_name"] == "Jardim Zoológico de Lisboa"
+    assert zoo["nearest_metro"]["name"] == "Jardim Zoológico"
+
+    assert avenue["match_source"] == "curated_gazetteer"
+    assert avenue["display_name"] == "Avenida de Roma"
+    assert avenue["nearest_metro"]["name"] != "Avenida"
+
+    assert alcantara["match_source"] == "curated_gazetteer"
+    assert alcantara["display_name"] == "Alcântara"
+    assert alcantara["nearest_cp"]["name"] in {"Alcantara - Mar", "Alcantara - Terra"}
+
+
+def test_cp_station_scope_uses_coordinates_not_operator_scope() -> None:
+    """CP stations inside Lisbon city should not be labelled as outside-city AML places."""
+    with patch("tools.location_resolver._fetch_nominatim_results_cached", return_value=[]):
+        belem = resolve_location_query("Belém")
+        santos = resolve_location_query("Santos")
+
+    assert belem["match_source"] == "cp_station"
+    assert belem["scope"] == "lisbon_city"
+    assert santos["match_source"] == "cp_station"
+    assert santos["scope"] == "lisbon_city"
+
+
 def test_foreign_place_aliases_resolve_to_curated_lisbon_queries() -> None:
     """Common foreign place names should resolve through curated Lisbon aliases before geocoding."""
     belem_variants = _build_query_variants("Tour de Belém")

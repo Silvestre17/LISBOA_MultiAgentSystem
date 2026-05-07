@@ -3398,6 +3398,14 @@ def canonicalize_planner_source_line(text: str, language: str = "en") -> str:
     if not text:
         return text
 
+    existing_source_lines = [
+        line.strip()
+        for line in text.splitlines()
+        if _SOURCE_LINE_RE.match(line.strip())
+    ]
+    if not existing_source_lines:
+        return text
+
     body_without_source = "\n".join(
         line for line in text.splitlines() if not _SOURCE_LINE_RE.match(line.strip())
     )
@@ -3418,6 +3426,22 @@ def canonicalize_planner_source_line(text: str, language: str = "en") -> str:
             else f"📌 **Source:** [*IPMA*](https://www.ipma.pt) | **Updated:** {timestamp}"
         )
         return _replace_source_line(text, replacement)
+    existing_links: list[str] = []
+    for source_line in existing_source_lines:
+        for link in re.findall(r"\[[^\]]+\]\([^)]+\)", source_line):
+            if link not in existing_links:
+                existing_links.append(link)
+
+    if existing_links:
+        replacement = (
+            f"📌 **Fonte:** {' | '.join(existing_links)} | **Atualizado:** {timestamp}"
+            if language == "pt"
+            else f"📌 **Source:** {' | '.join(existing_links)} | **Updated:** {timestamp}"
+        )
+        return _replace_source_line(text, replacement)
+
+    return text
+
     sources = []
     has_tourism_place_cards = bool(re.search(
         r"(?m)^###\s+(?:🏛️|🎨|🌿|📍)\s+(?:\d{1,2}:\d{2}\s*[·\-]\s*)?.+",
@@ -3449,7 +3473,7 @@ def canonicalize_planner_source_line(text: str, language: str = "en") -> str:
     if "carris.pt" in lower_body or re.search(r"\bcarris\b", lower_body):
         sources.append("[*Carris*](https://www.carris.pt)")
 
-    if "cp.pt" in lower_body or re.search(r"\b(?:cp|comboios?)\b", lower_body):
+    if "cp.pt" in lower_body or re.search(r"\bCP\b", body_without_source):
         sources.append("[*CP*](https://www.cp.pt)")
 
     if not sources:
@@ -3615,8 +3639,12 @@ def rebuild_transport_source_line(
         return text
 
     if "carris_metropolitana" in operators_used and "carris" in operators_used:
-        lowered_text = text.lower()
-        if "carris metropolitana" not in lowered_text and "carrismetropolitana" not in lowered_text:
+        visible_text = re.sub(
+            r"(?im)^\s*📌\s*\*\*(?:Source|Fonte):\*\*.*$",
+            "",
+            text,
+        ).lower()
+        if "carris metropolitana" not in visible_text and "carrismetropolitana" not in visible_text:
             operators_used = [op for op in operators_used if op != "carris_metropolitana"]
 
     deduped = []
@@ -9191,7 +9219,9 @@ def final_visual_pass(text: str) -> str:
         def _append_source(url: str, markdown: str) -> None:
             nonlocal added_any
             normalized = url.lower().rstrip("/")
-            if normalized not in existing_source_urls:
+            host = urlparse(normalized).netloc
+            existing_hosts = {urlparse(existing).netloc for existing in existing_source_urls}
+            if normalized not in existing_source_urls and host not in existing_hosts:
                 sources.append(markdown)
                 existing_source_urls.add(normalized)
                 added_any = True
@@ -9223,13 +9253,13 @@ def final_visual_pass(text: str) -> str:
                 "[*Carris Metropolitana*](https://www.carrismetropolitana.pt)",
             )
 
-        if re.search(r"\b(cp|comboio|comboios|cascais|train|trens)\b", lowered):
+        if re.search(r"\bcp\b", lowered):
             _append_source(
                 "https://www.cp.pt",
                 "[*CP*](https://www.cp.pt)",
             )
 
-        if re.search(r"\b(visitlisboa|museu|mosteiro|cultural|café|cafe|mercado|market|recycling|ecoponto|reciclagem|farm[áa]cia|farmacia|pol[ií]cia|biblioteca|estacionamento|parking)\b", lowered):
+        if re.search(r"\b(visitlisboa|museu|museum|mosteiro|monastery|monumento|monument|cultural|café|cafe|miradouro|viewpoint|jardim|garden|palace|palácio|castelo|castle)\b", lowered):
             source_key = (
                 "[*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais)"
                 if is_pt
@@ -9262,7 +9292,46 @@ def final_visual_pass(text: str) -> str:
             predicate=lambda line: bool(_SOURCE_LINE_RE.match(line.strip())),
         )
 
-    text = _merge_inferred_sources(text)
+    # Source footers must be provenance-led. Do not infer new source links from
+    # final prose keywords such as "train", "weather", "parking", or
+    # "event"; those words may appear in limitations, alternatives, or stale
+    # context. Transport-specific source rebuilding is handled earlier from
+    # actual tool-call logs in graph.py.
+
+    def _restore_nearest_metro_line_fields(value: str) -> str:
+        """Restore missing Metro line fields in nearest-station cards.
+
+        QA repairs can occasionally drop the final ``Lines`` child bullet from
+        a deterministic nearest-Metro list. This repair is intentionally narrow:
+        it only touches bullets already headed by Metro line-colour emojis.
+        """
+        line_names = {
+            "🟡": "Amarela",
+            "🔵": "Azul",
+            "🟢": "Verde",
+            "🔴": "Vermelha",
+        }
+
+        def _replacement(match: re.Match[str]) -> str:
+            emoji = match.group("emoji")
+            body = match.group("body")
+            if re.search(r"\*\*(?:Lines|Linhas)\s*:\*\*", body, flags=re.IGNORECASE):
+                return match.group(0)
+            lines = [name for marker, name in line_names.items() if marker in emoji]
+            if not lines:
+                return match.group(0)
+            indent = "    "
+            if re.search(r"\*\*(?:Distância|Distancia)\s*:\*\*", body, flags=re.IGNORECASE):
+                label = "Linhas"
+            else:
+                label = "Lines"
+            return f"{match.group(0).rstrip()}\n{indent}- 🚇 **{label}:** {', '.join(lines)}\n"
+
+        return re.sub(
+            r"(?ms)^-\s+(?P<emoji>[🟡🔵🟢🔴]{1,4})\s+\*\*(?P<station>[^*\n]+)\*\*\s*\n(?P<body>(?:\s{4}-\s+[^\n]+\n?)+)",
+            _replacement,
+            value,
+        )
 
     def _fix_lisboa_aberta_only_source_footer(value: str) -> str:
         lower_value = value.lower()
@@ -9848,7 +9917,7 @@ def final_visual_pass(text: str) -> str:
     text = re.sub(r"(?mi)^\s*💡\s*\*\*Timetables:\*\*\s*cp\.pt\s*\|\s*\*\*Buy tickets:\*\*\s*CP app or (?:at the )?station\s*$\n?", "", text)
     text = re.sub(r"(?m)^\*\*([^*\n]+)\s+\*\*([^*\n]+)\*\*\*\*$", r"**\1 \2**", text)
     text = re.sub(
-        r"(?mi)^\s*[-*•]\s*[^\n]*\*\*(?:Distance|Distância|Distancia)\*\*\s*:\s*(?:not available|não disponível|nao disponivel|indisponível|indisponivel)\s*$\n?",
+        r"(?mi)^\s*[-*•]\s*[^\n]*\*\*(?:Distance|Distância|Distancia)\*\*\s*:\s*(?:not available|not confirmed|não disponível|nao disponivel|indisponível|indisponivel|não confirmado|nao confirmado)\s*$\n?",
         "",
         text,
     )
@@ -9967,22 +10036,11 @@ def final_visual_pass(text: str) -> str:
     text = _clean_open_data_place_noise(text)
     text = _strip_split_source_heading_blocks(text)
     text = _strip_duplicate_semantic_bullets(text)
+    text = _restore_nearest_metro_line_fields(text)
     text = _strip_duplicate_weather_summary_heading(text)
     text = _strip_orphan_note_headings(text)
     text = normalize_transactional_refusal_style(text)
     text = _normalize_numbered_markdown_artifacts(text)
-    if (
-        "cp.pt" not in text.lower()
-        and re.search(r"\b(comboio|comboios|train)\b", text, flags=re.IGNORECASE)
-        and re.search(r"\b(Cascais|Cais do Sodr[eé]|Bel[eé]m)\b", text, flags=re.IGNORECASE)
-        and re.search(r"📌\s+\*\*(?:Fonte|Source):\*\*", text)
-    ):
-        text = re.sub(
-            r"(📌\s+\*\*(?:Fonte|Source):\*\*\s*)",
-            r"\1[*CP*](https://www.cp.pt) | ",
-            text,
-            count=1,
-        )
     text = ensure_transport_comparison_conclusion_separator(text)
     text = ensure_blank_lines_before_headers(text)
     text = ensure_blank_lines_before_horizontal_rules(text)
@@ -10003,10 +10061,96 @@ def final_visual_pass(text: str) -> str:
         r"\1\n\n### ",
         text,
     )
+    carris_snapshot_timestamp = extract_update_time(text) or datetime.now().strftime("%H:%M")
+    text = re.sub(
+        r"(?mi)^\s*(?:\*\*Source:\*\*|Source\s*:)\s*Carris GTFS-RT cached snapshot[^\n]*\.?\s*$",
+        f"📌 **Source:** [*Carris*](https://www.carris.pt) | **Updated:** {carris_snapshot_timestamp}",
+        text,
+    )
+    text = re.sub(
+        r"(?mi)^\s*(?:\*\*Fonte:\*\*|Fonte\s*:)\s*snapshot Carris GTFS-RT[^\n]*\.?\s*$",
+        f"📌 **Fonte:** [*Carris*](https://www.carris.pt) | **Atualizado:** {carris_snapshot_timestamp}",
+        text,
+    )
+    text = re.sub(
+        r"(?mi)^\s*(?:[-*•]\s*)?(?:📌\s*)?\**(?:Fonte|Fontes|Source|Sources)\**\s*:\s*(?!.*(?:https?://|\]\())[^.\n]*(?:dados|data|transport|transporte|resposta|response|não confirmada|not confirmed)[^\n]*$",
+        "",
+        text,
+    )
     text = re.sub(r"(?<=\S)[ \t]{2,}(?=\S)", " ", text)
     # Collapse triple blank lines that may have been reintroduced.
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+def final_post_qa_guard(text: str, language: str = "en") -> str:
+    """Run the deterministic guard that must execute after every QA repair.
+
+    This is the last non-generative cleanup layer. It does not infer new facts
+    or sources; it only removes residual QA/LLM corruption that is unsafe to
+    publish after the response has otherwise been assembled.
+    """
+    if not text or not isinstance(text, str):
+        return text or ""
+
+    normalized_schema_probe = re.sub(r"\s+", " ", text.lower())
+    structured_planner_schema = (
+        all(
+            marker in normalized_schema_probe
+            for marker in (
+                "direct answer",
+                "constraints used",
+                "plan blocks",
+                "movement logic",
+                "weather strategy",
+                "limitations",
+            )
+        )
+        or all(
+            any(alias in normalized_schema_probe for alias in aliases)
+            for aliases in (
+                ("resposta direta",),
+                ("restrições usadas", "restricoes usadas"),
+                ("blocos do plano",),
+                ("lógica de movimento", "logica de movimento"),
+                ("estratégia meteorológica", "estrategia meteorologica"),
+                ("limitações", "limitacoes"),
+            )
+        )
+    )
+    if structured_planner_schema:
+        guarded = text
+    else:
+        guarded = final_visual_pass(text)
+        guarded = enforce_language_labels(guarded, language)
+        guarded = final_visual_pass(guarded)
+
+    guarded = re.sub(
+        r"(?mi)^\s*(?:[-*•]\s*)?(?:📌\s*)?\**(?:Fonte|Fontes|Source|Sources)\**\s*:\s*(?!.*(?:https?://|\]\())[^.\n]*(?:dados|data|transport|transporte|resposta|response|não confirmada|not confirmed|not provided|não fornecid|nao fornecid)[^\n]*$",
+        "",
+        guarded,
+    )
+    guarded = re.sub(
+        r"(?mi)^\s*(?:[-*•]\s*)?\**(?:Fonte|Fontes|Source|Sources)\**\s*:\s*(?!.*(?:https?://|\]\()).*$",
+        "",
+        guarded,
+    )
+    guarded = re.sub(
+        r"(?mi)^\s*[-*•]\s*[^\n]*\*\*(?:Distance|Distância|Distancia|Lines|Linhas)\s*:\*\*\s*(?:not available|not confirmed|not provided|n/?a|unknown|não disponível|nao disponivel|indisponível|indisponivel|não confirmado|nao confirmado|não fornecido|nao fornecido|desconhecido)\s*$\n?",
+        "",
+        guarded,
+    )
+    guarded = re.sub(r"(?m)^#{1,6}\s*(?:[*_`~\s]|[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D])*$\n?", "", guarded)
+    guarded = re.sub(r"(?m)(^\s*###\s+.+\n)(?:\s*\1)+", r"\1", guarded)
+    guarded = re.sub(r"(?m)\*\*\s*\*\*", "", guarded)
+    guarded = re.sub(r"(?m)(\*\*[^*\n]+)\*\*\*\*", r"\1**", guarded)
+    guarded = re.sub(r"(?m)^\s*⚠️\s*(?:⚠️\s*)+", "⚠️ ", guarded)
+    guarded = strip_placeholder_field_lines(guarded)
+    if not structured_planner_schema:
+        guarded = final_visual_pass(guarded)
+        guarded = enforce_language_labels(guarded, language)
+    guarded = re.sub(r"\n{3,}", "\n\n", guarded)
+    return guarded.strip()
 
 
 # ==========================================================================

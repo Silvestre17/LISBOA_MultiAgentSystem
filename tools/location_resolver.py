@@ -294,6 +294,22 @@ _CURATED_LOCATION_POINTS: Dict[str, Dict[str, Any]] = {
             "moi lisboa",
         ],
     },
+    "avenida de roma": {
+        "display_name": "Avenida de Roma",
+        "lat": 38.7446,
+        "lon": -9.1399,
+        "class": "highway",
+        "type": "tertiary",
+        "aliases": ["av roma", "av. roma", "avenida roma"],
+    },
+    "alcantara": {
+        "display_name": "Alcântara",
+        "lat": 38.7047,
+        "lon": -9.1742,
+        "class": "place",
+        "type": "neighbourhood",
+        "aliases": ["alcântara", "bairro de alcantara", "bairro de alcântara"],
+    },
     "jardim zoologico de lisboa": {
         "display_name": "Jardim Zoológico de Lisboa",
         "lat": 38.7422,
@@ -578,9 +594,22 @@ def _looks_like_non_station_poi_query(query_norm: str) -> bool:
     if station_context:
         return False
 
+    # Street, neighbourhood, and venue wording should be resolved as places
+    # first. Otherwise fuzzy matching can incorrectly map "Avenida de Roma" to
+    # the Metro station "Avenida", or broad districts such as "Alcântara" to a
+    # specific rail platform without the user having asked for trains.
+    exact_station_safe_names = {"avenida", "oriente", "rossio", "santos", "belem"}
+    if query_norm not in exact_station_safe_names and re.search(
+        r"\b(?:rua|avenida|av|praca|praça|largo|estrada|travessa|bairro)\b",
+        query_norm,
+    ):
+        return True
+
     poi_patterns = [
         r"\bmuseu\b",
         r"\bmuseum\b",
+        r"\bzoo\b",
+        r"\bzoologico\b",
         r"\bmonumento\b",
         r"\bmonument\b",
         r"\bmosteiro\b",
@@ -601,6 +630,7 @@ def _looks_like_non_station_poi_query(query_norm: str) -> bool:
         r"\bhospital\b",
         r"\bclinica\b",
         r"\bclinic\b",
+        r"\balcantara\b",
     ]
     return any(re.search(pattern, query_norm) for pattern in poi_patterns)
 
@@ -1077,6 +1107,7 @@ def _resolve_known_cp_station(location_name: str) -> Optional[Dict[str, Any]]:
     station_lon = station.get("lon")
     if station_lat is None or station_lon is None:
         return None
+    scope = classify_coordinate_scope(station_lat, station_lon)
 
     return {
         "query": str(location_name or "").strip(),
@@ -1085,7 +1116,7 @@ def _resolve_known_cp_station(location_name: str) -> Optional[Dict[str, Any]]:
         "full_display_name": canonical_name,
         "lat": station_lat,
         "lon": station_lon,
-        "scope": "aml",
+        "scope": scope,
         "match_source": "cp_station",
         "confidence": 0.96,
         "lines": railways,

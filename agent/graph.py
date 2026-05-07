@@ -47,6 +47,7 @@ from agent.utils.response_formatter import (
     canonicalize_transport_terms,
     enforce_language_labels,
     ensure_response_title,
+    final_post_qa_guard,
     final_visual_pass,
     finalize_worker_response,
     format_response,
@@ -1176,6 +1177,189 @@ class MultiAgentAssistant:
             "and include practical transport logic."
         ).strip()
 
+
+    def _get_conversation_anchors(self) -> Dict[str, Any]:
+        """Return mutable structured anchors used for multi-turn planning follow-ups."""
+        user_ctx = self.state.setdefault("user_context", {})
+        anchors = user_ctx.setdefault(
+            "conversation_anchors",
+            {
+                "last_itinerary_destinations": [],
+                "current_selected_destination": "",
+                "excluded_areas": [],
+                "user_preferences": [],
+                "last_plan_summary": "",
+            },
+        )
+        if not isinstance(anchors, dict):
+            anchors = {
+                "last_itinerary_destinations": [],
+                "current_selected_destination": "",
+                "excluded_areas": [],
+                "user_preferences": [],
+                "last_plan_summary": "",
+            }
+            user_ctx["conversation_anchors"] = anchors
+        return anchors
+
+    @staticmethod
+    def _merge_anchor_values(existing: object, new_values: List[str], limit: int = 12) -> List[str]:
+        """Merge anchor lists while preserving order and ignoring empty values."""
+        merged: List[str] = []
+        seen: Set[str] = set()
+        for value in list(existing or []) + new_values:
+            cleaned = re.sub(r"\s+", " ", str(value or "")).strip(" .,:;\n\t")
+            key = cleaned.lower()
+            if cleaned and key not in seen:
+                merged.append(cleaned)
+                seen.add(key)
+        return merged[:limit]
+
+    @staticmethod
+    def _extract_excluded_areas(message: str) -> List[str]:
+        """Extract explicit areas the user asked not to repeat or include."""
+        exclusions: List[str] = []
+        for match in re.finditer(
+            r"(?i)(?:do not repeat|don't repeat|avoid|sem repetir|não repetir|nao repetir|evita(?:r)?)\s+([^.;!?]+)",
+            message or "",
+        ):
+            raw = match.group(1)
+            for piece in re.split(r"\s*(?:,|\band\b|\bor\b|\be\b|\bou\b|/|\+)\s*", raw, flags=re.IGNORECASE):
+                cleaned = re.sub(r"\b(?:or|ou|areas?|zonas?|neighbourhoods?|bairros?)\b", "", piece, flags=re.IGNORECASE).strip(" .,:;")
+                if cleaned:
+                    exclusions.append(cleaned)
+        return exclusions[:8]
+
+    @staticmethod
+    def _extract_user_preferences(message: str) -> List[str]:
+        """Extract stable planning preferences from the current message."""
+        normalized = re.sub(r"\s+", " ", (message or "").lower())
+        preferences: List[str] = []
+        preference_patterns = [
+            (r"\b(?:low walking|little walking|pouca caminhada|andar pouco|baixo declive|pouco declive)\b", "low walking"),
+            (r"\b(?:indoor backup|rain[- ]?safe|if it rains|se chover|chuva)\b", "rain-safe indoor backup"),
+            (r"\b(?:cheap|budget|barato|econ[oó]mico|mais barato)\b", "budget-conscious"),
+            (r"\b(?:public transport|metro|bus|tram|autocarro|el[eé]trico|comboio)\b", "public transport"),
+            (r"\b(?:history|hist[oó]ria|cultural|culture|cultura|museum|museu)\b", "culture/history"),
+        ]
+        for pattern, label in preference_patterns:
+            if re.search(pattern, normalized, flags=re.IGNORECASE):
+                preferences.append(label)
+        return preferences
+
+    @staticmethod
+    def _extract_destination_candidates_from_plan(text: str) -> List[str]:
+        """Extract concrete destination anchors from a final itinerary without storing raw internals."""
+        if not text:
+            return []
+        candidates: List[str] = []
+        skip = {
+            "direct answer", "constraints used", "plan blocks", "movement logic",
+            "weather strategy", "limitations", "source", "fonte", "updated", "atualizado",
+            "structured plan", "plano estruturado", "lisbon", "lisboa",
+        }
+        patterns = [
+            r"(?m)^#{2,4}\s*(?:[\W_]+\s*)?(?:Day\s*\d+|Dia\s*\d+|Block\s*\d+|Bloco\s*\d+)?\s*[·:-]?\s*([^\n]{3,70})$",
+            r"\*\*([^*\n]{3,70})\*\*",
+        ]
+        for pattern in patterns:
+            for match in re.finditer(pattern, text):
+                value = re.sub(r"^[\W_\d:.-]+", "", match.group(1)).strip(" .,:;*-_")
+                value = re.sub(r"\s+", " ", value)
+                block_match = re.match(r"(?i)^block\s+\d+\s*:\s*(.+)$", value)
+                if block_match:
+                    value = block_match.group(1).strip()
+                lower = value.lower()
+                if not value or lower in skip:
+                    continue
+                if any(token in lower for token in [
+                    "source", "updated", "distance", "lines", "warning", "tip", "limitation",
+                    "structured", "plan", "title", "temperature", "conditions", "yellow", "blue", "green",
+                    "origin confirmed", "transport limits", "location", "category", "note",
+                ]):
+                    continue
+                if re.match(r"(?i)^(?:block\s*\d+|direct answer|movement logic|weather strategy)$", value):
+                    continue
+                if len(value.split()) > 7:
+                    continue
+                if re.search(r"[A-ZÁÉÍÓÚÂÊÔÃÕÇ][\wÁÉÍÓÚÂÊÔÃÕÇáéíóúâêôãõç'’.-]+", value):
+                    candidates.append(value)
+        return MultiAgentAssistant._merge_anchor_values([], candidates, limit=10)
+
+    def _resolve_contextual_follow_up(self, message: str, language: str) -> Dict[str, str]:
+        """Resolve compact follow-ups such as 'there' or plan revision requests."""
+        anchors = self._get_conversation_anchors()
+        normalized = re.sub(r"\s+", " ", (message or "").lower()).strip()
+        if not normalized:
+            return {"message": message}
+
+        destination = str(anchors.get("current_selected_destination") or "").strip()
+        uses_there = bool(re.search(r"\b(?:there|lá|la|ali|aí|ai)\b", normalized))
+        asks_route = bool(re.search(r"\b(?:how do i get|como chego|como vou|ir de|go from|get from|from|desde|a partir de)\b", normalized))
+        if uses_there and asks_route:
+            if not destination:
+                clarification = (
+                    "Which destination from the previous plan do you want directions to?"
+                    if language != "pt"
+                    else "Para que destino do plano anterior queres as indicações?"
+                )
+                return {"clarification": clarification}
+            return {
+                "message": (
+                    f"{message}\n\nResolved conversation anchor: interpret 'there' as {destination}. "
+                    f"Destination: {destination}."
+                )
+            }
+
+        revises_previous_plan = bool(
+            re.search(r"\b(?:make it|change it|adjust it|cheaper|rain|chuva|mais barato|barato|suitable|adequado|adapta|ajusta)\b", normalized)
+            and str(anchors.get("last_plan_summary") or "").strip()
+        )
+        if revises_previous_plan:
+            preferences = ", ".join(anchors.get("user_preferences") or [])
+            exclusions = ", ".join(anchors.get("excluded_areas") or [])
+            return {
+                "message": (
+                    f"{message}\n\nPrevious itinerary context to revise:\n"
+                    f"{str(anchors.get('last_plan_summary') or '')[:900]}\n\n"
+                    f"Stored preferences: {preferences or 'none explicitly stored'}.\n"
+                    f"Stored exclusions: {exclusions or 'none explicitly stored'}."
+                )
+            }
+
+        return {"message": message}
+
+    def _update_conversation_anchors(
+        self,
+        message: str,
+        final_output: str,
+        effective_agents: List[str],
+    ) -> None:
+        """Update structured conversation anchors after publishing a final answer."""
+        anchors = self._get_conversation_anchors()
+        anchors["excluded_areas"] = self._merge_anchor_values(
+            anchors.get("excluded_areas"),
+            self._extract_excluded_areas(message),
+        )
+        anchors["user_preferences"] = self._merge_anchor_values(
+            anchors.get("user_preferences"),
+            self._extract_user_preferences(message),
+        )
+        if "planner" not in set(effective_agents or []):
+            return
+
+        destinations = self._extract_destination_candidates_from_plan(final_output)
+        excluded = {str(area).lower() for area in anchors.get("excluded_areas") or []}
+        filtered_destinations = [
+            destination
+            for destination in destinations
+            if destination.lower() not in excluded
+        ]
+        if filtered_destinations:
+            anchors["last_itinerary_destinations"] = filtered_destinations
+            anchors["current_selected_destination"] = filtered_destinations[0]
+        anchors["last_plan_summary"] = re.sub(r"\s+", " ", final_output or "").strip()[:1400]
+
     def _run_lightweight_weather_fact_check(
         self,
         user_query: str,
@@ -1936,6 +2120,9 @@ class MultiAgentAssistant:
                     effective_agents=effective_agents,
                 )
 
+        final_output = final_post_qa_guard(final_output, language=language)
+        self._update_conversation_anchors(message, final_output, effective_agents)
+
         self._append_assistant_message(final_output)
 
         execution_summary = self._collect_execution_summary(
@@ -2319,6 +2506,26 @@ class MultiAgentAssistant:
             user_ctx["detected_language"] = detected_language or effective_language
             user_ctx["requires_bilingual_note"] = requires_bilingual_note
 
+        contextual_resolution = self._resolve_contextual_follow_up(message, effective_language)
+        if contextual_resolution.get("clarification"):
+            return self._finalize_chat_response(
+                response=contextual_resolution["clarification"],
+                message=message,
+                language=effective_language,
+                agents_to_call=[],
+                routing_reasoning="Conversation anchor for the requested destination was ambiguous.",
+                agent_outputs={},
+                direct_response_used=True,
+                start_time=start_time,
+                workers=[],
+                run_workers_in_parallel=False,
+                qa_result=None,
+                retry_agents_used=[],
+                final_repair_ran=False,
+                simple_weather_fact_check=None,
+            )
+        message = contextual_resolution.get("message", message)
+
         if LANGSMITH_AVAILABLE:
             annotate_current_run(
                 metadata={
@@ -2363,6 +2570,16 @@ class MultiAgentAssistant:
         agents_to_call = routing.get("agents", [])
         direct_response = routing.get("direct_response")
         reasoning = routing.get("reasoning", "")
+        if re.search(r"\b(?:plan|itinerary|roteiro|planeia|planejar)\b", message, flags=re.IGNORECASE) and re.search(
+            r"\b(?:[2-9]\s*(?:day|days|dia|dias)|seven days|five days|7 days|5 days|weekend|fim de semana)\b",
+            message,
+            flags=re.IGNORECASE,
+        ):
+            required_planning_agents = ["weather", "transport", "researcher", "planner"]
+            agents_to_call = [agent for agent in required_planning_agents if agent not in agents_to_call] + list(agents_to_call)
+            agents_to_call = [agent for index, agent in enumerate(agents_to_call) if agent and agent not in agents_to_call[:index]]
+            direct_response = None
+            reasoning = (reasoning + " | Deterministic override: multi-day planning requires planner synthesis.").strip(" |")
         planning_follow_up_context = self._build_planning_follow_up_context(message)
 
         if verbose:
@@ -2913,9 +3130,9 @@ class MultiAgentAssistant:
             response_agents_to_call = ["weather"]
             response = str(agent_outputs.get("weather", "")).strip()
         elif planner_requested and planner_blocked:
-            from agent.agents.planner_agent import _build_deterministic_planner_fallback
+            from agent.agents.planner_agent import _build_structured_plan_fallback
 
-            response = _build_deterministic_planner_fallback(
+            response = _build_structured_plan_fallback(
                 user_message=message,
                 language=effective_language,
                 weather_data=str(agent_outputs.get("weather", "") or ""),
@@ -2923,6 +3140,7 @@ class MultiAgentAssistant:
                 places_data=str(agent_outputs.get("researcher", "") or ""),
                 events_data=str(agent_outputs.get("events", "") or ""),
                 qa_disclaimers=getattr(qa_result, "disclaimers", None),
+                conversation_context=str(agent_outputs.get("_conversation_context", "") or ""),
             )
             planner_executed = True
             planner_fallback_used = True
@@ -2940,9 +3158,9 @@ class MultiAgentAssistant:
             except Exception as e:
                 if verbose:
                     print(f"   [PLANNER] Planner synthesis failed ({type(e).__name__}): {e}")
-                from agent.agents.planner_agent import _build_deterministic_planner_fallback
+                from agent.agents.planner_agent import _build_structured_plan_fallback
 
-                response = _build_deterministic_planner_fallback(
+                response = _build_structured_plan_fallback(
                     user_message=message,
                     language=effective_language,
                     weather_data=str(agent_outputs.get("weather", "") or ""),
@@ -2950,6 +3168,7 @@ class MultiAgentAssistant:
                     places_data=str(agent_outputs.get("researcher", "") or ""),
                     events_data=str(agent_outputs.get("events", "") or ""),
                     qa_disclaimers=getattr(qa_result, "disclaimers", None),
+                    conversation_context=str(agent_outputs.get("_conversation_context", "") or ""),
                 )
                 planner_executed = True
                 planner_fallback_used = True
@@ -3087,7 +3306,19 @@ class MultiAgentAssistant:
                 verbose=verbose
             )
 
-        if not planner_fallback_used and self._should_run_final_qa_repair(response_agents_to_call, qa_result):
+        should_run_final_repair = self._should_run_final_qa_repair(response_agents_to_call, qa_result)
+        if should_run_final_repair and (
+            response_agents_to_call == ["transport"] or "planner" in set(response_agents_to_call or [])
+        ):
+            fact_check = qa_result.get("fact_check", {}) if isinstance(qa_result, dict) else {}
+            critical_issues = []
+            if isinstance(qa_result, dict):
+                critical_issues.extend(qa_result.get("critical_issues") or [])
+            if isinstance(fact_check, dict):
+                critical_issues.extend(fact_check.get("critical_issues") or [])
+            should_run_final_repair = bool(critical_issues)
+
+        if not planner_fallback_used and should_run_final_repair:
             if verbose:
                 print("\n   [QA] Running final repair pass on the drafted response...")
             final_repair_ran = True
@@ -3100,7 +3331,10 @@ class MultiAgentAssistant:
             )
 
         if planner_executed:
-            from agent.agents.planner_agent import enforce_multi_day_quality_mode
+            from agent.agents.planner_agent import (
+                _planner_response_matches_schema,
+                enforce_multi_day_quality_mode,
+            )
             from agent.utils.response_formatter import finalize_worker_response
 
             response = enforce_multi_day_quality_mode(
@@ -3108,7 +3342,7 @@ class MultiAgentAssistant:
                 user_message=message,
                 language=effective_language,
             )
-            if not planner_fallback_used:
+            if not planner_fallback_used and not _planner_response_matches_schema(response):
                 response = finalize_worker_response(response, "planner", message, effective_language)
         elif len(response_agents_to_call) == 1 and response_agents_to_call[0] in {"researcher", "transport"}:
             from agent.utils.response_formatter import (
