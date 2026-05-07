@@ -318,7 +318,8 @@ class SupervisorAgent(BaseAgent):
         normalized = cls._normalize_query(user_message)
         unsupported_patterns = [
             r"\b(book|reserve)\s+(?:me\s+)?(?:a\s+)?(?:table|restaurant|ticket|tickets|seat|seats|hotel|room)\b",
-            r"\bmake\s+(?:me\s+)?(?:a\s+)?reservation\b",
+            r"\b(can|could|please)?\s*(?:you\s+)?(?:help\s+me\s+)?(?:book|reserve|buy|purchase)\s+(?:(?:me\s+)?(?:a|an|one)\s+)?(?:table|restaurant|ticket|tickets|seat|seats|hotel|room|flight|pass|passes)\b",
+            r"\b(make|booking|do|doing)\s+(?:me\s+)?(?:a\s+)?(?:reservation|booking)\b",
             r"\bbuy\s+(?:me\s+)?(?:a\s+)?(?:ticket|tickets)\b",
             r"\breservar\s+(?:uma\s+)?(?:mesa|bilhetes?|hotel|quarto)\b",
             r"\bmarcar\s+(?:uma\s+)?(?:mesa|reserva|bilhetes?|hotel|quarto)\b",
@@ -332,16 +333,16 @@ class SupervisorAgent(BaseAgent):
         """Builds a concise limitation response for unsupported booking actions."""
         if language == "pt":
             return (
-                "### 🚫 **Ação não disponível**\n\n"
+                "### ⚠️ **Pedidos de reserva / compra**\n\n"
                 "Não consigo fazer reservas, compras ou marcações diretamente.\n\n"
-                "- 🌐 O website oficial, contactos e horários disponíveis são o canal mais seguro.\n"
-                "- ✅ Podes pedir informação sobre o local em Lisboa para saberes o que confirmar antes de reservares."
+                "- ✅ **O que posso confirmar:** dados públicos sobre o local em Lisboa, contactos ou fontes oficiais quando estiverem disponíveis.\n"
+                "- 🚫 **Não posso inventar:** disponibilidade de mesa/cadeira, preços atuais ou confirmação de reserva."
             )
         return (
-            "### 🚫 **Action Not Available**\n\n"
+            "### ⚠️ **Booking and purchase request**\n\n"
             "I can't make bookings, purchases, or reservations directly.\n\n"
-            "- 🌐 The official website, contact details, and opening information are the safest next step.\n"
-            "- ✅ Ask for local Lisbon venue details if you want to know what to verify before booking."
+            "- ✅ **What I can confirm:** public details about the Lisbon venue, contacts, or official sources when available.\n"
+            "- 🚫 **I cannot invent:** table/seat availability, current prices, opening status, or booking confirmation."
         )
 
     @staticmethod
@@ -459,10 +460,22 @@ class SupervisorAgent(BaseAgent):
         if cls._looks_like_follow_up(user_message):
             return None
         direct_weather_transport = cls._is_direct_weather_transport_query(user_message)
+        message_lower = cls._normalize_query(user_message)
+        if re.search(r"\b(uber|bolt|taxi|taxis|tÃ¡xi|tÃ¡xis|ride-hailing)\b", message_lower):
+            return {
+                "reasoning": "Direct unsupported ride-hailing transport override",
+                "agents": ["transport"],
+                "direct_response": None,
+            }
+        if cls._is_weather_only_outdoor_decision_query(user_message):
+            return {
+                "reasoning": "Direct weather advice override for outdoor activity",
+                "agents": ["weather"],
+                "direct_response": None,
+            }
         if cls._is_planning_query(user_message) and not direct_weather_transport:
             return None
 
-        message_lower = cls._normalize_query(user_message)
         weather_hit = cls._looks_like_weather_query(message_lower)
         transport_terms = [
             "metro", "bus", "autocarro", "comboio", "train", "carris",
@@ -686,6 +699,17 @@ class SupervisorAgent(BaseAgent):
             r"\borganiza(?:r)?\b",
             r"\bir a vários? locais\b",
             r"\bvisit multiple\b",
+            r"\bpasseio\b.*\b(?:\d+\s*h|\d+\s*horas?|percurso|coerente|alternativo|locais|sitios|s[ií]tios)\b",
+            r"\b(?:percurso|rota)\s+(?:a pe|a p[eé]|pedonal|coerente|alternativ[oa])\b",
+            r"\bwalk(?:ing)?\s+(?:route|around)\b",
+            r"\bcoherent\s+walk\b",
+            r"\b(?:one\s+)?cultural\s+stop\b",
+            r"\bdinner\s+plus\b",
+            r"\broute\b.*\b(?:history|historical|culture|cultural|pastry|custard|tart|pastel|pacing|stop)\b",
+            r"\b(?:history|historical|culture|cultural|pastry|custard|tart|pastel|pacing)\b.*\broute\b",
+            r"\b(?:this\s+)?afternoon\b.*\b(?:history|historical|pastry|custard|tart|pastel|stop)\b",
+            r"\b\d+\s*(?:h|hours?|horas?)\b.*\b(?:walk|passeio|percurso|itinerary|roteiro)\b",
+            r"\b\d+\s*minutes?\b.*\b(?:walk|cultural|dinner|stop)\b",
         ]
         if any(re.search(pattern, message_lower) for pattern in planning_patterns):
             return True
@@ -699,6 +723,8 @@ class SupervisorAgent(BaseAgent):
         origin_patterns = [
             r"\bstarting from\b",
             r"\bstart(?:ing)? at\b",
+            r"\barrive(?:s|d)? at\b",
+            r"\bi arrive at\b",
             r"\bfrom\b.+\bto\b",
             r"\ba partir de\b",
             r"\bdesde\b",
@@ -720,6 +746,14 @@ class SupervisorAgent(BaseAgent):
         full_planning_markers = [
             r"\bfull\s+(?:day|itinerary)\b",
             r"\bplan\s+(?:a|my|the)?\s*(?:full\s+)?(?:day|itinerary)\b",
+            r"\broute\b.*\b(?:history|historical|culture|cultural|pastry|custard|tart|pastel|pacing|stop)\b",
+            r"\b(?:history|historical|culture|cultural|pastry|custard|tart|pastel|pacing)\b.*\broute\b",
+            r"\bplan\s+(?:a\s+)?(?:single|one|relaxed|quiet|calm)\b.*\bday\b",
+            r"\bplan\b.*\b(?:museum|museu)\b.*\b(?:garden|jardim)\b",
+            r"\bplan\s+\d+\s*(?:day|days)\b",
+            r"\b\d+\s*(?:day|days)\b",
+            r"\bplane(?:ar|ia|ie)\s+\d+\s*dias\b",
+            r"\b\d+\s*dias\b",
             r"\bitinerary\b",
             r"\broteiro\b",
             r"\bplano\s+(?:do|de)?\s*dia\b",
@@ -737,11 +771,40 @@ class SupervisorAgent(BaseAgent):
         has_route_request = any(re.search(pattern, normalized) for pattern in route_markers)
         return cls._looks_like_weather_query(normalized) and cls._looks_like_transport_query(normalized) and has_route_request
 
+    @classmethod
+    def _is_weather_only_outdoor_decision_query(cls, user_message: str) -> bool:
+        """Detect weather advice for an outdoor activity without a requested transport leg."""
+        normalized = cls._normalize_query(user_message)
+        if not normalized or not cls._looks_like_weather_query(normalized):
+            return False
+        if cls._is_direct_weather_transport_query(user_message):
+            return False
+        if re.search(
+            r"\b(?:event|events|evento|eventos|concert|concerts|concerto|concertos|festival|festivals|exhibition|exhibitions|exposi[cç][aã]o|exposi[cç][oõ]es)\b",
+            normalized,
+        ):
+            return False
+        outdoor_activity = re.search(
+            r"\b(?:walk|walking|caminhar|passeio|outdoor|ar livre|viewpoint|miradouro|cycling|bicicleta)\b",
+            normalized,
+        )
+        if not outdoor_activity:
+            return False
+        explicit_route = re.search(
+            r"\b(?:how\s+(?:do|can)\s+i\s+(?:get|go)|como\s+(?:vou|chego|posso ir)|public transport|transportes publicos|transportes públicos|metro|bus|autocarro|comboio|train|tram|el[eé]trico)\b",
+            normalized,
+        )
+        return not bool(explicit_route)
+
     @staticmethod
     def _direct_weather_transport_query_needs_local_context(normalized_message: str) -> bool:
         """Returns whether a direct weather-route request also asks for visit context."""
         return bool(
-            re.search(r"\b(?:visit|visiting|visitar|conhecer|explore|explorar)\b", normalized_message)
+            re.search(
+                r"\b(?:what\s+to\s+visit|where\s+to\s+visit|places?\s+to\s+visit|recommend|suggest|"
+                r"o\s+que\s+visitar|onde\s+visitar|locais?\s+para\s+visitar|recomenda|sugere|sugeres)\b",
+                normalized_message,
+            )
         )
 
     @classmethod
@@ -835,8 +898,21 @@ class SupervisorAgent(BaseAgent):
         messages.append(HumanMessage(content=user_message))
 
         # Get routing decision from LLM (with retry for Azure content filter)
-        response = self._safe_llm_invoke(self.llm, messages)
-        content = clean_response(response.content, _print=False)
+        # If the model path is temporarily unavailable (rate-limit, connection,
+        # provider error), fallback to deterministic routing to keep user flow.
+        try:
+            response = self._safe_llm_invoke(self.llm, messages)
+            content = clean_response(response.content, _print=False)
+        except Exception as exc:
+            fallback_decision = self._fallback_routing(
+                user_message=user_message,
+                llm_response="",
+                language=language,
+            )
+            fallback_decision["reasoning"] = (
+                f"Fallback routing (supervisor model unavailable: {type(exc).__name__})"
+            )
+            return fallback_decision
 
         # Parse JSON response
         decision = parse_json_response(content)
@@ -849,7 +925,13 @@ class SupervisorAgent(BaseAgent):
             # Check if this is a planning query that requires weather
             is_planning_query = self._is_planning_query(user_message)
 
-            if is_planning_query:
+            weather_only_outdoor_decision = self._is_weather_only_outdoor_decision_query(user_message)
+            if weather_only_outdoor_decision:
+                agents = ["weather"]
+                reasoning += " (Reduced to weather: no transport leg requested)"
+                decision["agents"] = agents
+
+            if is_planning_query and not weather_only_outdoor_decision:
                 if "planner" not in agents:
                     agents.append("planner")
                     reasoning += " (Added planner agent: itinerary/planning query)"
@@ -1157,6 +1239,12 @@ class SupervisorAgent(BaseAgent):
             r"\btoday\b",
             r"\bfor today\b",
             r"\bpara hoje\b",
+            r"\bthis\s+(?:morning|afternoon|evening)\b",
+            r"\b(?:morning|afternoon|evening)\b",
+            r"\btonight\b",
+            r"\besta\s+(?:manh[Ã£a]|tarde|noite)\b",
+            r"\blogo\s+Ã \s+noite\b",
+            r"\blogo\s+a\s+noite\b",
             # Tomorrow
             r"\bamanh[ãa]\b",
             r"\btomorrow\b",

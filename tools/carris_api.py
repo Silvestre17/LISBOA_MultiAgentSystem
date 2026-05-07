@@ -139,21 +139,21 @@ def geocode_location(
         Tuple of (latitude, longitude, display_name) or (None, None, None) on error.
     """
     try:
-        from tools.location_resolver import geocode_location_name
+        from tools.location_resolver import resolve_location_query
     except ImportError:
-        from location_resolver import geocode_location_name
+        from location_resolver import resolve_location_query
 
     try:
-        geocoded = geocode_location_name(
+        resolved = resolve_location_query(
             place_name,
             prefer_city=True,
             allow_aml=True,
         )
-        if geocoded:
+        if resolved.get("success") and resolved.get("lat") is not None and resolved.get("lon") is not None:
             return (
-                geocoded["lat"],
-                geocoded["lon"],
-                geocoded["display_name"],
+                resolved["lat"],
+                resolved["lon"],
+                resolved["display_name"],
             )
     except Exception as e:
         logger.warning(f"Geocoding failed for '{place_name}': {e}")
@@ -2229,7 +2229,7 @@ def carris_vehicle_eta(route_short_name: str, stop_name: str) -> str:
             # Route exists but no vehicles: fall back to scheduled data
             vehicle_icon = "🚋" if route_short_name.upper().endswith("E") else "🚌"
             response = f"### {vehicle_icon} **{route_short_name} at {target_stop_name}**\n\n"
-            response += "- ℹ️ **Live ETA:** no active real-time vehicle was detected for this line right now.\n"
+            response += "- ℹ️ **Live Arrival Estimate:** no active real-time vehicle was detected for this line right now.\n"
             response += "- 🕒 **Scheduled fallback:**\n"
 
             now_dt = datetime.now()
@@ -2295,7 +2295,7 @@ def carris_vehicle_eta(route_short_name: str, stop_name: str) -> str:
                 )
 
         if not etas:
-            response += "- ℹ️ **Live ETA:** no active vehicle is currently matched to this stop.\n"
+            response += "- ℹ️ **Live Arrival Estimate:** no active vehicle is currently matched to this stop.\n"
             response += "- 🕒 **Scheduled fallback:**\n"
 
             now = datetime.now()
@@ -2350,7 +2350,7 @@ def carris_vehicle_eta(route_short_name: str, stop_name: str) -> str:
 
             minutes_until = max(_minutes_until_clock_time(eta["estimated_arrival"]) or 0, 0)
             response += f"**{vehicle_icon} {route_short_name}**\n"
-            response += f"    - ⏱️ **ETA:** {eta['estimated_arrival']} ({minutes_until} min){delay_str}\n"
+            response += f"    - ⏱️ **Estimated Arrival:** {eta['estimated_arrival']} ({minutes_until} min){delay_str}\n"
             response += f"    - 📍 **Current position:** {eta['current_stop']}\n"
             response += f"    - 🚏 **Stops remaining:** {eta['stops_remaining']}\n"
 
@@ -2367,7 +2367,7 @@ def carris_vehicle_eta(route_short_name: str, stop_name: str) -> str:
 
     except Exception as e:
         logger.error(f"Error calculating ETA: {e}")
-        return f"Erro ao calcular ETA: {e}"
+        return f"Erro ao calcular tempo estimado de chegada: {e}"
 
 
 @tool

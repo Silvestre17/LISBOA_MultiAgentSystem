@@ -337,9 +337,9 @@ def is_within_lisbon_city(lat: Optional[float], lon: Optional[float]) -> bool:
     """
     Checks if coordinates are within central Lisbon city limits.
 
-    Central Lisbon boundaries (approximate):
-    - Latitude: 38.70 to 38.80
-    - Longitude: -9.20 to -9.10
+    Lisbon city boundaries (approximate):
+    - Latitude: 38.68 to 38.80
+    - Longitude: -9.24 to -9.10
 
     Args:
         lat: Latitude.
@@ -350,7 +350,7 @@ def is_within_lisbon_city(lat: Optional[float], lon: Optional[float]) -> bool:
     """
     if lat is None or lon is None:
         return False
-    return 38.70 <= lat <= 38.80 and -9.20 <= lon <= -9.10
+    return 38.68 <= lat <= 38.80 and -9.24 <= lon <= -9.10
 
 
 def both_locations_in_lisbon_city(
@@ -379,30 +379,30 @@ def geocode_location(location_name: str) -> Optional[Dict[str, Any]]:
         Dict with name, lat, lon, type, address or None if not found.
     """
     try:
-        from tools.location_resolver import geocode_location_name
+        from tools.location_resolver import resolve_location_query
     except ImportError:
-        from location_resolver import geocode_location_name
+        from location_resolver import resolve_location_query
 
-    geocoded = geocode_location_name(
+    resolved = resolve_location_query(
         location_name,
         prefer_city=False,
         allow_aml=True,
     )
-    if not geocoded:
+    if not resolved.get("success") or resolved.get("lat") is None or resolved.get("lon") is None:
         logger.warning("Could not geocode '%s'", location_name)
         return None
 
     return {
-        "name": geocoded["display_name"],
-        "lat": geocoded["lat"],
-        "lon": geocoded["lon"],
-        "type": geocoded.get("type", "unknown"),
-        "class": geocoded.get("class", "unknown"),
-        "importance": float(geocoded.get("importance", 0.0)),
-        "address": geocoded.get("address", {}),
-        "query_used": geocoded.get("query_used", location_name),
-        "scope": geocoded.get("scope", "unknown"),
-        "confidence": geocoded.get("confidence", 0.0),
+        "name": resolved["display_name"],
+        "lat": resolved["lat"],
+        "lon": resolved["lon"],
+        "type": resolved.get("type", "unknown"),
+        "class": resolved.get("class", "unknown"),
+        "importance": float(resolved.get("importance", 0.0)),
+        "address": resolved.get("address", {}),
+        "query_used": resolved.get("query_used", location_name),
+        "scope": resolved.get("scope", "unknown"),
+        "confidence": resolved.get("confidence", 0.0),
     }
 
 

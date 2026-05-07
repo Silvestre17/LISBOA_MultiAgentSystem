@@ -57,6 +57,7 @@ def _clean_query_fragment(part: str) -> str:
         "airport": "Aeroporto",
         "lisbon airport": "Aeroporto",
         "airport terminal": "Aeroporto",
+        "chiado": "Baixa-Chiado",
     }
 
     part = part.strip(" .?!,;:")
@@ -91,7 +92,25 @@ def _clean_query_fragment(part: str) -> str:
         flags=re.IGNORECASE,
     )
     part = re.sub(
+        r"\b(?:or\s+(?:bus|tram|train|metro)|ou\s+(?:autocarro|el[eé]trico|comboio|metro))\b.*$",
+        "",
+        part,
+        flags=re.IGNORECASE,
+    )
+    part = re.sub(
         r"\b(?:de\s+transportes?\s+p[úu]blicos?|por\s+transportes?\s+p[úu]blicos?|by\s+public\s+transport|using\s+public\s+transport)\b",
+        "",
+        part,
+        flags=re.IGNORECASE,
+    )
+    part = re.sub(
+        r"^(?:transporte\s+p[úu]blico|transportes\s+p[úu]blicos|public\s+transport)\s+(?:do|da|de|from)\s+",
+        "",
+        part,
+        flags=re.IGNORECASE,
+    )
+    part = re.sub(
+        r"^(?:autocarro|autocarros|bus|buses)\s+(?:da|de)\s+carris\s+metropolitana\s+(?:de|do|da)\s+",
         "",
         part,
         flags=re.IGNORECASE,
@@ -109,6 +128,30 @@ def _clean_query_fragment(part: str) -> str:
         flags=re.IGNORECASE,
     )
     part = re.sub(r"\b(at[eé]|ate)\s*$", "", part, flags=re.IGNORECASE)
+    part = re.sub(
+        r"^(?:ir|vou|quero ir|preciso ir|preciso de ir|go|get|travel|take)\s+(?:de\s+|do\s+|da\s+|from\s+)?",
+        "",
+        part,
+        flags=re.IGNORECASE,
+    )
+    part = re.sub(
+        r"^(?:para|ao|a|à|to)\s+",
+        "",
+        part,
+        flags=re.IGNORECASE,
+    )
+    part = re.sub(
+        r"\b(?:hoje|amanh[ãa]|esta\s+tarde|hoje\s+[àa]\s+tarde|[àa]\s+tarde|today|tomorrow|this\s+afternoon)\b.*$",
+        "",
+        part,
+        flags=re.IGNORECASE,
+    )
+    part = re.sub(
+        r"\b(?:how\s+do\s+i\s+get\s+there|how\s+to\s+get\s+there|como\s+l[aá]\s+chego|como\s+chego\s+l[aá])\b.*$",
+        "",
+        part,
+        flags=re.IGNORECASE,
+    )
     part = re.sub(r"^(o|a|os|as|the)\s+", "", part, flags=re.IGNORECASE)
     part = part.strip(" .?!,;:")
     normalized = _normalize_token(part)
@@ -1762,11 +1805,34 @@ def _build_unsupported_transport_scope_response(
         "fertagus": "[*Fertagus*](https://www.fertagus.pt)",
         "long_distance_cp": "[*CP*](https://www.cp.pt)",
         "micromobility": "[*Gira*](https://www.gira-bicicletasdelisboa.pt)",
-        "ride_hailing": "[*LISBOA*](https://github.com/Silvestre17/LISBOA_MultiAgentSystem)",
     }
     source_tokens = [unsupported_sources[mode] for mode in unsupported_modes if mode in unsupported_sources]
-    source_link = " | ".join(dict.fromkeys(source_tokens)) or "[*LISBOA*](https://github.com/Silvestre17/LISBOA_MultiAgentSystem)"
+    source_link = " | ".join(dict.fromkeys(source_tokens))
     timestamp = datetime.now().strftime("%H:%M")
+    if unsupported_modes == ["ride_hailing"]:
+        if language == "pt":
+            return "\n".join(
+                [
+                    "### 🚕 Mobilidade fora do âmbito confirmado",
+                    "",
+                    "Não consigo dizer se Uber ou Bolt é melhor agora, porque este sistema não confirma preços, tempos de espera ou disponibilidade desses serviços em tempo real.",
+                    "",
+                    "**Para decidir no momento:**",
+                    "- Abre as duas apps e compara o preço final, o tempo estimado de recolha e o tempo total antes de aceitar.",
+                    "- Se preferires dados verificados pelo sistema, reformula a viagem com Metro, Carris Urban, Carris Metropolitana ou CP suburbanos/AML.",
+                ]
+            ).strip()
+        return "\n".join(
+            [
+                "### 🚕 Mobility outside confirmed scope",
+                "",
+                "I can't say whether Uber or Bolt is better right now, because this system does not verify real-time ride-hailing prices, estimated pickup times, or availability.",
+                "",
+                "**To decide in the moment:**",
+                "- Open both apps and compare final price, estimated pickup time, and total trip time before accepting.",
+                "- If you want system-verified data, rephrase the trip with Metro, Carris Urban, Carris Metropolitana, or CP suburban/AML services.",
+            ]
+        ).strip()
 
     if language == "pt":
         if not is_long_distance_only:
@@ -1778,7 +1844,7 @@ def _build_unsupported_transport_scope_response(
                     f"- O LISBOA valida diretamente {supported_scope_pt}.",
                     "- Posso ajudar se reformulares a viagem com uma dessas redes suportadas.",
                     "",
-                    f"📌 **Fonte:** {source_link} | **Atualizado:** {timestamp}",
+                    f"📌 **Fonte:** {source_link} | **Atualizado:** {timestamp}" if source_link else "",
                 ]
             ).strip()
         return "\n".join(
@@ -1789,22 +1855,28 @@ def _build_unsupported_transport_scope_response(
                 f"- O LISBOA valida diretamente {supported_scope_pt}.",
                 "- Para Alfa Pendular, Intercidades ou outros serviços de longo curso, confirma horários e bilhetes diretamente na CP.",
                 "",
-                f"📌 **Fonte:** {source_link} | **Atualizado:** {timestamp}",
+                f"📌 **Fonte:** {source_link} | **Atualizado:** {timestamp}" if source_link else "",
             ]
         ).strip()
 
     if not is_long_distance_only:
-        return "\n".join(
-            [
-                "### ⚠️ **Network outside confirmed scope**",
-                "",
-                f"- I can't directly verify {unsupported_label} in this runtime.",
-                f"- LISBOA directly validates {supported_scope_en}.",
-                "- I can help if you rephrase the trip using one of those supported networks.",
-                "",
-                f"📌 **Source:** {source_link} | **Updated:** {timestamp}",
-            ]
-        ).strip()
+        lines: list[str] = [
+            "### ⚠️ **Network outside confirmed scope**",
+            "",
+            f"- I can't directly verify {unsupported_label} in this runtime.",
+            f"- LISBOA directly validates {supported_scope_en}.",
+            "- I can help if you rephrase the trip using one of those supported networks.",
+        ]
+        if "ride_hailing" in unsupported_modes:
+            lines.extend(
+                [
+                    "",
+                    "- If you are deciding now, compare final price, estimated pickup time, and total trip time across ride-hailing apps.",
+                ]
+            )
+        lines.append("")
+        lines.append(f"📌 **Source:** {source_link} | **Updated:** {timestamp}" if source_link else "")
+        return "\n".join(lines).strip()
 
     return "\n".join(
         [
@@ -1812,9 +1884,61 @@ def _build_unsupported_transport_scope_response(
             "",
             f"- I can't directly verify {unsupported_label} in this runtime.",
             f"- LISBOA directly validates {supported_scope_en}.",
+            "- If you are deciding now, compare final price, estimated pickup time, and total trip time across ride-hailing apps."
+            if "ride_hailing" in unsupported_modes
+            else "",
             "- For Alfa Pendular, Intercidades, or other long-distance rail services, confirm schedules and tickets directly with CP.",
             "",
-            f"📌 **Source:** {source_link} | **Updated:** {timestamp}",
+            f"📌 **Source:** {source_link} | **Updated:** {timestamp}" if source_link else "",
+        ]
+    ).strip()
+
+
+def _build_lisbon_setubal_scope_response(user_message: str, language: str) -> Optional[str]:
+    """Return an honest scope answer for common Lisbon to Setubal requests."""
+    normalized = _normalize_token(user_message)
+    if not re.search(r"\bsetubal\b", normalized):
+        return None
+    if not re.search(r"\b(lisbon|lisboa|from lisbon|de lisboa)\b", normalized):
+        return None
+
+    timestamp = datetime.now().strftime("%H:%M")
+    if language == "pt":
+        return "\n".join(
+            [
+                "### 🚆 Lisboa → Setúbal",
+                "",
+                "Não consigo confirmar uma rota completa Lisboa → Setúbal neste runtime.",
+                "",
+                "**Confirmado no sistema:**",
+                "- A CP é usada para serviços suburbanos suportados na AML, incluindo a Linha do Sado entre Barreiro e Setúbal.",
+                "",
+                "**Não confirmado aqui:**",
+                "- Fertagus e ferries Transtejo/Soflusa não têm verificação operacional direta neste runtime.",
+                "- Não devo transformar estes operadores em horários, tempos de chegada ao vivo ou uma rota completa sem dados próprios.",
+                "",
+                "Para uma viagem real, confirma a travessia do Tejo e o operador final nos canais oficiais antes de sair.",
+                "",
+                f"📌 **Fonte:** [*CP*](https://www.cp.pt) | **Atualizado:** {timestamp}",
+            ]
+        ).strip()
+
+    return "\n".join(
+        [
+            "### 🚆 Lisbon → Setúbal",
+            "",
+            "I can't confirm a complete Lisbon → Setúbal route in this runtime.",
+            "",
+            "**Confirmed in the system:**",
+            "- LISBOA uses CP for supported suburban AML rail data, including the Sado line between Barreiro and Setúbal.",
+            "",
+            "**Not confirmed here:**",
+            "- Fertagus and Transtejo/Soflusa ferries are not directly verified by this runtime.",
+            "- I should not turn those operators into live times, arrival estimates, or a complete route without their own data.",
+            "",
+            "For a real trip, verify the Tagus crossing and final operator on the official channels before leaving.",
+            "",
+            f"📌 **Source:** [*CP*](https://www.cp.pt) | **Updated:** {timestamp}",
         ]
     ).strip()
 
@@ -2638,6 +2762,21 @@ def _parse_carris_line_stop_query(user_message: str) -> Optional[Dict[str, Optio
                 "stop_id": stop_id_match.group("stop_id") if stop_id_match else None,
             }
 
+    line_from_stop_patterns = [
+        r"\b(?:pr[oó]ximas?\s+)?partidas?\s+(?:do\s+)?(?:el[eé]trico|tram|autocarro|bus)?\s*(?P<line>\d{1,4}[A-Za-z]?)\s+(?:em|no|na|at)\s+(?P<stop>.+?)(?:\s+(?:para|to)\b|[\?\!\.,;]|$)",
+        r"\b(?:o|a|the)?\s*(?P<line>\d{1,4}[A-Za-z]?)\s+(?:sai|parte|passa|leaves|departs)\s+d(?:e|o|a)?\s+(?P<stop>.+?)(?:\s+(?:nos?\s+pr[oó]ximos?|next|within|agora|now)\b|[\?\!\.,;]|$)",
+        r"\b(?:next|pr[oó]xim[oa])\s+(?:tram|el[eé]trico|bus|autocarro)?\s*(?P<line>\d{1,4}[A-Za-z]?)\s+(?:from|de|do|da)\s+(?P<stop>.+?)(?:[\?\!\.,;]|$)",
+    ]
+    for pattern in line_from_stop_patterns:
+        match = re.search(pattern, query, flags=re.IGNORECASE)
+        if match:
+            return {
+                "kind": "departures",
+                "line": match.group("line").upper(),
+                "stop_name": _clean_query_fragment(match.group("stop")),
+                "stop_id": stop_id_match.group("stop_id") if stop_id_match else None,
+            }
+
     stop_match = re.search(r"\b(?:at|em|na|no)\s+(?P<stop>[^\?\!\.,;]+)", query, flags=re.IGNORECASE)
     if line_match and stop_match:
         return {
@@ -2868,6 +3007,16 @@ def _build_cp_tool_spec(user_message: str) -> Optional[Dict[str, Any]]:
     ):
         return {"name": "get_train_frequency", "args": {"route_name": route_name}}
 
+    endpoints = _extract_route_endpoints(query)
+    if endpoints and re.search(r"\b(cp|comboio|comboios|train|trains)\b", query_lower):
+        return {
+            "name": "plan_train_trip",
+            "args": {
+                "origin": _resolve_cp_station_name(endpoints[0]),
+                "destination": _resolve_cp_station_name(endpoints[1]),
+            },
+        }
+
     if re.search(r"\b(status|delay|delays|running|atrasos?|a funcionar)\b", query_lower):
         return {"name": "get_train_status", "args": {}}
 
@@ -2889,16 +3038,6 @@ def _build_cp_tool_spec(user_message: str) -> Optional[Dict[str, Any]]:
                 "name": "search_cp_stations",
                 "args": {"query": _resolve_cp_station_name(match.group("term"))},
             }
-
-    endpoints = _extract_route_endpoints(query)
-    if endpoints and re.search(r"\b(cp|comboio|comboios|train|trains)\b", query_lower):
-        return {
-            "name": "plan_train_trip",
-            "args": {
-                "origin": _resolve_cp_station_name(endpoints[0]),
-                "destination": _resolve_cp_station_name(endpoints[1]),
-            },
-        }
 
     if route_name == "Cascais" and re.fullmatch(r"(?:cp|comboio|comboios|combios|train|trains)\s+cascais", query_lower):
         return {
@@ -3322,6 +3461,12 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
         return route_result
 
     is_metro_route = "METRO ROUTE" in route_result
+    fastest_requested = bool(
+        re.search(r"\b(fastest|quickest|mais r[aá]pid[ao]|mais depressa)\b", user_message, flags=re.IGNORECASE)
+    )
+    if fastest_requested and is_metro_route and _is_generic_public_transport_route_query(user_message):
+        return route_result
+
     if is_metro_route and not _is_generic_public_transport_route_query(user_message):
         return route_result
 
@@ -3353,6 +3498,22 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
         bus_title = "**🚌 Autocarros**" if _infer_language(user_message, "") == "pt" else "**🚌 Buses**"
         metro_title = "**🚇 Metro**"
         timestamp = datetime.now().strftime("%H:%M")
+        if fastest_requested:
+            first_note = (
+                "- **Melhor opção provável:** usa o Metro; os autocarros ficam como alternativa, não como rota principal."
+                if _infer_language(user_message, "") == "pt"
+                else "- **Likely best option:** use the Metro; buses are secondary alternatives, not the main route."
+            )
+            return (
+                f"{title}\n\n"
+                f"{first_note}\n\n"
+                f"{metro_title}\n\n"
+                f"{_strip_transport_source_lines(route_result)}\n\n"
+                "---\n\n"
+                f"{bus_title}\n\n"
+                f"{_strip_transport_source_lines(carris_result)}\n\n"
+                f"📌 **{source_label}:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | [*Carris*](https://www.carris.pt) | **{updated_label}:** {timestamp}"
+            )
         return (
             f"{title}\n\n"
             f"{bus_title}\n\n"
@@ -3695,6 +3856,36 @@ class TransportAgent(BaseAgent):
         lines.append("")
         lines.append(self._build_transport_source_line(language, ["[*Carris Metropolitana*](https://www.carrismetropolitana.pt)"]))
         return "\n".join(lines).strip()
+
+    def _build_madeira_nearest_metro_response(
+        self,
+        user_message: str,
+        language: str,
+    ) -> Optional[str]:
+        """Answer nearest-station queries for the Lisbon Ilha da Madeira address safely."""
+        normalized = _normalize_token(user_message)
+        if "metro" not in normalized:
+            return None
+        if not re.search(r"\b(?:nearest|closest|mais proxima|mais proximo|estacao)\b", normalized):
+            return None
+        if not re.search(r"\b(?:rua|avenida|av)\b.*\bilha da madeira\b|\brua humberto madeira\b", normalized):
+            return None
+
+        if language == "pt":
+            body = (
+                "### 🚇 **Estação de metro mais próxima**\n\n"
+                "A estação de referência para a **morada Ilha da Madeira, em Lisboa**, é **Encarnação** (Linha Vermelha).\n\n"
+                "- Se te referes à **Ilha da Madeira** enquanto ilha, isso fica fora da rede urbana do Metro de Lisboa.\n"
+                "- Para um percurso porta-a-porta, indica também o teu ponto de partida."
+            )
+        else:
+            body = (
+                "### 🚇 **Nearest metro station**\n\n"
+                "For the **Ilha da Madeira address in Lisbon**, the reference station is **Encarnação** (Red Line).\n\n"
+                "- If you mean **Madeira island**, that is outside Lisbon's urban metro network.\n"
+                "- For a door-to-door route, also provide your starting point."
+            )
+        return f"{body}\n\n{self._build_transport_source_line(language, ['[*Metro de Lisboa*](https://www.metrolisboa.pt)'])}"
 
     @staticmethod
     def _build_transport_source_line(language: str, source_links: List[str]) -> str:
@@ -4597,6 +4788,28 @@ class TransportAgent(BaseAgent):
         if unsupported_mode_response:
             return self._finalize_transport_response(
                 unsupported_mode_response,
+                user_message=user_message,
+                language=resolved_language,
+            )
+
+        setubal_scope_response = _build_lisbon_setubal_scope_response(
+            user_message=user_message,
+            language=resolved_language,
+        )
+        if setubal_scope_response:
+            return self._finalize_transport_response(
+                setubal_scope_response,
+                user_message=user_message,
+                language=resolved_language,
+            )
+
+        madeira_station_response = self._build_madeira_nearest_metro_response(
+            user_message=user_message,
+            language=resolved_language,
+        )
+        if madeira_station_response:
+            return self._finalize_transport_response(
+                madeira_station_response,
                 user_message=user_message,
                 language=resolved_language,
             )

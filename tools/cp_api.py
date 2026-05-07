@@ -1515,7 +1515,7 @@ def get_train_status() -> str:
     delayed_trains = sum(1 for t in visible_trains if (t.get('delay') or 0) > 0)
     on_time_trains = max(total_trains - delayed_trains, 0)
 
-    response = "### 🚆 **CP Trains - Lisbon Metropolitan Area (AML)**\n\n"
+    response = "### 🚆 **CP Suburban Trains around Lisbon**\n\n"
     if delayed_trains > 0:
         response += (
             f"**Short answer:** No — CP suburban trains around Lisbon are **not running normally right now**. "
@@ -1599,7 +1599,8 @@ def get_train_status() -> str:
         response += "\n"
 
     response += f"📍 **AML Coverage:** {len(aml_stations)} stations\n"
-    response += "🔗 **Supported lines:** Cascais, Sintra, Azambuja, Sado/Fertagus\n"
+    response += "🔗 **Supported CP Lines:** Cascais, Sintra, Azambuja, Sado\n"
+    response += "ℹ️ **Not covered here:** Fertagus live operations are outside the CP source used by LISBOA.\n"
     response += "💡 **Quick Tip:** Ask about a specific station or line for departure-level detail.\n"
     response += "ℹ️ Long-distance services are excluded from this LISBOA CP view.\n"
 

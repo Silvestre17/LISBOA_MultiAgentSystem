@@ -26,7 +26,9 @@ from tools.location_resolver import (
     _fetch_nominatim_results_cached,
     build_location_ambiguity_preamble,
     build_dynamic_landmark_info,
+    geocode_location_name,
     get_location_display_name,
+    resolve_location_query,
 )
 from tools.metrolisboa_api import get_landmark_info
 
@@ -201,6 +203,110 @@ def test_city_centre_aliases_resolve_to_stable_central_lisbon_queries() -> None:
     assert get_location_display_name("centre of Lisbon") == "Rossio"
     assert get_location_display_name("center") == "Rossio"
     assert get_location_display_name("centre") == "Rossio"
+
+
+def test_curated_gazetteer_resolves_common_museums_without_network() -> None:
+    """High-frequency Lisbon venues should not depend on Nominatim availability."""
+    museum_queries = {
+        "Museu Nacional do Azulejo": "Museu Nacional do Azulejo",
+        "Museu Calouste Gulbenkian": "Museu Calouste Gulbenkian",
+        "MAAT - Museu de Arte, Arquitetura e Tecnologia": "MAAT",
+        "Museu do Fado": "Museu do Fado",
+        "National Museum of Ancient Art": "Museu Nacional de Arte Antiga",
+        "Carris Museum (Public Transport Museum)": "Carris Museum",
+        "Museu Coleção Berardo": "Museu Coleção Berardo",
+        "National Coach Museum": "Museu Nacional dos Coches",
+        "Museu do Oriente": "Museu do Oriente",
+        "Museu Nacional de História Natural e da Ciência": "Museu Nacional de História Natural",
+        "Museu das Ilusões Lisboa": "Museu das Ilusões Lisboa",
+    }
+
+    with patch("tools.location_resolver._fetch_nominatim_results_cached", return_value=[]):
+        for query, expected_display in museum_queries.items():
+            geocoded = geocode_location_name(query)
+            resolved = resolve_location_query(query)
+
+            assert geocoded is not None, query
+            assert geocoded["match_source"] == "curated_gazetteer"
+            assert geocoded["scope"] == "lisbon_city"
+            assert expected_display in geocoded["display_name"]
+            assert resolved["success"] is True
+            assert resolved["nearest_metro"] or resolved["nearest_cp"]
+
+
+def test_carris_geocode_uses_curated_gazetteer_for_common_museums() -> None:
+    """Carris routing should receive coordinates for common museums even offline."""
+    from tools.carris_api import geocode_location
+
+    with patch("tools.location_resolver._fetch_nominatim_results_cached", return_value=[]):
+        lat, lon, display = geocode_location("Museu Nacional do Azulejo")
+
+    assert lat is not None
+    assert lon is not None
+    assert display == "Museu Nacional do Azulejo"
+
+
+def test_transport_geocoders_resolve_station_hubs_without_poi_drift() -> None:
+    """Transport geocoders should not map a hub name to a similarly named museum."""
+    from tools.carris_api import geocode_location as carris_geocode
+    from tools.carrismetropolitana_api import geocode_location as cm_geocode
+
+    with patch("tools.location_resolver._fetch_nominatim_results_cached", return_value=[]):
+        raw_geocode = geocode_location_name("Oriente")
+        resolved = resolve_location_query("Oriente")
+        carris = carris_geocode("Oriente")
+        metropolitan = cm_geocode("Oriente")
+
+    assert raw_geocode is None
+    assert resolved["display_name"] == "Oriente"
+    assert resolved["match_source"] == "metro_station"
+    assert carris[2] == "Oriente"
+    assert metropolitan is not None
+    assert metropolitan["name"] == "Oriente"
+
+
+def test_curated_aml_hubs_resolve_without_external_geocoder() -> None:
+    """High-frequency AML hubs should have stable fallback coordinates."""
+    from tools.carrismetropolitana_api import (
+        geocode_location as cm_geocode,
+        is_within_lisbon_city as cm_is_within_lisbon_city,
+    )
+
+    with patch("tools.location_resolver._fetch_nominatim_results_cached", return_value=[]):
+        cacilhas = resolve_location_query("Cacilhas")
+        cristo_rei = resolve_location_query("Cristo Rei")
+        cm_cacilhas = cm_geocode("Cacilhas")
+
+    assert cacilhas["success"] is True
+    assert cacilhas["scope"] == "aml"
+    assert cacilhas["match_source"] == "curated_gazetteer"
+    assert cristo_rei["success"] is True
+    assert cristo_rei["display_name"] == "Cristo Rei"
+    assert cm_cacilhas is not None
+    assert cm_cacilhas["name"] == "Cacilhas"
+    assert cm_is_within_lisbon_city(38.6958, -9.1941) is True
+
+
+def test_nearest_metro_for_lisbon_zoo_prefers_jardim_zoologico() -> None:
+    """Lisbon Zoo should resolve to Jardim Zoológico, not the nearby Laranjeiras centroid."""
+    from tools.metrolisboa_api import find_nearest_metro
+
+    response = find_nearest_metro.invoke({"near_location_name": "Jardim Zoologico de Lisboa"})
+
+    assert "Jardim Zoológico" in response
+    assert response.index("Jardim Zoológico") < response.index("Laranjeiras")
+
+
+def test_poi_name_containing_station_name_does_not_resolve_as_station() -> None:
+    """POI names containing a station token should keep POI coordinates."""
+    with patch("tools.location_resolver._fetch_nominatim_results_cached", return_value=[]):
+        resolved = resolve_location_query("Museu do Oriente")
+
+    assert resolved["success"] is True
+    assert resolved["display_name"] == "Museu do Oriente"
+    assert resolved["match_source"] == "curated_gazetteer"
+    assert round(float(resolved["lat"]), 4) == 38.7031
+    assert round(float(resolved["lon"]), 4) == -9.1733
 
 
 def test_foreign_place_aliases_resolve_to_curated_lisbon_queries() -> None:

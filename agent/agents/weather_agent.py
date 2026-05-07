@@ -887,25 +887,46 @@ class WeatherAgent(BaseAgent):
                     else f"🌙 Tonight should get down to about **{minimum}°C** in Lisbon."
                 )
 
-        if "wind" in normalized or "vento" in normalized:
-            wind = cls._extract_wind_summary(tool_text)
-            if wind:
-                return (
-                    f"💨 Hoje, o vento em Lisboa está de **{wind}**."
-                    if is_pt
-                    else f"💨 Today, Lisbon's wind is **{wind}**."
-                )
+        practical_advice_terms = [
+            "suitable",
+            "avoid",
+            "good for",
+            "wear",
+            "wearing",
+            "clothes",
+            "clothing",
+            "walking",
+            "walk",
+            "walk outdoors",
+            "riverside",
+            "outdoors",
+            "adequado",
+            "evitar",
+            "bom para",
+            "vestir",
+            "roupa",
+            "caminhar",
+            "passeio",
+            "andar ao ar livre",
+            "ar livre",
+            "umbrella",
+            "guarda chuva",
+        ]
 
-        if "rain" in normalized or "chuva" in normalized or "chover" in normalized:
+        if (
+            ("rain" in normalized or "chuva" in normalized or "chover" in normalized)
+            and not any(term in normalized for term in practical_advice_terms)
+        ):
             rain = cls._extract_rain_summary(tool_text)
             if rain:
                 return cls._rain_direct_answer(rain, is_pt)
 
-        if any(term in normalized for term in ["wear", "wearing", "clothes", "clothing", "walking", "walk outdoors", "outdoors", "vestir", "roupa", "caminhar", "andar ao ar livre", "ar livre"]):
+        if any(term in normalized for term in practical_advice_terms):
             minimum = cls._extract_temperature_min(tool_text)
             maximum = cls._extract_temperature_max(tool_text)
             rain = cls._extract_rain_summary(tool_text)
             wind = cls._extract_wind_summary(tool_text)
+            rain_answer = f"{cls._rain_direct_answer(rain, is_pt)}\n\n" if rain else ""
             if is_pt:
                 advice_parts = ["leva **casaco leve**"]
                 if rain and float(rain.get("probability", 0) or 0) >= 35:
@@ -913,14 +934,37 @@ class WeatherAgent(BaseAgent):
                 if wind:
                     advice_parts.append("uma camada que corte o vento")
                 temperature_note = f" porque a previsão fica entre **{minimum}°C e {maximum}°C**" if minimum and maximum else ""
-                return f"👟 Para caminhar ao ar livre, {', '.join(advice_parts)}{temperature_note}."
+                suitability = "Parece adequado para caminhar" if any(term in normalized for term in ["adequado", "bom para", "evitar", "passeio"]) else "Para caminhar ao ar livre"
+                return f"{rain_answer}👟 {suitability}, {', '.join(advice_parts)}{temperature_note}."
             advice_parts = ["wear a **light jacket**"]
             if rain and float(rain.get("probability", 0) or 0) >= 35:
                 advice_parts.append("carry a compact umbrella or rain shell")
             if wind:
                 advice_parts.append("add a wind-resistant layer")
             temperature_note = f" because the forecast is around **{minimum}°C to {maximum}°C**" if minimum and maximum else ""
-            return f"👟 For walking outdoors, {', '.join(advice_parts)}{temperature_note}."
+            suitability = "It looks suitable for a walk" if any(term in normalized for term in ["suitable", "good for", "avoid", "riverside"]) else "For walking outdoors"
+            return f"{rain_answer}👟 {suitability}, {', '.join(advice_parts)}{temperature_note}."
+
+        if "wind" in normalized or "vento" in normalized:
+            wind = cls._extract_wind_summary(tool_text)
+            if wind:
+                future_reference = (
+                    "tomorrow" in normalized
+                    or "amanha" in normalized
+                    or "amanhã" in normalized
+                    or "saturday" in normalized
+                    or "sunday" in normalized
+                    or "sabado" in normalized
+                    or "sábado" in normalized
+                    or "domingo" in normalized
+                )
+                time_label_pt = "Na data pedida" if future_reference else "Hoje"
+                time_label_en = "For the requested day" if future_reference else "Today"
+                return (
+                    f"💨 {time_label_pt}, o vento em Lisboa está de **{wind}**."
+                    if is_pt
+                    else f"💨 {time_label_en}, Lisbon's wind is **{wind}**."
+                )
 
         if any(term in normalized for term in ["jacket", "coat", "casaco"]):
             minimum = cls._extract_temperature_min(tool_text)

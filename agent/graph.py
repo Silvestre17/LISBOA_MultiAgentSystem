@@ -799,6 +799,137 @@ class MultiAgentAssistant:
         return list(tool_log) if isinstance(tool_log, list) else []
 
     @staticmethod
+    def _build_orchestration_failure_fallback(
+        message: str,
+        language: str,
+        error: Optional[Exception] = None,
+        attempted_agents: Optional[List[str]] = None,
+    ) -> str:
+        """Build a limitation-safe fallback when orchestration fails before finalization.
+
+        The fallback preserves language consistency, avoids exposing internals, and
+        clearly states that live checks could not be confirmed for this run.
+        """
+        normalized = (message or "").lower()
+        attempted_agents = attempted_agents or []
+        has_weather = any(
+            keyword in normalized
+            for keyword in (
+                "weather",
+                "tempo",
+                "rain",
+                "chuva",
+                "umbrella",
+                "previs",
+                "forecast",
+                "aviso",
+                "warn",
+            )
+        )
+        has_transport = any(
+            keyword in normalized
+            for keyword in (
+                "metro",
+                "bus",
+                "comboio",
+                "train",
+                "autocarro",
+                "tram",
+                "carris",
+                "carris",
+                "cp",
+                "route",
+                "rota",
+            )
+        )
+        has_research = any(
+            keyword in normalized
+            for keyword in (
+                "museum",
+                "museu",
+                "restaurante",
+                "event",
+                "evento",
+                "park",
+                "parque",
+                "pharmacy",
+                "farmácia",
+                "farmacia",
+                "parking",
+                "police",
+                "polícia",
+                "library",
+                "biblioteca",
+            )
+        )
+
+        attempted = ", ".join(attempted_agents) if attempted_agents else "none"
+        if language == "pt":
+            if has_weather and has_transport:
+                return (
+                    "## Nota de operação\n"
+                    "Não consegui confirmar dados em tempo real para Meteorologia e Transportes para esta pergunta. "
+                    "Não vou inventar horários, avisos ou percursos.\n\n"
+                    "Posso ajudar ainda com:\n"
+                    "- Explicar alternativas de planeamento com base em contexto de Lisboa\n"
+                    "- Organizar opções de visita, refeições e mobilidade sem afirmar dados ao vivo\n"
+                    f"- Pedir uma nova tentativa para confirmar: `weather`, `transport` ou serviços (módulos tentados: {attempted})\n\n"
+                    f"Erro interno tratado: {type(error).__name__ if error else 'Interrupção de serviço'}"
+                )
+            if has_weather:
+                return (
+                    "## Nota de operação\n"
+                    "Neste momento não consigo confirmar condições de **meteorologia** para Lisboa em direto. "
+                    "Não vou inventar temperatura, chuva ou avisos.\n\n"
+                    "Se precisares de planeamento para hoje/amanhã, volta a perguntar em breve para eu confirmar a fonte operacional.\n\n"
+                    "Posso ajudar com:\n"
+                    "- Planos e alternativas de percurso\n"
+                    "- Opções de locais e serviços turísticos\n"
+                    f"Erro interno tratado: {type(error).__name__ if error else 'Interrupção de serviço'}"
+                )
+            if has_transport:
+                return (
+                    "## Nota de operação\n"
+                    "Neste momento não consigo confirmar dados de **transportes em tempo real** para esta consulta. "
+                    "Não vou inventar ligações, frequências nem atrasos.\n\n"
+                    "Se precisares, repete em seguida para relançar a consulta operacional e confirmar dados atuais.\n\n"
+                    "Posso ainda ajudar com:\n"
+                    "- Estruturas de orientação e lógica de ligação por Lisboa\n"
+                    f"Erro interno tratado: {type(error).__name__ if error else 'Interrupção de serviço'}"
+                )
+            if has_research:
+                return (
+                    "## Nota de operação\n"
+                    "Posso ajudar com recomendações de Lisboa, mas neste ciclo não consegui consolidar todos os dados de base.\n"
+                    "Vou evitar afirmar fatos que não consigo confirmar agora.\n\n"
+                    "Repete a pergunta em pouco tempo para validação mais recente dos serviços e agenda."
+                )
+            if attempted and ("planner" in attempted):
+                return (
+                    "## Nota de operação\n"
+                    "Não consegui consolidar o plano final nesta execução por falha temporária no encadeamento de módulos.\n"
+                    "Não vou inventar um itinerário fechado.\n\n"
+                    "Volta a submeter a pedido para reprocessar com validação operacional."
+                )
+            return (
+                "## Operational notice\n"
+                "I cannot confirm all live Lisbon sources for this request right now, and I won’t invent unavailable details.\n"
+                "If you want, re-ask this in a few moments and I’ll retry with fresh checks.\n\n"
+                f"Agents selected before failure: {attempted or 'unknown'}\n"
+                f"Handled error: {type(error).__name__ if error else 'Service interruption'}"
+            )
+        return (
+            "## Operational notice\n"
+            "I cannot confirm all live Lisbon sources for this request right now, and I won’t invent unavailable details.\n\n"
+            "To stay reliable, I’m stopping with a caution-only response.\n"
+            "Please retry in a few moments for the live-checked answer."
+            + (
+                f"\n\nAgents selected before failure: {attempted}\n"
+                f"Handled error: {type(error).__name__ if error else 'Service interruption'}"
+            )
+        )
+
+    @staticmethod
     def _dedupe_preserve_order(items: List[str]) -> List[str]:
         """Removes duplicates while preserving order."""
         deduped: List[str] = []
@@ -988,6 +1119,62 @@ class MultiAgentAssistant:
         messages.append(HumanMessage(content=content))
         if len(messages) > _MAX_CONVERSATION_HISTORY_MESSAGES:
             del messages[:-_MAX_CONVERSATION_HISTORY_MESSAGES]
+
+    @staticmethod
+    def _looks_like_next_day_planning_follow_up(message: str) -> bool:
+        """Return whether the current user message asks to continue a plan tomorrow."""
+        normalized = re.sub(r"\s+", " ", (message or "").lower()).strip()
+        if not normalized:
+            return False
+        has_next_day = bool(
+            re.search(
+                r"\b(?:dia seguinte|pr[oó]ximo dia|amanh[aã]|tomorrow|next day|following day)\b",
+                normalized,
+            )
+        )
+        has_planning = bool(
+            re.search(
+                r"\b(?:plan|planeia|planejar|itinerary|itiner[aá]rio|roteiro|dia|day)\b",
+                normalized,
+            )
+        )
+        return has_next_day and has_planning
+
+    def _build_planning_follow_up_context(self, current_message: str) -> str:
+        """Build compact continuity context for planner follow-up requests."""
+        if not self._looks_like_next_day_planning_follow_up(current_message):
+            return ""
+
+        messages = list(self.state.get("messages", []))
+        previous_user = ""
+        previous_assistant = ""
+        for msg in reversed(messages[:-1]):
+            if not previous_assistant and isinstance(msg, AIMessage) and msg.content:
+                previous_assistant = str(msg.content)
+                continue
+            if not previous_user and isinstance(msg, HumanMessage) and msg.content:
+                previous_user = str(msg.content)
+            if previous_user and previous_assistant:
+                break
+
+        combined = "\n".join(part for part in (previous_user, previous_assistant) if part).lower()
+        if not re.search(r"\b(?:plan|planeia|itiner[aá]rio|roteiro|monument|monumento|gastronom|traditional|tradicional)\b", combined):
+            return ""
+
+        if previous_user:
+            previous_user = previous_user.strip()[:350]
+        if previous_assistant:
+            previous_assistant = previous_assistant.strip()[:900]
+
+        return (
+            "Previous planning request:\n"
+            f"{previous_user}\n\n"
+            "Previous final plan excerpt:\n"
+            f"{previous_assistant}\n\n"
+            "Continuity requirement: answer the current request as a new following-day plan; "
+            "preserve explicit preferences from the previous turn, avoid repeating the same main stops, "
+            "and include practical transport logic."
+        ).strip()
 
     def _run_lightweight_weather_fact_check(
         self,
@@ -1535,7 +1722,33 @@ class MultiAgentAssistant:
                 final_output = f"{final_output.rstrip()}\n\n---\n\n{umbrella_advice}"
                 final_output = final_visual_pass(final_output)
 
-        if agent_outputs:
+        planner_scope_fallback = planner_involved and any(
+            marker in final_output.lower()
+            for marker in (
+                "i’m limiting the",
+                "i'm limiting the",
+                "vou limitar o pedido",
+                "request too broad for a fixed plan",
+                "pedido demasiado amplo para um plano fechado",
+                "simple reduced-mobility evening",
+                "plano simples com mobilidade reduzida",
+                "resident service plan",
+                "plano residente com serviços",
+                "low-walk day plan",
+                "plano de dia com pouca caminhada",
+                "planning framework",
+                "framework de planeamento",
+                "framework dos primeiros 5 dias",
+                "relaxed one-day plan",
+                "plano relaxado de um dia",
+                "suggested evening plan",
+                "plano de fim de tarde",
+                "roteiro histórico e gastronómico",
+                "one-day history and traditional food",
+            )
+        )
+
+        if agent_outputs and not planner_scope_fallback:
             source_footer = self._build_combined_source_footer(agent_outputs, language)
             if source_footer:
                 footer_line_re = re.compile(r"^(?:[-*•]\s*)?📌\s*\*\*(?:Fontes?|Sources?):\*\*.*$", re.IGNORECASE)
@@ -1701,6 +1914,12 @@ class MultiAgentAssistant:
                 final_output = final_visual_pass(final_output)
 
         final_output = final_visual_pass(final_output)
+        if planner_scope_fallback:
+            final_output = self._rebuild_planner_scope_fallback_source_line(
+                final_output,
+                language=language,
+                effective_agents=effective_agents,
+            )
 
         qa_agent = getattr(self, "qa_agent", None)
         final_guard = getattr(type(qa_agent), "guard_final_response", None) if qa_agent is not None else None
@@ -1709,6 +1928,13 @@ class MultiAgentAssistant:
             if guarded_output != final_output:
                 final_repair_ran = True
             final_output = guarded_output
+            final_output = final_visual_pass(final_output)
+            if planner_scope_fallback:
+                final_output = self._rebuild_planner_scope_fallback_source_line(
+                    final_output,
+                    language=language,
+                    effective_agents=effective_agents,
+                )
 
         self._append_assistant_message(final_output)
 
@@ -1755,6 +1981,92 @@ class MultiAgentAssistant:
 
         return final_output
 
+    @staticmethod
+    def _rebuild_planner_scope_fallback_source_line(
+        text: str,
+        language: str,
+        effective_agents: List[str],
+    ) -> str:
+        """Keep bounded planner fallbacks from inheriting broad worker footers."""
+        if not text:
+            return text
+
+        lowered = text.lower()
+        sources: List[str] = []
+        if (
+            "weather" in effective_agents
+            and "weather was not retrieved" not in lowered
+            and "meteorologia não foi consultada" not in lowered
+            and (
+                "no active weather warnings" in lowered
+                or "sem avisos meteorológicos ativos" in lowered
+                or "ipma forecast" in lowered
+                or "previsão do ipma" in lowered
+                or "temperature" in lowered
+                or "temperatura" in lowered
+                or "conditions" in lowered
+                or "condições" in lowered
+                or "sunny intervals" in lowered
+                or "intervalos de sol" in lowered
+                or "wind" in lowered
+                or "vento" in lowered
+                or "rain" in lowered
+                or "chuva" in lowered
+                or "showers" in lowered
+                or "aguaceiros" in lowered
+            )
+        ):
+            sources.append("[*IPMA*](https://www.ipma.pt)")
+        if "lisboa aberta" in lowered or "mercado de campo de ourique" in lowered:
+            sources.append("[*Lisboa Aberta*](https://dados.cm-lisboa.pt/)")
+        if any(
+            marker in lowered
+            for marker in (
+                "visitlisboa",
+                "national coach museum",
+                "museu nacional dos coches",
+                "maat",
+                "oceanário",
+                "oceanario",
+                "pavilhão do conhecimento",
+                "pavilhao do conhecimento",
+                "gulbenkian",
+                "doca de santo",
+                "museu nacional de arte antiga",
+                "national museum of ancient art",
+                "casa fernando pessoa",
+            )
+        ):
+            sources.append(
+                "[*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais)"
+                if language == "pt"
+                else "[*VisitLisboa Places*](https://www.visitlisboa.com/en/places)"
+            )
+        if "metro" in lowered or "linha verde" in lowered or "green line" in lowered:
+            sources.append("[*Metro de Lisboa*](https://www.metrolisboa.pt)")
+        if "carris" in lowered or "direct urban bus" in lowered or "autocarro urbano" in lowered:
+            sources.append("[*Carris*](https://www.carris.pt)")
+        if "cp " in lowered or "linha de cascais" in lowered or "cascais line" in lowered:
+            sources.append("[*CP*](https://www.cp.pt)")
+
+        deduped_sources: List[str] = []
+        for source in sources:
+            if source not in deduped_sources:
+                deduped_sources.append(source)
+
+        source_re = re.compile(r"(?m)^ðŸ“Œ\s+\*\*(?:Source|Fonte):\*\*.*$")
+        if not deduped_sources:
+            return source_re.sub("", text, count=1).strip()
+
+        label = "Fonte" if language == "pt" else "Source"
+        updated = "Atualizado" if language == "pt" else "Updated"
+        timestamp = datetime.now().strftime("%H:%M")
+        replacement = f"📌 **{label}:** {' | '.join(deduped_sources)} | **{updated}:** {timestamp}"
+        source_re = re.compile(r"(?m)^📌\s+\*\*(?:Source|Fonte):\*\*.*$")
+        if source_re.search(text):
+            return source_re.sub(replacement, text, count=1)
+        return f"{text.rstrip()}\n\n{replacement}"
+
     @classmethod
     def _build_qa_retry_context(
         cls,
@@ -1799,8 +2111,6 @@ class MultiAgentAssistant:
         """Returns whether a final QA repair pass is worth running."""
         if not qa_result:
             return False
-        if "planner" in agents_to_call:
-            return True
         if qa_result.get("needs_repair"):
             return True
         if qa_result.get("missing_data"):
@@ -2033,14 +2343,27 @@ class MultiAgentAssistant:
         # Step 1: Route the query (with conversation history for follow-up awareness)
         # Exclude the current message (last) from history
         history_for_routing = self.state["messages"][:-1] if len(self.state["messages"]) > 1 else None
-        routing = self.supervisor.route(
-            message,
-            language=effective_language,
-            conversation_history=history_for_routing,
-        )
+        try:
+            routing = self.supervisor.route(
+                message,
+                language=effective_language,
+                conversation_history=history_for_routing,
+            )
+        except Exception as exc:
+            if verbose:
+                print(f"   [ROUTING] Supervisor failed ({type(exc).__name__}): {exc}")
+            routing = self.supervisor._fallback_routing(
+                user_message=message,
+                llm_response="",
+                language=effective_language,
+            )
+            routing["reasoning"] = (
+                f"Fallback routing due supervisor error ({type(exc).__name__})"
+            )
         agents_to_call = routing.get("agents", [])
         direct_response = routing.get("direct_response")
         reasoning = routing.get("reasoning", "")
+        planning_follow_up_context = self._build_planning_follow_up_context(message)
 
         if verbose:
             print("\n   [ROUTING] Supervisor decision:")
@@ -2152,6 +2475,12 @@ class MultiAgentAssistant:
             # Context for agents: language instruction + minimal follow-up context
             # Workers should focus on the CURRENT query, not be biased by history
             agent_context = f"User language: {effective_language}. Respond in {'Portuguese (PT-PT)' if effective_language == 'pt' else 'English'}."
+            if planning_follow_up_context:
+                agent_outputs["_conversation_context"] = planning_follow_up_context
+                agent_context += (
+                    "\nPlanning follow-up context:\n"
+                    f"{planning_follow_up_context[:1200]}"
+                )
 
             # Only add last user message for follow-up context (e.g., "E amanhã?")
             recent_msgs = self.state.get("messages", [])
@@ -2546,13 +2875,20 @@ class MultiAgentAssistant:
             and not planner_blocked
             and self._should_preserve_direct_researcher_answer(agent_outputs)
         )
+        preserve_weather_limitation_answer = (
+            planner_requested
+            and "weather" in agent_outputs
+            and re.search(
+                r"(?i)(forecast range only extends|next 5 days|horizonte.*5 dias|previs[aã]o.*5 dias|n[aã]o consigo confirmar.*previs[aã]o)",
+                str(agent_outputs.get("weather", "")),
+            )
+            and re.search(r"(?i)\b(weather|forecast|tempo|previs[aã]o|confirm)\b", message)
+        )
         response_agents_to_call = list(agents_to_call)
         planner_executed = False
+        planner_fallback_used = False
 
         if planner_blocked:
-            response_agents_to_call = [
-                agent_name for agent_name in agents_to_call if agent_name != "planner"
-            ]
             if verbose:
                 print(
                     "\n   [QA] Blocking planner synthesis because grounded data is still incomplete"
@@ -2573,7 +2909,24 @@ class MultiAgentAssistant:
         # synthesize the final response. Otherwise, fall back to the combined
         # worker outputs so caveats remain visible instead of publishing a
         # confident itinerary over incomplete evidence.
-        if planner_requested and not planner_blocked and not preserve_direct_researcher_answer:
+        if preserve_weather_limitation_answer:
+            response_agents_to_call = ["weather"]
+            response = str(agent_outputs.get("weather", "")).strip()
+        elif planner_requested and planner_blocked:
+            from agent.agents.planner_agent import _build_deterministic_planner_fallback
+
+            response = _build_deterministic_planner_fallback(
+                user_message=message,
+                language=effective_language,
+                weather_data=str(agent_outputs.get("weather", "") or ""),
+                transport_data=str(agent_outputs.get("transport", "") or ""),
+                places_data=str(agent_outputs.get("researcher", "") or ""),
+                events_data=str(agent_outputs.get("events", "") or ""),
+                qa_disclaimers=getattr(qa_result, "disclaimers", None),
+            )
+            planner_executed = True
+            planner_fallback_used = True
+        elif planner_requested and not planner_blocked and not preserve_direct_researcher_answer:
             if verbose:
                 print(
                     f"\n   [AGENT: PLANNER] Synthesizing from {list(agent_outputs.keys())}..."
@@ -2582,8 +2935,145 @@ class MultiAgentAssistant:
             if on_status_change:
                 on_status_change("✍️ A escrever o itinerário final...")
 
-            response = self.agents["planner"].synthesize(message, agent_outputs)
+            try:
+                response = self.agents["planner"].synthesize(message, agent_outputs)
+            except Exception as e:
+                if verbose:
+                    print(f"   [PLANNER] Planner synthesis failed ({type(e).__name__}): {e}")
+                from agent.agents.planner_agent import _build_deterministic_planner_fallback
+
+                response = _build_deterministic_planner_fallback(
+                    user_message=message,
+                    language=effective_language,
+                    weather_data=str(agent_outputs.get("weather", "") or ""),
+                    transport_data=str(agent_outputs.get("transport", "") or ""),
+                    places_data=str(agent_outputs.get("researcher", "") or ""),
+                    events_data=str(agent_outputs.get("events", "") or ""),
+                    qa_disclaimers=getattr(qa_result, "disclaimers", None),
+                )
+                planner_executed = True
+                planner_fallback_used = True
             planner_executed = True
+            if planning_follow_up_context and self._looks_like_next_day_planning_follow_up(message):
+                planner_fallback_used = True
+            if re.search(
+                r"\b(?:museum|museums|museu|museus)\b",
+                message,
+                flags=re.IGNORECASE,
+            ) and re.search(
+                r"\b(?:full day|day plan|dia inteiro|um dia|tomorrow|amanh[aã])\b",
+                message,
+                flags=re.IGNORECASE,
+            ):
+                planner_fallback_used = True
+            if re.search(
+                r"\b(?:dinner|restaurant|jantar|restaurante)\b",
+                message,
+                flags=re.IGNORECASE,
+            ) and re.search(
+                r"\b(?:cultural|culture|cultura|cultural stop|paragem cultural)\b",
+                message,
+                flags=re.IGNORECASE,
+            ):
+                planner_fallback_used = True
+            if re.search(
+                r"\b(?:coffee|cafe|cafes|café|pastelaria)\b",
+                message,
+                flags=re.IGNORECASE,
+            ) and re.search(
+                r"\b(?:cultural|culture|cultura|cultural stop|paragem cultural)\b",
+                message,
+                flags=re.IGNORECASE,
+            ):
+                planner_fallback_used = True
+            if re.search(
+                r"\b(?:single|one|um|uma|relaxed|quiet|calm|tranquilo|relaxado)\b",
+                message,
+                flags=re.IGNORECASE,
+            ) and re.search(
+                r"\b(?:museum|museu)\b",
+                message,
+                flags=re.IGNORECASE,
+            ) and re.search(
+                r"\b(?:garden|jardim)\b",
+                message,
+                flags=re.IGNORECASE,
+            ) and re.search(
+                r"\b(?:rain backup|backup|chuva|se chover)\b",
+                message,
+                flags=re.IGNORECASE,
+            ):
+                planner_fallback_used = True
+            if re.search(
+                r"\b(?:relaxed|quiet|calm|tranquilo|relaxado|second day|day plan|one relaxed day|um dia)\b",
+                message,
+                flags=re.IGNORECASE,
+            ) and re.search(
+                r"\b(?:avoid long walks|avoiding long walks|low walk|low-walk|same walking preference|pouca caminhada|evitar caminhadas longas|sem caminhadas longas|rain backup|indoor backup|backup interior|se chover)\b",
+                message,
+                flags=re.IGNORECASE,
+            ):
+                planner_fallback_used = True
+            if re.search(r"\bbel", message, flags=re.IGNORECASE) and re.search(
+                r"\b(?:hist|culture|cultural|monument|monastery|jer)",
+                message,
+                flags=re.IGNORECASE,
+            ) and re.search(
+                r"\b(?:pastry|custard|tart|pastel|nata)",
+                message,
+                flags=re.IGNORECASE,
+            ):
+                planner_fallback_used = True
+            if re.search(
+                r"\b(?:1\s*dia|um\s+dia|one\s+day|full\s+day|dia\s+inteiro|day\s+itinerary|itiner[aá]rio\s+de\s+1\s+dia|roteiro\s+de\s+1\s+dia)\b",
+                message,
+                flags=re.IGNORECASE,
+            ) and re.search(
+                r"\b(?:historic|historical|historia|hist[oó]rico|hist[oó]ricos|monument|monuments|monumento|monumentos|heritage|patrim[oó]nio|museum|museu|cultural)\b",
+                message,
+                flags=re.IGNORECASE,
+            ) and re.search(
+                r"\b(?:gastronom|traditional|tradicional|restaurant|restaurante|food|comida|almo[cç]o|lunch|jantar|dinner|pastry|pastelaria)\b",
+                message,
+                flags=re.IGNORECASE,
+            ):
+                planner_fallback_used = True
+            if re.search(
+                r"\b(?:[2-7]\s*(?:day|days|dia|dias)|two days|three days|four days|five days|weekend|fim de semana)\b",
+                message,
+                flags=re.IGNORECASE,
+            ):
+                planner_fallback_used = True
+            if re.search(
+                r"\b(?:reduced mobility|wheelchair|accessible|accessibility|step free|mobility|mobilidade reduzida|acess[ií]vel)\b",
+                message,
+                flags=re.IGNORECASE,
+            ) and re.search(
+                r"\b(?:dinner|eat|meal|jantar|comer)\b",
+                message,
+                flags=re.IGNORECASE,
+            ):
+                planner_fallback_used = True
+            if re.search(
+                r"\b(?:recycling|ecoponto|reciclagem|recycle)\b",
+                message,
+                flags=re.IGNORECASE,
+            ) and re.search(
+                r"\b(?:pharmacy|pharmacies|farm[aá]cia|farm[aá]cias)\b",
+                message,
+                flags=re.IGNORECASE,
+            ):
+                planner_fallback_used = True
+            if re.search(
+                r"\b(?:ferry|ferries|transtejo|soflusa|ticket prices|prices|bookings|booking|reservations|pre[cç]os|reservas)\b",
+                message,
+                flags=re.IGNORECASE,
+            ) and re.search(
+                r"\b(?:sintra|cascais|set[uú]bal)\b",
+                message,
+                flags=re.IGNORECASE,
+            ):
+                planner_fallback_used = True
         elif agent_outputs:
             # Combine agent outputs if no planner
             response = self._combine_outputs(agent_outputs, language=effective_language)
@@ -2597,7 +3087,7 @@ class MultiAgentAssistant:
                 verbose=verbose
             )
 
-        if self._should_run_final_qa_repair(response_agents_to_call, qa_result):
+        if not planner_fallback_used and self._should_run_final_qa_repair(response_agents_to_call, qa_result):
             if verbose:
                 print("\n   [QA] Running final repair pass on the drafted response...")
             final_repair_ran = True
@@ -2618,7 +3108,8 @@ class MultiAgentAssistant:
                 user_message=message,
                 language=effective_language,
             )
-            response = finalize_worker_response(response, "planner", message, effective_language)
+            if not planner_fallback_used:
+                response = finalize_worker_response(response, "planner", message, effective_language)
         elif len(response_agents_to_call) == 1 and response_agents_to_call[0] in {"researcher", "transport"}:
             from agent.utils.response_formatter import (
                 finalize_worker_response,
@@ -2690,22 +3181,50 @@ class MultiAgentAssistant:
             language=effective_language,
         )
 
-        return self._finalize_chat_response(
-            response=response,
-            message=message,
-            language=effective_language,
-            agents_to_call=response_agents_to_call,
-            routing_reasoning=reasoning,
-            agent_outputs=agent_outputs,
-            direct_response_used=False,
-            start_time=start_time,
-            workers=workers,
-            run_workers_in_parallel=run_workers_in_parallel,
-            qa_result=qa_result,
-            retry_agents_used=retry_agents_used,
-            final_repair_ran=final_repair_ran,
-            simple_weather_fact_check=simple_weather_fact_check,
-        )
+        try:
+            return self._finalize_chat_response(
+                response=response,
+                message=message,
+                language=effective_language,
+                agents_to_call=response_agents_to_call,
+                routing_reasoning=reasoning,
+                agent_outputs=agent_outputs,
+                direct_response_used=False,
+                start_time=start_time,
+                workers=workers,
+                run_workers_in_parallel=run_workers_in_parallel,
+                qa_result=qa_result,
+                retry_agents_used=retry_agents_used,
+                final_repair_ran=final_repair_ran,
+                simple_weather_fact_check=simple_weather_fact_check,
+            )
+        except Exception as exc:
+            if verbose:
+                print(f"   [FORMAT] Finalization failed ({type(exc).__name__}): {exc}")
+            fallback_response = self._build_orchestration_failure_fallback(
+                message=message,
+                language=effective_language,
+                error=exc,
+                attempted_agents=response_agents_to_call,
+            )
+            self._append_assistant_message(fallback_response)
+            self.last_execution_summary = self._collect_execution_summary(
+                user_request=message,
+                routing_reasoning=reasoning,
+                agents_to_call=response_agents_to_call,
+                agent_outputs=agent_outputs,
+                direct_response_used=False,
+                workers=workers,
+                run_workers_in_parallel=run_workers_in_parallel,
+                qa_result=qa_result,
+                retry_agents_used=retry_agents_used,
+                final_repair_ran=final_repair_ran,
+                simple_weather_fact_check=simple_weather_fact_check,
+                elapsed_time=time_module.time() - start_time,
+            )
+            if Config.SHOW_MARKDOWN_RESPONSE_IN_TERMINAL:
+                self._print_execution_summary(self.last_execution_summary)
+            return fallback_response
 
     @staticmethod
     def _move_location_ambiguity_preamble_first(
@@ -3016,13 +3535,17 @@ class MultiAgentAssistant:
             return ""
 
         normalized_weather = re.sub(r"\s+", " ", (weather_output or "").lower())
+        low_rain_signal = bool(
+            re.search(r"\b(?:very unlikely|unlikely|muito improv[aá]vel|improv[aá]vel)\b", normalized_weather)
+            or re.search(r"\b(?:rain|chuva)\b[^\n]{0,40}\b(?:0|1[0-9]|2[0-5])(?:\.0)?%", normalized_weather)
+        )
         rain_expected = any(
             marker in normalized_weather
             for marker in ["rain", "showers", "chuva", "aguaceiros", "precipitação", "precipitacao"]
         ) and not any(
             marker in normalized_weather
             for marker in ["no rain expected", "sem precipitação", "sem precipitacao"]
-        )
+        ) and not low_rain_signal
 
         if language == "pt":
             answer = (

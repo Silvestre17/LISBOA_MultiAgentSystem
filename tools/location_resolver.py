@@ -36,9 +36,9 @@ NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 NOMINATIM_USER_AGENT = "LisbonUrbanAssistant/1.0 (research@novaims.pt)"
 
 LISBON_CITY_BOUNDS = {
-    "lat_min": 38.70,
+    "lat_min": 38.68,
     "lat_max": 38.80,
-    "lon_min": -9.20,
+    "lon_min": -9.24,
     "lon_max": -9.10,
 }
 
@@ -151,6 +151,238 @@ _CURATED_DISPLAY_NAMES = {
     "gulbenkian": "Museu Calouste Gulbenkian",
     "maat": "MAAT",
     "ccb": "Centro Cultural de Belém",
+}
+
+_CURATED_LOCATION_POINTS: Dict[str, Dict[str, Any]] = {
+    "museu nacional do azulejo": {
+        "display_name": "Museu Nacional do Azulejo",
+        "lat": 38.7243,
+        "lon": -9.1138,
+        "class": "tourism",
+        "type": "museum",
+        "aliases": ["national tile museum", "national museum of azulejo", "museu do azulejo"],
+    },
+    "museu calouste gulbenkian": {
+        "display_name": "Museu Calouste Gulbenkian",
+        "lat": 38.7377,
+        "lon": -9.1546,
+        "class": "tourism",
+        "type": "museum",
+        "aliases": ["gulbenkian museum", "gulbenkian", "fundacao calouste gulbenkian", "fundação calouste gulbenkian"],
+    },
+    "maat": {
+        "display_name": "MAAT",
+        "lat": 38.6958,
+        "lon": -9.1941,
+        "class": "tourism",
+        "type": "museum",
+        "aliases": [
+            "maat museum of art architecture and technology",
+            "maat museu de arte arquitetura e tecnologia",
+            "museu de arte arquitetura e tecnologia",
+            "museu de arte arquitectura e tecnologia",
+        ],
+    },
+    "museu do fado": {
+        "display_name": "Museu do Fado",
+        "lat": 38.7118,
+        "lon": -9.1293,
+        "class": "tourism",
+        "type": "museum",
+        "aliases": ["fado museum"],
+    },
+    "museu nacional de arte antiga": {
+        "display_name": "Museu Nacional de Arte Antiga",
+        "lat": 38.7045,
+        "lon": -9.1613,
+        "class": "tourism",
+        "type": "museum",
+        "aliases": ["national museum of ancient art", "mnAA", "mnaa"],
+    },
+    "museu arqueologico do carmo": {
+        "display_name": "Carmo Archaeological Museum",
+        "lat": 38.7121,
+        "lon": -9.1409,
+        "class": "tourism",
+        "type": "museum",
+        "aliases": ["carmo archaeological museum", "museu arqueológico do carmo", "convento do carmo"],
+    },
+    "carris museum": {
+        "display_name": "Carris Museum",
+        "lat": 38.7037,
+        "lon": -9.1788,
+        "class": "tourism",
+        "type": "museum",
+        "aliases": ["museu da carris", "carris museum public transport museum"],
+    },
+    "lisbon story centre": {
+        "display_name": "Lisbon Story Centre",
+        "lat": 38.7075,
+        "lon": -9.1367,
+        "class": "tourism",
+        "type": "museum",
+        "aliases": ["lisboa story centre"],
+    },
+    "national museum of sport": {
+        "display_name": "National Museum of Sport",
+        "lat": 38.7154,
+        "lon": -9.1419,
+        "class": "tourism",
+        "type": "museum",
+        "aliases": ["museu nacional do desporto"],
+    },
+    "museu de sao roque": {
+        "display_name": "Museu de São Roque",
+        "lat": 38.7138,
+        "lon": -9.1433,
+        "class": "tourism",
+        "type": "museum",
+        "aliases": ["museu de são roque", "sao roque museum", "são roque museum"],
+    },
+    "museu colecao berardo": {
+        "display_name": "Museu Coleção Berardo / CCB",
+        "lat": 38.6955,
+        "lon": -9.2094,
+        "class": "tourism",
+        "type": "museum",
+        "aliases": [
+            "museu coleção berardo",
+            "berardo collection museum",
+            "museu berardo",
+            "ccb museum",
+        ],
+    },
+    "museu nacional dos coches": {
+        "display_name": "Museu Nacional dos Coches",
+        "lat": 38.6978,
+        "lon": -9.1984,
+        "class": "tourism",
+        "type": "museum",
+        "aliases": ["national coach museum", "museu dos coches"],
+    },
+    "museu do oriente": {
+        "display_name": "Museu do Oriente",
+        "lat": 38.7031,
+        "lon": -9.1733,
+        "class": "tourism",
+        "type": "museum",
+        "aliases": ["orient museum", "oriente museum"],
+    },
+    "museu nacional de historia natural e da ciencia": {
+        "display_name": "Museu Nacional de História Natural e da Ciência",
+        "lat": 38.7189,
+        "lon": -9.1509,
+        "class": "tourism",
+        "type": "museum",
+        "aliases": [
+            "museu nacional de história natural e da ciência",
+            "national museum of natural history and science",
+        ],
+    },
+    "museu das ilusoes lisboa": {
+        "display_name": "Museu das Ilusões Lisboa",
+        "lat": 38.7100,
+        "lon": -9.1417,
+        "class": "tourism",
+        "type": "museum",
+        "aliases": [
+            "museu das ilusões lisboa",
+            "museu das ilusoes",
+            "museu das ilusões",
+            "museum of illusions lisbon",
+            "museum of illusions",
+            "moi lisboa",
+        ],
+    },
+    "jardim zoologico de lisboa": {
+        "display_name": "Jardim Zoológico de Lisboa",
+        "lat": 38.7422,
+        "lon": -9.1687,
+        "class": "tourism",
+        "type": "zoo",
+        "aliases": ["jardim zoológico de lisboa", "lisbon zoo", "zoo de lisboa"],
+    },
+    "cacilhas": {
+        "display_name": "Cacilhas",
+        "lat": 38.6876,
+        "lon": -9.1483,
+        "scope": "aml",
+        "class": "place",
+        "type": "transport_hub",
+        "aliases": ["cacilhas terminal", "terminal de cacilhas"],
+    },
+    "cristo rei": {
+        "display_name": "Cristo Rei",
+        "lat": 38.6780,
+        "lon": -9.1714,
+        "scope": "aml",
+        "class": "tourism",
+        "type": "monument",
+        "aliases": ["santuario cristo rei", "santuário cristo rei", "almada cristo rei"],
+    },
+    "almada": {
+        "display_name": "Almada",
+        "lat": 38.6765,
+        "lon": -9.1651,
+        "scope": "aml",
+        "class": "place",
+        "type": "municipality",
+        "aliases": ["almada centro", "centro de almada"],
+    },
+    "barreiro": {
+        "display_name": "Barreiro",
+        "lat": 38.6631,
+        "lon": -9.0724,
+        "scope": "aml",
+        "class": "place",
+        "type": "municipality",
+        "aliases": ["barreiro centro", "centro do barreiro"],
+    },
+    "setubal": {
+        "display_name": "Setúbal",
+        "lat": 38.5244,
+        "lon": -8.8882,
+        "scope": "aml",
+        "class": "place",
+        "type": "municipality",
+        "aliases": ["setúbal", "setubal centro", "centro de setubal", "centro de setúbal"],
+    },
+    "costa da caparica": {
+        "display_name": "Costa da Caparica",
+        "lat": 38.6446,
+        "lon": -9.2356,
+        "scope": "aml",
+        "class": "place",
+        "type": "town",
+        "aliases": ["caparica"],
+    },
+    "cascais": {
+        "display_name": "Cascais",
+        "lat": 38.6979,
+        "lon": -9.4215,
+        "scope": "aml",
+        "class": "place",
+        "type": "municipality",
+        "aliases": ["cascais centro", "centro de cascais"],
+    },
+    "sintra": {
+        "display_name": "Sintra",
+        "lat": 38.7989,
+        "lon": -9.3869,
+        "scope": "aml",
+        "class": "place",
+        "type": "municipality",
+        "aliases": ["sintra centro", "centro de sintra"],
+    },
+    "oeiras": {
+        "display_name": "Oeiras",
+        "lat": 38.6971,
+        "lon": -9.3017,
+        "scope": "aml",
+        "class": "place",
+        "type": "municipality",
+        "aliases": ["oeiras centro", "centro de oeiras"],
+    },
 }
 
 
@@ -328,6 +560,51 @@ def _query_mentions_aml_outside_lisbon(query_norm: str) -> bool:
     return any(token in query_norm for token in AML_OUTSIDE_LISBON_TOKENS)
 
 
+def _looks_like_non_station_poi_query(query_norm: str) -> bool:
+    """Return whether a query names a POI that should not fuzzy-match a station.
+
+    Fuzzy station matching is useful for typos such as "Marques Pombal", but it
+    is unsafe when the text clearly describes a venue, for example
+    "Museu do Oriente". In that case, matching the embedded token "Oriente" as
+    a station corrupts downstream distance and route calculations.
+    """
+    if not query_norm:
+        return False
+
+    station_context = re.search(
+        r"\b(?:station|estacao|estacao de|metro|train|comboio|cp|terminal|stop|paragem)\b",
+        query_norm,
+    )
+    if station_context:
+        return False
+
+    poi_patterns = [
+        r"\bmuseu\b",
+        r"\bmuseum\b",
+        r"\bmonumento\b",
+        r"\bmonument\b",
+        r"\bmosteiro\b",
+        r"\bmonastery\b",
+        r"\bigreja\b",
+        r"\bchurch\b",
+        r"\bcastelo\b",
+        r"\bcastle\b",
+        r"\bpalacio\b",
+        r"\bpalace\b",
+        r"\bcentro cultural\b",
+        r"\bcultural centre\b",
+        r"\bcultural center\b",
+        r"\buniversidade\b",
+        r"\buniversity\b",
+        r"\bfaculdade\b",
+        r"\bcampus\b",
+        r"\bhospital\b",
+        r"\bclinica\b",
+        r"\bclinic\b",
+    ]
+    return any(re.search(pattern, query_norm) for pattern in poi_patterns)
+
+
 def _build_query_variants(location_name: str) -> List[str]:
     """Builds a small ordered list of Nominatim query variants.
 
@@ -348,6 +625,58 @@ def _build_query_variants(location_name: str) -> List[str]:
         f"{clean_name}, Portugal",
     ]
     return [variant for variant in dict.fromkeys(v.strip() for v in variants if v.strip())]
+
+
+def _resolve_curated_location_point(location_name: str) -> Optional[Dict[str, Any]]:
+    """Resolve stable Lisbon landmarks from the local gazetteer before web geocoding."""
+    query_clean = str(location_name or "").strip()
+    query_norm = normalize_location_text(query_clean)
+    if not query_norm:
+        return None
+
+    best_key: Optional[str] = None
+    best_score = 0.0
+    for canonical_key, payload in _CURATED_LOCATION_POINTS.items():
+        aliases = [canonical_key, *payload.get("aliases", [])]
+        for alias in aliases:
+            alias_norm = normalize_location_text(str(alias))
+            if not alias_norm:
+                continue
+            if query_norm == alias_norm:
+                score = 1.0
+            elif alias_norm in query_norm:
+                score = 0.90
+            else:
+                score = SequenceMatcher(None, query_norm, alias_norm).ratio()
+            if score > best_score:
+                best_key = canonical_key
+                best_score = score
+
+    if not best_key or best_score < 0.88:
+        return None
+
+    payload = _CURATED_LOCATION_POINTS[best_key]
+    lat = _safe_float(payload.get("lat"))
+    lon = _safe_float(payload.get("lon"))
+    if lat is None or lon is None:
+        return None
+
+    scope = str(payload.get("scope") or classify_coordinate_scope(lat, lon))
+
+    return {
+        "display_name": str(payload.get("display_name") or query_clean),
+        "full_display_name": str(payload.get("display_name") or query_clean),
+        "lat": lat,
+        "lon": lon,
+        "type": str(payload.get("type") or "unknown"),
+        "class": str(payload.get("class") or "unknown"),
+        "importance": 1.0,
+        "address": {},
+        "query_used": best_key,
+        "scope": scope,
+        "match_source": "curated_gazetteer",
+        "confidence": round(min(0.99, best_score), 2),
+    }
 
 
 @lru_cache(maxsize=256)
@@ -465,6 +794,12 @@ def geocode_location_name(
     effective_prefer_city = prefer_city and not _query_mentions_aml_outside_lisbon(
         query_norm
     )
+
+    curated = _resolve_curated_location_point(query_clean)
+    if curated:
+        if not allow_aml and curated["scope"] != "lisbon_city":
+            return None
+        return curated
 
     candidates: List[Dict[str, Any]] = []
     seen = set()
@@ -631,11 +966,16 @@ def _resolve_known_metro_station(location_name: str) -> Optional[Dict[str, Any]]
         Resolved station payload or None.
     """
     alias_map, station_map = _get_metro_station_lookup()
-    canonical_name = _resolve_named_candidate(
-        location_name,
-        alias_map,
-        minimum_score=0.84,
-    )
+    normalized_query = normalize_location_text(location_name)
+    canonical_name = alias_map.get(normalized_query)
+    if not canonical_name and _looks_like_non_station_poi_query(normalized_query):
+        return None
+    if not canonical_name:
+        canonical_name = _resolve_named_candidate(
+            location_name,
+            alias_map,
+            minimum_score=0.84,
+        )
     if not canonical_name:
         return None
 
@@ -718,24 +1058,33 @@ def _resolve_known_cp_station(location_name: str) -> Optional[Dict[str, Any]]:
         Resolved station payload or None.
     """
     alias_map, station_map = _get_cp_station_lookup()
-    canonical_name = _resolve_named_candidate(
-        location_name,
-        alias_map,
-        minimum_score=0.82,
-    )
+    normalized_query = normalize_location_text(location_name)
+    canonical_name = alias_map.get(normalized_query)
+    if not canonical_name and _looks_like_non_station_poi_query(normalized_query):
+        return None
+    if not canonical_name:
+        canonical_name = _resolve_named_candidate(
+            location_name,
+            alias_map,
+            minimum_score=0.82,
+        )
     if not canonical_name:
         return None
 
     station = station_map.get(normalize_location_text(canonical_name), {})
     railways = list(station.get("railways", []))
+    station_lat = station.get("lat")
+    station_lon = station.get("lon")
+    if station_lat is None or station_lon is None:
+        return None
 
     return {
         "query": str(location_name or "").strip(),
         "normalized_query": normalize_location_text(location_name),
         "display_name": canonical_name,
         "full_display_name": canonical_name,
-        "lat": station.get("lat"),
-        "lon": station.get("lon"),
+        "lat": station_lat,
+        "lon": station_lon,
         "scope": "aml",
         "match_source": "cp_station",
         "confidence": 0.96,

@@ -77,6 +77,18 @@ _KNOWN_REFERENCE_COORDINATES: Dict[str, Tuple[float, float]] = {
     "oriente": (38.7688, -9.0988),
     "rato": (38.7168, -9.1527),
     "saldanha": (38.7351, -9.1457),
+    "areeiro": (38.7423, -9.1339),
+    "praca do areeiro": (38.7423, -9.1339),
+    "praça do areeiro": (38.7423, -9.1339),
+    "roma areeiro": (38.7457, -9.1383),
+    "roma-areeiro": (38.7457, -9.1383),
+    "alvalade": (38.7533, -9.1435),
+    "avenida de roma": (38.7474, -9.1396),
+    "roma": (38.7474, -9.1396),
+    "benfica": (38.7506, -9.2029),
+    "santos": (38.7064, -9.1567),
+    "alcantara": (38.7067, -9.1741),
+    "alcântara": (38.7067, -9.1741),
     "baixa chiado": (38.7106, -9.1401),
     "baixa-chiado": (38.7106, -9.1401),
 }
@@ -106,10 +118,10 @@ def _resolve_reference_coordinates(location_name: str) -> Optional[Tuple[float, 
         return _KNOWN_REFERENCE_COORDINATES[key]
 
     try:
-        from tools.location_resolver import geocode_location_name
+        from tools.location_resolver import resolve_location_query
 
-        resolved = geocode_location_name(location_name, prefer_city=True, allow_aml=True)
-        if resolved and resolved.get("lat") is not None and resolved.get("lon") is not None:
+        resolved = resolve_location_query(location_name, prefer_city=True, allow_aml=True)
+        if resolved.get("success") and resolved.get("lat") is not None and resolved.get("lon") is not None:
             return float(resolved["lat"]), float(resolved["lon"])
     except Exception as exc:
         logger.info("Shared geocoder could not resolve '%s': %s", location_name, exc)
@@ -389,10 +401,16 @@ CATEGORY_SYNONYMS = {
     'saúde': ['hospital', 'farmácia', 'centro de saúde', 'clínica', 'urgência', 'prestação de cuidados'],
     'health': ['hospital', 'farmácia', 'centro de saúde', 'clínica'],
     'hospital': ['hospitais', 'público', 'privado', 'militar'],
+    'farmacia': ['farmácia', 'farmácias', 'farmacias', 'pharmacy', 'pharmacies', 'parafarmácia'],
+    'farmacias': ['farmácia', 'farmácias', 'farmacias', 'pharmacy', 'pharmacies', 'parafarmácia'],
+    'pharmacy': ['farmácia', 'farmácias', 'farmacias', 'pharmacy', 'pharmacies', 'parafarmácia'],
+    'pharmacies': ['farmácia', 'farmácias', 'farmacias', 'pharmacy', 'pharmacies', 'parafarmácia'],
 
     # Environment
     'ambiente': ['jardim', 'parque', 'espaço verde', 'árvore', 'floresta', 'reciclagem', 'ecoponto'],
     'environment': ['jardim', 'parque', 'espaço verde', 'árvore'],
+    'ecopontos': ['ecoponto', 'reciclagem', 'residuos', 'residuo', 'waste', 'recycling'],
+    'recycling': ['ecoponto', 'reciclagem', 'residuos', 'residuo'],
 
     # Transport
     'transportes': ['metro', 'autocarro', 'comboio', 'estacionamento', 'bicicleta', 'mobilidade', 'gira'],
@@ -688,6 +706,11 @@ def find_nearby_services(
             "estacionamento",
             "municipal",
             "municipais",
+            "ecoponto",
+            "ecopontos",
+            "reciclagem",
+            "residuo",
+            "residuos",
         )
         normalized_language = "pt" if any(marker in probe_norm for marker in pt_service_markers) else "en"
     is_pt = normalized_language == "pt"
@@ -766,6 +789,7 @@ def find_nearby_services(
             (("escola", "school", "educa", "universidade", "faculdade"), "🎓", "Serviços de educação", "Education services"),
             (("biblioteca", "library", "leitura"), "📚", "Bibliotecas", "Libraries"),
             (("museu", "museum", "cultura", "cultural"), "🏛️", "Equipamentos culturais", "Cultural venues"),
+            (("ecoponto", "reciclag", "residuo", "residuos", "waste", "recycling"), "♻️", "Ecopontos e reciclagem", "Recycling points"),
             (("jardim", "parque", "garden", "green space", "verde"), "🌳", "Jardins e parques", "Gardens and parks"),
             (("policia", "police", "psp", "seguranca"), "👮", "Serviços de segurança", "Public safety services"),
             (("bombeir", "fire"), "🚒", "Bombeiros", "Fire services"),
@@ -812,6 +836,18 @@ def find_nearby_services(
         parking_request = bool(
             re.search(r"\b(parking|estacion|car\s*park|parque\s+de\s+estacionamento)\b", requested_norm)
         )
+        car_parking_request = bool(
+            parking_request
+            and re.search(r"\b(car|cars|auto|automovel|automoveis|carro|viatura|vehicle|vehicles)\b", requested_norm)
+        )
+
+        def _is_non_car_parking_dataset(row: pd.Series) -> bool:
+            basis = unicodedata.normalize(
+                "NFKD",
+                f"{row.get('title', '')} {row.get('description', '')}",
+            )
+            basis = basis.encode("ascii", "ignore").decode("ascii").lower()
+            return bool(re.search(r"\b(tuktuk|tuk\s*tuk|bicic\w*|velociped\w*|bike|bicycle|motocicl\w*|scooter\w*)\b", basis))
 
         def _score(row: pd.Series) -> int:
             basis = unicodedata.normalize(
@@ -832,11 +868,13 @@ def find_nearby_services(
                     score += 100
                 if re.search(r"\b(lugares?\s+de\s+estacionamento|zonas?\s+reguladas?\s+de\s+estacionamento)\b", basis):
                     score += 60
-                if re.search(r"\b(tuktuk|tuk\s*tuk|bicic|bike|bicycle|motocicl|scooter)\b", basis):
-                    score -= 80
+                if _is_non_car_parking_dataset(row):
+                    score -= 500 if car_parking_request else 80
             return score
 
         ranked = candidate_matches.copy()
+        if car_parking_request:
+            ranked = ranked[~ranked.apply(_is_non_car_parking_dataset, axis=1)]
         ranked["_service_rank"] = ranked.apply(_score, axis=1)
         return ranked.sort_values("_service_rank", ascending=False, kind="mergesort").drop(columns=["_service_rank"])
 
@@ -902,8 +940,10 @@ def find_nearby_services(
         # Try alternative search terms
         alternatives = {
             'pharmacy': 'farmácia', 'hospital': 'hospital', 'school': 'escola',
+            'pharmacies': 'farmácia', 'farmacias': 'farmácia', 'farmacia': 'farmácia',
             'park': 'jardim', 'garden': 'jardim', 'wifi': 'wifi', 'metro': 'metro',
-            'fountain': 'fontanário', 'parking': 'estacionamento'
+            'fountain': 'fontanário', 'parking': 'estacionamento', 'car parking': 'estacionamento',
+            'ecopontos': 'ecoponto', 'recycling': 'ecoponto'
         }
         alt_term = alternatives.get(service_type.lower(), service_type)
         matches = search_datasets(alt_term)
@@ -914,6 +954,10 @@ def find_nearby_services(
         return f"❌ No datasets found for: '{service_type}'\n💡 Try: pharmacies, hospitals, schools, parks, metro, fountains"
 
     matches = _rank_service_datasets(matches.drop_duplicates(subset="stable_url"), service_type)
+    if matches.empty:
+        if is_pt:
+            return f"❌ Não encontrei um dataset compatível para: '{service_type}'"
+        return f"❌ No compatible dataset found for: '{service_type}'"
 
     selected_title = ""
     selected_feature_count = 0
@@ -1018,6 +1062,27 @@ def find_nearby_services(
             return f"✓ Dataset '{selected_title}' carregado ({selected_feature_count} registos), mas não foi possível extrair dados de localização."
         return f"✓ Dataset '{selected_title}' loaded ({selected_feature_count} features) but couldn't extract location data."
 
+    for item in results:
+        raw_name = str(item.get("name") or "").strip()
+        if not raw_name or raw_name.lower() in {"n/a", "na", "none", "null", "unknown"}:
+            item["name"] = "Ponto de reciclagem" if is_pt else "Recycling point"
+
+    name_counts: Dict[str, int] = {}
+    for item in results:
+        base_name = str(item.get("name") or "").strip()
+        name_counts[base_name] = name_counts.get(base_name, 0) + 1
+    duplicate_name_indexes: Dict[str, int] = {}
+
+    def _display_result_name(base_name: object) -> str:
+        """Return a stable display name when a dataset uses generic repeated names."""
+        name = str(base_name or "").strip()
+        if not name:
+            name = "Ponto de reciclagem" if is_pt else "Recycling point"
+        if name_counts.get(name, 0) <= 1:
+            return name
+        duplicate_name_indexes[name] = duplicate_name_indexes.get(name, 0) + 1
+        return f"{name} {duplicate_name_indexes[name]}"
+
     item_icon, heading = _service_icon_and_heading(selected_title, service_type)
     count_label = "resultado" if len(results) == 1 else "resultados"
     response = f"### {item_icon} **{heading}**\n\n"
@@ -1032,19 +1097,22 @@ def find_nearby_services(
         nearest = results[0]
         nearest_distance = nearest.get("distance")
         if nearest_distance is not None:
+            nearest_name = _display_result_name(nearest.get("name"))
+            duplicate_name_indexes.clear()
             if is_pt:
                 response += (
-                    f"- ✅ **Mais perto:** {nearest['name']} "
+                    f"- ✅ **Mais perto:** {nearest_name} "
                     f"({nearest_distance:.2f} km de {near_location_name})\n\n"
                 )
             else:
                 response += (
-                    f"- ✅ **Nearest:** {nearest['name']} "
+                    f"- ✅ **Nearest:** {nearest_name} "
                     f"({nearest_distance:.2f} km from {near_location_name})\n\n"
                 )
 
     for r in results:
-        response += f"- {item_icon} **{r['name']}**\n"
+        display_name = _display_result_name(r.get("name"))
+        response += f"- {item_icon} **{display_name}**\n"
         cleaned_address = _clean_display_address(r.get('address'))
         if cleaned_address:
             map_url = f"https://www.google.com/maps/search/?api=1&query={quote_plus(cleaned_address)}"
