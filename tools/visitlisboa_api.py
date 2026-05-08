@@ -35,6 +35,7 @@ import warnings
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote_plus
 
 # Suppress chromadb telemetry warnings
 os.environ["OTEL_SDK_DISABLED"] = "true"
@@ -58,6 +59,7 @@ logger = logging.getLogger(__name__)
 COLLECTION_PDF = "lisbon_pdf"
 COLLECTION_PLACES = "lisbon_places"
 COLLECTION_EVENTS = "lisbon_events"
+MAX_USER_FACING_RESULTS = 5
 
 
 # ==========================================================================
@@ -716,19 +718,24 @@ def _localize_visitlisboa_description(
 def _localize_place_value_text(value: Optional[str], language: str = "en") -> str:
     """Localizes common VisitLisboa place field values for PT-PT output."""
     raw = re.sub(r"\s+", " ", (value or "").strip())
-    if not raw or language != "pt":
-        return raw
+    if not _clean_user_facing_value(raw):
+        return ""
+    if language != "pt":
+        cleaned = re.sub(r"^Price\s*:\s*", "", raw, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bGratis\b", "Free", cleaned, flags=re.IGNORECASE)
+        return _clean_user_facing_value(cleaned)
 
     localized = raw
     localized = re.sub(r"^Price\s*:", "Preço:", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bGratis\b", "Gratuito", localized, flags=re.IGNORECASE)
     localized = re.sub(r"\bFree\s+with\s+Lisboa\s+Card\b", "Gratuito com Lisboa Card", localized, flags=re.IGNORECASE)
     localized = re.sub(r"\bwith\s+Lisboa\s+Card\b", "com Lisboa Card", localized, flags=re.IGNORECASE)
     localized = re.sub(r"\bChildren\s+Free\s+until\s*\(age\)\s*:", "Crianças grátis até aos", localized, flags=re.IGNORECASE)
     localized = re.sub(r"\bAdult\s*:", "Adulto:", localized, flags=re.IGNORECASE)
     localized = re.sub(r"\bSenior\s*:", "Sénior:", localized, flags=re.IGNORECASE)
     localized = re.sub(r"\bFree\b", "Gratuito", localized, flags=re.IGNORECASE)
-    localized = re.sub(r"\+\s*info\b", "consultar website oficial", localized, flags=re.IGNORECASE)
-    return localized
+    localized = re.sub(r"\+\s*info\b", "", localized, flags=re.IGNORECASE).strip(" ;,.")
+    return _clean_user_facing_value(localized)
 
 
 def _compact_place_ticket_price_text(value: Optional[str], language: str = "en", max_chars: int = 115) -> str:
@@ -738,6 +745,9 @@ def _compact_place_ticket_price_text(value: Optional[str], language: str = "en",
         return ""
 
     cleaned = re.sub(r"^(?:link|links)\s+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^Price\s*:\s*", "", cleaned, flags=re.IGNORECASE)
+    if language != "pt":
+        cleaned = re.sub(r"\bGratis\b", "Free", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(
         r"\bChildren\s+Free\s+until\s*\(age\)\s*:\s*(\d+)",
         r"Children free until age \1",
@@ -777,7 +787,12 @@ def _is_generic_lisbon_location(value: Optional[str]) -> bool:
     return normalized in {"lisboa", "lisbon", "lisboa portugal", "lisbon portugal"}
 
 
-def _format_visitlisboa_location_line(location: Optional[str], title: str, language: str = "en") -> str:
+def _format_visitlisboa_location_line(
+    location: Optional[str],
+    title: str,
+    language: str = "en",
+    label_override: Optional[str] = None,
+) -> str:
     """Format VisitLisboa location output only when it contains a specific address."""
     loc = re.sub(r"\s+", " ", (location or "").strip())
     known_addresses = {
@@ -791,22 +806,301 @@ def _format_visitlisboa_location_line(location: Optional[str], title: str, langu
         "words factory": "Largo Mário Magalhães Infante, Cais de Vila Franca de Xira, 2600-187 Vila Franca de Xira",
     }
     normalized_title = _normalize_lookup_text(title)
+    label = label_override or ("Morada" if language == "pt" else "Address")
     if _is_generic_lisbon_location(loc) and normalized_title in known_addresses:
-        from urllib.parse import quote_plus
-
-        label = "Morada" if language == "pt" else "Address"
         address = known_addresses[normalized_title]
         query = quote_plus(address)
-        return f"   📍 **{label}:** [{address}](https://www.google.com/maps/search/?api=1&query={query})"
+        return f"    - 📍 **{label}:** [{address}](https://www.google.com/maps/search/?api=1&query={query})"
     if _is_generic_lisbon_location(loc):
         return ""
     if loc:
-        from urllib.parse import quote_plus
-
-        label = "Morada" if language == "pt" else "Address"
         query = quote_plus(loc)
-        return f"   📍 **{label}:** [{loc}](https://www.google.com/maps/search/?api=1&query={query})"
+        return f"    - 📍 **{label}:** [{loc}](https://www.google.com/maps/search/?api=1&query={query})"
     return ""
+
+
+def _format_coordinates_location_line(
+    lat: Any,
+    lon: Any,
+    label: str,
+    display_text: str = "Map",
+) -> str:
+    """Format verified coordinates as a map link without exposing raw GPS tuples."""
+    try:
+        lat_value = float(lat)
+        lon_value = float(lon)
+    except (TypeError, ValueError):
+        return ""
+    return (
+        f"    - 📍 **{label}:** "
+        f"[{display_text}](https://www.google.com/maps/search/?api=1&query={lat_value:.6f},{lon_value:.6f})"
+    )
+
+
+def _clean_user_facing_value(value: Any) -> str:
+    """Return a display-safe value, omitting known placeholder strings.
+
+    Args:
+        value: Raw scraped value.
+
+    Returns:
+        Cleaned text, or an empty string for placeholders.
+    """
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    normalized = _normalize_lookup_text(text)
+    if normalized in {
+        "",
+        "n a",
+        "na",
+        "none",
+        "null",
+        "not available",
+        "nao disponivel",
+        "não disponível",
+        "indisponivel",
+        "indisponível",
+        "available soon",
+        "check official website",
+        "consultar website oficial",
+        "info",
+        "mais info",
+        "more info",
+        "buy",
+        "tickets",
+    }:
+        return ""
+    if text.strip().lower() in {"+ info", "+info"}:
+        return ""
+    return text
+
+
+def _join_user_facing_parts(parts: List[Any]) -> str:
+    """Join optional scraped fields without letting ``None`` break search paths."""
+    return " ".join(
+        clean_part
+        for clean_part in (_clean_user_facing_value(part) for part in parts)
+        if clean_part
+    )
+
+
+def _is_http_url(value: Any) -> bool:
+    """Return whether a value is a safe HTTP(S) URL for Markdown links."""
+    text = str(value or "").strip()
+    return text.startswith(("https://", "http://"))
+
+
+def _format_markdown_link(label: str, url: Any) -> str:
+    """Build a Markdown link only when the URL is usable."""
+    clean_url = str(url or "").strip()
+    if not _is_http_url(clean_url):
+        return ""
+    return f"[{label}]({clean_url})"
+
+
+def _localized_visitlisboa_url(url: Any, language: str = "en") -> str:
+    """Return the VisitLisboa URL variant that best matches the output language."""
+    clean_url = str(url or "").strip()
+    if language == "pt" and "visitlisboa.com/en/" in clean_url:
+        return clean_url.replace("visitlisboa.com/en/", "visitlisboa.com/pt-pt/")
+    return clean_url
+
+
+def _format_phone_link(phone: Any) -> str:
+    """Format a phone number as a readable tel link when possible."""
+    raw = str(phone or "").strip()
+    if not raw:
+        return ""
+
+    digits = re.sub(r"\D+", "", raw)
+    if not digits:
+        return raw
+
+    if digits.startswith("351") and len(digits) == 12:
+        local = digits[3:]
+        display = f"+351 {local[:3]} {local[3:6]} {local[6:]}"
+        href = f"tel:+{digits}"
+    elif len(digits) == 9:
+        display = f"+351 {digits[:3]} {digits[3:6]} {digits[6:]}"
+        href = f"tel:+351{digits}"
+    else:
+        display = raw
+        href = f"tel:+{digits}" if raw.startswith("+") else f"tel:{digits}"
+
+    return f"[{display}]({href})"
+
+
+def _iter_named_http_links(value: Any) -> List[Tuple[str, str]]:
+    """Extract unique named HTTP links from VisitLisboa link structures."""
+    pairs: List[Tuple[str, str]] = []
+    seen: set[str] = set()
+
+    if isinstance(value, dict):
+        iterable = value.items()
+    elif isinstance(value, list):
+        iterable = []
+        for item in value:
+            if isinstance(item, dict):
+                iterable.append((item.get("title") or item.get("text") or "Link", item.get("url")))
+    else:
+        iterable = []
+
+    for raw_label, raw_url in iterable:
+        url = str(raw_url or "").strip()
+        if not _is_http_url(url) or url in seen:
+            continue
+        label = _clean_user_facing_value(raw_label) or "Official website"
+        pairs.append((label, url))
+        seen.add(url)
+
+    return pairs
+
+
+def _first_named_http_link(value: Any) -> Tuple[str, str] | None:
+    """Return the first usable named HTTP link from a scraped link structure."""
+    links = _iter_named_http_links(value)
+    return links[0] if links else None
+
+
+def _is_ticket_http_link(label: Any, url: Any) -> bool:
+    """Return whether a scraped link is specific enough to be shown as a ticket link."""
+    if not _is_http_url(url):
+        return False
+    normalized_label = _normalize_lookup_text(label)
+    normalized_url = _normalize_lookup_text(url)
+    if normalized_label in {"info", "mais info", "more info"}:
+        return False
+    ticket_markers = {
+        "ticket", "tickets", "bilhete", "bilhetes", "buy", "comprar",
+        "byblueticket", "bol", "ticketline",
+    }
+    return any(marker in normalized_label or marker in normalized_url for marker in ticket_markers)
+
+
+def _first_ticket_http_link(value: Any) -> Tuple[str, str] | None:
+    """Return the first usable ticket-specific HTTP link from scraped link structures."""
+    for label, url in _iter_named_http_links(value):
+        if _is_ticket_http_link(label, url):
+            return label, url
+    return None
+
+
+def _localize_visitlisboa_schedule_text(value: Any, language: str = "en") -> str:
+    """Localize common VisitLisboa schedule fragments for PT-PT output."""
+    text = _clean_user_facing_value(value)
+    if not text or language != "pt":
+        return text
+
+    replacements = [
+        (r"\bToday\b", "Hoje"),
+        (r"\bClosed\b", "Fechado"),
+        (r"\bSunday\b", "Domingo"),
+        (r"\bMonday\b", "Segunda-feira"),
+        (r"\bTuesday\b", "Terça-feira"),
+        (r"\bWednesday\b", "Quarta-feira"),
+        (r"\bThursday\b", "Quinta-feira"),
+        (r"\bFriday\b", "Sexta-feira"),
+        (r"\bSaturday\b", "Sábado"),
+        (r"\bTUE\b", "TER"),
+        (r"\bWED\b", "QUA"),
+        (r"\bTHU\b", "QUI"),
+        (r"\bFRI\b", "SEX"),
+        (r"\bSAT\b", "SÁB"),
+        (r"\bSUN\b", "DOM"),
+        (r"\bMON\b", "SEG"),
+        (r"\bto\b", "a"),
+    ]
+    localized = text
+    for pattern, replacement in replacements:
+        localized = re.sub(pattern, replacement, localized, flags=re.IGNORECASE)
+    return localized
+
+
+def _localize_place_feature_text(value: Any, language: str = "en") -> str:
+    """Localize common VisitLisboa feature values for PT-PT output."""
+    text = _clean_user_facing_value(value)
+    if not text:
+        return ""
+    if language != "pt":
+        return text
+
+    mapping = {
+        "Traditional Portuguese": "Cozinha tradicional portuguesa",
+        "Live entertainment / Music": "Entretenimento ao vivo / música",
+        "Wi-Fi": "Wi-Fi",
+    }
+    localized = mapping.get(text, text)
+    localized = re.sub(r"\bto\b", "a", localized, flags=re.IGNORECASE)
+    return localized
+
+
+def _format_compact_feature_summary(features: Any, language: str = "en", max_items: int = 4) -> str:
+    """Build a compact feature summary from VisitLisboa feature lists."""
+    if not isinstance(features, list):
+        return ""
+    cleaned_features = [
+        _localize_place_feature_text(feature, language=language)
+        for feature in features
+    ]
+    cleaned_features = [feature for feature in cleaned_features if feature]
+    return " · ".join(cleaned_features[:max_items])
+
+
+def _format_source_mix_line(vl_count: int, da_count: int, language: str = "en") -> str:
+    """Summarize the data sources represented in the displayed result cards."""
+    parts: List[str] = []
+    if vl_count:
+        parts.append(f"VisitLisboa: {vl_count}")
+    if da_count:
+        parts.append(f"Lisboa Aberta: {da_count}")
+    if not parts:
+        return ""
+    label = "Mistura de fontes" if language == "pt" else "Source mix"
+    return f"📊 **{label}:** {' · '.join(parts)}"
+
+
+def _format_remaining_results_line(remaining: int, language: str = "en") -> str:
+    """Format the compact continuation marker required by response standards."""
+    if remaining <= 0:
+        return ""
+    return f"... e {remaining} mais." if language == "pt" else f"... and {remaining} more."
+
+
+def _event_icon_for_category(category: str) -> str:
+    """Select a representative event icon from a VisitLisboa category."""
+    normalized = _normalize_lookup_text(category)
+    if "music" in normalized or "musica" in normalized:
+        return "🎵"
+    if "exhibition" in normalized or "exposicao" in normalized:
+        return "🎨"
+    if "theater" in normalized or "teatro" in normalized or "dance" in normalized or "danca" in normalized:
+        return "🎭"
+    if "cinema" in normalized:
+        return "🎬"
+    if "sport" in normalized or "desporto" in normalized:
+        return "🏃"
+    if "fair" in normalized or "feira" in normalized or "festival" in normalized:
+        return "🎪"
+    if "gastronomy" in normalized or "gastronomia" in normalized:
+        return "🍷"
+    return "📅"
+
+
+def _place_icon_for_category(category: str) -> str:
+    """Select a representative place icon from a VisitLisboa category."""
+    normalized = _normalize_lookup_text(category)
+    if "restaurant" in normalized or "restaurante" in normalized or "gastronomy" in normalized:
+        return "🍽️"
+    if "hotel" in normalized or "alojamento" in normalized:
+        return "🛏️"
+    if "park" in normalized or "garden" in normalized or "jardim" in normalized or "parque" in normalized:
+        return "🌳"
+    if "beach" in normalized or "praia" in normalized:
+        return "🌊"
+    if "shopping" in normalized or "compras" in normalized:
+        return "🛍️"
+    if "open data" in normalized:
+        return "📍"
+    return "🏛️"
 
 
 def _localize_event_date_filter(date_filter: Optional[str], language: str = "en") -> str:
@@ -922,22 +1216,14 @@ def _format_event_duration_label(duration: int, language: str = "en") -> str:
     if language == "pt":
         if duration == 1:
             return "🎯 Um só dia"
-        if duration <= 3:
-            return f"📆 {duration} dias"
-        if duration <= 7:
-            return "📅 Cerca de 1 semana"
         if duration <= 30:
-            return "📅 Cerca de 1 mês"
+            return f"📆 {duration} dias"
         return f"🏛️ Longa duração ({duration} dias)"
 
     if duration == 1:
         return "🎯 Single day"
-    if duration <= 3:
-        return f"📆 {duration} days"
-    if duration <= 7:
-        return "📅 About 1 week"
     if duration <= 30:
-        return "📅 About 1 month"
+        return f"📆 {duration} days"
     return f"🏛️ Long-running ({duration} days)"
 
 
@@ -975,11 +1261,15 @@ def _format_event_filter_summary(
             scope_parts.append(f"foco temático: {normalized_query}")
         else:
             scope_parts.append("pesquisa geral de eventos")
+        event_word = "evento" if total_results == 1 else "eventos"
+        match_verb = "corresponde" if total_results == 1 else "correspondem"
+        result_word = "resultado" if shown_results == 1 else "resultados"
+        shown_phrase = "mais relevante" if shown_results == 1 else "mais relevantes"
         return [
-            "- 🧾 **Resumo da pesquisa**",
-            f"    - 🧭 **Filtro aplicado:** {', '.join(scope_parts)}.",
-            f"    - 📊 **Resultado do filtro:** {total_results} evento(s) com data confirmada correspondem a este filtro.",
-            f"    - ✨ **Destaques mostrados:** {shown_results} resultado(s) mais relevantes (janela {shown_from}-{shown_to}).",
+            "### 🔵 **Eventos encontrados**",
+            f"🧭 **Filtro aplicado:** {', '.join(scope_parts)}.",
+            f"📊 **Resultado do filtro:** {total_results} {event_word} com data confirmada {match_verb} a este filtro.",
+            f"✨ **Destaques mostrados:** {shown_results} {result_word} {shown_phrase} (janela {shown_from}-{shown_to}).",
         ]
 
     scope_parts = [normalized_filter if not date_filter else f"{normalized_filter} ({date_window})"]
@@ -988,11 +1278,14 @@ def _format_event_filter_summary(
         scope_parts.append(f"theme focus: {normalized_query}")
     else:
         scope_parts.append("broad event discovery")
+    event_word = "event" if total_results == 1 else "events"
+    match_verb = "matches" if total_results == 1 else "match"
+    result_word = "result" if shown_results == 1 else "results"
     return [
-        "- 🧾 **Search summary**",
-        f"    - 🧭 **Filter used:** {', '.join(scope_parts)}.",
-        f"    - 📊 **Result count:** {total_results} confirmed-date event(s) match this filter.",
-        f"    - ✨ **Highlights shown:** {shown_results} most relevant result(s) (window {shown_from}-{shown_to}).",
+        "### 🔵 **Events Found**",
+        f"🧭 **Filter used:** {', '.join(scope_parts)}.",
+        f"📊 **Result count:** {total_results} confirmed-date {event_word} {match_verb} this filter.",
+        f"✨ **Highlights shown:** {shown_results} most relevant {result_word} (window {shown_from}-{shown_to}).",
     ]
 
 
@@ -1512,6 +1805,19 @@ _EVENT_SPECIFIC_LOOKUP_HINT_TOKENS = {
     "exposicao", "exposição", "music", "musica", "música", "theatre", "teatro",
     "summit", "conference", "congress", "forum", "expo",
 }
+_EVENT_CATEGORY_FILTER_TERMS = {
+    "ao vivo", "live music", "musica", "música", "music", "concert", "concerts",
+    "concerto", "concertos", "fado", "jazz", "festival", "festivals", "teatro",
+    "theatre", "theater", "dance", "dança", "danca", "cinema", "exhibition",
+    "exhibitions", "exposicao", "exposição", "exposicoes", "exposições",
+    "gastronomy", "gastronomia", "food", "free", "gratuito", "gratuitos",
+    "gratuita", "gratuitas", "familia", "família", "children", "kids",
+    "criancas", "crianças", "outdoor", "outdoors", "ar livre",
+}
+_EVENT_NAMED_ENTITY_HINTS = {
+    "book fair", "feira do livro", "web summit", "rock in rio", "doclisboa",
+    "lisboa games week", "open house", "lisbon week",
+}
 
 
 def _extract_specific_event_lookup_phrase(query: Optional[str]) -> Optional[str]:
@@ -1540,6 +1846,42 @@ def _extract_specific_event_lookup_phrase(query: Optional[str]) -> Optional[str]
         return " ".join(meaningful_tokens)
 
     return None
+
+
+def _is_event_category_filter_query(
+    query: Optional[str],
+    category: Optional[str],
+    date_filter: Optional[str],
+    specific_lookup_phrase: Optional[str],
+    specific_lookup_requested: bool = False,
+) -> bool:
+    """Return whether an event query is a thematic/category search, not a named lookup."""
+    normalized_query = _normalize_lookup_text(query)
+    if not normalized_query:
+        return False
+
+    if specific_lookup_requested:
+        return False
+
+    if any(named_hint in normalized_query for named_hint in _EVENT_NAMED_ENTITY_HINTS):
+        return False
+
+    if _QUOTED_LOOKUP_PATTERN.search(query or ""):
+        return False
+
+    query_tokens = set(_extract_lookup_tokens(normalized_query))
+    category_tokens = set(_extract_lookup_tokens(category)) if category else set()
+    category_filter_hit = bool(category_tokens and query_tokens & category_tokens)
+    thematic_hit = any(term in normalized_query for term in _EVENT_CATEGORY_FILTER_TERMS)
+
+    if category and thematic_hit:
+        return True
+    if date_filter and thematic_hit and specific_lookup_phrase:
+        return True
+    if category_filter_hit and thematic_hit:
+        return True
+
+    return False
 
 
 def _score_event_query_match(
@@ -2138,16 +2480,28 @@ _GENERIC_PLACE_QUERY_TOKENS = {
     "monumento", "monumentos", "open", "opened", "closed", "like",
     "imperdiveis", "imperdíveis", "primeira", "first", "time", "trip",
     "visitor", "visitors", "visita", "visiting", "must", "mustsee",
+    "cultural", "culture", "cultura", "stop", "paragem", "gallery", "galleries",
+    "galeria", "galerias", "viewpoint", "viewpoints", "near", "area", "zona",
+    "relaxed", "calm", "evening", "noite", "saldanha", "transport", "public", "real",
 }
 _SPECIFIC_PLACE_LOOKUP_TYPE_TOKENS = {
     "museum", "museums", "museu", "museus",
     "monument", "monuments", "monumento", "monumentos",
 }
 _SPECIFIC_PLACE_LOOKUP_NOISE_TOKENS = _GENERIC_PLACE_QUERY_TOKENS - _SPECIFIC_PLACE_LOOKUP_TYPE_TOKENS
+_BROAD_PLACE_LOOKUP_CONNECTORS = {
+    "in", "near", "with", "around", "for", "by", "at",
+    "em", "perto", "com", "para", "por", "junto",
+}
+_PLACE_LOOKUP_COMMAND_TOKENS = {
+    "show", "me", "find", "give", "list", "recommend", "suggest",
+    "mostra", "mostre", "encontra", "lista", "recomenda", "sugere",
+    "one", "two", "three", "four", "five", "um", "uma", "dois", "duas", "tres", "três", "quatro", "cinco",
+}
 _KNOWN_PLACE_LOCATION_HINTS = {
     "belem", "alfama", "chiado", "baixa", "rossio", "oriente", "expo",
     "ajuda", "alcantara", "estrela", "graca", "mouraria", "restelo",
-    "beato", "cascais", "sintra", "campo", "sodre",
+    "beato", "cascais", "sintra", "campo", "sodre", "principe",
 }
 _EXPLICIT_MUSEUM_MARKERS = {
     "museum", "museu", "maat", "mude", "gulbenkian", "berardo", "mac/ccb", "macccb",
@@ -2236,7 +2590,7 @@ def _score_ranked_place_result(result: Dict[str, Any], query_intent: Optional[st
     category = result.get("category", "")
     description = result.get("short_description", "")
     haystack = _normalize_place_hint_text(
-        " ".join(
+        _join_user_facing_parts(
             [
                 title,
                 category,
@@ -2334,6 +2688,20 @@ def _extract_place_query_tokens(query: Optional[str]) -> List[str]:
     ]
 
 
+def _is_broad_specific_place_phrase(phrase: Optional[str]) -> bool:
+    """Detect broad type/location fragments that should not be treated as named places."""
+    tokens = [
+        token for token in _extract_lookup_tokens(phrase)
+        if token not in _PLACE_LOOKUP_COMMAND_TOKENS and not token.isdigit()
+    ]
+    if len(tokens) < 2:
+        return False
+    return (
+        tokens[0] in _SPECIFIC_PLACE_LOOKUP_TYPE_TOKENS
+        and any(token in _BROAD_PLACE_LOOKUP_CONNECTORS for token in tokens[1:])
+    )
+
+
 def _extract_specific_place_lookup_phrase(query: Optional[str]) -> Optional[str]:
     """Extracts a specific place name from quoted or 'tell me about' queries."""
     prefixed = _extract_prefixed_lookup_phrase(
@@ -2344,14 +2712,18 @@ def _extract_specific_place_lookup_phrase(query: Optional[str]) -> Optional[str]
     )
     if prefixed:
         prefixed_tokens = _extract_lookup_tokens(prefixed)
-        if len(prefixed_tokens) == 1 and prefixed_tokens[0] in _SPECIFIC_PLACE_LOOKUP_TYPE_TOKENS:
+        if (
+            len(prefixed_tokens) == 1 and prefixed_tokens[0] in _SPECIFIC_PLACE_LOOKUP_TYPE_TOKENS
+        ) or _is_broad_specific_place_phrase(prefixed):
             return None
         return prefixed
 
     extracted = _extract_named_lookup_phrase(query, _SPECIFIC_PLACE_LOOKUP_NOISE_TOKENS)
     if extracted:
         extracted_tokens = _extract_lookup_tokens(extracted)
-        if len(extracted_tokens) == 1 and extracted_tokens[0] in _SPECIFIC_PLACE_LOOKUP_TYPE_TOKENS:
+        if (
+            len(extracted_tokens) == 1 and extracted_tokens[0] in _SPECIFIC_PLACE_LOOKUP_TYPE_TOKENS
+        ) or _is_broad_specific_place_phrase(extracted):
             return None
         return extracted
 
@@ -2372,9 +2744,12 @@ def _extract_specific_place_lookup_phrase(query: Optional[str]) -> Optional[str]
         and title_like_tokens
         and capitalized_token_count >= max(1, requires_title_majority)
     ):
-        if len(meaningful_tokens) == 1 and meaningful_tokens[0] in _SPECIFIC_PLACE_LOOKUP_TYPE_TOKENS:
+        candidate_phrase = " ".join(meaningful_tokens)
+        if (
+            len(meaningful_tokens) == 1 and meaningful_tokens[0] in _SPECIFIC_PLACE_LOOKUP_TYPE_TOKENS
+        ) or _is_broad_specific_place_phrase(candidate_phrase):
             return None
-        return " ".join(meaningful_tokens)
+        return candidate_phrase
     return None
 
 
@@ -2495,6 +2870,7 @@ def _schedule_day_matches(day_label: str, canonical_day: str) -> bool:
 def _format_place_schedule_previews(
     schedules: List[Dict[str, Any]],
     query: Optional[str],
+    language: str = "en",
 ) -> List[str]:
     """Builds concise schedule preview lines relevant to the user's query."""
     if not schedules:
@@ -2510,15 +2886,15 @@ def _format_place_schedule_previews(
                 for day_label, hours in (schedule.get('hours') or {}).items():
                     if _schedule_day_matches(day_label, requested_day):
                         if schedule_name and str(schedule_name).lower() != 'schedule':
-                            previews.append(f"{schedule_name}: {day_label} {hours}")
+                            previews.append(_localize_visitlisboa_schedule_text(f"{schedule_name}: {day_label} {hours}", language))
                         else:
-                            previews.append(f"{day_label}: {hours}")
+                            previews.append(_localize_visitlisboa_schedule_text(f"{day_label}: {hours}", language))
         if previews:
             return previews[:2]
 
     for schedule in schedules:
         if schedule.get('today'):
-            previews.append(schedule['today'])
+            previews.append(_localize_visitlisboa_schedule_text(schedule['today'], language))
             break
 
     if previews:
@@ -2527,7 +2903,7 @@ def _format_place_schedule_previews(
     # Fallback: show first two hours entries when no today shortcut is available.
     for schedule in schedules:
         for day_label, hours in list((schedule.get('hours') or {}).items())[:2]:
-            previews.append(f"{day_label}: {hours}")
+            previews.append(_localize_visitlisboa_schedule_text(f"{day_label}: {hours}", language))
         if previews:
             break
 
@@ -2536,7 +2912,7 @@ def _format_place_schedule_previews(
 
     for schedule in schedules:
         if schedule.get('summary'):
-            previews.append(schedule['summary'])
+            previews.append(_localize_visitlisboa_schedule_text(schedule['summary'], language))
             break
 
     return previews[:1]
@@ -2662,6 +3038,32 @@ def _convert_raw_place_to_result(place: Dict[str, Any], source: str = "visitlisb
         "url": place.get("url", ""),
         "source": source,
     }
+
+
+def _place_result_full_data(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Return full VisitLisboa place data for a normalized result when available."""
+    if result.get("source") != "visitlisboa" or not result.get("url"):
+        return {}
+    return _get_place_by_url(str(result.get("url") or "")) or {}
+
+
+def _place_result_has_ticket_link(result: Dict[str, Any]) -> bool:
+    """Return whether a place result has a real ticket URL."""
+    full_data = _place_result_full_data(result)
+    tickets_offers = full_data.get("tickets_offers") or {}
+    if isinstance(tickets_offers, dict):
+        for label, url in _iter_named_http_links(tickets_offers.get("links")):
+            if _is_ticket_http_link(label, url):
+                return True
+    tickets_url = (full_data.get("contact_info") or {}).get("tickets_url")
+    return _is_ticket_http_link("", tickets_url)
+
+
+def _place_result_has_schedule(result: Dict[str, Any]) -> bool:
+    """Return whether a place result has structured opening-hour data."""
+    full_data = _place_result_full_data(result)
+    schedules = full_data.get("schedules")
+    return isinstance(schedules, list) and bool(schedules)
 
 
 def _is_service_like_place_category(item_category: str) -> bool:
@@ -2928,14 +3330,14 @@ def _fallback_search(query: str, category: str, data: List[Dict], max_results: i
 
         searchable = _build_place_searchable_text(item).lower()
         normalized_searchable = _normalize_place_hint_text(searchable)
-        service_anchor_text = " ".join([
+        service_anchor_text = _join_user_facing_parts([
             item.get('title', ''),
             item.get('category', ''),
             item.get('location', ''),
             item.get('short_description', ''),
         ])
 
-        geography_text = " ".join([item.get('title', ''), item.get('url', ''), item.get('location', '')])
+        geography_text = _join_user_facing_parts([item.get('title', ''), item.get('url', ''), item.get('location', '')])
         if not _place_within_requested_geography(geography_text, query):
             continue
 
@@ -3032,6 +3434,15 @@ def search_cultural_events(
 
         render_language = _infer_visitlisboa_output_language(query, language)
         specific_lookup_phrase = _extract_specific_event_lookup_phrase(query)
+        category_filter_query = _is_event_category_filter_query(
+            query,
+            category,
+            date_filter,
+            specific_lookup_phrase,
+            specific_lookup_requested=specific_lookup,
+        )
+        if category_filter_query:
+            specific_lookup_phrase = None
         if specific_lookup and query and not specific_lookup_phrase:
             specific_lookup_phrase = _normalize_lookup_text(query)
         effective_query = specific_lookup_phrase or query
@@ -3279,8 +3690,9 @@ def search_cultural_events(
                 )
             return "\n".join(output_parts).strip()
 
-        # Keep exact-match fallback alternatives concise on the first batch.
-        display_count = min(max_results, 2) if exact_lookup_not_found_intro and offset == 0 else max_results
+        # Keep final cards concise and aligned with the response-quality contract.
+        display_cap = min(max_results, MAX_USER_FACING_RESULTS)
+        display_count = min(display_cap, 2) if exact_lookup_not_found_intro and offset == 0 else display_cap
 
         # Limit results
         results = events_data[offset : offset + display_count]
@@ -3315,79 +3727,121 @@ def search_cultural_events(
             duration = event.get('_duration_days', get_event_duration_days(event))
             duration_label = _format_event_duration_label(duration, language=render_language)
             description_summary = _localize_visitlisboa_description(
-                _summarize_event_description(event.get('full_description')),
+                _summarize_event_description(event.get('short_description') or event.get('full_description')),
                 language=render_language,
                 content_kind="event",
             )
             price_text = _localize_event_price(event.get('price'), language=render_language)
 
-            output_parts.append(f"{i}. 📅 **{title}**")
+            event_icon = _event_icon_for_category(cat)
+            output_parts.append(f"**{event_icon} {title}**")
             if render_language == "pt":
-                output_parts.append(f"   🗓️ **Quando:** {dates_str}")
-                output_parts.append(f"   ⏱️ **Duração:** {duration_label}")
-                output_parts.append(f"   📂 **Categoria:** {cat}")
+                output_parts.append(f"    - 🗓️ **Quando:** {dates_str}")
+                output_parts.append(f"    - ⏱️ **Duração:** {duration_label}")
+                output_parts.append(f"    - 📂 **Categoria:** {cat}")
             else:
-                output_parts.append(f"   🗓️ **When:** {dates_str}")
-                output_parts.append(f"   ⏱️ **Duration:** {duration_label}")
-                output_parts.append(f"   📂 **Category:** {cat}")
+                output_parts.append(f"    - 🗓️ **When:** {dates_str}")
+                output_parts.append(f"    - ⏱️ **Duration:** {duration_label}")
+                output_parts.append(f"    - 📂 **Category:** {cat}")
 
             if description_summary:
                 if render_language == "pt":
-                    output_parts.append(f"   📝 **Descrição:** {description_summary}")
+                    output_parts.append(f"    - 📝 **Descrição:** {description_summary}")
                 else:
-                    output_parts.append(f"   📝 **Description:** {description_summary}")
+                    output_parts.append(f"    - 📝 **Description:** {description_summary}")
 
-            location_line = _format_visitlisboa_location_line(loc, title, language=render_language)
-            if location_line:
-                output_parts.append(location_line)
+            location_lines: List[str] = []
+            venue_locations = event.get("venue_locations")
+            if isinstance(venue_locations, list) and venue_locations:
+                for venue in venue_locations[:2]:
+                    if not isinstance(venue, dict):
+                        continue
+                    venue_label = str(venue.get("venue_name") or "").strip()
+                    venue_location = str(venue.get("location") or "").strip()
+                    if venue_label and venue_location and venue_label.lower() not in venue_location.lower():
+                        location_value = f"{venue_label}, {venue_location}"
+                    else:
+                        location_value = venue_location or venue_label
+                    line = _format_visitlisboa_location_line(
+                        location_value,
+                        title,
+                        language=render_language,
+                        label_override="Local" if render_language == "pt" else "Venue",
+                    )
+                    if line and line not in location_lines:
+                        location_lines.append(line)
+            else:
+                location_line = _format_visitlisboa_location_line(
+                    loc,
+                    title,
+                    language=render_language,
+                    label_override="Local" if render_language == "pt" else "Venue",
+                )
+                if location_line:
+                    location_lines.append(location_line)
+
+            output_parts.extend(location_lines)
 
             # Show price information if available
             if price_text:
                 if render_language == "pt":
-                    output_parts.append(f"   💰 **Preço:** {price_text}")
+                    output_parts.append(f"    - 💶 **Preço:** {price_text}")
                 else:
-                    output_parts.append(f"   💰 **Price:** {price_text}")
+                    output_parts.append(f"    - 💶 **Price:** {price_text}")
 
-            if event.get('url'):
-                output_parts.append(f"   🔗 {event['url']}")
+            official_link = _first_named_http_link(event.get("information_links"))
+            if official_link:
+                _, official_url = official_link
+                link_text = "Website oficial" if render_language == "pt" else "Official website"
+                label = "Website"
+                output_parts.append(f"    - 🌐 **{label}:** {_format_markdown_link(link_text, official_url)}")
 
             # Show buy tickets link if available
-            if event.get('buy_tickets_url'):
+            if event.get('buy_tickets_url') and _is_http_url(event.get('buy_tickets_url')):
                 if render_language == "pt":
-                    output_parts.append(f"   🎟️ **Comprar bilhetes:** {event['buy_tickets_url']}")
+                    output_parts.append(
+                        f"    - 🎟️ **Bilhetes:** {_format_markdown_link('Comprar bilhetes', event['buy_tickets_url'])}"
+                    )
                 else:
-                    output_parts.append(f"   🎟️ **Buy tickets:** {event['buy_tickets_url']}")
+                    output_parts.append(
+                        f"    - 🎟️ **Tickets:** {_format_markdown_link('Buy tickets', event['buy_tickets_url'])}"
+                    )
 
             if event.get('schedule_notes'):
-                schedule_summary = "; ".join(str(note) for note in event['schedule_notes'][:2])
-                if render_language == "pt":
-                    output_parts.append(f"   🕐 **Horários:** {schedule_summary}")
-                else:
-                    output_parts.append(f"   🕐 **Schedule:** {schedule_summary}")
+                schedule_summary = "; ".join(
+                    _localize_visitlisboa_schedule_text(note, language=render_language)
+                    for note in event['schedule_notes'][:2]
+                    if _clean_user_facing_value(note)
+                )
+                if schedule_summary:
+                    if render_language == "pt":
+                        output_parts.append(f"    - 🕒 **Horários:** {schedule_summary}")
+                    else:
+                        output_parts.append(f"    - 🕒 **Schedule:** {schedule_summary}")
 
             if event.get('highlight_links'):
-                highlight_titles = ", ".join(
-                    str(item.get('title', ''))
+                highlight_titles = " · ".join(
+                    _format_markdown_link(str(item.get('title') or "Highlight"), item.get("url"))
+                    or _clean_user_facing_value(item.get("title"))
                     for item in event['highlight_links'][:3]
                     if isinstance(item, dict) and item.get('title')
                 )
                 if highlight_titles:
                     if render_language == "pt":
-                        output_parts.append(f"   ✨ **Destaques:** {highlight_titles}")
+                        output_parts.append(f"    - ✨ **Destaques:** {highlight_titles}")
                     else:
-                        output_parts.append(f"   ✨ **Highlights:** {highlight_titles}")
+                        output_parts.append(f"    - ✨ **Highlights:** {highlight_titles}")
+
+            if event.get('url'):
+                details_label = "Mais detalhes" if render_language == "pt" else "More details"
+                details_url = _localized_visitlisboa_url(event['url'], render_language)
+                output_parts.append(f"    - 🔗 **{details_label}:** {_format_markdown_link('VisitLisboa', details_url)}")
 
             output_parts.append("")  # Empty line between events
 
-        if len(events_data) > max_results:
-            if render_language == "pt":
-                output_parts.append(
-                    f"💡 A lista mostra {len(results)} destaque(s). Se quiser, posso refinar a pesquisa com uma categoria, bairro ou data mais específica."
-                )
-            else:
-                output_parts.append(
-                    f"💡 This list shows {len(results)} highlights. Narrow the search by category, area, or date for a tighter selection."
-                )
+        remaining_line = _format_remaining_results_line(len(events_data) - (offset + len(results)), render_language)
+        if remaining_line:
+            output_parts.append(remaining_line)
         if undated_candidates:
             if render_language == "pt":
                 output_parts.append(
@@ -3462,6 +3916,9 @@ def search_places_attractions(
         if specific_lookup_query:
             specific_lookup_query = _apply_known_place_lookup_alias(specific_lookup_query) or specific_lookup_query
         query_intent = _infer_place_query_intent(effective_query or query, category)
+        query_context = query or effective_query or ""
+        tickets_requested = _query_mentions_tickets(query_context)
+        schedule_requested = _query_mentions_schedule(query_context)
 
         logger.info(
             f"search_places_attractions: query='{query}', effective_query='{effective_query}', category='{category}', max={max_results}, offset={offset}"
@@ -3470,6 +3927,9 @@ def search_places_attractions(
 
         # Check if we should also search Dados Abertos (hybrid mode)
         search_dados_abertos = _should_search_dados_abertos(effective_query or query)
+        requested_category_for_hybrid = _normalize_place_category_filter(category)
+        if requested_category_for_hybrid in {"museums & monuments", "restaurants", "hotels", "view points", "tours"}:
+            search_dados_abertos = False
         dados_abertos_results = []
 
         if search_dados_abertos and (effective_query or query):
@@ -3541,7 +4001,7 @@ def search_places_attractions(
                     raw_location = metadata.get('address') or metadata.get('location') or ''
                     full_place_data = _get_place_by_url(metadata.get('url', '')) if metadata.get('url') else None
                     location_text = f"{metadata.get('title', '')} {metadata.get('url', '')} {raw_location} {doc.page_content}".lower()
-                    service_anchor_text = " ".join([
+                    service_anchor_text = _join_user_facing_parts([
                         metadata.get('title', ''),
                         item_category,
                         metadata.get('url', ''),
@@ -3549,7 +4009,7 @@ def search_places_attractions(
                         cleaned_doc_description,
                     ])
 
-                    geography_text = " ".join([metadata.get('title', ''), metadata.get('url', ''), raw_location])
+                    geography_text = _join_user_facing_parts([metadata.get('title', ''), metadata.get('url', ''), raw_location])
                     if not _place_within_requested_geography(geography_text, query):
                         continue
 
@@ -3654,7 +4114,10 @@ def search_places_attractions(
                 scored_candidates.sort(key=lambda x: x['final_score'], reverse=True)
 
                 # Convert to standard format
-                for item in scored_candidates[:requested_window]:
+                selection_window = requested_window
+                if tickets_requested or schedule_requested:
+                    selection_window = max(requested_window * 4, 12)
+                for item in scored_candidates[:selection_window]:
                     metadata = item['metadata']
                     # Attempt to get real address/location
                     full_place_data = _get_place_by_url(metadata.get('url', '')) if metadata.get('url') else None
@@ -3717,18 +4180,27 @@ def search_places_attractions(
             or bool(specific_lookup_query)
             or query_intent != "top_attractions"
         )
-        if should_use_json_fallback and len(visitlisboa_results) < requested_window:
+        if should_use_json_fallback and (len(visitlisboa_results) < requested_window or tickets_requested or schedule_requested):
             fallback_items = _fallback_search(
                 query=effective_query or query,
                 category=category,
                 data=_load_places_json(),
-                max_results=requested_window * 2,
+                max_results=5000 if (tickets_requested or schedule_requested) else requested_window * 2,
             )
             fallback_results = [_convert_raw_place_to_result(item) for item in fallback_items]
+            if tickets_requested or schedule_requested:
+                supplemental_items = _fallback_search(
+                    query=None,
+                    category=category,
+                    data=_load_places_json(),
+                    max_results=5000,
+                )
+                fallback_results.extend(_convert_raw_place_to_result(item) for item in supplemental_items)
             combined_visitlisboa: List[Dict[str, Any]] = []
             seen_visitlisboa_keys: set[str] = set()
             _append_unique_place_results(combined_visitlisboa, visitlisboa_results, seen_visitlisboa_keys)
-            _append_unique_place_results(combined_visitlisboa, fallback_results, seen_visitlisboa_keys, limit=requested_window)
+            fallback_limit = None if (tickets_requested or schedule_requested) else requested_window
+            _append_unique_place_results(combined_visitlisboa, fallback_results, seen_visitlisboa_keys, limit=fallback_limit)
             visitlisboa_results = combined_visitlisboa
 
         if required_service_terms:
@@ -3736,7 +4208,7 @@ def search_places_attractions(
                 result
                 for result in visitlisboa_results
                 if _matches_required_service_terms(
-                    " ".join(
+                    _join_user_facing_parts(
                         [
                             result.get('title', ''),
                             result.get('category', ''),
@@ -3776,6 +4248,36 @@ def search_places_attractions(
 
             # Add any Dados Abertos results that don't duplicate
             _append_unique_place_results(all_results, dados_abertos_results, existing_keys)
+
+        if effective_query or query:
+            output_location_hints = _extract_place_location_hints(effective_query or query)
+            if output_location_hints:
+                all_results.sort(
+                    key=lambda result: (
+                        0 if _matches_place_location_hints(
+                            _join_user_facing_parts(
+                                [
+                                    result.get("title", ""),
+                                    result.get("location", ""),
+                                    result.get("short_description", ""),
+                                    result.get("url", ""),
+                                ]
+                            ),
+                            output_location_hints,
+                        ) else 1,
+                        -float(result.get("ranking_score") or 0.0),
+                    )
+                )
+
+        if tickets_requested or schedule_requested:
+            all_results.sort(
+                key=lambda result: (
+                    1 if (not tickets_requested or _place_result_has_ticket_link(result)) else 0,
+                    1 if (not schedule_requested or _place_result_has_schedule(result)) else 0,
+                    float(result.get("ranking_score") or 0.0),
+                ),
+                reverse=True,
+            )
 
         # =====================================================================
         # STEP 3: Format Output
@@ -3865,8 +4367,9 @@ def search_places_attractions(
             if not all_results:
                 return f"No places found matching: '{query or 'all'}' in VisitLisboa or Open Data registries."
 
-        # Keep exact-match fallback alternatives concise on the first batch.
-        display_count = min(max_results, 2) if exact_lookup_not_found_intro and offset == 0 else max_results
+        # Keep cards concise and aligned with the response-quality contract.
+        display_cap = min(max_results, MAX_USER_FACING_RESULTS)
+        display_count = min(display_cap, 2) if exact_lookup_not_found_intro and offset == 0 else display_cap
 
         # Limit to the requested window.
         final_results = all_results[offset : offset + display_count]
@@ -3887,12 +4390,12 @@ def search_places_attractions(
 
         if render_language == "pt":
             output_parts = [
-                f"🏛️ **{len(final_results)} locais/atrações encontrados em Lisboa:**\n",
+                "### 🔵 **Locais e atrações**",
                 f"🧭 **Janela de resultados:** {offset + 1}-{offset + len(final_results)} de {len(all_results)}.",
             ]
         else:
             output_parts = [
-                f"🏛️ **Found {len(final_results)} Places/Attractions in Lisbon:**\n",
+                "### 🔵 **Places and Attractions**",
                 f"🧭 **Result window:** {offset + 1}-{offset + len(final_results)} of {len(all_results)}.",
             ]
 
@@ -3917,20 +4420,9 @@ def search_places_attractions(
             )
 
             # Source indicator
-            if source == 'dados_abertos':
-                output_parts.append(f"\n{i}. 📊 **{title}**")  # Open Data icon
-            else:
-                place_icon = "🍽️" if _normalize_lookup_text(cat) in {"restaurant", "restaurante", "restaurants", "restaurantes"} else "🏛️"
-                output_parts.append(f"\n{i}. {place_icon} **{title}**")  # VisitLisboa icon
-
-            output_parts.append(f"   📂 {'Categoria' if render_language == 'pt' else 'Category'}: {cat}")
-
-            # Lisboa Card benefit (from enriched data)
-            lisboa_card_benefit = None
-            if full_data:
-                lisboa_card_benefit = full_data.get('lisboa_card_benefit') or full_data.get('lisboa_card_discount')
-            if lisboa_card_benefit:
-                output_parts.append(f"   🎫 {_localize_place_value_text(lisboa_card_benefit, language=render_language)}")
+            place_icon = _place_icon_for_category(place.get('category', cat))
+            output_parts.append("")
+            output_parts.append(f"**{place_icon} {title}**")
 
             description_text = _clean_place_description_text(
                 (full_data.get('short_description') if full_data else None) or place.get('short_description'),
@@ -3949,56 +4441,141 @@ def search_places_attractions(
             if known_description and generic_description:
                 description_text = known_description
             if description_text:
-                desc = description_text[:200]
-                if len(description_text) > 200:
-                    desc += "..."
-                output_parts.append(f"   {desc}")
+                desc = description_text[:220]
+                if len(description_text) > 220:
+                    desc = desc.rsplit(" ", 1)[0].rstrip(" ,;:.") + "…"
+                description_label = "Descrição" if render_language == "pt" else "Description"
+                output_parts.append(f"    - 📝 **{description_label}:** {desc}")
+
+            output_parts.append(f"    - 📂 **{'Categoria' if render_language == 'pt' else 'Category'}:** {cat}")
 
             location_line = _format_visitlisboa_location_line(loc, title, language=render_language)
             if location_line:
                 output_parts.append(location_line)
+            elif place.get('lat') and place.get('lon'):
+                map_label = "Mapa" if render_language == "pt" else "Map"
+                address_label = "Localização" if render_language == "pt" else "Location"
+                coordinate_line = _format_coordinates_location_line(place.get('lat'), place.get('lon'), address_label, map_label)
+                if coordinate_line:
+                    output_parts.append(coordinate_line)
+
+            feature_summary = _format_compact_feature_summary(
+                full_data.get("features") if full_data else None,
+                language=render_language,
+            )
+            if feature_summary:
+                label = "Características" if render_language == "pt" else "Features"
+                output_parts.append(f"    - ✨ **{label}:** {feature_summary}")
 
             # Schedule/opening hours (from enriched data)
             if full_data and full_data.get('schedules'):
-                for preview in _format_place_schedule_previews(full_data['schedules'], query or effective_query):
-                    output_parts.append(f"   🕐 {preview}")
+                for preview in _format_place_schedule_previews(
+                    full_data['schedules'],
+                    query or effective_query,
+                    language=render_language,
+                ):
+                    label = "Horário" if render_language == "pt" else "Hours"
+                    output_parts.append(f"    - 🕒 **{label}:** {preview}")
 
             # Tickets/prices (from enriched data)
+            price_values: List[str] = []
+            ticket_line_added = False
+            lisboa_card_benefit = None
+            if full_data:
+                lisboa_card_benefit = full_data.get('lisboa_card_benefit') or full_data.get('lisboa_card_discount')
+            if lisboa_card_benefit:
+                localized_benefit = _localize_place_value_text(lisboa_card_benefit, language=render_language)
+                if localized_benefit:
+                    price_values.append(localized_benefit)
             if full_data and full_data.get('tickets_offers'):
                 tickets = full_data['tickets_offers']
                 if tickets.get('description'):
                     price_desc = _compact_place_ticket_price_text(tickets['description'], language=render_language)
-                    output_parts.append(f"   💰 {price_desc}")
-                elif tickets.get('links'):
-                    first_link = tickets['links'][0]
-                    output_parts.append(f"   🎟️ {first_link.get('text', 'Tickets')}: {first_link.get('url', '')}")
+                    if price_desc:
+                        price_values.append(price_desc)
+            if price_values:
+                label = "Preço" if render_language == "pt" else "Price"
+                output_parts.append(f"    - 💶 **{label}:** {'; '.join(dict.fromkeys(price_values))}")
+
+            if full_data and full_data.get('tickets_offers') and full_data['tickets_offers'].get('links'):
+                ticket_link = _first_ticket_http_link(full_data['tickets_offers'].get('links'))
+                if ticket_link:
+                    _, ticket_url = ticket_link
+                    if render_language == "pt":
+                        output_parts.append(f"    - 🎟️ **Bilhetes:** {_format_markdown_link('Comprar bilhetes', ticket_url)}")
+                    else:
+                        output_parts.append(f"    - 🎟️ **Tickets:** {_format_markdown_link('Buy tickets', ticket_url)}")
+                    ticket_line_added = True
             elif full_data and full_data.get('contact_info', {}).get('tickets_url') and _query_mentions_tickets(query or effective_query):
-                output_parts.append(f"   🎟️ Tickets: {full_data['contact_info']['tickets_url']}")
+                tickets_url = full_data['contact_info']['tickets_url']
+                if _is_ticket_http_link("", tickets_url):
+                    if render_language == "pt":
+                        output_parts.append(f"    - 🎟️ **Bilhetes:** {_format_markdown_link('Comprar bilhetes', tickets_url)}")
+                    else:
+                        output_parts.append(f"    - 🎟️ **Tickets:** {_format_markdown_link('Buy tickets', tickets_url)}")
+                    ticket_line_added = True
 
             # TripAdvisor rating (from enriched data)
             if full_data and full_data.get('tripadvisor'):
                 ta = full_data['tripadvisor']
                 if ta.get('rating'):
                     reviews_label = "avaliações" if render_language == "pt" else "reviews"
-                    output_parts.append(f"   ⭐ TripAdvisor: {ta['rating']}/5 ({ta.get('reviews_count', '?')} {reviews_label})")
+                    rating_value = _clean_user_facing_value(ta.get('rating'))
+                    reviews_count = _clean_user_facing_value(ta.get('reviews_count'))
+                    rating_label = "Avaliação" if render_language == "pt" else "Rating"
+                    if reviews_count:
+                        output_parts.append(f"    - ⭐ **{rating_label}:** TripAdvisor {rating_value}/5 ({reviews_count} {reviews_label})")
+                    else:
+                        output_parts.append(f"    - ⭐ **{rating_label}:** TripAdvisor {rating_value}/5")
 
             # Contact info (from enriched data)
             if full_data and full_data.get('contact_info'):
                 contact = full_data['contact_info']
                 if contact.get('phone'):
-                    output_parts.append(f"   📞 {contact['phone']}")
+                    phone_link = _format_phone_link(contact.get('phone'))
+                    if phone_link:
+                        label = "Telefone" if render_language == "pt" else "Phone"
+                        output_parts.append(f"    - 📞 **{label}:** {phone_link}")
+                if contact.get('email'):
+                    email = _clean_user_facing_value(contact.get('email'))
+                    if email:
+                        label = "Email"
+                        output_parts.append(f"    - ✉️ **{label}:** [{email}](mailto:{email})")
+                if contact.get('website') and _is_http_url(contact.get('website')):
+                    label = "Website"
+                    link_text = "Website oficial" if render_language == "pt" else "Official website"
+                    output_parts.append(f"    - 🌐 **{label}:** {_format_markdown_link(link_text, contact.get('website'))}")
+
+            if not ticket_line_added and full_data and full_data.get('tickets_offers') and full_data['tickets_offers'].get('links'):
+                ticket_link = _first_ticket_http_link(full_data['tickets_offers'].get('links'))
+                if ticket_link:
+                    _, ticket_url = ticket_link
+                    if render_language == "pt":
+                        output_parts.append(f"    - 🎟️ **Bilhetes:** {_format_markdown_link('Comprar bilhetes', ticket_url)}")
+                    else:
+                        output_parts.append(f"    - 🎟️ **Tickets:** {_format_markdown_link('Buy tickets', ticket_url)}")
+            elif not ticket_line_added and full_data and full_data.get('contact_info', {}).get('tickets_url') and _query_mentions_tickets(query or effective_query):
+                tickets_url = full_data['contact_info']['tickets_url']
+                if _is_ticket_http_link("", tickets_url):
+                    if render_language == "pt":
+                        output_parts.append(f"    - 🎟️ **Bilhetes:** {_format_markdown_link('Comprar bilhetes', tickets_url)}")
+                    else:
+                        output_parts.append(f"    - 🎟️ **Tickets:** {_format_markdown_link('Buy tickets', tickets_url)}")
 
             if place.get('url'):
-                output_parts.append(f"   🔗 {place['url']}")
-
-            if place.get('lat') and place.get('lon'):
-                output_parts.append(f"   🗺️ GPS: ({place['lat']:.5f}, {place['lon']:.5f})")
+                details_label = "Mais detalhes" if render_language == "pt" else "More details"
+                details_url = _localized_visitlisboa_url(place['url'], render_language)
+                output_parts.append(f"    - 🔗 **{details_label}:** {_format_markdown_link('VisitLisboa', details_url)}")
 
         # Source breakdown
-        output_parts.append(f"\n\n📊 **Sources:** {vl_count} from VisitLisboa, {da_count} from Lisboa Aberta")
-        if search_dados_abertos:
-            output_parts.append("🔄 **Hybrid search:** Public infrastructure included")
-        output_parts.append("💡 Try more specific queries for better results.")
+        remaining_line = _format_remaining_results_line(len(all_results) - (offset + len(final_results)), render_language)
+        if remaining_line:
+            output_parts.append("")
+            output_parts.append(remaining_line)
+        source_mix = _format_source_mix_line(vl_count, da_count, render_language)
+        if source_mix:
+            output_parts.append("")
+            output_parts.append(source_mix)
 
         return "\n".join(output_parts)
 

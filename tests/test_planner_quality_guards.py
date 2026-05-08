@@ -16,6 +16,7 @@ from agent.agents.planner_agent import (
     _build_public_transport_synthesis_instruction,
     _build_resident_service_plan_fallback,
     _build_short_coffee_culture_fallback,
+    _build_card_based_itinerary_fallback,
     _extract_visitlisboa_place_cards,
     _extract_weather_safety_bullets,
     enforce_multi_day_quality_mode,
@@ -25,11 +26,15 @@ from agent.agents.planner_agent import (
     _planner_response_has_incomplete_museum_day_blocks,
     _planner_response_has_transport_quality_defects,
 )
+from agent.agents.qa_agent import QualityAssuranceAgent
 from agent.agents.researcher_agent import ResearcherAgent
 from agent.agents.supervisor import SupervisorAgent
 from agent.agents.transport_agent import _build_unsupported_transport_scope_response
 from agent.agents.transport_agent import TransportAgent
 from agent.graph import MultiAgentAssistant
+from agent.planning.evidence import build_evidence_bundle
+from agent.planning.models import PlanBlock, PlanDraft, SourceRef
+from agent.planning.renderer import render_plan_markdown
 from agent.utils.response_formatter import (
     canonicalize_planner_source_line,
     final_visual_pass,
@@ -50,6 +55,247 @@ def test_public_transport_instruction_added_when_route_context_exists() -> None:
 
     assert "PUBLIC TRANSPORT SYNTHESIS CONTRACT" in instruction
     assert "board/alight" in instruction
+
+
+def test_planner_qa_retry_skips_already_usable_worker_evidence() -> None:
+    """Planner synthesis should not trigger a second broad worker pass."""
+    qa_result = {
+        "missing_data": ["exact opening hours"],
+        "repairable_agents": ["researcher", "transport"],
+    }
+
+    retry_agents = MultiAgentAssistant._filter_planner_qa_retry_agents(
+        ["researcher", "transport"],
+        user_message="Plan a relaxed evening around Príncipe Real from Saldanha.",
+        agents_to_call=["researcher", "transport", "planner"],
+        workers=["researcher", "transport"],
+        agent_outputs={
+            "researcher": "### Cultural options\n- Museu Nacional de História Natural",
+            "transport": "### Route\n- Metro Yellow Line from Saldanha to Rato",
+        },
+        qa_result=qa_result,
+    )
+
+    assert retry_agents == []
+    assert qa_result["_skipped_planner_retry_agents"] == ["researcher", "transport"]
+
+
+def test_planner_qa_retry_still_fetches_missing_domains() -> None:
+    """QA may still request domains that the supervisor did not gather."""
+    retry_agents = MultiAgentAssistant._filter_planner_qa_retry_agents(
+        ["transport"],
+        user_message="Plan a relaxed evening around Príncipe Real from Saldanha.",
+        agents_to_call=["researcher", "planner"],
+        workers=["researcher"],
+        agent_outputs={"researcher": "### Cultural options\n- Local evidence"},
+        qa_result={"missing_data": ["public transport route"]},
+    )
+
+    assert retry_agents == ["transport"]
+
+
+def test_planner_qa_retry_does_not_add_weather_for_generic_evening() -> None:
+    """A generic evening plan should not become weather-aware after QA."""
+    retry_agents = MultiAgentAssistant._filter_planner_qa_retry_agents(
+        ["weather"],
+        user_message="Plan a relaxed evening around Príncipe Real starting from Saldanha.",
+        agents_to_call=["transport", "researcher", "planner"],
+        workers=["transport", "researcher"],
+        agent_outputs={"transport": "metro route", "researcher": "local cultural stop"},
+        qa_result={"missing_data": ["weather"]},
+    )
+
+    assert retry_agents == []
+
+
+def test_qa_relaxes_final_markdown_contract_for_planner_worker_evidence() -> None:
+    """Intermediate worker evidence should be fact-checked without UI footer retries."""
+    qa_agent = QualityAssuranceAgent.__new__(QualityAssuranceAgent)
+
+    direct_result = qa_agent._verify_facts(
+        "### Route\n- **Address:** Saldanha\n- Metro Yellow Line from Saldanha to Rato",
+        "Plan an evening around Principe Real using public transport.",
+        language="en",
+        intermediate_output=False,
+    )
+    intermediate_result = qa_agent._verify_facts(
+        "### Route\n- **Address:** Saldanha\n- Metro Yellow Line from Saldanha to Rato",
+        "Plan an evening around Principe Real using public transport.",
+        language="en",
+        intermediate_output=True,
+    )
+
+    assert "Source footer is missing or malformed." in direct_result["critical_issues"]
+    assert "Source footer is missing or malformed." not in intermediate_result["critical_issues"]
+
+
+def test_structured_planner_renderer_omits_absent_weather_section() -> None:
+    """Generic plans should not show weather caveats when weather was not used."""
+    draft = PlanDraft(
+        title="Relaxed evening",
+        direct_answer="Use the metro and keep the final walk short.",
+        constraints_used=["public transport from Saldanha"],
+        blocks=[
+            PlanBlock(
+                title="Saldanha to Príncipe Real",
+                kind="transport",
+                movement=["Metro from Saldanha to Avenida, then walk."],
+                source_ids=["metro"],
+            )
+        ],
+        movement_logic=["Metro first, then short walk."],
+        weather_strategy=["Weather was not confirmed in the provided data."],
+        source_ids=["metro", "ipma"],
+    )
+    rendered = render_plan_markdown(
+        draft,
+        sources={
+            "metro": SourceRef("metro", "Metro de Lisboa", "Metro de Lisboa", "https://www.metrolisboa.pt"),
+            "ipma": SourceRef("ipma", "IPMA", "IPMA", "https://www.ipma.pt"),
+        },
+        language="en",
+    )
+
+    assert "Weather adaptation" not in rendered
+    assert "IPMA" not in rendered
+    assert "Metro de Lisboa" in rendered
+
+
+def test_structured_planner_renderer_drops_unused_carris_source() -> None:
+    """Source footers should cite the operator materially used in the answer."""
+    draft = PlanDraft(
+        title="Metro evening",
+        direct_answer="Use the metro from Saldanha to Avenida.",
+        blocks=[
+            PlanBlock(
+                title="Metro leg",
+                kind="transport",
+                movement=["Yellow line from Saldanha, transfer to the Blue line, alight at Avenida."],
+                limitations=["Carris line numbers and schedules should be confirmed only if using bus alternatives."],
+                source_ids=["metro", "carris"],
+            )
+        ],
+        movement_logic=["Metro is the clearest supported route."],
+    )
+    rendered = render_plan_markdown(
+        draft,
+        sources={
+            "metro": SourceRef("metro", "Metro de Lisboa", "Metro de Lisboa", "https://www.metrolisboa.pt"),
+            "carris": SourceRef("carris", "Carris", "Carris", "https://www.carris.pt"),
+        },
+        language="en",
+    )
+
+    assert "Metro de Lisboa" in rendered
+    assert "Carris" not in rendered.split("📌 **Source:**", 1)[-1]
+
+
+def test_structured_planner_accepts_route_blocks_and_renders_place_fields() -> None:
+    """Planner JSON aliases should render rich fields instead of falling back."""
+    draft = PlanDraft.from_dict(
+        {
+            "title": "Relaxed evening around Príncipe Real",
+            "direct_answer": "Use metro first, then keep the cultural stop local.",
+            "route_blocks": [
+                {
+                    "title": "Water Museum - Patriarchal Reservoir",
+                    "kind": "museum",
+                    "purpose": "Compact cultural stop in Príncipe Real.",
+                    "details": [
+                        "Description: Underground reservoir completed in 1864.",
+                        "Address: [Praça do Príncipe Real](https://www.google.com/maps/search/?api=1&query=Pra%C3%A7a+do+Pr%C3%ADncipe+Real)",
+                        "Website: [Official website](https://www.visitlisboa.com/en/places/water-museum-patriarchal-reservoir)",
+                    ],
+                    "movement": ["Metro from Saldanha to Avenida, then short walk."],
+                    "source_ids": ["visitlisboa_places", "metro"],
+                }
+            ],
+            "movement": ["Yellow line from Saldanha, transfer at Marquês de Pombal, exit at Avenida."],
+        }
+    )
+    rendered = render_plan_markdown(
+        draft,
+        sources={
+            "visitlisboa_places": SourceRef("visitlisboa_places", "VisitLisboa Places", "VisitLisboa Locais", "https://www.visitlisboa.com/en/places"),
+            "metro": SourceRef("metro", "Metro de Lisboa", "Metro de Lisboa", "https://www.metrolisboa.pt"),
+        },
+        language="en",
+    )
+
+    assert "📍 **Address:** [Praça do Príncipe Real]" in rendered
+    assert "🌐 **Website:** [Official website]" in rendered
+    assert "### 🚇 **How to move**" in rendered
+
+
+def test_planner_evidence_preserves_plain_visitlisboa_fields() -> None:
+    """Research cards should carry worker field data into planner evidence."""
+    bundle = build_evidence_bundle(
+        places_data=(
+            "### 🏛️ **Water Museum - Patriarchal Reservoir**\n"
+            "    - 📝 **Description:** Historic reservoir near Príncipe Real.\n"
+            "    - 📍 **Address:** Praça do Príncipe Real, Lisboa\n"
+            "    - 🕐 Today: 10:00-17:30\n"
+            "    - 💰 Price: €4\n"
+            "    - 🔗 https://www.visitlisboa.com/en/places/water-museum-patriarchal-reservoir\n"
+            "\n"
+            "📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places)\n"
+        )
+    )
+
+    assert bundle.cards
+    fields = bundle.cards[0].fields
+    assert fields["Description"] == "Historic reservoir near Príncipe Real."
+    assert fields["Address"] == "Praça do Príncipe Real, Lisboa"
+    assert fields["Hours"] == "10:00-17:30"
+    assert fields["Price"] == "€4"
+    assert fields["Website"].startswith("https://www.visitlisboa.com")
+
+
+def test_card_based_planner_fallback_uses_renderer_contract_for_evening_plan() -> None:
+    """Card fallback should not publish orphan headings or morning blocks."""
+    response = _build_card_based_itinerary_fallback(
+        user_message=(
+            "Plan a relaxed evening around Príncipe Real starting from Saldanha, "
+            "with one cultural stop and realistic public transport."
+        ),
+        language="en",
+        weather_data="",
+        transport_data=(
+            "### 🚇 Main move: Metro\n"
+            "- 🔹 **Best Metro Option**: Saldanha → Marquês de Pombal → Avenida\n"
+            "- 🔹 **Estimated Total Travel Time**: ~11 min\n"
+            "- Carris line numbers and schedules should be confirmed at carris.pt.\n"
+            "📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt)\n"
+        ),
+        places_data=(
+            "### 🏛️ **Water Museum - Patriarchal Reservoir**\n"
+            "    - 📝 **Description:** Underground reservoir hidden beneath the garden of Príncipe Real.\n"
+            "    - 📂 Category: Museums & Monuments\n"
+            "    - 📍 **Address:** Praça do Príncipe Real, Lisboa\n"
+            "    - 🕐 Today: 10:00-17:30\n"
+            "    - 💰 Price: €4\n"
+            "    - 🔗 https://www.visitlisboa.com/en/places/water-museum-patriarchal-reservoir\n"
+            "\n"
+            "### 🏛️ **Galeria Subterrânea do Loreto**\n"
+            "    - 📝 **Description:** Historic underground water gallery.\n"
+            "    - 📂 Category: Museums & Monuments\n"
+            "    - 📍 **Address:** Lisboa\n"
+            "📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places)\n"
+        ),
+        events_data="",
+        qa_disclaimers=None,
+    )
+
+    assert "✅ **Direct answer:**" in response
+    assert "09h30" not in response
+    assert response.count("Water Museum - Patriarchal Reservoir") == 1
+    assert "Galeria Subterrânea do Loreto" not in response
+    assert "\n### 🚇 **How to move**" in response
+    assert "\n### 🚇 Main move" not in response
+    assert "🏷️ **Category:** Museums & Monuments" in response
+    assert "📍 **Address:** [Praça do Príncipe Real, Lisboa]" in response
+    assert "💶 **Price:** €4" in response
+    assert "🌐 **Website:** [VisitLisboa]" in response
 
 
 def _build_planner_with_fake_llm(response_text: str) -> PlannerAgent:
@@ -984,7 +1230,7 @@ def test_full_museum_day_fallback_is_complete_and_transport_grounded() -> None:
     assert "**09:30 · Chiado / São Roque**" in response
     assert "**14:15 · Gulbenkian / São Sebastião**" in response
     assert "**16:45 · Belém, if still realistic**" in response
-    assert "### 🚇 Movement Logic" in response
+    assert "### 🚇 **How to move**" in response
     assert "Recommended order" not in response
     assert "Opening hours, tickets, and crowding were not confirmed live" in response
 
@@ -1018,7 +1264,7 @@ def test_planner_fallback_uses_grounded_cards_before_static_templates() -> None:
         qa_disclaimers=None,
     )
 
-    assert "Grounded Itinerary" in response
+    assert "Lisbon museum day" in response
     assert "National Tile Museum" in response
     assert "Carris Museum" in response
     assert "Museum of Lisbon" in response
@@ -1488,7 +1734,9 @@ Opening hours and tickets were not confirmed.
     assert "Transport Note:" not in guarded
     assert "### 📅 **" in guarded
     assert "✅ **Direct answer:**" in guarded
-    assert "### 🧭 **Constraints used**" in guarded
+    assert "### 🧭 **Plan basis**" in guarded
+    assert "### 🚇 **How to move**" in guarded
+    assert "### ⚠️ **Final notes**" in guarded
     assert "### 📍 **Day 1" in guarded
     assert "    - " in guarded
     assert guarded.count("📌 **Source:**") == 1

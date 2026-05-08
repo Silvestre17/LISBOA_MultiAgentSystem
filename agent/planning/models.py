@@ -138,31 +138,45 @@ class PlanDraft:
             Sanitized ``PlanDraft`` with unsupported block payloads ignored.
         """
         blocks: List[PlanBlock] = []
-        for raw_block in payload.get("blocks") or []:
+        raw_blocks = (
+            payload.get("blocks")
+            or payload.get("route_blocks")
+            or payload.get("plan_blocks")
+            or []
+        )
+        for raw_block in raw_blocks:
             if not isinstance(raw_block, dict):
                 continue
             blocks.append(
                 PlanBlock(
-                    title=str(raw_block.get("title") or "").strip(),
-                    kind=str(raw_block.get("kind") or "activity").strip() or "activity",
-                    purpose=str(raw_block.get("purpose") or "").strip(),
-                    details=_string_list(raw_block.get("details")),
-                    movement=_string_list(raw_block.get("movement")),
-                    weather=_string_list(raw_block.get("weather")),
-                    limitations=_string_list(raw_block.get("limitations")),
-                    source_ids=_string_list(raw_block.get("source_ids")),
+                    title=_clean_plan_string(raw_block.get("title")),
+                    kind=_clean_plan_string(raw_block.get("kind") or "activity") or "activity",
+                    purpose=_clean_plan_string(raw_block.get("purpose")),
+                    details=_string_list(raw_block.get("details") or raw_block.get("fields")),
+                    movement=_string_list(raw_block.get("movement") or raw_block.get("transport")),
+                    weather=_string_list(raw_block.get("weather") or raw_block.get("weather_adaptation")),
+                    limitations=_string_list(raw_block.get("limitations") or raw_block.get("caveats")),
+                    source_ids=_string_list(raw_block.get("source_ids") or raw_block.get("sources")),
                 )
             )
         return cls(
-            title=str(payload.get("title") or "").strip(),
-            direct_answer=str(payload.get("direct_answer") or "").strip(),
-            constraints_used=_string_list(payload.get("constraints_used")),
+            title=_clean_plan_string(payload.get("title")),
+            direct_answer=_clean_plan_string(
+                payload.get("direct_answer") or payload.get("directAnswer")
+            ),
+            constraints_used=_string_list(
+                payload.get("constraints_used") or payload.get("plan_basis")
+            ),
             blocks=blocks,
-            movement_logic=_string_list(payload.get("movement_logic")),
-            weather_strategy=_string_list(payload.get("weather_strategy")),
+            movement_logic=_string_list(
+                payload.get("movement_logic") or payload.get("movement")
+            ),
+            weather_strategy=_string_list(
+                payload.get("weather_strategy") or payload.get("weather_adaptation")
+            ),
             tips=_string_list(payload.get("tips")),
-            limitations=_string_list(payload.get("limitations")),
-            source_ids=_string_list(payload.get("source_ids")),
+            limitations=_string_list(payload.get("limitations") or payload.get("final_notes")),
+            source_ids=_string_list(payload.get("source_ids") or payload.get("sources")),
         )
 
 
@@ -186,8 +200,22 @@ def _string_list(value: Any) -> List[str]:
     cleaned: List[str] = []
     forbidden = {"", "n/a", "na", "none", "null", "unknown", "not available", "not provided", "+ info"}
     for item in candidates:
-        text = str(item or "").strip()
+        text = _clean_plan_string(item)
         if not text or text.lower().strip(" .:-_") in forbidden:
             continue
         cleaned.append(text)
     return cleaned
+
+
+def _clean_plan_string(value: Any) -> str:
+    """Return a compact planner string without control formatting.
+
+    Args:
+        value: Raw scalar value parsed from a planner JSON payload.
+
+    Returns:
+        Trimmed string preserving useful Markdown links for the renderer.
+    """
+    text = str(value or "").strip()
+    text = text.replace("\r", " ").replace("\n", " ")
+    return " ".join(text.split())

@@ -3753,6 +3753,7 @@ class TransportAgent(BaseAgent):
                     {},
                     str(raw_status),
                     language,
+                    user_message=user_message,
                 )
 
         summary_tool = self._get_tool_by_name("get_transport_summary")
@@ -4239,6 +4240,7 @@ class TransportAgent(BaseAgent):
         tool_args: Dict[str, Any],
         result: str,
         language: str,
+        user_message: str = "",
     ) -> str:
         """Post-process deterministic single-tool outputs for cleaner user rendering."""
         cleaned_result = str(result or "").strip()
@@ -4287,26 +4289,42 @@ class TransportAgent(BaseAgent):
                 flags=re.IGNORECASE,
             ):
                 parsed_lines.append(
-                    "- 🟢 **Todas as linhas**: circulação normal"
+                    "- ✅ **Todas as linhas**: circulação normal"
                     if language == "pt"
-                    else "- 🟢 **All lines**: normal service"
+                    else "- ✅ **All lines**: normal service"
                 )
 
             if parsed_lines:
-                title = "### 🚇 Estado do Metro de Lisboa" if language == "pt" else "### 🚇 Lisbon Metro Status"
+                title = "### 🚇 **Estado do Metro de Lisboa**" if language == "pt" else "### 🚇 **Lisbon Metro Status**"
                 disrupted_lines = [line for line in parsed_lines if not re.search(r":\s*(?:circulação normal|normal service)\s*$", line, flags=re.IGNORECASE)]
+                normalized_query = _normalize_token(user_message)
+                asks_disruption_polarity = bool(
+                    re.search(
+                        r"\b(?:perturbacao|perturbacoes|incidente|incidentes|avaria|avarias|disruption|disruptions|delay|delays|problem|problems)\b",
+                        normalized_query,
+                    )
+                )
                 if disrupted_lines:
                     direct_answer = (
-                        "Não, não totalmente: há perturbações reportadas em pelo menos uma linha."
+                        "✅ **Resposta direta:** Sim, há perturbações reportadas em pelo menos uma linha."
                         if language == "pt"
-                        else "No, not fully: at least one line has a reported disruption."
+                        else "✅ **Direct answer:** Yes, at least one line has a reported disruption."
                     )
                 else:
-                    direct_answer = (
-                        "Sim, as linhas do Metro estão reportadas com circulação normal."
-                        if language == "pt"
-                        else "Yes, the Metro lines are currently reported with normal service."
-                    )
+                    if language == "pt":
+                        answer_text = (
+                            "Não, não há perturbações reportadas neste momento nas linhas do Metro de Lisboa."
+                            if asks_disruption_polarity
+                            else "Sim, as linhas do Metro de Lisboa estão reportadas com circulação normal."
+                        )
+                        direct_answer = f"✅ **Resposta direta:** {answer_text}"
+                    else:
+                        answer_text = (
+                            "No, there are no reported disruptions on Lisbon Metro lines right now."
+                            if asks_disruption_polarity
+                            else "Yes, Lisbon Metro lines are currently reported with normal service."
+                        )
+                        direct_answer = f"✅ **Direct answer:** {answer_text}"
                 return "\n".join(
                     [
                         title,
@@ -5097,6 +5115,7 @@ class TransportAgent(BaseAgent):
             tool_args=tool_args,
             result=str(result).strip(),
             language=resolved_language,
+            user_message=user_message,
         )
         finalized_response = self._finalize_transport_response(
             formatted_result,

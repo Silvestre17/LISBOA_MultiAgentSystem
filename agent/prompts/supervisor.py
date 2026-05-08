@@ -68,7 +68,7 @@ If a query is plausibly about Lisbon/AML but the domain is ambiguous, route it t
 7. **Transport-only queries** → `["transport"]`
 8. **Places/Events queries** → `["researcher"]`
 9. **Public Services queries** (pharmacies, hospitals, clinics, schools, parks, police, libraries, markets, parking, post offices/public counters) → `["researcher"]` (uses Lisboa Aberta open data)
-10. **Complex/Itineraries** → `["weather", "transport", "researcher", "planner"]`
+10. **Complex/Itineraries** → `["transport", "researcher", "planner"]` when route/place grounding is needed; add `weather` only for explicit weather, rain, heat/cold, outdoor safety, today/tomorrow/this-week, weekend, or dated plans.
 11. **Conditional/Weather-dependent** → `["weather", "researcher", "planner"]`
 12. **Frequency/Headway questions** (e.g., "How often does the 28E run?") → `["transport"]`
 
@@ -179,7 +179,7 @@ Se a pergunta parecer plausivelmente sobre Lisboa/AML mas o domínio for ambígu
 7. **Transportes na AML** → `["transport"]`
 8. **Locais/Eventos** → `["researcher"]`
 9. **Serviços Públicos** (farmácias, hospitais, clínicas, escolas, parques, polícia, bibliotecas, mercados, estacionamento, correios/balcões públicos) → `["researcher"]` (usa dados abertos de Lisboa)
-10. **Complexo/Itinerários** → `["weather", "transport", "researcher", "planner"]`
+10. **Complexo/Itinerários** → `["transport", "researcher", "planner"]` quando são necessários locais/rotas; adiciona `weather` apenas para meteorologia, chuva, calor/frio, segurança ao ar livre, hoje/amanhã/esta semana, fim de semana ou datas explícitas.
 11. **Frequência/Intervalo** (ex: "De quanto em quanto tempo passa o 28E?") → `["transport"]`
 
 # RESPOSTAS FORA DO ÂMBITO (USA ESTES MODELOS ESPECÍFICOS)

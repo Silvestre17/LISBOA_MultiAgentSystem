@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 from app import (
     count_user_interactions,
+    normalize_streamlit_chat_markdown,
     render_assistant_markdown,
     request_capture_locked,
     runtime_auto_initialize_enabled,
@@ -93,6 +94,24 @@ def test_render_assistant_markdown_rerenders_original_full_text_after_streaming(
         "### 🎭 Evento\n- 📍 **Morada:** Lisboa\n- 📅 **Data/Hora:** Hoje\n"
     )
     assert final_text == "### 🎭 Evento\n- 📍 **Morada:** Lisboa\n- 📅 **Data/Hora:** Hoje\n"
+
+
+def test_streamlit_markdown_normalizer_prevents_orphan_indented_code_blocks() -> None:
+    """Indented LISBOA card bullets need a parent list item for Streamlit Markdown."""
+    raw = (
+        "### 📍 **Suggested route**\n\n"
+        "**🏷️ Water Museum**\n"
+        "    - 📝 **Description:** Historic reservoir.\n"
+        "    - 📍 **Address:** Lisboa\n\n"
+        "### 🚇 **How to move**\n"
+        "    - 🚇 **Metro:** Saldanha to Avenida\n"
+    )
+
+    normalized = normalize_streamlit_chat_markdown(raw)
+
+    assert "- **🏷️ Water Museum**" in normalized
+    assert "    - 📝 **Description:** Historic reservoir." in normalized
+    assert "\n- 🚇 **Metro:** Saldanha to Avenida" in normalized
 
 
 def test_runtime_auto_initialize_enabled_only_in_locked_production_mode() -> None:

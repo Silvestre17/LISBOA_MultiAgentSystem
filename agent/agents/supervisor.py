@@ -1266,7 +1266,6 @@ class SupervisorAgent(BaseAgent):
             r"\bfor today\b",
             r"\bpara hoje\b",
             r"\bthis\s+(?:morning|afternoon|evening)\b",
-            r"\b(?:morning|afternoon|evening)\b",
             r"\btonight\b",
             r"\besta\s+(?:manh[Ã£a]|tarde|noite)\b",
             r"\blogo\s+Ã \s+noite\b",

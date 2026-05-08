@@ -1053,6 +1053,7 @@ class QualityAssuranceAgent(BaseAgent):
         )
 
         per_agent_fact_checks: Dict[str, Dict[str, Any]] = {}
+        planner_expected = "planner" in set(agents_called or [])
         for agent_name, output in agent_outputs.items():
             if agent_name.startswith("_") or not isinstance(output, str):
                 continue
@@ -1062,6 +1063,7 @@ class QualityAssuranceAgent(BaseAgent):
                 user_context,
                 language=language,
                 agent_name=agent_name,
+                intermediate_output=planner_expected,
             )
 
         combined_fact_check = self._verify_facts(
@@ -1069,6 +1071,7 @@ class QualityAssuranceAgent(BaseAgent):
             user_query,
             user_context,
             language=language,
+            intermediate_output=planner_expected,
         )
         fact_check = self._merge_fact_check_results(
             combined_fact_check=combined_fact_check,
@@ -1260,6 +1263,7 @@ class QualityAssuranceAgent(BaseAgent):
         user_context: Optional[Dict[str, Any]] = None,
         language: Optional[str] = None,
         agent_name: Optional[str] = None,
+        intermediate_output: bool = False,
     ) -> Dict[str, Any]:
         """
         Deterministic fact verification against authoritative static data.
@@ -1279,6 +1283,10 @@ class QualityAssuranceAgent(BaseAgent):
             combined_output: All agent outputs concatenated.
             user_query: The user's original query (for context).
             user_context: User preferences/constraints dict.
+            intermediate_output: Whether this text is worker evidence that
+                will still pass through planner synthesis and final rendering.
+                Intermediate evidence is fact-checked, but it is not required
+                to satisfy the final Streamlit Markdown contract.
 
         Returns:
             Dict with:
@@ -1532,6 +1540,20 @@ class QualityAssuranceAgent(BaseAgent):
         # ── Check 10: User-facing output hygiene ───────────────────────
         # Flags backend-oriented fields that should never reach the final UI.
         checks.append("output_hygiene")
+        if intermediate_output:
+            result = {
+                "valid": len(critical_issues) == 0,
+                "disclaimers": disclaimers,
+                "critical_issues": critical_issues,
+                "checks_performed": checks,
+            }
+            if disclaimers or critical_issues:
+                logger.info(
+                    f"QA fact-check: {len(critical_issues)} critical issue(s), "
+                    f"{len(disclaimers)} disclaimer(s)"
+                )
+            return result
+
         structured_label_count = len(
             re.findall(r"\*\*[^*:\n]{2,40}:?\*\*", combined_output)
         )
