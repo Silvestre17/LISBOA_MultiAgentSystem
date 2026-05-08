@@ -54,6 +54,7 @@ jobs:
           mkdir -p hf_space_build/data/cp
           mkdir -p hf_space_build/data/pricing
           mkdir -p hf_space_build/data
+          mkdir -p hf_space_build/img
           mkdir -p hf_space_build/data_collection/webscraping
 
           cp Dockerfile hf_space_build/
@@ -67,7 +68,10 @@ jobs:
 
           rsync -a agent hf_space_build/
           rsync -a tools hf_space_build/
-          rsync -a img hf_space_build/
+          cp img/BannerLSIBOA_21-9_optimized.webp hf_space_build/img/
+          cp img/Logo_1-1_WithoutBG_optimized.webp hf_space_build/img/
+          cp img/LISBOA_Framework.svg hf_space_build/img/
+          cp img/t.png hf_space_build/img/
           rsync -a data/cp/ hf_space_build/data/cp/
           rsync -a data/pricing/ hf_space_build/data/pricing/
           rsync -a data_collection/webscraping/ hf_space_build/data_collection/webscraping/
