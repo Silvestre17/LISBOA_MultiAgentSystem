@@ -244,9 +244,6 @@ class Config:
     # =========================================================================
     # MULTI-AGENT SYSTEM CONFIGURATION
     # =========================================================================
-    # Enable/disable multi-agent mode (False = use single-agent V1)
-    USE_MULTI_AGENT = True
-
     # Agent model assignments by provider
     # Each provider has its own agent configuration
     # Format: "agent_name": {"provider": "...", "model": "...", "temperature": ...}

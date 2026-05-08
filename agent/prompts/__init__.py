@@ -4,20 +4,8 @@
 #
 #   Specialized prompts for each agent in the Multi-Agent System.
 #   Each agent has a focused, concise prompt optimized for its task.
-#
-#   Also re-exports the original single-agent system prompt for
-#   backward compatibility.
 # ==========================================================================
 
-# Import from original system prompt module (renamed to _system_prompt.py)
-# This maintains backward compatibility with existing code
-from agent.prompts._system_prompt import (
-    COMPACT_SYSTEM_PROMPT_EN,
-    COMPACT_SYSTEM_PROMPT_PT,
-    SYSTEM_PROMPT_EN,
-    SYSTEM_PROMPT_PT,
-    get_system_prompt,
-)
 from agent.prompts.planner import PLANNER_AGENT_PROMPT, get_planner_prompt
 from agent.prompts.qa import QA_AGENT_PROMPT_EN, QA_AGENT_PROMPT_PT, get_qa_prompt
 from agent.prompts.researcher import RESEARCHER_AGENT_PROMPT, get_researcher_prompt
@@ -32,13 +20,6 @@ from agent.prompts.transport import TRANSPORT_AGENT_PROMPT, get_transport_prompt
 from agent.prompts.weather import WEATHER_AGENT_PROMPT, get_weather_prompt
 
 __all__ = [
-    # Original single-agent prompts (backward compatibility)
-    "SYSTEM_PROMPT_EN",
-    "SYSTEM_PROMPT_PT",
-    "COMPACT_SYSTEM_PROMPT_EN",
-    "COMPACT_SYSTEM_PROMPT_PT",
-    "get_system_prompt",
-
     # Multi-agent specialized prompts
     "SUPERVISOR_PROMPT_EN",
     "SUPERVISOR_PROMPT_PT",

@@ -36,7 +36,6 @@ files = [
     r"agent\prompts\transport.py",
     r"agent\prompts\qa.py",
     r"agent\prompts\planner.py",
-    r"agent\prompts\_system_prompt.py",
     r"agent\prompts\supervisor.py",
     r"agent\prompts\researcher.py",
     r"agent\prompts\weather.py",

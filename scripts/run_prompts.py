@@ -483,10 +483,7 @@ def _print_smoke_tool_trace(messages, response: str, elapsed: float, execution_s
 def _warm_smoke_resources(language: str = "pt") -> dict[str, Any]:
     """Preload shared runtime resources before smoke-mode assistant startup."""
     print("\n🚀 Preloading shared runtime resources...", flush=True)
-    preload_status = run_startup_preload(
-        language=language,
-        use_multi_agent=Config.USE_MULTI_AGENT,
-    )
+    preload_status = run_startup_preload(language=language)
 
     transport_status = str(preload_status.get("transport_status") or "")
     if transport_status:
