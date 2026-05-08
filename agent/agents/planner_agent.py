@@ -17,8 +17,16 @@ from agent.agents.base import BaseAgent, clean_response
 from agent.prompts.planner import get_planner_prompt
 from agent.utils.langsmith_tracing import traceable
 from agent.utils.response_formatter import (
+    final_post_qa_guard,
     finalize_worker_response,
     infer_response_language,
+)
+from agent.planning import (
+    build_evidence_bundle,
+    build_structured_plan_messages,
+    parse_plan_draft_json,
+    render_plan_markdown,
+    validate_plan_draft,
 )
 
 _PLANNER_FIELD_LABELS = {
@@ -707,6 +715,60 @@ def _planner_response_matches_schema(response: str) -> bool:
     return True
 
 
+
+
+def _is_oriente_station_nearby_request(user_message: str) -> bool:
+    """Return whether Oriente should be treated as station/Parque das Nações locality."""
+    normalized = _normalize_planner_text(user_message or "")
+    if "oriente" not in normalized or "museu do oriente" in normalized:
+        return False
+    locality_signals = (
+        "arrive", "chego", "chegar", "nearby", "perto", "near", "dinner",
+        "jantar", "rain-safe", "cultural", "culture", "indoor", "interior",
+        "parque das nacoes", "station", "estacao",
+    )
+    return any(signal in normalized for signal in locality_signals)
+
+
+def _oriente_station_locality_cards(language: str) -> list[dict[str, str]]:
+    """Return stable Oriente/Parque das Nações anchors without live claims."""
+    if language == "pt":
+        return [
+            {
+                "name": "Estação do Oriente / Parque das Nações",
+                "category": "âncora local",
+                "description": "Usa Oriente como base compacta para uma chegada ao fim do dia, sem atravessar a cidade.",
+            },
+            {
+                "name": "Centro Vasco da Gama",
+                "category": "base coberta para jantar",
+                "description": "Opção prática e abrigada para procurar restauração sem assumir reserva ou horário específico.",
+            },
+            {
+                "name": "Oceanário / Pavilhão do Conhecimento",
+                "category": "referência cultural próxima",
+                "description": "Trata como alternativa cultural a confirmar, sem afirmar disponibilidade ou horário de visita.",
+            },
+        ]
+    return [
+        {
+            "name": "Oriente station / Parque das Nações",
+            "category": "local anchor",
+            "description": "Use Oriente as the compact arrival base instead of crossing the city.",
+        },
+        {
+            "name": "Centro Vasco da Gama",
+            "category": "covered dinner base",
+            "description": "A practical sheltered base for finding food without assuming booking or opening-hour confirmation.",
+        },
+        {
+            "name": "Oceanário / Pavilhão do Conhecimento",
+            "category": "nearby cultural reference",
+            "description": "Treat as a cultural backup to verify, without claiming availability or exact opening hours.",
+        },
+    ]
+
+
 def _build_structured_plan_fallback(
     *,
     user_message: str,
@@ -736,6 +798,12 @@ def _build_structured_plan_fallback(
         for clean_name in [_sanitize_planner_place_name(card.get("name", ""))]
         if clean_name
     ]
+    if _is_oriente_station_nearby_request(user_message):
+        clean_cards = [
+            card for card in clean_cards
+            if "museu do oriente" not in _normalize_planner_text(card.get("name", ""))
+        ]
+        clean_cards = _oriente_station_locality_cards(language) + clean_cards[:2]
     weather_bullets = _extract_weather_safety_bullets(weather_data, language)
     transport_bullets = _extract_planner_fallback_bullets(transport_data, max_items=4)
     source_line = _build_planner_fallback_source_line(
@@ -2063,6 +2131,46 @@ def _build_full_museum_day_transport_fallback(
     ).strip()
 
 
+def _is_full_museum_day_request(user_message: str) -> bool:
+    """Return whether the request asks for a full-day museum plan."""
+    normalized_query = _normalize_planner_text(user_message or "")
+    return bool(
+        re.search(r"\b(?:museum|museums|museu|museus)\b", normalized_query)
+        and re.search(r"\b(?:full day|day plan|dia inteiro|um dia|amanha|tomorrow)\b", normalized_query)
+    )
+
+
+def _planner_response_has_incomplete_museum_day_blocks(
+    user_message: str,
+    response: str,
+) -> bool:
+    """Return whether a museum-day planner draft contains empty generic blocks."""
+    if not _is_full_museum_day_request(user_message):
+        return False
+
+    normalized_response = _normalize_planner_text(response or "")
+    if not normalized_response:
+        return True
+
+    placeholder_patterns = [
+        r"\bblock\s+\d+\s*[.:·-]*\s*(?:short food|food/coffee|indoor backup|return leg|confirmable cultural stop)\b",
+        r"\bbloco\s+\d+\s*[.:·-]*\s*(?:pausa curta|backup interior|regresso|paragem cultural confirmavel)\b",
+        r"\bblock\s+\d+\s*[.:·-]*\s*$",
+        r"\bbloco\s+\d+\s*[.:·-]*\s*$",
+    ]
+    if any(re.search(pattern, normalized_response, flags=re.MULTILINE) for pattern in placeholder_patterns):
+        return True
+
+    museum_signal_count = len(
+        re.findall(
+            r"\b(?:museu|museum|maat|gulbenkian|coaches|coches|chiado|belem|bel[eé]m|carris museum|national museum)\b",
+            normalized_response,
+        )
+    )
+    has_itinerary_structure = bool(re.search(r"\b(?:plan blocks|recommended itinerary|roteiro recomendado|blocos do plano)\b", normalized_response))
+    return has_itinerary_structure and museum_signal_count < 3
+
+
 def _build_oriente_evening_food_culture_fallback(
     language: str,
     weather_data: str,
@@ -3241,11 +3349,7 @@ def _build_deterministic_planner_fallback(
         re.search(r"\b(?:coffee|cafe|cafes|café|cafes|pastelaria)\b", normalized_query)
         and re.search(r"\b(?:cultural|culture|cultura|cultural stop|paragem cultural)\b", normalized_query)
     )
-    museum_day_request = bool(
-        re.search(r"\b(?:museum|museums|museu|museus)\b", normalized_query)
-        and re.search(r"\b(?:full day|day plan|dia inteiro|um dia|amanha|tomorrow)\b", normalized_query)
-    )
-    if museum_day_request:
+    if _is_full_museum_day_request(user_message):
         return _build_full_museum_day_transport_fallback(
             user_message=user_message,
             language=language,
@@ -3733,6 +3837,99 @@ class PlannerAgent(BaseAgent):
         self.system_prompt = prompt
         return prompt
 
+    def _try_structured_json_plan(
+        self,
+        *,
+        user_message: str,
+        language: str,
+        weather_data: str,
+        transport_data: str,
+        places_data: str,
+        events_data: str,
+        qa_disclaimers: list[str] | None,
+        conversation_context: str,
+    ) -> str:
+        """Attempt the new evidence-card -> JSON -> deterministic-renderer path.
+
+        This is the preferred planner path. It keeps the LLM responsible for
+        planning decisions while making the visual response deterministic. If
+        the model does not return valid or sufficiently grounded JSON, the
+        legacy planner path below remains available as a fallback.
+        """
+        evidence = build_evidence_bundle(
+            weather_data=weather_data,
+            transport_data=transport_data,
+            places_data=places_data,
+            events_data=events_data,
+            qa_disclaimers=qa_disclaimers,
+        )
+
+        # If there is no usable evidence at all, keep the legacy path so its
+        # bounded fallbacks can explain the limitation.
+        if not evidence.cards:
+            return ""
+
+        messages = build_structured_plan_messages(
+            user_message=user_message,
+            language=language,
+            evidence=evidence,
+            conversation_context=conversation_context,
+        )
+        try:
+            response = self._safe_llm_invoke(self.llm, messages)
+        except Exception:
+            return ""
+
+        raw_content = getattr(response, "content", "")
+        draft = parse_plan_draft_json(str(raw_content or ""))
+        if draft is None:
+            draft = parse_plan_draft_json(clean_response(raw_content, _print=False))
+        if draft is None:
+            return ""
+
+        issues = validate_plan_draft(
+            draft,
+            evidence,
+            user_message=user_message,
+        )
+        if issues:
+            # Give the model one targeted repair attempt. This is not a free-form
+            # Markdown repair; it must still satisfy the same JSON contract.
+            retry_messages = messages + [
+                SystemMessage(
+                    content=(
+                        "The previous JSON failed validation. Return corrected JSON only. "
+                        "Do not add Markdown. Fix these issues: " + "; ".join(issues[:8])
+                    )
+                )
+            ]
+            try:
+                retry_response = self._safe_llm_invoke(self.llm, retry_messages, retries=1)
+                draft = parse_plan_draft_json(str(getattr(retry_response, "content", "") or ""))
+            except Exception:
+                draft = None
+            if draft is None:
+                return ""
+            issues = validate_plan_draft(
+                draft,
+                evidence,
+                user_message=user_message,
+            )
+            if issues:
+                return ""
+
+        rendered = render_plan_markdown(
+            draft,
+            sources=evidence.sources,
+            language=language,
+        )
+        rendered = final_post_qa_guard(rendered, language=language)
+        if not _planner_response_matches_schema(rendered):
+            return ""
+        if _planner_response_has_markdown_contract_defects(rendered):
+            return ""
+        return rendered.strip()
+
     @traceable(name="planner_agent", run_type="chain", tags=["sub-agent", "planner"])
     def invoke(
         self,
@@ -3760,9 +3957,28 @@ class PlannerAgent(BaseAgent):
             str: Formatted itinerary.
         """
         language = infer_response_language(user_query=user_message, default="en")
-        # Common planning requests must use the dynamic LLM synthesis path first.
-        # Deterministic builders below are retained only as safety fallbacks when
-        # the LLM fails, invents unsupported facts, or emits unsafe Markdown.
+        # Preferred path: the planner decides content in JSON, then a deterministic
+        # renderer guarantees LISBOA visual structure. This avoids asking the LLM
+        # to simultaneously plan and hand-format Markdown.
+        structured_plan = self._try_structured_json_plan(
+            user_message=user_message,
+            language=language,
+            weather_data=weather_data,
+            transport_data=transport_data,
+            places_data=places_data,
+            events_data=events_data,
+            qa_disclaimers=qa_disclaimers,
+            conversation_context=conversation_context,
+        )
+        if structured_plan:
+            return enforce_multi_day_quality_mode(
+                structured_plan,
+                user_message,
+                language,
+            )
+
+        # Legacy path: retained as a fallback when the JSON path cannot produce a
+        # valid, grounded PlanDraft.
 
         # Build context from agent outputs
         context_parts = []
@@ -3893,6 +4109,26 @@ class PlannerAgent(BaseAgent):
         try:
             response = self._safe_llm_invoke(self.llm, messages)
             cleaned_response = clean_response(response.content)
+            if _is_oriente_station_nearby_request(user_message) and "museu do oriente" in _normalize_planner_text(cleaned_response):
+                cleaned_response = _build_structured_plan_fallback(
+                    user_message=user_message,
+                    language=language,
+                    weather_data=weather_data,
+                    transport_data=transport_data,
+                    places_data=places_data,
+                    events_data=events_data,
+                    qa_disclaimers=qa_disclaimers,
+                    conversation_context=conversation_context,
+                )
+            if _planner_response_has_incomplete_museum_day_blocks(user_message, cleaned_response):
+                cleaned_response = _build_full_museum_day_transport_fallback(
+                    user_message=user_message,
+                    language=language,
+                    weather_data=weather_data,
+                    transport_data=transport_data,
+                    places_data=places_data,
+                    events_data=events_data,
+                )
         except Exception:
             fallback = _build_structured_plan_fallback(
                 user_message=user_message,
@@ -3960,6 +4196,26 @@ class PlannerAgent(BaseAgent):
             ]
             response = self._safe_llm_invoke(self.llm, retry_messages)
             cleaned_response = clean_response(response.content)
+            if _is_oriente_station_nearby_request(user_message) and "museu do oriente" in _normalize_planner_text(cleaned_response):
+                cleaned_response = _build_structured_plan_fallback(
+                    user_message=user_message,
+                    language=language,
+                    weather_data=weather_data,
+                    transport_data=transport_data,
+                    places_data=places_data,
+                    events_data=events_data,
+                    qa_disclaimers=qa_disclaimers,
+                    conversation_context=conversation_context,
+                )
+            if _planner_response_has_incomplete_museum_day_blocks(user_message, cleaned_response):
+                cleaned_response = _build_full_museum_day_transport_fallback(
+                    user_message=user_message,
+                    language=language,
+                    weather_data=weather_data,
+                    transport_data=transport_data,
+                    places_data=places_data,
+                    events_data=events_data,
+                )
             grounding_issues = _find_planner_grounding_issues(
                 cleaned_response,
                 allowed_places=allowed_places,
@@ -3979,17 +4235,28 @@ class PlannerAgent(BaseAgent):
             _planner_response_requires_fallback(cleaned_response)
             or _planner_response_has_markdown_contract_defects(cleaned_response)
             or not _planner_response_matches_schema(cleaned_response)
+            or _planner_response_has_incomplete_museum_day_blocks(user_message, cleaned_response)
         ):
-            cleaned_response = _build_structured_plan_fallback(
-                user_message=user_message,
-                language=language,
-                weather_data=weather_data,
-                transport_data=transport_data,
-                places_data=places_data,
-                events_data=events_data,
-                qa_disclaimers=qa_disclaimers,
-                conversation_context=conversation_context,
-            )
+            if _is_full_museum_day_request(user_message):
+                cleaned_response = _build_full_museum_day_transport_fallback(
+                    user_message=user_message,
+                    language=language,
+                    weather_data=weather_data,
+                    transport_data=transport_data,
+                    places_data=places_data,
+                    events_data=events_data,
+                )
+            else:
+                cleaned_response = _build_structured_plan_fallback(
+                    user_message=user_message,
+                    language=language,
+                    weather_data=weather_data,
+                    transport_data=transport_data,
+                    places_data=places_data,
+                    events_data=events_data,
+                    qa_disclaimers=qa_disclaimers,
+                    conversation_context=conversation_context,
+                )
         elif _planner_response_has_transport_quality_defects(
             cleaned_response,
             user_message,

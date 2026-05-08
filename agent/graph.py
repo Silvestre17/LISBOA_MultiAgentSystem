@@ -43,6 +43,7 @@ from agent.utils.langsmith_tracing import (
 # Response formatting for Streamlit rendering
 from agent.utils.response_formatter import (
     build_bilingual_note,
+    build_bounded_planning_framework,
     canonicalize_planner_source_line,
     canonicalize_transport_terms,
     enforce_language_labels,
@@ -50,6 +51,8 @@ from agent.utils.response_formatter import (
     final_post_qa_guard,
     final_visual_pass,
     finalize_worker_response,
+    has_source_line,
+    is_overcomplex_planning_request,
     format_response,
     generate_response_title,
     operators_from_tool_names,
@@ -1358,7 +1361,14 @@ class MultiAgentAssistant:
         if filtered_destinations:
             anchors["last_itinerary_destinations"] = filtered_destinations
             anchors["current_selected_destination"] = filtered_destinations[0]
-        anchors["last_plan_summary"] = re.sub(r"\s+", " ", final_output or "").strip()[:1400]
+        summary_parts: list[str] = []
+        if filtered_destinations:
+            summary_parts.append("Destinations: " + ", ".join(filtered_destinations[:5]))
+        if anchors.get("user_preferences"):
+            summary_parts.append("Preferences: " + ", ".join(str(item) for item in anchors.get("user_preferences") or []))
+        if anchors.get("excluded_areas"):
+            summary_parts.append("Excluded areas: " + ", ".join(str(item) for item in anchors.get("excluded_areas") or []))
+        anchors["last_plan_summary"] = "; ".join(summary_parts)[:700]
 
     def _run_lightweight_weather_fact_check(
         self,
@@ -1932,7 +1942,14 @@ class MultiAgentAssistant:
             )
         )
 
-        if agent_outputs and not planner_scope_fallback:
+        planner_has_structured_footer = planner_involved and has_source_line(final_output)
+        if planner_has_structured_footer:
+            # The structured planner renderer already cites only the source_ids
+            # selected by the PlanDraft. Do not replace that precise footer with
+            # a broader combined footer from every worker that happened to run.
+            final_output = canonicalize_planner_source_line(final_output, language=language)
+            final_output = final_visual_pass(final_output)
+        elif agent_outputs and not planner_scope_fallback:
             source_footer = self._build_combined_source_footer(agent_outputs, language)
             if source_footer:
                 footer_line_re = re.compile(r"^(?:[-*•]\s*)?📌\s*\*\*(?:Fontes?|Sources?):\*\*.*$", re.IGNORECASE)
@@ -2525,6 +2542,25 @@ class MultiAgentAssistant:
                 simple_weather_fact_check=None,
             )
         message = contextual_resolution.get("message", message)
+
+        if is_overcomplex_planning_request(message):
+            bounded_response = build_bounded_planning_framework(message, effective_language)
+            return self._finalize_chat_response(
+                response=bounded_response,
+                message=message,
+                language=effective_language,
+                agents_to_call=[],
+                routing_reasoning="Planner request exceeds safe grounded detail; returned bounded framework before worker execution.",
+                agent_outputs={},
+                direct_response_used=True,
+                start_time=start_time,
+                workers=[],
+                run_workers_in_parallel=False,
+                qa_result=None,
+                retry_agents_used=[],
+                final_repair_ran=False,
+                simple_weather_fact_check=None,
+            )
 
         if LANGSMITH_AVAILABLE:
             annotate_current_run(

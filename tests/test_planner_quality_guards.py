@@ -22,6 +22,7 @@ from agent.agents.planner_agent import (
     _is_historic_gastronomy_day_request,
     _is_next_day_planning_follow_up,
     _planner_response_has_markdown_contract_defects,
+    _planner_response_has_incomplete_museum_day_blocks,
     _planner_response_has_transport_quality_defects,
 )
 from agent.agents.researcher_agent import ResearcherAgent
@@ -33,6 +34,9 @@ from agent.utils.response_formatter import (
     canonicalize_planner_source_line,
     final_visual_pass,
     final_post_qa_guard,
+    build_bounded_planning_framework,
+    is_overcomplex_planning_request,
+    render_lisboa_planner_markdown,
     strip_internal_repository_source_links,
 )
 
@@ -1064,6 +1068,54 @@ def test_full_museum_day_fallback_respects_requested_start_area() -> None:
     assert "Rossio/Baixa-Chiado" not in response
 
 
+def test_planner_rejects_empty_museum_day_blocks() -> None:
+    """Full-day museum plans should not publish placeholder blocks."""
+    response = """### 📅 Structured 1-Day Lisbon Plan
+
+### ✅ Direct Answer
+Here is a short ordered plan.
+
+### 📍 Plan Blocks
+- **Block 1 · Carris Museum**
+- **Block 2 · short food/coffee break without assuming a booking.**
+- **Block 3 · indoor backup or return leg.**
+
+### 🚇 Movement Logic
+- Use public transport.
+
+### ⚠️ Limitations
+- Opening hours are not confirmed."""
+
+    assert _planner_response_has_incomplete_museum_day_blocks(
+        "Plan a full museum day in Lisbon for tomorrow, starting in Rossio and using public transport.",
+        response,
+    )
+
+
+def test_planner_accepts_concrete_museum_day_blocks() -> None:
+    """Concrete museum-day drafts should remain eligible for normal grounding checks."""
+    response = """### 📅 Full Museum Day From Rossio
+
+### ✅ Direct Answer
+Use a central morning and a Belém afternoon.
+
+### 📍 Recommended Itinerary
+- **09:30 · Chiado museum area**
+- **11:30 · National Museum of Ancient Art**
+- **15:00 · Belém museum cluster**
+
+### 🚇 Movement Logic
+- Use Carris 15E toward Belém where available.
+
+### ⚠️ Limitations
+- Opening hours are not confirmed."""
+
+    assert not _planner_response_has_incomplete_museum_day_blocks(
+        "Plan a full museum day in Lisbon for tomorrow, starting in Rossio and using public transport.",
+        response,
+    )
+
+
 def test_final_visual_pass_repairs_full_museum_day_headings() -> None:
     """Formatter should not leave planner section headers as top-level bullets."""
     response = (
@@ -1396,3 +1448,107 @@ def test_structured_planner_fallback_is_schema_valid_and_limits_overlong_request
     assert "Restaurant:**" not in response
     assert "Museum:**" not in response
 
+
+def test_final_guard_renders_raw_planner_schema_visual_contract() -> None:
+    """Raw planner schema labels are stable formatter defects, not valid final UI."""
+    raw = """### Title
+5-Day Lisbon Plan
+
+### Direct Answer
+A high-level plan is possible, but exact prices are not confirmed.
+
+### Constraints Used
+- history and viewpoints
+- public transport
+- rainy backups
+
+### Plan Blocks
+- Day 1 — Baixa and Chiado
+Why This Day: central orientation with short walks.
+Transport Note: use nearby metro anchors.
+
+### Movement Logic
+Use transport principles, not live departures.
+
+### Weather Strategy
+Keep indoor backups.
+
+### Limitations
+Opening hours and tickets were not confirmed.
+
+📌 **Source:** [*VisitLisboa*](https://www.visitlisboa.com)
+"""
+
+    guarded = final_post_qa_guard(raw, language="en")
+
+    assert "### Title" not in guarded
+    assert "### Direct Answer" not in guarded
+    assert "### Plan Blocks" not in guarded
+    assert "Why This Day:" not in guarded
+    assert "Transport Note:" not in guarded
+    assert "### 📅 **" in guarded
+    assert "✅ **Direct answer:**" in guarded
+    assert "### 🧭 **Constraints used**" in guarded
+    assert "### 📍 **Day 1" in guarded
+    assert "    - " in guarded
+    assert guarded.count("📌 **Source:**") == 1
+
+
+def test_overcomplex_planning_guard_builds_bounded_visual_answer() -> None:
+    """Long exact-detail itinerary requests should be bounded before worker synthesis."""
+    prompt = (
+        "Plan 7 days in Lisbon with exact routes, restaurants, tickets, prices, "
+        "weather, beaches, museums, nightlife, and no repeated neighbourhoods."
+    )
+
+    assert is_overcomplex_planning_request(prompt)
+    response = build_bounded_planning_framework(prompt, "en")
+
+    assert "### 📅 **" in response
+    assert "### Title" not in response
+    assert "### Direct Answer" not in response
+    assert "5-day high-level framework" in response
+    assert "exact live routes and schedules" in response.lower()
+    assert "📌 **Source:**" not in response
+    assert "    - " in response
+
+
+def test_conversation_anchor_extraction_rejects_schema_labels() -> None:
+    """Follow-up destination anchors must be real place-like labels, not schema headings."""
+    assistant = MultiAgentAssistant.__new__(MultiAgentAssistant)
+    response = """### 📅 **Structured 1-Day Lisbon Plan**
+
+✅ **Direct answer:** Use a compact plan.
+
+### 📍 **Block 1 · Museu de Lisboa - Santo António**
+    - 🎯 **Purpose:** Indoor stop.
+
+### 🚇 **Movement logic**
+    - 🚇 Use Rossio as origin.
+"""
+
+    anchors = assistant._extract_destination_candidates_from_plan(response)
+
+    assert "Structured 1-Day Lisbon Plan" not in anchors
+    assert "Direct Answer" not in anchors
+    assert "Movement logic" not in anchors
+    assert "Museu de Lisboa - Santo António" in anchors
+
+
+def test_oriente_nearby_fallback_uses_parque_das_nacoes_not_museu_do_oriente() -> None:
+    """Oriente station locality should not be conflated with Museu do Oriente."""
+    raw = _build_structured_plan_fallback(
+        user_message="I arrive at Oriente at 18:30 and want dinner plus a rain-safe cultural stop nearby.",
+        language="en",
+        weather_data="Rain possible this evening.",
+        transport_data="Metro Red line serves Oriente.",
+        places_data="### Museu do Oriente\nCategory: museum\nDescription: Cultural museum west of the station area.",
+        events_data="",
+        qa_disclaimers=None,
+    )
+    guarded = final_post_qa_guard(raw, language="en")
+
+    assert "Museu do Oriente" not in guarded
+    assert "Parque das Nações" in guarded or "Oriente station" in guarded
+    assert "Centro Vasco da Gama" in guarded
+    assert "opening hours" in guarded.lower() or "availability" in guarded.lower()

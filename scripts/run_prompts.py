@@ -83,7 +83,26 @@ DEFAULT_TRANSCRIPT_FILENAME = "test_queries_15.04.2026.txt"
 ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
 # Each prompt is a tuple: (prompt_text, language_code, category)
+APP_PROMPTS_TEST_PROMPTS = [
+    # App Prompts - Example Queries
+    ("Qual é a previsão do tempo para os próximos 3 dias?", "pt", "weather"),
+    ("Existem perturbações nas linhas do metro de Lisboa?", "pt", "transport"),
+    ("Encontra eventos de música ao vivo para este fim de semana.", "pt", "researcher"),
+    ("Onde fica a farmácia de serviço mais próxima do Rossio?", "pt", "researcher"),
+    ("Onde posso comer pratos tradicionais em Alfama?", "pt", "researcher"),
+    ("Planeia 2 dias a pé para amantes de arquitetura.", "pt", "planner"),
+    
+    # App Prompts - ⚡ Quick Actions
+    ("Qual é a previsão detalhada para Lisboa hoje? Existem avisos ativos?", "pt", "weather"),
+    ("Dá-me o ponto de situação do Metro, autocarros e comboios em Lisboa.", "pt", "transport"),
+    ("Quero explorar a cultura local. Que grandes eventos temos esta semana?", "pt", "researcher"),
+    ("Lista as atrações imperdíveis para quem visita Lisboa pela primeira vez.", "pt", "researcher"),
+    ("Cria um roteiro otimizado de 1 dia com monumentos históricos e gastronomia tradicional.", "pt", "planner"),
+]
+
 SMOKE_PROMPTS = [
+    *APP_PROMPTS_TEST_PROMPTS,
+
     # Additional test prompts (2026-04)
     ("Vai chover amahna em Lisboa?", "pt", "weather"),
     ("Dá-me o ponto de situação do Metro, autocarros e comboios em Lisboa.", "pt", "transport"),

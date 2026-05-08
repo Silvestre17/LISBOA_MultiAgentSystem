@@ -1,0 +1,90 @@
+# ==========================================================================
+# Master Thesis - Structured Planner Prompt
+#   - André Filipe Gomes Silvestre, 20240502
+#
+#   Builds the PlannerAgent message pair for JSON-only synthesis. The prompt
+#   delegates Markdown, visual formatting, indentation, and source-footers to
+#   deterministic code so the LLM focuses on selecting grounded plan content.
+# ==========================================================================
+from datetime import datetime
+
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from agent.planning.evidence import EvidenceBundle
+
+
+def build_structured_plan_messages(
+    *,
+    user_message: str,
+    language: str,
+    evidence: EvidenceBundle,
+    conversation_context: str = "",
+) -> list:
+    """Build messages that ask the planner LLM for JSON, not Markdown.
+
+    Args:
+        user_message: Original user request to satisfy.
+        language: Detected or requested response language.
+        evidence: Structured evidence bundle extracted from worker outputs.
+        conversation_context: Optional recent conversation context for
+            continuity-sensitive planning turns.
+
+    Returns:
+        LangChain system and human messages for structured plan synthesis.
+    """
+    is_pt = (language or "en").lower().startswith("pt")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    language_rule = "Portuguese from Portugal" if is_pt else "English"
+    evidence_text = evidence.to_prompt_text(language=language)
+    schema = """
+{
+  "title": "short user-facing title",
+  "direct_answer": "one concise answer sentence",
+  "constraints_used": ["constraint or preference actually used"],
+  "blocks": [
+    {
+      "title": "grounded place/event/service name or generic local block",
+      "kind": "place|museum|culture|event|food|coffee|pastry|transport|walk|service|activity",
+      "purpose": "why this block fits the request",
+      "details": ["grounded detail from evidence"],
+      "movement": ["grounded movement detail or scoped uncertainty"],
+      "weather": ["weather adaptation when relevant"],
+      "limitations": ["only relevant unconfirmed fields"],
+      "source_ids": ["source ids used by this block"]
+    }
+  ],
+  "movement_logic": ["overall movement logic"],
+  "weather_strategy": ["weather-aware strategy when relevant"],
+  "tips": ["short practical tips grounded in evidence"],
+  "limitations": ["global limitations"],
+  "source_ids": ["source ids materially used"]
+}
+""".strip()
+    # The schema is embedded directly in the prompt to keep the LLM output
+    # aligned with the dataclass contract used by the renderer and quality gate.
+    system = f"""
+You are LISBOA's planning composer. You decide the plan content, but a deterministic renderer will handle all Markdown, emojis, indentation, headings, and source footers.
+
+Return ONLY valid JSON. No Markdown. No prose outside JSON. No code fences.
+
+Language: {language_rule}.
+Current runtime: {now}.
+
+Hard rules:
+- Use only evidence cards below. Do not invent venues, restaurants, cafes, events, prices, opening hours, tickets, accessibility, live status, or exact routes.
+- If an exact transport leg is not evidenced, write a scoped uncertainty in movement or limitations.
+- If the user asks for public transport and transport evidence exists, include the line/operator/route detail that is evidenced.
+- Do not use live departures as a schedule for a future itinerary unless the user explicitly asks for live/next departures.
+- If events or places appear in the evidence, include their useful fields in details when selected.
+- Avoid static skeletons. Every block must explain purpose plus at least one useful detail, movement, weather adaptation, or limitation.
+- Keep one-day plans to 2 to 4 blocks. Multi-day plans may use up to 5 blocks.
+- Use source_ids only from the evidence. If unsure, leave the source_ids list empty and state the limitation.
+
+JSON schema:
+{schema}
+""".strip()
+    context_parts = ["# Evidence cards", evidence_text]
+    if conversation_context.strip():
+        context_parts.extend(["# Conversation continuity", conversation_context.strip()[:1200]])
+    human = "\n\n".join(context_parts) + f"\n\n# User request\n{user_message}\n\nReturn the JSON plan now."
+    return [SystemMessage(content=system), HumanMessage(content=human)]
