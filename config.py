@@ -89,6 +89,22 @@ class Config:
     # Directory for ChromaDB vector store (persistent embeddings)
     VECTOR_DB_DIR = BASE_DIR / "data" / "vector_db"
 
+    # Runtime vector database artifact download.
+    # Hosted deployments should keep data/vector_db out of the Space git history
+    # and fetch the latest release asset at startup when the local ChromaDB
+    # files are missing.
+    VECTOR_DB_RELEASE_ENABLED = _env_bool("VECTOR_DB_RELEASE_ENABLED", True)
+    VECTOR_DB_RELEASE_REPO = os.getenv("VECTOR_DB_RELEASE_REPO", "Silvestre17/LISBOA_MultiAgentSystem")
+    VECTOR_DB_RELEASE_TAG = os.getenv("VECTOR_DB_RELEASE_TAG", "vector-db-latest")
+    VECTOR_DB_RELEASE_ASSET = os.getenv("VECTOR_DB_RELEASE_ASSET", "vector_db.zip")
+    VECTOR_DB_RELEASE_TOKEN = (
+        os.getenv("VECTOR_DB_RELEASE_TOKEN")
+        or os.getenv("GITHUB_RELEASE_TOKEN")
+        or os.getenv("GITHUB_TOKEN")
+    )
+    VECTOR_DB_RELEASE_FORCE_DOWNLOAD = _env_bool("VECTOR_DB_RELEASE_FORCE_DOWNLOAD", False)
+    VECTOR_DB_RELEASE_TIMEOUT_SECONDS = int(os.getenv("VECTOR_DB_RELEASE_TIMEOUT_SECONDS", "120"))
+
     # Versioned local LLM pricing snapshot used for runtime/eval cost accounting.
     # This avoids live pricing lookups during user requests and keeps summaries
     # reproducible for a known snapshot date.
