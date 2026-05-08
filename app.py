@@ -1279,14 +1279,14 @@ def sync_page_from_query_params() -> None:
 
 
 def build_sidebar_url(page: str, language: str) -> str:
-    """Build a safe sidebar navigation URL preserving page and language."""
+    """Build a same-tab sidebar URL preserving page and language."""
     safe_page = page if page in {"chat", "info"} else "chat"
     safe_language = language if language in LANGUAGE_OPTIONS else "pt"
     return f"?page={safe_page}&lang={safe_language}"
 
 
 def render_language_selector(request_locked: bool) -> None:
-    """Render a responsive language selector that does not depend on emoji flags."""
+    """Render a responsive language selector with stable ellipsis behaviour."""
     current_language = st.session_state.get("language", "pt")
     current_page = st.session_state.get("current_page", "chat")
 
@@ -1314,7 +1314,9 @@ def render_language_selector(request_locked: bool) -> None:
 
         href = html.escape(build_sidebar_url(current_page, language_key), quote=True)
         aria_current = ' aria-current="true"' if is_active else ""
-        items.append(f'<a class="{class_attr}" href="{href}"{aria_current}>{content}</a>')
+        items.append(
+            f'<a class="{class_attr}" href="{href}" target="_self"{aria_current}>{content}</a>'
+        )
 
     selector_label = html.escape(t("language"))
     st.markdown(
