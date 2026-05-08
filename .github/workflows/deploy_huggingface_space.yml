@@ -43,7 +43,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
-          lfs: true
+          lfs: false
 
       - name: Prepare Hugging Face deploy bundle
         run: |
@@ -53,7 +53,7 @@ jobs:
           mkdir -p hf_space_build/.streamlit
           mkdir -p hf_space_build/data/cp
           mkdir -p hf_space_build/data/pricing
-          mkdir -p hf_space_build/data/vector_db
+          mkdir -p hf_space_build/data
           mkdir -p hf_space_build/data_collection/webscraping
 
           cp Dockerfile hf_space_build/
@@ -70,8 +70,17 @@ jobs:
           rsync -a img hf_space_build/
           rsync -a data/cp/ hf_space_build/data/cp/
           rsync -a data/pricing/ hf_space_build/data/pricing/
-          rsync -a data/vector_db/ hf_space_build/data/vector_db/
           rsync -a data_collection/webscraping/ hf_space_build/data_collection/webscraping/
+
+          cat > hf_space_build/data/vector_db_release.json <<EOF
+          {
+            "release_tag": "vector-db-latest",
+            "release_asset": "vector_db.zip",
+            "source_workflow": "${{ github.event.workflow_run.id || github.run_id }}",
+            "deploy_run_id": "${{ github.run_id }}",
+            "deployed_at": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          }
+          EOF
 
           cat > hf_space_build/README.md <<'EOF'
           ---

@@ -190,7 +190,16 @@ def _check_carris_metropolitana_readiness() -> Dict[str, Any]:
 def pre_warm_vector_store() -> bool:
     """Load the VisitLisboa vector store once before the first request."""
     try:
+        from agent.utils.vector_db_release import ensure_vector_db_from_release
         from tools.visitlisboa_api import initialize_vector_store
+
+        release_status = ensure_vector_db_from_release()
+        if not release_status.ok:
+            print(f"⚠️ Vector DB artifact unavailable: {release_status.message}", flush=True)
+            return False
+        if release_status.downloaded:
+            size_mb = (release_status.size_bytes or 0) / (1024 * 1024)
+            print(f"✅ Vector DB artifact downloaded ({size_mb:.1f} MB)", flush=True)
 
         initialize_vector_store()
         return True
