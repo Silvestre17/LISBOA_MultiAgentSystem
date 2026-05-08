@@ -175,6 +175,44 @@ WARNING_TYPES = {
     "Tempo Quente": {"en": "Hot Weather", "emoji": "🥵"}
 }
 
+
+def _format_warning_period(start_time: str, end_time: str) -> str:
+    """Format IPMA warning timestamps without exposing raw ISO values when possible."""
+    try:
+        start_dt = datetime.fromisoformat(str(start_time or "").replace('Z', '+00:00'))
+        end_dt = datetime.fromisoformat(str(end_time or "").replace('Z', '+00:00'))
+        return f"{start_dt.strftime('%b %d, %H:%M')} → {end_dt.strftime('%b %d, %H:%M')}"
+    except (ValueError, AttributeError):
+        safe_start = str(start_time or "").strip() or "not confirmed"
+        safe_end = str(end_time or "").strip() or "not confirmed"
+        return f"{safe_start} → {safe_end}"
+
+
+def _format_warning_item(warning: Dict[str, Any], *, include_description: bool = True) -> str:
+    """Return a render-safe Markdown card for one active IPMA warning.
+
+    The tool output is intentionally English because tools are language-neutral
+    at invocation time. Worker and final formatters localize labels when the
+    user query is Portuguese. This function avoids raw enum labels such as
+    PRECIPITATION/WIND and keeps warning fields aligned for Streamlit.
+    """
+    level = str(warning.get('awarenessLevelID', 'unknown') or 'unknown').lower()
+    level_info = WARNING_LEVELS.get(level, {"emoji": "⚪", "description": "Unknown"})
+    warning_type_pt = str(warning.get('awarenessTypeName', 'Unknown') or 'Unknown').strip()
+    warning_type_info = WARNING_TYPES.get(warning_type_pt, {"en": warning_type_pt, "emoji": "⚠️"})
+    period = _format_warning_period(warning.get('startTime', ''), warning.get('endTime', ''))
+    description = str(warning.get('text', '') or '').strip()
+
+    lines = [
+        f"- {level_info['emoji']} {warning_type_info['emoji']} **{warning_type_info['en']}**",
+        f"    - 🧭 **Level:** {level_info['description']}",
+        f"    - ⏰ **Period:** {period}",
+    ]
+    if include_description and description:
+        lines.append(f"    - 📝 **Description:** {description}")
+    return "\n".join(lines)
+
+
 # Wind direction mapping
 WIND_DIRECTIONS = {
     "N": "North", "NE": "Northeast", "E": "East", "SE": "Southeast",
@@ -411,40 +449,14 @@ def get_weather_warnings(area: str = "LSB") -> str:
         )
     )
 
-    # Format response
-    response = "⚠️ Active Weather Warnings"
+    # Format response using render-safe Markdown. Keep the tool text in English;
+    # language localization is applied by the worker/final formatter.
+    response = "### ⚠️ **Active weather warnings"
     if area_label:
         response += f" for {area_label}"
-    response += ":\n"
-    response += "=" * 40 + "\n\n"
-
-    for warning in active_warnings:
-        level = warning.get('awarenessLevelID', 'unknown').lower()
-        level_info = WARNING_LEVELS.get(level, {"emoji": "⚪", "description": "Unknown"})
-
-        warning_type_pt = warning.get('awarenessTypeName', 'Unknown')
-        warning_type_info = WARNING_TYPES.get(warning_type_pt, {"en": warning_type_pt, "emoji": "⚠️"})
-
-        text = warning.get('text', '')
-        start_time = warning.get('startTime', 'N/A')
-        end_time = warning.get('endTime', 'N/A')
-
-        # Format times
-        try:
-            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-            end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
-            time_str = f"{start_dt.strftime('%b %d, %H:%M')} → {end_dt.strftime('%b %d, %H:%M')}"
-        except (ValueError, AttributeError):
-            time_str = f"{start_time} → {end_time}"
-
-        response += f"{level_info['emoji']} {warning_type_info['emoji']} {warning_type_info['en'].upper()}\n"
-        response += f"   Level: {level_info['description']}\n"
-        response += f"   ⏰ {time_str}\n"
-        if text:
-            response += f"   📝 {text}\n"
-        response += "\n"
-
-    response += "📌 Fonte: [IPMA](https://www.ipma.pt) - Instituto Português do Mar e da Atmosfera"
+    response += "**\n\n"
+    response += "\n".join(_format_warning_item(warning) for warning in active_warnings)
+    response += "\n\n📌 **Source:** [*IPMA*](https://www.ipma.pt/en/) | **Updated:** " + datetime.now().strftime("%H:%M")
 
     return response
 
@@ -701,11 +713,7 @@ def get_current_weather_summary() -> str:
         if active:
             response += "⚠️ Active Warnings:\n"
             for w in active[:3]:  # Max 3 warnings
-                level = w.get('awarenessLevelID', 'unknown').lower()
-                level_info = WARNING_LEVELS.get(level, {"emoji": "⚪"})
-                warning_type_pt = w.get('awarenessTypeName', 'Unknown')
-                warning_type_info = WARNING_TYPES.get(warning_type_pt, {"en": warning_type_pt, "emoji": "⚠️"})
-                response += f"   {level_info['emoji']} {warning_type_info['emoji']} {warning_type_info['en']}\n"
+                response += _format_warning_item(w, include_description=False) + "\n"
         else:
             response += "✅ No active weather warnings.\n"
     else:

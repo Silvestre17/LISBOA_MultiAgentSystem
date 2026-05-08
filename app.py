@@ -1,5 +1,11 @@
 # ==========================================================================
-# LISBOA - Lisbon Itinerary System Based On AI
+# Master Thesis - Streamlit Application
+#   - André Filipe Gomes Silvestre, 20240502
+#
+#   Streamlit user interface for LISBOA, the Lisbon Itinerary System Based On
+#   AI. Provides the interactive chat workflow, provider selection, quick
+#   actions, tracing controls, debug visibility, and response rendering for the
+#   multi-agent runtime.
 # ==========================================================================
 
 import logging
@@ -2083,12 +2089,20 @@ def render_assistant_markdown(text: str) -> str:
 
 
 def clean_response_for_display(text: str) -> str:
-    """Remove obvious citation artefacts before rendering the final response."""
-    from agent.utils.response_formatter import final_visual_pass
+    """Remove citation artefacts and apply the final render-safe Markdown guard."""
+    from agent.utils.response_formatter import (
+        final_post_qa_guard,
+        final_visual_pass,
+        infer_response_language,
+    )
 
     cleaned = re.sub(r"【.*?】", "", text or "")
     cleaned = cleaned.replace("\x00", "").strip()
-    return final_visual_pass(cleaned)
+    display_language = infer_response_language(
+        context_text=cleaned,
+        default=st.session_state.get("language", "en"),
+    )
+    return final_post_qa_guard(final_visual_pass(cleaned), language=display_language)
 
 
 def count_user_interactions(messages: list[dict[str, Any]]) -> int:

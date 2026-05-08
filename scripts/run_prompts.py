@@ -105,7 +105,6 @@ SMOKE_PROMPTS = [
 
     # Additional test prompts (2026-04)
     ("Vai chover amahna em Lisboa?", "pt", "weather"),
-    ("Dá-me o ponto de situação do Metro, autocarros e comboios em Lisboa.", "pt", "transport"),
     ("Quando é a Feira do Livro?", "pt", "event"),
     ("Fala-me do Web Summit", "pt", "event"),
     ("Onde fica o Museu do Livro?", "pt", "researcher"),

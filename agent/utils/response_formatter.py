@@ -10444,6 +10444,261 @@ def render_lisboa_planner_markdown(text: str, language: str = "en") -> str:
     return f"{rendered}\n\n{footer}" if footer else rendered
 
 
+
+def _normalize_warning_display_label(label: str, language: str) -> str:
+    """Normalize raw IPMA warning labels that can leak from API payloads or tool text."""
+    normalized = unicodedata.normalize("NFKD", str(label or ""))
+    normalized = normalized.encode("ascii", "ignore").decode("ascii").strip().lower()
+    normalized = re.sub(r"[_\s-]+", " ", normalized)
+    mapping = {
+        "precipitation": ("Precipitação", "Precipitation"),
+        "precipitacao": ("Precipitação", "Precipitation"),
+        "wind": ("Vento", "Wind"),
+        "vento": ("Vento", "Wind"),
+        "thunderstorm": ("Trovoada", "Thunderstorm"),
+        "thunderstorms": ("Trovoada", "Thunderstorm"),
+        "trovoada": ("Trovoada", "Thunderstorm"),
+        "fog": ("Nevoeiro", "Fog"),
+        "nevoeiro": ("Nevoeiro", "Fog"),
+        "snow": ("Neve", "Snow"),
+        "neve": ("Neve", "Snow"),
+        "rough sea": ("Agitação marítima", "Rough sea"),
+        "agitacao maritima": ("Agitação marítima", "Rough sea"),
+        "hot weather": ("Tempo quente", "Hot weather"),
+        "tempo quente": ("Tempo quente", "Hot weather"),
+        "cold weather": ("Tempo frio", "Cold weather"),
+        "tempo frio": ("Tempo frio", "Cold weather"),
+    }
+    if normalized in mapping:
+        pt_label, en_label = mapping[normalized]
+        return pt_label if language == "pt" else en_label
+    return str(label or "").strip().title()
+
+
+def _normalize_weather_warning_layout(text: str, language: str) -> str:
+    """Make IPMA warning blocks render as aligned Markdown cards."""
+    if not text:
+        return text
+
+    labels = [
+        "PRECIPITATION", "PRECIPITAÇÃO", "PRECIPITACAO", "WIND", "VENTO",
+        "THUNDERSTORMS", "THUNDERSTORM", "TROVOADA", "FOG", "NEVOEIRO",
+        "SNOW", "NEVE", "ROUGH_SEA", "AGITAÇÃO MARÍTIMA", "AGITACAO MARITIMA",
+        "HOT_WEATHER", "COLD_WEATHER",
+    ]
+    for raw in labels:
+        text = re.sub(rf"\b{re.escape(raw)}\b", _normalize_warning_display_label(raw, language), text, flags=re.IGNORECASE)
+
+    # Repair a known Markdown corruption where a formatter joins the warning
+    # title and the level label into one bold token.
+    text = re.sub(
+        r"(?m)^-\s*(?P<level>[🟢🟡🟠🔴⚪])?\s*(?P<emoji>[🌧️💨⛈️🌫️❄️🌊🥶🥵⚠️]*)\s*\*\*(?P<label>Precipitação|Precipitation|Vento|Wind|Trovoada|Thunderstorm)(?:N[ií]vel|Level)\*\*:\s*(?P<value>.+)$",
+        lambda m: f"- {(m.group('level') or '🟡')} {(m.group('emoji') or '').strip()} **{m.group('label')}**\n    - 🧭 **{'Nível' if language == 'pt' else 'Level'}:** {m.group('value').strip()}",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    text = re.sub(
+        r"(?m)^-\s*(?P<level>[🟢🟡🟠🔴⚪])\s*(?P<emoji>[^*\n]*?)\*\*(?P<label>Precipitação|Precipitation|Vento|Wind|Trovoada|Thunderstorm)\s*(?:N[ií]vel|Level)\*\*:\s*(?P<value>.+)$",
+        lambda m: f"- {m.group('level')} {m.group('emoji').strip()} **{m.group('label').strip()}**\n    - 🧭 **{'Nível' if language == 'pt' else 'Level'}:** {m.group('value').strip()}",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    heading = "### ⚠️ **Avisos meteorológicos ativos**" if language == "pt" else "### ⚠️ **Active weather warnings**"
+    lines = text.splitlines()
+    out: List[str] = []
+    in_warnings = False
+    have_heading = False
+
+    def _is_warning_item(stripped_line: str) -> Optional[re.Match]:
+        patterns = [
+            r"^(?:[-*•]\s*)?(?P<level>[🟢🟡🟠🔴⚪])?\s*(?P<emoji>[🌧️💨⛈️🌫️❄️🌊🥶🥵⚠️]*)\s*\*\*(?P<label>[^*]+)\*\*\s*(?:[—-]\s*(?:N[ií]vel|Level)\s*:\s*(?P<leveltext>.+))?$",
+            r"^(?:[-*•]\s*)?(?P<level>[🟢🟡🟠🔴⚪])?\s*(?P<emoji>[🌧️💨⛈️🌫️❄️🌊🥶🥵⚠️]+)\s*(?P<label>[A-Za-zÀ-ÿ_ ]{3,40})\s*$",
+            r"^(?:[-*•]\s*)?(?P<level>[🟢🟡🟠🔴⚪])\s+(?P<label>[A-Za-zÀ-ÿ_ ]{3,40})\s*$",
+        ]
+        for pattern in patterns:
+            match = re.match(pattern, stripped_line, flags=re.IGNORECASE)
+            if match:
+                return match
+        return None
+
+    for raw_line in lines:
+        line = raw_line.rstrip()
+        stripped = line.strip()
+
+        if re.fullmatch(r"=+", stripped):
+            continue
+
+        if re.search(r"(?:Avisos Meteorol[oó]gicos|Active Weather Warnings|Active Warnings)", stripped, flags=re.IGNORECASE):
+            if not have_heading:
+                if out and out[-1].strip():
+                    out.append("")
+                out.append(heading)
+                have_heading = True
+            in_warnings = True
+            continue
+
+        if in_warnings:
+            if not stripped:
+                out.append("")
+                continue
+            if stripped == "---" or re.search(r"Previs[aã]o do Tempo|Weather Forecast|Fonte:|Source:", stripped, flags=re.IGNORECASE):
+                in_warnings = False
+                if out and out[-1].strip():
+                    out.append("")
+                out.append(line)
+                continue
+            if re.match(r"^(?:💡|✅|###\s|🚇|🚋|🚌|🚆|\*\*[^*]+\*\*)", stripped) and not _is_warning_item(stripped):
+                in_warnings = False
+                if out and out[-1].strip():
+                    out.append("")
+                out.append(line)
+                continue
+
+            m = _is_warning_item(stripped)
+            if m:
+                raw_label = str(m.group("label") or "").strip()
+                if not re.search(r"[📅🗓️]", raw_label):
+                    label = _normalize_warning_display_label(raw_label, language)
+                    level = (m.groupdict().get("level") or "").strip() or "🟡"
+                    emoji = (m.groupdict().get("emoji") or "").strip()
+                    if not emoji:
+                        emoji = {"Precipitação": "🌧️", "Precipitation": "🌧️", "Vento": "💨", "Wind": "💨", "Trovoada": "⛈️", "Thunderstorm": "⛈️"}.get(label, "⚠️")
+                    out.append(f"- {level} {emoji} **{label}**")
+                    leveltext = (m.groupdict().get("leveltext") or "").strip()
+                    if leveltext:
+                        field = "Nível" if language == "pt" else "Level"
+                        out.append(f"    - 🧭 **{field}:** {leveltext}")
+                    continue
+
+
+            level_match = re.match(r"^(?:[-*•]\s*)?\*\*(?:N[ií]vel|Level)\*\*\s*:?\s*(.+)$", stripped, flags=re.IGNORECASE)
+            if level_match:
+                field = "Nível" if language == "pt" else "Level"
+                value = re.sub(r"^:\s*", "", level_match.group(1).strip())
+                out.append(f"    - 🧭 **{field}:** {value}")
+                continue
+
+            period_match = re.match(r"^(?:[-*•]\s*)?(?:⏰\s*)?(?:(?:\*\*(?:Per[ií]odo|Period)\s*:?\*\*)\s*:?)?\s*(.+?\s*→\s*.+)$", stripped, flags=re.IGNORECASE)
+            if period_match and "→" in stripped:
+                field = "Período" if language == "pt" else "Period"
+                value = re.sub(r"^\*\*(?:Per[ií]odo|Period)\*\*\s*:?\s*", "", period_match.group(1).strip(), flags=re.IGNORECASE)
+                out.append(f"    - ⏰ **{field}:** {value}")
+                continue
+
+            desc_match = re.match(r"^(?:[-*•]\s*)?(?:📝\s*)?(?:(?:\*\*(?:Descri[cç][aã]o|Description)\s*:?\*\*\s*:?)\s*)?(.+)$", stripped, flags=re.IGNORECASE)
+            if desc_match and stripped.startswith(("- 📝", "📝", "**Descrição", "**Description")):
+                field = "Descrição" if language == "pt" else "Description"
+                out.append(f"    - 📝 **{field}:** {desc_match.group(1).strip()}")
+                continue
+
+        out.append(line)
+
+    cleaned = "\n".join(out)
+    cleaned = re.sub(
+        r"(?m)^-\s*(?P<emoji>🌧️|💨|⛈️|🌫️|❄️|🌊|🥶|🥵)\s*\*\*(?P<label>Precipitação|Precipitation|Vento|Wind|Trovoada|Thunderstorm)\*\*\s*[—-]\s*(?:N[ií]vel|Level):\s*(?P<level>.+)$",
+        lambda m: f"- 🟡 {m.group('emoji')} **{_normalize_warning_display_label(m.group('label'), language)}**\n    - 🧭 **{'Nível' if language == 'pt' else 'Level'}:** {m.group('level').strip()}",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"(?m)^\*\*(?:Per[ií]odo|Period):?\*\*\s*(.+?→.+)$", lambda m: f"    - ⏰ **{'Período' if language == 'pt' else 'Period'}:** {m.group(1).strip()}", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"(?m)^\*\*(?:Descri[cç][aã]o|Description):?\*\*\s*(.+)$", lambda m: f"    - 📝 **{'Descrição' if language == 'pt' else 'Description'}:** {m.group(1).strip()}", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"(?m)^\s*[-*•]\s*🌤️\s+Aqui está a previsão meteorológica disponível para Lisboa\.?\s*$", "", cleaned)
+    cleaned = re.sub(r"(?m)^\s*[-*•]\s*🌤️\s+Here is the available weather forecast for Lisbon\.?\s*$", "", cleaned)
+    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
+
+def _normalize_transport_visual_contract(text: str, language: str) -> str:
+    """Repair recurring transport display defects without changing factual content."""
+    if not text:
+        return text
+    value = text
+    if language == "pt":
+        replacements = [
+            (r"###\s*🚇\s*\*\*Lisbon Metro Status\*\*", "### 🚇 **Estado do Metro de Lisboa**"),
+            (r"\bYes, the Metro lines are currently reported with normal service\.", "Sim, as linhas do Metro estão reportadas com circulação normal."),
+            (r"\*\*All lines\*\*\s*:\s*normal service", "**Todas as linhas**: circulação normal"),
+            (r"\bSource:\s*", "Fonte: "),
+            (r"\bUpdated:\s*", "Atualizado: "),
+            (r"cached Em tempo real snapshot in use", "snapshot Carris GTFS-RT em cache"),
+            (r"in use \((\d+)s old\)", r"em uso (\1s)"),
+        ]
+    else:
+        replacements = [
+            (r"###\s*🚇\s*\*\*Estado do Metro de Lisboa\*\*", "### 🚇 **Lisbon Metro Status**"),
+            (r"\bFonte:\s*", "Source: "),
+            (r"\bAtualizado:\s*", "Updated: "),
+            (r"cached Em tempo real snapshot in use", "cached real-time snapshot in use"),
+        ]
+    for pattern, repl in replacements:
+        value = re.sub(pattern, repl, value, flags=re.IGNORECASE)
+
+    value = re.sub(r"(?m)^(###\s+🚇\s+\*\*Mobilidade em Lisboa)(Comparação:\*\*)", r"\1 · Comparação:**", value)
+    value = re.sub(r"(?m)\*\*(Direct option|Route|Transfer points|Status|Nearest|Opção direta|Rota|Transbordos|Estado|Mais perto):([^*]+)\*\*", r"**\1:** \2", value)
+    value = re.sub(r"(?m)(\*\*(?:Direct option|Route|Transfer points|Status|Nearest|Opção direta|Rota|Transbordos|Estado|Mais perto):\*\*)(?=\S)", r"\1 ", value)
+    value = re.sub(r"(?m)^_Source:\s*Metro route and next departures provided in the transport data\._\s*$", "📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Updated:** " + datetime.now().strftime("%H:%M"), value)
+    value = re.sub(r"(?mi)^\s*-\s*ℹ️\s*\*\*(?:Nota|Note):\*\*\s*(?:🚇\s*Metro|🗺️\s*(?:Trajeto|Route):[^\n]*|📍\s*(?:Informação de localização|Location information)|ISCTE\s*-\s*Instituto Universitário de Lisboa)\s*$\n?", "", value)
+    value = re.sub(r"(?mi)^\s*-\s*ℹ️\s*\*\*(?:Nota|Note):\*\*\s*University campus near Entrecampos and Cidade Universitária\s*$\n?", "", value)
+
+    # Remove inherited Carris Metropolitana citation from city-Carris answers
+    # when no suburban-bus claim remains in the visible body.
+    footer_match = re.search(r"(?mi)^📌\s*\*\*(?:Fonte|Source):\*\*.*$", value)
+    if footer_match and "Carris Metropolitana" in footer_match.group(0):
+        body = value[:footer_match.start()]
+        if not re.search(r"\b(Carris Metropolitana|metropolitana|suburban|AML|Almada|Loures|Odivelas|Sintra|Setúbal|Setubal|Amadora|Cascais|Oeiras)\b", body, flags=re.IGNORECASE):
+            footer = footer_match.group(0)
+            footer = re.sub(r"\s*\|\s*\[\*Carris Metropolitana\*\]\(https://www\.carrismetropolitana\.pt\)", "", footer)
+            footer = re.sub(r"\[\*Carris Metropolitana\*\]\(https://www\.carrismetropolitana\.pt\)\s*\|\s*", "", footer)
+            value = value[:footer_match.start()] + footer + value[footer_match.end():]
+    return value.strip()
+
+
+def _normalize_researcher_visual_contract(text: str, language: str) -> str:
+    """Apply safe display-only fixes for place/event/service answers."""
+    if not text:
+        return text
+    value = text
+    value = re.sub(r"(?m)^-\s*>\s*", "⚠️ ", value)
+    value = re.sub(r"(?m)\*\*(Nearest|Mais perto):([^*]+)\*\*", r"**\1:** \2", value)
+    value = re.sub(r"(?m)(\*\*(?:Nearest|Mais perto):\*\*)(?=\S)", r"\1 ", value)
+    value = re.sub(r"(?m)^([ ]{0,3})(📍|📏|📂|📝|💰|🕐|📅|⏱️|🌐|📞|⭐|🔗|🎟️)\s+", r"\1    - \2 ", value)
+    if re.match(r"^\s*\*\*🍽️", value):
+        title = "### 🍽️ **Opções gastronómicas em Lisboa**" if language == "pt" else "### 🍽️ **Food options in Lisbon**"
+        value = f"{title}\n\n{value}"
+    if re.match(r"^\s*🏛️\s*\*\*\d+\s+locais", value, flags=re.IGNORECASE):
+        title = "### 🏛️ **Locais e atrações em Lisboa**" if language == "pt" else "### 🏛️ **Lisbon places and attractions**"
+        value = re.sub(r"^\s*🏛️\s*\*\*[^\n]+\*\*\s*", title, value, count=1, flags=re.IGNORECASE)
+    value = re.sub(r"\bFrom Monday to Saturday\b", "De segunda-feira a sábado" if language == "pt" else "From Monday to Saturday", value)
+    value = re.sub(r"\bminutes duration\b", "minutos de duração" if language == "pt" else "minutes duration", value)
+    value = value.replace("arquitectura", "arquitetura")
+    return value.strip()
+
+
+def _final_contract_pass(text: str, language: str = "en") -> str:
+    """Final non-generative output-contract pass shared by CLI and Streamlit."""
+    if not text:
+        return text or ""
+    lang = language if language in {"pt", "en"} else infer_response_language(context_text=text, default="en")
+    weather_like = bool(re.search(r"\b(?:IPMA|weather|tempo|meteorolog|chuva|rain|vento|wind|warning|aviso)\b", text, flags=re.IGNORECASE))
+    value = canonicalize_weather_terms(text, lang) if weather_like else text
+    value = _normalize_weather_warning_layout(value, lang) if weather_like else value
+    if lang == "en":
+        value = re.sub(r"\bgrounded\b", "supported", value, flags=re.IGNORECASE)
+        value = re.sub(r"(?i)\b(Wind)-(resistant|proof)\b", r"wind-\2", value)
+        value = re.sub(r"(?i)\b(south|north|east|west|southwest|southeast|northwest|northeast) Wind\b", r"\1 wind", value)
+        value = re.sub(r"(?i)\brain and Wind\b", "rain and wind", value)
+        value = re.sub(r"(?i)\byellow Wind warning\b", "yellow wind warning", value)
+    else:
+        value = re.sub(r"\bgrounded\b", "suportada", value, flags=re.IGNORECASE)
+    value = _normalize_transport_visual_contract(value, lang)
+    value = _normalize_researcher_visual_contract(value, lang)
+    value = enforce_language_labels(value, lang)
+    value = re.sub(r"(?m)^#{1,6}\s*(?:[*_`~\s]|[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D])*$\n?", "", value)
+    value = re.sub(r"\n{3,}", "\n\n", value)
+    return value.strip()
+
+
 def final_post_qa_guard(text: str, language: str = "en") -> str:
     """Run the deterministic guard that must execute after every QA repair.
 
@@ -10453,6 +10708,8 @@ def final_post_qa_guard(text: str, language: str = "en") -> str:
     """
     if not text or not isinstance(text, str):
         return text or ""
+
+    text = _final_contract_pass(text, language)
 
     structured_planner_schema = bool(PLANNER_RAW_SCHEMA_HEADING_RE.search(text or "")) or bool(PLANNER_FORBIDDEN_RAW_RE.search(text or ""))
     if structured_planner_schema:
@@ -10499,6 +10756,7 @@ def final_post_qa_guard(text: str, language: str = "en") -> str:
         guarded = strip_placeholder_field_lines(guarded)
         guarded = final_visual_pass(guarded)
         guarded = enforce_language_labels(guarded, language)
+    guarded = _final_contract_pass(guarded, language)
     guarded = re.sub(r"\n{3,}", "\n\n", guarded)
     return guarded.strip()
 
