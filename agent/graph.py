@@ -1297,7 +1297,16 @@ class MultiAgentAssistant:
             return {"message": message}
 
         destination = str(anchors.get("current_selected_destination") or "").strip()
-        uses_there = bool(re.search(r"\b(?:there|lá|la|ali|aí|ai)\b", normalized))
+        # Treat "there" as an anaphoric destination only when it is not the
+        # existential construction used in questions such as "are there any
+        # disruptions?". Those prompts can also contain an explicit
+        # origin-destination pair, for example "from Cais do Sodré to Cascais".
+        explicit_route_pair = bool(re.search(
+            r"\b(?:from\s+.+?\s+to\s+.+|de\s+.+?\s+(?:para|a|ao|à|at[eé])\s+.+)",
+            normalized,
+        ))
+        existential_there = bool(re.search(r"\bthere\s+(?:are|is|were|was|any|no)\b", normalized))
+        uses_there = bool(re.search(r"\b(?:there|lá|la|ali|aí|ai)\b", normalized)) and not existential_there and not explicit_route_pair
         asks_route = bool(re.search(r"\b(?:how do i get|como chego|como vou|ir de|go from|get from|from|desde|a partir de)\b", normalized))
         if uses_there and asks_route:
             if not destination:

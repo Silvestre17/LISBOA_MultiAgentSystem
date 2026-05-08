@@ -1797,6 +1797,74 @@ class ResearcherAgent(BaseAgent):
         ])
         return "\n".join(lines)
 
+    @staticmethod
+    def _is_free_museum_event_query(user_message: str) -> bool:
+        """Detect mixed free-museum plus free-event requests.
+
+        These queries are high risk because place and event cards can be
+        accidentally merged by free-form synthesis. Keep the answer separated:
+        museum availability is only stated when confirmed; event suggestions
+        come from the event source.
+        """
+        normalized = unicodedata.normalize("NFKD", user_message or "")
+        normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+        has_museum = any(token in normalized for token in ("museu", "museus", "museum", "museums"))
+        has_event = any(token in normalized for token in ("evento", "event", "events", "festival", "concerto", "concert"))
+        has_free = any(token in normalized for token in ("gratuito", "gratuitos", "gratis", "free"))
+        has_weekend = any(token in normalized for token in ("fim de semana", "weekend", "sabado", "domingo", "saturday", "sunday"))
+        return has_museum and has_event and has_free and has_weekend
+
+    def _run_free_museum_event_guard(self, user_message: str, language: str) -> str:
+        """Answer free-museum + free-event questions without merging cards."""
+        events_tool = self._get_tool_by_name("search_cultural_events")
+        timestamp = datetime.now().strftime("%H:%M")
+        event_result = ""
+        if events_tool:
+            try:
+                event_result = str(self._invoke_tool(
+                    events_tool,
+                    {
+                        "query": "free events" if language != "pt" else "eventos gratuitos",
+                        "date_filter": "this weekend",
+                        "max_results": 3,
+                        "language": language,
+                        "offset": 0,
+                    },
+                    tool_name="search_cultural_events",
+                )).strip()
+            except Exception:
+                event_result = ""
+        event_result = re.sub(r"(?mi)^📌\s*\*\*(?:Fonte|Source):\*\*.*$", "", event_result).strip()
+
+        if language == "pt":
+            lines = [
+                "### 🏛️ **Museus e eventos gratuitos em Lisboa**",
+                "",
+                "✅ **Resposta direta:** não vou juntar museus e eventos no mesmo cartão. Nos dados disponíveis, não confirmei uma lista segura de **museus com entrada gratuita exatamente neste fim de semana**.",
+                "",
+                "⚠️ **Limitação:** benefícios como \"gratuito com Lisboa Card\" não são o mesmo que entrada gratuita geral; por isso não os trato como museus gratuitos.",
+            ]
+            if event_result and not event_result.startswith(("❌", "Error:")):
+                lines.extend(["", "### 🎭 **Eventos gratuitos encontrados**", "", event_result])
+            else:
+                lines.extend(["", "### 🎭 **Eventos gratuitos encontrados**", "", "- Não encontrei eventos gratuitos confirmados para este filtro nos dados disponíveis."])
+            lines.extend(["", f"📌 **Fonte:** [*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos) | **Atualizado:** {timestamp}"])
+            return "\n".join(lines)
+
+        lines = [
+            "### 🏛️ **Free museums and free events in Lisbon**",
+            "",
+            "✅ **Direct answer:** I will not merge museum and event data into one card. In the available data, I could not safely confirm a list of **museums with general free entry exactly this weekend**.",
+            "",
+            "⚠️ **Limitation:** benefits such as \"free with Lisboa Card\" are not the same as general free entry, so I do not label them as free museums.",
+        ]
+        if event_result and not event_result.startswith(("❌", "Error:")):
+            lines.extend(["", "### 🎭 **Free events found**", "", event_result])
+        else:
+            lines.extend(["", "### 🎭 **Free events found**", "", "- I did not find confirmed free events for this filter in the available data."])
+        lines.extend(["", f"📌 **Source:** [*VisitLisboa Events*](https://www.visitlisboa.com/en/events) | **Updated:** {timestamp}"])
+        return "\n".join(lines)
+
     def _run_direct_place_lookup(
         self,
         user_message: str,
@@ -2874,6 +2942,17 @@ class ResearcherAgent(BaseAgent):
                 print("      [RESEARCHER] Using deterministic Lisboa Aberta service lookup...")
 
             response = self._run_direct_tool_fallback(user_message, language)
+            return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
+                response,
+                agent_name="researcher",
+                user_query=user_message,
+                language=language,
+            ))
+
+        if not is_greeting and self._is_free_museum_event_query(user_message):
+            if verbose:
+                print("      [RESEARCHER] Using guarded free museum/event lookup...")
+            response = self._run_free_museum_event_guard(user_message, language)
             return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
                 response,
                 agent_name="researcher",

@@ -7,6 +7,7 @@
 #   order, source footers, and cleanup so the planner LLM does not need to emit
 #   final Markdown directly.
 # ==========================================================================
+
 import re
 from datetime import datetime
 from typing import Dict, Iterable, List

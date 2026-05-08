@@ -473,6 +473,23 @@ class SupervisorAgent(BaseAgent):
                 "agents": ["weather"],
                 "direct_response": None,
             }
+
+        # A single recommendation for one museum/monument in a constrained time
+        # window is not an itinerary. Route it to Researcher so the after-hours
+        # availability guard can answer conservatively instead of publishing a
+        # generic planner skeleton.
+        if (
+            re.search(r"\b(?:recomendas?|recommend|suggest|qual|which)\b", message_lower)
+            and re.search(r"\b(?:museu|museus|museum|museums|monumento|monument)\b", message_lower)
+            and re.search(r"\b(?:\d{1,2}\s*(?:h|:|às|as)\s*\d{0,2}|domingo|sunday|tonight|esta noite|evening|fim do dia)\b", message_lower)
+            and not re.search(r"\b(?:plano|plan|itinerary|roteiro|agenda|2 dias|dois dias|day plan)\b", message_lower)
+        ):
+            return {
+                "reasoning": "Direct single place recommendation with time-window override",
+                "agents": ["researcher"],
+                "direct_response": None,
+            }
+
         if cls._is_planning_query(user_message) and not direct_weather_transport:
             return None
 
