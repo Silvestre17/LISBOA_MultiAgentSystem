@@ -207,7 +207,7 @@ TRANSLATIONS = {
         "info_stat_scope_value": "2",
         "info_stat_scope_label": "Urban Contexts",
         "info_f1_title": "Tourism and Culture",
-        "info_f1_desc": "Attractions, events, points of interest, and local context grounded in VisitLisboa and municipal data.",
+        "info_f1_desc": "Attractions, events, points of interest, and local context anchored in VisitLisboa and municipal data.",
         "info_f2_title": "Mobility",
         "info_f2_desc": "Route support across Metro, Carris Urban, Carris Metropolitana, CP, and multimodal transport logic.",
         "info_f3_title": "Weather",
@@ -564,10 +564,35 @@ def build_image_data_uri(image_path: str) -> str:
     return f"data:{mime_type};base64,{image_b64}"
 
 
+def resolve_asset_path(*parts: str) -> str:
+    """Return an absolute asset path only when the file exists."""
+    asset_path = os.path.join(os.path.dirname(__file__), "img", *parts)
+    if os.path.exists(asset_path):
+        return asset_path
+
+    logging.warning("UI asset missing: %s", asset_path)
+    return ""
+
+
+def resolve_first_asset_path(*filenames: str) -> str:
+    """Return the first existing asset path from the provided filenames."""
+    for filename in filenames:
+        asset_path = os.path.join(os.path.dirname(__file__), "img", filename)
+        if os.path.exists(asset_path):
+            return asset_path
+
+    logging.warning("No UI asset candidate exists: %s", ", ".join(filenames))
+    return ""
+
+
 # Auto load assets
-banner_path = os.path.join(os.path.dirname(__file__), "img", "BannerLSIBOA_21-9_optimized.webp")
-logo_path = os.path.join(os.path.dirname(__file__), "img", "Logo_1-1_WithoutBG.png")
-framework_path = os.path.join(os.path.dirname(__file__), "img", "LISBOA_Framework.svg")
+banner_path = resolve_asset_path("BannerLSIBOA_21-9_optimized.webp")
+logo_path = resolve_first_asset_path(
+    "Logo_1-1_WithoutBG_optimized.webp",
+    "Logo_1-1_WithoutBG.png",
+)
+small_logo_path = resolve_asset_path("t.png")
+framework_path = resolve_asset_path("LISBOA_Framework.svg")
 
 banner_url = build_image_data_uri(banner_path)
 logo_url = build_image_data_uri(logo_path)
@@ -1651,8 +1676,8 @@ def initialize_assistant(
 # UI COMPONENTS
 # ==========================================================================
 
-if logo_path:
-    st.logo("img/t.png", icon_image=logo_path, size="small")
+if small_logo_path:
+    st.logo(small_logo_path, icon_image=logo_path or small_logo_path, size="small")
 
 
 def display_banner():
@@ -2071,6 +2096,7 @@ def render_assistant_markdown(text: str) -> str:
         st.markdown("")
         return ""
 
+    text = normalize_streamlit_chat_markdown(text)
     placeholder = st.empty()
     rendered_chunks: list[str] = []
 
@@ -2086,6 +2112,47 @@ def render_assistant_markdown(text: str) -> str:
     placeholder.empty()
     st.empty().markdown(final_text)
     return final_text
+
+
+def normalize_streamlit_chat_markdown(text: str) -> str:
+    """Convert LISBOA card indentation into Markdown Streamlit renders as lists.
+
+    Streamlit/CommonMark treats a standalone four-space-indented ``-`` line as
+    a code block unless it is nested below a parent list item. LISBOA answers
+    use indented field bullets for visual alignment, so the app adds a list
+    parent for bold item cards and flattens any remaining orphan indented
+    bullets before calling ``st.markdown``.
+
+    Args:
+        text: Final assistant Markdown.
+
+    Returns:
+        Markdown that preserves content while avoiding accidental code blocks.
+    """
+    if not text:
+        return text or ""
+
+    lines = text.splitlines()
+    output: list[str] = []
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        next_line = lines[index + 1] if index + 1 < len(lines) else ""
+        if (
+            re.match(r"^\*\*(?:🏷️|📍|🏛️|🍽️|☕|🥐|🎭)\s+[^*]+\*\*$", stripped)
+            and re.match(r"^\s{4,}[-*]\s+", next_line)
+        ):
+            output.append(f"- {stripped}")
+            continue
+        if re.match(r"^\s{4,}[-*]\s+", line):
+            previous = next((candidate.strip() for candidate in reversed(output) if candidate.strip()), "")
+            if not previous.startswith(("- ", "* ")):
+                output.append(re.sub(r"^\s{4,}([-*]\s+)", r"\1", line))
+                continue
+        output.append(line)
+    normalized = "\n".join(output)
+    if text.endswith("\n"):
+        normalized += "\n"
+    return normalized
 
 
 def clean_response_for_display(text: str) -> str:
@@ -3196,7 +3263,10 @@ def main():
 
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+            content = msg["content"]
+            if msg["role"] == "assistant":
+                content = normalize_streamlit_chat_markdown(content)
+            st.markdown(content)
 
     if not request_locked and not st.session_state.messages:
         welcome_request = build_welcome()
