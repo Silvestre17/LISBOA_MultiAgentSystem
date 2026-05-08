@@ -78,6 +78,8 @@ env:
   VECTOR_DB_RELEASE_TAG: vector-db-latest
   VECTOR_DB_RELEASE_ASSET: vector_db.zip
   VECTOR_DB_MANIFEST_ASSET: vector_db_manifest.json
+  VECTOR_DB_STAGING_ASSET: vector_db_staging.zip
+  VECTOR_DB_STAGING_MANIFEST_ASSET: vector_db_staging_manifest.json
   VECTOR_DB_RELEASE_MAX_BYTES: "1800000000"
 
 jobs:
@@ -184,24 +186,33 @@ jobs:
           rm -rf /tmp/lisboa_vector_db_release
           mkdir -p /tmp/lisboa_vector_db_release
 
+          RESTORE_ASSET="$VECTOR_DB_STAGING_ASSET"
           if ! gh release download "$VECTOR_DB_RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --pattern "$VECTOR_DB_RELEASE_ASSET" \
+            --pattern "$RESTORE_ASSET" \
             --dir /tmp/lisboa_vector_db_release \
             --clobber; then
-            echo "ℹ️ Release exists but $VECTOR_DB_RELEASE_ASSET is not available yet"
-            exit 0
+            echo "ℹ️ No staging vector DB asset found; falling back to latest completed asset"
+            RESTORE_ASSET="$VECTOR_DB_RELEASE_ASSET"
+            if ! gh release download "$VECTOR_DB_RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern "$RESTORE_ASSET" \
+              --dir /tmp/lisboa_vector_db_release \
+              --clobber; then
+              echo "ℹ️ Release exists but no vector DB asset is available yet"
+              exit 0
+            fi
           fi
 
-          if [ ! -f "/tmp/lisboa_vector_db_release/$VECTOR_DB_RELEASE_ASSET" ]; then
+          if [ ! -f "/tmp/lisboa_vector_db_release/$RESTORE_ASSET" ]; then
             echo "ℹ️ Release asset was not downloaded; using checked-out data/vector_db as seed"
             exit 0
           fi
 
           rm -rf data/vector_db
           mkdir -p data/vector_db
-          unzip -q "/tmp/lisboa_vector_db_release/$VECTOR_DB_RELEASE_ASSET" -d data/vector_db
-          echo "✅ Restored vector database from GitHub Release asset"
+          unzip -q "/tmp/lisboa_vector_db_release/$RESTORE_ASSET" -d data/vector_db
+          echo "✅ Restored vector database from GitHub Release asset: $RESTORE_ASSET"
 
       # =====================================================================
       # Check for Data Changes
@@ -259,6 +270,8 @@ jobs:
 
           publish_vector_db_asset() {
             local publish_msg="$1"
+            local target_asset="$2"
+            local target_manifest="$3"
 
             if [ ! -d "data/vector_db" ]; then
               echo "ℹ️ data/vector_db does not exist; nothing to publish"
@@ -272,14 +285,16 @@ jobs:
               return 0
             fi
 
-            rm -f "$VECTOR_DB_RELEASE_ASSET" "$VECTOR_DB_MANIFEST_ASSET"
+            rm -f "$target_asset" "$target_manifest"
 
+            TARGET_ASSET="$target_asset" \
             python - <<'PY'
+          import os
           from pathlib import Path
           from zipfile import ZIP_DEFLATED, ZipFile
 
           source = Path("data/vector_db")
-          target = Path("vector_db.zip")
+          target = Path(os.environ["TARGET_ASSET"])
 
           with ZipFile(target, "w", compression=ZIP_DEFLATED, compresslevel=6) as archive:
               for path in sorted(source.rglob("*")):
@@ -289,17 +304,17 @@ jobs:
 
             local sha256
             local size_bytes
-            sha256=$(sha256sum "$VECTOR_DB_RELEASE_ASSET" | awk '{print $1}')
-            size_bytes=$(wc -c < "$VECTOR_DB_RELEASE_ASSET" | tr -d ' ')
+            sha256=$(sha256sum "$target_asset" | awk '{print $1}')
+            size_bytes=$(wc -c < "$target_asset" | tr -d ' ')
             if [ "$size_bytes" -gt "$VECTOR_DB_RELEASE_MAX_BYTES" ]; then
-              echo "❌ $VECTOR_DB_RELEASE_ASSET is too large: $size_bytes bytes"
+              echo "❌ $target_asset is too large: $size_bytes bytes"
               echo "   Limit configured by VECTOR_DB_RELEASE_MAX_BYTES: $VECTOR_DB_RELEASE_MAX_BYTES bytes"
               exit 1
             fi
 
-            cat > "$VECTOR_DB_MANIFEST_ASSET" <<EOF
+            cat > "$target_manifest" <<EOF
           {
-            "asset": "$VECTOR_DB_RELEASE_ASSET",
+            "asset": "$target_asset",
             "sha256": "$sha256",
             "size_bytes": $size_bytes,
             "source_repository": "$GITHUB_REPOSITORY",
@@ -319,12 +334,12 @@ jobs:
             fi
 
             gh release upload "$VECTOR_DB_RELEASE_TAG" \
-              "$VECTOR_DB_RELEASE_ASSET" \
-              "$VECTOR_DB_MANIFEST_ASSET" \
+              "$target_asset" \
+              "$target_manifest" \
               --repo "$GITHUB_REPOSITORY" \
               --clobber
 
-            echo "✅ Published vector DB release asset: $publish_msg"
+            echo "✅ Published vector DB release asset ($target_asset): $publish_msg"
           }
 
           # Configure max docs per iteration (default: 200)
@@ -382,15 +397,15 @@ jobs:
             
             # Handle different exit codes (including SIGTERM = 143)
             if [ $EXIT_CODE -eq 0 ]; then
-              publish_vector_db_asset "$COMMIT_MSG"
+              publish_vector_db_asset "$COMMIT_MSG [complete]" "$VECTOR_DB_RELEASE_ASSET" "$VECTOR_DB_MANIFEST_ASSET"
               echo "✅ Sync complete (all documents processed)"
               break
             elif [ $EXIT_CODE -eq 2 ]; then
-              publish_vector_db_asset "$COMMIT_MSG"
+              publish_vector_db_asset "$COMMIT_MSG [staging]" "$VECTOR_DB_STAGING_ASSET" "$VECTOR_DB_STAGING_MANIFEST_ASSET"
               echo "⏳ More work pending, continuing..."
               TOTAL_PROCESSED=$((TOTAL_PROCESSED + MAX_DOCS))
             elif [ $EXIT_CODE -eq 143 ]; then
-              publish_vector_db_asset "$COMMIT_MSG"
+              publish_vector_db_asset "$COMMIT_MSG [staging]" "$VECTOR_DB_STAGING_ASSET" "$VECTOR_DB_STAGING_MANIFEST_ASSET"
               # SIGTERM received (runner timeout/memory pressure)
               echo "⚠️ SIGTERM received (exit code 143) - runner terminated process"
               echo "   Work completed so far has been saved"
@@ -421,75 +436,6 @@ jobs:
         if: steps.check-changes.outputs.changes_detected == 'true' || github.event_name == 'workflow_dispatch'
         run: |
           python tools/vector_store.py --stats --no-gpu
-
-      # =====================================================================
-      # Publish final release asset
-      # =====================================================================
-
-      - name: Publish Vector Database Release Asset
-        if: steps.check-changes.outputs.changes_detected == 'true' || github.event_name == 'workflow_dispatch'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-
-          if [ ! -d "data/vector_db" ] || [ "$(find data/vector_db -type f | wc -l)" -eq 0 ]; then
-            echo "ℹ️ No vector DB files to publish"
-            exit 0
-          fi
-
-          rm -f "$VECTOR_DB_RELEASE_ASSET" "$VECTOR_DB_MANIFEST_ASSET"
-
-          python - <<'PY'
-          from pathlib import Path
-          from zipfile import ZIP_DEFLATED, ZipFile
-
-          source = Path("data/vector_db")
-          target = Path("vector_db.zip")
-
-          with ZipFile(target, "w", compression=ZIP_DEFLATED, compresslevel=6) as archive:
-              for path in sorted(source.rglob("*")):
-                  if path.is_file():
-                      archive.write(path, path.relative_to(source).as_posix())
-          PY
-
-          SHA256=$(sha256sum "$VECTOR_DB_RELEASE_ASSET" | awk '{print $1}')
-          SIZE_BYTES=$(wc -c < "$VECTOR_DB_RELEASE_ASSET" | tr -d ' ')
-          if [ "$SIZE_BYTES" -gt "$VECTOR_DB_RELEASE_MAX_BYTES" ]; then
-            echo "❌ $VECTOR_DB_RELEASE_ASSET is too large: $SIZE_BYTES bytes"
-            echo "   Limit configured by VECTOR_DB_RELEASE_MAX_BYTES: $VECTOR_DB_RELEASE_MAX_BYTES bytes"
-            exit 1
-          fi
-          COMMIT_MSG="Vector DB Sync: $(date +'%Y-%m-%d %H:%M')"
-
-          cat > "$VECTOR_DB_MANIFEST_ASSET" <<EOF
-          {
-            "asset": "$VECTOR_DB_RELEASE_ASSET",
-            "sha256": "$SHA256",
-            "size_bytes": $SIZE_BYTES,
-            "source_repository": "$GITHUB_REPOSITORY",
-            "source_commit": "$GITHUB_SHA",
-            "workflow_run_id": "$GITHUB_RUN_ID",
-            "published_at": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
-            "message": "$COMMIT_MSG"
-          }
-          EOF
-
-          if ! gh release view "$VECTOR_DB_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$VECTOR_DB_RELEASE_TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "Latest LISBOA Vector Database" \
-              --notes "Automatically updated vector database artifact for the LISBOA Space." \
-              --latest=false
-          fi
-
-          gh release upload "$VECTOR_DB_RELEASE_TAG" \
-            "$VECTOR_DB_RELEASE_ASSET" \
-            "$VECTOR_DB_MANIFEST_ASSET" \
-            --repo "$GITHUB_REPOSITORY" \
-            --clobber
-
-          echo "✅ Vector database published to GitHub Release"
 
       # =====================================================================
       # Skip notification
