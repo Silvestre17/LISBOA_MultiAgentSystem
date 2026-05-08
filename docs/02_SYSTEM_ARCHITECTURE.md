@@ -3,7 +3,7 @@
 This document describes the runtime architecture implemented in the repository today. The supported default path is the multi-agent flow inside `MultiAgentAssistant` in `agent/graph.py`.
 
 > [!IMPORTANT]
-> The repository still contains the single-agent `LisbonAssistant` for compatibility, but the documented default runtime is the multi-agent system.
+> The production runtime is the multi-agent system. The former compatibility path has been removed from the supported app flow.
 
 ## 🖼️ Conceptual Framework Figure
 
@@ -16,7 +16,7 @@ This document describes the runtime architecture implemented in the repository t
 
 | Layer | Main files | Responsibility |
 |------|------------|----------------|
-| UI | `app.py` | Streamlit chat, provider/model selection, session state, quick actions, info pages, startup warmup of Carris Urban DB, Metro station cache, CP GTFS + AML support, Carris Metropolitana caches, and (in multi-agent mode) the vector store |
+| UI | `app.py` | Streamlit chat, provider/model selection, session state, quick actions, info pages, startup warmup of Carris Urban DB, Metro station cache, CP GTFS + AML support, Carris Metropolitana caches, and vector store |
 | Orchestration | `agent/graph.py` | supervisor routing, parallel worker execution, QA pass, planner synthesis or direct response |
 | State | `agent/state.py` | shared `AgentState` and user-context schema |
 | LLM provider factory | `agent/llm_factory.py` | provider creation and per-agent binding (Azure OpenAI, OpenAI, LM Studio) |

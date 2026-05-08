@@ -15,8 +15,6 @@ import os
 import sqlite3
 from typing import Any, Dict, Optional, Tuple
 
-from config import Config
-
 
 def _count_sqlite_rows(db_path: str, table_name: str) -> int:
     """Return the number of rows available in a SQLite table."""
@@ -245,31 +243,21 @@ def pre_warm_transport_networks() -> Dict[str, Any]:
     }
 
 
-def run_startup_preload(
-    language: str = "pt",
-    use_multi_agent: Optional[bool] = None,
-) -> Dict[str, Any]:
-    """Load one-time shared resources needed by runtime entrypoints."""
-    if use_multi_agent is None:
-        use_multi_agent = bool(getattr(Config, "USE_MULTI_AGENT", False))
-
+def run_startup_preload(language: str = "pt") -> Dict[str, Any]:
+    """Load one-time shared resources needed by the multi-agent runtime."""
     transport_preload = pre_warm_transport_networks()
     transport_ok = bool(transport_preload.get("ok", False))
     transport_status = str(transport_preload.get("summary") or "")
-    kb_ok = True
-    kb_status: Optional[str] = None
-
-    if use_multi_agent:
-        kb_ok = pre_warm_vector_store()
-        kb_status = (
-            "Base de conhecimento pronta."
-            if kb_ok and language == "pt"
-            else "Knowledge base ready."
-            if kb_ok
-            else "Não foi possível carregar a base de conhecimento."
-            if language == "pt"
-            else "Could not load the knowledge base."
-        )
+    kb_ok = pre_warm_vector_store()
+    kb_status = (
+        "Base de conhecimento pronta."
+        if kb_ok and language == "pt"
+        else "Knowledge base ready."
+        if kb_ok
+        else "Não foi possível carregar a base de conhecimento."
+        if language == "pt"
+        else "Could not load the knowledge base."
+    )
 
     return {
         "transport_ok": transport_ok,

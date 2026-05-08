@@ -1386,10 +1386,7 @@ def pre_warm_transport_networks() -> Dict[str, Any]:
 
 def _run_startup_preload(language: str = "pt") -> Dict[str, Any]:
     """Load one-time shared resources needed by the production app."""
-    return _run_startup_preload_impl(
-        language=language,
-        use_multi_agent=Config.USE_MULTI_AGENT,
-    )
+    return _run_startup_preload_impl(language=language)
 
 
 def ensure_startup_resources(
@@ -1525,14 +1522,8 @@ def test_assistant_connection(provider: str) -> Tuple[bool, Optional[str]]:
     placeholder = st.empty()
     from agent.utils.model_connection_probe import perform_raw_model_connection_probe
 
-    if Config.USE_MULTI_AGENT:
-        test_llm = st.session_state.assistant.supervisor.llm
-        model_display = st.session_state.assistant.model_name
-    else:
-        test_llm = getattr(st.session_state.assistant, "llm", None)
-        model_display = getattr(st.session_state.assistant, "model_name", "Model")
-        if test_llm is None:
-            return True, None
+    test_llm = st.session_state.assistant.supervisor.llm
+    model_display = st.session_state.assistant.model_name
 
     placeholder.info(
         f"🔄 A testar o modelo {model_display}..."
@@ -1607,7 +1598,7 @@ def initialize_assistant(
         return False, credentials_error
 
     try:
-        from agent.graph import MultiAgentAssistant, create_assistant
+        from agent.graph import MultiAgentAssistant
 
         set_credentials_env(provider)
 
@@ -1626,7 +1617,6 @@ def initialize_assistant(
         if not startup_gate_allows_requests(
             startup_ok,
             startup_status,
-            use_multi_agent=Config.USE_MULTI_AGENT,
         ):
             st.session_state.initialized = False
             return (
@@ -1634,7 +1624,6 @@ def initialize_assistant(
                 build_startup_gate_message(
                     startup_status,
                     language=lang,
-                    use_multi_agent=Config.USE_MULTI_AGENT,
                 ),
             )
 
@@ -1643,10 +1632,7 @@ def initialize_assistant(
             if lang == "pt"
             else "🤖 Initializing assistant..."
         ):
-            if Config.USE_MULTI_AGENT:
-                st.session_state.assistant = MultiAgentAssistant()
-            else:
-                st.session_state.assistant = create_assistant(provider)
+            st.session_state.assistant = MultiAgentAssistant()
 
         if run_connection_probe:
             connection_ok, connection_error = test_assistant_connection(provider)
@@ -2184,15 +2170,13 @@ def count_user_interactions(messages: list[dict[str, Any]]) -> int:
 def startup_gate_allows_requests(
     startup_ok: bool,
     startup_status: Dict[str, Any],
-    *,
-    use_multi_agent: bool,
 ) -> bool:
     """Return whether the startup readiness gate is open for new user requests."""
     if not startup_ok or not bool(startup_status.get("ok", False)):
         return False
     if not bool(startup_status.get("transport_ok", False)):
         return False
-    if use_multi_agent and not bool(startup_status.get("kb_ok", False)):
+    if not bool(startup_status.get("kb_ok", False)):
         return False
     return True
 
@@ -2264,7 +2248,6 @@ def build_startup_gate_message(
     startup_status: Dict[str, Any],
     *,
     language: str,
-    use_multi_agent: bool,
 ) -> str:
     """Build a concise readiness message listing the startup checks that failed."""
     if language == "pt":
@@ -2277,7 +2260,7 @@ def build_startup_gate_message(
         lines.append(transport_status)
 
     kb_status = str(startup_status.get("kb_status") or "").strip()
-    if use_multi_agent and not bool(startup_status.get("kb_ok", False)) and kb_status:
+    if not bool(startup_status.get("kb_ok", False)) and kb_status:
         lines.append(kb_status)
 
     return "\n\n".join(lines)

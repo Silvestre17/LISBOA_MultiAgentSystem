@@ -23,22 +23,18 @@ def test_startup_gate_allows_requests_requires_transport_and_kb() -> None:
     assert not startup_gate_allows_requests(
         False,
         {"transport_ok": True, "kb_ok": True, "ok": False},
-        use_multi_agent=True,
     )
     assert not startup_gate_allows_requests(
         True,
         {"transport_ok": False, "kb_ok": True, "ok": False},
-        use_multi_agent=True,
     )
     assert not startup_gate_allows_requests(
         True,
         {"transport_ok": True, "kb_ok": False, "ok": False},
-        use_multi_agent=True,
     )
     assert startup_gate_allows_requests(
         True,
         {"transport_ok": True, "kb_ok": True, "ok": True},
-        use_multi_agent=True,
     )
 
 
@@ -52,7 +48,6 @@ def test_build_startup_gate_message_lists_failed_readiness_checks() -> None:
             "kb_status": "Could not load the knowledge base.",
         },
         language="en",
-        use_multi_agent=True,
     )
 
     assert "Startup checks are incomplete" in message
@@ -85,7 +80,7 @@ def test_run_startup_preload_fails_closed_when_transport_layer_is_incomplete(mon
     )
     monkeypatch.setattr(startup_resources, "pre_warm_vector_store", lambda: True)
 
-    preload_status = startup_resources.run_startup_preload(language="en", use_multi_agent=True)
+    preload_status = startup_resources.run_startup_preload(language="en")
 
     assert not preload_status["transport_ok"]
     assert not preload_status["ok"]

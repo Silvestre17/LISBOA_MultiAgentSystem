@@ -77,7 +77,7 @@ Legacy `LANGCHAIN_*` tracing aliases are still accepted by the runtime for backw
 
 ### Provider Behavior Notes
 
-- Default runtime mode is **multi-agent** (`Config.USE_MULTI_AGENT = True`).
+- Runtime mode is **multi-agent** through `MultiAgentAssistant`.
 - Per-agent model mappings: `AGENT_MODELS_AZURE`, `AGENT_MODELS_OPENAI`, `AGENT_MODELS_LMSTUDIO` in `config.py`.
 - The Streamlit sidebar can override active provider and per-agent model at runtime.
 - UI provider connection tests use raw HTTP requests (not LangChain), so health checks do **not** create LangSmith traces.
@@ -120,7 +120,7 @@ pip install -r requirements_all.txt
 When `app.py` starts, it also:
 
 - warms the Carris Urban support database, Metro station cache, CP GTFS plus AML station support data, and Carris Metropolitana caches
-- pre-warms the vector store only when multi-agent mode is enabled
+- pre-warms the vector store for the multi-agent knowledge layer
 - loads environment values from `.env`
 
 ## 🧰 Vector-Store Operations
