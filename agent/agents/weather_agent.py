@@ -993,9 +993,9 @@ class WeatherAgent(BaseAgent):
             )
 
         return (
-            "🌤️ Aqui está a informação meteorológica grounded para Lisboa."
+            "🌤️ Aqui está a previsão meteorológica disponível para Lisboa."
             if is_pt
-            else "🌤️ Here is the grounded weather information for Lisbon."
+            else "🌤️ Here is the available weather information for Lisbon."
         )
 
     @staticmethod

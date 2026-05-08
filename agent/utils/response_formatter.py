@@ -852,6 +852,38 @@ def canonicalize_weather_terms(text: str, language: str = "en") -> str:
     normalized = text
     for pattern, replacement in replacements:
         normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+
+    # Remove internal grounding vocabulary and normalize enum-like warning labels
+    # that may come from IPMA warning payloads or previous tool output.
+    if language == "pt":
+        enum_labels = {
+            "PRECIPITATION": "Precipitação",
+            "WIND": "Vento",
+            "THUNDERSTORMS": "Trovoada",
+            "THUNDERSTORM": "Trovoada",
+            "FOG": "Nevoeiro",
+            "SNOW": "Neve",
+            "HOT_WEATHER": "Tempo quente",
+            "COLD_WEATHER": "Tempo frio",
+            "ROUGH_SEA": "Agitação marítima",
+        }
+        normalized = re.sub(r"\b(?:informa[cç][aã]o meteorol[oó]gica|previs[aã]o meteorol[oó]gica)\s+grounded\b", "previsão meteorológica", normalized, flags=re.IGNORECASE)
+    else:
+        enum_labels = {
+            "PRECIPITATION": "Precipitation",
+            "WIND": "Wind",
+            "THUNDERSTORMS": "Thunderstorm",
+            "THUNDERSTORM": "Thunderstorm",
+            "FOG": "Fog",
+            "SNOW": "Snow",
+            "HOT_WEATHER": "Hot weather",
+            "COLD_WEATHER": "Cold weather",
+            "ROUGH_SEA": "Rough sea",
+        }
+        normalized = re.sub(r"\bgrounded weather information\b", "available weather information", normalized, flags=re.IGNORECASE)
+    for raw_label, label in enum_labels.items():
+        normalized = re.sub(rf"\b{re.escape(raw_label)}\b", label, normalized)
+
     if language == "pt":
         normalized = re.sub(r"\|\s*intensidade:\s*moderado\b", "| **Intensidade:** moderada", normalized, flags=re.IGNORECASE)
         normalized = re.sub(r"\|\s*intensidade:\s*(fraca|forte)\b", r"| **Intensidade:** \1", normalized, flags=re.IGNORECASE)
@@ -3433,10 +3465,32 @@ def canonicalize_planner_source_line(text: str, language: str = "en") -> str:
                 existing_links.append(link)
 
     if existing_links:
+        pruned_links: list[str] = []
+        for link in existing_links:
+            link_lower = link.lower()
+            keep_link = True
+            if "carrismetropolitana" in link_lower:
+                keep_link = "carris metropolitana" in lower_body or "carrismetropolitana" in lower_body
+            elif "carris.pt" in link_lower:
+                keep_link = bool(re.search(r"\bcarris\b", lower_body))
+            elif "cp.pt" in link_lower:
+                keep_link = bool(re.search(r"\bcp\b", body_without_source))
+            elif "metrolisboa" in link_lower:
+                keep_link = "metro" in lower_body or "metrolisboa" in lower_body
+            elif "ipma" in link_lower:
+                keep_link = bool(re.search(r"\b(weather|rain|showers|temperature|temperatures|wind|vento|chuva|meteorolog|forecast|previs)\b", lower_body))
+            elif "visitlisboa.com/en/events" in link_lower or "visitlisboa.com/pt-pt/eventos" in link_lower:
+                keep_link = bool(re.search(r"\b(event|events|evento|eventos)\b", lower_body))
+            elif "wikipedia" in link_lower:
+                keep_link = "wikipedia" in lower_body or "web" in lower_body
+            if keep_link and link not in pruned_links:
+                pruned_links.append(link)
+        if not pruned_links:
+            return re.sub(r"(?im)^\s*📌\s*\*\*(?:Source|Fonte):\*\*.*$", "", text).strip()
         replacement = (
-            f"📌 **Fonte:** {' | '.join(existing_links)} | **Atualizado:** {timestamp}"
+            f"📌 **Fonte:** {' | '.join(pruned_links)} | **Atualizado:** {timestamp}"
             if language == "pt"
-            else f"📌 **Source:** {' | '.join(existing_links)} | **Updated:** {timestamp}"
+            else f"📌 **Source:** {' | '.join(pruned_links)} | **Updated:** {timestamp}"
         )
         return _replace_source_line(text, replacement)
 
@@ -10083,6 +10137,313 @@ def final_visual_pass(text: str) -> str:
     return text.strip()
 
 
+
+
+PLANNER_RAW_SCHEMA_HEADING_RE = re.compile(
+    r"(?im)^\s*#{1,4}\s*(?!.*\*\*)(?:\W+\s*)?(?:title|t[ií]tulo|direct answer|resposta direta|constraints used|restri[cç][oõ]es usadas|plan blocks|blocos do plano|movement logic|l[oó]gica de movimento|weather strategy|estrat[eé]gia meteorol[oó]gica|limitations|limita[cç][oõ]es)\s*$"
+)
+PLANNER_FORBIDDEN_RAW_RE = re.compile(r"(?i)(Place Cards|Museum:\*\*|Restaurant:\*\*|Event:\*\*|TransportWhat|Why This Day:|Transport Note:)")
+
+
+def is_overcomplex_planning_request(message: str) -> bool:
+    """Return whether a planner request exceeds LISBOA's safe grounding scope."""
+    if not message:
+        return False
+    normalized = _strip_accents_compat(message).lower()
+    if not re.search(r"\b(plan|itinerary|roteiro|plano|programa)\b", normalized):
+        return False
+    if (
+        re.search(r"\b(?:6|7|8|9|10|11|12|13|14)\s*(?:day|days|dia|dias)\b", normalized)
+        or re.search(r"\b(?:six|seven|eight|nine|ten)\s+days\b", normalized)
+        or re.search(r"\b(?:one|full)\s+week\b", normalized)
+        or "uma semana" in normalized
+    ):
+        return True
+    overload_patterns = [
+        r"\bexact\s+(?:route|routes|schedule|schedules|times|prices|tickets)\b",
+        r"\bfull\s+schedule\b",
+        r"\brestaurants?\b|\brestaurantes?\b",
+        r"\btickets?\b|\bbilhetes?\b",
+        r"\bprices?\b|\bprecos?\b",
+        r"\bweather\b|\bmeteorologia\b|\btempo\b",
+        r"\bbeaches?\b|\bpraias?\b",
+        r"\bnightlife\b|\bvida\s+noturna\b",
+        r"\bno\s+repeated\s+neighbou?rhoods?\b|\bsem\s+repetir\s+bairros?\b",
+        r"\ball\s+details\b|\btodos\s+os\s+detalhes\b",
+    ]
+    return sum(1 for pattern in overload_patterns if re.search(pattern, normalized)) >= 5
+
+
+def build_bounded_planning_framework(user_message: str, language: str = "en") -> str:
+    """Build a clean visual bounded framework for over-complex plans."""
+    if (language or "").lower().startswith("pt"):
+        return """### 📅 **Estrutura limitada para planear Lisboa**
+
+✅ **Resposta direta:** Não consigo fundamentar com segurança um plano completo de 6 ou mais dias com rotas exatas, restaurantes, bilhetes, preços, meteorologia, praias, vida noturna e bairros sem repetição. Posso dar uma estrutura segura de até 5 dias e assinalar o que precisa de confirmação externa.
+
+---
+
+### ⚠️ **Porque estou a limitar o pedido**
+    - 🌦️ **Meteorologia:** A previsão fiável tem horizonte limitado.
+    - 🚇 **Rotas:** Rotas e horários exatos para todos os pontos não são garantidos para vários dias.
+    - 🎟️ **Bilhetes e preços:** Precisam de confirmação direta em cada local.
+    - 🍽️ **Restaurantes:** Reservas, horários e disponibilidade não estão confirmados.
+    - 🏖️ **Praias e vida noturna:** Dependem da data, meteorologia, transporte e disponibilidade.
+
+---
+
+### 📍 **Estrutura de 5 dias em alto nível**
+
+### 📍 **Dia 1 · Centro histórico compacto**
+    - 🎯 **Objetivo:** Orientação inicial por Baixa, Chiado e Terreiro do Paço.
+    - 🚇 **Movimento:** Usar estações centrais e percursos curtos a pé.
+    - ☔ **Plano de chuva:** Priorizar museus, igrejas, cafés e espaços interiores próximos.
+    - ⚠️ **Limite:** Horários e preços específicos não foram confirmados.
+
+### 📍 **Dia 2 · Belém e história ribeirinha**
+    - 🎯 **Objetivo:** Concentrar monumentos e cultura numa zona coerente.
+    - 🚇 **Movimento:** Usar transporte público como princípio, sem prometer horários em direto.
+    - ☔ **Plano de chuva:** Trocar miradouros longos por visitas interiores.
+    - ⚠️ **Limite:** Bilhetes, filas e horários devem ser verificados no próprio dia.
+
+### 📍 **Dia 3 · Parque das Nações e frente ribeirinha oriental**
+    - 🎯 **Objetivo:** Dia mais plano, com boa acessibilidade e opções interiores.
+    - 🚇 **Movimento:** Usar Oriente como âncora de transporte.
+    - ☔ **Plano de chuva:** Privilegiar ciência, cultura, restauração e espaços cobertos.
+    - ⚠️ **Limite:** Disponibilidade de eventos não foi confirmada.
+
+### 📍 **Dia 4 · Bairros com miradouros, com esforço controlado**
+    - 🎯 **Objetivo:** Vistas e ambiente local sem excesso de declive.
+    - 🚇 **Movimento:** Combinar transporte público com caminhadas curtas.
+    - ☔ **Plano de chuva:** Reduzir miradouros expostos e usar museus/cafés como alternativa.
+    - ⚠️ **Limite:** Não há garantia de bairros totalmente sem repetição se as restrições forem muito rígidas.
+
+### 📍 **Dia 5 · Escolha flexível por tempo e energia**
+    - 🎯 **Objetivo:** Reservar o último dia para preferências reais: museus, compras, rio ou descanso.
+    - 🚇 **Movimento:** Escolher uma zona-base para evitar transferências longas.
+    - ☔ **Plano de chuva:** Usar atividades interiores e deslocações diretas.
+    - ⚠️ **Limite:** Restaurantes, preços e bilhetes requerem verificação atualizada."""
+    return """### 📅 **Bounded Lisbon Planning Framework**
+
+✅ **Direct answer:** I cannot safely ground a full plan of 6 or more days with exact routes, restaurants, tickets, prices, weather, beaches, nightlife, and non-repeated neighbourhoods from the available data. I can give a safe 5-day high-level framework and clearly mark what needs external verification.
+
+---
+
+### ⚠️ **Why I am limiting the request**
+    - 🌦️ **Weather:** The reliable forecast horizon is limited.
+    - 🚇 **Routes:** Exact live routes and schedules for every stop cannot be guaranteed for a multi-day plan.
+    - 🎟️ **Tickets and prices:** These need venue-level confirmation.
+    - 🍽️ **Restaurants:** Booking, opening hours, and availability are not confirmed.
+    - 🏖️ **Beaches and nightlife:** Suitability depends on date, weather, transport, and availability.
+
+---
+
+### 📍 **5-day high-level framework**
+
+### 📍 **Day 1 · Compact historic core**
+    - 🎯 **Purpose:** Build first-day orientation around Baixa, Chiado, and Terreiro do Paço.
+    - 🚇 **Movement:** Use central transport anchors, with short walking loops.
+    - ☔ **Rain backup:** Prefer museums, churches, cafés, and covered central stops.
+    - ⚠️ **Limit:** Exact opening hours and prices were not confirmed.
+
+### 📍 **Day 2 · Belém riverside history corridor**
+    - 🎯 **Purpose:** Keep major history and riverside context in one coherent area.
+    - 🚇 **Movement:** Use public transport as the principle, without promising live departures.
+    - ☔ **Rain backup:** Swap exposed viewpoints for indoor cultural stops.
+    - ⚠️ **Limit:** Tickets, queues, and opening hours need same-day confirmation.
+
+### 📍 **Day 3 · Parque das Nações and eastern riverfront**
+    - 🎯 **Purpose:** Use a flatter, accessible area with indoor options.
+    - 🚇 **Movement:** Treat Oriente as the transport anchor.
+    - ☔ **Rain backup:** Prefer science, culture, shopping, and covered food options.
+    - ⚠️ **Limit:** Event availability was not confirmed.
+
+### 📍 **Day 4 · Viewpoints with controlled effort**
+    - 🎯 **Purpose:** Include Lisbon viewpoints without overloading walking or hills.
+    - 🚇 **Movement:** Combine public transport with short local walks.
+    - ☔ **Rain backup:** Reduce exposed viewpoints and substitute museums or cafés nearby.
+    - ⚠️ **Limit:** Fully non-repeated neighbourhoods cannot be guaranteed under many constraints.
+
+### 📍 **Day 5 · Flexible preference day**
+    - 🎯 **Purpose:** Reserve one day for the visitor's real priority: museums, shopping, riverfront, or rest.
+    - 🚇 **Movement:** Pick one base area to avoid long transfers.
+    - ☔ **Rain backup:** Use indoor activities and direct public transport.
+    - ⚠️ **Limit:** Restaurants, prices, and tickets require current confirmation."""
+
+
+def _planner_split_source_footer(text: str) -> tuple[str, str]:
+    source_re = re.compile(r"(?im)^\s*📌\s*\*\*(?:Source|Fonte):\*\*.*$")
+    matches = list(source_re.finditer(text or ""))
+    if not matches:
+        return text or "", ""
+    return source_re.sub("", text or "").strip(), matches[-1].group(0).strip()
+
+
+def _planner_clean_inline(line: str) -> str:
+    cleaned = re.sub(r"^\s*(?:[-•]\s+|\*\s+)", "", line.strip())
+    cleaned = re.sub(r"^\s*#{1,6}\s*", "", cleaned).strip()
+    cleaned = re.sub(r"\b(Museum|Restaurant|Event):\*\*", r"**\1:**", cleaned)
+    cleaned = cleaned.replace("TransportWhat", "Transport")
+    cleaned = re.sub(r"\*\*\s*([^:*]+):\s*\*\*", r"**\1:**", cleaned)
+    label_map = {"why this day": "Purpose:", "transport note": "Movement:", "location": "Area:", "category": "Theme:"}
+    cleaned = re.sub(r"\b(Why This Day|Transport Note|Location|Category)\s*:", lambda m: label_map[m.group(1).lower()], cleaned, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _planner_bullet_emoji(text: str) -> str:
+    lowered = _strip_accents_compat(text).lower()
+    if any(token in lowered for token in ["rain", "chuva", "weather", "meteor", "indoor", "interior"]):
+        return "☔"
+    if any(token in lowered for token in ["transport", "metro", "train", "bus", "movement", "route", "movimento", "transporte"]):
+        return "🚇"
+    if any(token in lowered for token in ["limit", "limite", "not confirmed", "nao confirmado", "confirm"]):
+        return "⚠️"
+    if any(token in lowered for token in ["history", "museum", "culture", "historic", "cultura", "museu", "hist"]):
+        return "🏛️"
+    if any(token in lowered for token in ["budget", "cheap", "food", "restaurant", "comida", "barato", "jantar"]):
+        return "💶"
+    if any(token in lowered for token in ["walking", "walk", "declive", "low walking", "caminh"]):
+        return "🚶"
+    return "🎯"
+
+
+def _planner_format_bullet(line: str) -> str:
+    cleaned = _planner_clean_inline(line)
+    if not cleaned:
+        return ""
+    label_match = re.match(r"(?i)^\*\*([^:*]{2,40}):\*\*\s*(.+)$", cleaned)
+    plain_label = re.match(r"(?i)^(Purpose|Objetivo|Best for|Main idea|Movement|Movimento|Rain backup|Weather strategy|Limit|Limite|Area|Theme):\s*(.+)$", cleaned)
+    match = label_match or plain_label
+    if match:
+        label = match.group(1).strip()
+        value = match.group(2).strip()
+        if label.lower() == "best for":
+            label = "Purpose"
+        if label.lower() == "weather strategy":
+            label = "Rain backup"
+        return f"    - {_planner_bullet_emoji(label + ' ' + value)} **{label}:** {value}"
+    return f"    - {_planner_bullet_emoji(cleaned)} {cleaned}"
+
+
+def _planner_heading_title(line: str) -> str:
+    title = _planner_clean_inline(line)
+    title = re.sub(r"^\*\*|\*\*$", "", title).strip()
+    title = re.sub(r"(?i)^((?:block|day|dia|bloco)\s*\d+)\s*[:\-–—·]\s*", r"\1 · ", title)
+    return re.sub(r"\s+", " ", title).strip(" -*")[:120] or "Plan"
+
+
+def render_lisboa_planner_markdown(text: str, language: str = "en") -> str:
+    """Convert raw planner schema Markdown into LISBOA visual Markdown."""
+    if not text or not text.strip():
+        return build_bounded_planning_framework("", language)
+    body, footer = _planner_split_source_footer(text)
+    body = re.sub(r"(?im)^\s*(?:Place Cards|Raw Place Cards)\s*:?.*$", "", body)
+    sections: dict[str, list[str]] = {key: [] for key in ["title", "direct", "constraints", "plan", "movement", "weather", "limitations", "other"]}
+    current = "other"
+    heading_map = {
+        "title": re.compile(r"(?i)^(?:title|t[ií]tulo)$"),
+        "direct": re.compile(r"(?i)^(?:direct answer|resposta direta)$"),
+        "constraints": re.compile(r"(?i)^(?:constraints used|restri[cç][oõ]es usadas|conditions|condi[cç][oõ]es)$"),
+        "plan": re.compile(r"(?i)^(?:plan blocks|blocos do plano|plan|plano|itinerary|roteiro)$"),
+        "movement": re.compile(r"(?i)^(?:movement logic|l[oó]gica de movimento|transport limits|transport limitations)$"),
+        "weather": re.compile(r"(?i)^(?:weather strategy|estrat[eé]gia meteorol[oó]gica)$"),
+        "limitations": re.compile(r"(?i)^(?:limitations|limita[cç][oõ]es|limits|limites)$"),
+    }
+    for raw_line in body.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or re.match(r"^-{3,}$", stripped):
+            continue
+        heading_text = re.sub(r"^\s*#{1,6}\s*", "", stripped).strip()
+        heading_text = re.sub(r"^[^\w\d]+", "", heading_text).strip(" *")
+        if raw_line.lstrip().startswith("#"):
+            matched = False
+            for key, pattern in heading_map.items():
+                if pattern.match(heading_text):
+                    current = key
+                    matched = True
+                    break
+            if matched:
+                continue
+            if re.search(r"(?i)\b(?:structured|\d+\s*-?\s*day|bounded|lisbon|lisboa).*\b(?:plan|framework|itinerary|roteiro|plano)\b", heading_text):
+                sections["title"].append(heading_text)
+                current = "other"
+                continue
+            if re.search(r"(?i)\b(?:day|dia|block|bloco)\s*\d+\b", heading_text):
+                sections["plan"].append(stripped)
+                current = "plan"
+                continue
+        sections[current].append(stripped)
+
+    if sections["title"]:
+        title = _planner_clean_inline(sections["title"][0])
+    elif re.search(r"(?i)\b5\s*-?\s*day\b", body):
+        title = "5-Day Lisbon Planning Framework"
+    elif re.search(r"(?i)\b(?:1\s*-?\s*day|rainy afternoon|full day)\b", body):
+        title = "Lisbon Itinerary Plan"
+    else:
+        title = "Estrutura de planeamento de Lisboa" if (language or "").lower().startswith("pt") else "Lisbon Planning Framework"
+    title = re.sub(r"(?i)^title\s*:?\s*", "", title).strip() or "Lisbon Planning Framework"
+
+    direct_lines = [_planner_clean_inline(line) for line in sections["direct"] if _planner_clean_inline(line)]
+    if not direct_lines:
+        for candidate in sections["other"][:3]:
+            cleaned = _planner_clean_inline(candidate)
+            if cleaned and not re.search(r"(?i)^(source|fonte|place cards?)\b", cleaned):
+                direct_lines.append(cleaned)
+                break
+    direct_answer = " ".join(direct_lines).strip() or ("Posso dar um plano limitado e fundamentado para Lisboa, mas horários, preços, reservas e condições em direto precisam de confirmação atual." if (language or "").lower().startswith("pt") else "I can provide a bounded, grounded Lisbon plan, but exact schedules, prices, bookings, and live conditions need current confirmation.")
+    direct_label = "Resposta direta" if (language or "").lower().startswith("pt") else "Direct answer"
+    output: list[str] = [f"### 📅 **{title}**", "", f"✅ **{direct_label}:** {direct_answer}", "", "---"]
+
+    constraints = [_planner_format_bullet(line) for line in sections["constraints"]]
+    constraints = [line for line in constraints if line]
+    if constraints:
+        output.extend(["", f"### 🧭 **{'Restrições usadas' if (language or '').lower().startswith('pt') else 'Constraints used'}**", *constraints, "", "---"])
+
+    plan_output: list[str] = []
+    current_block_has_heading = False
+    fallback_block = 1
+    for raw in sections["plan"]:
+        cleaned = _planner_clean_inline(raw)
+        if not cleaned:
+            continue
+        is_heading = raw.lstrip().startswith("#") or bool(re.match(r"(?i)^[-*•]?\s*(?:\*\*)?(?:block|day|dia|bloco)\s*\d+\b", cleaned))
+        if is_heading:
+            if plan_output:
+                plan_output.append("")
+            plan_output.append(f"### 📍 **{_planner_heading_title(cleaned)}**")
+            current_block_has_heading = True
+            continue
+        if not current_block_has_heading:
+            plan_output.append(f"### 📍 **{'Bloco' if (language or '').lower().startswith('pt') else 'Block'} {fallback_block}**")
+            fallback_block += 1
+            current_block_has_heading = True
+        bullet = _planner_format_bullet(cleaned)
+        if bullet:
+            plan_output.append(bullet)
+    if plan_output:
+        output.extend(["", *plan_output, "", "---"])
+
+    for key, emoji, en_title, pt_title in [
+        ("movement", "🚇", "Movement logic", "Lógica de movimento"),
+        ("weather", "☔", "Weather strategy", "Estratégia para chuva"),
+        ("limitations", "⚠️", "Limitations", "Limitações"),
+    ]:
+        bullets = [_planner_format_bullet(line) for line in sections[key]]
+        bullets = [line for line in bullets if line]
+        if bullets:
+            output.extend(["", f"### {emoji} **{pt_title if (language or '').lower().startswith('pt') else en_title}**", *bullets])
+            if key != "limitations":
+                output.extend(["", "---"])
+
+    rendered = "\n".join(output).strip()
+    rendered = re.sub(r"(?im)^###\s*(?:Title|Direct Answer|Constraints Used|Plan Blocks|Movement Logic|Weather Strategy|Limitations)\s*$", "", rendered)
+    rendered = re.sub(r"(?im)^\s*(?:Place Cards|Raw Place Cards)\s*:?.*$", "", rendered)
+    rendered = PLANNER_FORBIDDEN_RAW_RE.sub("", rendered)
+    rendered = re.sub(r"\n{3,}", "\n\n", rendered).strip()
+    return f"{rendered}\n\n{footer}" if footer else rendered
+
+
 def final_post_qa_guard(text: str, language: str = "en") -> str:
     """Run the deterministic guard that must execute after every QA repair.
 
@@ -10093,33 +10454,9 @@ def final_post_qa_guard(text: str, language: str = "en") -> str:
     if not text or not isinstance(text, str):
         return text or ""
 
-    normalized_schema_probe = re.sub(r"\s+", " ", text.lower())
-    structured_planner_schema = (
-        all(
-            marker in normalized_schema_probe
-            for marker in (
-                "direct answer",
-                "constraints used",
-                "plan blocks",
-                "movement logic",
-                "weather strategy",
-                "limitations",
-            )
-        )
-        or all(
-            any(alias in normalized_schema_probe for alias in aliases)
-            for aliases in (
-                ("resposta direta",),
-                ("restrições usadas", "restricoes usadas"),
-                ("blocos do plano",),
-                ("lógica de movimento", "logica de movimento"),
-                ("estratégia meteorológica", "estrategia meteorologica"),
-                ("limitações", "limitacoes"),
-            )
-        )
-    )
+    structured_planner_schema = bool(PLANNER_RAW_SCHEMA_HEADING_RE.search(text or "")) or bool(PLANNER_FORBIDDEN_RAW_RE.search(text or ""))
     if structured_planner_schema:
-        guarded = text
+        guarded = render_lisboa_planner_markdown(text, language=language)
     else:
         guarded = final_visual_pass(text)
         guarded = enforce_language_labels(guarded, language)
@@ -10140,13 +10477,26 @@ def final_post_qa_guard(text: str, language: str = "en") -> str:
         "",
         guarded,
     )
+    guarded = re.sub(r"(?mi)^\s*(?:Distance|Distância|Distancia|Lines|Linhas)\s*:\s*not provided\s*$\n?", "", guarded)
     guarded = re.sub(r"(?m)^#{1,6}\s*(?:[*_`~\s]|[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D])*$\n?", "", guarded)
     guarded = re.sub(r"(?m)(^\s*###\s+.+\n)(?:\s*\1)+", r"\1", guarded)
     guarded = re.sub(r"(?m)\*\*\s*\*\*", "", guarded)
     guarded = re.sub(r"(?m)(\*\*[^*\n]+)\*\*\*\*", r"\1**", guarded)
     guarded = re.sub(r"(?m)^\s*⚠️\s*(?:⚠️\s*)+", "⚠️ ", guarded)
-    guarded = strip_placeholder_field_lines(guarded)
+    guarded = PLANNER_FORBIDDEN_RAW_RE.sub("", guarded)
+    guarded = re.sub(
+        r"(?m)^###\s+([\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+)\s+(?!\*\*)([^\n:]+?)\s*$",
+        r"### \1 **\2**",
+        guarded,
+    )
+    guarded = re.sub(
+        r"(?m)^(###\s+[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s+\*\*[^*\n]*?)(Route|Trajeto|Percurso):\*\*\s*(.+)$",
+        r"\1**\n\n**\2:** \3",
+        guarded,
+    )
+    guarded = re.sub(r"(?m)^⚠️\s+(Limitations|Limitações|Limitacoes)\s*$", r"### ⚠️ **\1**", guarded)
     if not structured_planner_schema:
+        guarded = strip_placeholder_field_lines(guarded)
         guarded = final_visual_pass(guarded)
         guarded = enforce_language_labels(guarded, language)
     guarded = re.sub(r"\n{3,}", "\n\n", guarded)
