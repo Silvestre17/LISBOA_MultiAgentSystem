@@ -173,6 +173,11 @@ def _detect_sources(text: str, default: Sequence[str] = ()) -> List[str]:
             sources.append("visitlisboa_places")
     if "metrolisboa" in lowered or "metro de lisboa" in lowered:
         sources.append("metro")
+    if re.search(r"\bmetro\b", lowered) or re.search(
+        r"\b(?:yellow|blue|green|red|amarela|azul|verde|vermelha)\s+line\b|\blinha\s+(?:amarela|azul|verde|vermelha)\b",
+        lowered,
+    ):
+        sources.append("metro")
     if "carrismetropolitana" in lowered or "carris metropolitana" in lowered:
         sources.append("carris_metropolitana")
     if "carris.pt" in lowered or re.search(r"\bcarris\b", lowered):
@@ -294,7 +299,28 @@ def _extract_research_cards(text: str, *, default_kind: str) -> List[EvidenceCar
             continue
         fields = _extract_fields(section[1:])
         summary_parts = []
-        for key in ("Description", "Descrição", "When", "Quando", "Venue", "Local", "Address", "Morada", "Price", "Preço", "Hours", "Horários"):
+        for key in (
+            "Description",
+            "Descrição",
+            "Category",
+            "Categoria",
+            "When",
+            "Quando",
+            "Venue",
+            "Local",
+            "Address",
+            "Morada",
+            "Price",
+            "Preço",
+            "Hours",
+            "Horário",
+            "Horários",
+            "Website",
+            "More details",
+            "Mais detalhes",
+            "Tickets",
+            "Bilhetes",
+        ):
             if fields.get(key):
                 summary_parts.append(f"{key}: {fields[key]}")
         if not summary_parts:
@@ -370,17 +396,89 @@ def _extract_fields(lines: Sequence[str]) -> Dict[str, str]:
     """
     fields: Dict[str, str] = {}
     field_re = re.compile(r"^\s*[-*•]?\s*(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s*)?\*\*(?P<label>[^*:]{2,40}):?\*\*\s*:??\s*(?P<value>.+)$")
+    plain_field_re = re.compile(
+        r"^\s*[-*•]?\s*(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s*)?"
+        r"(?P<label>Description|Descrição|Descricao|Category|Categoria|When|Quando|Venue|Local|Location|Address|Morada|Price|Preço|Preco|Hours|Horário|Horario|Horários|Horarios|Today|Hoje|Website|URL|More details|Mais detalhes|Tickets|Bilhetes)\s*:\s*(?P<value>.+)$",
+        flags=re.IGNORECASE,
+    )
+    raw_url_re = re.compile(r"^\s*[-*•]?\s*(?:🔗\s*)?(?P<url>https?://\S+)\s*$", flags=re.IGNORECASE)
     for raw in lines:
-        match = field_re.match(raw.strip())
-        if not match:
+        stripped = raw.strip()
+        match = field_re.match(stripped) or plain_field_re.match(stripped)
+        if match:
+            label = _canonical_field_label(_visible_line(match.group("label")).strip(" :"))
+            value = _visible_line(match.group("value"))
+        else:
+            url_match = raw_url_re.match(stripped)
+            if not url_match:
+                continue
+            label = "Website"
+            value = url_match.group("url").rstrip(").,;")
+        if _is_metadata_field_label(label):
             continue
-        label = _visible_line(match.group("label")).strip(" :")
-        value = _visible_line(match.group("value"))
         if not label or not value or _is_missing(value):
             continue
         if label not in fields:
             fields[label] = value[:240]
     return fields
+
+
+def _canonical_field_label(label: str) -> str:
+    """Normalize equivalent user-facing field labels for planner evidence.
+
+    Args:
+        label: Raw label extracted from a card line.
+
+    Returns:
+        Canonical label used by the planner prompt and renderer.
+    """
+    normalized = normalize_text(label)
+    mapping = {
+        "descricao": "Description",
+        "description": "Description",
+        "category": "Category",
+        "categoria": "Category",
+        "when": "When",
+        "quando": "When",
+        "venue": "Venue",
+        "local": "Venue",
+        "location": "Venue",
+        "address": "Address",
+        "morada": "Address",
+        "price": "Price",
+        "preco": "Price",
+        "hours": "Hours",
+        "horario": "Hours",
+        "horarios": "Hours",
+        "today": "Hours",
+        "hoje": "Hours",
+        "website": "Website",
+        "url": "Website",
+        "more details": "Website",
+        "mais detalhes": "Website",
+        "tickets": "Tickets",
+        "bilhetes": "Tickets",
+    }
+    return mapping.get(normalized, label.strip())
+
+
+def _is_metadata_field_label(label: str) -> bool:
+    """Return whether a parsed label is result metadata rather than card evidence."""
+    normalized = normalize_text(label)
+    return normalized in {
+        "filter used",
+        "filtro aplicado",
+        "result count",
+        "contagem de resultados",
+        "highlights shown",
+        "destaques mostrados",
+        "result window",
+        "janela de resultados",
+        "source mix",
+        "mistura de fontes",
+        "source completeness note",
+        "nota de completude da fonte",
+    }
 
 
 def _infer_card_kind(title: str, fields: Dict[str, str], default_kind: str) -> str:
@@ -424,7 +522,7 @@ def _is_non_card_title(title: str) -> bool:
     if not normalized:
         return True
     blocked = (
-        "direct answer", "resposta direta", "constraints", "restricoes", "movement logic", "weather strategy", "limitations", "source", "fonte", "local highlights", "destaques locais", "summary", "resumo",
+        "direct answer", "resposta direta", "constraints", "restricoes", "movement logic", "weather strategy", "limitations", "source", "fonte", "local highlights", "destaques locais", "summary", "resumo", "places and attractions", "locais e atracoes", "events found", "eventos encontrados",
     )
     return any(token in normalized for token in blocked)
 

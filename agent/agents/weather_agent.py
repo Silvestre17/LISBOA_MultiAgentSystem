@@ -255,8 +255,9 @@ class WeatherAgent(BaseAgent):
         if explicit_days:
             return max(1, min(int(explicit_days.group(1)), 5))
 
-        if any(term in query for term in ["tomorrow", "amanhã", "amanha"]):
-            return 2
+        normalized = WeatherAgent._normalize_weather_query(user_message)
+        if WeatherAgent._has_tomorrow_reference(normalized):
+            return 1
 
         if any(term in query for term in ["week", "semana", "weekend", "fim de semana"]):
             return 5
@@ -285,11 +286,16 @@ class WeatherAgent(BaseAgent):
                 return {"day_offset": day_offset, "days": 1, "label": "explicit_date"}
             return None
 
-        if any(term in normalized for term in ["tomorrow", "amanha"]):
+        if cls._has_tomorrow_reference(normalized):
             return {"day_offset": 1, "days": 1, "label": "tomorrow"}
 
         if any(term in normalized for term in ["tonight", "esta noite", "hoje a noite"]):
             return {"day_offset": 0, "days": 1, "label": "tonight"}
+
+        if any(term in normalized for term in ["today", "hoje", "agora"]) and any(
+            term in normalized for term in ["forecast", "previsao", "weather", "tempo", "detalhada", "detailed"]
+        ):
+            return {"day_offset": 0, "days": 1, "label": "today"}
 
         if any(term in normalized for term in ["weekend", "fim de semana"]):
             return cls._resolve_weekend_forecast_window()
@@ -399,6 +405,24 @@ class WeatherAgent(BaseAgent):
         normalized = unicodedata.normalize("NFKD", user_message or "")
         normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
         return re.sub(r"\s+", " ", normalized).strip()
+
+    @staticmethod
+    def _has_tomorrow_reference(normalized_query: str) -> bool:
+        """Return whether a normalized query refers to tomorrow, tolerating common typos."""
+        tokens = re.findall(r"[a-z]+", normalized_query or "")
+        if any(token in {"tomorrow", "amanha"} for token in tokens):
+            return True
+        # Common accent/typing corruptions observed in prompt runs: amahna,
+        # amanha with swapped letters, and close edit-distance variants.
+        for token in tokens:
+            if token.startswith("aman") or token.startswith("amah"):
+                if abs(len(token) - len("amanha")) <= 2:
+                    return True
+            if len(token) >= 5:
+                mismatches = sum(1 for a, b in zip(token[:6], "amanha") if a != b)
+                if mismatches <= 2 and abs(len(token) - 6) <= 1:
+                    return True
+        return False
 
     @classmethod
     def _is_portugal_overview_query(cls, user_message: str) -> bool:
@@ -993,9 +1017,9 @@ class WeatherAgent(BaseAgent):
             )
 
         return (
-            "🌤️ Aqui está a previsão meteorológica disponível para Lisboa."
+            "✅ **Resposta direta:** Aqui está a previsão meteorológica disponível para Lisboa."
             if is_pt
-            else "🌤️ Here is the available weather information for Lisbon."
+            else "✅ **Direct answer:** Here is the available weather information for Lisbon."
         )
 
     @staticmethod

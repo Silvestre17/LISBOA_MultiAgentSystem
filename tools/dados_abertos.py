@@ -1115,7 +1115,13 @@ def find_nearby_services(
         response += f"- {item_icon} **{display_name}**\n"
         cleaned_address = _clean_display_address(r.get('address'))
         if cleaned_address:
-            map_url = f"https://www.google.com/maps/search/?api=1&query={quote_plus(cleaned_address)}"
+            if r.get('lat') is not None and r.get('lon') is not None:
+                map_query = f"{r['lat']:.6f},{r['lon']:.6f}"
+            elif "lisboa" in cleaned_address.lower():
+                map_query = cleaned_address
+            else:
+                map_query = f"{cleaned_address}, Lisboa, Portugal"
+            map_url = f"https://www.google.com/maps/search/?api=1&query={quote_plus(map_query)}"
             address_label = "Morada" if is_pt else "Address"
             response += f"    - 📍 **{address_label}:** [{cleaned_address}]({map_url})\n"
         elif r.get('lat') is not None and r.get('lon') is not None:

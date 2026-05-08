@@ -724,7 +724,11 @@ class ResearcherAgent(BaseAgent):
     @staticmethod
     def _build_places_source_line(result: str, language: str) -> str:
         """Builds the right source line for direct place lookups, including hybrid open-data results."""
-        if "Open Data:" in result or re.search(r"\b[1-9]\d*\s+from Lisboa Aberta\b", result or ""):
+        if (
+            "Open Data:" in result
+            or "Lisboa Aberta:" in result
+            or re.search(r"\b[1-9]\d*\s+from Lisboa Aberta\b", result or "")
+        ):
             if language == "pt":
                 return "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) e [*Lisboa Aberta*](https://dados.cm-lisboa.pt/)"
             return "📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places) and [*Lisboa Aberta*](https://dados.cm-lisboa.pt/)"
@@ -876,8 +880,12 @@ class ResearcherAgent(BaseAgent):
 
     @staticmethod
     def _count_ranked_results(result: str) -> int:
-        """Counts numbered items in raw VisitLisboa-style outputs."""
-        return len(re.findall(r"(?m)^\s*\d+\.\s+", str(result or "")))
+        """Counts item cards in raw VisitLisboa-style outputs."""
+        text = str(result or "")
+        numbered_count = len(re.findall(r"(?m)^\s*\d+\.\s+", text))
+        if numbered_count:
+            return numbered_count
+        return len(re.findall(r"(?m)^\s*\*\*[^\n*]+\*\*\s*$", text))
 
     def _remember_search_context(
         self,
@@ -1273,6 +1281,11 @@ class ResearcherAgent(BaseAgent):
             "festival", "exhibition", "exposição", "exposicao", "show",
             "fair", "fairs", "feira", "feiras", "book fair",
         ]
+        has_place_like_query = bool(
+            re.search(r"\b(?:museum|museums|museu|museus|monument|monuments|restaurant|restaurants|place|places|attraction|attractions)\b", query)
+        )
+        if has_place_like_query:
+            event_keywords = [keyword for keyword in event_keywords if keyword != "show"]
         directed_lookup_markers = [
             "where is", "where's", "onde fica", "onde é", "onde e", "tell me about", "what about",
             "more about", "details about", "information about", "sobre",
@@ -1291,6 +1304,12 @@ class ResearcherAgent(BaseAgent):
 
         has_place_hint = ResearcherAgent._infer_place_category_hint(user_message) is not None
         has_directional_lookup = any(marker in query for marker in directed_lookup_markers)
+        has_field_specific_lookup = has_place_hint and bool(
+            re.search(
+                r"\b(?:opening hours?|hours?|hor[aá]rios?|tickets?|bilhetes?|website|site|phone|telefone|email|e-mail)\b",
+                query,
+            )
+        )
         has_recommendation_lookup = bool(
             re.search(
                 r"\b(?:best|top|recommended|recommend|suggest|suggested|good|melhores|principais|recomenda|sugere)\b",
@@ -1310,10 +1329,40 @@ class ResearcherAgent(BaseAgent):
 
         if has_place_hint and has_directional_lookup:
             return True
+        if has_field_specific_lookup:
+            return True
         if has_place_hint and has_recommendation_lookup:
             return True
 
         return False
+
+    @staticmethod
+    def _extract_requested_result_count(user_message: str) -> Optional[int]:
+        """Extract a small explicit result count from place-discovery prompts."""
+        query = (user_message or "").lower()
+        word_counts = {
+            "one": 1,
+            "um": 1,
+            "uma": 1,
+            "two": 2,
+            "dois": 2,
+            "duas": 2,
+            "three": 3,
+            "tres": 3,
+            "três": 3,
+            "four": 4,
+            "quatro": 4,
+            "five": 5,
+            "cinco": 5,
+        }
+        count_pattern = r"(?:museums?|museus|places?|locais|attractions?|atra[cç][oõ]es|restaurants?|restaurantes|monuments?|monumentos)"
+        digit_match = re.search(rf"\b([1-5])\s+{count_pattern}\b", query)
+        if digit_match:
+            return int(digit_match.group(1))
+        for word, count in word_counts.items():
+            if re.search(rf"\b{re.escape(word)}\s+{count_pattern}\b", query):
+                return count
+        return None
 
     @staticmethod
     def _is_visit_place_context_query(user_message: str) -> bool:
@@ -2023,7 +2072,7 @@ class ResearcherAgent(BaseAgent):
             return self._run_direct_tool_fallback(user_message, language)
 
         query_text = place_focus_query or user_message
-        max_results = 5
+        max_results = self._extract_requested_result_count(user_message) or 5
         if is_broad_attractions:
             query_text = f"{user_message} iconic monuments museums palaces castles historic sites"
             max_results = 6
@@ -2227,6 +2276,85 @@ class ResearcherAgent(BaseAgent):
             else "Não consegui concluir o fluxo semântico do prompt, mas as ferramentas de pesquisa continuam disponíveis."
         )
         return fallback_text
+
+    @staticmethod
+    def _is_planner_evidence_request(user_message: str) -> bool:
+        """Return whether Researcher should return cards for Planner consumption."""
+        query = (user_message or "").lower()
+        has_planning_intent = bool(
+            re.search(
+                r"\b(plan|itinerary|route plan|roteiro|planeia|planejar|plano|afternoon|evening|full day|day trip|fim de tarde|tarde|noite|dia inteiro)\b",
+                query,
+            )
+        )
+        has_place_need = bool(
+            re.search(
+                r"\b(cultural|culture|cultura|stop|paragem|museum|museu|gallery|galeria|monument|monumento|viewpoint|miradouro|restaurant|restaurante|food|comer|jantar|dinner|event|evento)\b",
+                query,
+            )
+        )
+        return has_planning_intent and has_place_need
+
+    def _run_planner_evidence_lookup(self, user_message: str, language: str) -> str:
+        """Return complete place/event cards for downstream planner synthesis."""
+        places_tool = self._get_tool_by_name("search_places_attractions")
+        if not places_tool:
+            return ""
+
+        query = user_message.strip()
+        normalized = query.lower()
+        result_blocks: List[str] = []
+
+        if re.search(r"\b(cultural|culture|cultura|museum|museu|gallery|galeria|monument|monumento|viewpoint|miradouro|stop|paragem)\b", normalized):
+            cultural_args = {
+                "query": f"cultural stop museums monuments viewpoints {query}",
+                "category": "Museums & Monuments",
+                "max_results": 5,
+                "language": language,
+            }
+            result = str(self._invoke_tool(places_tool, cultural_args, tool_name="search_places_attractions")).strip()
+            if result:
+                result_blocks.append(result)
+                self._remember_search_context(
+                    domain="places",
+                    tool_name="search_places_attractions",
+                    base_args={key: value for key, value in cultural_args.items() if key not in {"max_results", "offset"}},
+                    page_size=int(cultural_args["max_results"]),
+                    shown_count=self._count_ranked_results(result),
+                    language=language,
+                    source_query=query,
+                    offset=0,
+                )
+
+        if re.search(r"\b(restaurant|restaurante|restaurants|restaurantes|food|comer|jantar|dinner|cafe|caf[eé]|bar|bars)\b", normalized):
+            food_args = {
+                "query": f"restaurants cafes bars relaxed local option {query}",
+                "category": "Restaurants",
+                "max_results": 3,
+                "language": language,
+            }
+            result = str(self._invoke_tool(places_tool, food_args, tool_name="search_places_attractions")).strip()
+            if result:
+                result_blocks.append(result)
+
+        if not result_blocks:
+            generic_args = {"query": query, "max_results": 5, "language": language}
+            result = str(self._invoke_tool(places_tool, generic_args, tool_name="search_places_attractions")).strip()
+            if result:
+                result_blocks.append(result)
+
+        if not result_blocks:
+            return ""
+
+        heading = "### 🔵 **Evidência para planeamento**" if language == "pt" else "### 🔵 **Planning Evidence**"
+        note = (
+            "✅ **Resposta direta:** Recolhi cards completos para o planeador usar sem inventar campos."
+            if language == "pt"
+            else "✅ **Direct answer:** I gathered complete cards for the planner to use without inventing fields."
+        )
+        combined = "\n\n".join(result_blocks)
+        source_line = self._build_places_source_line(combined, language)
+        return "\n\n".join([heading, note, combined, source_line]).strip()
 
     @staticmethod
     def _extract_service_types(user_message: str) -> List[str]:
@@ -2877,6 +3005,19 @@ class ResearcherAgent(BaseAgent):
                 user_query=user_message,
                 language=language,
             ))
+
+        if not is_greeting and self._is_planner_evidence_request(user_message):
+            if verbose:
+                print("      [RESEARCHER] Returning deterministic planner evidence cards...")
+
+            response = self._run_planner_evidence_lookup(user_message, language)
+            if response:
+                return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
+                    response,
+                    agent_name="researcher",
+                    user_query=user_message,
+                    language=language,
+                ))
 
         if not is_greeting and self._is_history_culture_query(user_message):
             if verbose:

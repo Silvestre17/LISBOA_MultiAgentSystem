@@ -47,7 +47,7 @@ def build_structured_plan_messages(
       "title": "grounded place/event/service name or generic local block",
       "kind": "place|museum|culture|event|food|coffee|pastry|transport|walk|service|activity",
       "purpose": "why this block fits the request",
-      "details": ["grounded detail from evidence"],
+      "details": ["Description: grounded description", "Address: grounded address/map link", "Hours: grounded hours", "Price: grounded price", "Website: grounded official/details link"],
       "movement": ["grounded movement detail or scoped uncertainty"],
       "weather": ["weather adaptation when relevant"],
       "limitations": ["only relevant unconfirmed fields"],
@@ -76,7 +76,10 @@ Hard rules:
 - If an exact transport leg is not evidenced, write a scoped uncertainty in movement or limitations.
 - If the user asks for public transport and transport evidence exists, include the line/operator/route detail that is evidenced.
 - Do not use live departures as a schedule for a future itinerary unless the user explicitly asks for live/next departures.
+- If the user asks for a plan around a named neighbourhood or starting/ending area, prefer evidence located in that area or on the direct route. Do not choose a better-known venue in another district as the cultural stop unless you clearly frame it as an on-the-way detour.
 - If events or places appear in the evidence, include their useful fields in details when selected.
+- For selected places/events, preserve useful evidence fields as detail strings with these labels when present: Description, Address, Hours, Price, Website, When, Venue, Tickets. Omit any missing field; never write N/A, unknown, or + info.
+- For time-specific plans, do not choose a place whose evidence says it is closed for that period. If all strong matches are closed or lack hours, either choose a weaker open-ended stop and state the limitation, or frame the closed venue only as exterior/context, not as an enterable visit.
 - Avoid static skeletons. Every block must explain purpose plus at least one useful detail, movement, weather adaptation, or limitation.
 - Keep one-day plans to 2 to 4 blocks. Multi-day plans may use up to 5 blocks.
 - Use source_ids only from the evidence. If unsure, leave the source_ids list empty and state the limitation.

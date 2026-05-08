@@ -519,6 +519,32 @@ def build_agent_graph(provider: str = None):
 # ==========================================================================
 
 
+def _print_final_markdown_response(final_output: str) -> None:
+    """Print the final Markdown response while tolerating legacy consoles."""
+    import builtins
+    import sys
+
+    def _safe_print(value: object = "") -> None:
+        """Print final markdown without failing on legacy terminal encodings."""
+        try:
+            builtins.print(value)
+        except UnicodeEncodeError:
+            encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+            text = str(value).encode(encoding, errors="replace").decode(
+                encoding,
+                errors="replace",
+            )
+            builtins.print(text)
+
+    print = _safe_print
+
+    print("=" * 80)
+    print("📝 FINAL RESPONSE (Markdown)")
+    print("=" * 80)
+    print(final_output)
+    print("=" * 80 + "\n")
+
+
 class LisbonAssistant:
     """
     High-level interface for the Lisbon Urban Assistant.
@@ -633,6 +659,9 @@ class LisbonAssistant:
                 rendered = f"{note}\n\n{rendered}"
 
         rendered = final_visual_pass(rendered)
+
+        if Config.SHOW_MARKDOWN_RESPONSE_IN_TERMINAL:
+            _print_final_markdown_response(rendered)
 
         return rendered
 
@@ -877,8 +906,7 @@ class MultiAgentAssistant:
                     "Posso ajudar ainda com:\n"
                     "- Explicar alternativas de planeamento com base em contexto de Lisboa\n"
                     "- Organizar opções de visita, refeições e mobilidade sem afirmar dados ao vivo\n"
-                    f"- Pedir uma nova tentativa para confirmar: `weather`, `transport` ou serviços (módulos tentados: {attempted})\n\n"
-                    f"Erro interno tratado: {type(error).__name__ if error else 'Interrupção de serviço'}"
+                    "- Pedir uma nova tentativa para confirmar meteorologia, transportes ou serviços."
                 )
             if has_weather:
                 return (
@@ -888,8 +916,7 @@ class MultiAgentAssistant:
                     "Se precisares de planeamento para hoje/amanhã, volta a perguntar em breve para eu confirmar a fonte operacional.\n\n"
                     "Posso ajudar com:\n"
                     "- Planos e alternativas de percurso\n"
-                    "- Opções de locais e serviços turísticos\n"
-                    f"Erro interno tratado: {type(error).__name__ if error else 'Interrupção de serviço'}"
+                    "- Opções de locais e serviços turísticos."
                 )
             if has_transport:
                 return (
@@ -898,8 +925,7 @@ class MultiAgentAssistant:
                     "Não vou inventar ligações, frequências nem atrasos.\n\n"
                     "Se precisares, repete em seguida para relançar a consulta operacional e confirmar dados atuais.\n\n"
                     "Posso ainda ajudar com:\n"
-                    "- Estruturas de orientação e lógica de ligação por Lisboa\n"
-                    f"Erro interno tratado: {type(error).__name__ if error else 'Interrupção de serviço'}"
+                    "- Estruturas de orientação e lógica de ligação por Lisboa."
                 )
             if has_research:
                 return (
@@ -918,19 +944,13 @@ class MultiAgentAssistant:
             return (
                 "## Operational notice\n"
                 "I cannot confirm all live Lisbon sources for this request right now, and I won’t invent unavailable details.\n"
-                "If you want, re-ask this in a few moments and I’ll retry with fresh checks.\n\n"
-                f"Agents selected before failure: {attempted or 'unknown'}\n"
-                f"Handled error: {type(error).__name__ if error else 'Service interruption'}"
+                "Please re-ask this in a few moments and I’ll retry with fresh checks."
             )
         return (
             "## Operational notice\n"
             "I cannot confirm all live Lisbon sources for this request right now, and I won’t invent unavailable details.\n\n"
             "To stay reliable, I’m stopping with a caution-only response.\n"
             "Please retry in a few moments for the live-checked answer."
-            + (
-                f"\n\nAgents selected before failure: {attempted}\n"
-                f"Handled error: {type(error).__name__ if error else 'Service interruption'}"
-            )
         )
 
     @staticmethod
@@ -1840,9 +1860,12 @@ class MultiAgentAssistant:
             str: Final user-facing response.
         """
         from agent.utils.response_formatter import (
+            canonicalize_visitlisboa_source_line,
             ensure_transport_notes_heading,
+            format_researcher_card,
             infer_researcher_source_kind,
             reconcile_researcher_event_response,
+            researcher_place_response_missing_requested_fields,
             normalize_transport_notes_block,
             strip_redundant_transport_status_notes,
             strip_technical_output_artifacts,
@@ -2008,6 +2031,42 @@ class MultiAgentAssistant:
         if (
             not planner_involved
             and single_domain_agents == ["researcher"]
+            and infer_researcher_source_kind(user_query=message, text=final_output) == "places"
+            and researcher_place_response_missing_requested_fields(
+                final_output,
+                user_query=message,
+                language=language,
+            )
+        ):
+            researcher_agent = self.agents.get("researcher")
+            if researcher_agent is not None and hasattr(researcher_agent, "_run_direct_place_lookup"):
+                try:
+                    direct_place_output = researcher_agent._run_direct_place_lookup(message, language)
+                except Exception:
+                    direct_place_output = ""
+                if direct_place_output:
+                    final_output = reconcile_researcher_place_response(
+                        final_output,
+                        direct_place_output,
+                        language=language,
+                        user_query=message,
+                    )
+                    final_output = format_researcher_card(
+                        final_output,
+                        language=language,
+                        user_query=message,
+                    )
+                    final_output = final_visual_pass(final_output)
+                    final_output = canonicalize_visitlisboa_source_line(
+                        final_output,
+                        user_query=message,
+                        language=language,
+                    )
+                    final_output = final_visual_pass(final_output)
+
+        if (
+            not planner_involved
+            and single_domain_agents == ["researcher"]
             and infer_researcher_source_kind(user_query=message, text=final_output) == "events"
             and not (
                 callable(getattr(getattr(self, "agents", {}).get("researcher"), "_is_event_category_query", None))
@@ -2169,28 +2228,7 @@ class MultiAgentAssistant:
         self._print_execution_summary(execution_summary)
 
         if Config.SHOW_MARKDOWN_RESPONSE_IN_TERMINAL:
-            import builtins
-            import sys
-
-            def _safe_print(value: object = "") -> None:
-                """Print final markdown without failing on legacy terminal encodings."""
-                try:
-                    builtins.print(value)
-                except UnicodeEncodeError:
-                    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
-                    text = str(value).encode(encoding, errors="replace").decode(
-                        encoding,
-                        errors="replace",
-                    )
-                    builtins.print(text)
-
-            print = _safe_print
-
-            print("=" * 80)
-            print("📝 FINAL RESPONSE (Markdown)")
-            print("=" * 80)
-            print(final_output)
-            print("=" * 80 + "\n")
+            _print_final_markdown_response(final_output)
 
         return final_output
 
@@ -2315,6 +2353,84 @@ class MultiAgentAssistant:
             )
 
         return context
+
+    @staticmethod
+    def _is_usable_worker_output(output: object) -> bool:
+        """Return whether a worker produced evidence worth giving to the planner."""
+        text = str(output or "").strip()
+        if not text:
+            return False
+        lowered = text.lower()
+        failed_markers = (
+            "error:",
+            "erro:",
+            "failed:",
+            "timeout",
+            "traceback",
+            "no response",
+            "sem resposta",
+        )
+        return not lowered.startswith(failed_markers)
+
+    @classmethod
+    def _filter_planner_qa_retry_agents(
+        cls,
+        retry_agents: List[str],
+        *,
+        user_message: str,
+        agents_to_call: List[str],
+        workers: List[str],
+        agent_outputs: Dict[str, object],
+        qa_result: Optional[Dict[str, object]],
+    ) -> List[str]:
+        """Avoid broad second worker passes before planner synthesis.
+
+        For planner requests, already executed workers are evidence providers,
+        not final renderers. QA may still request a missing domain, or retry a
+        worker that failed. It should not re-run a healthy researcher or
+        transport worker just because optional details remain unconfirmed; the
+        planner must synthesize a bounded answer with the QA limitations.
+        """
+        if "planner" not in set(agents_to_call or []):
+            return retry_agents
+
+        worker_set = set(workers or [])
+        filtered: List[str] = []
+        skipped: List[str] = []
+        for agent_name in retry_agents:
+            if (
+                agent_name == "weather"
+                and "weather" not in worker_set
+                and not cls._planner_retry_should_fetch_weather(user_message)
+            ):
+                skipped.append(agent_name)
+                continue
+            if (
+                agent_name in worker_set
+                and cls._is_usable_worker_output(agent_outputs.get(agent_name))
+            ):
+                skipped.append(agent_name)
+                continue
+            filtered.append(agent_name)
+
+        if skipped and isinstance(qa_result, dict):
+            qa_result["_skipped_planner_retry_agents"] = cls._dedupe_preserve_order(skipped)
+        return cls._dedupe_preserve_order(filtered)
+
+    @staticmethod
+    def _planner_retry_should_fetch_weather(user_message: str) -> bool:
+        """Return whether QA may add weather to a planner route after workers."""
+        normalized = re.sub(r"\s+", " ", str(user_message or "").lower())
+        return bool(
+            re.search(
+                r"\b(?:weather|forecast|rain|rainy|temperature|wind|umbrella|chuva|previs[aã]o|temperatura|vento|guarda[-\s]?chuva)\b",
+                normalized,
+            )
+            or re.search(
+                r"\b(?:today|tonight|tomorrow|this week|weekend|hoje|esta noite|amanh[ãa]|fim de semana)\b",
+                normalized,
+            )
+        )
 
     @staticmethod
     def _should_run_final_qa_repair(
@@ -2922,7 +3038,9 @@ class MultiAgentAssistant:
                 qa_result = self.qa_agent.validate(
                     user_query=message,
                     agent_outputs=agent_outputs,
-                    agents_called=workers,
+                    agents_called=self._dedupe_preserve_order(
+                        workers + (["planner"] if "planner" in agents_to_call else [])
+                    ),
                     language=effective_language,
                     user_context=self.state.get("user_context"),
                     conversation_history=qa_history,
@@ -2969,6 +3087,14 @@ class MultiAgentAssistant:
                     a for a in qa_result.get("repairable_agents", [])
                     if a in self.agents and a != "planner"
                 ]
+            )
+            retry_agents = self._filter_planner_qa_retry_agents(
+                retry_agents,
+                user_message=message,
+                agents_to_call=agents_to_call,
+                workers=workers,
+                agent_outputs=agent_outputs,
+                qa_result=qa_result,
             )
 
             if retry_agents and (not qa_result["complete"] or qa_result.get("needs_repair")):
@@ -3057,7 +3183,11 @@ class MultiAgentAssistant:
                         qa_result_2 = self.qa_agent.validate(
                             user_query=message,
                             agent_outputs=agent_outputs,
-                            agents_called=workers + retry_agents,
+                            agents_called=self._dedupe_preserve_order(
+                                workers
+                                + retry_agents
+                                + (["planner"] if "planner" in agents_to_call else [])
+                            ),
                             language=effective_language,
                             user_context=self.state.get("user_context"),
                             conversation_history=qa_history,
@@ -3377,6 +3507,9 @@ class MultiAgentAssistant:
 
         if planner_executed:
             from agent.agents.planner_agent import (
+                _build_card_based_itinerary_fallback,
+                _build_structured_plan_fallback,
+                _planner_response_has_markdown_contract_defects,
                 _planner_response_matches_schema,
                 enforce_multi_day_quality_mode,
             )
@@ -3387,6 +3520,26 @@ class MultiAgentAssistant:
                 user_message=message,
                 language=effective_language,
             )
+            if not planner_fallback_used and _planner_response_has_markdown_contract_defects(response):
+                response = _build_card_based_itinerary_fallback(
+                    user_message=message,
+                    language=effective_language,
+                    weather_data=str(agent_outputs.get("weather", "") or ""),
+                    transport_data=str(agent_outputs.get("transport", "") or ""),
+                    places_data=str(agent_outputs.get("researcher", "") or ""),
+                    events_data=str(agent_outputs.get("events", "") or ""),
+                    qa_disclaimers=agent_outputs.get("_qa_disclaimers"),
+                ) or _build_structured_plan_fallback(
+                    user_message=message,
+                    language=effective_language,
+                    weather_data=str(agent_outputs.get("weather", "") or ""),
+                    transport_data=str(agent_outputs.get("transport", "") or ""),
+                    places_data=str(agent_outputs.get("researcher", "") or ""),
+                    events_data=str(agent_outputs.get("events", "") or ""),
+                    qa_disclaimers=agent_outputs.get("_qa_disclaimers"),
+                    conversation_context=str(agent_outputs.get("_conversation_context", "") or ""),
+                )
+                planner_fallback_used = True
             if not planner_fallback_used and not _planner_response_matches_schema(response):
                 response = finalize_worker_response(response, "planner", message, effective_language)
         elif len(response_agents_to_call) == 1 and response_agents_to_call[0] in {"researcher", "transport"}:

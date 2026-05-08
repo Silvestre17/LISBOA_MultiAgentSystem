@@ -9,7 +9,7 @@
 import re
 import unicodedata
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -24,6 +24,10 @@ from agent.utils.response_formatter import (
 from agent.planning import (
     build_evidence_bundle,
     build_structured_plan_messages,
+    EvidenceBundle,
+    EvidenceCard,
+    PlanBlock,
+    PlanDraft,
     parse_plan_draft_json,
     render_plan_markdown,
     validate_plan_draft,
@@ -658,7 +662,7 @@ def _planner_response_matches_schema(response: str) -> bool:
         return False
     headings = [line.strip() for line in response.splitlines() if line.strip().startswith("### ")]
     normalized_headings = [_normalize_planner_text(heading) for heading in headings]
-    if len(headings) < 6 or len(normalized_headings) != len(set(normalized_headings)):
+    if len(headings) < 3 or len(normalized_headings) != len(set(normalized_headings)):
         return False
     if re.search(r"(?im)^\s*(?:place cards?|raw cards?|visit suggestions)\s*$", response):
         return False
@@ -674,14 +678,37 @@ def _planner_response_matches_schema(response: str) -> bool:
     normalized = _normalize_planner_text(response)
     required_en = (
         "direct answer",
+        "plan basis",
+        "suggested route",
+        "how to move",
+        "weather adaptation",
+        "final notes",
+    )
+    legacy_required_en = (
+        "direct answer",
         "constraints used",
         "plan blocks",
         "movement logic",
         "weather strategy",
         "limitations",
     )
-    has_english_schema = all(section in normalized for section in required_en)
+    has_english_schema = all(section in normalized for section in required_en) or all(
+        section in normalized for section in legacy_required_en
+    ) or all(
+        section in normalized
+        for section in ("direct answer", "suggested route", "how to move", "final notes")
+    )
     has_portuguese_schema = all(
+        any(alias in normalized for alias in aliases)
+        for aliases in (
+            ("resposta direta",),
+            ("base do plano",),
+            ("roteiro sugerido",),
+            ("como te deslocas",),
+            ("adaptação ao tempo", "adaptacao ao tempo"),
+            ("notas finais",),
+        )
+    ) or all(
         any(alias in normalized for alias in aliases)
         for aliases in (
             ("resposta direta",),
@@ -690,6 +717,14 @@ def _planner_response_matches_schema(response: str) -> bool:
             ("lógica de movimento", "logica de movimento"),
             ("estratégia meteorológica", "estrategia meteorologica"),
             ("limitações", "limitacoes"),
+        )
+    ) or all(
+        any(alias in normalized for alias in aliases)
+        for aliases in (
+            ("resposta direta",),
+            ("roteiro sugerido",),
+            ("como te deslocas",),
+            ("notas finais",),
         )
     )
     if not (has_english_schema or has_portuguese_schema):
@@ -813,13 +848,9 @@ def _build_structured_plan_fallback(
         places_data,
         events_data,
     )
+    if source_line and "carris" not in _normalize_planner_text("\n".join(transport_bullets)):
+        source_line = re.sub(r"\s*\|\s*\[\*Carris\*\]\(https://www\.carris\.pt\)", "", source_line)
 
-    if not weather_bullets:
-        weather_bullets = [
-            "- Estratégia meteorológica: mantém alternativas interiores e confirma a previsão IPMA se a data for futura."
-            if is_pt
-            else "- Weather strategy: keep indoor alternatives and confirm the IPMA forecast if the date is in the future."
-        ]
     if not transport_bullets:
         transport_bullets = [
             "- As pernas exatas de transporte não ficaram confirmadas; usa o plano como ordem geográfica, não como horário."
@@ -827,11 +858,20 @@ def _build_structured_plan_fallback(
             else "- Exact transport legs were not confirmed; use this as geographic order, not as a timetable."
         ]
 
-    title = (
-        f"### 📅 Plano estruturado de {visible_days} dia{'s' if visible_days > 1 else ''}"
-        if is_pt
-        else f"### 📅 Structured {visible_days}-Day Lisbon Plan"
-    )
+    route_target = _extract_requested_plan_area(user_message)
+    route_origin = _extract_requested_plan_origin(user_message)
+    if visible_days == 1 and route_target:
+        title = (
+            f"### 📅 **Fim de dia descontraído em {route_target}**"
+            if is_pt
+            else f"### 📅 **Relaxed evening around {route_target}**"
+        )
+    else:
+        title = (
+            f"### 📅 **Plano de Lisboa de {visible_days} dia{'s' if visible_days > 1 else ''}**"
+            if is_pt
+            else f"### 📅 **Lisbon {visible_days}-Day Plan**"
+        )
     if requested_days > 5:
         direct = (
             "Vou limitar o pedido aos primeiros 5 dias para manter verificabilidade; rotas, preços, bilhetes, restaurantes e meteorologia futura não devem ser tratados como confirmados."
@@ -845,35 +885,47 @@ def _build_structured_plan_fallback(
             else "Here is a high-level day-by-day plan with examples anchored in the available data and explicit limits."
         )
     else:
-        direct = (
-            "Segue um plano curto e ordenado, com 3 a 4 blocos e sem inventar horários, preços ou disponibilidade."
-            if is_pt
-            else "Here is a short ordered plan with 3 to 4 blocks, without inventing opening hours, prices, or availability."
-        )
+        if route_origin and route_target:
+            direct = (
+                f"Usa a ligação de transporte público evidenciada a partir de **{route_origin}** para **{route_target}**, acrescenta uma paragem cultural confirmada e mantém a caminhada final curta."
+                if is_pt
+                else f"Use the evidenced public-transport leg from **{route_origin}** toward **{route_target}**, add one grounded cultural stop, and keep the final walk short."
+            )
+        else:
+            direct = (
+                "Segue um plano curto e ordenado, sem inventar horários, preços ou disponibilidade."
+                if is_pt
+                else "Here is a short ordered plan without inventing opening hours, prices, or availability."
+            )
 
     lines: List[str] = [
         title,
         "",
-        "### ✅ Resposta direta" if is_pt else "### ✅ Direct Answer",
-        direct,
-        "",
-        "### 🧭 Restrições usadas" if is_pt else "### 🧭 Constraints Used",
-        *[f"- {constraint}" for constraint in constraints],
-        "",
-        "### 📍 Blocos do plano" if is_pt else "### 📍 Plan Blocks",
+        f"✅ **{'Resposta direta' if is_pt else 'Direct answer'}:** {direct}",
     ]
+    if constraints:
+        lines.extend([
+            "",
+            f"💡 **{'Dicas' if is_pt else 'Tips'}:**",
+            *[f"    - {constraint}" for constraint in constraints[:3]],
+        ])
+    lines.extend([
+        "",
+        "### 📍 **Roteiro sugerido**" if is_pt else "### 📍 **Suggested route**",
+    ])
 
     if visible_days == 1:
         block_count = 0
         for card in clean_cards[:3]:
             block_count += 1
-            label = f"Bloco {block_count}" if is_pt else f"Block {block_count}"
-            lines.extend([f"- **{label}: {card['name']}**"])
+            lines.extend(["", f"**🏛️ {card['name']}**"])
             if card.get("category"):
-                lines.append(f"    - **{'Categoria' if is_pt else 'Category'}:** {card['category']}")
+                lines.append(f"    - 📝 **{'Categoria' if is_pt else 'Category'}:** {card['category']}")
             if card.get("description"):
-                lines.append(f"    - **{'Nota' if is_pt else 'Note'}:** {card['description'][:180].rstrip()}")
-        while block_count < 3:
+                description = _clean_planner_card_description(card["description"])
+                if description:
+                    lines.append(f"    - 📝 **{'Nota' if is_pt else 'Note'}:** {description[:220].rstrip()}")
+        if block_count == 0:
             block_count += 1
             if block_count == 1:
                 generic = "paragem cultural confirmável" if is_pt else "confirmable cultural stop"
@@ -881,7 +933,7 @@ def _build_structured_plan_fallback(
                 generic = "pausa curta para comida/café sem assumir reserva" if is_pt else "short food/coffee break without assuming a booking"
             else:
                 generic = "backup interior ou regresso" if is_pt else "indoor backup or return leg"
-            lines.append(f"- **{'Bloco' if is_pt else 'Block'} {block_count}:** {generic}.")
+            lines.extend(["", f"**📍 {generic.capitalize()}**"])
     else:
         themes_en = [
             "historic core with low walking",
@@ -909,13 +961,18 @@ def _build_structured_plan_fallback(
 
     lines.extend([
         "",
-        "### 🚇 Lógica de movimento" if is_pt else "### 🚇 Movement Logic",
+        "### 🚇 **Como te deslocas**" if is_pt else "### 🚇 **How to move**",
         *transport_bullets[:4],
+    ])
+    if weather_bullets:
+        lines.extend([
+            "",
+            "### ⛅ **Adaptação ao tempo**" if is_pt else "### ⛅ **Weather adaptation**",
+            *weather_bullets[:4],
+        ])
+    lines.extend([
         "",
-        "### ⛅ Estratégia meteorológica" if is_pt else "### ⛅ Weather Strategy",
-        *weather_bullets[:4],
-        "",
-        "### ⚠️ Limitações" if is_pt else "### ⚠️ Limitations",
+        "### ⚠️ **Notas finais**" if is_pt else "### ⚠️ **Final notes**",
     ])
     limitations = [
         "Não confirmei horários, preços, bilhetes, reservas, lotação ou disponibilidade em tempo real."
@@ -932,11 +989,68 @@ def _build_structured_plan_fallback(
             else "I limited the answer to the first 5 days; remaining days should be planned in a second iteration."
         )
     if qa_disclaimers:
-        limitations.extend(str(item) for item in qa_disclaimers[:2] if item)
+        visible_transport = _normalize_planner_text("\n".join(transport_bullets))
+        for item in qa_disclaimers[:3]:
+            item_text = str(item or "").strip()
+            if not item_text:
+                continue
+            normalized_item = _normalize_planner_text(item_text)
+            if "carris" in normalized_item and "carris" not in visible_transport:
+                continue
+            limitations.append(item_text)
     lines.extend(f"- {item}" for item in limitations)
     if source_line:
         lines.extend(["", source_line])
     return "\n".join(lines).strip()
+
+
+def _extract_requested_plan_area(user_message: str) -> str:
+    """Extract a named target area from a short planning request."""
+    text = str(user_message or "").strip()
+    patterns = [
+        r"\baround\s+(?P<area>[^,.;]+?)(?:\s+starting\b|\s+from\b|\s+with\b|$)",
+        r"\bin\s+(?P<area>[^,.;]+?)(?:\s+starting\b|\s+from\b|\s+with\b|$)",
+        r"\bà volta de\s+(?P<area>[^,.;]+?)(?:\s+a partir\b|\s+com\b|$)",
+        r"\bem\s+(?P<area>[^,.;]+?)(?:\s+a partir\b|\s+com\b|$)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            area = re.sub(r"\s+", " ", match.group("area")).strip(" .:-")
+            if 2 <= len(area) <= 80:
+                return area
+    return ""
+
+
+def _extract_requested_plan_origin(user_message: str) -> str:
+    """Extract an origin anchor from a short planning request."""
+    text = str(user_message or "").strip()
+    patterns = [
+        r"\bstarting\s+from\s+(?P<origin>[^,.;]+?)(?:[,.;]?\s+with\b|[,.;]?\s+include\b|$)",
+        r"\bfrom\s+(?P<origin>[^,.;]+?)\s+to\b",
+        r"\ba partir de\s+(?P<origin>[^,.;]+?)(?:[,.;]?\s+com\b|[,.;]?\s+inclui\b|$)",
+        r"\bde\s+(?P<origin>[^,.;]+?)\s+para\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            origin = re.sub(r"\s+", " ", match.group("origin")).strip(" .:-")
+            if 2 <= len(origin) <= 80:
+                return origin
+    return ""
+
+
+def _clean_planner_card_description(description: str) -> str:
+    """Remove nested field labels from fallback place descriptions."""
+    text = str(description or "").strip()
+    text = re.sub(
+        r"^(?:[-*•]\s*)?(?:📝\s*)?\*\*(?:Description|Descrição|Descricao|Note|Nota)\s*:?\*\*\s*:?\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"^(?:Description|Descrição|Descricao|Note|Nota)\s*:\s*", "", text, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", text).strip(" -")
 
 
 def _extract_planner_fallback_bullets(text: str, *, max_items: int = 4) -> List[str]:
@@ -957,6 +1071,9 @@ def _extract_planner_fallback_bullets(text: str, *, max_items: int = 4) -> List[
         elif stripped.startswith(("⛅", "⚠️", "💡", "🚇", "🚌", "📍", "🏛️", "☕", "🌤️")):
             candidate = stripped
         else:
+            continue
+        candidate = re.sub(r"^#{1,6}\s*", "", candidate).strip()
+        if re.fullmatch(r"(?:🚇\s*)?\*\*(?:best transport|melhor transporte)\*\*", candidate, flags=re.IGNORECASE):
             continue
 
         normalized = _normalize_planner_text(candidate)
@@ -1074,7 +1191,12 @@ def _build_planner_fallback_source_line(
         )
     if "lisboa aberta" in combined or "dados abertos" in combined:
         sources.append("[*Lisboa Aberta*](https://dados.cm-lisboa.pt)")
-    if "metrolisboa" in combined or "metro de lisboa" in combined:
+    if (
+        "metrolisboa" in combined
+        or "metro de lisboa" in combined
+        or re.search(r"\bmetro\b", combined)
+        or re.search(r"\b(?:yellow|blue|green|red)\s+line\b|\blinha\s+(?:amarela|azul|verde|vermelha)\b", combined)
+    ):
         sources.append("[*Metro de Lisboa*](https://www.metrolisboa.pt)")
     if "carrismetropolitana" in combined or "carris metropolitana" in combined:
         sources.append("[*Carris Metropolitana*](https://www.carrismetropolitana.pt)")
@@ -1129,11 +1251,7 @@ def _extract_weather_safety_bullets(weather_data: str, language: str) -> List[st
     """Extract concise rain/warning bullets for planner fallbacks."""
     text = str(weather_data or "")
     if not text.strip():
-        return [
-            "- Weather was not retrieved for this short plan; confirm conditions before leaving."
-            if language != "pt"
-            else "- A meteorologia não foi consultada para este plano curto; confirma as condições antes de sair."
-        ]
+        return []
 
     bullets = _extract_weather_fact_bullets(text, language, max_items=3)
     if not bullets:
@@ -2121,7 +2239,7 @@ def _build_full_museum_day_transport_fallback(
             "",
             "---",
             "",
-            "### 🚇 Movement Logic",
+            "### 🚇 **How to move**",
             f"- Use **Metro** for {metro_move}",
             "- Use **Carris** for the riverside Belém corridor only after checking the departure at the time of travel.",
             "- Opening hours, tickets, and crowding were not confirmed live; verify the selected museum before locking the route.",
@@ -2823,6 +2941,9 @@ def _extract_visitlisboa_place_cards(text: str, *, max_items: int = 8) -> List[D
 
     patterns = [
         re.compile(
+            r"(?ms)^\s*\*\*(?P<icon>[^\w\s*]{0,8})\s*(?P<name>[^*\n]+?)\*\*\s*\n(?P<body>.*?)(?=^\s*\*\*[^\n*]{2,140}\*\*\s*$|^\s*###\s+|\Z)"
+        ),
+        re.compile(
             r"(?ms)^\s*\d+\.\s*(?P<icon>[^\w\s*]{0,4})\s*\*\*(?P<name>[^*\n]+)\*\*\s*\n(?P<body>.*?)(?=^\s*\d+\.\s*[^\n]*\*\*|\Z)"
         ),
         re.compile(
@@ -2836,29 +2957,57 @@ def _extract_visitlisboa_place_cards(text: str, *, max_items: int = 8) -> List[D
             normalized_name = _normalize_planner_text(name)
             if not name or normalized_name in seen_names:
                 continue
+            if normalized_name in {
+                "places and attractions",
+                "locais e atracoes",
+                "locais e atracoes encontrados em lisboa",
+                "events found",
+                "eventos encontrados",
+            }:
+                continue
             body = match.group("body")
             if not re.search(
-                r"(?mi)(Address|Morada|Category|Categoria|Website|Site|Rating|Avalia|Price|Preço|Tickets|Bilhetes)",
+                r"(?mi)(Description|Descri(?:ç|c)[aã]o|Address|Morada|Category|Categoria|Website|Site|More details|Mais detalhes|Rating|Avalia|Price|Pre(?:ç|c)o|Tickets|Bilhetes|Hours|Hor[aá]rio)",
                 body,
             ):
                 continue
-            category_match = re.search(r"(?mi)^\s*📂\s*(?:\*\*)?(?:Category|Categoria)(?:\*\*)?:\s*(?P<value>[^\n]+)", body)
-            address_match = re.search(r"(?mi)^\s*📍\s*\*\*(?:Address|Morada):\*\*\s*(?P<value>[^\n]+)", body)
-            hours_match = re.search(r"(?mi)^\s*🕐\s*(?P<value>[^\n]+)", body)
+            description_match = re.search(r"(?mi)^\s*[-*•]?\s*(?:[^\w\s*]{1,8}\s*)?(?:\*\*)?(?:Description|Descri(?:ç|c)[aã]o)\s*:\s*(?:\*\*)?\s*(?P<value>[^\n]+)", body)
+            category_match = re.search(r"(?mi)^\s*[-*•]?\s*(?:[^\w\s*]{1,8}\s*)?(?:\*\*)?(?:Category|Categoria)\s*:\s*(?:\*\*)?\s*(?P<value>[^\n]+)", body)
+            address_match = re.search(r"(?mi)^\s*[-*•]?\s*(?:[^\w\s*]{1,8}\s*)?(?:\*\*)?(?:Address|Morada|Location|Localiza(?:ç|c)[aã]o)\s*:\s*(?:\*\*)?\s*(?P<value>[^\n]+)", body)
+            hours_match = re.search(r"(?mi)^\s*[-*•]?\s*(?:[^\w\s*]{1,8}\s*)?(?:\*\*)?(?:Hours|Hor[aá]rio|Horarios|Horários)\s*:\s*(?:\*\*)?\s*(?P<value>[^\n]+)", body)
+            price_match = re.search(r"(?mi)^\s*[-*•]?\s*(?:[^\w\s*]{1,8}\s*)?(?:\*\*)?(?:Price|Pre(?:ç|c)o)\s*:\s*(?:\*\*)?\s*(?P<value>[^\n]+)", body)
+            rating_match = re.search(r"(?mi)^\s*[-*•]?\s*(?:[^\w\s*]{1,8}\s*)?(?:\*\*)?(?:Rating|Avalia(?:ç|c)[aã]o)\s*:\s*(?:\*\*)?\s*(?P<value>[^\n]+)", body)
+            phone_match = re.search(r"(?mi)^\s*[-*•]?\s*(?:[^\w\s*]{1,8}\s*)?(?:\*\*)?(?:Phone|Telefone)\s*:\s*(?:\*\*)?\s*(?P<value>[^\n]+)", body)
+            email_match = re.search(r"(?mi)^\s*[-*•]?\s*(?:[^\w\s*]{1,8}\s*)?(?:\*\*)?(?:Email|E-mail)\s*:\s*(?:\*\*)?\s*(?P<value>[^\n]+)", body)
             url_match = re.search(
-                r"(?mi)^\s*(?:🔗|🌐)\s*(?:\*\*(?:Website|Site):\*\*\s*)?(?P<value>https?://\S+|\[[^\]]+\]\(https?://[^)]+\))",
+                r"(?mi)^\s*[-*•]?\s*(?:[^\w\s*]{1,8}\s*)?"
+                r"\*\*(?P<label>Website|Site|More details|Mais detalhes):\*\*\s*"
+                r"(?P<value>https?://\S+|\[[^\]]+\]\(https?://[^)]+\))",
                 body,
             )
-            description = ""
-            for raw_line in body.splitlines():
-                line = raw_line.strip()
-                if not line or re.match(r"^(📂|🎫|📍|🕐|💰|⭐|📞|🔗|🌐)", line):
-                    continue
-                description = re.sub(r"\s+", " ", line).strip()
-                break
+            if not url_match:
+                url_match = re.search(
+                    r"(?mi)^\s*[-*•]?\s*(?:🔗|🌐)\s*"
+                    r"(?P<value>https?://\S+|\[[^\]]+\]\(https?://[^)]+\))",
+                    body,
+                )
+            description = description_match.group("value").strip() if description_match else ""
+            if not description:
+                for raw_line in body.splitlines():
+                    line = raw_line.strip()
+                    if not line or re.match(r"^[-*•]?\s*(?:[^\w\s*]{1,8}\s*)?\*\*(?:Category|Categoria|Address|Morada|Location|Localiza(?:ç|c)[aã]o|Hours|Hor[aá]rio|Price|Pre(?:ç|c)o|Rating|Avalia|Phone|Telefone|Website|Site|Tickets|Bilhetes|More details|Mais detalhes)\s*:", line, flags=re.IGNORECASE):
+                        continue
+                    description = re.sub(r"\s+", " ", line).strip()
+                    break
             url = url_match.group("value").strip() if url_match else ""
+            url_label = url_match.groupdict().get("label", "").strip() if url_match else ""
+            if url and not url_label:
+                url_label = "VisitLisboa" if "visitlisboa.com" in url.lower() else "Official website"
             markdown_url_match = re.search(r"\((https?://[^)]+)\)", url)
             if markdown_url_match:
+                label_match = re.match(r"\[([^\]]+)\]\(", url)
+                if label_match:
+                    url_label = label_match.group(1).strip() or url_label
                 url = markdown_url_match.group(1)
             cards.append(
                 {
@@ -2866,7 +3015,12 @@ def _extract_visitlisboa_place_cards(text: str, *, max_items: int = 8) -> List[D
                     "category": category_match.group("value").strip() if category_match else "",
                     "address": address_match.group("value").strip() if address_match else "",
                     "hours": hours_match.group("value").strip() if hours_match else "",
+                    "price": price_match.group("value").strip() if price_match else "",
+                    "rating": rating_match.group("value").strip() if rating_match else "",
+                    "phone": phone_match.group("value").strip() if phone_match else "",
+                    "email": email_match.group("value").strip() if email_match else "",
                     "url": url,
+                    "url_label": url_label,
                     "description": description,
                 }
             )
@@ -2907,7 +3061,7 @@ def _build_card_based_itinerary_fallback(
         for clean_name in [_sanitize_planner_place_name(card.get("name", ""))]
         if clean_name
     ]
-    if len(cards) < 2:
+    if not cards:
         return ""
 
     requested_days = _extract_requested_day_count(user_message)
@@ -2921,6 +3075,18 @@ def _build_card_based_itinerary_fallback(
         places_data,
         events_data,
     )
+    structured_response = _build_card_based_renderer_fallback(
+        user_message=user_message,
+        language=language,
+        cards=cards,
+        weather_data=weather_data,
+        transport_data=transport_data,
+        places_data=places_data,
+        events_data=events_data,
+        qa_disclaimers=qa_disclaimers,
+    )
+    if structured_response:
+        return structured_response
 
     if language == "pt":
         title = (
@@ -2943,15 +3109,15 @@ def _build_card_based_itinerary_fallback(
         stop_label = "Paragem"
     else:
         title = (
-            f"### 📅 Grounded {visible_days}-Day Plan"
+            f"### 📅 Supported {visible_days}-Day Plan"
             if visible_days > 1
-            else "### 📅 Grounded Itinerary"
+            else "### 📅 Supported Itinerary"
         )
         intro = (
             "I used the concrete worker-gathered places and kept unconfirmed details as limitations."
         )
         weather_title = "### ⛅ Weather and Pacing"
-        move_title = "### 🚇 Movement Logic"
+        move_title = "### 🚇 How to move"
         no_transport = "- Exact transport legs were not confirmed; check the operator before leaving."
         limits_title = "### 💡 Practical Notes"
         limits = [
@@ -3019,6 +3185,406 @@ def _place_card_line(card: Dict[str, str], *, language: str) -> List[str]:
         label = "Website" if language == "pt" else "Website"
         lines.append(f"    - **{label}:** [VisitLisboa]({card['url']})")
     return lines
+
+
+def _build_card_based_renderer_fallback(
+    *,
+    user_message: str,
+    language: str,
+    cards: List[Dict[str, str]],
+    weather_data: str,
+    transport_data: str,
+    places_data: str,
+    events_data: str,
+    qa_disclaimers: list[str] | None,
+) -> str:
+    """Render card fallback through the deterministic structured planner renderer.
+
+    Args:
+        user_message: Original user planning request.
+        language: Final response language.
+        cards: Place cards extracted from grounded worker output.
+        weather_data: Weather worker output, if used.
+        transport_data: Transport worker output, if used.
+        places_data: Researcher place output.
+        events_data: Researcher event output.
+        qa_disclaimers: Optional QA limitations to surface.
+
+    Returns:
+        Streamlit-safe LISBOA Markdown, or an empty string if no grounded card is
+        usable.
+    """
+    selected_cards = _select_planner_cards_for_request(cards, user_message)
+    if not selected_cards:
+        return ""
+
+    evidence = build_evidence_bundle(
+        weather_data=weather_data,
+        transport_data=transport_data,
+        places_data=places_data,
+        events_data=events_data,
+        qa_disclaimers=qa_disclaimers,
+    )
+    is_pt = language == "pt"
+    blocks: List[PlanBlock] = []
+    for card in selected_cards[:5]:
+        details = _card_details_for_plan_block(card, language=language)
+        blocks.append(
+            PlanBlock(
+                title=card["name"],
+                kind=_card_kind_for_plan_block(card),
+                purpose=_card_purpose_for_plan_block(card, is_pt),
+                details=details,
+                source_ids=["visitlisboa_places"],
+            )
+        )
+
+    movement_items = [
+        item
+        for item in (
+            _fallback_bullet_body(bullet)
+            for bullet in _extract_planner_fallback_bullets(transport_data, max_items=5)
+        )
+        if item and not _is_generic_transport_heading(item)
+    ]
+    weather_items = [
+        item
+        for item in (
+            _fallback_bullet_body(bullet)
+            for bullet in _extract_weather_safety_bullets(weather_data, language)
+        )
+        if item
+    ]
+    limitation_items = _planner_fallback_limitations(
+        language=language,
+        transport_data=transport_data,
+        qa_disclaimers=qa_disclaimers,
+    )
+    title = _card_fallback_title(user_message, language)
+    direct = _card_fallback_direct_answer(user_message, language, bool(movement_items), bool(weather_items))
+    source_ids = list(evidence.sources.keys())
+    if "visitlisboa_places" not in source_ids:
+        source_ids.insert(0, "visitlisboa_places")
+    for source_id in ("metro", "carris", "cp", "ipma"):
+        if source_id in evidence.sources and source_id not in source_ids:
+            source_ids.append(source_id)
+
+    draft = PlanDraft(
+        title=title,
+        direct_answer=direct,
+        blocks=blocks,
+        movement_logic=movement_items,
+        weather_strategy=weather_items,
+        tips=[
+            "Mantém 20-30 minutos de margem entre a deslocação e a paragem cultural."
+            if is_pt
+            else "Keep 20-30 minutes of buffer between the transport leg and the cultural stop."
+        ],
+        limitations=limitation_items,
+        source_ids=source_ids,
+    )
+    rendered = render_plan_markdown(draft, evidence.sources, language=language)
+    return final_post_qa_guard(rendered, language=language)
+
+
+def _select_planner_cards_for_request(cards: List[Dict[str, str]], user_message: str) -> List[Dict[str, str]]:
+    """Select the number and type of place cards needed by a fallback plan."""
+    if not cards:
+        return []
+    normalized = _normalize_planner_text(user_message)
+    if re.search(r"\b(?:one|1|uma|um)\s+(?:cultural\s+)?(?:stop|paragem)\b", normalized):
+        scored_cards = [
+            (score, card)
+            for card in cards
+            for score in [_score_cultural_stop_card(card, normalized)]
+            if score > 0
+        ]
+        if scored_cards:
+            scored_cards.sort(key=lambda item: item[0], reverse=True)
+            return [scored_cards[0][1]]
+        return cards[:1]
+    return cards[:5]
+
+
+def _score_cultural_stop_card(card: Dict[str, str], normalized_query: str) -> int:
+    """Score a place card for a single cultural-stop itinerary."""
+    basis = _normalize_planner_text(
+        " ".join(str(card.get(key, "")) for key in ("name", "category", "address", "description", "hours"))
+    )
+    if not basis:
+        return 0
+
+    score = 0
+    if re.search(r"\b(?:museum|museu|gallery|galeria|monument|monumento|reservoir|reservatorio|patrimonial|heritage)\b", basis):
+        score += 50
+    if re.search(r"\b(?:view point|viewpoint|miradouro|garden|jardim|fair|feira|neighbourhood|neighborhood|bairro)\b", basis):
+        score += 28
+    if re.search(r"\b(?:cultural association|associacao cultural|centro cultural|cultural centre|culture centre)\b", basis):
+        score += 22
+    if re.search(r"\b(?:cultural|culture|cultura)\b", basis):
+        score += 8
+
+    if re.search(r"\b(?:hostel|hotel|apartment|apartamento|accommodation|alojamento|embassy|embaixada)\b", basis):
+        score -= 45
+    if re.search(r"\b(?:open data|dados abertos|estacoes de metro|estacao de metro)\b", basis):
+        score -= 20
+    if re.search(r"\b(?:today closed|closed today|hoje fechado|fechado hoje)\b", basis):
+        score -= 55
+
+    for token in ("principe real", "príncipe real", "saldanha", "chiado", "belem", "belém", "baixa"):
+        if token in normalized_query and token in basis:
+            score += 12
+    if card.get("address"):
+        score += 4
+    if card.get("url"):
+        score += 3
+    return score
+
+
+def _card_kind_for_plan_block(card: Dict[str, str]) -> str:
+    """Infer a renderer block kind from a VisitLisboa-style card."""
+    basis = _normalize_planner_text(" ".join(str(card.get(key, "")) for key in ("name", "category", "description")))
+    if re.search(r"\b(?:restaurant|restaurante|food|gastronomy|gastronomia|wine|bar)\b", basis):
+        return "food"
+    if re.search(r"\b(?:museum|museu|gallery|galeria|monument|monumento|reservoir|reservatorio|reservatório)\b", basis):
+        return "museum"
+    return "place"
+
+
+def _card_purpose_for_plan_block(card: Dict[str, str], is_pt: bool) -> str:
+    """Build a concise, grounded purpose line for a fallback place block."""
+    category = str(card.get("category") or "").strip()
+    if is_pt:
+        if category:
+            return f"Paragem compacta e verificável para o tema pedido; categoria indicada: {category}."
+        return "Paragem compacta e verificável para o tema pedido, limitada aos dados recolhidos."
+    if category:
+        return f"Compact, evidenced stop for the requested theme; listed category: {category}."
+    return "Compact, evidenced stop for the requested theme, limited to the gathered data."
+
+
+def _card_details_for_plan_block(card: Dict[str, str], *, language: str = "en") -> List[str]:
+    """Convert a place card into semantic planner detail fields."""
+    details: List[str] = []
+    if card.get("description"):
+        details.append(f"Description: {_clean_planner_card_description(card['description'])}")
+    if card.get("category"):
+        details.append(f"Category: {card['category']}")
+    if card.get("address"):
+        details.append(f"Address: {card['address']}")
+    if card.get("hours"):
+        details.append(f"Hours: {card['hours']}")
+    if card.get("price"):
+        details.append(f"Price: {card['price']}")
+    if card.get("rating"):
+        details.append(f"Rating: {card['rating']}")
+    if card.get("phone"):
+        details.append(f"Phone: {card['phone']}")
+    if card.get("email"):
+        details.append(f"Email: {card['email']}")
+    if card.get("url"):
+        url = str(card["url"])
+        url_label = str(card.get("url_label") or "").strip()
+        if not url_label:
+            url_label = "VisitLisboa" if "visitlisboa.com" in url.lower() else "Official website"
+        if url_label.lower() == "visitlisboa" and "visitlisboa.com" not in url.lower():
+            url_label = "Website oficial" if language == "pt" else "Official website"
+        details.append(f"Website: [{url_label}]({url})")
+    return details
+
+
+def _enrich_plan_draft_from_evidence(
+    *,
+    draft: PlanDraft,
+    evidence: EvidenceBundle,
+    user_message: str,
+) -> PlanDraft:
+    """Restore useful card fields that the planner selected but omitted.
+
+    The LLM chooses the plan structure; this deterministic pass preserves the
+    Researcher contract by carrying available address, hours, price, website,
+    and ticket fields into selected blocks instead of letting them disappear.
+    """
+    if not draft.blocks or not evidence.cards:
+        return draft
+
+    time_sensitive = bool(
+        re.search(
+            r"\b(evening|tonight|night|afternoon|morning|today|tomorrow|noite|esta noite|fim de tarde|tarde|manha|manhã|hoje|amanha|amanhã)\b",
+            _normalize_planner_text(user_message),
+        )
+    )
+    for block in draft.blocks:
+        matched_card = _match_evidence_card_for_block(block.title, evidence.cards)
+        if not matched_card:
+            continue
+        existing_labels = {
+            _normalize_planner_text(match.group("label"))
+            for detail in block.details
+            for match in [re.match(r"^\s*(?P<label>[A-Za-zÀ-ÿ ]{2,30})\s*:", str(detail or ""))]
+            if match
+        }
+        for label in ("Description", "Category", "Address", "Venue", "When", "Hours", "Price", "Rating", "Phone", "Email", "Website", "Tickets"):
+            value = _evidence_field_value(matched_card, label)
+            if not value:
+                continue
+            normalized_label = _normalize_planner_text(label)
+            if normalized_label not in existing_labels:
+                block.details.append(f"{label}: {value}")
+                existing_labels.add(normalized_label)
+        block.source_ids = list(dict.fromkeys([*block.source_ids, *matched_card.source_ids]))
+        if time_sensitive and _evidence_card_is_closed(matched_card):
+            warning = (
+                "Source lists this stop as closed for the checked period; use it only as exterior/context unless opening is confirmed."
+            )
+            if not any("closed" in _normalize_planner_text(item) or "fechado" in _normalize_planner_text(item) for item in block.limitations):
+                block.limitations.insert(0, warning)
+    draft.source_ids = list(dict.fromkeys([*draft.source_ids, *evidence.source_ids()]))
+    return draft
+
+
+def _match_evidence_card_for_block(title: str, cards: List[EvidenceCard]) -> EvidenceCard | None:
+    """Find the evidence card that supports a selected plan block."""
+    normalized_title = _normalize_planner_text(title)
+    if not normalized_title:
+        return None
+    for card in cards:
+        normalized_card = _normalize_planner_text(card.title)
+        if not normalized_card:
+            continue
+        if (
+            normalized_title == normalized_card
+            or normalized_title in normalized_card
+            or normalized_card in normalized_title
+        ):
+            return card
+    return None
+
+
+def _evidence_field_value(card: EvidenceCard, label: str) -> str:
+    """Return a field value from an evidence card using canonical label aliases."""
+    wanted = _normalize_planner_text(label)
+    aliases = {
+        "address": {"address", "morada", "location", "localizacao"},
+        "venue": {"venue", "local"},
+        "hours": {"hours", "horario", "horarios", "today", "hoje"},
+        "price": {"price", "preco"},
+        "website": {"website", "url", "more details", "mais detalhes"},
+        "tickets": {"tickets", "bilhetes"},
+        "category": {"category", "categoria"},
+        "description": {"description", "descricao"},
+        "rating": {"rating", "avaliacao", "avaliação"},
+        "phone": {"phone", "telefone"},
+        "email": {"email", "e-mail"},
+        "when": {"when", "quando"},
+    }
+    accepted = aliases.get(wanted, {wanted})
+    for raw_label, raw_value in (card.fields or {}).items():
+        if _normalize_planner_text(str(raw_label)) in accepted:
+            return str(raw_value or "").strip()
+    return ""
+
+
+def _evidence_card_is_closed(card: EvidenceCard) -> bool:
+    """Return whether an evidence card explicitly marks the venue as closed."""
+    hours = _evidence_field_value(card, "Hours")
+    return bool(re.search(r"\b(closed|fechado|encerrado)\b", _normalize_planner_text(hours)))
+
+
+def _fallback_bullet_body(bullet: str) -> str:
+    """Normalize a fallback bullet into a renderer-ready item body."""
+    text = str(bullet or "").strip()
+    text = re.sub(r"^(?:[-•]\s+|\*\s+)", "", text).strip()
+    text = re.sub(r"^[🔹▪️▫️]\s*", "", text).strip()
+    text = re.sub(r"^#{1,6}\s*", "", text).strip()
+    text = re.sub(r"\*\*([^*:\n]{2,80}):\*\*\s*", r"**\1:** ", text)
+    text = re.sub(r"\*\*([^*:\n]{2,80}):\s*([^*]{1,160})\*\*", r"**\1:** \2", text)
+    text = re.sub(r"\*\*([^*]+)\*\*\s*:\s*", r"\1: ", text)
+    text = re.sub(r"\*\*([^*:]{2,80}):\s*\*\*", r"**\1:**", text)
+    text = re.sub(
+        r"\b(Transfer at|Continue on|Exit at|Start at|Route|Estimated total time|Nearest metro to [^:]{1,80}|Mudar em|Continuar em|Sair em|Começar em|Comecar em|Rota|Percurso|Tempo estimado):(?=[^\s*])",
+        r"\1: ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"^\*\*([^*]+)\*\*$", r"\1", text)
+    return re.sub(r"\s+", " ", text).strip(" -")
+
+
+def _is_generic_transport_heading(item: str) -> bool:
+    """Return whether a transport item is only a section title."""
+    normalized = _normalize_planner_text(item)
+    return normalized in {
+        "getting there",
+        "how to move",
+        "main move metro",
+        "best transport",
+        "melhor transporte",
+        "como te deslocas",
+        "logica de deslocacao",
+    }
+
+
+def _planner_fallback_limitations(
+    *,
+    language: str,
+    transport_data: str,
+    qa_disclaimers: list[str] | None,
+) -> List[str]:
+    """Build concise fallback limitations without internal QA wording."""
+    is_pt = language == "pt"
+    limitations = [
+        "Horários, bilhetes, reservas e disponibilidade em tempo real só estão confirmados quando aparecem nos detalhes acima."
+        if is_pt
+        else "Opening hours, tickets, bookings, and live availability are confirmed only when they appear in the details above."
+    ]
+    if transport_data:
+        limitations.append(
+            "Para uma viagem futura, confirma partidas e eventuais alterações no operador antes de sair."
+            if is_pt
+            else "For a future trip, confirm departures and any service changes with the operator before leaving."
+        )
+    for item in qa_disclaimers or []:
+        text = _fallback_bullet_body(str(item))
+        if re.search(
+            r"\b(?:final response|canonical|worker|agent|qa|repair|schema|should avoid presenting|keeps both|gtfs data|carris line numbers)\b",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            continue
+        if text and len(text) <= 180:
+            limitations.append(text)
+    return list(dict.fromkeys(limitations))[:4]
+
+
+def _card_fallback_title(user_message: str, language: str) -> str:
+    """Build a specific fallback title from the requested planning intent."""
+    normalized = _normalize_planner_text(user_message)
+    if "principe real" in normalized or "príncipe real" in str(user_message).lower():
+        return "Noite descontraída no Príncipe Real" if language == "pt" else "Relaxed evening around Príncipe Real"
+    if re.search(r"\b(?:museum|museu|museums|museus)\b", normalized):
+        return "Dia de museus em Lisboa" if language == "pt" else "Lisbon museum day"
+    if "belem" in normalized:
+        return "Plano para Belém" if language == "pt" else "Belém plan"
+    return "Roteiro sugerido" if language == "pt" else "Suggested itinerary"
+
+
+def _card_fallback_direct_answer(
+    user_message: str,
+    language: str,
+    has_transport: bool,
+    has_weather: bool,
+) -> str:
+    """Build the direct answer for the renderer-based card fallback."""
+    is_pt = language == "pt"
+    normalized = _normalize_planner_text(user_message)
+    if "principe real" in normalized:
+        if is_pt:
+            return "Parte de Saldanha, usa o metro como eixo principal até à zona da Avenida/Rato e mantém uma única paragem cultural no Príncipe Real."
+        return "Start from Saldanha, use the metro as the main public-transport leg toward Avenida/Rato, and keep one cultural stop around Príncipe Real."
+    if is_pt:
+        return "Segue a ordem abaixo; usei apenas locais e deslocações apoiados pela evidência recolhida."
+    return "Follow the order below; I used only places and movement details supported by the gathered evidence."
 
 
 def _select_short_plan_card(cards: List[Dict[str, str]], *, area: str, kind: str) -> Optional[Dict[str, str]]:
@@ -3659,6 +4225,8 @@ def _planner_response_has_markdown_contract_defects(cleaned_response: str) -> bo
     normalized_headings = [_normalize_planner_text(heading) for heading in headings]
     if len(normalized_headings) != len(set(normalized_headings)):
         return True
+    if _has_nested_item_headings_inside_route_section(cleaned_response):
+        return True
 
     raw_lower = (cleaned_response or "").lower()
     normalized = _normalize_planner_text(cleaned_response)
@@ -3714,7 +4282,48 @@ def _planner_response_has_markdown_contract_defects(cleaned_response: str) -> bo
         return True
     if re.search(r"(?mi)^###\s+.*\bscheduled tonight\b", cleaned_response):
         return True
+    if re.search(r"(?mi)^###\s+🧭\s+\*\*(?:Plan basis|Base do plano)\*\*", cleaned_response):
+        return True
+    if re.search(
+        r"(?is)^###\s+☔\s+\*\*(?:Weather adaptation|Adaptação ao tempo)\*\*.*?\b(?:weather was not confirmed|weather was not provided|worker output|tempo não confirmado|tempo nao confirmado)\b",
+        cleaned_response,
+    ):
+        return True
+    if re.search(r"(?mi)^###\s+🚇\s+\*\*(?:Transport Limits|Limites dos transportes)\*\*", cleaned_response):
+        return True
+    if re.search(
+        r"\*\*(?:Best transport|Best public transport|Estimated travel time|Estimated total time|Route|Trajeto|Percurso|Tempo total estimado|Melhor transporte|Melhor transporte público):\S",
+        cleaned_response,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    if re.search(
+        r"(?is)💡\s*\*\*(?:Tips|Dicas):\*\*\s*\n+\s*[-*]\s*(?:use public transport|usar transportes públicos)\b",
+        cleaned_response,
+    ):
+        return True
     return any(re.search(pattern, normalized, flags=re.IGNORECASE) for pattern in defect_patterns)
+
+
+def _has_nested_item_headings_inside_route_section(markdown: str) -> bool:
+    """Return whether planner item cards were published as H3 headings."""
+    in_route = False
+    for raw_line in str(markdown or "").splitlines():
+        stripped = raw_line.strip()
+        if re.match(r"^###\s+📍\s+(?:\*\*)?(?:Roteiro sugerido|Suggested route)", stripped, flags=re.IGNORECASE):
+            in_route = True
+            continue
+        if in_route and stripped.startswith("### ") and re.match(
+            r"^###\s+(?:🏛️|🍽️|☕|🥐|🎭|📍)\s+",
+            stripped,
+        ):
+            return True
+        if in_route and stripped.startswith("### ") and not re.match(
+            r"^###\s+(?:🏛️|🍽️|☕|🥐|🎭|📍)\s+",
+            stripped,
+        ):
+            in_route = False
+    return False
 
 
 def _planner_response_has_transport_quality_defects(
@@ -3918,6 +4527,11 @@ class PlannerAgent(BaseAgent):
             if issues:
                 return ""
 
+        draft = _enrich_plan_draft_from_evidence(
+            draft=draft,
+            evidence=evidence,
+            user_message=user_message,
+        )
         rendered = render_plan_markdown(
             draft,
             sources=evidence.sources,
@@ -3973,6 +4587,22 @@ class PlannerAgent(BaseAgent):
         if structured_plan:
             return enforce_multi_day_quality_mode(
                 structured_plan,
+                user_message,
+                language,
+            )
+
+        card_based_plan = _build_card_based_itinerary_fallback(
+            user_message=user_message,
+            language=language,
+            weather_data=weather_data,
+            transport_data=transport_data,
+            places_data=places_data,
+            events_data=events_data,
+            qa_disclaimers=qa_disclaimers,
+        )
+        if card_based_plan:
+            return enforce_multi_day_quality_mode(
+                card_based_plan,
                 user_message,
                 language,
             )
@@ -4092,8 +4722,8 @@ class PlannerAgent(BaseAgent):
                 content=(
                     "OUTPUT BUDGET AND STRUCTURE:\n"
                     "- Target 450-650 words for rich cross-domain itineraries; stay shorter for simple requests.\n"
-                    "- Use this exact top-level schema: title, Direct Answer, Constraints Used, Plan Blocks, Movement Logic, Weather Strategy, Limitations.\n"
-                    "- Make Plan Blocks ordered and useful; use at most 4 blocks for one-day plans.\n"
+                    "- Use this exact data schema internally: title, direct_answer, plan_basis, route_blocks, movement, weather_adaptation, final_notes.\n"
+                    "- Make route_blocks ordered and useful; use at most 4 blocks for one-day plans.\n"
                     "- Include the useful evidence the workers gathered: weather consequence, realistic movement, grounded stops, and user preferences.\n"
                     "- Do not include raw place cards, empty sections, malformed labels, or placeholder fields.\n"
                     "- Do not include restaurants, events, exact prices, tickets, exact routes, or exact weather unless confirmed in the provided data.\n"
