@@ -389,12 +389,11 @@ def _search_wikipedia(query: str, language: str = "pt") -> Optional[str]:
         # We avoid 'sentences=...' to get the full intro.
         summary = page.summary
 
-        output = f"""📚 **Wikipédia: {page.title}**
+        return f"""📚 **Wikipédia: {page.title}**
 🔗 URL: {page.url}
 
 {summary}
 """
-        return output
     except Exception as e:
         logger.warning(f"Wikipedia search failed: {e}")
         return None

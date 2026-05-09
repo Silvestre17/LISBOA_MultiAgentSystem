@@ -12,6 +12,7 @@
 
 import logging
 import re
+from contextlib import suppress
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -24,7 +25,6 @@ from agent.utils.response_formatter import (
     _LABEL_TRANSLATIONS,
     _count_structured_place_cards,
     _place_response_missing_required_fields,
-    enforce_language_labels,
     final_post_qa_guard,
     final_visual_pass,
     infer_response_language,
@@ -434,7 +434,6 @@ class QualityAssuranceAgent(BaseAgent):
     @classmethod
     def _normalize_weather_query_validation(
         cls,
-        user_query: str,
         agents_called: List[str],
         llm_result: Dict[str, Any],
     ) -> Dict[str, Any]:
@@ -477,7 +476,6 @@ class QualityAssuranceAgent(BaseAgent):
     @classmethod
     def _normalize_transport_query_validation(
         cls,
-        user_query: str,
         agent_outputs: Dict[str, str],
         agents_called: List[str],
         llm_result: Dict[str, Any],
@@ -1025,12 +1023,10 @@ class QualityAssuranceAgent(BaseAgent):
             llm_result=llm_result,
         )
         llm_result = self._normalize_weather_query_validation(
-            user_query=user_query,
             agents_called=agents_called,
             llm_result=llm_result,
         )
         llm_result = self._normalize_transport_query_validation(
-            user_query=user_query,
             agent_outputs=agent_outputs,
             agents_called=agents_called,
             llm_result=llm_result,
@@ -1488,10 +1484,8 @@ class QualityAssuranceAgent(BaseAgent):
         temp_values: List[float] = []
         for tp in [r"(-?\d+\.?\d*)\s*°[Cc]", r"(?:tmax|tmin)\s*[:=]\s*(-?\d+\.?\d*)"]:
             for t in re.findall(tp, combined_output, re.IGNORECASE):
-                try:
+                with suppress(ValueError):
                     temp_values.append(float(t))
-                except ValueError:
-                    pass
         extreme_temps = [t for t in temp_values if t < _LISBON_TEMP_MIN or t > _LISBON_TEMP_MAX]
         if extreme_temps:
             critical_issues.append(
@@ -1502,13 +1496,11 @@ class QualityAssuranceAgent(BaseAgent):
         tmin_m = re.findall(r"\btmin\s*[:=]\s*(-?\d+\.?\d*)", combined_output, re.IGNORECASE)
         tmax_m = re.findall(r"\btmax\s*[:=]\s*(-?\d+\.?\d*)", combined_output, re.IGNORECASE)
         if tmin_m and tmax_m:
-            try:
+            with suppress(ValueError):
                 if float(tmin_m[0]) > float(tmax_m[0]):
                     critical_issues.append(
                         f"Temperature inversion: tMin ({tmin_m[0]}°C) > tMax ({tmax_m[0]}°C)"
                     )
-            except ValueError:
-                pass
 
         # ── Check 9: Dynamic-data disclaimers ─────────────────────────
         # Adds informational caveats for data that cannot be deterministically
@@ -1656,7 +1648,6 @@ class QualityAssuranceAgent(BaseAgent):
                 add_critical_issue("Place cards collapsed into summary text and lost the canonical layout.")
             elif _place_response_missing_required_fields(
                 combined_output,
-                expected_language,
                 place_card_count,
             ):
                 add_critical_issue(

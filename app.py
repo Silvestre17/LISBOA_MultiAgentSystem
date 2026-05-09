@@ -1512,8 +1512,7 @@ def sanitize_backend_error(raw_error: str) -> str:
     """Redact obvious secrets and endpoints from backend error messages."""
     sanitized = re.sub(r"https?://[^\s'\"]+", "[URL_REDACTED]", raw_error)
     sanitized = re.sub(r"(sk-[A-Za-z0-9]{6})[A-Za-z0-9_-]+", r"\1...[REDACTED]", sanitized)
-    sanitized = re.sub(r"(Bearer\s+)[^\s'\"]+", r"\1[REDACTED]", sanitized)
-    return sanitized
+    return re.sub(r"(Bearer\s+)[^\s'\"]+", r"\1[REDACTED]", sanitized)
 
 
 def test_assistant_connection(provider: str) -> Tuple[bool, Optional[str]]:

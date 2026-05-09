@@ -235,8 +235,7 @@ def _normalize_carris_display_value(text: str) -> str:
     normalized = normalized.lower()
     normalized = re.sub(r"[^a-z0-9\s-]", " ", normalized)
     normalized = re.sub(r"([a-z])\1+", r"\1", normalized)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    return normalized
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 def _normalize_area_key(text: str) -> str:
@@ -1303,7 +1302,7 @@ def get_real_time_bus_positions(
     stale_vehicle_timestamps = 0
 
     # Show vehicles
-    for i, vehicle in enumerate(filtered_vehicles[:10], 1):
+    for _i, vehicle in enumerate(filtered_vehicles[:10], 1):
         v_line_id = vehicle.get("line_id") or "unknown line"
         line_info = line_map.get(v_line_id, {})
         line_short = line_info.get("short_name", v_line_id)
@@ -1414,7 +1413,7 @@ def get_carris_metropolitana_alerts(area: Optional[str] = None) -> str:
     response += f"- 📊 **Active alerts shown:** {min(len(alerts), 5)} of {len(alerts)}\n\n"
 
     visible_alert_limit = 5
-    for i, alert in enumerate(alerts[:visible_alert_limit], 1):
+    for _i, alert in enumerate(alerts[:visible_alert_limit], 1):
         # Handle both old format (nested under 'alert') and new format (flat)
         alert_data = alert.get("alert", alert)
 

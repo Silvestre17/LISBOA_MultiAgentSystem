@@ -10,7 +10,6 @@
 import re
 import unicodedata
 import uuid
-from copy import deepcopy
 from datetime import datetime
 from difflib import SequenceMatcher
 from functools import lru_cache
@@ -1561,16 +1560,6 @@ def _parse_wait_targets_from_response(response: str) -> List[Tuple[str, str]]:
     return targets
 
 
-def _extract_wait_times_for_direction(wait_result: str, target_direction: str) -> Optional[str]:
-    """Extracts the next two wait times for a specific direction."""
-    block = _extract_wait_block_for_direction(wait_result, target_direction)
-    if not block:
-        return None
-
-    times = list(block.get("times", []))[:2]
-    return " | ".join(times) if times else None
-
-
 def _upsert_realtime_wait_section(response: str, lines: List[str], language: str = "pt") -> str:
     """Replaces or inserts the real-time section before the tip or source block."""
     if not lines:
@@ -2243,7 +2232,7 @@ def _find_metro_path_avoiding_current_disruptions(origin: str, destination: str)
     graph: Dict[str, List[Tuple[str, str]]] = {}
     for line_id, line_info in METRO_LINES.items():
         stations = line_info.get("stations", [])
-        for station_a, station_b in zip(stations, stations[1:]):
+        for station_a, station_b in zip(stations, stations[1:], strict=False):
             if line_id == "verde" and _green_segment_crosses_interruption(station_a, station_b):
                 continue
             graph.setdefault(station_a, []).append((station_b, line_id))
@@ -3276,7 +3265,7 @@ def _extract_first_metropolitana_line_id(text: str) -> Optional[str]:
     return match.group("line").upper() if match else None
 
 
-def _summarize_relevant_alerts_for_line(alert_text: str, line_id: Optional[str], language: str) -> str:
+def _summarize_relevant_alerts_for_line(alert_text: str, line_id: Optional[str]) -> str:
     """Summarize whether alert output appears to mention a recommended line."""
     if not alert_text:
         return "- ℹ️ **Service disruptions:** not confirmed from the alert feed."
@@ -3633,10 +3622,6 @@ class TransportAgent(BaseAgent):
         """Clears cached transport follow-up context for the session."""
         self._last_transport_context = None
 
-    def get_last_transport_context(self) -> Optional[dict]:
-        """Returns the latest cached transport follow-up context."""
-        return deepcopy(self._last_transport_context)
-
     def _get_tool_by_name(self, tool_name: str):
         """Returns a loaded tool by name, or None if not found."""
         for tool in self.tools:
@@ -3861,7 +3846,7 @@ class TransportAgent(BaseAgent):
         else:
             lines.append("- ℹ️ **Direct bus:** directness could not be reduced to one line from the returned data.")
 
-        lines.append(_summarize_relevant_alerts_for_line(alerts_result, line_id, language))
+        lines.append(_summarize_relevant_alerts_for_line(alerts_result, line_id))
 
         if line_id and live_result:
             if "No active buses found" in live_result:
@@ -5404,14 +5389,12 @@ class TransportAgent(BaseAgent):
         )
 
         self._remember_transport_context(effective_user_message)
-        finalized = self._finalize_transport_response(
+        return self._finalize_transport_response(
             response,
             user_message=effective_user_message,
             language=language,
             ensure_wait_times=True,
         )
-
-        return finalized
 
     def build_subgraph(self) -> "CompiledStateGraph":
         """

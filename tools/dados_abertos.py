@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 import requests
 from langchain_core.tools import tool
+import contextlib
 
 try:
     from config import Config
@@ -724,14 +725,12 @@ def find_nearby_services(
         cleaned = re.sub(r"(?i)<br\s*/?>", ", ", cleaned)
         cleaned = re.sub(r"<[^>]+>", " ", cleaned)
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,;\n\t")
-        cleaned = re.sub(r"\s+,", ",", cleaned)
-        return cleaned
+        return re.sub(r"\s+,", ",", cleaned)
 
     def _record_matches_requested_service(
         *,
         name: object,
         address: object,
-        properties: Dict[str, Any],
         requested_service: str,
     ) -> bool:
         """Filter mixed cultural datasets without leaking unrelated records."""
@@ -1006,7 +1005,6 @@ def find_nearby_services(
                 if not _record_matches_requested_service(
                     name=name,
                     address=address,
-                    properties=properties,
                     requested_service=service_type,
                 ):
                     continue
@@ -1356,7 +1354,7 @@ def _search_places_raw(query: str, max_results: int = 5) -> List[Dict]:
     potential_datasets = potential_datasets.drop_duplicates(subset='stable_url')
 
     # Limit to top 5 datasets to ensure responsiveness
-    for idx, dataset in potential_datasets.head(5).iterrows():
+    for _idx, dataset in potential_datasets.head(5).iterrows():
         title = dataset['title']
         url = dataset.get('stable_url')
 
@@ -1470,10 +1468,8 @@ def find_place_in_datasets(query: str, max_results: int = 5) -> str:
 # ==========================================================================
 if __name__ == "__main__":
     import sys
-    try:
+    with contextlib.suppress(AttributeError):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    except AttributeError:
-        pass
 
     print("\n" + "=" * 70)
     print("\033[1m🧪 COMPREHENSIVE TEST: Dados Abertos Lisboa Tools\033[0m")

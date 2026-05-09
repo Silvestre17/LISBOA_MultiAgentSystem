@@ -67,12 +67,10 @@ class EvidenceBundle:
             ids.extend(card.source_ids)
         return list(dict.fromkeys(source_id for source_id in ids if source_id in self.sources))
 
-    def to_prompt_text(self, language: str = "en", max_cards: int = 22) -> str:
+    def to_prompt_text(self, max_cards: int = 22) -> str:
         """Render evidence cards as compact text for the planner prompt.
 
         Args:
-            language: Requested response language, currently passed through to
-                each card renderer.
             max_cards: Maximum number of card entries to include per section.
 
         Returns:
@@ -87,7 +85,7 @@ class EvidenceBundle:
                 continue
             sections.append(f"## {kind.upper()} EVIDENCE")
             for card in cards[:max_cards]:
-                sections.append(card.to_prompt_text(language=language))
+                sections.append(card.to_prompt_text())
         if self.limitations:
             sections.append("## LIMITATIONS")
             sections.extend(f"- {item}" for item in self.limitations[:8])

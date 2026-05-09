@@ -365,12 +365,11 @@ def _parse_date_entry(time_element, time_str=None):
     Returns:
         dict: Date entry with datetime_iso, display_text, and time fields.
     """
-    entry = {
+    return {
         'datetime_iso': time_element.get('datetime'),  # ISO format: "2026-01-04"
         'display_text': time_element.get_text(strip=True),  # "04 Jan, 2026"
         'time': time_str  # "18:30" or None
     }
-    return entry
 
 
 def scrape_event_details(session, event_url):

@@ -10,7 +10,7 @@
 
 import json
 import re
-from typing import Any, Dict, Iterable, List, Sequence
+from typing import Any, List, Sequence
 
 from agent.planning.evidence import EvidenceBundle, normalize_text
 from agent.planning.models import PlanDraft

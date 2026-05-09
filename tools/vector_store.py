@@ -63,7 +63,7 @@ import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from tqdm import tqdm
 
@@ -73,7 +73,7 @@ from tqdm import tqdm
 _graceful_exit_requested = False
 
 
-def _sigterm_handler(signum, frame):
+def _sigterm_handler(_signum, _frame):
     """Handle SIGTERM gracefully to avoid exit code 143."""
     global _graceful_exit_requested
     _graceful_exit_requested = True
@@ -106,11 +106,6 @@ except ModuleNotFoundError:
 # Suppress warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=ImportWarning)
-
-# Lazy imports for heavy libraries to prevent startup hangs
-if TYPE_CHECKING:
-    from langchain_chroma import Chroma  # noqa: F401
-    from langchain_core.documents import Document  # noqa: F401
 
 # ==========================================================================
 # Constants
@@ -389,7 +384,7 @@ class KnowledgeBase:
             doc_hashes = {}
             metadatas = result.get("metadatas")
             if metadatas is not None:
-                for doc_id, metadata in zip(result["ids"], metadatas):
+                for doc_id, metadata in zip(result["ids"], metadatas, strict=False):
                     if metadata:
                         doc_hashes[doc_id] = metadata.get("content_hash", "")
             return doc_hashes
@@ -414,14 +409,12 @@ class KnowledgeBase:
         except Exception as exc:
             logger.warning("Could not delete vector collection %s: %s", collection_name, exc)
 
-    def _extract_title(self, item: Dict[str, Any], source_tag: str) -> str:
+    def _extract_title(self, item: Dict[str, Any]) -> str:
         """
         Extracts a meaningful title from a data item.
 
         Args:
             item (Dict[str, Any]): The data item.
-            source_tag (str): The source tag.
-
         Returns:
             str: The extracted title or 'Unknown'.
         """
@@ -457,7 +450,7 @@ class KnowledgeBase:
         Returns:
             Tuple[str, Document]: A tuple containing the document ID and the Document object.
         """
-        title = self._extract_title(item, source_tag)
+        title = self._extract_title(item)
         content_parts = [f"Name: {title}"]
 
         for key, value in item.items():

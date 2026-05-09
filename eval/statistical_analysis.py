@@ -128,8 +128,8 @@ def _wilcoxon_signed_rank(differences: Sequence[float]) -> dict[str, Any]:
         }
     except Exception:
         ranks = _rank_absolute_differences(nonzero)
-        positive_rank_sum = sum(rank for rank, diff in zip(ranks, nonzero) if diff > 0)
-        negative_rank_sum = sum(rank for rank, diff in zip(ranks, nonzero) if diff < 0)
+        positive_rank_sum = sum(rank for rank, diff in zip(ranks, nonzero, strict=False) if diff > 0)
+        negative_rank_sum = sum(rank for rank, diff in zip(ranks, nonzero, strict=False) if diff < 0)
         statistic = min(positive_rank_sum, negative_rank_sum)
         n = len(nonzero)
         expected = n * (n + 1) / 4.0
@@ -153,8 +153,8 @@ def _rank_biserial_correlation(differences: Sequence[float]) -> float | None:
     if not nonzero:
         return 0.0
     ranks = _rank_absolute_differences(nonzero)
-    positive_rank_sum = sum(rank for rank, diff in zip(ranks, nonzero) if diff > 0)
-    negative_rank_sum = sum(rank for rank, diff in zip(ranks, nonzero) if diff < 0)
+    positive_rank_sum = sum(rank for rank, diff in zip(ranks, nonzero, strict=False) if diff > 0)
+    negative_rank_sum = sum(rank for rank, diff in zip(ranks, nonzero, strict=False) if diff < 0)
     total_rank_sum = sum(ranks)
     if total_rank_sum == 0:
         return None

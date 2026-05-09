@@ -9,7 +9,7 @@
 import re
 import unicodedata
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -18,7 +18,6 @@ from agent.prompts.planner import get_planner_prompt
 from agent.utils.langsmith_tracing import traceable
 from agent.utils.response_formatter import (
     final_post_qa_guard,
-    finalize_worker_response,
     infer_response_language,
 )
 from agent.planning import (
@@ -352,22 +351,6 @@ def _build_multi_day_follow_up_note(language: str, requested_days: Optional[int]
         "This is a planning framework, not a locked schedule: opening hours, tickets, "
         "bookings, accessibility, and future transport should be confirmed day by day."
     )
-
-
-def _is_later_day_section_marker(line: str) -> bool:
-    """Returns whether a line starts a Day 2+ section in common markdown variants."""
-    cleaned = str(line or "")
-    cleaned = re.sub(r"^\s*#{1,6}\s*", "", cleaned)
-    cleaned = re.sub(r"^\s*(?:[-*•]\s*|\d+[\.)]\s*)", "", cleaned)
-    cleaned = re.sub(r"^[\s\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+", "", cleaned)
-    cleaned = re.sub(r"[*_`]+", "", cleaned).strip()
-
-    marker_patterns = [
-        r"^(?:dia|day)\s*(?:2|3|4|5|6|7)\b(?:\s*[:.\-–—·].*)?$",
-        r"^d\s*(?:2|3|4|5|6|7)\b(?:\s*[:.\-–—·].*)?$",
-        r"^(?:dia|day)\s*(?:ii|iii|iv|v|vi|vii)\b(?:\s*[:.\-–—·].*)?$",
-    ]
-    return any(re.match(pattern, cleaned, flags=re.IGNORECASE) for pattern in marker_patterns)
 
 
 def enforce_multi_day_quality_mode(response: str, user_message: str, language: str) -> str:
@@ -1516,7 +1499,7 @@ def _build_multi_day_scope_fallback(
     ).strip()
 
 
-def _build_reduced_mobility_evening_fallback(language: str, weather_data: str, transport_data: str) -> str:
+def _build_reduced_mobility_evening_fallback(language: str, weather_data: str) -> str:
     """Build a safe evening fallback when reduced mobility/accessibility cannot be verified."""
     weather_bullets = _extract_weather_safety_bullets(weather_data, language)
     source_line = _build_lisboa_scope_source_line(language, include_ipma=bool(str(weather_data or "").strip()))
@@ -1567,7 +1550,7 @@ def _build_reduced_mobility_evening_fallback(language: str, weather_data: str, t
     ).strip()
 
 
-def _extract_resident_plan_anchor(user_message: str, *, role: str, language: str) -> str:
+def _extract_resident_plan_anchor(user_message: str, *, role: str) -> str:
     """Extract the practical origin or dinner area for resident service plans."""
     text = str(user_message or "")
     if role == "dinner":
@@ -1595,7 +1578,7 @@ def _extract_resident_plan_anchor(user_message: str, *, role: str, language: str
     return default
 
 
-def _extract_resident_service_card(places_data: str, service: str, language: str) -> Dict[str, str]:
+def _extract_resident_service_card(places_data: str, service: str) -> Dict[str, str]:
     """Extract the first concrete Lisboa Aberta service card from worker output."""
     normalized_service = _normalize_planner_text(service)
     text = str(places_data or "")
@@ -1708,10 +1691,10 @@ def _build_resident_service_plan_fallback(
 ) -> str:
     """Build a safe resident-oriented plan for mixed municipal-service requests."""
     weather_bullets = _extract_weather_safety_bullets(weather_data, language)
-    origin = _extract_resident_plan_anchor(user_message, role="origin", language=language)
-    dinner_area = _extract_resident_plan_anchor(user_message, role="dinner", language=language)
-    recycling_card = _extract_resident_service_card(places_data, "recycling", language)
-    pharmacy_card = _extract_resident_service_card(places_data, "pharmacy", language)
+    origin = _extract_resident_plan_anchor(user_message, role="origin")
+    dinner_area = _extract_resident_plan_anchor(user_message, role="dinner")
+    recycling_card = _extract_resident_service_card(places_data, "recycling")
+    pharmacy_card = _extract_resident_service_card(places_data, "pharmacy")
     transport_text = str(transport_data or "")
     has_metro_evidence = bool(re.search(r"\b(?:metro|metrolisboa|green line|linha verde)\b", transport_text, re.IGNORECASE))
     has_carris_evidence = bool(re.search(r"\b(?:carris|bus|autocarro|autocarros)\b", transport_text, re.IGNORECASE))
@@ -2111,7 +2094,6 @@ def _build_full_museum_day_transport_fallback(
     user_message: str,
     language: str,
     weather_data: str,
-    transport_data: str,
     places_data: str,
     events_data: str,
 ) -> str:
@@ -3143,7 +3125,7 @@ def _build_card_based_itinerary_fallback(
             sections.append("")
     else:
         times = ["09h30", "11h15", "13h00", "15h00", "17h00"]
-        for time_label, card in zip(times, cards[:5]):
+        for time_label, card in zip(times, cards[:5], strict=False):
             sections.append(f"### 🏛️ {time_label} · {card['name']}")
             sections.extend(_place_card_line(card, language=language)[1:])
             sections.append("")
@@ -3261,7 +3243,7 @@ def _build_card_based_renderer_fallback(
         qa_disclaimers=qa_disclaimers,
     )
     title = _card_fallback_title(user_message, language)
-    direct = _card_fallback_direct_answer(user_message, language, bool(movement_items), bool(weather_items))
+    direct = _card_fallback_direct_answer(user_message, language)
     source_ids = list(evidence.sources.keys())
     if "visitlisboa_places" not in source_ids:
         source_ids.insert(0, "visitlisboa_places")
@@ -3572,8 +3554,6 @@ def _card_fallback_title(user_message: str, language: str) -> str:
 def _card_fallback_direct_answer(
     user_message: str,
     language: str,
-    has_transport: bool,
-    has_weather: bool,
 ) -> str:
     """Build the direct answer for the renderer-based card fallback."""
     is_pt = language == "pt"
@@ -3835,7 +3815,7 @@ def _build_deterministic_planner_fallback(
         and re.search(r"\b(?:cultural|culture|indoor|interior|museum|museu)\b", normalized_query)
     )
     if reduced_mobility_evening_request:
-        return _build_reduced_mobility_evening_fallback(language, weather_data, transport_data)
+        return _build_reduced_mobility_evening_fallback(language, weather_data)
 
     resident_service_plan_request = bool(
         re.search(r"\b(?:recycling|ecoponto|reciclagem|recycle)\b", normalized_query)
@@ -3920,7 +3900,6 @@ def _build_deterministic_planner_fallback(
             user_message=user_message,
             language=language,
             weather_data=weather_data,
-            transport_data=transport_data,
             places_data=places_data,
             events_data=events_data,
         )
@@ -4770,8 +4749,7 @@ class PlannerAgent(BaseAgent):
                 qa_disclaimers=qa_disclaimers,
                 conversation_context=conversation_context,
             )
-            fallback = enforce_multi_day_quality_mode(fallback, user_message, language)
-            return fallback
+            return enforce_multi_day_quality_mode(fallback, user_message, language)
 
         if (
             _planner_response_requires_fallback(cleaned_response)
@@ -4906,13 +4884,11 @@ class PlannerAgent(BaseAgent):
                 language,
             )
 
-        cleaned_response = enforce_multi_day_quality_mode(
+        return enforce_multi_day_quality_mode(
             cleaned_response,
             user_message,
             language,
         )
-
-        return cleaned_response
 
     def synthesize(self, user_message: str, agent_outputs: Dict[str, str]) -> str:
         """

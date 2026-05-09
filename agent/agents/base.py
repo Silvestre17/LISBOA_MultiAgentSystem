@@ -600,24 +600,6 @@ class BaseAgent:
             print(f"      [TOOL] Calling {resolved_name} with args: {resolved_args}")
         return tool.invoke(resolved_args)
 
-    def _invoke_tool_by_name(
-        self,
-        tool_name: str,
-        args: Optional[dict] = None,
-        *,
-        verbose: bool = False,
-    ) -> Any:
-        """Resolve a loaded tool by name and invoke it with analytics logging."""
-        resolved_name = str(tool_name or "").strip()
-        if not resolved_name:
-            raise ValueError("Tool name cannot be empty.")
-
-        for tool in self.tools:
-            if getattr(tool, "name", "") == resolved_name:
-                return self._invoke_tool(tool, args, tool_name=resolved_name, verbose=verbose)
-
-        raise ValueError(f"Tool '{resolved_name}' not found.")
-
     def _format_tool_result_for_fallback(
         self,
         *,
@@ -823,7 +805,7 @@ class BaseAgent:
 
         return results
 
-    def _safe_llm_invoke(self, llm, messages: list, retries: int = 2, verbose: bool = False):
+    def _safe_llm_invoke(self, llm, messages: list, retries: int = 2):
         """
         Invokes the LLM with targeted retry logic for transient Azure failures.
 
@@ -838,7 +820,6 @@ class BaseAgent:
             messages: The messages to send.
             retries: Maximum number of retry attempts for the specific content-
                 filter patterns handled here.
-            verbose: Whether to print debug information.
 
         Returns:
             The LLM response object.
@@ -925,7 +906,7 @@ class BaseAgent:
             latest available tool result converted into user-facing text.
         """
         # First LLM call - may request tool use (with retry for Azure content filter)
-        response = self._safe_llm_invoke(self.llm_with_tools, messages, verbose=verbose)
+        response = self._safe_llm_invoke(self.llm_with_tools, messages)
 
         # Tool enforcement: force tool usage if LLM doesn't call any tools
         if tool_enforcement_msg and not (
@@ -935,7 +916,7 @@ class BaseAgent:
                 print("      [DEBUG] No tools called initially. Forcing tool usage...")
             messages.append(AIMessage(content=response.content))
             messages.append(HumanMessage(content=tool_enforcement_msg))
-            response = self._safe_llm_invoke(self.llm_with_tools, messages, verbose=verbose)
+            response = self._safe_llm_invoke(self.llm_with_tools, messages)
 
         iteration = 0
         called_tools = set()        # Track tool signatures for loop detection
@@ -996,7 +977,7 @@ class BaseAgent:
                         content="STOP CALLING TOOLS. You already have the data. Respond to the user NOW."
                     )
                 )
-                response = self._safe_llm_invoke(self.llm_with_tools, messages, verbose=verbose)
+                response = self._safe_llm_invoke(self.llm_with_tools, messages)
                 break
 
             # --- Tool Execution (parallel when >1, sequential otherwise) ---
@@ -1063,7 +1044,7 @@ class BaseAgent:
                         ToolMessage(content=str(tool_result), tool_call_id=tool_id)
                     )
 
-            response = self._safe_llm_invoke(self.llm_with_tools, messages, verbose=verbose)
+            response = self._safe_llm_invoke(self.llm_with_tools, messages)
             iteration += 1
 
         # JSON tool call fallback (some models embed tool calls in text)

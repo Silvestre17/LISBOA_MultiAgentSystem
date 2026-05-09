@@ -52,13 +52,8 @@ class EvidenceCard:
     confidence: str = "grounded"
     limitations: List[str] = field(default_factory=list)
 
-    def to_prompt_text(self, language: str = "en") -> str:
+    def to_prompt_text(self) -> str:
         """Render this card as compact text for the structured planner prompt.
-
-        Args:
-            language: Requested response language. The current card contract is
-                language-neutral, but the argument keeps the interface aligned
-                with the bundle renderer.
 
         Returns:
             Plain text representation consumed by the planner prompt.

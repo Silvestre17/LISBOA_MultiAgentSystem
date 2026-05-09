@@ -127,6 +127,26 @@ def _safe_extract_zip(zip_path: Path, destination: Path) -> None:
         archive.extractall(destination)
 
 
+def _install_vector_db(extract_path: Path, vector_db_dir: Path) -> None:
+    """Install an extracted vector DB directory into the configured location.
+
+    Windows OneDrive-backed folders can deny recursive deletion of cloud-backed
+    Chroma collection directories. A clean replacement is preferred, but a
+    merge fallback is acceptable because ChromaDB uses ``chroma.sqlite3`` as the
+    authoritative index and ignores orphaned collection folders not referenced
+    by that database.
+    """
+    if vector_db_dir.exists():
+        try:
+            shutil.rmtree(vector_db_dir)
+        except OSError:
+            vector_db_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(extract_path, vector_db_dir, dirs_exist_ok=True)
+            return
+
+    shutil.move(str(extract_path), str(vector_db_dir))
+
+
 def ensure_vector_db_from_release() -> VectorDbReleaseStatus:
     """Ensure the runtime vector DB exists, downloading it from a release if needed."""
     vector_db_dir = Path(Config.VECTOR_DB_DIR)
@@ -174,9 +194,7 @@ def ensure_vector_db_from_release() -> VectorDbReleaseStatus:
             if not _vector_db_is_present(extract_path):
                 raise FileNotFoundError("Downloaded vector DB archive does not contain chroma.sqlite3.")
 
-            if vector_db_dir.exists():
-                shutil.rmtree(vector_db_dir)
-            shutil.move(str(extract_path), str(vector_db_dir))
+            _install_vector_db(extract_path=extract_path, vector_db_dir=vector_db_dir)
         except (OSError, zipfile.BadZipFile, ValueError, urllib.error.URLError, urllib.error.HTTPError) as exc:
             return VectorDbReleaseStatus(
                 ok=_vector_db_is_present(vector_db_dir),

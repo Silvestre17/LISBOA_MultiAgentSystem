@@ -438,8 +438,7 @@ def normalize_location_text(text: str) -> str:
     )
     normalized = normalized.lower()
     normalized = re.sub(r"[^a-z0-9\s/-]", " ", normalized)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    return normalized
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 _AMBIGUOUS_LOCATION_HINTS = {
