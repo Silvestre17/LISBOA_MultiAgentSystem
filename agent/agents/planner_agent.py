@@ -3779,6 +3779,7 @@ def _build_specific_planner_fallback(
     transport_data: str,
     places_data: str,
     events_data: str,
+    qa_disclaimers: list[str] | None = None,
 ) -> str:
     """Return a domain-specific fallback for known itinerary shapes."""
     normalized_query = _normalize_planner_text(user_message)
@@ -3795,6 +3796,7 @@ def _build_specific_planner_fallback(
             transport_data=transport_data,
             places_data=places_data,
             events_data=events_data,
+            qa_disclaimers=qa_disclaimers,
         )
 
     if _is_historic_gastronomy_day_request(normalized_query):
@@ -3805,6 +3807,17 @@ def _build_specific_planner_fallback(
         )
 
     if _is_full_museum_day_request(user_message):
+        card_based_fallback = _build_card_based_itinerary_fallback(
+            user_message=user_message,
+            language=language,
+            weather_data=weather_data,
+            transport_data=transport_data,
+            places_data=places_data,
+            events_data=events_data,
+            qa_disclaimers=qa_disclaimers,
+        )
+        if card_based_fallback:
+            return card_based_fallback
         return _build_full_museum_day_transport_fallback(
             user_message=user_message,
             language=language,
@@ -4798,7 +4811,15 @@ class PlannerAgent(BaseAgent):
                     conversation_context=conversation_context,
                 )
             if _planner_response_has_incomplete_museum_day_blocks(user_message, cleaned_response):
-                cleaned_response = _build_full_museum_day_transport_fallback(
+                cleaned_response = _build_card_based_itinerary_fallback(
+                    user_message=user_message,
+                    language=language,
+                    weather_data=weather_data,
+                    transport_data=transport_data,
+                    places_data=places_data,
+                    events_data=events_data,
+                    qa_disclaimers=qa_disclaimers,
+                ) or _build_full_museum_day_transport_fallback(
                     user_message=user_message,
                     language=language,
                     weather_data=weather_data,
@@ -4813,6 +4834,7 @@ class PlannerAgent(BaseAgent):
                 transport_data=transport_data,
                 places_data=places_data,
                 events_data=events_data,
+                qa_disclaimers=qa_disclaimers,
             ) or _build_structured_plan_fallback(
                 user_message=user_message,
                 language=language,
@@ -4837,6 +4859,7 @@ class PlannerAgent(BaseAgent):
                 transport_data=transport_data,
                 places_data=places_data,
                 events_data=events_data,
+                qa_disclaimers=qa_disclaimers,
             ) or _build_structured_plan_fallback(
                 user_message=user_message,
                 language=language,
@@ -4932,6 +4955,7 @@ class PlannerAgent(BaseAgent):
                 transport_data=transport_data,
                 places_data=places_data,
                 events_data=events_data,
+                qa_disclaimers=qa_disclaimers,
             ) or _build_structured_plan_fallback(
                 user_message=user_message,
                 language=language,
