@@ -250,6 +250,19 @@ def test_planner_evidence_preserves_plain_visitlisboa_fields() -> None:
     assert fields["Website"].startswith("https://www.visitlisboa.com")
 
 
+def test_planner_evidence_detects_carris_from_tram_15e() -> None:
+    """Planner source footers should cite Carris when a 15E tram leg is used."""
+    bundle = build_evidence_bundle(
+        transport_data=(
+            "### 🚇 **How to move**\n"
+            "- **Best direct option:** Tram 15E from Praça da Figueira\n"
+            "- **Next departures:** 14:50 | 15:00 | 15:11\n"
+        )
+    )
+
+    assert "carris" in bundle.sources
+
+
 def test_card_based_planner_fallback_uses_renderer_contract_for_evening_plan() -> None:
     """Card fallback should not publish orphan headings or morning blocks."""
     response = _build_card_based_itinerary_fallback(
@@ -1688,6 +1701,132 @@ def test_history_pastry_route_is_planning_not_direct_weather_transport() -> None
     assert not SupervisorAgent._is_direct_weather_transport_query(query)
     assert SupervisorAgent._single_domain_override(query) is None
     assert SupervisorAgent()._requires_weather_for_planning(query)
+
+
+def test_weather_sensitive_walking_plan_routes_to_planner() -> None:
+    """Walking-plan requests with weather impact need itinerary synthesis, not Weather-only routing."""
+    english_query = (
+        "I have two hours near Baixa. Suggest a simple walking plan and say "
+        "whether the weather could affect it."
+    )
+    portuguese_query = (
+        "Tenho duas horas perto da Baixa. Sugere um plano simples a pé e diz "
+        "se o tempo pode afetar."
+    )
+
+    for query in (english_query, portuguese_query):
+        assert SupervisorAgent._is_planning_query(query)
+        assert not SupervisorAgent._is_weather_only_outdoor_decision_query(query)
+        assert SupervisorAgent._single_domain_override(query) is None
+
+
+def test_final_visual_pass_demotes_long_planner_movement_headings() -> None:
+    """Planner movement sentences should render as bullets, not oversized H3 headings."""
+    response = (
+        "### 📅 **Morning in Belém from Rossio**\n\n"
+        "✅ **Direct answer:** Use a weather-aware order.\n\n"
+        "### 🚇 **How to move**\n"
+        "### 🚇 **Start from Rossio, then make a short move to Praça da Figueira for the evidenced Carris 15E option; exact boarding and timing should be checked before you leave because live timetables were not verified.**\n"
+        "### 🚶 Finish with the Monument to the Discoveries as a shorter outdoor riverside stop, keeping the walk flexible because of Wind and rain.\n\n"
+        "- 📍 **Address fields:**\n"
+        "- **Baixa-Chiado:** Open in Google Maps\n"
+        "- **Aeroporto Humberto Delgado:** Open in Google Maps\n\n"
+        "- 📍 **Address:**\n"
+        "- **Baixa-Chiado:** https://www.google.com/maps/search/?api=1&query=Baixa-Chiado+Metro+Station\n"
+        "- **Aeroporto Humberto Delgado:** google.com\n\n"
+        "📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Updated:** 14:30"
+    )
+
+    cleaned = final_visual_pass(response)
+
+    assert "### 🚇 **How to move**" in cleaned
+    assert "### 🚇 **Start from Rossio" not in cleaned
+    assert "### 🚶 Finish with" not in cleaned
+    assert "- 🚇 Start from Rossio" in cleaned
+    assert "- 🚶 Finish with the Monument" in cleaned
+    assert "Address fields" not in cleaned
+    assert "Open in Google Maps" not in cleaned
+    assert "Baixa-Chiado+Metro+Station" not in cleaned
+    assert "google.com" not in cleaned
+
+
+def test_final_visual_pass_removes_planner_prompt_control_tips() -> None:
+    """Planner prompt-control bullets must not leak into user-facing tips."""
+    response = (
+        "### 📅 Afternoon in Belém from Chiado\n\n"
+        "✅ **Direct answer:** Here is a realistic afternoon plan.\n\n"
+        "💡 **Tips:**\n\n"
+        "    - Use only evidence cards\n"
+        "    - Prefer direct-route transport evidence\n"
+        "    - Include historical context for Belém\n\n"
+        "---\n\n"
+        "### 📍 **Suggested route**\n\n"
+        "**🏷️ Torre de Belém**\n"
+        "    - 📝 Visit the riverfront landmark.\n\n"
+        "📌 **Source:** [*VisitLisboa*](https://www.visitlisboa.com) | **Updated:** 14:30"
+    )
+
+    cleaned = final_visual_pass(response)
+
+    assert "Use only evidence cards" not in cleaned
+    assert "Prefer direct-route transport evidence" not in cleaned
+    assert "Include historical context" not in cleaned
+    assert "💡 **Tips:**" not in cleaned
+    assert "### 📍 **Suggested route**" in cleaned
+
+
+def test_final_visual_pass_removes_generic_planner_purpose_filler() -> None:
+    """Generic evidence-filler lines should not be shown as activity descriptions."""
+    response = (
+        "### 📅 **Plano para Belém**\n\n"
+        "### 📍 **Roteiro sugerido**\n\n"
+        "**🏷️ Torre de Belém**\n"
+        "    - 📝 Paragem compacta e verificável para o tema pedido, limitada aos dados recolhidos.\n"
+        "    - 📝 **Descrição:** Símbolo histórico junto ao Tejo.\n\n"
+        "**🏷️ Jerónimos Monastery**\n"
+        "    - 📝 Compact, evidenced stop for the requested theme; listed category: Museums.\n"
+        "    - 📝 **Description:** Manueline monastery in Belém.\n\n"
+        "📌 **Fonte:** [*VisitLisboa*](https://www.visitlisboa.com) | **Atualizado:** 14:30"
+    )
+
+    cleaned = final_visual_pass(response)
+
+    assert "Paragem compacta" not in cleaned
+    assert "Compact, evidenced stop" not in cleaned
+    assert "Símbolo histórico" in cleaned
+    assert "Manueline monastery" in cleaned
+
+
+def test_generic_structured_planner_placeholder_is_contract_defect() -> None:
+    """Fallback placeholders should trigger richer deterministic planner paths when possible."""
+    response = (
+        "### 📅 **Lisbon 1-Day Plan**\n\n"
+        "✅ **Direct answer:** Here is a short ordered plan.\n\n"
+        "    - no explicit constraints beyond the requested plan\n\n"
+        "### 📍 **Suggested route**\n\n"
+        "- **📍 Confirmable cultural stop**"
+    )
+
+    assert _planner_response_has_markdown_contract_defects(response)
+
+
+def test_final_visual_pass_splits_planner_heading_time_runons() -> None:
+    """Timed itinerary blocks should not be glued into the preceding section heading."""
+    response = (
+        "### 🏛️ **Plano otimizado09:00 · Galerias Romanas / Baixa**\n"
+        "- 📍 **Localização:** Rua da Prata\n\n"
+        "### 🧭 **Recommended Itinerary09:30 · Chiado / São Roque**\n"
+        "- 🏛️ **Stop:** São Roque"
+    )
+
+    cleaned = final_visual_pass(response)
+
+    assert "Plano otimizado09:00" not in cleaned
+    assert "Recommended Itinerary09:30" not in cleaned
+    assert "### 🏛️ **Plano otimizado**" in cleaned
+    assert "**09:00 · Galerias Romanas / Baixa**" in cleaned
+    assert "### 🧭 **Recommended Itinerary**" in cleaned
+    assert "**09:30 · Chiado / São Roque**" in cleaned
 
 
 def test_belem_history_pastry_fallback_is_rich_but_not_live_departure_dump() -> None:

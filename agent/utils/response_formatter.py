@@ -8728,15 +8728,23 @@ def repair_bold_label_value_spans(text: str) -> str:
         "Best transport",
         "Best route",
         "Best realistic option",
+        "Best direct option",
         "Best supported route",
         "Best supported option",
         "Public transport connection",
+        "Next departures",
+        "Next departures shown",
+        "Estimated ride",
         "Melhor transporte",
         "Melhor percurso",
         "Melhor opção realista",
+        "Melhor opção direta",
         "Melhor percurso confirmado",
         "Melhor opção confirmada",
         "Ligação de transporte público",
+        "Próximas partidas",
+        "Próximas partidas apresentadas",
+        "Viagem estimada",
         "Route",
         "Percurso",
         "Walk",
@@ -8826,6 +8834,7 @@ def repair_route_value_bold_markers(text: str) -> str:
     route_label_re = re.compile(
         r"(?P<prefix>^\s*(?:[-*]\s*)?(?:[^\w\s*]{1,8}\s*)?\*\*"
         r"(?:(?:[^:*\n]{0,80}\b(?:route|percurso|rota|metro|line|linha|transport|transporte|transfer|transbordo)\b[^:*\n]{0,80})|"
+        r"(?:Best direct option|Melhor opção direta|Next departures(?: shown)?|Próximas partidas(?: apresentadas)?|Estimated ride|Viagem estimada)|"
         r"(?:Nearest metro to [^:]{1,80}|Metro mais pr[oó]ximo de [^:]{1,80}))"
         r":\*\*\s*)(?P<value>.+)$",
         re.IGNORECASE | re.MULTILINE,
@@ -9032,12 +9041,61 @@ def demote_sentence_headings(text: str) -> str:
         body = match.group("body").strip()
         body = re.sub(r"^\*{2,}(?P<inner>.+?)\*{2,}$", r"\g<inner>", body).strip()
         word_count = len(re.findall(r"\w+", _strip_markdown_formatting(body)))
-        if body.startswith(allowed_heading_starts) or word_count <= 8:
+        if word_count <= 8:
+            output_lines.append(f"### {body}")
+            continue
+        if body.startswith(allowed_heading_starts) and not _looks_like_sentence_heading(body):
             output_lines.append(f"### {body}")
             continue
         output_lines.append(f"- {body}")
 
     return "\n".join(output_lines)
+
+
+def _looks_like_sentence_heading(body: str) -> bool:
+    """Return whether a candidate heading is really sentence-level content."""
+    visible = _strip_markdown_formatting(body or "")
+    visible = re.sub(
+        r"^[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s+",
+        "",
+        visible,
+    ).strip()
+    word_count = len(re.findall(r"\w+", visible))
+    if word_count <= 8:
+        return False
+    if re.search(r"[.;,]", visible):
+        return True
+    if re.search(
+        r"\b(?:if|because|since|after|before|then|while|quando|porque|depois|antes|se)\b",
+        visible,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    return word_count > 12
+
+
+def promote_short_icon_bullet_headings(text: str) -> str:
+    """Promote only compact icon bullets that are intended as section headings."""
+    if not text:
+        return text or ""
+
+    def _bullet_replacement(match: re.Match) -> str:
+        icon = match.group("icon")
+        title = match.group("title").strip(" *")
+        if _looks_like_sentence_heading(f"{icon} {title}"):
+            return f"- {icon} {title}"
+        return f"### {icon} {title}"
+
+    value = re.sub(
+        r"(?mi)^\s*[-*]\s*(?P<icon>⛅|🚇|🏛️|🚶)\s*(?:\*\*)?(?P<title>[^\*\n]+?)(?:\*\*)?\s*$",
+        _bullet_replacement,
+        text,
+    )
+    return re.sub(
+        r"(?mi)^\*\*(?P<icon>⛅|🚇|🏛️|🚶)\s+(?P<title>[^\*\n]+?)\*\*\s*$",
+        _bullet_replacement,
+        value,
+    )
 
 
 def strip_weak_tip_lines(text: str) -> str:
@@ -9060,6 +9118,86 @@ def strip_weak_tip_lines(text: str) -> str:
             continue
         kept_lines.append(raw_line)
     return "\n".join(kept_lines)
+
+
+def strip_planner_meta_tip_lines(text: str) -> str:
+    """Remove planner prompt-control bullets that leaked into user tips."""
+    if not text:
+        return text or ""
+
+    meta_patterns = (
+        r"^use\s+only\s+evidence\s+cards(?:\s+provided)?$",
+        r"^usar\s+apenas\s+(?:cart[oõ]es\s+de\s+)?evid[êe]ncia$",
+        r"^prefer\s+(?:direct[-\s]?route|supported)\s+transport\s+evidence.*$",
+        r"^preferir\s+evid[êe]ncia\s+de\s+transporte\s+diret[ao]$",
+        r"^include\s+(?:historical\s+context|.*context|.*transport|.*weather|.*preferences?).*$",
+        r"^incluir\s+(?:contexto|transporte|tempo|meteorologia|prefer[êe]ncias?).*$",
+        r"^do\s+not\s+invent\b.*$",
+        r"^n[aã]o\s+inventar\b.*$",
+    )
+
+    kept_lines: list[str] = []
+    for raw_line in text.splitlines():
+        normalized = _strip_accents_compat(_strip_markdown_formatting(raw_line)).lower()
+        normalized = re.sub(
+            r"^\s*[-*•]\s*(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s*)?",
+            "",
+            normalized,
+        ).strip(" .:;")
+        if any(re.match(pattern, normalized, flags=re.IGNORECASE) for pattern in meta_patterns):
+            continue
+        kept_lines.append(raw_line)
+
+    cleaned = "\n".join(kept_lines)
+    cleaned = re.sub(
+        r"(?mi)^\s*💡\s+\*\*(?:Tips|Dicas):\*\*\s*(?:\n\s*)+(?=(?:---|###|📌|$))",
+        "",
+        cleaned,
+    )
+    return cleaned
+
+
+def strip_planner_generic_purpose_lines(text: str) -> str:
+    """Remove generic planner purpose filler when card details already carry the evidence."""
+    if not text:
+        return text or ""
+
+    output_lines: list[str] = []
+    for raw_line in text.splitlines():
+        normalized = _strip_accents_compat(_strip_markdown_formatting(raw_line)).lower()
+        normalized = re.sub(
+            r"^\s*[-*•]\s*(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s*)?",
+            "",
+            normalized,
+        ).strip(" .:;")
+        if re.match(
+            r"^(?:paragem compacta e verificavel|compact, evidenced stop)\b",
+            normalized,
+            flags=re.IGNORECASE,
+        ):
+            continue
+        output_lines.append(raw_line)
+    return "\n".join(output_lines)
+
+
+def repair_planner_heading_time_runons(text: str) -> str:
+    """Split planner section headings accidentally joined to the first timed block."""
+    if not text:
+        return text or ""
+
+    heading_re = re.compile(
+        r"(?m)^###\s+(?P<icon>[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+)\s+"
+        r"\*\*(?P<title>.*?)(?P<time>\d{1,2}:\d{2}\s*[·•.-]\s*[^*\n]+)\*\*\s*$"
+    )
+
+    def _replace(match: re.Match) -> str:
+        title = match.group("title").strip(" :-·•")
+        time_block = match.group("time").strip()
+        if not title:
+            return match.group(0)
+        return f"### {match.group('icon')} **{title}**\n\n**{time_block}**"
+
+    return heading_re.sub(_replace, text)
 
 
 def normalize_location_ambiguity_layout(text: str) -> str:
@@ -9671,6 +9809,40 @@ def strip_placeholder_field_lines(text: str) -> str:
             if placeholder_re.match(value) or placeholder_re.match(normalized_value):
                 continue
         kept_lines.append(raw_line)
+    return "\n".join(kept_lines)
+
+
+def strip_placeholder_map_field_lines(text: str) -> str:
+    """Remove QA-invented map placeholder rows that do not contain valid links."""
+    if not text:
+        return text or ""
+
+    kept_lines: list[str] = []
+    inside_placeholder_map_block = False
+    heading_re = re.compile(
+        r"^\s*[-*]?\s*📍?\s*\*\*(?:Address|Morada|Address fields|Map links|Campos de morada|Links de mapa):?\*\*\s*$",
+        flags=re.IGNORECASE,
+    )
+    placeholder_child_re = re.compile(
+        r"^\s*[-*]\s*(?:📍\s*)?\*\*[^*\n]+:\*\*\s*(?:Google Maps|Open in Google Maps|Abrir no Google Maps|(?:https?://)?(?:www\.)?google\.com(?:/maps/[^\s]*)?)\s*\.?\s*$",
+        flags=re.IGNORECASE,
+    )
+
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if heading_re.match(stripped):
+            inside_placeholder_map_block = True
+            continue
+        if inside_placeholder_map_block:
+            if not stripped:
+                continue
+            if placeholder_child_re.match(stripped) or "google" in stripped.lower():
+                continue
+            inside_placeholder_map_block = False
+        if placeholder_child_re.match(stripped):
+            continue
+        kept_lines.append(raw_line)
+
     return "\n".join(kept_lines)
 
 
@@ -10360,6 +10532,9 @@ def final_visual_pass(text: str) -> str:
                     "not available in this system",
                     "not available in the system",
                     "ride hailing data not available",
+                    "informacao de metro apresentada",
+                    "informação de metro apresentada",
+                    "metro information shown",
                 )
                 if any(marker in body for marker in non_evidence_markers):
                     removed_source_line = True
@@ -10566,6 +10741,7 @@ def final_visual_pass(text: str) -> str:
     text = strip_internal_qa_annotations(text)
     text = replace_pt_technical_vocabulary(text)
     text = linkify_phone_numbers(text)
+    text = strip_placeholder_map_field_lines(text)
     text = linkify_address_lines(text)
     text = unwrap_metro_station_maps_links(text)
     text = strip_generic_city_address_lines(text)
@@ -10577,6 +10753,9 @@ def final_visual_pass(text: str) -> str:
     text = demote_sentence_headings(text)
     text = normalize_transport_summary_operator_cards(text)
     text = strip_weak_tip_lines(text)
+    text = strip_planner_meta_tip_lines(text)
+    text = strip_planner_generic_purpose_lines(text)
+    text = repair_planner_heading_time_runons(text)
     text = normalize_location_ambiguity_layout(text)
     text = normalize_flat_metro_route_blocks(text)
     text = normalize_metro_route_label_lines(text)
@@ -10594,6 +10773,7 @@ def final_visual_pass(text: str) -> str:
     text = normalize_duplicate_transport_metric_icons(text)
     text = repair_unclosed_inline_bold(text)
     text = repair_route_value_bold_markers(text)
+    text = repair_bold_time_spacing(text)
     text = strip_list_internal_horizontal_rules(text)
     text = compact_nested_list_spacing(text)
     text = normalize_flat_cp_train_response(text)
@@ -10624,6 +10804,9 @@ def final_visual_pass(text: str) -> str:
     text = normalize_practical_tip_blocks(text)
     text = demote_sentence_headings(text)
     text = strip_weak_tip_lines(text)
+    text = strip_planner_meta_tip_lines(text)
+    text = strip_planner_generic_purpose_lines(text)
+    text = repair_planner_heading_time_runons(text)
     text = normalize_location_ambiguity_layout(text)
     text = normalize_event_card_field_indentation(text)
     text = normalize_transport_comparison_info_notes(text)
@@ -10652,15 +10835,11 @@ def final_visual_pass(text: str) -> str:
         text,
     )
     text = re.sub(
-        r"(?mi)^\s*[-*]\s*(⛅|🚇|🏛️|🚶)\s*(?:\*\*)?([^\*\n]+?)(?:\*\*)?\s*$",
-        r"### \1 \2",
+        r"(?mi)^\s*[-*]\s*\*\*(📅\s+.+?)\*\*\s*$",
+        r"### \1",
         text,
     )
-    text = re.sub(
-        r"(?mi)^\*\*(⛅|🚇|🏛️|🚶)\s+([^\*\n]+?)\*\*\s*$",
-        r"### \1 \2",
-        text,
-    )
+    text = promote_short_icon_bullet_headings(text)
     if "Jerónimos Monastery" in text and "Ordered history plan" not in text:
         text = re.sub(
             r"(?m)(^\s*---\s*\n+)(?=\s*[-*]\s+\*\*Jerónimos Monastery:\*\*)",
@@ -10676,6 +10855,12 @@ def final_visual_pass(text: str) -> str:
             count=1,
         )
     text = strip_placeholder_field_lines(text)
+    text = strip_placeholder_map_field_lines(text)
+    text = re.sub(
+        r"(?m)^(\s*[-*]\s*🏷️\s+\*\*(?:Category|Categoria):\*\*)\s*:\s*",
+        r"\1 ",
+        text,
+    )
     text = strip_redundant_coordinate_lines_when_address_present(text)
     text = strip_redundant_helpful_notes(text)
     text = normalize_carris_realtime_feed_phrasing(text)
@@ -10783,6 +10968,7 @@ def final_visual_pass(text: str) -> str:
         text,
     )
     text = strip_placeholder_field_lines(text)
+    text = strip_placeholder_map_field_lines(text)
     text = re.sub(
         r"(?mi)(\*\*Scheduled fallback:\*\*\s*)(?:unavailable|not available)(?:\s+(?:from|in)\s+[^.\n]+| right now)?\.?",
         r"\1no scheduled departure was confirmed from the current Carris data.",
@@ -10887,6 +11073,7 @@ def final_visual_pass(text: str) -> str:
     text = normalize_duplicate_transport_metric_icons(text)
     text = repair_unclosed_inline_bold(text)
     text = repair_route_value_bold_markers(text)
+    text = repair_bold_time_spacing(text)
     text = move_limitations_out_of_tips(text)
     text = _separate_standalone_route_fields(text)
     text = _normalize_planner_transport_children(text)
@@ -10935,6 +11122,16 @@ def final_visual_pass(text: str) -> str:
     text = re.sub(
         r"(?mi)^\s*(?:[-*•]\s*)?(?:📌\s*)?\**(?:Fonte|Fontes|Source|Sources)\**\s*:\s*(?!.*(?:https?://|\]\())[^.\n]*(?:dados|data|transport|transporte|resposta|response|não confirmada|not confirmed)[^\n]*$",
         "",
+        text,
+    )
+    text = re.sub(
+        r"(?mi)^\s*_?\s*(?:Fonte|Source)\s*:\s*(?:informação de metro apresentada|informacao de metro apresentada|metro information shown)[^.\n]*\.?\s*_?\s*$\n?",
+        "",
+        text,
+    )
+    text = re.sub(
+        r"(?m)^\s*[-*]\s*\*\*(📅\s+[^*\n]+)\*\*\s*$",
+        r"### \1",
         text,
     )
     text = re.sub(r"(?<=\S)[ \t]{2,}(?=\S)", " ", text)
@@ -11676,14 +11873,22 @@ def final_post_qa_guard(text: str, language: str = "en") -> str:
     guarded = normalize_duplicate_transport_metric_icons(guarded)
     guarded = repair_unclosed_inline_bold(guarded)
     guarded = repair_route_value_bold_markers(guarded)
+    guarded = repair_bold_time_spacing(guarded)
     guarded = move_limitations_out_of_tips(guarded, language=language)
+    guarded = strip_planner_meta_tip_lines(guarded)
+    guarded = strip_planner_generic_purpose_lines(guarded)
+    guarded = repair_planner_heading_time_runons(guarded)
     guarded = re.sub(r"\*\*([^*\n:]{2,80}):\s+\*\*(?=\s|$)", r"**\1:**", guarded)
     guarded = re.sub(r"\*\*([^*\n:]{2,80}):\s*\*\*(?=\s|$)", r"**\1:**", guarded)
     guarded = repair_bold_label_value_spans(guarded)
     guarded = normalize_duplicate_transport_metric_icons(guarded)
     guarded = repair_unclosed_inline_bold(guarded)
     guarded = repair_route_value_bold_markers(guarded)
+    guarded = repair_bold_time_spacing(guarded)
     guarded = move_limitations_out_of_tips(guarded, language=language)
+    guarded = strip_planner_meta_tip_lines(guarded)
+    guarded = strip_planner_generic_purpose_lines(guarded)
+    guarded = repair_planner_heading_time_runons(guarded)
     guarded = re.sub(r"\n{3,}", "\n\n", guarded)
     return guarded.strip()
 

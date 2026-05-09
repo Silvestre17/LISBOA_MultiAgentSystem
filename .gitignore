@@ -18,7 +18,6 @@ _/
 .agents/
 .ruff_cache/
 .github/agents/
-eval/results/
 .pytest**/
 pytesttmp*/
 

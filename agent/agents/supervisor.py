@@ -795,6 +795,8 @@ class SupervisorAgent(BaseAgent):
         normalized = cls._normalize_query(user_message)
         if not normalized or not cls._looks_like_weather_query(normalized):
             return False
+        if cls._is_planning_query(user_message):
+            return False
         if cls._is_direct_weather_transport_query(user_message):
             return False
         if re.search(

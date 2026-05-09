@@ -178,7 +178,11 @@ def _detect_sources(text: str, default: Sequence[str] = ()) -> List[str]:
         sources.append("metro")
     if "carrismetropolitana" in lowered or "carris metropolitana" in lowered:
         sources.append("carris_metropolitana")
-    if "carris.pt" in lowered or re.search(r"\bcarris\b", lowered):
+    if (
+        "carris.pt" in lowered
+        or re.search(r"\bcarris\b", lowered)
+        or re.search(r"\b(?:tram|el[eé]trico)\s*15e\b|\b15e\b", lowered)
+    ):
         sources.append("carris")
     if "cp.pt" in lowered or re.search(r"\bcp\b|comboios de portugal", lowered):
         sources.append("cp")

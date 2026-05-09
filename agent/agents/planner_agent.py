@@ -2519,7 +2519,7 @@ def _is_historic_gastronomy_day_request(normalized_query: str) -> bool:
     """Detect one-day history plus traditional food itinerary requests."""
     day_intent = bool(
         re.search(
-            r"\b(?:1\s*dia|um\s+dia|one\s+day|full\s+day|dia\s+inteiro|day\s+itinerary|itinerario\s+de\s+1\s+dia|roteiro\s+de\s+1\s+dia)\b",
+            r"\b(?:1\s*dia|um\s+dia|1[-\s]*day|one\s+day|full\s+day|dia\s+inteiro|day\s+itinerary|itinerario\s+de\s+1\s+dia|roteiro\s+de\s+1\s+dia)\b",
             normalized_query,
         )
     )
@@ -2808,6 +2808,7 @@ def _build_historic_gastronomy_day_fallback(
                 "---",
                 "",
                 "### 🏛️ Plano otimizado",
+                "",
                 "**09:00 · Galerias Romanas / Baixa**",
                 "- 📍 **Localização:** Rua da Prata / Rua da Conceição, Lisboa",
                 "- 🏷️ **Categoria:** Monumento histórico",
@@ -2868,6 +2869,7 @@ def _build_historic_gastronomy_day_fallback(
             "---",
             "",
             "### 🏛️ Optimized plan",
+            "",
             "**09:00 · Roman Galleries / Baixa**",
             "- 📍 **Location:** Rua da Prata / Rua da Conceição, Lisbon",
             "- 🏷️ **Category:** Historical monument",
@@ -3769,6 +3771,51 @@ def _build_short_coffee_culture_fallback(
     ).strip()
 
 
+def _build_specific_planner_fallback(
+    *,
+    user_message: str,
+    language: str,
+    weather_data: str,
+    transport_data: str,
+    places_data: str,
+    events_data: str,
+) -> str:
+    """Return a domain-specific fallback for known itinerary shapes."""
+    normalized_query = _normalize_planner_text(user_message)
+    belem_history_pastry_request = bool(
+        re.search(r"\b(?:belem|bel[eé]m)\b", normalized_query)
+        and re.search(r"\b(?:history|historical|historic|historico|historica|historia|hist[oó]ria|culture|cultural|monument|monastery|jeronimos|jer[oó]nimos)\b", normalized_query)
+        and re.search(r"\b(?:pastry|custard|tart|pastel|pasteis|past[eé]is|nata)\b", normalized_query)
+    )
+    if belem_history_pastry_request:
+        return _build_belem_history_pastry_fallback(
+            user_message=user_message,
+            language=language,
+            weather_data=weather_data,
+            transport_data=transport_data,
+            places_data=places_data,
+            events_data=events_data,
+        )
+
+    if _is_historic_gastronomy_day_request(normalized_query):
+        return _build_historic_gastronomy_day_fallback(
+            language=language,
+            weather_data=weather_data,
+            transport_data=transport_data,
+        )
+
+    if _is_full_museum_day_request(user_message):
+        return _build_full_museum_day_transport_fallback(
+            user_message=user_message,
+            language=language,
+            weather_data=weather_data,
+            places_data=places_data,
+            events_data=events_data,
+        )
+
+    return ""
+
+
 def _build_deterministic_planner_fallback(
     user_message: str,
     language: str,
@@ -3857,7 +3904,7 @@ def _build_deterministic_planner_fallback(
 
     belem_history_pastry_request = bool(
         re.search(r"\b(?:belem|bel[eÃ©]m)\b", normalized_query)
-        and re.search(r"\b(?:history|historical|historia|hist[oó]ria|culture|cultural|monument|monastery|jeronimos|jer[oó]nimos)\b", normalized_query)
+        and re.search(r"\b(?:history|historical|historic|historico|historica|historia|hist[oó]ria|culture|cultural|monument|monastery|jeronimos|jer[oó]nimos)\b", normalized_query)
         and re.search(r"\b(?:pastry|custard|tart|pastel|pasteis|past[eé]is|nata)\b", normalized_query)
     )
     if belem_history_pastry_request:
@@ -4231,6 +4278,12 @@ def _planner_response_has_markdown_contract_defects(cleaned_response: str) -> bo
         r"\bnot near\b.*\btreat it as\b",
         r"\bnot in the same immediate\b",
         r"\bcrossing lisbon just to fit\b",
+        r"\bconfirmable cultural stop\b",
+        r"\bparagem cultural confirmavel\b",
+        r"\bno explicit constraints beyond the requested plan\b",
+        r"\brestricoes nao especificadas\b",
+        r"\buse only evidence cards\b",
+        r"\bprefer supported transport evidence\b",
         r"\bdescription\s*:\s+.*\bcategory\s*:",
         r"\baddress\s*:\s+.*google\.com/maps",
         r"\bdescri[cç][aã]o\s*:\s+.*\bcategoria\s*:",
@@ -4550,6 +4603,21 @@ class PlannerAgent(BaseAgent):
             str: Formatted itinerary.
         """
         language = infer_response_language(user_query=user_message, default="en")
+        specific_plan = _build_specific_planner_fallback(
+            user_message=user_message,
+            language=language,
+            weather_data=weather_data,
+            transport_data=transport_data,
+            places_data=places_data,
+            events_data=events_data,
+        )
+        if specific_plan:
+            return enforce_multi_day_quality_mode(
+                specific_plan,
+                user_message,
+                language,
+            )
+
         # Preferred path: the planner decides content in JSON, then a deterministic
         # renderer guarantees LISBOA visual structure. This avoids asking the LLM
         # to simultaneously plan and hand-format Markdown.
@@ -4734,12 +4802,18 @@ class PlannerAgent(BaseAgent):
                     user_message=user_message,
                     language=language,
                     weather_data=weather_data,
-                    transport_data=transport_data,
                     places_data=places_data,
                     events_data=events_data,
                 )
         except Exception:
-            fallback = _build_structured_plan_fallback(
+            fallback = _build_specific_planner_fallback(
+                user_message=user_message,
+                language=language,
+                weather_data=weather_data,
+                transport_data=transport_data,
+                places_data=places_data,
+                events_data=events_data,
+            ) or _build_structured_plan_fallback(
                 user_message=user_message,
                 language=language,
                 weather_data=weather_data,
@@ -4756,7 +4830,14 @@ class PlannerAgent(BaseAgent):
             or _planner_response_has_markdown_contract_defects(cleaned_response)
             or not _planner_response_matches_schema(cleaned_response)
         ):
-            cleaned_response = _build_structured_plan_fallback(
+            cleaned_response = _build_specific_planner_fallback(
+                user_message=user_message,
+                language=language,
+                weather_data=weather_data,
+                transport_data=transport_data,
+                places_data=places_data,
+                events_data=events_data,
+            ) or _build_structured_plan_fallback(
                 user_message=user_message,
                 language=language,
                 weather_data=weather_data,
@@ -4820,7 +4901,6 @@ class PlannerAgent(BaseAgent):
                     user_message=user_message,
                     language=language,
                     weather_data=weather_data,
-                    transport_data=transport_data,
                     places_data=places_data,
                     events_data=events_data,
                 )
@@ -4845,26 +4925,23 @@ class PlannerAgent(BaseAgent):
             or not _planner_response_matches_schema(cleaned_response)
             or _planner_response_has_incomplete_museum_day_blocks(user_message, cleaned_response)
         ):
-            if _is_full_museum_day_request(user_message):
-                cleaned_response = _build_full_museum_day_transport_fallback(
-                    user_message=user_message,
-                    language=language,
-                    weather_data=weather_data,
-                    transport_data=transport_data,
-                    places_data=places_data,
-                    events_data=events_data,
-                )
-            else:
-                cleaned_response = _build_structured_plan_fallback(
-                    user_message=user_message,
-                    language=language,
-                    weather_data=weather_data,
-                    transport_data=transport_data,
-                    places_data=places_data,
-                    events_data=events_data,
-                    qa_disclaimers=qa_disclaimers,
-                    conversation_context=conversation_context,
-                )
+            cleaned_response = _build_specific_planner_fallback(
+                user_message=user_message,
+                language=language,
+                weather_data=weather_data,
+                transport_data=transport_data,
+                places_data=places_data,
+                events_data=events_data,
+            ) or _build_structured_plan_fallback(
+                user_message=user_message,
+                language=language,
+                weather_data=weather_data,
+                transport_data=transport_data,
+                places_data=places_data,
+                events_data=events_data,
+                qa_disclaimers=qa_disclaimers,
+                conversation_context=conversation_context,
+            )
         elif _planner_response_has_transport_quality_defects(
             cleaned_response,
             user_message,

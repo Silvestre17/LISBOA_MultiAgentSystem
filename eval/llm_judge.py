@@ -15,6 +15,7 @@
 import json
 import os
 import re
+import warnings
 from typing import Any, cast
 
 from agent.llm_factory import LLMFactory
@@ -379,7 +380,14 @@ class LLMJudge:
 
         try:
             try:
-                raw_result = self.llm.invoke(prompt_val)
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore",
+                        category=UserWarning,
+                        message=r"Pydantic serializer warnings:.*",
+                        module=r"pydantic\.main",
+                    )
+                    raw_result = self.llm.invoke(prompt_val)
             except Exception:
                 fallback_result, fallback_usage = self._invoke_json_fallback(prompt_val)
                 usage_payloads.append(fallback_usage)

@@ -16,6 +16,7 @@
 import logging
 import os
 import re
+import warnings
 from datetime import datetime
 from typing import Optional
 from urllib.parse import quote, urlparse
@@ -26,6 +27,11 @@ from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
 from langchain_core.tools import tool
+
+try:
+    from langchain_core._api.deprecation import LangChainDeprecationWarning
+except Exception:  # pragma: no cover - compatibility with older LangChain builds
+    LangChainDeprecationWarning = Warning
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -234,7 +240,13 @@ def _search_tavily(query: str, language: str = "pt", live_query: bool = False) -
 
     try:
         # Initialize Tavily with more results (5-10 represents a good comprehensive set)
-        tavily_tool = TavilySearchResults(max_results=DEFAULT_SEARCH_RESULTS_TAVILY)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=r"The class `TavilySearchResults` was deprecated.*",
+                category=LangChainDeprecationWarning,
+            )
+            tavily_tool = TavilySearchResults(max_results=DEFAULT_SEARCH_RESULTS_TAVILY)
         results = tavily_tool.invoke({"query": query})
 
         if not results:

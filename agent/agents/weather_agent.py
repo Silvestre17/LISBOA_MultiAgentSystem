@@ -1113,6 +1113,22 @@ class WeatherAgent(BaseAgent):
         )
 
     @staticmethod
+    def _build_tool_calls(tool_specs: list[tuple[str, dict]]) -> AIMessage:
+        """Create a deterministic multi-tool call message for the subgraph."""
+        return AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": name,
+                    "args": args,
+                    "id": f"auto_{uuid.uuid4().hex}",
+                    "type": "tool_call",
+                }
+                for name, args in tool_specs
+            ],
+        )
+
+    @staticmethod
     def _build_language_instruction(language: str) -> str:
         """Builds a compact language instruction for subgraph LLM steps."""
         return (
@@ -1152,6 +1168,20 @@ class WeatherAgent(BaseAgent):
             return cls._build_tool_call("get_weather_warnings", {"area": "LSB"})
 
         forecast_window = cls._resolve_forecast_window(user_message)
+        normalized = cls._normalize_weather_query(user_message)
+        safety_terms = ["sailing", "sail", "vela", "boat", "barco", "safe", "seguro"]
+        if forecast_window and any(term in normalized for term in safety_terms):
+            forecast_args = {
+                "days": int(forecast_window.get("days", 1)),
+                "day_offset": int(forecast_window.get("day_offset", 0)),
+            }
+            return cls._build_tool_calls(
+                [
+                    ("get_weather_warnings", {"area": "LSB"}),
+                    ("get_weather_forecast", forecast_args),
+                ]
+            )
+
         if forecast_window:
             return cls._build_tool_call(
                 "get_weather_forecast",
