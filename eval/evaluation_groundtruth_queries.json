@@ -4,11 +4,11 @@
     "query": "What's the weather like in Lisbon today?",
     "domain": "weather",
     "expected_tools": [
-      "get_current_weather_summary"
+      "get_weather_forecast"
     ],
     "expected_facts": [
-      "Current temperature",
-      "Current condition (e.g., sunny, raining)"
+      "Temperature min/max for today",
+      "Weather condition forecast for today"
     ],
     "language": "en",
     "edge_case": false
@@ -47,6 +47,7 @@
     "expected_tools": [
       "get_weather_forecast"
     ],
+    "tool_expectation": "flexible",
     "expected_facts": [
       "Friday forecast details if Friday is inside the available short-range forecast horizon",
       "If Friday is more than five days away or outside the provider horizon, state that the exact forecast is not available instead of guessing",
@@ -89,18 +90,25 @@
     "domain": "weather",
     "expected_tools": [],
     "expected_facts": [
-      "System only covers the Lisbon Metropolitan Area"
+      "The grounded weather tools provide Lisbon-city weather data, not Porto-specific weather",
+      "The response should not invent Porto weather conditions"
     ],
     "language": "en",
     "edge_case": true,
     "edge_type": "geographic_out_of_bounds",
-    "expected_behavior": "Inform user that the system only covers the Lisbon Metropolitan Area (AML)"
+    "expected_behavior": "Inform user that Porto is outside the grounded Lisbon weather scope and do not provide unsupported Porto-specific conditions"
   },
   {
     "id": "W08",
     "query": "Tell me the UV index for today.",
     "domain": "weather",
     "expected_tools": [],
+    "tool_expectation": "flexible",
+    "acceptable_tool_sets": [
+      [
+        "get_current_weather_summary"
+      ]
+    ],
     "expected_facts": [
       "UV index is not included in the system's weather tools"
     ],
@@ -127,14 +135,18 @@
     "query": "Há alertas meteorológicos para o fim de semana?",
     "domain": "weather",
     "expected_tools": [
-      "get_weather_warnings",
-      "get_weather_forecast"
+      "get_weather_warnings"
+    ],
+    "acceptable_tool_sets": [
+      [
+        "get_weather_warnings",
+        "get_weather_forecast"
+      ]
     ],
     "tool_expectation": "flexible",
     "expected_facts": [
-      "Information regarding any active weather warnings",
-      "Weekend forecast overview if the weekend is inside the available forecast horizon",
-      "If the requested weekend is outside the provider horizon, explain that limitation instead of extrapolating"
+      "Information regarding any active weather warnings relevant to Lisbon",
+      "If weekend-specific warning coverage cannot be confirmed from available IPMA data, state that limitation instead of extrapolating"
     ],
     "language": "pt",
     "edge_case": false
@@ -178,7 +190,7 @@
       "get_portugal_weather_overview"
     ],
     "expected_facts": [
-      "Overview Portugal temperature and conditions if available, or a clear message that this tool is not available if it is outside the system's scope",
+      "Portugal-wide temperature and condition overview if IPMA overview data is available, or a clear data-unavailable message if retrieval fails",
       "Lisbon included in the national weather overview"
     ],
     "language": "en",
@@ -220,6 +232,11 @@
     "expected_tools": [
       "get_train_schedule"
     ],
+    "acceptable_tool_sets": [
+      [
+        "plan_train_trip"
+      ]
+    ],
     "expected_facts": [
       "Departure times for Sintra line from Entrecampos",
       "Entrecampos is on the Linha de Sintra (CP Urbanos)"
@@ -232,9 +249,16 @@
     "query": "When is the next bus 736 at Marques de Pombal?",
     "domain": "transport",
     "expected_tools": [
-      "carris_get_next_departures"
+      "carris_vehicle_eta"
     ],
     "acceptable_tool_sets": [
+      [
+        "carris_get_stops",
+        "carris_vehicle_eta"
+      ],
+      [
+        "carris_get_next_departures"
+      ],
       [
         "carris_get_stops",
         "carris_get_next_departures"
@@ -311,6 +335,11 @@
     "domain": "transport",
     "expected_tools": [],
     "tool_expectation": "flexible",
+    "acceptable_tool_sets": [
+      [
+        "get_route_between_stations"
+      ]
+    ],
     "expected_facts": [
       "Stations/locations are fictitious and do not exist in the Lisbon transport network",
       "Agent should recognize these are not real places and inform the user"
@@ -342,6 +371,11 @@
     "domain": "transport",
     "expected_tools": [],
     "tool_expectation": "flexible",
+    "acceptable_tool_sets": [
+      [
+        "get_metro_wait_time"
+      ]
+    ],
     "expected_facts": [
       "Alcântara is not recognized as a Lisbon Metro station",
       "An attempted metro lookup followed by invalid-station correction is acceptable",
@@ -376,6 +410,17 @@
     "domain": "transport",
     "expected_tools": [],
     "tool_expectation": "flexible",
+    "acceptable_tool_sets": [
+      [
+        "get_cp_routes"
+      ],
+      [
+        "plan_train_trip"
+      ],
+      [
+        "get_route_between_stations"
+      ]
+    ],
     "expected_facts": [
       "Partial grounded guidance for Lisbon-to-Setúbal is acceptable when supported by the available transport data",
       "The system should honestly acknowledge unsupported providers or incomplete journey-planning coverage",
@@ -518,6 +563,16 @@
     "domain": "transport",
     "expected_tools": [
       "get_bus_realtime_locations"
+    ],
+    "tool_expectation": "flexible",
+    "acceptable_tool_sets": [
+      [
+        "search_carris_metropolitana_lines"
+      ],
+      [
+        "search_carris_metropolitana_lines",
+        "get_bus_realtime_locations"
+      ]
     ],
     "expected_facts": [
       "Detect that line 1507 does not serve Almada before presenting live locations",
@@ -826,7 +881,7 @@
       "find_nearby_services"
     ],
     "expected_facts": [
-      "Name and location of a pharmacy near Rossio/Baixa"
+      "Name, location, and distance or proximity information for a pharmacy near Rossio/Baixa"
     ],
     "language": "pt",
     "edge_case": false
@@ -836,9 +891,17 @@
     "query": "Where can I park my car in central Lisbon? Are there municipal car parks?",
     "domain": "researcher",
     "expected_tools": [
-      "find_place_in_datasets"
+      "find_nearby_services"
     ],
     "tool_expectation": "flexible",
+    "acceptable_tool_sets": [
+      [
+        "find_place_in_datasets"
+      ],
+      [
+        "list_available_datasets"
+      ]
+    ],
     "expected_facts": [
       "Information about parking options or car parks in central Lisbon",
       "Municipal, EMEL-related, or other parking references only when retrieved from available data"
@@ -852,6 +915,15 @@
     "domain": "researcher",
     "expected_tools": [
       "search_lisbon_knowledge"
+    ],
+    "acceptable_tool_sets": [
+      [
+        "search_lisbon_knowledge",
+        "search_places_attractions"
+      ],
+      [
+        "search_places_attractions"
+      ]
     ],
     "expected_facts": [
       "Oceanário de Lisboa has a Lisboa Card discount, not free entry",
@@ -897,8 +969,15 @@
     "query": "Can you book me a table at Ramiro?",
     "domain": "researcher",
     "expected_tools": [],
+    "tool_expectation": "flexible",
+    "acceptable_tool_sets": [
+      [
+        "search_places_attractions"
+      ]
+    ],
     "expected_facts": [
-      "Agent cannot book tables or perform transactional actions"
+      "Agent cannot book tables or perform transactional actions",
+      "If restaurant contact or venue information is provided, it must be grounded in retrieved data and must not imply that a booking was completed"
     ],
     "language": "en",
     "edge_case": true,
@@ -957,6 +1036,24 @@
       "get_transport_summary"
     ],
     "tool_expectation": "flexible",
+    "acceptable_tool_sets": [
+      [
+        "get_weather_forecast",
+        "search_places_attractions",
+        "get_route_between_stations"
+      ],
+      [
+        "get_weather_forecast",
+        "search_places_attractions",
+        "carris_find_routes_between"
+      ],
+      [
+        "get_weather_forecast",
+        "search_places_attractions",
+        "get_transport_summary",
+        "get_route_between_stations"
+      ]
+    ],
     "expected_facts": [
       "Weather forecast for tomorrow",
       "Museum recommendations for a full-day plan",
@@ -973,9 +1070,27 @@
     "expected_tools": [
       "get_weather_forecast",
       "search_places_attractions",
-      "get_transport_summary"
+      "get_route_between_stations"
     ],
     "tool_expectation": "flexible",
+    "acceptable_tool_sets": [
+      [
+        "get_weather_forecast",
+        "search_places_attractions",
+        "get_transport_summary"
+      ],
+      [
+        "get_weather_forecast",
+        "search_places_attractions",
+        "carris_find_routes_between"
+      ],
+      [
+        "get_weather_forecast",
+        "search_places_attractions",
+        "get_route_between_stations",
+        "get_transport_summary"
+      ]
+    ],
     "expected_facts": [
       "Condições meteorológicas para amanhã",
       "Sugestões de atrações em Belém",

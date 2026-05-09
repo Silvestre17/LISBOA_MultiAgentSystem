@@ -2930,6 +2930,18 @@ class ResearcherAgent(BaseAgent):
         query_lower = query.lower()
         normalized_query = cls._normalize_for_deterministic_routing(query)
 
+        if cls._is_event_category_query(query):
+            language = infer_response_language(user_query=query, default="en")
+            return cls._build_tool_call("get_event_categories", {"language": language})
+
+        if cls._is_place_category_query(query):
+            language = infer_response_language(user_query=query, default="en")
+            return cls._build_tool_call("get_place_categories", {"language": language})
+
+        if cls._is_service_category_query(query):
+            language = infer_response_language(user_query=query, default="en")
+            return cls._build_tool_call("list_service_categories", {"language": language})
+
         if cls._is_lisboa_card_query(query):
             return cls._build_tool_call("search_lisbon_knowledge", {"query": query, "max_results": 5})
 
