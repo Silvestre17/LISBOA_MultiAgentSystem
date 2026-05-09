@@ -229,8 +229,138 @@ class ResearcherAgent(BaseAgent):
         self._last_search_context: Optional[dict] = None
         self._pending_deterministic_replay: Optional[dict] = None
         self._pending_pagination_replay: Optional[dict] = None
-        # Tools are loaded by BaseAgent.__init__ via get_agent_tools("researcher")
-        # which returns the full set including dados_abertos tools
+        self._place_title_localization_cache: Dict[str, str] = {}
+
+    @staticmethod
+    def _place_title_needs_llm_localization(title: str) -> bool:
+        """Return whether a place title still appears English in a PT answer."""
+        normalized = unicodedata.normalize("NFKD", str(title or ""))
+        ascii_title = normalized.encode("ascii", "ignore").decode("ascii")
+        lowered = f" {ascii_title.lower()} "
+        english_markers = (
+            " museum ",
+            " palace ",
+            " castle ",
+            " monastery ",
+            " church ",
+            " cathedral ",
+            " tower ",
+            " monument ",
+            " gardens ",
+            " garden ",
+            " national ",
+            " archaeological ",
+            " maritime ",
+            " tile ",
+            " design ",
+            " history ",
+            " science ",
+            " natural ",
+        )
+        portuguese_markers = (
+            " museu ",
+            " palacio ",
+            " palácio ",
+            " castelo ",
+            " mosteiro ",
+            " igreja ",
+            " se ",
+            " sé ",
+            " torre ",
+            " monumento ",
+            " jardim ",
+            " jardins ",
+            " nacional ",
+        )
+        if any(marker in lowered for marker in portuguese_markers):
+            return False
+        return any(marker in lowered for marker in english_markers)
+
+    @staticmethod
+    def _valid_localized_place_title(original: str, candidate: str) -> bool:
+        """Validate conservative LLM title localization output."""
+        value = re.sub(r"\s+", " ", str(candidate or "").strip().strip('"“”'))
+        if not value or value.upper() == "SAME":
+            return False
+        if "\n" in value or "[" in value or "]" in value or "http" in value.lower():
+            return False
+        if len(value) > max(90, len(str(original or "")) * 2 + 20):
+            return False
+        lowered = value.lower()
+        blocked = ("tradução", "translation", "não sei", "unknown", "official")
+        return not any(token in lowered for token in blocked)
+
+    def _localize_place_title_with_llm(self, title: str, *, category: str = "", url: str = "") -> str:
+        """Use the Researcher LLM to localize one place-card title for PT output."""
+        raw_title = re.sub(r"\s+", " ", str(title or "").strip())
+        if not raw_title or not self._place_title_needs_llm_localization(raw_title):
+            return raw_title
+
+        cache_key = f"{raw_title}|{category}|{url}"
+        if cache_key in self._place_title_localization_cache:
+            return self._place_title_localization_cache[cache_key]
+
+        prompt = (
+            "Localize this Lisbon tourism place title to European Portuguese.\n"
+            "Return only the official/common Portuguese title, with no explanation.\n"
+            "If the title is a brand, already official as written, or you are not confident, return SAME.\n\n"
+            f"Title: {raw_title}\n"
+            f"Category: {category or 'unknown'}\n"
+            f"URL: {url or 'unknown'}"
+        )
+        try:
+            response = self._safe_llm_invoke(
+                self.llm,
+                [
+                    SystemMessage(content="You are a conservative Lisbon tourism title localizer. Do not invent uncertain names."),
+                    HumanMessage(content=prompt),
+                ],
+            )
+            candidate = str(getattr(response, "content", "") or "").strip()
+        except Exception:
+            candidate = ""
+
+        if self._valid_localized_place_title(raw_title, candidate):
+            localized = re.sub(r"\s+", " ", candidate.strip().strip('"“”'))
+        else:
+            localized = raw_title
+        self._place_title_localization_cache[cache_key] = localized
+        return localized
+
+    def _localize_place_card_titles_with_llm(self, text: str, language: str) -> str:
+        """Localize unknown English place-card titles in PT Researcher outputs."""
+        if language != "pt" or not text or not re.search(r"(?i)(locais e atra|places and attractions|visitlisboa)", text):
+            return text
+
+        lines = str(text).splitlines()
+        output_lines: List[str] = []
+        card_re = re.compile(
+            r"^(?P<prefix>\s*(?:[-*]\s+)?)\*\*(?P<icon>🏛️|🍽️|☕|🥐|🌿|📍|🖼️|🎵|📚|🛍️)\s+"
+            r"(?P<title>[^*\n]+?)\*\*(?P<suffix>\s*)$"
+        )
+        h3_re = re.compile(
+            r"^(?P<prefix>\s*#{1,6}\s+)(?P<icon>🏛️|🍽️|☕|🥐|🌿|📍|🖼️|🎵|📚|🛍️)\s+"
+            r"(?P<title>.+?)(?P<suffix>\s*)$"
+        )
+        for index, line in enumerate(lines):
+            match = card_re.match(line) or h3_re.match(line)
+            if not match:
+                output_lines.append(line)
+                continue
+            title = match.group("title").strip()
+            nearby = "\n".join(lines[index + 1:index + 8])
+            category_match = re.search(r"\*\*(?:Categoria|Category):\*\*\s*([^\n]+)", nearby)
+            url_match = re.search(r"https://www\.visitlisboa\.com/[^\s)]+", nearby)
+            localized = self._localize_place_title_with_llm(
+                title,
+                category=category_match.group(1).strip() if category_match else "",
+                url=url_match.group(0) if url_match else "",
+            )
+            if card_re.match(line):
+                output_lines.append(f"{match.group('prefix')}**{match.group('icon')} {localized}**{match.group('suffix')}")
+            else:
+                output_lines.append(f"{match.group('prefix')}{match.group('icon')} {localized}{match.group('suffix')}")
+        return "\n".join(output_lines)
 
     def reset_conversation_context(self) -> None:
         """Clears cached result-window context for this session."""
@@ -995,7 +1125,7 @@ class ResearcherAgent(BaseAgent):
     def _is_direct_event_lookup_query(user_message: str) -> bool:
         """Detects event-discovery queries that are safer to answer directly from tools."""
         query = (user_message or "").lower()
-        if any(term in query for term in ["history", "história", "historia", "culture", "cultura"]):
+        if any(term in query for term in ["history", "história", "historia"]):
             return False
 
         specific_lookup = _extract_specific_event_lookup_phrase(user_message)
@@ -1052,7 +1182,7 @@ class ResearcherAgent(BaseAgent):
             "restaurant", "restaurants", "restaurante", "restaurantes",
             "pharmacy", "pharmacies", "farmácia", "farmacias", "farmácias",
             "hospital", "hospitals", "attraction", "attractions", "place", "places",
-            "local", "locais", "monument", "monuments", "monumento", "monumentos",
+            "monument", "monuments", "monumento", "monumentos",
         ]
         return any(term in query for term in event_terms) and any(term in query for term in place_terms)
 
@@ -1380,6 +1510,11 @@ class ResearcherAgent(BaseAgent):
         """Detects history/culture questions that should use the dedicated grounded lookup path."""
         normalized = unicodedata.normalize("NFKD", user_message or "")
         normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+        if re.search(
+            r"\b(event|events|evento|eventos|festival|festivals|concert|concerto|show|what's on|o que ha|esta semana|this week|fim de semana|weekend)\b",
+            normalized,
+        ):
+            return False
         return bool(re.search(r"\b(history|historical|historia|culture|cultura)\b", normalized))
 
     @staticmethod
@@ -1951,6 +2086,7 @@ class ResearcherAgent(BaseAgent):
                 exact_args["category"] = exact_category_hint
 
             exact_result = str(self._invoke_tool(places_tool, exact_args, tool_name="search_places_attractions")).strip()
+            exact_result = self._localize_place_card_titles_with_llm(exact_result, language)
             # Accept the specific-lookup result when either (a) it is a clean exact
             # match, or (b) it is a "specific not found, here are alternatives"
             # response that nevertheless surfaces ranked alternatives.
@@ -2096,6 +2232,7 @@ class ResearcherAgent(BaseAgent):
             rewrite_result = getattr(self, "_rewrite_broad_attractions_result", None)
             if callable(rewrite_result):
                 result = str(rewrite_result(result, user_message, language)).strip()
+        result = self._localize_place_card_titles_with_llm(result, language)
         shown_count = self._count_ranked_results(result)
         remembered_page_size = shown_count if (specific_lookup and shown_count and self._has_specific_lookup_fallback_intro(result)) else int(args["max_results"])
         base_args = {key: value for key, value in args.items() if key not in {"max_results", "offset"}}
@@ -2256,6 +2393,7 @@ class ResearcherAgent(BaseAgent):
                 args["category"] = category_hint
 
             result = str(self._invoke_tool(tool, args, tool_name="search_places_attractions")).strip()
+            result = self._localize_place_card_titles_with_llm(result, language)
             base_args = {key: value for key, value in args.items() if key not in {"max_results", "offset"}}
             self._remember_search_context(
                 domain="places",
@@ -2313,6 +2451,7 @@ class ResearcherAgent(BaseAgent):
                 "language": language,
             }
             result = str(self._invoke_tool(places_tool, cultural_args, tool_name="search_places_attractions")).strip()
+            result = self._localize_place_card_titles_with_llm(result, language)
             if result:
                 result_blocks.append(result)
                 self._remember_search_context(
@@ -2334,12 +2473,14 @@ class ResearcherAgent(BaseAgent):
                 "language": language,
             }
             result = str(self._invoke_tool(places_tool, food_args, tool_name="search_places_attractions")).strip()
+            result = self._localize_place_card_titles_with_llm(result, language)
             if result:
                 result_blocks.append(result)
 
         if not result_blocks:
             generic_args = {"query": query, "max_results": 5, "language": language}
             result = str(self._invoke_tool(places_tool, generic_args, tool_name="search_places_attractions")).strip()
+            result = self._localize_place_card_titles_with_llm(result, language)
             if result:
                 result_blocks.append(result)
 
@@ -2586,6 +2727,7 @@ class ResearcherAgent(BaseAgent):
             "language": language,
         }
         result = str(self._invoke_tool(tool, args, tool_name="search_places_attractions")).strip()
+        result = self._localize_place_card_titles_with_llm(result, language)
         source_line = self._build_places_source_line(result, language)
         return f"{result}\n\n{source_line}".strip()
 
@@ -3101,6 +3243,18 @@ class ResearcherAgent(BaseAgent):
                 language=language,
             ))
 
+        if not is_greeting and self._is_direct_event_lookup_query(user_message) and not self._is_mixed_event_place_query(user_message):
+            if verbose:
+                print("      [RESEARCHER] Using deterministic direct event lookup...")
+
+            response = self._run_direct_event_lookup(user_message, language)
+            return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
+                response,
+                agent_name="researcher",
+                user_query=user_message,
+                language=language,
+            ))
+
         if not is_greeting:
             structured_response = self._maybe_run_structured_query_plan(user_message, language)
             if structured_response:
@@ -3167,18 +3321,6 @@ class ResearcherAgent(BaseAgent):
                 print("      [RESEARCHER] Using deterministic history/culture lookup...")
 
             response = self._run_direct_tool_fallback(user_message, language)
-            return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
-                response,
-                agent_name="researcher",
-                user_query=user_message,
-                language=language,
-            ))
-
-        if not is_greeting and self._is_direct_event_lookup_query(user_message) and not self._is_mixed_event_place_query(user_message):
-            if verbose:
-                print("      [RESEARCHER] Using deterministic direct event lookup...")
-
-            response = self._run_direct_event_lookup(user_message, language)
             return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
                 response,
                 agent_name="researcher",

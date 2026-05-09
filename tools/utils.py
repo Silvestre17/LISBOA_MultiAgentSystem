@@ -81,3 +81,52 @@ def fetch_json_with_retry(
             logger.error("Invalid JSON response from %s", url)
             return None
     return None
+
+
+# ==========================================================================
+# Test Block
+# ==========================================================================
+
+
+if __name__ == "__main__":
+    """Run utility smoke checks when this module is executed directly."""
+
+    import json
+
+    def _run_test(test_name: str, fn, *args, **kwargs) -> bool:
+        """Run a single callable and print pass/fail output."""
+        try:
+            result = fn(*args, **kwargs)
+            print(f"PASS: {test_name}")
+            print(json.dumps(result, ensure_ascii=False))
+            return True
+        except Exception as exc:
+            print(f"FAIL: {test_name} -> {exc}")
+            return False
+
+    print("=== utils.py smoke tests ===")
+    passed = 0
+    total = 0
+
+    total += 1
+    if _run_test(
+        "haversine_distance(Lisbon center to Belém)",
+        haversine_distance,
+        38.7169,
+        -9.1396,
+        38.6965,
+        -9.2045,
+    ):
+        passed += 1
+
+    total += 1
+    if _run_test(
+        "fetch_json_with_retry(empty endpoint) returns None",
+        fetch_json_with_retry,
+        "https://example.com/does-not-exist-xyz",
+        timeout=1,
+        max_retries=1,
+    ):
+        passed += 1
+
+    print(f"utils.py smoke tests completed: {passed}/{total}")

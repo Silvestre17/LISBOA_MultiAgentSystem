@@ -889,7 +889,8 @@ if __name__ == "__main__":
 
     try:
         result = get_portugal_weather_overview.invoke({})
-        print(result[:1200])
+        # print(result[:1200])
+        print(result)
         if "❌" not in result:
             print("\n\033[1;32m   ✅ Tool executed successfully\033[0m")
             tests_passed += 1

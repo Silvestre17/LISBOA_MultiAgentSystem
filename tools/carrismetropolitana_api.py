@@ -2386,11 +2386,13 @@ if __name__ == "__main__":
 
     print("\n1. Testing get_carris_metropolitana_alerts...")
     result = get_carris_metropolitana_alerts.invoke({})
-    print(result[:500])
+    # print(result[:500])
+    print(result)
 
     print("\n2. Testing search_carris_metropolitana_lines...")
     result = search_carris_metropolitana_lines.invoke({"query": "Sintra"})
-    print(result[:500])
+    # print(result[:500])
+    print(result)
 
     print("\n3. Testing geocode_location...")
     loc = geocode_location("Colombo")
@@ -2399,26 +2401,32 @@ if __name__ == "__main__":
 
     print("\n4. Testing find_bus_routes...")
     result = find_bus_routes.invoke({"origin": "Colombo", "destination": "Oriente"})
-    print(result[:800])
+    # print(result[:800])
+    print(result)
 
     print("\n5. Testing get_carris_metropolitana_stop_info...")
     result = get_carris_metropolitana_stop_info.invoke({"stop_id": "020037"})
-    print(result[:500])
+    # print(result[:500])
+    print(result)
 
     print("\n6. Testing find_direct_bus_lines...")
     result = find_direct_bus_lines.invoke({"origin": "Oeiras", "destination": "Amadora"})
-    print(result[:800])
+    # print(result[:800])
+    print(result)
 
     print("\n7. Testing get_real_time_bus_positions near Almada...")
     result = get_real_time_bus_positions.invoke({"location": "Almada", "radius_km": 1.0})
-    print(result[:800])
+    # print(result[:800])
+    print(result)
 
     print("\n8. Testing get_bus_realtime_locations for line 3001...")
     result = get_bus_realtime_locations.invoke({"line_id": "3001"})
-    print(result[:800])
+    # print(result[:800])
+    print(result)
 
     print("\n9. Testing get_bus_next_departures for line 3001 at stop 020037...")
     result = get_bus_next_departures.invoke({"line_id": "3001", "stop_id": "020037"})
-    print(result[:800])
+    # print(result[:800])
+    print(result)
 
     print("\n\033[1;32m✅ Carris Metropolitana API tests complete!\033[0m")

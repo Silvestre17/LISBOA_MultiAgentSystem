@@ -3404,7 +3404,7 @@ def canonicalize_visitlisboa_source_line(
     )
     if kind == "places" and not _has_researcher_event_hint(query_lower):
         has_event_evidence = False
-    elif kind == "events" and not _has_researcher_place_hint(query_lower):
+    elif kind == "events" and not re.search(r"visitlisboa\.com/(?:en/places|pt-pt/locais)/", lower_body):
         has_place_evidence = False
 
     if not has_visitlisboa and not visitlisboa_source_exists:
@@ -3452,11 +3452,52 @@ def canonicalize_visitlisboa_source_line(
     elif language != "pt" and "Updated" not in replacement:
         replacement += f" | **Updated:** {timestamp}"
 
+    replacement = normalize_visitlisboa_source_footer_links(replacement, language)
     return _replace_source_line(
         text,
         replacement,
         predicate=lambda line: bool(_SOURCE_LINE_RE.match(line.strip())) and "visitlisboa" in line.lower(),
     )
+
+
+def normalize_visitlisboa_source_footer_links(text: str, language: str = "en") -> str:
+    """Localize only VisitLisboa links that appear inside final source footers.
+
+    Detail links inside cards intentionally keep the canonical VisitLisboa
+    ``/en/`` URLs from the scraped data. This helper touches only lines matched
+    by the source-footer pattern, so card fields such as ``Mais detalhes`` are
+    not rewritten.
+    """
+    if not text or "visitlisboa" not in text.lower():
+        return text or ""
+
+    def _normalize_line(match: re.Match[str]) -> str:
+        line = match.group(0)
+        if language == "pt":
+            line = re.sub(
+                r"\[\*(?:VisitLisboa Places|VisitLisboa Locais)\*\]\(https://www\.visitlisboa\.com/(?:en/places|pt-pt/locais)\)",
+                "[*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais)",
+                line,
+            )
+            line = re.sub(
+                r"\[\*(?:VisitLisboa Events|VisitLisboa Eventos)\*\]\(https://www\.visitlisboa\.com/(?:en/events|pt-pt/eventos)\)",
+                "[*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos)",
+                line,
+            )
+        else:
+            line = re.sub(
+                r"\[\*(?:VisitLisboa Places|VisitLisboa Locais)\*\]\(https://www\.visitlisboa\.com/(?:en/places|pt-pt/locais)\)",
+                "[*VisitLisboa Places*](https://www.visitlisboa.com/en/places)",
+                line,
+            )
+            line = re.sub(
+                r"\[\*(?:VisitLisboa Events|VisitLisboa Eventos)\*\]\(https://www\.visitlisboa\.com/(?:en/events|pt-pt/eventos)\)",
+                "[*VisitLisboa Events*](https://www.visitlisboa.com/en/events)",
+                line,
+            )
+        return line
+
+    return re.sub(r"(?m)^\s*📌\s+\*\*(?:Fonte|Source):\*\*.*$", _normalize_line, text)
 
 
 def canonicalize_planner_source_line(text: str, language: str = "en") -> str:
@@ -3518,6 +3559,17 @@ def canonicalize_planner_source_line(text: str, language: str = "en") -> str:
             elif "wikipedia" in link_lower:
                 keep_link = "wikipedia" in lower_body or "web" in lower_body
             if keep_link and link not in pruned_links:
+                if language == "pt":
+                    link = re.sub(
+                        r"\[\*VisitLisboa Places\*\]\(https://www\.visitlisboa\.com/en/places\)",
+                        "[*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais)",
+                        link,
+                    )
+                    link = re.sub(
+                        r"\[\*VisitLisboa Events\*\]\(https://www\.visitlisboa\.com/en/events\)",
+                        "[*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos)",
+                        link,
+                    )
                 pruned_links.append(link)
         if not pruned_links:
             return re.sub(r"(?im)^\s*📌\s*\*\*(?:Source|Fonte):\*\*.*$", "", text).strip()
@@ -3526,58 +3578,10 @@ def canonicalize_planner_source_line(text: str, language: str = "en") -> str:
             if language == "pt"
             else f"📌 **Source:** {' | '.join(pruned_links)} | **Updated:** {timestamp}"
         )
+        replacement = normalize_visitlisboa_source_footer_links(replacement, language)
         return _replace_source_line(text, replacement)
 
     return text
-
-    sources = []
-    has_tourism_place_cards = bool(re.search(
-        r"(?m)^###\s+(?:🏛️|🎨|🌿|📍)\s+(?:\d{1,2}:\d{2}\s*[·\-]\s*)?.+",
-        body_without_source,
-    ))
-
-    if "visitlisboa" in lower_body or "visitlisboa.com" in lower_body or has_tourism_place_cards:
-        if language == "pt":
-            sources.append("[*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais)")
-        else:
-            sources.append("[*VisitLisboa Places*](https://www.visitlisboa.com/en/places)")
-
-    if (
-        "ipma" in lower_body
-        or re.search(r"\b(weather|rain|showers|temperature|temperatures|vento|chuva|meteorolog)\b", lower_body)
-    ):
-        sources.append("[*IPMA*](https://www.ipma.pt)")
-
-    if (
-        "metrolisboa" in lower_body
-        or "metro de lisboa" in lower_body
-        or re.search(r"\bmetro\b", lower_body)
-    ):
-        sources.append("[*Metro de Lisboa*](https://www.metrolisboa.pt)")
-
-    if "carrismetropolitana" in lower_body or "carris metropolitana" in lower_body:
-        sources.append("[*Carris Metropolitana*](https://www.carrismetropolitana.pt)")
-
-    if "carris.pt" in lower_body or re.search(r"\bcarris\b", lower_body):
-        sources.append("[*Carris*](https://www.carris.pt)")
-
-    if "cp.pt" in lower_body or re.search(r"\bCP\b", body_without_source):
-        sources.append("[*CP*](https://www.cp.pt)")
-
-    if not sources:
-        return text
-
-    deduped_sources = []
-    for source in sources:
-        if source not in deduped_sources:
-            deduped_sources.append(source)
-
-    if language == "pt":
-        replacement = f"📌 **Fonte:** {' | '.join(deduped_sources)} | **Atualizado:** {timestamp}"
-    else:
-        replacement = f"📌 **Source:** {' | '.join(deduped_sources)} | **Updated:** {timestamp}"
-
-    return _replace_source_line(text, replacement)
 
 
 def ensure_planner_visitlisboa_source(
@@ -4629,6 +4633,17 @@ def _event_card_lookup_key(title: str) -> str:
     return re.sub(r"\s+", " ", normalized).strip()
 
 
+def _strip_event_title_leading_emojis(title: str) -> str:
+    """Remove duplicated decorative emoji prefixes from event titles."""
+    cleaned = str(title or "").strip()
+    cleaned = re.sub(
+        r"^(?:[\U0001F300-\U0001FAFF\u2300-\u27BF\uFE0F\u200D]+\s+)+",
+        "",
+        cleaned,
+    )
+    return cleaned.strip() or str(title or "").strip()
+
+
 def _event_has_note_like_description(value: str) -> bool:
     """Return whether an event description is actually a generic note/warning."""
     normalized = _strip_accents_compat(_strip_markdown_formatting(value or "")).lower()
@@ -4643,6 +4658,11 @@ def _event_has_note_like_description(value: str) -> bool:
         "alteracoes de horarios",
         "alterações de horários",
         "recorrentes",
+        "registo(s) adicional(is)",
+        "fonte ainda nao confirma",
+        "fonte ainda não confirma",
+        "additional matching record",
+        "source does not confirm",
         "remain active this week",
         "changes to times/prices",
     )
@@ -4894,6 +4914,12 @@ def _parse_structured_event_cards(text: str, language: str = "en") -> tuple[list
     inline_section_heading_re = re.compile(
         r"^(?P<emoji>[\U0001F300-\U0001FAFF\u2300-\u27BF\uFE0F\u200D]+)\s+\*\*(?P<title>.+?)\*\*\s*$"
     )
+    bold_event_heading_re = re.compile(
+        r"^\*\*(?P<emoji>[\U0001F300-\U0001FAFF\u2300-\u27BF\uFE0F\u200D]+)\s+(?P<title>.+?)\*\*\s*$"
+    )
+    list_bold_event_heading_re = re.compile(
+        r"^[-*]\s+\*\*(?P<emoji>[\U0001F300-\U0001FAFF\u2300-\u27BF\uFE0F\u200D]+)\s+(?P<title>.+?)\*\*\s*$"
+    )
 
     def _new_event(icon: str, title: str) -> dict[str, object]:
         return {
@@ -5005,11 +5031,26 @@ def _parse_structured_event_cards(text: str, language: str = "en") -> tuple[list
                 if normalized_inline_title in {"eventos culturais", "cultural events"}:
                     intro_lines.append(f"### {inline_heading_match.group('emoji').strip()} {inline_heading_match.group('title').strip()}")
                 continue
+        bold_heading_match = bold_event_heading_re.match(stripped) or list_bold_event_heading_re.match(stripped)
+        if bold_heading_match:
+            _flush()
+            current_event = _new_event(
+                bold_heading_match.group("emoji").strip() or "🎭",
+                bold_heading_match.group("title").strip(),
+            )
+            continue
         heading_match = heading_re.match(stripped)
         if heading_match:
             title = heading_match.group("title").strip()
             normalized_title = _event_card_lookup_key(title)
-            if normalized_title in {"eventos culturais", "cultural events", "notas uteis", "helpful notes"}:
+            if normalized_title in {
+                "eventos culturais",
+                "cultural events",
+                "eventos encontrados",
+                "events found",
+                "notas uteis",
+                "helpful notes",
+            }:
                 _flush()
                 intro_lines.append(stripped)
                 continue
@@ -5042,6 +5083,8 @@ def reconcile_researcher_event_response(
     fallback_intro, fallback_events, fallback_source = _parse_structured_event_cards(worker_canonical, language=language)
     if not primary_events:
         return _strip_event_card_separators(worker_canonical or text)
+    if fallback_events and len(primary_events) < len(fallback_events):
+        return _strip_event_card_separators(worker_canonical)
     fallback_by_title = {
         _event_card_lookup_key(str(event.get("title") or "")): event
         for event in fallback_events
@@ -5049,11 +5092,20 @@ def reconcile_researcher_event_response(
     merged_events: list[dict[str, object]] = []
     for event in primary_events:
         merged = dict(event)
-        fallback = fallback_by_title.get(_event_card_lookup_key(str(event.get("title") or "")))
+        primary_key = _event_card_lookup_key(str(event.get("title") or ""))
+        fallback = fallback_by_title.get(primary_key)
+        if not fallback and primary_key:
+            for fallback_key, fallback_event in fallback_by_title.items():
+                if fallback_key and (fallback_key in primary_key or primary_key in fallback_key):
+                    fallback = fallback_event
+                    break
         if fallback:
+            merged["title"] = _strip_event_title_leading_emojis(str(fallback.get("title") or merged.get("title") or ""))
             for key in ("when", "duration", "category", "address", "price", "schedule", "highlights", "details_url", "tickets_url"):
                 if not str(merged.get(key) or "").strip() and str(fallback.get(key) or "").strip():
                     merged[key] = fallback.get(key)
+        else:
+            merged["title"] = _strip_event_title_leading_emojis(str(merged.get("title") or ""))
             if (
                 not str(merged.get("description") or "").strip()
                 or _event_has_note_like_description(str(merged.get("description") or ""))
@@ -5090,10 +5142,9 @@ def reconcile_researcher_event_response(
 
     for event in merged_events:
         icon = _event_card_icon(str(event.get("title") or ""), str(event.get("category") or ""), str(event.get("icon") or ""))
-        rendered_lines.append(f"### {icon} {event['title']}")
-        rendered_lines.append("")
+        rendered_lines.append(f"- **{icon} {_strip_event_title_leading_emojis(str(event['title']))}**")
         if event.get("description"):
-            rendered_lines.append(f"- 📝 **{description_label}:** {event['description']}")
+            rendered_lines.append(f"    - 📝 **{description_label}:** {event['description']}")
         if event.get("address"):
             address_value = str(event["address"]).strip()
             address_value = _render_researcher_address_value(
@@ -5102,22 +5153,22 @@ def reconcile_researcher_event_response(
                 language=language,
             )
             if address_value:
-                rendered_lines.append(f"- 📍 **{address_label}:** {address_value}")
+                rendered_lines.append(f"    - 📍 **{address_label}:** {address_value}")
         if event.get("when"):
-            rendered_lines.append(f"- 📅 **{date_label}:** {event['when']}")
+            rendered_lines.append(f"    - 📅 **{date_label}:** {event['when']}")
         if event.get("duration"):
-            rendered_lines.append(f"- ⏱️ **{duration_label}:** {event['duration']}")
+            rendered_lines.append(f"    - ⏱️ **{duration_label}:** {event['duration']}")
         if event.get("category"):
-            rendered_lines.append(f"- 📂 **{category_label}:** {event['category']}")
+            rendered_lines.append(f"    - 📂 **{category_label}:** {event['category']}")
         if event.get("price"):
-            rendered_lines.append(f"- 💰 **{price_label}:** {event['price']}")
+            rendered_lines.append(f"    - 💰 **{price_label}:** {event['price']}")
         if event.get("schedule"):
-            rendered_lines.append(f"- 🕐 **{schedule_label}:** {event['schedule']}")
+            rendered_lines.append(f"    - 🕐 **{schedule_label}:** {event['schedule']}")
         if event.get("highlights"):
-            rendered_lines.append(f"- ✨ **{highlights_label}:** {event['highlights']}")
+            rendered_lines.append(f"    - ✨ **{highlights_label}:** {event['highlights']}")
         details_link = _render_researcher_label_link(details_label, str(event.get("details_url") or "").strip())
         if details_link:
-            rendered_lines.append(f"- 🌐 {details_link}")
+            rendered_lines.append(f"    - 🌐 {details_link}")
         tickets_link = _render_researcher_label_link(
             tickets_label,
             str(event.get("tickets_url") or "").strip(),
@@ -5125,10 +5176,10 @@ def reconcile_researcher_event_response(
             fallback_note=_ticket_link_unavailable_note(language),
         )
         if tickets_link:
-            rendered_lines.append(f"- 🎟️ {tickets_link}")
+            rendered_lines.append(f"    - 🎟️ {tickets_link}")
         for extra_line in list(event.get("extra_lines") or []):
             if extra_line and not _event_has_note_like_description(str(extra_line)) and not str(extra_line).strip().startswith(("⚠️", "🔎", "💡")):
-                rendered_lines.append(f"- {str(extra_line).strip()}")
+                rendered_lines.append(f"    - {str(extra_line).strip()}")
         rendered_lines.append("")
 
     if source_line:
@@ -5230,6 +5281,15 @@ def format_researcher_event_cards(text: str, language: str = "en", user_query: s
 
     def _parse_start_line(line: str) -> Optional[tuple[str, str]]:
         stripped_line = line.strip()
+        bold_event_match = re.match(
+            r"^\*\*(?P<emoji>[\U0001F300-\U0001FAFF\u2300-\u27BF\uFE0F\u200D]+)\s+(?P<title>.+?)\*\*\s*$",
+            stripped_line,
+        )
+        if bold_event_match:
+            return (
+                bold_event_match.group("emoji").strip() or default_icon,
+                bold_event_match.group("title").strip(),
+            )
         match = start_re.match(stripped_line)
         if match:
             rest = match.group("rest").strip()
@@ -5382,31 +5442,30 @@ def format_researcher_event_cards(text: str, language: str = "en", user_query: s
         if output_lines and output_lines[-1] != "":
             output_lines.append("")
         icon = _event_card_icon(str(event.get("title") or ""), str(event.get("category") or ""), str(event.get("icon") or ""))
-        output_lines.append(f"### {icon} {event['title']}")
-        output_lines.append("")
+        output_lines.append(f"- **{icon} {_strip_event_title_leading_emojis(str(event['title']))}**")
 
         if event["description"] and not _event_has_note_like_description(str(event["description"])):
-            output_lines.append(f"- 📝 **{description_label}:** {event['description']}")
+            output_lines.append(f"    - 📝 **{description_label}:** {event['description']}")
         if event["address"]:
             address_value = str(event["address"]).strip()
             if "](" not in address_value:
                 address_value = f"[{address_value}]({_gmaps_link(address_value)})"
-            output_lines.append(f"- 📍 **{address_label}:** {address_value}")
+            output_lines.append(f"    - 📍 **{address_label}:** {address_value}")
         if event["when"]:
-            output_lines.append(f"- 📅 **{date_label}:** {event['when']}")
+            output_lines.append(f"    - 📅 **{date_label}:** {event['when']}")
         if event["duration"]:
-            output_lines.append(f"- ⏱️ **{duration_label}:** {event['duration']}")
+            output_lines.append(f"    - ⏱️ **{duration_label}:** {event['duration']}")
         if event["category"]:
-            output_lines.append(f"- 📂 **{category_label}:** {event['category']}")
+            output_lines.append(f"    - 📂 **{category_label}:** {event['category']}")
         if event["price"]:
-            output_lines.append(f"- 💰 **{price_label}:** {event['price']}")
+            output_lines.append(f"    - 💰 **{price_label}:** {event['price']}")
         if event["schedule"]:
-            output_lines.append(f"- 🕐 **{schedule_label}:** {event['schedule']}")
+            output_lines.append(f"    - 🕐 **{schedule_label}:** {event['schedule']}")
         if event["highlights"]:
-            output_lines.append(f"- ✨ **{highlights_label}:** {event['highlights']}")
+            output_lines.append(f"    - ✨ **{highlights_label}:** {event['highlights']}")
         details_link = _render_researcher_label_link(details_label, str(event.get("details_url") or ""))
         if details_link:
-            output_lines.append(f"- 🌐 {details_link}")
+            output_lines.append(f"    - 🌐 {details_link}")
         tickets_link = _render_researcher_label_link(
             tickets_label,
             str(event.get("tickets_url") or ""),
@@ -5414,10 +5473,10 @@ def format_researcher_event_cards(text: str, language: str = "en", user_query: s
             fallback_note=_ticket_link_unavailable_note(language),
         )
         if tickets_link:
-            output_lines.append(f"- 🎟️ {tickets_link}")
+            output_lines.append(f"    - 🎟️ {tickets_link}")
         for extra_line in event["extra_lines"]:
             if not _event_has_note_like_description(str(extra_line)) and not str(extra_line).strip().startswith(("⚠️", "🔎", "💡")):
-                output_lines.append(f"- {str(extra_line)}")
+                output_lines.append(f"    - {str(extra_line)}")
         output_lines.append("")
 
     lines = text.splitlines()
@@ -5498,7 +5557,7 @@ def format_researcher_event_cards(text: str, language: str = "en", user_query: s
                 skipping_summary_block = True
                 transformed = True
                 continue
-            if normalized_title in {"eventos culturais", "cultural events"}:
+            if normalized_title in {"eventos culturais", "cultural events", "eventos encontrados", "events found"}:
                 current_event = None
                 skipping_summary_block = False
                 output_lines.append(f"### {icon} {title}" if stripped.startswith("### ") else stripped)
@@ -8431,23 +8490,29 @@ def normalize_researcher_card_field_indentation(text: str) -> str:
     if not text:
         return text or ""
 
-    card_heading_re = re.compile(
-        r"^(?:#{1,6}\s+)?(?:\*\*)?"
-        r"(?P<icon>🏛️|🎭|🍽️|☕|🥐|🌿|📍|🖼️|🎵|📚|🛍️)\s+"
-        r"(?P<title>[^*\n]+?)(?:\*\*)?\s*$"
-    )
     bold_card_heading_re = re.compile(
-        r"^\*\*(?P<icon>🏛️|🎭|🍽️|☕|🥐|🌿|📍|🖼️|🎵|📚|🛍️)\s+"
+        r"^\*\*(?P<icon>🏛️|🎭|🍽️|☕|🥐|🌿|📍|🖼️|🎵|📚|🛍️|📅|🏅)\s+"
         r"(?P<title>[^*\n]+?)\*\*\s*$"
     )
+    list_card_heading_re = re.compile(
+        r"^[-*]\s+\*\*(?P<icon>🏛️|🎭|🍽️|☕|🥐|🌿|📍|🖼️|🎵|📚|🛍️|📅|🏅)\s+"
+        r"(?P<title>[^*\n]+?)\*\*\s*$"
+    )
+    h3_card_heading_re = re.compile(
+        r"^#{1,6}\s+(?P<icon>🏛️|🎭|🍽️|☕|🥐|🌿|📍|🖼️|🎵|📚|🛍️|📅|🏅)\s+"
+        r"(?:\*\*)?(?P<title>.+?)(?:\*\*)?\s*$"
+    )
     field_re = re.compile(
-        r"^\s*[-*]\s+(?:📝|📂|📍|🕒|💶|⭐|📞|✉️|🌐|🔗|🎟️|📅|⏱️)\s+"
+        r"^\s*[-*]\s+(?:📝|📂|📍|🕒|💶|💰|⭐|📞|✉️|🌐|🔗|🎟️|📅|🗓️|⏱️|🕐|✨)\s+"
         r"\*\*(?:Description|Descrição|Category|Categoria|Address|Morada|Location|Localização|"
         r"Hours|Horário|Price|Preço|Rating|Avaliação|Phone|Telefone|Email|E-mail|Website|Site|"
-        r"More details|Mais detalhes|Tickets|Bilhetes|Date/Time|Data/Hora|Duration|Duração):\*\*",
+        r"More details|Mais detalhes|Tickets|Bilhetes|Date/Time|Data/Hora|When|Quando|Duration|Duração|"
+        r"Schedule|Horários|Highlights|Destaques|Venue|Local):\*\*",
         re.IGNORECASE,
     )
     non_card_titles = {
+        "cultural events",
+        "eventos culturais",
         "planning evidence",
         "evidencia para planeamento",
         "evidência para planeamento",
@@ -8461,13 +8526,30 @@ def normalize_researcher_card_field_indentation(text: str) -> str:
         "suggested route",
         "roteiro sugerido",
     }
+    non_card_title_fragments = (
+        " day from ",
+        "museum day",
+        "recommended itinerary",
+        "itinerary",
+        "roteiro",
+        "plan ",
+        " plano",
+    )
 
-    def _is_card_heading(stripped: str) -> bool:
-        match = card_heading_re.match(stripped) or bold_card_heading_re.match(stripped)
+    def _card_heading_match(stripped: str) -> Optional[re.Match[str]]:
+        match = (
+            bold_card_heading_re.match(stripped)
+            or list_card_heading_re.match(stripped)
+            or h3_card_heading_re.match(stripped)
+        )
         if not match:
-            return False
+            return None
         title = _strip_accents_compat(_strip_markdown_formatting(match.group("title"))).lower().strip(" .:-")
-        return title not in non_card_titles
+        if re.match(r"^\d{1,2}:\d{2}\b", title):
+            return None
+        if title in non_card_titles or any(fragment in f" {title} " for fragment in non_card_title_fragments):
+            return None
+        return match
 
     output_lines: list[str] = []
     in_card = False
@@ -8480,11 +8562,26 @@ def normalize_researcher_card_field_indentation(text: str) -> str:
             in_card = False
             output_lines.append(raw_line)
             continue
-        if stripped.startswith("### ") or stripped.startswith("**"):
-            in_card = _is_card_heading(stripped)
-            output_lines.append(raw_line)
+        if stripped.startswith("### "):
+            heading_match = _card_heading_match(stripped)
+            in_card = bool(heading_match)
+            if heading_match:
+                output_lines.append(f"- **{heading_match.group('icon')} {heading_match.group('title').strip()}**")
+            else:
+                output_lines.append(raw_line)
+            continue
+        if stripped.startswith("**") or list_card_heading_re.match(stripped):
+            heading_match = _card_heading_match(stripped)
+            in_card = bool(heading_match)
+            if heading_match:
+                output_lines.append(f"- **{heading_match.group('icon')} {heading_match.group('title').strip()}**")
+            else:
+                output_lines.append(raw_line)
             continue
         if in_card and field_re.match(stripped):
+            output_lines.append(f"    - {stripped.lstrip('-* ').strip()}")
+            continue
+        if in_card and re.match(r"^\s*[-*]\s+(?:🌐|🔗|🎟️)\s+\[[^\]]+\]\(https?://[^)]+\)", stripped):
             output_lines.append(f"    - {stripped.lstrip('-* ').strip()}")
             continue
         output_lines.append(raw_line)
@@ -8517,6 +8614,115 @@ def normalize_planner_transport_section_indentation(text: str) -> str:
             continue
         output_lines.append(raw_line)
     return "\n".join(output_lines)
+
+
+def normalize_transport_summary_operator_cards(text: str) -> str:
+    """Keep aggregate transport status operators as cards, not repeated H3 sections."""
+    if not text:
+        return text or ""
+    if not re.search(
+        r"(?i)(Situa[cç][aã]o dos Transportes|Ponto de situa[cç][aã]o dos transportes|Transport Status)",
+        text,
+    ):
+        return text
+    if not any(
+        marker in text
+        for marker in (
+            "Metro de Lisboa",
+            "Carris Urban",
+            "Carris Metropolitana",
+            "CP Suburban",
+            "Comboios suburbanos CP",
+        )
+    ):
+        return text
+
+    operator_heading_re = re.compile(
+        r"^#{1,6}\s+(?P<icon>🚇|🚌|🚆)\s+(?:\*\*)?(?P<title>"
+        r"Metro de Lisboa|Carris Urban|Carris Metropolitana|CP Suburban Trains in Lisbon/AML|"
+        r"Comboios suburbanos CP em Lisboa/AML"
+        r")(?:\*\*)?\s*$"
+    )
+    bold_operator_re = re.compile(
+        r"^\*\*(?P<icon>🚇|🚌|🚆)\s+(?P<title>"
+        r"Metro de Lisboa|Carris Urban|Carris Metropolitana|CP Suburban Trains in Lisbon/AML|"
+        r"Comboios suburbanos CP em Lisboa/AML"
+        r")\*\*\s*$"
+    )
+    list_operator_re = re.compile(
+        r"^[-*]\s+\*\*(?P<icon>🚇|🚌|🚆)\s+(?P<title>"
+        r"Metro de Lisboa|Carris Urban|Carris Metropolitana|CP Suburban Trains in Lisbon/AML|"
+        r"Comboios suburbanos CP em Lisboa/AML"
+        r")\*\*\s*$"
+    )
+    metric_re = re.compile(
+        r"^(?:[-*]\s+)?(?P<body>(?:(?:[🟡🔵🔴✅❌📊]|⚠️?|🟢(?=\s+\*\*(?:Verde|Green|Estado|Status|Estado geral|Overall status)\b))\s+.+))$"
+    )
+
+    output_lines: list[str] = []
+    in_operator_card = False
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        heading_match = operator_heading_re.match(stripped)
+        if heading_match:
+            output_lines.append(f"- **{heading_match.group('icon')} {heading_match.group('title')}**")
+            in_operator_card = True
+            continue
+        bold_match = bold_operator_re.match(stripped)
+        if bold_match:
+            output_lines.append(f"- **{bold_match.group('icon')} {bold_match.group('title')}**")
+            in_operator_card = True
+            continue
+        list_match = list_operator_re.match(stripped)
+        if list_match:
+            output_lines.append(f"- **{list_match.group('icon')} {list_match.group('title')}**")
+            in_operator_card = True
+            continue
+        if not stripped:
+            output_lines.append(raw_line)
+            continue
+        metric_match = metric_re.match(stripped)
+        if in_operator_card and metric_match:
+            body = metric_match.group("body").strip()
+            body = re.sub(r"^🟢\s+(\*\*Estado:\*\*\s+)", r"✅ \1", body)
+            body = re.sub(r"^🟢\s+(\*\*Estado geral:\*\*\s+)", r"✅ \1", body)
+            body = re.sub(r"^🟢\s+(\*\*Status:\*\*\s+)", r"✅ \1", body)
+            body = re.sub(r"^🟢\s+(\*\*Overall status:\*\*\s+)", r"✅ \1", body)
+            output_lines.append(f"    - {body}")
+            continue
+
+        if stripped.startswith("### ") or stripped == "---" or _SOURCE_LINE_RE.match(stripped):
+            in_operator_card = False
+            output_lines.append(raw_line)
+            continue
+        if stripped.startswith(("💡", "⚠️")) and not stripped.startswith("- "):
+            in_operator_card = False
+            output_lines.append(raw_line)
+            continue
+
+        output_lines.append(raw_line)
+
+    normalized = "\n".join(output_lines)
+    operator_names = (
+        r"Metro de Lisboa|Carris Urban|Carris Metropolitana|CP Suburban Trains in Lisbon/AML|"
+        r"Comboios suburbanos CP em Lisboa/AML"
+    )
+    normalized = re.sub(
+        rf"(?m)^(?:[-*]\s+)?(\*\*(?:🚇|🚌|🚆)\s+(?:{operator_names})\*\*)\n+(?:[ \t]{{4}})-\s+",
+        r"\1\n    - ",
+        normalized,
+    )
+    normalized = re.sub(
+        rf"(?m)^(\*\*(?:🚇|🚌|🚆)\s+(?:{operator_names})\*\*)$",
+        r"- \1",
+        normalized,
+    )
+    normalized = re.sub(
+        r"(?m)^([ \t]{4}-\s+[^\n]+)\n+(?:[ \t]{4})-\s+",
+        r"\1\n    - ",
+        normalized,
+    )
+    return normalized
 
 
 def strip_empty_planner_transport_wrapper(text: str) -> str:
@@ -8908,11 +9114,7 @@ def normalize_event_card_field_indentation(text: str) -> str:
     """Keep event date and duration fields aligned with address/category fields."""
     if not text or not re.search(r"(?i)(Data/Hora|Date/Time|Dura[cç][aã]o|Duration)", text):
         return text or ""
-    return re.sub(
-        r"(?m)^\s{2,}-\s+((?:📅|⏱️)\s+\*\*(?:Data/Hora|Date/Time|Dura[cç][aã]o|Duration):\*\*.*)$",
-        r"- \1",
-        text,
-    )
+    return normalize_researcher_card_field_indentation(text)
 
 
 def normalize_transport_comparison_info_notes(text: str) -> str:
@@ -10211,7 +10413,7 @@ def final_visual_pass(text: str) -> str:
             stripped = line.strip()
             is_bold_card_heading = bool(
                 re.match(
-                    r"^\*\*[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s+[^*\n]+\*\*\s*$",
+                    r"^(?:[-*]\s+)?\*\*[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s+[^*\n]+\*\*\s*$",
                     stripped,
                 )
             )
@@ -10410,6 +10612,7 @@ def final_visual_pass(text: str) -> str:
     text = normalize_duplicate_heading_markers(text)
     text = normalize_practical_tip_blocks(text)
     text = demote_sentence_headings(text)
+    text = normalize_transport_summary_operator_cards(text)
     text = strip_weak_tip_lines(text)
     text = normalize_location_ambiguity_layout(text)
     text = normalize_flat_metro_route_blocks(text)
@@ -10421,6 +10624,7 @@ def final_visual_pass(text: str) -> str:
     text = normalize_streamlit_nested_bullet_indentation(text)
     text = normalize_researcher_card_field_indentation(text)
     text = normalize_planner_transport_section_indentation(text)
+    text = normalize_transport_summary_operator_cards(text)
     text = strip_empty_planner_transport_wrapper(text)
     text = repair_bold_label_value_spans(text)
     text = strip_orphan_planner_transport_headings(text)
@@ -10713,6 +10917,7 @@ def final_visual_pass(text: str) -> str:
     text = normalize_streamlit_nested_bullet_indentation(text)
     text = normalize_researcher_card_field_indentation(text)
     text = normalize_planner_transport_section_indentation(text)
+    text = normalize_transport_summary_operator_cards(text)
     text = strip_empty_planner_transport_wrapper(text)
     text = repair_bold_label_value_spans(text)
     text = strip_orphan_planner_transport_headings(text)
@@ -10734,6 +10939,7 @@ def final_visual_pass(text: str) -> str:
     text = _normalize_numbered_markdown_artifacts(text)
     text = ensure_transport_comparison_conclusion_separator(text)
     text = ensure_blank_lines_before_headers(text)
+    text = normalize_transport_summary_operator_cards(text)
     text = ensure_blank_lines_before_horizontal_rules(text)
     text = ensure_blank_lines_after_horizontal_rules(text)
     text = re.sub(r"(?m)(### 📅 Recommended Itinerary)\n\n---\n\n(### )", r"\1\n\n\2", text)
@@ -11333,9 +11539,6 @@ def _normalize_researcher_visual_contract(text: str, language: str) -> str:
         value = re.sub(r"^\s*🏛️\s*\*\*[^\n]+\*\*\s*", title, value, count=1, flags=re.IGNORECASE)
     if language == "pt":
         value = re.sub(r"(\*\*[^*\n]+?)\s+\|\s+(?:Restaurant|Restaurants|Food & Restaurants)(\*\*)", r"\1\2", value, flags=re.IGNORECASE)
-        value = re.sub(r"https://www\.visitlisboa\.com/en/events\b", "https://www.visitlisboa.com/pt-pt/eventos", value)
-        value = re.sub(r"https://www\.visitlisboa\.com/en/places\b", "https://www.visitlisboa.com/pt-pt/locais", value)
-        value = re.sub(r"https://www\.visitlisboa\.com/en/restaurants\b", "https://www.visitlisboa.com/pt-pt/restaurantes", value)
     value = re.sub(r"\bFrom Monday to Saturday\b", "De segunda-feira a sábado" if language == "pt" else "From Monday to Saturday", value)
     value = re.sub(r"\bminutes duration\b", "minutos de duração" if language == "pt" else "minutes duration", value)
     value = value.replace("arquitectura", "arquitetura")
@@ -11361,6 +11564,7 @@ def _final_contract_pass(text: str, language: str = "en") -> str:
     value = _normalize_transport_visual_contract(value, lang)
     value = _normalize_researcher_visual_contract(value, lang)
     value = enforce_language_labels(value, lang)
+    value = normalize_visitlisboa_source_footer_links(value, lang)
     value = re.sub(
         r"\b(Estimated total time|Estimated travel time|Best transport|Best public transport|Route|Walk|Metro|Transfer|Exit|Tempo total estimado|Melhor transporte|Rota|Percurso):(?=\S)",
         r"\1: ",
@@ -11454,6 +11658,13 @@ def final_post_qa_guard(text: str, language: str = "en") -> str:
     )
     guarded = re.sub(
         r"(?mi)^\s*[-*•]\s*[^\n]*\*\*(?:Distance|Distância|Distancia|Lines|Linhas)\s*:\*\*\s*(?:not available|not confirmed|not provided|n/?a|unknown|não disponível|nao disponivel|indisponível|indisponivel|não confirmado|nao confirmado|não fornecido|nao fornecido|desconhecido)\s*$\n?",
+        "",
+        guarded,
+    )
+    guarded = re.sub(
+        r"(?mi)^\s*[-*•]\s*📝\s*\*\*(?:Descrição|Description):\*\*\s*"
+        r"(?:\d+\s+)?(?:registo\(s\)\s+adicional\(is\)|additional matching record).*"
+        r"(?:fonte\s+ainda\s+n[aã]o\s+confirma|source\s+does\s+not\s+confirm).*$\n?",
         "",
         guarded,
     )

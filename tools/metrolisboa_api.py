@@ -2602,32 +2602,39 @@ if __name__ == "__main__":
 
     print("\n1. Testing get_metro_status...")
     result = get_metro_status.invoke({})
-    print(result[:500])
+    # print(result[:500])
+    print(result)
 
     print("\n2. Testing get_all_metro_stations...")
     result = get_all_metro_stations.invoke({})
-    print(result[:500])
+    # print(result[:500])
+    print(result)
 
     if _is_metro_api_available():
         print("\n3. Testing get_metro_wait_time...")
         result = get_metro_wait_time.invoke({"station": "Campo Grande"})
-        print(result[:500])
+        # print(result[:500])
+        print(result)
 
         print("\n4. Testing get_metro_wait_time with explicit direction (Saldanha -> Odivelas)...")
         result = get_metro_wait_time.invoke({"station": "Saldanha", "direction": "Odivelas"})
-        print(result[:500])
+        # print(result[:500])
+        print(result)
 
         print("\n5. Testing get_metro_line_wait_times...")
         result = get_metro_line_wait_times.invoke({"line": "amarela"})
-        print(result[:500])
+        # print(result[:500])
+        print(result)
 
         print("\n6. Testing get_metro_frequency...")
         result = get_metro_frequency.invoke({"line": "verde", "day_type": "weekday"})
-        print(result[:500])
+        # print(result[:500])
+        print(result)
 
         print("\n7. Testing find_nearest_metro...")
         result = find_nearest_metro.invoke({"latitude": 38.7548, "longitude": -9.1867})
-        print(result[:500])
+        # print(result[:500])
+        print(result)
     else:
         print("\n⚠️ Metro API credentials not configured, skipping OAuth2 tests")
 

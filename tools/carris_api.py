@@ -2493,7 +2493,7 @@ def carris_get_service_frequency(
         icon = "🚋" if route_short_name.upper().endswith("E") else "🚌"
         response = f"### {icon} **Route {route_short_name} service frequency**\n\n"
         response += f"- 📍 **Stop:** {stop_display}\n"
-        response += f"- 📊 **Total departures today:** {len(departures)}\n\n"
+        response += f"- 📊 **Total departures today (Paragens):** {len(departures)}\n\n"
 
         for window_name, start_min, end_min in windows:
             window_deps = [d for d in departures if start_min <= d < end_min]
@@ -2568,10 +2568,10 @@ if __name__ == "__main__":
         try:
             result = test_func(*args, **kwargs)
             # Truncate long outputs for readability
-            if isinstance(result, str) and len(result) > 800:
-                print(result[:800] + "\n\n... (truncated for readability)")
-            elif result is not None:
-                print(result)
+            # if isinstance(result, str) and len(result) > 800:
+            #     print(result[:800] + "\n\n... (truncated for readability)")
+            # elif result is not None:
+            print(result)
             test_results["passed"] += 1
             print("\n\033[1;32m✅ PASSED\033[0m")
             return result
@@ -2803,8 +2803,10 @@ if __name__ == "__main__":
         if "não encontrada" in result.lower() and "erro" in result.lower():
             raise AssertionError("Route not found - direction fix may have broken routing")
         if "Linha" in result or "Route" in result or "rota" in result.lower():
-            return f"✅ Direction-aware routing working\n{result[:500]}"
-        return result[:500]
+            # return f"✅ Direction-aware routing working\n{result[:500]}"
+            return f"✅ Direction-aware routing working\n{result}"
+        # return result[:500]
+        return result
 
     run_test("Direction Routing: Cais do Sodré → Belém (forward)", _test_direction_fix)
 
@@ -2815,7 +2817,8 @@ if __name__ == "__main__":
         )
         if "não encontrada" in result.lower() and "erro" in result.lower():
             raise AssertionError("Reverse route not found")
-        return f"✅ Reverse routing working\n{result[:500]}"
+        # return f"✅ Reverse routing working\n{result[:500]}"
+        return f"✅ Reverse routing working\n{result}"
 
     run_test("Direction Routing: Belém → Cais do Sodré (reverse)", _test_reverse_direction)
 

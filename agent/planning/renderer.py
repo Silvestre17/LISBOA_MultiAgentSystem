@@ -311,7 +311,12 @@ def _source_footer(
     for source_id in deduped[:5]:
         source = sources[source_id]
         label = source.label_pt if is_pt else source.label_en
-        links.append(f"[*{label}*]({source.url})")
+        url = source.url
+        if is_pt and source_id == "visitlisboa_places":
+            url = "https://www.visitlisboa.com/pt-pt/locais"
+        elif is_pt and source_id == "visitlisboa_events":
+            url = "https://www.visitlisboa.com/pt-pt/eventos"
+        links.append(f"[*{label}*]({url})")
     timestamp = datetime.now().strftime("%H:%M")
     return f"📌 **{'Fonte' if is_pt else 'Source'}:** {' | '.join(links)} | **{'Atualizado' if is_pt else 'Updated'}:** {timestamp}"
 

@@ -2289,7 +2289,7 @@ def get_train_frequency(
 
         response = f"### 🚆 **{route_display} service frequency**\n\n"
         response += f"- 📍 **Station:** {stop_display}\n"
-        response += f"- 📊 **Total trains today:** {len(departures)}\n\n"
+        response += f"- 📊 **Total trains today (Comboios):** {len(departures)}\n\n"
 
         for window_name, start_min, end_min in windows:
             window_deps = [d for d in departures if start_min <= d < end_min]
@@ -2357,10 +2357,10 @@ if __name__ == "__main__":
         print(f"{'─' * 70}")
         try:
             result = test_func(*args, **kwargs)
-            if isinstance(result, str) and len(result) > 800:
-                print(result[:800] + "\n\n... (truncated for readability)")
-            elif result is not None:
-                print(result)
+            # if isinstance(result, str) and len(result) > 800:
+            #     print(result[:800] + "\n\n... (truncated for readability)")
+            # elif result is not None:
+            print(result)
             test_results["passed"] += 1
             print("\n\033[1;32m✅ PASSED\033[0m")
             return result
