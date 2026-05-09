@@ -631,10 +631,18 @@ def _localize_place_title(title: Optional[str], language: str = "en") -> str:
     if not raw or language != "pt":
         return raw
     mapping = {
+        "Castle Museum": "Castelo de São Jorge",
+        "Castle of the Moors": "Castelo dos Mouros",
+        "Carmo Archaeological Museum": "Museu Arqueológico do Carmo",
+        "Fronteira Palace": "Palácio Fronteira",
         "João de Deus Museum": "Museu João de Deus",
         "Joao de Deus Museum": "Museu João de Deus",
         "Words Factory": "Fábrica das Palavras",
         "Monument to the Discoveries": "Padrão dos Descobrimentos",
+        "National Museum of Natural History and Science": "Museu Nacional de História Natural e da Ciência",
+        "National Palace and Gardens of Queluz": "Palácio Nacional e Jardins de Queluz",
+        "National Tile Museum": "Museu Nacional do Azulejo",
+        "Pena National Palace": "Palácio Nacional da Pena",
         "Prazeres Cemetery and Museum": "Cemitério e Museu dos Prazeres",
         "Museum of Aljube – Resistance and Freedom": "Museu do Aljube - Resistência e Liberdade",
         "Museum of Aljube - Resistance and Freedom": "Museu do Aljube - Resistência e Liberdade",
@@ -1047,22 +1055,12 @@ def _format_compact_feature_summary(features: Any, language: str = "en", max_ite
 
 def _format_source_mix_line(vl_count: int, da_count: int, language: str = "en") -> str:
     """Summarize the data sources represented in the displayed result cards."""
-    parts: List[str] = []
-    if vl_count:
-        parts.append(f"VisitLisboa: {vl_count}")
-    if da_count:
-        parts.append(f"Lisboa Aberta: {da_count}")
-    if not parts:
-        return ""
-    label = "Mistura de fontes" if language == "pt" else "Source mix"
-    return f"📊 **{label}:** {' · '.join(parts)}"
+    return ""
 
 
 def _format_remaining_results_line(remaining: int, language: str = "en") -> str:
     """Format the compact continuation marker required by response standards."""
-    if remaining <= 0:
-        return ""
-    return f"... e {remaining} mais." if language == "pt" else f"... and {remaining} more."
+    return ""
 
 
 def _event_icon_for_category(category: str) -> str:
@@ -1251,9 +1249,6 @@ def _format_event_filter_summary(
     normalized_query = (query or "").strip()
     normalized_category = (category or "").strip()
     normalized_category = _localize_event_category(normalized_category, language=language)
-    shown_from = offset + 1 if shown_results > 0 else 0
-    shown_to = offset + shown_results if shown_results > 0 else 0
-
     if language == "pt":
         scope_parts = [normalized_filter if not date_filter else f"{normalized_filter} ({date_window})"]
         scope_parts.append(normalized_category if normalized_category else "todas as categorias")
@@ -1261,15 +1256,9 @@ def _format_event_filter_summary(
             scope_parts.append(f"foco temático: {normalized_query}")
         else:
             scope_parts.append("pesquisa geral de eventos")
-        event_word = "evento" if total_results == 1 else "eventos"
-        match_verb = "corresponde" if total_results == 1 else "correspondem"
-        result_word = "resultado" if shown_results == 1 else "resultados"
-        shown_phrase = "mais relevante" if shown_results == 1 else "mais relevantes"
         return [
             "### 🔵 **Eventos encontrados**",
             f"🧭 **Filtro aplicado:** {', '.join(scope_parts)}.",
-            f"📊 **Resultado do filtro:** {total_results} {event_word} com data confirmada {match_verb} a este filtro.",
-            f"✨ **Destaques mostrados:** {shown_results} {result_word} {shown_phrase} (janela {shown_from}-{shown_to}).",
         ]
 
     scope_parts = [normalized_filter if not date_filter else f"{normalized_filter} ({date_window})"]
@@ -1278,14 +1267,9 @@ def _format_event_filter_summary(
         scope_parts.append(f"theme focus: {normalized_query}")
     else:
         scope_parts.append("broad event discovery")
-    event_word = "event" if total_results == 1 else "events"
-    match_verb = "matches" if total_results == 1 else "match"
-    result_word = "result" if shown_results == 1 else "results"
     return [
         "### 🔵 **Events Found**",
         f"🧭 **Filter used:** {', '.join(scope_parts)}.",
-        f"📊 **Result count:** {total_results} confirmed-date {event_word} {match_verb} this filter.",
-        f"✨ **Highlights shown:** {shown_results} most relevant {result_word} (window {shown_from}-{shown_to}).",
     ]
 
 
@@ -3731,6 +3715,8 @@ def search_cultural_events(
                 language=render_language,
                 content_kind="event",
             )
+            if "descrição disponível na página oficial" in description_summary.lower():
+                description_summary = ""
             price_text = _localize_event_price(event.get('price'), language=render_language)
 
             event_icon = _event_icon_for_category(cat)
@@ -3834,7 +3820,7 @@ def search_cultural_events(
 
             if event.get('url'):
                 details_label = "Mais detalhes" if render_language == "pt" else "More details"
-                details_url = _localized_visitlisboa_url(event['url'], render_language)
+                details_url = event['url']
                 output_parts.append(f"    - 🔗 **{details_label}:** {_format_markdown_link('VisitLisboa', details_url)}")
 
             output_parts.append("")  # Empty line between events
@@ -4564,7 +4550,7 @@ def search_places_attractions(
 
             if place.get('url'):
                 details_label = "Mais detalhes" if render_language == "pt" else "More details"
-                details_url = _localized_visitlisboa_url(place['url'], render_language)
+                details_url = place['url']
                 output_parts.append(f"    - 🔗 **{details_label}:** {_format_markdown_link('VisitLisboa', details_url)}")
 
         # Source breakdown

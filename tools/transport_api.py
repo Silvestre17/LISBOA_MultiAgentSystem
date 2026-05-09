@@ -708,65 +708,98 @@ def get_route_between_stations(origin: str, destination: str) -> str:
 
 
 @tool
-def get_transport_summary() -> str:
+def get_transport_summary(language: str = "pt") -> str:
     """
     Gets a quick summary of all public transport status in Lisbon.
     Combines Metro, buses, and trains into a single overview.
 
+    Args:
+        language: Preferred response language. Use ``"pt"`` for Portuguese
+            and ``"en"`` for English. Defaults to Portuguese for backward
+            compatibility with existing tool calls.
+
     Returns:
         str: Combined transport status summary.
     """
+    is_pt = (language or "pt").lower().startswith("pt")
     now_str = datetime.now().strftime('%H:%M')
+    title = "Ponto de situação dos transportes em Lisboa" if is_pt else "Transport Status in Lisbon"
+    direct_answer = (
+        f"Resumo rápido do Metro, autocarros e comboios atualizado às **{now_str}**."
+        if is_pt
+        else f"Quick status for Metro, buses, and suburban trains updated at **{now_str}**."
+    )
+    source_label = "Fonte" if is_pt else "Source"
+    updated_label = "Atualizado" if is_pt else "Updated"
     response = "\n".join(
         [
-            "### 🚇 Situação dos Transportes em Lisboa",
+            f"### 🔵 **{title}**",
             "",
-            f"Resumo rápido atualizado às **{now_str}**.",
-            "",
-            "---",
+            f"✅ **{'Resposta direta' if is_pt else 'Direct answer'}:** {direct_answer}",
             "",
         ]
     )
 
     # 1. Metro Status
-    response += "**🚇 Metro de Lisboa**\n"
+    response += "- **🚇 Metro de Lisboa**\n"
 
     metro_data = fetch_json_with_retry(METRO_STATUS_URL)
     if metro_data and metro_data.get('resposta'):
         resp = metro_data['resposta']
         all_ok = True
+        line_labels = {
+            "amarela": "Amarela" if is_pt else "Yellow",
+            "azul": "Azul" if is_pt else "Blue",
+            "verde": "Verde" if is_pt else "Green",
+            "vermelha": "Vermelha" if is_pt else "Red",
+        }
         for line_key, line_info in METRO_LINES.items():
-            status = resp.get(line_key, 'Unknown').strip()
+            status = str(resp.get(line_key, "Unknown")).strip() or "Unknown"
             if status.lower() != 'ok':
                 all_ok = False
-            response += f"- {line_info['emoji']} **{line_key.title()}**: {status}\n"
+            status_label = "Ok" if status.lower() == "ok" else status
+            response += f"    - {line_info['emoji']} **{line_labels.get(line_key, line_key.title())}:** {status_label}\n"
 
         if all_ok:
-            response += "- 🟢 **Estado:** Circulação normal em todas as linhas\n"
+            status_text = "Circulação normal em todas as linhas" if is_pt else "Normal service on all lines"
+            response += f"    - ✅ **{'Estado geral' if is_pt else 'Overall status'}:** {status_text}\n"
+        else:
+            warning_text = (
+                "Há perturbações reportadas; confirma a linha afetada antes de sair"
+                if is_pt
+                else "Disruptions are reported; check the affected line before leaving"
+            )
+            response += f"    - ⚠️ **{'Estado geral' if is_pt else 'Overall status'}:** {warning_text}\n"
     else:
-        response += "- ❌ **Estado:** Dados Indisponíveis\n"
+        response += f"    - ❌ **{'Estado' if is_pt else 'Status'}:** {'Dados indisponíveis' if is_pt else 'Data unavailable'}\n"
 
     response += "\n"
 
     # 2. Carris (Urban Lisbon)
-    response += "**🚌 Carris Urban**\n"
+    response += "- **🚌 Carris Urban**\n"
 
     try:
         from tools.carris_api import fetch_gtfs_rt_vehicles
 
         vehicles = fetch_gtfs_rt_vehicles()
         if vehicles:
-            response += f"- 🟢 **Veículos em serviço:** {len(vehicles)} veículos\n"
+            metric = "Veículos em serviço" if is_pt else "Vehicles in service"
+            if is_pt:
+                vehicle_word = "veículo" if len(vehicles) == 1 else "veículos"
+            else:
+                vehicle_word = "vehicle" if len(vehicles) == 1 else "vehicles"
+            response += f"    - ✅ **{metric}:** {len(vehicles)} {vehicle_word}\n"
         else:
-            response += "- ⚠️ **Estado:** Dados em tempo real indisponíveis\n"
+            status_text = "Dados em tempo real indisponíveis" if is_pt else "Real-time data unavailable"
+            response += f"    - ⚠️ **{'Estado' if is_pt else 'Status'}:** {status_text}\n"
     except Exception as e:
         logger.warning(f"Carris Urban data failed: {e}")
-        response += "- ⚠️ **Estado:** Dados indisponíveis\n"
+        response += f"    - ⚠️ **{'Estado' if is_pt else 'Status'}:** {'Dados indisponíveis' if is_pt else 'Data unavailable'}\n"
 
     response += "\n"
 
     # 3. Carris Metropolitana (AML metropolitan buses)
-    response += "**🚌 Carris Metropolitana**\n"
+    response += "- **🚌 Carris Metropolitana**\n"
 
     try:
         from tools.carrismetropolitana_api import (
@@ -775,22 +808,29 @@ def get_transport_summary() -> str:
 
         alerts_data = fetch_json_with_retry(CARRIS_ALERTS_URL)
         if alerts_data:
-            # API returns a list directly, not a dict with 'entity' key
+            # API returns a list directly, not a dict with 'entity' key.
             alerts = alerts_data if isinstance(alerts_data, list) else alerts_data.get('entity', [])
             if alerts:
-                response += f"- ⚠️ **Alertas ativos:** {len(alerts)} alertas\n"
+                metric = "Alertas ativos" if is_pt else "Active alerts"
+                if is_pt:
+                    alert_word = "alerta" if len(alerts) == 1 else "alertas"
+                else:
+                    alert_word = "alert" if len(alerts) == 1 else "alerts"
+                response += f"    - ⚠️ **{metric}:** {len(alerts)} {alert_word}\n"
             else:
-                response += "- 🟢 **Estado:** Sem alertas ativos\n"
+                response += f"    - ✅ **{'Estado' if is_pt else 'Status'}:** {'Sem alertas ativos' if is_pt else 'No active alerts'}\n"
         else:
-            response += "- ⚠️ **Estado:** Dados de alertas indisponíveis\n"
+            status_text = "Dados de alertas indisponíveis" if is_pt else "Alert data unavailable"
+            response += f"    - ⚠️ **{'Estado' if is_pt else 'Status'}:** {status_text}\n"
     except Exception as e:
         logger.warning(f"Carris Metropolitana alerts failed: {e}")
-        response += "- ⚠️ **Estado:** Dados indisponíveis\n"
+        response += f"    - ⚠️ **{'Estado' if is_pt else 'Status'}:** {'Dados indisponíveis' if is_pt else 'Data unavailable'}\n"
 
     response += "\n"
 
     # 4. CP suburban trains
-    response += "**🚆 CP Suburban Trains in Lisbon/AML**\n"
+    cp_title = "Comboios suburbanos CP em Lisboa/AML" if is_pt else "CP Suburban Trains in Lisbon/AML"
+    response += f"- **🚆 {cp_title}**\n"
 
     try:
         aml_trains = get_cp_aml_trains()
@@ -798,25 +838,37 @@ def get_transport_summary() -> str:
             total = len(aml_trains)
             delayed = sum(1 for t in aml_trains if (t.get('delay') or 0) > 60)
 
-            response += f"- 📊 **Comboios a circular na AML:** {total} comboios\n"
-            if delayed > 0:
-                response += f"- ⚠️ **Atrasos superiores a 1 min:** {delayed} comboios\n"
+            trains_metric = "Comboios a circular na AML" if is_pt else "Trains currently in the AML"
+            if is_pt:
+                train_word = "comboio" if total == 1 else "comboios"
             else:
-                response += "- 🟢 **Estado:** Comboios a operar normalmente\n"
+                train_word = "train" if total == 1 else "trains"
+            response += f"    - 📊 **{trains_metric}:** {total} {train_word}\n"
+            if delayed > 0:
+                delay_metric = "Atrasos superiores a 1 min" if is_pt else "Delays over 1 min"
+                response += f"    - ⚠️ **{delay_metric}:** {delayed} {train_word}\n"
+            else:
+                status_text = "Comboios a operar normalmente" if is_pt else "Trains operating normally"
+                response += f"    - ✅ **{'Estado' if is_pt else 'Status'}:** {status_text}\n"
         else:
-            response += "- ⚠️ **Estado:** Dados indisponíveis\n"
+            response += f"    - ⚠️ **{'Estado' if is_pt else 'Status'}:** {'Dados indisponíveis' if is_pt else 'Data unavailable'}\n"
     except Exception as e:
         logger.warning(f"CP train data failed: {e}")
-        response += "- ⚠️ **Estado:** Dados indisponíveis\n"
+        response += f"    - ⚠️ **{'Estado' if is_pt else 'Status'}:** {'Dados indisponíveis' if is_pt else 'Data unavailable'}\n"
 
-    response += "\n---\n\n"
-    response += (
-        "💡 **Antes de sair**\n"
-        "- Se vais usar Carris Metropolitana ou CP, confirma a partida específica pouco antes de sair, porque alertas e atrasos agregados não identificam sempre a tua linha.\n\n"
-    )
+    response += "\n"
+    if is_pt:
+        response += (
+            "💡 **Antes de sair:**\n"
+            "- Se vais usar Carris Metropolitana ou CP, confirma a partida específica pouco antes de sair, porque alertas e atrasos agregados não identificam sempre a tua linha.\n\n"
+        )
+    else:
+        response += (
+            "💡 **Before leaving:**\n"
+            "- If you plan to use Carris Metropolitana or CP, check the specific departure shortly before you leave because aggregate alerts and delays do not always identify your line.\n\n"
+        )
 
-    # Footer with proper italic source links
-    response += f"📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | [*Carris*](https://www.carris.pt) | [*Carris Metropolitana*](https://www.carrismetropolitana.pt) | [*CP*](https://www.cp.pt) | **Atualizado:** {now_str}\n"
+    response += f"📌 **{source_label}:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | [*Carris*](https://www.carris.pt) | [*Carris Metropolitana*](https://www.carrismetropolitana.pt) | [*CP*](https://www.cp.pt) | **{updated_label}:** {now_str}\n"
 
     return response
 
@@ -842,10 +894,11 @@ if __name__ == "__main__":
             if result:
                 test_results["passed"] += 1
                 print(f"\033[1;32m[PASS]\033[0m Result length: {len(result)} chars")
-                # Show first 600 chars for readability
-                print(result[:600])
-                if len(result) > 600:
-                    print(f"... ({len(result) - 600} more chars)")
+                # # Show first 600 chars for readability
+                # print(result[:600])
+                # if len(result) > 600:
+                #     print(f"... ({len(result) - 600} more chars)")
+                print(result)
             else:
                 test_results["failed"] += 1
                 print("\033[1;31m[FAIL]\033[0m Empty result")

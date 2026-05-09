@@ -885,6 +885,15 @@ def test_researcher_extracts_start_location_for_resident_service_plans() -> None
     assert ResearcherAgent._extract_near_location_name(variant) == "Roma-Areeiro"
 
 
+def test_researcher_routes_local_culture_event_discovery_as_events_not_history() -> None:
+    """Event discovery phrased as local culture should not fall into web history fallback."""
+    query = "Quero explorar a cultura local. Que grandes eventos temos esta semana?"
+
+    assert ResearcherAgent._is_direct_event_lookup_query(query)
+    assert not ResearcherAgent._is_history_culture_query(query)
+    assert not ResearcherAgent._is_mixed_event_place_query(query)
+
+
 def test_resident_service_fallback_uses_concrete_service_cards() -> None:
     """Planner fallback should answer with the actual municipal service cards when available."""
     places_data = """
@@ -1203,15 +1212,91 @@ def test_transport_summary_tool_uses_aligned_sections(monkeypatch) -> None:
 
     response = transport_api.get_transport_summary.func()
 
-    assert "### 🚇 Situação dos Transportes em Lisboa" in response
-    assert "**🚇 Metro de Lisboa**" in response
-    assert "- 🟢 **Estado:** Circulação normal em todas as linhas" in response
-    assert "**🚌 Carris Urban**" in response
-    assert "- 🟢 **Veículos em serviço:** 2 veículos" in response
-    assert "**🚌 Carris Metropolitana**" in response
-    assert "- ⚠️ **Alertas ativos:** 2 alertas" in response
-    assert "- ⚠️ **Atrasos superiores a 1 min:** 2 comboios" in response
+    assert "### 🔵 **Ponto de situação dos transportes em Lisboa**" in response
+    assert "✅ **Resposta direta:**" in response
+    assert "- **🚇 Metro de Lisboa**" in response
+    assert "    - 🟡 **Amarela:** Ok" in response
+    assert "    - 🔵 **Azul:** Ok" in response
+    assert "    - 🟢 **Verde:** Ok" in response
+    assert "    - 🔴 **Vermelha:** Ok" in response
+    assert "    - ✅ **Estado geral:** Circulação normal em todas as linhas" in response
+    assert "- 🟢 **Estado:** Circulação normal em todas as linhas" not in response
+    assert "- **🚌 Carris Urban**" in response
+    assert "    - ✅ **Veículos em serviço:** 2 veículos" in response
+    assert "- **🚌 Carris Metropolitana**" in response
+    assert "    - ⚠️ **Alertas ativos:** 2 alertas" in response
+    assert "    - ⚠️ **Atrasos superiores a 1 min:** 2 comboios" in response
     assert ", [*Carris*]" not in response
+
+
+def test_transport_summary_tool_supports_english_and_disruptions(monkeypatch) -> None:
+    """The aggregate status tool should preserve structure in English and abnormal states."""
+    from tools import carris_api, transport_api
+
+    def fake_fetch_json(url: str, *args: object, **kwargs: object) -> object:
+        if url == transport_api.METRO_STATUS_URL:
+            statuses = {key: "OK" for key in transport_api.METRO_LINES}
+            statuses["verde"] = "Service interrupted"
+            return {"resposta": statuses}
+        return []
+
+    monkeypatch.setattr(transport_api, "fetch_json_with_retry", fake_fetch_json)
+    monkeypatch.setattr(carris_api, "fetch_gtfs_rt_vehicles", lambda: [{"id": "v1"}])
+    monkeypatch.setattr(transport_api, "get_cp_aml_trains", lambda: [{"delay": 0}])
+
+    response = transport_api.get_transport_summary.func(language="en")
+
+    assert "### 🔵 **Transport Status in Lisbon**" in response
+    assert "✅ **Direct answer:**" in response
+    assert "- **🚇 Metro de Lisboa**" in response
+    assert "    - 🟡 **Yellow:** Ok" in response
+    assert "    - 🟢 **Green:** Service interrupted" in response
+    assert "    - ⚠️ **Overall status:** Disruptions are reported" in response
+    assert "Normal service on all lines" not in response
+    assert "- **🚌 Carris Urban**" in response
+    assert "    - ✅ **Vehicles in service:** 1 vehicle" in response
+    assert "- **🚆 CP Suburban Trains in Lisbon/AML**" in response
+    assert "📌 **Source:**" in response
+
+
+def test_transport_summary_routing_wins_over_cp_status_for_multi_operator_english_query() -> None:
+    """A Metro+bus+train status query should not collapse to CP-only status."""
+    from agent.agents.transport_agent import _build_deterministic_transport_tool_call
+
+    message = _build_deterministic_transport_tool_call(
+        "Give me the current status of the Metro, buses, and trains in Lisbon."
+    )
+
+    assert message is not None
+    assert message.tool_calls[0]["name"] == "get_transport_summary"
+    assert message.tool_calls[0]["args"] == {"language": "en"}
+
+
+def test_final_visual_pass_keeps_transport_summary_operator_metrics_nested() -> None:
+    """QA repair must not promote transport-summary operators into repeated H3 sections."""
+    response = (
+        "### 🚇 **Situação dos Transportes em Lisboa**\n\n"
+        "### 🚇 **Metro de Lisboa**\n"
+        "- 🟡 **Amarela:** Ok\n"
+        "- 🟢 **Estado:** Circulação normal em todas as linhas\n\n"
+        "**🚌 Carris Metropolitana**\n\n"
+        "- ⚠️ **Alertas ativos:** 2 alertas\n\n"
+        "### 🚆 **Comboios suburbanos CP em Lisboa/AML**\n"
+        "- 📊 **Comboios a circular na AML:** 3 comboios\n"
+        "- ⚠️ **Atrasos superiores a 1 min:** 2 comboios\n\n"
+        "📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | [*Carris Metropolitana*](https://www.carrismetropolitana.pt) | [*CP*](https://www.cp.pt) | **Atualizado:** 09:00"
+    )
+
+    cleaned = final_visual_pass(response)
+
+    assert "### 🚇 **Metro de Lisboa**" not in cleaned
+    assert "### 🚆 **Comboios suburbanos CP em Lisboa/AML**" not in cleaned
+    assert "- **🚇 Metro de Lisboa**" in cleaned
+    assert "    - 🟡 **Amarela:** Ok" in cleaned
+    assert "    - ✅ **Estado:** Circulação normal em todas as linhas" in cleaned
+    assert "- 🟢 **Estado:** Circulação normal em todas as linhas" not in cleaned
+    assert "    - ⚠️ **Alertas ativos:** 2 alertas" in cleaned
+    assert "    - ⚠️ **Atrasos superiores a 1 min:** 2 comboios" in cleaned
 
 
 def test_full_museum_day_fallback_is_complete_and_transport_grounded() -> None:

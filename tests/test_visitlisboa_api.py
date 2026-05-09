@@ -12,14 +12,24 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
+from agent.agents.researcher_agent import ResearcherAgent
 from agent.utils.response_formatter import (
     canonicalize_visitlisboa_source_line,
+    final_post_qa_guard,
     final_visual_pass,
+    format_researcher_event_cards,
     format_researcher_card,
     reconcile_researcher_place_response,
     researcher_place_response_missing_requested_fields,
 )
 import tools.visitlisboa_api as visitlisboa_api
+
+
+class _DummyLLMResponse:
+    """Minimal response object for ResearcherAgent LLM-localization tests."""
+
+    def __init__(self, content: str) -> None:
+        self.content = content
 
 
 def test_get_vector_store_initializes_once_under_parallel_calls() -> None:
@@ -128,6 +138,10 @@ def test_pt_visitlisboa_description_and_value_helpers_do_not_leak_raw_english() 
     assert visitlisboa_api._localize_place_value_text("Price: Free", "pt") == "Preço: Gratuito"
     assert "with Lisboa Card" not in visitlisboa_api._localize_place_value_text("20% with Lisboa Card", "pt")
     assert visitlisboa_api._localize_place_category("Attractions", "pt") == "Atrações"
+    assert visitlisboa_api._localize_place_title("Castle Museum", "pt") == "Castelo de São Jorge"
+    assert visitlisboa_api._localize_place_title("National Palace and Gardens of Queluz", "pt") == "Palácio Nacional e Jardins de Queluz"
+    assert visitlisboa_api._localize_place_title("Pena National Palace", "pt") == "Palácio Nacional da Pena"
+    assert visitlisboa_api._localize_place_title("Carmo Archaeological Museum", "pt") == "Museu Arqueológico do Carmo"
 
 
 def test_place_ticket_price_compaction_removes_scraper_scaffolding() -> None:
@@ -218,7 +232,7 @@ def test_search_places_attractions_renders_enriched_place_cards() -> None:
     assert "    - 🎟️ **Tickets:** [Buy tickets](https://tickets.example.com/azulejo)" in result
     assert "    - 🔗 **More details:** [VisitLisboa](https://www.visitlisboa.com/en/places/national-tile-museum)" in result
     assert not re.search(r"(?m)^\s*\d+\.\s+", result)
-    assert "📊 **Source mix:** VisitLisboa: 1" in result
+    assert "📊 **Source mix:**" not in result
 
 
 def test_search_cultural_events_renders_enriched_event_cards() -> None:
@@ -258,6 +272,144 @@ def test_search_cultural_events_renders_enriched_event_cards() -> None:
     assert "    - ✨ **Highlights:** [Programme](https://official.example.com/programme)" in result
     assert "    - 🔗 **More details:** [VisitLisboa](https://www.visitlisboa.com/en/events/free-jazz-night)" in result
     assert not re.search(r"(?m)^\s*\d+\.\s+", result)
+    assert "Result count" not in result
+    assert "Highlights shown" not in result
+
+
+def test_pt_visitlisboa_event_cards_do_not_localize_detail_urls_or_emit_loose_more_marker() -> None:
+    """Portuguese event cards should keep canonical /en/ VisitLisboa URLs and complete cards only."""
+    event_day = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    sample_events = [
+        {
+            "url": "https://www.visitlisboa.com/en/events/free-jazz-night",
+            "title": "Free Jazz Night",
+            "category": "Music",
+            "short_description": "Descrição disponível na página oficial do evento.",
+            "price": "Free Entry",
+            "location": "Jardim da Estrela, Lisboa",
+            "dates": [{"date": {"datetime_iso": event_day}}],
+        },
+        {
+            "url": "https://www.visitlisboa.com/en/events/book-market",
+            "title": "Book Market",
+            "category": "Other",
+            "location": "Lisboa",
+            "dates": [{"date": {"datetime_iso": event_day}}],
+        },
+    ]
+
+    with patch.object(visitlisboa_api, "_load_events_json", return_value=sample_events):
+        result = str(
+            visitlisboa_api.search_cultural_events.invoke(
+                {"query": "eventos esta semana", "date_filter": "this week", "language": "pt", "max_results": 1}
+            )
+        )
+
+    assert "https://www.visitlisboa.com/en/events/free-jazz-night" in result
+    assert "pt-pt" not in result
+    assert "... e 1 mais" not in result
+    assert "Destaques mostrados" not in result
+    assert "Resultado do filtro" not in result
+    assert "Descrição disponível na página oficial do evento" not in result
+
+
+def test_event_formatter_recovers_worker_bold_event_cards_without_collapsing_titles() -> None:
+    """QA guard should not merge later event titles into the first event card."""
+    worker_output = """### 🔵 **Eventos encontrados**
+✅ **Resposta direta:** Encontrei 2 eventos com data confirmada.
+
+**🎵 Gipsy Kings**
+    - 🗓️ **Quando:** 10 de maio
+    - ⏱️ **Duração:** 🎯 Um só dia
+    - 📂 **Categoria:** Música
+    - 📍 **Local:** [Coliseu de Lisboa](https://www.google.com/maps/search/?api=1&query=Coliseu+de+Lisboa)
+    - 🔗 **Mais detalhes:** [VisitLisboa](https://www.visitlisboa.com/en/events/gipsy-kings)
+
+**📅 Morabeza LX**
+    - 🗓️ **Quando:** 09 de maio
+    - ⏱️ **Duração:** 🎯 Um só dia
+    - 📂 **Categoria:** Festivais
+    - 🔗 **Mais detalhes:** [VisitLisboa](https://www.visitlisboa.com/en/events/morabeza-lx)
+
+📌 **Fonte:** [*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos) | **Atualizado:** 09:05"""
+
+    cleaned = final_post_qa_guard(
+        format_researcher_event_cards(worker_output, language="pt", user_query="eventos esta semana"),
+        language="pt",
+    )
+
+    assert "**🎵 Gipsy Kings**" in cleaned
+    assert "**🎭 Morabeza LX**" in cleaned
+    assert "- **📅 Morabeza LX**" not in cleaned
+    assert "    - 📍 **Morada:** [Coliseu de Lisboa]" in cleaned
+    assert "    - ⏱️ **Duração:** 🎯 Um só dia" in cleaned
+    assert cleaned.count("📌 **Fonte:**") == 1
+    assert "https://www.visitlisboa.com/en/events/gipsy-kings" in cleaned
+    assert "[*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos)" in cleaned
+
+
+def test_final_guard_keeps_event_card_fields_at_one_streamlit_safe_level() -> None:
+    """Event cards should use a real list parent so Streamlit does not stair-step fields."""
+    raw = """### 🎭 **Eventos Culturais**
+
+**🎵 Gipsy Kings by Diego Baliardo | "A Tu Vera” Tour**
+    - 📍 **Morada:** [Coliseu de Lisboa, Lisboa](https://www.google.com/maps/search/?api=1&query=Coliseu)
+    - 📅 **Data/Hora:** 10 de maio
+    - ⏱️ **Duração:** 🎯 Um só dia
+    - 📂 **Categoria:** Música
+    - 💰 **Preço:** de €25 a €50
+    - 🌐 [Mais detalhes](https://www.visitlisboa.com/en/events/gipsy-kings)
+    - 🎟️ [Bilhetes](https://tickets.example.com)
+
+📌 **Fonte:** [*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos) | **Atualizado:** 09:05"""
+
+    cleaned = final_post_qa_guard(raw, language="pt")
+    lines = cleaned.splitlines()
+    start = lines.index('- **🎵 Gipsy Kings by Diego Baliardo | "A Tu Vera” Tour**')
+    field_lines = [line for line in lines[start + 1:] if line.strip().startswith("- ")]
+
+    assert field_lines[:7] == [
+        "    - 📍 **Morada:** [Coliseu de Lisboa, Lisboa](https://www.google.com/maps/search/?api=1&query=Coliseu)",
+        "    - 📅 **Data/Hora:** 10 de maio",
+        "    - ⏱️ **Duração:** 🎯 Um só dia",
+        "    - 📂 **Categoria:** Música",
+        "    - 💰 **Preço:** de €25 a €50",
+        "    - 🌐 [Mais detalhes](https://www.visitlisboa.com/en/events/gipsy-kings)",
+        "    - 🎟️ [Bilhetes](https://tickets.example.com)",
+    ]
+    assert not any(line.startswith("        - ") for line in field_lines)
+
+
+def test_final_guard_removes_event_source_completeness_note_from_description_field() -> None:
+    """QA repair must not publish source-completeness notes as event descriptions."""
+    raw = """### 🎭 **Eventos Culturais**
+
+### 🎭 **Billy's Tour**
+    - 📝 **Descrição:** 29 registo(s) adicional(is) compatíveis foram excluídos porque a fonte ainda não confirma a respetiva data.
+    - 📍 **Morada:** [Poço do Borratém, Lisboa](https://www.google.com/maps/search/?api=1&query=Poco)
+    - 📅 **Data/Hora:** 08 de maio a 10 de maio
+
+📌 **Fonte:** [*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos) | **Atualizado:** 10:36"""
+
+    cleaned = final_post_qa_guard(raw, language="pt")
+
+    assert "registo(s) adicional(is)" not in cleaned
+    assert "    - 📍 **Morada:**" in cleaned
+
+
+def test_final_guard_localizes_visitlisboa_source_footer_but_keeps_detail_url_canonical() -> None:
+    """PT source footer may use PT VisitLisboa pages while card detail links keep canonical /en/ URLs."""
+    raw = """### 🎭 **Eventos Culturais**
+
+### 🎵 **Evento**
+    - 🔗 **Mais detalhes:** [VisitLisboa](https://www.visitlisboa.com/en/events/example)
+
+📌 **Fonte:** [*VisitLisboa Events*](https://www.visitlisboa.com/en/events) | **Atualizado:** 10:00"""
+
+    cleaned = final_post_qa_guard(raw, language="pt")
+
+    assert "https://www.visitlisboa.com/en/events/example" in cleaned
+    assert "[*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos)" in cleaned
 
 
 def test_researcher_formatter_removes_event_intro_from_place_answers() -> None:
@@ -368,6 +520,113 @@ def test_final_visual_pass_keeps_repeated_place_card_fields() -> None:
     assert cleaned.count("**Website:** [Official website]") == 2
     assert cleaned.count("**Tickets:** [Buy tickets]") == 2
     assert cleaned.count("**More details:** [VisitLisboa]") == 2
+
+
+def test_final_guard_keeps_place_card_fields_at_one_streamlit_safe_level() -> None:
+    """Place cards should use a list parent so Streamlit does not stair-step fields."""
+    raw = """### 🔵 **Locais e atrações**
+
+### 🏛️ Castle Museum
+    - 📂 **Categoria:** Museus
+    - 📍 **Morada:** [Castelo de São Jorge, Lisboa](https://www.google.com/maps/search/?api=1&query=Castelo)
+    - 💶 **Preço:** Gratuito com Lisboa Card
+    - ⭐ **Avaliação:** TripAdvisor 4.2/5
+    - 📞 **Telefone:** [+351 218 800 620](tel:+351218800620)
+    - ✉️ **Email:** [info@example.pt](mailto:info@example.pt)
+    - 🌐 **Website:** [Website oficial](https://example.pt)
+    - 🔗 **Mais detalhes:** [VisitLisboa](https://www.visitlisboa.com/en/places/castle-museum)
+
+📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) | **Atualizado:** 10:46"""
+
+    cleaned = final_visual_pass(raw)
+    lines = cleaned.splitlines()
+    start = lines.index("- **🏛️ Castle Museum**")
+    field_lines = [line for line in lines[start + 1:] if line.strip().startswith("- ")]
+
+    assert field_lines[:8] == [
+        "    - 📂 **Categoria:** Museus",
+        "    - 📍 **Morada:** [Castelo de São Jorge, Lisboa](https://www.google.com/maps/search/?api=1&query=Castelo)",
+        "    - 💶 **Preço:** Gratuito com Lisboa Card",
+        "    - ⭐ **Avaliação:** TripAdvisor 4.2/5",
+        "    - 📞 **Telefone:** [+351 218 800 620](tel:+351218800620)",
+        "    - ✉️ **Email:** [info@example.pt](mailto:info@example.pt)",
+        "    - 🌐 **Website:** [Website oficial](https://example.pt)",
+        "    - 🔗 **Mais detalhes:** [VisitLisboa](https://www.visitlisboa.com/en/places/castle-museum)",
+    ]
+    assert not any(line.startswith("        - ") for line in field_lines)
+
+
+def test_researcher_localizes_unknown_english_place_titles_with_llm_cache() -> None:
+    """ResearcherAgent should localize new English VisitLisboa place titles in PT cards."""
+    agent = object.__new__(ResearcherAgent)
+    agent.llm = object()
+    agent._place_title_localization_cache = {}
+    calls = []
+
+    def fake_safe_llm_invoke(llm, messages, retries=2, verbose=False):  # noqa: ANN001, ANN202
+        calls.append(messages)
+        return _DummyLLMResponse("Museu de Marinha")
+
+    agent._safe_llm_invoke = fake_safe_llm_invoke
+    text = """### 🔵 **Locais e atrações**
+
+- **🏛️ Maritime Museum**
+    - 📂 **Categoria:** Museus
+    - 🔗 **Mais detalhes:** [VisitLisboa](https://www.visitlisboa.com/en/places/maritime-museum)"""
+
+    first = agent._localize_place_card_titles_with_llm(text, "pt")
+    second = agent._localize_place_card_titles_with_llm(text, "pt")
+
+    assert "- **🏛️ Museu de Marinha**" in first
+    assert "Maritime Museum" not in first
+    assert "    - 📂 **Categoria:** Museus" in first
+    assert second == first
+    assert len(calls) == 1
+
+
+def test_researcher_keeps_place_title_when_llm_is_not_confident() -> None:
+    """Uncertain or invalid LLM localizations must not corrupt official place titles."""
+    agent = object.__new__(ResearcherAgent)
+    agent.llm = object()
+    agent._place_title_localization_cache = {}
+
+    def fake_safe_llm_invoke(llm, messages, retries=2, verbose=False):  # noqa: ANN001, ANN202
+        return _DummyLLMResponse("SAME")
+
+    agent._safe_llm_invoke = fake_safe_llm_invoke
+    text = """### 🔵 **Locais e atrações**
+
+- **🏛️ Design Museum**
+    - 📂 **Categoria:** Museus
+    - 🔗 **Mais detalhes:** [VisitLisboa](https://www.visitlisboa.com/en/places/design-museum)"""
+
+    localized = agent._localize_place_card_titles_with_llm(text, "pt")
+
+    assert "- **🏛️ Design Museum**" in localized
+
+
+def test_researcher_does_not_localize_place_titles_in_english_answers() -> None:
+    """English answers should keep English place titles and avoid localizer LLM calls."""
+    agent = object.__new__(ResearcherAgent)
+    agent.llm = object()
+    agent._place_title_localization_cache = {}
+    calls = []
+
+    def fake_safe_llm_invoke(llm, messages, retries=2, verbose=False):  # noqa: ANN001, ANN202
+        calls.append(messages)
+        return _DummyLLMResponse("Museu de Marinha")
+
+    agent._safe_llm_invoke = fake_safe_llm_invoke
+    text = """### 🔵 **Places and Attractions**
+
+- **🏛️ Maritime Museum**
+    - 📂 **Category:** Museums
+    - 🔗 **More details:** [VisitLisboa](https://www.visitlisboa.com/en/places/maritime-museum)"""
+
+    localized = agent._localize_place_card_titles_with_llm(text, "en")
+
+    assert localized == text
+    assert calls == []
 
 
 def test_place_response_missing_requested_fields_detects_partial_ticket_loss() -> None:

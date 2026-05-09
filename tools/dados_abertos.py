@@ -1489,11 +1489,11 @@ if __name__ == "__main__":
         print(f"{'─' * 70}")
         try:
             result = test_func(*args, **kwargs)
-            # Truncate long outputs for readability
-            if len(result) > 800:
-                print(result[:800] + "\n\n... (truncated for readability)")
-            else:
-                print(result)
+            # # Truncate long outputs for readability
+            # if len(result) > 800:
+            #     print(result[:800] + "\n\n... (truncated for readability)")
+            # else:
+            print(result)
             test_results["passed"] += 1
             print("\n\033[1;32m✅ PASSED\033[0m")
             return result

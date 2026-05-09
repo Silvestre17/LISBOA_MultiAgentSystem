@@ -488,6 +488,7 @@ def _query_has_status_intent(query: str) -> bool:
     """Returns whether the query is primarily asking about service status."""
     status_patterns = [
         r"\bis the metro working\b",
+        r"\bcurrent status\b",
         r"\bmetro status\b",
         r"\btransport status\b",
         r"\bstatus overview\b",
@@ -509,6 +510,36 @@ def _query_has_status_intent(query: str) -> bool:
         r"\bservice status\b",
     ]
     return any(re.search(pattern, query, flags=re.IGNORECASE) for pattern in status_patterns)
+
+
+def _query_is_aggregate_transport_status(query: str) -> bool:
+    """Returns whether a status query asks for multiple transport families."""
+    if _query_has_wait_departure_intent(query):
+        return False
+
+    query_lower = query.lower()
+    status_hit = _query_has_status_intent(query) or bool(
+        re.search(r"\b(?:status|situation|estado|situa[cç][aã]o|operational|operacional)\b", query_lower)
+    )
+    if not status_hit:
+        return False
+
+    mode_hits = 0
+    mode_patterns = [
+        r"\bmetro\b",
+        r"\b(?:bus|buses|autocarro|autocarros)\b",
+        r"\b(?:train|trains|comboio|comboios)\b",
+        r"\b(?:tram|trams|el[eé]trico|eletrico)\b",
+    ]
+    for pattern in mode_patterns:
+        if re.search(pattern, query_lower):
+            mode_hits += 1
+
+    broad_network = re.search(
+        r"\b(?:transport|transports|transportes|network|rede|all transport|overview|resumo)\b",
+        query_lower,
+    )
+    return mode_hits >= 2 or bool(broad_network and mode_hits >= 1)
 
 
 def _query_has_wait_departure_intent(query: str) -> bool:
@@ -3551,6 +3582,10 @@ def _build_deterministic_transport_tool_call(user_message: str) -> Optional[AIMe
     if _query_has_route_mode_constraints(query):
         return None
 
+    if _query_is_aggregate_transport_status(query):
+        language = infer_response_language(user_query=user_message, default="en")
+        return _build_tool_call("get_transport_summary", {"language": language})
+
     for spec_builder in (
         _build_cp_tool_spec,
         _build_carris_metropolitana_tool_spec,
@@ -3758,7 +3793,7 @@ class TransportAgent(BaseAgent):
 
         summary_tool = self._get_tool_by_name("get_transport_summary")
         if summary_tool:
-            return self._invoke_tool(summary_tool, {}, tool_name="get_transport_summary")
+            return self._invoke_tool(summary_tool, {"language": language}, tool_name="get_transport_summary")
 
         return None
 
@@ -5140,10 +5175,14 @@ class TransportAgent(BaseAgent):
         query_lower = user_message.lower()
         if (
             not _query_has_wait_departure_intent(user_message)
-            and re.search(r"\b(summary|overview|all transport|transport summary|transport overview|across)\b", query_lower)
+            and (
+                _query_is_aggregate_transport_status(user_message)
+                or re.search(r"\b(summary|overview|all transport|transport summary|transport overview|across)\b", query_lower)
+            )
             and re.search(r"\b(transport|metro|bus|buses|train|trains|comboio|comboios|autocarro|autocarros)\b", query_lower)
         ):
-            return _build_tool_call("get_transport_summary", {})
+            language = infer_response_language(user_query=user_message, default="en")
+            return _build_tool_call("get_transport_summary", {"language": language})
 
         endpoints = _extract_route_endpoints(user_message)
         if endpoints:
