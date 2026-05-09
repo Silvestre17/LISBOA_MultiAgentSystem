@@ -36,6 +36,7 @@ import sqlite3
 import time
 import unicodedata
 import zipfile
+from pathlib import Path
 from datetime import datetime, timedelta
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
@@ -62,8 +63,10 @@ except ImportError:
 
 try:
     from tools.location_resolver import build_location_ambiguity_preamble
+    from tools.runtime_paths import resolve_runtime_data_dir, seed_runtime_data_dir
 except ImportError:
     from location_resolver import build_location_ambiguity_preamble
+    from runtime_paths import resolve_runtime_data_dir, seed_runtime_data_dir
 
 # ==========================================================================
 # Configuration
@@ -77,10 +80,13 @@ CARRIS_GTFS_RT_URL = (
     "https://gateway.carris.pt/gateway/gtfs/api/v2.8/GTFS/realtime/vehiclepositions"
 )
 
-# Data directory (relative to project root)
-CARRIS_DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "carris")
-CARRIS_DB_PATH = os.path.join(CARRIS_DATA_DIR, "carris.db")
-CARRIS_METADATA_PATH = os.path.join(CARRIS_DATA_DIR, "metadata.json")
+# Data directory (relative to project root locally, writable runtime path on HF)
+SOURCE_CARRIS_DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "carris"
+_CARRIS_RUNTIME_DATA_DIR = resolve_runtime_data_dir(SOURCE_CARRIS_DATA_DIR, "carris")
+seed_runtime_data_dir(SOURCE_CARRIS_DATA_DIR, _CARRIS_RUNTIME_DATA_DIR, ("carris.db", "metadata.json"))
+CARRIS_DATA_DIR = str(_CARRIS_RUNTIME_DATA_DIR)
+CARRIS_DB_PATH = str(_CARRIS_RUNTIME_DATA_DIR / "carris.db")
+CARRIS_METADATA_PATH = str(_CARRIS_RUNTIME_DATA_DIR / "metadata.json")
 
 # Request timeout
 REQUEST_TIMEOUT = 120  # GTFS download can take time
