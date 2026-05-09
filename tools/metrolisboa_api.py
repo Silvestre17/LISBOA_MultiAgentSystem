@@ -1880,8 +1880,7 @@ def _normalize_metro_text(text: str) -> str:
     normalized = normalized.lower().strip()
     normalized = normalized.replace("s. ", "sao ")
     normalized = re.sub(r"[^a-z0-9\s/-]", " ", normalized)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    return normalized
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 def _resolve_named_metro_reference(location_name: str) -> Optional[tuple[float, float]]:
@@ -2405,7 +2404,7 @@ def find_nearest_metro(
 
     response = "### 🚇 **Nearest Metro Stations**\n\n"
 
-    for i, station in enumerate(nearest, 1):
+    for _i, station in enumerate(nearest, 1):
         name = station.get("stop_name", "Unknown")
         distance_m = station.get("distance_m", 0)
         lines = station.get("linha", "[]")

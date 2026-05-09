@@ -42,6 +42,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from langchain_core.tools import tool
+import contextlib
 
 # GTFS-RT Protocol Buffers
 try:
@@ -236,8 +237,7 @@ def _normalize_carris_text(text: str) -> str:
     }
     for pattern, replacement in replacements.items():
         normalized = re.sub(pattern, replacement, normalized)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    return normalized
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 def _clean_carris_headsign(text: Optional[str]) -> str:
@@ -2536,10 +2536,8 @@ def carris_get_service_frequency(
 if __name__ == "__main__":
     import sys
     import time as time_module
-    try:
+    with contextlib.suppress(AttributeError):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    except AttributeError:
-        pass
 
     # Argument Parsing
     parser = argparse.ArgumentParser(description="Carris API Tools Test Suite")

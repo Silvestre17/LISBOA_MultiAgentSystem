@@ -36,7 +36,7 @@ def build_structured_plan_messages(
     is_pt = (language or "en").lower().startswith("pt")
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     language_rule = "Portuguese from Portugal" if is_pt else "English"
-    evidence_text = evidence.to_prompt_text(language=language)
+    evidence_text = evidence.to_prompt_text()
     schema = """
 {
   "title": "short user-facing title",

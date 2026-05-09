@@ -1005,7 +1005,7 @@ def structure_weather_markdown(text: str) -> str:
     structured_lines: list[str] = []
     source_lines = text.splitlines()
 
-    for idx, raw_line in enumerate(source_lines):
+    for _idx, raw_line in enumerate(source_lines):
         stripped = raw_line.strip()
         if not stripped:
             continue
@@ -1111,8 +1111,7 @@ def _normalize_planner_line(text: str) -> str:
     cleaned = _strip_markdown_formatting(text)
     cleaned = re.sub(r"^(?:###\s*)?(?:[-*•]\s*)?(?:#+\s*)?", "", cleaned).strip()
     cleaned = re.sub(r"(\d{1,2})\s*:\s*(\d{2})", r"\1:\2", cleaned)
-    cleaned = re.sub(r"\s*[·•]\s*", " · ", cleaned)
-    return cleaned
+    return re.sub(r"\s*[·•]\s*", " · ", cleaned)
 
 
 def _is_planner_metadata_line(text: str) -> bool:
@@ -4126,7 +4125,6 @@ def _ticket_link_unavailable_note(language: str) -> str:
 def _render_researcher_label_link(
     label: str,
     value: str,
-    language: str = "en",
     fallback_note: Optional[str] = None,
 ) -> str:
     """Render a label-based markdown link, with an optional plain-text fallback note."""
@@ -4142,7 +4140,7 @@ def _render_researcher_label_link(
     return f"**{label}:** {fallback_note}"
 
 
-def _render_researcher_link_value(value: str, label: str, language: str = "en") -> str:
+def _render_researcher_link_value(value: str, label: str) -> str:
     """Render website or ticket values as markdown links when possible."""
     stripped = (value or "").strip()
     if not stripped:
@@ -4165,7 +4163,7 @@ def _render_researcher_link_value(value: str, label: str, language: str = "en") 
             parsed_ticket = urlparse(ticket_url)
             if "visitlisboa.com" in parsed_ticket.netloc.lower() and parsed_ticket.fragment.lower() == "tickets":
                 return ""
-            return _render_researcher_label_link(label, ticket_url, language=language)
+            return _render_researcher_label_link(label, ticket_url)
         return ""
 
     url = _extract_valid_public_url(stripped)
@@ -4475,7 +4473,6 @@ def _structured_place_card_fields_by_title(text: str) -> dict[str, set[str]]:
 def researcher_place_response_missing_requested_fields(
     text: str,
     user_query: str = "",
-    language: str = "en",
 ) -> bool:
     """Return whether a place-card answer dropped fields explicitly requested by the user."""
     if infer_researcher_source_kind(user_query=user_query, text=text) != "places":
@@ -4533,7 +4530,6 @@ def _place_response_lost_worker_fields(text: str, worker_canonical: str) -> bool
 
 def _place_response_missing_required_fields(
     text: str,
-    expected_language: str,
     place_card_count: int,
 ) -> bool:
     """Return whether any structured place card is missing canonical core fields."""
@@ -5147,11 +5143,7 @@ def reconcile_researcher_event_response(
             rendered_lines.append(f"    - 📝 **{description_label}:** {event['description']}")
         if event.get("address"):
             address_value = str(event["address"]).strip()
-            address_value = _render_researcher_address_value(
-                address_value,
-                title=str(event.get("title") or ""),
-                language=language,
-            )
+            address_value = _render_researcher_address_value(address_value)
             if address_value:
                 rendered_lines.append(f"    - 📍 **{address_label}:** {address_value}")
         if event.get("when"):
@@ -5172,7 +5164,6 @@ def reconcile_researcher_event_response(
         tickets_link = _render_researcher_label_link(
             tickets_label,
             str(event.get("tickets_url") or "").strip(),
-            language=language,
             fallback_note=_ticket_link_unavailable_note(language),
         )
         if tickets_link:
@@ -5207,7 +5198,7 @@ def reconcile_researcher_place_response(
         return worker_canonical
     if primary_count <= 0:
         return text
-    if _place_response_missing_required_fields(text, language, primary_count):
+    if _place_response_missing_required_fields(text, primary_count):
         return worker_canonical
     if _place_response_lost_worker_fields(text, worker_canonical):
         return worker_canonical
@@ -5469,7 +5460,6 @@ def format_researcher_event_cards(text: str, language: str = "en", user_query: s
         tickets_link = _render_researcher_label_link(
             tickets_label,
             str(event.get("tickets_url") or ""),
-            language=language,
             fallback_note=_ticket_link_unavailable_note(language),
         )
         if tickets_link:
@@ -5662,11 +5652,7 @@ def format_researcher_card(text: str, language: str = "en", user_query: str = ""
                 continue
             label = labels[key]
             if key == "address":
-                value = _render_researcher_address_value(
-                    value,
-                    title=str(current_card.get("title") or ""),
-                    language=language,
-                )
+                value = _render_researcher_address_value(value)
                 if not value:
                     continue
             elif key == "phone":
@@ -5676,7 +5662,7 @@ def format_researcher_card(text: str, language: str = "en", user_query: str = ""
                 if not value:
                     continue
             elif key in {"website", "tickets", "details"}:
-                value = _render_researcher_link_value(value, label, language=language)
+                value = _render_researcher_link_value(value, label)
                 if not value:
                     continue
             card_lines.append(f"- {emoji} **{label}:** {value}")
@@ -6581,13 +6567,12 @@ def normalize_source_links(text: str) -> str:
         text,
         flags=re.IGNORECASE,
     )
-    text = re.sub(
+    return re.sub(
         r'<a\s+href="?https?://www\.metrolisboa\.pt"?[^>]*>\s*Metro de Lisboa\s*</a>',
         r'[*Metro de Lisboa*](https://www.metrolisboa.pt)',
         text,
         flags=re.IGNORECASE,
     )
-    return text
 
 
 def normalize_metro_terminology(text: str) -> str:
@@ -7408,7 +7393,7 @@ def _is_generic_city_address(value: str) -> bool:
     return bool(re.fullmatch(r"(?:lisboa|lisbon)(?:\s*,?\s*portugal)?", normalized))
 
 
-def _render_researcher_address_value(value: str, *, title: str = "", language: str = "en") -> str:
+def _render_researcher_address_value(value: str) -> str:
     """Render a place/event address only when the value is specific enough to map."""
     stripped = (value or "").strip()
     if not stripped:
@@ -7504,8 +7489,7 @@ def repair_bold_time_spacing(text: str) -> str:
     if not text or ":" not in text:
         return text
     text = _BOLD_TIME_SPACE_AFTER_RE.sub(r"\1:\2", text)
-    text = _BOLD_TIME_SPACE_BEFORE_RE.sub(r"\1:\2", text)
-    return text
+    return _BOLD_TIME_SPACE_BEFORE_RE.sub(r"\1:\2", text)
 
 
 def strip_stray_leading_enumerator(text: str) -> str:
@@ -7581,12 +7565,11 @@ def normalize_invalid_markdown_links(text: str) -> str:
     def _plain_target(target: str) -> str:
         cleaned = _strip_markdown_formatting(target or "").strip()
         cleaned = re.sub(r"^\[([^\]]+)\]\(([^()]*)\)$", r"\2", cleaned).strip()
-        cleaned = re.sub(
+        return re.sub(
             r"(?i)^(?:bilhetes|tickets|comprar bilhetes|buy tickets)\s*:?\s*",
             "",
             cleaned,
         ).strip(" .:-")
-        return cleaned
 
     def _fallback(label: str, target: str) -> str:
         label_clean = _strip_markdown_formatting(label or "").strip()
@@ -7996,12 +7979,11 @@ def normalize_metro_route_label_lines(text: str) -> str:
         "**Baixa-Chiado**",
         cleaned,
     )
-    cleaned = re.sub(
+    return re.sub(
         r"\bBaixa\s*→\s*Chiado\b",
         "Baixa-Chiado",
         cleaned,
     )
-    return cleaned
 
 
 def ensure_transport_time_route_paragraph_breaks(text: str) -> str:
@@ -8026,13 +8008,12 @@ def ensure_transport_time_route_paragraph_breaks(text: str) -> str:
         cleaned,
         flags=re.IGNORECASE,
     )
-    cleaned = re.sub(
+    return re.sub(
         r"(?m)^(\s*🗓️\s+(?:\*\*)?(?:Next Metros|Próximos Metros)(?:\*\*)?.*?:)[ \t]*\n(-\s+)",
         r"\1\n\n\2",
         cleaned,
         flags=re.IGNORECASE,
     )
-    return cleaned
 
 
 def ensure_blank_lines_around_warning_blocks(text: str) -> str:
@@ -8097,12 +8078,11 @@ def compact_service_lookup_spacing(text: str) -> str:
         r"\1\n",
         compacted,
     )
-    compacted = re.sub(
+    return re.sub(
         r"(?m)^(\s{3}🗺️\s+\*\*.+)$\n(?=-\s+(?:💊|🏥|👮|📍)\s+\*\*)",
         r"\1\n\n",
         compacted,
     )
-    return compacted
 
 
 def normalize_municipal_service_field_lines(text: str) -> str:
@@ -8279,12 +8259,11 @@ def normalize_transport_timing_artifacts(text: str) -> str:
         cleaned,
         flags=re.IGNORECASE,
     )
-    cleaned = re.sub(
+    return re.sub(
         r"(?im)^\s*💡\s*\*\*(?:Quick\s+tip|Tip|Dica\s+rápida)\*\*:?\s*$\n(?:\s*$)?",
         "",
         cleaned,
     )
-    return cleaned
 
 
 def normalize_weather_day_indentation(text: str) -> str:
@@ -8326,12 +8305,11 @@ def normalize_weather_summary_spacing(text: str) -> str:
         r"\1\n",
         text,
     )
-    cleaned = re.sub(
+    return re.sub(
         r"(?m)^(-\s+🌤️[^\n]+)\n(?=\*\*🌤️\s+(?:Previs[aã]o do Tempo|Weather Forecast))",
         r"\1\n\n",
         cleaned,
     )
-    return cleaned
 
 
 def normalize_coordinate_link_wrappers(text: str) -> str:
@@ -8350,8 +8328,7 @@ def strip_artificial_horizontal_rules(text: str) -> str:
     if not text:
         return text or ""
     cleaned = re.sub(r"(?m)^\s*---\s*$", "---", text)
-    cleaned = re.sub(r"(?:\n\s*---\s*){2,}", "\n\n---", cleaned)
-    return cleaned
+    return re.sub(r"(?:\n\s*---\s*){2,}", "\n\n---", cleaned)
 
 
 def strip_single_researcher_result_meta(text: str) -> str:
@@ -8717,12 +8694,11 @@ def normalize_transport_summary_operator_cards(text: str) -> str:
         r"- \1",
         normalized,
     )
-    normalized = re.sub(
+    return re.sub(
         r"(?m)^([ \t]{4}-\s+[^\n]+)\n+(?:[ \t]{4})-\s+",
         r"\1\n    - ",
         normalized,
     )
-    return normalized
 
 
 def strip_empty_planner_transport_wrapper(text: str) -> str:
@@ -8793,13 +8769,12 @@ def repair_bold_label_value_spans(text: str) -> str:
         text,
         flags=re.IGNORECASE,
     )
-    text = re.sub(
+    return re.sub(
         rf"\*\*(?P<label>{label_pattern})\s*:\s*(?P<value>[^*\n]+?)\*\*",
         lambda match: f"**{match.group('label')}:** {match.group('value').strip()}",
         text,
         flags=re.IGNORECASE,
     )
-    return text
 
 
 def strip_orphan_planner_transport_headings(text: str) -> str:
@@ -8828,8 +8803,7 @@ def normalize_duplicate_transport_metric_icons(text: str) -> str:
     if not text:
         return text or ""
     value = re.sub(r"(?m)^(\s*[-*]\s*)⏱️\s+⏳\s+", r"\1⏱️ ", text)
-    value = re.sub(r"(?m)^(\s*[-*]\s*)⏳\s+⏱️\s+", r"\1⏱️ ", value)
-    return value
+    return re.sub(r"(?m)^(\s*[-*]\s*)⏳\s+⏱️\s+", r"\1⏱️ ", value)
 
 
 def repair_unclosed_inline_bold(text: str) -> str:
@@ -9134,8 +9108,7 @@ def normalize_transport_comparison_info_notes(text: str) -> str:
         output_lines.append(raw_line)
 
     cleaned = "\n".join(output_lines)
-    cleaned = re.sub(r"(?m)^---\s*\n\s*(\*\*ℹ️[^\n]+\*\*)\s*\n\s*---\s*$", r"\1", cleaned)
-    return cleaned
+    return re.sub(r"(?m)^---\s*\n\s*(\*\*ℹ️[^\n]+\*\*)\s*\n\s*---\s*$", r"\1", cleaned)
 
 
 def normalize_transport_comparison_sections(text: str) -> str:
@@ -9238,12 +9211,11 @@ def ensure_transport_comparison_conclusion_separator(text: str) -> str:
         "---",
         separated,
     )
-    separated = re.sub(
+    return re.sub(
         r"(?m)^(?:\*\*)?✅\s*(Conclus[aã]o|Conclusion)(?:\*\*)?\s*$",
         lambda match: "**✅ Conclusion**" if re.search(r"Conclusion", match.group(1), re.IGNORECASE) else "**✅ Conclusão**",
         separated,
     )
-    return separated
 
 
 def ensure_transport_comparison_mode_separator(text: str) -> str:
@@ -9306,20 +9278,18 @@ def dedupe_location_ambiguity_blocks(text: str) -> str:
         r"\1\n",
         text,
     )
-    cleaned = re.sub(
+    return re.sub(
         r"(?ms)((?:###\s+)?🚇\s+Mobilidade em Lisboa\s*)\n+\s*A\)\s+🚇\s+(?:\*\*)?Estação Marquês de Pombal(?:\*\*)?.*?\n\s*B\)\s+📍\s+(?:\*\*)?Praça/Rotunda do Marquês de Pombal(?:\*\*)?.*?\n+",
         r"\1\n",
         cleaned,
     )
-    return cleaned
 
 
 def normalize_ambiguity_options_for_markdown(text: str) -> str:
     """Render A/B ambiguity choices as bullets so Streamlit keeps line breaks."""
     if not text or not re.search(r"(?m)^\s*[AB]\)", text):
         return text or ""
-    normalized = re.sub(r"(?m)^\s*([AB]\)\s+)", r"- \1", text)
-    return normalized
+    return re.sub(r"(?m)^\s*([AB]\)\s+)", r"- \1", text)
 
 
 def reorder_warnings_before_source(text: str) -> str:
@@ -9597,8 +9567,7 @@ def strip_redundant_helpful_notes(text: str) -> str:
         _flush_notes()
 
     cleaned = clean_newlines("\n".join(kept)).strip()
-    cleaned = re.sub(r"\n---\n\n(?=-\s*⚠️\s+\*\*(?:Note|Nota):)", "\n\n", cleaned)
-    return cleaned
+    return re.sub(r"\n---\n\n(?=-\s*⚠️\s+\*\*(?:Note|Nota):)", "\n\n", cleaned)
 
 
 def strip_placeholder_field_lines(text: str) -> str:
@@ -9803,8 +9772,7 @@ def label_unconfirmed_planner_transport_legs(text: str) -> str:
         for pattern in patterns:
             match = re.search(pattern, value, flags=re.IGNORECASE)
             if match:
-                station = _strip_markdown_formatting(match.group("station")).strip(" -*—–")
-                return station
+                return _strip_markdown_formatting(match.group("station")).strip(" -*—–")
         return ""
 
     def _station_serves_any_line(station: str, line_ids: set[str]) -> bool:
@@ -10032,13 +10000,12 @@ def normalize_carris_realtime_feed_phrasing(text: str) -> str:
         text,
         flags=re.IGNORECASE,
     )
-    text = re.sub(
+    return re.sub(
         r"📡\s*\*\*Tempo real:\*\*\s*Carris GTFS-RT:\s*em tempo real vehicle feed active\.?",
         "📡 **Tempo real:** feed de veículos Carris ativo.",
         text,
         flags=re.IGNORECASE,
     )
-    return text
 
 
 def final_visual_pass(text: str) -> str:
@@ -10326,12 +10293,11 @@ def final_visual_pass(text: str) -> str:
             r"- 📂 **\1:** \2",
             value,
         )
-        value = re.sub(
+        return re.sub(
             r"(?mi)^\s*[-*]\s*(?:📝\s*)?(?:Descri[cç][aã]o dispon[ií]vel na p[aá]gina oficial do local|Description available on the official page)\.\s*$\n?",
             "",
             value,
         )
-        return value
 
     def _strip_split_source_heading_blocks(value: str) -> str:
         return re.sub(
@@ -10359,12 +10325,11 @@ def final_visual_pass(text: str) -> str:
             "📌 **Fonte:** ",
             value,
         )
-        value = re.sub(
+        return re.sub(
             r"(?mi)^\s*(?:[-*•]\s*)?📌\s*(?:sources|source)\s*:\s*",
             "📌 **Source:** ",
             value,
         )
-        return value
 
     def _strip_non_evidence_source_lines(value: str) -> str:
         """Remove source-looking lines that only restate unsupported scope."""
@@ -10461,8 +10426,7 @@ def final_visual_pass(text: str) -> str:
             r"\1\2",
             value,
         )
-        value = re.sub(r"(?m)^(\s*)\d+[.)]\s+", r"\1- ", value)
-        return value
+        return re.sub(r"(?m)^(\s*)\d+[.)]\s+", r"\1- ", value)
 
     def _strip_unasked_transport_status_overview(value: str) -> str:
         """Remove broad network-status dumps when a concrete route is requested."""
@@ -10556,8 +10520,7 @@ def final_visual_pass(text: str) -> str:
 
         cleaned = "\n".join(kept_lines)
         cleaned = re.sub(r"(?mi)^\s*-\s*⚠️\s*$\n?", "", cleaned)
-        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-        return cleaned
+        return re.sub(r"\n{3,}", "\n\n", cleaned)
 
     def _strip_unsupported_long_range_weather_details(value: str) -> str:
         """Keep future-date weather answers as scoped limitations, not almanac-style forecasts."""
@@ -11017,7 +10980,7 @@ def is_overcomplex_planning_request(message: str) -> bool:
     return sum(1 for pattern in overload_patterns if re.search(pattern, normalized)) >= 5
 
 
-def build_bounded_planning_framework(user_message: str, language: str = "en") -> str:
+def build_bounded_planning_framework(language: str = "en") -> str:
     """Build a clean visual bounded framework for over-complex plans."""
     if (language or "").lower().startswith("pt"):
         return """### 📅 **Estrutura limitada para planear Lisboa**
@@ -11178,7 +11141,7 @@ def _planner_heading_title(line: str) -> str:
 def render_lisboa_planner_markdown(text: str, language: str = "en") -> str:
     """Convert raw planner schema Markdown into LISBOA visual Markdown."""
     if not text or not text.strip():
-        return build_bounded_planning_framework("", language)
+        return build_bounded_planning_framework(language)
     body, footer = _planner_split_source_footer(text)
     body = re.sub(r"(?im)^\s*(?:Place Cards|Raw Place Cards)\s*:?.*$", "", body)
     sections: dict[str, list[str]] = {key: [] for key in ["title", "direct", "constraints", "plan", "movement", "weather", "limitations", "other"]}
@@ -11806,8 +11769,7 @@ def _label_replace(text: str, src_label: str, dst_label: str) -> str:
         r"(?<!\w)\*\*" + re.escape(src_label) + r"\*\*",
         re.IGNORECASE,
     )
-    text = pattern_plain.sub(f"**{dst_label}**", text)
-    return text
+    return pattern_plain.sub(f"**{dst_label}**", text)
 
 
 def enforce_language_labels(text: str, language: str) -> str:

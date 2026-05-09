@@ -254,8 +254,7 @@ def get_cp_station_info(station_name: str) -> Optional[Dict[str, Any]]:
         normalized = "".join(
             char for char in normalized if not unicodedata.combining(char)
         )
-        normalized = normalized.lower().strip()
-        return normalized
+        return normalized.lower().strip()
 
     station_lower = normalize_station(station_name)
 
@@ -1147,7 +1146,7 @@ def search_cp_station(query: str) -> List[Dict[str, Any]]:
     query_lower = query.lower().strip()
 
     matches = []
-    for code, station in aml_stations.items():
+    for _code, station in aml_stations.items():
         if query_lower in station['name'].lower():
             matches.append(station)
 

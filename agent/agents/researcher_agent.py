@@ -368,10 +368,6 @@ class ResearcherAgent(BaseAgent):
         self._pending_deterministic_replay = None
         self._pending_pagination_replay = None
 
-    def get_last_search_context(self) -> Optional[dict]:
-        """Returns the latest cached result-window context."""
-        return deepcopy(self._last_search_context)
-
     @staticmethod
     def _normalize_structured_plan_text(value: Any) -> Optional[str]:
         """Normalize optional JSON string fields returned by the structured query planner."""
@@ -388,8 +384,7 @@ class ResearcherAgent(BaseAgent):
         normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
         normalized = normalized.replace("-", "_").replace("/", "_")
         normalized = re.sub(r"[^a-z0-9_ ]+", "", normalized)
-        normalized = re.sub(r"\s+", "_", normalized).strip("_")
-        return normalized
+        return re.sub(r"\s+", "_", normalized).strip("_")
 
     @classmethod
     def _normalize_structured_service_types(cls, values: Any) -> List[str]:
@@ -1228,25 +1223,6 @@ class ResearcherAgent(BaseAgent):
         return not has_quoted_title and not any(marker in query for marker in named_lookup_markers)
 
     @staticmethod
-    def _is_uncertain_place_recommendation_request(user_message: str) -> bool:
-        """Detects requests that explicitly ask the assistant to guess uncertain places."""
-        query = (user_message or "").lower()
-        uncertainty_markers = [
-            "not completely sure",
-            "not sure",
-            "não tiveres a certeza",
-            "nao tiveres a certeza",
-            "mesmo sem certeza",
-            "even if",
-            "guess",
-            "invent",
-        ]
-        place_markers = ["hidden spots", "spots", "places", "locais", "sítios", "sitios"]
-        return any(marker in query for marker in uncertainty_markers) and any(
-            marker in query for marker in place_markers
-        )
-
-    @staticmethod
     def _is_outdoor_event_query(user_message: str) -> bool:
         """Detects explicit outdoor-event discovery requests."""
         normalized_query = unicodedata.normalize("NFKD", user_message or "")
@@ -1821,7 +1797,7 @@ class ResearcherAgent(BaseAgent):
         return ""
 
     @staticmethod
-    def _extend_place_source_line_with_history(source_line: str, language: str) -> str:
+    def _extend_place_source_line_with_history(source_line: str) -> str:
         """Add the historical-context source to a VisitLisboa place footer."""
         addition = "[*Wikipedia/Web*](https://www.wikipedia.org/)"
         if addition in source_line:
@@ -1998,7 +1974,7 @@ class ResearcherAgent(BaseAgent):
         has_weekend = any(token in normalized for token in ("fim de semana", "weekend", "sabado", "domingo", "saturday", "sunday"))
         return has_museum and has_event and has_free and has_weekend
 
-    def _run_free_museum_event_guard(self, user_message: str, language: str) -> str:
+    def _run_free_museum_event_guard(self, language: str) -> str:
         """Answer free-museum + free-event questions without merging cards."""
         events_tool = self._get_tool_by_name("search_cultural_events")
         timestamp = datetime.now().strftime("%H:%M")
@@ -2120,7 +2096,7 @@ class ResearcherAgent(BaseAgent):
                     )
                     source_line = self._build_places_source_line(exact_result, language)
                     if history_section:
-                        source_line = self._extend_place_source_line_with_history(source_line, language)
+                        source_line = self._extend_place_source_line_with_history(source_line)
                         return f"{exact_result}\n\n{history_section}\n\n{source_line}".strip()
                     return f"{exact_result}\n\n{source_line}".strip()
 
@@ -2408,12 +2384,11 @@ class ResearcherAgent(BaseAgent):
             source_line = self._build_places_source_line(result, language)
             return f"{result}\n\n{source_line}".strip()
 
-        fallback_text = (
+        return (
             "I couldn't complete the semantic search prompt flow, but the retrieval tools are available."
             if language == "en"
             else "Não consegui concluir o fluxo semântico do prompt, mas as ferramentas de pesquisa continuam disponíveis."
         )
-        return fallback_text
 
     @staticmethod
     def _is_planner_evidence_request(user_message: str) -> bool:
@@ -2535,12 +2510,6 @@ class ResearcherAgent(BaseAgent):
                     normalized_service = "car parking"
                 extracted.append(normalized_service)
         return extracted
-
-    @classmethod
-    def _extract_service_type(cls, user_message: str) -> str:
-        """Extracts the first practical service keyword for open-data fallback."""
-        extracted = cls._extract_service_types(user_message)
-        return extracted[0] if extracted else user_message
 
     @staticmethod
     def _service_category_for_type(service_type: str) -> Optional[str]:
@@ -2712,7 +2681,7 @@ class ResearcherAgent(BaseAgent):
             return f"{result}\n\n{source_line}".strip()
         return None
 
-    def _run_discovery_lookup(self, user_message: str, language: str) -> str:
+    def _run_discovery_lookup(self, language: str) -> str:
         """Returns grounded suggestions for broad Lisbon discovery prompts."""
         tool = self._get_tool_by_name("search_places_attractions")
         if not tool:
@@ -3235,7 +3204,7 @@ class ResearcherAgent(BaseAgent):
         if not is_greeting and self._is_free_museum_event_query(user_message):
             if verbose:
                 print("      [RESEARCHER] Using guarded free museum/event lookup...")
-            response = self._run_free_museum_event_guard(user_message, language)
+            response = self._run_free_museum_event_guard(language)
             return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
                 response,
                 agent_name="researcher",
@@ -3270,7 +3239,7 @@ class ResearcherAgent(BaseAgent):
         if not is_greeting and self._is_generic_research_discovery_query(user_message):
             if verbose:
                 print("      [RESEARCHER] Using deterministic discovery lookup for broad Lisbon query...")
-            response = self._run_discovery_lookup(user_message, language)
+            response = self._run_discovery_lookup(language)
             return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
                 response,
                 agent_name="researcher",

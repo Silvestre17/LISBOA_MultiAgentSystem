@@ -270,7 +270,7 @@ def _evaluate_with_judges(
     """Evaluate one response with every configured judge and average the scores."""
     judge_runs: list[dict] = []
 
-    for judge, judge_model_manifest in zip(judges, judge_model_manifests):
+    for judge, judge_model_manifest in zip(judges, judge_model_manifests, strict=False):
         empty_eval_usage, empty_eval_cost = _build_empty_judge_payload(
             judge_model_manifest,
             pricing_by_model,

@@ -139,6 +139,7 @@ from tools.visitlisboa_api import (
 
 # Web Knowledge (History, Culture, Real-time facts)
 from tools.web_knowledge import search_history_culture
+import contextlib
 
 # Number of previous messages included in QA conversation_history context
 _QA_HISTORY_WINDOW = 6
@@ -385,7 +386,6 @@ class MultiAgentAssistant:
     def _build_orchestration_failure_fallback(
         message: str,
         language: str,
-        error: Optional[Exception] = None,
         attempted_agents: Optional[List[str]] = None,
     ) -> str:
         """Build a limitation-safe fallback when orchestration fails before finalization.
@@ -1585,7 +1585,6 @@ class MultiAgentAssistant:
             and researcher_place_response_missing_requested_fields(
                 final_output,
                 user_query=message,
-                language=language,
             )
         ):
             researcher_agent = self.agents.get("researcher")
@@ -1984,7 +1983,6 @@ class MultiAgentAssistant:
 
     @staticmethod
     def _should_run_final_qa_repair(
-        agents_to_call: List[str],
         qa_result: Optional[Dict[str, object]],
     ) -> bool:
         """Returns whether a final QA repair pass is worth running."""
@@ -2219,7 +2217,7 @@ class MultiAgentAssistant:
         message = contextual_resolution.get("message", message)
 
         if is_overcomplex_planning_request(message):
-            bounded_response = build_bounded_planning_framework(message, effective_language)
+            bounded_response = build_bounded_planning_framework(effective_language)
             return self._finalize_chat_response(
                 response=bounded_response,
                 message=message,
@@ -3031,7 +3029,7 @@ class MultiAgentAssistant:
                 verbose=verbose
             )
 
-        should_run_final_repair = self._should_run_final_qa_repair(response_agents_to_call, qa_result)
+        should_run_final_repair = self._should_run_final_qa_repair(qa_result)
         if should_run_final_repair and (
             response_agents_to_call == ["transport"] or "planner" in set(response_agents_to_call or [])
         ):
@@ -3186,7 +3184,6 @@ class MultiAgentAssistant:
             fallback_response = self._build_orchestration_failure_fallback(
                 message=message,
                 language=effective_language,
-                error=exc,
                 attempted_agents=response_agents_to_call,
             )
             self._append_assistant_message(fallback_response)
@@ -3366,8 +3363,7 @@ class MultiAgentAssistant:
             cleaned_lines.append(line)
 
         cleaned = "\n".join(cleaned_lines)
-        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-        return cleaned
+        return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
     def _render_structured_hybrid_response(self, agent_outputs: dict, language: str) -> str:
         """Builds a deterministic multi-section response for hybrid multi-agent answers."""
@@ -3623,7 +3619,7 @@ class MultiAgentAssistant:
         }
         breakdown = []
 
-        for agent_name, summary in by_agent.items():
+        for _agent_name, summary in by_agent.items():
             tokens = summary.get("tokens", {})
             totals["input_tokens"] += int(tokens.get("input_tokens", 0) or 0)
             totals["output_tokens"] += int(tokens.get("output_tokens", 0) or 0)
@@ -3663,10 +3659,8 @@ if __name__ == "__main__":
 
     # .Fix Windows console encoding
     if sys.platform == "win32":
-        try:
+        with contextlib.suppress(AttributeError):
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        except AttributeError:
-            pass
 
     print("=" * 70)
     print("MULTI-AGENT SYSTEM - SMOKE TEST SUITE")

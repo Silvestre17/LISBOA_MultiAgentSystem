@@ -646,7 +646,6 @@ def test_place_response_missing_requested_fields_detects_partial_ticket_loss() -
     assert researcher_place_response_missing_requested_fields(
         partial,
         user_query="Show me two museums with opening hours and ticket links",
-        language="en",
     )
 
 

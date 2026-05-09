@@ -246,27 +246,6 @@ class WeatherAgent(BaseAgent):
             or re.search(r"\b(today|hoje)\b.*\b(weather|tempo)\b", query)
         )
 
-    @staticmethod
-    def _extract_requested_forecast_days(user_message: str) -> Optional[int]:
-        """Extracts the requested forecast window from simple weather queries."""
-        query = (user_message or "").lower()
-
-        explicit_days = re.search(r"\b([1-5])\s*(?:-|\s)?\s*(?:day|days|dia|dias)\b", query)
-        if explicit_days:
-            return max(1, min(int(explicit_days.group(1)), 5))
-
-        normalized = WeatherAgent._normalize_weather_query(user_message)
-        if WeatherAgent._has_tomorrow_reference(normalized):
-            return 1
-
-        if any(term in query for term in ["week", "semana", "weekend", "fim de semana"]):
-            return 5
-
-        if any(term in query for term in ["forecast", "previsão", "previsao", "next days", "próximos dias", "proximos dias"]):
-            return 3
-
-        return None
-
     @classmethod
     def _resolve_forecast_window(cls, user_message: str) -> Optional[dict[str, Any]]:
         """Resolve the smallest grounded forecast window implied by a query.
@@ -419,7 +398,7 @@ class WeatherAgent(BaseAgent):
                 if abs(len(token) - len("amanha")) <= 2:
                     return True
             if len(token) >= 5:
-                mismatches = sum(1 for a, b in zip(token[:6], "amanha") if a != b)
+                mismatches = sum(1 for a, b in zip(token[:6], "amanha", strict=False) if a != b)
                 if mismatches <= 2 and abs(len(token) - 6) <= 1:
                     return True
         return False

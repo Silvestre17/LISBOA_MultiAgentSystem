@@ -374,8 +374,7 @@ def _get_line_status(line_id: str) -> str:
     try:
         metro_data = fetch_json_with_retry(METRO_STATUS_URL)
         if metro_data and metro_data.get('resposta'):
-            status = metro_data['resposta'].get(line_id, 'unknown').strip()
-            return status
+            return metro_data['resposta'].get(line_id, 'unknown').strip()
     except Exception:
         pass
     return "unknown"

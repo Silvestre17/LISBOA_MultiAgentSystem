@@ -171,8 +171,7 @@ def normalize_audit_text(text: str) -> str:
     normalized = str(text or "")
     normalized = re.sub(r"\b\d{2}:\d{2}(?::\d{2})?\b", "<TIME>", normalized)
     normalized = re.sub(r"auto_[0-9a-f]+", "auto_id", normalized)
-    normalized = re.sub(r"\s+", " ", normalized).strip().lower()
-    return normalized
+    return re.sub(r"\s+", " ", normalized).strip().lower()
 
 
 def compute_similarity(reference: str, candidate: str) -> float:

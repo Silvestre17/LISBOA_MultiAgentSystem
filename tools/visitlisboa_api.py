@@ -45,6 +45,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=ImportWarning)
 
 from langchain_core.tools import tool
+import contextlib
 
 try:
     from config import Config
@@ -240,15 +241,11 @@ def get_event_dates(event: Dict) -> List[datetime]:
             end_iso = end_info.get('datetime_iso')
 
             if start_iso:
-                try:
+                with contextlib.suppress(ValueError):
                     dates.append(datetime.strptime(start_iso, '%Y-%m-%d'))
-                except ValueError:
-                    pass
             if end_iso:
-                try:
+                with contextlib.suppress(ValueError):
                     dates.append(datetime.strptime(end_iso, '%Y-%m-%d'))
-                except ValueError:
-                    pass
 
     return dates
 
@@ -333,7 +330,6 @@ def get_event_duration_days(event: Dict) -> int:
 def calculate_temporal_relevance_score(
     event: Dict,
     query_start: Optional[datetime],
-    query_end: Optional[datetime]
 ) -> float:
     """
     Calculates a temporal relevance score for ranking events.
@@ -349,8 +345,6 @@ def calculate_temporal_relevance_score(
     Args:
         event: Event dictionary.
         query_start: Start of the query date range.
-        query_end: End of the query date range.
-
     Returns:
         float: Score (higher = more relevant). Range: 0.0 to 100.0
     """
@@ -539,8 +533,7 @@ def _localize_event_date_text(value: str, language: str = "en") -> str:
         flags=re.IGNORECASE,
     )
     localized = re.sub(r"\bto\b", "a", localized, flags=re.IGNORECASE)
-    localized = re.sub(r"\s+", " ", localized).strip()
-    return localized
+    return re.sub(r"\s+", " ", localized).strip()
 
 
 def _clean_event_title(title: Optional[str], url: str = "") -> str:
@@ -570,8 +563,7 @@ def _localize_event_price(price: Optional[str], language: str = "en") -> str:
         localized = re.sub(r"\bFrom\s+(€?\d+(?:[\.,]\d+)?)\s+to\s+(€?\d+(?:[\.,]\d+)?)\b", r"de \1 a \2", raw, flags=re.IGNORECASE)
         localized = re.sub(r"\bFrom\s+", "desde ", localized, flags=re.IGNORECASE)
         localized = re.sub(r"\bFree Entry\b", "Entrada gratuita", localized, flags=re.IGNORECASE)
-        localized = re.sub(r"\bPaid\b", "Pago", localized, flags=re.IGNORECASE)
-        return localized
+        return re.sub(r"\bPaid\b", "Pago", localized, flags=re.IGNORECASE)
 
     return raw
 
@@ -1037,8 +1029,7 @@ def _localize_place_feature_text(value: Any, language: str = "en") -> str:
         "Wi-Fi": "Wi-Fi",
     }
     localized = mapping.get(text, text)
-    localized = re.sub(r"\bto\b", "a", localized, flags=re.IGNORECASE)
-    return localized
+    return re.sub(r"\bto\b", "a", localized, flags=re.IGNORECASE)
 
 
 def _format_compact_feature_summary(features: Any, language: str = "en", max_items: int = 4) -> str:
@@ -1051,16 +1042,6 @@ def _format_compact_feature_summary(features: Any, language: str = "en", max_ite
     ]
     cleaned_features = [feature for feature in cleaned_features if feature]
     return " · ".join(cleaned_features[:max_items])
-
-
-def _format_source_mix_line(vl_count: int, da_count: int, language: str = "en") -> str:
-    """Summarize the data sources represented in the displayed result cards."""
-    return ""
-
-
-def _format_remaining_results_line(remaining: int, language: str = "en") -> str:
-    """Format the compact continuation marker required by response standards."""
-    return ""
 
 
 def _event_icon_for_category(category: str) -> str:
@@ -1231,9 +1212,6 @@ def _format_event_filter_summary(
     date_filter: Optional[str],
     start_date: Optional[datetime],
     end_date: Optional[datetime],
-    total_results: int,
-    shown_results: int,
-    offset: int = 0,
     language: str = "en",
 ) -> List[str]:
     """Builds a contextual summary for the event filter and result count."""
@@ -2757,8 +2735,7 @@ def _clean_place_description_text(text: Optional[str], fallback_title: str = "")
             continue
         cleaned_parts.append(line)
 
-    cleaned = re.sub(r"\s+", " ", " ".join(cleaned_parts)).strip(" -")
-    return cleaned
+    return re.sub(r"\s+", " ", " ".join(cleaned_parts)).strip(" -")
 
 
 _PLACE_QUERY_DAY_ALIASES = {
@@ -3603,7 +3580,7 @@ def search_cultural_events(
         # Step 4: SORT BY TEMPORAL RELEVANCE (CRITICAL!)
         # Ephemeral events (single-day concerts) should rank ABOVE long exhibitions
         for event in events_data:
-            event['_relevance_score'] = calculate_temporal_relevance_score(event, start_date, end_date)
+            event['_relevance_score'] = calculate_temporal_relevance_score(event, start_date)
             event['_duration_days'] = get_event_duration_days(event)
             event['_query_match_score'] = query_scores.get(id(event), 0.0)
             event['_geography_score'] = 1 if _event_within_requested_geography(event, query) else 0
@@ -3653,9 +3630,6 @@ def search_cultural_events(
                 date_filter=date_filter,
                 start_date=start_date,
                 end_date=end_date,
-                total_results=len(events_data),
-                shown_results=0,
-                offset=offset,
                 language=render_language,
             )
             if render_language == "pt":
@@ -3688,16 +3662,13 @@ def search_cultural_events(
             date_filter=date_filter,
             start_date=start_date,
             end_date=end_date,
-            total_results=len(events_data),
-            shown_results=len(results),
-            offset=offset,
             language=render_language,
         )
         if exact_lookup_not_found_intro and offset == 0:
             output_parts = [exact_lookup_not_found_intro, "", *output_parts]
         output_parts.append("")
 
-        for i, event in enumerate(results, 1):
+        for _i, event in enumerate(results, 1):
             title = _localize_event_title(
                 _clean_event_title(event.get('title'), event.get('url', '')),
                 language=render_language,
@@ -3825,9 +3796,6 @@ def search_cultural_events(
 
             output_parts.append("")  # Empty line between events
 
-        remaining_line = _format_remaining_results_line(len(events_data) - (offset + len(results)), render_language)
-        if remaining_line:
-            output_parts.append(remaining_line)
         if undated_candidates:
             if render_language == "pt":
                 output_parts.append(
@@ -4370,10 +4338,6 @@ def search_places_attractions(
                 "❌ There are no more places to show for this filter window."
             )
 
-        # Count sources
-        vl_count = sum(1 for r in final_results if r.get('source') == 'visitlisboa')
-        da_count = sum(1 for r in final_results if r.get('source') == 'dados_abertos')
-
         if render_language == "pt":
             output_parts = [
                 "### 🔵 **Locais e atrações**",
@@ -4388,7 +4352,7 @@ def search_places_attractions(
         if exact_lookup_not_found_intro and offset == 0:
             output_parts = [exact_lookup_not_found_intro, "", *output_parts]
 
-        for i, place in enumerate(final_results, 1):
+        for _i, place in enumerate(final_results, 1):
             title = _localize_place_title(place.get('title', 'Unknown'), language=render_language)
             cat = _localize_place_category(place.get('category', 'General'), language=render_language)
             source = place.get('source', 'unknown')
@@ -4554,15 +4518,6 @@ def search_places_attractions(
                 output_parts.append(f"    - 🔗 **{details_label}:** {_format_markdown_link('VisitLisboa', details_url)}")
 
         # Source breakdown
-        remaining_line = _format_remaining_results_line(len(all_results) - (offset + len(final_results)), render_language)
-        if remaining_line:
-            output_parts.append("")
-            output_parts.append(remaining_line)
-        source_mix = _format_source_mix_line(vl_count, da_count, render_language)
-        if source_mix:
-            output_parts.append("")
-            output_parts.append(source_mix)
-
         return "\n".join(output_parts)
 
     except Exception as e:

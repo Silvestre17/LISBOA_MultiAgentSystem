@@ -162,7 +162,7 @@ def build_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
             if (result.get("heuristics") or {}).get("overall_pass", False):
                 bucket["overall_pass_rate"] += 1
 
-    for provider, bucket in per_provider.items():
+    for _provider, bucket in per_provider.items():
         count = max(int(bucket["count"]), 1)
         bucket["avg_latency_s"] = round(bucket["avg_latency_s"] / count, 2)
         bucket["overall_pass_rate"] = round(bucket["overall_pass_rate"] / count, 3)

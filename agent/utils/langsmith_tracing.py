@@ -42,7 +42,7 @@ _LAST_LANGSMITH_RUNTIME_FAILURE: Optional[Dict[str, str]] = None
 _LANGSMITH_RUNTIME_HANDLER_INSTALLED = False
 
 
-def _noop_traceable(*args, **kwargs):
+def _noop_traceable(*_args, **_kwargs):
     """Return a no-op decorator compatible with LangSmith's traceable API."""
 
     def decorator(func):

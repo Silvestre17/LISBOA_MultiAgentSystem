@@ -41,8 +41,7 @@ def _normalize(name: str) -> str:
     name = "".join(c for c in nfkd if not unicodedata.combining(c))
     # Normalize separators
     name = name.replace("-", " ").replace("/", " ")
-    name = re.sub(r"\s+", " ", name).strip()
-    return name
+    return re.sub(r"\s+", " ", name).strip()
 
 
 def _find_station(name: str) -> str | None:

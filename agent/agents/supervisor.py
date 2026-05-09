@@ -8,6 +8,7 @@
 
 import re
 import unicodedata
+from contextlib import suppress
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional
 
@@ -923,7 +924,6 @@ class SupervisorAgent(BaseAgent):
         except Exception as exc:
             fallback_decision = self._fallback_routing(
                 user_message=user_message,
-                llm_response="",
                 language=language,
             )
             fallback_decision["reasoning"] = (
@@ -1025,16 +1025,15 @@ class SupervisorAgent(BaseAgent):
             }
 
         # Fallback: If JSON parsing fails, try to extract intent heuristically
-        return self._fallback_routing(user_message, content, language)
+        return self._fallback_routing(user_message, language)
 
-    def _fallback_routing(self, user_message: str, llm_response: str, language: str = "pt") -> Dict[str, Any]:
+    def _fallback_routing(self, user_message: str, language: str = "pt") -> Dict[str, Any]:
         """
         Fallback routing when JSON parsing fails.
         Uses simple keyword matching as backup.
 
         Args:
             user_message: Original user query.
-            llm_response: Raw LLM response that failed to parse.
             language: User language code ("pt" or "en"). Defaults to "pt".
 
         Returns:
@@ -1309,44 +1308,14 @@ class SupervisorAgent(BaseAgent):
 
         return False
 
-    def format_agent_outputs(self, agent_outputs: Dict[str, str]) -> str:
-        """
-        Formats outputs from multiple agents into a combined context string.
-
-        Args:
-            agent_outputs: Dict mapping agent names to their outputs.
-
-        Returns:
-            str: Formatted context for the planner or final response.
-        """
-        if not agent_outputs:
-            return ""
-
-        sections = []
-
-        if "weather" in agent_outputs:
-            sections.append(f"## 🌤️ Weather Information\n{agent_outputs['weather']}")
-
-        if "transport" in agent_outputs:
-            sections.append(
-                f"## 🚇 Transport Information\n{agent_outputs['transport']}"
-            )
-
-        if "researcher" in agent_outputs:
-            sections.append(f"## 🔍 Places & Events\n{agent_outputs['researcher']}")
-
-        return "\n\n---\n\n".join(sections)
-
 
 # ==========================================================================
 # Test Block
 # ==========================================================================
 if __name__ == "__main__":
     import sys
-    try:
+    with suppress(AttributeError):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    except AttributeError:
-        pass
 
     print("\033[1m" + "=" * 60 + "\033[0m")
     print("\033[1m🧪 Supervisor Agent Test\033[0m")
@@ -1406,7 +1375,7 @@ if __name__ == "__main__":
         ]
 
         for query, expected_agent, description in service_tests:
-            decision = supervisor._fallback_routing(query, "")
+            decision = supervisor._fallback_routing(query)
             agents = decision["agents"]
             if expected_agent in agents:
                 passed += 1
@@ -1434,7 +1403,7 @@ if __name__ == "__main__":
         ]
 
         for query, expected_agent, description in frequency_tests:
-            decision = supervisor._fallback_routing(query, "")
+            decision = supervisor._fallback_routing(query)
             agents = decision["agents"]
             if expected_agent in agents:
                 passed += 1
@@ -1458,7 +1427,7 @@ if __name__ == "__main__":
         ]
 
         for query, description in oos_tests:
-            decision = supervisor._fallback_routing(query, "")
+            decision = supervisor._fallback_routing(query)
             agents = decision["agents"]
             print(f"  \033[1m📝\033[0m {description}: \"{query[:40]}\"")
             print(f"      Agents: {agents} | Direct: {'Yes' if decision['direct_response'] else 'No'}")

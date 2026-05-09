@@ -41,7 +41,6 @@ from agent.utils.response_formatter import (
     final_post_qa_guard,
     build_bounded_planning_framework,
     is_overcomplex_planning_request,
-    render_lisboa_planner_markdown,
     strip_internal_repository_source_links,
 )
 
@@ -1835,7 +1834,7 @@ def test_overcomplex_planning_guard_builds_bounded_visual_answer() -> None:
     )
 
     assert is_overcomplex_planning_request(prompt)
-    response = build_bounded_planning_framework(prompt, "en")
+    response = build_bounded_planning_framework("en")
 
     assert "### 📅 **" in response
     assert "### Title" not in response
