@@ -1737,6 +1737,7 @@ def _compact_transport_arrivals_markdown(text: str) -> Optional[str]:
             extras,
             flags=re.IGNORECASE,
         )
+        extras = re.sub(r"\s*·?\s*\[(?:SCHEDULE|REAL-TIME)\].*$", "", extras, flags=re.IGNORECASE)
         if is_pt:
             extras = re.sub(r"(\d+)\s+min\s+late", r"atraso \1 min", extras, flags=re.IGNORECASE)
             extras = re.sub(r"(\d+)\s+stops?\s+remaining", r"\1 paragens restantes", extras, flags=re.IGNORECASE)
@@ -2369,6 +2370,12 @@ def canonicalize_transport_terms(text: str, language: str = "en") -> str:
             (r"\bDireção\b", "Direction"),
             (r"\bSem dados em tempo real\b", "No real-time data available"),
             (r"Próximas Chegadas", "Next Arrivals"),
+            (r"\*\*Em tempo real\*\*", "**Real time**"),
+            (r"\*\*Hor[aá]rios programados\*\*", "**Scheduled times**"),
+            (r"\*\*Dica rápida:\*\*", "**Quick tip:**"),
+            (r"\bDica rápida:\b", "Quick tip:"),
+            (r"“Em tempo real” usa dados GPS recentes; os restantes horários são programados\.", "“Real time” uses recent GPS data, while the remaining times are scheduled."),
+            (r"Os tempos assinalados como em tempo real usam dados GPS recentes da Carris\.", "Real-time labels use recent Carris GPS data."),
             (r"Paragens Carris", "Carris Stops"),
             (r"\bParagem\b", "Stop"),
             (r"\bHora:\b", "Time:"),
@@ -2383,6 +2390,8 @@ def canonicalize_transport_terms(text: str, language: str = "en") -> str:
             (r"\bMatrícula:\b", "Plate:"),
             (r"\*\*Matrícula\*\*:", "**Plate**:"),
             (r"\bFaltam\s+(\d+)\s+paragens\b", r"\1 stops remaining"),
+            (r"\batraso\s+(\d+)\s+min\b", r"\1 min late"),
+            (r"\b(\d+)\s+paragens restantes\b", r"\1 stops remaining"),
             (r"\bVeículos? a caminho\b", "vehicles on the way"),
             (r"\bTempo viagem estimado:\b", "Estimated travel time:"),
             (r"\badiantado\s+(\d+)\s+min\b", r"\1 min early"),
@@ -5208,6 +5217,8 @@ def reconcile_researcher_place_response(
 def format_researcher_event_cards(text: str, language: str = "en", user_query: str = "") -> str:
     """Normalize ranked researcher event results into canonical markdown cards."""
     if not text or infer_researcher_source_kind(user_query=user_query, text=text) != "events":
+        return text
+    if re.search(r"(?i)\b(?:Event Categories in Lisbon|Categorias de Eventos em Lisboa)\b", text):
         return text
 
     is_pt = language == "pt"
@@ -8498,6 +8509,8 @@ def normalize_researcher_card_field_indentation(text: str) -> str:
         "locais e atrações",
         "events found",
         "eventos encontrados",
+        "event categories in lisbon",
+        "categorias de eventos em lisboa",
         "free events found",
         "eventos gratuitos encontrados",
         "suggested route",

@@ -2770,6 +2770,7 @@ def _parse_carris_line_stop_query(user_message: str) -> Optional[Dict[str, Optio
 
     stop_name_arrival_patterns = [
         r"(?:quais\s+)?(?:os\s+)?pr[oó]xim(?:os|as)\s+(?:autocarros?|el[eé]tricos?|autocarros?\s+da\s+carris|ve[ií]culos?\s+da\s+carris|partidas|chegadas)\s+(?:da\s+carris\s+)?(?:at|em|na|no)\s+(?P<stop>.+?)(?:[\?\!\.,;]|$)",
+        r"(?:next\s+)?(?:buses?|trams?|buses?\s+or\s+trams?|trams?\s+or\s+buses?|arrivals|departures)\s+(?:for\s+carris\s+)?(?:at|in)\s+(?P<stop>.+?)(?:[\?\!\.,;]|$)",
         r"(?:next\s+)?(?:buses?|trams?|arrivals|departures)\s+(?:for\s+carris\s+)?(?:at|in)\s+(?P<stop>.+?)(?:[\?\!\.,;]|$)",
     ]
     for pattern in stop_name_arrival_patterns:

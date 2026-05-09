@@ -875,8 +875,18 @@ class MultiAgentAssistant:
             r"\b(?:from\s+.+?\s+to\s+.+|de\s+.+?\s+(?:para|a|ao|à|at[eé])\s+.+)",
             normalized,
         ))
+        explicit_destination_in_current_turn = bool(re.search(
+            r"\b(?:get|go|travel|head|ir|chegar|viajar)\s+(?:to|para|a|ao|à)\s+"
+            r"(?!there\b|la\b|lá\b|ali\b|ai\b|aí\b)[a-z0-9à-ÿ' -]{2,}",
+            normalized,
+        ))
         existential_there = bool(re.search(r"\bthere\s+(?:are|is|were|was|any|no)\b", normalized))
-        uses_there = bool(re.search(r"\b(?:there|lá|la|ali|aí|ai)\b", normalized)) and not existential_there and not explicit_route_pair
+        uses_there = (
+            bool(re.search(r"\b(?:there|lá|la|ali|aí|ai)\b", normalized))
+            and not existential_there
+            and not explicit_route_pair
+            and not explicit_destination_in_current_turn
+        )
         asks_route = bool(re.search(r"\b(?:how do i get|como chego|como vou|ir de|go from|get from|from|desde|a partir de)\b", normalized))
         if uses_there and asks_route:
             if not destination:

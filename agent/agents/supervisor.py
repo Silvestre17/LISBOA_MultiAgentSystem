@@ -822,6 +822,8 @@ class SupervisorAgent(BaseAgent):
         return bool(
             re.search(
                 r"\b(?:what\s+to\s+visit|where\s+to\s+visit|places?\s+to\s+visit|recommend|suggest|"
+                r"visit(?:ing)?\s+(?:belem|bel[eé]m|a\s+place|an\s+area|a\s+neighbourhood|a\s+neighborhood)|"
+                r"visitar\s+(?:belem|bel[eé]m|um\s+local|uma\s+zona|um\s+bairro)|"
                 r"o\s+que\s+visitar|onde\s+visitar|locais?\s+para\s+visitar|recomenda|sugere|sugeres)\b",
                 normalized_message,
             )

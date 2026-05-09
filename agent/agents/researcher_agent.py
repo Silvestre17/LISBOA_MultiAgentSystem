@@ -1418,7 +1418,8 @@ class ResearcherAgent(BaseAgent):
         )
         has_recommendation_lookup = bool(
             re.search(
-                r"\b(?:best|top|recommended|recommend|suggest|suggested|good|melhores|principais|recomenda|sugere)\b",
+                r"\b(?:best|top|recommended|recommend|suggest|suggested|good|quiet|hidden|lesser[-\s]?known|"
+                r"calm|calmos?|tranquilos?|escondidos?|menos\s+conhecidos|melhores|principais|recomenda|sugere)\b",
                 query,
             )
             or re.search(r"\bwhat are\b.*\b(?:museums?|monuments?|restaurants?|hotels?|viewpoints?)\b", query)

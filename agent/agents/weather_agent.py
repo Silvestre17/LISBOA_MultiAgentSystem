@@ -9,7 +9,7 @@
 import re
 import unicodedata
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -617,22 +617,25 @@ class WeatherAgent(BaseAgent):
             if delta_days < 0 or delta_days > FORECAST_MAX_OFFSET:
                 return True
 
+        weekday_offset = cls._extract_named_weekday_offset(user_message)
+        if weekday_offset is not None and weekday_offset > FORECAST_MAX_OFFSET:
+            return True
+
         return False
 
     @staticmethod
     def _build_forecast_horizon_limit_message(language: str) -> str:
         """Builds a localized message when the user asks beyond the 5-day forecast horizon."""
-        max_supported_date = (datetime.now() + timedelta(days=FORECAST_MAX_OFFSET)).strftime("%Y-%m-%d")
         if language == "pt":
             return (
                 "### 🌤️ **Previsão Meteorológica**\n\n"
                 "⚠️ Só tenho previsão meteorológica fiável do IPMA para Lisboa para os próximos 5 dias, "
-                f"por isso não consigo confirmar o tempo para esse horizonte. O limite atual vai até {max_supported_date}."
+                "por isso não consigo confirmar o tempo para esse horizonte sem inventar dados."
             )
         return (
             "### 🌤️ **Weather Forecast**\n\n"
             "⚠️ I only have reliable IPMA weather forecast data for Lisbon for the next 5 days, "
-            f"so I can't confirm the weather for that time horizon. The current reliable limit runs through {max_supported_date}."
+            "so I can't confirm the weather for that time horizon without inventing data."
         )
 
     @classmethod
@@ -980,12 +983,12 @@ class WeatherAgent(BaseAgent):
             wind = cls._extract_wind_summary(tool_text)
             if is_pt:
                 return (
-                    "⛵ A saída parece **razoável apenas como leitura meteorológica geral**, "
-                    f"com base em avisos, chuva e vento{f' ({wind})' if wind else ''}. Confirma sempre a previsão marítima oficial antes de sair."
+                    "⛵ Não consigo certificar se é seguro velejar só com estes dados meteorológicos urbanos. "
+                    f"Usa os avisos, a chuva e o vento{f' ({wind})' if wind else ''} apenas como contexto e confirma sempre a previsão marítima oficial antes de sair."
                 )
             return (
-                "⛵ Sailing looks **reasonable only as a general weather read**, "
-                f"based on warnings, rain, and wind{f' ({wind})' if wind else ''}. Check the official marine forecast before departing."
+                "⛵ I cannot certify sailing safety from these urban weather data alone. "
+                f"Use warnings, rain, and wind{f' ({wind})' if wind else ''} only as context, and check the official marine forecast before departing."
             )
 
         if cls._is_portugal_overview_query(user_message):
