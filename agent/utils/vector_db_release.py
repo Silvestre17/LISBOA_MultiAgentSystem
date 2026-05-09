@@ -12,6 +12,7 @@ import hashlib
 import json
 import shutil
 import tempfile
+import threading
 import urllib.error
 import urllib.request
 import zipfile
@@ -24,6 +25,8 @@ from config import Config
 
 GITHUB_API_BASE_URL = "https://api.github.com"
 CHROMA_SQLITE_FILENAME = "chroma.sqlite3"
+_VECTOR_DB_DOWNLOAD_LOCK = threading.Lock()
+_VECTOR_DB_READY_THIS_PROCESS = False
 
 
 @dataclass(frozen=True)
@@ -149,66 +152,86 @@ def _install_vector_db(extract_path: Path, vector_db_dir: Path) -> None:
 
 def ensure_vector_db_from_release() -> VectorDbReleaseStatus:
     """Ensure the runtime vector DB exists, downloading it from a release if needed."""
+    global _VECTOR_DB_READY_THIS_PROCESS
+
     vector_db_dir = Path(Config.VECTOR_DB_DIR)
-    force_download = bool(getattr(Config, "VECTOR_DB_RELEASE_FORCE_DOWNLOAD", False))
 
-    if _vector_db_is_present(vector_db_dir) and not force_download:
-        return VectorDbReleaseStatus(
-            ok=True,
-            attempted=False,
-            message="Local vector database is already available.",
-            path=vector_db_dir,
-        )
+    with _VECTOR_DB_DOWNLOAD_LOCK:
+        force_download = bool(getattr(Config, "VECTOR_DB_RELEASE_FORCE_DOWNLOAD", False))
 
-    if not bool(getattr(Config, "VECTOR_DB_RELEASE_ENABLED", True)):
-        return VectorDbReleaseStatus(
-            ok=_vector_db_is_present(vector_db_dir),
-            attempted=False,
-            message="Vector DB release download is disabled.",
-            path=vector_db_dir,
-        )
-
-    timeout = int(getattr(Config, "VECTOR_DB_RELEASE_TIMEOUT_SECONDS", 120))
-    vector_db_dir.parent.mkdir(parents=True, exist_ok=True)
-
-    try:
-        asset_url = _resolve_asset_download_url(timeout=timeout)
-    except (OSError, ValueError, urllib.error.URLError, urllib.error.HTTPError) as exc:
-        return VectorDbReleaseStatus(
-            ok=_vector_db_is_present(vector_db_dir),
-            attempted=True,
-            message=f"Could not resolve vector DB release asset: {exc}",
-            path=vector_db_dir,
-        )
-
-    with tempfile.TemporaryDirectory(prefix="lisboa_vector_db_") as temp_root:
-        temp_path = Path(temp_root)
-        archive_path = temp_path / str(getattr(Config, "VECTOR_DB_RELEASE_ASSET", "vector_db.zip"))
-        extract_path = temp_path / "vector_db"
-        extract_path.mkdir(parents=True, exist_ok=True)
-
-        try:
-            sha256, size_bytes = _download_file(asset_url, archive_path, timeout=timeout)
-            _safe_extract_zip(archive_path, extract_path)
-
-            if not _vector_db_is_present(extract_path):
-                raise FileNotFoundError("Downloaded vector DB archive does not contain chroma.sqlite3.")
-
-            _install_vector_db(extract_path=extract_path, vector_db_dir=vector_db_dir)
-        except (OSError, zipfile.BadZipFile, ValueError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+        if _VECTOR_DB_READY_THIS_PROCESS and _vector_db_is_present(vector_db_dir):
             return VectorDbReleaseStatus(
-                ok=_vector_db_is_present(vector_db_dir),
-                attempted=True,
-                message=f"Could not download vector DB release asset: {exc}",
+                ok=True,
+                attempted=False,
+                message="Vector database already prepared in this process.",
                 path=vector_db_dir,
             )
 
-    return VectorDbReleaseStatus(
-        ok=True,
-        attempted=True,
-        downloaded=True,
-        message="Vector database downloaded from GitHub Release asset.",
-        path=vector_db_dir,
-        sha256=sha256,
-        size_bytes=size_bytes,
-    )
+        if _vector_db_is_present(vector_db_dir) and not force_download:
+            _VECTOR_DB_READY_THIS_PROCESS = True
+            return VectorDbReleaseStatus(
+                ok=True,
+                attempted=False,
+                message="Local vector database is already available.",
+                path=vector_db_dir,
+            )
+
+        if not bool(getattr(Config, "VECTOR_DB_RELEASE_ENABLED", True)):
+            ok = _vector_db_is_present(vector_db_dir)
+            _VECTOR_DB_READY_THIS_PROCESS = ok
+            return VectorDbReleaseStatus(
+                ok=ok,
+                attempted=False,
+                message="Vector DB release download is disabled.",
+                path=vector_db_dir,
+            )
+
+        timeout = int(getattr(Config, "VECTOR_DB_RELEASE_TIMEOUT_SECONDS", 120))
+        vector_db_dir.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            asset_url = _resolve_asset_download_url(timeout=timeout)
+        except (OSError, ValueError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+            ok = _vector_db_is_present(vector_db_dir)
+            _VECTOR_DB_READY_THIS_PROCESS = ok
+            return VectorDbReleaseStatus(
+                ok=ok,
+                attempted=True,
+                message=f"Could not resolve vector DB release asset: {exc}",
+                path=vector_db_dir,
+            )
+
+        with tempfile.TemporaryDirectory(prefix="lisboa_vector_db_") as temp_root:
+            temp_path = Path(temp_root)
+            archive_path = temp_path / str(getattr(Config, "VECTOR_DB_RELEASE_ASSET", "vector_db.zip"))
+            extract_path = temp_path / "vector_db"
+            extract_path.mkdir(parents=True, exist_ok=True)
+
+            try:
+                sha256, size_bytes = _download_file(asset_url, archive_path, timeout=timeout)
+                _safe_extract_zip(archive_path, extract_path)
+
+                if not _vector_db_is_present(extract_path):
+                    raise FileNotFoundError("Downloaded vector DB archive does not contain chroma.sqlite3.")
+
+                _install_vector_db(extract_path=extract_path, vector_db_dir=vector_db_dir)
+            except (OSError, zipfile.BadZipFile, ValueError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+                ok = _vector_db_is_present(vector_db_dir)
+                _VECTOR_DB_READY_THIS_PROCESS = ok
+                return VectorDbReleaseStatus(
+                    ok=ok,
+                    attempted=True,
+                    message=f"Could not download vector DB release asset: {exc}",
+                    path=vector_db_dir,
+                )
+
+        _VECTOR_DB_READY_THIS_PROCESS = True
+        return VectorDbReleaseStatus(
+            ok=True,
+            attempted=True,
+            downloaded=True,
+            message="Vector database downloaded from GitHub Release asset.",
+            path=vector_db_dir,
+            sha256=sha256,
+            size_bytes=size_bytes,
+        )

@@ -48,8 +48,10 @@ logger = logging.getLogger(__name__)
 
 try:
     from tools.utils import fetch_json_with_retry
+    from tools.runtime_paths import resolve_runtime_data_dir, seed_runtime_data_dir
 except ImportError:
     from utils import fetch_json_with_retry
+    from runtime_paths import resolve_runtime_data_dir, seed_runtime_data_dir
 
 # ==========================================================================
 # Constants and Configuration
@@ -63,7 +65,9 @@ CP_STATIONS_URL = "https://comboios.live/api/stations"
 CP_VEHICLES_URL = "https://comboios.live/api/vehicles"
 
 # Data storage paths
-DATA_DIR = Path(__file__).parent.parent / "data" / "cp"
+SOURCE_DATA_DIR = Path(__file__).parent.parent / "data" / "cp"
+DATA_DIR = resolve_runtime_data_dir(SOURCE_DATA_DIR, "cp")
+seed_runtime_data_dir(SOURCE_DATA_DIR, DATA_DIR, ("cp_gtfs.db", "gtfs.zip", "metadata.json"))
 DB_PATH = DATA_DIR / "cp_gtfs.db"
 METADATA_PATH = DATA_DIR / "metadata.json"
 GTFS_ZIP_PATH = DATA_DIR / "gtfs.zip"

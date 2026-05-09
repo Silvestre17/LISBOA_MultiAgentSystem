@@ -19,6 +19,7 @@
 # pip install python-dotenv
 
 import os
+import tempfile
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -86,8 +87,27 @@ class Config:
     # Directory containing all data collection scripts and outputs
     DATA_COLLECTION_DIR = BASE_DIR / "data_collection"
 
+    # Writable runtime data root for generated databases in hosted deployments.
+    RUNTIME_DATA_DIR = Path(
+        os.getenv(
+            "LISBOA_RUNTIME_DATA_DIR",
+            str(Path(tempfile.gettempdir()) / "lisboa_runtime")
+            if os.getenv("SPACE_ID") or os.getenv("HF_SPACE_ID") or os.getenv("SPACE_HOST")
+            else str(BASE_DIR / "data"),
+        )
+    )
+
     # Directory for ChromaDB vector store (persistent embeddings)
-    VECTOR_DB_DIR = BASE_DIR / "data" / "vector_db"
+    VECTOR_DB_DIR = Path(
+        os.getenv(
+            "VECTOR_DB_DIR",
+            str(
+                RUNTIME_DATA_DIR / "vector_db"
+                if RUNTIME_DATA_DIR != BASE_DIR / "data"
+                else BASE_DIR / "data" / "vector_db"
+            ),
+        )
+    )
 
     # Runtime vector database artifact download.
     # Hosted deployments should keep data/vector_db out of the Space git history
