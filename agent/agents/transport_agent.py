@@ -532,6 +532,8 @@ def _query_has_status_intent(query: str) -> bool:
         r"\bponto de situa[cç][aã]o dos transportes\b",
         r"\bperturba(?:cao|ções|coes|ção|caoes)s?\b.*\bmetro\b",
         r"\bperturba(?:cao|ções|coes|ção|caoes)s?\b.*\btransportes\b",
+        r"\b(?:delay|delays|disruption|disruptions|problem|problems)\b.*\bmetro\b",
+        r"\bmetro\b.*\b(?:delay|delays|disruption|disruptions|problem|problems)\b",
         r"\btransportes?\b.*\blisboa\b",
         r"\bmetro,?\s+autocarros?\s+e\s+comboios\b",
         r"\bare trains running\b",
@@ -3888,6 +3890,8 @@ class TransportAgent(BaseAgent):
             r"\bperturba(?:cao|ções|coes|ção|caoes)s?\b.*\bmetro\b",
             r"\bperturba(?:cao|ções|coes|ção|caoes)s?\b.*\blinhas\b",
             r"\bdisruptions?\b.*\bmetro\b",
+            r"\b(?:delay|delays|problem|problems)\b.*\bmetro\b",
+            r"\bmetro\b.*\b(?:delay|delays|problem|problems)\b",
             r"\bmetro de lisboa\b.*\b(?:estado|status|perturba(?:cao|ções|coes|ção|caoes)s?)\b",
             r"\bmetro lines\b",
             r"\bmetro service\b",
@@ -4604,11 +4608,24 @@ class TransportAgent(BaseAgent):
                 cleaned_result,
                 flags=re.IGNORECASE,
             ):
-                parsed_lines.append(
-                    "- ✅ **Todas as linhas**: circulação normal"
-                    if language == "pt"
-                    else "- ✅ **All lines**: normal service"
-                )
+                if language == "pt":
+                    parsed_lines.extend(
+                        [
+                            "- 🟡 **Linha Amarela**: circulação normal",
+                            "- 🔵 **Linha Azul**: circulação normal",
+                            "- 🟢 **Linha Verde**: circulação normal",
+                            "- 🔴 **Linha Vermelha**: circulação normal",
+                        ]
+                    )
+                else:
+                    parsed_lines.extend(
+                        [
+                            "- 🟡 **Yellow Line**: normal service",
+                            "- 🔵 **Blue Line**: normal service",
+                            "- 🟢 **Green Line**: normal service",
+                            "- 🔴 **Red Line**: normal service",
+                        ]
+                    )
 
             if parsed_lines:
                 title = "### 🚇 **Estado do Metro de Lisboa**" if language == "pt" else "### 🚇 **Lisbon Metro Status**"

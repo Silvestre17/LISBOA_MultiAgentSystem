@@ -3465,6 +3465,37 @@ class MultiAgentAssistant:
         except Exception as exc:
             if verbose:
                 print(f"   [FORMAT] Finalization failed ({type(exc).__name__}): {exc}")
+            try:
+                emergency_response = final_post_qa_guard(
+                    final_visual_pass(clean_response(response)),
+                    language=effective_language,
+                )
+            except Exception:
+                emergency_response = ""
+            if (
+                emergency_response
+                and len(emergency_response.strip()) >= 80
+                and "Operational Notice" not in emergency_response
+                and "Dados Não Confirmados" not in emergency_response
+            ):
+                self._append_assistant_message(emergency_response)
+                self.last_execution_summary = self._collect_execution_summary(
+                    user_request=message,
+                    routing_reasoning=reasoning,
+                    agents_to_call=response_agents_to_call,
+                    agent_outputs=agent_outputs,
+                    direct_response_used=False,
+                    workers=workers,
+                    run_workers_in_parallel=run_workers_in_parallel,
+                    qa_result=qa_result,
+                    retry_agents_used=retry_agents_used,
+                    final_repair_ran=final_repair_ran,
+                    simple_weather_fact_check=simple_weather_fact_check,
+                    elapsed_time=time_module.time() - start_time,
+                )
+                if Config.SHOW_MARKDOWN_RESPONSE_IN_TERMINAL:
+                    self._print_execution_summary(self.last_execution_summary)
+                return emergency_response
             fallback_response = self._build_orchestration_failure_fallback(
                 message=message,
                 language=effective_language,

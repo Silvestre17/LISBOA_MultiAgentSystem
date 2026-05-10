@@ -191,43 +191,43 @@ TRANSLATIONS = {
         "thinking": "Analyzing live city data...",
         "footer_version": "LISBOA | AI Assistant",
         "footer_made": "André Filipe Gomes Silvestre • NOVA IMS",
-        "info_title": "About LISBOA",
-        "info_subtitle": "A Multi-Agent Assistant for Lisbon",
-        "info_intro": "A Lisbon-focused assistant that integrates urban data, live mobility, weather conditions, and local knowledge to deliver practical, context-aware answers.",
+        "info_title": "LISBOA",
+        "info_subtitle": "Lisbon Itinerary System Based On AI",
+        "info_intro": "An academic multi-agent prototype that helps users ask grounded questions about Lisbon tourism, mobility, weather, local services, and itineraries.",
         "info_badge": "Master's Thesis Project",
         "info_stat_agents_value": "6",
         "info_stat_agents_label": "Coordinated Agents",
         "info_stat_tools_value": "45",
         "info_stat_tools_label": "Grounded Tools",
-        "info_stat_scope_value": "2",
-        "info_stat_scope_label": "Urban Contexts",
+        "info_stat_scope_value": "PT/EN",
+        "info_stat_scope_label": "Bilingual Interface",
         "info_f1_title": "Tourism and Culture",
-        "info_f1_desc": "Attractions, events, points of interest, and local context anchored in VisitLisboa and municipal data.",
+        "info_f1_desc": "Attractions, monuments, events, neighbourhoods, restaurants, and local context anchored in Lisbon-focused sources.",
         "info_f2_title": "Mobility",
-        "info_f2_desc": "Route support across Metro, Carris Urban, Carris Metropolitana, CP, and multimodal transport logic.",
+        "info_f2_desc": "Public-transport guidance across Metro, Carris Urban, Carris Metropolitana, CP, and multimodal route logic.",
         "info_f3_title": "Weather",
-        "info_f3_desc": "IPMA forecasts, weather classes, and warnings used to adapt daily recommendations.",
-        "info_f4_title": "Essential Services",
-        "info_f4_desc": "Nearby services, pharmacies, hospitals, and practical municipal information.",
+        "info_f3_desc": "IPMA forecasts and active warnings used to adapt visit suggestions, clothing advice, and daily plans.",
+        "info_f4_title": "Plans and Services",
+        "info_f4_desc": "Itineraries, nearby services, useful municipal information, and Lisbon-specific practical guidance.",
         "info_architecture_title": "System Architecture",
-        "info_architecture_desc": "A *supervisor-worker* architecture routes each request to specialised agents, validates the result, and uses itinerary synthesis only when planning is needed.",
-        "info_flow_title": "From urban data to a useful answer",
+        "info_architecture_desc": "A *supervisor-worker* architecture routes each request, retrieves evidence through specialised tools, validates the answer, and only synthesises an itinerary when planning is needed.",
+        "info_flow_title": "How LISBOA produces an answer",
         "info_flow_1_title": "Data Sources",
-        "info_flow_1_desc": "VisitLisboa, IPMA, Lisboa Aberta, and transport feeds keep the assistant anchored in local evidence.",
+        "info_flow_1_desc": "Tourism, weather, transport, open-data, and local-knowledge sources provide the evidence base.",
         "info_flow_2_title": "Tools and Context",
-        "info_flow_2_desc": "Knowledge retrieval, open-data search, weather, and mobility tools turn source data into verifiable context.",
+        "info_flow_2_desc": "Retrieval, geospatial search, weather, and mobility tools convert source data into usable context.",
         "info_flow_3_title": "Agent Coordination",
-        "info_flow_3_desc": "The supervisor delegates to weather, transport, and researcher agents before the quality layer checks the answer.",
+        "info_flow_3_desc": "The supervisor selects the right worker agents and preserves conversation context across follow-up questions.",
         "info_flow_4_title": "Final Response",
-        "info_flow_4_desc": "The interface presents the answer in the format that best fits the request, from route steps to full itineraries.",
+        "info_flow_4_desc": "The quality layer checks completeness, sources, scope, and formatting before the response is shown.",
         "info_audience_title": "Designed for Tourists and Residents",
-        "info_audience_desc": "The same pipeline serves two city contexts; what changes is the evidence it prioritises and the response format it produces.",
+        "info_audience_desc": "The same system supports tourist planning and everyday urban decisions; it changes the evidence it prioritises and the response format it produces.",
         "info_tourists_title": "Tourists",
-        "info_tourists_desc": "Prioritises sequencing, cultural context, weather-aware trade-offs, and movement between points of interest.",
+        "info_tourists_desc": "Useful for discovering monuments, events, neighbourhoods, restaurants, and weather-aware itineraries.",
         "info_residents_title": "Residents",
-        "info_residents_desc": "Prioritises service proximity, disruption awareness, municipal context, and practical daily decisions.",
+        "info_residents_desc": "Useful for mobility decisions, nearby services, local events, municipal information, and practical planning.",
         "info_framework_title": "Technical Map",
-        "info_framework_desc": "The diagram presents the implemented data sources, tool layer, agent orchestration, user interface, and evaluation layer.",
+        "info_framework_desc": "The diagram summarises the implemented data sources, tool layer, agent orchestration, interface, and evaluation.",
         "info_source_visitlisboa_desc": "Tourism, events, and cultural knowledge",
         "info_source_ipma_desc": "Official forecasts and weather warnings",
         "info_source_metro_desc": "Metro service status and operational information",
@@ -241,16 +241,35 @@ TRANSLATIONS = {
         "feat_cultura": "🎭 Culture",
         "feat_mapa": "📍 Places",
         "feat_roteiros": "🗺️ Itineraries",
-        "info_objective": "System Capabilities",
-        "info_objective_text": "LISBOA (Lisbon Itinerary System Based On AI) is a Lisbon-focused proof of concept for personalised tourism and urban mobility support. It integrates transport, weather, tourism, and municipal data while keeping planning, retrieval, validation, and final synthesis as separate stages.",
+        "info_scope_title": "Scope and Limits",
+        "info_scope_items": [
+            "It is prepared for questions within Lisbon or the Lisbon Metropolitan Area using the integrated data sources.",
+            "Live details depend on the availability and freshness of the connected public sources.",
+            "It does not replace official operators, emergency services, booking platforms, or payment systems.",
+            "When a request is outside the supported scope or asks for information the system cannot verify, LISBOA should state the limitation clearly and suggest a safer next step.",
+        ],
+        "info_examples_title": "What You Can Ask",
+        "info_examples_desc": "These examples mirror the user-study tasks and show the intended scope of the prototype.",
+        "info_example_weather_title": "Weather-Aware Questions",
+        "info_example_weather_items": [
+            "What is the weather like in Lisbon today? Should I take a jacket?",
+            "What is the weather forecast for the next 3 days in Lisbon?",
+        ],
+        "info_example_mobility_title": "Mobility Questions",
+        "info_example_mobility_items": [
+            "How do I get from Rossio to Belém by public transport?",
+            "What is the next train from Entrecampos to Sete-Rios?",
+        ],
+        "info_example_tourism_title": "Tourism and Local Information",
+        "info_example_tourism_items": [
+            "What are three well-known monuments in Belém?",
+            "Is there a pharmacy near Rossio?",
+        ],
+        "info_example_plan_title": "Itinerary Planning",
+        "info_example_plan_items": [
+            "Plan an afternoon in Belém from Chiado, with historical context, realistic public transport, and one custard tart stop.",
+        ],
         "info_data_sources": "Integrated Sources",
-        "info_data_sources_text": """- **IPMA API** - Official weather forecasts and warnings
-    - **Metro de Lisboa** - Line status and, when configured, official real-time endpoints
-    - **Carris Urban** - Lisbon buses and trams
-    - **Carris Metropolitana** - Metropolitan bus network
-    - **CP (Comboios de Portugal)** - Train stations and service data
-    - **Lisboa Aberta** - Municipal open-data services
-    - **VisitLisboa** - Tourism and cultural knowledge""",
         "info_author": "Author",
         "info_author_project": "LISBOA: Lisbon Itinerary System Based On AI",
         "info_author_role": "Master's Student",
@@ -259,10 +278,6 @@ TRANSLATIONS = {
         "info_author_year": "Academic year 2025/2026",
         "info_author_github": "GitHub",
         "info_author_linkedin": "LinkedIn",
-        "info_author_text": """**André Filipe Gomes Silvestre**
-Master's Student in Data Science and Advanced Analytics
-NOVA IMS - Universidade NOVA de Lisboa
-2025/2026""",
         "discover_eyebrow": "New here?",
         "discover_title": "Discover how LISBOA works",
         "discover_subtitle": "A multi-agent system grounding live transport, weather, events and tourism data into feasible itineraries for Lisbon.",
@@ -336,43 +351,43 @@ NOVA IMS - Universidade NOVA de Lisboa
         "thinking": "A processar dados urbanos...",
         "footer_version": "LISBOA | Assistente IA",
         "footer_made": "André Filipe Gomes Silvestre • NOVA IMS",
-        "info_title": "Sobre o LISBOA",
-        "info_subtitle": "Um Assistente Multi-Agente para Lisboa",
-        "info_intro": "Um assistente centrado em Lisboa que integra dados urbanos, mobilidade em tempo real, meteorologia e conhecimento local para responder com contexto e utilidade.",
+        "info_title": "LISBOA",
+        "info_subtitle": "Lisbon Itinerary System Based On AI",
+        "info_intro": "Um protótipo académico multi-agente que ajuda a fazer perguntas fundamentadas sobre turismo, mobilidade, meteorologia, serviços locais e roteiros em Lisboa.",
         "info_badge": "Projeto de Tese de Mestrado",
         "info_stat_agents_value": "6",
         "info_stat_agents_label": "Agentes Coordenados",
         "info_stat_tools_value": "45",
         "info_stat_tools_label": "Ferramentas Especializadas",
-        "info_stat_scope_value": "2",
-        "info_stat_scope_label": "Contextos Urbanos",
+        "info_stat_scope_value": "PT/EN",
+        "info_stat_scope_label": "Interface Bilingue",
         "info_f1_title": "Turismo e Cultura",
-        "info_f1_desc": "Atrações, eventos, pontos de interesse e contexto local ancorados no VisitLisboa e em dados municipais.",
+        "info_f1_desc": "Atrações, monumentos, eventos, bairros, restaurantes e contexto local ancorados em fontes centradas em Lisboa.",
         "info_f2_title": "Mobilidade",
-        "info_f2_desc": "Apoio a percursos com Metro, Carris Urban, Carris Metropolitana, CP e lógica multimodal.",
+        "info_f2_desc": "Apoio a deslocações em Metro, Carris Urban, Carris Metropolitana, CP e lógica multimodal.",
         "info_f3_title": "Meteorologia",
-        "info_f3_desc": "Previsões IPMA, classes meteorológicas e avisos usados para adaptar recomendações ao dia.",
-        "info_f4_title": "Serviços Essenciais",
-        "info_f4_desc": "Serviços próximos, farmácias, hospitais e informação municipal prática.",
+        "info_f3_desc": "Previsões e avisos do IPMA usados para adaptar visitas, roupa recomendada e planos do dia.",
+        "info_f4_title": "Planos e Serviços",
+        "info_f4_desc": "Roteiros, serviços próximos, informação municipal útil e apoio prático específico de Lisboa.",
         "info_architecture_title": "Arquitetura do Sistema",
-        "info_architecture_desc": "Uma arquitetura *supervisor-worker* encaminha cada pedido para agentes especializados, valida o resultado e usa síntese de itinerários apenas quando o planeamento é necessário.",
-        "info_flow_title": "Dos dados urbanos à resposta útil",
+        "info_architecture_desc": "Uma arquitetura *supervisor-worker* encaminha cada pedido, recolhe evidência com ferramentas especializadas, valida a resposta e só sintetiza itinerários quando há planeamento.",
+        "info_flow_title": "Como o LISBOA produz uma resposta",
         "info_flow_1_title": "Fontes de Dados",
-        "info_flow_1_desc": "VisitLisboa, IPMA, Lisboa Aberta e feeds de transporte mantêm o assistente ancorado em evidência local.",
+        "info_flow_1_desc": "Fontes de turismo, meteorologia, transportes, dados abertos e conhecimento local fornecem a base factual.",
         "info_flow_2_title": "Ferramentas e Contexto",
-        "info_flow_2_desc": "A recuperação de conhecimento, a pesquisa em dados abertos, a meteorologia e a mobilidade transformam fontes brutas em contexto verificável.",
+        "info_flow_2_desc": "Retrieval, pesquisa geoespacial, meteorologia e mobilidade transformam dados de origem em contexto utilizável.",
         "info_flow_3_title": "Coordenação por Agentes",
-        "info_flow_3_desc": "O supervisor encaminha o pedido para agentes de meteorologia, transporte e investigação antes da validação de qualidade.",
+        "info_flow_3_desc": "O supervisor escolhe os agentes certos e preserva o contexto da conversa em perguntas de seguimento.",
         "info_flow_4_title": "Resposta Final",
-        "info_flow_4_desc": "A interface apresenta o formato mais adequado ao pedido, desde passos de percurso até itinerários completos.",
+        "info_flow_4_desc": "A camada de qualidade verifica completude, fontes, âmbito e formatação antes de mostrar a resposta.",
         "info_audience_title": "Pensado para Turistas e Residentes",
-        "info_audience_desc": "A mesma pipeline serve dois contextos urbanos; muda a evidência que prioriza e o formato de resposta que entrega.",
+        "info_audience_desc": "O mesmo sistema apoia planeamento turístico e decisões urbanas do dia a dia; muda a evidência que prioriza e o formato de resposta que produz.",
         "info_tourists_title": "Turistas",
-        "info_tourists_desc": "Prioriza sequência de visita, contexto cultural, compromissos com a meteorologia e deslocações entre pontos de interesse.",
+        "info_tourists_desc": "Útil para descobrir monumentos, eventos, bairros, restaurantes e roteiros adaptados ao tempo.",
         "info_residents_title": "Residentes",
-        "info_residents_desc": "Prioriza proximidade de serviços, perturbações de mobilidade, contexto municipal e decisões práticas do dia a dia.",
+        "info_residents_desc": "Útil para mobilidade, serviços próximos, eventos locais, informação municipal e decisões práticas.",
         "info_framework_title": "Mapa Técnico",
-        "info_framework_desc": "O diagrama apresenta as fontes de dados implementadas, a camada de ferramentas, a orquestração por agentes, a interface e a avaliação.",
+        "info_framework_desc": "O diagrama resume as fontes de dados implementadas, a camada de ferramentas, a orquestração por agentes, a interface e a avaliação.",
         "info_source_visitlisboa_desc": "Turismo, eventos e conhecimento cultural",
         "info_source_ipma_desc": "Previsões e avisos meteorológicos oficiais",
         "info_source_metro_desc": "Estado do serviço e informação operacional do Metro",
@@ -386,16 +401,35 @@ NOVA IMS - Universidade NOVA de Lisboa
         "feat_cultura": "🎭 Cultura",
         "feat_mapa": "📍 Locais",
         "feat_roteiros": "🗺️ Roteiros",
-        "info_objective": "Capacidades do Sistema",
-        "info_objective_text": "LISBOA (Lisbon Itinerary System Based On AI) é um protótipo centrado em Lisboa para apoio personalizado ao turismo e à mobilidade urbana. Integra dados de transporte, meteorologia, turismo e serviços municipais, mantendo separadas as etapas de planeamento, pesquisa, validação e síntese final.",
+        "info_scope_title": "Âmbito e Limites",
+        "info_scope_items": [
+            "Está preparado para perguntas dentro de Lisboa ou da Área Metropolitana de Lisboa com as fontes de dados integradas.",
+            "Os detalhes em tempo real dependem da disponibilidade e atualização das fontes públicas ligadas ao sistema.",
+            "Não substitui operadores oficiais, serviços de emergência, plataformas de reserva ou sistemas de pagamento.",
+            "Quando o pedido sai do âmbito suportado ou exige informação que o sistema não consegue verificar, o LISBOA deve explicitar a limitação e orientar para uma alternativa mais segura.",
+        ],
+        "info_examples_title": "O Que Pode Perguntar",
+        "info_examples_desc": "Estes exemplos seguem as tarefas do estudo com utilizadores e mostram o âmbito previsto do protótipo.",
+        "info_example_weather_title": "Perguntas Meteorológicas",
+        "info_example_weather_items": [
+            "Como está o tempo hoje em Lisboa? Devo levar casaco?",
+            "Qual é a previsão do tempo para os próximos 3 dias em Lisboa?",
+        ],
+        "info_example_mobility_title": "Perguntas de Mobilidade",
+        "info_example_mobility_items": [
+            "Como vou do Rossio a Belém de transporte público?",
+            "Qual é o próximo comboio de Entrecampos para Sete-Rios?",
+        ],
+        "info_example_tourism_title": "Turismo e Informação Local",
+        "info_example_tourism_items": [
+            "Quais são três monumentos conhecidos em Belém?",
+            "Há alguma farmácia perto do Rossio?",
+        ],
+        "info_example_plan_title": "Planeamento de Roteiros",
+        "info_example_plan_items": [
+            "Planeia uma tarde em Belém a partir do Chiado, com contexto histórico, transporte público realista e uma paragem para pastel de nata.",
+        ],
         "info_data_sources": "Fontes Integradas",
-        "info_data_sources_text": """- **API IPMA** - Previsões e avisos meteorológicos oficiais
-    - **Metro de Lisboa** - Estado das linhas e, quando configurado, endpoints oficiais em tempo real
-    - **Carris Urban** - Autocarros e elétricos de Lisboa
-    - **Carris Metropolitana** - Rede metropolitana de autocarros
-    - **CP (Comboios de Portugal)** - Estações e dados de serviço ferroviário
-    - **Lisboa Aberta** - Serviços e dados municipais abertos
-    - **VisitLisboa** - Conhecimento turístico e cultural""",
         "info_author": "Autor",
         "info_author_project": "LISBOA: Lisbon Itinerary System Based On AI",
         "info_author_role": "Mestrando",
@@ -404,10 +438,6 @@ NOVA IMS - Universidade NOVA de Lisboa
         "info_author_year": "Ano letivo 2025/2026",
         "info_author_github": "GitHub",
         "info_author_linkedin": "LinkedIn",
-        "info_author_text": """**André Filipe Gomes Silvestre**
-Mestrando em Data Science e Advanced Analytics
-NOVA IMS - Universidade NOVA de Lisboa
-2025/2026""",
         "discover_eyebrow": "Primeira visita?",
         "discover_title": "Descubra como o LISBOA funciona",
         "discover_subtitle": "Um sistema multi-agente que combina dados ao vivo de transportes, meteorologia, eventos e turismo em roteiros viáveis para Lisboa.",
@@ -419,6 +449,19 @@ NOVA IMS - Universidade NOVA de Lisboa
 def t(key: str) -> str:
     lang = st.session_state.get("language", "pt")
     return TRANSLATIONS.get(lang, TRANSLATIONS["en"]).get(key, key)
+
+
+def t_list(key: str) -> list[str]:
+    """Return a translated list value for structured UI sections."""
+    lang = st.session_state.get("language", "pt")
+    value = TRANSLATIONS.get(lang, TRANSLATIONS["en"]).get(key, [])
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    if isinstance(value, tuple):
+        return [str(item) for item in value]
+    if value:
+        return [str(value)]
+    return []
 
 
 def md_to_html(text: str) -> str:
@@ -452,13 +495,40 @@ def build_info_feature_card_html(
     )
 
 
-def build_info_detail_card_html(icon: str, title: str, body: str, tone: str) -> str:
+def build_info_detail_card_html(
+    icon: str,
+    title: str,
+    body: str,
+    tone: str,
+    extra_class: str = "",
+) -> str:
     """Build a detail card used on the Info page."""
     safe_tone = re.sub(r"[^a-z0-9_-]", "", tone.lower()) or "red"
+    safe_extra = re.sub(r"[^a-z0-9_ -]", "", extra_class).strip()
+    extra = f" {safe_extra}" if safe_extra else ""
     return (
-        f'<article class="info-detail-card info-detail-{safe_tone}">'
+        f'<article class="info-detail-card info-detail-{safe_tone}{extra}">'
         f'<div class="info-detail-title">{html.escape(icon)} <span>{html.escape(title)}</span></div>'
         f'<div class="info-detail-body">{body}</div>'
+        '</article>'
+    )
+
+
+def build_info_list_html(items: list[str]) -> str:
+    """Build a safe HTML list for Info page detail blocks."""
+    if not items:
+        return ""
+    return "<ul>" + "".join(f"<li>{html.escape(item)}</li>" for item in items) + "</ul>"
+
+
+def build_info_example_card_html(icon: str, title: str, examples: list[str], tone: str) -> str:
+    """Build a prompt-example card used on the Info page."""
+    safe_tone = re.sub(r"[^a-z0-9_-]", "", tone.lower()) or "red"
+    prompt_items = "".join(f"<li>{html.escape(example)}</li>" for example in examples)
+    return (
+        f'<article class="info-example-card info-example-{safe_tone}">'
+        f'<div class="info-example-title">{html.escape(icon)} <span>{html.escape(title)}</span></div>'
+        f'<ul>{prompt_items}</ul>'
         '</article>'
     )
 
@@ -568,7 +638,7 @@ CSS = f"""
     --text-main: #2b2b2b;
     --text-muted: #5e5e5e;
     --shadow-sm: 0 10px 28px rgba(15, 23, 42, 0.07);
-    --shadow-md: 0 18px 44px rgba(255, 64, 17, 0.16);
+    --shadow-md: 0 18px 44px rgba(148, 148, 148, 0.16);
 }}
 
 /* Base Fonts */
@@ -1147,7 +1217,7 @@ st.set_page_config(
     page_title="LISBOA | Intelligent Tour & Urban System",
     page_icon="🏙️",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 
 
@@ -1266,6 +1336,17 @@ def build_sidebar_url(page: str, language: str) -> str:
     safe_page = page if page in {"chat", "info"} else "chat"
     safe_language = language if language in LANGUAGE_OPTIONS else "pt"
     return f"?page={safe_page}&lang={safe_language}"
+
+
+def set_navigation_query_params(page: str) -> None:
+    """Navigate between app pages while preserving the selected UI language."""
+    safe_page = page if page in {"chat", "info"} else "chat"
+    language = st.session_state.get("language", "pt")
+    safe_language = language if language in LANGUAGE_OPTIONS else "pt"
+    st.session_state.current_page = safe_page
+    st.session_state.language = safe_language
+    st.query_params["page"] = safe_page
+    st.query_params["lang"] = safe_language
 
 
 def render_language_selector(request_locked: bool) -> None:
@@ -1689,8 +1770,7 @@ def build_sidebar():
             type="primary" if st.session_state.current_page == "chat" else "secondary",
             disabled=request_locked,
         ):
-            st.session_state.current_page = "chat"
-            st.query_params["page"] = "chat"
+            set_navigation_query_params("chat")
             st.rerun()
         if col2.button(
             "ℹ️ Info",
@@ -1698,8 +1778,7 @@ def build_sidebar():
             type="primary" if st.session_state.current_page == "info" else "secondary",
             disabled=request_locked,
         ):
-            st.session_state.current_page = "info"
-            st.query_params["page"] = "info"
+            set_navigation_query_params("info")
             st.rerun()
 
         st.divider()
@@ -1949,6 +2028,10 @@ def build_sidebar():
 
 
 def build_welcome():
+    info_href = html.escape(
+        build_sidebar_url("info", st.session_state.get("language", "pt")),
+        quote=True,
+    )
     st.markdown(
         f"<h2 style='text-align: center; margin-bottom: 10px;'>{t('welcome_title')}</h2>",
         unsafe_allow_html=True,
@@ -1966,7 +2049,7 @@ def build_welcome():
                 <h3>{t('discover_title')}</h3>
                 <p>{t('discover_subtitle')}</p>
             </div>
-            <a class="welcome-discover-cta" href="?page=info" target="_self" rel="noopener">
+            <a class="welcome-discover-cta" href="{info_href}" target="_self" rel="noopener">
                 <span>ℹ️ {t('discover_cta')}</span>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <line x1="5" y1="12" x2="19" y2="12"/>
@@ -2576,11 +2659,16 @@ def run_info_page() -> None:
 
         .info-section-heading p,
         .info-system-desc {
-            max-width: 780px;
+            max-width: 980px;
             margin: 0.45rem 0 0 0;
             color: #526273;
             font-size: 0.98rem;
             line-height: 1.65;
+        }
+
+        .info-framework-section .info-section-heading p,
+        .info-audience-section .info-section-heading p {
+            max-width: min(1120px, 100%);
         }
 
         .info-system-band {
@@ -2723,6 +2811,79 @@ def run_info_page() -> None:
             line-height: 1.35;
         }
 
+        .info-example-section {
+            margin: 1.5rem 0;
+            padding: clamp(1.35rem, 2.4vw, 2.15rem);
+            border-radius: 8px;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            background:
+                linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.95)),
+                linear-gradient(90deg, rgba(255, 64, 17, 0.06), rgba(55, 119, 255, 0.06));
+            box-shadow: 0 16px 40px rgba(15, 23, 42, 0.07);
+        }
+
+        .info-example-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.75rem;
+        }
+
+        .info-example-card {
+            min-height: 180px;
+            padding: 1rem;
+            border-radius: 8px;
+            background: #ffffff;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.055);
+        }
+
+        .info-example-red { border-top: 4px solid var(--primary-red); }
+        .info-example-blue { border-top: 4px solid #3777ff; }
+        .info-example-yellow { border-top: 4px solid var(--primary-yellow); }
+        .info-example-green { border-top: 4px solid #0ee071; }
+
+        .info-example-title {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            margin-bottom: 0.8rem;
+            color: #111827;
+            font-size: 0.98rem;
+            font-weight: 800;
+            line-height: 1.35;
+        }
+
+        .info-example-card ul {
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .info-example-card li {
+            position: relative;
+            margin: 0 0 0.68rem 0;
+            padding-left: 1rem;
+            color: #526273;
+            font-size: 0.88rem;
+            line-height: 1.48;
+            overflow-wrap: anywhere;
+        }
+
+        .info-example-card li:last-child {
+            margin-bottom: 0;
+        }
+
+        .info-example-card li::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 0.58em;
+            width: 0.38rem;
+            height: 0.38rem;
+            border-radius: 999px;
+            background: var(--primary-red);
+        }
+
         .info-audience-grid {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2730,7 +2891,7 @@ def run_info_page() -> None:
         }
 
         .info-audience-card {
-            min-height: 190px;
+            min-height: 160px;
             padding: 1.3rem;
             border-radius: 8px;
             border: 1px solid rgba(15, 23, 42, 0.08);
@@ -2778,6 +2939,10 @@ def run_info_page() -> None:
             box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
         }
 
+        .info-detail-wide {
+            grid-column: 1 / -1;
+        }
+
         .info-detail-red { border-left: 4px solid var(--primary-red); }
         .info-detail-blue { border-left: 4px solid #3777ff; }
         .info-detail-green { border-left: 4px solid #0ee071; }
@@ -2813,12 +2978,12 @@ def run_info_page() -> None:
             gap: 1.2rem;
             align-items: center;
             padding: clamp(1.2rem, 2.4vw, 1.7rem);
-            border: 1px solid rgba(246, 218, 0, 0.3);
+            border: 1px solid rgba(177, 177, 177, 0.18);
             border-radius: 8px;
             background:
-                linear-gradient(135deg, rgba(255, 64, 17, 0.07), rgba(246, 218, 0, 0.16)),
+                linear-gradient(135deg, rgba(246, 218, 0, 0.08), rgba(255, 64, 17, 0.08), rgba(55, 119, 255, 0.08) 52%, rgba(14, 224, 113, 0.07)),
                 #ffffff;
-            box-shadow: 0 18px 42px rgba(15, 23, 42, 0.08);
+            box-shadow: 0 18px 42px rgba(22, 29, 45, 0.075);
             text-align: left;
         }
 
@@ -2853,6 +3018,14 @@ def run_info_page() -> None:
             color: #334155;
             font-size: 0.9rem;
             line-height: 1.55;
+        }
+
+        .info-author-secondary {
+            display: block;
+            margin-top: 0.08rem;
+            color: #64748b;
+            font-size: 0.8rem;
+            line-height: 1.45;
         }
 
         .info-author-links {
@@ -2909,7 +3082,8 @@ def run_info_page() -> None:
         @media (max-width: 980px) {
             .info-layer-grid,
             .info-system-band,
-            .info-flow-track {
+            .info-flow-track,
+            .info-example-grid {
                 grid-template-columns: 1fr 1fr;
             }
             .info-source-grid { grid-template-columns: 1fr 1fr; }
@@ -2930,6 +3104,7 @@ def run_info_page() -> None:
             .info-flow-track,
             .info-audience-grid,
             .info-details-grid,
+            .info-example-grid,
             .info-stat-grid {
                 grid-template-columns: 1fr;
             }
@@ -2968,6 +3143,10 @@ def run_info_page() -> None:
             .info-card {
                 min-height: auto;
             }
+
+            .info-example-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
         }
 
         @container (max-width: 700px) {
@@ -2999,6 +3178,7 @@ def run_info_page() -> None:
             .info-audience-grid,
             .info-details-grid,
             .info-source-grid,
+            .info-example-grid,
             .info-stat-grid {
                 grid-template-columns: 1fr;
             }
@@ -3008,7 +3188,8 @@ def run_info_page() -> None:
             }
 
             .info-card,
-            .info-flow-step {
+            .info-flow-step,
+            .info-example-card {
                 min-height: auto;
             }
 
@@ -3066,7 +3247,7 @@ def run_info_page() -> None:
 
     source_items = [
         ("VisitLisboa", t("info_source_visitlisboa_desc"), "https://www.visitlisboa.com/"),
-        ("IPMA", t("info_source_ipma_desc"), "https://api.ipma.pt/"),
+        ("IPMA", t("info_source_ipma_desc"), "https://ipma.pt/"),
         ("Metro", t("info_source_metro_desc"), "https://www.metrolisboa.pt/"),
         ("Carris", t("info_source_carris_desc"), "https://www.carris.pt/"),
         ("Carris Metropolitana", t("info_source_cm_desc"), "https://www.carrismetropolitana.pt/"),
@@ -3079,11 +3260,43 @@ def run_info_page() -> None:
         + "</div>"
     )
 
-    detail_cards = build_info_detail_card_html(
-        "🧩",
-        t("info_data_sources"),
-        source_links,
-        "blue",
+    example_items = [
+        ("🌦️", t("info_example_weather_title"), t_list("info_example_weather_items"), "yellow"),
+        ("🚇", t("info_example_mobility_title"), t_list("info_example_mobility_items"), "blue"),
+        ("🏛️", t("info_example_tourism_title"), t_list("info_example_tourism_items"), "red"),
+        ("🗺️", t("info_example_plan_title"), t_list("info_example_plan_items"), "green"),
+    ]
+    example_cards = "".join(
+        build_info_example_card_html(icon, title, examples, tone)
+        for icon, title, examples, tone in example_items
+    )
+    examples_markup = (
+        '<section class="info-example-section">'
+        '<div class="info-section-heading">'
+        '<div>'
+        f'<h3>💬 {html.escape(t("info_examples_title"))}</h3>'
+        f'<p>{html.escape(t("info_examples_desc"))}</p>'
+        '</div>'
+        '</div>'
+        f'<div class="info-example-grid">{example_cards}</div>'
+        '</section>'
+    )
+
+    detail_cards = (
+        build_info_detail_card_html(
+            "🧩",
+            t("info_data_sources"),
+            source_links,
+            "blue",
+            "info-detail-wide",
+        )
+        + build_info_detail_card_html(
+            "🧭",
+            t("info_scope_title"),
+            build_info_list_html(t_list("info_scope_items")),
+            "yellow",
+            "info-detail-wide",
+        )
     )
 
     framework_markup = ""
@@ -3136,6 +3349,7 @@ def run_info_page() -> None:
         '</div>'
         '</section>'
         f'<div class="info-layer-grid">{feature_cards}</div>'
+        f'{examples_markup}'
         '<section class="info-system-band">'
         '<div class="info-system-copy">'
         f'<span class="info-system-badge">⚙️ {html.escape(t("info_architecture_title"))}</span>'
@@ -3153,8 +3367,9 @@ def run_info_page() -> None:
         '<h3 class="info-author-name">André Filipe Gomes Silvestre</h3>'
         f'<p class="info-author-project">{html.escape(t("info_author_project"))}</p>'
         f'<p class="info-author-meta"><strong>{html.escape(t("info_author_role"))}</strong> · '
-        f'{html.escape(t("info_author_degree"))}<br>{html.escape(t("info_author_affiliation"))}<br>'
-        f'{html.escape(t("info_author_year"))}</p>'
+        f'{html.escape(t("info_author_degree"))}'
+        f'<span class="info-author-secondary">{html.escape(t("info_author_affiliation"))}</span>'
+        f'<span class="info-author-secondary">{html.escape(t("info_author_year"))}</span></p>'
         '</div>'
         '<div class="info-author-links">'
         f'<a class="info-author-link info-author-link-github" href="https://github.com/Silvestre17" target="_blank" rel="noopener noreferrer"><span>{html.escape(t("info_author_github"))}</span></a>'
@@ -3171,8 +3386,7 @@ def run_info_page() -> None:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         if st.button(f"💬 {back_text}", type="primary", use_container_width=True):
-            st.session_state.current_page = "chat"
-            st.query_params["page"] = "chat"
+            set_navigation_query_params("chat")
             st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
