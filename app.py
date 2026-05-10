@@ -3043,7 +3043,7 @@ def run_info_page() -> None:
             min-height: 44px;
             padding: 0.62rem 0.86rem;
             border-radius: 8px;
-            border: 1px solid rgba(255, 64, 17, 0.18);
+            border: 1px solid rgba(55, 119, 255, 0.18);
             background: rgba(255, 255, 255, 0.86);
             color: #111827;
             font-size: 0.9rem;
@@ -3054,7 +3054,7 @@ def run_info_page() -> None:
 
         .info-author-link:hover {
             transform: translateY(-2px);
-            border-color: rgba(255, 64, 17, 0.24);
+            border-color: rgba(55, 119, 255, 0.24);
             box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
             color: #111827;
         }
