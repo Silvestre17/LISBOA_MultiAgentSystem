@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 
 def _count_sqlite_rows(db_path: str, table_name: str) -> int:
@@ -203,21 +203,6 @@ def pre_warm_vector_store() -> bool:
         return True
     except Exception:
         return False
-
-
-def prepare_transport_database() -> Tuple[bool, str]:
-    """Prepare the Carris Urban support database used by runtime tools."""
-    try:
-        carris_detail = _check_carris_urban_readiness()
-        if not carris_detail["ok"]:
-            return False, str(carris_detail["message"])
-
-        from tools.carris_api import CARRIS_DB_PATH
-
-        db_size_mb = os.path.getsize(CARRIS_DB_PATH) / (1024 * 1024)
-        return True, f"Base de dados pronta ({db_size_mb:.0f} MB, {carris_detail['stops']} paragens)"
-    except Exception:
-        return False, "Não foi possível preparar a base de dados de transportes"
 
 
 def pre_warm_transport_networks() -> Dict[str, Any]:

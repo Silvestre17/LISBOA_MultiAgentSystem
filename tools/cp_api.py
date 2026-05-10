@@ -1167,43 +1167,6 @@ def search_cp_station(query: str) -> List[Dict[str, Any]]:
 # ==========================================================================
 
 
-def get_gtfs_stops_in_aml() -> List[Dict[str, Any]]:
-    """
-    Gets all GTFS stops within the AML region.
-
-    Returns:
-        List of stops with id, name, lat, lon.
-    """
-    manager = get_gtfs_manager()
-    conn = manager.get_db_connection()
-
-    if not conn:
-        return []
-
-    try:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT stop_id, stop_name, stop_lat, stop_lon, stop_code
-            FROM stops
-            WHERE stop_lat BETWEEN ? AND ?
-            AND stop_lon BETWEEN ? AND ?
-            AND location_type = 0
-            ORDER BY stop_name
-        """, (
-            AML_BOUNDS['lat_min'], AML_BOUNDS['lat_max'],
-            AML_BOUNDS['lon_min'], AML_BOUNDS['lon_max']
-        ))
-
-        stops = [dict(row) for row in cursor.fetchall()]
-        conn.close()
-        return stops
-
-    except sqlite3.Error as e:
-        logger.error(f"Error querying GTFS stops: {e}")
-        conn.close()
-        return []
-
-
 def get_gtfs_routes() -> List[Dict[str, Any]]:
     """
     Gets all GTFS routes.
@@ -1312,43 +1275,6 @@ def get_stop_departures(
 
     except sqlite3.Error as e:
         logger.error(f"Error querying departures: {e}")
-        conn.close()
-        return []
-
-
-def get_trip_stops(trip_id: str) -> List[Dict[str, Any]]:
-    """
-    Gets all stops for a trip in order.
-
-    Args:
-        trip_id: GTFS trip ID.
-
-    Returns:
-        List of stops with times and sequence.
-    """
-    manager = get_gtfs_manager()
-    conn = manager.get_db_connection()
-
-    if not conn:
-        return []
-
-    try:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT st.stop_sequence, st.arrival_time, st.departure_time,
-                   s.stop_id, s.stop_name, s.stop_lat, s.stop_lon
-            FROM stop_times st
-            JOIN stops s ON st.stop_id = s.stop_id
-            WHERE st.trip_id = ?
-            ORDER BY st.stop_sequence
-        """, (trip_id,))
-
-        stops = [dict(row) for row in cursor.fetchall()]
-        conn.close()
-        return stops
-
-    except sqlite3.Error as e:
-        logger.error(f"Error querying trip stops: {e}")
         conn.close()
         return []
 
