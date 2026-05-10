@@ -1,4 +1,4 @@
-# ==========================================================================
+﻿# ==========================================================================
 # Master Thesis - Web Knowledge Tool
 #   - André Filipe Gomes Silvestre, 20240502
 #
@@ -20,6 +20,7 @@ import warnings
 from datetime import datetime
 from typing import Optional
 from urllib.parse import quote, urlparse
+import sys
 
 import requests
 import wikipedia
@@ -32,6 +33,10 @@ try:
     from langchain_core._api.deprecation import LangChainDeprecationWarning
 except Exception:  # pragma: no cover - compatibility with older LangChain builds
     LangChainDeprecationWarning = Warning
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -71,6 +76,39 @@ LIVE_INFO_HINTS = {
     "fechada",
     "atraso",
     "atrasos",
+}
+LIVE_FALLBACK_DOMAINS = (
+    "metrolisboa.pt",
+    "carris.pt",
+    "carrismetropolitana.pt",
+    "cp.pt",
+    "ipma.pt",
+    "lisboa.pt",
+    "cm-lisboa.pt",
+    "visitlisboa.com",
+)
+LIVE_OPERATOR_DOMAIN_HINTS = {
+    ("metro", "metropolitano", "metrolisboa", "metropolitano lisbon", "metro lisbo"): (
+        "metrolisboa.pt",
+        "cm-lisboa.pt",
+    ),
+    ("carris", "eléctrico", "eletrico", "tram", "autocarro", "carris urban"): (
+        "carris.pt",
+        "carrismetropolitana.pt",
+        "lisboa.pt",
+    ),
+    ("carrimetropolitana", "carrismetropolitana", "carris metropolitana"): (
+        "carrismetropolitana.pt",
+        "carris.pt",
+        "lisboa.pt",
+    ),
+    ("comboio", "cp", "sintra", "cascais", "azambuja"): (
+        "cp.pt",
+        "lisboa.pt",
+    ),
+    ("clima", "tempo", "meteo", "temperatura", "chuva"): (
+        "ipma.pt",
+    ),
 }
 AUTHORITATIVE_DOMAINS = (
     "wikipedia.org",
@@ -126,6 +164,70 @@ def _is_live_info_query(query: str) -> bool:
     return any(hint in query_lower for hint in LIVE_INFO_HINTS)
 
 
+def _dedupe_preserve_order(items: list[str]) -> list[str]:
+    """Return list items in original order while removing duplicates."""
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        ordered.append(item)
+    return ordered
+
+
+def _get_live_priority_domains(query: str) -> list[str]:
+    """Build a prioritized list of official domains for live queries."""
+    query_lower = (query or "").lower()
+    domains: list[str] = []
+
+    for keywords, mapped_domains in LIVE_OPERATOR_DOMAIN_HINTS.items():
+        if any(keyword in query_lower for keyword in keywords):
+            domains.extend(mapped_domains)
+
+    if not domains:
+        domains.extend(LIVE_FALLBACK_DOMAINS)
+
+    return _dedupe_preserve_order(domains)
+
+
+def _build_live_domain_queries(query: str) -> list[str]:
+    """Build a list of live-focused, domain-scoped search queries."""
+    normalized = query or ""
+    base_query = normalized
+    if "lisboa" not in normalized.lower() and "portugal" not in normalized.lower():
+        base_query = f"{normalized} Lisboa Portugal"
+
+    queries = [base_query]
+    for domain in _get_live_priority_domains(normalized):
+        queries.append(f"{base_query} site:{domain}")
+    return _dedupe_preserve_order(queries)
+
+
+def _build_no_live_data_message(language: str = "pt", query: str = "") -> str:
+    """Build a strict no-result response for current/live queries."""
+    if language == "en":
+        return (
+            f"⚠️ I could not find a reliable current-time source for: '{query}'."
+            " For live disruptions, delays, and operational changes, verify on official channels before acting."
+            "\n- Metro Lisboa: https://www.metrolisboa.pt/\n"
+            "- Carris: https://www.carris.pt/\n"
+            "- Carris Metropolitana: https://www.carrismetropolitana.pt/\n"
+            "- CP: https://www.cp.pt/\n"
+            "- IPMA: https://www.ipma.pt/"
+        )
+
+    return (
+        f"⚠️ Não consegui confirmar uma fonte de referência recente para: '{query}'."
+        " Para questões em tempo real (greves, atrasos, cortes de serviço), confirma a informação em canais oficiais antes de agir."
+        "\n- Metro Lisboa: https://www.metrolisboa.pt/\n"
+        "- Carris: https://www.carris.pt/\n"
+        "- Carris Metropolitana: https://www.carrismetropolitana.pt/\n"
+        "- CP: https://www.cp.pt/\n"
+        "- IPMA: https://www.ipma.pt/"
+    )
+
+
 def _extract_result_datetime(text: str = "", url: str = "") -> Optional[datetime]:
     """Extracts a publication-like date from a snippet or URL when available."""
     haystacks = [text or "", url or ""]
@@ -168,6 +270,17 @@ def _extract_result_datetime(text: str = "", url: str = "") -> Optional[datetime
                     pass
 
     return None
+
+
+def _has_recent_live_datetime_in_text(text: str = "") -> bool:
+    """Check whether the text contains at least one recent date for live queries."""
+    haystacks = [(text or "").replace(";", ".").split("\n")]
+    for fragment_group in haystacks:
+        for fragment in fragment_group:
+            result_date = _extract_result_datetime(fragment)
+            if result_date and _is_recent_live_result(result_date):
+                return True
+    return False
 
 
 def _is_recent_live_result(result_date: Optional[datetime]) -> bool:
@@ -222,7 +335,11 @@ def _get_live_result_notice(language: str = "pt") -> str:
     )
 
 
-def _search_tavily(query: str, language: str = "pt", live_query: bool = False) -> Optional[str]:
+def _search_tavily(
+    query: str,
+    language: str = "pt",
+    live_query: bool = False,
+) -> tuple[Optional[str], bool]:
     """
     Execute search using Tavily API.
     Returns comprehensive results without truncation.
@@ -231,12 +348,12 @@ def _search_tavily(query: str, language: str = "pt", live_query: bool = False) -
         query (str): The topic to search (e.g., "História do Castelo de São Jorge").
 
     Returns:
-        str: Comprehensive search results from the best available source.
+        tuple[Optional[str], bool]: (search text, has_recent_live_signal).
     """
     api_key = os.getenv("TAVILY_API_KEY")
     if not api_key:
         logger.debug("Tavily API key not found. Skipping.")
-        return None
+        return None, False
 
     try:
         # Initialize Tavily with more results (5-10 represents a good comprehensive set)
@@ -250,7 +367,7 @@ def _search_tavily(query: str, language: str = "pt", live_query: bool = False) -
         results = tavily_tool.invoke({"query": query})
 
         if not results:
-            return None
+            return None, False
 
         enriched_results = []
         for res in results:
@@ -288,12 +405,10 @@ def _search_tavily(query: str, language: str = "pt", live_query: bool = False) -
             ),
         )
 
-        recent_authoritative_found = any(
-            res["_is_authoritative"] and res["_is_recent"] for res in sorted_results
-        )
+        has_recent_live_signal = any(res["_is_recent"] for res in sorted_results)
 
         output = [f"🌐 **Resultados Tavily Search para '{query}':**"]
-        if live_query and not recent_authoritative_found:
+        if live_query and not has_recent_live_signal:
             if language == "en":
                 output.append(
                     "⚠️ No recent dated official result was found in the retrieved web results. Treat older notices as historical context, not confirmation that a disruption is active right now."
@@ -319,14 +434,14 @@ def _search_tavily(query: str, language: str = "pt", live_query: bool = False) -
             # Append full content without truncation
             output.append(f"\n### {source_badge} [{domain}]({url})\n{content}")
 
-        return "\n".join(output)
+        return "\n".join(output), has_recent_live_signal
 
     except Exception as e:
         logger.error(f"Tavily search failed: {e}")
-        return None
+        return None, False
 
 
-def _search_duckduckgo(query: str) -> Optional[str]:
+def _search_duckduckgo(query: str, live_query: bool = False) -> tuple[Optional[str], bool]:
     """
     Execute search using DuckDuckGo.
     Free fallback using the HTML backend for robustness.
@@ -335,7 +450,7 @@ def _search_duckduckgo(query: str) -> Optional[str]:
         query (str): The topic to search (e.g., "História do Castelo de São Jorge").
 
     Returns:
-        str: Comprehensive search results from the best available source.
+        tuple[Optional[str], bool]: (search text, has_recent_live_signal).
     """
     try:
         # standardizing usage via wrapper for clarity/control
@@ -345,15 +460,24 @@ def _search_duckduckgo(query: str) -> Optional[str]:
         result = ddg_tool.invoke(query)
 
         if not result:
-            return None
+            return None, False
+
+        result_text = f"[Resultados DuckDuckGo para '{query}']\n\n{result}"
+        if not live_query:
+            return result_text, False
+
+        has_recent_live_signal = _has_recent_live_datetime_in_text(result_text)
+        if not has_recent_live_signal:
+            logger.info("DuckDuckGo live query did not return a recent dated signal: %s", query)
+            return None, False
 
         # DuckDuckGo result is usually a string of snippets.
-        # We return it fully.
-        return f"🦆 **Resultados DuckDuckGo para '{query}':**\n\n{result}"
+        # We return it fully when it includes a recent/live signal.
+        return result_text, True
 
     except Exception as e:
         logger.warning(f"DuckDuckGo search failed: {e}")
-        return None
+        return None, False
 
 
 def _search_wikipedia(query: str, language: str = "pt") -> Optional[str]:
@@ -452,10 +576,9 @@ def search_history_culture(query: str, language: str = "pt") -> str:
     """
     Search the web for historical facts, cultural context, and live information.
 
-    Uses a waterfall strategy to ensure the best possible result:
-    1. **Tavily Search** (Best for AI, high quality, requires Key).
-    2. **DuckDuckGo** (Broad fallback).
-    3. **Wikipedia** (Encyclopedia fallback).
+    Uses a quality-first strategy:
+    - background/cultural queries -> Wikipedia -> Tavily -> DuckDuckGo
+    - live queries -> Tavily (freshness-aware) -> scoped live DuckDuckGo -> official source guidance.
 
     Args:
         query (str): The topic to search (e.g., "História do Castelo de São Jorge").
@@ -480,19 +603,44 @@ def search_history_culture(query: str, language: str = "pt") -> str:
             return result
 
     # Tavily remains the best general web option for current/live information.
-    result = _search_tavily(search_query, language=language, live_query=live_query)
-    if result:
+    result, has_live_signal = _search_tavily(search_query, language=language, live_query=live_query)
+    if result and (not live_query or has_live_signal):
         if live_query:
             return f"{result}\n\n{_get_live_result_notice(language)}"
         return result
 
+    if live_query and not has_live_signal:
+        logger.info(f"Attempting live domain-scoped fallback for query: {query}")
+        for scoped_query in _build_live_domain_queries(query):
+            if scoped_query == search_query:
+                continue
+            result, has_scoped_live_signal = _search_tavily(
+                scoped_query,
+                language=language,
+                live_query=live_query,
+            )
+            if result and has_scoped_live_signal:
+                return f"{result}\n\n{_get_live_result_notice(language)}"
+
     # Broad web search is kept as a fallback, but should be treated carefully.
-    logger.info(f"Falling back to DuckDuckGo for query: {query}")
-    result = _search_duckduckgo(search_query)
-    if result:
-        return f"{result}\n\n{_get_low_confidence_notice(language)}"
+    if live_query:
+        logger.info(f"Attempting DuckDuckGo fallback for live query: {query}")
+        for scoped_query in _build_live_domain_queries(query):
+            result, has_scoped_live_signal = _search_duckduckgo(scoped_query, live_query=True)
+            if result and has_scoped_live_signal:
+                return f"{result}\n\n{_get_low_confidence_notice(language)}"
+            logger.debug("Ignoring DuckDuckGo live result without recent signal: %s", scoped_query)
+    else:
+        logger.info(f"Falling back to DuckDuckGo for query: {query}")
+        result, _ = _search_duckduckgo(search_query, live_query=False)
+        if result:
+            return f"{result}\n\n{_get_low_confidence_notice(language)}"
 
     # Final encyclopedia fallback for live-style queries when web search fails.
+    if live_query:
+        logger.info(f"No reliable live web source found for query: {query}")
+        return _build_no_live_data_message(language=language, query=query)
+
     logger.info(f"Falling back to Wikipedia for query: {query}")
     result = _search_wikipedia_with_fallback(query, language)
     if result:
@@ -511,7 +659,7 @@ if __name__ == "__main__":
     print("\033[1m" + "=" * 60 + "\033[0m")
 
     test_queries = [
-        ("História do Castelo de São Jorge", "pt"),
+        ("Castelo de São Jorge", "pt"),
         ("Greve Metro Lisboa", "pt"),
         ("What is happening with Lisbon metro service today?", "en"),
         ("History of Belém Tower", "en"),

@@ -358,6 +358,40 @@ def _extract_metro_line_id(query: str) -> Optional[str]:
     return None
 
 
+def _metro_line_emoji(line_id: str) -> str:
+    """Returns the official color emoji for a Metro de Lisboa line."""
+    return {
+        "amarela": "🟡",
+        "azul": "🔵",
+        "verde": "🟢",
+        "vermelha": "🔴",
+    }.get(line_id, "🚇")
+
+
+def _query_requests_metro_line_wait_times(query: str) -> bool:
+    """Detects whole-line or all-station Metro wait-time questions."""
+    line_id = _extract_metro_line_id(query)
+    if not line_id:
+        return False
+
+    normalized = _normalize_token(query)
+    has_wait_intent = bool(
+        re.search(
+            r"\b(?:wait(?:ing)?\s+times?|tempo(?:s)?\s+de\s+espera|proximos?\s+metros?|next\s+metros?|next\s+trains?)\b",
+            normalized,
+        )
+        or re.search(r"\bespera\b", normalized)
+    )
+    has_line_scope = bool(
+        re.search(
+            r"\b(?:toda\s+a\s+linha|linha\s+toda|em\s+toda\s+a\s+linha|todas?\s+as\s+estacoes|all\s+stations|entire\s+line|whole\s+line|across)\b",
+            normalized,
+        )
+        or re.search(r"\b(?:linha|line)\b", normalized)
+    )
+    return has_wait_intent and has_line_scope
+
+
 def _build_metro_tool_spec(user_message: str) -> Optional[Dict[str, Any]]:
     """Maps natural-language Lisbon Metro queries to deterministic tool specs."""
     query = user_message.strip()
@@ -371,16 +405,16 @@ def _build_metro_tool_spec(user_message: str) -> Optional[Dict[str, Any]]:
     ):
         return {"name": "get_metro_status", "args": {}}
 
+    if line_id and _query_requests_metro_line_wait_times(query):
+        return {"name": "get_metro_line_wait_times", "args": {"line": line_id}}
+
     if has_metro_context and re.search(
         r"\b(all|list|show|every|what|which|todas?|listar|quais)\b.*\b(stations|esta[cç][õo]es|estacoes)\b|\bmetro\s+(?:stations|esta[cç][õo]es|estacoes)\b|\b(stations|esta[cç][õo]es|estacoes)\b.*\bmetro\b",
         query_lower,
     ):
         return {"name": "get_all_metro_stations", "args": {}}
 
-    if line_id and re.search(
-        r"\b(wait times?|tempos? de espera|entire|whole|all stations|linha toda|toda a linha)\b",
-        query_lower,
-    ):
+    if line_id and re.search(r"\b(wait times?|entire|whole|all stations|linha toda|toda a linha)\b", query_lower):
         return {"name": "get_metro_line_wait_times", "args": {"line": line_id}}
 
     if line_id and re.search(
@@ -576,12 +610,13 @@ def _query_has_wait_departure_intent(query: str) -> bool:
     """Returns whether the query asks for next departures, arrivals, wait times, or ETAs."""
     patterns = [
         r"\bnext\b",
-        r"\bwait time\b",
+        r"\bwait(?:ing)? times?\b",
         r"\bwhen is the next\b",
         r"\bdeparture(?:s)?\b",
         r"\barrival(?:s)?\b",
         r"\beta\b",
         r"\bpr[oó]xim[oa]s?\b",
+        r"\btempos?\s+de\s+espera\b",
         r"\bchegada(?:s)?\b",
         r"\bpartida(?:s)?\b",
         r"\bquando passa\b",
@@ -611,6 +646,217 @@ def _parse_metro_wait_blocks(wait_result: str) -> List[Dict[str, Any]]:
         )
 
     return blocks
+
+
+def _parse_metro_line_wait_entries(wait_result: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """Parses all-station Metro line wait snapshots from the Metro tool output."""
+    entries: List[Dict[str, Any]] = []
+    current_entry: Optional[Dict[str, Any]] = None
+    updated_at: Optional[str] = None
+
+    for raw_line in str(wait_result or "").splitlines():
+        stripped = raw_line.strip()
+        if not stripped or set(stripped) <= {"="}:
+            continue
+
+        updated_match = re.match(r"📍\s*Updated:\s*(?P<updated>.+)$", stripped, flags=re.IGNORECASE)
+        if updated_match:
+            updated_at = updated_match.group("updated").strip()
+            current_entry = None
+            continue
+
+        station_match = re.match(r"📍\s*(?P<station>.+)$", stripped)
+        if station_match:
+            current_entry = {
+                "station": _display_metro_line_station_name(station_match.group("station").strip()),
+                "directions": [],
+            }
+            entries.append(current_entry)
+            continue
+
+        direction_match = re.match(r"→\s*(?P<direction>.+?):\s*(?P<wait>.+)$", stripped)
+        if direction_match and current_entry is not None:
+            current_entry["directions"].append(
+                {
+                    "direction": _display_metro_line_station_name(direction_match.group("direction").strip()),
+                    "wait": direction_match.group("wait").strip(),
+                }
+            )
+
+    return entries, updated_at
+
+
+def _format_metro_line_wait_snapshot(
+    *,
+    line_id: str,
+    wait_result: str,
+    language: str,
+) -> str:
+    """Formats a Metro whole-line wait-time snapshot with localized labels."""
+    line_name = _line_display_name(line_id, language)
+    line_emoji = _metro_line_emoji(line_id)
+    entries, updated_at = _parse_metro_line_wait_entries(wait_result)
+    title_suffix = "Tempos de Espera" if language == "pt" else "Wait Times"
+    title = f"### {line_emoji} **{line_name} - {title_suffix}**"
+
+    if not entries:
+        direct_answer = (
+            f"não consegui confirmar agora os tempos de espera em tempo real para a **{line_name}**."
+            if language == "pt"
+            else f"I could not confirm real-time wait times for the **{line_name}** right now."
+        )
+        return "\n".join([title, "", f"✅ **{'Resposta direta' if language == 'pt' else 'Direct answer'}:** {direct_answer}"]).strip()
+
+    try:
+        from tools.metrolisboa_api import METRO_LINES
+
+        station_ids = METRO_LINES.get(line_id, {}).get("stations", [])
+    except Exception:
+        station_ids = []
+    terminal_text = ""
+    if len(station_ids) >= 2:
+        terminal_text = (
+            f"{_display_metro_line_station_name(station_ids[0])} ↔ "
+            f"{_display_metro_line_station_name(station_ids[-1])}"
+        )
+
+    snapshot_time = f" às **{updated_at[:5]}**" if language == "pt" and updated_at else ""
+    snapshot_time_en = f" at **{updated_at[:5]}**" if language != "pt" and updated_at else ""
+    direct_answer = (
+        f"estes são os tempos de espera em tempo real disponíveis para a **{line_name}**"
+        f"{snapshot_time}, em todas as estações reportadas."
+        if language == "pt"
+        else f"these are the real-time wait times available for the **{line_name}**"
+        f"{snapshot_time_en}, across all reported stations."
+    )
+
+    direction_label = "Sentido" if language == "pt" else "Direction"
+    line_summary_label = "Linha" if language == "pt" else "Line"
+
+    lines = [
+        title,
+        "",
+        f"✅ **{'Resposta direta' if language == 'pt' else 'Direct answer'}:** {direct_answer}",
+        "",
+        "---",
+        "",
+        f"{line_emoji} **{line_summary_label}:** {line_name}{f' — {terminal_text}' if terminal_text else ''}",
+        "",
+    ]
+
+    for entry in entries:
+        directions = entry.get("directions") or []
+        if not directions:
+            continue
+        lines.append(f"**📍 {entry.get('station')}**")
+        for direction in directions:
+            wait_time = _localize_wait_times(str(direction.get("wait") or ""), language)
+            lines.append(
+                f"    - ➡️ **{direction_label} {direction.get('direction')}:** {wait_time}"
+            )
+        lines.append("")
+
+    return "\n".join(lines).strip()
+
+
+def _format_all_metro_stations(*, language: str, user_message: str = "") -> str:
+    """Formats Metro station inventories in the requested language."""
+    from tools.metrolisboa_api import METRO_LINES
+
+    requested_line_id = _extract_metro_line_id(user_message)
+    line_ids = [requested_line_id] if requested_line_id else ["amarela", "azul", "verde", "vermelha"]
+    line_ids = [line_id for line_id in line_ids if line_id in METRO_LINES]
+
+    interchange_prefixes = {
+        "campo grande": "🟡🟢",
+        "alameda": "🟢🔴",
+        "saldanha": "🔴🟡",
+        "marques de pombal": "🟡🔵",
+        "baixa chiado": "🔵🟢",
+        "baixa-chiado": "🔵🟢",
+        "sao sebastiao": "🔵🔴",
+    }
+    rail_prefixes = {
+        "santa apolonia": "🚆",
+        "cais do sodre": "🚆",
+        "rossio": "🚆",
+        "areeiro": "🚆",
+        "oriente": "🚆",
+    }
+
+    def station_label(station_name: str) -> str:
+        display_name = _display_metro_line_station_name(station_name)
+        normalized = _normalize_token(station_name)
+        prefix = interchange_prefixes.get(normalized) or rail_prefixes.get(normalized)
+        return f"{prefix} {display_name}" if prefix else display_name
+
+    if requested_line_id:
+        line_name = _line_display_name(requested_line_id, language)
+        line_emoji = _metro_line_emoji(requested_line_id)
+        title = (
+            f"### {line_emoji} **Estações da {line_name}**"
+            if language == "pt"
+            else f"### {line_emoji} **{line_name} Stations**"
+        )
+        direct_answer = (
+            f"aqui estão as estações da **{line_name}**, mantendo os principais transbordos assinalados."
+            if language == "pt"
+            else f"here are the **{line_name}** stations, with key interchanges marked."
+        )
+    else:
+        title = "### 🚇 **Estações do Metro de Lisboa**" if language == "pt" else "### 🚇 **Lisbon Metro Stations**"
+        direct_answer = (
+            "aqui estão as estações do Metro de Lisboa organizadas por linha."
+            if language == "pt"
+            else "here are Lisbon Metro stations organized by line."
+        )
+
+    lines = [
+        title,
+        "",
+        f"✅ **{'Resposta direta' if language == 'pt' else 'Direct answer'}:** {direct_answer}",
+        "",
+        "---",
+        "",
+    ]
+
+    for line_id in line_ids:
+        line_info = METRO_LINES.get(line_id, {})
+        stations = list(line_info.get("stations", []))
+        if line_id == "azul":
+            stations.reverse()
+        if not stations:
+            continue
+        line_name = _line_display_name(line_id, language)
+        line_emoji = _metro_line_emoji(line_id)
+        terminal_text = f"{_display_metro_line_station_name(stations[0])} ↔ {_display_metro_line_station_name(stations[-1])}"
+        station_text = " · ".join(station_label(station) for station in stations)
+        lines.extend(
+            [
+                f"{line_emoji} **{line_name}:** {terminal_text}",
+                f"    - {station_text}",
+                "",
+            ]
+        )
+
+    if language == "pt":
+        lines.extend(
+            [
+                "ℹ️ **Legenda:**",
+                "    - 🟡🟢, 🟢🔴, 🔴🟡, 🟡🔵, 🔵🟢 e 🔵🔴 assinalam estações de correspondência entre linhas.",
+                "    - 🚆 assinala estações servidas por serviços ferroviários ou ligadas diretamente a eles.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "ℹ️ **Legend:**",
+                "    - 🟡🟢, 🟢🔴, 🔴🟡, 🟡🔵, 🔵🟢 and 🔵🔴 mark line-interchange stations.",
+                "    - 🚆 marks stations served by rail or directly connected to rail services.",
+            ]
+        )
+
+    return "\n".join(lines).strip()
 
 
 def _extract_wait_block_for_direction(wait_result: str, target_direction: str) -> Optional[Dict[str, Any]]:
@@ -714,6 +960,9 @@ def _build_metro_wait_lines(targets: List[Tuple[str, str]], language: str) -> Li
 
 def _extract_route_endpoints(user_message: str) -> Optional[Tuple[str, str]]:
     """Extracts route endpoints from common PT/EN route phrasings."""
+    if _query_requests_metro_line_wait_times(user_message):
+        return None
+
     shorthand_pair = _extract_metro_station_pair_from_shorthand(user_message)
     if shorthand_pair:
         return shorthand_pair
@@ -2269,25 +2518,43 @@ def _resolve_metro_line_station_name(station_name: Optional[str]) -> Optional[st
     return None
 
 
+def _format_metro_station_casing(station_name: str) -> str:
+    """Returns a clean display casing for Metro station names."""
+    display_name = str(station_name or "").title()
+    for connector in ("De", "Do", "Da", "Dos", "Das"):
+        display_name = re.sub(rf"\b{connector}\b", connector.lower(), display_name)
+    return display_name
+
+
 def _display_metro_line_station_name(station_name: str) -> str:
     """Return a user-facing Metro station name with proper casing and accents."""
     explicit_display_names = {
+        "baixa chiado": "Baixa-Chiado",
         "baixa-chiado": "Baixa-Chiado",
-        "cais do sodré": "Cais do Sodré",
-        "são sebastião": "São Sebastião",
-        "s. sebastião": "São Sebastião",
-        "marquês de pombal": "Marquês de Pombal",
+        "cais do sodre": "Cais do Sodré",
+        "sao sebastiao": "São Sebastião",
+        "s sebastiao": "São Sebastião",
+        "marques de pombal": "Marquês de Pombal",
+        "praca de espanha": "Praça de Espanha",
+        "santa apolonia": "Santa Apolónia",
+        "terreiro do paco": "Terreiro do Paço",
     }
-    normalized_station = str(station_name or "").lower()
+    normalized_station = _normalize_token(station_name)
     if normalized_station in explicit_display_names:
         return explicit_display_names[normalized_station]
+    resolved_station = _resolve_metro_line_station_name(station_name)
+    if resolved_station:
+        return explicit_display_names.get(
+            _normalize_token(resolved_station),
+            _format_metro_station_casing(resolved_station),
+        )
     try:
         from tools.metrolisboa_api import METRO_STATION_IDS, METRO_STATION_NAMES
     except Exception:
         return station_name.title()
-    station_id = METRO_STATION_IDS.get(normalized_station)
+    station_id = METRO_STATION_IDS.get(normalized_station) or METRO_STATION_IDS.get(str(station_name or "").lower())
     display_name = METRO_STATION_NAMES.get(station_id, str(station_name or "").title())
-    return explicit_display_names.get(display_name.lower(), display_name)
+    return explicit_display_names.get(_normalize_token(display_name), _format_metro_station_casing(display_name))
 
 
 def _direction_for_segment(line_id: str, start_station: str, end_station: str) -> str:
@@ -2898,16 +3165,34 @@ def _build_deterministic_metro_wait_response(
     context: str,
 ) -> Optional[str]:
     """Builds a deterministic single-station metro wait response without losing tool detail."""
+    language = _infer_language(user_message, context)
+    requested_line_id = _extract_metro_line_id(user_message)
+
+    if requested_line_id and _query_requests_metro_line_wait_times(user_message):
+        if _is_future_transport_planning_query(user_message):
+            station_label = _line_display_name(requested_line_id, language)
+            return _build_future_metro_wait_limit_response(station_label, None, language)
+
+        from tools.metrolisboa_api import get_metro_line_wait_times
+
+        try:
+            line_wait_result = str(get_metro_line_wait_times.invoke({"line": requested_line_id}))
+        except Exception:
+            line_wait_result = ""
+        return _format_metro_line_wait_snapshot(
+            line_id=requested_line_id,
+            wait_result=line_wait_result,
+            language=language,
+        )
+
     request = _parse_metro_wait_request(user_message)
     if not request:
         return None
 
-    language = _infer_language(user_message, context)
     future_planning = _is_future_transport_planning_query(user_message)
     station = request.get("station") or ""
     direction = request.get("direction")
     status_requested = bool(request.get("status_requested"))
-    requested_line_id = _extract_metro_line_id(user_message)
 
     if future_planning:
         return _build_future_metro_wait_limit_response(station, direction, language)
@@ -2921,16 +3206,11 @@ def _build_deterministic_metro_wait_response(
             line_wait_result = ""
         state_lines = _build_route_state_lines([requested_line_id], language)
         line_name = _line_display_name(requested_line_id, language)
-        line_emoji = {
-            "amarela": "🟡",
-            "azul": "🔵",
-            "verde": "🟢",
-            "vermelha": "🔴",
-        }.get(requested_line_id, "🚇")
+        line_emoji = _metro_line_emoji(requested_line_id)
         title = (
-            f"### 🚇 **{line_emoji} {line_name} em {station}**"
+            f"### {line_emoji} **{line_name} em {station}**"
             if language == "pt"
-            else f"### 🚇 **{line_emoji} {line_name} at {station}**"
+            else f"### {line_emoji} **{line_name} at {station}**"
         )
         response_lines = [title, "", _metro_state_title(state_lines, language, singular=True), *state_lines, ""]
         if any("interrupted" in line.lower() or "interrompida" in line.lower() for line in state_lines):
@@ -3565,6 +3845,9 @@ def _build_deterministic_metro_route_response(
 
 def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]:
     """Returns the raw route-tool guidance for non-metro-direct routes."""
+    if _query_requests_metro_line_wait_times(user_message):
+        return None
+
     if _query_has_wait_departure_intent(user_message) and re.search(
         r"\b(carris|autocarro|autocarros|bus|buses|tram|trams|el[eé]trico|eletrico)\b",
         user_message,
@@ -3817,10 +4100,48 @@ class TransportAgent(BaseAgent):
             )
         )
 
+    def _rewrite_metro_line_wait_follow_up(self, user_message: str, language: str) -> str:
+        """Rewrites short Metro line wait follow-ups using the latest wait-time context."""
+        last_context = getattr(self, "_last_transport_context", None) or {}
+        if last_context.get("intent") != "metro_line_waits":
+            return user_message
+
+        if _extract_route_endpoints(user_message):
+            return user_message
+
+        normalized = _normalize_token(user_message)
+        explicit_station_list = bool(
+            re.search(r"\b(?:quais|listar|lista|list|show|what|which)\b.*\b(?:estacoes|stations)\b", normalized)
+        )
+        if explicit_station_list and not _query_has_wait_departure_intent(user_message):
+            return user_message
+
+        line_id = _extract_metro_line_id(user_message)
+        if not line_id and re.search(r"\b(?:mesma|essa|esta|same|that|only|so|apenas)\b", normalized):
+            line_id = str(last_context.get("line") or "")
+
+        if not line_id:
+            return user_message
+
+        is_wait_follow_up = _query_has_wait_departure_intent(user_message) or bool(
+            re.search(r"\b(?:todas?\s+as\s+estacoes|all\s+stations|linha|line|only|so|apenas)\b", normalized)
+        )
+        if not is_wait_follow_up:
+            return user_message
+
+        line_name = _line_display_name(line_id, language)
+        if language == "pt":
+            return f"Diz-me o tempo de espera de toda a {line_name} do metro em todas as estações."
+        return f"Show me the wait times across the whole {line_name} at all stations."
+
     def _rewrite_follow_up_transport_query(self, user_message: str, language: str) -> str:
         """Rewrites short transport follow-ups using the last remembered route endpoints."""
         if _extract_route_endpoints(user_message):
             return user_message
+
+        metro_wait_follow_up = self._rewrite_metro_line_wait_follow_up(user_message, language)
+        if metro_wait_follow_up != user_message:
+            return metro_wait_follow_up
 
         if not self._is_referential_mode_follow_up(user_message):
             return user_message
@@ -3857,6 +4178,16 @@ class TransportAgent(BaseAgent):
 
     def _remember_transport_context(self, user_message: str) -> None:
         """Caches the latest route endpoints so transport-mode follow-ups can reuse them."""
+        line_id = _extract_metro_line_id(user_message)
+        if line_id and _query_requests_metro_line_wait_times(user_message):
+            self._last_transport_context = {
+                "intent": "metro_line_waits",
+                "line": line_id,
+                "last_user_query": user_message,
+                "mode": "metro",
+            }
+            return
+
         endpoints = _extract_route_endpoints(user_message)
         if not endpoints:
             return
@@ -4399,6 +4730,19 @@ class TransportAgent(BaseAgent):
         cleaned_result = str(result or "").strip()
         if not cleaned_result:
             return cleaned_result
+
+        if tool_name == "get_metro_line_wait_times":
+            raw_line = str(tool_args.get("line") or user_message or "").strip()
+            line_id = _extract_metro_line_id(raw_line) or _extract_metro_line_id(user_message)
+            if line_id:
+                return _format_metro_line_wait_snapshot(
+                    line_id=line_id,
+                    wait_result=cleaned_result,
+                    language=language,
+                )
+
+        if tool_name == "get_all_metro_stations":
+            return _format_all_metro_stations(language=language, user_message=user_message)
 
         if tool_name == "plan_train_trip":
             origin = str(tool_args.get("origin") or "Origem" if language == "pt" else tool_args.get("origin") or "Origin").strip()
@@ -5315,6 +5659,35 @@ class TransportAgent(BaseAgent):
             )
             return with_ambiguity_preamble(finalized_response)
 
+        metro_wait_response = _build_deterministic_metro_wait_response(
+            user_message=user_message,
+            context=context,
+        )
+        if metro_wait_response:
+            line_wait_line_id = (
+                _extract_metro_line_id(user_message)
+                if _query_requests_metro_line_wait_times(user_message)
+                else None
+            )
+            if line_wait_line_id:
+                self._record_tool_call("get_metro_line_wait_times", {"line": line_wait_line_id})
+            else:
+                metro_wait_request = _parse_metro_wait_request(user_message)
+                if metro_wait_request:
+                    requested_line_id = _extract_metro_line_id(user_message)
+                    if requested_line_id and not metro_wait_request.get("direction"):
+                        self._record_tool_call("get_metro_line_wait_times", {"line": requested_line_id})
+                    else:
+                        wait_args = {"station": metro_wait_request.get("station")}
+                        if metro_wait_request.get("direction"):
+                            wait_args["direction"] = metro_wait_request.get("direction")
+                        self._record_tool_call("get_metro_wait_time", wait_args)
+            return self._finalize_transport_response(
+                metro_wait_response,
+                user_message=user_message,
+                language=resolved_language,
+            )
+
         deterministic_response = None
         cp_tool_spec = _build_cp_tool_spec(user_message)
         if not ambiguity_preamble and not cp_tool_spec and not _is_generic_public_transport_route_query(user_message):
@@ -5330,27 +5703,6 @@ class TransportAgent(BaseAgent):
                 )
             return self._finalize_transport_response(
                 deterministic_response,
-                user_message=user_message,
-                language=resolved_language,
-            )
-
-        metro_wait_response = _build_deterministic_metro_wait_response(
-            user_message=user_message,
-            context=context,
-        )
-        if metro_wait_response:
-            metro_wait_request = _parse_metro_wait_request(user_message)
-            if metro_wait_request:
-                requested_line_id = _extract_metro_line_id(user_message)
-                if requested_line_id and not metro_wait_request.get("direction"):
-                    self._record_tool_call("get_metro_line_wait_times", {"line": requested_line_id})
-                else:
-                    wait_args = {"station": metro_wait_request.get("station")}
-                    if metro_wait_request.get("direction"):
-                        wait_args["direction"] = metro_wait_request.get("direction")
-                    self._record_tool_call("get_metro_wait_time", wait_args)
-            return self._finalize_transport_response(
-                metro_wait_response,
                 user_message=user_message,
                 language=resolved_language,
             )
@@ -5798,12 +6150,23 @@ class TransportAgent(BaseAgent):
             if isinstance(last_message, ToolMessage):
                 if self._is_deterministic_subgraph_tool_result(messages):
                     previous_message = messages[-2]
-                    tool_args = getattr(previous_message, "tool_calls", [{}])[0].get("args", {})
-                    finalized_response = finalize_worker_response(
-                        str(last_message.content).strip(),
-                        agent_name="transport",
-                        user_query=user_message or "",
+                    tool_call = getattr(previous_message, "tool_calls", [{}])[0]
+                    tool_name = str(tool_call.get("name") or "")
+                    tool_args = tool_call.get("args", {})
+                    if tool_name and not any(call.get("tool_name") == tool_name for call in self.get_tool_calls_log()):
+                        self._record_tool_call(tool_name, dict(tool_args))
+                    formatted_response = self._format_deterministic_tool_result(
+                        tool_name=tool_name,
+                        tool_args=dict(tool_args),
+                        result=str(last_message.content).strip(),
                         language=language,
+                        user_message=user_message or "",
+                    )
+                    finalized_response = self._finalize_transport_response(
+                        formatted_response,
+                        user_message=user_message or "",
+                        language=language,
+                        ensure_wait_times=tool_name == "get_route_between_stations",
                     )
                     finalized_response = self._prepend_location_ambiguity(
                         finalized_response,
@@ -5819,10 +6182,6 @@ class TransportAgent(BaseAgent):
                 return {"messages": [response]}
 
             if user_message:
-                deterministic_tool_call = self._build_subgraph_deterministic_tool_call(user_message)
-                if deterministic_tool_call:
-                    return {"messages": [deterministic_tool_call]}
-
                 deterministic_response = self._resolve_deterministic_response(
                     user_message=user_message,
                     context="",
@@ -5830,6 +6189,10 @@ class TransportAgent(BaseAgent):
                 )
                 if deterministic_response:
                     return {"messages": [AIMessage(content=deterministic_response)]}
+
+                deterministic_tool_call = self._build_subgraph_deterministic_tool_call(user_message)
+                if deterministic_tool_call:
+                    return {"messages": [deterministic_tool_call]}
 
             response = self._safe_llm_invoke(
                 self.llm_with_tools,
