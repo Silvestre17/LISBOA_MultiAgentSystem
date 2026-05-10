@@ -225,6 +225,20 @@ def _query_requests_public_transport(user_message: str) -> bool:
     )
 
 
+def _query_requests_live_transport_status(user_message: str) -> bool:
+    """Detect whether the user explicitly asks for live or next-departure transport data."""
+    normalized = _normalize_planner_text(user_message)
+    if re.search(r"\b(?:agora|tempo real|em direto|live|real[- ]?time|right now|current)\b", normalized, re.IGNORECASE):
+        return True
+    return bool(
+        re.search(
+            r"\bproxim[oa]s?\s+(?:metro|metros|autocarro|autocarros|bus|comboio|comboios|train|trains|partida|partidas|saida|saidas|chegada|chegadas)\b",
+            normalized,
+            re.IGNORECASE,
+        )
+    )
+
+
 def _build_public_transport_synthesis_instruction(
     user_message: str,
     transport_data: str,
@@ -239,8 +253,10 @@ def _build_public_transport_synthesis_instruction(
         "- For every movement you include, provide concrete evidence-supported details from the transport context: "
         "operator, line or mode, direction when available, and board/alight or transfer point when available.\n"
         "- If the provided context does not confirm a specific leg, write exactly which leg is unconfirmed.\n"
+        "- Preserve the user's stated origin and target in the movement section when they are present in the request.\n"
         "- Do not replace missing route details with vague prose such as 'continue by public transport', "
         "'verify locally', 'use the exact street address', or 'check the most direct connection locally'.\n"
+        "- Do not present live next departures unless the user explicitly asked for next departures, live status, or current waiting times.\n"
         "- For future-day itineraries, do not present live next departures captured now as tomorrow's times."
     )
 
@@ -874,7 +890,7 @@ def _build_structured_plan_fallback(
     visible_days = min(requested_days, 5)
     constraints = _extract_plan_constraints(user_message, conversation_context, language)
     combined_places = "\n".join([places_data or "", events_data or ""])
-    cards = _extract_visitlisboa_place_cards(combined_places, max_items=10)
+    cards = _extract_visitlisboa_place_cards(combined_places, max_items=10, language=language)
     clean_cards = [
         {**card, "name": clean_name}
         for card in cards
@@ -1086,7 +1102,7 @@ def _extract_requested_plan_origin(user_message: str) -> str:
     patterns = [
         r"\bstarting\s+from\s+(?P<origin>[^,.;]+?)(?:[,.;]?\s+with\b|[,.;]?\s+include\b|$)",
         r"\bfrom\s+(?P<origin>[^,.;]+?)\s+to\b",
-        r"\ba partir de\s+(?P<origin>[^,.;]+?)(?:[,.;]?\s+com\b|[,.;]?\s+inclui\b|$)",
+        r"\ba partir d(?:e|o|a|os|as)\s+(?P<origin>[^,.;]+?)(?:[,.;]?\s+com\b|[,.;]?\s+inclui\b|$)",
         r"\bde\s+(?P<origin>[^,.;]+?)\s+para\b",
     ]
     for pattern in patterns:
@@ -1096,6 +1112,77 @@ def _extract_requested_plan_origin(user_message: str) -> str:
             if 2 <= len(origin) <= 80:
                 return origin
     return ""
+
+
+def _strip_unrequested_live_departure_lines(response: str, user_message: str) -> str:
+    """Remove live departure rows from itinerary prose when the user did not ask for live waits."""
+    if not response or _query_requests_live_transport_status(user_message):
+        return response
+
+    cleaned_lines: list[str] = []
+    skip_departure_rows = False
+    departure_label = re.compile(
+        r"\b(?:pr[oó]ximas?\s+(?:sa[ií]das?|partidas?|metros?)|next\s+(?:departures?|metros?))\b",
+        re.IGNORECASE,
+    )
+    time_row = re.compile(r"^\s*[-*•]?\s*(?:\*\*)?\d{1,2}[:h]\d{2}\b")
+    for line in response.splitlines():
+        stripped = line.strip()
+        if departure_label.search(stripped):
+            skip_departure_rows = True
+            continue
+        if re.search(r"\b(?:tempo real|real[- ]?time|live)\b", stripped, re.IGNORECASE):
+            continue
+        if skip_departure_rows:
+            if not stripped or stripped.startswith("### ") or re.match(r"^\s*---\s*$", stripped):
+                skip_departure_rows = False
+            elif time_row.search(stripped):
+                continue
+            elif re.search(r"\b\d{1,2}[:h]\d{2}\b", stripped) and re.search(r"\b(?:paragem|stop|departure|partida|saida)\b", stripped, re.IGNORECASE):
+                continue
+            else:
+                skip_departure_rows = False
+        cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines).strip()
+
+
+def _ensure_requested_origin_target_in_transport_section(
+    response: str,
+    user_message: str,
+    language: str,
+    transport_data: str,
+) -> str:
+    """Ensure planner movement guidance keeps the user's stated origin and target visible."""
+    if not response or not str(transport_data or "").strip():
+        return response
+
+    origin = _extract_requested_plan_origin(user_message)
+    target = _extract_requested_plan_area(user_message)
+    if not origin or not target:
+        return response
+
+    normalized_response = _normalize_planner_text(response)
+    if _normalize_planner_text(origin) in normalized_response and _normalize_planner_text(target) in normalized_response:
+        return response
+
+    if language == "pt":
+        heading = "### 🚇 **Como te deslocas**"
+        bullet = f"- 🗺️ **Percurso base:** começa em **{origin}** e segue para **{target}** com a ligação de transporte público confirmada abaixo."
+        final_notes_pattern = r"(?m)^###\s+⚠️\s+\*\*Notas finais\*\*"
+    else:
+        heading = "### 🚇 **How to move**"
+        bullet = f"- 🗺️ **Base route:** start from **{origin}** and continue toward **{target}** using the confirmed public-transport leg below."
+        final_notes_pattern = r"(?m)^###\s+⚠️\s+\*\*Final notes\*\*"
+
+    movement_heading_pattern = r"(?m)^(###\s+🚇\s+\*\*(?:Como te deslocas|How to move)\*\*\s*)$"
+    if re.search(movement_heading_pattern, response):
+        return re.sub(movement_heading_pattern, rf"\1\n{bullet}", response, count=1).strip()
+
+    if re.search(final_notes_pattern, response):
+        return re.sub(final_notes_pattern, f"{heading}\n{bullet}\n\n---\n\n\\g<0>", response, count=1).strip()
+
+    return f"{response.rstrip()}\n\n---\n\n{heading}\n{bullet}".strip()
 
 
 def _clean_planner_card_description(description: str) -> str:
@@ -1375,7 +1462,12 @@ def _is_historic_gastronomy_day_request(normalized_query: str) -> bool:
     return day_intent and history_intent and food_intent
 
 
-def _extract_visitlisboa_place_cards(text: str, *, max_items: int = 8) -> List[Dict[str, str]]:
+def _extract_visitlisboa_place_cards(
+    text: str,
+    *,
+    max_items: int = 8,
+    language: str = "en",
+) -> List[Dict[str, str]]:
     """Extract lightweight VisitLisboa place cards from gathered researcher text."""
     cards: List[Dict[str, str]] = []
     seen_names: set[str] = set()
@@ -1423,18 +1515,21 @@ def _extract_visitlisboa_place_cards(text: str, *, max_items: int = 8) -> List[D
             rating_match = re.search(r"(?mi)^\s*[-*•]?\s*(?:[^\w\s*]{1,8}\s*)?(?:\*\*)?(?:Rating|Avalia(?:ç|c)[aã]o)\s*:\s*(?:\*\*)?\s*(?P<value>[^\n]+)", body)
             phone_match = re.search(r"(?mi)^\s*[-*•]?\s*(?:[^\w\s*]{1,8}\s*)?(?:\*\*)?(?:Phone|Telefone)\s*:\s*(?:\*\*)?\s*(?P<value>[^\n]+)", body)
             email_match = re.search(r"(?mi)^\s*[-*•]?\s*(?:[^\w\s*]{1,8}\s*)?(?:\*\*)?(?:Email|E-mail)\s*:\s*(?:\*\*)?\s*(?P<value>[^\n]+)", body)
-            url_match = re.search(
+            url_entries: List[tuple[str, str, str]] = []
+            url_field_re = re.compile(
                 r"(?mi)^\s*[-*•]?\s*(?:[^\w\s*]{1,8}\s*)?"
                 r"\*\*(?P<label>Website|Site|More details|Mais detalhes):\*\*\s*"
-                r"(?P<value>https?://\S+|\[[^\]]+\]\(https?://[^)]+\))",
-                body,
+                r"(?P<value>https?://\S+|\[[^\]]+\]\(https?://[^)]+\))"
             )
-            if not url_match:
-                url_match = re.search(
-                    r"(?mi)^\s*[-*•]?\s*(?:🔗|🌐)\s*"
-                    r"(?P<value>https?://\S+|\[[^\]]+\]\(https?://[^)]+\))",
-                    body,
-                )
+            icon_url_re = re.compile(
+                r"(?mi)^\s*[-*•]?\s*(?P<icon>🔗|🌐)\s*"
+                r"(?P<value>https?://\S+|\[[^\]]+\]\(https?://[^)]+\))"
+            )
+            for match in url_field_re.finditer(body):
+                url_entries.append((match.group("label").strip(), match.group("value").strip(), ""))
+            for match in icon_url_re.finditer(body):
+                label = "More details" if match.group("icon") == "🔗" else "Website"
+                url_entries.append((label, match.group("value").strip(), match.group("icon")))
             description = description_match.group("value").strip() if description_match else ""
             if not description:
                 for raw_line in body.splitlines():
@@ -1443,16 +1538,29 @@ def _extract_visitlisboa_place_cards(text: str, *, max_items: int = 8) -> List[D
                         continue
                     description = re.sub(r"\s+", " ", line).strip()
                     break
-            url = url_match.group("value").strip() if url_match else ""
-            url_label = url_match.groupdict().get("label", "").strip() if url_match else ""
-            if url and not url_label:
-                url_label = "VisitLisboa" if "visitlisboa.com" in url.lower() else "Official website"
-            markdown_url_match = re.search(r"\((https?://[^)]+)\)", url)
-            if markdown_url_match:
-                label_match = re.match(r"\[([^\]]+)\]\(", url)
-                if label_match:
-                    url_label = label_match.group(1).strip() or url_label
-                url = markdown_url_match.group(1)
+            website_url = ""
+            website_label = ""
+            details_url = ""
+            details_label = ""
+            for field_label, raw_url, _icon in url_entries:
+                normalized_url = raw_url
+                value_label = ""
+                markdown_url_match = re.search(r"\((https?://[^)]+)\)", normalized_url)
+                if markdown_url_match:
+                    label_match = re.match(r"\[([^\]]+)\]\(", normalized_url)
+                    if label_match:
+                        value_label = label_match.group(1).strip()
+                    normalized_url = markdown_url_match.group(1)
+                field_key = _normalize_planner_text(field_label)
+                if "visitlisboa.com" in normalized_url.lower() or "detail" in field_key or "detalh" in field_key:
+                    if not details_url:
+                        details_url = normalized_url
+                        details_label = value_label or "VisitLisboa"
+                elif not website_url:
+                    website_url = normalized_url
+                    website_label = value_label or ("Website oficial" if language == "pt" else "Official website")
+            url = details_url or website_url
+            url_label = details_label if details_url else website_label
             cards.append(
                 {
                     "name": name,
@@ -1465,6 +1573,10 @@ def _extract_visitlisboa_place_cards(text: str, *, max_items: int = 8) -> List[D
                     "email": email_match.group("value").strip() if email_match else "",
                     "url": url,
                     "url_label": url_label,
+                    "website_url": website_url,
+                    "website_label": website_label,
+                    "details_url": details_url,
+                    "details_label": details_label,
                     "description": description,
                 }
             )
@@ -1498,7 +1610,7 @@ def _build_card_based_itinerary_fallback(
         return ""
 
     combined_context = "\n".join([places_data or "", events_data or ""])
-    cards = _extract_visitlisboa_place_cards(combined_context, max_items=12)
+    cards = _extract_visitlisboa_place_cards(combined_context, max_items=12, language=language)
     cards = [
         {**card, "name": clean_name}
         for card in cards
@@ -1631,6 +1743,13 @@ def _build_card_based_renderer_fallback(
         source_ids=source_ids,
     )
     rendered = render_plan_markdown(draft, evidence.sources, language=language)
+    rendered = _strip_unrequested_live_departure_lines(rendered, user_message)
+    rendered = _ensure_requested_origin_target_in_transport_section(
+        rendered,
+        user_message,
+        language,
+        transport_data,
+    )
     return final_post_qa_guard(rendered, language=language)
 
 
@@ -1885,6 +2004,28 @@ def _card_purpose_for_plan_block(card: Dict[str, str], is_pt: bool) -> str:
     return "Compact, evidenced stop for the requested theme, limited to the gathered data."
 
 
+def _append_card_link_details(details: List[str], card: Dict[str, str], *, language: str = "en") -> None:
+    """Append website and VisitLisboa details links without collapsing them into one field."""
+    website_url = str(card.get("website_url") or "").strip()
+    details_url = str(card.get("details_url") or "").strip()
+    legacy_url = str(card.get("url") or "").strip()
+
+    if not website_url and legacy_url and "visitlisboa.com" not in legacy_url.lower():
+        website_url = legacy_url
+    if not details_url and legacy_url and "visitlisboa.com" in legacy_url.lower():
+        details_url = legacy_url
+
+    if website_url:
+        website_label = str(card.get("website_label") or "").strip()
+        if not website_label or website_label.lower() == "visitlisboa":
+            website_label = "Website oficial" if language == "pt" else "Official website"
+        details.append(f"Website: [{website_label}]({website_url})")
+
+    if details_url and details_url != website_url:
+        details_label = str(card.get("details_label") or "").strip() or "VisitLisboa"
+        details.append(f"More details: [{details_label}]({details_url})")
+
+
 def _card_details_for_plan_block(card: Dict[str, str], *, language: str = "en") -> List[str]:
     """Convert a place card into semantic planner detail fields."""
     details: List[str] = []
@@ -1904,14 +2045,7 @@ def _card_details_for_plan_block(card: Dict[str, str], *, language: str = "en") 
         details.append(f"Phone: {card['phone']}")
     if card.get("email"):
         details.append(f"Email: {card['email']}")
-    if card.get("url"):
-        url = str(card["url"])
-        url_label = str(card.get("url_label") or "").strip()
-        if not url_label:
-            url_label = "VisitLisboa" if "visitlisboa.com" in url.lower() else "Official website"
-        if url_label.lower() == "visitlisboa" and "visitlisboa.com" not in url.lower():
-            url_label = "Website oficial" if language == "pt" else "Official website"
-        details.append(f"Website: [{url_label}]({url})")
+    _append_card_link_details(details, card, language=language)
     return details
 
 
@@ -1926,14 +2060,7 @@ def _card_details_for_itinerary_block(card: Dict[str, str], *, language: str = "
         details.append(f"Hours: {card['hours']}")
     if card.get("price"):
         details.append(f"Price: {card['price']}")
-    if card.get("url"):
-        url = str(card["url"])
-        url_label = str(card.get("url_label") or "").strip()
-        if not url_label:
-            url_label = "VisitLisboa" if "visitlisboa.com" in url.lower() else "Official website"
-        if url_label.lower() == "visitlisboa" and "visitlisboa.com" not in url.lower():
-            url_label = "Website oficial" if language == "pt" else "Official website"
-        details.append(f"Website: [{url_label}]({url})")
+    _append_card_link_details(details, card, language=language)
     return details
 
 
@@ -2383,7 +2510,7 @@ def _planner_response_has_transport_quality_defects(
     if (
         not live_status_requested
         and re.search(r"\b(?:departures?|partidas?|live wait|current status|pr[oó]xim[oa]s? partidas?)\b", normalized, re.IGNORECASE)
-        and re.search(r"\b\d{1,2}\s+\d{2}\b", normalized)
+        and re.search(r"\b\d{1,2}(?::|h|\s+)\d{2}\b", normalized)
     ):
         return True
 
@@ -2832,6 +2959,13 @@ class PlannerAgent(BaseAgent):
                 qa_disclaimers=qa_disclaimers,
                 conversation_context=conversation_context,
             )
+            fallback = _strip_unrequested_live_departure_lines(fallback, user_message)
+            fallback = _ensure_requested_origin_target_in_transport_section(
+                fallback,
+                user_message,
+                language,
+                transport_data,
+            )
             return enforce_multi_day_quality_mode(fallback, user_message, language)
 
         if (
@@ -2991,6 +3125,14 @@ class PlannerAgent(BaseAgent):
             )
             if _planner_response_has_minimum_user_value(rescue_response):
                 cleaned_response = rescue_response
+
+        cleaned_response = _strip_unrequested_live_departure_lines(cleaned_response, user_message)
+        cleaned_response = _ensure_requested_origin_target_in_transport_section(
+            cleaned_response,
+            user_message,
+            language,
+            transport_data,
+        )
 
         return enforce_multi_day_quality_mode(
             cleaned_response,

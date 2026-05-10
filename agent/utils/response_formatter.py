@@ -4475,6 +4475,22 @@ def _structured_place_card_fields_by_title(text: str) -> dict[str, set[str]]:
     return fields_by_title
 
 
+def _structured_place_card_link_fields_by_title(text: str) -> dict[str, set[str]]:
+    """Extract link-backed place-card fields for every structured card."""
+    links_by_title: dict[str, set[str]] = {}
+    for section in _iter_structured_place_card_sections(text):
+        title_key = _place_card_title_lookup_key(section)
+        if not title_key:
+            continue
+        link_fields: set[str] = set()
+        for raw_line in section[1:]:
+            field_key = _canonical_place_field_key(raw_line)
+            if field_key in {"website", "details", "tickets"} and _extract_valid_public_url(raw_line):
+                link_fields.add(field_key)
+        links_by_title[title_key] = link_fields
+    return links_by_title
+
+
 def researcher_place_response_missing_requested_fields(
     text: str,
     user_query: str = "",
@@ -4517,11 +4533,16 @@ def _place_response_lost_worker_fields(text: str, worker_canonical: str) -> bool
     fallback_fields = _structured_place_card_fields_by_title(worker_canonical)
     if not primary_fields or not fallback_fields:
         return False
+    primary_link_fields = _structured_place_card_link_fields_by_title(text)
+    fallback_link_fields = _structured_place_card_link_fields_by_title(worker_canonical)
 
     high_value_fields = {"hours", "tickets", "website", "details", "phone", "email", "price"}
     for title_key, fallback_field_set in fallback_fields.items():
         primary_field_set = primary_fields.get(title_key)
         if primary_field_set is None:
+            return True
+        missing_link_fields = fallback_link_fields.get(title_key, set()) - primary_link_fields.get(title_key, set())
+        if missing_link_fields & {"tickets", "website", "details"}:
             return True
 
         missing_fields = fallback_field_set - primary_field_set
@@ -5107,8 +5128,6 @@ def reconcile_researcher_event_response(
             for key in ("when", "duration", "category", "address", "price", "schedule", "highlights", "details_url", "tickets_url"):
                 if not str(merged.get(key) or "").strip() and str(fallback.get(key) or "").strip():
                     merged[key] = fallback.get(key)
-        else:
-            merged["title"] = _strip_event_title_leading_emojis(str(merged.get("title") or ""))
             if (
                 not str(merged.get("description") or "").strip()
                 or _event_has_note_like_description(str(merged.get("description") or ""))
@@ -5118,6 +5137,8 @@ def reconcile_researcher_event_response(
                 merged["icon"] = fallback.get("icon") or merged.get("icon")
             if not merged.get("extra_lines") and fallback.get("extra_lines"):
                 merged["extra_lines"] = list(fallback.get("extra_lines") or [])
+        else:
+            merged["title"] = _strip_event_title_leading_emojis(str(merged.get("title") or ""))
         merged_events.append(merged)
 
     intro_lines = _select_researcher_specific_lookup_intro(primary_intro, fallback_intro)
@@ -10277,7 +10298,7 @@ def insert_direct_answer_separator(text: str) -> str:
         re.IGNORECASE,
     )
     weather_no_warning_re = re.compile(
-        r"^[-*]\s+✅\s+(?:Não,\s+)?não há avisos meteorológicos ativos\b",
+        r"^[-*]\s+✅\s+(?:(?:Não,\s+)?não há\s+(?:\*\*)?avisos meteorológicos ativos|No,\s+there are\s+(?:\*\*)?no active weather warnings)\b",
         re.IGNORECASE,
     )
     lines = text.splitlines()

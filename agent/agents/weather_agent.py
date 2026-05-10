@@ -836,7 +836,21 @@ class WeatherAgent(BaseAgent):
         clear_warning_pattern = r"no active weather warnings|sem avisos meteorol|n[aã]o h[aá] avisos meteorol"
         direct_says_clear = bool(re.search(clear_warning_pattern, combined_direct))
         body_says_clear = bool(re.search(clear_warning_pattern, combined_body))
-        body_has_active_details = bool(re.search(r"yellow|orange|red|amarelo|laranja|vermelho|rough sea|vento|chuva|agita", combined_body))
+        body_has_forecast_details = bool(
+            re.search(
+                r"\b(?:forecast|previsao|temperature|temperatura|rain|chuva|wind|vento|precipitation|precipitacao)\b|°c",
+                combined_body,
+                flags=re.IGNORECASE,
+            )
+        )
+        if body_has_forecast_details:
+            return False
+        body_has_active_details = bool(
+            re.search(
+                r"yellow|orange|red|amarelo|laranja|vermelho|rough sea|vento|chuva|wind|rain|agita",
+                combined_body,
+            )
+        )
         return direct_says_clear and body_says_clear and not body_has_active_details
 
     @classmethod
