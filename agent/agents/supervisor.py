@@ -16,6 +16,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent.agents.base import BaseAgent, clean_response, parse_json_response
 from agent.prompts.supervisor import get_supervisor_prompt
+from agent.utils.geographic_scope import (
+    build_geographic_out_of_scope_response,
+    route_mentions_outside_aml,
+)
 from agent.utils.langsmith_tracing import traceable
 from agent.utils.response_formatter import strip_unsupported_closing_offers
 
@@ -234,8 +238,13 @@ class SupervisorAgent(BaseAgent):
             r"\bcomo vou\b",
             r"\bcomo posso ir\b",
             r"\bcomo ir\b",
+            r"\b(?:e\s+se\s+)?(?:quiser|quero|queria|preciso|vou|posso|tenho)\s+(?:de\s+)?ir\b",
             r"\ba partir do\b",
             r"\ba partir da\b",
+            r"\ba partir dos\b",
+            r"\ba partir das\b",
+            r"\b(?:quero|queria|quiser|preciso|vou|posso|tenho)\s+(?:de\s+)?ir\s+(?:dos|das|do|da|de)\s+.+?\s+(?:para|ao|a|à|até)\s+.+",
+            r"\b(?:dos|das|do|da|de)\s+.+?\s+(?:para|ao|a|à|até)\s+.+",
             r"\bfrom\s+.+\s+to\s+.+",
         ]
         if any(re.search(pattern, normalized) for pattern in transport_patterns):
@@ -295,23 +304,11 @@ class SupervisorAgent(BaseAgent):
 
     @classmethod
     def _is_geographic_out_of_scope_route(cls, user_message: str) -> bool:
-        """Detects point-to-point route requests wholly outside the Lisbon/AML scope."""
+        """Detect point-to-point route requests outside LISBOA's AML scope."""
         normalized = cls._normalize_query(user_message)
         if not cls._looks_like_transport_query(normalized):
             return False
-        outside_places = [
-            "madrid",
-            "barcelona",
-            "seville",
-            "sevilla",
-            "paris",
-            "london",
-            "porto",
-            "coimbra",
-            "faro",
-        ]
-        mentioned = [place for place in outside_places if re.search(rf"\b{re.escape(place)}\b", normalized)]
-        return len(mentioned) >= 2 and not cls._has_lisbon_context(normalized)
+        return route_mentions_outside_aml(user_message)
 
     @classmethod
     def _is_unsupported_action_request(cls, user_message: str) -> bool:
@@ -323,9 +320,13 @@ class SupervisorAgent(BaseAgent):
             r"\b(make|booking|do|doing)\s+(?:me\s+)?(?:a\s+)?(?:reservation|booking)\b",
             r"\bbuy\s+(?:me\s+)?(?:a\s+)?(?:ticket|tickets)\b",
             r"\breservar\s+(?:uma\s+)?(?:mesa|bilhetes?|hotel|quarto)\b",
+            r"\breserva\s+(?:uma\s+)?(?:mesa|bilhetes?|hotel|quarto)\b",
             r"\bmarcar\s+(?:uma\s+)?(?:mesa|reserva|bilhetes?|hotel|quarto)\b",
+            r"\bmarca\s+(?:uma\s+)?(?:mesa|reserva|bilhetes?|hotel|quarto)\b",
             r"\bfazer\s+(?:uma\s+)?reserva\b",
+            r"\bfaz\s+(?:uma\s+)?reserva\b",
             r"\bcomprar\s+(?:bilhetes?|entradas?)\s+(?:por mim|para mim)\b",
+            r"\bcompra\s+(?:bilhetes?|entradas?)\s+(?:por mim|para mim)\b",
         ]
         return any(re.search(pattern, normalized) for pattern in unsupported_patterns)
 
@@ -334,16 +335,16 @@ class SupervisorAgent(BaseAgent):
         """Builds a concise limitation response for unsupported booking actions."""
         if language == "pt":
             return (
-                "### ⚠️ **Pedidos de reserva / compra**\n\n"
-                "Não consigo fazer reservas, compras ou marcações diretamente.\n\n"
-                "- ✅ **O que posso confirmar:** dados públicos sobre o local em Lisboa, contactos ou fontes oficiais quando estiverem disponíveis.\n"
-                "- 🚫 **Não posso inventar:** disponibilidade de mesa/cadeira, preços atuais ou confirmação de reserva."
+                "### ⚠️ **Reservas e Compras Não Suportadas**\n\n"
+                "Não consigo fazer reservas, compras ou marcações diretamente, mas posso ajudar-te a decidir com dados verificáveis sobre Lisboa.\n\n"
+                "- ✅ **Posso confirmar:** contactos, moradas, fontes oficiais e informação pública do local quando estiver disponível.\n"
+                "- 🚫 **Não posso assumir:** disponibilidade de mesa/lugar, preços atuais, bilhetes ainda válidos ou confirmação de reserva."
             )
         return (
-            "### ⚠️ **Booking and purchase request**\n\n"
-            "I can't make bookings, purchases, or reservations directly.\n\n"
-            "- ✅ **What I can confirm:** public details about the Lisbon venue, contacts, or official sources when available.\n"
-            "- 🚫 **I cannot invent:** table/seat availability, current prices, opening status, or booking confirmation."
+            "### ⚠️ **Booking and Purchase Requests**\n\n"
+            "I can't make bookings, purchases, or reservations directly, but I can help you decide with verifiable Lisbon data.\n\n"
+            "- ✅ **I can confirm:** contacts, addresses, official sources, and public venue information when available.\n"
+            "- 🚫 **I cannot assume:** table/seat availability, current prices, still-valid tickets, or booking confirmation."
         )
 
     @staticmethod
@@ -364,30 +365,32 @@ class SupervisorAgent(BaseAgent):
         """Builds a friendly out-of-scope redirection response."""
         if language == "en":
             return (
-                "Oops, that's outside my area of expertise! 😄 "
-                "I'm your **Lisbon Urban Assistant** and I focus on the Lisbon Metropolitan Area 🏙️\n\n"
-                "Here's what I can help you with:\n\n"
-                "- 🌤️ Weather forecasts and real-time warnings\n"
-                "- 🚇 Transport information (Metro, buses, trains, trams)\n"
-                "- 🎭 Cultural events and activities\n"
-                "- 📍 Places to visit, restaurants, and attractions\n"
-                "- 🗺️ Custom itinerary planning\n"
-                "- 🏥 Nearby services such as pharmacies and hospitals\n"
-                "- 📚 Lisbon history and culture\n\n"
-                "Ask me anything about Lisbon and I'll jump in. 🧭"
+                "### 🧭 **Outside LISBOA's Scope**\n\n"
+                "✅ **Direct answer:** that falls outside what I can validate with quality in this system.\n\n"
+                "---\n\n"
+                "LISBOA is focused on the **Lisbon Metropolitan Area**.\n\n"
+                "💡 **I can help with:**\n"
+                "- **Weather:** forecasts and warnings for Lisbon 🌤️\n"
+                "- **Mobility:** Metro, buses, suburban trains, and trams 🚇\n"
+                "- **Culture:** events and activities 🎭\n"
+                "- **Places:** restaurants, attractions, and nearby services 📍\n"
+                "- **Planning:** personalized routes and itineraries 🗺️\n"
+                "- **Knowledge:** Lisbon history and culture 📚\n\n"
+                "Ask me about Lisbon/AML and I will use confirmable data whenever possible."
             )
         return (
-            "Ups, isso fica fora da minha especialidade! 😄 "
-            "Sou o teu **Assistente Urbano de Lisboa** e foco-me na Área Metropolitana de Lisboa 🏙️\n\n"
-            "Posso ajudar-te com:\n\n"
-            "- 🌤️ Previsões meteorológicas e avisos em tempo real\n"
-            "- 🚇 Informação de transportes (Metro, autocarros, comboios, elétricos)\n"
-            "- 🎭 Eventos culturais e atividades\n"
-            "- 📍 Locais para visitar, restaurantes e atrações\n"
-            "- 🗺️ Planeamento de itinerários à medida\n"
-            "- 🏥 Serviços próximos, como farmácias e hospitais\n"
-            "- 📚 História e cultura de Lisboa\n\n"
-            "Pergunta-me o que quiseres sobre Lisboa e eu trato disso. 🧭"
+            "### 🧭 **Fora do Âmbito do LISBOA**\n\n"
+            "✅ **Resposta direta:** isso fica fora do que consigo validar com qualidade neste sistema.\n\n"
+            "---\n\n"
+            "O LISBOA está focado na **Área Metropolitana de Lisboa**.\n\n"
+            "💡 **Posso ajudar com:**\n"
+            "- **Meteorologia:** previsão e avisos para Lisboa 🌤️\n"
+            "- **Mobilidade:** Metro, autocarros, comboios suburbanos e elétricos 🚇\n"
+            "- **Cultura:** eventos e atividades 🎭\n"
+            "- **Locais:** restaurantes, atrações e serviços próximos 📍\n"
+            "- **Planeamento:** roteiros e percursos personalizados 🗺️\n"
+            "- **Conhecimento:** história e cultura de Lisboa 📚\n\n"
+            "Pergunta-me por Lisboa/AML e eu respondo com dados confirmáveis sempre que possível."
         )
 
     def _direct_routing_override(self, user_message: str, language: str) -> Optional[Dict[str, Any]]:
@@ -410,7 +413,9 @@ class SupervisorAgent(BaseAgent):
             return {
                 "reasoning": "Direct geographic out-of-scope route override",
                 "agents": [],
-                "direct_response": self._sanitize_direct_response(self._build_out_of_scope_response(language)),
+                "direct_response": self._sanitize_direct_response(
+                    build_geographic_out_of_scope_response(user_message, language=language)
+                ),
             }
 
         if self._is_obvious_out_of_scope(user_message):
@@ -458,7 +463,7 @@ class SupervisorAgent(BaseAgent):
     @classmethod
     def _single_domain_override(cls, user_message: str) -> Optional[Dict[str, Any]]:
         """Routes obvious standalone single-domain queries without letting history or the LLM over-expand them."""
-        if cls._looks_like_follow_up(user_message):
+        if cls._looks_like_follow_up(user_message) and not cls._looks_like_transport_query(user_message):
             return None
         direct_weather_transport = cls._is_direct_weather_transport_query(user_message)
         message_lower = cls._normalize_query(user_message)
@@ -755,6 +760,25 @@ class SupervisorAgent(BaseAgent):
         return any(re.search(pattern, normalized) for pattern in origin_patterns)
 
     @classmethod
+    def _planning_query_requires_transport_context(cls, user_message: str) -> bool:
+        """Return whether itinerary quality depends on movement feasibility."""
+        normalized = cls._normalize_query(user_message)
+        if cls._looks_like_transport_query(normalized) or cls._planning_query_has_origin_anchor(user_message):
+            return True
+
+        movement_patterns = [
+            r"\b(?:optimized|optimised|optimal|efficient|feasible)\b",
+            r"\b(?:otimizad[oa]s?|optimizado|otimizar|eficiente|vi[aá]vel)\b",
+            r"\b(?:itinerary|roteiro|percurso|route|rota)\b",
+            r"\b(?:one|1|um)\s+(?:day|dia)\b",
+            r"\b(?:full\s+day|dia\s+inteiro)\b",
+            r"\b(?:multiple|v[aá]rios?|varios?)\s+(?:places|stops|locais|s[ií]tios|paragens)\b",
+            r"\b(?:monuments?|monumentos?).*\b(?:food|gastronomy|restaurant|restaurants|gastronomia|restaurante|almo[cç]o|jantar)\b",
+            r"\b(?:food|gastronomy|restaurant|restaurants|gastronomia|restaurante|almo[cç]o|jantar).*\b(?:monuments?|monumentos?)\b",
+        ]
+        return any(re.search(pattern, normalized) for pattern in movement_patterns)
+
+    @classmethod
     def _is_direct_weather_transport_query(cls, user_message: str) -> bool:
         """Detects operational weather-plus-route requests that should not become itineraries."""
         normalized = cls._normalize_query(user_message)
@@ -837,8 +861,12 @@ class SupervisorAgent(BaseAgent):
             r"\bwhat kinds? of\b.*\b(?:places?|events?|public services?|services?)\b",
             r"\bwhat types? of\b.*\b(?:places?|events?|public services?|services?)\b",
             r"\b(?:places?|events?|public services?|services?)\b.*\b(?:can i explore|can i look for|can you help me find|available categories|categories)\b",
+            r"\b(?:which|what|tell me|list|show me)\b.*\b(?:monuments?|museums?|places?|attractions?)\b.*\b(?:visit|in|around|near)\b",
+            r"\b(?:monuments?|museums?|places?|attractions?)\b.*\b(?:can i visit|to visit|worth visiting)\b",
             r"\bque tipos? de\b.*\b(?:locais|eventos|servi[cç]os)\b",
             r"\b(?:locais|eventos|servi[cç]os)\b.*\b(?:posso procurar|posso explorar|categorias disponiveis|categorias)\b",
+            r"\b(?:que|quais|diz-me|fala-me|lista|indica)\b.*\b(?:monumentos?|museus?|locais|atra[cç][oõ]es)\b.*\b(?:visitar|em|no|na|perto)\b",
+            r"\b(?:monumentos?|museus?|locais|atra[cç][oõ]es)\b.*\b(?:posso ir visitar|posso visitar|para visitar|vale a pena visitar)\b",
         ]
         return any(re.search(pattern, normalized) for pattern in category_patterns)
 
@@ -941,7 +969,6 @@ class SupervisorAgent(BaseAgent):
         if decision:
             agents = decision.get("agents", [])
             reasoning = decision.get("reasoning", "")
-            message_lower = user_message.lower()
 
             # Check if this is a planning query that requires weather.
             is_planning_query = self._is_planning_query(user_message)
@@ -971,11 +998,10 @@ class SupervisorAgent(BaseAgent):
                     reasoning += " (Added researcher agent: planning needs place/activity grounding)"
 
                 if (
-                    self._looks_like_transport_query(message_lower)
-                    or self._planning_query_has_origin_anchor(user_message)
+                    self._planning_query_requires_transport_context(user_message)
                 ) and "transport" not in agents:
                     agents.append("transport")
-                    reasoning += " (Added transport agent: planning query includes route/origin feasibility)"
+                    reasoning += " (Added transport agent: itinerary quality depends on movement feasibility)"
 
             # Force weather agent for near-future planning
             if is_planning_query and (
@@ -991,36 +1017,7 @@ class SupervisorAgent(BaseAgent):
             if not agents and any(k in reasoning_lower for k in ["matemática", "math", "fora de âmbito", "out of scope", "trivia", "trivialidade"]):
                 # Only override if LLM didn't provide a direct_response
                 if not decision.get("direct_response"):
-                    if language == "pt":
-                        decision["direct_response"] = (
-                            "Ups, isso fica um pouco fora da minha especialidade! 😄 "
-                            "Sou o teu **Assistente Urbano de Lisboa** e estou aqui para te ajudar "
-                            "a aproveitar ao máximo a Área Metropolitana de Lisboa 🏙️\n\n"
-                            "Olha o que posso fazer por ti:\n\n"
-                            "- 🌤️ Previsões meteorológicas e avisos em tempo real\n"
-                            "- 🚇 Informação de transportes (Metro, autocarros, comboios, elétricos)\n"
-                            "- 🎭 Eventos culturais e atividades\n"
-                            "- 📍 Locais para visitar, restaurantes e atrações\n"
-                            "- 🗺️ Planeamento de itinerários à medida\n"
-                            "- 🏥 Serviços próximos (farmácias, hospitais, parques)\n"
-                            "- 📚 História e cultura de Lisboa\n\n"
-                            "Pergunta-me o que quiseres sobre Lisboa! 🧭"
-                        )
-                    else:
-                        decision["direct_response"] = (
-                            "Oops, that's a bit outside my expertise! 😄 "
-                            "I'm your **Lisbon Urban Assistant** and I'm here to help you "
-                            "make the most of the Lisbon Metropolitan Area 🏙️\n\n"
-                            "Here's what I can do for you:\n\n"
-                            "- 🌤️ Weather forecasts & real-time warnings\n"
-                            "- 🚇 Transport info (Metro, buses, trains, trams)\n"
-                            "- 🎭 Cultural events & activities\n"
-                            "- 📍 Places to visit, restaurants & attractions\n"
-                            "- 🗺️ Custom itinerary planning\n"
-                            "- 🏥 Nearby services (pharmacies, hospitals, parks)\n"
-                            "- 📚 Lisbon history & culture\n\n"
-                            "Go ahead, ask me anything about Lisbon! 🧭"
-                        )
+                    decision["direct_response"] = self._build_out_of_scope_response(language)
 
             return {
                 "reasoning": reasoning,
@@ -1071,32 +1068,7 @@ class SupervisorAgent(BaseAgent):
             r"\brome\b",
         ]
         if any(re.search(pat, message_lower) for pat in forbidden_patterns):
-            if language == "en":
-                oos_msg = (
-                    "That's a bit outside my area! 😊 "
-                    "I'm your guide for the **Lisbon Metropolitan Area** 🏙️\n\n"
-                    "But here's everything I can help you with:\n\n"
-                    "- 🌤️ Weather forecasts and warnings\n"
-                    "- 🚇 Real-time transport (Metro, buses, trains)\n"
-                    "- 🎭 Cultural events and activities\n"
-                    "- 📍 Places, museums and attractions\n"
-                    "- 🗺️ Personalized itinerary planning\n"
-                    "- 🏥 Essential services (pharmacies, hospitals, schools)\n\n"
-                    "Want to explore Lisbon? Just ask! 🧭"
-                )
-            else:
-                oos_msg = (
-                    "Isso fica um pouco fora da minha área! 😊 "
-                    "Sou o teu guia para a **Área Metropolitana de Lisboa** 🏙️\n\n"
-                    "Mas olha tudo o que te posso ajudar:\n\n"
-                    "- 🌤️ Previsão meteorológica e avisos\n"
-                    "- 🚇 Transportes em tempo real (Metro, autocarros, comboios)\n"
-                    "- 🎭 Eventos e atividades culturais\n"
-                    "- 📍 Locais, museus e atrações\n"
-                    "- 🗺️ Planeamento personalizado de itinerários\n"
-                    "- 🏥 Serviços essenciais (farmácias, hospitais, escolas)\n\n"
-                    "Queres explorar Lisboa? Pergunta-me! 🧭"
-                )
+            oos_msg = self._build_out_of_scope_response(language)
             return {
                 "reasoning": "Fallback: Detected out-of-scope location (outside AML)",
                 "agents": [],
@@ -1229,8 +1201,7 @@ class SupervisorAgent(BaseAgent):
             ) and "weather" not in agents:
                 agents.append("weather")
             if (
-                self._looks_like_transport_query(message_lower)
-                or self._planning_query_has_origin_anchor(user_message)
+                self._planning_query_requires_transport_context(user_message)
             ) and "transport" not in agents:
                 agents.append("transport")
             if "researcher" not in agents:

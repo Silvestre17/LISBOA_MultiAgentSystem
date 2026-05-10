@@ -126,32 +126,6 @@ class AgentState(TypedDict):
     iteration_count: Optional[int]         # Execution-tracking metadata for loop prevention
 
 
-class PlanItem(TypedDict):
-    """
-    Single item in an itinerary plan.
-
-    Attributes:
-        order (int): Order in the itinerary.
-        time (str): Scheduled time (e.g., '10:00').
-        duration (int): Duration in minutes.
-        name (str): Name of the place/activity.
-        category (str): Category (e.g., 'museum', 'restaurant', 'transport').
-        location (str): Address or location description.
-        coordinates (tuple): `(latitude, longitude)` in WGS84 order.
-        notes (str): Additional notes or context.
-        transport_to_next (str): How to get to the next item.
-    """
-    order: int
-    time: str
-    duration: int
-    name: str
-    category: str
-    location: str
-    coordinates: Optional[tuple]
-    notes: str
-    transport_to_next: Optional[str]
-
-
 def create_initial_state(session_id: str = None) -> AgentState:
     """
     Creates an initial empty state for a new conversation.

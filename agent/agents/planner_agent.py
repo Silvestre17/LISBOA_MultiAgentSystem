@@ -236,7 +236,7 @@ def _build_public_transport_synthesis_instruction(
     return (
         "PUBLIC TRANSPORT SYNTHESIS CONTRACT:\n"
         "- The user asked for public transport and transport context is available.\n"
-        "- For every movement you include, provide concrete grounded details from the transport context: "
+        "- For every movement you include, provide concrete evidence-supported details from the transport context: "
         "operator, line or mode, direction when available, and board/alight or transfer point when available.\n"
         "- If the provided context does not confirm a specific leg, write exactly which leg is unconfirmed.\n"
         "- Do not replace missing route details with vague prose such as 'continue by public transport', "
@@ -301,16 +301,16 @@ def _build_multi_day_planner_instruction(language: str, requested_days: Optional
         return (
             f"MULTI-DAY QUALITY MODE: o pedido é para {requested_days} dias. "
             f"Entrega um plano dia-a-dia para até {visible_days} dias, com detalhe suficiente para ser útil. "
-            "Cada dia deve ter uma zona principal, 2-4 paragens grounded quando existirem nos dados, "
+            "Cada dia deve ter uma zona principal, 2-4 paragens suportadas pelos dados quando existirem, "
             "uma opção interior/backup, lógica de deslocação e limites explícitos. "
             "Se o pedido exceder 5 dias, limita a resposta aos primeiros 5 dias e explica brevemente porquê. "
-            "Não invente horários, preços, reservas, acessibilidade ou tempos em tempo real para datas futuras."
+            "Não inventes horários, preços, reservas, acessibilidade ou tempos em tempo real para datas futuras."
         )
 
     return (
         f"MULTI-DAY QUALITY MODE: the request covers {requested_days} days. "
         f"Deliver a day-by-day plan for up to {visible_days} days, detailed enough to be useful. "
-        "Each day must have one main area, 2-4 grounded stops when the data supports them, "
+        "Each day must have one main area, 2-4 evidence-supported stops when the data supports them, "
         "one indoor/backup option, movement logic, and explicit limits. "
         "If the request exceeds 5 days, limit the answer to the first 5 days and briefly explain why. "
         "Do not invent opening hours, prices, bookings, accessibility details, or future live transport times."
@@ -475,7 +475,7 @@ def _build_planner_grounding_message(
     """Builds a strict grounding note for planner synthesis."""
     rules = [
         "GROUNDING RULES:",
-        "- You MUST stay grounded in the provided agent data.",
+        "- You MUST stay supported by the provided agent data.",
         "- Do NOT mention any venue, museum, restaurant, or landmark unless it appears in the provided data.",
         "- If data is missing, say it is not confirmed instead of filling the gap from general knowledge.",
     ]
@@ -536,9 +536,10 @@ def _build_planner_evidence_packet(
 ) -> str:
     """Build a structured evidence summary for dynamic planner synthesis.
 
-    The packet keeps the LLM path grounded without turning common planning
-    requests into static templates. It intentionally summarizes worker evidence
-    and limitations; deterministic builders remain a last-resort fallback.
+    The packet keeps the LLM path evidence-supported without turning common
+    planning requests into static templates. It intentionally summarizes
+    specialized-agent evidence and limitations; deterministic builders remain a
+    last-resort fallback.
     """
     is_pt = language == "pt"
     requested_days = _extract_requested_day_count(user_message)
@@ -573,7 +574,7 @@ def _build_planner_evidence_packet(
         _section(
             "Weather Facts" if not is_pt else "Factos Meteorológicos",
             weather_bullets,
-            "Weather was not confirmed in the worker output." if not is_pt else "A meteorologia não foi confirmada no output dos workers.",
+            "Weather was not confirmed in the available evidence." if not is_pt else "A meteorologia não foi confirmada na evidência disponível.",
         ),
         _section(
             "Transport Evidence" if not is_pt else "Evidência de Transportes",
@@ -581,7 +582,7 @@ def _build_planner_evidence_packet(
             "Transport was not confirmed; do not invent lines, stops, durations, or live departures." if not is_pt else "Os transportes não foram confirmados; não inventes linhas, paragens, durações ou partidas em tempo real.",
         ),
         _section(
-            "Grounded Places" if not is_pt else "Locais Grounded",
+            "Evidence-Supported Places" if not is_pt else "Locais Suportados por Evidência",
             place_bullets,
             "No concrete place cards were provided; ask for confirmation or give a scoped limitation instead of inventing venues." if not is_pt else "Não foram fornecidos cartões de locais concretos; assume uma limitação delimitada em vez de inventar locais.",
         ),
@@ -595,13 +596,13 @@ def _build_planner_evidence_packet(
     if event_bullets:
         sections.append(
             _section(
-                "Grounded Events" if not is_pt else "Eventos Grounded",
+                "Evidence-Supported Events" if not is_pt else "Eventos Suportados por Evidência",
                 event_bullets,
                 "",
             )
         )
     if qa_disclaimers:
-        limitation_title = "QA Limitations" if not is_pt else "Limitações QA"
+        limitation_title = "Data Caveats" if not is_pt else "Cautelas dos Dados"
         sections.append(
             f"### {limitation_title}\n" + "\n".join(f"- {item}" for item in qa_disclaimers)
         )
@@ -636,7 +637,7 @@ def _extract_plan_constraints(user_message: str, conversation_context: str, lang
     if avoid_match:
         areas = re.sub(r"\s+", " ", avoid_match.group("areas")).strip(" .?!,;:")
         add(f"evitar {areas}", f"avoid {areas}")
-    return constraints[:6] or (["restrições não especificadas"] if is_pt else ["no explicit constraints beyond the requested plan"])
+    return constraints[:6]
 
 
 def _planner_response_matches_schema(response: str) -> bool:
@@ -731,6 +732,70 @@ def _planner_response_matches_schema(response: str) -> bool:
             if not re.search(r"\b(?:not|no|without|unconfirmed|do not|did not|não|nao|sem)\b", line, flags=re.IGNORECASE):
                 return False
     return True
+
+
+def _planner_response_has_minimum_user_value(response: str) -> bool:
+    """Return whether a planner answer contains actionable content for the user.
+
+    Planner responses can pass a heading-level schema check while still being
+    effectively empty after LLM repair or Markdown normalization. This guard
+    rejects those shells before they reach QA or the UI.
+    """
+    if not response or not response.strip():
+        return False
+
+    without_sources = re.sub(
+        r"(?im)^\s*(?:[-*•]\s*)?(?:📌\s*)?\**(?:Fonte|Fontes|Source|Sources)\**\s*:.*$",
+        "",
+        response,
+    )
+    compact = re.sub(r"\s+", " ", without_sources).strip()
+    if len(compact) < 180:
+        return False
+
+    normalized = _normalize_planner_text(without_sources)
+    if re.search(r"\b(?:dados nao confirmados|data not confirmed)\b", normalized):
+        return False
+
+    headings = [
+        _normalize_planner_text(line)
+        for line in without_sources.splitlines()
+        if line.strip().startswith("### ")
+    ]
+    useful_headings = [
+        heading
+        for heading in headings
+        if not re.search(r"\b(?:fonte|source|sources|fontes)\b", heading)
+    ]
+    meaningful_bullets: list[str] = []
+    item_cards: list[str] = []
+    body_lines: list[str] = []
+
+    for raw_line in without_sources.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped == "---" or stripped.startswith("### "):
+            continue
+        normalized_line = _normalize_planner_text(stripped)
+        if re.search(r"\b(?:fonte|source|sources|fontes|resposta direta|direct answer)\b", normalized_line):
+            continue
+        body_lines.append(stripped)
+        if re.match(r"^(?:[-*•]|\d+[.)])\s+", stripped):
+            meaningful_bullets.append(stripped)
+        elif re.match(r"^\*\*[^*\n]{3,120}\*\*\s*$", stripped):
+            item_cards.append(stripped)
+
+    if len(item_cards) >= 1 and (meaningful_bullets or len(body_lines) >= 3):
+        return True
+    if len(meaningful_bullets) >= 2 and len(useful_headings) >= 2:
+        return True
+    has_plan_section = any(
+        re.search(
+            r"\b(?:roteiro sugerido|suggested route|como te deslocas|how to move|adapta[cç]ao ao tempo|weather adaptation|notas finais|final notes)\b",
+            heading,
+        )
+        for heading in useful_headings
+    )
+    return has_plan_section and len(useful_headings) >= 3 and len(body_lines) >= 3
 
 
 
@@ -834,12 +899,11 @@ def _build_structured_plan_fallback(
     if source_line and "carris" not in _normalize_planner_text("\n".join(transport_bullets)):
         source_line = re.sub(r"\s*\|\s*\[\*Carris\*\]\(https://www\.carris\.pt\)", "", source_line)
 
-    if not transport_bullets:
-        transport_bullets = [
-            "- As pernas exatas de transporte não ficaram confirmadas; usa o plano como ordem geográfica, não como horário."
-            if is_pt
-            else "- Exact transport legs were not confirmed; use this as geographic order, not as a timetable."
-        ]
+    transport_limitation = (
+        "A ligação entre zonas não ficou confirmada nos dados recolhidos; não inventei linhas, paragens, durações ou partidas."
+        if is_pt
+        else "The connection between areas was not confirmed in the gathered data; I did not invent lines, stops, durations, or departures."
+    )
 
     route_target = _extract_requested_plan_area(user_message)
     route_origin = _extract_requested_plan_origin(user_message)
@@ -868,11 +932,17 @@ def _build_structured_plan_fallback(
             else "Here is a high-level day-by-day plan with examples anchored in the available data and explicit limits."
         )
     else:
-        if route_origin and route_target:
+        if route_origin and route_target and transport_bullets:
             direct = (
                 f"Usa a ligação de transporte público evidenciada a partir de **{route_origin}** para **{route_target}**, acrescenta uma paragem cultural confirmada e mantém a caminhada final curta."
                 if is_pt
-                else f"Use the evidenced public-transport leg from **{route_origin}** toward **{route_target}**, add one grounded cultural stop, and keep the final walk short."
+                else f"Use the evidenced public-transport leg from **{route_origin}** toward **{route_target}**, add one confirmed cultural stop, and keep the final walk short."
+            )
+        elif route_origin and route_target:
+            direct = (
+                f"Não ficou confirmada uma ligação concreta entre **{route_origin}** e **{route_target}**; deixo apenas os dados verificáveis recolhidos e a limitação explícita."
+                if is_pt
+                else f"A concrete connection between **{route_origin}** and **{route_target}** was not confirmed; I am keeping only the verified gathered data and the explicit limitation."
             )
         else:
             direct = (
@@ -894,7 +964,9 @@ def _build_structured_plan_fallback(
         ])
     lines.extend([
         "",
-        "### 📍 **Roteiro sugerido**" if is_pt else "### 📍 **Suggested route**",
+        ("### 📍 **Roteiro sugerido**" if clean_cards else "### 📍 **Dados confirmados para o plano**")
+        if is_pt
+        else ("### 📍 **Suggested Route**" if clean_cards else "### 📍 **Confirmed Planning Data**"),
     ])
 
     if visible_days == 1:
@@ -905,18 +977,15 @@ def _build_structured_plan_fallback(
             if card.get("category"):
                 lines.append(f"    - 📝 **{'Categoria' if is_pt else 'Category'}:** {card['category']}")
             if card.get("description"):
-                description = _clean_planner_card_description(card["description"])
+                description = _planner_card_description_for_language(card["description"], language)
                 if description:
                     lines.append(f"    - 📝 **{'Nota' if is_pt else 'Note'}:** {description[:220].rstrip()}")
         if block_count == 0:
-            block_count += 1
-            if block_count == 1:
-                generic = "paragem cultural confirmável" if is_pt else "confirmable cultural stop"
-            elif block_count == 2:
-                generic = "pausa curta para comida/café sem assumir reserva" if is_pt else "short food/coffee break without assuming a booking"
-            else:
-                generic = "backup interior ou regresso" if is_pt else "indoor backup or return leg"
-            lines.extend(["", f"**📍 {generic.capitalize()}**"])
+            lines.append(
+                "- ⚠️ Não consegui confirmar locais concretos suficientes para publicar um roteiro fechado; mantém o plano como orientação e pede uma zona, tema ou ponto de partida para eu recolher evidência concreta."
+                if is_pt
+                else "- ⚠️ I could not confirm enough concrete places to publish a fixed itinerary; treat this as guidance and provide an area, theme, or starting point so I can gather concrete evidence."
+            )
     else:
         themes_en = [
             "historic core with low walking",
@@ -938,15 +1007,16 @@ def _build_structured_plan_fallback(
             label = f"Dia {day_index + 1}" if is_pt else f"Day {day_index + 1}"
             theme = themes[day_index % len(themes)]
             if anchor:
-                lines.append(f"- **{label}:** {theme}; exemplo ancorado: **{anchor}**." if is_pt else f"- **{label}:** {theme}; grounded example: **{anchor}**.")
+                lines.append(f"- **{label}:** {theme}; exemplo ancorado: **{anchor}**." if is_pt else f"- **{label}:** {theme}; evidenced example: **{anchor}**.")
             else:
                 lines.append(f"- **{label}:** {theme}; escolher locais concretos só após confirmação." if is_pt else f"- **{label}:** {theme}; choose concrete venues only after confirmation.")
 
-    lines.extend([
-        "",
-        "### 🚇 **Como te deslocas**" if is_pt else "### 🚇 **How to move**",
-        *transport_bullets[:4],
-    ])
+    if transport_bullets:
+        lines.extend([
+            "",
+            "### 🚇 **Como te deslocas**" if is_pt else "### 🚇 **How to move**",
+            *transport_bullets[:4],
+        ])
     if weather_bullets:
         lines.extend([
             "",
@@ -961,10 +1031,15 @@ def _build_structured_plan_fallback(
         "Não confirmei horários, preços, bilhetes, reservas, lotação ou disponibilidade em tempo real."
         if is_pt
         else "I did not confirm opening hours, prices, tickets, bookings, crowding, or real-time availability.",
-        "Não uses partidas live recolhidas agora como horário para planos futuros."
-        if is_pt
-        else "Do not use live departures captured now as a schedule for future plans.",
     ]
+    if transport_bullets:
+        limitations.append(
+            "Não uses partidas em tempo real recolhidas agora como horário para planos futuros."
+            if is_pt
+            else "Do not use live departures captured now as a schedule for future plans."
+        )
+    elif _query_requests_public_transport(user_message) or route_origin or route_target:
+        limitations.append(transport_limitation)
     if requested_days > 5:
         limitations.append(
             "Limitei a resposta aos primeiros 5 dias; os restantes dias devem ser planeados numa segunda iteração."
@@ -1034,6 +1109,19 @@ def _clean_planner_card_description(description: str) -> str:
     )
     text = re.sub(r"^(?:Description|Descrição|Descricao|Note|Nota)\s*:\s*", "", text, flags=re.IGNORECASE)
     return re.sub(r"\s+", " ", text).strip(" -")
+
+
+def _planner_card_description_for_language(description: str, language: str) -> str:
+    """Return a cleaned card description with conservative PT localization."""
+    text = _clean_planner_card_description(description)
+    if language == "pt":
+        fixed_translations = {
+            "Typical Portuguese cuisine.": "Cozinha portuguesa típica.",
+            "Traditional Portuguese cuisine.": "Cozinha portuguesa tradicional.",
+            "Typical Portuguese food.": "Comida portuguesa típica.",
+        }
+        return fixed_translations.get(text, text)
+    return text
 
 
 def _extract_planner_fallback_bullets(text: str, *, max_items: int = 4) -> List[str]:
@@ -1195,41 +1283,6 @@ def _build_planner_fallback_source_line(
     return f"{source_label} {' | '.join(sources)} | {timestamp} {datetime.now().strftime('%H:%M')}"
 
 
-def _build_lisboa_scope_source_line(
-    language: str,
-    *,
-    include_ipma: bool = False,
-    include_lisboa_aberta: bool = False,
-    include_visitlisboa: bool = False,
-    include_metro: bool = False,
-    include_carris: bool = False,
-    include_cp: bool = False,
-) -> str:
-    """Build a source line for answers based on LISBOA runtime scope rather than live evidence."""
-    label = "📌 **Fonte:**" if language == "pt" else "📌 **Source:**"
-    updated = "**Atualizado:**" if language == "pt" else "**Updated:**"
-    sources: List[str] = []
-    if include_ipma:
-        sources.append("[*IPMA*](https://www.ipma.pt)")
-    if include_lisboa_aberta:
-        sources.append("[*Lisboa Aberta*](https://dados.cm-lisboa.pt/)")
-    if include_visitlisboa:
-        sources.append(
-            "[*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais)"
-            if language == "pt"
-            else "[*VisitLisboa Places*](https://www.visitlisboa.com/en/places)"
-        )
-    if include_metro:
-        sources.append("[*Metro de Lisboa*](https://www.metrolisboa.pt)")
-    if include_carris:
-        sources.append("[*Carris*](https://www.carris.pt)")
-    if include_cp:
-        sources.append("[*CP*](https://www.cp.pt)")
-    if not sources:
-        return ""
-    return f"{label} {' | '.join(sources)} | {updated} {datetime.now().strftime('%H:%M')}"
-
-
 def _extract_weather_safety_bullets(weather_data: str, language: str) -> List[str]:
     """Extract concise rain/warning bullets for planner fallbacks."""
     text = str(weather_data or "")
@@ -1245,990 +1298,6 @@ def _extract_weather_safety_bullets(weather_data: str, language: str) -> List[st
         )
 
     return bullets[:2]
-
-
-def _build_multi_day_scope_fallback(
-    user_message: str,
-    language: str,
-    requested_days: int,
-    weather_data: str,
-) -> str:
-    """Build a bounded multi-day framework without pretending full live validation."""
-    area = _extract_neighborhood_hint(
-        user_message,
-        default="a zona indicada" if language == "pt" else "the requested base area",
-    )
-    visible_days = min(requested_days, 5)
-    normalized_query = _normalize_planner_text(user_message)
-    low_walk = bool(
-        re.search(
-            r"\b(?:avoid long walks|low walk|low-walk|pouca caminhada|evitar caminhadas longas|sem caminhadas longas|reduced mobility|mobilidade reduzida)\b",
-            normalized_query,
-        )
-    )
-    family = bool(re.search(r"\b(?:child|children|kid|kids|family|familia|criança|crianca)\b", normalized_query))
-    budget = bool(re.search(r"\b(?:low-cost|low cost|budget|cheap|barato|econ[oó]mic)\b", normalized_query))
-    weather_bullets = _extract_weather_safety_bullets(weather_data, language)
-    source_line = _build_lisboa_scope_source_line(
-        language,
-        include_ipma=bool(str(weather_data or "").strip()),
-        include_visitlisboa=True,
-        include_metro=True,
-        include_carris=True,
-    )
-
-    if language == "pt":
-        meal_field = (
-            "🍽️ **Refeição económica:** prato do dia/pastelaria/food court na zona; confirma preço no local."
-            if budget
-            else "🍽️ **Pausa:** escolhe uma refeição simples na mesma zona para evitar deslocações extra."
-        )
-        parque_morning = (
-            "Oceanário de Lisboa ou Pavilhão do Conhecimento como visita principal; privilegia estas âncoras com criança."
-            if family
-            else "Oceanário de Lisboa ou Pavilhão do Conhecimento como visita principal."
-        )
-        day_templates = [
-            {
-                "title": "Dia 1 · Baixa, Chiado e Lisboa antiga",
-                "morning": "Rossio → Baixa → Arco da Rua Augusta / Praça do Comércio, com contexto sobre a reconstrução pombalina.",
-                "afternoon": "Chiado e Museu Nacional de Arte Contemporânea ou Museu de São Roque como paragem interior.",
-                "transport": f"Metro a partir de **{area}** para Baixa-Chiado/Rossio; depois caminhadas curtas e planas sempre que possível.",
-                "rain": "Se chover, troca a parte exterior por Museu de São Roque, Lisboa Story Centre ou outro museu central confirmado.",
-                "meal": meal_field,
-            },
-            {
-                "title": "Dia 2 · Belém histórico",
-                "morning": "Mosteiro dos Jerónimos e Pastéis de Belém como eixo histórico-gastronómico.",
-                "afternoon": "Museu dos Coches ou MAAT; Torre de Belém/Padrão dos Descobrimentos só se o tempo permitir.",
-                "transport": "Vai pelo corredor Cais do Sodré/Praça da Figueira → Belém com Carris quando a partida estiver confirmada.",
-                "rain": "Com chuva, mantém Jerónimos + Museu dos Coches/MAAT e reduz a frente ribeirinha.",
-                "meal": meal_field,
-            },
-            {
-                "title": "Dia 3 · Parque das Nações",
-                "morning": parque_morning,
-                "afternoon": "Passeio curto junto à Gare do Oriente / zona ribeirinha apenas se o tempo estiver estável.",
-                "transport": "Usa Metro para o eixo de Oriente, com ligação à Linha Vermelha quando aplicável; confirma a estação mais conveniente antes de sair.",
-                "rain": "É o melhor dia para chuva porque concentra atrações interiores e transportes cobertos em Oriente.",
-                "meal": meal_field,
-            },
-            {
-                "title": "Dia 4 · Gulbenkian e Avenidas Novas",
-                "morning": "Museu Calouste Gulbenkian ou Centro de Arte Moderna, com pausa no jardim se estiver seco.",
-                "afternoon": "Parque Eduardo VII / El Corte Inglés / Saldanha como bloco leve e próximo da base.",
-                "transport": "Usa Metro até São Sebastião/Saldanha; evita acrescentar outro bairro neste dia.",
-                "rain": "Se chover, transforma este dia num bloco quase todo interior entre Gulbenkian e zonas cobertas próximas.",
-                "meal": meal_field,
-            },
-            {
-                "title": "Dia 5 · Alcântara ou Príncipe Real",
-                "morning": "Escolhe Alcântara/LX Factory para um eixo criativo e ribeirinho, ou Príncipe Real/Estrela para bairro, jardim e miradouros próximos.",
-                "afternoon": "Mantém só uma dessas zonas; acrescentar as duas piora a experiência se houver pouca caminhada.",
-                "transport": "Usa Carris/Metro conforme a zona escolhida e confirma a ligação final no momento.",
-                "rain": "Com chuva, prefere LX Factory ou um museu/galeria interior; com tempo seco, Príncipe Real/Estrela funciona melhor.",
-                "meal": meal_field,
-            },
-        ]
-        intro = (
-            f"Vou dar um plano turístico de **{visible_days} dias** com zonas visitáveis, visitas concretas e deslocações simples. "
-            "Não é uma agenda fechada: horários, bilhetes, reservas e transportes futuros têm de ser confirmados por dia."
-        )
-        if requested_days > 5:
-            intro = (
-                f"O pedido tem **{requested_days} dias**; para manter qualidade, detalhe e verdade factual, deixo já os **primeiros 5 dias** bem estruturados."
-            )
-        constraints = [
-            f"- 🏨 **Base:** {area}.",
-            "- 🚶 **Ritmo:** máximo 2-3 paragens principais por dia, com zonas próximas entre si.",
-            "- 🚇 **Transporte:** Metro para eixos principais; Carris quando Belém/Alcântara exigirem superfície.",
-        ]
-        if low_walk:
-            constraints.append("- 👟 **Pouca caminhada:** evita combinar colinas, miradouros distantes e bairros separados no mesmo dia.")
-        return "\n".join(
-            [
-                f"### 📅 {'Primeiros 5 dias em Lisboa' if requested_days > 5 else f'Plano de {visible_days} dias em Lisboa'}",
-                "",
-                intro,
-                "",
-                "---",
-                "",
-                "### ⛅ Condições e estratégia",
-                *weather_bullets,
-                "- Mantém sempre uma alternativa interior por dia em vez de cancelar o plano.",
-                "",
-                "---",
-                "",
-                "### 🧭 Regras do plano",
-                *constraints[:5],
-                "",
-                "---",
-                "",
-                *[
-                    "\n".join(
-                        [
-                            f"### 📍 {day['title']}",
-                            f"- 🏛️ **Manhã:** {day['morning']}",
-                            f"- 🖼️ **Tarde:** {day['afternoon']}",
-                            f"- 🚇 **Como ir:** {day['transport']}",
-                            f"- 🌧️ **Backup de chuva:** {day['rain']}",
-                            f"- {day['meal']}",
-                            "",
-                            "---",
-                            "",
-                        ]
-                    )
-                    for day in day_templates[:visible_days]
-                ],
-                "### ⚠️ Limites honestos",
-                "- Não confirmo horários de abertura, bilhetes, reservas, acessibilidade detalhada ou partidas futuras em tempo real nesta resposta.",
-                "- Para transformar isto numa agenda fechada, valida cada dia com a data final e os locais que queres mesmo visitar.",
-                "",
-                source_line,
-            ]
-        ).strip()
-
-    meal_field_en = (
-        "🍽️ **Low-cost meal:** daily dish, bakery, sandwich/soup, or food-court option in the same area; confirm prices locally."
-        if budget
-        else "🍽️ **Meal pause:** keep food in the same area so the day does not become transport-heavy."
-    )
-    parque_morning_en = (
-        "Oceanário de Lisboa or Pavilhão do Conhecimento as the main visit; this is the strongest family-friendly day with a 7-year-old."
-        if family
-        else "Oceanário de Lisboa or Pavilhão do Conhecimento as the main visit; this is the easiest weather-safe modern Lisbon day."
-    )
-    day_templates_en = [
-        {
-            "title": "Day 1 · Baixa, Chiado and Old Lisbon",
-            "morning": "Rossio → Baixa → Rua Augusta Arch / Praça do Comércio, with context on the Pombaline reconstruction.",
-            "afternoon": "Chiado plus Museu Nacional de Arte Contemporânea or the São Roque museum area as the indoor stop.",
-            "transport": f"Metro from **{area}** to Baixa-Chiado/Rossio, then short flat walks where possible.",
-            "rain": "If it rains, swap exposed squares for Museu de São Roque, Lisboa Story Centre, or another confirmed central museum.",
-            "meal": meal_field_en,
-        },
-        {
-            "title": "Day 2 · Belém History",
-            "morning": "Jerónimos Monastery and Pastéis de Belém as the history-and-food anchor.",
-            "afternoon": "National Coach Museum or MAAT; Belém Tower / Discoveries Monument only if the weather is manageable.",
-            "transport": "Use the Cais do Sodré/Praça da Figueira → Belém Carris corridor when a suitable departure is confirmed.",
-            "rain": "In rain, keep Jerónimos + National Coach Museum/MAAT and shorten the riverside walk.",
-            "meal": meal_field_en,
-        },
-        {
-            "title": "Day 3 · Parque das Nações",
-            "morning": parque_morning_en,
-            "afternoon": "Short Oriente / riverside walk only if conditions are comfortable.",
-            "transport": "Use Metro toward Oriente, connecting to the Red Line when applicable; confirm the most convenient station before leaving.",
-            "rain": "This is the safest rain day because the main attractions and transport hub are close together.",
-            "meal": meal_field_en,
-        },
-        {
-            "title": "Day 4 · Gulbenkian and Avenidas Novas",
-            "morning": "Calouste Gulbenkian Museum or CAM as the cultural anchor.",
-            "afternoon": "Gulbenkian Garden if dry; Parque Eduardo VII / Saldanha covered areas if rain or tiredness builds up.",
-            "transport": "Use Metro to São Sebastião/Saldanha and avoid adding a second distant district.",
-            "rain": "Turn this into an almost fully indoor day around Gulbenkian and nearby covered streets.",
-            "meal": meal_field_en,
-        },
-        {
-            "title": "Day 5 · Alcântara or Príncipe Real",
-            "morning": "Choose Alcântara/LX Factory for creative riverside Lisbon, or Príncipe Real/Estrela for neighbourhood, garden and viewpoints.",
-            "afternoon": "Stay with the chosen zone; combining both weakens a low-walk itinerary.",
-            "transport": "Use Carris/Metro according to the chosen zone and confirm the final connection at travel time.",
-            "rain": "In rain, prefer LX Factory or an indoor museum/gallery; in dry weather, Príncipe Real/Estrela is better.",
-            "meal": meal_field_en,
-        },
-    ]
-    intro_en = (
-        f"Here is a usable **{visible_days}-day Lisbon itinerary** with visitable areas, concrete stops, simple public transport, and rain backups. "
-        "It is not a locked booking schedule: opening hours, tickets, bookings, and future departures still need day-by-day confirmation."
-    )
-    if requested_days > 5:
-        intro_en = (
-            f"The request covers **{requested_days} days**; to keep the answer useful and truthful, I’m giving the **first 5 days** with real structure rather than a thin 7-day list."
-        )
-    constraints_en = [
-        f"- 🏨 **Base:** {area}.",
-        "- 🚶 **Pace:** 2-3 main stops per day, kept geographically close.",
-        "- 🚇 **Transport:** Metro for main axes; Carris for Belém/Alcântara-style surface links.",
-    ]
-    if low_walk:
-        constraints_en.append("- 👟 **Low walking:** avoid combining hills, distant viewpoints, and separated districts on the same day.")
-    return "\n".join(
-        [
-            f"### 📅 {'First 5 Days in Lisbon' if requested_days > 5 else f'{visible_days}-Day Lisbon Itinerary'}",
-            "",
-            intro_en,
-            "",
-            "---",
-            "",
-            "### ⛅ Conditions and Strategy",
-            *weather_bullets,
-            "- Keep one indoor backup per day instead of cancelling the plan if rain appears.",
-            "",
-            "---",
-            "",
-            "### 🧭 Plan Rules",
-            *constraints_en[:5],
-            "",
-            "---",
-            "",
-            *[
-                "\n".join(
-                    [
-                        f"### 📍 {day['title']}",
-                        f"- 🏛️ **Morning:** {day['morning']}",
-                        f"- 🖼️ **Afternoon:** {day['afternoon']}",
-                        f"- 🚇 **How to move:** {day['transport']}",
-                        f"- 🌧️ **Rain backup:** {day['rain']}",
-                        f"- {day['meal']}",
-                        "",
-                        "---",
-                        "",
-                    ]
-                )
-                for day in day_templates_en[:visible_days]
-            ],
-            "### ⚠️ Honest Limits",
-            "- I am not confirming opening hours, tickets, bookings, detailed accessibility, or future real-time departures in this answer.",
-            "- To turn this into a locked daily schedule, validate each day with the final date and the specific places you care about most.",
-            "",
-            source_line,
-        ]
-    ).strip()
-
-
-def _build_reduced_mobility_evening_fallback(language: str, weather_data: str) -> str:
-    """Build a safe evening fallback when reduced mobility/accessibility cannot be verified."""
-    weather_bullets = _extract_weather_safety_bullets(weather_data, language)
-    source_line = _build_lisboa_scope_source_line(language, include_ipma=bool(str(weather_data or "").strip()))
-    if language == "pt":
-        return "\n".join(
-            [
-                "### 📅 Plano simples com mobilidade reduzida",
-                "",
-                "**⛅ Condições**",
-                *weather_bullets,
-                "",
-                "---",
-                "",
-                "**🚇 Chegada e deslocação**",
-                "- Mantém o plano entre **Aeroporto** e **Baixa/Chiado**, com o mínimo de transbordos possível.",
-                "- Não confirmo elevadores, rampas, pisos sem degraus ou acessibilidade do local cultural com os dados recolhidos.",
-                "",
-                "---",
-                "",
-                "**🍽️ Jantar e cultura**",
-                "- Escolhe jantar perto da estação/saída que for mais conveniente na Baixa, em vez de atravessar a cidade com bagagem.",
-                "- Usa uma paragem cultural interior apenas depois de confirmar horário e acessibilidade oficial.",
-                "",
-                source_line,
-            ]
-        ).strip()
-    return "\n".join(
-        [
-            "### 📅 Simple Reduced-Mobility Evening",
-            "",
-            "**⛅ Conditions**",
-            *weather_bullets,
-            "",
-            "---",
-            "",
-            "**🚇 Arrival and movement**",
-            "- Keep the plan between **Aeroporto** and **Baixa/Chiado**, with as few transfers as possible.",
-            "- I am not confirming lifts, ramps, step-free paths, or venue accessibility from the gathered data.",
-            "",
-            "---",
-            "",
-            "**🍽️ Dinner and culture**",
-            "- Choose dinner near the most convenient Baixa exit instead of crossing the city with luggage.",
-            "- Use an indoor cultural stop only after official opening hours and accessibility are confirmed.",
-            "",
-            source_line,
-        ]
-    ).strip()
-
-
-def _extract_resident_plan_anchor(user_message: str, *, role: str) -> str:
-    """Extract the practical origin or dinner area for resident service plans."""
-    text = str(user_message or "")
-    if role == "dinner":
-        patterns = (
-            r"\b(?:quiet\s+)?dinner\s+(?:in|near|around)\s+(?P<location>.+?)(?:\s+if\b|\s+when\b|[\?\!\.,]|$)",
-            r"\bjantar\s+(?:em|no|na|perto\s+de|perto\s+do|perto\s+da)\s+(?P<location>.+?)(?:\s+se\b|\s+quando\b|[\?\!\.,]|$)",
-        )
-        default = "Alvalade"
-    else:
-        patterns = (
-            r"\bstart(?:ing)?\s+(?:in|from|at)\s+(?P<location>.+?)(?:\s*,|\s+and\b|\s+then\b|\s+to\b|[\?\!\.]|$)",
-            r"\bfrom\s+(?P<location>.+?)\s+(?:i|we)\s+(?:need|want|have)\b",
-            r"\bfrom\s+(?P<location>.+?)\s+(?:to|towards|toward)\b",
-            r"\bcome(?:çar|car)\s+(?:em|no|na|do|da)\s+(?P<location>.+?)(?:\s*,|\s+e\b|\s+depois\b|\s+para\b|[\?\!\.]|$)",
-            r"\ba\s+partir\s+(?:de|do|da)\s+(?P<location>.+?)(?:\s*,|\s+e\b|\s+depois\b|\s+para\b|[\?\!\.]|$)",
-        )
-        default = "Areeiro"
-
-    for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        if match:
-            location = re.sub(r"\s+", " ", match.group("location")).strip(" .?!,;:")
-            if location:
-                return location
-    return default
-
-
-def _extract_resident_service_card(places_data: str, service: str) -> Dict[str, str]:
-    """Extract the first concrete Lisboa Aberta service card from worker output."""
-    normalized_service = _normalize_planner_text(service)
-    text = str(places_data or "")
-    if not text.strip():
-        return {}
-
-    sections = re.split(r"(?m)(?=^###\s+)", text)
-    service_markers = {
-        "recycling": ("recycling", "ecoponto", "ecopontos", "reciclagem"),
-        "pharmacy": ("pharmacy", "pharmacies", "farmacia", "farmacias", "farmácia", "farmácias"),
-    }
-    markers = service_markers.get(normalized_service, (normalized_service,))
-    candidate_sections = [
-        candidate
-        for candidate in sections
-        if any(marker in _normalize_planner_text(candidate) for marker in markers)
-    ]
-    detailed_sections = [
-        candidate
-        for candidate in candidate_sections
-        if re.search(r"(?mi)^\s{4}-\s*📍\s*\*\*(?:Address|Morada):\*\*", candidate)
-    ]
-    section = (detailed_sections or candidate_sections or [text])[0]
-
-    if re.search(r"(?mi)^❌|could not|não consegui|nao consegui|no datasets found|dataset temporarily unavailable", section):
-        first_line = next((line.strip() for line in section.splitlines() if line.strip()), "")
-        return {"limitation": first_line}
-
-    nearest_match = re.search(
-        r"(?mi)^-\s*✅\s*\*\*(?:Nearest|Mais perto):\*\*\s*(?P<name>.+?)(?:\s*\((?P<distance>[^)]*km[^)]*)\))?\s*$",
-        section,
-    )
-    item_match = re.search(
-        r"(?mi)^-\s*(?:♻️|💊|📍)?\s*\*\*(?P<name>[^*\n]+)\*\*\s*$",
-        section,
-    )
-    name = ""
-    distance = ""
-    if nearest_match:
-        name = nearest_match.group("name").strip()
-        distance = (nearest_match.group("distance") or "").strip()
-    elif item_match:
-        name = item_match.group("name").strip()
-
-    address_match = re.search(
-        r"(?mi)^\s{4}-\s*📍\s*\*\*(?:Address|Morada):\*\*\s*(?P<address>.+?)\s*$",
-        section,
-    )
-    distance_match = re.search(
-        r"(?mi)^\s{4}-\s*📏\s*\*\*(?:Distance|Distância):\*\*\s*(?P<distance>[0-9]+(?:\.[0-9]+)?\s*km)\s*$",
-        section,
-    )
-    if distance_match and not distance:
-        distance = distance_match.group("distance").strip()
-
-    result: Dict[str, str] = {}
-    if name:
-        result["name"] = name
-    if address_match:
-        result["address"] = address_match.group("address").strip()
-    if distance:
-        result["distance"] = distance
-    return result
-
-
-def _format_resident_service_bullet(card: Dict[str, str], fallback_name: str, unavailable_text: str) -> List[str]:
-    """Format one resident-service card without leaking placeholders."""
-    if card.get("name"):
-        raw_name = card["name"].strip()
-        generic_recycling = bool(re.fullmatch(r"(?i)recycling point\s+\d+", raw_name))
-        display_name = "nearest municipal recycling point returned by Lisboa Aberta" if generic_recycling else raw_name
-        lines = [f"- **Recommended stop:** {display_name}"]
-        if card.get("address"):
-            lines.append(f"    - **Address:** {card['address']}")
-        elif generic_recycling:
-            lines.append("    - **Location detail:** the municipal result did not include a street address in this run; use the map/proximity point before walking there.")
-        if card.get("distance"):
-            lines.append(f"    - **Distance:** {card['distance']}")
-        return lines
-    if card.get("limitation"):
-        return [f"- **Status:** {card['limitation']}", f"- **Fallback:** {unavailable_text}"]
-    return [f"- **Status:** {fallback_name}", f"- **Fallback:** {unavailable_text}"]
-
-
-def _format_resident_service_bullet_pt(card: Dict[str, str], fallback_name: str, unavailable_text: str) -> List[str]:
-    """Format one resident-service card in European Portuguese."""
-    if card.get("name"):
-        raw_name = card["name"].strip()
-        generic_recycling = bool(re.fullmatch(r"(?i)(?:recycling point|ponto de reciclagem)\s+\d+", raw_name))
-        display_name = "ecoponto municipal mais próximo devolvido pela Lisboa Aberta" if generic_recycling else raw_name
-        lines = [f"- **Paragem recomendada:** {display_name}"]
-        if card.get("address"):
-            lines.append(f"    - **Morada:** {card['address']}")
-        elif generic_recycling:
-            lines.append("    - **Detalhe de localização:** o resultado municipal não trouxe morada nesta execução; confirma o ponto no mapa/proximidade antes de ires a pé.")
-        if card.get("distance"):
-            lines.append(f"    - **Distância:** {card['distance']}")
-        return lines
-    if card.get("limitation"):
-        return [f"- **Estado:** {card['limitation']}", f"- **Alternativa:** {unavailable_text}"]
-    return [f"- **Estado:** {fallback_name}", f"- **Alternativa:** {unavailable_text}"]
-
-
-def _build_resident_service_plan_fallback(
-    user_message: str,
-    language: str,
-    weather_data: str,
-    places_data: str,
-    transport_data: str,
-) -> str:
-    """Build a safe resident-oriented plan for mixed municipal-service requests."""
-    weather_bullets = _extract_weather_safety_bullets(weather_data, language)
-    origin = _extract_resident_plan_anchor(user_message, role="origin")
-    dinner_area = _extract_resident_plan_anchor(user_message, role="dinner")
-    recycling_card = _extract_resident_service_card(places_data, "recycling")
-    pharmacy_card = _extract_resident_service_card(places_data, "pharmacy")
-    transport_text = str(transport_data or "")
-    has_metro_evidence = bool(re.search(r"\b(?:metro|metrolisboa|green line|linha verde)\b", transport_text, re.IGNORECASE))
-    has_carris_evidence = bool(re.search(r"\b(?:carris|bus|autocarro|autocarros)\b", transport_text, re.IGNORECASE))
-    origin_norm = _normalize_planner_text(origin)
-    dinner_norm = _normalize_planner_text(dinner_area)
-    known_green_line_pair = "areeiro" in origin_norm and "alvalade" in dinner_norm
-    source_line = _build_lisboa_scope_source_line(
-        language,
-        include_ipma=bool(str(weather_data or "").strip()),
-        include_lisboa_aberta=True,
-        include_metro=has_metro_evidence or known_green_line_pair,
-        include_carris=has_carris_evidence and not has_metro_evidence,
-    )
-    if language == "pt":
-        recycling_lines = _format_resident_service_bullet_pt(
-            recycling_card,
-            f"não foi devolvido um ecoponto concreto perto de {origin}.",
-            "usa o ecoponto municipal mais próximo apenas depois de o confirmares no mapa ou na recolha local.",
-        )
-        pharmacy_lines = _format_resident_service_bullet_pt(
-            pharmacy_card,
-            f"não foi devolvida uma farmácia concreta perto de {origin}.",
-            "para uso tardio, confirma a farmácia de serviço e o horário antes de te deslocares.",
-        )
-        movement = (
-            f"- **{origin} → {dinner_area}:** usa a **Linha Verde do Metro** entre Areeiro/Roma e Alvalade se a operação estiver normal; "
-            "para chuva, evita caminhadas longas e sai perto da Avenida da Igreja/estação de Alvalade."
-            if has_metro_evidence or known_green_line_pair
-            else f"- **{origin} → {dinner_area}:** confirma a ligação no momento; mantém a deslocação curta e coberta se chover."
-        )
-        return "\n".join(
-            [
-                f"### 📅 Plano residente: {origin} → {dinner_area}",
-                "",
-                f"Começa pelo serviço municipal perto de **{origin}**, mantém a farmácia como backup com limitação explícita, e termina em **{dinner_area}** com uma opção interior se chover.",
-                "",
-                "---",
-                "",
-                "### ⛅ Condições para amanhã",
-                *weather_bullets,
-                "",
-                "---",
-                "",
-                f"### ♻️ Reciclagem perto de {origin}",
-                *recycling_lines,
-                "- Faz esta paragem primeiro para não transportar resíduos durante o resto do plano.",
-                "",
-                "---",
-                "",
-                f"### 💊 Farmácia perto de {origin}",
-                *pharmacy_lines,
-                "- **Limite importante:** a Lisboa Aberta confirma localização/proximidade; não confirma stock, horário em tempo real ou farmácia de serviço.",
-                "",
-                "---",
-                "",
-                "### 🚇 Deslocação e jantar",
-                movement,
-                f"- **Jantar:** escolhe uma opção interior e tranquila em **{dinner_area}**; reservas, lotação e abertura ao fim do dia não foram confirmadas.",
-                "",
-                source_line,
-            ]
-        ).strip()
-    recycling_lines_en = _format_resident_service_bullet(
-        recycling_card,
-        f"no concrete recycling point was returned near {origin}.",
-        "use the nearest municipal recycling point only after confirming it on the map or locally.",
-    )
-    pharmacy_lines_en = _format_resident_service_bullet(
-        pharmacy_card,
-        f"no concrete pharmacy was returned near {origin}.",
-        "for late use, confirm the duty pharmacy and opening hours before going.",
-    )
-    movement_en = (
-        f"- **{origin} → {dinner_area}:** use the **Metro Green Line** between Areeiro/Roma and Alvalade if service is normal; "
-        "in rain, keep the walk short and exit near Avenida da Igreja/Alvalade station."
-        if has_metro_evidence or known_green_line_pair
-        else f"- **{origin} → {dinner_area}:** confirm the connection before leaving; keep the move short and covered if rain develops."
-    )
-    return "\n".join(
-        [
-            f"### 📅 Resident Plan: {origin} → {dinner_area}",
-            "",
-            f"Start with the municipal service stop near **{origin}**, keep the pharmacy as a late-use backup with clear limits, then finish in **{dinner_area}** with an indoor dinner plan if rain develops.",
-            "",
-            "---",
-            "",
-            "### ⛅ Tomorrow Conditions",
-            *weather_bullets,
-            "",
-            "---",
-            "",
-            f"### ♻️ Recycling near {origin}",
-            *recycling_lines_en,
-            "- Do this first so you are not carrying recycling through the rest of the evening.",
-            "",
-            "---",
-            "",
-            f"### 💊 Pharmacy near {origin}",
-            *pharmacy_lines_en,
-            "- **Important limit:** Lisboa Aberta confirms location/proximity; it does not confirm stock, real-time opening, or duty-pharmacy status.",
-            "",
-            "---",
-            "",
-            "### 🚇 Movement and Dinner",
-            movement_en,
-            f"- **Dinner:** choose a quiet indoor option in **{dinner_area}**; reservations, crowding, and late opening were not confirmed.",
-            "",
-            source_line,
-        ]
-    ).strip()
-
-
-def _build_overcomplex_scope_fallback(language: str, weather_data: str) -> str:
-    """Build a bounded answer for requests that combine unsupported live data, prices, ferries, and bookings."""
-    weather_bullets = _extract_weather_safety_bullets(weather_data, language)
-    source_line = _build_lisboa_scope_source_line(language, include_ipma=bool(str(weather_data or "").strip()))
-    if language == "pt":
-        return "\n".join(
-            [
-                "### ⚠️ Pedido demasiado amplo para um plano fechado",
-                "",
-                "**O que consigo fazer com segurança**",
-                "- Posso dividir Lisboa, Sintra, Cascais e Setúbal em etapas separadas e validar transportes suportados caso a caso.",
-                "- Posso usar CP suburbano/AML quando aplicável, Metro, Carris Urban e Carris Metropolitana dentro do âmbito suportado.",
-                "",
-                "**O que não vou inventar**",
-                "- Horários live para uma data futura.",
-                "- Ferries Transtejo/Soflusa, preços atuais de bilhetes ou reservas de restaurante.",
-                "- Um plano multi-local fechado sem confirmar horários e disponibilidade.",
-                "",
-                "**⛅ Condições**",
-                *weather_bullets,
-                "",
-                source_line,
-            ]
-        ).strip()
-    return "\n".join(
-        [
-            "### ⚠️ Request Too Broad For A Fixed Plan",
-            "",
-            "**What I can do safely**",
-            "- Split Lisbon, Sintra, Cascais, and Setúbal into separate validated legs.",
-            "- Use supported CP suburban/AML, Metro, Carris Urban, and Carris Metropolitana data where applicable.",
-            "",
-            "**What I will not invent**",
-            "- Live transport times for a future date.",
-            "- Transtejo/Soflusa ferry times, current ticket prices, or restaurant bookings.",
-            "- A locked multi-city plan without confirmed schedules and availability.",
-            "",
-            "**⛅ Conditions**",
-            *weather_bullets,
-            "",
-            source_line,
-        ]
-    ).strip()
-
-
-def _build_low_walk_day_fallback(
-    user_message: str,
-    language: str,
-    weather_data: str,
-) -> str:
-    """Build a compact low-walk day plan instead of publishing raw place cards."""
-    normalized = "".join(
-        ch
-        for ch in unicodedata.normalize("NFKD", user_message or "")
-        if not unicodedata.combining(ch)
-    ).lower()
-    weather_bullets = _extract_weather_safety_bullets(weather_data, language)
-    is_belem = "belem" in normalized
-    is_parque = "parque das nacoes" in normalized or "oriente" in normalized
-
-    if is_belem:
-        source_line = _build_lisboa_scope_source_line(
-            language,
-            include_ipma=bool(str(weather_data or "").strip()),
-            include_visitlisboa=True,
-            include_carris=True,
-        )
-        if language == "pt":
-            return "\n".join(
-                [
-                    "### 📅 Plano de dia com pouca caminhada",
-                    "",
-                    "**⛅ Condições**",
-                    *weather_bullets,
-                    "",
-                    "---",
-                    "",
-                    "**🧭 Estratégia**",
-                    "- Mantém o dia concentrado em **Belém** e evita atravessar a zona a pé.",
-                    "- A partir do **Rossio**, privilegia uma ligação direta de autocarro urbano; confirma a linha e o horário na Carris antes de sair.",
-                    "",
-                    "**🏛️ Paragens principais**",
-                    "- **Museu Nacional dos Coches** como primeira paragem interior e de baixa caminhada.",
-                    "- **MAAT / Central Tejo** como backup interior se chover ou se quiseres prolongar a parte cultural.",
-                    "- Confirma horários de abertura, acessibilidade detalhada e lotação antes de fechares a visita.",
-                    "",
-                    source_line,
-                ]
-            ).strip()
-        return "\n".join(
-            [
-                "### 📅 Low-Walk Day Plan",
-                "",
-                "**⛅ Conditions**",
-                *weather_bullets,
-                "",
-                "---",
-                "",
-                "**🧭 Strategy**",
-                "- Keep the day concentrated in **Belém** and avoid crossing the district on foot.",
-                "- From **Rossio**, prefer a direct urban bus; confirm the final line and schedule with Carris before leaving.",
-                "",
-                "**🏛️ Main stops**",
-                "- **National Coach Museum** as the first indoor, low-walk cultural stop.",
-                "- **MAAT / Central Tejo** as the indoor backup if rain develops or you want a second cultural stop.",
-                "- Confirm opening hours, detailed accessibility, and live crowding before committing to either venue.",
-                "",
-                source_line,
-            ]
-        ).strip()
-
-    if is_parque:
-        source_line = _build_lisboa_scope_source_line(
-            language,
-            include_ipma=bool(str(weather_data or "").strip()),
-            include_visitlisboa=True,
-            include_metro=True,
-        )
-        if language == "pt":
-            return "\n".join(
-                [
-                    "### 📅 Plano de dia com pouca caminhada",
-                    "",
-                    "**⛅ Condições**",
-                    *weather_bullets,
-                    "",
-                    "---",
-                    "",
-                    "**🧭 Estratégia**",
-                    "- Usa **Oriente** como base e mantém o dia dentro de **Parque das Nações**.",
-                    "- Se saíres do Rossio, a ligação de referência é Metro: Linha Verde até Alameda e Linha Vermelha até Oriente.",
-                    "",
-                    "**🏛️ Paragens principais**",
-                    "- **Oceanário de Lisboa** ou **Pavilhão do Conhecimento** como paragem cultural/interior principal, depois de confirmar horário.",
-                    "- **Centro Vasco da Gama** como pausa coberta se chover ou se quiseres reduzir ainda mais a caminhada.",
-                    "- Confirma horários, bilhetes, acessibilidade detalhada e lotação antes de fechares a visita.",
-                    "",
-                    source_line,
-                ]   
-            ).strip()
-        return "\n".join(
-            [
-                "### 📅 Low-Walk Day Plan",
-                "",
-                "**⛅ Conditions**",
-                *weather_bullets,
-                "",
-                "---",
-                "",
-                "**🧭 Strategy**",
-                "- Use **Oriente** as the base and keep the day inside **Parque das Nações**.",
-                "- From Rossio, the reference metro route is Green Line to Alameda, then Red Line to Oriente.",
-                "",
-                "**🏛️ Main stops**",
-                "- **Oceanário de Lisboa** or **Pavilhão do Conhecimento** as the main indoor cultural stop, after confirming opening hours.",
-                "- **Centro Vasco da Gama** as a covered pause if it rains or you want to reduce walking further.",
-                "- Confirm opening hours, tickets, detailed accessibility, and live crowding before committing to the visit.",
-                "",
-                source_line,
-            ]
-        ).strip()
-
-    source_line = _build_lisboa_scope_source_line(language, include_ipma=bool(str(weather_data or "").strip()))
-    if language == "pt":
-        return "\n".join(
-            [
-                "### 📅 Plano de dia com pouca caminhada",
-                "",
-                "**⛅ Condições**",
-                *weather_bullets,
-                "",
-                "---",
-                "",
-                "**🧭 Estratégia**",
-                "- Mantém o plano numa única zona compacta.",
-                "- Escolhe uma paragem principal e uma alternativa interior, em vez de encadear muitos locais.",
-                "- Confirma horários, acessibilidade e transporte antes de sair.",
-                "",
-                source_line,
-            ]
-        ).strip()
-    return "\n".join(
-        [
-            "### 📅 Low-Walk Day Plan",
-            "",
-            "**⛅ Conditions**",
-            *weather_bullets,
-            "",
-            "---",
-            "",
-            "**🧭 Strategy**",
-            "- Keep the plan inside one compact area.",
-            "- Choose one main stop and one indoor backup instead of chaining many places.",
-            "- Confirm opening hours, accessibility, and transport before leaving.",
-            "",
-            source_line,
-        ]
-    ).strip()
-
-
-def _build_single_day_museum_garden_fallback(
-    user_message: str,
-    language: str,
-    weather_data: str,
-) -> str:
-    """Build a compact one-day museum/garden plan without dumping service cards."""
-    normalized = _normalize_planner_text(user_message)
-    weather_bullets = _extract_weather_safety_bullets(weather_data, language)
-    near_saldanha = bool(re.search(r"\b(?:saldanha|campo pequeno|avenidas novas|sao sebastiao|são sebastião)\b", normalized))
-    source_line = _build_lisboa_scope_source_line(
-        language,
-        include_ipma=bool(str(weather_data or "").strip()),
-        include_visitlisboa=True,
-        include_metro=True,
-    )
-    if language == "pt":
-        if near_saldanha:
-            area = "Saldanha / São Sebastião"
-            museum = "Museu Calouste Gulbenkian"
-            garden = "Jardim da Gulbenkian"
-            movement = "Metro até **São Sebastião**, seguido de caminhada curta dentro da mesma zona."
-        else:
-            area = _extract_neighborhood_hint(user_message, default="uma zona compacta de Lisboa")
-            museum = "um museu na mesma zona"
-            garden = "um jardim próximo"
-            movement = "Escolhe uma ligação de Metro ou Carris e mantém as duas paragens na mesma zona."
-        return "\n".join(
-            [
-                "### 📅 Plano relaxado de um dia",
-                "",
-                "**⛅ Condições**",
-                *weather_bullets,
-                "",
-                "---",
-                "",
-                "**🧭 Sequência recomendada**",
-                f"- Base prática: **{area}**.",
-                f"- **Manhã:** {museum}.",
-                f"- **Depois:** {garden}, apenas se a chuva permitir.",
-                f"- **Transporte:** {movement}",
-                "",
-                "**🌧️ Backup se chover**",
-                "- Mantém o dia no museu e em zonas cobertas próximas, em vez de acrescentar outro bairro.",
-                "- Confirma horários, bilhetes e acessibilidade antes de sair.",
-                "",
-                source_line,
-            ]
-        ).strip()
-
-    if near_saldanha:
-        area = "Saldanha / São Sebastião"
-        museum = "Museu Calouste Gulbenkian"
-        garden = "Gulbenkian Garden"
-        movement = "Metro to **São Sebastião**, then a short walk within the same area."
-    else:
-        area = _extract_neighborhood_hint(user_message, default="one compact Lisbon area")
-        museum = "one museum in the same area"
-        garden = "a nearby garden"
-        movement = "Use one Metro or Carris connection and keep both stops in the same area."
-    return "\n".join(
-        [
-            "### 📅 Relaxed One-Day Plan",
-            "",
-            "**⛅ Conditions**",
-            *weather_bullets,
-            "",
-            "---",
-            "",
-            "**🧭 Recommended sequence**",
-            f"- Practical base: **{area}**.",
-            f"- **Morning:** {museum}.",
-            f"- **Afterwards:** {garden}, only if rain is manageable.",
-            f"- **Transport:** {movement}",
-            "",
-            "**🌧️ Rain backup**",
-            "- Keep the day inside the museum and nearby covered areas instead of adding another district.",
-            "- Confirm opening hours, tickets, and accessibility before leaving.",
-            "",
-            source_line,
-        ]
-    ).strip()
-
-
-def _build_full_museum_day_transport_fallback(
-    user_message: str,
-    language: str,
-    weather_data: str,
-    places_data: str,
-    events_data: str,
-) -> str:
-    """Build a complete museum-day fallback with coherent public transport."""
-    start_match = re.search(
-        r"\b(?:starting in|starting from|start in|start from|from|a partir de|desde|começar em|começar no|começar na|comecar em|comecar no|comecar na)\s+([A-Za-zÀ-ÿ\s'-]+?)(?:\s+and|\s+using|\s+with|\s+para|\s+com|\s+usando|,|\.|$)",
-        user_message or "",
-        flags=re.IGNORECASE,
-    )
-    start_area = (start_match.group(1).strip(" .,!?:;") if start_match else "Rossio") or "Rossio"
-    start_normalized = _normalize_planner_text(start_area)
-    starts_in_baixa = bool(re.search(r"\b(?:baixa|chiado|baixa chiado)\b", start_normalized))
-    weather_bullets = _extract_weather_safety_bullets(weather_data, language)
-    source_line = _build_lisboa_scope_source_line(
-        language,
-        include_ipma=bool(str(weather_data or "").strip()),
-        include_visitlisboa=bool(str(places_data or "").strip()) or bool(str(events_data or "").strip()),
-        include_metro=True,
-        include_carris=True,
-    )
-
-    if language == "pt":
-        first_move = (
-            "a pé dentro do eixo Baixa/Chiado, usando Baixa-Chiado como referência de Metro."
-            if starts_in_baixa
-            else f"a pé a partir de {start_area} até Chiado/Baixa-Chiado, ou Metro Linha Verde até Baixa-Chiado e caminhada curta."
-        )
-        metro_move = (
-            "Baixa-Chiado → Linha Azul → São Sebastião."
-            if starts_in_baixa
-            else f"{start_area}/Baixa-Chiado → transferência para a Linha Azul → São Sebastião."
-        )
-        return "\n".join(
-            [
-                f"### 📅 Dia completo de museus a partir de {start_area}",
-                "",
-                "A sequência mais segura é começar no centro, seguir para São Sebastião/Gulbenkian de Metro e deixar Belém como bloco final apenas se ainda houver tempo e a chuva permitir.",
-                "",
-                "---",
-                "",
-                "### ⛅ Condições e estratégia",
-                *weather_bullets,
-                "- Mantém o plano centrado em espaços interiores e evita atravessar a cidade várias vezes.",
-                "",
-                "---",
-                "",
-                "### 🧭 Roteiro recomendado",
-                "",
-                "**09:30 · Chiado / São Roque**",
-                "- 🏛️ **Paragem:** Museu Nacional de Arte Contemporânea do Chiado ou Museu de São Roque.",
-                f"- 🚇 **Desde {start_area}:** {first_move}",
-                "- 💡 **Porquê aqui:** começa perto do ponto de partida e evita perder a manhã em deslocações.",
-                "",
-                "**11:30 · Baixa / Alfama cultural**",
-                "- 🏛️ **Paragem:** escolhe um segundo museu central, como Lisboa Story Centre, Museu do Fado ou outro resultado confirmado pelo sistema.",
-                "- 🚶 **Ligação:** caminhada curta ou uma ligação Carris curta dentro do centro histórico.",
-                "- 💡 **Porquê aqui:** mantém coerência geográfica antes da deslocação maior da tarde.",
-                "",
-                "**14:15 · Gulbenkian / São Sebastião**",
-                "- 🏛️ **Paragem:** Museu Calouste Gulbenkian / zona de São Sebastião.",
-                f"- 🚇 **Transporte:** {metro_move}",
-                "- 💡 **Porquê aqui:** é um bloco forte para tarde chuvosa e fica bem servido por Metro.",
-                "",
-                "**16:45 · Belém, se ainda fizer sentido**",
-                "- 🏛️ **Paragem:** MAAT, Museu Nacional dos Coches ou outro museu de Belém confirmado antes de sair.",
-                "- 🚌 **Transporte:** segue pelo eixo Praça da Figueira/Cais do Sodré → Belém com Carris quando disponível.",
-                "- 💡 **Plano B:** se a chuva estiver forte ou o tempo estiver curto, termina na Gulbenkian em vez de acrescentar Belém.",
-                "",
-                "---",
-                "",
-                "### 🚇 Lógica de transporte",
-                f"- Usa **Metro** para a ligação {metro_move}",
-                "- Usa **Carris** para o corredor ribeirinho até Belém apenas quando confirmares a partida no momento.",
-                "- Não foram confirmados horários de abertura, bilhetes ou lotação em tempo real; valida o museu escolhido antes de fechar a rota.",
-                "",
-                source_line,
-            ]
-        ).strip()
-
-    first_move = (
-        "walk within the Baixa/Chiado axis, using Baixa-Chiado as the Metro reference point."
-        if starts_in_baixa
-        else f"walk from {start_area} toward Chiado/Baixa-Chiado, or take the Green Line to Baixa-Chiado and walk briefly."
-    )
-    metro_move = (
-        "Baixa-Chiado → Blue Line → São Sebastião."
-        if starts_in_baixa
-        else f"{start_area}/Baixa-Chiado → transfer to the Blue Line → São Sebastião."
-    )
-    return "\n".join(
-        [
-            f"### 📅 Full Museum Day From {start_area}",
-            "",
-            "The strongest route is to start centrally, move to São Sebastião/Gulbenkian by Metro, and treat Belém as a final block only if time and rain conditions still make it realistic.",
-            "",
-            "---",
-            "",
-            "### ⛅ Conditions and Rain Strategy",
-            *weather_bullets,
-            "- Keep the day mostly indoors and avoid crossing the city more than once.",
-            "",
-            "---",
-            "",
-            "### 🧭 Recommended Itinerary",
-            "",
-            "**09:30 · Chiado / São Roque**",
-            "- 🏛️ **Stop:** Museu Nacional de Arte Contemporânea do Chiado or the São Roque museum area.",
-            f"- 🚇 **From {start_area}:** {first_move}",
-            f"- 💡 **Why here:** it starts close to {start_area} and keeps the morning efficient.",
-            "",
-            "**11:30 · Baixa / Alfama Culture Block**",
-            "- 🏛️ **Stop:** choose a second central museum such as Lisboa Story Centre, Museu do Fado, or another confirmed central museum.",
-            "- 🚶 **Connection:** short walk or a short Carris hop within the historic centre.",
-            "- 💡 **Why here:** it keeps the route geographically coherent before the bigger afternoon transfer.",
-            "",
-            "**14:15 · Gulbenkian / São Sebastião**",
-            "- 🏛️ **Stop:** Calouste Gulbenkian Museum / São Sebastião area.",
-            f"- 🚇 **Transport:** {metro_move}",
-            "- 💡 **Why here:** it is a strong indoor afternoon anchor and is well served by Metro.",
-            "",
-            "**16:45 · Belém, if still realistic**",
-            "- 🏛️ **Stop:** MAAT, National Coach Museum, or another Belém museum confirmed before leaving.",
-            "- 🚌 **Transport:** use the Praça da Figueira/Cais do Sodré → Belém Carris corridor when a suitable departure is available.",
-            "- 💡 **Plan B:** if rain is heavy or time is short, finish at Gulbenkian rather than adding Belém.",
-            "",
-            "---",
-            "",
-            "### 🚇 **How to move**",
-            f"- Use **Metro** for {metro_move}",
-            "- Use **Carris** for the riverside Belém corridor only after checking the departure at the time of travel.",
-            "- Opening hours, tickets, and crowding were not confirmed live; verify the selected museum before locking the route.",
-            "",
-            source_line,
-        ]
-    ).strip()
 
 
 def _is_full_museum_day_request(user_message: str) -> bool:
@@ -2271,250 +1340,6 @@ def _planner_response_has_incomplete_museum_day_blocks(
     return has_itinerary_structure and museum_signal_count < 3
 
 
-def _build_oriente_evening_food_culture_fallback(
-    language: str,
-    weather_data: str,
-    places_data: str,
-    events_data: str,
-) -> str:
-    """Build a useful rain-safe dinner-and-culture fallback around Oriente."""
-    weather_bullets = _extract_weather_safety_bullets(weather_data, language)
-    source_line = _build_planner_fallback_source_line(
-        language=language,
-        weather_data=weather_data,
-        transport_data="",
-        places_data=(places_data or "") + "\nVisitLisboa Oriente Station Parque das Nações Centro Vasco da Gama",
-        events_data=events_data,
-    )
-
-    if language == "pt":
-        return "\n".join(
-            [
-                "### 📅 Plano de fim de tarde a partir do Oriente",
-                "",
-                "**⛅ Chuva e segurança**",
-                *weather_bullets,
-                "",
-                "---",
-                "",
-                "**🏛️ Paragem cultural**",
-                "- Fica em **Parque das Nações**: evita atravessar Lisboa depois de chegares ao Oriente.",
-                "- Usa a **Estação do Oriente** como paragem arquitetónica coberta; se confirmares horário e a chuva estiver controlada, troca para **Oceanário de Lisboa** ou **Pavilhão do Conhecimento**.",
-                "",
-                "---",
-                "",
-                "**🍽️ Jantar**",
-                "- Mantém o jantar no eixo **Centro Vasco da Gama / Parque das Nações**, que é a opção mais segura se chover.",
-                "- Para um nome concreto, **Cantinho do Avillez - Parque das Nações** aparece nos dados VisitLisboa; disponibilidade, reserva e horário desta noite não foram confirmados aqui.",
-                "",
-                "---",
-                "",
-                "**🚶 Sequência prática**",
-                "- **18:00:** chegada ao Oriente → paragem arquitetónica curta na estação.",
-                "- **Depois:** jantar perto do Centro Vasco da Gama; se não estiver a chover, acrescenta uma caminhada curta pela frente ribeirinha.",
-                "",
-                source_line,
-            ]
-        ).strip()
-
-    return "\n".join(
-        [
-            "### 📅 Rain-Safe Evening From Oriente",
-            "",
-            "**⛅ Rain and safety**",
-            *weather_bullets,
-            "",
-            "---",
-            "",
-            "**🏛️ Cultural stop**",
-            "- Stay in **Parque das Nações**: it avoids a cross-city transfer after arriving at Oriente.",
-            "- Use **Oriente Station** as the covered architecture stop; if opening time is confirmed and rain is manageable, upgrade to **Oceanário de Lisboa** or **Pavilhão do Conhecimento**.",
-            "",
-            "---",
-            "",
-            "**🍽️ Dinner**",
-            "- Keep dinner around **Centro Vasco da Gama / Parque das Nações**, the safest base if showers start.",
-            "- For a named option, **Cantinho do Avillez - Parque das Nações** appears in VisitLisboa data; tonight's opening, table availability, and booking status were not confirmed here.",
-            "",
-            "---",
-            "",
-            "**🚶 Practical sequence**",
-            "- **18:00:** arrive at Oriente → short covered architecture stop inside/around the station.",
-            "- **Afterwards:** dinner near Centro Vasco da Gama; if it stays dry, add a short riverside walk before or after eating.",
-            "",
-            source_line,
-        ]
-    ).strip()
-
-
-def _extract_neighborhood_hint(user_message: str, default: str = "the requested area") -> str:
-    """Extract a compact area label from a neighborhood-scale itinerary request."""
-    base_match = re.search(
-        r"\b(?:staying near|staying in|based near|based in|base em|base no|base na|ficar em|alojado em|alojada em)\s+([A-Za-zÀ-ÿ\s'-]+?)(?:\s+with|\s+com|\s+using|\s+usando|\s+for|\s+para|,|\.|$)",
-        user_message or "",
-        flags=re.IGNORECASE,
-    )
-    if base_match:
-        base_area = base_match.group(1).strip(" .,!?:;")
-        if 2 <= len(base_area) <= 60:
-            return base_area
-
-    origin_match = re.search(
-        r"\b(?:from|a partir de|a partir do|a partir da|a partir dos|a partir das|desde)\s+([A-Za-zÀ-ÿ\s'-]+?)(?:\s+with|\s+com|\s+using|\s+usando|\s+for|\s+para|,|\.|$)",
-        user_message or "",
-        flags=re.IGNORECASE,
-    )
-    if origin_match:
-        origin_area = origin_match.group(1).strip(" .,!?:;")
-        if 2 <= len(origin_area) <= 60:
-            return origin_area
-
-    match = re.search(
-        r"\b(?:in|around|near|em|perto de|na zona de)\s+([A-Za-zÀ-ÿ\s'-]+?)(?:\s+with|\s+com|\s+for|\s+para|,|\.|$)",
-        user_message or "",
-        flags=re.IGNORECASE,
-    )
-    if not match:
-        return default
-    area = match.group(1).strip(" .,!?:;")
-    return area if 2 <= len(area) <= 60 else default
-
-
-def _build_belem_history_pastry_fallback(
-    user_message: str,
-    language: str,
-    weather_data: str,
-    transport_data: str,
-    places_data: str,
-    events_data: str,
-) -> str:
-    """Build a rich corridor plan for history plus pastry requests in Belem."""
-    del user_message
-    normalized_context = _normalize_planner_text("\n".join([transport_data or "", places_data or "", events_data or ""]))
-    weather_bullets = _extract_planner_fallback_bullets(weather_data, max_items=4)
-    if not weather_bullets:
-        weather_bullets = [
-            "- No detailed weather facts were available in this run; keep riverside walking segments optional and prioritise indoor heritage stops if conditions worsen."
-            if language != "pt"
-            else "- Esta execução não trouxe factos meteorológicos detalhados; mantém opcionais os troços ribeirinhos a pé e privilegia paragens interiores se o tempo piorar."
-        ]
-
-    transport_bullets_en: List[str] = []
-    transport_bullets_pt: List[str] = []
-    if "15e" in normalized_context:
-        transport_bullets_en.append(
-            "- **Surface option:** Carris tram **15E** from the Baixa/Praça da Figueira axis toward **Belém/Algés**; useful if you want the classic riverside approach."
-        )
-        transport_bullets_pt.append(
-            "- **Opção de superfície:** elétrico Carris **15E** a partir do eixo Baixa/Praça da Figueira em direção a **Belém/Algés**; é a opção clássica junto ao rio."
-        )
-    if re.search(r"\b728\b", normalized_context):
-        transport_bullets_en.append(
-            "- **Bus option:** Carris **728** is a useful Chiado/Baixa-to-Belém corridor option when confirmed for your exact stop."
-        )
-        transport_bullets_pt.append(
-            "- **Autocarro:** Carris **728** é uma opção útil no corredor Chiado/Baixa-Belém quando confirmada para a tua paragem exata."
-        )
-    if "cais do sodre" in normalized_context or "cais do sodré" in normalized_context:
-        transport_bullets_en.append(
-            "- **Rail-backed option:** Metro from **Baixa/Chiado** to **Cais do Sodré**, then CP Cascais line to **Belém** if you confirm the timetable on the travel day."
-        )
-        transport_bullets_pt.append(
-            "- **Opção com comboio:** Metro de **Baixa/Chiado** para **Cais do Sodré**, depois Linha de Cascais da CP até **Belém**, confirmando horários no próprio dia."
-        )
-    if not transport_bullets_en:
-        transport_bullets_en.append(
-            "- Transport data did not confirm a specific line strongly enough; use Carris/CP official channels before leaving."
-        )
-        transport_bullets_pt.append(
-            "- Os dados de transporte não confirmaram uma linha específica com confiança suficiente; confirma nos canais Carris/CP antes de sair."
-        )
-    transport_bullets_en.append("- Do **not** use current next-departure times as an afternoon schedule; check live departures when you are ready to leave.")
-    transport_bullets_pt.append("- Não uses próximas partidas recolhidas agora como horário da tarde; confirma partidas live quando fores sair.")
-
-    used_sources: List[str] = []
-    if str(weather_data or "").strip():
-        used_sources.append("[*IPMA*](https://www.ipma.pt)" if language == "pt" else "[*IPMA*](https://www.ipma.pt/en/)")
-    if any("Carris" in bullet for bullet in transport_bullets_en):
-        used_sources.append("[*Carris*](https://www.carris.pt)")
-    if any("Metro" in bullet for bullet in transport_bullets_en):
-        used_sources.append("[*Metro de Lisboa*](https://www.metrolisboa.pt)")
-    if any("CP" in bullet for bullet in transport_bullets_en):
-        used_sources.append("[*CP*](https://www.cp.pt)")
-    used_sources.append(
-        "[*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais)"
-        if language == "pt"
-        else "[*VisitLisboa Places*](https://www.visitlisboa.com/en/places)"
-    )
-    deduped_sources = list(dict.fromkeys(used_sources))
-    label = "📌 **Fonte:**" if language == "pt" else "📌 **Source:**"
-    updated = "**Atualizado:**" if language == "pt" else "**Updated:**"
-    source_line = f"{label} {' | '.join(deduped_sources)} | {updated} {datetime.now().strftime('%H:%M')}"
-
-    if language == "pt":
-        return "\n".join(
-            [
-                "### 📅 Tarde em Belém a partir do Chiado",
-                "",
-                "A versão mais útil é fazer **um corredor simples Chiado → Belém**, com transporte para a deslocação longa e caminhada curta apenas dentro de Belém.",
-                "",
-                "### ⛅ Tempo e ritmo",
-                *weather_bullets,
-                "- Se houver chuva, começa por Jerónimos/Pastéis de Belém e deixa a frente ribeirinha para uma janela mais seca.",
-                "",
-                "---",
-                "",
-                "### 🚇 Transporte recomendado",
-                *transport_bullets_pt[:4],
-                "",
-                "---",
-                "",
-                "### 🏛️ Plano histórico ordenado",
-                "- **Mosteiro dos Jerónimos:** começa aqui; é o melhor ponto para enquadrar Belém na expansão marítima portuguesa e no período manuelino.",
-                "- **Pastéis de Belém:** faz a pausa de pastelaria a meio da tarde, junto ao eixo dos Jerónimos, para não quebrar a lógica geográfica.",
-                "- **Padrão dos Descobrimentos:** segue para a frente ribeirinha se o tempo permitir; funciona como transição visual entre história e rio.",
-                "- **Torre de Belém:** termina aqui se ainda houver luz e condições para caminhar junto ao Tejo; se chover mais, encurta este troço.",
-                "",
-                "**💡 Dicas úteis**",
-                "- Mantém o plano em 3-4 horas; não juntes outro bairro à mesma tarde.",
-                "- Horários, bilhetes e entrada nos monumentos não foram confirmados aqui; valida-os antes de fechar o plano.",
-                "",
-                source_line,
-            ]
-        ).strip()
-
-    return "\n".join(
-        [
-            "### 📅 Belém Afternoon From Chiado",
-            "",
-            "The useful version is a **simple Chiado → Belém corridor**: use transport for the long move, then keep the walking local inside Belém.",
-            "",
-            "### ⛅ Weather and pacing",
-            *weather_bullets,
-            "- If showers pick up, start with Jerónimos/Pastéis de Belém and leave the open riverside for the driest window.",
-            "",
-            "---",
-            "",
-            "### 🚇 Recommended transport",
-            *transport_bullets_en[:4],
-            "",
-            "---",
-            "",
-            "### 🏛️ Ordered history plan",
-            "- **Jerónimos Monastery:** start here; it anchors Belém’s Age of Discovery and Manueline context.",
-            "- **Pastéis de Belém:** use this as the mid-afternoon pastry break beside the monastery axis, not as a detached detour.",
-            "- **Padrão dos Descobrimentos:** continue to the riverside if the weather allows; it links the historical theme to the Tagus setting.",
-            "- **Belém Tower:** finish here if there is still light and the riverside walk is comfortable; shorten this leg if rain strengthens.",
-            "",
-            "**💡 Useful tips**",
-            "- Keep this to 3-4 hours; do not add another Lisbon district to the same afternoon.",
-            "- Opening hours, tickets, and monument access were not confirmed here; verify them before locking the plan.",
-            "",
-            source_line,
-        ]
-    ).strip()
-
-
 def _is_historic_gastronomy_day_request(normalized_query: str) -> bool:
     """Detect one-day history plus traditional food itinerary requests."""
     day_intent = bool(
@@ -2522,6 +1347,8 @@ def _is_historic_gastronomy_day_request(normalized_query: str) -> bool:
             r"\b(?:1\s*dia|um\s+dia|1[-\s]*day|one\s+day|full\s+day|dia\s+inteiro|day\s+itinerary|itinerario\s+de\s+1\s+dia|roteiro\s+de\s+1\s+dia)\b",
             normalized_query,
         )
+        or re.search(r"\b(?:roteiro|plano|itinerario)\b.{0,40}\b(?:1\s*dia|um\s+dia)\b", normalized_query)
+        or re.search(r"\b(?:itinerary|plan)\b.{0,40}\b(?:one\s+day|1[-\s]*day)\b", normalized_query)
     )
     history_intent = bool(
         re.search(
@@ -2538,392 +1365,15 @@ def _is_historic_gastronomy_day_request(normalized_query: str) -> bool:
     return day_intent and history_intent and food_intent
 
 
-def _extract_weather_overview_bullets(weather_data: str, language: str, *, max_items: int = 4) -> List[str]:
-    """Extract concrete weather facts for itinerary fallbacks."""
-    text = str(weather_data or "").strip()
-    if not text:
-        return [
-            "- Confirma a previsão do IPMA antes de fechar longos troços ao ar livre."
-            if language == "pt"
-            else "- Check the IPMA forecast before locking long outdoor stretches."
-        ]
-
-    fact_bullets = _extract_weather_fact_bullets(text, language, max_items=max_items)
-    if fact_bullets:
-        return fact_bullets[:max_items]
-
-    bullets: List[str] = []
-    seen: set[str] = set()
-    weather_markers = (
-        "weather",
-        "meteorolog",
-        "temperature",
-        "temperatura",
-        "°c",
-        "rain",
-        "chuva",
-        "precip",
-        "wind",
-        "vento",
-        "warning",
-        "aviso",
-        "condition",
-        "condi",
-        "aguaceiro",
-        "showers",
-        "cloud",
-        "nublado",
-        "trovoada",
-    )
-    ambiguous_weather_markers = ("tempo",)
-
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line or _PLANNER_SOURCE_LINE_RE.match(line):
-            continue
-        line = re.sub(r"^[-*•]\s+", "", line).strip()
-        line = re.sub(r"^\*{0,2}📅\s*", "", line).strip()
-        if re.search(
-            r"\b(?:claro|sim|yes|aqui tens|here is|here's|roteiro|itinerario|itinerary|plano|plan|monumentos|gastronomia|gastronomy|weather context|weather in|contexto meteorologico|estado do tempo|tempo em|should be comfortable|deve estar confortavel|deve estar confortável|da para|dá para|confortaveis|confortáveis)\b",
-            line,
-            flags=re.IGNORECASE,
-        ):
-            continue
-        line_lower = line.lower()
-        has_strong_weather_marker = any(marker in line_lower for marker in weather_markers)
-        has_ambiguous_weather_marker = any(marker in line_lower for marker in ambiguous_weather_markers)
-        if not has_strong_weather_marker and not has_ambiguous_weather_marker:
-            continue
-        if has_ambiguous_weather_marker and not has_strong_weather_marker:
-            continue
-        if re.search(r"\b(?:source|fonte|updated|atualizado)\b", line, flags=re.IGNORECASE):
-            continue
-        normalized = _normalize_planner_text(line)
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        bullets.append(f"- {line}")
-        if len(bullets) >= max_items:
-            break
-
-    if bullets:
-        return bullets
-
-    return _extract_weather_safety_bullets(weather_data, language)[:max_items]
-
-
-def _is_next_day_planning_follow_up(user_message: str, conversation_context: str = "") -> bool:
-    """Detect a planning continuation that asks for the following day."""
-    normalized_query = _normalize_planner_text(user_message)
-    normalized_context = _normalize_planner_text(conversation_context)
-    if not re.search(r"\b(?:dia seguinte|proximo dia|próximo dia|amanha|amanhã|tomorrow|next day|following day)\b", normalized_query):
-        return False
-    if not re.search(r"\b(?:plan|planeia|planejar|itinerary|itinerario|roteiro|dia|day)\b", normalized_query):
-        return False
-    return bool(
-        re.search(
-            r"\b(?:plan|itinerary|itinerario|roteiro|monument|monumento|histor|gastronom|traditional|tradicional|restaurant|restaurante)\b",
-            normalized_context,
-        )
-    )
-
-
-def _build_next_day_historic_food_transport_fallback(
-    language: str,
-    weather_data: str,
-    transport_data: str,
-    conversation_context: str,
-) -> str:
-    """Build a second-day continuation that preserves prior interests without repeating stops."""
-    weather_bullets = _extract_weather_overview_bullets(weather_data, language, max_items=3)
-    has_transport_context = bool(str(transport_data or "").strip())
-    source_line = _build_lisboa_scope_source_line(
-        language,
-        include_ipma=bool(str(weather_data or "").strip()),
-        include_visitlisboa=True,
-        include_metro=has_transport_context,
-        include_carris=has_transport_context,
-    )
-    prior_context = _normalize_planner_text(conversation_context)
-    avoid_belem_centre = any(
-        token in prior_context
-        for token in ("belem", "jeronimos", "baixa", "carmo", "se de lisboa", "santo antonio")
-    )
-
-    if language == "pt":
-        continuity_note = (
-            "Mantive o tema do roteiro anterior (**história + gastronomia tradicional**), mas mudei o eixo para **Estrela, Campo de Ourique, Ajuda e Alcântara**, evitando repetir Baixa, Sé, Carmo e Belém."
-            if avoid_belem_centre
-            else "Mantive o tema anterior (**história + gastronomia tradicional**) e organizei um segundo dia compacto, com transportes simples e pouca repetição de zonas."
-        )
-        transport_note = (
-            "- Usa **Metro** como eixo principal até **Rato/Marquês/São Sebastião** e completa as ligações para Estrela, Ajuda ou Alcântara com **Carris**; confirma a linha e a hora pouco antes de sair."
-            if has_transport_context
-            else "- Os dados de transporte detalhado por perna não foram recolhidos; confirma as ligações exatas no operador antes de sair."
-        )
-        return "\n".join(
-            [
-                "### 📅 Dia Seguinte · História, Gastronomia e Transportes",
-                "",
-                continuity_note,
-                "",
-                "### ⛅ Tempo e ritmo",
-                *weather_bullets,
-                "- Se chover, troca a ordem para fazer primeiro os espaços interiores e deixa jardins/miradouros para as janelas mais secas.",
-                "",
-                "---",
-                "",
-                "### 🏛️ Plano alternativo",
-                "**09:30 · Basílica da Estrela e Jardim da Estrela**",
-                "- 📍 **Zona:** Estrela",
-                "- 🏷️ **Tema:** património religioso, bairro histórico e pausa verde curta",
-                "- 🚌 **Transporte:** começa por Metro até Rato/Marquês e completa a ligação local com Carris ou caminhada curta, consoante o ponto de partida.",
-                "",
-                "**11:30 · Campo de Ourique e paragem gastronómica**",
-                "- 📍 **Zona:** Campo de Ourique",
-                "- 🏷️ **Tema:** bairro residencial, mercado/restauração e gastronomia tradicional",
-                "- 💡 **Dica:** escolhe aqui o almoço para não voltares ao eixo turístico do dia anterior.",
-                "",
-                "**14:30 · Palácio Nacional da Ajuda ou Museu Nacional de Arte Antiga**",
-                "- 📍 **Zona:** Ajuda / Santos",
-                "- 🏷️ **Tema:** palácio, coleções históricas e programa interior para chuva",
-                "- 🚌 **Transporte:** usa Carris para a aproximação final; os horários exatos devem ser confirmados no próprio dia.",
-                "",
-                "**17:30 · Alcântara ou Santos para jantar tradicional**",
-                "- 📍 **Zona:** Alcântara / Santos",
-                "- 🏷️ **Tema:** jantar, frente ribeirinha urbana e regresso fácil",
-                "- 💡 **Dica:** termina aqui se quiseres evitar atravessar novamente a cidade ao fim do dia.",
-                "",
-                "---",
-                "",
-                "### 🚇 Transportes",
-                transport_note,
-                "- Evita depender de elétricos turísticos em hora de ponta ou com chuva; são úteis, mas podem ser lentos e cheios.",
-                "- Para deslocações entre zonas sem ligação direta confirmada, privilegia Metro + Carris em vez de longas caminhadas.",
-                "",
-                "### 💡 Limites práticos",
-                "- Não repeti os principais blocos do dia anterior; a ideia é dar continuidade temática sem fazer o mesmo circuito.",
-                "- Confirma horários de entrada, encerramentos e disponibilidade de restaurantes antes de sair.",
-                "",
-                source_line,
-            ]
-        ).strip()
-
-    continuity_note = (
-        "I kept the previous theme (**history + traditional food**) but moved the route to **Estrela, Campo de Ourique, Ajuda, and Alcântara**, avoiding a repeat of Baixa, Sé, Carmo, and Belém."
-        if avoid_belem_centre
-        else "I kept the previous theme (**history + traditional food**) and structured a compact second day with simple public-transport logic."
-    )
-    transport_note = (
-        "- Use **Metro** as the backbone toward **Rato/Marquês/São Sebastião**, then complete the local legs to Estrela, Ajuda, or Alcântara with **Carris**; confirm the exact line and time shortly before leaving."
-        if has_transport_context
-        else "- Detailed leg-by-leg transport was not retrieved; confirm exact connections with the operator before leaving."
-    )
-    return "\n".join(
-        [
-            "### 📅 Next Day · History, Food, And Transport",
-            "",
-            continuity_note,
-            "",
-            "### ⛅ Weather and pacing",
-            *weather_bullets,
-            "- If it rains, do the indoor stops first and keep gardens or viewpoints for the driest window.",
-            "",
-            "---",
-            "",
-            "### 🏛️ Alternative plan",
-            "**09:30 · Basilica da Estrela and Estrela Garden**",
-            "- 📍 **Area:** Estrela",
-            "- 🏷️ **Theme:** religious heritage, historic neighbourhood, and a short green pause",
-            "- 🚌 **Transport:** start by Metro toward Rato/Marquês and complete the local connection by Carris or a short walk, depending on your start point.",
-            "",
-            "**11:30 · Campo de Ourique food stop**",
-            "- 📍 **Area:** Campo de Ourique",
-            "- 🏷️ **Theme:** residential Lisbon, market/restaurants, and traditional food",
-            "- 💡 **Tip:** lunch here so the second day does not fall back into the same tourist corridor.",
-            "",
-            "**14:30 · Ajuda National Palace or Museu Nacional de Arte Antiga**",
-            "- 📍 **Area:** Ajuda / Santos",
-            "- 🏷️ **Theme:** palace, historical collections, and an indoor rain-safe block",
-            "- 🚌 **Transport:** use Carris for the final approach; exact times should be checked on the day.",
-            "",
-            "**17:30 · Alcântara or Santos for dinner**",
-            "- 📍 **Area:** Alcântara / Santos",
-            "- 🏷️ **Theme:** dinner, urban riverside, and an easier return",
-            "- 💡 **Tip:** finish here if you want to avoid crossing the city again late in the day.",
-            "",
-            "---",
-            "",
-            "### 🚇 Transport",
-            transport_note,
-            "- Avoid relying on tourist trams during peak hours or rain; they can be useful, but slow and crowded.",
-            "- For legs without a confirmed direct link, prefer Metro + Carris over long walks.",
-            "",
-            "### 💡 Practical limits",
-            "- This avoids repeating the main blocks from the previous day while keeping the same interests.",
-            "- Confirm entry times, closures, and restaurant availability before leaving.",
-            "",
-            source_line,
-        ]
-    ).strip()
-
-
-def _build_historic_gastronomy_day_fallback(
-    language: str,
-    weather_data: str,
-    transport_data: str,
-) -> str:
-    """Build a rich one-day historical and traditional food itinerary fallback."""
-    weather_bullets = _extract_weather_overview_bullets(weather_data, language, max_items=4)
-    has_transport_context = bool(str(transport_data or "").strip())
-    source_line = _build_lisboa_scope_source_line(
-        language,
-        include_ipma=bool(str(weather_data or "").strip()),
-        include_visitlisboa=True,
-        include_carris=has_transport_context,
-        include_cp=has_transport_context,
-    )
-    belem_move_pt = (
-        "- **Carmo → Belém:** desce para o eixo Baixa/Cais do Sodré e confirma uma opção Carris para Belém/Algés ou a Linha de Cascais da CP até Belém no momento da viagem."
-        if has_transport_context
-        else "- **Carmo → Belém:** usa transporte público confirmado no momento da viagem; escolhe uma ligação direta para Belém em vez de acrescentar outro bairro ao roteiro."
-    )
-    belem_move_en = (
-        "- **Carmo → Belém:** move down toward the Baixa/Cais do Sodré axis and confirm a Carris option toward Belém/Algés or the CP Cascais line to Belém at travel time."
-        if has_transport_context
-        else "- **Carmo → Belém:** use public transport confirmed at travel time; choose a direct link to Belém instead of adding another neighbourhood."
-    )
-
-    if language == "pt":
-        return "\n".join(
-            [
-                "### 📅 Roteiro histórico e gastronómico para 1 dia",
-                "",
-                "A opção mais coerente é concentrar o dia entre **Baixa, Sé, Chiado/Carmo e Belém**, com as deslocações longas antes ou depois do almoço e caminhadas curtas dentro de cada zona.",
-                "",
-                "### ⛅ Condições meteorológicas",
-                *weather_bullets,
-                "- Se houver chuva ou vento, mantém Belém e o centro histórico como blocos separados e usa pausas interiores entre visitas.",
-                "",
-                "---",
-                "",
-                "### 🏛️ Plano otimizado",
-                "",
-                "**09:00 · Galerias Romanas / Baixa**",
-                "- 📍 **Localização:** Rua da Prata / Rua da Conceição, Lisboa",
-                "- 🏷️ **Categoria:** Monumento histórico",
-                "- 💡 **Dica:** começa no centro histórico para manter o início compacto e evitar deslocações cedo demais.",
-                "",
-                "**10:30 · Sé de Lisboa e Igreja de Santo António**",
-                "- 📍 **Localização:** Largo da Sé / Largo de Santo António da Sé, Lisboa",
-                "- 🏷️ **Categoria:** Património religioso e histórico",
-                "- 💡 **Dica:** faz este bloco a pé; as duas paragens ficam próximas e dão contexto à Lisboa medieval.",
-                "",
-                "**12:30 · Almoço tradicional na Baixa**",
-                "- 📍 **Sugestão:** Granja Velha, Rua dos Douradores, 200, Lisboa",
-                "- 🏷️ **Categoria:** Restaurante tradicional",
-                "- 💡 **Dica:** é uma boa pausa logística antes de subires para o Carmo ou seguires para Belém.",
-                "",
-                "**14:30 · Museu Arqueológico do Carmo**",
-                "- 📍 **Localização:** Largo do Carmo, Lisboa",
-                "- 🏷️ **Categoria:** Museu / monumento histórico",
-                "- 💡 **Dica:** funciona bem depois do almoço porque fica perto da Baixa e tem valor histórico claro sem alongar demasiado o percurso.",
-                "",
-                "**16:30 · Belém histórico**",
-                "- 📍 **Paragens:** Mosteiro dos Jerónimos, Padrão dos Descobrimentos e Torre de Belém",
-                "- 🏷️ **Categoria:** Monumentos e frente ribeirinha",
-                "- 💡 **Dica:** se o tempo piorar, prioriza Jerónimos e deixa a caminhada ribeirinha para uma janela mais seca.",
-                "",
-                "**18:30 · Pastelaria ou jantar leve**",
-                "- 📍 **Sugestão:** Pastéis de Belém ou regresso à Baixa/Chiado para jantar tradicional",
-                "- 🏷️ **Categoria:** Gastronomia tradicional",
-                "- 💡 **Dica:** escolhe Belém se ainda estiveres nessa zona; regressa ao centro se quiseres terminar perto de transportes.",
-                "",
-                "---",
-                "",
-                "### 🚶 Como chegar e deslocação",
-                "- **Baixa → Sé / Santo António:** a pé, por ruas curtas do centro histórico.",
-                "- **Sé / Santo António → Granja Velha:** a pé, regressando para a Baixa.",
-                "- **Granja Velha → Carmo:** a pé, subindo para Chiado/Carmo; conta com uma subida curta.",
-                belem_move_pt,
-                "",
-                "### 💡 Dicas úteis",
-                "- Confirma horários, bilhetes e eventuais encerramentos de cada monumento antes de sair.",
-                "- Mantém 20-30 minutos de margem entre blocos, sobretudo se chover ou se Belém ficar para o fim do dia.",
-                "- O plano é otimizado por coerência geográfica e temática; horários de entradas, partidas e restaurantes devem ser confirmados em tempo real.",
-                "",
-                source_line,
-            ]
-        ).strip()
-
-    return "\n".join(
-        [
-            "### 📅 One-Day History And Traditional Food Itinerary",
-            "",
-            "The strongest structure is **Baixa, Sé, Chiado/Carmo, then Belém**, with compact walks inside each area and the longer move kept to one clear transfer.",
-            "",
-            "### ⛅ Weather and pacing",
-            *weather_bullets,
-            "- If rain or wind increases, keep Belém and the historic centre as separate blocks and use indoor pauses between stops.",
-            "",
-            "---",
-            "",
-            "### 🏛️ Optimized plan",
-            "",
-            "**09:00 · Roman Galleries / Baixa**",
-            "- 📍 **Location:** Rua da Prata / Rua da Conceição, Lisbon",
-            "- 🏷️ **Category:** Historical monument",
-            "- 💡 **Tip:** start in the historic centre so the morning stays compact.",
-            "",
-            "**10:30 · Lisbon Cathedral and Saint Anthony Church**",
-            "- 📍 **Location:** Largo da Sé / Largo de Santo António da Sé, Lisbon",
-            "- 🏷️ **Category:** Religious and historical heritage",
-            "- 💡 **Tip:** do this section on foot; the stops are close and give the route a medieval Lisbon anchor.",
-            "",
-            "**12:30 · Traditional lunch in Baixa**",
-            "- 📍 **Suggestion:** Granja Velha, Rua dos Douradores, 200, Lisbon",
-            "- 🏷️ **Category:** Traditional restaurant",
-            "- 💡 **Tip:** it is a practical lunch pause before Carmo or the longer move to Belém.",
-            "",
-            "**14:30 · Carmo Archaeological Museum**",
-            "- 📍 **Location:** Largo do Carmo, Lisbon",
-            "- 🏷️ **Category:** Museum / historical monument",
-            "- 💡 **Tip:** it works well after lunch because it is close to Baixa and gives the day a strong historical stop.",
-            "",
-            "**16:30 · Historic Belém**",
-            "- 📍 **Stops:** Jerónimos Monastery, Padrão dos Descobrimentos, and Belém Tower",
-            "- 🏷️ **Category:** Monuments and riverside heritage",
-            "- 💡 **Tip:** if the weather worsens, prioritize Jerónimos and save the riverside walk for the driest window.",
-            "",
-            "**18:30 · Pastry or light dinner**",
-            "- 📍 **Suggestion:** Pastéis de Belém or return to Baixa/Chiado for traditional dinner",
-            "- 🏷️ **Category:** Traditional food",
-            "- 💡 **Tip:** stay in Belém if you are already there; return to the centre if you want an easier transport finish.",
-            "",
-            "---",
-            "",
-            "### 🚶 Movement logic",
-            "- **Baixa → Sé / Saint Anthony:** walk through the compact historic core.",
-            "- **Sé / Saint Anthony → Granja Velha:** walk back toward Baixa.",
-            "- **Granja Velha → Carmo:** walk uphill toward Chiado/Carmo.",
-            belem_move_en,
-            "",
-            "### 💡 Useful tips",
-            "- Confirm opening hours, tickets, and closures before leaving.",
-            "- Keep 20-30 minutes of buffer between blocks, especially if rain or wind affects movement.",
-            "- The plan is optimized for geographic and thematic coherence; entry times, departures, and restaurant availability should be confirmed live.",
-            "",
-            source_line,
-        ]
-    ).strip()
-
-
 def _extract_visitlisboa_place_cards(text: str, *, max_items: int = 8) -> List[Dict[str, str]]:
     """Extract lightweight VisitLisboa place cards from gathered researcher text."""
     cards: List[Dict[str, str]] = []
     seen_names: set[str] = set()
 
     patterns = [
+        re.compile(
+            r"(?ms)^[ \t]{0,3}[-*]\s+\*\*(?P<icon>[^\w\s*]{0,8})\s*(?P<name>[^*\n]+?)\*\*\s*\n(?P<body>.*?)(?=^[ \t]{0,3}[-*]\s+\*\*[^\n*]{2,140}\*\*\s*$|^\s*\*\*[^\n*]{2,140}\*\*\s*$|^\s*###\s+|\Z)"
+        ),
         re.compile(
             r"(?ms)^\s*\*\*(?P<icon>[^\w\s*]{0,8})\s*(?P<name>[^*\n]+?)\*\*\s*\n(?P<body>.*?)(?=^\s*\*\*[^\n*]{2,140}\*\*\s*$|^\s*###\s+|\Z)"
         ),
@@ -3024,7 +1474,7 @@ def _build_card_based_itinerary_fallback(
     events_data: str,
     qa_disclaimers: list[str] | None,
 ) -> str:
-    """Build a generic fallback from grounded cards rather than prompt-specific templates."""
+    """Build a generic fallback from evidence cards rather than prompt-specific templates."""
     normalized_query = _normalize_planner_text(user_message)
     if not re.search(
         r"\b(?:plan|itinerary|roteiro|planeia|planear|day|dia|afternoon|evening|museum|museu|visit|visitar|tour)\b",
@@ -3048,18 +1498,7 @@ def _build_card_based_itinerary_fallback(
     if not cards:
         return ""
 
-    requested_days = _extract_requested_day_count(user_message)
-    visible_days = min(requested_days or 1, 5)
-    weather_bullets = _extract_weather_safety_bullets(weather_data, language)
-    transport_bullets = _extract_planner_fallback_bullets(transport_data, max_items=5)
-    source_line = _build_planner_fallback_source_line(
-        language,
-        weather_data,
-        transport_data,
-        places_data,
-        events_data,
-    )
-    structured_response = _build_card_based_renderer_fallback(
+    return _build_card_based_renderer_fallback(
         user_message=user_message,
         language=language,
         cards=cards,
@@ -3069,106 +1508,6 @@ def _build_card_based_itinerary_fallback(
         events_data=events_data,
         qa_disclaimers=qa_disclaimers,
     )
-    if structured_response:
-        return structured_response
-
-    if language == "pt":
-        title = (
-            f"### 📅 Plano Grounded de {visible_days} Dias"
-            if visible_days > 1
-            else "### 📅 Roteiro Grounded"
-        )
-        intro = (
-            "Usei os locais concretos recolhidos pelos workers e mantive detalhes não confirmados como limitações."
-        )
-        weather_title = "### ⛅ Tempo e Ritmo"
-        move_title = "### 🚇 Lógica de Deslocação"
-        no_transport = "- As pernas exatas de transporte não ficaram confirmadas; valida a ligação no operador antes de sair."
-        limits_title = "### 💡 Notas Práticas"
-        limits = [
-            "- Horários, bilhetes, reservas e acessibilidade não devem ser assumidos se não aparecerem nos dados.",
-            "- Mantém 20-30 minutos de margem entre blocos quando houver mudança de zona.",
-        ]
-        day_label = "Dia"
-        stop_label = "Paragem"
-    else:
-        title = (
-            f"### 📅 Supported {visible_days}-Day Plan"
-            if visible_days > 1
-            else "### 📅 Supported Itinerary"
-        )
-        intro = (
-            "I used the concrete worker-gathered places and kept unconfirmed details as limitations."
-        )
-        weather_title = "### ⛅ Weather and Pacing"
-        move_title = "### 🚇 How to move"
-        no_transport = "- Exact transport legs were not confirmed; check the operator before leaving."
-        limits_title = "### 💡 Practical Notes"
-        limits = [
-            "- Do not assume opening hours, tickets, bookings, or accessibility unless they appear in the data.",
-            "- Keep 20-30 minutes of buffer between blocks when changing areas.",
-        ]
-        day_label = "Day"
-        stop_label = "Stop"
-
-    sections: List[str] = [title, intro, "", "---", "", weather_title, *weather_bullets, "", "---", ""]
-    if visible_days > 1:
-        cards_per_day = max(1, min(3, (len(cards) + visible_days - 1) // visible_days))
-        for day in range(visible_days):
-            day_cards = cards[day * cards_per_day:(day + 1) * cards_per_day]
-            if not day_cards:
-                break
-            sections.extend([f"### 📍 {day_label} {day + 1}", ""])
-            for index, card in enumerate(day_cards, start=1):
-                sections.append(f"**{stop_label} {index} · {card['name']}**")
-                sections.extend(_place_card_line(card, language=language)[1:])
-                sections.append("")
-            sections.append("---")
-            sections.append("")
-    else:
-        times = ["09h30", "11h15", "13h00", "15h00", "17h00"]
-        for time_label, card in zip(times, cards[:5], strict=False):
-            sections.append(f"### 🏛️ {time_label} · {card['name']}")
-            sections.extend(_place_card_line(card, language=language)[1:])
-            sections.append("")
-            sections.append("---")
-            sections.append("")
-
-    sections.extend([move_title])
-    sections.extend(transport_bullets if transport_bullets else [no_transport])
-    if qa_disclaimers:
-        sections.extend(f"- {item}" for item in qa_disclaimers[:3])
-    sections.extend(["", limits_title, *limits])
-    if requested_days and requested_days > 5:
-        sections.append(
-            "- Limitei a resposta aos primeiros 5 dias para manter qualidade e verificabilidade."
-            if language == "pt"
-            else "- I limited the answer to the first 5 days to preserve quality and verifiability."
-        )
-    if source_line:
-        sections.extend(["", source_line])
-    return "\n".join(section for section in sections if section is not None).strip()
-
-
-def _place_card_line(card: Dict[str, str], *, language: str) -> List[str]:
-    """Format a compact place candidate without placeholder fields."""
-    lines = [f"- **Candidate from gathered data:** {card['name']}" if language != "pt" else f"- **Candidato dos dados recolhidos:** {card['name']}"]
-    if card.get("description"):
-        label = "Nota" if language == "pt" else "Note"
-        lines.append(f"    - **{label}:** {card['description']}")
-    if card.get("category"):
-        label = "Categoria" if language == "pt" else "Category"
-        lines.append(f"    - **{label}:** {card['category']}")
-    if card.get("address"):
-        label = "Morada" if language == "pt" else "Address"
-        lines.append(f"    - **{label}:** {card['address']}")
-    if card.get("hours"):
-        label = "Horário" if language == "pt" else "Hours"
-        lines.append(f"    - **{label}:** {card['hours']}")
-    if card.get("url"):
-        label = "Website" if language == "pt" else "Website"
-        lines.append(f"    - **{label}:** [VisitLisboa]({card['url']})")
-    return lines
 
 
 def _build_card_based_renderer_fallback(
@@ -3187,20 +1526,23 @@ def _build_card_based_renderer_fallback(
     Args:
         user_message: Original user planning request.
         language: Final response language.
-        cards: Place cards extracted from grounded worker output.
-        weather_data: Weather worker output, if used.
-        transport_data: Transport worker output, if used.
+        cards: Place cards extracted from specialized-agent output.
+        weather_data: Weather output, if used.
+        transport_data: Transport output, if used.
         places_data: Researcher place output.
         events_data: Researcher event output.
         qa_disclaimers: Optional QA limitations to surface.
 
     Returns:
-        Streamlit-safe LISBOA Markdown, or an empty string if no grounded card is
-        usable.
+        Streamlit-safe LISBOA Markdown, or an empty string if no evidence card
+        is usable.
     """
     selected_cards = _select_planner_cards_for_request(cards, user_message)
     if not selected_cards:
         return ""
+    historic_food_request = _is_historic_gastronomy_day_request(_normalize_planner_text(user_message))
+    if historic_food_request:
+        selected_cards = _order_historic_food_cards(selected_cards)
 
     evidence = build_evidence_bundle(
         weather_data=weather_data,
@@ -3211,11 +1553,22 @@ def _build_card_based_renderer_fallback(
     )
     is_pt = language == "pt"
     blocks: List[PlanBlock] = []
-    for card in selected_cards[:5]:
-        details = _card_details_for_plan_block(card, language=language)
+    for index, card in enumerate(selected_cards[:5], start=1):
+        details = (
+            _card_details_for_itinerary_block(card, language=language)
+            if historic_food_request
+            else _card_details_for_plan_block(card, language=language)
+        )
+        display_name = _planner_card_display_name(card)
         blocks.append(
             PlanBlock(
-                title=card["name"],
+                title=_itinerary_block_title(
+                    display_name or card["name"],
+                    card,
+                    index=index,
+                    historic_food_request=historic_food_request,
+                    language=language,
+                ),
                 kind=_card_kind_for_plan_block(card),
                 purpose=_card_purpose_for_plan_block(card, is_pt),
                 details=details,
@@ -3271,23 +1624,198 @@ def _build_card_based_renderer_fallback(
     return final_post_qa_guard(rendered, language=language)
 
 
+def _planner_card_display_name(card: Dict[str, str]) -> str:
+    """Return a concrete display name for generic researcher section cards."""
+    name = _sanitize_planner_place_name(card.get("name", ""))
+    normalized_name = _normalize_planner_text(name)
+    if name and not re.search(
+        r"\b(?:manha|manhã|almoco|almoço|tarde|jantar|fim de tarde|sugestao|sugestão|dica|ordem|roteiro)\b",
+        normalized_name,
+    ):
+        return name
+
+    evidence_text = " ".join(
+        str(card.get(key, ""))
+        for key in ("description", "category", "address", "url_label")
+    )
+    patterns = [
+        r"\b((?:Museu|Mosteiro|Torre|Castelo|Pal[aá]cio|Padr[aã]o|S[eé]\s+de\s+Lisboa|Igreja|Convento|Parreirinha|Pap[’']A[cç]orda|Past[eé]is de Bel[eé]m)[^,.;\n]{0,70})",
+        r"\b((?:Museum|Monastery|Tower|Castle|Palace|Church|Cathedral|Past[eé]is de Bel[eé]m)[^,.;\n]{0,70})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, evidence_text)
+        if match:
+            candidate = _sanitize_planner_place_name(match.group(1))
+            if candidate:
+                return candidate
+    return name
+
+
+def _order_historic_food_cards(cards: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """Order historic-and-food fallback cards into a practical one-day flow."""
+    cultural_cards = [card for card in cards if _card_kind_for_plan_block(card) != "food"]
+    food_cards = [card for card in cards if _card_kind_for_plan_block(card) == "food"]
+
+    def _zone_score(card: Dict[str, str]) -> int:
+        basis = _normalize_planner_text(
+            " ".join(str(card.get(key, "")) for key in ("name", "address", "description"))
+        )
+        if re.search(r"\b(?:carmo|chiado|baixa|rossio|correeiros|douradores)\b", basis):
+            return 0
+        if re.search(r"\b(?:belem|belem|bras[ií]lia|tejo|descobrimentos)\b", basis):
+            return 2
+        return 1
+
+    cultural_cards = sorted(cultural_cards, key=lambda card: (_zone_score(card), -_score_historic_plan_card(card)))
+    food_cards = sorted(food_cards, key=lambda card: (_zone_score(card), -_score_food_plan_card(card)))
+
+    ordered: List[Dict[str, str]] = []
+    if cultural_cards:
+        ordered.append(cultural_cards[0])
+    if food_cards:
+        ordered.append(food_cards[0])
+    ordered.extend(cultural_cards[1:4])
+    if len(ordered) < 5:
+        ordered.extend(food_cards[1:2])
+
+    deduped: List[Dict[str, str]] = []
+    seen: set[str] = set()
+    for card in ordered:
+        key = _normalize_planner_text(_planner_card_display_name(card) or card.get("name", ""))
+        if key and key not in seen:
+            deduped.append(card)
+            seen.add(key)
+    return deduped[:5]
+
+
+def _itinerary_block_title(
+    title: str,
+    card: Dict[str, str],
+    *,
+    index: int,
+    historic_food_request: bool,
+    language: str,
+) -> str:
+    """Add a light schedule cue to planner fallback blocks when useful."""
+    if not historic_food_request:
+        return title
+    is_pt = language == "pt"
+    kind = _card_kind_for_plan_block(card)
+    time_labels = ["09:30", "12:45", "15:00", "16:30", "19:00"]
+    time_label = time_labels[min(max(index - 1, 0), len(time_labels) - 1)]
+    if kind == "food" and index <= 2:
+        prefix = "Almoço tradicional" if is_pt else "Traditional lunch"
+    elif kind == "food":
+        prefix = "Jantar opcional" if is_pt else "Optional dinner"
+    else:
+        prefix = "Paragem histórica" if is_pt else "Historic stop"
+    return f"{time_label} · {prefix}: {title}"
+
+
 def _select_planner_cards_for_request(cards: List[Dict[str, str]], user_message: str) -> List[Dict[str, str]]:
     """Select the number and type of place cards needed by a fallback plan."""
     if not cards:
         return []
     normalized = _normalize_planner_text(user_message)
+    usable_cards = [card for card in cards if not _planner_dict_card_is_closed(card)] or cards
     if re.search(r"\b(?:one|1|uma|um)\s+(?:cultural\s+)?(?:stop|paragem)\b", normalized):
         scored_cards = [
             (score, card)
-            for card in cards
+            for card in usable_cards
             for score in [_score_cultural_stop_card(card, normalized)]
             if score > 0
         ]
         if scored_cards:
             scored_cards.sort(key=lambda item: item[0], reverse=True)
             return [scored_cards[0][1]]
-        return cards[:1]
-    return cards[:5]
+        return usable_cards[:1]
+    if (
+        re.search(r"\b(?:hist[oó]ric|monument|monumento|patrim[oó]nio|heritage)\b", normalized)
+        and re.search(r"\b(?:gastronom|restaurant|restaurante|food|comida|tradicional|almo[cç]o|jantar)\b", normalized)
+    ):
+        cultural_cards = sorted(
+            (
+                (score, card)
+                for card in usable_cards
+                for score in [_score_historic_plan_card(card)]
+                if score > 0
+            ),
+            key=lambda item: item[0],
+            reverse=True,
+        )
+        food_cards = sorted(
+            (
+                (score, card)
+                for card in usable_cards
+                for score in [_score_food_plan_card(card)]
+                if score > 0
+            ),
+            key=lambda item: item[0],
+            reverse=True,
+        )
+        selected: List[Dict[str, str]] = []
+        for _, card in cultural_cards[:2]:
+            selected.append(card)
+        if food_cards:
+            selected.append(food_cards[0][1])
+        for _, card in cultural_cards[2:4]:
+            selected.append(card)
+        for _, card in food_cards[1:2]:
+            selected.append(card)
+        deduped: List[Dict[str, str]] = []
+        seen: set[str] = set()
+        for card in selected:
+            key = _normalize_planner_text(_planner_card_display_name(card) or card.get("name", ""))
+            if key and key not in seen:
+                deduped.append(card)
+                seen.add(key)
+        if deduped:
+            return deduped[:5]
+    return usable_cards[:5]
+
+
+def _planner_dict_card_is_closed(card: Dict[str, str]) -> bool:
+    """Return whether a raw planner card says the place is closed."""
+    basis = _normalize_planner_text(
+        " ".join(str(card.get(key, "")) for key in ("name", "description", "category", "hours"))
+    )
+    return bool(re.search(r"\b(?:hoje fechado|fechado hoje|today closed|closed today|horario hoje fechado|hours today closed)\b", basis))
+
+
+def _score_historic_plan_card(card: Dict[str, str]) -> int:
+    """Score a card as a historic/cultural itinerary stop."""
+    basis = _normalize_planner_text(
+        " ".join(str(card.get(key, "")) for key in ("name", "category", "address", "description", "hours"))
+    )
+    score = 0
+    if re.search(r"\b(?:monument|monumento|museu|museum|igreja|church|cathedral|se de lisboa|sé de lisboa|torre|tower|padrao|padrão|mosteiro|monastery|castelo|castle|palacio|palácio|convento|carmo)\b", basis):
+        score += 50
+    if re.search(r"\b(?:lisboa|belem|belém|baixa|alfama|chiado|carmo|se |sé |brasilia|brasília)\b", basis):
+        score += 18
+    if re.search(r"\b(?:batalha|alcobaca|alcobaça|tomar|setubal|setúbal|cascais|sintra)\b", basis):
+        score -= 80
+    if _planner_dict_card_is_closed(card):
+        score -= 60
+    if card.get("address"):
+        score += 5
+    return score
+
+
+def _score_food_plan_card(card: Dict[str, str]) -> int:
+    """Score a card as a traditional-food itinerary stop."""
+    basis = _normalize_planner_text(
+        " ".join(str(card.get(key, "")) for key in ("name", "category", "address", "description", "hours"))
+    )
+    score = 0
+    if re.search(r"\b(?:restaurant|restaurante|cozinha tradicional portuguesa|gastronomia|food|comida|bar|cafe|café)\b", basis):
+        score += 50
+    if re.search(r"\b(?:tradicional|portuguesa|typical portuguese|cozinha)\b", basis):
+        score += 20
+    if re.search(r"\b(?:lisboa|baixa|alfama|chiado|prata|douradores|correeiros)\b", basis):
+        score += 10
+    if _planner_dict_card_is_closed(card):
+        score -= 80
+    return score
 
 
 def _score_cultural_stop_card(card: Dict[str, str], normalized_query: str) -> int:
@@ -3351,7 +1879,7 @@ def _card_details_for_plan_block(card: Dict[str, str], *, language: str = "en") 
     """Convert a place card into semantic planner detail fields."""
     details: List[str] = []
     if card.get("description"):
-        details.append(f"Description: {_clean_planner_card_description(card['description'])}")
+        details.append(f"Description: {_planner_card_description_for_language(card['description'], language)}")
     if card.get("category"):
         details.append(f"Category: {card['category']}")
     if card.get("address"):
@@ -3366,6 +1894,28 @@ def _card_details_for_plan_block(card: Dict[str, str], *, language: str = "en") 
         details.append(f"Phone: {card['phone']}")
     if card.get("email"):
         details.append(f"Email: {card['email']}")
+    if card.get("url"):
+        url = str(card["url"])
+        url_label = str(card.get("url_label") or "").strip()
+        if not url_label:
+            url_label = "VisitLisboa" if "visitlisboa.com" in url.lower() else "Official website"
+        if url_label.lower() == "visitlisboa" and "visitlisboa.com" not in url.lower():
+            url_label = "Website oficial" if language == "pt" else "Official website"
+        details.append(f"Website: [{url_label}]({url})")
+    return details
+
+
+def _card_details_for_itinerary_block(card: Dict[str, str], *, language: str = "en") -> List[str]:
+    """Convert a place card into concise itinerary fields rather than a raw card."""
+    details: List[str] = []
+    if card.get("description"):
+        details.append(f"Description: {_planner_card_description_for_language(card['description'], language)}")
+    if card.get("address"):
+        details.append(f"Address: {card['address']}")
+    if card.get("hours"):
+        details.append(f"Hours: {card['hours']}")
+    if card.get("price"):
+        details.append(f"Price: {card['price']}")
     if card.get("url"):
         url = str(card["url"])
         url_label = str(card.get("url_label") or "").strip()
@@ -3531,7 +2081,7 @@ def _planner_fallback_limitations(
     for item in qa_disclaimers or []:
         text = _fallback_bullet_body(str(item))
         if re.search(
-            r"\b(?:final response|canonical|worker|agent|qa|repair|schema|should avoid presenting|keeps both|gtfs data|carris line numbers)\b",
+            r"\b(?:final response|canonical|worker|agent|qa|repair|schema|should avoid presenting|keeps both|gtfs data|carris line numbers|dados gtfs|numeros das linhas|números das linhas|horarios da carris|horários da carris|carris\.pt)\b",
             text,
             flags=re.IGNORECASE,
         ):
@@ -3544,6 +2094,8 @@ def _planner_fallback_limitations(
 def _card_fallback_title(user_message: str, language: str) -> str:
     """Build a specific fallback title from the requested planning intent."""
     normalized = _normalize_planner_text(user_message)
+    if _is_historic_gastronomy_day_request(normalized):
+        return "Roteiro histórico e gastronómico de 1 dia" if language == "pt" else "One-day history and food itinerary"
     if "principe real" in normalized or "príncipe real" in str(user_message).lower():
         return "Noite descontraída no Príncipe Real" if language == "pt" else "Relaxed evening around Príncipe Real"
     if re.search(r"\b(?:museum|museu|museums|museus)\b", normalized):
@@ -3560,6 +2112,10 @@ def _card_fallback_direct_answer(
     """Build the direct answer for the renderer-based card fallback."""
     is_pt = language == "pt"
     normalized = _normalize_planner_text(user_message)
+    if _is_historic_gastronomy_day_request(normalized):
+        if is_pt:
+            return "Organizei um dia compacto com monumentos históricos e uma pausa gastronómica, usando apenas dados recolhidos e verificáveis."
+        return "I organized a compact day with historic stops and one food break, using only gathered and verifiable data."
     if "principe real" in normalized:
         if is_pt:
             return "Parte de Saldanha, usa o metro como eixo principal até à zona da Avenida/Rato e mantém uma única paragem cultural no Príncipe Real."
@@ -3567,208 +2123,6 @@ def _card_fallback_direct_answer(
     if is_pt:
         return "Segue a ordem abaixo; usei apenas locais e deslocações apoiados pela evidência recolhida."
     return "Follow the order below; I used only places and movement details supported by the gathered evidence."
-
-
-def _select_short_plan_card(cards: List[Dict[str, str]], *, area: str, kind: str) -> Optional[Dict[str, str]]:
-    """Select the best concrete card for a short neighborhood plan."""
-    area_norm = _normalize_planner_text(area)
-    candidates: List[tuple[int, Dict[str, str]]] = []
-    for card in cards:
-        basis = _normalize_planner_text(
-            " ".join(str(card.get(field, "")) for field in ("name", "category", "address", "description"))
-        )
-        score = 0
-        if kind == "coffee":
-            if re.search(r"\b(cafe|cafes|coffee|restaurant|restaurants|pastelaria|bar|wine|wines)\b", basis):
-                score += 10
-            else:
-                continue
-        else:
-            if re.search(r"\b(museum|museums|monument|monuments|cultural|culture|museu|museus|galer|gallery|casa)\b", basis):
-                score += 10
-            else:
-                continue
-        if area_norm and area_norm in basis:
-            score += 8
-        if "campo de ourique" in area_norm and re.search(r"\b(casa fernando pessoa|amoreiras|campo de ourique)\b", basis):
-            score += 10
-        if re.search(r"\b(today:\s*closed|hoje:\s*fechado|closed today|fechado hoje)\b", basis):
-            score -= 6
-        candidates.append((score, card))
-    if not candidates:
-        return None
-    candidates.sort(key=lambda item: item[0], reverse=True)
-    return candidates[0][1]
-
-
-def _known_short_plan_anchor(area: str, kind: str) -> Optional[Dict[str, str]]:
-    """Return a conservative known anchor for common short neighborhood plans."""
-    area_norm = _normalize_planner_text(area)
-    if "campo de ourique" not in area_norm:
-        return None
-    if kind == "coffee":
-        return {
-            "name": "Mercado de Campo de Ourique",
-            "category": "Market / food hall",
-            "address": "Rua Coelho da Rocha, Campo de Ourique, Lisboa",
-            "hours": "",
-            "url": "",
-            "description": "Useful local base for a short coffee or snack pause, but individual vendors and morning service must be checked on arrival.",
-            "source_hint": "lisboa_aberta",
-        }
-    if kind == "culture":
-        return {
-            "name": "Casa Fernando Pessoa",
-            "category": "Museum",
-            "address": "Rua Coelho da Rocha, 16/18, Campo de Ourique, 1250-088, Lisboa",
-            "hours": "",
-            "url": "https://www.visitlisboa.com/en/places/casa-fernando-pessoa",
-            "description": "Local cultural anchor for Fernando Pessoa's work and house-museum context.",
-            "source_hint": "visitlisboa",
-        }
-    return None
-
-
-def _build_short_coffee_culture_fallback(
-    user_message: str,
-    language: str,
-    weather_data: str,
-    places_data: str,
-    events_data: str,
-) -> str:
-    """Build a conservative short-plan fallback for coffee plus one cultural stop."""
-    weather_bullets = _extract_weather_safety_bullets(weather_data, language)
-    area = _extract_neighborhood_hint(
-        user_message,
-        default="a zona indicada" if language == "pt" else "the requested area",
-    )
-    context = "\n".join([places_data or "", events_data or ""])
-    normalized_context = _normalize_planner_text(context)
-    mentions_closed = bool(re.search(r"\b(?:today closed|closed today|hoje fechado|fechado hoje)\b", normalized_context))
-    cards = _extract_visitlisboa_place_cards(context)
-    coffee_card = _select_short_plan_card(cards, area=area, kind="coffee")
-    culture_card = _select_short_plan_card(cards, area=area, kind="culture")
-    known_source_context = ""
-    if not coffee_card:
-        coffee_card = _known_short_plan_anchor(area, "coffee")
-        if coffee_card:
-            known_source_context += "\nLisboa Aberta: Mercado de Campo de Ourique"
-    if not culture_card:
-        culture_card = _known_short_plan_anchor(area, "culture")
-        if culture_card:
-            known_source_context += "\nVisitLisboa Places: Casa Fernando Pessoa"
-    source_line = _build_planner_fallback_source_line(
-        language=language,
-        weather_data=weather_data,
-        transport_data="",
-        places_data=f"{places_data or ''}{known_source_context}",
-        events_data=events_data,
-    )
-
-    if language == "pt":
-        coffee_lines = (
-            _place_card_line(coffee_card, language=language)
-            if coffee_card
-            else [
-                f"- Não foi confirmado um café específico em **{area}** nos dados recolhidos.",
-                "- Mantém o café numa opção local e interior, validada no momento.",
-            ]
-        )
-        culture_lines = (
-            _place_card_line(culture_card, language=language)
-            if culture_card
-            else [
-                f"- Não foi confirmado um local cultural específico em **{area}** nos dados recolhidos.",
-                "- Usa uma paragem curta no bairro apenas depois de confirmares que está aberta.",
-            ]
-        )
-        closed_note = (
-            "- Se o local cultural recolhido aparecer como fechado hoje, não o uses como paragem principal; substitui por uma pausa cultural curta no bairro e valida um espaço aberto antes de sair."
-            if mentions_closed
-            else "- Usa o local cultural recolhido apenas se o horário oficial confirmar que está aberto no intervalo pretendido."
-        )
-        return "\n".join(
-            [
-                "### 📅 Plano curto com café e cultura",
-                "",
-                "### ⛅ Condições",
-                *weather_bullets,
-                "",
-                "---",
-                "",
-                "### ☕ Café",
-                f"- Mantém o café em **{area}** para não gastar a janela de 90 minutos em deslocações.",
-                *coffee_lines,
-                "",
-                "---",
-                "",
-                "### 🏛️ Paragem cultural",
-                f"- Faz uma paragem curta e localizada em **{area}**, em vez de atravessar Lisboa para preencher o plano.",
-                *culture_lines,
-                closed_note,
-                "",
-                "---",
-                "",
-                "### 🚶 Ritmo recomendado",
-                "- **30 min:** café.",
-                "- **10-15 min:** deslocação a pé curta.",
-                "- **35-45 min:** paragem cultural ou alternativa interior confirmada aberta.",
-                "",
-                source_line,
-            ]
-        ).strip()
-
-    closed_note = (
-        "- If the gathered cultural venue is marked closed today, do not use it as the main stop; keep the plan to a short neighborhood cultural pause and verify an open venue before leaving."
-        if mentions_closed
-        else "- Use the gathered cultural venue only if official hours confirm it is open during your window."
-    )
-    coffee_lines_en = (
-        _place_card_line(coffee_card, language=language)
-        if coffee_card
-        else [
-            f"- Keep coffee local in **{area}** and choose a confirmed-open indoor café before leaving.",
-            "- Do not cross the city for coffee in a 90-minute plan; protect the time for the cultural stop.",
-        ]
-    )
-    culture_lines_en = (
-        _place_card_line(culture_card, language=language)
-        if culture_card
-        else [
-            f"- Use a short cultural stop in **{area}** only after confirming current opening hours.",
-            "- If no grounded venue is available, make the cultural part a brief neighbourhood architecture or literary walk rather than inventing a museum.",
-        ]
-    )
-    return "\n".join(
-        [
-            "### 📅 Short Coffee And Culture Plan",
-            "",
-            "### ⛅ Conditions",
-            *weather_bullets,
-            "",
-            "---",
-            "",
-            "### ☕ Coffee",
-            f"- Keep coffee in **{area}** so the 90-minute window is not spent crossing Lisbon.",
-            *coffee_lines_en,
-            "",
-            "---",
-            "",
-            "### 🏛️ Cultural stop",
-            f"- Keep the cultural stop local to **{area}**, rather than forcing a cross-city museum visit.",
-            *culture_lines_en,
-            closed_note,
-            "",
-            "---",
-            "",
-            "### 🚶 Suggested pace",
-            "- **30 min:** coffee.",
-            "- **10-15 min:** short walk.",
-            "- **35-45 min:** cultural stop or confirmed-open indoor alternative.",
-            "",
-            source_line,
-        ]
-    ).strip()
 
 
 def _build_specific_planner_fallback(
@@ -3781,15 +2135,10 @@ def _build_specific_planner_fallback(
     events_data: str,
     qa_disclaimers: list[str] | None = None,
 ) -> str:
-    """Return a domain-specific fallback for known itinerary shapes."""
+    """Return a card-based fallback for itinerary shapes with concrete evidence."""
     normalized_query = _normalize_planner_text(user_message)
-    belem_history_pastry_request = bool(
-        re.search(r"\b(?:belem|bel[eé]m)\b", normalized_query)
-        and re.search(r"\b(?:history|historical|historic|historico|historica|historia|hist[oó]ria|culture|cultural|monument|monastery|jeronimos|jer[oó]nimos)\b", normalized_query)
-        and re.search(r"\b(?:pastry|custard|tart|pastel|pasteis|past[eé]is|nata)\b", normalized_query)
-    )
-    if belem_history_pastry_request:
-        return _build_belem_history_pastry_fallback(
+    if _is_historic_gastronomy_day_request(normalized_query):
+        return _build_card_based_itinerary_fallback(
             user_message=user_message,
             language=language,
             weather_data=weather_data,
@@ -3797,13 +2146,6 @@ def _build_specific_planner_fallback(
             places_data=places_data,
             events_data=events_data,
             qa_disclaimers=qa_disclaimers,
-        )
-
-    if _is_historic_gastronomy_day_request(normalized_query):
-        return _build_historic_gastronomy_day_fallback(
-            language=language,
-            weather_data=weather_data,
-            transport_data=transport_data,
         )
 
     if _is_full_museum_day_request(user_message):
@@ -3816,423 +2158,9 @@ def _build_specific_planner_fallback(
             events_data=events_data,
             qa_disclaimers=qa_disclaimers,
         )
-        if card_based_fallback:
-            return card_based_fallback
-        return _build_full_museum_day_transport_fallback(
-            user_message=user_message,
-            language=language,
-            weather_data=weather_data,
-            places_data=places_data,
-            events_data=events_data,
-        )
-
-    return ""
-
-
-def _build_deterministic_planner_fallback(
-    user_message: str,
-    language: str,
-    weather_data: str,
-    transport_data: str,
-    places_data: str,
-    events_data: str,
-    qa_disclaimers: list[str] | None,
-) -> str:
-    """Build a compact deterministic itinerary when planner LLM synthesis fails or times out."""
-    requested_days = _extract_requested_day_count(user_message)
-    normalized_query = _normalize_planner_text(user_message)
-    overcomplex_scope_request = bool(
-        re.search(r"\b(?:ferry|ferries|transtejo|soflusa|ticket prices|prices|bookings|booking|reservations|reservas|precos|preços)\b", normalized_query)
-        and re.search(r"\b(?:sintra|cascais|setubal|setubal|setúbal)\b", normalized_query)
-        and re.search(r"\b(?:live|right now|next saturday|future|next)\b", normalized_query)
-    )
-    if overcomplex_scope_request:
-        return _build_overcomplex_scope_fallback(language, weather_data)
-
-    card_based_fallback = _build_card_based_itinerary_fallback(
-        user_message=user_message,
-        language=language,
-        weather_data=weather_data,
-        transport_data=transport_data,
-        places_data=places_data,
-        events_data=events_data,
-        qa_disclaimers=qa_disclaimers,
-    )
-    if card_based_fallback:
         return card_based_fallback
 
-    if requested_days and requested_days > 1:
-        return _build_multi_day_scope_fallback(
-            user_message=user_message,
-            language=language,
-            requested_days=requested_days,
-            weather_data=weather_data,
-        )
-
-    reduced_mobility_evening_request = bool(
-        re.search(r"\b(?:reduced mobility|wheelchair|accessible|accessibility|step free|mobility|mobilidade reduzida|acessivel|acessível)\b", normalized_query)
-        and re.search(r"\b(?:dinner|eat|meal|jantar|comer)\b", normalized_query)
-        and re.search(r"\b(?:cultural|culture|indoor|interior|museum|museu)\b", normalized_query)
-    )
-    if reduced_mobility_evening_request:
-        return _build_reduced_mobility_evening_fallback(language, weather_data)
-
-    resident_service_plan_request = bool(
-        re.search(r"\b(?:recycling|ecoponto|reciclagem|recycle)\b", normalized_query)
-        and re.search(r"\b(?:pharmacy|pharmacies|farmacia|farmacias|farmácia|farmácias)\b", normalized_query)
-        and re.search(r"\b(?:dinner|jantar|restaurant|restaurante)\b", normalized_query)
-    )
-    if resident_service_plan_request:
-        return _build_resident_service_plan_fallback(
-            user_message,
-            language,
-            weather_data,
-            places_data,
-            transport_data,
-        )
-
-    single_day_museum_garden_request = bool(
-        re.search(r"\b(?:single|one|um|uma|relaxed|quiet|calm|tranquilo|relaxado)\b", normalized_query)
-        and re.search(r"\b(?:museum|museu)\b", normalized_query)
-        and re.search(r"\b(?:garden|jardim)\b", normalized_query)
-        and re.search(r"\b(?:rain backup|backup|chuva|se chover)\b", normalized_query)
-    )
-    if single_day_museum_garden_request:
-        return _build_single_day_museum_garden_fallback(
-            user_message=user_message,
-            language=language,
-            weather_data=weather_data,
-        )
-
-    low_walk_day_request = bool(
-        re.search(r"\b(?:relaxed|quiet|calm|tranquilo|relaxado|relaxed day|second day|day plan|one relaxed day|um dia)\b", normalized_query)
-        and re.search(r"\b(?:avoid long walks|avoiding long walks|low walk|low-walk|same walking preference|pouca caminhada|evitar caminhadas longas|sem caminhadas longas|rain backup|indoor backup|backup interior|se chover)\b", normalized_query)
-    )
-    if low_walk_day_request:
-        return _build_low_walk_day_fallback(
-            user_message=user_message,
-            language=language,
-            weather_data=weather_data,
-        )
-
-    belem_history_pastry_request = bool(
-        re.search(r"\b(?:belem|bel[eÃ©]m)\b", normalized_query)
-        and re.search(r"\b(?:history|historical|historic|historico|historica|historia|hist[oó]ria|culture|cultural|monument|monastery|jeronimos|jer[oó]nimos)\b", normalized_query)
-        and re.search(r"\b(?:pastry|custard|tart|pastel|pasteis|past[eé]is|nata)\b", normalized_query)
-    )
-    if belem_history_pastry_request:
-        return _build_belem_history_pastry_fallback(
-            user_message=user_message,
-            language=language,
-            weather_data=weather_data,
-            transport_data=transport_data,
-            places_data=places_data,
-            events_data=events_data,
-        )
-
-    if _is_historic_gastronomy_day_request(normalized_query):
-        return _build_historic_gastronomy_day_fallback(
-            language=language,
-            weather_data=weather_data,
-            transport_data=transport_data,
-        )
-
-    walking_route_request = bool(
-        (
-            re.search(r"\b(passeio|percurso|rota)\b", normalized_query)
-            and re.search(r"\b(a pe|pedonal|caminh|walk|walking|horas?|minutos?)\b", normalized_query)
-        )
-        or (
-            re.search(r"\b(?:coherent walk|walking route|walk)\b", normalized_query)
-            and re.search(r"\b(?:minutes?|hours?|minutos?|horas?)\b", normalized_query)
-        )
-    )
-    evening_food_culture_request = bool(
-        re.search(r"\b(?:dinner|restaurant|jantar|restaurante)\b", normalized_query)
-        and re.search(r"\b(?:cultural|culture|cultura|cultural stop|paragem cultural)\b", normalized_query)
-    )
-    short_coffee_culture_request = bool(
-        re.search(r"\b(?:coffee|cafe|cafes|café|cafes|pastelaria)\b", normalized_query)
-        and re.search(r"\b(?:cultural|culture|cultura|cultural stop|paragem cultural)\b", normalized_query)
-    )
-    if _is_full_museum_day_request(user_message):
-        return _build_full_museum_day_transport_fallback(
-            user_message=user_message,
-            language=language,
-            weather_data=weather_data,
-            places_data=places_data,
-            events_data=events_data,
-        )
-    if evening_food_culture_request:
-        if re.search(r"\b(?:oriente|parque das nacoes|parque das nações|expo)\b", normalized_query):
-            return _build_oriente_evening_food_culture_fallback(
-                language=language,
-                weather_data=weather_data,
-                places_data=places_data,
-                events_data=events_data,
-            )
-        area = _extract_neighborhood_hint(
-            user_message,
-            default="a zona indicada" if language == "pt" else "the requested area",
-        )
-        area = re.sub(
-            r"\b(?:tonight|today|this evening|hoje|esta noite|esta tarde)\b",
-            "",
-            area,
-            flags=re.IGNORECASE,
-        ).strip(" /,.-") or ("a zona indicada" if language == "pt" else "the requested area")
-        area_axis = (
-            "Santos / Cais do Sodré"
-            if "santos" in _normalize_planner_text(area)
-            else f"{area} / Cais do Sodré / Santos"
-        )
-        normalized_context = _normalize_planner_text("\n".join([places_data or "", events_data or ""]))
-        has_doca = "doca de santo" in normalized_context
-        has_mnaa = (
-            "museu nacional de arte antiga" in normalized_context
-            or "national museum of ancient art" in normalized_context
-        )
-        weather_bullets = _extract_weather_overview_bullets(weather_data, language, max_items=2)
-        if not weather_bullets:
-            weather_bullets = [
-                "- No detailed weather facts were available in this run; keep the riverside or outdoor part flexible."
-                if language != "pt"
-                else "- Esta execução não trouxe factos meteorológicos detalhados; mantém flexível a parte ribeirinha ou ao ar livre."
-            ]
-        source_line = _build_lisboa_scope_source_line(
-            language,
-            include_ipma=bool(str(weather_data or "").strip()),
-            include_visitlisboa=bool(str(places_data or events_data or "").strip()),
-        )
-        if language == "pt":
-            dinner_line = (
-                "- **Jantar:** **Doca de Santo** apareceu nos dados recolhidos; usa-o como opção candidata, mas confirma horário, reserva e disponibilidade antes de sair."
-                if has_doca
-                else f"- **Jantar:** escolhe uma opção na zona de **{area}** depois de confirmares horário e disponibilidade."
-            )
-            culture_line = (
-                "- **Paragem cultural:** **Museu Nacional de Arte Antiga** é a âncora cultural mais clara perto de Santos; para esta noite, confirma se há horário compatível ou evento ativo antes de o tratar como plano fechado."
-                if has_mnaa
-                else "- **Paragem cultural:** usa apenas uma paragem interior próxima que consigas confirmar aberta hoje; não assumas disponibilidade noturna sem confirmação."
-            )
-            return "\n".join(
-                [
-                    "### 📅 Plano de fim de tarde",
-                    "",
-                    "**⛅ Condições e segurança**",
-                    *weather_bullets,
-                    "",
-                    "---",
-                    "",
-                    "**📍 Plano recomendado**",
-                    f"- Mantém o plano concentrado em **{area_axis}**, em vez de atravessar Lisboa para preencher uma paragem.",
-                    culture_line,
-                    dinner_line,
-                    "- Se a paragem cultural não estiver confirmada aberta, transforma a noite em jantar + passeio curto junto ao rio.",
-                    "- Disponibilidade noturna, reservas e bilhetes devem ser confirmados antes de sair.",
-                    "",
-                    source_line,
-                ]
-            ).strip()
-        dinner_line = (
-            "- **Dinner:** **Doca de Santo** appeared in the gathered data; treat it as a candidate option, but confirm opening hours, booking, and availability before leaving."
-            if has_doca
-            else f"- **Dinner:** choose an option in **{area}** after confirming opening hours and availability."
-        )
-        culture_line = (
-            "- **Cultural stop:** **Museu Nacional de Arte Antiga** is the clearest cultural anchor near Santos; for tonight, confirm compatible opening/event hours before treating it as a fixed stop."
-            if has_mnaa
-            else "- **Cultural stop:** use only a nearby indoor stop that you can confirm open today; do not assume evening availability without confirmation."
-        )
-        return "\n".join(
-            [
-                "### 📅 Suggested Evening Plan",
-                "",
-                "**⛅ Weather and safety**",
-                *weather_bullets,
-                "",
-                "---",
-                "",
-                "**📍 Recommended plan**",
-                f"- Keep the evening around **{area_axis}** instead of crossing Lisbon just to fill the cultural stop.",
-                culture_line,
-                dinner_line,
-                "- If the cultural stop is not confirmed open, turn the evening into dinner plus a short riverside walk.",
-                "- Confirm tonight's opening, tickets, reservations, and event availability before leaving.",
-                "",
-                source_line,
-            ]
-        ).strip()
-    if short_coffee_culture_request:
-        return _build_short_coffee_culture_fallback(
-            user_message=user_message,
-            language=language,
-            weather_data=weather_data,
-            places_data=places_data,
-            events_data=events_data,
-        )
-    if language == "pt" and walking_route_request:
-        origin_match = re.search(r"\b(?:estou em|em|a partir de|desde)\s+([A-Za-zÀ-ÿ\s-]+?)(?:\s+e\s+quero|\s+com|\s+de\s+\d+|\s*,|$)", user_message)
-        origin = origin_match.group(1).strip(" .,!?:;") if origin_match else "a zona indicada"
-        duration_match = re.search(r"\b(\d+\s*(?:h|horas|minutos?))\b", normalized_query)
-        duration = duration_match.group(1).replace("h", " horas") if duration_match else "cerca de 2 horas"
-        weather_bullets = _extract_planner_fallback_bullets(weather_data, max_items=2)
-        if not weather_bullets:
-            weather_bullets = ["- Confirma a previsão do IPMA antes de sair, sobretudo se houver hipótese de chuva."]
-        source_line = _build_planner_fallback_source_line(language, weather_data, "", "", "")
-        return "\n".join(
-            [
-                "### 📅 Itinerário sugerido",
-                "",
-                "**⛅ Condições e segurança**",
-                *weather_bullets,
-                "",
-                "---",
-                "",
-                "**🚶 Percurso a pé**",
-                f"- **Início:** {origin}.",
-                f"- **Duração:** {duration}.",
-                "- **Lógica do percurso:** mantém um circuito compacto, com ruas secundárias e pontos de pausa próximos, em vez de saltar entre zonas afastadas.",
-                "- **Transporte:** não é necessário para o corpo do passeio; usa metro/autocarro apenas para chegar ao ponto inicial ou regressar.",
-                "",
-                "---",
-                "",
-                "**📍 Paragens sugeridas**",
-                f"- Começa em **{origin}** e escolhe ruas de bairro com comércio local para a primeira parte.",
-                "- Faz uma pausa curta num jardim, praça ou café próximo que esteja efetivamente aberto no momento.",
-                "- Fecha o circuito regressando por ruas paralelas, para manter continuidade e evitar repetir exatamente o mesmo caminho.",
-                "",
-                "---",
-                "",
-                "**✨ Notas práticas**",
-                "- Não foram confirmados horários, lotação ou abertura atual de espaços específicos; valida qualquer paragem interior antes de entrar.",
-                "",
-                source_line,
-            ]
-        ).strip()
-    if walking_route_request:
-        origin_match = re.search(r"\b(?:near|at|from|starting from)\s+([A-Za-zÀ-ÿ\s'-]+?)(?:\s+before|\s+with|\s+for|\s*,|$)", user_message, flags=re.IGNORECASE)
-        origin = origin_match.group(1).strip(" .,!?:;") if origin_match else "the indicated area"
-        duration_match = re.search(r"\b(\d+\s*(?:minutes?|hours?))\b", normalized_query)
-        duration = duration_match.group(1) if duration_match else "about 90 minutes"
-        weather_bullets = _extract_planner_fallback_bullets(weather_data, max_items=2)
-        if not weather_bullets:
-            weather_bullets = [
-                "- No detailed weather facts were available in this run; keep the route compact and preserve a covered fallback."
-            ]
-        source_line = _build_planner_fallback_source_line(language, weather_data, "", "", "")
-        return "\n".join(
-            [
-                "### 📅 Suggested Walk",
-                "",
-                "**⛅ Weather and safety**",
-                *weather_bullets,
-                "",
-                "---",
-                "",
-                "**🚶 Route logic**",
-                f"- **Start and finish:** {origin}.",
-                f"- **Duration:** {duration}.",
-                "- **Shape:** use a compact out-and-back route so you can return quickly if the weather worsens.",
-                "- **Train buffer:** keep the final 15-20 minutes close to the station instead of committing to a long one-way loop.",
-                "",
-                "---",
-                "",
-                "**📍 Suggested stops**",
-                f"- Start near **{origin}** and stay on the most direct, familiar streets first.",
-                "- Add the riverside or viewpoint stretch only while conditions are comfortable.",
-                "- Turn back early if showers or wind strengthen, and use nearby cafes or covered streets as the fallback.",
-                "",
-                source_line,
-            ]
-        ).strip()
-    title = (
-        "### 📅 Dia 1 · Itinerário Sugerido"
-        if language == "pt"
-        else "### 📅 Day 1 · Suggested Itinerary"
-    ) if requested_days and requested_days > 1 else (
-        "### 📅 Itinerário Sugerido"
-        if language == "pt"
-        else "### 📅 Suggested Itinerary"
-    )
-    weather_heading = "### ⛅ Condições e Segurança" if language == "pt" else "### ⛅ Weather and Safety"
-    transport_heading = "### 🚇 Como Chegar e Deslocação" if language == "pt" else "### 🚇 Getting There and Moving Around"
-    activities_heading = "### 📍 Sugestões para a visita" if language == "pt" else "### 📍 Visit Suggestions"
-    notes_heading = "### ✨ Notas Práticas" if language == "pt" else "### ✨ Practical Notes"
-
-    weather_bullets = _extract_planner_fallback_bullets(weather_data, max_items=3)
-    transport_bullets = _extract_planner_fallback_bullets(transport_data, max_items=4)
-    activity_bullets = _extract_planner_fallback_bullets(
-        "\n".join(part for part in [places_data, events_data] if part),
-        max_items=4,
-    )
-    if language == "pt":
-        english_markers = re.compile(
-            r"\b(start|continue|end|suitable|quieter|calmer|heritage|finish|listed|available)\b",
-            re.IGNORECASE,
-        )
-        activity_bullets = [bullet for bullet in activity_bullets if not english_markers.search(bullet)]
-    note_bullets = [f"- {item}" for item in (qa_disclaimers or [])[:3]]
-
-    if not weather_bullets:
-        weather_bullets = [
-            "- Esta execução não trouxe factos meteorológicos detalhados; mantém flexíveis as partes ao ar livre."
-            if language == "pt"
-            else "- No detailed weather facts were available in this run; keep outdoor parts flexible."
-        ]
-    if not transport_bullets:
-        transport_bullets = [
-            "- Confirme o trajeto em carris.pt, metrolisboa.pt ou cp.pt antes de partir."
-            if language == "pt"
-            else "- Confirm the route on carris.pt, metrolisboa.pt, or cp.pt before leaving."
-        ]
-    if not activity_bullets:
-        activity_bullets = [
-            "- Priorize espaços interiores e pausas curtas, com base nos locais já recolhidos."
-            if language == "pt"
-            else "- Prioritize indoor stops and short breaks based on the gathered places data."
-        ]
-    if not note_bullets:
-        note_bullets = [
-            "- Verifique horários e acessibilidade diretamente nos operadores e locais oficiais."
-            if language == "pt"
-            else "- Verify opening hours and accessibility directly with the official operators and venues."
-        ]
-
-    follow_up_note = _build_multi_day_follow_up_note(language, requested_days)
-    if follow_up_note:
-        note_bullets.insert(0, f"- {follow_up_note}")
-
-    sections = [
-        title,
-        "",
-        weather_heading,
-        *weather_bullets,
-        "",
-        "---",
-        "",
-        transport_heading,
-        *transport_bullets,
-        "",
-        "---",
-        "",
-        activities_heading,
-        *activity_bullets,
-        "",
-        "---",
-        "",
-        notes_heading,
-        *note_bullets,
-        "",
-        _build_planner_fallback_source_line(
-            language,
-            weather_data,
-            transport_data,
-            places_data,
-            events_data,
-        ),
-    ]
-    return "\n".join(sections).strip()
+    return ""
 
 
 def _planner_response_requires_fallback(cleaned_response: str) -> bool:
@@ -4293,6 +2221,10 @@ def _planner_response_has_markdown_contract_defects(cleaned_response: str) -> bo
         r"\bcrossing lisbon just to fit\b",
         r"\bconfirmable cultural stop\b",
         r"\bparagem cultural confirmavel\b",
+        r"\bpasseio livre\b",
+        r"\bpasseio historico final\b",
+        r"\bseguir a ordem indicada\b",
+        r"\bpernas exatas\b",
         r"\bno explicit constraints beyond the requested plan\b",
         r"\brestricoes nao especificadas\b",
         r"\buse only evidence cards\b",
@@ -4306,6 +2238,8 @@ def _planner_response_has_markdown_contract_defects(cleaned_response: str) -> bo
         r"^###\s+[^\n]*\b\d{1,2}:\d{2}\b\s*[·\-]\s*(?:today|hoje)\s*:",
         r"^###\s+[^\n]*\b(?:hours|horario|horário)\s*:",
         r"^###\s*(?:ℹ️\s*)?(?:note|nota)\s*:?\s*$",
+        r"^###\s+🚇\s+\*\*(?!(?:Como te deslocas|How to move)\b)",
+        r"^###\s+🚇\s+\*\*(?:Manhã|Meio da manhã|Almoço|Tarde|Jantar|Fim de tarde|Morning|Lunch|Afternoon|Dinner)\b",
     ]
     if any(re.search(pattern, heading, flags=re.IGNORECASE) for heading in headings for pattern in unsafe_heading_patterns):
         return True
@@ -4326,6 +2260,11 @@ def _planner_response_has_markdown_contract_defects(cleaned_response: str) -> bo
     if re.search(r"(?mi)\*\*(?:https?|www)\*\*\s*:\s*//", cleaned_response):
         return True
     if re.search(r"(?mi)^###\s+.*\bscheduled tonight\b", cleaned_response):
+        return True
+    if re.search(
+        r"(?mi)^\*\*🏷️\s*(?:Museum|Place|Manh[aã]|Almo[cç]o|Tarde|Jantar|Fim de tarde|Evening|Morning|Lunch|Afternoon|Dinner)\b",
+        cleaned_response,
+    ):
         return True
     if re.search(r"(?mi)^###\s+🧭\s+\*\*(?:Plan basis|Base do plano)\*\*", cleaned_response):
         return True
@@ -4377,14 +2316,31 @@ def _planner_response_has_transport_quality_defects(
     transport_data: str,
 ) -> bool:
     """Return whether transport-aware planner output hides grounded route gaps."""
+    has_route_leg_evidence = bool(
+        re.search(
+            r"\b(?:liga[cç][oõ]es entre paragens do roteiro|route legs between itinerary stops|carris\s+15e|caminhada curta|short walk)\b",
+            _normalize_planner_text(transport_data),
+            re.IGNORECASE,
+        )
+    )
     if (
         not cleaned_response
         or not str(transport_data or "").strip()
-        or not _query_requests_public_transport(user_message)
+        or (
+            not _query_requests_public_transport(user_message)
+            and not has_route_leg_evidence
+        )
     ):
         return False
 
     normalized = _normalize_planner_text(cleaned_response)
+    if has_route_leg_evidence and not re.search(
+        r"\b(?:como te deslocas|how to move|carris\s+15e|linha\s+15e|caminhada curta|short walk|route legs|liga[cç][oõ]es)\b",
+        normalized,
+        re.IGNORECASE,
+    ):
+        return True
+
     vague_transport_patterns = (
         r"\bverify locally\b",
         r"\bcheck the most direct (?:bus or metro )?connection locally\b",
@@ -4424,7 +2380,7 @@ def _append_transport_uncertainty_note(response: str, language: str) -> str:
     """Append a scoped transport note without replacing a useful planner draft."""
     note_heading = "### 🚇 Limites dos transportes" if language == "pt" else "### 🚇 Transport Limits"
     note_line = (
-        "- Algumas pernas exatas de transporte público não ficaram totalmente confirmadas nos dados recolhidos; confirma no operador antes de sair e não trates isto como horário live de partida."
+        "- Algumas ligações entre zonas não ficaram totalmente confirmadas nos dados recolhidos; confirma no operador antes de sair e não trates isto como horário de partida em tempo real."
         if language == "pt"
         else "- Some exact public-transport legs were not fully confirmed in the gathered data; check the operator before leaving and do not treat this as a live departure schedule."
     )
@@ -4449,7 +2405,7 @@ def _add_transport_quality_issue(
     if _planner_response_has_transport_quality_defects(response, user_message, transport_data):
         issue = (
             "Public-transport guidance is too vague despite transport context being available. "
-            "Use concrete grounded operator, line, direction, board/alight, or transfer details; "
+            "Use concrete supported operator, line, direction, board/alight, or transfer details; "
             "otherwise mark the exact leg as unconfirmed."
         )
         if issue not in issues:
@@ -4587,6 +2543,8 @@ class PlannerAgent(BaseAgent):
             return ""
         if _planner_response_has_markdown_contract_defects(rendered):
             return ""
+        if not _planner_response_has_minimum_user_value(rendered):
+            return ""
         return rendered.strip()
 
     @traceable(name="planner_agent", run_type="chain", tags=["sub-agent", "planner"])
@@ -4616,24 +2574,11 @@ class PlannerAgent(BaseAgent):
             str: Formatted itinerary.
         """
         language = infer_response_language(user_query=user_message, default="en")
-        specific_plan = _build_specific_planner_fallback(
-            user_message=user_message,
-            language=language,
-            weather_data=weather_data,
-            transport_data=transport_data,
-            places_data=places_data,
-            events_data=events_data,
-        )
-        if specific_plan:
-            return enforce_multi_day_quality_mode(
-                specific_plan,
-                user_message,
-                language,
-            )
-
         # Preferred path: the planner decides content in JSON, then a deterministic
         # renderer guarantees LISBOA visual structure. This avoids asking the LLM
-        # to simultaneously plan and hand-format Markdown.
+        # to simultaneously plan and hand-format Markdown. Fallbacks are only
+        # used after this evidence-driven synthesis path cannot produce a valid
+        # evidence-supported plan.
         structured_plan = self._try_structured_json_plan(
             user_message=user_message,
             language=language,
@@ -4645,11 +2590,37 @@ class PlannerAgent(BaseAgent):
             conversation_context=conversation_context,
         )
         if structured_plan:
-            return enforce_multi_day_quality_mode(
-                structured_plan,
-                user_message,
-                language,
-            )
+            if (
+                not _planner_response_has_markdown_contract_defects(structured_plan)
+                and _planner_response_has_minimum_user_value(structured_plan)
+                and not _planner_response_has_transport_quality_defects(
+                    structured_plan,
+                    user_message,
+                    transport_data,
+                )
+            ):
+                return enforce_multi_day_quality_mode(
+                    structured_plan,
+                    user_message,
+                    language,
+                )
+            structured_plan = ""
+
+        specific_plan = _build_specific_planner_fallback(
+            user_message=user_message,
+            language=language,
+            weather_data=weather_data,
+            transport_data=transport_data,
+            places_data=places_data,
+            events_data=events_data,
+        )
+        if specific_plan:
+            if _planner_response_has_minimum_user_value(specific_plan):
+                return enforce_multi_day_quality_mode(
+                    specific_plan,
+                    user_message,
+                    language,
+                )
 
         card_based_plan = _build_card_based_itinerary_fallback(
             user_message=user_message,
@@ -4661,11 +2632,12 @@ class PlannerAgent(BaseAgent):
             qa_disclaimers=qa_disclaimers,
         )
         if card_based_plan:
-            return enforce_multi_day_quality_mode(
-                card_based_plan,
-                user_message,
-                language,
-            )
+            if _planner_response_has_minimum_user_value(card_based_plan):
+                return enforce_multi_day_quality_mode(
+                    card_based_plan,
+                    user_message,
+                    language,
+                )
 
         # Legacy path: retained as a fallback when the JSON path cannot produce a
         # valid, grounded PlanDraft.
@@ -4732,7 +2704,7 @@ class PlannerAgent(BaseAgent):
         # Inject QA disclaimers so the planner transparently communicates limitations
         if qa_disclaimers:
             disclaimer_text = "\n".join(f"- ⚠️ {d}" for d in qa_disclaimers)
-            heading = "## ⚠️ Limitações dos Dados" if language == "pt" else "## ⚠️ Data Limitations"
+            heading = "## ⚠️ Cautelas dos Dados" if language == "pt" else "## ⚠️ Data Caveats"
             instruction = (
                 "Inclui estas cautelas apenas quando forem úteis para o utilizador:"
                 if language == "pt"
@@ -4784,7 +2756,7 @@ class PlannerAgent(BaseAgent):
                     "- Target 450-650 words for rich cross-domain itineraries; stay shorter for simple requests.\n"
                     "- Use this exact data schema internally: title, direct_answer, plan_basis, route_blocks, movement, weather_adaptation, final_notes.\n"
                     "- Make route_blocks ordered and useful; use at most 4 blocks for one-day plans.\n"
-                    "- Include the useful evidence the workers gathered: weather consequence, realistic movement, grounded stops, and user preferences.\n"
+                    "- Include the useful evidence gathered by specialized agents: weather consequence, realistic movement, supported stops, and user preferences.\n"
                     "- Do not include raw place cards, empty sections, malformed labels, or placeholder fields.\n"
                     "- Do not include restaurants, events, exact prices, tickets, exact routes, or exact weather unless confirmed in the provided data.\n"
                     "- Do not include current live departure times in an itinerary unless the user explicitly asked for next departures or live status.\n"
@@ -4819,12 +2791,6 @@ class PlannerAgent(BaseAgent):
                     places_data=places_data,
                     events_data=events_data,
                     qa_disclaimers=qa_disclaimers,
-                ) or _build_full_museum_day_transport_fallback(
-                    user_message=user_message,
-                    language=language,
-                    weather_data=weather_data,
-                    places_data=places_data,
-                    events_data=events_data,
                 )
         except Exception:
             fallback = _build_specific_planner_fallback(
@@ -4851,6 +2817,7 @@ class PlannerAgent(BaseAgent):
             _planner_response_requires_fallback(cleaned_response)
             or _planner_response_has_markdown_contract_defects(cleaned_response)
             or not _planner_response_matches_schema(cleaned_response)
+            or not _planner_response_has_minimum_user_value(cleaned_response)
         ):
             cleaned_response = _build_specific_planner_fallback(
                 user_message=user_message,
@@ -4893,8 +2860,8 @@ class PlannerAgent(BaseAgent):
                         "Your previous draft violated the grounding rules. Revise it now.\n"
                         "- Remove any unsupported venue names.\n"
                         "- Remove unsupported accessibility claims.\n"
-                        "- Keep only facts grounded in the provided data.\n"
-                        "- Replace vague transport prose with concrete grounded line/stop/transfer details, "
+                        "- Keep only facts supported by the provided data.\n"
+                        "- Replace vague transport prose with concrete supported line/stop/transfer details, "
                         "or mark the exact leg as unconfirmed."
                     )
                 ),
@@ -4920,12 +2887,14 @@ class PlannerAgent(BaseAgent):
                     conversation_context=conversation_context,
                 )
             if _planner_response_has_incomplete_museum_day_blocks(user_message, cleaned_response):
-                cleaned_response = _build_full_museum_day_transport_fallback(
+                cleaned_response = _build_card_based_itinerary_fallback(
                     user_message=user_message,
                     language=language,
                     weather_data=weather_data,
+                    transport_data=transport_data,
                     places_data=places_data,
                     events_data=events_data,
+                    qa_disclaimers=qa_disclaimers,
                 )
             grounding_issues = _find_planner_grounding_issues(
                 cleaned_response,
@@ -4941,11 +2910,14 @@ class PlannerAgent(BaseAgent):
             )
             if not _planner_response_matches_schema(cleaned_response):
                 grounding_issues.append("Planner response does not follow the required structured schema.")
+            if not _planner_response_has_minimum_user_value(cleaned_response):
+                grounding_issues.append("Planner response is structurally present but lacks useful plan content.")
 
         if (
             _planner_response_requires_fallback(cleaned_response)
             or _planner_response_has_markdown_contract_defects(cleaned_response)
             or not _planner_response_matches_schema(cleaned_response)
+            or not _planner_response_has_minimum_user_value(cleaned_response)
             or _planner_response_has_incomplete_museum_day_blocks(user_message, cleaned_response)
         ):
             cleaned_response = _build_specific_planner_fallback(
@@ -4984,6 +2956,20 @@ class PlannerAgent(BaseAgent):
                 cleaned_response,
                 language,
             )
+
+        if not _planner_response_has_minimum_user_value(cleaned_response):
+            rescue_response = _build_structured_plan_fallback(
+                user_message=user_message,
+                language=language,
+                weather_data=weather_data,
+                transport_data=transport_data,
+                places_data=places_data,
+                events_data=events_data,
+                qa_disclaimers=qa_disclaimers,
+                conversation_context=conversation_context,
+            )
+            if _planner_response_has_minimum_user_value(rescue_response):
+                cleaned_response = rescue_response
 
         return enforce_multi_day_quality_mode(
             cleaned_response,
@@ -5077,7 +3063,7 @@ if __name__ == "__main__":
     mocked_agent.system_prompt = "PLANNER PROMPT"
     mocked_agent.llm = object()
     mocked_agent._safe_llm_invoke = lambda _llm, _messages: SimpleNamespace(
-        content="### 📅 Day 1\n- **Jerónimos Monastery**\n- Short grounded plan"
+        content="### 📅 Day 1\n- **Jerónimos Monastery**\n- Short evidence-supported plan"
     )
 
     mocked_response = mocked_agent.invoke(
@@ -5106,7 +3092,11 @@ if __name__ == "__main__":
         events_data="",
         transport_data="🚇 Metro available",
     )
-    _check("Source" in fallback_response and "Suggested Itinerary" in fallback_response, "Planner fallback stays user-facing and structured")
+    _check(
+        ("Source" in fallback_response or "Fonte" in fallback_response)
+        and ("Itinerary" in fallback_response or "Roteiro" in fallback_response),
+        "Planner fallback stays user-facing and structured",
+    )
 
     if os.getenv("LISBOA_RUN_LIVE_PLANNER_TESTS") == "1":
         print("\n\033[1m🌐 Optional live planner smoke:\033[0m")

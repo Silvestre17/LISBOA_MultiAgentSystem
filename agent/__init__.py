@@ -28,7 +28,6 @@ from agent.prompts import (  # Multi-Agent Prompts
 )
 from agent.state import (
     AgentState,
-    PlanItem,
     TransportContext,
     UserContext,
     WeatherContext,
@@ -46,7 +45,6 @@ __all__ = [
     "UserContext",
     "WeatherContext",
     "TransportContext",
-    "PlanItem",
     "create_initial_state",
 
     # Multi-Agent Prompts

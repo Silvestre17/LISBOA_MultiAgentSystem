@@ -4,7 +4,8 @@
 #
 #   Builds the PlannerAgent message pair for JSON-only synthesis. The prompt
 #   delegates Markdown, visual formatting, indentation, and source-footers to
-#   deterministic code so the LLM focuses on selecting grounded plan content.
+#   deterministic code so the LLM focuses on selecting evidence-supported plan
+#   content.
 # ==========================================================================
 
 from datetime import datetime
@@ -44,11 +45,11 @@ def build_structured_plan_messages(
   "constraints_used": ["constraint or preference actually used"],
   "blocks": [
     {
-      "title": "grounded place/event/service name or generic local block",
+      "title": "evidence-supported place/event/service name or generic local block",
       "kind": "place|museum|culture|event|food|coffee|pastry|transport|walk|service|activity",
       "purpose": "why this block fits the request",
-      "details": ["Description: grounded description", "Address: grounded address/map link", "Hours: grounded hours", "Price: grounded price", "Website: grounded official/details link"],
-      "movement": ["grounded movement detail or scoped uncertainty"],
+      "details": ["Description: evidence-supported description", "Address: evidence-supported address/map link", "Hours: evidence-supported hours", "Price: evidence-supported price", "Website: evidence-supported official/details link"],
+      "movement": ["evidence-supported movement detail or scoped uncertainty"],
       "weather": ["weather adaptation when relevant"],
       "limitations": ["only relevant unconfirmed fields"],
       "source_ids": ["source ids used by this block"]
@@ -56,7 +57,7 @@ def build_structured_plan_messages(
   ],
   "movement_logic": ["overall movement logic"],
   "weather_strategy": ["weather-aware strategy when relevant"],
-  "tips": ["short practical tips grounded in evidence"],
+  "tips": ["short practical tips supported by evidence"],
   "limitations": ["global limitations"],
   "source_ids": ["source ids materially used"]
 }
@@ -69,7 +70,7 @@ You are LISBOA's planning composer. You decide the plan content, but a determini
 Return ONLY valid JSON. No Markdown. No prose outside JSON. No code fences.
 
 Language: {language_rule}.
-Current runtime: {now}.
+Current date/time for reasoning only: {now}.
 
 Hard rules:
 - Use only evidence cards below. Do not invent venues, restaurants, cafes, events, prices, opening hours, tickets, accessibility, live status, or exact routes.
