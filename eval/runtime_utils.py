@@ -7,18 +7,17 @@
 # ===========================================================================
 
 from __future__ import annotations
-from agent.utils import usage_costs as _shared_usage_costs
 
 import hashlib
+import importlib.util
 import json
 import re
+import ast
 from collections import Counter
 from copy import deepcopy
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Iterable, Optional, Sequence
-
-from tools import __all__ as EXPORTED_TOOL_NAMES
 
 RESULTS_ROOT = Path(__file__).with_name("results")
 SUPPORTED_MODEL_PROVIDERS = frozenset({"azure", "openai", "lmstudio"})
@@ -51,6 +50,52 @@ MIN_JSON_MONEY_DECIMALS = 5
 _JSON_MONEY_FIELD_PATTERN = re.compile(
     rf'(?P<prefix>\s*"(?:{"|".join(JSON_MONEY_FIELD_NAMES)})"\s*:\s*)(?P<value>-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?P<suffix>\s*,?\s*)$'
 )
+
+
+def _load_exported_tool_names() -> tuple[str, ...]:
+    """Read ``tools.__all__`` without importing LangChain-backed tool modules."""
+    tools_init_path = Path(__file__).resolve().parents[1] / "tools" / "__init__.py"
+    try:
+        module_ast = ast.parse(tools_init_path.read_text(encoding="utf-8"))
+    except OSError:
+        return ()
+
+    for node in module_ast.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets):
+            continue
+        try:
+            exported_names = ast.literal_eval(node.value)
+        except (SyntaxError, ValueError):
+            return ()
+        return tuple(str(name) for name in exported_names)
+
+    return ()
+
+
+EXPORTED_TOOL_NAMES = _load_exported_tool_names()
+
+
+def _load_shared_usage_costs_module() -> Any:
+    """Load shared usage-cost helpers without importing the full agent package.
+
+    Importing ``agent.utils`` executes ``agent/__init__.py``, which imports the
+    interactive LangChain runtime. The evaluation notebooks only need the
+    standalone usage-cost helpers, so loading this file directly keeps the
+    analysis path independent from optional application runtime dependencies.
+    """
+    module_path = Path(__file__).resolve().parents[1] / "agent" / "utils" / "usage_costs.py"
+    spec = importlib.util.spec_from_file_location("_lisboa_shared_usage_costs", module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load shared usage-cost helpers from {module_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_shared_usage_costs = _load_shared_usage_costs_module()
 
 
 def _coerce_int(value: Any) -> int:
