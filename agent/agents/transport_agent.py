@@ -718,6 +718,7 @@ def _extract_route_endpoints(user_message: str) -> Optional[Tuple[str, str]]:
 
     patterns = [
         r"\b(?:quais\s+os\s+)?(?:pr[oó]xim(?:os|as)|next)\s+(?:autocarros?|buses?|el[eé]tricos?|trams?).*?\b(?:at|em|na|no)\s+(?P<origin>.+?)\s+(?:para\s+(?:seguir\s+)?(?:para\s+)?|to\s+)(?P<destination>.+?)(?:[\?\!\.,;]|$)",
+        r"\b(?:plan|planeia|planeie|organiza|organize)\b.*?\b(?:em|in)\s+(?P<destination>[^,\?\!\.]+?)\s+(?:a\s+partir\s+(?:dos|das|do|da|de)|desde|from)\s+(?P<origin>[^,\?\!\.]+?)(?:\s*,|\s+com\b|\s+with\b|\s+e\b|\s+and\b|[\?\!\.]|$)",
         r"\b(?:plan|planeia|planeie|organiza|organize)\b.*?\b(?:em|in)\s+(?P<destination>[^,\?\!\.]+),\s*(?:diz[- ]me|diga[- ]me|tell me|show me)\s+como\s+l[aá]\s+chegar\s+a\s+partir\s+(?:dos|das|do|da|de)\s+(?P<origin>.+?)(?:\s+e\b|[\?\!\.,;]|$)",
         r"\b(?:plan|planeia|planeie|organiza|organize)\b.*?\b(?:em|in)\s+(?P<destination>[^,\?\!\.]+),\s*(?:tell me|show me)\s+how\s+to\s+get\s+there\s+from\s+(?P<origin>.+?)(?:\s+and\b|[\?\!\.,;]|$)",
         r"\b(?:como\s+(?:é\s+que\s+)?(?:posso\s+)?ir|como\s+(?:é\s+que\s+)?vou|como\s+chego)\s+(?:dos|das|do|da|de)\s+(?P<origin>.+?)\s+(?:para|ao|a|à|até)\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
@@ -3093,8 +3094,11 @@ def _build_cp_tool_spec(user_message: str) -> Optional[Dict[str, Any]]:
     route_name = _extract_cp_route_name(query)
     endpoints = _extract_route_endpoints(query)
     cp_route_pair = bool(endpoints and _is_probable_cp_suburban_route_pair(endpoints))
+    explicit_train_context = bool(re.search(r"\b(cp|comboio|comboios|combios|train|trains)\b", query_lower))
+    if endpoints and cp_route_pair and _is_generic_public_transport_route_query(query) and not explicit_train_context:
+        cp_route_pair = False
     has_train_context = bool(
-        re.search(r"\b(cp|comboio|comboios|combios|train|trains)\b", query_lower)
+        explicit_train_context
         or cp_route_pair
         or (
             route_name
@@ -3127,7 +3131,7 @@ def _build_cp_tool_spec(user_message: str) -> Optional[Dict[str, Any]]:
     ):
         return {"name": "get_train_frequency", "args": {"route_name": route_name}}
 
-    if endpoints and re.search(r"\b(cp|comboio|comboios|train|trains)\b", query_lower):
+    if endpoints and explicit_train_context:
         return {
             "name": "plan_train_trip",
             "args": {
