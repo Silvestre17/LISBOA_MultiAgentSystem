@@ -204,6 +204,22 @@ class SupervisorAgent(BaseAgent):
     def _looks_like_transport_query(cls, message_lower: str) -> bool:
         """Detects transport and routing queries from natural PT/EN phrasing, not only explicit mode words."""
         normalized = cls._normalize_query(message_lower)
+        weather_only_transport_false_positive = (
+            cls._looks_like_weather_query(normalized)
+            and re.search(
+                r"\b(?:previs[aã]o|forecast)\b.*\b(?:tempo|weather)\b|"
+                r"\b(?:tempo|weather)\b.*\b(?:hoje|amanh[aã]|semana|dias?|week|days?)\b",
+                normalized,
+            )
+            and not re.search(
+                r"\b(?:metro|bus|autocarro|comboio|train|tram|el[eé]trico|transportes?|public transport|"
+                r"como\s+(?:vou|chego|posso ir)|how\s+(?:do|can)\s+i\s+(?:get|go)|from\s+.+\s+to)\b",
+                normalized,
+            )
+        )
+        if weather_only_transport_false_positive:
+            return False
+
         transport_patterns = [
             r"\bmetro\b",
             r"\bbus\b",

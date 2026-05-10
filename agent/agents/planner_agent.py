@@ -1146,6 +1146,16 @@ def _extract_planner_fallback_bullets(text: str, *, max_items: int = 4) -> List[
         candidate = re.sub(r"^#{1,6}\s*", "", candidate).strip()
         if re.fullmatch(r"(?:🚇\s*)?\*\*(?:best transport|melhor transporte)\*\*", candidate, flags=re.IGNORECASE):
             continue
+        if re.fullmatch(
+            r"[\U0001F300-\U0001FAFF\u2300-\u23FF\u2600-\u27BF\uFE0F\u200D\s]+",
+            candidate,
+        ):
+            continue
+        if re.fullmatch(
+            r"(?:[\U0001F300-\U0001FAFF\u2300-\u23FF\u2600-\u27BF\uFE0F\u200D]+\s*)?\*\*[A-Za-zÀ-ÿ0-9 /'-]{2,70}:\*\*",
+            candidate,
+        ):
+            continue
 
         normalized = _normalize_planner_text(candidate)
         if not normalized or normalized in seen:
@@ -2197,6 +2207,17 @@ def _planner_response_has_markdown_contract_defects(cleaned_response: str) -> bo
 
     raw_lower = (cleaned_response or "").lower()
     normalized = _normalize_planner_text(cleaned_response)
+    source_match = re.search(r"(?mi)^\s*📌\s+\*\*(?:Source|Fonte):\*\*.*$", cleaned_response)
+    source_line = source_match.group(0) if source_match else ""
+    if re.search(r"(?m)^\s*[-*]\s*[\U0001F300-\U0001FAFF\u2300-\u23FF\u2600-\u27BF\uFE0F\u200D\s]+\s*$", cleaned_response):
+        return True
+    if re.search(
+        r"(?mi)^\s*[-*]\s*📝\s+\*\*(?:Descrição|Descricao|Description):\*\*\s*(?:⭐|TripAdvisor|Avalia[cç][aã]o|Rating)\b",
+        cleaned_response,
+    ):
+        return True
+    if re.search(r"\b(?:linha\s+15e|linha\s+728|15e|728)\b", raw_lower) and "carris" not in source_line.lower():
+        return True
     if re.search(r"(?m)^\s*\d+[.)]\s+", cleaned_response):
         return True
     if len(re.findall(r"(?im)^\s*(?:[-*]\s*)?📌\s*\*\*(?:Source|Sources|Fonte|Fontes):\*\*", cleaned_response)) > 1:

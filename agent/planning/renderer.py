@@ -473,7 +473,25 @@ def _source_is_materially_used(source_id: str, rendered_body: str) -> bool:
     if source_id == "carris":
         if any(marker in text for marker in ("carris line numbers and schedules are not needed", "carris line numbers and schedules should be confirmed")):
             return False
-        return any(marker in text for marker in ("carris", "bus", "tram", "autocarro", "elétrico", "eletrico"))
+        return any(
+            marker in text
+            for marker in (
+                "carris",
+                "bus",
+                "tram",
+                "autocarro",
+                "elétrico",
+                "eletrico",
+                "linha 15e",
+                "linha 728",
+                " 15e",
+                " 728",
+                "pç. figueira",
+                "pç figueira",
+                "pç. comércio",
+                "estação fluvial belém",
+            )
+        )
     if source_id == "carris_metropolitana":
         return any(marker in text for marker in ("carris metropolitana", "suburban bus", "autocarro suburbano"))
     if source_id == "cp":
@@ -518,6 +536,13 @@ def _clean_list(items: Iterable[str], max_items: int = 5) -> List[str]:
     for item in items or []:
         text = _clean_inline(str(item or ""))
         if not text or text.lower().strip(" .:-_") in forbidden:
+            continue
+        if re.fullmatch(
+            r"[\U0001F300-\U0001FAFF\u2300-\u23FF\u2600-\u27BF\uFE0F\u200D\s]+(?:\*\*[A-Za-zÀ-ÿ0-9 /'-]{2,70}:\*\*)?",
+            text,
+        ):
+            continue
+        if re.fullmatch(r"\*\*[A-Za-zÀ-ÿ0-9 /'-]{2,70}:\*\*", text):
             continue
         if text not in output:
             output.append(text)

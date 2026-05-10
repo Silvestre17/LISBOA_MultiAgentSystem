@@ -12018,6 +12018,16 @@ def final_post_qa_guard(text: str, language: str = "en") -> str:
     guarded = strip_planner_generic_purpose_lines(guarded)
     guarded = repair_planner_heading_time_runons(guarded)
     guarded = repair_cp_departure_section_indentation(guarded)
+    guarded = re.sub(
+        r"(?m)^\s*[-*•]\s*[\U0001F300-\U0001FAFF\u2300-\u23FF\u2600-\u27BF\uFE0F\u200D\s]+\s*$\n?",
+        "",
+        guarded,
+    )
+    guarded = re.sub(
+        r"(?m)^\s*[-*•]\s*(?:[\U0001F300-\U0001FAFF\u2300-\u23FF\u2600-\u27BF\uFE0F\u200D]+\s*)?\*\*[A-Za-zÀ-ÿ0-9 /'-]{2,80}:\*\*\s*$\n?",
+        "",
+        guarded,
+    )
     guarded = re.sub(r"\n{3,}", "\n\n", guarded)
     return guarded.strip()
 
