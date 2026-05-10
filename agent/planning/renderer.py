@@ -79,11 +79,7 @@ def render_plan_markdown(draft: PlanDraft, sources: Dict[str, SourceRef], langua
     movement_items = _filter_movement_items(
         _clean_list(draft.movement_logic, max_items=6),
         block_titles=block_titles,
-    ) or [
-        "seguir a ordem indicada e confirmar pernas exatas no operador quando não estiverem evidenciadas"
-        if is_pt
-        else "follow the order shown and confirm exact legs with the operator when they are not evidenced"
-    ]
+    )
     weather_items = [
         item for item in _clean_list(draft.weather_strategy, max_items=6)
         if not _is_placeholder_weather_item(item)
@@ -264,6 +260,36 @@ def _filter_movement_items(items: Iterable[str], *, block_titles: Iterable[str])
         ):
             continue
         if normalized in {"how to move", "como te deslocas", "movement logic", "logica de movimento"}:
+            continue
+        if normalized in {"metro", "metro de lisboa"}:
+            continue
+        if re.fullmatch(
+            r"(?:metro(?: de lisboa)?|transportes?|mobility|mobilidade)\s*:?\s*"
+            r"(?:ok|normal|circulacao normal|circulação normal|sem alertas|no alerts)",
+            normalized,
+        ):
+            continue
+        if re.search(
+            r"\b(?:confirma|confirm|check)\b.*\b(?:melhor ligacao|melhor ligação|best connection|operator|operador)\b",
+            normalized,
+        ):
+            continue
+        if re.search(
+            r"\b(?:diz-me|indica|send|tell me|provide)\b.*\b(?:origem|origin)\b.*\b(?:destino|destination)\b",
+            normalized,
+        ):
+            continue
+        if re.search(
+            r"\b(?:para eu\s+)?(?:optimizar|otimizar|optimize)\b.*\b(?:roteiro|plano|itinerary|plan)\b",
+            normalized,
+        ):
+            continue
+        if re.fullmatch(
+            r"(?:amarela|azul|verde|vermelha|yellow|blue|green|red)\s*:?\s*(?:ok|normal service|circulacao normal|circulação normal)",
+            normalized,
+        ):
+            continue
+        if normalized.startswith("estado geral") and re.search(r"\b(?:ok|normal|circulacao|circulação)\b", normalized):
             continue
         if block_markers and normalized in block_markers:
             continue

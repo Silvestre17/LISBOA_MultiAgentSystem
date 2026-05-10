@@ -43,18 +43,6 @@ class EvidenceBundle:
     sources: Dict[str, SourceRef] = field(default_factory=dict)
     limitations: List[str] = field(default_factory=list)
 
-    def cards_by_kind(self, *kinds: str) -> List[EvidenceCard]:
-        """Return cards whose kind matches one of the requested kinds.
-
-        Args:
-            *kinds: Card kinds to include, compared case-insensitively.
-
-        Returns:
-            Matching evidence cards in their original order.
-        """
-        allowed = {kind.lower() for kind in kinds}
-        return [card for card in self.cards if card.kind.lower() in allowed]
-
     def source_ids(self) -> List[str]:
         """Return unique source identifiers used by the bundle cards.
 

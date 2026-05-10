@@ -20,6 +20,22 @@ from tools.visitlisboa_api import (
     _load_places_json,
     _score_specific_place_lookup_match,
 )
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langgraph.graph import END, StateGraph
+
+if TYPE_CHECKING:
+    from langgraph.graph.state import CompiledStateGraph
+
+from agent.agents.base import BaseAgent, parse_json_response
+from agent.prompts.researcher import get_researcher_prompt
+from agent.utils.langsmith_tracing import traceable
+from agent.state import AgentState
+from agent.utils.langgraph_compat import ToolNode
+from agent.utils.response_formatter import (
+    finalize_worker_response,
+    infer_response_language,
+    resolve_output_language,
+)
 
 # Words that start interrogative sentences — not place names when they appear at token[0].
 _QUESTION_STARTER_WORDS: frozenset = frozenset({
@@ -183,23 +199,6 @@ _STRUCTURED_DATE_MONTHS: Dict[str, int] = {
     "november": 11, "novembro": 11, "nov": 11,
     "december": 12, "dezembro": 12, "dec": 12, "dez": 12,
 }
-
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-from langgraph.graph import END, StateGraph
-
-if TYPE_CHECKING:
-    from langgraph.graph.state import CompiledStateGraph
-
-from agent.agents.base import BaseAgent, parse_json_response
-from agent.prompts.researcher import get_researcher_prompt
-from agent.utils.langsmith_tracing import traceable
-from agent.state import AgentState
-from agent.utils.langgraph_compat import ToolNode
-from agent.utils.response_formatter import (
-    finalize_worker_response,
-    infer_response_language,
-    resolve_output_language,
-)
 
 
 class ResearcherAgent(BaseAgent):
@@ -521,7 +520,6 @@ class ResearcherAgent(BaseAgent):
                 HumanMessage(content=user_message),
             ],
             retries=1,
-            verbose=False,
         )
         payload = parse_json_response(str(getattr(response, "content", response) or ""))
         if not isinstance(payload, dict):
@@ -1122,6 +1120,8 @@ class ResearcherAgent(BaseAgent):
         query = (user_message or "").lower()
         if any(term in query for term in ["history", "história", "historia"]):
             return False
+        if ResearcherAgent._is_direct_place_lookup_query(user_message):
+            return False
 
         specific_lookup = _extract_specific_event_lookup_phrase(user_message)
         planning_terms = [
@@ -1341,11 +1341,12 @@ class ResearcherAgent(BaseAgent):
         )
         if visit_area_match:
             subject = visit_area_match.group("subject").strip(" .?!,")
+            subject = re.sub(r"^(?:in|em|no|na|nos|nas)\s+", "", subject, flags=re.IGNORECASE)
             if subject:
                 return subject
 
         named_lookup_re = re.compile(
-            r"\b(?:tell me about|what about|more about|details about|information about|where is|where's|find|show me|sobre(?: o| a| os| as)?|fala[- ]?me(?: mais)? sobre(?: o| a| os| as)?|fala[- ]?me(?: mais)? (?:de|do|da|dos|das)|fale[- ]?me(?: mais)? (?:de|do|da|dos|das)|diz[- ]?me(?: mais)? sobre(?: o| a| os| as)?|diz[- ]?me (?:de|do|da|dos|das)|diz[- ]?me onde(?: e| é| fica)(?: o| a| os| as)?|onde(?: e| é| fica)(?: o| a| os| as)?|encontra(?:r)?|mostrar(?:-me)?)\b",
+            r"\b(?:tell me about|what about|more about|details about|information about|where is|where's|find|show me|d[aá][- ]?me(?: mais)? detalhes? sobre(?: o| a| os| as)?|detalhes? sobre(?: o| a| os| as)?|sobre(?: o| a| os| as)?|fala[- ]?me(?: mais)? sobre(?: o| a| os| as)?|fala[- ]?me(?: mais)? (?:de|do|da|dos|das)|fale[- ]?me(?: mais)? (?:de|do|da|dos|das)|diz[- ]?me(?: mais)? sobre(?: o| a| os| as)?|diz[- ]?me (?:de|do|da|dos|das)|diz[- ]?me onde(?: e| é| fica)(?: o| a| os| as)?|onde(?: e| é| fica)(?: o| a| os| as)?|encontra(?:r)?|mostrar(?:-me)?)\b",
             re.IGNORECASE,
         )
         if named_lookup_re.search(query):
@@ -1388,7 +1389,15 @@ class ResearcherAgent(BaseAgent):
             "fair", "fairs", "feira", "feiras", "book fair",
         ]
         has_place_like_query = bool(
-            re.search(r"\b(?:museum|museums|museu|museus|monument|monuments|restaurant|restaurants|place|places|attraction|attractions)\b", query)
+            re.search(
+                r"\b(?:museum|museums|museu|museus|monument|monuments|monumento|monumentos|"
+                r"restaurant|restaurants|restaurante|restaurantes|place|places|local|locais|"
+                r"attraction|attractions|atra[cç][aã]o|atra[cç][oõ]es|viewpoint|viewpoints|"
+                r"miradouro|miradouros|palace|palaces|pal[aá]cio|pal[aá]cios|castle|castles|"
+                r"castelo|castelos|church|churches|igreja|igrejas|monastery|monasteries|"
+                r"mosteiro|mosteiros|tower|towers|torre|torres|heritage|patrim[oó]nio)\b",
+                query,
+            )
         )
         if has_place_like_query:
             event_keywords = [keyword for keyword in event_keywords if keyword != "show"]
@@ -1425,6 +1434,20 @@ class ResearcherAgent(BaseAgent):
             or re.search(r"\bwhat are\b.*\b(?:museums?|monuments?|restaurants?|hotels?|viewpoints?)\b", query)
             or re.search(r"\bquais s(?:ã|a)o\b.*\b(?:museus|monumentos|restaurantes|hot[eé]is|miradouros)\b", query)
         )
+        has_area_filter = bool(
+            re.search(
+                r"\b(?:in|near|around|em|no|na|nos|nas|perto de|perto do|perto da)\s+"
+                r"[a-zà-ÿ0-9][a-zà-ÿ0-9 '\-/]{1,80}",
+                query,
+            )
+        )
+        has_listing_lookup = has_place_like_query and bool(
+            re.search(
+                r"\b(?:tell me|show me|list|show|give me|recommend|suggest|diz[- ]?me|"
+                r"mostra|lista|indica|recomenda|sugere|fala[- ]?me|quais|que)\b",
+                query,
+            )
+        )
 
         if focus_query and any(marker in query for marker in [
             "where is", "where's", "onde fica", "onde é", "onde e", "tell me about", "what about", "more about",
@@ -1439,6 +1462,8 @@ class ResearcherAgent(BaseAgent):
         if has_field_specific_lookup:
             return True
         if has_place_hint and has_recommendation_lookup:
+            return True
+        if has_place_hint and has_place_like_query and (has_area_filter or has_listing_lookup):
             return True
 
         return False
@@ -1648,6 +1673,10 @@ class ResearcherAgent(BaseAgent):
                 "fale me",
                 "tell me about",
                 "talk to me about",
+                "details about",
+                "information about",
+                "detalhes",
+                "sobre",
                 "historia",
                 "history",
                 "historical",
@@ -1676,8 +1705,33 @@ class ResearcherAgent(BaseAgent):
     @staticmethod
     def _extract_primary_place_title(result: str) -> str:
         """Extract the first canonical place-card title from a formatted tool result."""
-        match = re.search(r"(?m)^###\s+(?:[\U0001F300-\U0001FAFF\u2300-\u27BF\uFE0F\u200D]+\s+)?(.+?)\s*$", result or "")
-        return match.group(1).strip() if match else ""
+        generic_titles = {
+            "locais e atracoes",
+            "places and attractions",
+            "lisbon places and attractions",
+        }
+
+        def _canonical_title(raw_title: str) -> str:
+            title = re.sub(r"^\*+|\*+$", "", raw_title or "").strip()
+            normalized = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode("ascii").lower()
+            return title if normalized not in generic_titles else ""
+
+        for pattern in (
+            r"(?m)^\s*\*\*(?:[\U0001F300-\U0001FAFF\u2300-\u27BF\uFE0F\u200D]+\s+)?(?P<title>[^*\n]+?)\*\*\s*$",
+            r"(?m)^\s*[-*]\s+\*\*(?:[\U0001F300-\U0001FAFF\u2300-\u27BF\uFE0F\u200D]+\s+)?(?P<title>[^*\n]+?)\*\*\s*$",
+        ):
+            card_match = re.search(pattern, result or "")
+            if not card_match:
+                continue
+            title = _canonical_title(card_match.group("title"))
+            if title:
+                return title
+
+        for match in re.finditer(r"(?m)^###\s+(?:[\U0001F300-\U0001FAFF\u2300-\u27BF\uFE0F\u200D]+\s+)?(.+?)\s*$", result or ""):
+            title = _canonical_title(match.group(1))
+            if title:
+                return title
+        return ""
 
     @staticmethod
     def _known_place_history_facts(subject: str, language: str) -> List[str]:
@@ -1811,27 +1865,37 @@ class ResearcherAgent(BaseAgent):
         user_message: str,
         result: str,
         language: str,
-    ) -> str:
-        """Fetch and format a concise historical context section for a specific place."""
+    ) -> tuple[str, bool]:
+        """Fetch and format a concise historical context section for a specific place.
+
+        Returns:
+            A tuple with the formatted section and whether an external history source was
+            queried. Curated facts are intentionally not attributed to the web footer.
+        """
         if not subject or not self._should_add_place_history_context(user_message, result):
-            return ""
-        history_tool = self._get_tool_by_name("search_history_culture")
-        if not history_tool:
-            return ""
+            return "", False
         canonical_subject = self._extract_primary_place_title(result) or subject
-        query = canonical_subject
-        raw_history = str(
-            self._invoke_tool(
-                history_tool,
-                {"query": query, "language": language},
-                tool_name="search_history_culture",
-            )
-        ).strip()
-        compact_history = self._compact_history_result(raw_history, language, canonical_subject)
+        curated_facts = self._known_place_history_facts(canonical_subject, language)
+        used_external_history_source = False
+        if curated_facts:
+            compact_history = "\n".join(curated_facts)
+        else:
+            history_tool = self._get_tool_by_name("search_history_culture")
+            if not history_tool:
+                return "", False
+            raw_history = str(
+                self._invoke_tool(
+                    history_tool,
+                    {"query": canonical_subject, "language": language},
+                    tool_name="search_history_culture",
+                )
+            ).strip()
+            compact_history = self._compact_history_result(raw_history, language, canonical_subject)
+            used_external_history_source = bool(compact_history)
         if not compact_history:
-            return ""
+            return "", False
         heading = f"### 📜 Factos Históricos de {canonical_subject}" if language == "pt" else f"### 📜 Historical Facts About {canonical_subject}"
-        return f"---\n\n{heading}\n\n{compact_history}"
+        return f"---\n\n{heading}\n\n{compact_history}", used_external_history_source
 
     @staticmethod
     def _maybe_answer_after_hours_culture_query(user_message: str, language: str) -> Optional[str]:
@@ -2089,7 +2153,7 @@ class ResearcherAgent(BaseAgent):
                         source_query=user_message,
                         offset=0,
                     )
-                    history_section = self._build_place_history_section(
+                    history_section, used_external_history_source = self._build_place_history_section(
                         place_focus_query,
                         user_message,
                         exact_result,
@@ -2097,7 +2161,8 @@ class ResearcherAgent(BaseAgent):
                     )
                     source_line = self._build_places_source_line(exact_result, language)
                     if history_section:
-                        source_line = self._extend_place_source_line_with_history(source_line)
+                        if used_external_history_source:
+                            source_line = self._extend_place_source_line_with_history(source_line)
                         return f"{exact_result}\n\n{history_section}\n\n{source_line}".strip()
                     return f"{exact_result}\n\n{source_line}".strip()
 
@@ -2403,11 +2468,150 @@ class ResearcherAgent(BaseAgent):
         )
         has_place_need = bool(
             re.search(
-                r"\b(cultural|culture|cultura|stop|paragem|museum|museu|gallery|galeria|monument|monumento|viewpoint|miradouro|restaurant|restaurante|food|comer|jantar|dinner|event|evento)\b",
+                r"\b(cultural|culture|cultura|hist[oó]ric[oa]s?|stop|paragem|museum|museu|gallery|galeria|monument|monumento|monumentos|viewpoint|miradouro|restaurant|restaurante|restaurants|restaurantes|food|comida|comer|gastronom(?:y|ia)|tradicional|almo[cç]o|jantar|dinner|event|evento)\b",
                 query,
             )
         )
         return has_planning_intent and has_place_need
+
+    def _extract_planner_evidence_query_plan(self, user_message: str, language: str) -> Optional[Dict[str, List[Dict[str, Any]]]]:
+        """Ask the LLM for VisitLisboa queries that will feed itinerary synthesis.
+
+        The output is still verified through tools. The LLM only chooses compact
+        search terms, which avoids baking one fixed itinerary into the Researcher
+        while keeping deterministic seeds available if the planner call fails.
+        """
+        if not user_message or not user_message.strip():
+            return None
+
+        prompt = (
+            "Convert the user request into VisitLisboa search calls for a Lisbon itinerary planner.\n"
+            "Return ONLY valid JSON with keys cultural_queries and food_queries.\n"
+            "Each item must have: query, category, max_results, specific_lookup.\n"
+            "Allowed categories: Museums & Monuments, View Points, Restaurants, Tours, General.\n"
+            "Use concrete Lisbon/AML place names when a named itinerary needs verifiable cards; otherwise use a broad semantic query.\n"
+            "For historic/gastronomy day plans, prefer 3-4 geographically coherent historical/cultural Lisbon POIs and one restaurant query.\n"
+            "For one-day Lisbon historic/gastronomy plans without a user-specified zone, include at least one central Lisbon/Baixa/Chiado/Alfama/Sé stop and one Belém stop.\n"
+            "When using specific_lookup=true, query must be exactly one official/common place name, not a list of places.\n"
+            "Never include places outside Lisbon/AML, placeholder text, or unsupported sources.\n"
+            "Set specific_lookup=true only for named POIs. Keep max_results between 1 and 5.\n\n"
+            f"Language: {language}\n"
+            f"User request: {user_message}"
+        )
+        try:
+            response = self._safe_llm_invoke(
+                self.llm,
+                [
+                    SystemMessage(content="You are a conservative Lisbon tourism query planner. Output JSON only."),
+                    HumanMessage(content=prompt),
+                ],
+                retries=1,
+            )
+        except Exception:
+            return None
+
+        payload = parse_json_response(str(getattr(response, "content", response) or ""))
+        if not isinstance(payload, dict):
+            return None
+
+        def _normalize_entries(raw_entries: Any, *, default_category: str) -> List[Dict[str, Any]]:
+            entries = raw_entries if isinstance(raw_entries, list) else []
+            output: List[Dict[str, Any]] = []
+            seen_queries: set[str] = set()
+            allowed_categories = {
+                "Museums & Monuments",
+                "View Points",
+                "Restaurants",
+                "Tours",
+                "General",
+            }
+            known_lisbon_pois = (
+                ("Mosteiro dos Jerónimos", "mosteiro dos jeronimos"),
+                ("Torre de Belém", "torre de belem"),
+                ("Padrão dos Descobrimentos", "padrao dos descobrimentos"),
+                ("Castelo de São Jorge", "castelo de sao jorge"),
+                ("Museu Arqueológico do Carmo", "museu arqueologico do carmo"),
+                ("Sé Catedral de Lisboa", "se de lisboa"),
+                ("Arco da Rua Augusta", "arco da rua augusta"),
+                ("Casa dos Bicos", "casa dos bicos"),
+            )
+            for raw_entry in entries:
+                if not isinstance(raw_entry, dict):
+                    continue
+                query = re.sub(r"\s+", " ", str(raw_entry.get("query") or "").strip())
+                if not query or query.lower() in {"null", "none", "unknown", "n/a"}:
+                    continue
+                normalized_query = query.lower()
+                if normalized_query in seen_queries:
+                    continue
+                seen_queries.add(normalized_query)
+                category = str(raw_entry.get("category") or default_category).strip()
+                if category not in allowed_categories:
+                    category = default_category
+                if default_category == "Museums & Monuments" and category == "General":
+                    category = default_category
+                try:
+                    max_results = int(raw_entry.get("max_results") or 1)
+                except (TypeError, ValueError):
+                    max_results = 1
+                specific_lookup = bool(raw_entry.get("specific_lookup"))
+                normalized_ascii_query = unicodedata.normalize("NFKD", query)
+                normalized_ascii_query = normalized_ascii_query.encode("ascii", "ignore").decode("ascii").lower()
+                if default_category == "Museums & Monuments" and category == "Museums & Monuments" and not specific_lookup:
+                    has_concrete_place_marker = bool(
+                        re.search(
+                            r"\b(?:museu|museum|mosteiro|monastery|torre|tower|castelo|castle|"
+                            r"palacio|palace|igreja|church|se de lisboa|arco|padrao|carmo|bicos|"
+                            r"teatro romano|judiaria|descobrimentos|jeronimos)\b",
+                            normalized_ascii_query,
+                        )
+                    )
+                    if not has_concrete_place_marker:
+                        continue
+                if specific_lookup:
+                    matched_pois = [
+                        display_name
+                        for display_name, normalized_name in known_lisbon_pois
+                        if normalized_name in normalized_ascii_query
+                    ]
+                    if len(matched_pois) > 1:
+                        for display_name in matched_pois:
+                            normalized_display = display_name.lower()
+                            if normalized_display in seen_queries:
+                                continue
+                            seen_queries.add(normalized_display)
+                            output.append(
+                                {
+                                    "query": display_name,
+                                    "category": category,
+                                    "max_results": 1,
+                                    "specific_lookup": True,
+                                    "language": language,
+                                }
+                            )
+                        continue
+                output.append(
+                    {
+                        "query": query,
+                        "category": category,
+                        "max_results": max(1, min(max_results, 5)),
+                        "specific_lookup": specific_lookup,
+                        "language": language,
+                    }
+                )
+            return output
+
+        cultural_queries = _normalize_entries(
+            payload.get("cultural_queries"),
+            default_category="Museums & Monuments",
+        )[:4]
+        food_queries = _normalize_entries(
+            payload.get("food_queries"),
+            default_category="Restaurants",
+        )[:2]
+        if not cultural_queries and not food_queries:
+            return None
+        return {"cultural_queries": cultural_queries, "food_queries": food_queries}
 
     def _run_planner_evidence_lookup(self, user_message: str, language: str) -> str:
         """Return complete place/event cards for downstream planner synthesis."""
@@ -2418,40 +2622,103 @@ class ResearcherAgent(BaseAgent):
         query = user_message.strip()
         normalized = query.lower()
         result_blocks: List[str] = []
+        planner_query_plan = self._extract_planner_evidence_query_plan(query, language)
+        planned_cultural_queries = list(planner_query_plan.get("cultural_queries", [])) if planner_query_plan else []
+        planned_food_queries = list(planner_query_plan.get("food_queries", [])) if planner_query_plan else []
 
-        if re.search(r"\b(cultural|culture|cultura|museum|museu|gallery|galeria|monument|monumento|viewpoint|miradouro|stop|paragem)\b", normalized):
-            cultural_args = {
-                "query": f"cultural stop museums monuments viewpoints {query}",
-                "category": "Museums & Monuments",
-                "max_results": 5,
-                "language": language,
-            }
-            result = str(self._invoke_tool(places_tool, cultural_args, tool_name="search_places_attractions")).strip()
-            result = self._localize_place_card_titles_with_llm(result, language)
-            if result:
-                result_blocks.append(result)
-                self._remember_search_context(
-                    domain="places",
-                    tool_name="search_places_attractions",
-                    base_args={key: value for key, value in cultural_args.items() if key not in {"max_results", "offset"}},
-                    page_size=int(cultural_args["max_results"]),
-                    shown_count=self._count_ranked_results(result),
-                    language=language,
-                    source_query=query,
-                    offset=0,
+        has_historic_monument_need = bool(
+            re.search(r"\b(hist[oó]ric[oa]s?|monument|monumento|monumentos|patrim[oó]nio|heritage)\b", normalized)
+        )
+        if has_historic_monument_need and planned_cultural_queries:
+            planned_query_text = " ".join(str(item.get("query") or "") for item in planned_cultural_queries)
+            planned_query_ascii = unicodedata.normalize("NFKD", planned_query_text)
+            planned_query_ascii = planned_query_ascii.encode("ascii", "ignore").decode("ascii").lower()
+            supplemental_queries = [
+                ("Museu Arqueológico do Carmo", r"\b(?:carmo|baixa|chiado|alfama|se de lisboa|sao jorge|augusta|bicos)\b"),
+                ("Padrão dos Descobrimentos", r"\b(?:padrao dos descobrimentos|descobrimentos)\b"),
+                ("Torre de Belém", r"\btorre de belem\b"),
+            ]
+            for supplemental_query, presence_pattern in supplemental_queries:
+                if len(planned_cultural_queries) >= 4:
+                    break
+                if re.search(presence_pattern, planned_query_ascii):
+                    continue
+                planned_cultural_queries.append(
+                    {
+                        "query": supplemental_query,
+                        "category": "Museums & Monuments",
+                        "max_results": 1,
+                        "specific_lookup": True,
+                        "language": language,
+                    }
                 )
+        if re.search(r"\b(cultural|culture|cultura|hist[oó]ric[oa]s?|museum|museu|gallery|galeria|monument|monumento|monumentos|viewpoint|miradouro|stop|paragem)\b", normalized):
+            cultural_queries: List[Dict[str, Any]]
+            if planned_cultural_queries:
+                cultural_queries = planned_cultural_queries
+            elif has_historic_monument_need:
+                cultural_queries = [
+                    {
+                        "query": "Padrão dos Descobrimentos",
+                        "category": "Museums & Monuments",
+                        "max_results": 2,
+                        "specific_lookup": True,
+                        "language": language,
+                    },
+                    {
+                        "query": "Museu Arqueológico do Carmo",
+                        "category": "Museums & Monuments",
+                        "max_results": 1,
+                        "specific_lookup": True,
+                        "language": language,
+                    },
+                    {
+                        "query": "Torre de Belém",
+                        "category": "Museums & Monuments",
+                        "max_results": 1,
+                        "specific_lookup": True,
+                        "language": language,
+                    },
+                ]
+            else:
+                cultural_queries = [
+                    {
+                        "query": f"cultural stop museums monuments viewpoints {query}",
+                        "category": "Museums & Monuments",
+                        "max_results": 5,
+                        "language": language,
+                    }
+                ]
+            for cultural_args in cultural_queries:
+                result = str(self._invoke_tool(places_tool, cultural_args, tool_name="search_places_attractions")).strip()
+                result = self._localize_place_card_titles_with_llm(result, language)
+                if result:
+                    result_blocks.append(result)
+                    self._remember_search_context(
+                        domain="places",
+                        tool_name="search_places_attractions",
+                        base_args={key: value for key, value in cultural_args.items() if key not in {"max_results", "offset"}},
+                        page_size=int(cultural_args["max_results"]),
+                        shown_count=self._count_ranked_results(result),
+                        language=language,
+                        source_query=query,
+                        offset=0,
+                    )
 
-        if re.search(r"\b(restaurant|restaurante|restaurants|restaurantes|food|comer|jantar|dinner|cafe|caf[eé]|bar|bars)\b", normalized):
-            food_args = {
-                "query": f"restaurants cafes bars relaxed local option {query}",
-                "category": "Restaurants",
-                "max_results": 3,
-                "language": language,
-            }
-            result = str(self._invoke_tool(places_tool, food_args, tool_name="search_places_attractions")).strip()
-            result = self._localize_place_card_titles_with_llm(result, language)
-            if result:
-                result_blocks.append(result)
+        if re.search(r"\b(restaurant|restaurante|restaurants|restaurantes|food|comida|comer|gastronom(?:y|ia)|tradicional|almo[cç]o|jantar|dinner|cafe|caf[eé]|bar|bars)\b", normalized):
+            food_queries = planned_food_queries or [
+                {
+                    "query": "restaurantes de gastronomia tradicional em Lisboa",
+                    "category": "Restaurants",
+                    "max_results": 5,
+                    "language": language,
+                }
+            ]
+            for food_args in food_queries[:2]:
+                result = str(self._invoke_tool(places_tool, food_args, tool_name="search_places_attractions")).strip()
+                result = self._localize_place_card_titles_with_llm(result, language)
+                if result:
+                    result_blocks.append(result)
 
         if not result_blocks:
             generic_args = {"query": query, "max_results": 5, "language": language}
@@ -2638,6 +2905,12 @@ class ResearcherAgent(BaseAgent):
                 normalized,
             )
             or re.search(r"\bevents?\b.*\b(?:can i look for|can i find|available categories|categories)\b", normalized)
+            or re.search(r"\bque tipos? de\b.*\beventos?\b", normalized)
+            or re.search(r"\b(?:tipos|categorias) de eventos?\b", normalized)
+            or re.search(
+                r"\beventos?\b.*\b(?:posso encontrar|posso procurar|posso explorar|categorias disponiveis|categorias)\b",
+                normalized,
+            )
         )
 
     @classmethod
@@ -2653,6 +2926,12 @@ class ResearcherAgent(BaseAgent):
                 r"\b(?:places?|locais|attractions?)\b.*\b(?:can i explore|can i visit|available categories|categories)\b",
                 normalized,
             )
+            or re.search(r"\bque tipos? de\b.*\b(?:locais|lugares|atracoes?)\b", normalized)
+            or re.search(r"\b(?:tipos|categorias) de (?:locais|lugares|atracoes?)\b", normalized)
+            or re.search(
+                r"\b(?:locais|lugares|atracoes?)\b.*\b(?:posso explorar|posso visitar|posso procurar|categorias disponiveis|categorias)\b",
+                normalized,
+            )
         )
 
     @classmethod
@@ -2662,6 +2941,12 @@ class ResearcherAgent(BaseAgent):
         return bool(
             re.search(r"\b(?:what kinds?|types?|categories?)\b.*\b(?:public )?services?\b", normalized)
             or re.search(r"\b(?:public )?services?\b.*\b(?:can you help me find|available categories|categories)\b", normalized)
+            or re.search(r"\bque tipos? de\b.*\bservicos?\b", normalized)
+            or re.search(r"\b(?:tipos|categorias) de servicos?\b", normalized)
+            or re.search(
+                r"\bservicos?\b.*\b(?:posso procurar|posso encontrar|podes ajudar|categorias disponiveis|categorias)\b",
+                normalized,
+            )
         )
 
     def _run_category_lookup(self, user_message: str, language: str) -> Optional[str]:
@@ -3263,7 +3548,11 @@ class ResearcherAgent(BaseAgent):
         last_search_context = getattr(self, "_last_search_context", None)
         if not is_greeting and last_search_context and self._is_named_lookup_followup(user_message):
             cached_domain = str(last_search_context.get("domain") or "").strip()
-            if cached_domain == "events":
+            explicit_place_lookup = (
+                self._is_direct_place_lookup_query(user_message)
+                or self._is_broad_attractions_query(user_message)
+            )
+            if cached_domain == "events" and not explicit_place_lookup:
                 if verbose:
                     print("      [RESEARCHER] Resolving named follow-up against previous event domain...")
 
@@ -3274,7 +3563,7 @@ class ResearcherAgent(BaseAgent):
                     user_query=user_message,
                     language=language,
                 ))
-            if cached_domain == "places":
+            if cached_domain == "places" or explicit_place_lookup:
                 if verbose:
                     print("      [RESEARCHER] Resolving named follow-up against previous place domain...")
 

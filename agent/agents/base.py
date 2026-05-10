@@ -11,6 +11,7 @@
 # ==========================================================================
 
 import json
+import logging
 import os
 import re
 import time as time_module
@@ -32,6 +33,7 @@ except ModuleNotFoundError:
 
 
 _LOCAL_LLM_PROVIDERS = {"lmstudio"}
+logger = logging.getLogger(__name__)
 
 
 # ==========================================================================
@@ -621,8 +623,8 @@ class BaseAgent:
                 )
                 if formatted:
                     return clean_response(str(formatted))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Tool result formatter failed for %s: %s", tool_name, exc)
 
         return clean_response(raw_result)
 
@@ -707,7 +709,12 @@ class BaseAgent:
         """Cleans model artifacts from response."""
         return clean_response(content)
 
-    def execute_tool_from_json(self, content: str, verbose: bool = False) -> Optional[str]:
+    def execute_tool_from_json(
+        self,
+        content: str,
+        verbose: bool = False,
+        language: str = "en",
+    ) -> Optional[str]:
         """
         Execute a tool call if the model returns a JSON tool request in content.
 
@@ -715,8 +722,13 @@ class BaseAgent:
             {"tool_call_name": "get_metro_status", "tool_call_arguments": {}}
             {"name": "get_metro_status", "arguments": {}}
 
+        Args:
+            content: Model response content that may contain a JSON tool call.
+            verbose: Whether to print debug information.
+            language: Response language used by deterministic tool formatters.
+
         Returns:
-            Tool result as string, or None if no tool call detected.
+            Formatted tool result as string, or None if no tool call detected.
         """
         parsed = parse_json_response(content)
         if not isinstance(parsed, dict):
@@ -735,7 +747,13 @@ class BaseAgent:
         for tool in self.tools:
             if tool.name == tool_name:
                 try:
-                    return str(self._invoke_tool(tool, tool_args, tool_name=tool_name, verbose=verbose))
+                    raw_result = self._invoke_tool(tool, tool_args, tool_name=tool_name, verbose=verbose)
+                    return self._format_tool_result_for_fallback(
+                        tool_name=tool_name,
+                        tool_args=tool_args if isinstance(tool_args, dict) else {},
+                        result=raw_result,
+                        language=language,
+                    )
                 except Exception as e:
                     return f"Error executing {tool_name}: {str(e)}"
 
@@ -1048,7 +1066,11 @@ class BaseAgent:
             iteration += 1
 
         # JSON tool call fallback (some models embed tool calls in text)
-        json_tool_result = self.execute_tool_from_json(response.content, verbose=verbose)
+        json_tool_result = self.execute_tool_from_json(
+            response.content,
+            verbose=verbose,
+            language=fallback_language,
+        )
         if json_tool_result:
             return clean_response(json_tool_result)
 

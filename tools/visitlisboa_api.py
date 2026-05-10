@@ -24,6 +24,7 @@
 # Required libraries:
 # pip install langchain-core langchain-chroma langchain-huggingface
 
+import contextlib
 import json
 import logging
 import math
@@ -37,15 +38,14 @@ from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote_plus
 
+from langchain_core.tools import tool
+
 # Suppress chromadb telemetry warnings
 os.environ["OTEL_SDK_DISABLED"] = "true"
 os.environ["ANONYMIZED_TELEMETRY"] = "false"
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=ImportWarning)
-
-from langchain_core.tools import tool
-import contextlib
 
 try:
     from config import Config
@@ -642,6 +642,7 @@ def _localize_place_title(title: Optional[str], language: str = "en") -> str:
         "Roman Galleries": "Galerias Romanas",
         "Jerónimos Monastery": "Mosteiro dos Jerónimos",
         "Jeronimos Monastery": "Mosteiro dos Jerónimos",
+        "Combatant's Museum in Forte do Bom Sucesso": "Museu dos Combatentes no Forte do Bom Sucesso",
     }
     if raw in mapping:
         return mapping[raw]
@@ -706,6 +707,11 @@ def _localize_visitlisboa_description(
         " discover",
         " located",
         " offers ",
+        " across ",
+        " clothing ",
+        " second life",
+        " recycling ",
+        " event that ",
     ]
     padded = f" {raw.lower()} "
     if any(marker in padded for marker in english_markers):
@@ -727,12 +733,18 @@ def _localize_place_value_text(value: Optional[str], language: str = "en") -> st
 
     localized = raw
     localized = re.sub(r"^Price\s*:", "Preço:", localized, flags=re.IGNORECASE)
-    localized = re.sub(r"\bGratis\b", "Gratuito", localized, flags=re.IGNORECASE)
+    localized = re.sub(
+        r"\bChildren\s+(?:Free|Gratis|Gratuito)\s+until\s*(?:\(age\)|age)?\s*:?\s*(\d+)",
+        r"Crianças grátis até aos \1 anos",
+        localized,
+        flags=re.IGNORECASE,
+    )
     localized = re.sub(r"\bFree\s+with\s+Lisboa\s+Card\b", "Gratuito com Lisboa Card", localized, flags=re.IGNORECASE)
     localized = re.sub(r"\bwith\s+Lisboa\s+Card\b", "com Lisboa Card", localized, flags=re.IGNORECASE)
-    localized = re.sub(r"\bChildren\s+Free\s+until\s*\(age\)\s*:", "Crianças grátis até aos", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bChildren\s*:", "Crianças:", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bGratis\b", "Gratuito", localized, flags=re.IGNORECASE)
     localized = re.sub(r"\bAdult\s*:", "Adulto:", localized, flags=re.IGNORECASE)
-    localized = re.sub(r"\bSenior\s*:", "Sénior:", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bSenior(\s*\([^)]*\))?\s*:", r"Sénior\1:", localized, flags=re.IGNORECASE)
     localized = re.sub(r"\bFree\b", "Gratuito", localized, flags=re.IGNORECASE)
     localized = re.sub(r"\+\s*info\b", "", localized, flags=re.IGNORECASE).strip(" ;,.")
     return _clean_user_facing_value(localized)

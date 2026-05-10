@@ -12,6 +12,7 @@
 
 import logging
 import re
+import unicodedata
 from contextlib import suppress
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -219,6 +220,51 @@ class QualityAssuranceAgent(BaseAgent):
 
         return has_event_intent and not has_planning_intent and not has_weather_intent and not has_transport_intent
 
+    @classmethod
+    def _is_category_browse_query(cls, user_query: str) -> bool:
+        """Detects category-browsing questions that should not require instance cards."""
+        normalized = unicodedata.normalize("NFKD", user_query or "")
+        normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        return bool(
+            re.search(r"\b(?:what kinds?|types?|categories?|which kinds?)\b.*\b(?:events?|places?|services?|public services?)\b", normalized)
+            or re.search(r"\bque tipos? de\b.*\b(?:eventos?|locais|lugares|atracoes?|servicos?)\b", normalized)
+            or re.search(r"\b(?:categorias|tipos) de (?:eventos?|locais|lugares|atracoes?|servicos?)\b", normalized)
+            or re.search(r"\b(?:eventos?|locais|lugares|atracoes?|servicos?)\b.*\b(?:posso encontrar|posso procurar|posso explorar|categorias)\b", normalized)
+        )
+
+    @classmethod
+    def _normalize_category_query_validation(
+        cls,
+        user_query: str,
+        agents_called: List[str],
+        llm_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Keep category queries scoped to category lists, not item-level completeness."""
+        if not cls._is_category_browse_query(user_query):
+            return llm_result
+
+        called_workers = {agent for agent in agents_called if agent}
+        if called_workers and not called_workers.issubset({"researcher"}):
+            return llm_result
+
+        llm_result["required_agents"] = []
+        llm_result["missing_data"] = []
+        llm_result["disclaimers"] = [
+            item for item in llm_result.get("disclaimers", [])
+            if not cls._is_cross_domain_event_requirement(item)
+        ]
+        llm_result["complete"] = True
+
+        normalization_note = (
+            "Normalized QA for category query: category lists are complete without event/place instance cards."
+        )
+        reasoning = llm_result.get("reasoning", "")
+        if normalization_note not in reasoning:
+            llm_result["reasoning"] = f"{reasoning} | {normalization_note}".strip(" |")
+
+        return llm_result
+
     @staticmethod
     def _is_cross_domain_event_requirement(text: str) -> bool:
         """Returns whether a QA gap/disclaimer incorrectly asks for weather/transport in an events-only query."""
@@ -262,7 +308,7 @@ class QualityAssuranceAgent(BaseAgent):
         if called_workers and not called_workers.issubset({"researcher"}):
             return llm_result
 
-        filtered_required_agents = [
+        filtered_required_agents = [] if "researcher" in called_workers else [
             agent for agent in llm_result.get("required_agents", [])
             if agent == "researcher"
         ]
@@ -318,6 +364,14 @@ class QualityAssuranceAgent(BaseAgent):
             r"\bimperd[ií]veis\b",
             r"\bfirst time\b",
             r"\bprimeira vez\b",
+            r"\bdetalhes?\s+sobre\b",
+            r"\bdetails?\s+about\b",
+            r"\btell me about\b",
+            r"\bfala[- ]?me\b",
+            r"\bpadr[aã]o dos descobrimentos\b",
+            r"\btorre de bel[eé]m\b",
+            r"\bcastelo de s[aã]o jorge\b",
+            r"\bmosteiro dos jer[oó]nimos\b",
         ]
         planning_patterns = [
             r"\bplan\b",
@@ -375,13 +429,36 @@ class QualityAssuranceAgent(BaseAgent):
         if called_workers and not called_workers.issubset({"researcher"}):
             return llm_result
 
-        filtered_required_agents = [
+        filtered_required_agents = [] if "researcher" in called_workers else [
             agent for agent in llm_result.get("required_agents", [])
             if agent == "researcher"
         ]
+
+        def _is_extra_place_suggestion_requirement(item: object) -> bool:
+            normalized = unicodedata.normalize("NFKD", str(item or ""))
+            normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+            return bool(
+                re.search(r"\b(?:segunda|second).*(?:terceira|third).*(?:sugesto|suggestion|loca|place|atrac)", normalized)
+                or re.search(r"\b(?:more|additional|mais|outras?)\s+(?:places?|locais|attractions?|atracoes?|sugestoes?)\b", normalized)
+            )
+
+        def _is_non_retryable_place_detail_gap(item: object) -> bool:
+            normalized_item = unicodedata.normalize("NFKD", str(item or ""))
+            normalized_item = normalized_item.encode("ascii", "ignore").decode("ascii").lower()
+            normalized_query = unicodedata.normalize("NFKD", user_query or "")
+            normalized_query = normalized_query.encode("ascii", "ignore").decode("ascii").lower()
+            if "acessibilidade" in normalized_item or "accessibility" in normalized_item:
+                return not re.search(r"\b(acessibilidade|acessivel|mobilidade reduzida|wheelchair|accessible|accessibility)\b", normalized_query)
+            return bool(
+                re.search(r"\b(horario|opening hours?|hours?)\b", normalized_item)
+                and re.search(r"\b(confirmacao|confirmar|valid[oa]|fonte oficial|desatualiz|outdated|official source)\b", normalized_item)
+            )
+
         filtered_missing_data = [
             item for item in llm_result.get("missing_data", [])
             if not cls._is_cross_domain_event_requirement(item)
+            and not _is_extra_place_suggestion_requirement(item)
+            and not _is_non_retryable_place_detail_gap(item)
         ]
         filtered_disclaimers = [
             item for item in llm_result.get("disclaimers", [])
@@ -1012,6 +1089,11 @@ class QualityAssuranceAgent(BaseAgent):
                 ],
             }
 
+        llm_result = self._normalize_category_query_validation(
+            user_query=user_query,
+            agents_called=agents_called,
+            llm_result=llm_result,
+        )
         llm_result = self._normalize_event_query_validation(
             user_query=user_query,
             agents_called=agents_called,
@@ -1130,7 +1212,7 @@ class QualityAssuranceAgent(BaseAgent):
         if language == "pt":
             system_prompt = (
                 "És a etapa final de reparação de qualidade da resposta. "
-                "Receberás um rascunho de resposta, os outputs dos agentes worker e os achados do QA. "
+                "Receberás um rascunho de resposta, os outputs dos agentes especializados e os achados do QA. "
                 "Reescreve APENAS o necessário para corrigir problemas factuais, remover alegações não confirmadas, "
                 "manter a resposta completa e preservar uma apresentação natural com markdown, emojis e linhas de fonte corretas.\n\n"
                 "REGRAS:\n"
@@ -1138,9 +1220,9 @@ class QualityAssuranceAgent(BaseAgent):
                 "- Nunca inventes locais, horários, preços, acessibilidade, estações, ligações, ou URLs.\n"
                 "- Se algo não estiver confirmado e o utilizador o pediu, diz brevemente que deve ser verificado. Caso contrário, omite o campo.\n"
                 "- Remove referências internas a QA, validação, fact-checking, reasoning, ou agentes.\n"
-                "- Preserva o idioma de saída exigido pelo runtime, o estilo visual, os emojis úteis e a estrutura markdown.\n"
+                "- Preserva o idioma de saída exigido, o estilo visual, os emojis úteis e a estrutura markdown.\n"
                 "- Todas as tuas edições, avisos e aditamentos de texto devem ser estritamente em Português (PT-PT).\n"
-                "- Mantém ou melhora a linha de fonte final se ela já existir.\n"
+                "- Mantém ou melhora a linha de fonte final se ela já existir; Google Maps nunca deve aparecer como fonte de evidência.\n"
                 "- Preserva quaisquer perguntas interativas ao utilizador que estejam no final do texto (ex: perguntar se o utilizador quer planear o Dia 2).\n"
                 "- Não acrescentes notas ou avisos de QA ao output do utilizador. Repara silenciosamente ou omite campos sem suporte.\n"
                 "- Só mantém um aviso ⚠️ quando houver uma preocupação real de segurança ou quando o utilizador tiver pedido cautelas.\n"
@@ -1150,12 +1232,12 @@ class QualityAssuranceAgent(BaseAgent):
             critical_label = "Problemas críticos"
             disclaimer_label = "Notas e limitações"
             missing_label = "Dados em falta"
-            worker_label = "Outputs dos workers"
+            worker_label = "Outputs dos agentes especializados"
             draft_label = "Rascunho atual"
         else:
             system_prompt = (
                 "You are the final response-quality repair pass. "
-                "You will receive a draft answer, the worker-agent outputs, and QA findings. "
+                "You will receive a draft answer, the specialized-agent outputs, and QA findings. "
                 "Rewrite only what is necessary to fix factual issues, remove unsupported claims, "
                 "keep the answer complete, and preserve a natural markdown response with useful emojis and a correct source line.\n\n"
                 "RULES:\n"
@@ -1163,9 +1245,9 @@ class QualityAssuranceAgent(BaseAgent):
                 "- Never invent venues, times, prices, accessibility claims, stations, links, or URLs.\n"
                 "- If something is not confirmed and the user asked for it, briefly say it should be verified. Otherwise omit the field.\n"
                 "- Remove any references to QA, validation, fact-checking, reasoning, or internal agents.\n"
-                "- Preserve the required runtime output language, visual style, helpful emojis, and markdown structure.\n"
+                "- Preserve the required output language, visual style, helpful emojis, and markdown structure.\n"
                 "- All edits, warnings, and added text must be strictly in English.\n"
-                "- Keep or improve the final source line if one already exists.\n"
+                "- Keep or improve the final source line if one already exists; Google Maps must never appear as an evidence source.\n"
                 "- Preserve any interactive questions to the user at the end of the text (e.g., asking if they want to plan Day 2).\n"
                 "- Do not add QA notes or QA warnings to the user output. Repair silently or omit unsupported fields.\n"
                 "- Keep a ⚠️ warning only for a real-world safety concern or when the user explicitly asked for caveats.\n"
@@ -1510,7 +1592,10 @@ class QualityAssuranceAgent(BaseAgent):
             "event", "evento", "exhibition", "exposição", "exposicao",
             "festival", "concert", "concerto", "spectacle", "espectáculo",
         }
-        if any(kw in output_lower for kw in event_keywords):
+        is_event_category_listing = bool(
+            re.search(r"\b(?:event categories|categorias de eventos)\b", output_lower)
+        )
+        if any(kw in output_lower for kw in event_keywords) and not is_event_category_listing:
             disclaimers.append(
                 "Event details (dates, times, ticket prices) should be confirmed at "
                 "visitlisboa.com, as this data is synced daily and may have changed."
@@ -1591,6 +1676,9 @@ class QualityAssuranceAgent(BaseAgent):
             trailing_text = combined_output[source_footer_match.end():]
             if re.search(r"(?m)^\s*(?:[-*•]\s*)?[💡⚠️]", trailing_text):
                 add_critical_issue("Tips and warnings must appear before the source footer.")
+            source_footer = source_footer_match.group(0)
+            if re.search(r"google\.com/maps|Google Maps", source_footer, flags=re.IGNORECASE):
+                add_critical_issue("Google Maps links are address aids, not valid evidence sources.")
 
         if re.search(r"(?m)^\s*1\.\s*$", combined_output):
             add_critical_issue("Stray numbered-list markers leaked into the response.")
@@ -1612,7 +1700,7 @@ class QualityAssuranceAgent(BaseAgent):
             r"(?m)^[^\n]*(?:📍\s*\*\*(?:Address|Morada|Endereço|Localização|Location)|📞\s*\*\*(?:Phone|Telefone)|🌐\s*\*\*(?:Website)|🎟️\s*\*\*(?:Tickets|Bilhetes)).+",
             combined_output,
         ) and re.search(
-            r"(?m)^.+\S\s+(?:📍\s*\*\*|📞\s*\*\*|🌐\s*\*\*|🎟️\s*\*\*)",
+            r"(?m)^(?!\s*[-*•]\s).+\S\s+(?:📍\s*\*\*|📞\s*\*\*|🌐\s*\*\*|🎟️\s*\*\*)",
             combined_output,
         ):
             add_critical_issue("Structured emoji field labels must start on their own line.")

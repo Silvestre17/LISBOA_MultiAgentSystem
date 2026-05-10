@@ -72,8 +72,12 @@ def validate_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, user_message
         issues.append("too many plan blocks")
 
     user_norm = normalize_text(user_message)
+    pt_requested = _user_prefers_portuguese(user_message)
     evidence_titles = [normalize_text(card.title) for card in evidence.cards if card.title]
     evidence_text = normalize_text(" ".join([card.title + " " + card.summary for card in evidence.cards]))
+    grounded_itinerary_requested = _query_requests_grounded_itinerary(user_message)
+    place_cards = [card for card in evidence.cards if getattr(card, "kind", "") in {"place", "event", "service"}]
+    matched_place_blocks = 0
 
     all_text_fields = [draft.title, draft.direct_answer, *draft.constraints_used, *draft.movement_logic, *draft.weather_strategy, *draft.tips, *draft.limitations]
     detail_text_fields: List[str] = []
@@ -85,6 +89,14 @@ def validate_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, user_message
         if _looks_like_unsupported_named_venue(block.title, evidence_titles, user_norm, evidence_text):
             issues.append(f"unsupported venue title: {block.title[:60]}")
         matched_card = _matching_evidence_card(block.title, evidence)
+        if matched_card and getattr(matched_card, "kind", "") in {"place", "event", "service"}:
+            matched_place_blocks += 1
+        if (
+            grounded_itinerary_requested
+            and place_cards
+            and _looks_like_generic_itinerary_block_title(block.title)
+        ):
+            issues.append(f"generic itinerary block instead of evidence card: {block.title[:60]}")
         if (
             matched_card
             and _query_requests_time_specific_visit(user_message)
@@ -102,6 +114,8 @@ def validate_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, user_message
             issues.append("broken URL leaked into plan")
         if re.search(r"\b(?:tool|agent|QA|LangSmith|repository|run id)\b", text, flags=re.IGNORECASE):
             issues.append("internal system wording leaked into plan")
+        if pt_requested and _has_pt_language_drift(text):
+            issues.append("Portuguese plan contains English scaffold text")
 
     for text in detail_text_fields:
         if not text:
@@ -114,11 +128,16 @@ def validate_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, user_message
             issues.append("broken URL leaked into plan")
         if re.search(r"\b(?:tool|agent|QA|LangSmith|repository|run id)\b", text, flags=re.IGNORECASE):
             issues.append("internal system wording leaked into plan")
+        if pt_requested and _has_pt_language_drift(text):
+            issues.append("Portuguese plan contains English scaffold text")
 
     if _query_requests_public_transport(user_message):
         movement_text = normalize_text(" ".join([*draft.movement_logic, *[" ".join(block.movement) for block in draft.blocks]]))
         if not re.search(r"\b(?:metro|carris|cp|bus|tram|train|line|linha|route|rota|stop|station|paragem|estacao|unconfirmed|nao confirmad|não confirmad)\b", movement_text):
             issues.append("public transport requested but movement logic is too vague")
+
+    if grounded_itinerary_requested and place_cards and matched_place_blocks < min(2, len(place_cards)):
+        issues.append("grounded itinerary did not select enough evidence cards")
 
     if re.search(r"\b(?:rain|chuva|weather|tempo|umbrella|guarda chuva|indoor|interior)\b", normalize_text(user_message)):
         weather_text = normalize_text(" ".join([*draft.weather_strategy, *[" ".join(block.weather) for block in draft.blocks]]))
@@ -165,6 +184,54 @@ def _query_requests_public_transport(user_message: str) -> bool:
     """Return whether the request asks for public transport guidance."""
     normalized = normalize_text(user_message)
     return bool(re.search(r"\b(public transport|transportes publicos|metro|carris|cp|bus|autocarro|comboio|train|tram|eletrico|route|rota|how do i get|como vou|como chego)\b", normalized))
+
+
+def _query_requests_grounded_itinerary(user_message: str) -> bool:
+    """Return whether a user asks for a concrete visit plan with named stops."""
+    normalized = normalize_text(user_message)
+    return bool(
+        re.search(r"\b(plan|itinerary|roteiro|plano|visit|visitar|tour|dia|day)\b", normalized)
+        and re.search(
+            r"\b(monument|monumento|museum|museu|historic|historico|historia|história|culture|cultura|restaurant|restaurante|food|gastronomy|gastronomia|traditional|tradicional)\b",
+            normalized,
+        )
+    )
+
+
+def _user_prefers_portuguese(user_message: str) -> bool:
+    """Return whether the request is clearly Portuguese."""
+    normalized = normalize_text(user_message)
+    return bool(
+        re.search(
+            r"\b(?:cria|d[aá]|quero|roteiro|plano|monumentos|hist[oó]ricos|gastronomia|tradicional|lisboa|hoje|amanh[aã])\b",
+            normalized,
+        )
+    )
+
+
+def _has_pt_language_drift(text: str) -> bool:
+    """Return whether a Portuguese plan still contains English scaffold prose."""
+    return bool(
+        re.search(
+            r"\b(?:morning|lunch|afternoon|dinner|start at|after lunch|traditional portuguese cuisine|more heritage|traditional meal|live entertainment|real-time entertainment)\b",
+            text or "",
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _looks_like_generic_itinerary_block_title(title: str) -> bool:
+    """Return whether a block title is only a temporal/area placeholder."""
+    normalized = normalize_text(title)
+    if not normalized:
+        return True
+    return bool(
+        re.fullmatch(
+            r"(?:manha|manhã|morning|almoco|almoço|lunch|tarde|afternoon|jantar|dinner|fim de tarde|evening)(?:\s+[a-z/ -]{0,40})?",
+            normalized,
+        )
+        or normalized in {"baixa", "belem", "belém", "centro", "centro historico", "centro histórico", "baixa chiado"}
+    )
 
 
 def _query_requests_time_specific_visit(user_message: str) -> bool:

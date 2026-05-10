@@ -687,6 +687,17 @@ class WeatherAgent(BaseAgent):
         ]
         return any(term in normalized for term in advice_terms)
 
+    @classmethod
+    def _is_planning_weather_context_query(cls, user_message: str) -> bool:
+        """Return whether Weather was called only to supply context for a plan."""
+        normalized = cls._normalize_weather_query(user_message)
+        return bool(
+            re.search(
+                r"\b(?:plan|itinerary|roteiro|plano|planeia|cria|create|visit|visitar|tour|monument|monumento|museum|museu|restaurant|restaurante|gastronom)\b",
+                normalized,
+            )
+        )
+
     def _run_direct_tool_fallback(
         self,
         user_message: str,
@@ -799,7 +810,12 @@ class WeatherAgent(BaseAgent):
         """Prepend a query-specific answer before grounded weather details."""
         body = "\n\n---\n\n".join(section for section in sections if section).strip()
         direct_answer = cls._build_direct_weather_answer(user_message, body, language, forecast_window)
-        title = cls._weather_title_for_query(user_message, language)
+        title = cls._weather_title_for_query(
+            user_message,
+            language,
+            tool_text=body,
+            forecast_window=forecast_window,
+        )
         if not direct_answer:
             return f"{title}\n\n{body}".strip()
         if not body:
@@ -824,13 +840,46 @@ class WeatherAgent(BaseAgent):
         return direct_says_clear and body_says_clear and not body_has_active_details
 
     @classmethod
-    def _weather_title_for_query(cls, user_message: str, language: str) -> str:
+    def _weather_title_for_query(
+        cls,
+        user_message: str,
+        language: str,
+        *,
+        tool_text: str = "",
+        forecast_window: Optional[dict[str, Any]] = None,
+    ) -> str:
         """Build the canonical H3 weather title for the query intent."""
         normalized = cls._normalize_weather_query(user_message)
+        asks_warnings = any(term in normalized for term in _WARNING_QUERY_TERMS)
+        has_forecast_data = bool(forecast_window) or bool(
+            re.search(
+                r"\b(?:forecast|previs[aã]o|temperature|temperatura|rain|chuva|wind|vento|humidity|humidade)\b",
+                tool_text,
+                flags=re.IGNORECASE,
+            )
+        )
+        has_clear_no_warning_status = bool(
+            re.search(
+                r"no active weather warnings|sem avisos meteorol|n[aã]o h[aá] avisos meteorol",
+                tool_text,
+                flags=re.IGNORECASE,
+            )
+        )
+        has_active_warning_data = asks_warnings and not has_clear_no_warning_status and bool(
+            re.search(
+                r"(?:active weather warnings for|avisos meteorol[oó]gicos ativos|🟡|🟠|🔴|yellow|orange|red|amarelo|laranja|vermelho)",
+                tool_text,
+                flags=re.IGNORECASE,
+            )
+        )
         if cls._is_portugal_overview_query(user_message):
             title = "Visão Meteorológica de Portugal" if language == "pt" else "Portugal Weather Overview"
-        elif any(term in normalized for term in _WARNING_QUERY_TERMS):
-            title = "Avisos Meteorológicos" if language == "pt" else "Weather Warnings"
+        elif has_forecast_data:
+            title = "Previsão Meteorológica de Lisboa" if language == "pt" else "Lisbon Weather Forecast"
+        elif asks_warnings and has_active_warning_data:
+            title = "Avisos meteorológicos ativos" if language == "pt" else "Active Weather Warnings"
+        elif asks_warnings:
+            title = "Estado dos Avisos Meteorológicos" if language == "pt" else "Weather Warning Status"
         elif cls._is_current_weather_query(user_message):
             title = "Resumo Meteorológico de Lisboa" if language == "pt" else "Lisbon Weather Summary"
         else:
@@ -1268,6 +1317,20 @@ class WeatherAgent(BaseAgent):
                 response,
                 agent_name="weather",
                 user_query=user_message,
+                language=language,
+            )
+
+        if self._is_planning_weather_context_query(user_message):
+            context_query = (
+                "Qual é a previsão para Lisboa hoje? Existem avisos ativos?"
+                if language == "pt"
+                else "What is today's Lisbon weather forecast? Are there active warnings?"
+            )
+            response = self._run_direct_tool_fallback(context_query, include_warnings=True)
+            return finalize_worker_response(
+                response,
+                agent_name="weather",
+                user_query=context_query,
                 language=language,
             )
 
