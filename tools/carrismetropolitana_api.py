@@ -860,29 +860,6 @@ def get_vehicles_near_location(
     return nearby_vehicles[:max_results]
 
 
-def get_vehicles_for_line(line_id: str) -> List[Dict[str, Any]]:
-    """
-    Gets all real-time vehicles currently serving a specific line.
-
-    Args:
-        line_id: The line ID (e.g., '1001', '1503').
-
-    Returns:
-        List of vehicles for that line with position and status.
-    """
-    vehicles = load_carris_metropolitana_vehicles()
-
-    if not vehicles:
-        return []
-
-    line_vehicles = [v for v in vehicles if v.get("line_id") == line_id]
-
-    # Sort by timestamp (most recent first)
-    line_vehicles.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
-
-    return line_vehicles
-
-
 # ==========================================================================
 # Stop Search Functions
 # ==========================================================================

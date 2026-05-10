@@ -1296,6 +1296,9 @@ _KNOWN_PLACE_LOOKUP_ALIASES = {
     "maat": "Museu de Arte, Arquitetura e Tecnologia",
     "panteao": "Panteão Nacional",
     "panteao nacional": "Panteão Nacional",
+    "padrao dos descobrimentos": "Monument to the Discoveries",
+    "monumento aos descobrimentos": "Monument to the Discoveries",
+    "monumento dos descobrimentos": "Monument to the Discoveries",
     "torre de belem": "Torre de Belém",
     "tour de belem": "Torre de Belém",
 }
@@ -1984,14 +1987,6 @@ def _expand_event_query_tokens(query: Optional[str]) -> List[str]:
     return sorted(expanded_tokens)
 
 
-def _event_matches_query(event: Dict[str, Any], expanded_tokens: List[str]) -> bool:
-    """Returns whether an event matches the expanded query tokens."""
-    if not expanded_tokens:
-        return True
-
-    return _score_event_query_match(event, expanded_tokens) > 0
-
-
 # ==========================================================================
 # Vector Store Connection (Lazy Loading)
 # ==========================================================================
@@ -2034,14 +2029,6 @@ def _get_vector_store():
 
 # Expose initialization for external use (e.g., app startup)
 initialize_vector_store = _get_vector_store
-
-
-def reset_visitlisboa_runtime_cache() -> None:
-    """Reset VisitLisboa singletons after repository data changes."""
-    global _vector_store, _places_cache
-    with _vector_store_lock:
-        _vector_store = None
-    _places_cache = None
 
 
 # ==========================================================================
@@ -2335,88 +2322,6 @@ def _get_place_by_url(url: str) -> Optional[Dict[str, Any]]:
 # ==========================================================================
 # Helper Functions
 # ==========================================================================
-
-def _extract_event_from_doc(doc) -> str:
-    """
-    Formats a vector store document as an event summary.
-
-    Args:
-        doc: LangChain Document from vector store.
-
-    Returns:
-        str: Formatted event summary.
-    """
-    parts = []
-    metadata = doc.metadata
-    content = doc.page_content
-
-    # Title
-    title = metadata.get('title', 'Unknown Event')
-    parts.append(f"📅 **{title}**")
-
-    # Category
-    category = metadata.get('category', 'General')
-    if category and category != 'General':
-        parts.append(f"   Category: {category}")
-
-    # Extract key info from content
-    content_lines = content.split('\n')
-    for line in content_lines[:5]:  # First 5 lines
-        if line.startswith('Name:'):
-            continue  # Skip, already have title
-        if len(line) > 200:
-            line = line[:200] + "..."
-        if line.strip():
-            parts.append(f"   {line}")
-
-    # URL
-    url = metadata.get('url', '')
-    if url:
-        parts.append(f"   🔗 {url}")
-
-    return "\n".join(parts)
-
-
-def _extract_place_from_doc(doc) -> str:
-    """
-    Formats a vector store document as a place summary.
-
-    Args:
-        doc: LangChain Document from vector store.
-
-    Returns:
-        str: Formatted place summary.
-    """
-    parts = []
-    metadata = doc.metadata
-    content = doc.page_content
-
-    # Title
-    title = metadata.get('title', 'Unknown Place')
-    parts.append(f"🏛️ **{title}**")
-
-    # Category
-    category = metadata.get('category', 'General')
-    if category and category != 'General':
-        parts.append(f"   Category: {category}")
-
-    # Extract key info from content
-    content_lines = content.split('\n')
-    for line in content_lines[:5]:  # First 5 lines
-        if line.startswith('Name:'):
-            continue  # Skip, already have title
-        if len(line) > 200:
-            line = line[:200] + "..."
-        if line.strip():
-            parts.append(f"   {line}")
-
-    # URL
-    url = metadata.get('url', '')
-    if url:
-        parts.append(f"   🔗 {url}")
-
-    return "\n".join(parts)
-
 
 _PLACE_CATEGORY_ALIASES = {
     "museums & monuments": {
@@ -3749,6 +3654,7 @@ def search_cultural_events(
             official_link = _first_named_http_link(event.get("information_links"))
             if official_link:
                 _, official_url = official_link
+                official_url = _localized_visitlisboa_url(official_url, render_language)
                 link_text = "Website oficial" if render_language == "pt" else "Official website"
                 label = "Website"
                 output_parts.append(f"    - 🌐 **{label}:** {_format_markdown_link(link_text, official_url)}")
@@ -3778,7 +3684,10 @@ def search_cultural_events(
 
             if event.get('highlight_links'):
                 highlight_titles = " · ".join(
-                    _format_markdown_link(str(item.get('title') or "Highlight"), item.get("url"))
+                    _format_markdown_link(
+                        str(item.get('title') or "Highlight"),
+                        _localized_visitlisboa_url(item.get("url"), render_language),
+                    )
                     or _clean_user_facing_value(item.get("title"))
                     for item in event['highlight_links'][:3]
                     if isinstance(item, dict) and item.get('title')
@@ -3791,7 +3700,7 @@ def search_cultural_events(
 
             if event.get('url'):
                 details_label = "Mais detalhes" if render_language == "pt" else "More details"
-                details_url = event['url']
+                details_url = _localized_visitlisboa_url(event['url'], render_language)
                 output_parts.append(f"    - 🔗 **{details_label}:** {_format_markdown_link('VisitLisboa', details_url)}")
 
             output_parts.append("")  # Empty line between events
@@ -4514,7 +4423,7 @@ def search_places_attractions(
 
             if place.get('url'):
                 details_label = "Mais detalhes" if render_language == "pt" else "More details"
-                details_url = place['url']
+                details_url = _localized_visitlisboa_url(place['url'], render_language)
                 output_parts.append(f"    - 🔗 **{details_label}:** {_format_markdown_link('VisitLisboa', details_url)}")
 
         # Source breakdown
@@ -4578,7 +4487,9 @@ def get_event_categories(language: str = "en") -> str:
         for cat, count in sorted_categories:
             normalized_cat = _normalize_lookup_text(cat)
             emoji = emoji_map.get(normalized_cat, "📌")
-            label = str(cat).strip() or ("Sem categoria" if is_pt else "Uncategorized")
+            label = _localize_event_category(cat, language="pt") if is_pt else str(cat).strip()
+            if not label or normalized_cat == "uncategorized":
+                label = "Sem categoria" if is_pt else "Uncategorized"
             noun = event_word if count == 1 else event_word_plural
             output_parts.append(f"- {emoji} **{label}:** {count} {noun}")
 

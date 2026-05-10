@@ -54,6 +54,20 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return default
 
 
+def _env_positive_int_or_none(name: str, default: int | None = None) -> int | None:
+    """Return a positive integer setting, or ``None`` when unset/invalid."""
+    raw_value = os.getenv(name)
+    if raw_value is None or not raw_value.strip():
+        return default
+
+    try:
+        value = int(raw_value.strip())
+    except ValueError:
+        return default
+
+    return value if value > 0 else default
+
+
 class Config:
     """
     Global configuration settings for the Lisbon Urban Assistant.
@@ -124,6 +138,15 @@ class Config:
     )
     VECTOR_DB_RELEASE_FORCE_DOWNLOAD = _env_bool("VECTOR_DB_RELEASE_FORCE_DOWNLOAD", False)
     VECTOR_DB_RELEASE_TIMEOUT_SECONDS = int(os.getenv("VECTOR_DB_RELEASE_TIMEOUT_SECONDS", "120"))
+
+    # Streamlit cache policy for heavyweight startup resources. Leave unset for
+    # per-process caching until redeploy/restart. Set a positive number of
+    # seconds only if a hosted app must refresh release-backed resources without
+    # a new deployment.
+    STREAMLIT_RESOURCE_CACHE_TTL_SECONDS = _env_positive_int_or_none(
+        "STREAMLIT_RESOURCE_CACHE_TTL_SECONDS",
+        None,
+    )
 
     # Versioned local LLM pricing snapshot used for runtime/eval cost accounting.
     # This avoids live pricing lookups during user requests and keeps summaries

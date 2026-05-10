@@ -44,17 +44,12 @@ try:
     torch.classes.__path__ = _StreamlitTorchPath()
 except ImportError:
     pass
-except Exception:
-    pass
+except Exception as exc:
+    logging.getLogger(__name__).debug("Streamlit torch path workaround skipped: %s", exc)
 
 sys.path.insert(0, ".")
 
-from agent.utils.startup_resources import (
-    pre_warm_transport_networks as _pre_warm_transport_networks_impl,
-    pre_warm_vector_store as _pre_warm_vector_store_impl,
-    prepare_transport_database as _prepare_transport_database_impl,
-    run_startup_preload as _run_startup_preload_impl,
-)
+from agent.utils.startup_resources import run_startup_preload as _run_startup_preload_impl
 from config import Config
 
 PORTUGAL_FLAG_SVG = """
@@ -432,56 +427,6 @@ def md_to_html(text: str) -> str:
     return re.sub(r"(?<!\*)\*(?!\*)([^*]+?)(?<!\*)\*(?!\*)", r"<em>\1</em>", html_text)
 
 
-def rich_text_to_html(text: str) -> str:
-    """Convert simple translation markdown blocks into safe HTML for `st.html()` sections."""
-    if not text:
-        return ""
-
-    blocks: list[str] = []
-    list_items: list[str] = []
-    list_tag: Optional[str] = None
-
-    def flush_list() -> None:
-        nonlocal list_items, list_tag
-        if not list_items or not list_tag:
-            return
-        items_html = "".join(f"<li>{item}</li>" for item in list_items)
-        blocks.append(f"<{list_tag}>{items_html}</{list_tag}>")
-        list_items = []
-        list_tag = None
-
-    for raw_line in text.strip().splitlines():
-        line = raw_line.strip()
-        if not line:
-            flush_list()
-            continue
-
-        ordered_match = re.match(r"^\d+\.\s+(.*)$", line)
-        unordered_match = re.match(r"^-\s+(.*)$", line)
-
-        if ordered_match:
-            content = md_to_html(html.escape(ordered_match.group(1).strip()))
-            if list_tag != "ol":
-                flush_list()
-                list_tag = "ol"
-            list_items.append(content)
-            continue
-
-        if unordered_match:
-            content = md_to_html(html.escape(unordered_match.group(1).strip()))
-            if list_tag != "ul":
-                flush_list()
-                list_tag = "ul"
-            list_items.append(content)
-            continue
-
-        flush_list()
-        blocks.append(f"<p>{md_to_html(html.escape(line))}</p>")
-
-    flush_list()
-    return "".join(blocks)
-
-
 def render_html_block(content: str) -> None:
     """Render raw HTML reliably, preferring `st.html()` when available."""
     if hasattr(st, "html"):
@@ -537,9 +482,10 @@ def build_info_source_link_html(label: str, description: str, url: str) -> str:
 # ==========================================================================
 
 
-@st.cache_data(show_spinner=False)
-def get_base64_image(image_path: str) -> str:
+@st.cache_data(show_spinner=False, max_entries=16)
+def get_base64_image(image_path: str, modified_ns: int = 0) -> str:
     """Return a base64-encoded image file for inline UI assets."""
+    _ = modified_ns
     try:
         with open(image_path, "rb") as img_file:
             return base64.b64encode(img_file.read()).decode()
@@ -549,7 +495,12 @@ def get_base64_image(image_path: str) -> str:
 
 def build_image_data_uri(image_path: str) -> str:
     """Build a browser-ready data URI for a local image asset."""
-    image_b64 = get_base64_image(image_path)
+    try:
+        modified_ns = os.stat(image_path).st_mtime_ns if image_path else 0
+    except OSError:
+        modified_ns = 0
+
+    image_b64 = get_base64_image(image_path, modified_ns)
     if not image_b64:
         return ""
 
@@ -1291,7 +1242,8 @@ def sync_page_from_query_params() -> None:
     try:
         raw_page_value = st.query_params.get("page", "")
         raw_language_value = st.query_params.get("lang", "")
-    except Exception:
+    except Exception as exc:
+        logging.getLogger(__name__).debug("Could not read Streamlit query parameters: %s", exc)
         raw_page_value = ""
         raw_language_value = ""
 
@@ -1361,32 +1313,44 @@ def render_language_selector(request_locked: bool) -> None:
     )
 
 
-@st.cache_resource(show_spinner=False)
-def pre_warm_vector_store() -> bool:
-    """Load the vector store once per server process."""
-    return _pre_warm_vector_store_impl()
+def _localized_kb_status(kb_ok: bool, language: str) -> str:
+    """Return a localized knowledge-base readiness message."""
+    if kb_ok:
+        return "Base de conhecimento pronta." if language == "pt" else "Knowledge base ready."
+    return (
+        "Não foi possível carregar a base de conhecimento."
+        if language == "pt"
+        else "Could not load the knowledge base."
+    )
 
 
-@st.cache_resource(show_spinner=False)
-def prepare_transport_database() -> Tuple[bool, str]:
-    """Prepare Carris GTFS database once per server process."""
-    return _prepare_transport_database_impl()
+def _localize_startup_status(status: Dict[str, Any], language: str) -> Dict[str, Any]:
+    """Copy shared startup status and localize session-facing messages."""
+    localized_status = dict(status)
+    localized_status["kb_status"] = _localized_kb_status(
+        bool(localized_status.get("kb_ok", False)),
+        language,
+    )
+    return localized_status
 
 
-@st.cache_resource(show_spinner=False)
-def pre_warm_transport_networks() -> Dict[str, Any]:
-    """Warm the static transport datasets required by first-turn routing.
+@st.cache_resource(
+    show_spinner=False,
+    ttl=Config.STREAMLIT_RESOURCE_CACHE_TTL_SECONDS,
+)
+def _load_shared_startup_resources() -> Dict[str, Any]:
+    """Load shared runtime resources once per Streamlit server process.
 
-    The goal is to avoid the first user prompt paying the cold-start cost for
-    Metro station cache loading, CP GTFS DB creation/checks, and Carris
-    Metropolitana stop/line/route cache downloads.
+    This intentionally caches only process-wide resources such as the vector
+    store embeddings and generated transport databases. The conversational
+    assistant remains in ``st.session_state`` because it is user/session scoped.
     """
-    return _pre_warm_transport_networks_impl()
+    return _run_startup_preload_impl(language="en")
 
 
 def _run_startup_preload(language: str = "pt") -> Dict[str, Any]:
-    """Load one-time shared resources needed by the production app."""
-    return _run_startup_preload_impl(language=language)
+    """Return one-time shared resource status localized for the active session."""
+    return _localize_startup_status(_load_shared_startup_resources(), language)
 
 
 def ensure_startup_resources(
@@ -1397,11 +1361,11 @@ def ensure_startup_resources(
     attempted = bool(st.session_state.get("startup_resources_attempted", False))
     cached_ok = st.session_state.get("startup_resources_ok")
     cached_status = st.session_state.get("startup_resources_status") or {}
+    language = st.session_state.get("language", "pt")
 
     if attempted and cached_ok is not None and not force_retry:
-        return bool(cached_ok), cached_status
+        return bool(cached_ok), _localize_startup_status(cached_status, language)
 
-    language = st.session_state.get("language", "pt")
     spinner_text = (
         "🚀 A preparar conhecimento e dados de mobilidade..."
         if language == "pt"
@@ -1409,6 +1373,8 @@ def ensure_startup_resources(
     )
 
     def _load() -> Tuple[bool, Dict[str, Any]]:
+        if force_retry:
+            _load_shared_startup_resources.clear()
         preload_status = _run_startup_preload(language)
         st.session_state.startup_resources_attempted = True
         st.session_state.startup_resources_ok = preload_status.get("ok")

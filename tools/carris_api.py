@@ -470,7 +470,7 @@ class CarrisGTFSManager:
             return False, remote_date
 
         except Exception as e:
-            logger.error(f"Error checking for GTFS updates: {e}")
+            logger.debug(f"Carris GTFS update check failed; using cached data when available: {e}")
             return False, None
 
     def download_gtfs(self) -> Optional[bytes]:
@@ -1446,6 +1446,9 @@ def carris_get_stops(query: str = "", limit: Optional[int] = None) -> str:
 
         for row in shown_rows:
             response += f"**🚏 {row['stop_name']}**\n"
+            response += f"    - 🆔 **Stop ID:** `{row['stop_id']}`\n"
+            if row["stop_code"]:
+                response += f"    - 🔢 **Stop code:** `{row['stop_code']}`\n"
             if row["stop_lat"] and row["stop_lon"]:
                 response += (
                     "    - 📍 "
@@ -1675,12 +1678,26 @@ def carris_get_next_departures(
     try:
         cursor = conn.cursor()
 
-        cursor.execute("SELECT stop_name FROM stops WHERE stop_id = ?", (stop_id,))
+        original_stop_input = str(stop_id or "").strip()
+        resolved_from_name = False
+
+        cursor.execute("SELECT stop_name FROM stops WHERE stop_id = ?", (original_stop_input,))
         stop_row = cursor.fetchone()
 
         if not stop_row:
-            conn.close()
-            return f"Stop '{stop_id}' not found."
+            name_matches = _search_stop_rows(conn, original_stop_input, limit=1)
+            if not name_matches:
+                conn.close()
+                return (
+                    f"Stop '{original_stop_input}' not found. "
+                    "Use carris_get_stops first and pass one returned Stop ID."
+                )
+            matched_stop = name_matches[0]
+            stop_id = str(matched_stop["stop_id"])
+            stop_row = matched_stop
+            resolved_from_name = True
+        else:
+            stop_id = original_stop_input
 
         stop_name = stop_row["stop_name"]
 
@@ -1816,6 +1833,8 @@ def carris_get_next_departures(
             any(t.startswith("**") for t in times) for times in departures.values()
         )
         response = f"🚌 **Next Departures from {stop_name}**  \n"
+        if resolved_from_name:
+            response += f"   Resolved '{original_stop_input}' to Stop ID `{stop_id}`.  \n"
         if has_realtime_data:
             response += "   (📡 Real-Time Data Active)  \n"
         freshness_note = _build_gtfs_rt_freshness_note() if not is_future_query else ""
@@ -2001,6 +2020,39 @@ def carris_find_routes_between(
         trams = [r for r in unique_routes.values() if r["route_short_name"].endswith("E")]
         buses = [r for r in unique_routes.values() if not r["route_short_name"].endswith("E")]
 
+        def get_route_stop_hint(route_short_name: str) -> Dict[str, str]:
+            """Return the matched origin/destination stops for a direct route."""
+            if not origin_stops or not dest_stops:
+                return {}
+
+            origin_ids_hint = [s["id"] for s in origin_stops]
+            dest_ids_hint = [s["id"] for s in dest_stops]
+            ph_origin = ",".join(["?" for _ in origin_ids_hint])
+            ph_dest = ",".join(["?" for _ in dest_ids_hint])
+            cursor.execute(
+                f"""
+                SELECT
+                    t.trip_headsign AS headsign,
+                    so.stop_name AS origin_stop_name,
+                    sd.stop_name AS destination_stop_name
+                FROM stop_times st_o
+                JOIN stop_times st_d ON st_o.trip_id = st_d.trip_id
+                    AND st_o.stop_sequence < st_d.stop_sequence
+                JOIN trips t ON st_o.trip_id = t.trip_id
+                JOIN routes r ON t.route_id = r.route_id
+                JOIN stops so ON st_o.stop_id = so.stop_id
+                JOIN stops sd ON st_d.stop_id = sd.stop_id
+                WHERE r.route_short_name = ?
+                  AND st_o.stop_id IN ({ph_origin})
+                  AND st_d.stop_id IN ({ph_dest})
+                ORDER BY st_o.stop_sequence, st_d.stop_sequence
+                LIMIT 1
+                """,
+                [route_short_name, *origin_ids_hint, *dest_ids_hint],
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else {}
+
         def format_route_line(r: Dict[str, Any]) -> str:
             """Format a single route entry with direction-safe departures and RT hints."""
             departures = _get_directional_departures_for_route(
@@ -2014,8 +2066,15 @@ def carris_find_routes_between(
             )
 
             if not departures:
-                line = f"   {r['route_short_name']}: {r['route_long_name']}\n"
-                line += "     ℹ️ Real-time departure details are unavailable at this stop.\n\n"
+                stop_hint = get_route_stop_hint(r["route_short_name"])
+                headsign = stop_hint.get("headsign")
+                route_summary = f"para {headsign}" if headsign else r["route_long_name"]
+                line = f"   {r['route_short_name']}: {route_summary}\n"
+                origin_stop_name = stop_hint.get("origin_stop_name")
+                dest_stop_name = stop_hint.get("destination_stop_name")
+                if origin_stop_name and dest_stop_name:
+                    line += f"     Stops: board at {origin_stop_name}; leave at {dest_stop_name}.\n"
+                line += "     ℹ️ No upcoming departures were confirmed today at the matched origin stop.\n\n"
                 return line
 
             first_dep = departures[0]
