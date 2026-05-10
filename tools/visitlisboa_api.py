@@ -635,6 +635,8 @@ def _localize_place_title(title: Optional[str], language: str = "en") -> str:
         "National Palace and Gardens of Queluz": "Palácio Nacional e Jardins de Queluz",
         "National Tile Museum": "Museu Nacional do Azulejo",
         "Pena National Palace": "Palácio Nacional da Pena",
+        "Palace of Belém": "Palácio de Belém",
+        "Palace of Belem": "Palácio de Belém",
         "Prazeres Cemetery and Museum": "Cemitério e Museu dos Prazeres",
         "Museum of Aljube – Resistance and Freedom": "Museu do Aljube - Resistência e Liberdade",
         "Museum of Aljube - Resistance and Freedom": "Museu do Aljube - Resistência e Liberdade",
@@ -686,8 +688,6 @@ def _known_place_description(title: str, language: str = "en") -> str:
 def _localize_visitlisboa_description(
     description: Optional[str],
     language: str = "en",
-    *,
-    content_kind: str = "place",
 ) -> str:
     """Avoid leaking raw English scraped descriptions into PT-PT answers."""
     raw = re.sub(r"\s+", " ", (description or "").strip())
@@ -715,9 +715,7 @@ def _localize_visitlisboa_description(
     ]
     padded = f" {raw.lower()} "
     if any(marker in padded for marker in english_markers):
-        if content_kind == "event":
-            return "Descrição disponível na página oficial do evento."
-        return "Descrição disponível na página oficial do local."
+        return ""
     return raw
 
 
@@ -909,12 +907,14 @@ def _format_markdown_link(label: str, url: Any) -> str:
     return f"[{label}]({clean_url})"
 
 
-def _localized_visitlisboa_url(url: Any, language: str = "en") -> str:
-    """Return the VisitLisboa URL variant that best matches the output language."""
-    clean_url = str(url or "").strip()
-    if language == "pt" and "visitlisboa.com/en/" in clean_url:
-        return clean_url.replace("visitlisboa.com/en/", "visitlisboa.com/pt-pt/")
-    return clean_url
+def _preserve_source_url(url: Any) -> str:
+    """Return a scraped source URL without language rewriting.
+
+    Portuguese collection footers may point to ``/pt-pt/...``, but item-level
+    VisitLisboa URLs and external official URLs must keep the scraped URL because
+    translated item paths are not guaranteed to exist.
+    """
+    return str(url or "").strip()
 
 
 def _format_phone_link(phone: Any) -> str:
@@ -3601,7 +3601,6 @@ def search_cultural_events(
             description_summary = _localize_visitlisboa_description(
                 _summarize_event_description(event.get('short_description') or event.get('full_description')),
                 language=render_language,
-                content_kind="event",
             )
             if "descrição disponível na página oficial" in description_summary.lower():
                 description_summary = ""
@@ -3666,7 +3665,7 @@ def search_cultural_events(
             official_link = _first_named_http_link(event.get("information_links"))
             if official_link:
                 _, official_url = official_link
-                official_url = _localized_visitlisboa_url(official_url, render_language)
+                official_url = _preserve_source_url(official_url)
                 link_text = "Website oficial" if render_language == "pt" else "Official website"
                 label = "Website"
                 output_parts.append(f"    - 🌐 **{label}:** {_format_markdown_link(link_text, official_url)}")
@@ -3698,7 +3697,7 @@ def search_cultural_events(
                 highlight_titles = " · ".join(
                     _format_markdown_link(
                         str(item.get('title') or "Highlight"),
-                        _localized_visitlisboa_url(item.get("url"), render_language),
+                        _preserve_source_url(item.get("url")),
                     )
                     or _clean_user_facing_value(item.get("title"))
                     for item in event['highlight_links'][:3]
@@ -3712,7 +3711,7 @@ def search_cultural_events(
 
             if event.get('url'):
                 details_label = "Mais detalhes" if render_language == "pt" else "More details"
-                details_url = _localized_visitlisboa_url(event['url'], render_language)
+                details_url = _preserve_source_url(event['url'])
                 output_parts.append(f"    - 🔗 **{details_label}:** {_format_markdown_link('VisitLisboa', details_url)}")
 
             output_parts.append("")  # Empty line between events
@@ -4302,15 +4301,16 @@ def search_places_attractions(
             description_text = _localize_visitlisboa_description(
                 description_text,
                 language=render_language,
-                content_kind="place",
             )
             known_description = _known_place_description(title, language=render_language)
             generic_description = _normalize_lookup_text(description_text) in {
                 "descricao disponivel na pagina oficial do local",
                 "description available on the official place page",
             }
-            if known_description and generic_description:
+            if known_description and (not description_text or generic_description):
                 description_text = known_description
+            elif generic_description:
+                description_text = ""
             if description_text:
                 desc = description_text[:220]
                 if len(description_text) > 220:
@@ -4435,7 +4435,7 @@ def search_places_attractions(
 
             if place.get('url'):
                 details_label = "Mais detalhes" if render_language == "pt" else "More details"
-                details_url = _localized_visitlisboa_url(place['url'], render_language)
+                details_url = _preserve_source_url(place['url'])
                 output_parts.append(f"    - 🔗 **{details_label}:** {_format_markdown_link('VisitLisboa', details_url)}")
 
         # Source breakdown
