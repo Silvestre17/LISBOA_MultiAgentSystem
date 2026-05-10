@@ -9800,9 +9800,9 @@ def strip_placeholder_field_lines(text: str) -> str:
     )
     field_label_re = re.compile(
         r"^\s*(?:[-*•]\s*)?(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s*)?"
-        r"(?:\*\*(?P<label_bold>address|location|morada|localiza(?:ç|c)[ãa]o|opening hours|hours|"
+        r"(?:\*\*(?P<label_bold>description|descri(?:ç|c)[ãa]o|address|location|morada|localiza(?:ç|c)[ãa]o|opening hours|hours|"
         r"hor[aá]rio|price|pre[çc]o|tickets?|bilhetes?|website|site oficial):?\*\*|"
-        r"(?P<label>address|location|morada|localiza(?:ç|c)[ãa]o|opening hours|hours|"
+        r"(?P<label>description|descri(?:ç|c)[ãa]o|address|location|morada|localiza(?:ç|c)[ãa]o|opening hours|hours|"
         r"hor[aá]rio|price|pre[çc]o|tickets?|bilhetes?|website|site oficial)"
         r")\s*:?\s*(?P<value>.+?)\s*$",
         flags=re.IGNORECASE,
@@ -9868,6 +9868,18 @@ def strip_placeholder_field_lines(text: str) -> str:
             value = _strip_markdown_formatting(raw_value).strip(" -:.;")
             normalized_value = _strip_accents_compat(value).lower()
             normalized_label = _strip_accents_compat(label).lower()
+            if normalized_label in {"description", "descricao"} and (
+                (
+                    "alguns eventos" in normalized_value
+                    and any(token in normalized_value for token in ("morada", "localizacao", "descricao"))
+                    and any(token in normalized_value for token in ("nao incluem", "nao indicam", "nao confirm"))
+                )
+                or (
+                    any(token in normalized_value for token in ("localizacao", "morada", "descricao"))
+                    and any(token in normalized_value for token in ("nao esta confirmada", "nao estao confirmadas"))
+                )
+            ):
+                continue
             if normalized_label in {"tickets", "ticket", "bilhetes", "bilhete"} and not _extract_valid_public_url(raw_value):
                 if "lisboa card" in normalized_value:
                     localized_value = _localize_lisboa_card_benefit(value, language="pt" if "bilhete" in normalized_label else "en")
