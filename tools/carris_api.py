@@ -686,7 +686,10 @@ class CarrisGTFSManager:
                     logger.info(f"  {filename}: {len(rows):,} rows")
 
                 except KeyError:
-                    logger.warning(f"  {filename}: not found in ZIP")
+                    if table_name == "shapes":
+                        logger.info(f"  {filename}: not found in ZIP (optional)")
+                    else:
+                        logger.warning(f"  {filename}: not found in ZIP")
                 except Exception as e:
                     logger.error(f"  {filename}: error - {e}")
 

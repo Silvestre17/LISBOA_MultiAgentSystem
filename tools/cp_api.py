@@ -535,7 +535,10 @@ class CPGTFSManager:
                         except Exception as e:
                             logger.warning(f"  Error processing {filename}: {e}")
                     else:
-                        logger.warning(f"  {filename} not found in GTFS")
+                        if filename == "shapes.txt":
+                            logger.info("  shapes.txt not found in GTFS (optional)")
+                        else:
+                            logger.warning(f"  {filename} not found in GTFS")
 
             # Create indexes for fast queries
             self._create_indexes(cursor)

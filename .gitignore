@@ -1,6 +1,7 @@
 # Carris Metropolitana data directory (exceeds 100MB) + Vector DB (already included in GitHub Releases, no need to track in Git)
-/data/carris/
+data/carris/
 data/vector_db/
+data/cp
 
 # Specific Files
 .github/copilot-instructions.md
