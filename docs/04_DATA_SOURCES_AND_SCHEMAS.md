@@ -2,20 +2,23 @@
 
 This page documents what is live, what is periodically refreshed, and what is stored locally for LISBOA.
 
+> [!NOTE]
+> Refresh cadences below reflect the GitHub Actions workflows under `.github/workflows/`. Manual workflow dispatches can override the default schedule.
+
 ## 🧾 Source Summary
 
 | Source | Type | Access pattern | Refresh model | Main consumers |
 |--------|------|----------------|---------------|----------------|
-| IPMA | live API | direct runtime call | live on request | `WeatherAgent` |
-| Metro de Lisboa | live API + public fallback | direct runtime call | live on request | `TransportAgent` |
-| Carris Metropolitana | live REST API | direct runtime call | live on request | `TransportAgent` |
-| Carris Urban | GTFS + GTFS-RT | local SQLite + live feed | live plus cached static support data | `TransportAgent` |
-| CP / Comboios.live | live API + GTFS support data | direct runtime call plus local support files | live on request | `TransportAgent` |
-| VisitLisboa places | scraped JSON + vector store | local JSON + semantic retrieval | weekly on Mondays by workflow | `ResearcherAgent`, `PlannerAgent` |
-| VisitLisboa events | scraped JSON + vector store | local JSON + semantic retrieval | daily by workflow | `ResearcherAgent`, `PlannerAgent` |
-| Official Lisbon guide PDF | static document + vector store | local file + semantic retrieval | rebuilt on demand | `ResearcherAgent`, `PlannerAgent` |
-| Lisboa Aberta | open GeoJSON datasets | local metadata + on-demand dataset fetch | metadata refreshed by collection scripts, datasets fetched live | `ResearcherAgent` |
-| Web knowledge | web search fallback | runtime lookup | on request | `ResearcherAgent` |
+| IPMA | Live API | Direct runtime call | Live on request | `WeatherAgent` |
+| Metro de Lisboa | Live API + Public Fallback | Direct runtime call | Live on request | `TransportAgent` |
+| Carris Metropolitana | Live REST API | Direct runtime call | Live on request | `TransportAgent` |
+| Carris Urban | GTFS + GTFS-RT | Local SQLite + live feed | Live plus cached static support data | `TransportAgent` |
+| CP / Comboios.live | Live API + GTFS Support Data | Direct runtime call plus local support files | Live on request | `TransportAgent` |
+| VisitLisboa places | Scraped JSON + Vector Store | Local JSON + semantic retrieval | Weekly on Mondays by workflow | `ResearcherAgent`, `PlannerAgent` |
+| VisitLisboa events | Scraped JSON + Vector Store | Local JSON + semantic retrieval | Daily by workflow | `ResearcherAgent`, `PlannerAgent` |
+| Official Lisbon guide PDF | Static Document + Vector Store | Local file + semantic retrieval | Rebuilt on demand | `ResearcherAgent`, `PlannerAgent` |
+| Lisboa Aberta | Open GeoJSON Datasets | Local metadata + on-demand dataset fetch | Metadata refreshed by collection scripts, datasets fetched live | `ResearcherAgent` |
+| Web knowledge | Web Search Fallback | Runtime lookup | On request | `ResearcherAgent` |
 
 ## ⏱️ Refresh and Staleness Model
 
@@ -102,8 +105,8 @@ These artefacts support faster local lookups and reduce repeated parsing of stat
 
 | Layer | Local artefacts | Purpose |
 |-------|------------------|---------|
-| Carris Urban | `data/carris/carris.db`, `data/carris/metadata.json` | runtime stop, route, and GTFS support |
-| CP | `data/cp/cp_gtfs.db`, `data/cp/metadata.json`, `data/cp/gtfs.zip` | local schedule support and reproducible reference data |
+| Carris Urban | `data/carris/carris.db`, `data/carris/metadata.json` | Runtime stop, Route, and GTFS support |
+| CP | `data/cp/cp_gtfs.db`, `data/cp/metadata.json`, `data/cp/gtfs.zip` | Local schedule support and Reproducible reference data |
 
 ## 🧠 Vector Database
 
@@ -114,19 +117,17 @@ These artefacts support faster local lookups and reduce repeated parsing of stat
 | Storage directory | `data/vector_db/` |
 | Embedding model | `BAAI/bge-m3` |
 | Collections | `lisbon_pdf`, `lisbon_places`, `lisbon_events` |
-| Language support | multilingual retrieval, with Portuguese and English coverage in the indexed material |
+| Language support | Multilingual Retrieval, with Portuguese and English coverage in the indexed material |
 
-The vector store supports multilingual retrieval, but the 2026-04 runtime still emits final user-facing answers only in PT-PT or English.
+The vector store supports multilingual retrieval, but the runtime emits final user-facing answers only in PT-PT or English.
 
 ### Sync Semantics
 
 The vector-store update flow is incremental:
 
-- documents receive stable identifiers
-- metadata stores a SHA-256 content hash
-- new content is inserted
-- changed content is updated
-- removed content is deleted from the affected collection
+- Documents receive stable identifiers.
+- Metadata stores a SHA-256 content hash.
+- New content is inserted; changed content is updated; removed content is deleted from the affected collection.
 
 This allows the GitHub Actions sync workflow to process updates in batches instead of rebuilding the full store every time.
 
@@ -138,7 +139,7 @@ python tools/vector_store.py --stats
 
 ## 📌 Operational Boundaries
 
-- Exported runtime tools are counted from `tools/__init__.py`
-- `tools/vector_store.py` is operational infrastructure, not an exported runtime tool
-- VisitLisboa semantic retrieval depends on both local JSON artefacts and the vector store
-- Lisboa Aberta service discovery is intentionally handled through structured on-demand fetches rather than bulk embedding
+- Exported runtime tools are counted from `tools/__init__.py`.
+- `tools/vector_store.py` is operational infrastructure, not an exported runtime tool.
+- VisitLisboa semantic retrieval depends on both local JSON artefacts and the vector store.
+- Lisboa Aberta service discovery is intentionally handled through structured on-demand fetches rather than bulk embedding.

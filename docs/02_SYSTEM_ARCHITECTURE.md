@@ -58,33 +58,34 @@ graph TD
 
 | Agent | Primary role | Assigned tools | Notes |
 |------|--------------|---------------:|------|
-| `SupervisorAgent` | query routing and direct handling | 0 | returns direct responses for greetings and out-of-scope cases |
-| `WeatherAgent` | weather retrieval | 4 | IPMA only |
-| `TransportAgent` | transport retrieval | 30 | Metro, Carris Metropolitana, Carris Urban, CP, and multimodal tools |
-| `ResearcherAgent` | tourism, services, and knowledge retrieval | 11 | VisitLisboa, Lisboa Aberta, and web fallback |
-| `QualityAssuranceAgent` | validation and retry guidance | 0 | validates outputs, adds disclaimers, and can trigger one retry path |
-| `PlannerAgent` | final planning synthesis | 0 | only used when the route explicitly includes the planner |
+| `SupervisorAgent` | Query Routing and Direct Handling | 0 | returns direct responses for greetings and out-of-scope cases |
+| `WeatherAgent` | Weather Retrieval | 4 | IPMA only |
+| `TransportAgent` | Transport Retrieval | 30 | Metro, Carris Metropolitana, Carris Urban, CP, and multimodal tools |
+| `ResearcherAgent` | Tourism, Services, and Knowledge Retrieval | 11 | VisitLisboa, Lisboa Aberta, and web fallback |
+| `QualityAssuranceAgent` | Validation and Retry Guidance | 0 | validates outputs, adds disclaimers, and can trigger one retry path |
+| `PlannerAgent` | Final Planning Synthesis | 0 | only used when the route explicitly includes the planner |
 
 ## 🎯 Final Response Semantics
 
-One of the most important architectural details is that the planner is **not** always the final responder.
+> [!IMPORTANT]
+> The planner is **not** always the final responder. Its role is constrained to itinerary synthesis.
 
-- **Planning queries:** the final answer is synthesized by `PlannerAgent.synthesize()`.
-- **Greetings or out-of-scope requests:** the response can be returned directly by the supervisor.
-- **Simple single-domain requests:** the response can come from one specialist worker or from combined worker outputs, without using the planner.
-- **Language resolution in the 2026-04 runtime:** final user-facing answers are emitted only in **PT-PT** or **English**. If the detected input language is neither Portuguese nor English, the runtime answers in English and prepends a small bilingual note explaining that the assistant is optimized for PT-PT and English.
+- **Planning queries** — the final answer is synthesized by `PlannerAgent.synthesize()`.
+- **Greetings or out-of-scope requests** — returned directly by the supervisor.
+- **Simple single-domain requests** — returned by one specialist worker, or as combined worker outputs, without invoking the planner.
+- **Language resolution** — final answers are emitted only in **PT-PT** or **English**. If the detected input language is neither Portuguese nor English, the runtime answers in English and prepends a short bilingual note explaining that the assistant is optimized for PT-PT and English.
 
-This behavior is implemented in `MultiAgentAssistant.chat()` in `agent/graph.py`.
+This behaviour is implemented in `MultiAgentAssistant.chat()` in `agent/graph.py`.
 
 ## ✅ QA in the Real Runtime
 
 `QualityAssuranceAgent` is not a general conversational front-end. Its runtime role is to:
 
-- inspect worker outputs
-- detect missing critical data
-- attach disclaimers about data limitations
-- guide a single retry path when worker outputs are incomplete
-- perform deterministic validation for certain factual checks
+- Inspect worker outputs.
+- Detect missing critical data.
+- Attach disclaimers about data limitations.
+- Guide a single retry path when worker outputs are incomplete.
+- Perform deterministic validation for selected factual checks.
 
 The QA step happens **after** worker execution and **before** final synthesis or response combination.
 
@@ -119,9 +120,9 @@ The QA step happens **after** worker execution and **before** final synthesis or
 
 ## 🛡️ Reliability and Control Mechanisms
 
-- loop detection for repeated tool calls and forced response generation
-- safe LLM invocation with Azure content-filter retry handling
-- parallel worker execution with context propagation
-- single QA-guided retry path; deterministic validation in QA stage
-- response cleanup and formatting before Streamlit rendering
-- per-agent usage and latency tracking hooks
+- Loop detection for repeated tool calls and forced response generation.
+- Safe LLM invocation with Azure content-filter retry handling.
+- Parallel worker execution with context propagation.
+- Single QA-guided retry path; deterministic validation in QA stage.
+- Response cleanup and formatting before Streamlit rendering.
+- Per-agent usage and latency tracking hooks.

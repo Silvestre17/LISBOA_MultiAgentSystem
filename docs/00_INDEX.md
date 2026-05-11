@@ -1,9 +1,9 @@
 # 📚 LISBOA Documentation Hub
 
-This documentation set describes the repository as it exists in code today. It has been reviewed against the supported Streamlit entrypoint `app.py`, the multi-agent runtime in `agent/graph.py`, the exported tool registry in `tools/__init__.py`, the GitHub Actions workflows, the strict live-test prerequisites in `tests/conftest.py`, and the evaluation notebook in `eval/benchmark_ablation_analysis.ipynb`.
+This documentation set describes the repository as it exists in code today. It has been verified against the Streamlit entrypoint `app.py`, the multi-agent runtime in `agent/graph.py`, the exported tool registry in `tools/__init__.py`, the GitHub Actions workflows under `.github/workflows/`, and the evaluation notebook in `eval/benchmark_ablation_analysis.ipynb`.
 
 > [!IMPORTANT]
-> Public setup, runtime, and validation instructions support `app.py` as the documented entrypoint.
+> The supported public entrypoint for setup, runtime, and validation is `app.py`. Run it with `streamlit run app.py`.
 
 > [!NOTE]
 > Conceptual thesis framework figure: [`../img/LISBOA_Framework.png`](../img/LISBOA_Framework.png) (vector source: [`../img/LISBOA_Framework.svg`](../img/LISBOA_Framework.svg)).
@@ -40,28 +40,32 @@ python tools/vector_store.py
 streamlit run app.py
 ```
 
+> [!TIP]
+> Need the full local environment (scraping, evaluation, notebooks, CUDA-enabled PyTorch)? Use `conda env create -f environment_local_gpu.yml` instead. See [`05_DEPLOYMENT_AND_OPERATIONS.md`](./05_DEPLOYMENT_AND_OPERATIONS.md) for details.
+
 ## 🧭 Recommended Reading Paths
 
-- **New to the repository:** `../README.md` -> `docs/01_PROJECT_OVERVIEW.md` -> `docs/02_SYSTEM_ARCHITECTURE.md`
-- **Need the exact capability map:** `docs/03_TOOLS_REFERENCE.md` -> `docs/04_DATA_SOURCES_AND_SCHEMAS.md`
-- **Want to run locally:** `docs/05_DEPLOYMENT_AND_OPERATIONS.md` -> `../.env.example`
-- **Working on evaluation:** `../eval/README.md` -> `../eval/benchmark_ablation_analysis.ipynb`
-- **Need live-test readiness:** `docs/05_DEPLOYMENT_AND_OPERATIONS.md` plus `tests/conftest.py`
+- **New to the repository:** [`../README.md`](../README.md) → [`01_PROJECT_OVERVIEW.md`](./01_PROJECT_OVERVIEW.md) → [`02_SYSTEM_ARCHITECTURE.md`](./02_SYSTEM_ARCHITECTURE.md)
+- **Need the exact capability map:** [`03_TOOLS_REFERENCE.md`](./03_TOOLS_REFERENCE.md) → [`04_DATA_SOURCES_AND_SCHEMAS.md`](./04_DATA_SOURCES_AND_SCHEMAS.md)
+- **Want to run it locally:** [`05_DEPLOYMENT_AND_OPERATIONS.md`](./05_DEPLOYMENT_AND_OPERATIONS.md) → [`../.env.example`](../.env.example)
+- **Working on evaluation:** [`../eval/README.md`](../eval/README.md) → [`../eval/benchmark_ablation_analysis.ipynb`](../eval/benchmark_ablation_analysis.ipynb)
 
-## ✅ Canonical References Used Across the Docs
+## ✅ Canonical Sources of Truth
 
-The following files are treated as the source of truth when counts, roles, or workflows are documented:
+When counts, roles, or workflows are documented, these files are the reference:
 
-- `tools/__init__.py` for the exported 45-tool registry
-- `agent/graph.py` for the default runtime orchestration, response flow, and agent responsibilities
-- `agent/state.py` for the shared `AgentState`
-- `config.py` for provider defaults, agent-model mappings, and core paths
-- `.github/workflows/data_pipeline.yml` and `.github/workflows/sync_vector_db.yml` for automation
-- `tests/conftest.py` for strict live prerequisite enforcement
-- `eval/benchmark_ablation_analysis.ipynb` for benchmark and ablation CSV exports
+- [`tools/__init__.py`](../tools/__init__.py) — exported 45-tool registry
+- [`agent/graph.py`](../agent/graph.py) — orchestration, routing, response flow
+- [`agent/state.py`](../agent/state.py) — shared `AgentState` schema
+- [`config.py`](../config.py) — provider defaults, agent-model mappings, paths
+- [`.github/workflows/data_pipeline.yml`](../.github/workflows/data_pipeline.yml) and [`.github/workflows/sync_vector_db.yml`](../.github/workflows/sync_vector_db.yml) — automation
+- [`eval/evaluation_groundtruth_queries.json`](../eval/evaluation_groundtruth_queries.json) — 72-query evaluation corpus
+- [`eval/benchmark_ablation_analysis.ipynb`](../eval/benchmark_ablation_analysis.ipynb) — benchmark and ablation CSV exports
 
 ## 📝 Notes
 
-- Some upstream payloads are in Portuguese because Lisbon public sources publish in Portuguese; final user-facing answers are emitted only in **PT-PT or English** (other input languages get an English answer with a short bilingual note).
+> [!NOTE]
+> Upstream payloads are often in Portuguese because Lisbon public sources publish in Portuguese. Final user-facing answers are emitted only in **PT-PT** or **English**; other input languages receive an English answer with a short bilingual note.
+
 - `tools/vector_store.py` is operational infrastructure and is **not** counted among the 45 exported runtime tools.
-- The `docs/` set documents the supported public path centered on `app.py`. Auxiliary thesis material may exist but is not part of the public operating path unless explicitly stated.
+- The `docs/` set covers the supported public path centred on `app.py`. Auxiliary thesis material may live in the repository, but it is not part of the public operating path unless explicitly stated.

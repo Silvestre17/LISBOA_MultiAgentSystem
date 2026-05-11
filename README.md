@@ -32,9 +32,10 @@
 <a id="overview"></a>
 ## 📍 Overview
 
-LISBOA is a Master's thesis project at NOVA IMS that implements an intelligent multi-agent system for personalized tourist planning and urban mobility support in the Lisbon Metropolitan Area. It combines Retrieval-Augmented Generation (RAG), real-time transport and weather APIs, municipal open data, and a Streamlit interface to support grounded, context-aware answers.
+LISBOA is a Master's thesis project at NOVA IMS that implements an intelligent multi-agent system for personalized tourist planning and urban mobility support in the Lisbon Metropolitan Area. It combines Retrieval-Augmented Generation (RAG), real-time transport and weather APIs, municipal open data, and a Streamlit interface to deliver grounded, context-aware answers.
 
-The supported user-facing entrypoint is `app.py`. The current runtime is the multi-agent system implemented by `MultiAgentAssistant`.
+> [!IMPORTANT]
+> The supported user-facing entrypoint is `app.py`. The runtime is the multi-agent system implemented by `MultiAgentAssistant` in [`agent/graph.py`](./agent/graph.py).
 
 <p align="center">
   <img src="./img/LISBOA_Framework.png" alt="LISBOA framework figure" width="720">
@@ -148,7 +149,7 @@ User query
 - **LLM providers supported:** Azure OpenAI, OpenAI, LM Studio
 - **Embedding model:** `BAAI/bge-m3`
 - **Packaging:** `pyproject.toml` supports editable installs
-- **Testing:** `pytest` suites under `tests/` and `eval/tests/`
+- **Evaluation:** deterministic dataset/validator suites under `eval/tests/`, plus benchmark and ablation runners
 - **Automation:** GitHub Actions for scraping and vector synchronization
 
 <a id="data-sources-and-tool-inventory"></a>
@@ -261,27 +262,31 @@ Full provider, tracing, and TLS notes: [`docs/05_DEPLOYMENT_AND_OPERATIONS.md`](
 ```bash
 # Fast deterministic checks
 python scripts/syntax_check.py
-python -m pytest tests/ eval/tests/ -q
+python -m pytest eval/tests/ -q
 
 # Single-prompt smoke test
 python scripts/run_prompts.py --suite smoke
+python scripts/run_prompts.py --prompt "How do I get from Baixa-Chiado to Aeroporto?" --language en --quiet
 
 # Benchmark / ablation (module form required)
 python -m eval.run_benchmark --mode run_test
 python -m eval.run_ablation  --mode run_test
-
-# Optional live provider smoke checks
-python -m pytest tests/test_lisbon_transport.py -q --run-live -m live
 ```
 
-Artefacts land under `eval/results/{benchmark,ablation,statistics,figures}/` or the output path selected by the runner. See [`eval/README.md`](./eval/README.md) for the current validation policy.
+> [!IMPORTANT]
+> Benchmark and ablation runners require module form (`python -m eval.run_benchmark`). Direct script invocation breaks `agent` import resolution.
+
+Artefacts land under `eval/results/{benchmark,ablation,statistics,figures}/`. See [`eval/README.md`](./eval/README.md) for the current validation policy.
 
 ## ⚙️ Automation
 
 Two GitHub Actions workflows keep the knowledge base fresh:
 
-1. [`data_pipeline.yml`](./.github/workflows/data_pipeline.yml) scrapes VisitLisboa content daily at **04:00 UTC**. Places are refreshed weekly on Mondays during scheduled runs. Manual runs can choose `events`, `places`, or `both` without changing the automatic behaviour.
+1. [`data_pipeline.yml`](./.github/workflows/data_pipeline.yml) scrapes VisitLisboa content **daily at 04:00 UTC**. Places are refreshed weekly on **Mondays** during scheduled runs. Manual runs can choose `events`, `places`, or `both` without changing the automatic behaviour.
 2. [`sync_vector_db.yml`](./.github/workflows/sync_vector_db.yml) runs after the scraping workflow completes successfully and performs incremental vector synchronization.
+
+> [!NOTE]
+> Both workflows can also be triggered manually from the GitHub Actions tab.
 
 ## 📄 License
 

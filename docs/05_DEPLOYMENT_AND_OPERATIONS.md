@@ -9,11 +9,11 @@ This guide covers local setup, environment configuration, runtime workflows, CI 
 
 | Requirement | Needed for | Notes |
 |-------------|------------|-------|
-| Python 3.10+ | all local workflows | required by the repository and GitHub Actions |
-| Git | cloning and updating the repository | standard prerequisite |
-| One configured LLM provider | runtime assistant and evaluation | Azure OpenAI, OpenAI, or LM Studio |
-| Metro credentials | full official Metro realtime experience | optional for basic fallback status checks |
-| Tavily API key | web fallback and strict live coverage | optional for casual local use, required for strict live tests |
+| Python 3.10+ | All local workflows | Required by the repository and GitHub Actions |
+| Git | Cloning and updating the repository | Standard prerequisite |
+| One configured LLM provider | Runtime assistant and evaluation | Azure OpenAI, OpenAI, or LM Studio |
+| Metro credentials | Full official Metro realtime experience | Optional; fallback status remains available |
+| Tavily API key | Web fallback for history and culture queries | Optional |
 
 ## 🔐 Environment Configuration
 
@@ -54,14 +54,17 @@ Optional Metro TLS overrides from `.env.example`:
 - `METRO_SSL_VERIFY`
 - `METRO_SSL_ALLOW_INSECURE_FALLBACK`
 
-Metro TLS note:
+Metro TLS notes:
 
 - By default, the runtime keeps certificate verification enabled.
-- If the Metro gateway serves an incomplete TLS chain, the code now builds a temporary CA bundle dynamically from the live certificate's AIA issuer chain and retries securely.
+- If the Metro gateway serves an incomplete TLS chain, the code builds a temporary CA bundle dynamically from the live certificate's AIA issuer chain and retries securely.
 - No repository PEM file is required for this default path.
 - `METRO_CA_BUNDLE` is only for explicit custom trust bundles.
 - `METRO_SSL_VERIFY=false` disables verification outright and should be limited to local diagnosis.
-- `METRO_SSL_ALLOW_INSECURE_FALLBACK=true` allows one insecure retry only after secure validation and dynamic chain completion both fail. This is not recommended for deployed environments.
+- `METRO_SSL_ALLOW_INSECURE_FALLBACK=true` allows one insecure retry only after secure validation and dynamic chain completion both fail.
+
+> [!CAUTION]
+> Insecure TLS fallback is **not recommended for deployed environments**. Use it only as a temporary diagnostic measure.
 
 #### Optional Services and Observability
 
@@ -119,9 +122,12 @@ pip install -r requirements_all.txt
 
 When `app.py` starts, it also:
 
-- warms the Carris Urban support database, Metro station cache, CP GTFS plus AML station support data, and Carris Metropolitana caches
-- pre-warms the vector store for the multi-agent knowledge layer
-- loads environment values from `.env`
+- Warms the Carris Urban support database, Metro station cache, CP GTFS plus AML station support data, and Carris Metropolitana caches.
+- Pre-warms the vector store for the multi-agent knowledge layer.
+- Loads environment values from `.env`.
+
+> [!TIP]
+> First boot may take longer because of model downloads (`BAAI/bge-m3`) and cache warmup. Subsequent runs are noticeably faster.
 
 ## 🧰 Vector-Store Operations
 
@@ -137,7 +143,7 @@ python tools/vector_store.py --rebuild-all
 python tools/vector_store.py --no-gpu --max-docs 200
 ```
 
-Resumable sync behavior:
+Resumable sync behaviour:
 
 - JSON source files remain the source of truth.
 - The sync process persists only checkpoint metadata under `data/vector_db/_sync_state/`.
@@ -148,64 +154,62 @@ Resumable sync behavior:
 
 ## ✅ Validation Ladder
 
-### 1. Syntax and fast deterministic checks
+> [!TIP]
+> Run these in order, escalating only when faster checks pass.
 
-Use this layer before slower runs:
+### 1. Syntax and dataset integrity (fast)
 
 ```bash
 python scripts/syntax_check.py
-python -m pytest eval/tests/test_dataset_integrity.py eval/tests/test_benchmark_utils.py eval/tests/test_cost_accounting.py eval/tests/test_llm_judge.py eval/tests/test_validators.py -v
+python -m pytest eval/tests/ -q
 ```
 
-### 2. Runtime-facing regression subset
+`eval/tests/` currently protects deterministic dataset shape and validator helpers (`test_dataset_integrity.py`, `test_validators.py`). It is intentionally lean and not the main proof of user-facing answer quality.
 
-This subset exercises QA, prompt, and transport-facing paths:
+### 2. Prompt smoke runs (recommended for prompt/agent changes)
 
 ```bash
-python -m pytest tests/test_qa_agent.py tests/test_audit_fixes.py tests/test_response_guardrails.py tests/test_transport_parity_and_rendering.py tests/test_langsmith_tracing.py tests/test_metro_api_fallback_messaging.py -q
 python scripts/run_prompts.py --suite smoke
+python scripts/run_prompts.py --prompt "How do I get from Baixa-Chiado to Aeroporto?" --language en --quiet
 ```
 
-### 3. Strict live coverage
+For any change to agents, prompts, formatters, planner, QA, or routing logic, run at least one prompt plus one variant (different entity, language, or wording).
 
-This suite is intentionally loud about missing prerequisites:
+### 3. Transport-specific verification
 
 ```bash
-python -m pytest tests/test_tool_prompt_coverage.py --run-live -m "live and coverage" -v
+python scripts/run_transport_verification.py
 ```
 
-Strict live coverage currently validates that the following are available:
+### 4. Provider consistency
 
-- active provider credentials for the configured LLM backend
-- `METRO_CONSUMER_KEY`
-- `METRO_CONSUMER_SECRET`
-- `TAVILY_API_KEY`
-- `data/vector_db/`
-- `data_collection/webscraping/events.json`
-- `data_collection/webscraping/places.json`
-- `data/carris/carris.db`
-- `data/cp/cp_gtfs.db`
+```bash
+python scripts/run_provider_consistency.py
+```
 
-### 4. Benchmark and ablation runs
+### 5. Benchmark and ablation runs (research)
 
 ```bash
 python -m eval.run_benchmark --mode run_test
 python -m eval.run_benchmark --mode full
 python -m eval.run_benchmark --limit 5
-python -m eval.run_ablation --mode run_test
-python -m eval.run_ablation --mode full
+python -m eval.run_ablation  --mode run_test
+python -m eval.run_ablation  --mode full
 ```
 
-For the evaluation model, refer to `eval/README.md` for judge-specific details and output schema notes.
+> [!IMPORTANT]
+> Benchmark and ablation runners must be invoked in module form (`python -m eval.run_benchmark`). Direct script invocation breaks `agent` import resolution.
+
+For judge-specific details and the output schema, refer to [`eval/README.md`](../eval/README.md).
 
 ## 📦 Evaluation Artefacts and Notebook Exports
 
 | Artefact family | Default location | Notes |
 |-----------------|------------------|-------|
-| benchmark JSON outputs | `eval/results/benchmark/` | produced by `eval/run_benchmark.py` |
-| ablation JSON outputs | `eval/results/ablation/` | produced by `eval/run_ablation.py` |
-| strict live coverage JSON outputs | `eval/results/coverage/` | produced by live coverage runs |
-| statistical analysis JSON/CSV outputs | `eval/results/statistics/` | produced by `eval/statistical_analysis.py` |
+| Benchmark JSON outputs | `eval/results/benchmark/` | Produced by `eval/run_benchmark.py` |
+| Ablation JSON outputs | `eval/results/ablation/` | Produced by `eval/run_ablation.py` |
+| Statistical analysis JSON/CSV outputs | `eval/results/statistics/` | Produced by `eval/statistical_analysis.py` |
+| Figures | `eval/results/figures/` | Produced by the analysis notebook |
 
 The analysis notebook `eval/benchmark_ablation_analysis.ipynb` also exports latest CSV summaries through `flatten_benchmark_results()` and `flatten_ablation_results()`:
 
@@ -234,7 +238,7 @@ Checkpoint semantics used by the sync workflow:
 - `sync_vector_db.yml` runs when scraped JSON changed and also when `_sync_state/` already contains pending work from an earlier run.
 - Each sync iteration stages and pushes `data/vector_db/` immediately after the Python sync command returns, so completed progress is durable before the next iteration starts.
 - Workflow concurrency is serialized per ref to avoid overlapping vector DB pushes.
-- As of 2026-04, the workflow timeout is configured below the GitHub-hosted 6-hour hard job limit, while still leaving room for dependency installation and final repository operations.
+- The workflow timeout is configured below the GitHub-hosted 6-hour hard job limit, while still leaving room for dependency installation and final repository operations.
 
 ## 🚦 Performance and Batching Notes
 
@@ -243,7 +247,6 @@ Checkpoint semantics used by the sync workflow:
 - Lower `max_docs` values reduce per-run pressure when the collection changes are large.
 - The repository caches pip dependencies and Hugging Face model downloads during CI.
 - Event sync runs before places sync inside the Python orchestration so time-sensitive event updates are refreshed earlier in a constrained CI window.
-
 ## 🩺 Troubleshooting
 
 ### ChromaDB Database Locked
@@ -256,9 +259,9 @@ sqlite3.OperationalError: database is locked
 
 **Typical response:**
 
-1. stop concurrent Python processes using the vector store
-2. remove stale SQLite WAL and SHM lock files if they exist
-3. rerun the vector-store command once the database is free
+1. Stop concurrent Python processes using the vector store.
+2. Remove stale SQLite WAL and SHM lock files if they exist.
+3. Rerun the vector-store command once the database is free.
 
 ### Missing Metro Credentials
 
@@ -266,32 +269,33 @@ If `METRO_CONSUMER_KEY` and `METRO_CONSUMER_SECRET` are missing, the system can 
 
 ### Metro TLS Chain Fails Even With Valid Credentials
 
-As of 2026-04, the preferred behavior is:
+Preferred behaviour:
 
-1. normal certificate verification
-2. automatic dynamic completion of missing issuer certificates
-3. optional insecure retry only when `METRO_SSL_ALLOW_INSECURE_FALLBACK=true`
+1. Normal certificate verification.
+2. Automatic dynamic completion of missing issuer certificates.
+3. Optional insecure retry only when `METRO_SSL_ALLOW_INSECURE_FALLBACK=true`.
 
-If a deployed environment still fails after step 2, first keep `METRO_SSL_VERIFY=true` and inspect outbound network policy or TLS interception. Only use insecure fallback as a temporary diagnostic measure.
+> [!WARNING]
+> If a deployed environment still fails after step 2, keep `METRO_SSL_VERIFY=true` and inspect outbound network policy or TLS interception. Use insecure fallback only as a temporary diagnostic measure.
 
 ### Strict Live Coverage Fails Immediately
 
-If the live suite fails before any meaningful execution, inspect the environment and the local artefacts listed in `tests/conftest.py`. The suite is designed to fail loudly rather than silently skip missing prerequisites.
+The legacy strict-live-coverage suite under `tests/` was retired during the 2026-05 cleanup. Per-tool live coverage is now exercised through real prompt smoke runs (`scripts/run_prompts.py`) and the operator-specific verification scripts under `scripts/`. If a live integration appears broken, run the targeted tool module directly (for example `python tools/ipma_api.py`) and check provider credentials in `.env`.
 
 ### CI Sync Taking Too Long
 
 If vector synchronization repeatedly times out in GitHub Actions:
 
-- reduce `max_docs`
-- inspect `python tools/vector_store.py --stats --no-gpu` to see whether any collection reports pending sync work
-- rerun the workflow manually if the previous run exited with `2`
-- inspect whether the workflow reached the iteration cap before completion
-- inspect `data/vector_db/_sync_state/` only when diagnosis is required, and delete a checkpoint manually only if the source JSON changed and the saved queue is demonstrably stale or corrupted
+- Reduce `max_docs`.
+- Inspect `python tools/vector_store.py --stats --no-gpu` to see whether any collection reports pending sync work.
+- Rerun the workflow manually if the previous run exited with `2`.
+- Inspect whether the workflow reached the iteration cap before completion.
+- Inspect `data/vector_db/_sync_state/` only when diagnosis is required, and delete a checkpoint manually only if the source JSON changed and the saved queue is demonstrably stale or corrupted.
 
 ### Local Model Connectivity
 
 If using LM Studio:
 
-- ensure the local server is running
-- confirm the base URL matches `Config.LMSTUDIO_BASE_URL`
-- confirm the loaded model matches the model name expected by the runtime
+- Ensure the local server is running.
+- Confirm the base URL matches `Config.LMSTUDIO_BASE_URL`.
+- Confirm the loaded model matches the model name expected by the runtime.

@@ -1,13 +1,9 @@
-# LISBOA Evaluation Pipeline
+# 🧪 LISBOA Evaluation Pipeline
 
-This folder contains the evaluation stack used for the LISBOA thesis workflow.
-It supports benchmark runs, ablation runs, response validators, statistical
-analysis artefacts, and analysis notebooks.
+This folder contains the evaluation stack used for the LISBOA thesis workflow. It supports benchmark runs, ablation runs, response validators, statistical analysis artefacts, and analysis notebooks.
 
-The evaluation stack is not the same thing as the app quality gate. User-facing
-changes to agents, prompts, routing, QA, planners, or final response formatting
-must be validated with real LISBOA prompt runs through `scripts/run_prompts.py`
-and, where rendering matters, through Streamlit/browser inspection.
+> [!IMPORTANT]
+> The evaluation stack is **not** the same thing as the app quality gate. User-facing changes to agents, prompts, routing, QA, planners, or final response formatting must be validated with real LISBOA prompt runs through `scripts/run_prompts.py` and, where rendering matters, through Streamlit/browser inspection.
 
 ## 📍 What Lives Here
 
@@ -60,9 +56,10 @@ contains 72 entries across 6 domains:
 | `greeting` | 3 |
 | `out_of_scope` | 4 |
 
-The corpus is for realistic evaluation scenarios, not exhaustive exported-tool
-coverage. Tool counts can change; verify `tools/__init__.py` before making exact
-claims in thesis or documentation text.
+The corpus is for realistic evaluation scenarios, not exhaustive exported-tool coverage.
+
+> [!TIP]
+> Tool counts can change. Verify [`tools/__init__.py`](../tools/__init__.py).
 
 ## ☑️ Recommended Validation
 
@@ -70,20 +67,18 @@ Use this sequence after code changes:
 
 ```powershell
 python -X utf8 scripts/syntax_check.py
-python -X utf8 -m pytest tests/ eval/tests/ -q
+python -X utf8 -m pytest eval/tests/ -q
 python -X utf8 scripts/run_prompts.py --suite smoke
 ```
 
-For a focused agent or prompt change, run at least one direct prompt plus one
-variant with a different entity, language, location, or wording. For transport
-logic, also consider:
+For a focused agent or prompt change, run at least one direct prompt plus one variant with a different entity, language, location, or wording. For transport logic, also consider:
 
 ```powershell
 python -X utf8 scripts/run_transport_verification.py
-python -X utf8 -m pytest tests/test_lisbon_transport.py -q --run-live -m live
 ```
 
-The live pytest command is opt-in because it calls external providers.
+> [!NOTE]
+> The legacy `tests/` directory and its strict live-coverage suite were retired during the 2026-05 cleanup. Live integrations are now exercised through real prompt smoke runs and the operator-specific verification script.
 
 ## 📂 Outputs
 
