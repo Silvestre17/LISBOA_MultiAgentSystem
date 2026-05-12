@@ -11,6 +11,7 @@ on:
       - "requirements.txt"
       - "pyproject.toml"
       - ".streamlit/config.toml"
+      - "scripts/hf_space_entrypoint.py"
       - "agent/**"
       - "tools/**"
       - "img/**"
@@ -51,6 +52,7 @@ jobs:
 
           rm -rf hf_space_build
           mkdir -p hf_space_build/.streamlit
+          mkdir -p hf_space_build/scripts
           mkdir -p hf_space_build/data/cp
           mkdir -p hf_space_build/data/pricing
           mkdir -p hf_space_build/data
@@ -64,6 +66,7 @@ jobs:
           cp requirements.txt hf_space_build/
           cp pyproject.toml hf_space_build/
           cp LICENSE hf_space_build/
+          cp scripts/hf_space_entrypoint.py hf_space_build/scripts/
           cp .streamlit/config.toml hf_space_build/.streamlit/config.toml
 
           rsync -a agent hf_space_build/
