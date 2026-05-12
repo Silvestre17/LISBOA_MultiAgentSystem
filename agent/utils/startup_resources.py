@@ -14,11 +14,14 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 
 STARTUP_LOG_SEPARATOR = "=" * 72
+_STARTUP_PRELOAD_LOCK = threading.Lock()
+_STARTUP_PRELOAD_STATUS: Dict[str, Any] | None = None
 
 
 def _startup_log(message: str = "") -> None:
@@ -82,6 +85,35 @@ def _sqlite_table_counts(db_path: str | Path, table_names: list[str]) -> Dict[st
 def _format_counts(counts: Dict[str, int]) -> str:
     """Format SQLite/API counts for startup diagnostics."""
     return ", ".join(f"{name}={value:,}" for name, value in counts.items())
+
+
+def _localized_kb_status(kb_ok: bool, language: str) -> str:
+    """Return the KnowledgeBase status message in the requested language."""
+    if kb_ok:
+        return (
+            "Base de conhecimento pronta."
+            if language == "pt"
+            else "Knowledge base ready."
+        )
+
+    return (
+        "Não foi possível carregar a base de conhecimento."
+        if language == "pt"
+        else "Could not load the knowledge base."
+    )
+
+
+def _copy_startup_status_for_language(
+    status: Dict[str, Any],
+    language: str,
+) -> Dict[str, Any]:
+    """Return a shallow startup status copy localized for the caller."""
+    localized_status = dict(status)
+    localized_status["kb_status"] = _localized_kb_status(
+        bool(localized_status.get("kb_ok", False)),
+        language,
+    )
+    return localized_status
 
 
 def _print_startup_header() -> None:
@@ -193,7 +225,7 @@ def _print_carris_metropolitana_report(
     _startup_log(f"   📊 Loaded: {_format_counts(counts)}")
 
 
-def _invoke_startup_tool_without_tracing(tool: Any, args: Optional[Dict[str, Any]] = None) -> Any:
+def _invoke_startup_tool_without_tracing(tool: Any, args: Dict[str, Any] | None = None) -> Any:
     """Invoke a LangChain tool for startup checks without creating a LangSmith trace."""
     resolved_args = args if isinstance(args, dict) else {}
     try:
@@ -515,29 +547,42 @@ def pre_warm_transport_networks() -> Dict[str, Any]:
     }
 
 
-def run_startup_preload(language: str = "pt") -> Dict[str, Any]:
-    """Load one-time shared resources needed by the multi-agent runtime."""
-    transport_preload = pre_warm_transport_networks()
-    transport_ok = bool(transport_preload.get("ok", False))
-    transport_status = str(transport_preload.get("summary") or "")
-    kb_ok = pre_warm_vector_store()
-    kb_status = (
-        "Base de conhecimento pronta."
-        if kb_ok and language == "pt"
-        else "Knowledge base ready."
-        if kb_ok
-        else "Não foi possível carregar a base de conhecimento."
-        if language == "pt"
-        else "Could not load the knowledge base."
-    )
+def run_startup_preload(language: str = "pt", force_refresh: bool = False) -> Dict[str, Any]:
+    """Load one-time shared resources needed by the multi-agent runtime.
 
-    return {
-        "transport_ok": transport_ok,
-        "transport_status": transport_status,
-        "transport_summary": transport_preload.get("summary"),
-        "transport_details": transport_preload.get("statuses", {}),
-        "transport_network_details": transport_preload.get("details", {}),
-        "kb_ok": kb_ok,
-        "kb_status": kb_status,
-        "ok": transport_ok and kb_ok,
-    }
+    Args:
+        language: UI language code used for user-facing status messages.
+        force_refresh: Whether to bypass the successful in-process preload cache.
+
+    Returns:
+        Structured startup readiness status for the app or a container entrypoint.
+    """
+    global _STARTUP_PRELOAD_STATUS
+
+    with _STARTUP_PRELOAD_LOCK:
+        if (
+            not force_refresh
+            and _STARTUP_PRELOAD_STATUS is not None
+            and bool(_STARTUP_PRELOAD_STATUS.get("ok", False))
+        ):
+            return _copy_startup_status_for_language(_STARTUP_PRELOAD_STATUS, language)
+
+        transport_preload = pre_warm_transport_networks()
+        transport_ok = bool(transport_preload.get("ok", False))
+        transport_status = str(transport_preload.get("summary") or "")
+        kb_ok = pre_warm_vector_store()
+        startup_status = {
+            "transport_ok": transport_ok,
+            "transport_status": transport_status,
+            "transport_summary": transport_preload.get("summary"),
+            "transport_details": transport_preload.get("statuses", {}),
+            "transport_network_details": transport_preload.get("details", {}),
+            "kb_ok": kb_ok,
+            "kb_status": _localized_kb_status(kb_ok, language),
+            "ok": transport_ok and kb_ok,
+        }
+
+        if bool(startup_status.get("ok", False)):
+            _STARTUP_PRELOAD_STATUS = dict(startup_status)
+
+        return startup_status

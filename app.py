@@ -1426,7 +1426,10 @@ def _load_shared_startup_resources() -> Dict[str, Any]:
     store embeddings and generated transport databases. The conversational
     assistant remains in ``st.session_state`` because it is user/session scoped.
     """
-    return _run_startup_preload_impl(language="en")
+    return _run_startup_preload_impl(
+        language="en",
+        force_refresh=Config.STREAMLIT_RESOURCE_CACHE_TTL_SECONDS is not None,
+    )
 
 
 def _run_startup_preload(language: str = "pt") -> Dict[str, Any]:

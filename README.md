@@ -32,7 +32,7 @@
 <a id="overview"></a>
 ## 📍 Overview
 
-LISBOA is a Master's thesis project at NOVA IMS that implements an intelligent multi-agent system for personalized tourist planning and urban mobility support in the Lisbon Metropolitan Area. It combines Retrieval-Augmented Generation (RAG), real-time transport and weather APIs, municipal open data, and a Streamlit interface to deliver grounded, context-aware answers.
+LISBOA is a Master's thesis project at NOVA IMS that implements an intelligent multi-agent system for personalized tourist planning and urban mobility support in the Lisbon Metropolitan Area. It combines Retrieval-Augmented Generation (RAG), real-time transport and weather APIs, municipal open data, and a Streamlit interface to support grounded, context-aware answers.
 
 > [!IMPORTANT]
 > The supported user-facing entrypoint is `app.py`. The runtime is the multi-agent system implemented by `MultiAgentAssistant` in [`agent/graph.py`](./agent/graph.py).
