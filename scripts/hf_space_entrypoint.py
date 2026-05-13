@@ -23,6 +23,13 @@ APP_PATH = REPO_ROOT / "app.py"
 DEFAULT_STREAMLIT_PORT = 8501
 
 
+def _ensure_repo_import_path() -> None:
+    """Make repository packages importable when this script runs from /app/scripts."""
+    repo_root = str(REPO_ROOT)
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+
+
 def _env_bool(name: str, default: bool = False) -> bool:
     """Read a permissive boolean value from environment variables."""
     raw_value = os.getenv(name)
@@ -91,6 +98,7 @@ def _preload_startup_resources() -> bool:
         return True
 
     try:
+        _ensure_repo_import_path()
         from agent.utils.startup_resources import run_startup_preload
 
         language = os.getenv("LISBOA_STARTUP_PRELOAD_LANGUAGE", "pt")
