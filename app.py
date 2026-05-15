@@ -25,14 +25,33 @@ import os
 import re
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import quote
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import streamlit as st
 from dotenv import load_dotenv
 
 load_dotenv()
+
+LISBON_TIMEZONE_NAME = "Europe/Lisbon"
+
+
+def get_lisbon_timezone() -> ZoneInfo | timezone:
+    """Return Portugal Continental timezone for UI timestamps."""
+    try:
+        return ZoneInfo(LISBON_TIMEZONE_NAME)
+    except ZoneInfoNotFoundError:
+        # Last-resort hosted fallback. The tzdata package in requirements should
+        # normally make this branch unnecessary.
+        return timezone(timedelta(hours=1), name="WEST")
+
+
+def format_lisbon_now() -> str:
+    """Format the current Portugal Continental time for the sidebar footer."""
+    return datetime.now(get_lisbon_timezone()).strftime("%Y-%m-%d %H:%M")
+
 
 # WORKAROUND: Fix Streamlit file watcher crash with PyTorch
 try:
@@ -2021,7 +2040,7 @@ def build_sidebar():
         <div class="sidebar-footer">
             <div class="sidebar-footer-version">{t("footer_version")}</div>
             <div class="sidebar-footer-made">{t("footer_made")}</div>
-            <div class="sidebar-footer-made" style="margin-top:2px;">{datetime.now().strftime('%Y-%m-%d %H:%M')}</div>
+            <div class="sidebar-footer-made" style="margin-top:2px;">{format_lisbon_now()}</div>
         </div>
         """,
             unsafe_allow_html=True,

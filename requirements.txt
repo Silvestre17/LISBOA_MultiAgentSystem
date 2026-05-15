@@ -90,3 +90,4 @@ pydantic==2.12.4              # Explicitly imported by eval/llm_judge.py
 # Utilities
 # -----------------------------------------------------------------------------
 python-dotenv==1.2.2          # Environment variable management
+tzdata>=2024.2                # IANA timezones for Europe/Lisbon in hosted runtimes
