@@ -49,9 +49,11 @@ logger = logging.getLogger(__name__)
 try:
     from tools.utils import fetch_json_with_retry
     from tools.runtime_paths import resolve_runtime_data_dir, seed_runtime_data_dir
+    from tools.transport_release_assets import ensure_runtime_data_from_release
 except ImportError:
     from utils import fetch_json_with_retry
     from runtime_paths import resolve_runtime_data_dir, seed_runtime_data_dir
+    from transport_release_assets import ensure_runtime_data_from_release
 
 # ==========================================================================
 # Constants and Configuration
@@ -71,6 +73,8 @@ seed_runtime_data_dir(SOURCE_DATA_DIR, DATA_DIR, ("cp_gtfs.db", "gtfs.zip", "met
 DB_PATH = DATA_DIR / "cp_gtfs.db"
 METADATA_PATH = DATA_DIR / "metadata.json"
 GTFS_ZIP_PATH = DATA_DIR / "gtfs.zip"
+CP_RUNTIME_RELEASE_ENV_PREFIX = "CP_RUNTIME_RELEASE"
+CP_RUNTIME_RELEASE_ASSET = "cp_runtime.zip"
 
 # Cache settings
 CACHE_EXPIRATION_HOURS = 1  # Real-time cache
@@ -345,6 +349,36 @@ class CPGTFSManager:
         with open(self.metadata_path, 'w', encoding='utf-8') as f:
             json.dump(metadata, f, indent=2, default=str)
 
+    def _database_has_stops(self) -> bool:
+        """Return whether the local CP SQLite database has stop rows."""
+        if not self.db_path.exists():
+            return False
+
+        try:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                count = conn.execute("SELECT COUNT(*) FROM stops").fetchone()[0]
+            return int(count or 0) > 0
+        except sqlite3.Error as exc:
+            logger.warning(f"CP database validation failed: {exc}")
+            return False
+
+    def restore_database_from_release(self) -> bool:
+        """Restore CP runtime files from the last-known-good release asset."""
+        status = ensure_runtime_data_from_release(
+            operator_name="CP",
+            target_dir=self.data_dir,
+            required_files=("cp_gtfs.db", "metadata.json"),
+            env_prefix=CP_RUNTIME_RELEASE_ENV_PREFIX,
+            default_asset=CP_RUNTIME_RELEASE_ASSET,
+        )
+
+        if status.ok and status.restored:
+            logger.warning(status.message)
+        elif not status.ok:
+            logger.warning(status.message)
+
+        return status.ok and self._database_has_stops()
+
     def check_for_updates(self) -> bool:
         """
         Checks if GTFS data needs to be refreshed using HTTP headers.
@@ -461,6 +495,7 @@ class CPGTFSManager:
 
             # Store server headers in metadata for future update checks
             metadata = self._load_metadata()
+            metadata.pop("_runtime_release_restore", None)
             metadata['last_download'] = datetime.now().isoformat()
             if server_etag:
                 metadata['etag'] = server_etag
@@ -912,6 +947,10 @@ class CPGTFSManager:
         # If download failed but database exists, use existing
         if self.db_path.exists():
             logger.warning("Download failed, using existing database")
+            return True
+
+        if self.restore_database_from_release():
+            logger.warning("Using CP last-known-good release backup due to download failure")
             return True
 
         return False

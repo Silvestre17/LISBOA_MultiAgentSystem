@@ -1,0 +1,132 @@
+# ==========================================================================
+# Master Thesis - Transport Runtime Data Sync Workflow
+#   - André Filipe Gomes Silvestre, 20240502
+#
+# Publishes replaceable last-known-good runtime assets for transport SQLite
+# databases. These assets are used only as startup fallback when live GTFS
+# downloads fail and the hosted runtime starts without local data.
+#
+# Release strategy:
+#   - Release tag: transport-data-latest
+#   - Assets are overwritten with --clobber, so the release keeps a fixed
+#     asset count instead of growing with every daily refresh.
+#   - Current assets: carris_runtime.zip, cp_runtime.zip, manifest JSON.
+# ==========================================================================
+
+name: Sync Transport Runtime Data
+
+concurrency:
+  group: sync-transport-runtime-data
+  cancel-in-progress: false
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/sync_transport_runtime_data.yml"
+      - "scripts/publish_transport_runtime_data.py"
+      - "tools/carris_api.py"
+      - "tools/cp_api.py"
+      - "tools/runtime_paths.py"
+      - "tools/transport_release_assets.py"
+
+  schedule:
+    # GitHub cron runs in UTC. This is 03:25 in Portugal winter time and
+    # 04:25 in Portugal summer time.
+    - cron: "25 3 * * *"
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PYTHON_VERSION: "3.11"
+  TRANSPORT_DATA_RELEASE_TAG: transport-data-latest
+  TRANSPORT_ARTIFACT_DIR: transport_runtime_artifacts
+  CARRIS_RUNTIME_RELEASE_ENABLED: "false"
+  CP_RUNTIME_RELEASE_ENABLED: "false"
+  CARRIS_RUNTIME_RELEASE_ASSET: carris_runtime.zip
+  CP_RUNTIME_RELEASE_ASSET: cp_runtime.zip
+  TRANSPORT_DATA_RELEASE_MAX_BYTES: "1800000000"
+
+jobs:
+  sync-transport-runtime-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install lightweight transport dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install requests python-dotenv langchain-core protobuf gtfs-realtime-bindings
+
+      - name: Build transport runtime assets
+        run: |
+          set -euo pipefail
+          export LISBOA_RUNTIME_DATA_DIR="$RUNNER_TEMP/lisboa_runtime"
+          python scripts/publish_transport_runtime_data.py --artifact-dir "$TRANSPORT_ARTIFACT_DIR"
+          ls -lh "$TRANSPORT_ARTIFACT_DIR"
+
+      - name: Publish transport runtime release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          EXISTING_ASSETS=""
+          if ! gh release view "$TRANSPORT_DATA_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TRANSPORT_DATA_RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Latest LISBOA Transport Runtime Data" \
+              --notes "Automatically updated CP and Carris Urban runtime fallback assets for LISBOA hosted deployments." \
+              --latest=false
+          else
+            EXISTING_ASSETS=$(gh release view "$TRANSPORT_DATA_RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json assets \
+              --jq '.assets[].name')
+          fi
+
+          mapfile -t ASSETS < <(
+            find "$TRANSPORT_ARTIFACT_DIR" -maxdepth 1 -type f \
+              \( -name '*_runtime.zip' -o -name 'transport_runtime_manifest.json' \) \
+              | sort
+          )
+
+          for expected_asset in "$CARRIS_RUNTIME_RELEASE_ASSET" "$CP_RUNTIME_RELEASE_ASSET"; do
+            if [ -f "$TRANSPORT_ARTIFACT_DIR/$expected_asset" ]; then
+              continue
+            fi
+
+            if printf '%s\n' "$EXISTING_ASSETS" | grep -Fxq "$expected_asset"; then
+              echo "⚠️ $expected_asset was not regenerated; keeping previous release asset."
+              continue
+            fi
+
+            echo "❌ $expected_asset is missing and no previous release asset exists."
+            exit 1
+          done
+
+          if [ "${#ASSETS[@]}" -eq 0 ]; then
+            echo "No transport runtime release assets were generated."
+            exit 1
+          fi
+
+          gh release upload "$TRANSPORT_DATA_RELEASE_TAG" \
+            "${ASSETS[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+          echo "Published ${#ASSETS[@]} transport runtime asset(s) to $TRANSPORT_DATA_RELEASE_TAG"

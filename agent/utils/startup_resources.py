@@ -87,6 +87,30 @@ def _format_counts(counts: Dict[str, int]) -> str:
     return ", ".join(f"{name}={value:,}" for name, value in counts.items())
 
 
+def _metadata_restore_changed(before: Dict[str, Any], after: Dict[str, Any]) -> bool:
+    """Return whether metadata shows a new runtime release restore."""
+    before_restore = before.get("_runtime_release_restore") if before else None
+    after_restore = after.get("_runtime_release_restore") if after else None
+    return bool(after_restore and after_restore != before_restore)
+
+
+def _format_runtime_restore(metadata: Dict[str, Any]) -> str | None:
+    """Format release-restore metadata for startup diagnostics."""
+    restore = metadata.get("_runtime_release_restore")
+    if not isinstance(restore, dict):
+        return None
+
+    asset = restore.get("asset", "unknown")
+    tag = restore.get("tag", "unknown")
+    restored_at = restore.get("restored_at", "unknown")
+    size_bytes = restore.get("size_bytes")
+    size_text = ""
+    if isinstance(size_bytes, int) and size_bytes > 0:
+        size_text = f", size={size_bytes / (1024 * 1024):.1f} MB"
+
+    return f"asset={asset}, tag={tag}, restored_at={restored_at}{size_text}"
+
+
 def _localized_kb_status(kb_ok: bool, language: str) -> str:
     """Return the KnowledgeBase status message in the requested language."""
     if kb_ok:
@@ -150,6 +174,9 @@ def _print_carris_urban_report(
             f"updated_at={metadata.get('updated_at', 'unknown')}, "
             f"schema={metadata.get('schema_version', 'unknown')}"
         )
+        restore_snapshot = _format_runtime_restore(metadata)
+        if restore_snapshot:
+            _startup_log(f"   🧯 Release backup: {restore_snapshot}")
     _startup_log(f"   📊 Tables: {_format_counts(counts)}")
 
 
@@ -185,6 +212,9 @@ def _print_cp_report(
             f"db_created={metadata.get('db_created', 'unknown')}, "
             f"last_modified={metadata.get('last_modified', 'unknown')}"
         )
+        restore_snapshot = _format_runtime_restore(metadata)
+        if restore_snapshot:
+            _startup_log(f"   🧯 Release backup: {restore_snapshot}")
     _startup_log(f"   📊 Tables: {_format_counts(counts)}")
     _startup_log(f"   🚉 AML station cache: {aml_station_count:,} stations")
 
@@ -292,6 +322,9 @@ def _check_carris_urban_readiness() -> Dict[str, Any]:
             else "Carris Urban GTFS database is not populated"
         )
         action = (
+            "restored last-known-good GitHub Release backup"
+            if _metadata_restore_changed(metadata_before, metadata_after)
+            else
             "downloaded GTFS and rebuilt SQLite"
             if db_mtime_before != db_mtime_after or metadata_before != metadata_after
             else "remote GTFS freshness check completed; local SQLite reused"
@@ -403,6 +436,9 @@ def _check_cp_readiness() -> Dict[str, Any]:
             else "CP GTFS SQLite database is not populated"
         )
         action = (
+            "restored last-known-good GitHub Release backup"
+            if _metadata_restore_changed(metadata_before, metadata_after)
+            else
             "downloaded GTFS and rebuilt SQLite"
             if (
                 db_mtime_before != db_mtime_after

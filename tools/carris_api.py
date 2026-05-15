@@ -64,9 +64,11 @@ except ImportError:
 try:
     from tools.location_resolver import build_location_ambiguity_preamble
     from tools.runtime_paths import resolve_runtime_data_dir, seed_runtime_data_dir
+    from tools.transport_release_assets import ensure_runtime_data_from_release
 except ImportError:
     from location_resolver import build_location_ambiguity_preamble
     from runtime_paths import resolve_runtime_data_dir, seed_runtime_data_dir
+    from transport_release_assets import ensure_runtime_data_from_release
 
 # ==========================================================================
 # Configuration
@@ -87,6 +89,8 @@ seed_runtime_data_dir(SOURCE_CARRIS_DATA_DIR, _CARRIS_RUNTIME_DATA_DIR, ("carris
 CARRIS_DATA_DIR = str(_CARRIS_RUNTIME_DATA_DIR)
 CARRIS_DB_PATH = str(_CARRIS_RUNTIME_DATA_DIR / "carris.db")
 CARRIS_METADATA_PATH = str(_CARRIS_RUNTIME_DATA_DIR / "metadata.json")
+CARRIS_RUNTIME_RELEASE_ENV_PREFIX = "CARRIS_RUNTIME_RELEASE"
+CARRIS_RUNTIME_RELEASE_ASSET = "carris_runtime.zip"
 
 # Request timeout
 REQUEST_TIMEOUT = 120  # GTFS download can take time
@@ -432,6 +436,36 @@ class CarrisGTFSManager:
                 json.dump(data, f, indent=2)
         except Exception as e:
             logger.warning(f"Could not save metadata: {e}")
+
+    def _database_has_stops(self) -> bool:
+        """Return whether the local Carris SQLite database has stop rows."""
+        if not os.path.exists(self.db_path):
+            return False
+
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                count = conn.execute("SELECT COUNT(*) FROM stops").fetchone()[0]
+            return int(count or 0) > 0
+        except sqlite3.Error as exc:
+            logger.warning(f"Carris database validation failed: {exc}")
+            return False
+
+    def restore_database_from_release(self) -> bool:
+        """Restore Carris runtime files from the last-known-good release asset."""
+        status = ensure_runtime_data_from_release(
+            operator_name="Carris Urban",
+            target_dir=Path(self.data_dir),
+            required_files=("carris.db", "metadata.json"),
+            env_prefix=CARRIS_RUNTIME_RELEASE_ENV_PREFIX,
+            default_asset=CARRIS_RUNTIME_RELEASE_ASSET,
+        )
+
+        if status.ok and status.restored:
+            logger.warning(status.message)
+        elif not status.ok:
+            logger.warning(status.message)
+
+        return status.ok and self._database_has_stops()
 
     def check_for_updates(self) -> Tuple[bool, Optional[str]]:
         """
@@ -787,6 +821,9 @@ class CarrisGTFSManager:
             else:
                 if os.path.exists(self.db_path):
                     logger.warning("Using stale database due to download failure")
+                    return True
+                if self.restore_database_from_release():
+                    logger.warning("Using Carris last-known-good release backup due to download failure")
                     return True
                 return False
 

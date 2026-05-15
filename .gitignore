@@ -2,6 +2,7 @@
 data/carris/
 data/vector_db/
 data/cp/
+transport_runtime_artifacts/
 
 # Specific Files
 .github/copilot-instructions.md
