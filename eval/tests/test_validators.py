@@ -12,14 +12,11 @@
 #     -k metro or -k heuristics   focus on one validator family
 #     -x                          stop on first failure
 #     --tb=short                  shorter tracebacks
-#   Notes:
-#     - Prefer relative paths in this workspace. Absolute pytest paths may be
-#       treated as glob patterns on Windows because the folder name includes
-#       `[` and `]`.
 # ==========================================================================
 
 import os
 import sys
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
@@ -34,6 +31,7 @@ from eval.validators.response_heuristics import (
     extract_response_contract,
     run_all_heuristics,
 )
+from agent.utils.response_formatter import canonicalize_planner_source_line, final_post_qa_guard
 from eval.validators.transport_validator import (
     validate_metro_route,
     validate_response_route_facts,
@@ -41,6 +39,22 @@ from eval.validators.transport_validator import (
     validate_station_on_line,
     validate_transfer_point,
 )
+from agent.agents.qa_agent import QualityAssuranceAgent
+from agent.agents.planner_agent import (
+    _build_card_based_renderer_fallback,
+    _planner_response_has_markdown_contract_defects,
+    _planner_response_has_transport_quality_defects,
+    _planner_response_has_unrequested_sequence_stops,
+    _planner_transport_bullet_is_actionable,
+    _planner_response_missing_requested_movement,
+    _planner_response_missing_requested_stops,
+    _planner_response_violates_requested_start,
+)
+from agent.agents.supervisor import SupervisorAgent
+from agent.agents.transport_agent import _extract_route_endpoints, _parse_route_mode_preferences
+from agent.graph import MultiAgentAssistant
+from agent.planning.renderer import _shared_walkable_zone
+from tools import location_resolver
 
 # ==========================================================================
 # TransportValidator Tests
@@ -251,6 +265,735 @@ class TestCheckLanguageCompliance:
         assert r["compliant"]
 
 
+class TestQAFinalResponseAudit:
+    """Deterministic QA checks that run after final response synthesis."""
+
+    def test_requested_bus_mode_flags_metro_only_answer(self):
+        """A bus request must not be accepted when the final answer is Metro-only."""
+        agent = QualityAssuranceAgent.__new__(QualityAssuranceAgent)
+        result = agent.assess_final_response(
+            user_query="Como é que vou de autocarro entre Avenidas Novas e Campo de Ourique?",
+            final_response=(
+                "### 🚇 **Mobilidade em Lisboa**\n\n"
+                "✅ **Resposta direta:** segue até à estação Rato.\n\n"
+                "---\n\n"
+                "🚇 **Destino de metro:** Rato.\n\n"
+                "📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Atualizado:** 10:00"
+            ),
+            language="pt",
+        )
+
+        assert not result["complete"]
+        assert result["needs_repair"]
+        assert any("autocarro" in item for item in result["missing_data"])
+
+    def test_requested_metro_mode_flags_cp_only_answer(self):
+        """A Metro request must not be accepted when the final answer is CP-only."""
+        agent = QualityAssuranceAgent.__new__(QualityAssuranceAgent)
+        result = agent.assess_final_response(
+            user_query="Quero ir de metro entre o Rossio e o Cais do Sodré",
+            final_response=(
+                "### 🚆 **Rossio → Cais do Sodré**\n\n"
+                "✅ **Resposta direta:** não consegui confirmar uma ligação direta de CP suburbano.\n\n"
+                "📌 **Fonte:** [*CP*](https://www.cp.pt) | **Atualizado:** 10:00"
+            ),
+            language="pt",
+        )
+
+        assert not result["complete"]
+        assert result["needs_repair"]
+        assert any("metro" in item for item in result["missing_data"])
+
+    def test_pin_section_heading_is_not_treated_as_address_field(self):
+        """A decorative/semantic pin heading must not require a Google Maps link."""
+        agent = QualityAssuranceAgent.__new__(QualityAssuranceAgent)
+        result = agent.assess_final_response(
+            user_query="Lista atrações imperdíveis em Lisboa",
+            final_response=(
+                "### 📍 **Locais e atrações**\n\n"
+                "✅ **Resposta direta:** aqui estão opções úteis para uma primeira visita.\n\n"
+                "---\n\n"
+                "- **🏛️ Sé de Lisboa**\n"
+                "    - 📝 **Descrição:** Catedral histórica no centro de Lisboa.\n\n"
+                "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) | **Atualizado:** 10:00"
+            ),
+            language="pt",
+        )
+
+        critical = " ".join(result.get("critical_issues", []))
+        assert "Address fields must use Google Maps links" not in critical
+
+    def test_final_guard_repairs_route_bullet_missing_opening_bold(self):
+        """Planner movement bullets must not render with dangling ``:**`` markers."""
+        raw = (
+            "### 🚇 **Como te deslocas**\n\n"
+            "- Rua Alfa 10 → Museu Beta:** opções Carris 123, 456, 789; confirma a partida.**\n"
+            "- Museu Beta → Jardim Gama:** confirma a ligação no momento.**\n\n"
+            "📌 **Fonte:** [*Carris*](https://www.carris.pt) | **Atualizado:** 10:00"
+        )
+
+        repaired = final_post_qa_guard(raw, language="pt")
+
+        assert "- **Rua Alfa 10 → Museu Beta:** opções Carris 123, 456, 789; confirma a partida." in repaired
+        assert "- **Museu Beta → Jardim Gama:** confirma a ligação no momento." in repaired
+        assert "- Rua Alfa 10" not in repaired
+        assert "partida.**" not in repaired
+
+    def test_final_guard_repairs_plain_transport_metric_bullets(self):
+        """Transport metric lines from final repair must be render-safe."""
+        raw = (
+            "### 🚇 **Como te deslocas**\n"
+            "- 🚌 **Rua Alfa 10 → Museu Beta:Carris 123** — direção **Terminal Beta**\n"
+            "- Partida indicada:Paragem Alfa**\n"
+            "- Tempo de viagem estimado:~31 min**\n"
+            "- Próximos veículos indicados: 00:43 | 01:00 | 05:45**\n\n"
+            "📌 **Fonte:** [*Carris*](https://www.carris.pt) | **Atualizado:** 10:00"
+        )
+
+        repaired = final_post_qa_guard(raw, language="pt")
+
+        assert "- 🚌 **Rua Alfa 10 → Museu Beta:** Carris 123 — direção **Terminal Beta**" in repaired
+        assert "- **Partida indicada:** Paragem Alfa" in repaired
+        assert "- **Tempo de viagem estimado:** ~31 min" in repaired
+        assert "- **Próximos veículos indicados:** 00:43 | 01:00 | 05:45" in repaired
+        assert ":Carris" not in repaired
+        assert "Paragem Alfa**" not in repaired
+
+    def test_final_guard_repairs_plain_planner_movement_labels(self):
+        """Final repair labels such as recommendation/note must not keep dangling bold."""
+        raw = (
+            "### 🚇 **Como te deslocas**\n"
+            "- Deslocação recomendada:CP Comboios**, com ligação via **Paragem Alfa**.\n"
+            "- Nota:** confirma a partida antes de sair.\n\n"
+            "📌 **Fonte:** [*CP*](https://www.cp.pt) | **Atualizado:** 10:00"
+        )
+
+        repaired = final_post_qa_guard(raw, language="pt")
+
+        assert "- **Deslocação recomendada:** CP Comboios, com ligação via Paragem Alfa." in repaired
+        assert "- **Nota:** confirma a partida antes de sair." in repaired
+        assert "CP Comboios**" not in repaired
+        assert "- Nota:**" not in repaired
+
+    def test_final_guard_collapses_duplicate_pipe_titles(self):
+        """Planner item titles must not show the same place twice around a pipe."""
+        raw = (
+            "### 📍 **Roteiro sugerido**\n\n"
+            "- **🏷️ Sé de Lisboa | Sé de Lisboa**\n"
+            "- **🏷️ Granja Velha | Restaurante**\n"
+            "  - 📍 **Morada:** [Largo da Sé, Lisboa](https://www.google.com/maps/search/?api=1&query=Largo+da+S%C3%A9%2C+Lisboa)\n\n"
+            "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) | **Atualizado:** 10:00"
+        )
+
+        repaired = final_post_qa_guard(raw, language="pt")
+
+        assert "- **🏷️ Sé de Lisboa**" in repaired
+        assert "- **🏷️ Granja Velha**" in repaired
+        assert "Sé de Lisboa | Sé de Lisboa" not in repaired
+        assert "Granja Velha | Restaurante" not in repaired
+        assert "[*VisitLisboa Locais*]" in repaired
+
+    def test_final_guard_localizes_transport_no_result_fragments(self):
+        """PT transport answers must not keep English no-result fragments."""
+        raw = (
+            "### 🚌 **Opções de autocarro**\n\n"
+            "#### 🚌 Carris Urban\n\n"
+            "❌ **No Carris Metropolitana stops found near Campo de Ourique.**\n\n"
+            "💡 **Tip:** try a more specific name, address, stop, or GPS point.\n\n"
+            "📌 **Fonte:** [*Carris Metropolitana*](https://www.carrismetropolitana.pt) | **Atualizado:** 10:00"
+        )
+
+        repaired = final_post_qa_guard(raw, language="pt")
+
+        assert "Não foram encontradas paragens da Carris Metropolitana perto de Campo de Ourique." in repaired
+        assert "Dica" in repaired
+        assert "Carris Urbana" in repaired
+        assert "No Carris Metropolitana" not in repaired
+        assert "Carris Urban\n" not in repaired
+        assert "Carris Urban**" not in repaired
+        assert "try a more specific" not in repaired
+
+    def test_final_guard_adds_missing_material_carris_source(self):
+        """Planner transport legs that use Carris must cite Carris in the final footer."""
+        raw = (
+            "### 🚇 **Como te deslocas**\n\n"
+            "- 🚌 **Rua Alfa 10 → Museu Beta:** opções Carris: Carris 123, Carris 456.\n\n"
+            "📌 **Fonte:** [*IPMA*](https://www.ipma.pt) | [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) | **Atualizado:** 10:00"
+        )
+
+        repaired = final_post_qa_guard(raw, language="pt")
+
+        assert "[*Carris*](https://www.carris.pt)" in repaired
+        assert "📌 **Fonte:**" in repaired
+
+    def test_planner_source_canonicalizer_drops_generic_carris_note_without_carris_leg(self):
+        """A generic Carris confirmation note alone must not keep a Carris source."""
+        raw = (
+            "### 📍 **Suggested route**\n\n"
+            "- **🏷️ 09:30 · Historic stop: Rua Alfa 10**\n"
+            "  - 📍 **Address:** Rua Alfa 10, Lisboa\n\n"
+            "### 🚇 **How to move**\n"
+            "- 🚶 **Rua Alfa 10 → Museu Beta:** short walk in the historic center.\n\n"
+            "### 💡 **Tips**\n"
+            "- Keep 20-30 minutes of buffer between stops.\n"
+            "- Carris line numbers and schedules should be confirmed at carris.pt, because GTFS data may miss very recent changes.\n\n"
+            "📌 **Source:** [*Carris*](https://www.carris.pt) | [*VisitLisboa Places*](https://www.visitlisboa.com/en/places) | **Updated:** 10:00"
+        )
+
+        repaired = canonicalize_planner_source_line(raw, language="en")
+
+        assert "Carris line numbers" not in repaired
+        assert "[*Carris*](https://www.carris.pt)" not in repaired
+        assert "[*VisitLisboa Places*](https://www.visitlisboa.com/en/places)" in repaired
+
+    def test_final_audit_flags_missing_material_carris_source(self):
+        """QA must reject a final answer that uses Carris data without Carris attribution."""
+        agent = QualityAssuranceAgent.__new__(QualityAssuranceAgent)
+        result = agent.assess_final_response(
+            user_query="Cria um roteiro com deslocações por autocarro",
+            final_response=(
+                "### 🚇 **Como te deslocas**\n\n"
+                "- 🚌 **Rua Alfa 10 → Museu Beta:** opções Carris: Carris 123, Carris 456.\n\n"
+                "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) | **Atualizado:** 10:00"
+            ),
+            language="pt",
+        )
+
+        assert not result["complete"]
+        assert result["needs_repair"]
+        assert any("Carris" in issue for issue in result.get("critical_issues", []))
+
+    def test_final_guard_localizes_link_labels_in_portuguese(self):
+        """PT final answers must not keep English card-link labels."""
+        raw = (
+            "### 🏛️ **Torre de Belém**\n\n"
+            "- 🎟️ **Bilhetes:** [Buy tickets](https://bilheteira.museusemonumentos.pt/)\n"
+            "- 🌐 **Website:** [Official website](https://example.org)\n\n"
+            "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) | **Atualizado:** 10:00"
+        )
+
+        repaired = final_post_qa_guard(raw, language="pt")
+
+        assert "[Comprar bilhetes](" in repaired
+        assert "[Página oficial](" in repaired
+        assert "[Buy tickets](" not in repaired
+        assert "[Official website](" not in repaired
+
+    def test_final_audit_flags_english_link_labels_in_portuguese(self):
+        """QA must catch language drift inside Markdown link text, not only bold labels."""
+        agent = QualityAssuranceAgent.__new__(QualityAssuranceAgent)
+        result = agent.assess_final_response(
+            user_query="Mostra-me detalhes da Torre de Belém",
+            final_response=(
+                "### 🏛️ **Torre de Belém**\n\n"
+                "- 🎟️ **Bilhetes:** [Buy tickets](https://bilheteira.museusemonumentos.pt/)\n\n"
+                "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) | **Atualizado:** 10:00"
+            ),
+            language="pt",
+        )
+
+        assert not result["complete"]
+        assert any("English link labels" in issue for issue in result.get("critical_issues", []))
+
+    def test_planner_transport_quality_flags_vague_confirm_later_text(self):
+        """Planner quality must reject vague transport advice when transport context exists."""
+        response = (
+            "### 🚇 **Como te deslocas**\n"
+            "- 🚇 **Rua Alfa 10 → Museu Beta:** usa transporte público; a ligação exata deve ser confirmada perto da hora.\n"
+        )
+        transport_context = (
+            "### 🚇 **Ligações entre paragens do roteiro**\n"
+            "- 🚌 **Rua Alfa 10 → Museu Beta:** opções Carris: Carris 123, Carris 456."
+        )
+
+        assert _planner_response_has_transport_quality_defects(
+            response,
+            "Cria um roteiro e inclui como me desloco",
+            transport_context,
+        )
+
+    def test_final_guard_removes_invalid_carris_metropolitana_line_mix(self):
+        """Carris Urban-style line IDs must not be presented as Carris Metropolitana."""
+        raw = (
+            "### 🚇 **Como te deslocas**\n\n"
+            "- 🚌 **Alternativa:** também surgem opções de **Carris Metropolitana** nas linhas **729** e **79B**.\n"
+            "- 🚌 **Rua Alfa 10 → Museu Beta:** usa **Carris 123**.\n\n"
+            "📌 **Fonte:** [*Carris Metropolitana*](https://www.carrismetropolitana.pt) | [*Carris*](https://www.carris.pt) | **Atualizado:** 10:00"
+        )
+
+        repaired = final_post_qa_guard(raw, language="pt")
+
+        assert "Carris Metropolitana" not in repaired
+        assert "729" not in repaired
+        assert "79B" not in repaired
+        assert "[*Carris*](https://www.carris.pt)" in repaired
+        assert "carrismetropolitana.pt" not in repaired
+
+    def test_final_audit_flags_invalid_carris_metropolitana_line_mix(self):
+        """QA must catch operator-boundary leaks in the final response."""
+        agent = QualityAssuranceAgent.__new__(QualityAssuranceAgent)
+        result = agent.assess_final_response(
+            user_query="Inclui alternativas de autocarro para Belém",
+            final_response=(
+                "### 🚇 **Como te deslocas**\n\n"
+                "- 🚌 **Alternativa:** também surgem opções de **Carris Metropolitana** nas linhas **729** e **79B**.\n\n"
+                "📌 **Fonte:** [*Carris Metropolitana*](https://www.carrismetropolitana.pt) | **Atualizado:** 10:00"
+            ),
+            language="pt",
+        )
+
+        assert not result["complete"]
+        assert any("Carris Metropolitana line identifiers" in issue for issue in result.get("critical_issues", []))
+
+    def test_final_audit_flags_english_running_prose_in_portuguese(self):
+        """QA must catch prose-level language drift, not only labels."""
+        agent = QualityAssuranceAgent.__new__(QualityAssuranceAgent)
+        result = agent.assess_final_response(
+            user_query="Cria um roteiro em Lisboa",
+            final_response=(
+                "### 📅 **Plano para Belém**\n\n"
+                "- **🏷️ Lisbon Cathedral**\n"
+                "  - 📝 **Descrição:** Start at Lisbon Cathedral and walk downhill toward Baixa.\n\n"
+                "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) | **Atualizado:** 10:00"
+            ),
+            language="pt",
+        )
+
+        assert not result["complete"]
+        assert any("English running prose" in issue for issue in result.get("critical_issues", []))
+
+    def test_final_audit_flags_english_transport_no_result_in_portuguese(self):
+        """QA must catch English transport no-result prose in Portuguese answers."""
+        agent = QualityAssuranceAgent.__new__(QualityAssuranceAgent)
+        result = agent.assess_final_response(
+            user_query="Como vou de autocarro entre Avenidas Novas e Campo de Ourique?",
+            final_response=(
+                "### 🚌 **Opções de autocarro**\n\n"
+                "**🚌 Carris Urban**\n\n"
+                "❌ **No Carris Metropolitana stops found near Campo de Ourique.**\n\n"
+                "💡 **Tip:** try a more specific name, address, stop, or GPS point.\n\n"
+                "📌 **Fonte:** [*Carris Metropolitana*](https://www.carrismetropolitana.pt) | **Atualizado:** 10:00"
+            ),
+            language="pt",
+        )
+
+        assert not result["complete"]
+        assert any("English running prose" in issue for issue in result.get("critical_issues", []))
+
+    def test_planner_flags_missing_explicit_requested_stop(self):
+        """Planner quality must reject plans that omit a user-requested anchor."""
+        evidence = (
+            "- **🏛️ Sé de Lisboa**\n"
+            "    - 📍 **Morada:** Largo da Sé, Lisboa\n"
+            "- **🏛️ Torre de Belém**\n"
+            "    - 📍 **Morada:** Av. Brasília, Lisboa\n"
+        )
+        response = (
+            "### 📅 **Plano para Belém**\n\n"
+            "### 📍 **Roteiro sugerido**\n"
+            "- **🏛️ Torre de Belém**\n"
+        )
+
+        assert _planner_response_missing_requested_stops(
+            response,
+            "Cria um roteiro que comece na Sé de Lisboa e termine na Torre de Belém",
+            evidence,
+        )
+
+    def test_planner_flags_requested_start_not_first(self):
+        """Planner quality must reject plans ordered against an explicit start."""
+        response = (
+            "### 📍 **Roteiro sugerido**\n"
+            "- **🏛️ Torre de Belém**\n"
+            "- **🏛️ Sé de Lisboa**\n"
+        )
+
+        assert _planner_response_violates_requested_start(
+            response,
+            "Cria um roteiro que comece na Sé de Lisboa e termine na Torre de Belém",
+        )
+
+    def test_planner_flags_missing_arbitrary_requested_stop(self):
+        """Planner quality must generalize requested-stop checks beyond curated anchors."""
+        evidence = (
+            "- **📍 Rua Alfa 10**\n"
+            "    - 📍 **Morada:** Rua Alfa 10, Lisboa\n"
+            "- **🏛️ Museu Beta**\n"
+            "    - 📍 **Morada:** Avenida Brasília, Lisboa\n"
+        )
+        response = (
+            "### 📍 **Roteiro sugerido**\n"
+            "- **🏛️ Museu Beta**\n"
+        )
+
+        assert _planner_response_missing_requested_stops(
+            response,
+            "Cria um roteiro que comece na Rua Alfa 10 e termine no Museu Beta",
+            evidence,
+        )
+
+    def test_planner_flags_arbitrary_requested_start_not_first(self):
+        """Planner ordering checks must use the requested place text, not a whitelist."""
+        response = (
+            "### 📍 **Roteiro sugerido**\n"
+            "- **🏛️ Museu Beta**\n"
+            "- **📍 Rua Alfa 10**\n"
+        )
+
+        assert _planner_response_violates_requested_start(
+            response,
+            "Cria um roteiro que comece na Rua Alfa 10 e termine no Museu Beta",
+        )
+
+    def test_planner_card_fallback_preserves_arbitrary_requested_sequence(self):
+        """Fallback planning must not replace an explicit X-to-Y request with unrelated cards."""
+        cards = [
+            {
+                "name": "Museu Beta",
+                "category": "Museus",
+                "address": "Avenida Beta 20, Lisboa",
+                "description": "Espaco cultural usado como evidencia deterministica no teste.",
+            },
+            {
+                "name": "Biblioteca Gama",
+                "category": "Bibliotecas",
+                "address": "Rua Gama 3, Lisboa",
+                "description": "Local nao pedido que nao deve preencher um roteiro X-Y explicito.",
+            },
+        ]
+
+        rendered = _build_card_based_renderer_fallback(
+            user_message="Cria um roteiro curto que comece na Rua Alfa 10 e termine no Museu Beta; inclui como me desloco.",
+            language="pt",
+            cards=cards,
+            weather_data="",
+            transport_data="",
+            places_data="- **Museu Beta**\n    - **Morada:** Avenida Beta 20, Lisboa",
+            events_data="",
+            qa_disclaimers=None,
+        )
+
+        assert "Rua Alfa 10" in rendered
+        assert "Museu Beta" in rendered
+        assert "Biblioteca Gama" not in rendered
+        assert rendered.index("Rua Alfa 10") < rendered.index("Museu Beta")
+        assert "Rua Alfa 10 → Museu Beta" in rendered
+
+    def test_planner_flags_missing_arbitrary_requested_movement_section(self):
+        """Movement checks must generalize beyond central-Lisbon to Belem examples."""
+        response = (
+            "### **Roteiro sugerido**\n"
+            "- **Rua Alfa 10**\n"
+            "- **Museu Beta**\n"
+        )
+
+        assert _planner_response_missing_requested_movement(
+            response,
+            "Cria um roteiro curto que comece na Rua Alfa 10 e termine no Museu Beta; inclui como me desloco.",
+            "",
+        )
+
+    def test_planner_flags_wrong_movement_leg_for_arbitrary_sequence(self):
+        """A movement section must belong to the explicit X-to-Y pair, not another route."""
+        response = (
+            "### **Roteiro sugerido**\n"
+            "- **Rua Alfa 10**\n"
+            "- **Museu Beta**\n\n"
+            "### 🚇 **Como te deslocas**\n"
+            "- 🚶 **Jardim Gama → Biblioteca Delta:** caminhada curta.\n"
+        )
+
+        assert _planner_response_missing_requested_movement(
+            response,
+            "Cria um roteiro curto que comece na Rua Alfa 10 e termine no Museu Beta; inclui como me desloco.",
+            "- 🚶 **Jardim Gama → Biblioteca Delta:** caminhada curta.",
+        )
+
+    def test_planner_flags_base_route_without_concrete_leg_or_limitation(self):
+        """A route-base sentence alone is not enough movement guidance for X-to-Y plans."""
+        response = (
+            "### **Roteiro sugerido**\n"
+            "- **Rua Alfa 10**\n"
+            "- **Museu Beta**\n\n"
+            "### 🚇 **Como te deslocas**\n"
+            "- 🗺️ **Percurso base:** começa em Rua Alfa 10 e segue para Museu Beta com a ligação indicada abaixo.\n"
+        )
+
+        assert _planner_response_missing_requested_movement(
+            response,
+            "Cria um roteiro curto que comece na Rua Alfa 10 e termine no Museu Beta; inclui como me desloco.",
+            "",
+        )
+
+    def test_planner_flags_split_unrequested_movement_legs_for_strict_sequence(self):
+        """Strict X-to-Y movement must not be replaced by legs through an unrequested stop."""
+        response = (
+            "### **Roteiro sugerido**\n"
+            "- **Rua Alfa 10**\n"
+            "- **Biblioteca Gama**\n"
+            "- **Museu Beta**\n\n"
+            "### 🚇 **Como te deslocas**\n"
+            "- ⚠️ **Rua Alfa 10 -> Biblioteca Gama:** ligação não confirmada.\n"
+            "- ⚠️ **Biblioteca Gama -> Museu Beta:** ligação não confirmada.\n"
+        )
+
+        assert _planner_response_missing_requested_movement(
+            response,
+            "Cria um roteiro curto que comece na Rua Alfa 10 e termine no Museu Beta; inclui como me desloco.",
+            "",
+        )
+
+    def test_planner_fallback_filters_unrelated_movement_for_strict_sequence(self):
+        """Fallback movement for X-to-Y requests must not reuse unrelated transport legs."""
+        rendered = _build_card_based_renderer_fallback(
+            user_message="Cria um roteiro curto que comece na Rua Alfa 10 e termine no Museu Beta; inclui como me desloco.",
+            language="pt",
+            cards=[
+                {
+                    "name": "Museu Beta",
+                    "category": "Museus",
+                    "address": "Avenida Beta 20, Lisboa",
+                }
+            ],
+            weather_data="",
+            transport_data="### 🚇 **Como te deslocas**\n- 🚶 **Jardim Gama → Biblioteca Delta:** caminhada curta.",
+            places_data="- **Museu Beta**\n    - **Morada:** Avenida Beta 20, Lisboa",
+            events_data="",
+            qa_disclaimers=None,
+        )
+
+        assert "⚠️ **Rua Alfa 10 → Museu Beta:**" in rendered
+        assert "Jardim Gama → Biblioteca Delta" not in rendered
+
+    def test_planner_flags_unrequested_stop_in_strict_sequence(self):
+        """Strict X-to-Y plans must not add unrelated visible stops."""
+        response = (
+            "### **Roteiro sugerido**\n"
+            "- **Rua Alfa 10**\n"
+            "- **Biblioteca Gama**\n"
+            "- **Museu Beta**\n"
+        )
+
+        assert _planner_response_has_unrequested_sequence_stops(
+            response,
+            "Cria um roteiro curto que comece na Rua Alfa 10 e termine no Museu Beta; inclui como me desloco.",
+        )
+
+    def test_planner_flags_raw_bold_unrequested_stop_in_strict_sequence(self):
+        """Strict X-to-Y stop checks must also catch raw bold route blocks without bullets."""
+        response = (
+            "### **Roteiro sugerido**\n"
+            "**09:30 · Início: Rua Alfa 10**\n"
+            "**11:00 · Paragem cultural: Biblioteca Gama**\n"
+            "**12:30 · Fim: Museu Beta**\n"
+        )
+
+        assert _planner_response_has_unrequested_sequence_stops(
+            response,
+            "Cria um roteiro curto que comece na Rua Alfa 10 e termine no Museu Beta; inclui como me desloco.",
+        )
+
+    def test_planner_flags_unbalanced_bold_in_movement_section(self):
+        """Malformed Markdown in movement instructions must force deterministic repair."""
+        response = (
+            "### 🚇 **Como te deslocas**\n"
+            "- 🏛️ Rua Alfa 10 → Museu Beta**\n"
+            "- Embarque em:Estação Alfa**\n"
+        )
+
+        assert _planner_response_has_markdown_contract_defects(response)
+
+    def test_planner_rejects_malformed_transport_bullet(self):
+        """Transport bullets with broken labels must not survive into planner fallback."""
+        assert not _planner_transport_bullet_is_actionable("🏛️ Rua Alfa 10 → Museu Beta**")
+        assert not _planner_transport_bullet_is_actionable("Embarque em:Estação Alfa**")
+
+    def test_planner_flags_missing_requested_cross_zone_movement(self):
+        """A center-to-Belém plan with route evidence must keep that route visible."""
+        response = (
+            "### 🚇 **Como te deslocas**\n"
+            "- 🚶 **Padrão dos Descobrimentos → Torre de Belém:** caminhada curta.\n"
+        )
+        transport_context = (
+            "### 🚇 **Ligações entre paragens do roteiro**\n"
+            "- 🚌 **Baixa → Torre de Belém:** opções Carris: Carris 123 (~31 min), Carris 456.\n"
+        )
+
+        assert _planner_response_missing_requested_movement(
+            response,
+            "Começa na Sé de Lisboa, almoça na Baixa, vai à Torre de Belém e ao Padrão dos Descobrimentos; inclui como me desloco.",
+            transport_context,
+        )
+
+    def test_planner_detects_event_food_route_request(self):
+        """Planner transport enrichment must detect event + dinner + movement requests."""
+        assert MultiAgentAssistant._planner_request_requires_event_food_route(
+            "cria um plano para esta semana com um evento cultural e jantar tradicional; inclui como me desloco"
+        )
+
+    def test_planner_prioritizes_event_and_food_cards_for_route_enrichment(self):
+        """Route enrichment must use generic card types, not fixed event or restaurant names."""
+        cards = [
+            {
+                "name": "Noite de Jazz",
+                "category": "Música",
+                "when": "16 de maio às 21:00",
+                "address": "Rua A, Lisboa",
+                "url": "https://www.visitlisboa.com/en/events/noite-de-jazz",
+            },
+            {
+                "name": "Tasca do Bairro",
+                "category": "Restaurantes",
+                "features": "Cozinha tradicional portuguesa",
+                "address": "Rua B, Lisboa",
+            },
+            {
+                "name": "Museu Exemplo",
+                "category": "Museus",
+                "address": "Rua C, Lisboa",
+            },
+        ]
+
+        selected = MultiAgentAssistant._planner_event_food_route_cards(cards, [cards[2]])
+
+        assert [card["name"] for card in selected[:2]] == ["Noite de Jazz", "Tasca do Bairro"]
+
+    def test_planner_does_not_accept_generic_carris_as_concrete_cross_zone_leg(self):
+        """Generic operator prose is not enough when a concrete route leg is requested."""
+        response = (
+            "### 🚇 **Como te deslocas**\n"
+            "- 🚌 **Baixa → Torre de Belém:** usa Carris ou CP; confirma a ligação no momento.\n"
+        )
+        transport_context = (
+            "### 🚇 **Ligações entre paragens do roteiro**\n"
+            "- 🚌 **Baixa → Torre de Belém:** opções Carris: Carris 123 (~31 min), Carris 456.\n"
+        )
+
+        assert _planner_response_missing_requested_movement(
+            response,
+            "Começa na Sé de Lisboa, almoça na Baixa, vai à Torre de Belém; inclui como me desloco.",
+            transport_context,
+        )
+
+    def test_final_audit_flags_missing_requested_food_stop(self):
+        """Final QA must reject a plan that drops the requested lunch/food part."""
+        agent = QualityAssuranceAgent.__new__(QualityAssuranceAgent)
+        result = agent.assess_final_response(
+            user_query="Cria um roteiro de 1 dia com almoço na Baixa e monumentos em Belém",
+            final_response=(
+                "### 📅 **Plano para Belém**\n\n"
+                "### 📍 **Roteiro sugerido**\n"
+                "- **🏛️ Torre de Belém**\n"
+                "- **🏛️ Padrão dos Descobrimentos**\n\n"
+                "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) | **Atualizado:** 10:00"
+            ),
+            language="pt",
+        )
+
+        assert not result["complete"]
+        assert any("refeição" in item or "restaurante" in item for item in result.get("missing_data", []))
+
+    def test_final_audit_flags_wrong_requested_start(self):
+        """Final QA must reject a plan whose first route block ignores the requested start."""
+        agent = QualityAssuranceAgent.__new__(QualityAssuranceAgent)
+        result = agent.assess_final_response(
+            user_query="Cria um roteiro que comece na Sé de Lisboa e termine na Torre de Belém",
+            final_response=(
+                "### 📅 **Plano para Belém**\n\n"
+                "### 📍 **Roteiro sugerido**\n"
+                "- **🏛️ Torre de Belém**\n"
+                "- **🏛️ Sé de Lisboa**\n\n"
+                "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) | **Atualizado:** 10:00"
+            ),
+            language="pt",
+        )
+
+        assert not result["complete"]
+        assert any("primeira paragem" in item for item in result.get("missing_data", []))
+
+    def test_final_audit_flags_missing_explicit_requested_stop(self):
+        """Final QA must reject planner answers that lost an explicit requested stop."""
+        agent = QualityAssuranceAgent.__new__(QualityAssuranceAgent)
+        result = agent.assess_final_response(
+            user_query="Cria um roteiro que comece na Sé de Lisboa e termine na Torre de Belém",
+            final_response=(
+                "### 📅 **Plano para Belém**\n\n"
+                "### 📍 **Roteiro sugerido**\n"
+                "- **🏛️ Torre de Belém**\n\n"
+                "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) | **Atualizado:** 10:00"
+            ),
+            language="pt",
+        )
+
+        assert not result["complete"]
+        assert any("Sé de Lisboa" in item for item in result.get("missing_data", []))
+
+    def test_final_audit_flags_missing_arbitrary_requested_stop(self):
+        """Final QA requested-stop checks must not depend on a fixed anchor list."""
+        agent = QualityAssuranceAgent.__new__(QualityAssuranceAgent)
+        result = agent.assess_final_response(
+            user_query="Cria um roteiro que comece na Rua Alfa 10 e termine no Museu Beta",
+            final_response=(
+                "### 📅 **Plano cultural**\n\n"
+                "### 📍 **Roteiro sugerido**\n"
+                "- **🏛️ Museu Beta**\n\n"
+                "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) | **Atualizado:** 10:00"
+            ),
+            language="pt",
+        )
+
+        assert not result["complete"]
+        assert any("Rua Alfa 10" in item for item in result.get("missing_data", []))
+
+    def test_final_audit_accepts_explicit_cross_zone_limitation(self):
+        """QA should not treat a grounded unconfirmed-leg limitation as dead prose."""
+        agent = QualityAssuranceAgent.__new__(QualityAssuranceAgent)
+        result = agent.assess_final_response(
+            user_query="Começa na Baixa, vai à Torre de Belém; inclui como me desloco.",
+            final_response=(
+                "### 📅 **Plano para Belém**\n\n"
+                "### 📍 **Roteiro sugerido**\n"
+                "- **📍 Baixa**\n"
+                "- **🏛️ Torre de Belém**\n\n"
+                "### 🚇 **Como te deslocas**\n"
+                "- ⚠️ **Baixa → Torre de Belém:** ligação concreta não confirmada nos dados recolhidos.\n\n"
+                "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) | **Atualizado:** 10:00"
+            ),
+            language="pt",
+        )
+
+        assert not any("deslocação entre o centro" in item for item in result.get("missing_data", []))
+
+    def test_final_audit_flags_missing_cross_zone_movement(self):
+        """Final QA must reject plans that omit the requested center-to-Belém movement leg."""
+        agent = QualityAssuranceAgent.__new__(QualityAssuranceAgent)
+        result = agent.assess_final_response(
+            user_query="Começa na Sé de Lisboa, almoça na Baixa, vai à Torre de Belém e ao Padrão dos Descobrimentos; inclui como me desloco.",
+            final_response=(
+                "### 📅 **Plano para Belém**\n\n"
+                "### 📍 **Roteiro sugerido**\n"
+                "- **🏛️ Sé de Lisboa**\n"
+                "- **🍽️ Almoço na Baixa**\n"
+                "- **🏛️ Torre de Belém**\n"
+                "- **🏛️ Padrão dos Descobrimentos**\n\n"
+                "### 🚇 **Como te deslocas**\n"
+                "- 🚶 **Padrão dos Descobrimentos → Torre de Belém:** caminhada curta.\n\n"
+                "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) | **Atualizado:** 10:00"
+            ),
+            language="pt",
+        )
+
+        assert not result["complete"]
+        assert any("Belém" in item for item in result.get("missing_data", []))
+
+    def test_walkable_zone_does_not_mark_baixa_to_belem_as_short_walk(self):
+        """Same-zone walking heuristics must not bridge central Lisbon to Belém."""
+        previous = SimpleNamespace(title="Baixa", details=["Almoço na Baixa"])
+        current = SimpleNamespace(title="Belém", details=["Depois do almoço, segue de Baixa para Belém."])
+
+        assert _shared_walkable_zone(previous, current) == ""
+
+
 class TestCheckHallucinatedFeatures:
     """Tests for check_hallucinated_features()."""
 
@@ -373,7 +1116,7 @@ class TestResponseContracts:
             "- Aguaceiros fracos\n\n"
             "---\n\n"
             "### 🚇 Transportes\n\n"
-            "- Autocarro 728 disponível\n\n"
+            "- Autocarro local disponível\n\n"
             "📌 **Fonte:** [*IPMA*](https://www.ipma.pt) | **Atualizado:** 11:08"
         )
 
@@ -463,3 +1206,77 @@ class TestResponseContracts:
         comparison = compare_response_contracts(reference, candidate)
 
         assert comparison["consistent"] is True
+
+    def test_location_resolver_tries_user_query_before_curated_variants(self):
+        """Location variants should prefer generic Nominatim search before local hints."""
+        curated_key = next(iter(location_resolver._CURATED_QUERY_VARIANTS))
+        variants = location_resolver._build_query_variants(curated_key)
+
+        assert variants[0] == curated_key
+        assert variants[1] == f"{curated_key}, Lisboa, Portugal"
+        assert any(variant in variants[3:] for variant in location_resolver._CURATED_QUERY_VARIANTS[curated_key])
+
+    def test_location_resolver_prefers_nominatim_before_curated_fallback(self, monkeypatch):
+        """A live geocoder match should beat a matching curated gazetteer entry."""
+        curated_key = next(iter(location_resolver._CURATED_LOCATION_POINTS))
+        calls = []
+
+        def fake_fetch(query):
+            calls.append(query)
+            if query == curated_key:
+                return [
+                    {
+                        "lat": "38.711850",
+                        "lon": "-9.129380",
+                        "display_name": f"{curated_key}, Lisboa, Portugal",
+                        "importance": 0.9,
+                        "type": "museum",
+                        "class": "tourism",
+                        "address": {"city": "Lisboa"},
+                    }
+                ]
+            return []
+
+        monkeypatch.setattr(location_resolver, "_fetch_nominatim_results_cached", fake_fetch)
+
+        result = location_resolver.geocode_location_name(curated_key)
+
+        assert result is not None
+        assert result["match_source"] == "nominatim"
+        assert calls[0] == curated_key
+
+    def test_location_resolver_uses_curated_only_as_fallback(self, monkeypatch):
+        """Curated coordinates remain useful when Nominatim has no usable match."""
+        curated_key = next(iter(location_resolver._CURATED_LOCATION_POINTS))
+        monkeypatch.setattr(location_resolver, "_fetch_nominatim_results_cached", lambda query: [])
+        monkeypatch.setattr(location_resolver, "_fetch_photon_results_cached", lambda query: [])
+
+        result = location_resolver.geocode_location_name(curated_key)
+
+        assert result is not None
+        assert result["match_source"] == "curated_gazetteer"
+
+    def test_current_transport_mode_preferences_override_alternatives(self):
+        """Current explicit transport preferences must drive mode selection."""
+        bus_only = _parse_route_mode_preferences("Quero ir de autocarro da Rua Alfa 10 para o Museu Beta")
+        flexible = _parse_route_mode_preferences("Quero ir de metro ou autocarro da Rua Alfa 10 para o Museu Beta")
+
+        assert bus_only["bus_only"]
+        assert not bus_only["metro_only"]
+        assert not flexible["bus_only"]
+        assert not flexible["metro_only"]
+
+    def test_route_endpoint_parser_removes_requested_mode_prefix(self):
+        """Route endpoints must not include the user's requested transport mode."""
+        assert _extract_route_endpoints(
+            "Quero ir de autocarro da Rua Alfa 10 para o Museu Beta"
+        ) == ("Rua Alfa 10", "Museu Beta")
+
+    def test_supervisor_keeps_explicit_place_to_place_bus_route_on_transport(self):
+        """A pure X-to-Y bus route must not be promoted into planner synthesis."""
+        decision = SupervisorAgent._single_domain_override(
+            "Quero ir de autocarro da Rua Alfa 10 para o Museu Beta"
+        )
+
+        assert decision is not None
+        assert decision["agents"] == ["transport"]

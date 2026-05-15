@@ -79,6 +79,7 @@ Hard rules:
 - Do not use live departures as a schedule for a future itinerary unless the user explicitly asks for live/next departures.
 - If the user asks for a plan around a named neighbourhood or starting/ending area, prefer evidence located in that area or on the direct route. Do not choose a better-known venue in another district as the cultural stop unless you clearly frame it as an on-the-way detour.
 - If events or places appear in the evidence, include their useful fields in details when selected.
+- If the user asks for multiple explicit themes and evidence exists for them, include at least one selected block for each requested theme. For example, a plan asking for historical sights and gastronomy must include both a cultural/historical stop and a food/restaurant/pastry block when those evidence cards are available.
 - For selected places/events, preserve useful evidence fields as detail strings with these labels when present: Description, Address, Hours, Price, Website, When, Venue, Tickets. Omit any missing field; never write N/A, unknown, or + info.
 - For time-specific plans, do not choose a place whose evidence says it is closed for that period. If all strong matches are closed or lack hours, either choose a weaker open-ended stop and state the limitation, or frame the closed venue only as exterior/context, not as an enterable visit.
 - Avoid static skeletons. Every block must explain purpose plus at least one useful detail, movement, weather adaptation, or limitation.

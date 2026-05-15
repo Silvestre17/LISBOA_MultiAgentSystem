@@ -139,8 +139,11 @@ CP_LINES = {
 CP_KEY_STATIONS = {
     # Main hubs
     "oriente": {"name": "Lisboa - Oriente", "lines": ["sintra", "azambuja", "norte"], "metro": "vermelha"},
-    "entrecampos": {"name": "Entrecampos", "lines": ["fertagus", "norte"], "metro": "amarela"},
+    "entrecampos": {"name": "Entrecampos", "lines": ["sintra", "azambuja", "fertagus", "norte"], "metro": "amarela"},
     "rossio": {"name": "Rossio", "lines": ["sintra"], "metro": "verde"},
+    "campolide": {"name": "Campolide", "lines": ["sintra"], "description": "Lisbon station on the Sintra suburban corridor"},
+    "sete_rios": {"name": "Sete Rios", "lines": ["sintra", "azambuja"], "metro": "azul"},
+    "sete rios": {"name": "Sete Rios", "lines": ["sintra", "azambuja"], "metro": "azul"},
     "cais_sodre": {"name": "Cais do Sodré", "lines": ["cascais"], "metro": "verde"},
     "santa_apolonia": {"name": "Santa Apolónia", "lines": ["azambuja", "norte"], "metro": "azul"},
 

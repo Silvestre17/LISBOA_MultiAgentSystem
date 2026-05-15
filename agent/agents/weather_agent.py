@@ -383,6 +383,8 @@ class WeatherAgent(BaseAgent):
         """Normalize weather query text for accent-insensitive capability checks."""
         normalized = unicodedata.normalize("NFKD", user_message or "")
         normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+        normalized = re.sub(r"\bs[\?\s]*bado\b", "sabado", normalized)
+        normalized = re.sub(r"\bter\?a\b", "terca", normalized)
         return re.sub(r"\s+", " ", normalized).strip()
 
     @staticmethod
@@ -418,6 +420,37 @@ class WeatherAgent(BaseAgent):
         )
 
     @classmethod
+    def _requested_warning_areas(cls, user_message: str) -> list[tuple[str, str]]:
+        """Return IPMA warning areas explicitly requested by the user."""
+        normalized = cls._normalize_weather_query(user_message)
+        areas: list[tuple[str, str]] = []
+
+        def add(code: str, label: str) -> None:
+            if code not in {existing_code for existing_code, _ in areas}:
+                areas.append((code, label))
+
+        if re.search(r"\b(?:lisboa|lisbon)\b", normalized):
+            add("LSB", "Lisboa")
+        if re.search(r"\bsetubal\b", normalized):
+            add("STB", "Setúbal")
+        return areas
+
+    @staticmethod
+    def _warning_tool_result_has_active_warning(tool_result: str) -> bool:
+        """Return whether a warnings tool response contains active warning details."""
+        normalized = unicodedata.normalize("NFKD", tool_result or "")
+        normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+        if "no active weather warnings" in normalized or "sem avisos meteorologicos" in normalized:
+            return False
+        return bool(
+            re.search(
+                r"\b(?:yellow|orange|red|amarelo|laranja|vermelho|active weather warnings|avisos meteorologicos ativos)\b|[🟡🟠🔴]",
+                tool_result or "",
+                flags=re.IGNORECASE,
+            )
+        )
+
+    @classmethod
     def _extract_unsupported_weather_location(cls, user_message: str) -> str | None:
         """Detect non-Lisbon city-specific weather requests that should not use Lisbon forecast data."""
         normalized = cls._normalize_weather_query(user_message)
@@ -436,6 +469,18 @@ class WeatherAgent(BaseAgent):
             "acores": "Açores",
             "azores": "Açores",
             "ponta delgada": "Ponta Delgada",
+            "sintra": "Sintra",
+            "cascais": "Cascais",
+            "oeiras": "Oeiras",
+            "almada": "Almada",
+            "setubal": "Setúbal",
+            "setúbal": "Setúbal",
+            "los angeles": "Los Angeles",
+            "madrid": "Madrid",
+            "barcelona": "Barcelona",
+            "paris": "Paris",
+            "londres": "Londres",
+            "london": "London",
         }
         weather_terms = [
             "weather",
@@ -452,9 +497,37 @@ class WeatherAgent(BaseAgent):
         if not any(term in normalized for term in weather_terms):
             return None
 
+        raw_message = str(user_message or "")
+        if re.search(r"\b(?:em|in|for|para)\s+(?:L\.?\s*A\.?)\b", raw_message):
+            return "LA"
+
         for token, label in unsupported_locations.items():
             if re.search(rf"\b{re.escape(token)}\b", normalized):
                 return label
+
+        explicit_location_match = re.search(
+            r"\b(?:em|in|for|para)\s+"
+            r"(?P<location>[A-ZÁÉÍÓÚÂÊÔÃÕÇ][A-Za-zÁÉÍÓÚÂÊÔÃÕÇáéíóúâêôãõç'. -]{1,60})",
+            raw_message,
+        )
+        if explicit_location_match:
+            candidate = re.split(
+                r"\b(?:hoje|amanh[ãa]|today|tomorrow|with|com|e|and)\b",
+                explicit_location_match.group("location"),
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )[0].strip(" .,:;?!")
+            candidate_norm = cls._normalize_weather_query(candidate)
+            allowed_locations = {
+                "lisboa",
+                "lisbon",
+                "area metropolitana de lisboa",
+                "aml",
+                "portugal",
+            }
+            if candidate and candidate_norm not in allowed_locations:
+                return candidate
+
         return None
 
     @staticmethod
@@ -763,6 +836,53 @@ class WeatherAgent(BaseAgent):
 
         if wants_warnings:
             warnings_tool = self._get_tool_by_name("get_weather_warnings")
+            requested_warning_areas = self._requested_warning_areas(user_message)
+            if warnings_tool and len(requested_warning_areas) > 1:
+                area_lines: list[str] = []
+                has_any_active = False
+                for area_code, area_label in requested_warning_areas:
+                    tool_result = str(self._invoke_tool(warnings_tool, {"area": area_code}))
+                    has_active = self._warning_tool_result_has_active_warning(tool_result)
+                    has_any_active = has_any_active or has_active
+                    if language == "pt":
+                        if has_active:
+                            area_lines.append(f"- ⚠️ **{area_label}:** há avisos ativos; consulta o detalhe no IPMA.")
+                        else:
+                            area_lines.append(f"- ✅ **{area_label}:** sem avisos meteorológicos ativos neste momento.")
+                    else:
+                        if has_active:
+                            area_lines.append(f"- ⚠️ **{area_label}:** active warnings are present; check IPMA for the detailed advisory.")
+                        else:
+                            area_lines.append(f"- ✅ **{area_label}:** no active weather warnings right now.")
+                if language == "pt":
+                    direct = (
+                        "⚠️ **Resposta direta:** há pelo menos um aviso ativo nas áreas pedidas."
+                        if has_any_active
+                        else "✅ **Resposta direta:** não há avisos meteorológicos ativos nas áreas pedidas neste momento."
+                    )
+                    return "\n".join([
+                        "### 🌤️ **Estado dos Avisos Meteorológicos**",
+                        "",
+                        direct,
+                        "",
+                        "---",
+                        "",
+                        *area_lines,
+                    ]).strip()
+                direct = (
+                    "⚠️ **Direct answer:** at least one requested area has active warnings."
+                    if has_any_active
+                    else "✅ **Direct answer:** there are no active weather warnings in the requested areas right now."
+                )
+                return "\n".join([
+                    "### 🌤️ **Weather Warning Status**",
+                    "",
+                    direct,
+                    "",
+                    "---",
+                    "",
+                    *area_lines,
+                ]).strip()
             if warnings_tool:
                 sections.append(self._invoke_tool(warnings_tool, {"area": "LSB"}))
 
@@ -809,6 +929,7 @@ class WeatherAgent(BaseAgent):
     ) -> str:
         """Prepend a query-specific answer before grounded weather details."""
         body = "\n\n---\n\n".join(section for section in sections if section).strip()
+        body = cls._strip_redundant_body_heading(body)
         direct_answer = cls._build_direct_weather_answer(user_message, body, language, forecast_window)
         title = cls._weather_title_for_query(
             user_message,
@@ -823,6 +944,37 @@ class WeatherAgent(BaseAgent):
         if cls._is_redundant_clear_warning_body(user_message, direct_answer, body):
             return f"{title}\n\n{direct_answer}".strip()
         return f"{title}\n\n{direct_answer}\n\n---\n\n{body}".strip()
+
+    @classmethod
+    def _strip_redundant_body_heading(cls, body: str) -> str:
+        """Drop the tool-emitted top heading that duplicates the H3 title.
+
+        Tools such as ``get_weather_forecast`` emit a leading line like
+        ``🌤️ Weather Forecast for Lisbon`` which, after PT translation,
+        becomes ``🌤️ Previsão do Tempo para Lisboa``. The agent already
+        prepends a canonical H3 title (``### 🌤️ **Previsão Meteorológica de
+        Lisboa**``), so keeping the tool heading produces a duplicated
+        sub-title. Remove it conservatively while preserving every other
+        body line.
+        """
+        if not body:
+            return body
+        heading_re = re.compile(
+            r"^\s*\**\s*🌤️?\s*\**\s*"
+            r"(?:Weather Forecast for Lisbon|Previs[aã]o do Tempo para Lisboa|"
+            r"Lisbon Weather Summary|Resumo Meteorol[oó]gico de Lisboa)"
+            r"\s*\**\s*:?\s*$",
+            re.IGNORECASE,
+        )
+        out_lines: list[str] = []
+        for line in body.splitlines():
+            if heading_re.match(line):
+                continue
+            out_lines.append(line)
+        # Collapse leading blank lines created by the strip.
+        while out_lines and not out_lines[0].strip():
+            out_lines.pop(0)
+        return "\n".join(out_lines).strip()
 
     @classmethod
     def _is_redundant_clear_warning_body(cls, user_message: str, direct_answer: str, body: str) -> bool:
@@ -1335,7 +1487,7 @@ class WeatherAgent(BaseAgent):
             )
 
         if self._is_planning_weather_context_query(user_message):
-            context_query = (
+            context_query = user_message if self._resolve_forecast_window(user_message) else (
                 "Qual é a previsão para Lisboa hoje? Existem avisos ativos?"
                 if language == "pt"
                 else "What is today's Lisbon weather forecast? Are there active warnings?"

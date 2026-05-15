@@ -390,6 +390,8 @@ def _resolve_warning_area_label(area: str) -> Optional[str]:
     normalized = (area or "").strip().upper()
     if normalized == Config.LISBON_AREA_AVISO:
         return "Lisbon"
+    if normalized == "STB":
+        return "Setúbal"
     return None
 
 

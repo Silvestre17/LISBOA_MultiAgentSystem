@@ -428,10 +428,19 @@ CATEGORY_SYNONYMS = {
     # Security
     'segurança': ['polícia', 'bombeiros', 'proteção civil', 'emergência'],
     'security': ['polícia', 'bombeiros', 'proteção civil'],
+    'psp': ['Polícia de Segurança Pública', 'esquadra'],
 
     # Commerce
     'comércio': ['mercado', 'feira', 'loja', 'centro comercial', 'quiosque'],
     'commerce': ['mercado', 'feira', 'loja', 'centro comercial'],
+
+    # Amenities
+    'wc': ['instalações sanitárias', 'instalações sanitárias públicas automáticas', 'sanitários', 'casas de banho', 'toilet', 'restroom'],
+    'sanitarios': ['instalações sanitárias', 'instalações sanitárias públicas automáticas', 'wc', 'casas de banho', 'toilet', 'restroom'],
+    'sanitários': ['instalações sanitárias', 'instalações sanitárias públicas automáticas', 'wc', 'casas de banho', 'toilet', 'restroom'],
+    'casa de banho': ['instalações sanitárias', 'instalações sanitárias públicas automáticas', 'wc', 'sanitários', 'toilet', 'restroom'],
+    'toilet': ['instalações sanitárias', 'instalações sanitárias públicas automáticas', 'wc', 'restroom'],
+    'restroom': ['instalações sanitárias', 'instalações sanitárias públicas automáticas', 'wc', 'toilet'],
 }
 
 
@@ -789,15 +798,21 @@ def find_nearby_services(
             (("biblioteca", "library", "leitura"), "📚", "Bibliotecas", "Libraries"),
             (("museu", "museum", "cultura", "cultural"), "🏛️", "Equipamentos culturais", "Cultural venues"),
             (("ecoponto", "reciclag", "residuo", "residuos", "waste", "recycling"), "♻️", "Ecopontos e reciclagem", "Recycling points"),
+            (("parques infantis", "parque infantil", "playground", "playgrounds", "infantil"), "🛝", "Parques infantis", "Playgrounds"),
+            (("fontan", "bebedouro", "chafariz", "lago", "fountain", "water", "agua", "arquitetura da agua", "elementos de agua"), "🚰", "Fontanários e água", "Fountains and water points"),
             (("jardim", "parque", "garden", "green space", "verde"), "🌳", "Jardins e parques", "Gardens and parks"),
             (("policia", "police", "psp", "seguranca"), "👮", "Serviços de segurança", "Public safety services"),
             (("bombeir", "fire"), "🚒", "Bombeiros", "Fire services"),
             (("mercado", "market", "feira"), "🛒", "Mercados", "Markets"),
             (("correio", "postal", "ctt"), "✉️", "Serviços postais", "Postal services"),
             (("loja cidadao", "citizen", "atendimento"), "🏢", "Serviços municipais", "Municipal services"),
-            (("fontan", "bebedouro", "fountain", "water"), "🚰", "Fontanários e água", "Fountains and water points"),
             (("wifi", "internet"), "📶", "Pontos Wi-Fi", "Wi-Fi points"),
-            (("wc", "sanitario", "toilet", "restroom"), "🚻", "Instalações sanitárias", "Restrooms"),
+            (
+                ("wc", "sanitario", "sanitaria", "sanitarias", "instalacoes sanitarias", "casa de banho", "casas de banho", "toilet", "restroom"),
+                "🚻",
+                "Instalações sanitárias",
+                "Restrooms",
+            ),
             (("metro", "transport", "transporte", "paragem", "stop"), "🚇", "Transportes", "Transport services"),
         ]
 
@@ -818,8 +833,11 @@ def find_nearby_services(
                 break
 
         if is_pt:
-            return icon, f"{pt_label} perto de {location}" if location else f"{pt_label} próximos"
-        return icon, f"{en_label} near {location}" if location else f"Nearby {en_label.lower()}"
+            if location:
+                return icon, f"{pt_label} perto de {location}"
+            found_label = "encontradas" if re.search(r"(?:as|ões)$", pt_label.lower()) else "encontrados"
+            return icon, f"{pt_label} {found_label}"
+        return icon, f"{en_label} near {location}" if location else f"{en_label} found"
 
     def _rank_service_datasets(candidate_matches: pd.DataFrame, requested_service: str) -> pd.DataFrame:
         """Sort service datasets by semantic fit before trying GeoJSON URLs."""
@@ -942,7 +960,13 @@ def find_nearby_services(
             'pharmacies': 'farmácia', 'farmacias': 'farmácia', 'farmacia': 'farmácia',
             'park': 'jardim', 'garden': 'jardim', 'wifi': 'wifi', 'metro': 'metro',
             'fountain': 'fontanário', 'parking': 'estacionamento', 'car parking': 'estacionamento',
-            'ecopontos': 'ecoponto', 'recycling': 'ecoponto'
+            'ecopontos': 'ecoponto', 'recycling': 'ecoponto',
+            'wc públicos': 'instalações sanitárias', 'wc publicos': 'instalações sanitárias',
+            'sanitários': 'instalações sanitárias', 'sanitarios': 'instalações sanitárias',
+            'casas de banho públicas': 'instalações sanitárias',
+            'casas de banho publicas': 'instalações sanitárias',
+            'toilet': 'instalações sanitárias', 'toilets': 'instalações sanitárias',
+            'restroom': 'instalações sanitárias', 'restrooms': 'instalações sanitárias',
         }
         alt_term = alternatives.get(service_type.lower(), service_type)
         matches = search_datasets(alt_term)
@@ -1084,12 +1108,6 @@ def find_nearby_services(
     item_icon, heading = _service_icon_and_heading(selected_title, service_type)
     count_label = "resultado" if len(results) == 1 else "resultados"
     response = f"### {item_icon} **{heading}**\n\n"
-    if is_pt:
-        response += f"- 🧭 **Fonte do dataset:** {selected_title}\n"
-        response += f"- 📊 **Resultados:** {len(results)} {count_label}\n\n"
-    else:
-        response += f"- 🧭 **Dataset:** {selected_title}\n"
-        response += f"- 📊 **Results:** {len(results)} result(s)\n\n"
 
     if near_location_name and results:
         nearest = results[0]
@@ -1097,16 +1115,38 @@ def find_nearby_services(
         if nearest_distance is not None:
             nearest_name = _display_result_name(nearest.get("name"))
             duplicate_name_indexes.clear()
+            walk_minutes = max(1, round(float(nearest_distance) * 12))
             if is_pt:
                 response += (
                     f"- ✅ **Mais perto:** {nearest_name} "
-                    f"({nearest_distance:.2f} km de {near_location_name})\n\n"
+                    f"({nearest_distance:.2f} km de {near_location_name}; cerca de {walk_minutes} min a pé)\n\n"
                 )
             else:
                 response += (
                     f"- ✅ **Nearest:** {nearest_name} "
-                    f"({nearest_distance:.2f} km from {near_location_name})\n\n"
+                    f"({nearest_distance:.2f} km from {near_location_name}; about {walk_minutes} min walking)\n\n"
                 )
+
+    if is_pt:
+        response += f"- 🧭 **Fonte do dataset:** {selected_title}\n"
+        response += f"- 📊 **Resultados:** {len(results)} {count_label}\n\n"
+        if not near_location_name:
+            response += "- ⚠️ **Cobertura:** esta pesquisa mostra apenas os primeiros resultados disponíveis; não é uma listagem exaustiva da AML e horários/contactos só aparecem quando constam do dataset.\n\n"
+    else:
+        response += f"- 🧭 **Dataset:** {selected_title}\n"
+        response += f"- 📊 **Results:** {len(results)} result(s)\n\n"
+        if not near_location_name:
+            response += "- ⚠️ **Coverage:** this search shows only the first available results; it is not an exhaustive AML-wide list, and hours/contacts appear only when present in the dataset.\n\n"
+    water_context = any(
+        marker in unicodedata.normalize("NFKD", f"{selected_title} {service_type}").encode("ascii", "ignore").decode("ascii").lower()
+        for marker in ("arquitetura da agua", "elementos de agua", "bebedouro", "fontan", "chafariz", "water")
+    )
+    if water_context:
+        response += (
+            "- ⚠️ **Nota:** estes registos identificam elementos/fontes de água no espaço público; a potabilidade não é confirmada pelo dataset.\n\n"
+            if is_pt
+            else "- ⚠️ **Note:** these records identify public water/fountain features; drinkability is not confirmed by the dataset.\n\n"
+        )
 
     for r in results:
         display_name = _display_result_name(r.get("name"))
@@ -1130,6 +1170,11 @@ def find_nearby_services(
         if r['distance'] is not None:
             distance_label = "Distância" if is_pt else "Distance"
             response += f"    - 📏 **{distance_label}:** {r['distance']:.2f} km\n"
+            if near_location_name:
+                walk_minutes = max(1, round(float(r['distance']) * 12))
+                walk_label = "Tempo a pé estimado" if is_pt else "Estimated walking time"
+                walk_value = f"cerca de {walk_minutes} min" if is_pt else f"about {walk_minutes} min"
+                response += f"    - 🚶 **{walk_label}:** {walk_value}\n"
         response += "\n"
 
     return response
@@ -1273,6 +1318,7 @@ def _search_places_raw(query: str, max_results: int = 5) -> List[Dict]:
         'farmacia': ['Farmácias e Parafarmácias'],
         'bombeiros': ['Bombeiros'],
         'policia': ['Polícia Municipal', 'Polícia de Segurança Pública', 'GNR', 'Defesa e Segurança'],
+        'psp': ['Polícia de Segurança Pública'],
         'seguranca': ['Polícia Municipal', 'Polícia de Segurança Pública'],
         'proteccao civil': ['Protecção Civil', 'Lisboa. Pontos de encontro - Emergência'],
 
@@ -1299,10 +1345,27 @@ def _search_places_raw(query: str, max_results: int = 5) -> List[Dict]:
 
         # Outdoors & Leisure
         'jardim': ['Jardins - Parques Urbanos', 'Grandes Parques e Jardins de Lisboa', 'Espaços Verdes'],
+        'parque infantil': ['Parques Infantis'],
+        'parques infantis': ['Parques Infantis'],
+        'playground': ['Parques Infantis'],
         'parque': ['Grandes Parques e Jardins de Lisboa', 'Jardins - Parques Urbanos', 'Parques Infantis', 'Parques de Merendas', 'Parques Caninos'],
         'praia': [],  # Not many open datasets for beaches in CML directly besides river ones
         'desporto': ['Instalações Desportivas', 'Centros Desportivos', 'Equipamentos de Fitness ao Ar Livre\u200b', 'Programa Desporto Mexe Comigo'],
         'piscina': ['Instalações Desportivas', 'Programa de Apoio à Natação Curricular'],
+        'bebedouro': ['Arquitetura da Água', 'Elementos de Água'],
+        'bebedouros': ['Arquitetura da Água', 'Elementos de Água'],
+        'ponto de agua': ['Arquitetura da Água', 'Elementos de Água'],
+        'pontos de agua': ['Arquitetura da Água', 'Elementos de Água'],
+        'ponto de água': ['Arquitetura da Água', 'Elementos de Água'],
+        'pontos de água': ['Arquitetura da Água', 'Elementos de Água'],
+        'fontanario': ['Arquitetura da Água', 'Elementos de Água'],
+        'fontanarios': ['Arquitetura da Água', 'Elementos de Água'],
+        'fontanário': ['Arquitetura da Água', 'Elementos de Água'],
+        'fontanários': ['Arquitetura da Água', 'Elementos de Água'],
+        'chafariz': ['Arquitetura da Água', 'Elementos de Água'],
+        'chafarizes': ['Arquitetura da Água', 'Elementos de Água'],
+        'arquitetura da agua': ['Arquitetura da Água'],
+        'arquitetura da água': ['Arquitetura da Água'],
 
         # Services & Amenities
         'wc': ['Instalações Sanitárias', 'Instalações Sanitárias Públicas Automáticas', 'Balneários'],

@@ -2416,6 +2416,7 @@ def run_interaction(user_input: str, user_message_already_rendered: bool = False
             st.session_state.messages.append(
                 {"role": "assistant", "content": rendered_response}
             )
+            st.markdown(rendered_response)
 
         except Exception as error:
             # Log the FULL traceback to the terminal for debugging
@@ -3410,10 +3411,20 @@ def main():
         run_info_page()
         return
 
-    display_banner()
-    attempt_startup_auto_initialization(selected_provider)
-
     pending = st.session_state.get("pending_request")
+    request_running = st.session_state.get("request_running", False)
+    show_landing = not st.session_state.messages and not pending and not request_running
+
+    banner_slot = st.empty()
+    if show_landing:
+        with banner_slot.container():
+            display_banner()
+    else:
+        banner_slot.empty()
+
+    if show_landing:
+        attempt_startup_auto_initialization(selected_provider)
+
     request_locked = request_capture_locked(
         pending,
         st.session_state.get("request_running", False),
@@ -3426,15 +3437,21 @@ def main():
     welcome_request = None
     chat_request = None
 
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            content = msg["content"]
-            if msg["role"] == "assistant":
-                content = normalize_streamlit_chat_markdown(content)
-            st.markdown(content)
+    chat_history_slot = st.container()
+    with chat_history_slot:
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                content = msg["content"]
+                if msg["role"] == "assistant":
+                    content = normalize_streamlit_chat_markdown(content)
+                st.markdown(content)
 
-    if not request_locked and not st.session_state.messages:
-        welcome_request = build_welcome()
+    welcome_slot = st.empty()
+    if show_landing and not request_locked:
+        with welcome_slot.container():
+            welcome_request = build_welcome()
+    else:
+        welcome_slot.empty()
 
     if in_text := st.chat_input(t("chat_placeholder"), disabled=request_locked):
         chat_request = in_text

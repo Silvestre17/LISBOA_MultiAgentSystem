@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 REQUEST_TIMEOUT = 10
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 NOMINATIM_USER_AGENT = "LisbonUrbanAssistant/1.0 (research@novaims.pt)"
+PHOTON_URL = "https://photon.komoot.io/api/"
 
 LISBON_CITY_BOUNDS = {
     "lat_min": 38.68,
@@ -85,6 +86,12 @@ _CURATED_QUERY_VARIANTS = {
     "city center": ["Rossio, Lisboa, Portugal", "Baixa-Chiado, Lisboa, Portugal"],
     "centro de lisboa": ["Rossio, Lisboa, Portugal", "Baixa-Chiado, Lisboa, Portugal"],
     "centro da cidade": ["Rossio, Lisboa, Portugal", "Baixa-Chiado, Lisboa, Portugal"],
+    "marques": ["Marquês de Pombal, Lisboa, Portugal"],
+    "marquês": ["Marquês de Pombal, Lisboa, Portugal"],
+    "marques pombal": ["Marquês de Pombal, Lisboa, Portugal"],
+    "marquês pombal": ["Marquês de Pombal, Lisboa, Portugal"],
+    "marques de pombal": ["Marquês de Pombal, Lisboa, Portugal"],
+    "marquês de pombal": ["Marquês de Pombal, Lisboa, Portugal"],
     "jardim da estrela": ["Jardim da Estrela, Lisboa, Portugal"],
     "biblioteca nacional": ["Biblioteca Nacional de Portugal, Campo Grande, Lisboa, Portugal"],
     "biblioteca nacional de portugal": ["Biblioteca Nacional de Portugal, Campo Grande, Lisboa, Portugal"],
@@ -129,6 +136,12 @@ _CURATED_DISPLAY_NAMES = {
     "city center": "Rossio",
     "centro de lisboa": "Rossio",
     "centro da cidade": "Rossio",
+    "marques": "Marquês de Pombal",
+    "marquês": "Marquês de Pombal",
+    "marques pombal": "Marquês de Pombal",
+    "marquês pombal": "Marquês de Pombal",
+    "marques de pombal": "Marquês de Pombal",
+    "marquês de pombal": "Marquês de Pombal",
     "jardim da estrela": "Jardim da Estrela",
     "biblioteca nacional": "Biblioteca Nacional de Portugal",
     "biblioteca nacional de portugal": "Biblioteca Nacional de Portugal",
@@ -302,6 +315,48 @@ _CURATED_LOCATION_POINTS: Dict[str, Dict[str, Any]] = {
         "type": "tertiary",
         "aliases": ["av roma", "av. roma", "avenida roma"],
     },
+    "avenidas novas": {
+        "display_name": "Avenidas Novas",
+        "lat": 38.7359,
+        "lon": -9.1489,
+        "class": "place",
+        "type": "neighbourhood",
+        "aliases": [
+            "avenidas novas lisboa",
+            "bairro das avenidas novas",
+            "zona das avenidas novas",
+            "av novas",
+        ],
+    },
+    "amoreiras shopping center": {
+        "display_name": "Amoreiras Shopping Center",
+        "lat": 38.72306,
+        "lon": -9.16222,
+        "class": "shop",
+        "type": "mall",
+        "aliases": [
+            "amoreiras",
+            "centro comercial amoreiras",
+            "centro comercial das amoreiras",
+            "amoreiras shopping",
+            "amoreiras centro comercial",
+            "rua carlos alberto da mota pinto",
+            "rua carlos alberto da mota pinto lisboa",
+        ],
+    },
+    "nova ims": {
+        "display_name": "NOVA IMS",
+        "lat": 38.732462,
+        "lon": -9.159921,
+        "class": "amenity",
+        "type": "university",
+        "aliases": [
+            "nova ims university",
+            "nova information management school",
+            "campus de campolide nova ims",
+            "information management school",
+        ],
+    },
     "alcantara": {
         "display_name": "Alcântara",
         "lat": 38.7047,
@@ -441,18 +496,416 @@ def normalize_location_text(text: str) -> str:
     return re.sub(r"\s+", " ", normalized).strip()
 
 
+def _parse_coordinate_pair(text: str) -> Optional[Tuple[float, float]]:
+    """Parses a latitude/longitude pair from a free-form location string."""
+    match = re.search(
+        r"(?P<lat>-?\d{1,2}(?:\.\d+)?)\s*[,;/]\s*(?P<lon>-?\d{1,3}(?:\.\d+)?)",
+        str(text or ""),
+    )
+    if not match:
+        return None
+
+    lat = _safe_float(match.group("lat"))
+    lon = _safe_float(match.group("lon"))
+    if lat is None or lon is None:
+        return None
+    if not is_within_aml(lat, lon):
+        return None
+    return lat, lon
+
+
+_LOCATION_ADDRESS_HINT_RE = re.compile(
+    r"\b(?:rua|avenida|av\.?|largo|pra[cç]a|travessa|estrada|alameda|cal[cç]ada|"
+    r"campo|campus|jardim|parque|museu|biblioteca|hospital|farm[aá]cia|centro\s+comercial|"
+    r"shopping|universidade|faculdade|escola|teatro|cinema|est[aá]dio|mercado|igreja|"
+    r"mosteiro|torre|castelo|pal[aá]cio|palacio)\b|\b\d{4}-\d{3}\b",
+    re.IGNORECASE,
+)
+
+_LOCATION_VENUE_LABEL_RE = re.compile(
+    r"\b(?:centro\s+comercial|shopping|farm[aá]cia|loja|restaurante|caf[eé]|hotel|"
+    r"museu|biblioteca|hospital|universidade|faculdade|escola|teatro|cinema|aeroporto|mercado)\b",
+    re.IGNORECASE,
+)
+
+_LOCATION_EXACT_ADDRESS_RE = re.compile(r"\b\d+[A-Za-z]?\b|\b\d{4}-\d{3}\b")
+
+_LOCATION_CONTEXT_EXTRACTORS: Tuple[re.Pattern, ...] = (
+    re.compile(
+        r"\b(?:perto|junto|ao\s+p[eé]|mais\s+pr[oó]xim[ao]s?|closest|nearest|near|around)\s+"
+        r"(?:de|do|da|dos|das|to|the)?\s+(?P<location>.+)$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:estou|tou|i(?:'m| am))\s+(?:na|no|em|at|in|on)\s+(?P<location>.+)$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:ir|vou|quero\s+ir|preciso\s+(?:de\s+)?ir|go|travel|get)\s+"
+        r"(?:desde|a\s+partir\s+(?:de|do|da|dos|das)|dos|das|do|da|de|from)?\s*"
+        r"(?P<location>.+?)\s+(?:para|ao|a|à|at[eé]|to)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:from|desde|a\s+partir\s+(?:de|do|da|dos|das))\s+(?P<location>.+?)\s+"
+        r"(?:to|para|ao|a|à|at[eé])\b",
+        re.IGNORECASE,
+    ),
+)
+
+_LOCATION_SUFFIX_SPLITTERS: Tuple[re.Pattern, ...] = (
+    re.compile(r"\s*\?\s*.*$"),
+    re.compile(
+        r"\s*[,;]\s*(?:qual|quais|onde|como|diz|diga|d[aá][- ]?me|mostra|"
+        r"tell|show|how|where|which|what)\b.*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\s+(?:e|and)\s+(?:quero|preciso|tenho|vou|gostava|como|depois|a\s+seguir|"
+        r"de\s+seguida|diz|diga|d[aá][- ]?me|mostra|h[aá]|existem|tem|t[eê]m|"
+        r"need|want|then|after|show|tell|can|are\s+there|is\s+there)\b.*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\s+(?:e|and)\s+(?:h[aá]|existem|tem|t[eê]m|are\s+there|is\s+there)\s+"
+        r"(?:atrasos?|perturba[cç][oõ]es|avisos?|alertas?|delays?|disruptions?|warnings?|alerts?)\b.*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\s+(?:para|to)\s+(?:chegar|chegares|chegarmos|ir|go|get|arrive|estar|usar|use)\b.*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\s+(?:com|with)\s+(?:morada|address|endere[cç]o|dist[aâ]ncia|distance|hor[aá]rio|hours?|telefone|phone)\b.*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\s+(?:sem\s+ser\s+a\s+p[eé]|without\s+walking|de\s+metro|de\s+autocarro|"
+        r"de\s+comboio|by\s+metro|by\s+bus|by\s+train|op[cç][aã]o|option)\b.*$",
+        re.IGNORECASE,
+    ),
+)
+
+_LOCATION_LEADING_PREFIX_RE = re.compile(
+    r"^(?:(?:estou|tou|i(?:'m| am))\s+(?:na|no|em|at|in|on)\s+|"
+    r"(?:perto|junto)\s+(?:de|do|da|dos|das)?\s+|"
+    r"(?:mais\s+pr[oó]xim[ao]s?|closest|nearest)\s+(?:de|do|da|to)?\s+|"
+    r"(?:desde|from|a\s+partir\s+(?:de|do|da|dos|das)|em|na|no|at|in|para|to)\s+|"
+    r"(?:o|a|os|as|the)\s+)+",
+    re.IGNORECASE,
+)
+
+
+def _is_generic_service_request_fragment(value: str) -> bool:
+    """Return whether a fragment names a service type, not a location.
+
+    This prevents the geocoder from treating requests such as
+    ``"farmácia mais próxima"`` as an actual place name. Fragments that include
+    an address, area, or named venue remain eligible for normal resolution.
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        return False
+    if _LOCATION_EXACT_ADDRESS_RE.search(raw) or re.search(
+        r"\b(?:rua|avenida|av\.?|largo|pra[cç]a|travessa|estrada|alameda|cal[cç]ada|campo|campus)\b",
+        raw,
+        flags=re.IGNORECASE,
+    ):
+        return False
+
+    normalized = normalize_location_text(raw)
+    if not normalized:
+        return False
+
+    if not re.search(
+        r"\b(?:farmacia|farmacias|pharmacy|pharmacies|biblioteca|bibliotecas|library|libraries|"
+        r"hospital|hospitais|school|schools|escola|escolas|mercado|mercados|market|markets|"
+        r"parque|parques|park|parks|wc|restroom|restrooms|casa de banho|casas de banho|"
+        r"servico|servicos|serviço|serviços|service|services)\b",
+        normalized,
+    ):
+        return False
+
+    remainder = re.sub(
+        r"\b(?:farmacia|farmacias|pharmacy|pharmacies|biblioteca|bibliotecas|library|libraries|"
+        r"hospital|hospitais|school|schools|escola|escolas|mercado|mercados|market|markets|"
+        r"parque|parques|park|parks|wc|restroom|restrooms|casa de banho|casas de banho|"
+        r"servico|servicos|serviço|serviços|service|services|mais|proximo|proxima|proximos|"
+        r"proximas|nearest|closest|nearby|perto|junto|de|do|da|dos|das|o|a|os|as|the)\b",
+        " ",
+        normalized,
+    )
+    return not re.sub(r"\s+", " ", remainder).strip()
+
+
+def _strip_location_query_tail(value: str) -> str:
+    """Strip intent clauses that are not part of a location name."""
+    cleaned = re.sub(r"\s+", " ", str(value or "")).strip(" .?!,;:")
+    for splitter in _LOCATION_SUFFIX_SPLITTERS:
+        cleaned = splitter.sub("", cleaned).strip(" .?!,;:")
+    return cleaned
+
+
+def clean_location_query_fragment(location_name: str) -> str:
+    """Extract the location phrase from a free-form user/tool argument.
+
+    The geocoder should receive a place, street, landmark, shop, or coordinate,
+    not a whole request such as ``"Largo Camões e quero ir à Biblioteca..."``.
+    This helper is deliberately generic: it removes request/transport clauses
+    while preserving concrete names for Nominatim-first resolution.
+
+    Args:
+        location_name: Free-form location or accidental sentence fragment.
+
+    Returns:
+        Cleaned location phrase, or an empty string when none is recoverable.
+    """
+    raw = re.sub(r"\s+", " ", str(location_name or "")).strip(" .?!,;:")
+    if not raw:
+        return ""
+    if _is_generic_service_request_fragment(raw):
+        return ""
+
+    coordinate_pair = _parse_coordinate_pair(raw)
+    if coordinate_pair:
+        return f"{coordinate_pair[0]},{coordinate_pair[1]}"
+
+    located_at_match = re.match(
+        r"^(?P<label>.+?)\s+que\s+fica\s+(?:na|no|em|at)\s+(?P<tail>.+)$",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if located_at_match:
+        label = _strip_location_query_tail(located_at_match.group("label"))
+        tail = _strip_location_query_tail(located_at_match.group("tail"))
+        if _LOCATION_VENUE_LABEL_RE.search(label) and _LOCATION_EXACT_ADDRESS_RE.search(tail):
+            raw = f"{label}, {tail}"
+        elif _LOCATION_VENUE_LABEL_RE.search(label):
+            raw = label
+        else:
+            raw = tail if _LOCATION_ADDRESS_HINT_RE.search(tail) else label
+
+    embedded_address_match = re.match(
+        r"^(?P<label>.{2,80}?)\s+(?:da|do|das|dos|na|no|em)\s+"
+        r"(?P<tail>(?:rua|avenida|av\.?|largo|pra[cç]a|travessa|estrada|alameda|"
+        r"cal[cç]ada|campo|campus|jardim|parque)\b.*)$",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if embedded_address_match:
+        label = _strip_location_query_tail(embedded_address_match.group("label"))
+        tail = _strip_location_query_tail(embedded_address_match.group("tail"))
+        tail = re.sub(r",?\s+em\s+([^,]+)$", r", \1", tail, flags=re.IGNORECASE)
+        if _is_generic_service_request_fragment(label):
+            raw = tail
+        elif label and tail:
+            raw = f"{label}, {tail}"
+
+    for extractor in _LOCATION_CONTEXT_EXTRACTORS:
+        match = extractor.search(raw)
+        if match:
+            candidate = _strip_location_query_tail(match.group("location"))
+            candidate = _LOCATION_LEADING_PREFIX_RE.sub("", candidate).strip(" .?!,;:")
+            if candidate:
+                return candidate
+
+    cleaned = _strip_location_query_tail(raw)
+    cleaned = _LOCATION_LEADING_PREFIX_RE.sub("", cleaned).strip(" .?!,;:")
+    return cleaned
+
+
 _AMBIGUOUS_LOCATION_HINTS = {
     "madeira": {
         "pt": [
-            "A) 🏝️ **Ilha da Madeira** — não é acessível por transportes urbanos de Lisboa; requer avião.",
-            "B) 🚇 **Rua Humberto Madeira / Av. Ilha da Madeira, em Lisboa** — continuo abaixo com a opção urbana.",
+            "- A) 🏝️ **Ilha da Madeira** — não é acessível por transportes urbanos de Lisboa; requer avião.",
+            "- B) 🚇 **Rua Humberto Madeira / Av. Ilha da Madeira, em Lisboa** — continuo abaixo com a opção urbana.",
         ],
         "en": [
-            "A) 🏝️ **Madeira island** — not reachable by Lisbon urban transport; it requires a flight.",
-            "B) 🚇 **Rua Humberto Madeira / Avenida da Ilha da Madeira, Lisbon** — continuing below with the urban option.",
+            "- A) 🏝️ **Madeira island** — not reachable by Lisbon urban transport; it requires a flight.",
+            "- B) 🚇 **Rua Humberto Madeira / Avenida da Ilha da Madeira, Lisbon** — continuing below with the urban option.",
         ],
     },
 }
+
+
+def _location_is_specific_enough(raw_location: str) -> bool:
+    """Return whether a location is specific enough to avoid ambiguity prompts."""
+    cleaned = clean_location_query_fragment(raw_location)
+    normalized = normalize_location_text(cleaned)
+    if not cleaned or not normalized:
+        return True
+    if _parse_coordinate_pair(cleaned):
+        return True
+    if _looks_like_acronym_label(cleaned):
+        return True
+    if _LOCATION_ADDRESS_HINT_RE.search(cleaned):
+        return True
+    if normalized in _CURATED_QUERY_VARIANTS or normalized in _CURATED_DISPLAY_NAMES:
+        return True
+    if normalized in _CURATED_LOCATION_POINTS:
+        return True
+    if len(normalized.split()) > 4:
+        return True
+    return False
+
+
+def _format_ambiguity_candidate(result: Dict[str, Any]) -> str:
+    """Return a compact user-facing label for an ambiguous geocoder candidate."""
+    display = str(result.get("display_name") or "").strip()
+    if not display:
+        return ""
+    parts = [part.strip() for part in display.split(",") if part.strip()]
+    return ", ".join(parts[:3]) if parts else display
+
+
+def _build_dynamic_location_ambiguity_hints(raw_location: str) -> List[str]:
+    """Find generic Nominatim alternatives for underspecified place names."""
+    cleaned = clean_location_query_fragment(raw_location)
+    normalized = normalize_location_text(cleaned)
+    if _location_is_specific_enough(cleaned):
+        return []
+
+    try:
+        if _resolve_known_metro_station(cleaned) or _resolve_known_cp_station(cleaned):
+            return []
+    except NameError:
+        pass
+
+    candidates: List[Dict[str, Any]] = []
+    seen: set[Tuple[float, float, str]] = set()
+    for query in _build_query_variants(cleaned)[:3]:
+        for result in _fetch_nominatim_results_cached(query):
+            lat = _safe_float(result.get("lat"))
+            lon = _safe_float(result.get("lon"))
+            if lat is None or lon is None:
+                continue
+            scope = classify_coordinate_scope(lat, lon)
+            if scope == "outside_scope":
+                continue
+            key = (
+                round(lat, 5),
+                round(lon, 5),
+                normalize_location_text(result.get("display_name", "")),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            scored = dict(result)
+            scored["lat"] = lat
+            scored["lon"] = lon
+            scored["scope"] = scope
+            scored["score"] = _score_nominatim_result(
+                scored,
+                query_norm=normalized,
+                prefer_city=True,
+            )
+            candidates.append(scored)
+        for result in _fetch_photon_results_cached(query):
+            lat = _safe_float(result.get("lat"))
+            lon = _safe_float(result.get("lon"))
+            if lat is None or lon is None:
+                continue
+            key = (
+                round(lat, 5),
+                round(lon, 5),
+                normalize_location_text(result.get("display_name", "")),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            scored = dict(result)
+            scored["score"] = _score_nominatim_result(
+                scored,
+                query_norm=normalized,
+                prefer_city=True,
+            )
+            candidates.append(scored)
+
+    if len(candidates) < 2:
+        return []
+
+    candidates.sort(
+        key=lambda item: (
+            item.get("score", 0.0),
+            _safe_float(item.get("importance")) or 0.0,
+        ),
+        reverse=True,
+    )
+
+    def _primary_display_key(candidate: Dict[str, Any]) -> str:
+        """Return the normalized leading display-name segment for ambiguity ranking."""
+        primary = normalize_location_text(str(candidate.get("display_name") or "").split(",")[0])
+        return re.sub(r"^(?:a|o|the)\s+", "", primary).strip()
+
+    top_score_for_exact = float(candidates[0].get("score", 0.0))
+    exact_primary_candidates = [
+        candidate for candidate in candidates[:10]
+        if _primary_display_key(candidate) == normalized
+        and top_score_for_exact - float(candidate.get("score", 0.0)) <= 0.5
+    ]
+    landmark_types = {
+        "mall", "attraction", "museum", "university", "college", "school",
+        "hospital", "pharmacy", "library", "theatre", "restaurant", "bakery",
+        "supermarket", "hotel", "monument", "administrative", "city", "town",
+        "village", "municipality", "suburb",
+    }
+    if (
+        len(exact_primary_candidates) == 1
+        and str(exact_primary_candidates[0].get("type") or "").lower() in landmark_types
+    ):
+        return []
+    if len(candidates) >= 2:
+        top_candidate = candidates[0]
+        second_score = float(candidates[1].get("score", 0.0))
+        top_score_value = float(top_candidate.get("score", 0.0))
+        top_display_first = _primary_display_key(top_candidate)
+        exact_named_landmark = bool(
+            top_display_first
+            and (
+                top_display_first == normalized
+                or normalized in top_display_first
+            )
+            and (top_score_value - second_score) >= 3.0
+        )
+        if exact_named_landmark:
+            return []
+    top_score = float(candidates[0].get("score", 0.0))
+    close_candidates = [
+        candidate
+        for candidate in candidates[:5]
+        if top_score - float(candidate.get("score", 0.0)) <= 1.25
+    ]
+    labels: List[str] = []
+    seen_labels: set[str] = set()
+    for candidate in close_candidates:
+        label = _format_ambiguity_candidate(candidate)
+        label_key = normalize_location_text(label)
+        if label and label_key not in seen_labels:
+            seen_labels.add(label_key)
+            labels.append(label)
+        if len(labels) == 3:
+            break
+    generic_location_terms = {
+        "loja", "store", "cafe", "café", "restaurante", "restaurant",
+        "padaria", "farmacia", "farmácia", "centro", "comercial",
+    }
+    query_terms = {
+        term for term in normalized.split()
+        if len(term) >= 3 and term not in generic_location_terms
+    }
+    if labels and query_terms:
+        relevant_labels = [
+            label for label in labels
+            if any(term in normalize_location_text(label) for term in query_terms)
+        ]
+        if not relevant_labels and re.search(
+            r"\b(?:loja|store|cafe|café|restaurante|restaurant|padaria|farm[áa]cia)\b",
+            cleaned,
+            flags=re.IGNORECASE,
+        ):
+            return [f"__NO_CLEAR_MATCH__:{cleaned}"]
+        labels = relevant_labels or labels
+    return labels if len(labels) >= 2 else []
 
 
 def build_location_ambiguity_preamble(
@@ -468,10 +921,40 @@ def build_location_ambiguity_preamble(
 
     for raw_location in (origin, destination):
         token = normalize_location_text(raw_location)
-        if token not in _AMBIGUOUS_LOCATION_HINTS or token in seen:
+        if token in seen:
             continue
         seen.add(token)
-        hints = _AMBIGUOUS_LOCATION_HINTS[token][selected_language]
+        if token in _AMBIGUOUS_LOCATION_HINTS:
+            hints = _AMBIGUOUS_LOCATION_HINTS[token][selected_language]
+        else:
+            dynamic_hints = _build_dynamic_location_ambiguity_hints(raw_location)
+            if not dynamic_hints:
+                continue
+            if len(dynamic_hints) == 1 and dynamic_hints[0].startswith("__NO_CLEAR_MATCH__:"):
+                requested = dynamic_hints[0].split(":", 1)[1].strip() or raw_location
+                if selected_language == "pt":
+                    blocks.append(
+                        f"⚠️ **Preciso de confirmar '{raw_location}':** não encontrei uma correspondência clara para "
+                        f"**{requested}** em Lisboa/AML. Indica a morada, centro comercial, zona ou ponto de referência exato."
+                    )
+                else:
+                    blocks.append(
+                        f"⚠️ **I need to confirm '{raw_location}':** I could not find a clear match for "
+                        f"**{requested}** in Lisbon/AML. Provide the exact address, shopping centre, area, or landmark."
+                    )
+                continue
+            if selected_language == "pt":
+                hints = [
+                    f"- {chr(65 + index)}) 📍 **{hint}**"
+                    for index, hint in enumerate(dynamic_hints)
+                ]
+                hints.append("- Indica a morada, zona ou ponto de referência se nenhuma destas opções for a pretendida.")
+            else:
+                hints = [
+                    f"- {chr(65 + index)}) 📍 **{hint}**"
+                    for index, hint in enumerate(dynamic_hints)
+                ]
+                hints.append("- Specify the address, area, or landmark if none of these options is what you mean.")
         heading = (
             f"⚠️ **Ambiguidade em '{raw_location}':** posso estar a interpretar uma destas opções:"
             if selected_language == "pt"
@@ -645,19 +1128,43 @@ def _build_query_variants(location_name: str) -> List[str]:
     """
     clean_name = str(location_name or "").strip()
     normalized_name = normalize_location_text(clean_name)
-    curated_variants = _CURATED_QUERY_VARIANTS.get(normalized_name, [])
+    comma_variants: List[str] = []
+    comma_parts = [part.strip() for part in clean_name.split(",") if part.strip()]
+    if len(comma_parts) > 1:
+        for start_index in range(1, len(comma_parts)):
+            tail = ", ".join(comma_parts[start_index:])
+            if _LOCATION_ADDRESS_HINT_RE.search(tail) or _LOCATION_EXACT_ADDRESS_RE.search(tail):
+                comma_variants.extend(
+                    [
+                        tail,
+                        f"{tail}, Lisboa, Portugal",
+                        f"{tail}, Lisbon, Portugal",
+                    ]
+                )
+                break
+
+        label_without_type = re.sub(
+            r"^(?:farm[aá]cia|loja|restaurante|caf[eé]|hotel|museu|biblioteca|hospital)\s+",
+            "",
+            comma_parts[0],
+            flags=re.IGNORECASE,
+        ).strip()
+        if label_without_type and label_without_type != comma_parts[0]:
+            comma_variants.append(label_without_type)
+
     variants = [
-        *curated_variants,
         clean_name,
+        *comma_variants,
         f"{clean_name}, Lisboa, Portugal",
         f"{clean_name}, Lisbon, Portugal",
         f"{clean_name}, Portugal",
+        *_CURATED_QUERY_VARIANTS.get(normalized_name, []),
     ]
     return [variant for variant in dict.fromkeys(v.strip() for v in variants if v.strip())]
 
 
 def _resolve_curated_location_point(location_name: str) -> Optional[Dict[str, Any]]:
-    """Resolve stable Lisbon landmarks from the local gazetteer before web geocoding."""
+    """Resolve stable Lisbon landmarks from the local gazetteer as a fallback."""
     query_clean = str(location_name or "").strip()
     query_norm = normalize_location_text(query_clean)
     if not query_norm:
@@ -744,6 +1251,93 @@ def _fetch_nominatim_results_cached(query: str) -> List[Dict[str, Any]]:
         return []
 
 
+def _format_photon_display(properties: Dict[str, Any]) -> str:
+    """Build a compact display name for a Photon feature."""
+    street = str(properties.get("street") or "").strip()
+    number = str(properties.get("housenumber") or "").strip()
+    name = str(properties.get("name") or "").strip()
+    postcode = str(properties.get("postcode") or "").strip()
+    city = str(
+        properties.get("city")
+        or properties.get("district")
+        or properties.get("county")
+        or "Lisboa"
+    ).strip()
+    street_line = " ".join(part for part in (street, number) if part).strip()
+    parts = [part for part in (name, street_line, postcode, city) if part]
+    return ", ".join(dict.fromkeys(parts))
+
+
+def _photon_feature_to_result(feature: Dict[str, Any], query: str) -> Optional[Dict[str, Any]]:
+    """Convert a Photon feature into the internal geocoder-result shape."""
+    geometry = feature.get("geometry") or {}
+    coordinates = geometry.get("coordinates") or []
+    if len(coordinates) < 2:
+        return None
+    lon = _safe_float(coordinates[0])
+    lat = _safe_float(coordinates[1])
+    if lat is None or lon is None:
+        return None
+    scope = classify_coordinate_scope(lat, lon)
+    if scope == "outside_scope":
+        return None
+
+    properties = feature.get("properties") or {}
+    display_name = _format_photon_display(properties) or query
+    return {
+        "display_name": display_name,
+        "lat": lat,
+        "lon": lon,
+        "class": str(properties.get("osm_key") or "place"),
+        "type": str(properties.get("osm_value") or properties.get("type") or "unknown"),
+        "importance": 0.45,
+        "address": {
+            "road": properties.get("street"),
+            "house_number": properties.get("housenumber"),
+            "postcode": properties.get("postcode"),
+            "city": properties.get("city") or properties.get("district"),
+        },
+        "query_used": query,
+        "scope": scope,
+        "match_source": "photon",
+    }
+
+
+@lru_cache(maxsize=256)
+def _fetch_photon_results_cached(query: str) -> List[Dict[str, Any]]:
+    """Fetch and cache Photon/OSM results as a fallback to Nominatim."""
+    headers = {"User-Agent": NOMINATIM_USER_AGENT}
+    params = {
+        "q": query,
+        "limit": 8,
+        "lat": 38.7223,
+        "lon": -9.1393,
+    }
+    try:
+        response = requests.get(PHOTON_URL, params=params, headers=headers, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        payload = response.json()
+        features = payload.get("features") if isinstance(payload, dict) else None
+        if not isinstance(features, list):
+            return []
+        results: List[Dict[str, Any]] = []
+        for feature in features:
+            if isinstance(feature, dict):
+                result = _photon_feature_to_result(feature, query)
+                if result:
+                    results.append(result)
+        return results
+    except ValueError as exc:
+        logger.info("Invalid Photon JSON for '%s': %s", query, exc)
+        return []
+    except requests.RequestException as exc:
+        logger.info("Photon lookup failed for '%s': %s", query, exc)
+        return []
+    except Exception as exc:
+        logger.info("Unexpected Photon error for '%s': %s", query, exc)
+        return []
+
+
 def _score_nominatim_result(
     result: Dict[str, Any],
     query_norm: str,
@@ -815,7 +1409,31 @@ def geocode_location_name(
     Returns:
         Best geocoded result dictionary or None if unresolved.
     """
-    query_clean = str(location_name or "").strip()
+    raw_query = str(location_name or "").strip()
+    if not raw_query:
+        return None
+
+    coordinate_pair = _parse_coordinate_pair(raw_query)
+    if coordinate_pair:
+        lat, lon = coordinate_pair
+        return {
+            "display_name": raw_query,
+            "full_display_name": raw_query,
+            "lat": lat,
+            "lon": lon,
+            "type": "coordinate",
+            "class": "place",
+            "importance": 1.0,
+            "address": {},
+            "query_used": raw_query,
+            "raw_query": raw_query,
+            "cleaned_query": raw_query,
+            "scope": classify_coordinate_scope(lat, lon),
+            "match_source": "coordinate_pair",
+            "confidence": 1.0,
+        }
+
+    query_clean = clean_location_query_fragment(raw_query)
     if not query_clean:
         return None
 
@@ -823,12 +1441,6 @@ def geocode_location_name(
     effective_prefer_city = prefer_city and not _query_mentions_aml_outside_lisbon(
         query_norm
     )
-
-    curated = _resolve_curated_location_point(query_clean)
-    if curated:
-        if not allow_aml and curated["scope"] != "lisbon_city":
-            return None
-        return curated
 
     candidates: List[Dict[str, Any]] = []
     seen = set()
@@ -866,8 +1478,47 @@ def geocode_location_name(
                 prefer_city=effective_prefer_city,
             )
             candidates.append(scored)
+        for result in _fetch_photon_results_cached(query):
+            lat = _safe_float(result.get("lat"))
+            lon = _safe_float(result.get("lon"))
+            if lat is None or lon is None:
+                continue
+
+            scope = classify_coordinate_scope(lat, lon)
+            if scope == "outside_scope":
+                continue
+            if not allow_aml and scope != "lisbon_city":
+                continue
+
+            dedupe_key = (
+                round(lat, 5),
+                round(lon, 5),
+                normalize_location_text(result.get("display_name", "")),
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+
+            scored = dict(result)
+            scored["lat"] = lat
+            scored["lon"] = lon
+            scored["scope"] = scope
+            scored["query_used"] = query
+            scored["score"] = _score_nominatim_result(
+                scored,
+                query_norm=query_norm,
+                prefer_city=effective_prefer_city,
+            )
+            candidates.append(scored)
 
     if not candidates:
+        curated = _resolve_curated_location_point(query_clean)
+        if curated:
+            if not allow_aml and curated["scope"] != "lisbon_city":
+                return None
+            curated["raw_query"] = raw_query
+            curated["cleaned_query"] = query_clean
+            return curated
         return None
 
     candidates.sort(
@@ -891,8 +1542,10 @@ def geocode_location_name(
         "importance": _safe_float(best.get("importance")) or 0.0,
         "address": best.get("address", {}) or {},
         "query_used": str(best.get("query_used") or query_clean),
+        "raw_query": raw_query,
+        "cleaned_query": query_clean,
         "scope": str(best.get("scope") or "unknown"),
-        "match_source": "nominatim",
+        "match_source": str(best.get("match_source") or "nominatim"),
         "confidence": round(min(0.99, 0.55 + (best.get("score", 0.0) / 25.0)), 2),
     }
 
@@ -1214,12 +1867,14 @@ def resolve_location_query(
     Returns:
         Resolution payload with scope, match source, confidence, and nearest nodes.
     """
-    query = str(location_name or "").strip()
+    raw_query = str(location_name or "").strip()
+    query = clean_location_query_fragment(raw_query)
     normalized_query = normalize_location_text(query)
 
-    if not query:
+    if not raw_query or not query:
         return {
-            "query": "",
+            "query": query,
+            "raw_query": raw_query,
             "normalized_query": "",
             "success": False,
             "display_name": "",
@@ -1247,6 +1902,7 @@ def resolve_location_query(
     if not geocoded:
         return {
             "query": query,
+            "raw_query": raw_query,
             "normalized_query": normalized_query,
             "success": False,
             "display_name": query,
@@ -1270,6 +1926,7 @@ def resolve_location_query(
 
     return {
         "query": query,
+        "raw_query": raw_query,
         "normalized_query": normalized_query,
         "success": True,
         "display_name": geocoded["display_name"],
@@ -1432,19 +2089,24 @@ def get_location_display_name(location_name: str, detailed: bool = False) -> str
     if _looks_like_acronym_label(raw):
         return raw
 
-    normalized_raw = normalize_location_text(raw)
-    curated_display_name = _CURATED_DISPLAY_NAMES.get(normalized_raw)
-    if curated_display_name:
-        return curated_display_name
-
     resolved = resolve_location_query(raw, prefer_city=True, allow_aml=True)
     if resolved.get("success"):
+        curated_display_name = _CURATED_DISPLAY_NAMES.get(normalize_location_text(raw))
+        if curated_display_name:
+            return curated_display_name
+        cleaned_query = clean_location_query_fragment(raw)
+        if cleaned_query and normalize_location_text(cleaned_query) != normalize_location_text(raw):
+            return str(resolved.get("display_name") or cleaned_query).strip()
         if resolved.get("match_source") in {"metro_station", "cp_station"}:
             resolved_display = str(resolved.get("display_name") or raw).strip()
             if normalize_location_text(raw) == normalize_location_text(resolved_display):
                 return resolved_display
             return raw.title()
         return str(resolved.get("display_name") or raw).strip()
+
+    curated_display_name = _CURATED_DISPLAY_NAMES.get(normalize_location_text(raw))
+    if curated_display_name:
+        return curated_display_name
 
     return raw.title()
 

@@ -1895,7 +1895,8 @@ def carris_find_routes_between(
         response += "=" * 55 + "\n\n"
         ambiguity_note = build_location_ambiguity_preamble(origin, destination, language="pt")
         if ambiguity_note:
-            response += f"{ambiguity_note}\n\n"
+            conn.close()
+            return ambiguity_note
 
         origin_lat, origin_lon, origin_name = geocode_location(origin)
         dest_lat, dest_lon, dest_name = geocode_location(destination)
@@ -1960,15 +1961,56 @@ def carris_find_routes_between(
                         )
             return sorted(nearby, key=lambda x: x["distance_km"])
 
+        def filter_endpoint_stops(
+            stops: List[Dict[str, Any]],
+            own_lat: float,
+            own_lon: float,
+            other_lat: float,
+            other_lon: float,
+        ) -> List[Dict[str, Any]]:
+            """Keep stops that are plausibly attached to their intended endpoint."""
+            endpoint_stops: List[Dict[str, Any]] = []
+            for stop in stops:
+                own_distance = float(
+                    stop.get("distance_km")
+                    or haversine_distance(own_lat, own_lon, stop["lat"], stop["lon"])
+                )
+                other_distance = haversine_distance(other_lat, other_lon, stop["lat"], stop["lon"])
+                if own_distance <= other_distance + 0.05:
+                    endpoint_stops.append(stop)
+            return endpoint_stops
+
         routes_found = []
         origin_stops = []
+        dest_stops = []
         final_radius = search_radius_km
 
         for r in [search_radius_km, search_radius_km * 2, search_radius_km * 3]:
             final_radius = r
-            origin_stops = find_stops_near(origin_lat, origin_lon, r)
-            dest_stops = find_stops_near(dest_lat, dest_lon, r)
+            raw_origin_stops = find_stops_near(origin_lat, origin_lon, r)
+            raw_dest_stops = find_stops_near(dest_lat, dest_lon, r)
 
+            if not raw_origin_stops or not raw_dest_stops:
+                continue
+
+            origin_stops = filter_endpoint_stops(
+                raw_origin_stops,
+                origin_lat,
+                origin_lon,
+                dest_lat,
+                dest_lon,
+            )
+            dest_stops = filter_endpoint_stops(
+                raw_dest_stops,
+                dest_lat,
+                dest_lon,
+                origin_lat,
+                origin_lon,
+            )
+            shared_stop_ids = {s["id"] for s in origin_stops} & {s["id"] for s in dest_stops}
+            if shared_stop_ids:
+                origin_stops = [s for s in origin_stops if s["id"] not in shared_stop_ids]
+                dest_stops = [s for s in dest_stops if s["id"] not in shared_stop_ids]
             if not origin_stops or not dest_stops:
                 continue
 
@@ -2022,6 +2064,8 @@ def carris_find_routes_between(
 
         trams = [r for r in unique_routes.values() if r["route_short_name"].endswith("E")]
         buses = [r for r in unique_routes.values() if not r["route_short_name"].endswith("E")]
+        origin_stop_by_id = {str(s["id"]): s for s in origin_stops}
+        dest_stop_by_id = {str(s["id"]): s for s in dest_stops}
 
         def get_route_stop_hint(route_short_name: str) -> Dict[str, str]:
             """Return the matched origin/destination stops for a direct route."""
@@ -2035,6 +2079,8 @@ def carris_find_routes_between(
             cursor.execute(
                 f"""
                 SELECT
+                    st_o.stop_id AS origin_stop_id,
+                    st_d.stop_id AS destination_stop_id,
                     t.trip_headsign AS headsign,
                     so.stop_name AS origin_stop_name,
                     sd.stop_name AS destination_stop_name
@@ -2049,19 +2095,55 @@ def carris_find_routes_between(
                   AND st_o.stop_id IN ({ph_origin})
                   AND st_d.stop_id IN ({ph_dest})
                 ORDER BY st_o.stop_sequence, st_d.stop_sequence
-                LIMIT 1
+                LIMIT 80
                 """,
                 [route_short_name, *origin_ids_hint, *dest_ids_hint],
             )
-            row = cursor.fetchone()
-            return dict(row) if row else {}
+            rows = cursor.fetchall()
+            if not rows:
+                return {}
+
+            def stop_pair_score(row: sqlite3.Row) -> float:
+                origin_stop = origin_stop_by_id.get(str(row["origin_stop_id"]), {})
+                dest_stop = dest_stop_by_id.get(str(row["destination_stop_id"]), {})
+                return float(origin_stop.get("distance_km", 99.0)) + float(
+                    dest_stop.get("distance_km", 99.0)
+                )
+
+            return dict(min(rows, key=stop_pair_score))
+
+        def format_final_walk_line(stop_hint: Dict[str, str]) -> str:
+            """Return a final walking estimate from the alighting stop to destination."""
+            hinted_dest = dest_stop_by_id.get(str(stop_hint.get("destination_stop_id")))
+            if not hinted_dest:
+                return ""
+            distance_km = haversine_distance(
+                dest_lat,
+                dest_lon,
+                hinted_dest["lat"],
+                hinted_dest["lon"],
+            )
+            if distance_km > 1.2:
+                return ""
+            walking_minutes = max(1, round(distance_km * 12))
+            return f"     Final walk: ~{walking_minutes} min to destination.\n"
 
         def format_route_line(r: Dict[str, Any]) -> str:
             """Format a single route entry with direction-safe departures and RT hints."""
+            stop_hint = get_route_stop_hint(r["route_short_name"])
+            route_origin_stops = origin_stops
+            route_dest_stops = dest_stops
+            if stop_hint:
+                hinted_origin = origin_stop_by_id.get(str(stop_hint.get("origin_stop_id")))
+                hinted_dest = dest_stop_by_id.get(str(stop_hint.get("destination_stop_id")))
+                if hinted_origin and hinted_dest:
+                    route_origin_stops = [hinted_origin]
+                    route_dest_stops = [hinted_dest]
+
             departures = _get_directional_departures_for_route(
                 conn=conn,
-                origin_stops=origin_stops,
-                dest_stops=dest_stops,
+                origin_stops=route_origin_stops,
+                dest_stops=route_dest_stops,
                 route_short_name=r["route_short_name"],
                 active_services=active_services,
                 current_time=current_time,
@@ -2069,7 +2151,6 @@ def carris_find_routes_between(
             )
 
             if not departures:
-                stop_hint = get_route_stop_hint(r["route_short_name"])
                 headsign = stop_hint.get("headsign")
                 route_summary = f"para {headsign}" if headsign else r["route_long_name"]
                 line = f"   {r['route_short_name']}: {route_summary}\n"
@@ -2077,11 +2158,17 @@ def carris_find_routes_between(
                 dest_stop_name = stop_hint.get("destination_stop_name")
                 if origin_stop_name and dest_stop_name:
                     line += f"     Stops: board at {origin_stop_name}; leave at {dest_stop_name}.\n"
+                    line += format_final_walk_line(stop_hint)
                 line += "     ℹ️ No upcoming departures were confirmed today at the matched origin stop.\n\n"
                 return line
 
             first_dep = departures[0]
             line = f"   {r['route_short_name']}: para {first_dep['headsign']}\n"
+            origin_stop_name = stop_hint.get("origin_stop_name")
+            dest_stop_name = stop_hint.get("destination_stop_name")
+            if origin_stop_name and dest_stop_name:
+                line += f"     Stops: board at {origin_stop_name}; leave at {dest_stop_name}.\n"
+                line += format_final_walk_line(stop_hint)
             shown_times = []
             for dep in departures[:3]:
                 time_text = dep["estimated_departure"] if dep["is_realtime"] else dep["scheduled_departure"]
@@ -2089,7 +2176,7 @@ def carris_find_routes_between(
                     time_text = f"{time_text} {_format_delay_label(dep['delay_mins'])}"
                 shown_times.append(time_text)
 
-            line += f"     Next: {', '.join(shown_times)} (stop {first_dep['origin_stop_name'][:28]})\n"
+            line += f"     Next: {', '.join(shown_times)} (stop {first_dep['origin_stop_name']})\n"
             if first_dep.get("travel_mins"):
                 line += f"     ~{first_dep['travel_mins']}min travel\n"
             line += "\n"
@@ -2832,7 +2919,7 @@ if __name__ == "__main__":
     def _test_next_departures_by_name():
         stops_result = carris_get_stops.invoke({"query": "Rato"})
         print(stops_result)
-        
+
         # Resolve stop IDs from DB to avoid brittle markdown parsing.
         stop_id = _resolve_stop_id_from_db("Rato")
         if stop_id:
@@ -2957,7 +3044,7 @@ if __name__ == "__main__":
     def _test_frequency_format():
         result = carris_get_service_frequency.invoke({"route_short_name": "28E"})
         print(result)
-        
+
         lower_result = result.lower()
         checks = {
             "has_title": "28E" in result,

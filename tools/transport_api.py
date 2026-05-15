@@ -65,6 +65,8 @@ METRO_STATUS_URL = "https://app.metrolisboa.pt/status/getLinhas.php"
 _METRO_STATION_ALIASES: Dict[str, str] = {
     "sete rios": "jardim zoológico",
     "terminal sete rios": "jardim zoológico",
+    "marques": "Marquês de Pombal",
+    "marquês": "Marquês de Pombal",
     "marques pombal": "Marquês de Pombal",
     "marques de pombal": "Marquês de Pombal",
     "rotunda do marques": "Marquês de Pombal",
@@ -85,6 +87,30 @@ def _canonical_metro_station_name(station_name: str) -> str:
     """Return the official Metro station name for known user-facing aliases."""
     raw = str(station_name or "").strip()
     return _METRO_STATION_ALIASES.get(_normalize_station(raw), raw)
+
+
+def _format_metro_line_suffix(line_value: str) -> str:
+    """Return a compact line suffix with every Metro colour represented."""
+    line_ids = [
+        line_id
+        for line_id in re.split(r"[/,;]\s*|\s+(?:e|and)\s+", str(line_value or "").strip().lower())
+        if line_id
+    ]
+    known_line_ids = [line_id for line_id in line_ids if line_id in METRO_LINES]
+    if not known_line_ids:
+        return ""
+
+    line_labels = {
+        "amarela": "Amarela",
+        "azul": "Azul",
+        "verde": "Verde",
+        "vermelha": "Vermelha",
+    }
+    emojis = "".join(str(METRO_LINES[line_id].get("emoji") or "") for line_id in known_line_ids)
+    names = [line_labels.get(line_id, line_id.title()) for line_id in known_line_ids]
+    if len(names) == 1:
+        return f" ({emojis} {names[0]})"
+    return f" ({emojis} {'/'.join(names)})"
 
 
 def _format_location_display_name(location: str, detailed: bool = False) -> str:
@@ -497,29 +523,50 @@ def get_route_between_stations(origin: str, destination: str) -> str:
 
     # Handle landmarks first
     if has_landmarks:
-        response += "📍 **LOCATION INFORMATION**\n"
+        response += "📍 **Location information**\n\n"
+
+        def _render_landmark_block(label: str, landmark: Dict[str, Any]) -> str:
+            """Render a landmark info block with safe Markdown.
+
+            Uses 4-space indentation so Streamlit treats the nested lines as
+            continuation paragraphs of the parent list item; suppresses the
+            empty-line and the internal "Resolved dynamically" marker that
+            otherwise leaks into user-facing output.
+            """
+            block = f"- **{label}**\n"
+            metro_name = str(landmark.get('metro') or '').strip()
+            if metro_name:
+                sources_used.append("[*Metro de Lisboa*](https://www.metrolisboa.pt)")
+                line = str(landmark.get('line') or '').strip()
+                suffix = _format_metro_line_suffix(line)
+                block += f"    - 🚇 **Nearest Metro:** **{metro_name.title()}**{suffix}\n"
+            elif landmark.get('alternative'):
+                alternative = str(landmark['alternative'])
+                normalized_alternative = normalize_location_text(alternative)
+                if "carris" in normalized_alternative:
+                    sources_used.append("[*Carris*](https://www.carris.pt)")
+                if re.search(r"\b(?:cp|train|comboio|rail)\b", normalized_alternative):
+                    sources_used.append("[*CP*](https://www.cp.pt)")
+                block += "    - ⚠️ **Metro:** No direct Metro!\n"
+                block += f"    - 🚌 **Alternative:** {alternative}\n"
+            description = str(landmark.get('description') or '').strip()
+            if description and not description.lower().startswith(
+                'resolved dynamically'
+            ):
+                block += f"    - ℹ️ **Note:** {description}\n"
+            return block + "\n"
 
         if origin_landmark:
-            response += f"**{_format_location_display_name(origin, detailed=True)}**\n"
-            if origin_landmark.get('metro'):
-                line = origin_landmark.get('line', '')
-                line_emoji = METRO_LINES.get(line.split('/')[0], {}).get('emoji', '🚇')
-                response += f"   🚇 Nearest Metro: **{origin_landmark['metro'].title()}** ({line_emoji} {line.title()} Line)\n"
-            elif origin_landmark.get('alternative'):
-                response += "   ⚠️ No direct Metro!\n"
-                response += f"   🚌 Alternative: {origin_landmark['alternative']}\n"
-            response += f"   ℹ️ {origin_landmark.get('description', '')}\n\n"
+            response += _render_landmark_block(
+                _format_location_display_name(origin, detailed=True),
+                origin_landmark,
+            )
 
         if dest_landmark:
-            response += f"**{_format_location_display_name(destination, detailed=True)}**\n"
-            if dest_landmark.get('metro'):
-                line = dest_landmark.get('line', '')
-                line_emoji = METRO_LINES.get(line.split('/')[0], {}).get('emoji', '🚇')
-                response += f"   🚇 Nearest Metro: **{dest_landmark['metro'].title()}** ({line_emoji} {line.title()} Line)\n"
-            elif dest_landmark.get('alternative'):
-                response += "   ⚠️ No direct Metro!\n"
-                response += f"   🚌 Alternative: {dest_landmark['alternative']}\n"
-            response += f"   ℹ️ {dest_landmark.get('description', '')}\n\n"
+            response += _render_landmark_block(
+                _format_location_display_name(destination, detailed=True),
+                dest_landmark,
+            )
 
     # Resolve effective Metro stations (Handle Landmarks -> Stations)
     eff_origin = metro_origin if origin_lines else origin

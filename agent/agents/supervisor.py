@@ -190,13 +190,18 @@ class SupervisorAgent(BaseAgent):
             r"\bsea conditions\b",
             r"\bmarine forecast\b",
             r"\bcomo est[aá] o tempo\b",
-            r"\bqual (?:é|e) o tempo\b",
+            r"\bqual (?:é|e) o tempo\b(?!\s+de\s+espera)",
             r"\btempo em\b",
             r"\btempo hoje\b",
             r"\btempo amanh[aã]\b",
         ]
         if any(re.search(pattern, normalized) for pattern in weather_patterns):
             return True
+
+        # Guard: do not classify "tempo de espera" (wait time) as weather even
+        # if a more permissive pattern matched. This is a transport phrase.
+        if re.search(r"\btempos?\s+de\s+espera\b", normalized):
+            return False
 
         return False
 
@@ -298,6 +303,8 @@ class SupervisorAgent(BaseAgent):
             return False
 
         out_of_scope_patterns = [
+            r"\b(?:todos?|todas?|all|every)\b.{0,80}\b(?:portugal|pa[ií]s|country|national)\b",
+            r"\b(?:portugal|pa[ií]s|country|national)\b.{0,80}\b(?:todos?|todas?|all|every)\b",
             r"\b\d+\s*[-+*/x]\s*\d+\b",
             r"\bcapital of\b",
             r"\bpresident of\b",
@@ -335,16 +342,74 @@ class SupervisorAgent(BaseAgent):
             r"\b(can|could|please)?\s*(?:you\s+)?(?:help\s+me\s+)?(?:book|reserve|buy|purchase)\s+(?:(?:me\s+)?(?:a|an|one)\s+)?(?:table|restaurant|ticket|tickets|seat|seats|hotel|room|flight|pass|passes)\b",
             r"\b(make|booking|do|doing)\s+(?:me\s+)?(?:a\s+)?(?:reservation|booking)\b",
             r"\bbuy\s+(?:me\s+)?(?:a\s+)?(?:ticket|tickets)\b",
+            r"\breserva[-\s]?me\s+(?:uma\s+)?(?:mesa|bilhetes?|hotel|quarto)\b",
             r"\breservar\s+(?:uma\s+)?(?:mesa|bilhetes?|hotel|quarto)\b",
             r"\breserva\s+(?:uma\s+)?(?:mesa|bilhetes?|hotel|quarto)\b",
+            r"\bmarca[-\s]?me\s+(?:uma\s+)?(?:mesa|reserva|bilhetes?|hotel|quarto)\b",
             r"\bmarcar\s+(?:uma\s+)?(?:mesa|reserva|bilhetes?|hotel|quarto)\b",
             r"\bmarca\s+(?:uma\s+)?(?:mesa|reserva|bilhetes?|hotel|quarto)\b",
             r"\bfazer\s+(?:uma\s+)?reserva\b",
             r"\bfaz\s+(?:uma\s+)?reserva\b",
+            r"\bcompra[-\s]?me\s+(?:bilhetes?|entradas?)\b",
             r"\bcomprar\s+(?:bilhetes?|entradas?)\s+(?:por mim|para mim)\b",
             r"\bcompra\s+(?:bilhetes?|entradas?)\s+(?:por mim|para mim)\b",
+            r"\b(?:consegues|consegue|podes|pode|poderias|podias)\s+(?:comprar|reservar|marcar)\s+(?:bilhetes?|entradas?|tickets?|mesa|reserva)\b",
+            r"\b(?:can|could)\s+you\s+(?:buy|purchase|book|reserve)\s+(?:tickets?|seats?|a\s+table|a\s+reservation)\b",
         ]
         return any(re.search(pattern, normalized) for pattern in unsupported_patterns)
+
+    @classmethod
+    def _is_broad_realtime_transport_dump_request(cls, user_message: str) -> bool:
+        """Detect requests that ask for an unusably broad live transport dump."""
+        normalized = cls._normalize_query(user_message)
+        if not normalized:
+            return False
+        if not re.search(r"\b(?:tempo real|real[-\s]?time|live|agora|now)\b", normalized):
+            return False
+        has_transport_catalog_context = bool(
+            re.search(
+                r"\b(?:carris|autocarros?|buses|paragens?|stops|linhas?|lines|"
+                r"metro|subway|esta[cç][oõ]es?|stations?|tempos?\s+de\s+espera|wait\s+times?|"
+                r"cp|comboios?|trains?|partidas?|departures?|servi[cç]os?|services?)\b",
+                normalized,
+            )
+        )
+        asks_all_catalog = bool(
+            re.search(
+                r"\b(?:todas?|todos?|all|every)\b.*\b(?:linhas?|lines|paragens?|stops|esta[cç][oõ]es?|stations?|partidas?|departures?|comboios?|trains?|servi[cç]os?|services?|tempos?\s+de\s+espera|wait\s+times?)\b"
+                r"|\b(?:linhas?|lines|paragens?|stops|esta[cç][oõ]es?|stations?|partidas?|departures?|comboios?|trains?|servi[cç]os?|services?|tempos?\s+de\s+espera|wait\s+times?)\b.*\b(?:todas?|todos?|all|every)\b",
+                normalized,
+            )
+        )
+        requested_metro_lines = set(
+            re.findall(r"\b(?:linha\s+)?(amarela|azul|verde|vermelha|yellow|blue|green|red)\b", normalized)
+        )
+        single_metro_line_scope = len(requested_metro_lines) == 1 and re.search(
+            r"\b(?:metro|esta[cç][oõ]es?|stations?|tempos?\s+de\s+espera|wait\s+times?)\b",
+            normalized,
+        )
+        if single_metro_line_scope and not re.search(r"\b(?:todas?\s+as\s+linhas|all\s+lines|all\s+metro)\b", normalized):
+            return False
+        return has_transport_catalog_context and asks_all_catalog
+
+    @staticmethod
+    def _build_broad_realtime_transport_dump_response(language: str) -> str:
+        """Build a direct response for broad real-time transport catalogue requests."""
+        if language == "pt":
+            return (
+                "### 📡 **Pedido demasiado amplo para tempo real**\n\n"
+                "✅ **Resposta direta:** não é útil nem fiável despejar todas as linhas, estações, paragens, partidas, veículos ou tempos de espera numa só resposta em tempo real.\n\n"
+                "---\n\n"
+                "- 🧭 **Para responder com qualidade:** indica uma linha, paragem, zona ou origem → destino.\n"
+                "- 🚌 **Exemplos bons:** `tempo de espera na Alameda`, `próximo 758 em Amoreiras`, `autocarro de Avenidas Novas para Campo de Ourique`, `próximo CP de Entrecampos para Sete Rios`."
+            )
+        return (
+            "### 📡 **Request Too Broad For Real-Time Data**\n\n"
+            "✅ **Direct answer:** dumping every line, station, stop, departure, vehicle, or wait time in one live answer is not useful or reliable.\n\n"
+            "---\n\n"
+            "- 🧭 **To answer well:** give me a line, stop, area, or origin → destination.\n"
+            "- 🚌 **Good examples:** `wait time at Alameda`, `next 758 at Amoreiras`, `bus from Avenidas Novas to Campo de Ourique`, `next CP train from Entrecampos to Sete Rios`."
+        )
 
     @staticmethod
     def _build_unsupported_action_response(language: str) -> str:
@@ -425,6 +490,15 @@ class SupervisorAgent(BaseAgent):
                 "direct_response": self._sanitize_direct_response(self._build_unsupported_action_response(language)),
             }
 
+        if self._is_broad_realtime_transport_dump_request(user_message):
+            return {
+                "reasoning": "Direct broad real-time transport dump override",
+                "agents": [],
+                "direct_response": self._sanitize_direct_response(
+                    self._build_broad_realtime_transport_dump_response(language)
+                ),
+            }
+
         if self._is_geographic_out_of_scope_route(user_message):
             return {
                 "reasoning": "Direct geographic out-of-scope route override",
@@ -483,7 +557,7 @@ class SupervisorAgent(BaseAgent):
             return None
         direct_weather_transport = cls._is_direct_weather_transport_query(user_message)
         message_lower = cls._normalize_query(user_message)
-        if re.search(r"\b(uber|bolt|taxi|taxis|tÃ¡xi|tÃ¡xis|ride-hailing)\b", message_lower):
+        if re.search(r"\b(uber|bolt|taxi|taxis|táxi|táxis|ride-hailing)\b", message_lower):
             return {
                 "reasoning": "Direct unsupported ride-hailing transport override",
                 "agents": ["transport"],
@@ -532,8 +606,23 @@ class SupervisorAgent(BaseAgent):
         ]
         service_terms = [
             "pharmacy", "farmácia", "farmacia", "hospital", "school", "escola",
-            "library", "biblioteca", "police", "polícia", "policia",
+            "library", "biblioteca", "police", "polícia", "policia", "psp", "esquadra",
+            "market", "markets", "mercado", "mercados", "feira", "feiras",
+            "park", "parks", "parque", "parques", "garden", "gardens", "jardim", "jardins",
+            "parking", "estacionamento", "wifi", "wi-fi", "wc", "restroom", "restrooms",
+            "casa de banho", "casas de banho", "instalações sanitárias",
+            "posto de turismo", "tourist office",
         ]
+        service_transport_request = bool(
+            re.search(
+                r"\b(?:metro|autocarro|autocarros|bus|buses|comboio|train|carris|"
+                r"transporte|transport|rota|route|como\s+(?:vou|chego|posso\s+ir|ir)|"
+                r"leva[-\s]?me|take\s+me|sem\s+ser\s+a\s+p[eé]|without\s+walking|"
+                r"apanhar|catch|partida|departure|hor[áa]rio|schedule)\b",
+                message_lower,
+                flags=re.IGNORECASE,
+            )
+        )
 
         transport_hit = cls._looks_like_transport_query(message_lower) or cls._contains_domain_keyword(
             message_lower,
@@ -586,6 +675,60 @@ class SupervisorAgent(BaseAgent):
         if transport_hit and not exact_place_hit:
             place_hit = False
         service_hit = cls._contains_domain_keyword(message_lower, service_terms, minimum_ratio=0.84)
+        if (
+            service_hit
+            and not any([weather_hit, event_hit, place_hit])
+            and re.search(
+                r"\b(?:nearest|closest|nearby|mais\s+pr[oó]xim[ao]s?|"
+                r"perto\s+(?:de|do|da|dos|das)|junto\s+(?:de|do|da|dos|das)|"
+                r"na\s+zona\s+de|nas\s+proximidades\s+de|near)\b",
+                message_lower,
+                flags=re.IGNORECASE,
+            )
+            and not service_transport_request
+        ):
+            return {
+                "reasoning": "Direct nearby-service override; Lisboa Aberta proximity includes distance/walking-time estimate.",
+                "agents": ["researcher"],
+                "direct_response": None,
+            }
+
+        if service_hit and transport_hit and not any([weather_hit, event_hit, place_hit]):
+            needs_service_confirmation = bool(
+                re.search(r"\b(?:confirmar|confirma|h[aá]\s+uma?|chamad[ao]|called|named)\b", message_lower)
+            )
+            has_explicit_origin = bool(
+                re.search(r"\b(?:desde|a\s+partir\s+de|from|de|do|da)\s+.+\b(?:para|at[eé]|até|to)\b", message_lower)
+            )
+            agents = ["transport"] if has_explicit_origin and not needs_service_confirmation else ["researcher", "transport"]
+            return {
+                "reasoning": "Direct service-destination mobility override; route/confirmation request should not become an itinerary planner task.",
+                "agents": agents,
+                "direct_response": None,
+            }
+
+        if transport_hit and place_hit and not any([weather_hit, event_hit, service_hit]):
+            explicit_point_to_point = bool(
+                re.search(
+                    r"\b(?:desde|a\s+partir\s+de|from|de|do|da)\s+.+\b(?:para|at[eé]|até|to)\s+.+",
+                    message_lower,
+                )
+            )
+            operational_route_request = bool(
+                re.search(
+                    r"\b(?:rota|route|transporte|transport|como\s+(?:vou|chego|posso\s+ir)|"
+                    r"(?:quero|preciso|tenho)\s+(?:de\s+)?ir|"
+                    r"a\s+que\s+horas|quando\s+devo\s+sair|sair|apanhar|catch|leave|"
+                    r"chegar\s+(?:a|à|as|às))\b",
+                    message_lower,
+                )
+            )
+            if explicit_point_to_point and operational_route_request:
+                return {
+                    "reasoning": "Direct place-destination mobility override; point-to-point transport should not become an itinerary planner task.",
+                    "agents": ["transport"],
+                    "direct_response": None,
+                }
 
         if weather_hit and not any([transport_hit, event_hit, place_hit, service_hit]):
             return {
@@ -717,6 +860,8 @@ class SupervisorAgent(BaseAgent):
     def _is_planning_query(cls, user_message: str) -> bool:
         """Detects itinerary/planning intent without over-matching words like `today`."""
         message_lower = cls._normalize_query(user_message)
+        if cls._negates_itinerary_request(user_message):
+            return False
         if cls._is_category_browse_query(user_message):
             return False
         if cls._is_direct_weather_transport_query(user_message):
@@ -754,6 +899,31 @@ class SupervisorAgent(BaseAgent):
             return True
 
         return False
+
+    @classmethod
+    def _negates_itinerary_request(cls, user_message: str) -> bool:
+        """Return whether the user explicitly says not to produce a route/itinerary."""
+        normalized = cls._normalize_query(user_message)
+        if not normalized:
+            return False
+        explicit_negation = bool(
+            re.search(
+                r"\b(?:nao|não)\s+(?:me\s+)?(?:des|de|d[eê]s|fa[cç]as?|quero|preciso)\s+(?:um\s+|uma\s+)?(?:roteiro|itinerario|itiner[aá]rio|rota|percurso)\b",
+                normalized,
+            )
+            or re.search(r"\b(?:sem|without|no)\s+(?:roteiro|itinerario|itinerary|route|walking route)\b", normalized)
+            or re.search(r"\bdo\s+not\s+give\s+me\s+(?:an?\s+)?(?:itinerary|route|plan)\b", normalized)
+            or re.search(r"\bdon'?t\s+give\s+me\s+(?:an?\s+)?(?:itinerary|route|plan)\b", normalized)
+        )
+        if not explicit_negation:
+            return False
+        return bool(
+            re.search(
+                r"\b(?:explica|explicar|resumo|resume|summarize|explain|historia|history|cultura|culture|o que era|what was)\b",
+                normalized,
+            )
+            or not re.search(r"\b(?:planeia|planear|plan|visitar|visit|dia|day)\b", normalized)
+        )
 
     @classmethod
     def _planning_query_has_origin_anchor(cls, user_message: str) -> bool:
@@ -985,6 +1155,14 @@ class SupervisorAgent(BaseAgent):
         if decision:
             agents = decision.get("agents", [])
             reasoning = decision.get("reasoning", "")
+            if self._negates_itinerary_request(user_message):
+                original_agents = list(agents)
+                agents = [
+                    agent for agent in agents
+                    if agent != "planner" and (agent != "transport" or self._looks_like_transport_query(user_message))
+                ]
+                if agents != original_agents:
+                    reasoning += " (Removed planner/transport: user explicitly asked not to receive an itinerary.)"
 
             # Check if this is a planning query that requires weather.
             is_planning_query = self._is_planning_query(user_message)
@@ -1257,8 +1435,8 @@ class SupervisorAgent(BaseAgent):
             r"\bpara hoje\b",
             r"\bthis\s+(?:morning|afternoon|evening)\b",
             r"\btonight\b",
-            r"\besta\s+(?:manh[Ã£a]|tarde|noite)\b",
-            r"\blogo\s+Ã \s+noite\b",
+            r"\besta\s+(?:manh[ãa]|tarde|noite)\b",
+            r"\blogo\s+à\s+noite\b",
             r"\blogo\s+a\s+noite\b",
             # Tomorrow
             r"\bamanh[ãa]\b",
@@ -1285,6 +1463,11 @@ class SupervisorAgent(BaseAgent):
             r"\bfim de semana\b",
             r"\bpr[óo]ximo fim de semana\b",
             r"\bnext weekend\b",
+            # Named weekdays / explicit dates in planning requests
+            r"\b(?:segunda|terça|terca|quarta|quinta|sexta|sábado|sabado|domingo)(?:-feira)?\b",
+            r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+            r"\b\d{1,2}\s+de\s+(?:janeiro|fevereiro|março|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b",
+            r"\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b",
             # Now/immediate
             r"\bagora\b",
             r"\bnow\b",

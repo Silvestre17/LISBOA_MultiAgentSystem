@@ -9,7 +9,7 @@
 # ==========================================================================
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Iterable, List
 
 from agent.planning.models import PlanDraft, SourceRef
@@ -80,6 +80,7 @@ def render_plan_markdown(draft: PlanDraft, sources: Dict[str, SourceRef], langua
         _clean_list(draft.movement_logic, max_items=6),
         block_titles=block_titles,
     )
+    movement_items = _ensure_adjacent_short_walks(movement_items, draft.blocks[:5], is_pt=is_pt)
     weather_items = [
         item for item in _clean_list(draft.weather_strategy, max_items=6)
         if not _is_placeholder_weather_item(item)
@@ -120,7 +121,7 @@ def _append_section(lines: List[str], emoji: str, title: str, items: Iterable[st
         return
     lines.extend(["", "---", "", f"### {emoji} **{title}**"])
     for item in cleaned:
-        lines.append(f"    - {item}")
+        lines.append(f"- {item}")
 
 
 def _append_movement_section(lines: List[str], items: Iterable[str], *, is_pt: bool) -> None:
@@ -130,10 +131,10 @@ def _append_movement_section(lines: List[str], items: Iterable[str], *, is_pt: b
         return
     lines.extend(["", "---", "", f"### 🚇 **{'Como te deslocas' if is_pt else 'How to move'}**"])
     for item in cleaned:
-        lines.append(_format_movement_bullet(item, is_pt=is_pt))
+        lines.append(_format_movement_bullet(item, is_pt=is_pt, indent=""))
 
 
-def _format_movement_bullet(item: str, *, is_pt: bool) -> str:
+def _format_movement_bullet(item: str, *, is_pt: bool, indent: str = "    ") -> str:
     """Render one movement item as an icon-labelled nested bullet."""
     text = _clean_inline(item)
     text_for_match = re.sub(
@@ -145,6 +146,15 @@ def _format_movement_bullet(item: str, *, is_pt: bool) -> str:
         r"^\*\*(?P<label>[A-Za-zÀ-ÿ0-9 /'-]{2,70})\s*:\*\*\s*(?P<value>.+)$",
         text_for_match,
     )
+    route_bold_match = re.match(
+        r"^\*\*(?P<route>[^*\n]{2,160}(?:→|->)[^*\n]{2,160})\s*:\*\*\s*(?P<value>.+)$",
+        text_for_match,
+    )
+    if route_bold_match:
+        route = route_bold_match.group("route").strip()
+        value = route_bold_match.group("value").strip()
+        icon = "⚠️" if re.match(r"^⚠️", text) or re.search(r"\b(?:not confirmed|não ficou confirmada|nao ficou confirmada)\b", text, re.IGNORECASE) else _movement_icon_for_text(text)
+        return f"{indent}- {icon} **{route}:** {value}"
     match = bold_match or re.match(r"^(?P<label>[A-Za-zÀ-ÿ0-9 /'-]{2,70})\s*:\s*(?P<value>.+)$", text_for_match)
     if not match:
         bold_heading = re.match(r"^\*\*(?P<value>[^*\n]{2,120})\*\*$", text_for_match)
@@ -168,11 +178,20 @@ def _format_movement_bullet(item: str, *, is_pt: bool) -> str:
                 "comecar em": ("📍", "Início" if is_pt else "Start"),
             }
             icon, label = action_map.get(normalized_action, ("🚇", action))
-            return f"    - {icon} **{label}:** {place}"
+            return f"{indent}- {icon} **{label}:** {place}"
+        route_match = re.match(
+            r"^(?P<route>[^:\n]{2,140}(?:→|->)[^:\n]{2,140})\s*:\s*(?P<value>.+)$",
+            heading_text,
+        )
+        if route_match:
+            icon = _movement_icon_for_text(text)
+            route = route_match.group("route").strip()
+            value = route_match.group("value").strip()
+            return f"{indent}- {icon} **{route}:** {value}"
         if re.match(r"^[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s+", text):
-            return f"    - {text}"
+            return f"{indent}- {text}"
         icon = _movement_icon_for_text(text)
-        return f"    - {icon} {text}"
+        return f"{indent}- {icon} {text}"
 
     label = match.group("label").strip()
     value = match.group("value").strip(" *")
@@ -195,7 +214,98 @@ def _format_movement_bullet(item: str, *, is_pt: bool) -> str:
         icon, display_label = "🚇", label
     else:
         icon, display_label = label_map.get(normalized, (_movement_icon_for_text(text), label))
-    return f"    - {icon} **{display_label}:** {value}"
+    return f"{indent}- {icon} **{display_label}:** {value}"
+
+
+def _ensure_adjacent_short_walks(items: List[str], blocks: List[object], *, is_pt: bool) -> List[str]:
+    """Add missing short walking legs between adjacent same-zone plan blocks."""
+    output = list(items or [])
+    existing_norm = "\n".join(_normalize_for_match(item) for item in output)
+    additions: List[str] = []
+    for previous, current in zip(blocks, blocks[1:]):
+        previous_name = _block_display_name(str(getattr(previous, "title", "") or ""))
+        current_name = _block_display_name(str(getattr(current, "title", "") or ""))
+        if not previous_name or not current_name:
+            continue
+        if _normalize_for_match(previous_name) in existing_norm and _normalize_for_match(current_name) in existing_norm:
+            continue
+        zone = _shared_walkable_zone(previous, current)
+        if not zone:
+            continue
+        current_time = _block_time(str(getattr(current, "title", "") or ""))
+        if is_pt:
+            if current_time and re.search(r"(?:almo|lunch)", _normalize_for_match(str(getattr(current, "title", "") or ""))):
+                depart_window = _departure_window_for_time(current_time)
+                departure_text = depart_window or "15-20 min antes"
+                suffix = f"; sai cerca de {departure_text} para chegares ao almoço das {current_time}"
+            else:
+                suffix = "; mantém esta ligação a pé se o tempo permitir"
+            additions.append(f"🚶 {previous_name} → {current_name}: caminhada curta na zona {zone}{suffix}.")
+        else:
+            if current_time and re.search(r"(?:almo|lunch)", _normalize_for_match(str(getattr(current, "title", "") or ""))):
+                depart_window = _departure_window_for_time(current_time)
+                departure_text = depart_window or "15-20 min before"
+                suffix = f"; leave around {departure_text} to arrive for the {current_time} lunch"
+            else:
+                suffix = "; keep this as a walking leg if conditions allow"
+            additions.append(f"🚶 {previous_name} → {current_name}: short walk in the {zone} area{suffix}.")
+    return additions + output
+
+
+def _departure_window_for_time(time_value: str, *, early_minutes: int = 20, late_minutes: int = 15) -> str:
+    """Return a short departure window before an HH:MM time string."""
+    try:
+        target = datetime.strptime(str(time_value).strip(), "%H:%M")
+    except (TypeError, ValueError):
+        return ""
+    early = target - timedelta(minutes=early_minutes)
+    late = target - timedelta(minutes=late_minutes)
+    return f"{early.strftime('%H:%M')}-{late.strftime('%H:%M')}"
+
+
+def _block_display_name(title: str) -> str:
+    """Extract the venue name from a rendered/planner block title."""
+    cleaned = _clean_inline(title)
+    cleaned = re.sub(r"^\d{1,2}:\d{2}\s*[·:-]\s*", "", cleaned).strip()
+    if ":" in cleaned:
+        cleaned = cleaned.split(":", 1)[1].strip()
+    return cleaned.strip(" .·-")
+
+
+def _block_time(title: str) -> str:
+    """Extract HH:MM from a block title when present."""
+    match = re.search(r"\b(\d{1,2}:\d{2})\b", title or "")
+    return match.group(1) if match else ""
+
+
+def _block_zone_text(block: object) -> str:
+    """Collect title/detail text for same-zone walking heuristics."""
+    parts = [str(getattr(block, "title", "") or "")]
+    parts.extend(str(item or "") for item in getattr(block, "details", []) or [])
+    return _normalize_for_match(" ".join(parts))
+
+
+def _shared_walkable_zone(previous: object, current: object) -> str:
+    """Return a compact zone label when two adjacent blocks are safely walkable."""
+    previous_text = _block_zone_text(previous)
+    current_text = _block_zone_text(current)
+    central_markers = (
+        "carmo", "baixa", "chiado", "correeiros", "douradores", "praca do comercio",
+        "praça do comercio", "rua augusta", "largo da se", "largo da sé", "se de lisboa",
+    )
+    belem_markers = (
+        "belem", "belém", "brasilia", "brasília", "jeronimos", "jerónimos",
+        "torre de belem", "padrao dos descobrimentos", "padrão dos descobrimentos",
+    )
+    previous_central = any(marker in previous_text for marker in central_markers)
+    current_central = any(marker in current_text for marker in central_markers)
+    previous_belem = any(marker in previous_text for marker in belem_markers)
+    current_belem = any(marker in current_text for marker in belem_markers)
+    if previous_central and current_central and not (previous_belem or current_belem):
+        return "Baixa/Chiado"
+    if previous_belem and current_belem and not (previous_central or current_central):
+        return "Belém"
+    return ""
 
 
 def _movement_icon_for_text(text: str) -> str:
@@ -203,7 +313,7 @@ def _movement_icon_for_text(text: str) -> str:
     normalized = _normalize_for_match(text)
     if re.search(r"\b(?:transport|transporte)\b", normalized):
         return "🚇"
-    if re.search(r"\b(?:walk|walking|caminh|andar)\b", normalized):
+    if re.search(r"\b(?:walk|walking|caminh\w*|andar)\b", normalized):
         return "🚶"
     if re.search(r"\b(?:bus|carris|autocarro)\b", normalized):
         return "🚌"
@@ -239,8 +349,8 @@ def _filter_movement_items(items: Iterable[str], *, block_titles: Iterable[str])
     }
     mobility_re = re.compile(
         r"\b(?:metro|bus|tram|train|walk|walking|transfer|board|exit|route|line|"
-        r"carris|cp|station|"
-        r"autocarro|el[eé]trico|comboio|caminh|andar|apanh|sair|mudar|linha|esta[cç][aã]o|paragem)\b",
+        r"carris|cp|station|ligacao|liga[cç][aã]o|desloca[cç][aã]o|percurso|trajeto|"
+        r"autocarro|el[eé]trico|comboio|caminh\w*|andar|apanh\w*|sair|mudar|linha|esta[cç][aã]o|paragem)\b",
         re.IGNORECASE,
     )
     cultural_re = re.compile(
@@ -261,11 +371,22 @@ def _filter_movement_items(items: Iterable[str], *, block_titles: Iterable[str])
             continue
         if normalized in {"how to move", "como te deslocas", "movement logic", "logica de movimento"}:
             continue
+        if re.fullmatch(r"(?:rota|route|percurso)\s+de\s+um\s+local\s+para\s+outro", normalized):
+            continue
+        if re.match(r"^(?:estado atual|current status)\b", normalized) and re.search(r"\b(?:metro|carris|cp)\b", normalized):
+            continue
         if normalized in {"metro", "metro de lisboa"}:
+            continue
+        if normalized in {"carris", "carris urbana", "carris urban", "carris metropolitana", "cp"}:
             continue
         if re.fullmatch(
             r"(?:metro(?: de lisboa)?|transportes?|mobility|mobilidade)\s*:?\s*"
             r"(?:ok|normal|circulacao normal|circulação normal|sem alertas|no alerts)",
+            normalized,
+        ):
+            continue
+        if re.fullmatch(
+            r"(?:circulacao normal|circulação normal|normal service)\s+(?:em|on)\s+(?:todas|all)\s+(?:as\s+)?(?:linhas|lines)",
             normalized,
         ):
             continue
@@ -276,6 +397,12 @@ def _filter_movement_items(items: Iterable[str], *, block_titles: Iterable[str])
             continue
         if re.search(
             r"\b(?:diz-me|indica|send|tell me|provide)\b.*\b(?:origem|origin)\b.*\b(?:destino|destination)\b",
+            normalized,
+        ):
+            continue
+        if re.fullmatch(
+            r"(?:onde comecas|onde começas|where you start|where you are starting|ponto de partida|origem|"
+            r"para onde queres ir|para onde quer ir|where you want to go|destination|destino)",
             normalized,
         ):
             continue
@@ -347,6 +474,36 @@ def _source_footer(
     return f"📌 **{'Fonte' if is_pt else 'Source'}:** {' | '.join(links)} | **{'Atualizado' if is_pt else 'Updated'}:** {timestamp}"
 
 
+def _rewrite_misrouted_detail(text: str) -> str:
+    """Rewrite planner detail strings whose label disagrees with the value's leading emoji.
+
+    The planner LLM occasionally fills the ``description`` field with rating, feature, hours,
+    price, contact, or website content that already carries its own field emoji and label
+    (for example ``"Description: ⭐ Avaliação: TripAdvisor 3.5/5"``). Render those bullets
+    under the correct label instead of collapsing them all into ``📝 Descrição``.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return text
+    label_match = re.match(r"^(?P<label>[A-Za-zÀ-ÿ ]{2,24})\s*:\s*(?P<value>.+)$", stripped)
+    if not label_match:
+        return text
+    raw_label = label_match.group("label").strip().lower()
+    value = label_match.group("value").strip()
+    description_labels = {"description", "descrição", "descricao"}
+    if raw_label not in description_labels:
+        return text
+    nested = re.match(
+        r"^(?P<emoji>[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF])\s*\*?\*?(?P<inner_label>[A-Za-zÀ-ÿ ]{2,24})\*?\*?\s*:\s*(?P<inner_value>.+)$",
+        value,
+    )
+    if not nested:
+        return text
+    inner_label = nested.group("inner_label").strip()
+    inner_value = nested.group("inner_value").strip(" *")
+    return f"{inner_label}: {inner_value}"
+
+
 def _format_detail_bullet(detail: str, is_pt: bool) -> str:
     """Render a planner detail using the same field emojis as worker cards.
 
@@ -358,6 +515,7 @@ def _format_detail_bullet(detail: str, is_pt: bool) -> str:
         Indented Markdown bullet with a semantic emoji and localized label.
     """
     text = _clean_inline(detail)
+    text = _rewrite_misrouted_detail(text)
     match = re.match(r"^\s*(?P<label>[A-Za-zÀ-ÿ ]{2,24})\s*:\s*(?P<value>.+)$", text)
     if not match:
         return f"    - 📝 {text}"
@@ -375,6 +533,9 @@ def _format_detail_bullet(detail: str, is_pt: bool) -> str:
         "venue": ("📍", "Local" if is_pt else "Venue"),
         "when": ("🕒", "Quando" if is_pt else "When"),
         "quando": ("🕒", "Quando" if is_pt else "When"),
+        "duration": ("⏱️", "Duração" if is_pt else "Duration"),
+        "duração": ("⏱️", "Duração" if is_pt else "Duration"),
+        "duracao": ("⏱️", "Duração" if is_pt else "Duration"),
         "hours": ("🕒", "Horário" if is_pt else "Hours"),
         "horário": ("🕒", "Horário" if is_pt else "Hours"),
         "horario": ("🕒", "Horário" if is_pt else "Hours"),
@@ -395,6 +556,9 @@ def _format_detail_bullet(detail: str, is_pt: bool) -> str:
         "avaliacao": ("⭐", "Avaliação" if is_pt else "Rating"),
         "more details": ("🔗", "Mais detalhes" if is_pt else "More details"),
         "mais detalhes": ("🔗", "Mais detalhes" if is_pt else "More details"),
+        "features": ("✨", "Características" if is_pt else "Features"),
+        "características": ("✨", "Características" if is_pt else "Features"),
+        "caracteristicas": ("✨", "Características" if is_pt else "Features"),
     }
     emoji, label = label_map.get(raw_label, ("📝", match.group("label").strip()))
     if raw_label == "website":
@@ -473,6 +637,8 @@ def _source_is_materially_used(source_id: str, rendered_body: str) -> bool:
     if source_id == "carris":
         if any(marker in text for marker in ("carris line numbers and schedules are not needed", "carris line numbers and schedules should be confirmed")):
             return False
+        if re.search(r"\bcarris\s+\d{1,4}[a-z]?\b", text):
+            return True
         return any(
             marker in text
             for marker in (
@@ -482,10 +648,8 @@ def _source_is_materially_used(source_id: str, rendered_body: str) -> bool:
                 "autocarro",
                 "elétrico",
                 "eletrico",
-                "linha 15e",
-                "linha 728",
-                " 15e",
-                " 728",
+                "opções carris",
+                "opcoes carris",
                 "pç. figueira",
                 "pç figueira",
                 "pç. comércio",
@@ -499,7 +663,16 @@ def _source_is_materially_used(source_id: str, rendered_body: str) -> bool:
     if source_id.startswith("visitlisboa"):
         return any(marker in text for marker in ("visitlisboa", "museum", "museu", "cultural", "culture", "restaurant", "restaurante", "event", "evento", "príncipe real", "principe real", "cam "))
     if source_id == "lisboa_aberta":
-        return any(marker in text for marker in ("lisboa aberta", "pharmacy", "farmácia", "serviço", "service"))
+        return any(
+            marker in text
+            for marker in (
+                "lisboa aberta", "dados abertos", "municipal",
+                "pharmacy", "farmácia", "hospital", "biblioteca", "library",
+                "escola", "school", "mercado", "market", "polícia", "police",
+                "bombeiros", "firefighters", "wc", "toilet", "restroom",
+                "parque infantil", "playground",
+            )
+        )
     return True
 
 

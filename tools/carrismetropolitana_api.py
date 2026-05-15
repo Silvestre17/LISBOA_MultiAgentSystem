@@ -1348,26 +1348,73 @@ def _normalize_alert_area(text: str) -> str:
 
 
 @tool
-def get_carris_metropolitana_alerts(area: Optional[str] = None) -> str:
+def get_carris_metropolitana_alerts(
+    area: Optional[str] = None,
+    line: Optional[str] = None,
+    language: str = "pt",
+) -> str:
     """
     Gets current service alerts from Carris Metropolitana (suburban buses).
 
     Args:
         area: Optional municipality or area filter, such as "Almada".
+        line: Optional Carris Metropolitana line filter, such as "3001".
+        language: Output language, either "pt" or "en".
 
     Returns:
         str: Formatted list of active service alerts.
     """
     data = fetch_json_with_retry(CARRIS_ALERTS_URL)
+    is_pt = (language or "pt").lower().startswith("pt")
 
     if not data:
-        return "❌ Failed to fetch Carris Metropolitana alerts."
+        return "❌ Não foi possível obter alertas da Carris Metropolitana." if is_pt else "❌ Failed to fetch Carris Metropolitana alerts."
 
     # API returns a list directly, not a dict with 'entity' key
     alerts = data if isinstance(data, list) else data.get("entity", [])
 
     if not alerts:
-        return "✅ No active alerts from Carris Metropolitana."
+        return "✅ Não há alertas ativos da Carris Metropolitana." if is_pt else "✅ No active alerts from Carris Metropolitana."
+
+    line_filter = str(line or "").strip().upper()
+    if not line_filter and area:
+        area_line_match = re.search(r"\b(?:linha|line)?\s*(?P<line>\d{3,4}[A-Z]?)\b", str(area), flags=re.IGNORECASE)
+        if area_line_match:
+            line_filter = area_line_match.group("line").upper()
+            area = None
+
+    def alert_route_ids(alert_data: Dict[str, Any]) -> List[str]:
+        route_ids: List[str] = []
+        for entity in alert_data.get("informed_entity", []):
+            route_id = str(entity.get("route_id", "") or "").strip()
+            if not route_id:
+                continue
+            clean_route = route_id.split("_", 1)[0].upper()
+            if clean_route and clean_route not in route_ids:
+                route_ids.append(clean_route)
+        header_text = alert_data.get("header_text", {})
+        header = header_text.get("translation", [{}])[0].get("text", "")
+        for route_id in re.findall(r"\b\d{3,4}[A-Z]?\b", header.upper()):
+            if route_id not in route_ids:
+                route_ids.append(route_id)
+        return route_ids
+
+    if line_filter:
+        filtered_alerts = []
+        for alert in alerts:
+            alert_data = alert.get("alert", alert)
+            route_ids = alert_route_ids(alert_data)
+            desc_text = alert_data.get("description_text", {})
+            desc = desc_text.get("translation", [{}])[0].get("text", "")
+            if line_filter in route_ids or re.search(rf"\b{re.escape(line_filter)}\b", desc, flags=re.IGNORECASE):
+                filtered_alerts.append(alert)
+        alerts = filtered_alerts
+        if not alerts:
+            return (
+                f"✅ Não encontrei alertas ativos da Carris Metropolitana para a linha {line_filter}."
+                if is_pt
+                else f"✅ No active Carris Metropolitana service alerts found for line {line_filter}."
+            )
 
     if area:
         area_norm = _normalize_alert_area(area)
@@ -1383,24 +1430,43 @@ def get_carris_metropolitana_alerts(area: Optional[str] = None) -> str:
                 filtered_alerts.append(alert)
         alerts = filtered_alerts
         if not alerts:
-            return f"✅ No active Carris Metropolitana service alerts found for {area}."
+            return (
+                f"✅ Não encontrei alertas ativos da Carris Metropolitana para {area}."
+                if is_pt
+                else f"✅ No active Carris Metropolitana service alerts found for {area}."
+            )
 
-    scope = f" — {area}" if area else ""
-    response = f"### ⚠️ **Carris Metropolitana service alerts{scope}**\n\n"
-    response += f"- 📊 **Active alerts shown:** {min(len(alerts), 5)} of {len(alerts)}\n\n"
-
+    if line_filter:
+        scope = f" — linha {line_filter}" if is_pt else f" — line {line_filter}"
+    else:
+        scope = f" — {area}" if area else ""
     visible_alert_limit = 5
+    visible_count = min(len(alerts), visible_alert_limit)
+    if is_pt:
+        total_label = "alerta ativo" if len(alerts) == 1 else "alertas ativos"
+        visible_label = "esse alerta" if visible_count == 1 else f"os primeiros **{visible_count}**"
+        response = f"### ⚠️ **Alertas ativos da Carris Metropolitana{scope}**\n\n"
+        response += f"✅ **Resposta direta:** encontrei **{len(alerts)}** {total_label}; mostro {visible_label}.\n\n"
+        response += "---\n\n"
+    else:
+        total_label = "active alert" if len(alerts) == 1 else "active alerts"
+        visible_label = "that alert" if visible_count == 1 else f"the first **{visible_count}**"
+        response = f"### ⚠️ **Carris Metropolitana service alerts{scope}**\n\n"
+        response += f"✅ **Direct answer:** I found **{len(alerts)}** {total_label}; showing {visible_label}.\n\n"
+        response += "---\n\n"
+
     for _i, alert in enumerate(alerts[:visible_alert_limit], 1):
         # Handle both old format (nested under 'alert') and new format (flat)
         alert_data = alert.get("alert", alert)
 
         # Header
         header_text = alert_data.get("header_text", {})
-        header = header_text.get("translation", [{}])[0].get("text", "No title")
+        header = header_text.get("translation", [{}])[0].get("text", "Sem título" if is_pt else "No title")
+        header = re.sub(r"\s+\*\*\s*$", "", header).strip()
 
         # Description
         desc_text = alert_data.get("description_text", {})
-        desc = desc_text.get("translation", [{}])[0].get("text", "No details")
+        desc = desc_text.get("translation", [{}])[0].get("text", "Sem detalhes" if is_pt else "No details")
 
         # Time period
         active_period = alert_data.get("active_period", [{}])[0]
@@ -1408,30 +1474,38 @@ def get_carris_metropolitana_alerts(area: Optional[str] = None) -> str:
         end = format_timestamp(active_period.get("end", 0))
 
         # Affected routes
-        informed_entity = alert_data.get("informed_entity", [])
-        route_ids = []
-        for entity in informed_entity:
-            route_id = str(entity.get("route_id", "") or "").strip()
-            if not route_id:
-                continue
-            clean_route = route_id.split("_", 1)[0]
-            if clean_route and clean_route not in route_ids:
-                route_ids.append(clean_route)
-        if not route_ids:
-            for route_id in re.findall(r"\b\d{4}[A-Z]?\b", header):
-                if route_id not in route_ids:
-                    route_ids.append(route_id)
-        routes_str = ", ".join(route_ids[:8]) if route_ids else "All routes"
+        route_ids = alert_route_ids(alert_data)
+        if line_filter and line_filter not in route_ids:
+            route_ids.append(line_filter)
+        if line_filter and line_filter in route_ids:
+            route_ids = [line_filter, *[route_id for route_id in route_ids if route_id != line_filter]]
+        routes_str = ", ".join(route_ids[:8]) if route_ids else ("Todas as linhas" if is_pt else "All routes")
 
-        response += f"**⚠️ {header}**\n"
-        response += f"    - 📝 {desc[:220]}{'...' if len(desc) > 220 else ''}\n"
-        response += f"    - 🚌 **Routes:** {routes_str}\n"
+        response += f"- **⚠️ {header}**\n"
+        response += f"  - 📝 {desc[:220]}{'...' if len(desc) > 220 else ''}\n"
+        if line_filter:
+            consulted_label = "Linha consultada" if is_pt else "Requested line"
+            response += f"  - 🚌 **{consulted_label}:** {line_filter}\n"
+            other_routes = [
+                route_id for route_id in route_ids
+                if route_id != line_filter
+            ]
+            if other_routes:
+                other_label = "Outras linhas no mesmo alerta oficial" if is_pt else "Other lines in the same official alert"
+                response += f"  - ℹ️ **{other_label}:** {', '.join(other_routes[:7])}\n"
+        else:
+            route_label = "Linhas afetadas" if is_pt else "Routes"
+            response += f"  - 🚌 **{route_label}:** {routes_str}\n"
+        period_label = "Período" if is_pt else "Period"
         if start != "N/A" or end != "N/A":
-            response += f"    - ⏰ **Period:** {start} - {end}\n"
+            response += f"  - ⏰ **{period_label}:** {start} - {end}\n"
         response += "\n"
 
     if len(alerts) > visible_alert_limit:
-        response += f"... and {len(alerts) - visible_alert_limit} more alerts.\n"
+        if is_pt:
+            response += f"- ℹ️ E mais {len(alerts) - visible_alert_limit} alertas.\n"
+        else:
+            response += f"- ℹ️ And {len(alerts) - visible_alert_limit} more alerts.\n"
 
     return response
 

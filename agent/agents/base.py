@@ -597,10 +597,21 @@ class BaseAgent:
         """
         resolved_args = args if isinstance(args, dict) else {}
         resolved_name = str(tool_name or getattr(tool, "name", "unknown")).strip() or "unknown"
+        resolved_args = self._preprocess_tool_args(resolved_name, resolved_args)
         self._record_tool_call(resolved_name, resolved_args)
         if verbose:
             print(f"      [TOOL] Calling {resolved_name} with args: {resolved_args}")
         return tool.invoke(resolved_args)
+
+    def _preprocess_tool_args(self, tool_name: str, tool_args: dict) -> dict:
+        """Hook for subclasses to sanitize LLM-emitted tool arguments.
+
+        The default implementation is a passthrough. Workers (for example the
+        Transport agent) override this to clean common LLM mistakes such as
+        stuffing entire conjunctive multi-leg phrases into a single
+        ``destination`` field.
+        """
+        return tool_args
 
     def _format_tool_result_for_fallback(
         self,
@@ -1029,6 +1040,7 @@ class BaseAgent:
                 for tool_call in tools_to_execute:
                     tool_name = tool_call.get("name")
                     tool_args = tool_call.get("args", {})
+                    tool_args = self._preprocess_tool_args(str(tool_name or ""), tool_args)
                     tool_id = tool_call.get("id", f"call_{iteration}")
 
                     if verbose:

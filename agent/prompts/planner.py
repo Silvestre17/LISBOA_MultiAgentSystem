@@ -28,6 +28,8 @@ The preferred planner path uses JSON and deterministic rendering. If you are ask
 - If public transport is requested, include the supported line/operator/route detail where available. If not available, mark the exact leg as unconfirmed.
 - Do not reuse live departures captured now as future schedules unless the user explicitly asks for next departures or live status.
 - If events or places appear in the evidence, preserve their useful confirmed fields in the selected block.
+- If the user asks for multiple explicit themes and evidence exists for them, include at least one selected block for each requested theme. For example, a plan asking for historical sights and gastronomy must include both a cultural/historical stop and a food/restaurant/pastry block when those evidence cards are available.
+- Movement bullets in "How to move" must be concrete and grounded: each bullet should reference an explicit origin → destination, a named line, an operator with a stop or station, a walking distance, or a specific transfer step. Do NOT pad the section with brochure phrases such as "optimized route between the points", "metro, Carris or CP whichever is most convenient", "estimated travel time and direct connections". If only one concrete leg is supported, output only that one bullet.
 
 # Markdown contract
 Use this exact top-level structure:
@@ -92,6 +94,8 @@ O caminho preferencial do planeador usa JSON e renderização determinística. S
 - Se forem pedidos transportes públicos, inclui a linha, operador ou rota suportada por evidência quando existir. Caso contrário, marca a perna exata como não confirmada.
 - Não reutilizes partidas em tempo real captadas agora como horários futuros, a menos que o utilizador peça explicitamente próximas partidas ou estado em tempo real.
 - Se eventos ou locais aparecerem na evidência, preserva os campos confirmados úteis no bloco selecionado.
+- Se o utilizador pedir vários temas explícitos e existir evidência para eles, inclui pelo menos um bloco selecionado para cada tema pedido. Por exemplo, um plano com monumentos históricos e gastronomia deve incluir uma paragem cultural/histórica e um bloco de comida/restaurante/pastelaria quando esses cards de evidência estiverem disponíveis.
+- Os bullets em "Como te deslocas" têm de ser concretos e suportados por evidência: cada bullet deve referir uma origem → destino explícita, uma linha nomeada, um operador com uma paragem ou estação, uma distância caminhada, ou um transbordo específico. NÃO preenchas a secção com frases brochure como "rota otimizada entre os pontos que queres visitar", "metro, Carris ou CP mais convenientes", "tempo estimado de deslocação e ligações diretas". Se apenas existir uma perna concreta suportada, mostra só esse bullet.
 
 # Contrato Markdown
 Usa esta estrutura de topo:

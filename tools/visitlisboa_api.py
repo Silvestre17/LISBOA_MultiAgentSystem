@@ -512,6 +512,8 @@ def _localize_event_title(title: Optional[str], language: str = "en") -> str:
         flags=re.IGNORECASE,
     )
     cleaned = re.sub(r"\bBook\s+Fair\b", "Feira do Livro", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\|\s*guided tour\b", "| visita guiada", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bguided tour\b", "visita guiada", cleaned, flags=re.IGNORECASE)
     return cleaned.strip()
 
 
@@ -641,6 +643,8 @@ def _localize_place_title(title: Optional[str], language: str = "en") -> str:
         "Museum of Aljube – Resistance and Freedom": "Museu do Aljube - Resistência e Liberdade",
         "Museum of Aljube - Resistance and Freedom": "Museu do Aljube - Resistência e Liberdade",
         "Museum of the Lisbon Geographical Society": "Museu da Sociedade de Geografia de Lisboa",
+        "Maritime Museum": "Museu de Marinha",
+        "Museum of Illusions": "Museu das Ilusões",
         "Roman Galleries": "Galerias Romanas",
         "Jerónimos Monastery": "Mosteiro dos Jerónimos",
         "Jeronimos Monastery": "Mosteiro dos Jerónimos",
@@ -740,9 +744,21 @@ def _localize_place_value_text(value: Optional[str], language: str = "en") -> st
     localized = re.sub(r"\bFree\s+with\s+Lisboa\s+Card\b", "Gratuito com Lisboa Card", localized, flags=re.IGNORECASE)
     localized = re.sub(r"\bwith\s+Lisboa\s+Card\b", "com Lisboa Card", localized, flags=re.IGNORECASE)
     localized = re.sub(r"\bChildren\s*:", "Crianças:", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bChildren\s*\((\d+)\s*-\s*(\d+)\)\s*:", r"Crianças (\1-\2 anos):", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bChildren\s*\((\d+)\s*-\s*(\d+)\s*Years?\)\s*-", r"Crianças (\1-\2 anos):", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bYoungsters?\s*\((\d+)\s*-\s*(\d+)\s*Years?\)\s*-", r"Jovens (\1-\2 anos):", localized, flags=re.IGNORECASE)
     localized = re.sub(r"\bGratis\b", "Gratuito", localized, flags=re.IGNORECASE)
     localized = re.sub(r"\bAdult\s*:", "Adulto:", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bAdults?\s*:", "Adulto:", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bAdults?\s*\(\+?(\d+)\s*Years?\)\s*-", r"Adulto (+\1 anos):", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bFamily\s*:", "Família:", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bStudents?\s*:", "Estudantes:", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bUp\s+to\s+(\d+)\s+years\s+old\s*-", r"Até aos \1 anos -", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\b(\d+)\s+to\s+(\d+)\s+years\s+old\s*-", r"\1 a \2 anos -", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\b(\d+)\+\s+years\s*-", r"\1+ anos -", localized, flags=re.IGNORECASE)
     localized = re.sub(r"\bSenior(\s*\([^)]*\))?\s*:", r"Sénior\1:", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bSeniors?\s*:", "Sénior:", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\bSeniors?\s*\(\+?(\d+)\s*Years?\)\s*-", r"Sénior (+\1 anos):", localized, flags=re.IGNORECASE)
     localized = re.sub(r"\bFree\b", "Gratuito", localized, flags=re.IGNORECASE)
     localized = re.sub(r"\+\s*info\b", "", localized, flags=re.IGNORECASE).strip(" ;,.")
     return _clean_user_facing_value(localized)
@@ -756,6 +772,12 @@ def _compact_place_ticket_price_text(value: Optional[str], language: str = "en",
 
     cleaned = re.sub(r"^(?:link|links)\s+", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"^Price\s*:\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(
+        r"\bTickets\s+(?=(?:Children|Youngsters?|Adults?|Family|Seniors?|Students?)\b)",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
     if language != "pt":
         cleaned = re.sub(r"\bGratis\b", "Free", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(
@@ -766,6 +788,12 @@ def _compact_place_ticket_price_text(value: Optional[str], language: str = "en",
     )
     cleaned = re.sub(
         r"\s+(?=(?:Children(?:\s*\([^)]*\))?|Adult|Adults|Family|Senior|Seniors|Student|Students)\s*:)",
+        "; ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\s+(?=(?:Children|Youngsters?|Adults?|Family|Seniors?|Students?)\s*\([^)]*\)\s*-)",
         "; ",
         cleaned,
         flags=re.IGNORECASE,
@@ -1024,6 +1052,16 @@ def _localize_visitlisboa_schedule_text(value: Any, language: str = "en") -> str
     localized = text
     for pattern, replacement in replacements:
         localized = re.sub(pattern, replacement, localized, flags=re.IGNORECASE)
+    residual_english_markers = [
+        r"\bis on stage\b",
+        r"\bon stage\b",
+        r"\bin lisbon\b",
+        r"\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)\b",
+        r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+        r"\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b",
+    ]
+    if any(re.search(pattern, localized, flags=re.IGNORECASE) for pattern in residual_english_markers):
+        return ""
     return localized
 
 
@@ -1038,21 +1076,49 @@ def _localize_place_feature_text(value: Any, language: str = "en") -> str:
     mapping = {
         "Traditional Portuguese": "Cozinha tradicional portuguesa",
         "Live entertainment / Music": "Entretenimento ao vivo / música",
+        "Accessibility": "Acessibilidade",
+        "Outdoor Seating": "Esplanada",
+        "Contemporary": "Contemporâneo",
+        "Seafood": "Marisco",
+        "International": "Internacional",
+        "Paid Parking": "Estacionamento pago",
+        "Sea or River view": "Vista mar/rio",
         "Wi-Fi": "Wi-Fi",
     }
     localized = mapping.get(text, text)
     return re.sub(r"\bto\b", "a", localized, flags=re.IGNORECASE)
 
 
-def _format_compact_feature_summary(features: Any, language: str = "en", max_items: int = 4) -> str:
+def _format_compact_feature_summary(
+    features: Any,
+    language: str = "en",
+    max_items: int = 4,
+    priority_flags: Optional[Dict[str, bool]] = None,
+) -> str:
     """Build a compact feature summary from VisitLisboa feature lists."""
     if not isinstance(features, list):
         return ""
-    cleaned_features = [
-        _localize_place_feature_text(feature, language=language)
-        for feature in features
-    ]
-    cleaned_features = [feature for feature in cleaned_features if feature]
+    feature_rows: List[Tuple[int, int, str]] = []
+    for index, feature in enumerate(features):
+        localized_feature = _localize_place_feature_text(feature, language=language)
+        if not localized_feature:
+            continue
+
+        priority = 0
+        if priority_flags:
+            raw_text = _normalize_place_hint_text(str(feature or ""))
+            lookup_text = _normalize_lookup_text(raw_text)
+            if priority_flags.get("traditional") and _RESTAURANT_TRADITIONAL_EVIDENCE_RE.search(lookup_text):
+                priority -= 30
+            if priority_flags.get("low_price") and _RESTAURANT_LOW_PRICE_EVIDENCE_RE.search(raw_text):
+                priority -= 30
+            if priority_flags.get("accessibility") and _RESTAURANT_ACCESSIBILITY_EVIDENCE_RE.search(lookup_text):
+                priority -= 30
+
+        feature_rows.append((priority, index, localized_feature))
+
+    feature_rows.sort(key=lambda row: (row[0], row[1]))
+    cleaned_features = [row[2] for row in feature_rows]
     return " · ".join(cleaned_features[:max_items])
 
 
@@ -2381,6 +2447,7 @@ _KNOWN_PLACE_LOCATION_HINTS = {
     "belem", "alfama", "chiado", "baixa", "rossio", "oriente", "expo",
     "ajuda", "alcantara", "estrela", "graca", "mouraria", "restelo",
     "beato", "cascais", "sintra", "campo", "sodre", "principe",
+    "centro", "central",
 }
 _EXPLICIT_MUSEUM_MARKERS = {
     "museum", "museu", "maat", "mude", "gulbenkian", "berardo", "mac/ccb", "macccb",
@@ -2408,7 +2475,9 @@ _OUTSIDE_LISBON_CITY_MARKERS = {
     "cascais", "sintra", "almada", "setubal", "setúbal", "oeiras", "amadora",
     "loures", "odivelas", "montijo", "seixal", "sesimbra", "barreiro", "mafra",
     "alcochete", "moita", "palmela", "vila franca", "vila franca de xira",
-    "santa iria", "azóia", "azoia",
+    "santa iria", "azóia", "azoia", "entroncamento", "alcobaca", "alcobaça",
+    "batalha", "fatima", "fátima", "obidos", "óbidos", "tomar", "porto",
+    "coimbra", "aveiro", "braga", "evora", "évora",
 }
 
 
@@ -2432,7 +2501,40 @@ def _matches_place_location_hints(text: str, location_hints: List[str]) -> bool:
         return True
 
     normalized_text = _normalize_place_hint_text(text)
-    return any(hint in normalized_text for hint in location_hints)
+    area_markers = {
+        "belem": (
+            "belem", "jeronimos", "torre de belem", "padrao dos descobrimentos",
+            "descobrimentos", "palacio de belem", "centro cultural de belem", "ccb",
+            "praca do imperio", "praca afonso de albuquerque", "avenida de brasilia",
+            "av brasilia", "avenida da india", "av da india", "museu dos coches",
+            "national coach museum", "maat",
+        ),
+        "baixa": (
+            "baixa", "rossio", "figueira", "restauradores", "comercio",
+            "rua augusta", "rua do ouro", "rua da prata", "douradores",
+            "correeiros", "fanqueiros", "conceicao", "santa justa",
+        ),
+        "chiado": (
+            "chiado", "garrett", "camoes", "camões", "trindade", "carmo",
+            "misericordia", "misericórdia", "alecrim", "largo do chiado",
+        ),
+        "centro": (
+            "baixa", "chiado", "rossio", "restauradores", "alfama", "mouraria",
+            "carmo", "se", "catedral", "rua augusta", "prata", "conceicao",
+            "santa justa", "martim moniz", "figueira", "pombal", "liberdade",
+        ),
+        "central": (
+            "baixa", "chiado", "rossio", "restauradores", "alfama", "mouraria",
+            "carmo", "se", "catedral", "rua augusta", "prata", "conceicao",
+            "santa justa", "martim moniz", "figueira", "pombal", "liberdade",
+        ),
+    }
+    for hint in location_hints:
+        if hint in normalized_text:
+            return True
+        if any(marker in normalized_text for marker in area_markers.get(hint, ())):
+            return True
+    return False
 
 
 def _query_requests_ranked_places(query: Optional[str]) -> bool:
@@ -2449,6 +2551,30 @@ _PROMINENT_MUSEUM_MARKER_WEIGHTS: Tuple[Tuple[str, float], ...] = (
     ("national coach", 0.30),
     ("coches", 0.30),
     ("maritime", 0.22),
+)
+
+_PROMINENT_TOP_ATTRACTION_MARKER_WEIGHTS: Tuple[Tuple[str, float], ...] = (
+    ("torre de belem", 0.80),
+    ("tower of belem", 0.80),
+    ("mosteiro dos jeronimos", 0.78),
+    ("jeronimos monastery", 0.78),
+    ("castelo de sao jorge", 0.76),
+    ("sao jorge castle", 0.76),
+    ("padrao dos descobrimentos", 0.64),
+    ("monument to the discoveries", 0.64),
+    ("praca do comercio", 0.58),
+    ("commerce square", 0.58),
+    ("se de lisboa", 0.52),
+    ("lisbon cathedral", 0.52),
+    ("elevador de santa justa", 0.46),
+    ("santa justa lift", 0.46),
+    ("alfama", 0.42),
+    ("oceanario", 0.38),
+    ("oceanarium", 0.38),
+    ("museu nacional do azulejo", 0.34),
+    ("national tile museum", 0.34),
+    ("maat", 0.30),
+    ("gulbenkian", 0.28),
 )
 
 
@@ -2484,6 +2610,10 @@ def _score_ranked_place_result(result: Dict[str, Any], query_intent: Optional[st
     score = float(result.get("ranking_score") or 0.0)
     if query_intent == "museum_only":
         score *= 0.35
+    if query_intent == "top_attractions":
+        # Broad "first time/must-see" queries should not be dominated by one
+        # vector-search pass over generic words such as museums or palaces.
+        score *= 0.25
     tripadvisor = (full_data or {}).get("tripadvisor") or {}
     rating = _coerce_ranking_float(result.get("rating"), default=0.0) or _coerce_ranking_float(
         tripadvisor.get("rating"), default=0.0
@@ -2503,9 +2633,285 @@ def _score_ranked_place_result(result: Dict[str, Any], query_intent: Optional[st
                 score += weight
                 break
 
+    if query_intent == "top_attractions":
+        score += _top_attraction_category_bonus(category)
+        matched_top_marker = False
+        for marker, weight in _PROMINENT_TOP_ATTRACTION_MARKER_WEIGHTS:
+            if marker in haystack:
+                score += weight
+                matched_top_marker = True
+                break
+        if not matched_top_marker and re.search(r"\b(?:museum|museu|museus)\b", haystack):
+            score -= 0.38
+        if any(marker in haystack for marker in ("museum of illusions", "estufa fria", "shaare tikvah")):
+            score -= 0.22
+
+    if query_intent == "traditional_food":
+        if re.search(
+            r"\b(?:traditional|tradicional|portuguese|portuguesa|portugues|"
+            r"cozinha portuguesa|cozinha tradicional|typical portuguese|"
+            r"tipic[ao] portugues[ae]?|t[ií]pic[ao] portugues[ae]?|"
+            r"tasca|cervejaria|petiscos)\b",
+            haystack,
+        ):
+            score += 0.55
+        if re.search(
+            r"\b(?:international|internacional|contemporary|contempor[aâ]neo|"
+            r"italian|italiano|japanese|japon[eê]s|sushi|burger|hamburguer|"
+            r"steakhouse|fusion)\b",
+            haystack,
+        ):
+            score -= 0.45
+
     if _is_service_like_place_category(category):
         score -= 0.60
     return score
+
+
+_RESTAURANT_TRADITIONAL_EVIDENCE_RE = re.compile(
+    r"\b(?:traditional|tradicional|portuguese|portuguesa|portugues|"
+    r"cozinha portuguesa|cozinha tradicional|typical portuguese|"
+    r"tipico portugues|tipica portuguesa|"
+    r"tasca|cervejaria|petiscos|marisqueira)\b"
+)
+_RESTAURANT_NON_TRADITIONAL_EVIDENCE_RE = re.compile(
+    r"\b(?:international|internacional|italian|italiano|pizzaria|pizza|"
+    r"japanese|japones|sushi|burger|hamburguer|fusion|steakhouse|"
+    r"contemporary|contemporaneo|asian|asiatico)\b"
+)
+_RESTAURANT_ACCESSIBILITY_EVIDENCE_RE = re.compile(
+    r"\b(?:accessibility|accessible|acessibilidade|acessivel|wheelchair|"
+    r"mobilidade reduzida|cadeira de rodas)\b"
+)
+_RESTAURANT_VEGETARIAN_EVIDENCE_RE = re.compile(
+    r"\b(?:vegetarian|vegetarians|vegetariano|vegetarianos|vegetariana|vegetarianas|"
+    r"vegan|vegano|veganos|vegana|veganas|plant[-\s]?based|vegetais)\b"
+)
+_RESTAURANT_LOW_PRICE_EVIDENCE_RE = re.compile(
+    r"(?:<\s*20\s*(?:e|€|eur)?|under\s*20|up\s*to\s*20|ate\s*20|"
+    r"barato|barata|baixo preco|preco baixo|budget|low price)"
+)
+_RESTAURANT_MID_PRICE_EVIDENCE_RE = re.compile(
+    r"(?:20\s*(?:e|€|eur)?\s*(?:a|to|-)\s*50\s*(?:e|€|eur)?)"
+)
+_RESTAURANT_HIGH_PRICE_EVIDENCE_RE = re.compile(
+    r"(?:>\s*50\s*(?:e|€|eur)?|over\s*50|more than\s*50|acima\s+de\s+50)"
+)
+
+
+def _infer_restaurant_preference_flags(
+    query: Optional[str],
+    query_intent: Optional[str],
+) -> Dict[str, bool]:
+    """Infer restaurant preference constraints explicitly requested by the user."""
+    normalized = _normalize_lookup_text(query)
+    if not normalized and query_intent not in {"food", "traditional_food"}:
+        return {}
+
+    restaurant_context = query_intent in {"food", "traditional_food"} or bool(
+        re.search(
+            r"\b(?:restaurant|restaurants|restaurante|restaurantes|"
+            r"food|comida|jantar|dinner|almoco|lunch|gastronomy|gastronomia)\b",
+            normalized,
+        )
+    )
+    if not restaurant_context:
+        return {}
+
+    flags = {
+        "traditional": query_intent == "traditional_food" or bool(
+            re.search(
+                r"\b(?:traditional|tradicional|portuguese|portuguesa|portugues|"
+                r"cozinha portuguesa|cozinha tradicional|gastronomia tradicional|"
+                r"tipico|tipica|tasca|cervejaria|petiscos)\b",
+                normalized,
+            )
+        ),
+        "low_price": bool(
+            re.search(
+                r"\b(?:preco baixo|baixo preco|barato|barata|economico|economica|"
+                r"budget|cheap|low price|under 20|ate 20)\b",
+                normalized,
+            )
+        ),
+        "accessibility": bool(
+            re.search(
+                r"\b(?:acessibilidade|acessivel|accessible|accessibility|"
+                r"wheelchair|mobilidade reduzida|cadeira de rodas)\b",
+                normalized,
+            )
+        ),
+        "vegetarian": bool(
+            re.search(
+                r"\b(?:vegetarian|vegetarians|vegetariano|vegetarianos|vegetariana|vegetarianas|"
+                r"vegan|vegano|veganos|vegana|veganas|plant[-\s]?based|vegetais)\b",
+                normalized,
+            )
+        ),
+    }
+    return {name: requested for name, requested in flags.items() if requested}
+
+
+def _restaurant_preference_text(result: Dict[str, Any]) -> str:
+    """Build a normalized evidence blob for restaurant preference scoring."""
+    full_data = _place_result_full_data(result)
+    return _normalize_place_hint_text(
+        _join_user_facing_parts(
+            [
+                result.get("title", ""),
+                result.get("category", ""),
+                result.get("location", ""),
+                result.get("short_description", ""),
+                _build_place_searchable_text(full_data) if full_data else "",
+            ]
+        )
+    )
+
+
+def _score_restaurant_preference_result(
+    result: Dict[str, Any],
+    preference_flags: Dict[str, bool],
+) -> Tuple[float, int, bool]:
+    """Score how well a restaurant result satisfies explicit user preferences."""
+    evidence_text = _restaurant_preference_text(result)
+    lookup_text = _normalize_lookup_text(evidence_text)
+
+    traditional = bool(_RESTAURANT_TRADITIONAL_EVIDENCE_RE.search(lookup_text))
+    non_traditional = bool(_RESTAURANT_NON_TRADITIONAL_EVIDENCE_RE.search(lookup_text))
+    accessible = bool(_RESTAURANT_ACCESSIBILITY_EVIDENCE_RE.search(lookup_text))
+    vegetarian = bool(_RESTAURANT_VEGETARIAN_EVIDENCE_RE.search(lookup_text))
+    low_price = bool(_RESTAURANT_LOW_PRICE_EVIDENCE_RE.search(evidence_text))
+    mid_price = bool(_RESTAURANT_MID_PRICE_EVIDENCE_RE.search(evidence_text))
+    high_price = bool(_RESTAURANT_HIGH_PRICE_EVIDENCE_RE.search(evidence_text))
+
+    score = 0.0
+    matched_constraints = 0
+    hard_negative = False
+
+    if preference_flags.get("traditional"):
+        if traditional:
+            score += 4.0
+            matched_constraints += 1
+        elif non_traditional:
+            score -= 2.5
+
+    if preference_flags.get("low_price"):
+        if low_price:
+            score += 3.0
+            matched_constraints += 1
+        elif high_price:
+            score -= 4.0
+            hard_negative = True
+        elif mid_price:
+            score -= 1.0
+
+    if preference_flags.get("accessibility"):
+        if accessible:
+            score += 3.0
+            matched_constraints += 1
+
+    if preference_flags.get("vegetarian"):
+        if vegetarian:
+            score += 5.0
+            matched_constraints += 1
+        else:
+            hard_negative = True
+
+    if non_traditional and not traditional and matched_constraints == 0:
+        hard_negative = True
+
+    return score, matched_constraints, hard_negative
+
+
+def _rank_restaurant_results_for_preferences(
+    results: List[Dict[str, Any]],
+    query: Optional[str],
+    query_intent: Optional[str],
+) -> Tuple[List[Dict[str, Any]], bool]:
+    """Rank and trim restaurant results according to explicit preference evidence."""
+    preference_flags = _infer_restaurant_preference_flags(query, query_intent)
+    if not preference_flags or not results:
+        return results, False
+
+    requested_constraints = len(preference_flags)
+    scored_results: List[Tuple[float, int, bool, float, int, Dict[str, Any]]] = []
+    for index, result in enumerate(results):
+        preference_score, matched_constraints, hard_negative = _score_restaurant_preference_result(
+            result,
+            preference_flags,
+        )
+        ranking_score = _score_ranked_place_result(result, query_intent)
+        scored_results.append(
+            (
+                preference_score,
+                matched_constraints,
+                hard_negative,
+                ranking_score,
+                -index,
+                result,
+            )
+        )
+
+    minimum_matches = max(1, requested_constraints - 1)
+    complete_results = [
+        item
+        for item in scored_results
+        if item[1] >= requested_constraints
+    ]
+    viable_results = complete_results or [
+        item
+        for item in scored_results
+        if item[0] > 0 and item[1] >= minimum_matches
+    ]
+    if not viable_results:
+        viable_results = [
+            item
+            for item in scored_results
+            if item[0] > 0 and item[1] >= 1 and not item[2]
+        ]
+    if not viable_results:
+        viable_results = [item for item in scored_results if not item[2]]
+    if not viable_results:
+        viable_results = scored_results
+
+    viable_results.sort(
+        key=lambda item: (item[0], item[1], item[3], item[4]),
+        reverse=True,
+    )
+    has_complete_match = any(item[1] >= requested_constraints for item in viable_results)
+    return [item[5] for item in viable_results], not has_complete_match
+
+
+def _build_restaurant_preference_note(query: Optional[str], language: str = "en") -> str:
+    """Build a concise caveat when restaurant results only partially match constraints."""
+    preference_flags = _infer_restaurant_preference_flags(query, "food")
+    if not preference_flags:
+        return ""
+
+    if language == "pt":
+        labels = {
+            "traditional": "cozinha tradicional",
+            "low_price": "preço baixo",
+            "accessibility": "acessibilidade",
+            "vegetarian": "opção vegetariana",
+        }
+        requested = ", ".join(labels[key] for key in preference_flags)
+        return (
+            f"ℹ️ **Nota:** não encontrei uma opção com todos os critérios confirmados "
+            f"nos dados consultados; priorizo as melhores correspondências para {requested}."
+        )
+
+    labels = {
+        "traditional": "traditional cuisine",
+        "low_price": "low price",
+        "accessibility": "accessibility",
+        "vegetarian": "vegetarian option",
+    }
+    requested = ", ".join(labels[key] for key in preference_flags)
+    return (
+        f"ℹ️ **Note:** I did not find one option with every criterion confirmed "
+        f"in the consulted data; I am prioritising the closest matches for {requested}."
+    )
 
 
 def _is_explicit_museum_candidate(title: str, url: str = "", extra_text: str = "") -> bool:
@@ -2583,6 +2989,14 @@ def _is_broad_specific_place_phrase(phrase: Optional[str]) -> bool:
 
 def _extract_specific_place_lookup_phrase(query: Optional[str]) -> Optional[str]:
     """Extracts a specific place name from quoted or 'tell me about' queries."""
+    normalized_raw_query = _normalize_lookup_text(query)
+    if re.search(
+        r"\b(?:restaurants|restaurantes|museums|museus|monuments|monumentos|"
+        r"places|locais|attractions|atra[cç][oõ]es|hotels|hot[eé]is)\b",
+        normalized_raw_query,
+    ):
+        return None
+
     prefixed = _extract_prefixed_lookup_phrase(
         query,
         noise_tokens=_SPECIFIC_PLACE_LOOKUP_NOISE_TOKENS,
@@ -2944,6 +3358,32 @@ def _place_result_has_schedule(result: Dict[str, Any]) -> bool:
     return isinstance(schedules, list) and bool(schedules)
 
 
+def _query_requires_open_today(query: Optional[str]) -> bool:
+    """Return whether the user explicitly requested places open today."""
+    normalized = _normalize_place_hint_text(query)
+    return bool(
+        re.search(r"\b(?:open|opened|aberto|aberta|abertos|abertas)\b", normalized)
+        and re.search(r"\b(?:today|hoje)\b", normalized)
+    )
+
+
+def _place_result_is_open_today(result: Dict[str, Any]) -> bool:
+    """Return whether VisitLisboa structured schedules say the place is open today."""
+    full_data = _place_result_full_data(result)
+    schedules = full_data.get("schedules")
+    if not isinstance(schedules, list):
+        return False
+    for schedule in schedules:
+        today = _normalize_place_hint_text(schedule.get("today"))
+        if not today:
+            continue
+        if re.search(r"\b(?:fechado|closed)\b", today):
+            return False
+        if re.search(r"\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}", today):
+            return True
+    return False
+
+
 def _is_service_like_place_category(item_category: str) -> bool:
     """Detects accommodation/info-desk categories that should not dominate museum queries."""
     category_lower = (item_category or "").lower()
@@ -2993,8 +3433,12 @@ def _infer_place_query_intent(query: Optional[str], category: Optional[str]) -> 
     monument_requested = _text_contains_fuzzy_term(query, monument_terms)
     top_attractions_requested = _text_contains_fuzzy_term(query, top_attraction_terms)
 
+    if top_attractions_requested and not (museum_requested and not monument_requested):
+        return "top_attractions"
     if normalized_category == "museums & monuments" and museum_requested and not monument_requested:
         return "museum_only"
+    if normalized_category == "museums & monuments" and monument_requested and not museum_requested:
+        return "monument_only"
     if normalized_category == "museums & monuments":
         return "museum_monument"
     if museum_requested and not monument_requested:
@@ -3003,8 +3447,16 @@ def _infer_place_query_intent(query: Optional[str], category: Optional[str]) -> 
         return "monument_only"
     if museum_requested or monument_requested:
         return "museum_monument"
-    if top_attractions_requested:
-        return "top_attractions"
+    if _text_contains_fuzzy_term(
+        query,
+        [
+            "traditional food", "traditional restaurant", "traditional portuguese",
+            "traditional restaurants", "cozinha tradicional", "gastronomia tradicional",
+            "restaurante tradicional", "restaurantes tradicionais",
+            "portuguese cuisine", "cozinha portuguesa", "típico", "tipico",
+        ],
+    ):
+        return "traditional_food"
     if _text_contains_fuzzy_term(query, ["restaurant", "restaurante", "food", "dinner", "lunch", "brunch", "gastronomy"]):
         return "food"
     if _text_contains_fuzzy_term(query, ["hotel", "stay", "accommodation", "guest house"]):
@@ -3020,7 +3472,7 @@ def _infer_specific_place_fallback_category(query: Optional[str], category: Opti
     query_intent = _infer_place_query_intent(query, category)
     if query_intent in {"museum_only", "museum_monument", "monument_only"}:
         return "Museums & Monuments"
-    if query_intent == "food":
+    if query_intent in {"food", "traditional_food"}:
         return "Restaurants"
     if query_intent == "accommodation":
         return "Hotels"
@@ -3163,9 +3615,21 @@ def _matches_place_query_intent(item_category: str, searchable_text: str, query_
     if not query_intent:
         return True
 
-    haystack = f"{item_category or ''} {searchable_text or ''}".lower()
+    category_text = _normalize_place_hint_text(item_category)
+    searchable = _normalize_place_hint_text(searchable_text)
+    if query_intent == "monument_only":
+        # "Museums & Monuments" is a broad VisitLisboa taxonomy bucket, not
+        # evidence that a candidate is actually a monument.
+        category_text = re.sub(r"\bmuseums?\s*&\s*monuments?\b|\bmuseus?\s+e\s+monumentos?\b", " ", category_text)
+    haystack = f"{category_text} {searchable}"
     museum_markers = ["museum", "museu", "museums"]
-    monument_markers = ["monument", "monumento", "monastery", "castle", "palace", "church"]
+    monument_markers = [
+        "monument", "monumento", "monuments", "monumentos",
+        "monastery", "mosteiro", "castle", "castelo", "palace", "palacio",
+        "church", "igreja", "tower", "torre", "cathedral", "catedral",
+        "se catedral", "padrao", "convent", "convento", "roman", "romana",
+        "romanas", "ruin", "ruins", "ruina", "ruinas",
+    ]
 
     if query_intent == "museum_only":
         return any(marker in haystack for marker in museum_markers)
@@ -3222,7 +3686,12 @@ def _fallback_search(query: str, category: str, data: List[Dict], max_results: i
         if not _matches_required_service_terms(service_anchor_text, required_service_terms):
             continue
 
-        if not _matches_place_location_hints(searchable, location_hints):
+        location_hint_text = _join_user_facing_parts([
+            item.get('title', ''),
+            item.get('url', ''),
+            item.get('location', ''),
+        ])
+        if not _matches_place_location_hints(location_hint_text, location_hints):
             continue
 
         if query_intent == "museum_only" and not _is_explicit_museum_candidate(
@@ -3569,6 +4038,38 @@ def search_cultural_events(
         display_cap = min(max_results, MAX_USER_FACING_RESULTS)
         display_count = min(display_cap, 2) if exact_lookup_not_found_intro and offset == 0 else display_cap
 
+        # Deduplicate near-identical event entries by (title, first date, venue/location)
+        # so the same event scraped from multiple sources or category pages does not
+        # appear twice in the same answer.
+        deduped_events: List[Dict[str, Any]] = []
+        seen_event_keys: set[Tuple[str, str, str]] = set()
+        for event in events_data:
+            raw_title = _clean_event_title(event.get('title'), event.get('url', '')) or ''
+            title_key = re.sub(r"\s+", " ", str(raw_title).strip().lower())
+            dates_list = get_event_dates(event) or []
+            first_date_key = ''
+            if dates_list:
+                first = dates_list[0]
+                if isinstance(first, dict):
+                    first_date_key = str(first.get('start') or first.get('date') or '').strip()
+                else:
+                    first_date_key = str(first).strip()
+            first_date_key = re.sub(r"[T\s]\d{1,2}:\d{2}(?::\d{2})?.*$", "", first_date_key).strip()
+            iso_date_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", first_date_key)
+            if iso_date_match:
+                first_date_key = iso_date_match.group(1)
+            venue_key = re.sub(
+                r"\s+",
+                " ",
+                str(event.get('venue_name') or event.get('location') or '').strip().lower(),
+            )
+            dedup_key = (title_key, first_date_key, venue_key)
+            if title_key and dedup_key in seen_event_keys:
+                continue
+            seen_event_keys.add(dedup_key)
+            deduped_events.append(event)
+        events_data = deduped_events
+
         # Limit results
         results = events_data[offset : offset + display_count]
 
@@ -3682,11 +4183,14 @@ def search_cultural_events(
                     )
 
             if event.get('schedule_notes'):
-                schedule_summary = "; ".join(
-                    _localize_visitlisboa_schedule_text(note, language=render_language)
+                localized_schedule_notes = [
+                    localized_note
                     for note in event['schedule_notes'][:2]
                     if _clean_user_facing_value(note)
-                )
+                    for localized_note in [_localize_visitlisboa_schedule_text(note, language=render_language)]
+                    if localized_note
+                ]
+                schedule_summary = "; ".join(localized_schedule_notes)
                 if schedule_summary:
                     if render_language == "pt":
                         output_parts.append(f"    - 🕒 **Horários:** {schedule_summary}")
@@ -3791,8 +4295,17 @@ def search_places_attractions(
             specific_lookup_query = _apply_known_place_lookup_alias(specific_lookup_query) or specific_lookup_query
         query_intent = _infer_place_query_intent(effective_query or query, category)
         query_context = query or effective_query or ""
+        if (
+            _normalize_place_category_filter(category) == "restaurants"
+            and re.search(
+                r"\b(?:tradicion|traditional|cozinha\s+portuguesa|portuguese\s+cuisine|t[ií]pic[ao]|tipic[ao])\b",
+                _normalize_lookup_text(query_context),
+            )
+        ):
+            query_intent = "traditional_food"
         tickets_requested = _query_mentions_tickets(query_context)
         schedule_requested = _query_mentions_schedule(query_context)
+        open_today_required = _query_requires_open_today(query_context)
 
         logger.info(
             f"search_places_attractions: query='{query}', effective_query='{effective_query}', category='{category}', max={max_results}, offset={offset}"
@@ -3874,7 +4387,11 @@ def search_places_attractions(
                     normalized_searchable = _normalize_place_hint_text(searchable)
                     raw_location = metadata.get('address') or metadata.get('location') or ''
                     full_place_data = _get_place_by_url(metadata.get('url', '')) if metadata.get('url') else None
-                    location_text = f"{metadata.get('title', '')} {metadata.get('url', '')} {raw_location} {doc.page_content}".lower()
+                    location_text = _join_user_facing_parts([
+                        metadata.get('title', ''),
+                        metadata.get('url', ''),
+                        raw_location,
+                    ])
                     service_anchor_text = _join_user_facing_parts([
                         metadata.get('title', ''),
                         item_category,
@@ -4077,6 +4594,81 @@ def search_places_attractions(
             _append_unique_place_results(combined_visitlisboa, fallback_results, seen_visitlisboa_keys, limit=fallback_limit)
             visitlisboa_results = combined_visitlisboa
 
+        if query_intent == "top_attractions":
+            supplemental_items = _fallback_search(
+                query=None,
+                category=category or "Museums & Monuments",
+                data=_load_places_json(),
+                max_results=5000,
+            )
+            supplemental_results = [_convert_raw_place_to_result(item) for item in supplemental_items]
+            combined_attractions: List[Dict[str, Any]] = []
+            seen_attraction_keys: set[str] = set()
+            _append_unique_place_results(combined_attractions, visitlisboa_results, seen_attraction_keys)
+            _append_unique_place_results(combined_attractions, supplemental_results, seen_attraction_keys)
+            geographically_valid_attractions = [
+                result
+                for result in combined_attractions
+                if _place_within_requested_geography(
+                    _join_user_facing_parts(
+                        [
+                            result.get("title", ""),
+                            result.get("location", ""),
+                            result.get("short_description", ""),
+                            result.get("url", ""),
+                        ]
+                    ),
+                    effective_query or query,
+                )
+            ]
+            if geographically_valid_attractions:
+                combined_attractions = geographically_valid_attractions
+            visitlisboa_results = sorted(
+                combined_attractions,
+                key=lambda result: _score_ranked_place_result(result, query_intent),
+                reverse=True,
+            )[:requested_window]
+
+        if query_intent == "traditional_food":
+            supplemental_items = _fallback_search(
+                query=None,
+                category=category or "Restaurants",
+                data=_load_places_json(),
+                max_results=5000,
+            )
+            supplemental_results = [_convert_raw_place_to_result(item) for item in supplemental_items]
+            combined_traditional: List[Dict[str, Any]] = []
+            seen_traditional_keys: set[str] = set()
+            _append_unique_place_results(combined_traditional, visitlisboa_results, seen_traditional_keys)
+            _append_unique_place_results(combined_traditional, supplemental_results, seen_traditional_keys)
+            ranked_traditional_results = sorted(
+                combined_traditional,
+                key=lambda result: _score_ranked_place_result(result, query_intent),
+                reverse=True,
+            )
+            traditional_location_hints = _extract_place_location_hints(effective_query or query)
+            if traditional_location_hints:
+                area_ranked_results = [
+                    result
+                    for result in ranked_traditional_results
+                    if _matches_place_location_hints(
+                        _join_user_facing_parts(
+                            [
+                                result.get("title", ""),
+                                result.get("location", ""),
+                                result.get("short_description", ""),
+                                result.get("url", ""),
+                            ]
+                        ),
+                        traditional_location_hints,
+                    )
+                ]
+                if area_ranked_results:
+                    ranked_traditional_results = area_ranked_results + [
+                        result for result in ranked_traditional_results if result not in area_ranked_results
+                    ]
+            visitlisboa_results = ranked_traditional_results[:requested_window]
+
         if required_service_terms:
             visitlisboa_results = [
                 result
@@ -4124,8 +4716,44 @@ def search_places_attractions(
             _append_unique_place_results(all_results, dados_abertos_results, existing_keys)
 
         if effective_query or query:
+            geographically_valid_results = [
+                result
+                for result in all_results
+                if _place_within_requested_geography(
+                    _join_user_facing_parts(
+                        [
+                            result.get("title", ""),
+                            result.get("location", ""),
+                            result.get("short_description", ""),
+                            result.get("url", ""),
+                        ]
+                    ),
+                    effective_query or query,
+                )
+            ]
+            if geographically_valid_results:
+                all_results = geographically_valid_results
+
+        if effective_query or query:
             output_location_hints = _extract_place_location_hints(effective_query or query)
             if output_location_hints:
+                matching_area_results = [
+                    result
+                    for result in all_results
+                    if _matches_place_location_hints(
+                        _join_user_facing_parts(
+                            [
+                                result.get("title", ""),
+                                result.get("location", ""),
+                                result.get("short_description", ""),
+                                result.get("url", ""),
+                            ]
+                        ),
+                        output_location_hints,
+                    )
+                ]
+                if matching_area_results:
+                    all_results = matching_area_results
                 all_results.sort(
                     key=lambda result: (
                         0 if _matches_place_location_hints(
@@ -4143,14 +4771,35 @@ def search_places_attractions(
                     )
                 )
 
+        if open_today_required:
+            open_today_results = [result for result in all_results if _place_result_is_open_today(result)]
+            if open_today_results:
+                all_results = open_today_results
+
         if tickets_requested or schedule_requested:
             all_results.sort(
                 key=lambda result: (
                     1 if (not tickets_requested or _place_result_has_ticket_link(result)) else 0,
                     1 if (not schedule_requested or _place_result_has_schedule(result)) else 0,
+                    1 if (not open_today_required or _place_result_is_open_today(result)) else 0,
                     float(result.get("ranking_score") or 0.0),
                 ),
                 reverse=True,
+            )
+
+        preference_query = effective_query or query
+        restaurant_preference_partial_match = False
+        restaurant_preference_flags: Dict[str, bool] = {}
+        restaurant_output = (
+            query_intent in {"food", "traditional_food"}
+            or _normalize_place_category_filter(category) == "restaurants"
+        )
+        if all_results and restaurant_output:
+            restaurant_preference_flags = _infer_restaurant_preference_flags(preference_query, query_intent)
+            all_results, restaurant_preference_partial_match = _rank_restaurant_results_for_preferences(
+                all_results,
+                preference_query,
+                query_intent,
             )
 
         # =====================================================================
@@ -4245,6 +4894,13 @@ def search_places_attractions(
         display_cap = min(max_results, MAX_USER_FACING_RESULTS)
         display_count = min(display_cap, 2) if exact_lookup_not_found_intro and offset == 0 else display_cap
 
+        if query_intent == "top_attractions":
+            all_results = sorted(
+                all_results,
+                key=lambda result: _score_ranked_place_result(result, query_intent),
+                reverse=True,
+            )
+
         # Limit to the requested window.
         final_results = all_results[offset : offset + display_count]
         if not final_results:
@@ -4259,18 +4915,28 @@ def search_places_attractions(
             )
 
         if render_language == "pt":
+            heading = "### 🍽️ **Restaurantes**" if restaurant_output else "### 🔵 **Locais e atrações**"
             output_parts = [
-                "### 🔵 **Locais e atrações**",
+                heading,
                 f"🧭 **Janela de resultados:** {offset + 1}-{offset + len(final_results)} de {len(all_results)}.",
             ]
         else:
+            heading = "### 🍽️ **Restaurants**" if restaurant_output else "### 🔵 **Places and Attractions**"
             output_parts = [
-                "### 🔵 **Places and Attractions**",
+                heading,
                 f"🧭 **Result window:** {offset + 1}-{offset + len(final_results)} of {len(all_results)}.",
             ]
 
         if exact_lookup_not_found_intro and offset == 0:
             output_parts = [exact_lookup_not_found_intro, "", *output_parts]
+
+        if restaurant_preference_partial_match and offset == 0:
+            preference_note = _build_restaurant_preference_note(
+                preference_query,
+                language=render_language,
+            )
+            if preference_note:
+                output_parts.extend(["", preference_note])
 
         for _i, place in enumerate(final_results, 1):
             title = _localize_place_title(place.get('title', 'Unknown'), language=render_language)
@@ -4333,6 +4999,7 @@ def search_places_attractions(
             feature_summary = _format_compact_feature_summary(
                 full_data.get("features") if full_data else None,
                 language=render_language,
+                priority_flags=restaurant_preference_flags,
             )
             if feature_summary:
                 label = "Características" if render_language == "pt" else "Features"

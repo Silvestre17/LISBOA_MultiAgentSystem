@@ -76,7 +76,8 @@ def validate_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, user_message
     evidence_titles = [normalize_text(card.title) for card in evidence.cards if card.title]
     evidence_text = normalize_text(" ".join([card.title + " " + card.summary for card in evidence.cards]))
     grounded_itinerary_requested = _query_requests_grounded_itinerary(user_message)
-    place_cards = [card for card in evidence.cards if getattr(card, "kind", "") in {"place", "event", "service"}]
+    place_cards = [card for card in evidence.cards if getattr(card, "kind", "") in {"place", "food", "event", "service"}]
+    food_cards = [card for card in evidence.cards if _evidence_card_is_food(card)]
     matched_place_blocks = 0
 
     all_text_fields = [draft.title, draft.direct_answer, *draft.constraints_used, *draft.movement_logic, *draft.weather_strategy, *draft.tips, *draft.limitations]
@@ -89,7 +90,7 @@ def validate_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, user_message
         if _looks_like_unsupported_named_venue(block.title, evidence_titles, user_norm, evidence_text):
             issues.append(f"unsupported venue title: {block.title[:60]}")
         matched_card = _matching_evidence_card(block.title, evidence)
-        if matched_card and getattr(matched_card, "kind", "") in {"place", "event", "service"}:
+        if matched_card and getattr(matched_card, "kind", "") in {"place", "food", "event", "service"}:
             matched_place_blocks += 1
         if (
             grounded_itinerary_requested
@@ -103,6 +104,8 @@ def validate_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, user_message
             and _evidence_card_is_closed(matched_card)
         ):
             issues.append(f"time-specific plan selected closed venue: {block.title[:60]}")
+        if _block_time_conflicts_with_supported_hours(block):
+            issues.append(f"planned stop outside supported opening hours: {block.title[:60]}")
     for text in all_text_fields:
         if not text:
             continue
@@ -138,6 +141,9 @@ def validate_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, user_message
 
     if grounded_itinerary_requested and place_cards and matched_place_blocks < min(2, len(place_cards)):
         issues.append("grounded itinerary did not select enough evidence cards")
+
+    if _query_requests_food_stop(user_message) and food_cards and not _draft_includes_food_stop(draft, food_cards):
+        issues.append("requested gastronomy but plan omitted food evidence")
 
     if re.search(r"\b(?:rain|chuva|weather|tempo|umbrella|guarda chuva|indoor|interior)\b", normalize_text(user_message)):
         weather_text = normalize_text(" ".join([*draft.weather_strategy, *[" ".join(block.weather) for block in draft.blocks]]))
@@ -198,6 +204,115 @@ def _query_requests_grounded_itinerary(user_message: str) -> bool:
     )
 
 
+def _query_requests_food_stop(user_message: str) -> bool:
+    """Return whether the user explicitly asks for food or gastronomy in a plan."""
+    normalized = normalize_text(user_message)
+    return bool(
+        re.search(
+            r"\b(?:gastronomy|gastronomia|restaurant|restaurante|food|comida|lunch|almoco|almoço|dinner|jantar|pastry|pastelaria|pastel|traditional cuisine|cozinha tradicional)\b",
+            normalized,
+        )
+    )
+
+
+def _evidence_card_is_food(card: Any) -> bool:
+    """Return whether an evidence card supports a food or restaurant stop."""
+    if getattr(card, "kind", "") == "food":
+        return True
+    fields = getattr(card, "fields", {}) or {}
+    text = normalize_text(
+        " ".join(
+            [
+                str(getattr(card, "title", "")),
+                str(getattr(card, "summary", "")),
+                *[str(key) for key in fields.keys()],
+                *[str(value) for value in fields.values()],
+            ]
+        )
+    )
+    return bool(
+        re.search(
+            r"\b(?:restaurant|restaurante|gastronomy|gastronomia|food|cuisine|cozinha|pastelaria|pastry|comida)\b",
+            text,
+        )
+    )
+
+
+def _draft_includes_food_stop(draft: PlanDraft, food_cards: Sequence[Any]) -> bool:
+    """Return whether a plan draft selected at least one evidenced food stop."""
+    food_titles = [normalize_text(getattr(card, "title", "")) for card in food_cards]
+    for block in draft.blocks:
+        if getattr(block, "kind", "") in {"food", "coffee", "pastry"}:
+            return True
+        block_text = normalize_text(
+            " ".join([block.title, block.purpose, *block.details, *block.movement, *block.limitations])
+        )
+        if re.search(r"\b(?:restaurant|restaurante|gastronomy|gastronomia|food|cuisine|cozinha|pastelaria|pastry|almoco|almoço|jantar)\b", block_text):
+            return True
+        if any(food_title and (food_title in block_text or block_text in food_title) for food_title in food_titles):
+            return True
+    return False
+
+
+def _block_time_conflicts_with_supported_hours(block: Any) -> bool:
+    """Return whether a timed block falls outside its evidenced opening hours."""
+    title = str(getattr(block, "title", "") or "")
+    scheduled_minutes = _extract_block_start_minutes(title)
+    if scheduled_minutes is None:
+        return False
+
+    hours_fragments = [
+        str(detail)
+        for detail in getattr(block, "details", []) or []
+        if re.search(r"(?:Hours|Horário|Horario|Horários|Horarios)\s*:\s*\*{0,2}", str(detail), flags=re.IGNORECASE)
+    ]
+    if not hours_fragments:
+        return False
+    hours_text = " ".join(hours_fragments)
+    if re.search(r"\b(?:closed|fechado|encerrado)\b", normalize_text(hours_text)):
+        return True
+
+    intervals = _extract_hour_intervals(hours_text)
+    if not intervals:
+        return False
+    return not any(_minutes_in_interval(scheduled_minutes, start, end) for start, end in intervals)
+
+
+def _extract_block_start_minutes(title: str) -> int | None:
+    """Extract the leading planned time from a rendered planner block title."""
+    match = re.match(r"^\s*(?:\D{0,8})?(?P<hour>\d{1,2}):(?P<minute>\d{2})\b", title or "")
+    if not match:
+        return None
+    hour = int(match.group("hour"))
+    minute = int(match.group("minute"))
+    if hour > 23 or minute > 59:
+        return None
+    return hour * 60 + minute
+
+
+def _extract_hour_intervals(text: str) -> List[tuple[int, int]]:
+    """Extract opening-hour intervals from a detail string."""
+    intervals: List[tuple[int, int]] = []
+    for match in re.finditer(
+        r"(?P<start_h>\d{1,2}):(?P<start_m>\d{2})\s*[-–—]\s*(?P<end_h>\d{1,2}):(?P<end_m>\d{2})",
+        text or "",
+    ):
+        start = int(match.group("start_h")) * 60 + int(match.group("start_m"))
+        end = int(match.group("end_h")) * 60 + int(match.group("end_m"))
+        if end <= start:
+            end += 24 * 60
+        intervals.append((start, end))
+    return intervals
+
+
+def _minutes_in_interval(minutes: int, start: int, end: int) -> bool:
+    """Return whether minutes since midnight falls inside an opening interval."""
+    candidate = minutes
+    if end > 24 * 60 and candidate < start:
+        candidate += 24 * 60
+    return start <= candidate < end
+
+
 def _user_prefers_portuguese(user_message: str) -> bool:
     """Return whether the request is clearly Portuguese."""
     normalized = normalize_text(user_message)
@@ -213,7 +328,10 @@ def _has_pt_language_drift(text: str) -> bool:
     """Return whether a Portuguese plan still contains English scaffold prose."""
     return bool(
         re.search(
-            r"\b(?:morning|lunch|afternoon|dinner|start at|after lunch|traditional portuguese cuisine|more heritage|traditional meal|live entertainment|real-time entertainment)\b",
+            r"\b(?:morning|lunch|afternoon|dinner|start at|after lunch|from the|if you prefer|"
+            r"have lunch|i couldn['’]?t|couldn['’]?t confirm|allow about|good first stop|"
+            r"walking is|how to get|bel[eé]m stops|by tram|taxi|rideshare|"
+            r"traditional portuguese cuisine|more heritage|traditional meal|live entertainment|real-time entertainment)\b",
             text or "",
             flags=re.IGNORECASE,
         )

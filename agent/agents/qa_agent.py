@@ -25,6 +25,7 @@ from agent.prompts.qa import get_qa_prompt
 from agent.utils.response_formatter import (
     _LABEL_TRANSLATIONS,
     _count_structured_place_cards,
+    missing_material_source_labels,
     _place_response_missing_required_fields,
     final_post_qa_guard,
     final_visual_pass,
@@ -50,6 +51,228 @@ except ImportError:
     _HAS_CP_DATA = False
 
 logger = logging.getLogger(__name__)
+
+_QA_ANCHOR_KEYWORD_RE = re.compile(
+    r"\b(?:rua|avenida|av|largo|praca|calcada|travessa|estrada|campo|"
+    r"museu|palacio|castelo|mosteiro|torre|padrao|catedral|igreja|capela|"
+    r"jardim|parque|miradouro|mercado|fundacao|universidade|faculdade|"
+    r"hospital|farmacia|estacao|aeroporto|terminal|centro\s+comercial|"
+    r"shopping|livraria|teatro|coliseu|oceanario|maat|lx\s*factory)\b",
+    re.IGNORECASE,
+)
+_QA_GENERIC_ANCHOR_RE = re.compile(
+    r"\b(?:monumentos?|atracoes?|atra[cç][oõ]es?|museus?|restaurantes?|"
+    r"gastronomia|comida|cozinha|eventos?|cultura|historicos?|tradicional|"
+    r"imperdiveis|locais|sitios|places|sights|restaurants?|food|culture|events?)\b",
+    re.IGNORECASE,
+)
+_QA_ANCHOR_LIST_SPLIT_RE = re.compile(
+    r"\s*(?:[,;]|\s+\+\s+|\s+/\s+|\s+(?:e|and)\s+)\s+",
+    re.IGNORECASE,
+)
+_QA_CENTRAL_AREA_RE = re.compile(
+    r"\b(?:se de lisboa|catedral de lisboa|carmo|baixa|chiado|rossio|praca do comercio|terreiro do paco|alfama)\b",
+    re.IGNORECASE,
+)
+_QA_BELEM_AREA_RE = re.compile(
+    r"\b(?:belem|torre de belem|padrao dos descobrimentos|jeronimos|mosteiro dos jeronimos|brasilia|imperio)\b",
+    re.IGNORECASE,
+)
+
+
+def _qa_normalize_text(text: str) -> str:
+    """Normalize user-facing text for deterministic final-response audits."""
+    normalized = unicodedata.normalize("NFKD", text or "")
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    normalized = re.sub(r"[^a-zA-Z0-9\s/-]", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip().lower()
+
+
+def _qa_clean_requested_anchor_fragment(fragment: str) -> str:
+    """Return a compact candidate place name from a user-request fragment."""
+    cleaned = re.sub(r"\([^)]*\)", " ", str(fragment or ""))
+    cleaned = re.sub(
+        r"^\s*(?:o|a|os|as|um|uma|uns|umas|no|na|nos|nas|em|at|from|the|"
+        r"de|do|da|dos|das)\s+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\s+(?:e|and)\s+(?:termin\S*|acab\S*|ending|end)\b.*$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\s+(?:as|at|pelas|por\s+volta|durante|during|com|with|inclui|include|"
+        r"including|depois|then|sem|using|usando)\b.*$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(r"\s+", " ", cleaned).strip(" .:-")
+
+
+def _qa_anchor_fragment_is_specific(fragment: str) -> bool:
+    """Return whether a candidate is likely a specific place, not a category."""
+    cleaned = _qa_clean_requested_anchor_fragment(fragment)
+    normalized = _qa_normalize_text(cleaned)
+    if not (2 <= len(cleaned) <= 90 and normalized):
+        return False
+    if _QA_GENERIC_ANCHOR_RE.fullmatch(normalized):
+        return False
+    if _QA_ANCHOR_KEYWORD_RE.search(normalized):
+        return True
+    if re.search(r"\b[A-Z0-9]{2,}\b", cleaned):
+        return True
+    if len(normalized.split()) >= 2 and re.search(r"\b[A-Z][A-Za-z0-9-]{2,}", cleaned):
+        return True
+    return len(normalized.split()) == 1 and cleaned[:1].isupper() and len(normalized) >= 4
+
+
+def _qa_split_requested_anchor_fragment(fragment: str) -> List[str]:
+    """Split a user-provided place list into specific place candidates."""
+    candidates: List[str] = []
+    for part in _QA_ANCHOR_LIST_SPLIT_RE.split(str(fragment or "")):
+        cleaned = _qa_clean_requested_anchor_fragment(part)
+        if _qa_anchor_fragment_is_specific(cleaned):
+            candidates.append(cleaned)
+    return candidates
+
+
+def _qa_extract_requested_anchor_phrases(user_query: str) -> List[str]:
+    """Extract specific requested place names without relying on a fixed list."""
+    text = str(user_query or "").strip()
+    labels: List[str] = []
+    seen: set[str] = set()
+
+    def add_fragment(fragment: str) -> None:
+        for candidate in _qa_split_requested_anchor_fragment(fragment):
+            key = _qa_normalize_text(candidate)
+            if key and key not in seen:
+                seen.add(key)
+                labels.append(candidate)
+
+    endpoint_patterns = [
+        r"\bde\s+(?P<origin>[^,.;]+?)\s+(?:para|ate|at\S*)\s+(?P<destination>[^,.;]+)",
+        r"\bfrom\s+(?P<origin>[^,.;]+?)\s+to\s+(?P<destination>[^,.;]+)",
+    ]
+    for pattern in endpoint_patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            add_fragment(match.group("origin"))
+            add_fragment(match.group("destination"))
+
+    single_place_patterns = [
+        r"\b(?:come\S*|iniciar|inicia|starting|start)\s+(?:no|na|em|at|from)\s+(?P<place>[^,.;]+)",
+        r"\b(?:termin\S*|acab\S*|ending|end)\s+(?:no|na|em|at|in)\s+(?P<place>[^,.;]+)",
+        r"\b(?:a\s+partir\s+d\S*|desde)\s+(?P<place>[^,.;]+)",
+    ]
+    for pattern in single_place_patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            add_fragment(match.group("place"))
+
+    list_patterns = [
+        r"\b(?:visitar|visit|inclui\S*|include|including|passar\s+por|pass\s+through)\s+(?P<places>[^.;]+)",
+    ]
+    for pattern in list_patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            add_fragment(match.group("places"))
+
+    return labels
+
+
+def _qa_requested_anchor_labels(user_query: str) -> List[str]:
+    """Extract explicit named Lisbon anchors from a user request."""
+    return _qa_extract_requested_anchor_phrases(user_query)
+
+
+def _qa_response_mentions_anchor(response: str, label: str) -> bool:
+    """Return whether the response mentions a required anchor or alias."""
+    normalized_response = _qa_normalize_text(response)
+    normalized_label = _qa_normalize_text(label)
+    return bool(normalized_label and re.search(rf"\b{re.escape(normalized_label)}\b", normalized_response))
+
+
+def _qa_mentions_central_and_belem(text: str) -> bool:
+    """Return whether text mentions both central Lisbon and Belém-area anchors."""
+    normalized = _qa_normalize_text(text)
+    return bool(_QA_CENTRAL_AREA_RE.search(normalized) and _QA_BELEM_AREA_RE.search(normalized))
+
+
+def _qa_response_has_cross_zone_movement(response: str) -> bool:
+    """Return whether a final response contains a concrete center-to-Belém movement leg."""
+    concrete_mode_re = re.compile(
+        r"\b(?:carris\s+\d{2,4}[a-z]?|\d{1,4}e|\d{3,4}[a-z]?|linha\s+(?:\d{2,4}[a-z]?|verde|azul|amarela|vermelha|de\s+(?:cascais|sintra|azambuja|sado))|"
+        r"line\s+(?:\d{2,4}[a-z]?|green|blue|yellow|red)|cp\s+linha|comboio\s+linha|train\s+line)\b",
+        re.IGNORECASE,
+    )
+    for raw_line in str(response or "").splitlines():
+        normalized_line = _qa_normalize_text(raw_line)
+        has_leg_marker = (
+            "->" in raw_line
+            or "→" in raw_line
+            or " para " in f" {normalized_line} "
+            or " to " in f" {normalized_line} "
+        )
+        if (
+            has_leg_marker
+            and _QA_CENTRAL_AREA_RE.search(normalized_line)
+            and _QA_BELEM_AREA_RE.search(normalized_line)
+            and concrete_mode_re.search(normalized_line)
+        ):
+            return True
+    normalized_response = _qa_normalize_text(response)
+    return bool(
+        _qa_mentions_central_and_belem(normalized_response)
+        and concrete_mode_re.search(normalized_response)
+    )
+
+
+def _qa_response_has_cross_zone_limitation(response: str) -> bool:
+    """Return whether a final response names the central-Belém leg as unconfirmed."""
+    normalized_response = _qa_normalize_text(response)
+    return bool(
+        _qa_mentions_central_and_belem(normalized_response)
+        and re.search(
+            r"\b(?:nao confirmad\w*|unconfirmed|sem ligacao confirmad\w*|sem ligacao concreta|did not confirm|not confirmed)\b",
+            normalized_response,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _qa_requested_start_label(user_query: str) -> str:
+    """Return the explicit requested starting anchor, when the query names one."""
+    normalized_query = _qa_normalize_text(user_query)
+    if not re.search(r"\b(?:comeca|comece|comecar|inicia|iniciar|start|starting)\b", normalized_query):
+        return ""
+    labels = _qa_extract_requested_anchor_phrases(user_query)
+    return labels[0] if labels else ""
+
+
+def _qa_first_route_block_mentions_anchor(response: str, label: str) -> bool:
+    """Return whether the first visible itinerary block starts at the requested anchor."""
+    if not label:
+        return True
+    in_route_section = False
+    for raw_line in str(response or "").splitlines():
+        stripped = raw_line.strip()
+        normalized_line = _qa_normalize_text(stripped)
+        if re.search(r"\b(?:roteiro sugerido|suggested route)\b", normalized_line):
+            in_route_section = True
+            continue
+        if in_route_section and stripped.startswith("### "):
+            return False
+        if not in_route_section:
+            continue
+        if not re.match(r"^[-*]\s+\*\*.+\*\*", stripped):
+            continue
+        first_title = re.sub(r"^[-*]\s+\*\*", "", stripped)
+        first_title = re.sub(r"\*\*.*$", "", first_title)
+        return _qa_response_mentions_anchor(first_title, label)
+    return False
+
 
 # ==========================================================================
 # Static Knowledge for Deterministic Fact-Checking
@@ -340,6 +563,70 @@ class QualityAssuranceAgent(BaseAgent):
         return llm_result
 
     @classmethod
+    def _normalize_event_no_result_validation(
+        cls,
+        user_query: str,
+        agent_outputs: Dict[str, str],
+        agents_called: List[str],
+        llm_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Accept grounded no-result event listings as complete answers.
+
+        Event searches often have valid negative outcomes, especially when the
+        user combines temporal, price, audience, and location filters. In that
+        case the best answer is to preserve the applied filters and the scoped
+        limitation instead of forcing a repair that invents event cards.
+        """
+        if not cls._is_event_listing_query(user_query):
+            return llm_result
+
+        called_workers = {agent for agent in agents_called if agent}
+        if called_workers and not called_workers.issubset({"researcher"}):
+            return llm_result
+
+        combined_output = "\n".join(
+            str(value)
+            for key, value in agent_outputs.items()
+            if not str(key).startswith("_") and isinstance(value, str)
+        )
+        normalized_output = cls._normalize_query(combined_output)
+        if not normalized_output:
+            return llm_result
+
+        no_result_patterns = (
+            r"\bnão encontrei eventos\b",
+            r"\bnão encontrei mais eventos\b",
+            r"\bnao encontrei eventos\b",
+            r"\bnao encontrei mais eventos\b",
+            r"\bnão há eventos\b",
+            r"\bnao ha eventos\b",
+            r"\bsem eventos\b",
+            r"\bsem resultados\b.*\beventos\b",
+            r"\bno events?\b",
+            r"\bno more confirmed events?\b",
+            r"\bno confirmed events?\b",
+            r"\bdid not find\b.*\bmore\b.*\bevents?\b",
+            r"\bdid not find\b.*\bevents?\b",
+            r"\bcould not find\b.*\bmore\b.*\bevents?\b",
+            r"\bcould not find\b.*\bevents?\b",
+        )
+        if not any(re.search(pattern, normalized_output) for pattern in no_result_patterns):
+            return llm_result
+
+        llm_result["required_agents"] = []
+        llm_result["missing_data"] = []
+        llm_result["complete"] = True
+
+        normalization_note = (
+            "Normalized QA for event no-result query: a grounded empty result set is complete."
+        )
+        reasoning = llm_result.get("reasoning", "")
+        if normalization_note not in reasoning:
+            llm_result["reasoning"] = f"{reasoning} | {normalization_note}".strip(" |")
+
+        return llm_result
+
+    @classmethod
     def _is_place_listing_query(cls, user_query: str) -> bool:
         """Detects standalone place/attraction discovery queries that should stay inside researcher scope."""
         query = cls._normalize_query(user_query)
@@ -573,6 +860,72 @@ class QualityAssuranceAgent(BaseAgent):
             if not str(key).startswith("_") and isinstance(value, str)
         )
         normalized_output = cls._normalize_query(combined_output)
+        if (
+            re.search(r"\b(?:ambiguidade|ambiguity)\b", combined_output, flags=re.IGNORECASE)
+            and re.search(
+                r"\b(?:indica|especifica|specify|morada|address|zona|area|ponto de referência|landmark)\b",
+                combined_output,
+                flags=re.IGNORECASE,
+            )
+        ):
+            llm_result["missing_data"] = []
+            llm_result["required_agents"] = []
+            llm_result["complete"] = True
+            return llm_result
+
+        has_actionable_bus_route = bool(
+            re.search(
+                r"(?:melhor op[cç][aã]o confirmada|best confirmed option).{0,240}"
+                r"(?:apanha|take).{0,80}\b\d{3,4}[A-Z]?\b.{0,240}"
+                r"(?:sai em|alight at)",
+                combined_output,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            or re.search(
+                r"(?:paragens|stops).{0,120}(?:apanha em|board at).{0,120}(?:sai em|alight at).{0,160}"
+                r"(?:tempo estimado|estimated travel time)",
+                combined_output,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+        )
+        has_actionable_bus_realtime = bool(
+            re.search(
+                r"(?:pr[oó]ximas partidas|next departures).{0,220}"
+                r"(?:tempo real|real-time|em tempo real|live|atraso|delay)",
+                combined_output,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+        )
+        combined_query_output = cls._normalize_query(
+            " ".join(
+                str(part or "")
+                for part in [llm_result.get("reasoning"), *llm_result.get("missing_data", [])]
+            )
+            + " "
+            + combined_output
+        )
+        requested_cm_line_match = re.search(
+            r"\b(?:linha|line)\s+(?P<line>\d{3,4}[A-Z]?)\b",
+            combined_query_output,
+            flags=re.IGNORECASE,
+        )
+        requested_cm_line = requested_cm_line_match.group("line").upper() if requested_cm_line_match else ""
+        has_filtered_cm_alert = bool(
+            requested_cm_line
+            and (
+                re.search(
+                    rf"\b(?:linha consultada|requested line|linhas? afetadas?|affected lines?)\b"
+                    rf"[^0-9A-Z]{{0,40}}{re.escape(requested_cm_line)}\b",
+                    normalized_output,
+                    flags=re.IGNORECASE,
+                )
+                or re.search(
+                    rf"\balertas?\b[^.\n]{{0,160}}\blinha\b[^0-9A-Z]{{0,20}}{re.escape(requested_cm_line)}\b",
+                    normalized_output,
+                    flags=re.IGNORECASE,
+                )
+            )
+        )
 
         limitation_patterns = {
             "fare": r"(tarifa|preco|price|fare).{0,120}(nao foi possivel|not possible|not confirmed|nao confirmad|not available)",
@@ -582,9 +935,51 @@ class QualityAssuranceAgent(BaseAgent):
 
         def _is_satisfied_limitation(item: object) -> bool:
             normalized_item = cls._normalize_query(str(item or ""))
+            if any(
+                token in normalized_item
+                for token in (
+                    "ligação de autocarro",
+                    "ligacao de autocarro",
+                    "linha, direção",
+                    "linha, direcao",
+                    "pontos de transferência",
+                    "pontos de transferencia",
+                    "bus route",
+                    "bus option",
+                )
+            ):
+                return has_actionable_bus_route
+            if (
+                has_filtered_cm_alert
+                and requested_cm_line
+                and re.search(r"\b(?:alerta|alert|linha)\b", normalized_item)
+                and re.search(
+                    r"\b(?:exclusiv\w*|estrit\w*|especificamente|conjunto|sem incluir|associad\w*|sem referencia|sem referência|only|exclusive)\b",
+                    normalized_item,
+                )
+            ):
+                return True
+            if has_filtered_cm_alert and requested_cm_line and re.search(
+                r"\b(?:truncamento|texto descritivo|detalhes? completos?|full detail|specific source|fonte especifica|fonte específica|"
+                r"pagina da linha|página da linha|citacao material|citação material|pagina oficial|página oficial)\b",
+                normalized_item,
+            ):
+                return True
+            if has_filtered_cm_alert and requested_cm_line and re.search(
+                r"\b(?:estado em tempo real|perturbacoes especificas|perturbações específicas|aviso generico|aviso genérico|alerta activo|alerta ativo)\b",
+                normalized_item,
+            ):
+                return True
+            if has_filtered_cm_alert and requested_cm_line and re.search(
+                r"\b(?:clarific\w*|partilhad\w*|filtrad\w*|omitid\w*)\b",
+                normalized_item,
+            ):
+                return True
             if any(token in normalized_item for token in ("tarifa", "preco", "price", "fare")):
                 return bool(re.search(limitation_patterns["fare"], normalized_output))
             if "tempo real" in normalized_item or "real time" in normalized_item:
+                if has_actionable_bus_realtime:
+                    return True
                 return bool(re.search(limitation_patterns["cp_realtime"], normalized_output))
             if any(token in normalized_item for token in ("on time", "delayed", "disrupted", "atras", "perturb")):
                 return bool(re.search(limitation_patterns["delay_unknown"], normalized_output))
@@ -598,6 +993,7 @@ class QualityAssuranceAgent(BaseAgent):
         if not filtered_missing and not llm_result.get("critical_issues"):
             llm_result["complete"] = True
             llm_result["required_agents"] = []
+            llm_result["needs_repair"] = False
         return llm_result
 
     @classmethod
@@ -615,12 +1011,42 @@ class QualityAssuranceAgent(BaseAgent):
             if not str(key).startswith("_") and isinstance(value, str)
         )
         output_lower = combined_output.lower()
+        if (
+            re.search(r"\b(?:ambiguidade|ambiguity)\b", combined_output, flags=re.IGNORECASE)
+            and re.search(
+                r"\b(?:indica|especifica|specify|morada|address|zona|area|ponto de referência|landmark)\b",
+                combined_output,
+                flags=re.IGNORECASE,
+            )
+        ):
+            llm_result["missing_data"] = []
+            llm_result["required_agents"] = []
+            llm_result["complete"] = True
+            return llm_result
 
         missing_data = cls._dedupe_preserve_order(list(llm_result.get("missing_data", [])))
         required_agents = cls._dedupe_preserve_order(list(llm_result.get("required_agents", [])))
         disclaimers = cls._dedupe_preserve_order(list(llm_result.get("disclaimers", [])))
         reasoning = str(llm_result.get("reasoning", "") or "").strip()
         reasoning_notes: List[str] = []
+
+        rejected_mode_markers = {
+            "metro": r"\b(?:n[aã]o\s+(?:quero|usar|uses?|meter)|sem|without|no)\s+metro\b|\bmetro\b.{0,30}\b(?:n[aã]o|sem|without|no)\b",
+            "bus": r"\b(?:n[aã]o\s+(?:quero|usar|uses?|meter)|sem|without|no)\s+(?:autocarro|bus|ônibus|onibus)\b|\b(?:autocarro|bus)\b.{0,30}\b(?:n[aã]o|sem|without|no)\b",
+            "train": r"\b(?:n[aã]o\s+(?:quero|usar|uses?|meter)|sem|without|no)\s+(?:comboio|train|cp)\b|\b(?:comboio|train|cp)\b.{0,30}\b(?:n[aã]o|sem|without|no)\b",
+        }
+        rejected_modes = {
+            mode for mode, pattern in rejected_mode_markers.items()
+            if re.search(pattern, query, flags=re.IGNORECASE)
+        }
+        if rejected_modes:
+            before_count = len(missing_data)
+            missing_data = [
+                item for item in missing_data
+                if not any(mode in cls._normalize_query(str(item or "")) for mode in rejected_modes)
+            ]
+            if len(missing_data) != before_count:
+                reasoning_notes.append("removed QA gap for a transport mode explicitly rejected by the user")
 
         def add_gap(message: str, required_agent: Optional[str] = None) -> None:
             if message not in missing_data:
@@ -655,10 +1081,364 @@ class QualityAssuranceAgent(BaseAgent):
                 add_gap(gap_label, required_agent="researcher")
                 reasoning_notes.append(gap_label)
 
-        asks_metro = bool(re.search(r"\bmetro\b", query))
-        asks_train = bool(re.search(r"\b(comboio|comboios|train|trains)\b", query))
+        asks_opening_hours = bool(
+            re.search(
+                r"\b(?:hor[aá]rio|horarios|hours|opening|abert[oa]|open|fecha|closes|disponibilidade|availability)\b",
+                query,
+                flags=re.IGNORECASE,
+            )
+        )
+        has_nearby_service_result = bool(
+            re.search(r"\b(?:mais perto|nearest|perto de|near)\b", output_lower, flags=re.IGNORECASE)
+            and re.search(r"\b(?:dist[aâ]ncia|distance|tempo a p[eé]|walking time)\b", output_lower, flags=re.IGNORECASE)
+        )
+        if has_nearby_service_result and not asks_opening_hours:
+            before_count = len(missing_data)
+            missing_data = [
+                item for item in missing_data
+                if not re.search(
+                    r"\b(?:hor[aá]rio|horarios|hours|opening|funcionamento|abert[oa]|open|disponibilidade|availability)\b",
+                    cls._normalize_query(str(item or "")),
+                    flags=re.IGNORECASE,
+                )
+            ]
+            if len(missing_data) != before_count:
+                reasoning_notes.append("opening hours are optional for this nearby-service request")
+
+        query_has_reference_anchor = bool(
+            re.search(r"\b(?:perto de|near|junto a|around|em torno de)\b", query, flags=re.IGNORECASE)
+        )
+        if has_nearby_service_result and query_has_reference_anchor:
+            before_count = len(missing_data)
+            missing_data = [
+                item for item in missing_data
+                if not re.search(
+                    r"\b(?:ponto de partida|localiza[cç][aã]o do utilizador|user location|user origin|origin point|morada/ponto de partida)\b",
+                    cls._normalize_query(str(item or "")),
+                    flags=re.IGNORECASE,
+                )
+            ]
+            if len(missing_data) != before_count:
+                reasoning_notes.append("nearby-service ranking uses the explicit reference anchor from the query")
+            if not any(
+                re.search(r"\b(?:servi[cç]o|service|biblioteca|library|farmacia|pharmacy|hospital)\b", cls._normalize_query(str(item or "")))
+                for item in missing_data
+            ):
+                required_agents = [agent for agent in required_agents if agent != "researcher"]
+
+        if has_nearby_service_result:
+            before_count = len(missing_data)
+            missing_data = [
+                item for item in missing_data
+                if not re.search(
+                    r"\b(?:instru[cç][oõ]es?.*(?:p[eé]|pedonal)|caminho\s+a\s+p[eé]|"
+                    r"rota\s+(?:a\s+p[eé]|pedonal)|walking\s+(?:route|directions)|"
+                    r"ponto\s+de\s+partida\s+exato|exact\s+starting\s+point|"
+                    r"proximidade.*coerente|coerente.*proximidade)\b",
+                    cls._normalize_query(str(item or "")),
+                    flags=re.IGNORECASE,
+                )
+            ]
+            if len(missing_data) != before_count:
+                reasoning_notes.append(
+                    "nearby-service distance and walking-time estimate are sufficient when exact pedestrian routing is unavailable"
+                )
+            if not missing_data:
+                required_agents = [
+                    agent for agent in required_agents
+                    if agent not in {"transport", "researcher"}
+                ]
+
+        if has_nearby_service_result and re.search(r"\b(?:morada|address|localiza[cç][aã]o|location)\b", output_lower):
+            before_count = len(missing_data)
+            missing_data = [
+                item for item in missing_data
+                if not re.search(
+                    r"\b(?:designa[cç][aã]o canonica|canonical|nome.*morada|name.*address|fonte material|material source|campo util|additional field)\b",
+                    cls._normalize_query(str(item or "")),
+                    flags=re.IGNORECASE,
+                )
+            ]
+            if len(missing_data) != before_count:
+                reasoning_notes.append("nearby-service result already includes name, address, distance and walking time")
+            if not any(
+                re.search(r"\b(?:servi[cç]o|service|biblioteca|library|farmacia|pharmacy|hospital)\b", cls._normalize_query(str(item or "")))
+                for item in missing_data
+            ):
+                required_agents = [agent for agent in required_agents if agent != "researcher"]
+
+        event_query = bool(
+            re.search(
+                r"\b(?:evento|eventos|event|events|concerto|concert|festival|exposi[cç][aã]o|exhibition)\b",
+                query,
+                flags=re.IGNORECASE,
+            )
+        )
+        if event_query:
+            normalized_output = cls._normalize_query(combined_output)
+            has_event_card = bool(
+                re.search(r"(?m)^-\s+\*\*.+?\*\*", combined_output)
+                and re.search(
+                    r"\b(?:visitlisboa|data/hora|date/time|quando|when|bilhetes|tickets)\b",
+                    normalized_output,
+                    flags=re.IGNORECASE,
+                )
+            )
+            free_filter_ok = (
+                not re.search(r"\b(?:gratuit|gratis|grátis|free)\b", query, flags=re.IGNORECASE)
+                or re.search(
+                    r"\b(?:entrada gratuita|gratuito|gratuita|free entry|free admission|free)\b",
+                    normalized_output,
+                    flags=re.IGNORECASE,
+                )
+            )
+            belem_filter_ok = (
+                not re.search(r"\b(?:bel[eé]m|belem)\b", query, flags=re.IGNORECASE)
+                or re.search(r"\b(?:bel[eé]m|belem)\b", normalized_output, flags=re.IGNORECASE)
+            )
+            date_filter_ok = (
+                not re.search(
+                    r"\b(?:fim de semana|weekend|esta semana|this week|hoje|today|amanh[aã]|tomorrow)\b",
+                    query,
+                    flags=re.IGNORECASE,
+                )
+                or re.search(
+                    r"\b(?:data/hora|date/time|quando|when|\d{1,2}\s+de\s+\w+|\bmaio\b|\bmay\b)\b",
+                    normalized_output,
+                    flags=re.IGNORECASE,
+                )
+            )
+
+            if has_event_card and free_filter_ok and belem_filter_ok and date_filter_ok:
+                def _is_satisfied_event_gap(item: str) -> bool:
+                    normalized_item = cls._normalize_query(str(item or ""))
+                    if not re.search(r"\b(?:evento|eventos|event|events)\b", normalized_item):
+                        return False
+                    return bool(
+                        re.search(
+                            r"\b(?:adicional|additional|mais|more|plural|gratuit|gratis|grátis|free|data|date|fim de semana|weekend)\b",
+                            normalized_item,
+                            flags=re.IGNORECASE,
+                        )
+                    )
+
+                before_count = len(missing_data)
+                missing_data = [
+                    item for item in missing_data
+                    if not _is_satisfied_event_gap(str(item))
+                ]
+                if len(missing_data) != before_count:
+                    reasoning_notes.append("grounded event result satisfies requested filters")
+                if not any(
+                    re.search(r"\b(?:evento|eventos|event|events)\b", cls._normalize_query(str(item or "")))
+                    for item in missing_data
+                ):
+                    required_agents = [agent for agent in required_agents if agent != "researcher"]
+
+        forbids_metro = bool(
+            re.search(r"\b(?:sem|without|no|n[aã]o\s+(?:quero|usar|uses?|meter))\s+metro\b", query)
+            or re.search(r"\bmetro\b.{0,30}\b(?:sem|without|no|n[aã]o)\b", query)
+            or re.search(r"\b(?:so|only)\s+(?:de\s+)?(?:autocarro|autocarros|bus|buses)\b", query)
+        )
+        forbids_bus = bool(
+            re.search(r"\b(?:sem|without|no|n[aã]o\s+(?:quero|usar|uses?|meter))\s+(?:autocarro|autocarros|bus|buses)\b", query)
+            or re.search(r"\b(?:autocarro|autocarros|bus|buses)\b.{0,30}\b(?:sem|without|no|n[aã]o)\b", query)
+            or re.search(r"\b(?:so|only)\s+(?:de\s+)?metro\b", query)
+        )
+        forbids_train = bool(
+            re.search(r"\b(?:sem|without|no|n[aã]o\s+(?:quero|usar|uses?|meter))\s+(?:comboio|comboios|train|trains|cp)\b", query)
+            or re.search(r"\b(?:comboio|comboios|train|trains|cp)\b.{0,30}\b(?:sem|without|no|n[aã]o)\b", query)
+        )
+        forbids_tram = bool(
+            re.search(r"\b(?:sem|without|no|n[aã]o\s+(?:quero|usar|uses?|meter))\s+(?:eletrico|eletricos|tram|trams)\b", query)
+            or re.search(r"\b(?:eletrico|eletricos|tram|trams)\b.{0,30}\b(?:sem|without|no|n[aã]o)\b", query)
+        )
+
+        asks_metro = bool(re.search(r"\bmetro\b", query)) and not forbids_metro
+        asks_train = bool(re.search(r"\b(comboio|comboios|train|trains)\b", query)) and not forbids_train
+        asks_bus = bool(re.search(r"\b(autocarro|autocarros|bus|buses)\b", query)) and not forbids_bus
+        asks_tram = bool(re.search(r"\b(eletrico|eletricos|tram|trams)\b", query)) and not forbids_tram
+        forbidden_mode_gaps = []
+        if forbids_metro:
+            forbidden_mode_gaps.extend(["metro option details", "detalhes da opcao de metro", "detalhes da opção de metro"])
+        if forbids_bus:
+            forbidden_mode_gaps.extend(["bus option details", "detalhes da opcao de autocarro", "detalhes da opção de autocarro"])
+        if forbids_train:
+            forbidden_mode_gaps.extend(["train option details", "detalhes da opcao de comboio", "detalhes da opção de comboio"])
+        if forbids_tram:
+            forbidden_mode_gaps.extend(["tram option details", "detalhes da opcao de eletrico", "detalhes da opção de elétrico", "detalhes da opção de eletrico"])
+        if forbidden_mode_gaps:
+            before_count = len(missing_data)
+            missing_data = [
+                item for item in missing_data
+                if not any(gap in cls._normalize_query(str(item or "")) for gap in forbidden_mode_gaps)
+            ]
+            if len(missing_data) != before_count:
+                reasoning_notes.append("removed forbidden transport mode from QA gaps")
         asks_fastest = bool(re.search(r"\b(mais r[aá]pid[oa]|faster|fastest|quickest)\b", query))
         asks_cheapest = bool(re.search(r"\b(mais barat[oa]|cheaper|cheapest|lowest cost|pre[cç]o)\b", query))
+        requested_modes = [
+            mode for mode, requested in (
+                ("metro", asks_metro),
+                ("train", asks_train),
+                ("bus", asks_bus),
+                ("tram", asks_tram),
+            )
+            if requested
+        ]
+
+        output_mode_markers = {
+            "metro": r"\b(?:metro|metropolitano|linha\s+(?:amarela|azul|verde|vermelha)|yellow line|blue line|green line|red line)\b",
+            "train": r"\b(?:cp|comboio|comboios|train|trains|linha\s+de\s+sintra|linha\s+de\s+cascais|linha\s+da\s+azambuja|linha\s+do\s+sado)\b",
+            "bus": r"\b(?:carris|autocarro|autocarros|bus|buses|linha\s+\d{3,4}|linhas\s+\d{3,4})\b",
+            "tram": r"\b(?:el[eé]trico|eletrico|tram|trams|\b\d{1,2}e\b)\b",
+        }
+
+        def _output_mentions_mode(mode: str) -> bool:
+            return bool(re.search(output_mode_markers[mode], output_lower, flags=re.IGNORECASE))
+
+        for mode in requested_modes:
+            if _output_mentions_mode(mode):
+                continue
+            label_by_mode = {
+                "metro": "metro option details" if language == "en" else "detalhes da opção de metro",
+                "train": "train option details" if language == "en" else "detalhes da opção de comboio",
+                "bus": "bus option details" if language == "en" else "detalhes da opção de autocarro",
+                "tram": "tram option details" if language == "en" else "detalhes da opção de elétrico",
+            }
+            add_gap(label_by_mode[mode], required_agent="transport")
+            reasoning_notes.append(f"missing requested transport mode: {mode}")
+
+        best_transport_requested = bool(
+            re.search(r"\b(?:melhor\s+opcao|melhor\s+opcao|melhor\s+linha|best\s+option|best\s+line)\b", query)
+        )
+        has_ranked_transport_answer = bool(
+            re.search(r"\b(?:melhor\s+opcao\s+confirmada|best\s+confirmed\s+option)\b", output_lower)
+            and re.search(r"\b(?:tempo\s+estimado|estimated\s+time|~?\d{1,3}\s*min)\b", output_lower)
+        )
+        if best_transport_requested and has_ranked_transport_answer:
+            before_count = len(missing_data)
+            missing_data = [
+                item for item in missing_data
+                if not re.search(
+                    r"\b(?:melhor|best|rapida|rapido|faster|fastest|quickest|comparacao|comparison)\b",
+                    cls._normalize_query(str(item or "")),
+                    flags=re.IGNORECASE,
+                )
+            ]
+            if len(missing_data) != before_count:
+                reasoning_notes.append("ranked best transport option is already present")
+
+        if requested_modes and all(_output_mentions_mode(mode) for mode in requested_modes):
+            comparison_requested = asks_fastest or asks_cheapest
+
+            def _is_satisfied_transport_option_gap(item: str) -> bool:
+                normalized_item = cls._normalize_query(str(item or ""))
+                if comparison_requested and re.search(
+                    r"\b(?:mais rapido|mais rapida|faster|fastest|quickest|mais barato|mais barata|cheaper|cheapest|tarifa|fare|preco|price)\b",
+                    normalized_item,
+                    flags=re.IGNORECASE,
+                ):
+                    return False
+                return bool(
+                    re.search(
+                        r"\b(?:rota|rotas|route|routes|opcao|opcoes|option|options|modo|modos|mode|modes|transporte|transport|ambas|both|coerente|coherent|especifica|specific)\b",
+                        normalized_item,
+                        flags=re.IGNORECASE,
+                    )
+                    and (
+                        any(
+                            re.search(output_mode_markers[mode], normalized_item, flags=re.IGNORECASE)
+                            for mode in requested_modes
+                        )
+                        or bool(re.search(r"\b(?:ambas|both)\b", normalized_item, flags=re.IGNORECASE))
+                    )
+                )
+
+            before_count = len(missing_data)
+            missing_data = [
+                item for item in missing_data
+                if not _is_satisfied_transport_option_gap(str(item))
+            ]
+            if len(missing_data) != before_count:
+                reasoning_notes.append("requested transport modes are present with route details")
+
+        is_final_response_audit = "final" in agent_outputs
+        if is_final_response_audit:
+            normalized_user_query = _qa_normalize_text(user_query)
+            plan_like_query = bool(
+                re.search(
+                    r"\b(?:roteiro|plano|itinerario|itinerary|plan|visitar|visit|dia|day)\b",
+                    normalized_user_query,
+                    flags=re.IGNORECASE,
+                )
+            )
+            if plan_like_query:
+                for label in _qa_requested_anchor_labels(user_query):
+                    if _qa_response_mentions_anchor(combined_output, label):
+                        continue
+                    add_gap(
+                        f"explicitly requested stop or area: {label}"
+                        if language == "en"
+                        else f"paragem ou zona explicitamente pedida: {label}",
+                        required_agent="planner",
+                    )
+                    reasoning_notes.append(f"missing requested anchor: {label}")
+                start_label = _qa_requested_start_label(user_query)
+                if start_label and not _qa_first_route_block_mentions_anchor(combined_output, start_label):
+                    add_gap(
+                        f"first itinerary stop should match requested start: {start_label}"
+                        if language == "en"
+                        else f"a primeira paragem deve respeitar o início pedido: {start_label}",
+                        required_agent="planner",
+                    )
+                    reasoning_notes.append(f"wrong requested start: {start_label}")
+                normalized_final_output = _qa_normalize_text(combined_output)
+                if (
+                    re.search(
+                        r"\b(?:gastronom|restaurant|restaurante|food|comida|tradicional|almoco|lunch|jantar|dinner|cozinha)\b",
+                        normalized_user_query,
+                        flags=re.IGNORECASE,
+                    )
+                    and not re.search(
+                        r"\b(?:almoco|lunch|jantar|dinner|restaurante|restaurant|cozinha|comida)\b",
+                        normalized_final_output,
+                        flags=re.IGNORECASE,
+                    )
+                ):
+                    add_gap(
+                        "requested meal or restaurant stop"
+                        if language == "en"
+                        else "paragem de refeição ou restaurante pedido",
+                        required_agent="planner",
+                    )
+                    reasoning_notes.append("missing requested food stop")
+
+            asks_movement_details = bool(
+                re.search(
+                    r"\b(?:como\s+(?:me|te)?\s*deslocas?|deslocacoes|deslocacao|deslocar|transportes?|"
+                    r"percurso|trajeto|rota|route|movement|how to move|get around|getting around|"
+                    r"inclui\s+(?:como|transportes?|deslocacoes)|include\s+(?:transport|movement|how to))\b",
+                    normalized_user_query,
+                    flags=re.IGNORECASE,
+                )
+            )
+            if (
+                asks_movement_details
+                and _qa_mentions_central_and_belem(user_query)
+                and not _qa_response_has_cross_zone_movement(combined_output)
+                and not _qa_response_has_cross_zone_limitation(combined_output)
+            ):
+                add_gap(
+                    "movement leg between central Lisbon and Belém"
+                    if language == "en"
+                    else "ligação de deslocação entre o centro de Lisboa e Belém",
+                    required_agent="planner",
+                )
+                if "transport" not in required_agents:
+                    required_agents.append("transport")
+                reasoning_notes.append("missing requested cross-zone movement leg")
+
         if asks_metro and asks_train:
             if not re.search(r"\bmetro\b", output_lower):
                 add_gap(
@@ -699,6 +1479,8 @@ class QualityAssuranceAgent(BaseAgent):
         llm_result["disclaimers"] = cls._dedupe_preserve_order(disclaimers)
         if llm_result["missing_data"]:
             llm_result["complete"] = False
+        elif not llm_result.get("critical_issues"):
+            llm_result["complete"] = True
 
         if reasoning_notes:
             note = " | ".join(reasoning_notes)
@@ -741,12 +1523,18 @@ class QualityAssuranceAgent(BaseAgent):
             "unsupported",
             "no real time",
             "no live",
+            "no results",
+            "did not find",
+            "could not find",
             "não confirmado",
             "não confirmada",
             "não confirmados",
             "não está confirmado",
             "não foi possível",
             "não consigo confirmar",
+            "não encontrei",
+            "nao encontrei",
+            "nao foi encontrado",
             "nao confirmado",
             "nao confirmada",
             "nao confirmados",
@@ -760,10 +1548,12 @@ class QualityAssuranceAgent(BaseAgent):
         )
 
         limitation_categories = [
+            (("previsao", "previsão", "forecast", "temperatura", "temperature", "precipitacao", "precipitação", "weather", "tempo"), ("previsao", "previsão", "forecast", "ipma", "dias", "days", "horizonte")),
             (("tarifa", "preco", "price", "fare", "barato", "cheapest"), ("tarifa", "preco", "price", "fare")),
             (("tempo real", "real time", "real-time", "live", "on time", "delay", "atras", "pontual", "perturb"), ("tempo real", "real time", "real-time", "live", "delay", "atras", "pontual", "perturb")),
             (("horario", "opening", "hours", "evening", "tonight", "availability", "disponibilidade", "aberto", "fechado"), ("horario", "opening", "hours", "evening", "tonight", "availability", "disponibilidade", "aberto", "fechado")),
             (("gratuito", "gratuita", "free", "gratuit"), ("gratuito", "gratuita", "free", "gratuit")),
+            (("evento", "event", "titulo", "title", "data", "date", "localizacao", "location", "crianca", "children", "kids", "familia", "family"), ("evento", "event", "crianca", "children", "kids", "familia", "family", "gratuit", "free")),
             (("fertagus", "ferry", "barreiro", "transtejo", "soflusa", "operator", "operador", "ambito", "scope"), ("fertagus", "ferry", "barreiro", "transtejo", "soflusa", "operator", "operador", "ambito", "scope")),
             (("partida", "departure", "eta", "arrival", "route", "rota", "linha", "ligacao"), ("partida", "departure", "eta", "arrival", "route", "rota", "linha", "ligacao")),
         ]
@@ -868,9 +1658,7 @@ class QualityAssuranceAgent(BaseAgent):
             return None
 
         if "carris bus route numbers and schedules should be verified at carris.pt" in lowered:
-            if language == "pt":
-                return "Os números das linhas e os horários da Carris devem ser confirmados em carris.pt, porque os dados GTFS podem não refletir alterações muito recentes."
-            return "Carris line numbers and schedules should be confirmed at carris.pt, because GTFS data may miss very recent changes."
+            return None
 
         if "real-time" in lowered or "tempo real" in lowered:
             if language == "pt":
@@ -1099,6 +1887,12 @@ class QualityAssuranceAgent(BaseAgent):
             agents_called=agents_called,
             llm_result=llm_result,
         )
+        llm_result = self._normalize_event_no_result_validation(
+            user_query=user_query,
+            agent_outputs=agent_outputs,
+            agents_called=agents_called,
+            llm_result=llm_result,
+        )
         llm_result = self._normalize_place_query_validation(
             user_query=user_query,
             agents_called=agents_called,
@@ -1174,6 +1968,84 @@ class QualityAssuranceAgent(BaseAgent):
         llm_result["fact_check"] = fact_check
         return llm_result
 
+    def assess_final_response(
+        self,
+        user_query: str,
+        final_response: str,
+        language: str = "en",
+        user_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Deterministically audit the final composed answer before display.
+
+        The main ``validate`` method checks worker evidence before synthesis.
+        This method checks the final Markdown after planner/formatter/repair
+        steps, where language drift, source-footer defects, or mode-mismatch
+        regressions can still be introduced.
+        """
+        if not final_response:
+            return {
+                "complete": False,
+                "missing_data": ["final response is empty"],
+                "required_agents": [],
+                "reasoning": "Final response audit found an empty response.",
+                "disclaimers": [],
+                "critical_issues": ["Final response is empty."],
+                "repairable_agents": [],
+                "needs_repair": True,
+                "fact_check": {
+                    "valid": False,
+                    "disclaimers": [],
+                    "critical_issues": ["Final response is empty."],
+                    "checks_performed": ["final_response_audit"],
+                    "repairable_agents": [],
+                    "per_agent": {},
+                },
+            }
+
+        result: Dict[str, Any] = {
+            "complete": True,
+            "missing_data": [],
+            "required_agents": [],
+            "reasoning": "Final response deterministic audit completed.",
+            "disclaimers": [],
+        }
+        result = self._augment_query_specific_validation(
+            user_query=user_query,
+            agent_outputs={"final": final_response},
+            llm_result=result,
+            language=language,
+        )
+        fact_check = self._verify_facts(
+            final_response,
+            user_query,
+            user_context,
+            language=language,
+            agent_name="final",
+            intermediate_output=False,
+        )
+        critical_issues = self._dedupe_preserve_order(
+            list(result.get("critical_issues", []))
+            + list(fact_check.get("critical_issues", []))
+        )
+        disclaimers = self._dedupe_preserve_order(
+            list(result.get("disclaimers", []))
+            + list(fact_check.get("disclaimers", []))
+        )
+        result["critical_issues"] = critical_issues
+        result["disclaimers"] = disclaimers
+        result["repairable_agents"] = []
+        result["fact_check"] = {
+            **fact_check,
+            "critical_issues": critical_issues,
+            "disclaimers": disclaimers,
+            "repairable_agents": [],
+            "per_agent": {},
+        }
+        result["needs_repair"] = bool(critical_issues or result.get("missing_data"))
+        if result["needs_repair"]:
+            result["complete"] = False
+        return result
+
     @traceable(name="qa_repair_pass", run_type="chain", tags=["sub-agent", "qa", "repair"])
     def repair_final_response(
         self,
@@ -1191,6 +2063,12 @@ class QualityAssuranceAgent(BaseAgent):
         """
         if not draft_response:
             return draft_response
+        if re.search(
+            r"\b(?:Ambiguidade em|Ambiguity in|Preciso de confirmar o local|Location needs confirmation)\b",
+            draft_response,
+            flags=re.IGNORECASE,
+        ):
+            return final_post_qa_guard(draft_response, language=language)
 
         fact_check = qa_result.get("fact_check", {}) if isinstance(qa_result, dict) else {}
         missing_data = self._dedupe_preserve_order(
@@ -1222,11 +2100,14 @@ class QualityAssuranceAgent(BaseAgent):
                 "- Remove referências internas a QA, validação, fact-checking, reasoning, ou agentes.\n"
                 "- Preserva o idioma de saída exigido, o estilo visual, os emojis úteis e a estrutura markdown.\n"
                 "- Todas as tuas edições, avisos e aditamentos de texto devem ser estritamente em Português (PT-PT).\n"
+                "- Preserva o tipo de resposta pedido pelo utilizador. Se o utilizador pediu explicação, lista, comparação ou contexto histórico, não transformes a resposta num roteiro/plano. Se o utilizador disse para não dar roteiro, plano ou itinerário, essa restrição é obrigatória.\n"
                 "- Mantém ou melhora a linha de fonte final se ela já existir; Google Maps nunca deve aparecer como fonte de evidência.\n"
                 "- Preserva links markdown válidos exatamente quando aparecem no rascunho ou nos outputs dos agentes. Nunca substituas campos com link por texto simples como Website oficial, VisitLisboa, Bilhetes ou Tickets.\n"
                 "- Preserva quaisquer perguntas interativas ao utilizador que estejam no final do texto (ex: perguntar se o utilizador quer planear o Dia 2).\n"
                 "- Não acrescentes notas ou avisos de QA ao output do utilizador. Repara silenciosamente ou omite campos sem suporte.\n"
                 "- Só mantém um aviso ⚠️ quando houver uma preocupação real de segurança ou quando o utilizador tiver pedido cautelas.\n"
+                "- NUNCA promovas passos intermédios de uma rota (caminhar, transbordo, embarque, saída) a títulos `### ...`. Esses passos são bullets `-` dentro da secção `🗺️ O seu Trajeto de Metro:` e nunca devem ter um separador `---` entre eles.\n"
+                "- Preserva a estrutura visual já existente: títulos H3, listas, indentação a 4 espaços, separadores `---` e linhas em branco devem permanecer onde já estão. Não acrescentes novos `---` nem novos títulos H3.\n"
                 "- Devolve apenas a resposta final reparada, sem prefácio nem explicações."
             )
             task_prefix = "# TAREFA DE REPARAÇÃO FINAL"
@@ -1248,11 +2129,14 @@ class QualityAssuranceAgent(BaseAgent):
                 "- Remove any references to QA, validation, fact-checking, reasoning, or internal agents.\n"
                 "- Preserve the required output language, visual style, helpful emojis, and markdown structure.\n"
                 "- All edits, warnings, and added text must be strictly in English.\n"
+                "- Preserve the answer type requested by the user. If the user asked for an explanation, list, comparison, or historical context, do not transform the answer into an itinerary/plan. If the user said not to provide a route, plan, or itinerary, that constraint is mandatory.\n"
                 "- Keep or improve the final source line if one already exists; Google Maps must never appear as an evidence source.\n"
                 "- Preserve valid markdown links exactly when they appear in the draft or worker outputs. Never replace linked fields with plain text such as Official website, VisitLisboa, Tickets, or More details.\n"
                 "- Preserve any interactive questions to the user at the end of the text (e.g., asking if they want to plan Day 2).\n"
                 "- Do not add QA notes or QA warnings to the user output. Repair silently or omit unsupported fields.\n"
                 "- Keep a ⚠️ warning only for a real-world safety concern or when the user explicitly asked for caveats.\n"
+                "- NEVER promote intermediate route steps (walk, transfer, board, exit) to `### ...` headings. Those steps are list bullets `-` inside the `🗺️ Your Metro Route:` section and must not have `---` separators between them.\n"
+                "- Preserve the existing visual structure: H3 titles, list bullets, 4-space indentation, `---` separators and blank lines must stay where they already are. Do not add new `---` rules or new H3 titles.\n"
                 "- Return only the repaired final answer, with no preface or explanation."
             )
             task_prefix = "# FINAL REPAIR TASK"
@@ -1602,7 +2486,14 @@ class QualityAssuranceAgent(BaseAgent):
                 "Event details (dates, times, ticket prices) should be confirmed at "
                 "visitlisboa.com, as this data is synced daily and may have changed."
             )
-        tram_mentions = {m.lower() for m in re.findall(r"\b\d+e\b", output_lower)}
+        tram_mentions = {
+            match.lower()
+            for pattern in (
+                r"\b(?:tram|trams|el[eé]trico|el[eé]tricos)\s+(\d+e)\b",
+                r"\b(\d+e)\s+(?:tram|trams|el[eé]trico|el[eé]tricos)\b",
+            )
+            for match in re.findall(pattern, output_lower)
+        }
         invalid_trams = tram_mentions - _CARRIS_TRAM_LINES
         if invalid_trams:
             disclaimers.append(
@@ -1655,6 +2546,23 @@ class QualityAssuranceAgent(BaseAgent):
             re.IGNORECASE,
         ):
             add_critical_issue("Unnamed placeholder content leaked into user-facing output.")
+        for raw_line in combined_output.splitlines():
+            normalized_line = unicodedata.normalize("NFKD", raw_line or "")
+            normalized_line = "".join(char for char in normalized_line if not unicodedata.combining(char)).lower()
+            normalized_line = re.sub(r"[*_`~]", "", normalized_line)
+            if "carris metropolitana" not in normalized_line:
+                continue
+            match = re.search(
+                r"\b(?:nas?\s+)?(?:linha|linhas|line|lines)\b\s*(?::|#)?\s*"
+                r"(?P<ids>(?:\d{1,4}[a-z]?\s*(?:,|/|e|and|\s+)?)+)",
+                normalized_line,
+            )
+            if not match:
+                continue
+            line_ids = re.findall(r"\b\d{1,4}[a-z]?\b", match.group("ids"))
+            if any(not re.fullmatch(r"\d{4}", line_id) for line_id in line_ids):
+                add_critical_issue("Carris Metropolitana line identifiers must not be mixed with Carris Urban line IDs.")
+                break
 
         translatable_pairs = [
             (pt_label, en_label)
@@ -1671,6 +2579,33 @@ class QualityAssuranceAgent(BaseAgent):
             for _, en_label in translatable_pairs
         ):
             add_critical_issue("English field labels leaked into a Portuguese response.")
+        if expected_language == "en" and re.search(
+            r"\[(?:Comprar bilhetes|Página oficial|Mais detalhes)\]\(",
+            combined_output,
+            flags=re.IGNORECASE,
+        ):
+            add_critical_issue("Portuguese link labels leaked into an English response.")
+        if expected_language == "pt" and re.search(
+            r"\[(?:Buy tickets|Tickets|Official website|Official page|More details)\]\(",
+            combined_output,
+            flags=re.IGNORECASE,
+        ):
+            add_critical_issue("English link labels leaked into a Portuguese response.")
+        if expected_language == "pt":
+            body_without_sources = re.sub(
+                r"(?m)^📌\s*\*\*(?:Fontes?|Sources?):\*\*.*$",
+                "",
+                combined_output,
+            )
+            if re.search(
+                r"\b(?:start at|from the|if you prefer|have lunch|i couldn['’]?t|couldn['’]?t confirm|"
+                r"after lunch|allow about|good first stop|walking is|how to get|bel[eé]m stops|"
+                r"by tram|taxi|rideshare|no direct bus routes found|no carris metropolitana stops found|"
+                r"try a more specific|you may need to transfer|consider a metro|appears to be inside lisbon city|carris urban)\b",
+                body_without_sources,
+                flags=re.IGNORECASE,
+            ):
+                add_critical_issue("English running prose leaked into a Portuguese response.")
 
         if structured_output and not source_footer_match:
             add_critical_issue("Source footer is missing or malformed.")
@@ -1681,6 +2616,13 @@ class QualityAssuranceAgent(BaseAgent):
             source_footer = source_footer_match.group(0)
             if re.search(r"google\.com/maps|Google Maps", source_footer, flags=re.IGNORECASE):
                 add_critical_issue("Google Maps links are address aids, not valid evidence sources.")
+            missing_sources = missing_material_source_labels(combined_output, expected_language)
+            if missing_sources:
+                add_critical_issue(
+                    "Source footer is missing material source(s): "
+                    + ", ".join(missing_sources)
+                    + "."
+                )
 
         if re.search(r"(?m)^\s*1\.\s*$", combined_output):
             add_critical_issue("Stray numbered-list markers leaked into the response.")
@@ -1711,7 +2653,11 @@ class QualityAssuranceAgent(BaseAgent):
             if re.search(r"(?:📞|\*\*(?:Phone|Telefone|Contact|Contacto):\*\*)", line, re.IGNORECASE):
                 if re.search(r"\+351\s*\d{3}\s*\d{3}\s*\d{3}", line) and "tel:" not in line.lower():
                     add_critical_issue("Phone fields must include a tel: link.")
-            if re.search(r"(?:📍|\*\*(?:Address|Morada|Endereço|Localização|Location):\*\*)", line, re.IGNORECASE):
+            if re.search(
+                r"(?:📍\s*\*\*(?:Address|Morada|Endereço|Localização|Location):\*\*|\*\*(?:Address|Morada|Endereço|Localização|Location):\*\*)",
+                line,
+                re.IGNORECASE,
+            ):
                 if "google.com/maps" not in line.lower():
                     add_critical_issue("Address fields must use Google Maps links.")
 

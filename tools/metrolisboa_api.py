@@ -443,19 +443,19 @@ LISBON_LANDMARKS = {
     "belém": {
         "name": "Belém",
         "metro": None,
-        "alternative": "Tram 15E (Praça da Figueira) or CP Train (from Cais do Sodré)",
+        "alternative": "Use a confirmed Carris riverfront service or CP suburban rail from Cais do Sodré; check the specific route and departure close to travel time",
         "description": "Jerónimos Monastery, Belém Tower, Padrão dos Descobrimentos",
     },
     "torre de belém": {
         "name": "Torre de Belém",
         "metro": None,
-        "alternative": "Tram 15E or CP Train to Belém",
+        "alternative": "Use a confirmed Carris riverfront service or CP suburban rail to Belém; check the specific route and departure close to travel time",
         "description": "UNESCO Monument",
     },
     "mosteiro dos jerónimos": {
         "name": "Mosteiro dos Jerónimos",
         "metro": None,
-        "alternative": "Tram 15E or CP Train to Belém",
+        "alternative": "Use a confirmed Carris riverfront service or CP suburban rail to Belém; check the specific route and departure close to travel time",
         "description": "UNESCO Monument",
     },
     "castelo de são jorge": {
@@ -2437,18 +2437,23 @@ def find_nearest_metro(
 
 
 @tool
-def get_metro_frequency(line: str, day_type: str = "weekday") -> str:
+def get_metro_frequency(line: str, day_type: str = "weekday", language: str = "en") -> str:
     """
     Gets the service frequency (intervals between trains) for a Metro line.
 
     Args:
         line: Line name - 'Amarela', 'Azul', 'Verde', or 'Vermelha'.
         day_type: 'weekday' for Monday-Friday, 'weekend' for Saturday/Sunday/Holidays.
+        language: Response language, 'pt' for PT-PT or 'en' for English.
 
     Returns:
         str: Formatted frequency schedule for the line.
     """
+    normalized_language = "pt" if str(language).lower().startswith("pt") else "en"
+
     if not _is_metro_api_available():
+        if normalized_language == "pt":
+            return "⚠️ Os dados de frequência do Metro estão temporariamente indisponíveis."
         return _build_metro_realtime_unavailable_message("Metro frequency data is")
 
     line_map = {
@@ -2465,16 +2470,26 @@ def get_metro_frequency(line: str, day_type: str = "weekday") -> str:
     line_normalized = line_map.get(line.lower().strip())
 
     if not line_normalized:
+        if normalized_language == "pt":
+            return f"❌ Linha desconhecida '{line}'. Usa: Amarela, Azul, Verde ou Vermelha."
         return f"❌ Unknown line '{line}'. Use: Amarela, Azul, Verde, or Vermelha."
 
     day_code = (
         "S" if day_type.lower() in ["weekday", "s", "semana", "week", "du"] else "F"
     )
-    day_label = "Weekdays" if day_code == "S" else "Weekends/Holidays"
+    if normalized_language == "pt":
+        day_label = "dias úteis" if day_code == "S" else "fins de semana/feriados"
+    else:
+        day_label = "weekdays" if day_code == "S" else "weekends/holidays"
 
     data = _metro_api_request(f"/infoIntervalos/{line_normalized}/{day_code}")
 
     if not data or data.get("codigo") != "200":
+        if normalized_language == "pt":
+            return (
+                "⚠️ Os dados de frequência do Metro estão temporariamente indisponíveis."
+                + f"\n\nLinha pedida: {line_normalized}."
+            )
         return (
             _build_metro_realtime_unavailable_message("Metro frequency data is")
             + f"\n\nLine requested: {line_normalized}."
@@ -2483,15 +2498,43 @@ def get_metro_frequency(line: str, day_type: str = "weekday") -> str:
     intervals = data.get("resposta", [])
 
     if not intervals:
+        if normalized_language == "pt":
+            return f"❌ Não há dados de frequência disponíveis para a Linha {line_normalized.title()}."
         return f"❌ No frequency data available for {line_normalized} line."
 
     line_key = line_normalized.lower()
     line_info = METRO_LINES.get(line_key, {})
     emoji = line_info.get("emoji", "🚇")
-    name = line_info.get("name", line_normalized)
+    line_names = {
+        "pt": {
+            "amarela": "Linha Amarela (Rato ↔ Odivelas)",
+            "azul": "Linha Azul (Santa Apolónia ↔ Reboleira)",
+            "verde": "Linha Verde (Telheiras ↔ Cais do Sodré)",
+            "vermelha": "Linha Vermelha (São Sebastião ↔ Aeroporto)",
+        },
+        "en": {
+            "amarela": "Yellow Line (Rato ↔ Odivelas)",
+            "azul": "Blue Line (Santa Apolónia ↔ Reboleira)",
+            "verde": "Green Line (Telheiras ↔ Cais do Sodré)",
+            "vermelha": "Red Line (São Sebastião ↔ Aeroporto)",
+        },
+    }
+    name = line_names[normalized_language].get(line_key, line_info.get("name", line_normalized))
 
-    response = f"{emoji} **{name}**\n\n"
-    response += f"📅 **Service frequency ({day_label})**\n\n"
+    if normalized_language == "pt":
+        direct_answer = (
+            f"✅ **Resposta direta:** a frequência programada da **{name}** varia ao longo do dia; "
+            "os intervalos oficiais aparecem abaixo."
+        )
+    else:
+        direct_answer = (
+            f"✅ **Direct answer:** the scheduled frequency for the **{name}** varies throughout the day; "
+            "the official intervals are listed below."
+        )
+
+    response = f"{emoji} **{name}**\n\n{direct_answer}\n\n---\n\n"
+    section_label = "Frequência de serviço" if normalized_language == "pt" else "Service frequency"
+    response += f"📅 **{section_label} ({day_label})**\n\n"
 
     for interval in intervals:
         start = interval.get("HoraInicio", "")
@@ -2502,16 +2545,23 @@ def get_metro_frequency(line: str, day_type: str = "weekday") -> str:
             parts = freq.split(":")
             minutes = int(parts[0])
             seconds = int(parts[1]) if len(parts) > 1 else 0
-            freq_str = f"{minutes} min {seconds} sec" if seconds else f"{minutes} min"
+            if normalized_language == "pt":
+                freq_str = f"{minutes} min {seconds} s" if seconds else f"{minutes} min"
+            else:
+                freq_str = f"{minutes} min {seconds} sec" if seconds else f"{minutes} min"
         except Exception:
             freq_str = freq
 
         start_short = start[:5] if start else ""
         end_short = end[:5] if end else ""
 
-        response += f"- ⏰ **{start_short} - {end_short}:** every **{freq_str}**\n"
+        interval_label = "a cada" if normalized_language == "pt" else "every"
+        response += f"- ⏰ **{start_short} - {end_short}:** {interval_label} **{freq_str}**\n"
 
-    response += "\n💡 **Tip:** Trains are more frequent during rush hours (07:15-09:30 and 16:45-19:00)."
+    if normalized_language == "pt":
+        response += "\n💡 **Dica:** O metro é mais frequente nas horas de ponta (07:15-09:30 e 16:45-19:00)."
+    else:
+        response += "\n💡 **Tip:** Trains are more frequent during rush hours (07:15-09:30 and 16:45-19:00)."
 
     return response
 

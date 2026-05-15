@@ -67,7 +67,7 @@ class EvidenceBundle:
         if not self.cards:
             return "No structured evidence cards were extracted. Do not invent venues, routes, event dates, prices, or weather facts."
         sections: List[str] = []
-        for kind in ("weather", "transport", "place", "event", "service", "knowledge"):
+        for kind in ("weather", "transport", "place", "food", "event", "service", "knowledge"):
             cards = [card for card in self.cards if card.kind == kind]
             if not cards:
                 continue
@@ -476,6 +476,21 @@ def _infer_card_kind(title: str, fields: Dict[str, str], default_kind: str) -> s
     text = normalize_text(" ".join([title, *fields.keys(), *fields.values()]))
     if any(token in text for token in ("when", "quando", "event", "evento", "exhibition", "festival", "fair", "feira")):
         return "event"
+    if any(
+        token in text
+        for token in (
+            "restaurant",
+            "restaurante",
+            "gastronomy",
+            "gastronomia",
+            "food",
+            "cuisine",
+            "cozinha",
+            "traditional portuguese",
+            "portuguesa",
+        )
+    ):
+        return "food"
     if any(token in text for token in ("pharmacy", "hospital", "library", "parking", "ecoponto", "servico", "serviço")):
         return "service"
     return default_kind
