@@ -1319,6 +1319,7 @@ def init_system_state():
         "transport_db_status": None,
         "startup_auto_init_attempted_provider": None,
         "startup_auto_init_error": None,
+        "startup_auto_init_in_progress": False,
         "request_running": False,
     }
     for k, v in defaults.items():
@@ -1776,6 +1777,9 @@ def build_sidebar():
         request_locked = request_capture_locked(
             st.session_state.get("pending_request"),
             st.session_state.get("request_running", False),
+            startup_initializing=st.session_state.get(
+                "startup_auto_init_in_progress", False
+            ),
         )
 
         # Show custom Logo if exists
@@ -2270,6 +2274,33 @@ def should_attempt_startup_auto_initialization(
     return True
 
 
+def selected_provider_from_runtime_state() -> str:
+    """Return the provider that will be selected before rendering the sidebar."""
+    if not runtime_provider_selector_enabled():
+        return Config.MODEL_PROVIDER
+    return str(st.session_state.get("provider") or Config.MODEL_PROVIDER)
+
+
+def should_lock_for_startup_auto_initialization(selected_provider: str) -> bool:
+    """Return whether input controls should be locked for startup auto-init."""
+    if st.session_state.get("current_page") != "chat":
+        return False
+    if st.session_state.get("messages") or st.session_state.get("pending_request"):
+        return False
+    if st.session_state.get("request_running"):
+        return True
+
+    credentials_ready, _ = provider_has_required_credentials(selected_provider)
+    return should_attempt_startup_auto_initialization(
+        initialized=bool(st.session_state.get("initialized", False)),
+        current_provider=str(st.session_state.get("provider") or ""),
+        selected_provider=selected_provider,
+        credentials_ready=credentials_ready,
+        attempted_provider=st.session_state.get("startup_auto_init_attempted_provider"),
+        last_error=st.session_state.get("startup_auto_init_error"),
+    )
+
+
 def attempt_startup_auto_initialization(selected_provider: str) -> bool:
     """Initialize the assistant automatically when production credentials are ready.
 
@@ -2287,8 +2318,10 @@ def attempt_startup_auto_initialization(selected_provider: str) -> bool:
         last_error=st.session_state.get("startup_auto_init_error"),
     )
     if not should_initialize:
+        st.session_state.startup_auto_init_in_progress = False
         return False
 
+    st.session_state.startup_auto_init_in_progress = True
     st.session_state.request_running = True
     spinner_text = (
         "🚀 A preparar o LISBOA para a primeira pergunta..."
@@ -2303,6 +2336,7 @@ def attempt_startup_auto_initialization(selected_provider: str) -> bool:
             )
     finally:
         st.session_state.request_running = False
+        st.session_state.startup_auto_init_in_progress = False
 
     st.session_state.startup_auto_init_attempted_provider = selected_provider
     if success:
@@ -2353,9 +2387,10 @@ def select_new_request(
 def request_capture_locked(
     pending_request: Optional[str],
     request_running: bool = False,
+    startup_initializing: bool = False,
 ) -> bool:
     """Return whether the UI should temporarily block new requests."""
-    return bool(pending_request) or bool(request_running)
+    return bool(pending_request) or bool(request_running) or bool(startup_initializing)
 
 
 def build_user_error_message(error: Exception) -> str:
@@ -3424,9 +3459,15 @@ def main():
     st.markdown(CSS, unsafe_allow_html=True)
     sync_page_from_query_params()
 
+    preselected_provider = selected_provider_from_runtime_state()
+    st.session_state.startup_auto_init_in_progress = (
+        should_lock_for_startup_auto_initialization(preselected_provider)
+    )
+
     selected_provider, q_act = build_sidebar()
 
     if st.session_state.current_page == "info":
+        st.session_state.startup_auto_init_in_progress = False
         run_info_page()
         return
 
@@ -3447,6 +3488,7 @@ def main():
     request_locked = request_capture_locked(
         pending,
         st.session_state.get("request_running", False),
+        startup_initializing=st.session_state.get("startup_auto_init_in_progress", False),
     )
 
     # Stage 1: Capture a new request from quick-action, chat input, or welcome
