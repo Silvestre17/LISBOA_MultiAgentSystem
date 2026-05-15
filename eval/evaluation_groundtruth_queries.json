@@ -62,7 +62,7 @@
     "domain": "weather",
     "expected_tools": [],
     "expected_facts": [
-      "System cannot forecast weather that far in advance",
+      "A weather forecast for December 25th 2030 cannot be confirmed from the available forecast horizon",
       "The forecast window is limited to the next few days"
     ],
     "language": "en",
@@ -91,7 +91,7 @@
     "expected_tools": [],
     "expected_facts": [
       "The grounded weather tools provide Lisbon-city weather data, not Porto-specific weather",
-      "The response should not invent Porto weather conditions"
+      "No Porto weather conditions should be invented"
     ],
     "language": "en",
     "edge_case": true,
@@ -110,7 +110,7 @@
       ]
     ],
     "expected_facts": [
-      "UV index is not included in the system's weather tools"
+      "The available weather data does not include a UV index value"
     ],
     "language": "en",
     "edge_case": true,
@@ -175,7 +175,7 @@
     "domain": "weather",
     "expected_tools": [],
     "expected_facts": [
-      "This system provides short-range forecasts, not historical climate averages"
+      "The available weather data provides short-range forecasts, not historical climate averages"
     ],
     "language": "pt",
     "edge_case": true,
@@ -267,7 +267,7 @@
     "expected_facts": [
       "estimated arrival time or scheduled time for bus 736",
       "Stop name near Marquês de Pombal",
-      "Stop resolution is acceptable before the estimated-arrival or departure lookup"
+      "When multiple Marquês de Pombal stops are possible, the answer keeps the selected stop context visible"
     ],
     "language": "en",
     "edge_case": false
@@ -283,7 +283,7 @@
       "One valid grounded metro route from Oriente to Marquês de Pombal, either via Vermelha to Saldanha then Amarela to Marquês de Pombal, or via Vermelha to São Sebastião then Azul to Marquês de Pombal",
       "Transfer at Saldanha or São Sebastião, matching the route chosen",
       "If using Saldanha, take the Amarela line one stop towards Rato; if using São Sebastião, take the Azul line towards Santa Apolónia",
-      "Estimated travel time if the routing tool provides it, or a clear route-only answer if not"
+      "Estimated travel time when grounded route data is available, or clear line and direction steps without inventing a duration"
     ],
     "language": "en",
     "edge_case": false
@@ -308,7 +308,7 @@
     "domain": "transport",
     "expected_tools": [],
     "expected_facts": [
-      "System only covers Lisbon Metropolitan Area suburban lines (Sintra, Cascais, Azambuja, Sado)"
+      "The available transport coverage is limited to Lisbon Metropolitan Area mobility and CP suburban lines such as Sintra, Cascais, Azambuja, and Sado"
     ],
     "language": "pt",
     "edge_case": true,
@@ -342,7 +342,7 @@
     ],
     "expected_facts": [
       "Stations/locations are fictitious and do not exist in the Lisbon transport network",
-      "Agent should recognize these are not real places and inform the user"
+      "The answer identifies the requested locations as fictional or outside valid Lisbon transport data"
     ],
     "language": "en",
     "edge_case": true,
@@ -378,7 +378,7 @@
     ],
     "expected_facts": [
       "Alcântara is not recognized as a Lisbon Metro station",
-      "An attempted metro lookup followed by invalid-station correction is acceptable",
+      "No metro wait time should be provided for Alcântara as if it were a Metro de Lisboa station",
       "Nearby rail context such as Alcântara-Terra or Alcântara-Mar may be mentioned only as CP context, not as metro stations"
     ],
     "language": "en",
@@ -416,15 +416,12 @@
       ],
       [
         "plan_train_trip"
-      ],
-      [
-        "get_route_between_stations"
       ]
     ],
     "expected_facts": [
-      "Partial grounded guidance for Lisbon-to-Setúbal is acceptable when supported by the available transport data",
-      "The system should honestly acknowledge unsupported providers or incomplete journey-planning coverage",
-      "The system should not invent ferry schedules, connection details, or real-time information it does not have"
+      "Lisbon-to-Setúbal routing may be only partially covered by the available LISBOA transport data",
+      "Unsupported providers or incomplete journey-planning coverage must be stated explicitly",
+      "No invented ferry schedules, unsupported transfers, or real-time details"
     ],
     "language": "en",
     "edge_case": true,
@@ -499,6 +496,13 @@
     "tool_expectation": "flexible",
     "acceptable_tool_sets": [
       [
+        "find_direct_bus_lines"
+      ],
+      [
+        "find_bus_routes"
+      ],
+      [
+        "find_direct_bus_lines",
         "find_bus_routes"
       ]
     ],
@@ -617,7 +621,7 @@
     "expected_facts": [
       "Direct line options between Oeiras and Amadora if found",
       "If no direct bus is found, provide grounded alternatives or say directness was not confirmed",
-      "Do not assume a direct bus exists without tool support"
+      "A direct bus is reported only when supported by retrieved route data; otherwise directness is stated as unconfirmed"
     ],
     "language": "en",
     "edge_case": false
@@ -766,7 +770,7 @@
     "expected_facts": [
       "Arrival predictions for relevant Rossio-area stops",
       "Live arrival estimates when available",
-      "Stop resolution is acceptable before arrival lookup"
+      "When multiple Rossio stops are possible, the answer keeps the selected stop context visible"
     ],
     "language": "en",
     "edge_case": false
@@ -787,7 +791,7 @@
     "expected_facts": [
       "Next 28E tram at Martim Moniz expressed as an estimated arrival time or minutes until departure",
       "Route and stop context",
-      "Stop resolution is acceptable before the estimated-arrival lookup",
+      "When multiple Martim Moniz stops are possible, the answer keeps the selected stop context visible",
       "Explain when the stop is the origin or when scheduled departures are used as fallback"
     ],
     "language": "en",
@@ -891,20 +895,24 @@
     "query": "Where can I park my car in central Lisbon? Are there municipal car parks?",
     "domain": "researcher",
     "expected_tools": [
-      "find_nearby_services"
+      "list_available_datasets"
     ],
     "tool_expectation": "flexible",
     "acceptable_tool_sets": [
       [
+        "list_available_datasets"
+      ],
+      [
         "find_place_in_datasets"
       ],
       [
-        "list_available_datasets"
+        "list_available_datasets",
+        "find_place_in_datasets"
       ]
     ],
     "expected_facts": [
-      "Information about parking options or car parks in central Lisbon",
-      "Municipal, EMEL-related, or other parking references only when retrieved from available data"
+      "Clear statement when the available Lisboa Aberta data does not confirm municipal car parks for cars",
+      "Do not present bicycle or TukTuk parking datasets as car parking unless explicitly labelled as such"
     ],
     "language": "en",
     "edge_case": false
@@ -927,7 +935,7 @@
     ],
     "expected_facts": [
       "Oceanário de Lisboa has a Lisboa Card discount, not free entry",
-      "Lisboa Card includes other transport or attraction benefits beyond Oceanário"
+      "Do not describe Oceanário de Lisboa as free with the Lisboa Card"
     ],
     "language": "en",
     "edge_case": false
@@ -959,7 +967,7 @@
     "expected_facts": [
       "Use only beach or coastal-area options grounded in available Lisbon data, such as confirmed VisitLisboa beach entries",
       "If the available beach data is limited, disclose that limitation instead of inventing richer coverage for Cascais, Estoril, Costa da Caparica, or other areas",
-      "Optional nearby beach-zone context is acceptable only when clearly labelled as general guidance, not as retrieved source detail"
+      "Optional nearby beach-zone context is clearly labelled as general guidance, not as retrieved source detail"
     ],
     "language": "pt",
     "edge_case": false
@@ -976,7 +984,7 @@
       ]
     ],
     "expected_facts": [
-      "Agent cannot book tables or perform transactional actions",
+      "The answer must not claim that a table booking was completed",
       "If restaurant contact or venue information is provided, it must be grounded in retrieved data and must not imply that a booking was completed"
     ],
     "language": "en",
@@ -1033,7 +1041,7 @@
     "expected_tools": [
       "get_weather_forecast",
       "search_places_attractions",
-      "get_transport_summary"
+      "carris_find_routes_between"
     ],
     "tool_expectation": "flexible",
     "acceptable_tool_sets": [
@@ -1070,15 +1078,10 @@
     "expected_tools": [
       "get_weather_forecast",
       "search_places_attractions",
-      "get_route_between_stations"
+      "carris_find_routes_between"
     ],
     "tool_expectation": "flexible",
     "acceptable_tool_sets": [
-      [
-        "get_weather_forecast",
-        "search_places_attractions",
-        "get_transport_summary"
-      ],
       [
         "get_weather_forecast",
         "search_places_attractions",
@@ -1087,14 +1090,26 @@
       [
         "get_weather_forecast",
         "search_places_attractions",
-        "get_route_between_stations",
+        "find_bus_routes"
+      ],
+      [
+        "get_weather_forecast",
+        "search_places_attractions",
+        "carris_find_routes_between",
+        "get_transport_summary"
+      ],
+      [
+        "get_weather_forecast",
+        "search_places_attractions",
+        "find_bus_routes",
         "get_transport_summary"
       ]
     ],
     "expected_facts": [
       "Condições meteorológicas para amanhã",
       "Sugestões de atrações em Belém",
-      "Opções plausíveis e fundamentadas de transporte público do Rossio para Belém, sem impor um exemplo de linha específico"
+      "Opções plausíveis e fundamentadas de transporte público do Rossio para Belém, sem impor um exemplo de linha específico",
+      "Belém não deve ser tratada como estação de Metro de Lisboa nem como rota exclusivamente de metro se isso não estiver confirmado"
     ],
     "language": "pt",
     "edge_case": false
@@ -1158,7 +1173,7 @@
     "domain": "out_of_scope",
     "expected_tools": [],
     "expected_facts": [
-      "System is focused on Lisbon tourism and mobility",
+      "The assistant scope is Lisbon tourism and mobility",
       "Cannot answer general knowledge questions unrelated to Lisbon"
     ],
     "language": "en",
@@ -1172,7 +1187,7 @@
     "domain": "out_of_scope",
     "expected_tools": [],
     "expected_facts": [
-      "System is a Lisbon and AML information assistant, not a code generator"
+      "The assistant scope is Lisbon and AML information, not code generation"
     ],
     "language": "en",
     "edge_case": true,
@@ -1185,7 +1200,7 @@
     "domain": "out_of_scope",
     "expected_tools": [],
     "expected_facts": [
-      "System only covers the Lisbon Metropolitan Area",
+      "The assistant scope is the Lisbon Metropolitan Area",
       "Cannot provide routing for Spanish cities"
     ],
     "language": "pt",
