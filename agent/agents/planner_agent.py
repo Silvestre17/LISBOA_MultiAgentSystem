@@ -2476,6 +2476,20 @@ def _build_structured_plan_fallback(
         card for card in clean_cards
         if not _planner_card_is_low_fit_infrastructure(card, user_message)
     ]
+    target_area = _extract_requested_plan_area(user_message)
+    strict_same_area_context = bool(
+        target_area
+        and re.search(
+            r"\b(?:zona\s+anterior|previous\s+area|restri[cç][aã]o\s+de\s+zona|area\s+constraint)\b",
+            _normalize_planner_text(user_message),
+        )
+    )
+    if strict_same_area_context:
+        area_cards = [
+            card for card in clean_cards
+            if _planner_card_matches_area(card, target_area)
+        ]
+        clean_cards = area_cards
     excluded_areas = _extract_excluded_plan_areas(user_message)
     if excluded_areas:
         clean_cards = [
@@ -2806,6 +2820,7 @@ def _extract_requested_plan_area(user_message: str) -> str:
     """Extract a named target area from a short planning request."""
     text = str(user_message or "").strip()
     patterns = [
+        r"\b(?:zona\s+anterior|previous\s+area|restri[cç][aã]o\s+de\s+zona|area\s+constraint)\s*:\s*\*{0,2}(?P<area>[^,.;\n*]+)",
         r"\b(?:termin\S*|acab\S*|finish|end)\s+(?:perto\s+d(?:e|o|a|os|as)|em|no|na|near|around|at)\s+(?P<area>[^,.;]+?)(?:\s+no\s+segundo\s+dia|\s+on\s+day\s+\d+|[,.;]|$)",
         r"\b(?:termin\S*|acab\S*|finishing|ending|finish|end)\s+(?:(?:o|a|no|na|on|the)\s+)?(?:primeiro|segundo|terceiro|\d+)(?:\s+dia|\s+day)?\s+(?:perto\s+d(?:e|o|a|os|as)|em|no|na|near|around|at)\s+(?P<area>[^,.;]+?)(?:[,.;]|$)",
         r"\baround\s+(?P<area>[^,.;]+?)(?:\s+starting\b|\s+from\b|\s+with\b|$)",
@@ -4524,6 +4539,20 @@ def _build_card_based_itinerary_fallback(
             if "museu do oriente" not in _normalize_planner_text(card.get("name", ""))
         ]
         cards = _dedupe_planner_cards([*_oriente_station_locality_cards(language), *cards])
+    target_area = _extract_requested_plan_area(user_message)
+    strict_same_area_context = bool(
+        target_area
+        and re.search(
+            r"\b(?:zona\s+anterior|previous\s+area|restri[cç][aã]o\s+de\s+zona|area\s+constraint)\b",
+            normalized_query,
+        )
+    )
+    if strict_same_area_context:
+        area_cards = [
+            card for card in cards
+            if _planner_card_matches_area(card, target_area)
+        ]
+        cards = area_cards
     complete_cards = [
         card
         for card in cards
@@ -6397,6 +6426,14 @@ def _card_fallback_direct_answer(
             return "Selecionei eventos suportados pelos dados recolhidos, sem inventar disponibilidade, bilhetes ou horários."
         return "I selected events supported by the gathered data without inventing availability, tickets, or schedules."
     target_area = _extract_requested_plan_area(user_message)
+    if re.search(r"\b(?:chuva|chover|rain|interiores?|indoor|cobert[oa]s?|covered)\b", normalized):
+        if target_area:
+            if is_pt:
+                return f"Adaptei o roteiro para chuva, mantendo apenas opções interiores ou cobertas confirmadas na zona de {target_area}."
+            return f"I adapted the itinerary for rain, keeping only confirmed indoor or covered options in {target_area}."
+        if is_pt:
+            return "Adaptei o roteiro para chuva, priorizando opções interiores ou cobertas confirmadas."
+        return "I adapted the itinerary for rain, prioritizing confirmed indoor or covered options."
     if target_area and _query_requests_low_walk_plan(user_message):
         if is_pt:
             return f"Organizei uma proposta compacta em {target_area}, priorizando paragens próximas e limitações explícitas quando os dados não confirmam um detalhe."

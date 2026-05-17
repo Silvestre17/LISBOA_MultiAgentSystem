@@ -762,6 +762,7 @@ def _localize_place_category(category: Optional[str], language: str = "en") -> s
         "Running": "Corrida",
         "Water Sports": "Desportos Aquáticos",
         "Surf Spots": "Locais de Surf",
+        "National Surf Reserve": "Reserva Mundial de Surf",
     }
     return mapping.get(raw, raw)
 
@@ -796,6 +797,11 @@ def _localize_place_title(title: Optional[str], language: str = "en") -> str:
         "Jerónimos Monastery": "Mosteiro dos Jerónimos",
         "Jeronimos Monastery": "Mosteiro dos Jerónimos",
         "Combatant's Museum in Forte do Bom Sucesso": "Museu dos Combatentes no Forte do Bom Sucesso",
+        "Beaches of Ericeira": "Praias da Ericeira",
+        "Beaches of Cascais": "Praias de Cascais",
+        "Beaches of Costa da Caparica": "Praias da Costa da Caparica",
+        "Beaches of Arrábida and Sesimbra": "Praias da Arrábida e Sesimbra",
+        "Beaches of Arrabida and Sesimbra": "Praias da Arrábida e Sesimbra",
     }
     if raw in mapping:
         return mapping[raw]
@@ -805,6 +811,7 @@ def _localize_place_title(title: Optional[str], language: str = "en") -> str:
         (r"^Museum of Lisbon\s+(.+)$", r"Museu de Lisboa - \1"),
         (r"^Museum of the\s+(.+)$", r"Museu da \1"),
         (r"^Museum of\s+(.+)$", r"Museu de \1"),
+        (r"^Beaches of\s+(.+)$", r"Praias de \1"),
     ]
     localized = raw
     for pattern, replacement in generic_replacements:
@@ -863,9 +870,21 @@ def _localize_visitlisboa_description(
         " second life",
         " recycling ",
         " event that ",
+        " authentic ",
+        " concert ",
+        " concerts ",
+        " venue ",
+        " venues ",
+        " lying ",
+        " north of ",
+        " wonderful ",
+        " tranquil ",
+        " tourist office ",
     ]
     padded = f" {raw.lower()} "
     if any(marker in padded for marker in english_markers):
+        return ""
+    if re.search(r"\b(?:authentic|concerts?|venues?|lying|wonderful|tranquil|tourist office|tourist offices)\b", padded):
         return ""
     return raw
 
@@ -1298,7 +1317,7 @@ def _place_icon_for_category(category: str) -> str:
         return "🛏️"
     if "park" in normalized or "garden" in normalized or "jardim" in normalized or "parque" in normalized:
         return "🌳"
-    if "beach" in normalized or "praia" in normalized:
+    if "beach" in normalized or "praia" in normalized or "surf" in normalized:
         return "🌊"
     if "shopping" in normalized or "compras" in normalized:
         return "🛍️"
@@ -4539,6 +4558,12 @@ def search_cultural_events(
                 )
                 if query:
                     message += f", foco temático: {query}"
+                if category:
+                    message += (
+                        ".\n\n💡 Experimente alargar a janela temporal, remover o termo de zona/tema "
+                        "ou pedir eventos nessa categoria sem data fixa."
+                    )
+                    return message
                 suggestion_pool = [
                     ("Music", "música"),
                     ("Exhibitions", "exposições"),
@@ -4561,6 +4586,12 @@ def search_cultural_events(
                 )
                 if query:
                     message += f", theme focus: {query}"
+                if category:
+                    message += (
+                        ".\n\n💡 Try broadening the date range, removing the area/theme term, "
+                        "or asking for that category without a fixed date."
+                    )
+                    return message
                 suggestion_pool = [
                     ("Music", "music"),
                     ("Exhibitions", "exhibitions"),

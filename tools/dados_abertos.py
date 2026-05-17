@@ -102,6 +102,39 @@ def _normalize_reference_location_name(location_name: str) -> str:
     return " ".join(normalized.replace("-", " ").split())
 
 
+def _fold_open_data_text(value: object) -> str:
+    """Return accent-insensitive text for Lisboa Aberta matching."""
+    normalized = unicodedata.normalize("NFKD", str(value or ""))
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii").lower()
+    ascii_text = re.sub(r"[^a-z0-9]+", " ", ascii_text)
+    return re.sub(r"\s+", " ", ascii_text).strip()
+
+
+_DATASET_QUERY_STOPWORDS = {
+    "a",
+    "ao",
+    "aos",
+    "as",
+    "da",
+    "das",
+    "de",
+    "do",
+    "dos",
+    "e",
+    "em",
+    "near",
+    "of",
+    "os",
+    "para",
+    "perto",
+    "publica",
+    "publicas",
+    "publico",
+    "publicos",
+    "the",
+}
+
+
 def _resolve_reference_coordinates(location_name: str) -> Optional[Tuple[float, float]]:
     """Resolve a named Lisbon reference point without using service datasets.
 
@@ -408,14 +441,21 @@ CATEGORY_SYNONYMS = {
     'pharmacies': ['farmácia', 'farmácias', 'farmacias', 'pharmacy', 'pharmacies', 'parafarmácia'],
 
     # Environment
-    'ambiente': ['jardim', 'parque', 'espaço verde', 'árvore', 'floresta', 'reciclagem', 'ecoponto'],
+    'ambiente': ['jardim', 'parque', 'espaço verde', 'árvore', 'floresta', 'reciclagem', 'ecoponto', 'pilhão', 'pilhoes', 'papeleira', 'bebedouro'],
     'environment': ['jardim', 'parque', 'espaço verde', 'árvore'],
     'ecopontos': ['ecoponto', 'reciclagem', 'residuos', 'residuo', 'waste', 'recycling'],
     'recycling': ['ecoponto', 'reciclagem', 'residuos', 'residuo'],
+    'pilhoes': ['pilhões', 'pilhoes', 'pilhão', 'pilhao', 'pilhas', 'baterias'],
+    'pilhão': ['pilhões', 'pilhoes', 'pilhao', 'pilhas', 'baterias'],
+    'papeleiras': ['papeleiras', 'papeleira', 'lixo', 'caixote', 'resíduos', 'residuos', 'waste bins'],
+    'bebedouros': ['bebedouro', 'bebedouros', 'fontanário', 'fontanarios', 'chafariz', 'elementos de água', 'agua'],
+    'parques caninos': ['parques caninos', 'parque canino', 'canino', 'dog park', 'dog parks'],
 
     # Transport
-    'transportes': ['metro', 'autocarro', 'comboio', 'estacionamento', 'bicicleta', 'mobilidade', 'gira'],
-    'transport': ['metro', 'autocarro', 'comboio', 'estacionamento', 'bicicleta'],
+    'transportes': ['metro', 'autocarro', 'comboio', 'estacionamento', 'bicicleta', 'bicicletas', 'velocípede', 'velocipede', 'mobilidade', 'gira'],
+    'transport': ['metro', 'autocarro', 'comboio', 'estacionamento', 'bicicleta', 'velocipede'],
+    'estacionamento de bicicletas': ['estacionamento de velocípedes', 'estacionamento de velocipedes', 'velocípede', 'velocipede', 'velocípedes', 'velocipedes', 'bicicleta', 'bicicletas', 'bike parking', 'bicycle parking'],
+    'bicicletas': ['estacionamento de velocípedes', 'estacionamento de velocipedes', 'velocípede', 'velocipede', 'bicicleta', 'bicicletas'],
 
     # Culture
     'cultura': ['museu', 'biblioteca', 'teatro', 'cinema', 'galeria', 'monumento', 'património'],
@@ -426,9 +466,11 @@ CATEGORY_SYNONYMS = {
     'tourism': ['hotel', 'alojamento', 'miradouro', 'monumento'],
 
     # Security
-    'segurança': ['polícia', 'bombeiros', 'proteção civil', 'emergência'],
-    'security': ['polícia', 'bombeiros', 'proteção civil'],
+    'segurança': ['polícia', 'bombeiros', 'proteção civil', 'emergência', 'pontos de encontro'],
+    'security': ['polícia', 'bombeiros', 'proteção civil', 'emergência', 'emergency meeting points'],
     'psp': ['Polícia de Segurança Pública', 'esquadra'],
+    'emergencia': ['emergência', 'pontos de encontro', 'ponto de encontro', 'proteção civil', 'emergency meeting points'],
+    'pontos de encontro de emergencia': ['pontos de encontro', 'ponto de encontro', 'emergência', 'emergencia', 'proteção civil'],
 
     # Commerce
     'comércio': ['mercado', 'feira', 'loja', 'centro comercial', 'quiosque'],
@@ -436,6 +478,7 @@ CATEGORY_SYNONYMS = {
 
     # Amenities
     'wc': ['instalações sanitárias', 'instalações sanitárias públicas automáticas', 'sanitários', 'casas de banho', 'toilet', 'restroom'],
+    'instalacoes sanitarias': ['instalações sanitárias', 'instalações sanitárias públicas automáticas', 'sanitários', 'wc', 'casas de banho', 'toilet', 'restroom'],
     'sanitarios': ['instalações sanitárias', 'instalações sanitárias públicas automáticas', 'wc', 'casas de banho', 'toilet', 'restroom'],
     'sanitários': ['instalações sanitárias', 'instalações sanitárias públicas automáticas', 'wc', 'casas de banho', 'toilet', 'restroom'],
     'casa de banho': ['instalações sanitárias', 'instalações sanitárias públicas automáticas', 'wc', 'sanitários', 'toilet', 'restroom'],
@@ -525,12 +568,12 @@ def get_datasets_for_category(category: str) -> pd.DataFrame:
     if DF_METADATA.empty:
         return pd.DataFrame()
 
-    category_lower = category.lower().strip()
+    category_key = _fold_open_data_text(category)
 
     # Find matching taxonomy entry
     keywords = []
     for cat_key, cat_info in CATEGORY_TAXONOMY.items():
-        if cat_key == category_lower or cat_info["en"].lower() == category_lower:
+        if _fold_open_data_text(cat_key) == category_key or _fold_open_data_text(cat_info["en"]) == category_key:
             keywords = cat_info["keywords"]
             break
 
@@ -539,13 +582,16 @@ def get_datasets_for_category(category: str) -> pd.DataFrame:
         return search_datasets(category)
 
     # Search using all category keywords
-    combined_mask = pd.Series([False] * len(DF_METADATA))
+    combined_mask = pd.Series([False] * len(DF_METADATA), index=DF_METADATA.index)
+    metadata_basis = (
+        DF_METADATA["title"].fillna("").astype(str)
+        + " "
+        + DF_METADATA["description"].fillna("").astype(str)
+    ).map(_fold_open_data_text)
     for kw in keywords:
-        mask = (
-            DF_METADATA['title'].str.lower().str.contains(kw, na=False) |
-            DF_METADATA['description'].str.lower().str.contains(kw, na=False)
-        )
-        combined_mask = combined_mask | mask
+        folded_kw = _fold_open_data_text(kw)
+        if folded_kw:
+            combined_mask = combined_mask | metadata_basis.str.contains(re.escape(folded_kw), na=False)
 
     return DF_METADATA[combined_mask]
 
@@ -560,15 +606,20 @@ def expand_search_terms(query: str) -> List[str]:
     Returns:
         List[str]: List of search terms including synonyms.
     """
-    query_lower = query.lower()
-    terms = [query_lower]
+    query_lower = str(query or "").lower()
+    query_folded = _fold_open_data_text(query)
+    terms = [query_lower, query_folded]
 
     # Check if query matches any category and expand
     for category, synonyms in CATEGORY_SYNONYMS.items():
-        if category in query_lower or query_lower in category:
+        category_folded = _fold_open_data_text(category)
+        if category_folded and (
+            category_folded in query_folded
+            or query_folded in category_folded
+        ):
             terms.extend(synonyms)
 
-    return list(set(terms))  # Remove duplicates
+    return [term for term in dict.fromkeys(terms) if term]  # Remove duplicates
 
 
 def search_datasets(query: str) -> pd.DataFrame:
@@ -587,15 +638,29 @@ def search_datasets(query: str) -> pd.DataFrame:
     # Expand search terms semantically
     search_terms = expand_search_terms(query)
 
-    # Build combined mask for all terms
-    combined_mask = pd.Series([False] * len(DF_METADATA))
+    # Build combined mask for all terms, using accent-insensitive matching.
+    combined_mask = pd.Series([False] * len(DF_METADATA), index=DF_METADATA.index)
+    metadata_basis = (
+        DF_METADATA["title"].fillna("").astype(str)
+        + " "
+        + DF_METADATA["description"].fillna("").astype(str)
+    ).map(_fold_open_data_text)
 
     for term in search_terms:
-        mask = (
-            DF_METADATA['title'].str.lower().str.contains(term, na=False) |
-            DF_METADATA['description'].str.lower().str.contains(term, na=False)
-        )
-        combined_mask = combined_mask | mask
+        folded_term = _fold_open_data_text(term)
+        if folded_term:
+            combined_mask = combined_mask | metadata_basis.str.contains(re.escape(folded_term), na=False)
+
+    query_tokens = [
+        token
+        for token in _fold_open_data_text(query).split()
+        if len(token) > 2 and token not in _DATASET_QUERY_STOPWORDS
+    ]
+    if query_tokens:
+        token_mask = pd.Series([True] * len(DF_METADATA), index=DF_METADATA.index)
+        for token in query_tokens:
+            token_mask = token_mask & metadata_basis.str.contains(rf"\b{re.escape(token)}", regex=True, na=False)
+        combined_mask = combined_mask | token_mask
 
     return DF_METADATA[combined_mask]
 
@@ -689,8 +754,7 @@ def find_nearby_services(
     """
     def _fold_text(value: object) -> str:
         """Return accent-insensitive lowercase text for matching."""
-        normalized = unicodedata.normalize("NFKD", str(value or ""))
-        return normalized.encode("ascii", "ignore").decode("ascii").lower()
+        return _fold_open_data_text(value)
 
     normalized_language = (language or "").lower().strip()
     if normalized_language not in {"pt", "en"}:
@@ -804,6 +868,7 @@ def find_nearby_services(
         location = near_location_name.strip() if near_location_name else ""
 
         service_families = [
+            (("estacionamento de bicicletas", "estacionamento de velocipedes", "velocipede", "velocipedes", "bike parking", "bicycle parking"), "🚲", "Estacionamento de bicicletas", "Bicycle parking"),
             (("parking", "estacion", "car park", "parques de estacionamento"), "🅿️", "Estacionamento", "Parking"),
             (("farm", "pharmac"), "💊", "Farmácias", "Pharmacies"),
             (("hospit",), "🏥", "Hospitais", "Hospitals"),
@@ -811,12 +876,16 @@ def find_nearby_services(
             (("escola", "school", "educa", "universidade", "faculdade"), "🎓", "Serviços de educação", "Education services"),
             (("biblioteca", "library", "leitura"), "📚", "Bibliotecas", "Libraries"),
             (("museu", "museum", "cultura", "cultural"), "🏛️", "Equipamentos culturais", "Cultural venues"),
+            (("pilhao", "pilhoes", "pilha", "pilhas", "bateria", "baterias"), "🔋", "Pilhões", "Battery recycling points"),
+            (("papeleira", "papeleiras", "waste bin", "litter bin"), "🗑️", "Papeleiras", "Waste bins"),
             (("ecoponto", "reciclag", "residuo", "residuos", "waste", "recycling"), "♻️", "Ecopontos e reciclagem", "Recycling points"),
             (("parques infantis", "parque infantil", "playground", "playgrounds", "infantil"), "🛝", "Parques infantis", "Playgrounds"),
+            (("parque canino", "parques caninos", "canino", "dog park", "dog parks"), "🐾", "Parques caninos", "Dog parks"),
             (("fontan", "bebedouro", "chafariz", "lago", "fountain", "water", "agua", "arquitetura da agua", "elementos de agua"), "🚰", "Fontanários e água", "Fountains and water points"),
             (("jardim", "parque", "garden", "green space", "verde"), "🌳", "Jardins e parques", "Gardens and parks"),
             (("policia", "police", "psp", "seguranca"), "👮", "Serviços de segurança", "Public safety services"),
             (("bombeir", "fire"), "🚒", "Bombeiros", "Fire services"),
+            (("pontos de encontro", "ponto de encontro", "emergencia", "emergency meeting"), "🆘", "Pontos de encontro de emergência", "Emergency meeting points"),
             (("mercado", "market", "feira"), "🛒", "Mercados", "Markets"),
             (("correio", "postal", "ctt"), "✉️", "Serviços postais", "Postal services"),
             (("loja cidadao", "citizen", "atendimento"), "🏢", "Serviços municipais", "Municipal services"),
@@ -961,12 +1030,25 @@ def find_nearby_services(
             # Search within category datasets
             search_terms = expand_search_terms(service_type)
             combined_mask = pd.Series([False] * len(category_datasets), index=category_datasets.index)
+            category_basis = (
+                category_datasets["title"].fillna("").astype(str)
+                + " "
+                + category_datasets["description"].fillna("").astype(str)
+            ).map(_fold_open_data_text)
             for term in search_terms:
-                mask = (
-                    category_datasets['title'].str.lower().str.contains(term, na=False) |
-                    category_datasets['description'].str.lower().str.contains(term, na=False)
-                )
-                combined_mask = combined_mask | mask
+                folded_term = _fold_open_data_text(term)
+                if folded_term:
+                    combined_mask = combined_mask | category_basis.str.contains(re.escape(folded_term), na=False)
+            query_tokens = [
+                token
+                for token in _fold_open_data_text(service_type).split()
+                if len(token) > 2 and token not in _DATASET_QUERY_STOPWORDS
+            ]
+            if query_tokens:
+                token_mask = pd.Series([True] * len(category_datasets), index=category_datasets.index)
+                for token in query_tokens:
+                    token_mask = token_mask & category_basis.str.contains(rf"\b{re.escape(token)}", regex=True, na=False)
+                combined_mask = combined_mask | token_mask
             matches = category_datasets[combined_mask]
             if matches.empty:
                 # Fall back to service-specific search instead of broad category noise.
@@ -984,7 +1066,17 @@ def find_nearby_services(
             'park': 'jardim', 'garden': 'jardim', 'wifi': 'wifi', 'metro': 'metro',
             'fountain': 'fontanário', 'parking': 'estacionamento', 'car parking': 'estacionamento',
             'ecopontos': 'ecoponto', 'recycling': 'ecoponto',
+            'pilhoes': 'pilhões', 'pilhao': 'pilhões',
+            'bebedouros': 'fontanário', 'bebedouro': 'fontanário',
+            'papeleiras': 'papeleiras', 'papeleira': 'papeleiras',
+            'parques caninos': 'parques caninos', 'parque canino': 'parques caninos',
+            'estacionamento de bicicletas': 'estacionamento de velocípedes',
+            'bike parking': 'estacionamento de velocípedes',
+            'bicycle parking': 'estacionamento de velocípedes',
+            'pontos de encontro de emergencia': 'pontos de encontro emergência',
+            'emergency meeting points': 'pontos de encontro emergência',
             'wc públicos': 'instalações sanitárias', 'wc publicos': 'instalações sanitárias',
+            'instalacoes sanitarias': 'instalações sanitárias',
             'sanitários': 'instalações sanitárias', 'sanitarios': 'instalações sanitárias',
             'casas de banho públicas': 'instalações sanitárias',
             'casas de banho publicas': 'instalações sanitárias',
@@ -1187,8 +1279,8 @@ def find_nearby_services(
             response += f"    - 📍 **{address_label}:** [{cleaned_address}]({map_url})\n"
         elif r.get('lat') is not None and r.get('lon') is not None:
             map_url = f"https://www.google.com/maps/search/?api=1&query={r['lat']:.6f}%2C{r['lon']:.6f}"
-            map_label = "Mapa" if is_pt else "Map"
-            open_label = "Abrir mapa" if is_pt else "Open map"
+            map_label = "Localização" if is_pt else "Location"
+            open_label = "Abrir localização" if is_pt else "Open location"
             response += f"    - 🗺️ **{map_label}:** [{open_label}]({map_url})\n"
         if r['distance'] is not None:
             distance_label = "Distância" if is_pt else "Distance"

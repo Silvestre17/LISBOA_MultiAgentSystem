@@ -35,6 +35,7 @@ from agent.utils.response_formatter import (
     finalize_worker_response,
     has_source_line,
     infer_response_language,
+    normalize_cp_no_more_trains_message,
     operators_from_tool_names,
     preserve_contextual_destination_name,
     rebuild_transport_source_line,
@@ -1849,7 +1850,7 @@ def _build_mode_unavailable_response(
                     "",
                     "- 🚇 O Metro de Lisboa só cobre estações da própria rede; pelo menos um dos pontos pedidos não ficou confirmado como estação de Metro.",
                     "- Não vou substituir por autocarro, CP ou ferry porque pediste especificamente **metro**.",
-                    f"- Se quiseres uma alternativa multimodal, pergunta: **“Como vou de {origin_display} para {destination_display} em transportes públicos?”**",
+                    "- Uma alternativa multimodal suportada pode combinar Metro, CP ou autocarro quando os operadores tiverem dados para a rota.",
                     "",
                     f"📌 **Fonte:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Atualizado:** {timestamp}",
                 ]
@@ -1864,7 +1865,7 @@ def _build_mode_unavailable_response(
                 "",
                 "- 🚇 Metro de Lisboa only covers its own station network; at least one requested point was not confirmed as a Metro station.",
                 "- I will not replace it with bus, CP, or ferry because you specifically asked for **Metro**.",
-                f"- For a multimodal alternative, ask: **“How do I get from {origin_display} to {destination_display} by public transport?”**",
+                "- A supported multimodal alternative may combine Metro, CP, or bus when those operators have route data.",
                 "",
                 f"📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Updated:** {timestamp}",
             ]
@@ -1877,7 +1878,7 @@ def _build_mode_unavailable_response(
                 "",
                 f"✅ **Resposta direta:** não consegui confirmar uma rota apenas de **{mode}** para esta ligação nos dados disponíveis.",
                 "",
-                "- Se aceitares combinar modos suportados, posso procurar uma alternativa sem inventar horários ou operadores.",
+                "- Uma alternativa multimodal suportada pode combinar acesso por Metro ou autocarro a uma estação CP e depois CP suburbana/AML, quando os dados confirmarem a ligação.",
                 "",
                 f"📌 **Fonte:** [*CP*](https://www.cp.pt) | **Atualizado:** {timestamp}",
             ]
@@ -1888,7 +1889,7 @@ def _build_mode_unavailable_response(
             "",
             f"✅ **Direct answer:** I could not confirm a **{mode} only** route for this trip from the available data.",
             "",
-            "- If you accept a supported multimodal option, I can search for it without inventing operators or schedules.",
+            "- A supported multimodal alternative may combine Metro or bus access to a CP station and then CP suburban/AML rail when the data confirms the connection.",
             "",
             f"📌 **Source:** [*CP*](https://www.cp.pt) | **Updated:** {timestamp}",
         ]
@@ -1966,6 +1967,183 @@ def _route_result_is_metro_only_partial(route_result: str) -> bool:
     )
 
 
+def _bare_aml_municipality_label(value: str) -> str:
+    """Return the canonical AML municipality label for an exact broad endpoint."""
+    normalized = _normalize_token(value)
+    if not normalized:
+        return ""
+    if normalized == "vila franca":
+        return "Vila Franca de Xira"
+    if normalized == "setubal":
+        return "Setúbal"
+    for municipality in AML_MUNICIPALITY_NAMES:
+        if normalized == _normalize_token(municipality):
+            return municipality
+    return ""
+
+
+def _stop_is_canonical_for_bare_municipality(stop_text: str, municipality: str) -> bool:
+    """Return whether a stop looks like the canonical centre/station for a municipality."""
+    normalized_stop = _normalize_token(stop_text)
+    normalized_municipality = _normalize_token(municipality)
+    if not normalized_stop or not normalized_municipality:
+        return False
+    if normalized_stop == normalized_municipality:
+        return True
+    if normalized_municipality not in normalized_stop:
+        return False
+    return bool(
+        re.search(
+            r"\b(?:estacao|terminal|centro|camara|municipio|municipal)\b",
+            normalized_stop,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _build_bare_municipality_clarification(
+    *,
+    origin: str,
+    destination: str,
+    municipality: str,
+    rejected_stop: str = "",
+    language: str = "pt",
+) -> str:
+    """Ask for a precise point when a broad municipality would route to a homonym stop."""
+    timestamp = datetime.now().strftime("%H:%M")
+    if language == "pt":
+        second_option = (
+            f"- B) 🚏 **{rejected_stop}** — confirma se era esta paragem/rua concreta."
+            if rejected_stop
+            else "- B) 🚏 **Uma paragem/rua concreta com esse nome** — indica o nome completo."
+        )
+        return "\n".join(
+            [
+                "### 🧭 **Preciso de confirmar o destino**",
+                "",
+                f"✅ **Resposta direta:** **{destination}** é demasiado amplo para uma rota porta-a-porta a partir de **{origin}**.",
+                "",
+                "⚠️ **Ambiguidade:** posso estar a interpretar uma destas opções:",
+                f"- A) 🏘️ **{municipality} município/concelho** — indica uma zona, estação, paragem ou morada dentro do concelho.",
+                second_option,
+                "",
+                f"💡 Para uma rota precisa, escreve por exemplo: **{origin} → centro de {municipality}** ou uma morada/paragem específica dentro desse concelho.",
+                "",
+                f"📌 **Fonte:** [*Carris Metropolitana*](https://www.carrismetropolitana.pt) | **Atualizado:** {timestamp}",
+            ]
+        )
+
+    second_option = (
+        f"- B) 🚏 **{rejected_stop}** — confirm if you meant this exact stop/street."
+        if rejected_stop
+        else "- B) 🚏 **A specific stop/street with that name** — provide the full name."
+    )
+    return "\n".join(
+        [
+            "### 🧭 **I Need To Confirm The Destination**",
+            "",
+            f"✅ **Direct answer:** **{destination}** is too broad for a door-to-door route from **{origin}**.",
+            "",
+            "⚠️ **Ambiguity:** I may be interpreting one of these options:",
+            f"- A) 🏘️ **{municipality} municipality** — specify an area, station, stop, or address inside the municipality.",
+            second_option,
+            "",
+            f"💡 For a precise route, ask for example: **{origin} → {municipality} centre** or a specific address/stop inside that municipality.",
+            "",
+            f"📌 **Source:** [*Carris Metropolitana*](https://www.carrismetropolitana.pt) | **Updated:** {timestamp}",
+        ]
+    )
+
+
+def _preferred_metropolitana_option_details(
+    bus_block: str,
+    destination: str,
+) -> tuple[str, str]:
+    """Return lines/stop from the option that best matches the requested destination."""
+    if not bus_block:
+        return "", ""
+
+    option_blocks = re.split(r"(?m)^\s*-\s*🚌\s+\*\*(?:Opção|Option)\s+\d+\*\*\s*$", bus_block)
+    if len(option_blocks) <= 1:
+        option_blocks = [bus_block]
+    else:
+        option_blocks = option_blocks[1:]
+
+    destination_norm = _normalize_token(destination)
+    parsed: list[tuple[str, str, str]] = []
+    for block in option_blocks:
+        stop_match = re.search(r"\*\*(?:Sai em|Alight at|Get off at):\*\*\s*([^|\n]+)", block, flags=re.IGNORECASE)
+        line_match = re.search(r"\*\*(?:Linhas|Lines):\*\*\s*([^\n]+)", block, flags=re.IGNORECASE)
+        stop_text = (stop_match.group(1).strip() if stop_match else "").strip(".")
+        line_text = (line_match.group(1).strip() if line_match else "").strip(".")
+        if not stop_text and not line_text:
+            continue
+        stop_norm = _normalize_token(stop_text)
+        parsed.append((line_text, stop_text, stop_norm))
+
+    if not parsed:
+        return "", ""
+
+    if destination_norm:
+        for line_text, stop_text, stop_norm in parsed:
+            if stop_norm == destination_norm:
+                return line_text, stop_text
+        for line_text, stop_text, stop_norm in parsed:
+            if destination_norm in stop_norm or stop_norm in destination_norm:
+                return line_text, stop_text
+
+    line_text, stop_text, _stop_norm = parsed[0]
+    return line_text, stop_text
+
+
+def _prioritize_metropolitana_option_blocks(bus_block: str, destination: str) -> str:
+    """Move the option whose alighting stop best matches the destination first."""
+    if not bus_block or not destination:
+        return bus_block or ""
+
+    option_re = re.compile(
+        r"(?ms)^-\s*🚌\s+\*\*(?:Opção|Option)\s+\d+\*\*.*?(?=^\s*-\s*🚌\s+\*\*(?:Opção|Option)\s+\d+\*\*|\Z)",
+    )
+    matches = list(option_re.finditer(bus_block))
+    if len(matches) < 2:
+        return bus_block
+
+    prefix = bus_block[: matches[0].start()]
+    suffix = bus_block[matches[-1].end():]
+    destination_norm = _normalize_token(destination)
+
+    def score(block: str) -> tuple[int, int]:
+        stop_match = re.search(r"\*\*(?:Sai em|Alight at|Get off at):\*\*\s*([^|\n]+)", block, flags=re.IGNORECASE)
+        stop_text = (stop_match.group(1).strip() if stop_match else "").strip(".")
+        stop_norm = _normalize_token(stop_text)
+        if destination_norm and stop_norm == destination_norm:
+            return (0, 0)
+        if destination_norm and (destination_norm in stop_norm or stop_norm in destination_norm):
+            return (1, 0)
+        return (2, 0)
+
+    indexed_blocks = [(idx, match.group(0)) for idx, match in enumerate(matches, start=1)]
+    ordered = sorted(indexed_blocks, key=lambda item: (*score(item[1]), item[0]))
+    if [idx for idx, _block in ordered] == [idx for idx, _block in indexed_blocks]:
+        return bus_block
+
+    is_pt = bool(re.search(r"\*\*Opção\s+\d+\*\*", matches[0].group(0), flags=re.IGNORECASE))
+    option_label = "Opção" if is_pt else "Option"
+    renumbered: list[str] = []
+    for new_idx, (_old_idx, block) in enumerate(ordered, start=1):
+        renumbered.append(
+            re.sub(
+                r"^-\s*🚌\s+\*\*(?:Opção|Option)\s+\d+\*\*",
+                f"- 🚌 **{option_label} {new_idx}**",
+                block,
+                count=1,
+                flags=re.IGNORECASE,
+            ).rstrip()
+        )
+    prefix_clean = prefix.rstrip()
+    return (f"{prefix_clean}\n" if prefix_clean else "") + "\n".join(renumbered) + suffix
+
+
 def _build_metropolitana_bridge_for_partial_metro_route(
     *,
     user_message: str,
@@ -1975,6 +2153,8 @@ def _build_metropolitana_bridge_for_partial_metro_route(
 ) -> Optional[str]:
     """Try a Metro-to-AML-bus bridge when the destination is outside Metro coverage."""
     language = _infer_language(user_message, "")
+    broad_destination = _bare_aml_municipality_label(destination)
+    skipped_homonym_stop = ""
     transfer_hubs = (
         "Campo Grande",
         "Senhor Roubado",
@@ -2041,13 +2221,14 @@ def _build_metropolitana_bridge_for_partial_metro_route(
             _clean_metropolitana_direct_bus_block(hub_bus_result),
             language,
         )
+        bus_block = _prioritize_metropolitana_option_blocks(bus_block, destination)
         if not bus_block:
             continue
 
-        line_match = re.search(r"\*\*(?:Linhas|Lines):\*\*\s*([^\n]+)", bus_block, flags=re.IGNORECASE)
-        stop_match = re.search(r"\*\*(?:Sai em|Get off at):\*\*\s*([^|\n]+)", bus_block, flags=re.IGNORECASE)
-        line_text = (line_match.group(1).strip() if line_match else "").strip(".")
-        stop_text = (stop_match.group(1).strip() if stop_match else "").strip(".")
+        line_text, stop_text = _preferred_metropolitana_option_details(bus_block, destination)
+        if broad_destination and stop_text and not _stop_is_canonical_for_bare_municipality(stop_text, broad_destination):
+            skipped_homonym_stop = skipped_homonym_stop or stop_text
+            continue
         bus_reference = (
             f"linha(s) **{line_text}** até **{stop_text}**"
             if language == "pt" and line_text and stop_text
@@ -2131,6 +2312,12 @@ def _build_metropolitana_bridge_for_partial_metro_route(
             _clean_metropolitana_direct_bus_block(direct_metropolitana_result),
             language,
         )
+        bus_block = _prioritize_metropolitana_option_blocks(bus_block, destination)
+        if bus_block:
+            _line_text, stop_text = _preferred_metropolitana_option_details(bus_block, destination)
+            if broad_destination and stop_text and not _stop_is_canonical_for_bare_municipality(stop_text, broad_destination):
+                skipped_homonym_stop = skipped_homonym_stop or stop_text
+                bus_block = ""
         if bus_block:
             timestamp = datetime.now().strftime("%H:%M")
             direct_answer = (
@@ -2145,7 +2332,265 @@ def _build_metropolitana_bridge_for_partial_metro_route(
             )
             return f"### 🚌 **{origin} → {destination}**\n\n{direct_answer}\n\n---\n\n{bus_block}\n\n{source}"
 
+    if broad_destination and skipped_homonym_stop:
+        try:
+            from tools.cp_api import get_cp_station_info
+
+            has_cp_station = bool(get_cp_station_info(destination))
+        except Exception:
+            has_cp_station = False
+        if not has_cp_station:
+            return _build_bare_municipality_clarification(
+                origin=origin,
+                destination=destination,
+                municipality=broad_destination,
+                rejected_stop=skipped_homonym_stop,
+                language=language,
+            )
+
     return None
+
+
+def _extract_route_minutes_for_scoring(text: str) -> Optional[int]:
+    """Extract a best-effort journey duration from a route or train block."""
+    if not text:
+        return None
+
+    normalized = unicodedata.normalize("NFKD", str(text))
+    normalized = normalized.encode("ascii", "ignore").decode("ascii")
+    patterns = [
+        r"(?:Tempo total estimado|Estimated total time|Duracao|Duration):\s*\**~?\s*(\d+)",
+        r"\((\d+)\s*min\)",
+        r"\b(\d+)\s*min(?:utos?)?\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, normalized, flags=re.IGNORECASE)
+        if match:
+            try:
+                return int(match.group(1))
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _build_cp_bridge_for_partial_metro_route(
+    *,
+    user_message: str,
+    origin: str,
+    destination: str,
+    route_result: str,
+    requested_bus: bool = False,
+    checked_metropolitana_direct: bool = False,
+) -> Optional[str]:
+    """Try a Metro-to-CP bridge when the destination is outside Metro coverage."""
+    language = _infer_language(user_message, "")
+    preferences = _parse_route_mode_preferences(user_message)
+    if (
+        preferences["metro_only"]
+        or preferences["bus_only"]
+        or preferences["tram_only"]
+        or preferences["exclude_metro"]
+    ):
+        return None
+    normalized_request = _normalize_token(user_message)
+    if re.search(
+        r"\b(?:sem|evitar|evito|n[aã]o\s+quero|without|avoid|no)\s+(?:cp|comboio|comboios|train|trains)\b",
+        normalized_request,
+    ):
+        return None
+
+    try:
+        from tools.cp_api import get_cp_station_info, plan_train_trip
+    except Exception:
+        return None
+
+    destination_cp = get_cp_station_info(destination)
+    if not destination_cp:
+        return None
+
+    destination_station = str(destination_cp.get("name") or destination).strip()
+    if not destination_station:
+        return None
+
+    cp_access_hubs: tuple[tuple[str, str], ...] = (
+        ("Oriente", "Oriente"),
+        ("Entrecampos", "Entrecampos"),
+        ("Sete Rios", "Jardim Zoológico"),
+        ("Rossio", "Rossio"),
+        ("Cais do Sodré", "Cais do Sodré"),
+        ("Santa Apolónia", "Santa Apolónia"),
+    )
+
+    candidates: list[dict[str, Any]] = []
+    for cp_station, metro_station in cp_access_hubs:
+        if _normalize_token(cp_station) == _normalize_token(destination_station):
+            continue
+        try:
+            raw_train = str(
+                plan_train_trip.invoke(
+                    {"origin": cp_station, "destination": destination_station}
+                )
+            ).strip()
+        except Exception:
+            continue
+        if not raw_train or _tool_result_indicates_no_match(raw_train):
+            continue
+
+        metro_prompt = (
+            f"Quero ir de metro de {origin} para {metro_station}"
+            if language == "pt"
+            else f"I want to go by metro from {origin} to {metro_station}"
+        )
+        metro_block = _build_deterministic_metro_route_response(
+            user_message=metro_prompt,
+            context=f"User language: {language}",
+        )
+        if not metro_block or _route_result_is_metro_only_partial(metro_block):
+            continue
+
+        metro_minutes = _extract_route_minutes_for_scoring(metro_block) or 999
+        train_minutes = _extract_route_minutes_for_scoring(raw_train) or 999
+        candidates.append(
+            {
+                "score": metro_minutes + train_minutes,
+                "cp_station": cp_station,
+                "metro_station": metro_station,
+                "metro_block": metro_block,
+                "train_block": raw_train,
+            }
+        )
+
+    if not candidates:
+        return None
+
+    selected = min(candidates, key=lambda item: int(item["score"]))
+    cp_station = str(selected["cp_station"])
+    metro_station = str(selected["metro_station"])
+    metro_block = _strip_embedded_transport_route_block(str(selected["metro_block"]))
+    train_block = _strip_transport_source_lines(str(selected["train_block"]))
+    train_block = re.sub(
+        r"(?m)^###\s+🚆\s+\*\*[^*\n]+\*\*\s*\n+",
+        "",
+        train_block,
+        count=1,
+    ).strip()
+    train_block = normalize_cp_no_more_trains_message(train_block, language)
+    no_more_cp_today = bool(
+        re.search(
+            r"\b(?:Sem mais comboios hoje|No more trains today)\b",
+            train_block,
+            flags=re.IGNORECASE,
+        )
+    )
+
+    origin_display = _get_transport_display_name(origin)
+    destination_display = _get_transport_display_name(destination)
+    timestamp = datetime.now().strftime("%H:%M")
+    include_bus_note = requested_bus or checked_metropolitana_direct
+    broad_destination = _bare_aml_municipality_label(destination)
+
+    if language == "pt":
+        title = f"### 🚇🚆 **{origin_display} → {destination_display}**"
+        direct = (
+            f"✅ **Resposta direta:** o percurso suportado é ir de **Metro até {metro_station}** "
+            f"e depois seguir de **CP suburbana/AML** para **{destination_display}**, "
+            "mas a CP não mostra mais partidas hoje para esse troço."
+            if no_more_cp_today
+            else (
+                f"✅ **Resposta direta:** a opção confirmada é ir de **Metro até {metro_station}** "
+                f"e depois apanhar a **CP suburbana/AML** para **{destination_display}**."
+            )
+        )
+        broad_note = (
+            f"ℹ️ **Nota de destino:** assumi **Estação/Centro de {broad_destination}** como referência. "
+            "Se queres outro ponto do concelho, indica a morada, zona ou paragem."
+            if broad_destination
+            else ""
+        )
+        metro_title = "**🚇 Acesso à CP**"
+        train_title = "**🚆 Comboio / CP**"
+        sequence = (
+            f"- 🚇 **{origin_display} → {metro_station}:** Metro de Lisboa.\n"
+            f"- 🚆 **{cp_station} → {destination_display}:** CP suburbana/AML."
+        )
+        bus_note = (
+            "**🚌 Autocarro**\n\n"
+            "- ⚠️ Não encontrei uma linha direta de autocarro **Carris Metropolitana** confirmada para este par nos dados consultados; "
+            "uma alternativa sem Metro+CP exigiria confirmar transbordos mais longos."
+        )
+        source_links = [
+            "[*Metro de Lisboa*](https://www.metrolisboa.pt)",
+            "[*CP*](https://www.cp.pt)",
+        ]
+        if include_bus_note:
+            source_links.append("[*Carris Metropolitana*](https://www.carrismetropolitana.pt)")
+        source = (
+            f"📌 **Fonte:** {' | '.join(source_links)} | **Atualizado:** {timestamp}"
+        )
+    else:
+        title = f"### 🚇🚆 **{origin_display} → {destination_display}**"
+        direct = (
+            f"✅ **Direct answer:** the supported route is to take **Metro to {metro_station}** "
+            f"and then **CP suburban/AML rail** to **{destination_display}**, "
+            "but CP shows no more departures today for that rail leg."
+            if no_more_cp_today
+            else (
+                f"✅ **Direct answer:** the confirmed option is to take **Metro to {metro_station}** "
+                f"and then **CP suburban/AML rail** to **{destination_display}**."
+            )
+        )
+        broad_note = (
+            f"ℹ️ **Destination note:** I used **{broad_destination} station/centre** as the reference. "
+            "If you mean another point in the municipality, provide the address, area, or stop."
+            if broad_destination
+            else ""
+        )
+        metro_title = "**🚇 Access to CP rail**"
+        train_title = "**🚆 Train / CP**"
+        sequence = (
+            f"- 🚇 **{origin_display} → {metro_station}:** Lisbon Metro.\n"
+            f"- 🚆 **{cp_station} → {destination_display}:** CP suburban/AML rail."
+        )
+        bus_note = (
+            "**🚌 Bus**\n\n"
+            "- ⚠️ I could not confirm a direct **Carris Metropolitana** bus line for this pair in the consulted data; "
+            "an option without Metro+CP would require checking longer transfers."
+        )
+        source_links = [
+            "[*Metro de Lisboa*](https://www.metrolisboa.pt)",
+            "[*CP*](https://www.cp.pt)",
+        ]
+        if include_bus_note:
+            source_links.append("[*Carris Metropolitana*](https://www.carrismetropolitana.pt)")
+        source = f"📌 **Source:** {' | '.join(source_links)} | **Updated:** {timestamp}"
+
+    parts = [
+        title,
+        "",
+        direct,
+        broad_note,
+        "",
+        "---",
+        "",
+        "🧭 **Sequência recomendada**" if language == "pt" else "🧭 **Recommended sequence**",
+        sequence,
+        "",
+        "---",
+        "",
+        metro_title,
+        "",
+        metro_block,
+        "",
+        "---",
+        "",
+        train_title,
+        "",
+        train_block,
+    ]
+    if include_bus_note:
+        parts.extend(["", "---", "", bus_note])
+    parts.extend(["", source])
+    return "\n".join(part for part in parts if part is not None).strip()
 
 
 def _tool_result_indicates_no_match(result: str) -> bool:
@@ -2773,7 +3218,25 @@ def _clean_metropolitana_direct_bus_block(text: str) -> str:
             continue
         cleaned_lines.append(raw_line)
 
-    return "\n".join(cleaned_lines).strip()
+    return _linkify_metropolitana_coordinate_suffixes("\n".join(cleaned_lines).strip())
+
+
+def _linkify_metropolitana_coordinate_suffixes(text: str) -> str:
+    """Replace internal coordinate suffixes with compact Google Maps links."""
+    if not text:
+        return text
+
+    def repl(match: re.Match[str]) -> str:
+        lat = match.group("lat")
+        lon = match.group("lon")
+        return f" | [Paragem](https://www.google.com/maps/search/?api=1&query={lat}%2C{lon})"
+
+    return re.sub(
+        r"\s*\|\s*(?:coords|coordinates|coordenadas)\s*:\s*(?P<lat>-?\d+(?:\.\d+)?),\s*(?P<lon>-?\d+(?:\.\d+)?)",
+        repl,
+        text,
+        flags=re.IGNORECASE,
+    )
 
 
 def _localize_metropolitana_direct_bus_block(text: str, language: str) -> str:
@@ -2782,18 +3245,35 @@ def _localize_metropolitana_direct_bus_block(text: str, language: str) -> str:
         return text
 
     localized = text
+    localized = re.sub(
+        r"\b(\d+)\s+direct route option\(s\) found\b",
+        lambda match: (
+            f"{match.group(1)} opção direta encontrada"
+            if match.group(1) == "1"
+            else f"{match.group(1)} opções diretas encontradas"
+        ),
+        localized,
+        flags=re.IGNORECASE,
+    )
+    localized = re.sub(
+        r"\b(\d+)\s+Line match\(es\)",
+        lambda match: (
+            f"{match.group(1)} linha compatível"
+            if match.group(1) == "1"
+            else f"{match.group(1)} linhas compatíveis"
+        ),
+        localized,
+        flags=re.IGNORECASE,
+    )
     replacements = [
-        (r"\b(\d+)\s+direct route option\(s\) found\b", r"\1 opção direta encontrada"),
-        (r"\b(\d+)\s+Line match\(es\)", r"\1 linhas compatíveis"),
         (r"\bOption\s+(\d+)\b", r"Opção \1"),
         (r"\*\*Alight at:\*\*", "**Sai em:**"),
         (r"\*\*Board at:\*\*", "**Apanha em:**"),
         (r"\*\*Lines:\*\*", "**Linhas:**"),
-        (r"\bcoords:\s*", "coordenadas: "),
     ]
     for pattern, replacement in replacements:
         localized = re.sub(pattern, replacement, localized, flags=re.IGNORECASE)
-    return localized
+    return _linkify_metropolitana_coordinate_suffixes(localized)
 
 
 def _extract_metropolitana_nearby_lines(text: str, location_label: str) -> Optional[str]:
@@ -5120,6 +5600,35 @@ def _is_probable_cp_suburban_route_pair(endpoints: Tuple[str, str]) -> bool:
     return all(_is_probable_cp_suburban_endpoint(endpoint) for endpoint in endpoints)
 
 
+def _infer_cp_line_label_for_pair(origin: str, destination: str, language: str = "pt") -> str:
+    """Infer a shared CP suburban line label for a known station pair."""
+    try:
+        from tools.cp_api import CP_LINES, get_cp_station_info
+    except Exception:
+        return ""
+
+    origin_info = get_cp_station_info(origin)
+    destination_info = get_cp_station_info(destination)
+    if not origin_info or not destination_info:
+        return ""
+
+    common_lines = [
+        line
+        for line in (origin_info.get("lines") or [])
+        if line in set(destination_info.get("lines") or [])
+    ]
+    if not common_lines:
+        return ""
+
+    labels: list[str] = []
+    for line_key in common_lines:
+        line_info = CP_LINES.get(str(line_key).lower(), {})
+        label = str(line_info.get("name") or line_key).strip()
+        if label:
+            labels.append(label)
+    return ", ".join(dict.fromkeys(labels))
+
+
 def _build_cp_tool_spec(user_message: str) -> Optional[Dict[str, Any]]:
     """Maps common natural-language CP queries to deterministic tool specs."""
     query = user_message.strip()
@@ -5501,6 +6010,7 @@ def _build_deterministic_metro_route_response(
 
     language = _infer_language(user_message, context)
     future_planning = _is_future_transport_planning_query(user_message)
+    preferences = _parse_route_mode_preferences(user_message)
 
     from tools.metrolisboa_api import (
         METRO_LINES,
@@ -5521,6 +6031,8 @@ def _build_deterministic_metro_route_response(
 
     if not _route_result_uses_metro(route_result):
         return None
+    if _route_result_is_metro_only_partial(route_result) and not preferences["metro_only"]:
+        return None
 
     details = _parse_route_details(route_result)
     board_station = details["board_station"] or endpoints[0].title()
@@ -5529,7 +6041,7 @@ def _build_deterministic_metro_route_response(
     directions = details["directions"]
     first_direction = directions[0] if directions else None
     second_direction = directions[1] if len(directions) > 1 else None
-    estimated_time = details["estimated_time"] or "~-- min"
+    estimated_time = details["estimated_time"]
     walk_target = details["walk_target"]
     origin_display = _get_transport_display_name(endpoints[0])
     destination_display = _get_transport_display_name(endpoints[1])
@@ -5728,9 +6240,10 @@ def _build_deterministic_metro_route_response(
             "",
         ])
 
+    if estimated_time:
+        response_lines.extend([f"{time_title} {estimated_time}", ""])
+
     response_lines.extend([
-        f"{time_title} {estimated_time}",
-        "",
         route_section,
         f"{board_text} {board_station_route_display}**",
     ])
@@ -5880,6 +6393,20 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
         re.search(r"\b(fastest|quickest|mais r[aá]pid[ao]|mais depressa)\b", user_message, flags=re.IGNORECASE)
     )
     if is_metro_route and _route_result_is_metro_only_partial(route_result):
+        broad_destination = _bare_aml_municipality_label(endpoints[1])
+        cp_first = bool(broad_destination and not bus_or_tram_requested)
+
+        if cp_first:
+            cp_bridge = _build_cp_bridge_for_partial_metro_route(
+                user_message=user_message,
+                origin=endpoints[0],
+                destination=endpoints[1],
+                route_result=route_result,
+                checked_metropolitana_direct=True,
+            )
+            if cp_bridge:
+                return cp_bridge
+
         metropolitana_bridge = _build_metropolitana_bridge_for_partial_metro_route(
             user_message=user_message,
             origin=endpoints[0],
@@ -5888,6 +6415,32 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
         )
         if metropolitana_bridge:
             return metropolitana_bridge
+
+        if not cp_first:
+            cp_bridge = _build_cp_bridge_for_partial_metro_route(
+                user_message=user_message,
+                origin=endpoints[0],
+                destination=endpoints[1],
+                route_result=route_result,
+                checked_metropolitana_direct=True,
+            )
+            if cp_bridge:
+                return cp_bridge
+
+        if bus_or_tram_requested:
+            if broad_destination:
+                return _build_bare_municipality_clarification(
+                    origin=endpoints[0],
+                    destination=endpoints[1],
+                    municipality=broad_destination,
+                    language=_infer_language(user_message, ""),
+                )
+            return _build_mode_unavailable_response(
+                mode="autocarro" if _infer_language(user_message, "") == "pt" else "bus",
+                origin=endpoints[0],
+                destination=endpoints[1],
+                language=_infer_language(user_message, ""),
+            )
 
     if fastest_requested and is_metro_route and _is_generic_public_transport_route_query(user_message):
         return route_result
@@ -6169,9 +6722,16 @@ class TransportAgent(BaseAgent):
         if not normalized:
             return False
 
+        mode_pattern = (
+            r"(?:metro|bus|autocarro|autocarros|carris|train|comboio|comboios|cp|"
+            r"tram|trams|el[eé]trico|el[eé]tricos)"
+        )
         return bool(
             re.fullmatch(
-                r"(?:(?:e|and|what about|how about|same|also|agora|now)\s+)?(?:(?:de|by)\s+)?(?:metro|bus|autocarro|autocarros|carris|train|comboio|comboios|cp|tram|trams|el[eé]trico|el[eé]tricos)(?:\s+only)?",
+                rf"(?:(?:mas\s+e|e|and|what about|how about|same|also|agora|now)\s+)?"
+                rf"(?:(?:de|by)\s+)?{mode_pattern}"
+                rf"(?:\s+(?:ou|or|e|and)\s+(?:(?:de|by)\s+)?{mode_pattern})*"
+                r"(?:\s+only)?",
                 normalized,
             )
         )
@@ -6301,6 +6861,37 @@ class TransportAgent(BaseAgent):
         destination = str(last_context.get("destination") or "").strip()
         if not origin or not destination:
             return user_message
+
+        requested_modes = _requested_route_option_modes(user_message)
+        if len(requested_modes) > 1:
+            mode_order = ["metro", "bus", "train", "tram"]
+            ordered_modes = [mode for mode in mode_order if mode in requested_modes]
+            if language == "pt":
+                labels = {
+                    "metro": "metro",
+                    "bus": "autocarro",
+                    "train": "comboio",
+                    "tram": "elétrico",
+                }
+                mode_labels = [labels[mode] for mode in ordered_modes]
+                if len(mode_labels) == 2:
+                    mode_phrase = f"de {mode_labels[0]} ou {mode_labels[1]}"
+                else:
+                    mode_phrase = f"de {', '.join(mode_labels[:-1])} ou {mode_labels[-1]}"
+                return f"Como vou de {origin} para {destination} {mode_phrase}?".strip()
+
+            labels = {
+                "metro": "metro",
+                "bus": "bus",
+                "train": "train",
+                "tram": "tram",
+            }
+            mode_labels = [labels[mode] for mode in ordered_modes]
+            if len(mode_labels) == 2:
+                mode_phrase = f"by {mode_labels[0]} or {mode_labels[1]}"
+            else:
+                mode_phrase = f"by {', '.join(mode_labels[:-1])} or {mode_labels[-1]}"
+            return f"How do I get from {origin} to {destination} {mode_phrase}?".strip()
 
         if language == "pt":
             mode_phrase = {
@@ -6997,6 +7588,66 @@ class TransportAgent(BaseAgent):
         origin_landmark = get_landmark_info(origin) or {}
         train_station = str(origin_landmark.get("train_station") or "").strip()
         if not train_station:
+            if _query_strictly_requests_train_only(user_message):
+                return _build_mode_unavailable_response(
+                    mode="comboio" if language == "pt" else "train",
+                    origin=origin,
+                    destination=destination,
+                    language=language,
+                )
+            try:
+                from tools.transport_api import get_route_between_stations
+
+                route_result = str(
+                    get_route_between_stations.invoke(
+                        {"origin": origin, "destination": destination}
+                    )
+                ).strip()
+            except Exception:
+                route_result = ""
+            if route_result and _route_result_is_metro_only_partial(route_result):
+                bus_requested = bool(_requested_route_option_modes(user_message) & {"bus"})
+                if not bus_requested:
+                    cp_bridge = _build_cp_bridge_for_partial_metro_route(
+                        user_message=user_message,
+                        origin=origin,
+                        destination=destination,
+                        route_result=route_result,
+                        requested_bus=False,
+                        checked_metropolitana_direct=True,
+                    )
+                    if cp_bridge:
+                        self._record_tool_call(
+                            "get_route_between_stations",
+                            {"origin": origin, "destination": destination},
+                        )
+                        return cp_bridge
+                metropolitana_bridge = _build_metropolitana_bridge_for_partial_metro_route(
+                    user_message=user_message,
+                    origin=origin,
+                    destination=destination,
+                    route_result=route_result,
+                )
+                if metropolitana_bridge:
+                    self._record_tool_call(
+                        "get_route_between_stations",
+                        {"origin": origin, "destination": destination},
+                    )
+                    return metropolitana_bridge
+                cp_bridge = _build_cp_bridge_for_partial_metro_route(
+                    user_message=user_message,
+                    origin=origin,
+                    destination=destination,
+                    route_result=route_result,
+                    requested_bus=bus_requested,
+                    checked_metropolitana_direct=True,
+                )
+                if cp_bridge:
+                    self._record_tool_call(
+                        "get_route_between_stations",
+                        {"origin": origin, "destination": destination},
+                    )
+                    return cp_bridge
             return None
         if _normalize_token(train_station) == _normalize_token(origin):
             return None
@@ -7337,6 +7988,18 @@ class TransportAgent(BaseAgent):
             origin = str(tool_args.get("origin") or "").strip()
             destination = str(tool_args.get("destination") or "").strip()
             if origin and destination and _route_result_is_metro_only_partial(cleaned_result):
+                broad_destination = _bare_aml_municipality_label(destination)
+                bus_requested = bool(_requested_route_option_modes(user_message) & {"bus"})
+                if broad_destination and not bus_requested:
+                    cp_bridge = _build_cp_bridge_for_partial_metro_route(
+                        user_message=user_message,
+                        origin=origin,
+                        destination=destination,
+                        route_result=cleaned_result,
+                        checked_metropolitana_direct=True,
+                    )
+                    if cp_bridge:
+                        return cp_bridge
                 metropolitana_bridge = _build_metropolitana_bridge_for_partial_metro_route(
                     user_message=user_message,
                     origin=origin,
@@ -7345,6 +8008,16 @@ class TransportAgent(BaseAgent):
                 )
                 if metropolitana_bridge:
                     return metropolitana_bridge
+                if not (broad_destination and not bus_requested):
+                    cp_bridge = _build_cp_bridge_for_partial_metro_route(
+                        user_message=user_message,
+                        origin=origin,
+                        destination=destination,
+                        route_result=cleaned_result,
+                        checked_metropolitana_direct=True,
+                    )
+                    if cp_bridge:
+                        return cp_bridge
 
         if tool_name == "get_metro_line_wait_times":
             raw_line = str(tool_args.get("line") or user_message or "").strip()
@@ -7402,6 +8075,62 @@ class TransportAgent(BaseAgent):
                         "- 🧭 Long-distance services or destinations outside the AML are outside the confirmed scope.",
                     ]
                 ).strip()
+
+            no_more_match = re.search(
+                r"No more trains today from \*\*(?P<origin>.+?)\*\* to \*\*(?P<destination>.+?)\*\*"
+                r".*?There are (?P<count>\d+) trips on other days",
+                cleaned_result,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            if no_more_match:
+                origin = no_more_match.group("origin").strip() or origin
+                destination = no_more_match.group("destination").strip() or destination
+                other_days_count = no_more_match.group("count").strip()
+                line_value = _infer_cp_line_label_for_pair(origin, destination, language)
+                if language == "pt":
+                    lines = [
+                        f"### 🚆 **{origin} → {destination}**",
+                        "",
+                        "✅ **Resposta direta:** não há mais comboios confirmados hoje para esta ligação CP suburbana/AML.",
+                        "",
+                        "---",
+                        "",
+                        "### 📊 **Resumo da viagem**",
+                        "- 🚆 **Operador:** CP suburbano/AML",
+                    ]
+                    if line_value:
+                        lines.append(f"- 🛤️ **Linha:** {line_value}")
+                    lines.extend(
+                        [
+                            "- ⏰ **Próximo comboio hoje:** sem mais partidas confirmadas",
+                            f"- 📊 **Serviço noutros dias:** {other_days_count} viagens no GTFS disponível",
+                            "",
+                            "💡 **Antes de sair:** confirma no site/app da CP a primeira partida disponível para a data em que vais viajar.",
+                        ]
+                    )
+                    return "\n".join(lines).strip()
+
+                lines = [
+                    f"### 🚆 **{origin} → {destination}**",
+                    "",
+                    "✅ **Direct answer:** there are no more confirmed trains today for this CP suburban/AML connection.",
+                    "",
+                    "---",
+                    "",
+                    "### 📊 **Trip summary**",
+                    "- 🚆 **Operator:** CP suburban/AML",
+                ]
+                if line_value:
+                    lines.append(f"- 🛤️ **Line:** {line_value}")
+                lines.extend(
+                    [
+                        "- ⏰ **Next train today:** no more confirmed departures",
+                        f"- 📊 **Service on other days:** {other_days_count} trips in the available GTFS data",
+                        "",
+                        "💡 **Before leaving:** check the CP website/app for the first available departure on your travel date.",
+                    ]
+                )
+                return "\n".join(lines).strip()
 
             field_values: dict[str, str] = {}
             for raw_line in cleaned_result.splitlines():
@@ -8724,10 +9453,22 @@ class TransportAgent(BaseAgent):
                 language=resolved_language,
             )
 
-        nearest_cp_destination_response = self._build_nearest_cp_destination_response(
-            user_message=user_message,
-            language=resolved_language,
+        early_cp_tool_spec = _build_cp_tool_spec(user_message)
+        explicit_train_context = bool(
+            re.search(r"\b(?:cp|comboio|comboios|train|trains)\b", user_message, flags=re.IGNORECASE)
+            and not re.search(
+                r"\b(?:sem|evitar|evito|n[aã]o\s+quero|without|avoid|no)\s+"
+                r"(?:cp|comboio|comboios|train|trains)\b",
+                user_message,
+                flags=re.IGNORECASE,
+            )
         )
+        nearest_cp_destination_response = None
+        if not (early_cp_tool_spec and explicit_train_context):
+            nearest_cp_destination_response = self._build_nearest_cp_destination_response(
+                user_message=user_message,
+                language=resolved_language,
+            )
         if nearest_cp_destination_response:
             return self._finalize_transport_response(
                 nearest_cp_destination_response,
@@ -9209,7 +9950,7 @@ class TransportAgent(BaseAgent):
         if has_carris_direct and "carris_metropolitana" not in normalized:
             add("carris")
 
-        if re.search(r"\b(?:comboio via|train via|cp suburban|linha de cascais|linha de sintra)\b", normalized):
+        if re.search(r"\b(?:comboio via|train via|cp suburban|cp suburbana|linha de cascais|linha de sintra)\b", normalized):
             add("cp")
 
         return operators

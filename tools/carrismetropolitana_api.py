@@ -43,14 +43,26 @@ else:
 logger = logging.getLogger(__name__)
 
 CARRIS_METROPOLITANA_CITY_FALLBACKS = {
+    "alcochete": (38.7553, -8.9609),
     "almada": (38.6765, -9.1654),
     "amadora": (38.7597, -9.2397),
-    "oeiras": (38.6970, -9.3017),
+    "barreiro": (38.6631, -9.0724),
+    "cascais": (38.6979, -9.4215),
+    "lisboa": (38.7223, -9.1393),
     "loures": (38.8309, -9.1685),
+    "mafra": (38.9379, -9.3276),
+    "moita": (38.6508, -8.9904),
+    "montijo": (38.7067, -8.9739),
+    "odivelas": (38.7927, -9.1838),
+    "oeiras": (38.6970, -9.3017),
+    "palmela": (38.5690, -8.9013),
+    "seixal": (38.6400, -9.1015),
+    "sesimbra": (38.4445, -9.1015),
     "setubal": (38.5244, -8.8882),
     "setúbal": (38.5244, -8.8882),
     "sintra": (38.8029, -9.3817),
-    "cascais": (38.6979, -9.4215),
+    "vila franca": (38.9553, -8.9897),
+    "vila franca de xira": (38.9553, -8.9897),
 }
 
 try:
@@ -245,6 +257,16 @@ def _normalize_area_key(text: str) -> str:
     normalized = normalized.lower()
     normalized = re.sub(r"[^a-z0-9\s-]", " ", normalized)
     return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _bare_municipality_key(text: str) -> str:
+    """Return a municipality key only when the user wrote just that broad area."""
+    normalized = _normalize_area_key(text)
+    if not normalized:
+        return ""
+    if normalized == "vila franca":
+        return "vila franca de xira"
+    return normalized if normalized in CARRIS_METROPOLITANA_CITY_FALLBACKS else ""
 
 
 def _clean_carris_display_list(
@@ -1050,9 +1072,15 @@ def resolve_location(
     }
 
     clean_name = location_name.strip()
+    broad_municipality_key = _bare_municipality_key(clean_name)
 
     # Step 1: Try direct name match
-    name_matches = find_stops_by_name(clean_name, max_results=max_stops)
+    # A bare municipality such as "Oeiras" or "Almada" is a broad area, not a
+    # stop-name query. Searching stops by substring first can otherwise choose
+    # unrelated homonyms such as "Av Conde Oeiras 1" and present them as the
+    # requested destination. For exact municipality names, resolve the area
+    # centre first and only use stop-name matches as a last diagnostic fallback.
+    name_matches = [] if broad_municipality_key else find_stops_by_name(clean_name, max_results=max_stops)
 
     if len(name_matches) >= 3:
         result["method"] = "name_match"
@@ -1065,9 +1093,25 @@ def resolve_location(
 
     # Step 2: Try geocoding
     geocoded = geocode_location(clean_name)
+    if not geocoded and broad_municipality_key:
+        fallback_lat, fallback_lon = CARRIS_METROPOLITANA_CITY_FALLBACKS[broad_municipality_key]
+        geocoded = {
+            "name": clean_name,
+            "lat": fallback_lat,
+            "lon": fallback_lon,
+            "type": "municipality",
+            "class": "boundary",
+            "address": {"municipality": clean_name},
+            "query_used": clean_name,
+            "scope": "aml",
+            "confidence": 0.75,
+        }
 
     if geocoded:
         result["location"] = geocoded
+        if broad_municipality_key:
+            result["broad_area"] = True
+            result["area_key"] = broad_municipality_key
 
         nearby_stops = find_stops_near_coordinates(
             geocoded["lat"],
@@ -1077,7 +1121,7 @@ def resolve_location(
         )
 
         if nearby_stops:
-            result["method"] = "geocoding"
+            result["method"] = "broad_area_geocoding" if broad_municipality_key else "geocoding"
             result["stops"] = nearby_stops
             result["success"] = True
             logger.info(
@@ -1092,7 +1136,7 @@ def resolve_location(
             )
 
             if nearby_stops:
-                result["method"] = "geocoding_expanded"
+                result["method"] = "broad_area_geocoding_expanded" if broad_municipality_key else "geocoding_expanded"
                 result["stops"] = nearby_stops
                 result["success"] = True
                 logger.info(
@@ -1101,6 +1145,9 @@ def resolve_location(
                 return result
 
     # Step 3: Fallback to name matches
+    if broad_municipality_key:
+        name_matches = find_stops_by_name(clean_name, max_results=max_stops)
+
     if name_matches:
         result["method"] = "name_match_fallback"
         result["stops"] = name_matches
@@ -2273,6 +2320,12 @@ def find_bus_routes(
         origin_resolved = resolve_location(origin, search_radius_km, max_stops=10)
 
     origin_stops = origin_resolved.get("stops", [])
+    if origin_resolved.get("broad_area"):
+        response += (
+            f"ℹ️ **{origin}** é uma área/município amplo. Usei paragens perto "
+            "do centro de referência; indica uma morada, estação ou paragem se "
+            "quiseres uma rota porta-a-porta.\n\n"
+        )
 
     if not origin_stops:
         origin_loc = origin_resolved.get("location")
@@ -2299,6 +2352,12 @@ def find_bus_routes(
         dest_resolved = resolve_location(destination, search_radius_km, max_stops=10)
 
     dest_stops = dest_resolved.get("stops", [])
+    if dest_resolved.get("broad_area"):
+        response += (
+            f"ℹ️ **{destination}** é uma área/município amplo. Usei paragens perto "
+            "do centro de referência; indica uma morada, estação ou paragem se "
+            "quiseres uma rota porta-a-porta.\n\n"
+        )
 
     if not dest_stops:
         dest_loc = dest_resolved.get("location")

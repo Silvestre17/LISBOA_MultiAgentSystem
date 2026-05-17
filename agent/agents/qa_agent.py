@@ -1897,13 +1897,116 @@ class QualityAssuranceAgent(BaseAgent):
                 if fare_disclaimer not in disclaimers:
                     disclaimers.append(fare_disclaimer)
 
+        critical_issues = cls._dedupe_preserve_order(list(llm_result.get("critical_issues", [])))
+
+        def add_critical_issue(message: str) -> None:
+            """Add a deterministic final-answer quality issue."""
+            if message not in critical_issues:
+                critical_issues.append(message)
+
+        if re.search(r"\b~?\s*--\s*min\b", combined_output, flags=re.IGNORECASE):
+            add_critical_issue("placeholder travel time leaked into the user-facing answer")
+            reasoning_notes.append("detected placeholder travel-time output")
+        if re.search(r"(?mi)^###\s+✅\s+\*\*(?:Resposta direta|Direct answer):", combined_output):
+            add_critical_issue("direct answer was incorrectly rendered as a heading")
+            reasoning_notes.append("detected malformed direct-answer heading")
+        if (
+            re.search(r"(?m)^###\s+", combined_output)
+            and re.search(r"\*\*(?:Fonte|Source):\*\*", combined_output, flags=re.IGNORECASE)
+            and not re.search(r"\*\*(?:Resposta direta|Direct answer):\*\*", combined_output, flags=re.IGNORECASE)
+        ):
+            add_critical_issue("missing direct-answer line in a factual response")
+            reasoning_notes.append("detected missing direct answer")
+        if re.search(
+            r"(?mi)^(?:💡\s*)?(?:Dicas(?: Práticas)?|Practical Tips)\s*:?\s*$\n\s*(?:📌\s+\*\*(?:Fonte|Source):|\Z)",
+            combined_output,
+        ):
+            add_critical_issue("empty practical-tips section leaked into the final answer")
+            reasoning_notes.append("detected empty tips section")
+        if re.search(r"\bleave at stop\b|\bsai em stop\b", combined_output, flags=re.IGNORECASE):
+            add_critical_issue("raw English stop wording leaked into a transport answer")
+            reasoning_notes.append("detected raw stop wording")
+        if re.search(
+            r"(?mi)^-\s+\*\*[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s+"
+            r"(?:manh[aã]|tarde|noite|afternoon|morning|evening|roteiro|itiner[aá]rio)[^*\n]*\*\*\s*$",
+            combined_output,
+        ):
+            add_critical_issue("planner title was rendered as a bullet instead of an H3 heading")
+            reasoning_notes.append("detected planner title bullet")
+        area_match = re.search(
+            r"(?:Zona anterior|Previous area):\s*\*{0,2}(?P<area>[^\n.]+?)\*{0,2}(?:[.\n]|$)",
+            user_query,
+            flags=re.IGNORECASE,
+        )
+        area_rules = {
+            "belem": {
+                "labels": {"belem", "belém"},
+                "postal_prefixes": {"1300", "1400", "1449"},
+                "terms": {"belem", "brasilia", "imperio", "jeronimos", "descobrimentos"},
+            },
+            "baixa": {
+                "labels": {"baixa", "baixa/chiado", "chiado"},
+                "postal_prefixes": {"1100", "1200"},
+                "terms": {"baixa", "chiado", "rossio", "carmo", "se", "comercio", "mouraria"},
+            },
+            "parque_nacoes": {
+                "labels": {"parque das nacoes", "parque das nações"},
+                "postal_prefixes": {"1990", "1998"},
+                "terms": {"parque das nacoes", "oriente", "olivais", "oceanos", "fil"},
+            },
+            "avenidas": {
+                "labels": {"avenidas novas", "saldanha"},
+                "postal_prefixes": {"1000", "1050", "1069", "1070"},
+                "terms": {"avenidas novas", "saldanha", "picoas", "tomas ribeiro"},
+            },
+        }
+        if area_match:
+            requested_area = cls._normalize_query(area_match.group("area"))
+            matched_zone = next(
+                (
+                    zone
+                    for zone, rule in area_rules.items()
+                    if requested_area in rule["labels"] or any(label in requested_area for label in rule["labels"])
+                ),
+                "",
+            )
+            if matched_zone:
+                rule = area_rules[matched_zone]
+                address_lines = re.findall(
+                    r"(?mi)^\s*[-*]\s+[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]*\s*"
+                    r"\*\*(?:Morada|Address):\*\*\s*(.+)$",
+                    combined_output,
+                )
+                outside_area_lines: list[str] = []
+                for address_line in address_lines:
+                    folded_address = cls._normalize_query(address_line)
+                    postals = re.findall(r"\b(\d{4})\s*-?\s*\d{3}\b", folded_address)
+                    if postals:
+                        if not any(prefix in rule["postal_prefixes"] for prefix in postals):
+                            outside_area_lines.append(address_line)
+                        continue
+                    if not any(term in folded_address for term in rule["terms"]):
+                        outside_area_lines.append(address_line)
+                has_same_area_limitation = re.search(
+                    r"\b(?:não há dados suficientes|nao ha dados suficientes|sem alternativas confirmadas|"
+                    r"not enough confirmed|no confirmed alternatives)\b",
+                    output_lower,
+                    flags=re.IGNORECASE,
+                )
+                if outside_area_lines and not has_same_area_limitation:
+                    add_critical_issue("planner violated the requested same-area constraint")
+                    reasoning_notes.append("detected itinerary items outside the previous plan area")
+
         llm_result["missing_data"] = cls._dedupe_preserve_order(missing_data)
         llm_result["required_agents"] = cls._dedupe_preserve_order(required_agents)
         llm_result["disclaimers"] = cls._dedupe_preserve_order(disclaimers)
+        llm_result["critical_issues"] = cls._dedupe_preserve_order(critical_issues)
         if llm_result["missing_data"]:
             llm_result["complete"] = False
         elif not llm_result.get("critical_issues"):
             llm_result["complete"] = True
+        else:
+            llm_result["complete"] = False
 
         if reasoning_notes:
             note = " | ".join(reasoning_notes)

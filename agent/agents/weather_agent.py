@@ -513,7 +513,9 @@ class WeatherAgent(BaseAgent):
         )
         if explicit_location_match:
             candidate = re.split(
-                r"\b(?:hoje|amanh[ãa]|today|tomorrow|with|com|e|and)\b",
+                r"\b(?:hoje|amanh[ãa]|today|tomorrow|with|com|e|and|"
+                r"nos?\s+pr[oó]xim[oa]s?|next|following|daqui|durante|during|"
+                r"esta\s+semana|this\s+week|fim\s+de\s+semana|weekend)\b",
                 explicit_location_match.group("location"),
                 maxsplit=1,
                 flags=re.IGNORECASE,

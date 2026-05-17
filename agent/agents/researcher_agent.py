@@ -194,6 +194,44 @@ _STRUCTURED_SERVICE_TYPE_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             "estacionamento_de_bicicletas", "estacionamento_de_velocipedes", "bicicletas",
         },
     },
+    "battery_recycling": {
+        "tool_label": "pilhões",
+        "category": "ambiente",
+        "dataset_term": "Pilhões",
+        "aliases": {
+            "battery_recycling", "battery_bins", "battery_bin", "battery_points",
+            "pilhoes", "pilhao", "pilhões", "pilhão", "pilhas", "baterias",
+        },
+    },
+    "waste_bins": {
+        "tool_label": "papeleiras",
+        "category": "ambiente",
+        "dataset_term": "Papeleiras",
+        "aliases": {
+            "waste_bins", "waste_bin", "litter_bins", "litter_bin",
+            "papeleiras", "papeleira", "caixote_do_lixo", "caixotes_do_lixo",
+        },
+    },
+    "dog_parks": {
+        "tool_label": "parques caninos",
+        "category": "ambiente",
+        "dataset_term": "Parques Caninos",
+        "aliases": {
+            "dog_parks", "dog_park", "parques_caninos", "parque_canino",
+            "canino", "caes", "cães",
+        },
+    },
+    "emergency_meeting_points": {
+        "tool_label": "pontos de encontro de emergência",
+        "category": "segurança",
+        "dataset_term": "Lisboa. Pontos de encontro - Emergência.",
+        "aliases": {
+            "emergency_meeting_points", "emergency_meeting_point",
+            "pontos_de_encontro_de_emergencia", "ponto_de_encontro_de_emergencia",
+            "pontos_de_encontro", "ponto_de_encontro", "emergencia", "emergência",
+            "proteccao_civil", "protecao_civil", "proteção_civil",
+        },
+    },
     "cemeteries": {
         "tool_label": "cemitérios",
         "category": None,
@@ -547,6 +585,8 @@ class ResearcherAgent(BaseAgent):
         unsupported_service_markers = [
             "casa de banho", "casas de banho", "sanitario", "sanitarios",
             "biciclet", "velociped", "cemiter", "bombeir", "embaix",
+            "pilh", "bateria", "papeleir", "caixote", "parque canino",
+            "canino", "ponto de encontro", "emergencia", "protecao civil",
             "loja do cidada", "estacoes de metro", "estacao de metro",
         ]
         named_service_with_nearby = bool(
@@ -1545,7 +1585,6 @@ class ResearcherAgent(BaseAgent):
     def _is_broad_attractions_query(user_message: str) -> bool:
         """Detects broad attraction-list queries that should bypass free-form synthesis."""
         query = (user_message or "").lower()
-        normalized_query = ResearcherAgent._normalize_event_preference_text(user_message)
         attraction_phrases = [
             "atrações imperdíveis",
             "atracoes imperdiveis",
@@ -1909,7 +1948,11 @@ class ResearcherAgent(BaseAgent):
             re.search(
                 r"\b(?:eventos?|events?|todos?|todas?|all|lista|list|mostra|show|"
                 r"quais|which|desporto|desportiv[oa]s?|sports?|musica|music|"
-                r"teatro|exposicoes?|exhibitions?|festivais|festivals?)\b",
+                r"teatro|exposicoes?|exhibitions?|festivais|festivals?|"
+                r"gastronomia|gastronomic[oa]s?|culinari[oa]s?|food|wine|vinho|"
+                r"familias?|family|kids|children|criancas|cinema|films?|movies?|"
+                r"feiras?|fairs?|market|mercado|principais|main|summit|conference|"
+                r"congress|forum|expo)\b",
                 normalized,
                 flags=re.IGNORECASE,
             )
@@ -2021,7 +2064,7 @@ class ResearcherAgent(BaseAgent):
         if not tokens:
             return False
         category_noise = {
-            "de", "do", "da", "dos", "das", "o", "a", "os", "as",
+            "de", "do", "da", "dos", "das", "em", "in", "o", "a", "os", "as",
             "event", "events", "evento", "eventos", "todos", "todas",
             "all", "not", "no", "nao", "sem", "without", "except",
             "excluding", "exclui", "excluir", "menos", "music", "musica",
@@ -2030,7 +2073,16 @@ class ResearcherAgent(BaseAgent):
             "desportivos", "desportivas", "festival", "festivals",
             "festivais", "teatro", "theatre", "theater", "exposicao",
             "exposicoes", "exhibition", "exhibitions", "categoria",
-            "category", "tipo", "types", "kinds",
+            "category", "tipo", "types", "kinds", "lisboa", "lisbon",
+            "gastronomia", "gastronomico", "gastronomicos", "gastronomica",
+            "gastronomicas", "gastronomy", "gastronomic", "culinaria",
+            "culinario", "culinary", "food", "wine", "vinho", "familia",
+            "familias", "family", "kids", "children", "child", "criancas",
+            "cinema", "film", "films", "movie", "movies", "fair", "fairs",
+            "feira", "feiras", "market", "mercado", "main", "principais",
+            "principal", "summit", "conference", "congress", "forum", "expo",
+            "este", "esta", "mes", "month", "semana", "week", "hoje",
+            "today", "amanha", "tomorrow", "junho", "june", "maio", "may",
         }
         return all(token in category_noise for token in tokens)
 
@@ -4740,6 +4792,10 @@ class ResearcherAgent(BaseAgent):
             r"\b(?:car|cars|carro|carros|automovel|automoveis|viatura|viaturas|automobile|vehicle)\b",
             normalized_query,
         ))
+        bike_parking_context = bool(re.search(
+            r"\b(?:bike|bikes|bicycle|bicycles|bicicleta|bicicletas|velocipede|velocipedes|velocipedo|velocipedos)\b",
+            normalized_query,
+        ))
         service_catalog = [
             (("pharmacy", "pharmacies", "farm", "pharmac"), "farm\u00e1cias"),
             (
@@ -4753,7 +4809,37 @@ class ResearcherAgent(BaseAgent):
             ),
             (("school", "schools", "escola", "escolas", "sch"), "escolas"),
             (("library", "libraries", "bibliot", "librar"), "bibliotecas"),
-            (("ecoponto", "ecopontos", "reciclag", "recycling", "recycle", "residuo", "residuos", "waste"), "ecopontos"),
+            (
+                (
+                    "pilhao", "pilhoes", "pilha", "pilhas", "bateria", "baterias",
+                    "battery bin", "battery bins", "battery recycling", "battery point",
+                    "battery points",
+                ),
+                "pilhões",
+            ),
+            (
+                (
+                    "papeleira", "papeleiras", "caixote do lixo", "caixotes do lixo",
+                    "litter bin", "litter bins", "waste bin", "waste bins",
+                ),
+                "papeleiras",
+            ),
+            (
+                (
+                    "parque canino", "parques caninos", "dog park", "dog parks",
+                    "canino", "caes", "caes soltos", "cães", "cães soltos",
+                ),
+                "parques caninos",
+            ),
+            (
+                (
+                    "ponto de encontro", "pontos de encontro", "ponto de encontro de emergencia",
+                    "pontos de encontro de emergencia", "proteccao civil", "protecao civil",
+                    "proteção civil", "emergency meeting point", "emergency meeting points",
+                ),
+                "pontos de encontro de emergência",
+            ),
+            (("ecoponto", "ecopontos", "reciclag", "recycling", "recycle", "residuo", "residuos"), "ecopontos"),
             (("parque infantil", "parques infantis", "playground", "playgrounds", "infantil"), "parques infantis"),
             (
                 (
@@ -4768,6 +4854,14 @@ class ResearcherAgent(BaseAgent):
             (("park", "parks", "garden", "gardens", "jardim", "jardins"), "jardins"),
             (("psp", "policia de seguranca publica", "pol\u00edcia de seguran\u00e7a p\u00fablica", "esquadra"), "Pol\u00edcia de Seguran\u00e7a P\u00fablica"),
             (("police", "polic"), "pol\u00edcia"),
+            (
+                (
+                    "bike parking", "bicycle parking", "estacionamento de bicicletas",
+                    "estacionamento de velocipedes", "estacionamento de velocípedes",
+                    "bicicleta", "bicicletas", "velocipede", "velocipedes",
+                ),
+                "Estacionamento de velocípedes",
+            ),
             (("parking", "estacion", "car park", "park my car", "parque de estacionamento"), "parking"),
             (("market", "markets", "mercado", "mercados", "feira", "feiras"), "mercados"),
             (("firefighter", "firefighters", "bombeiro", "bombeiros"), "bombeiros"),
@@ -4797,6 +4891,8 @@ class ResearcherAgent(BaseAgent):
             if normalized_service == "jardins" and parking_context:
                 continue
             if any(marker in normalized_query for marker in markers) and normalized_service not in extracted:
+                if normalized_service == "parking" and bike_parking_context:
+                    continue
                 if normalized_service == "parking" and car_parking_context:
                     normalized_service = "car parking"
                 extracted.append(normalized_service)
@@ -4826,6 +4922,10 @@ class ResearcherAgent(BaseAgent):
             "bombeiros": ("bombeiro", "firefighter"),
             "polícia": ("policia", "police"),
             "Polícia de Segurança Pública": ("psp", "esquadra", "policia"),
+            "pilhões": ("pilhao", "pilhoes", "pilha", "bateria", "battery"),
+            "papeleiras": ("papeleira", "papeleiras", "caixote", "litter", "waste"),
+            "parques caninos": ("parque canino", "parques caninos", "dog park", "canino"),
+            "pontos de encontro de emergência": ("ponto de encontro", "emergencia", "protecao civil", "emergency"),
         }
 
         filtered = [
@@ -4848,11 +4948,19 @@ class ResearcherAgent(BaseAgent):
             return "educa\u00e7\u00e3o"
         if normalized == "bibliotecas":
             return "cultura"
-        if normalized in {"jardins", "parques infantis", "ecopontos", "arquitetura da agua"}:
+        if normalized in {
+            "jardins",
+            "parques infantis",
+            "ecopontos",
+            "arquitetura da agua",
+            "pilhoes",
+            "papeleiras",
+            "parques caninos",
+        }:
             return "ambiente"
-        if normalized in {"policia", "policia de seguranca publica", "bombeiros"}:
+        if normalized in {"policia", "policia de seguranca publica", "bombeiros", "pontos de encontro de emergencia"}:
             return "seguran\u00e7a"
-        if "parking" in normalized:
+        if "parking" in normalized or "velocipedes" in normalized or "bicicletas" in normalized:
             return "transportes"
         if normalized in {"estacionamento", "sanitarios", "loja do cidadao", "wifi"}:
             return "servi\u00e7os"
@@ -4997,6 +5105,11 @@ class ResearcherAgent(BaseAgent):
             "polícia": "polícia",
             "car parking": "estacionamento automóvel",
             "ecopontos": "ecopontos",
+            "pilhões": "pilhões",
+            "papeleiras": "papeleiras",
+            "parques caninos": "parques caninos",
+            "pontos de encontro de emergência": "pontos de encontro de emergência",
+            "Estacionamento de velocípedes": "estacionamento de bicicletas",
         }
         display_names_en = {
             "bibliotecas": "libraries",
@@ -5008,6 +5121,11 @@ class ResearcherAgent(BaseAgent):
             "polícia": "police",
             "car parking": "car parking",
             "ecopontos": "recycling points",
+            "pilhões": "battery recycling points",
+            "papeleiras": "waste bins",
+            "parques caninos": "dog parks",
+            "pontos de encontro de emergência": "emergency meeting points",
+            "Estacionamento de velocípedes": "bicycle parking",
         }
         names = display_names_pt if language == "pt" else display_names_en
         services = ", ".join(names.get(service, service) for service in service_types)

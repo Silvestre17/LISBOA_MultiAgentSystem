@@ -856,7 +856,7 @@ class MultiAgentAssistant:
         preferences: List[str] = []
         preference_patterns = [
             (r"\b(?:low walking|little walking|pouca caminhada|andar pouco|baixo declive|pouco declive)\b", "low walking"),
-            (r"\b(?:indoor backup|rain[- ]?safe|if it rains|se chover|chuva)\b", "rain-safe indoor backup"),
+            (r"\b(?:indoor backup|rain[- ]?safe|if it rains|se chover|chuva|chover|interior|interiores|coberto|coberta)\b", "rain-safe indoor backup"),
             (r"\b(?:cheap|budget|barato|econ[oó]mico|mais barato)\b", "budget-conscious"),
             (r"\b(?:public transport|metro|bus|tram|autocarro|el[eé]trico|comboio)\b", "public transport"),
             (r"\b(?:history|hist[oó]ria|cultural|culture|cultura|museum|museu)\b", "culture/history"),
@@ -876,33 +876,43 @@ class MultiAgentAssistant:
             "direct answer", "constraints used", "plan blocks", "movement logic",
             "weather strategy", "limitations", "source", "fonte", "updated", "atualizado",
             "structured plan", "plano estruturado", "lisbon", "lisboa",
+            "roteiro sugerido", "suggested route", "como te deslocas", "how to move",
+            "dicas", "tips", "notas finais", "final notes", "resumo da viagem",
         }
-        patterns = [
-            r"(?m)^#{2,4}\s*(?:[\W_]+\s*)?(?:Day\s*\d+|Dia\s*\d+|Block\s*\d+|Bloco\s*\d+)?\s*[·:-]?\s*([^\n]{3,70})$",
-            r"\*\*([^*\n]{3,70})\*\*",
-        ]
-        for pattern in patterns:
-            for match in re.finditer(pattern, text):
-                value = re.sub(r"^[\W_\d:.-]+", "", match.group(1)).strip(" .,:;*-_")
-                value = re.sub(r"\s+", " ", value)
-                block_match = re.match(r"(?i)^block\s+\d+\s*:\s*(.+)$", value)
-                if block_match:
-                    value = block_match.group(1).strip()
-                lower = value.lower()
-                if not value or lower in skip:
-                    continue
-                if any(token in lower for token in [
-                    "source", "updated", "distance", "lines", "warning", "tip", "limitation",
-                    "structured", "plan", "title", "temperature", "conditions", "yellow", "blue", "green",
-                    "origin confirmed", "transport limits", "location", "category", "note",
-                ]):
-                    continue
-                if re.match(r"(?i)^(?:block\s*\d+|direct answer|movement logic|weather strategy)$", value):
-                    continue
-                if len(value.split()) > 7:
-                    continue
-                if re.search(r"[A-ZÁÉÍÓÚÂÊÔÃÕÇ][\wÁÉÍÓÚÂÊÔÃÕÇáéíóúâêôãõç'’.-]+", value):
-                    candidates.append(value)
+
+        def add_candidate(raw_value: str) -> None:
+            value = re.sub(r"^[\W_\d:.-]+", "", raw_value or "").strip(" .,:;*-_")
+            value = re.sub(r"\s+", " ", value)
+            value = re.sub(r"^\d{1,2}:\d{2}\s*[·.-]\s*", "", value).strip()
+            label_match = re.match(
+                r"(?i)^(?:paragem\s+hist[oó]rica|paragem\s+cultural|visita|"
+                r"almo[cç]o|jantar|caf[eé]|lanche|historic\s+stop|visit|"
+                r"lunch|dinner|coffee|snack)\s*:\s*(.+)$",
+                value,
+            )
+            if label_match:
+                value = label_match.group(1).strip()
+            lower = value.lower()
+            folded = MultiAgentAssistant._fold_context_text(value)
+            if not value or lower in skip or folded in skip:
+                return
+            if any(token in folded for token in [
+                "source", "updated", "distance", "lines", "warning", "tip", "limitation",
+                "structured", "plan", "title", "temperature", "conditions", "yellow", "blue", "green",
+                "origin confirmed", "transport limits", "location", "category", "note",
+                "resposta direta", "direct answer", "roteiro sugerido", "como te deslocas",
+                "dicas", "notas finais", "manha em", "morning in",
+            ]):
+                return
+            if len(value.split()) > 8:
+                return
+            if re.search(r"[A-ZÁÉÍÓÚÂÊÔÃÕÇ][\wÁÉÍÓÚÂÊÔÃÕÇáéíóúâêôãõç'’.-]+", value):
+                candidates.append(value)
+
+        for match in MultiAgentAssistant._PLANNER_CARD_NAME_RE.finditer(text):
+            add_candidate(match.group("name") or "")
+        for match in MultiAgentAssistant._PLANNER_SIMPLE_CARD_RE.finditer(text):
+            add_candidate(match.group("name") or "")
         return MultiAgentAssistant._merge_anchor_values([], candidates, limit=10)
 
     # Anaphoric reference to a venue/place suggested in the previous turn,
@@ -2571,6 +2581,28 @@ class MultiAgentAssistant:
         if transport_destination_clarification:
             return transport_destination_clarification
 
+        compact_route_pair = re.search(
+            r"^\s*(?:e\s+)?(?:de|do|da|desde|from)\s+"
+            r"(?P<origin>.+?)\s+(?:para|até|ate|to)\s+"
+            r"(?P<destination>[^?!.;,]+)",
+            message,
+            flags=re.IGNORECASE,
+        )
+        if compact_route_pair:
+            origin = re.sub(r"\s+", " ", compact_route_pair.group("origin")).strip(" .,:;?!")
+            destination = re.sub(r"\s+", " ", compact_route_pair.group("destination")).strip(" .,:;?!")
+            if len(origin) >= 2 and len(destination) >= 2:
+                rewritten = (
+                    f"Como vou de {origin} para {destination}?"
+                    if language == "pt"
+                    else f"How do I get from {origin} to {destination}?"
+                )
+                return {
+                    "message": rewritten,
+                    "agents": ["transport"],
+                    "routing_reasoning": "Compact origin-destination follow-up resolved as a transport route.",
+                }
+
         standalone_place_after_transport = self._resolve_standalone_place_after_transport_follow_up(message, language)
         if standalone_place_after_transport:
             return standalone_place_after_transport
@@ -2740,20 +2772,103 @@ class MultiAgentAssistant:
                 "routing_reasoning": "Conversation destination anchor resolved into a point-to-point transport request.",
             }
 
+        previous_plan_context = (
+            str(anchors.get("last_plan_summary") or "").strip()
+            or str(anchors.get("last_plan_text") or "").strip()
+        )
         revises_previous_plan = bool(
-            re.search(r"\b(?:make it|change it|adjust it|cheaper|rain|chuva|mais barato|barato|suitable|adequado|adapta|ajusta)\b", normalized)
-            and str(anchors.get("last_plan_summary") or "").strip()
+            re.search(
+                r"\b(?:make it|change it|adjust it|cheaper|rain|chuva|chover|"
+                r"mais\s+interiores?|interior|indoor|mais barato|barato|"
+                r"suitable|adequado|adapta|ajusta|muda|troca)\b",
+                normalized,
+            )
+            and previous_plan_context
         )
         if revises_previous_plan:
             preferences = ", ".join(anchors.get("user_preferences") or [])
             exclusions = ", ".join(anchors.get("excluded_areas") or [])
-            return {
-                "message": (
-                    f"{message}\n\nPrevious itinerary context to revise:\n"
-                    f"{str(anchors.get('last_plan_summary') or '')[:900]}\n\n"
+            destinations = ", ".join(str(item) for item in (anchors.get("last_itinerary_destinations") or [])[:8])
+            folded_area_context = self._fold_context_text(
+                " ".join(
+                    [
+                        destinations,
+                        str(anchors.get("last_plan_summary") or ""),
+                        str(anchors.get("last_plan_text") or ""),
+                    ]
+                )
+            )
+            previous_zone = str(anchors.get("last_plan_area_zone") or "").strip()
+            if not previous_zone and "belem" in folded_area_context:
+                previous_zone = "belem"
+            previous_area = self._planner_zone_label(previous_zone, language=language) if previous_zone else ""
+            rain_or_indoor_revision = bool(
+                re.search(r"\b(?:rain|chuva|chover|interiores?|indoor|covered|cobert[oa]s?)\b", normalized)
+            )
+            if language == "pt":
+                locality_constraint = (
+                    f"Restrição de zona: mantém apenas pontos na zona **{previous_area}**; "
+                    "ignora resultados cuja morada, nome ou descrição indiquem outra zona ou concelho. "
+                    "Se não houver alternativas interiores confirmadas nessa zona, diz claramente que não há dados suficientes "
+                    "em vez de trocar para outra zona."
+                    if previous_area
+                    else "Restrição de zona: preserva a zona inferida pelas paragens anteriores; não mudes para outra zona salvo pedido explícito."
+                )
+                revision_goal = (
+                    "Objetivo: adaptar o roteiro anterior para chuva, substituindo paragens exteriores "
+                    "por opções mais interiores ou cobertas, como museus, monumentos visitáveis por dentro, "
+                    "centros culturais e cafés/pastelarias cobertas próximos das paragens anteriores. "
+                    "A resposta direta deve dizer explicitamente que o roteiro foi adaptado para chuva "
+                    "e destacar a principal alteração feita. "
+                    "Mantém a mesma zona do roteiro anterior; não uses alternativas noutros bairros/concelhos "
+                    "como se fossem substituições locais. Se não houver dados suficientes na mesma zona, diz isso claramente. "
+                    f"{locality_constraint}"
+                    if rain_or_indoor_revision
+                    else "Objetivo: rever o roteiro anterior mantendo apenas alterações pedidas pelo utilizador."
+                )
+                context_message = (
+                    f"{message}\n\n"
+                    f"Contexto do roteiro anterior: {str(anchors.get('last_plan_summary') or '')[:900]}.\n"
+                    f"Paragens anteriores: {destinations or 'não extraídas explicitamente'}.\n"
+                    f"Zona anterior: {previous_area or 'inferir pelas paragens anteriores'}.\n"
+                    f"{revision_goal}\n"
+                    "Não trates títulos de secção ou texto de resposta direta como paragens do roteiro.\n\n"
+                    f"Preferências guardadas: {preferences or 'nenhuma preferência explícita'}.\n"
+                    f"Exclusões guardadas: {exclusions or 'nenhuma exclusão explícita'}."
+                )
+            else:
+                locality_constraint = (
+                    f"Area constraint: keep only places in **{previous_area}**; ignore results whose address, name, "
+                    "or description indicate another area or municipality. If there are not enough confirmed indoor "
+                    "alternatives in that area, state that limitation instead of switching area."
+                    if previous_area
+                    else "Area constraint: preserve the area inferred from the previous stops; do not switch area unless explicitly requested."
+                )
+                revision_goal = (
+                    "Goal: adapt the previous itinerary for rain by replacing outdoor stops with more indoor "
+                    "or covered options, such as museums, indoor monuments, cultural centres, and covered cafés "
+                    "near the previous stops. The direct answer must explicitly say that the itinerary was "
+                    "adapted for rain and highlight the main change. "
+                    "Keep the same area as the previous itinerary; do not use alternatives "
+                    "in other neighbourhoods/municipalities as local replacements. If there is not enough same-area "
+                    f"evidence, state that clearly. {locality_constraint}"
+                    if rain_or_indoor_revision
+                    else "Goal: revise the previous itinerary while preserving only the changes requested by the user."
+                )
+                context_message = (
+                    f"{message}\n\n"
+                    f"Previous itinerary context: {str(anchors.get('last_plan_summary') or '')[:900]}.\n"
+                    f"Previous stops: {destinations or 'not explicitly extracted'}.\n"
+                    f"Previous area: {previous_area or 'infer from the previous stops'}.\n"
+                    f"{revision_goal}\n"
+                    "Do not treat section headings or direct-answer text as itinerary stops.\n\n"
                     f"Stored preferences: {preferences or 'none explicitly stored'}.\n"
                     f"Stored exclusions: {exclusions or 'none explicitly stored'}."
                 )
+            return {
+                "message": context_message,
+                "agents": ["weather", "researcher", "planner"],
+                "routing_reasoning": "Planning follow-up asks to revise the previous itinerary using weather/context.",
             }
 
         return {"message": message}
@@ -2840,11 +2955,18 @@ class MultiAgentAssistant:
         summary_parts: list[str] = []
         if filtered_destinations:
             summary_parts.append("Destinations: " + ", ".join(filtered_destinations[:5]))
+        mentioned_zones = self._planner_zones_in_text(f"{message}\n{final_output}")
+        if len(mentioned_zones) == 1:
+            plan_zone = next(iter(mentioned_zones))
+            anchors["last_plan_area_zone"] = plan_zone
+            summary_parts.append("Area: " + self._planner_zone_label(plan_zone, language="pt"))
+        elif "last_plan_area_zone" in anchors:
+            anchors.pop("last_plan_area_zone", None)
         if anchors.get("user_preferences"):
             summary_parts.append("Preferences: " + ", ".join(str(item) for item in anchors.get("user_preferences") or []))
         if anchors.get("excluded_areas"):
             summary_parts.append("Excluded areas: " + ", ".join(str(item) for item in anchors.get("excluded_areas") or []))
-        anchors["last_plan_summary"] = "; ".join(summary_parts)[:700]
+        anchors["last_plan_summary"] = ("; ".join(summary_parts) or "Previous itinerary available")[:700]
         anchors["last_plan_text"] = (final_output or "")[:4000]
 
     def _run_lightweight_weather_fact_check(
@@ -5192,7 +5314,7 @@ class MultiAgentAssistant:
         has_dataset_summary = bool(re.search(r"\b(?:fonte do dataset|dataset source|resultados|results)\b", normalized))
         has_service_card = bool(
             re.search(
-                r"(?m)^-\s+(?:💊|🏥|👮|📍|📚|🌳|♻️|🅿️|🎓|🏛️|🛒|✉️|🏢|🚰|📶|🚻|🚇|🚒|🛝|⚡|🔌|🚗)\s+\*\*",
+                r"(?m)^-\s+[\U0001F100-\U0001F1FF\U0001F300-\U0001FAFF\u2300-\u27BF\uFE0F\u200D]+\s+\*\*",
                 value,
             )
         )
@@ -5223,12 +5345,20 @@ class MultiAgentAssistant:
             r"casa de banho|wc|sanitario|biblioteca|bibliotecas|mercado|mercados|"
             r"policia|psp|escola|escolas|jardim|jardins|parque|parques|"
             r"ponto de agua|bebedouro|wifi|wi-fi|posto|counter|public toilet|"
-            r"pharmacy|hospital|library|market|municipal service|public service"
+            r"pilhao|pilhoes|pilha|bateria|papeleira|papeleiras|caixote|"
+            r"parque canino|parques caninos|ponto de encontro|emergencia|"
+            r"estacionamento de bicicleta|estacionamento de bicicletas|"
+            r"estacionamento de velocipede|estacionamento de velocipedes|"
+            r"bicicleta|bicicletas|velocipede|velocipedes|"
+            r"pharmacy|hospital|library|market|municipal service|public service|"
+            r"battery|battery recycling|waste bin|waste bins|litter bin|dog park|"
+            r"emergency meeting point|emergency meeting points|bike parking|bicycle parking"
         )
         discovery_terms = (
             r"mais proxim[oa]s?|perto de|junto de|onde (?:ha|há|existe|existem)|"
             r"qual (?:e|é)|quais|encontra|encontrar|procura|procurar|lista|listar|"
-            r"mostra|indica|near(?:by|est)?|closest|find|show|list|which|where"
+            r"mostra|indica|deixar|estacionar|near(?:by|est)?|closest|find|show|"
+            r"list|which|where|leave|park"
         )
         return bool(
             re.search(rf"\b(?:{service_terms})\b", normalized)
@@ -5250,6 +5380,18 @@ class MultiAgentAssistant:
         if not MultiAgentAssistant._researcher_output_looks_structured_lisboa_aberta_service(researcher_text):
             return agent_outputs
         if MultiAgentAssistant._user_request_needs_municipal_service_listing(user_message):
+            transport_text = str(agent_outputs.get("transport") or "")
+            normalized_transport = MultiAgentAssistant._fold_context_text(transport_text)
+            if re.search(
+                r"\b(?:rede fora do ambito confirmado|fora do ambito confirmado|micromobility|gira|"
+                r"nao consigo confirmar em tempo real|nao consigo confirmar)\b",
+                normalized_transport,
+            ):
+                return {
+                    key: value
+                    for key, value in agent_outputs.items()
+                    if key != "transport"
+                }
             return agent_outputs
 
         # A structured Lisboa Aberta list is valuable for "find the nearest X";
@@ -5285,6 +5427,36 @@ class MultiAgentAssistant:
         if re.search(r"\b(saldanha|parque eduardo vii|tomas ribeiro|avenida 5 de outubro|picoas)\b", normalized):
             return "avenidas"
         return ""
+
+    @staticmethod
+    def _planner_zones_in_text(text: str) -> set[str]:
+        """Infer all broad planning zones mentioned in a text block."""
+        normalized = unicodedata.normalize("NFKD", str(text or "").lower())
+        normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+        zone_patterns = {
+            "belem": r"\b(belem|brasilia|jeronimos|descobrimentos|torre de belem|mosteiro)\b",
+            "parque_nacoes": r"\b(parque das nacoes|expo|oriente|oceanario|fil|altice arena|rossio dos olivais|alameda dos oceanos)\b",
+            "baixa": r"\b(carmo|chiado|baixa|rossio|se|largo da se|mouraria|correeiros|douradores|prata|conceicao|figueira|comercio)\b",
+            "avenidas": r"\b(saldanha|parque eduardo vii|tomas ribeiro|avenida 5 de outubro|picoas|avenidas novas)\b",
+        }
+        return {
+            zone
+            for zone, pattern in zone_patterns.items()
+            if re.search(pattern, normalized)
+        }
+
+    @staticmethod
+    def _planner_zone_label(zone: str, language: str = "pt") -> str:
+        """Return a human label for a broad planner zone."""
+        is_pt = (language or "").lower().startswith("pt")
+        labels = {
+            "baixa": "Baixa/Chiado",
+            "belem": "Belém",
+            "parque_nacoes": "Parque das Nações" if is_pt else "Parque das Nações",
+            "avenidas": "Avenidas Novas",
+        }
+        fallback = "a mesma zona" if is_pt else "the same area"
+        return labels.get(str(zone or "").strip(), fallback)
 
     @staticmethod
     def _planner_walking_leg_summary(

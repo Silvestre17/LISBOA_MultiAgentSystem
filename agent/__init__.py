@@ -3,12 +3,6 @@
 #   - André Filipe Gomes Silvestre, 20240502
 # ==========================================================================
 
-import agent.agents as agents
-from agent.graph import (
-    MultiAgentAssistant,
-    create_multiagent_assistant,
-    get_all_tools,
-)
 from agent.llm_factory import LLMFactory
 from agent.prompts import (  # Multi-Agent Prompts
     PLANNER_AGENT_PROMPT,
@@ -33,6 +27,34 @@ from agent.state import (
     WeatherContext,
     create_initial_state,
 )
+
+
+def __getattr__(name: str):
+    """Lazily expose heavy graph/agent objects without import-time cycles.
+
+    Utility modules under ``agent.utils`` are imported by low-level tools. If the
+    package imports ``agent.graph`` eagerly here, those tools can end up importing
+    the graph while it is still importing the tools. Keeping graph and agent
+    classes lazy preserves the public package API without creating circular
+    imports during standalone tool tests.
+    """
+    if name in {"MultiAgentAssistant", "create_multiagent_assistant", "get_all_tools"}:
+        from agent.graph import MultiAgentAssistant, create_multiagent_assistant, get_all_tools
+
+        values = {
+            "MultiAgentAssistant": MultiAgentAssistant,
+            "create_multiagent_assistant": create_multiagent_assistant,
+            "get_all_tools": get_all_tools,
+        }
+        globals().update(values)
+        return values[name]
+    if name == "agents":
+        import agent.agents as _agents
+
+        globals()["agents"] = _agents
+        return _agents
+    raise AttributeError(f"module 'agent' has no attribute {name!r}")
+
 
 __all__ = [
     # Graph
