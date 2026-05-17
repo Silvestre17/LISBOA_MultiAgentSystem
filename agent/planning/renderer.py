@@ -554,6 +554,8 @@ def _format_detail_bullet(detail: str, is_pt: bool) -> str:
         "rating": ("⭐", "Avaliação" if is_pt else "Rating"),
         "avaliação": ("⭐", "Avaliação" if is_pt else "Rating"),
         "avaliacao": ("⭐", "Avaliação" if is_pt else "Rating"),
+        "suggested time": ("⏱️", "Tempo sugerido" if is_pt else "Suggested time"),
+        "tempo sugerido": ("⏱️", "Tempo sugerido" if is_pt else "Suggested time"),
         "more details": ("🔗", "Mais detalhes" if is_pt else "More details"),
         "mais detalhes": ("🔗", "Mais detalhes" if is_pt else "More details"),
         "features": ("✨", "Características" if is_pt else "Features"),

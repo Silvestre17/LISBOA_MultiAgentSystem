@@ -781,12 +781,26 @@ def find_nearby_services(
         return False
 
     def _service_icon_and_heading(dataset_title: str, requested_service: str) -> tuple[str, str]:
-        """Build a localized heading for any selected municipal service dataset."""
-        normalized_basis = unicodedata.normalize(
-            "NFKD",
-            f"{dataset_title or ''} {requested_service or ''} {category or ''}",
+        """Build a localized heading for any selected municipal service dataset.
+
+        The requested service and selected dataset define the service family.
+        Proximity labels such as "(perto de Jardim da Estrela)" must not affect
+        classification, otherwise toilets near a garden become "parks".
+        """
+
+        def _normalize_basis(value: str) -> str:
+            normalized = unicodedata.normalize("NFKD", value or "")
+            return normalized.encode("ascii", "ignore").decode("ascii").lower()
+
+        clean_dataset_title = re.sub(
+            r"\s+\((?:perto de|near|ordenado por distância|sorted by distance)\s+.*?\)\s*$",
+            "",
+            dataset_title or "",
+            flags=re.IGNORECASE,
         )
-        normalized_basis = normalized_basis.encode("ascii", "ignore").decode("ascii").lower()
+        requested_basis = _normalize_basis(requested_service or "")
+        dataset_basis = _normalize_basis(clean_dataset_title)
+        category_basis = _normalize_basis(category or "")
         location = near_location_name.strip() if near_location_name else ""
 
         service_families = [
@@ -819,18 +833,27 @@ def find_nearby_services(
         icon = "📍"
         pt_label = "Serviços públicos"
         en_label = "Public services"
-        for markers, candidate_icon, candidate_pt, candidate_en in service_families:
-            if any(marker in normalized_basis for marker in markers):
-                icon = candidate_icon
-                pt_label = candidate_pt
-                en_label = candidate_en
-                if candidate_pt == "Hospitais" and any(
-                    public_marker in normalized_basis
-                    for public_marker in ("public", "publico", "publicos", "publica", "publicas")
-                ):
-                    pt_label = "Hospitais públicos"
-                    en_label = "Public hospitals"
-                break
+
+        def _match_family(basis: str) -> tuple[str, str, str] | None:
+            for markers, candidate_icon, candidate_pt, candidate_en in service_families:
+                if any(marker in basis for marker in markers):
+                    return candidate_icon, candidate_pt, candidate_en
+            return None
+
+        combined_basis = f"{requested_basis} {dataset_basis} {category_basis}"
+        matched_family = (
+            _match_family(requested_basis)
+            or _match_family(dataset_basis)
+            or _match_family(category_basis)
+        )
+        if matched_family:
+            icon, pt_label, en_label = matched_family
+            if pt_label == "Hospitais" and any(
+                public_marker in combined_basis
+                for public_marker in ("public", "publico", "publicos", "publica", "publicas")
+            ):
+                pt_label = "Hospitais públicos"
+                en_label = "Public hospitals"
 
         if is_pt:
             if location:

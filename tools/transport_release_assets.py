@@ -35,7 +35,7 @@ except ImportError:
 GITHUB_API_BASE_URL = "https://api.github.com"
 DEFAULT_RELEASE_TAG = "transport-data-latest"
 DEFAULT_RELEASE_REPO = "Silvestre17/LISBOA_MultiAgentSystem"
-GITHUB_API_VERSION = "2022-11-28"                                           
+GITHUB_API_VERSION = "2022-11-28"
 _LOCKS: dict[str, threading.Lock] = {}
 
 

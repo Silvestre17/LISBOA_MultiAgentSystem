@@ -512,6 +512,7 @@ def _localize_event_title(title: Optional[str], language: str = "en") -> str:
         flags=re.IGNORECASE,
     )
     cleaned = re.sub(r"\bBook\s+Fair\b", "Feira do Livro", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bPopular\s+Marches\b", "Marchas Populares", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\|\s*guided tour\b", "| visita guiada", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bguided tour\b", "visita guiada", cleaned, flags=re.IGNORECASE)
     return cleaned.strip()
@@ -587,11 +588,138 @@ def _localize_event_category(category: Optional[str], language: str = "en") -> s
         "Sports": "Desporto",
         "Fairs": "Feiras",
         "Festivals": "Festivais",
+        "Family & Kids": "Família e Crianças",
         "Gastronomy": "Gastronomia",
         "Others": "Outros",
         "General": "Geral",
     }
     return mapping.get(raw, raw)
+
+
+def _normalize_event_category_key(category: Optional[str]) -> str:
+    """Return a comparable ASCII key for an event category label."""
+    raw = str(category or "").strip()
+    if not raw:
+        return ""
+    normalized = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode("ascii")
+    normalized = re.sub(r"[^a-z0-9&]+", " ", normalized.lower())
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    aliases = {
+        "musica": "music",
+        "concert": "music",
+        "concerts": "music",
+        "concerto": "music",
+        "concertos": "music",
+        "teatro": "theater opera dance",
+        "opera": "theater opera dance",
+        "danca": "theater opera dance",
+        "dance": "theater opera dance",
+        "exposicao": "exhibitions",
+        "exposicoes": "exhibitions",
+        "exhibition": "exhibitions",
+        "feira": "fairs",
+        "feiras": "fairs",
+        "festival": "festivals",
+        "festivais": "festivals",
+        "desporto": "sports",
+        "desportos": "sports",
+        "desportivo": "sports",
+        "desportiva": "sports",
+        "desportivos": "sports",
+        "desportivas": "sports",
+        "sport": "sports",
+        "sports": "sports",
+        "family & kids": "family kids",
+        "family kids": "family kids",
+        "familia": "family kids",
+        "criancas": "family kids",
+        "crianças": "family kids",
+        "kids": "family kids",
+        "children": "family kids",
+        "main events": "main events",
+        "principais eventos": "main events",
+        "eventos principais": "main events",
+        "gastronomia": "gastronomy",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _parse_excluded_event_categories(exclude_categories: Optional[str]) -> set[str]:
+    """Parse comma-separated event categories that must be excluded."""
+    raw = str(exclude_categories or "").strip()
+    if not raw or raw.lower() == "none":
+        return set()
+    return {
+        normalized
+        for value in re.split(r"[,;/|]+", raw)
+        if (normalized := _normalize_event_category_key(value))
+    }
+
+
+def _event_matches_any_category(event: Dict[str, Any], category_keys: set[str]) -> bool:
+    """Return whether an event category matches one of the requested category keys."""
+    if not category_keys:
+        return True
+    event_key = _normalize_event_category_key(event.get("category"))
+    if not event_key:
+        return False
+    return any(
+        event_key == key
+        or event_key in key
+        or key in event_key
+        for key in category_keys
+    )
+
+
+_EXCLUDED_EVENT_TEXT_TERMS: Dict[str, Tuple[str, ...]] = {
+    "music": ("music", "musica", "concert", "concerts", "concerto", "concertos", "fado", "jazz"),
+    "fairs": ("fair", "fairs", "feira", "feiras", "market", "markets", "mercado", "mercados"),
+    "exhibitions": ("exhibition", "exhibitions", "exposicao", "exposicoes"),
+    "theater opera dance": ("theater", "theatre", "teatro", "opera", "dance", "danca", "ballet"),
+    "family kids": ("family", "familia", "kids", "children", "child", "criancas", "miudos"),
+    "cinema": ("cinema", "film", "films", "movie", "movies"),
+    "sports": ("sport", "sports", "desporto", "desportos", "desportivo", "desportiva", "desportivos", "desportivas"),
+    "festivals": ("festival", "festivals", "festivais"),
+    "gastronomy": ("food", "gastronomy", "gastronomia", "wine", "vinho"),
+}
+
+
+def _normalize_event_free_text(value: str) -> str:
+    """Return normalized free text for exclusion-term matching."""
+    normalized = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized.lower())
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _event_category_is_excluded(event: Dict[str, Any], excluded_categories: set[str]) -> bool:
+    """Return whether an event belongs to, or visibly names, an excluded category."""
+    if not excluded_categories:
+        return False
+    category_key = _normalize_event_category_key(event.get("category"))
+    if category_key and any(excluded == category_key or excluded in category_key for excluded in excluded_categories):
+        return True
+
+    searchable_text = _normalize_event_free_text(
+        " ".join(
+            str(event.get(key) or "")
+            for key in (
+                "title",
+                "name",
+                "short_description",
+                "description",
+                "category",
+                "venue",
+                "location",
+            )
+        )
+    )
+    if not searchable_text:
+        return False
+    for excluded in excluded_categories:
+        for term in _EXCLUDED_EVENT_TEXT_TERMS.get(excluded, ()):
+            if re.search(rf"\b{re.escape(term)}\b", searchable_text):
+                return True
+    return False
 
 
 def _localize_place_category(category: Optional[str], language: str = "en") -> str:
@@ -615,6 +743,25 @@ def _localize_place_category(category: Optional[str], language: str = "en") -> s
         "Nightlife": "Vida noturna",
         "Tours": "Tours",
         "Beaches": "Praias",
+        "Hotel": "Hotel",
+        "Apartments & Hotel Apartments": "Apartamentos e Aparthotéis",
+        "Local & Rural Accommodation": "Alojamento Local e Rural",
+        "Guest Houses": "Guest houses",
+        "Hostels": "Hostels",
+        "Pousadas": "Pousadas",
+        "Camping": "Campismo",
+        "Tejo Cruises": "Cruzeiros no Tejo",
+        "Tourist Offices": "Postos de Turismo",
+        "Coffee shop": "Cafetaria",
+        "Bars & Nightlife": "Bares e Vida Noturna",
+        "Fado": "Fado",
+        "Golf": "Golfe",
+        "18 Holes": "Golfe - 18 buracos",
+        "9 Holes": "Golfe - 9 buracos",
+        "Other Sports": "Outros Desportos",
+        "Running": "Corrida",
+        "Water Sports": "Desportos Aquáticos",
+        "Surf Spots": "Locais de Surf",
     }
     return mapping.get(raw, raw)
 
@@ -1178,6 +1325,18 @@ def _localize_event_date_filter(date_filter: Optional[str], language: str = "en"
         "this year": "este ano",
         "next year": "próximo ano",
         "upcoming": "próximos dias",
+        "january": "janeiro",
+        "february": "fevereiro",
+        "march": "março",
+        "april": "abril",
+        "may": "maio",
+        "june": "junho",
+        "july": "julho",
+        "august": "agosto",
+        "september": "setembro",
+        "october": "outubro",
+        "november": "novembro",
+        "december": "dezembro",
     }
     return mapping.get(raw.lower(), raw)
 
@@ -1287,6 +1446,7 @@ def _format_event_duration_label(duration: int, language: str = "en") -> str:
 def _format_event_filter_summary(
     query: Optional[str],
     category: Optional[str],
+    exclude_categories: Optional[str],
     date_filter: Optional[str],
     start_date: Optional[datetime],
     end_date: Optional[datetime],
@@ -1305,9 +1465,16 @@ def _format_event_filter_summary(
     normalized_query = (query or "").strip()
     normalized_category = (category or "").strip()
     normalized_category = _localize_event_category(normalized_category, language=language)
+    excluded_labels = [
+        _localize_event_category(value.strip(), language=language)
+        for value in re.split(r"[,;/|]+", str(exclude_categories or ""))
+        if value.strip()
+    ]
     if language == "pt":
         scope_parts = [normalized_filter if not date_filter else f"{normalized_filter} ({date_window})"]
         scope_parts.append(normalized_category if normalized_category else "todas as categorias")
+        if excluded_labels:
+            scope_parts.append(f"sem {', '.join(dict.fromkeys(excluded_labels))}")
         if normalized_query:
             scope_parts.append(f"foco temático: {normalized_query}")
         else:
@@ -1319,6 +1486,8 @@ def _format_event_filter_summary(
 
     scope_parts = [normalized_filter if not date_filter else f"{normalized_filter} ({date_window})"]
     scope_parts.append(normalized_category if normalized_category else "all categories")
+    if excluded_labels:
+        scope_parts.append(f"excluding {', '.join(dict.fromkeys(excluded_labels))}")
     if normalized_query:
         scope_parts.append(f"theme focus: {normalized_query}")
     else:
@@ -1855,7 +2024,10 @@ _EVENT_CATEGORY_FILTER_TERMS = {
     "exhibitions", "exposicao", "exposição", "exposicoes", "exposições",
     "gastronomy", "gastronomia", "food", "free", "gratuito", "gratuitos",
     "gratuita", "gratuitas", "familia", "família", "children", "kids",
-    "criancas", "crianças", "outdoor", "outdoors", "ar livre",
+    "criancas", "crianças", "outdoor", "outdoors", "ar livre", "sport",
+    "sports", "desporto", "desportivo", "desportivos", "maratona",
+    "marathon", "trail", "arraial", "arraiais", "arrais",
+    "santos populares", "marchas populares", "festas de lisboa",
 }
 _EVENT_NAMED_ENTITY_HINTS = {
     "book fair", "feira do livro", "web summit", "rock in rio", "doclisboa",
@@ -2041,6 +2213,14 @@ _EVENT_QUERY_SYNONYMS = {
     'feira': ['fair', 'market', 'salon'],
     'outdoor': ['outdoors', 'open', 'air', 'park', 'parque', 'garden', 'jardim', 'grass', 'picnic'],
     'outdoors': ['outdoor', 'open', 'air', 'park', 'parque', 'garden', 'jardim', 'grass', 'picnic'],
+    'sport': ['sports', 'desporto', 'athletics', 'race', 'marathon', 'trail'],
+    'sports': ['sport', 'desporto', 'athletics', 'race', 'marathon', 'trail'],
+    'desporto': ['sports', 'sport', 'corrida', 'maratona', 'trail'],
+    'desportivo': ['sports', 'sport', 'desporto'],
+    'desportivos': ['sports', 'sport', 'desporto'],
+    'arraial': ['arraiais', 'santos', 'populares', 'marchas'],
+    'arraiais': ['arraial', 'santos', 'populares', 'marchas'],
+    'arrais': ['arraial', 'arraiais', 'santos', 'populares', 'marchas'],
 }
 
 
@@ -2063,6 +2243,39 @@ def _expand_event_query_tokens(query: Optional[str]) -> List[str]:
         expanded_tokens.update(_EVENT_QUERY_SYNONYMS.get(token, []))
 
     return sorted(expanded_tokens)
+
+
+def _event_strict_theme_key(query: Optional[str]) -> Optional[str]:
+    """Return a strict thematic cluster for event themes that must not broaden."""
+    normalized_query = _normalize_lookup_text(query)
+    if not normalized_query:
+        return None
+    if re.search(
+        r"\b(?:arrai(?:al|ais|s)?|santos populares|marchas populares|festas de lisboa)\b",
+        normalized_query,
+        flags=re.IGNORECASE,
+    ):
+        return "santos_populares"
+    return None
+
+
+def _event_matches_strict_theme(event: Dict[str, Any], theme_key: Optional[str]) -> bool:
+    """Return whether an event matches a strict thematic event cluster."""
+    if not theme_key:
+        return True
+    searchable = _normalize_lookup_text(_build_event_searchable_text(event))
+    if not searchable:
+        return False
+    if theme_key == "santos_populares":
+        return bool(
+            re.search(
+                r"\b(?:arrai(?:al|ais|s)?|santos populares|marchas populares|"
+                r"popular marches|festas de lisboa|av liberdade|avenida da liberdade)\b",
+                searchable,
+                flags=re.IGNORECASE,
+            )
+        )
+    return True
 
 
 # ==========================================================================
@@ -2173,6 +2386,29 @@ def _should_search_dados_abertos(query: Optional[str]) -> bool:
         return False
 
     return any(_matches_open_data_keyword(query, keyword) for keyword in DADOS_ABERTOS_KEYWORDS)
+
+
+def _category_should_suppress_open_data(category: Optional[str], query: Optional[str]) -> bool:
+    """Return whether a VisitLisboa category should stay in the tourism catalogue.
+
+    Some terms, such as "loja", can mean a retail shop in a tourism/search
+    context or a municipal citizen counter in Lisboa Aberta. When the user or
+    agent has already selected a VisitLisboa tourism category, keep the search
+    in that catalogue unless the query explicitly targets a municipal service.
+    """
+    normalized_category = _normalize_place_category_filter(category)
+    if normalized_category not in _VISITLISBOA_ONLY_HYBRID_CATEGORIES:
+        return False
+
+    normalized_query = _normalize_lookup_text(query)
+    if normalized_category == "shopping" and re.search(
+        r"\b(?:loja\s+do\s+cidadao|loja\s+de\s+cidadao|citizen\s+shop|citizen\s+service)\b",
+        normalized_query,
+        flags=re.IGNORECASE,
+    ):
+        return False
+
+    return True
 
 
 def _score_open_data_place_match(query: str, name: str, address: str = "") -> float:
@@ -2408,10 +2644,72 @@ _PLACE_CATEGORY_ALIASES = {
         "palace", "church",
     },
     "restaurants": {"restaurant", "restaurants", "restaurante", "restaurantes", "food", "dining", "gastronomy", "gastronomia"},
-    "hotels": {"hotel", "hotels", "guest house", "guest houses", "apartments", "accommodation", "alojamento"},
+    "hotels": {
+        "hotel", "hotels", "hoteis", "hotéis", "guest house", "guest houses",
+        "apartments", "accommodation", "lodging", "stay", "alojamento",
+        "alojamentos", "hostel", "hostels", "pousada", "pousadas",
+    },
     "view points": {"view point", "view points", "viewpoint", "viewpoints", "miradouro", "miradouros"},
     "parks & gardens": {"park", "parks", "garden", "gardens", "parque", "parques", "jardim", "jardins", "nature"},
-    "tours": {"tour", "tours", "trip", "trips"},
+    "shopping": {
+        "shopping", "shop", "shops", "store", "stores", "loja", "lojas",
+        "compras", "centro comercial", "centros comerciais", "mall", "malls",
+        "tourist office", "tourist offices", "posto de turismo", "postos de turismo",
+    },
+    "tejo cruises": {"tejo cruises", "cruise", "cruises", "cruzeiro", "cruzeiros", "tejo", "tagus"},
+    "beaches": {"beach", "beaches", "praia", "praias", "surf"},
+    "fado": {"fado"},
+    "nightlife": {"nightlife", "vida noturna", "vida nocturna", "bar", "bars"},
+    "sports": {"sport", "sports", "desporto", "desportos", "running", "corrida", "surf"},
+    "golf": {"golf", "golfe", "campo de golfe", "campos de golfe"},
+    "running": {"running", "corrida"},
+    "water sports": {"water sports", "desportos aquaticos", "desportos aquáticos", "surf"},
+    "tours": {"tour", "tours", "trip", "trips", "visita", "visitas", "experiência", "experiencias", "experiências"},
+}
+
+_PLACE_CATEGORY_ITEM_MATCHES = {
+    "museums & monuments": {"museums & monuments", "museums", "monuments"},
+    "restaurants": {"restaurant", "restaurants", "restaurants & cafes", "coffee shop"},
+    "hotels": {
+        "hotel", "apartments & hotel apartments", "local & rural accommodation",
+        "guest houses", "hostels", "pousadas", "camping",
+    },
+    "view points": {"view points"},
+    "parks & gardens": {"parks & gardens", "gardens & parks", "nature", "natural reserves"},
+    "shopping": {"shopping", "tourist offices"},
+    "tejo cruises": {"tejo cruises", "traditional boats", "nautical tours & others", "marinas & ports"},
+    "beaches": {"beaches", "surf spots", "national surf reserve"},
+    "fado": {"fado"},
+    "nightlife": {"bars & nightlife", "fado"},
+    "sports": {
+        "other sports", "running", "water sports", "surf spots", "national surf reserve",
+        "golf", "18 holes", "9 holes", "golfs links & sea view",
+    },
+    "golf": {"golf", "18 holes", "9 holes", "golfs links & sea view"},
+    "running": {"running"},
+    "water sports": {"water sports", "surf spots", "national surf reserve"},
+    "tours": {
+        "tours", "sightseeing tours", "private tours", "nature & adventure tours",
+        "cultural centres & trips", "only in lisbon", "attractions",
+        "culture, art & architecture",
+    },
+}
+
+_PLACE_CATEGORY_QUERY_TOKENS = {
+    "accommodation", "alojamento", "alojamentos", "apartamento", "apartamentos",
+    "bar", "bars", "beach", "beaches", "centro", "centros", "comercial",
+    "comerciais", "compras", "corrida", "cruise", "cruises", "cruzeiro",
+    "cruzeiros", "desporto", "desportos", "fado", "golf", "golfe", "guest",
+    "hotel", "hotels", "hoteis", "hostel", "hostels", "loja", "lojas",
+    "mall", "malls", "nightlife", "pousada", "pousadas", "praia", "praias",
+    "running", "shop", "shopping", "shops", "sport", "sports", "surf",
+    "tagus", "tejo", "tour", "tours",
+}
+
+_VISITLISBOA_ONLY_HYBRID_CATEGORIES = {
+    "museums & monuments", "restaurants", "hotels", "view points", "tours",
+    "shopping", "tejo cruises", "beaches", "fado", "nightlife", "sports", "golf",
+    "running", "water sports",
 }
 
 _GENERIC_PLACE_QUERY_TOKENS = {
@@ -2535,6 +2833,176 @@ def _matches_place_location_hints(text: str, location_hints: List[str]) -> bool:
         if any(marker in normalized_text for marker in area_markers.get(hint, ())):
             return True
     return False
+
+
+def _geocoded_place_matches_location_text(location_text: str, geocoded: Dict[str, Any]) -> bool:
+    """Return whether a geocoder result still matches the source place address.
+
+    Provider geocoding can fall back to a broad Lisbon match when a catalogue
+    address is partially unresolved. Distance ranking should only use
+    coordinates when the resolved display still shares concrete address or
+    locality evidence with the source text.
+    """
+    normalized_location = _normalize_place_hint_text(location_text)
+    resolved_text = _normalize_place_hint_text(
+        _join_user_facing_parts(
+            [
+                geocoded.get("display_name", ""),
+                geocoded.get("full_display_name", ""),
+                " ".join(str(value) for value in (geocoded.get("address") or {}).values()),
+            ]
+        )
+    )
+    if not normalized_location or not resolved_text:
+        return False
+
+    postal_codes = re.findall(r"\b\d{4}[-\s]?\d{3}\b", normalized_location)
+    if postal_codes:
+        compact_resolved = re.sub(r"\D", "", resolved_text)
+        if any(re.sub(r"\D", "", postal_code) in compact_resolved for postal_code in postal_codes):
+            return True
+
+    ignored_tokens = {
+        "avenida", "av", "rua", "largo", "praca", "praça", "estrada", "travessa",
+        "beco", "calcada", "calçada", "edificio", "edifício", "loja", "lisboa",
+        "lisbon", "portugal", "pt", "campo", "centro", "hotel", "real",
+    } | _GENERIC_PLACE_QUERY_TOKENS | _PLACE_CATEGORY_QUERY_TOKENS
+    source_tokens = {
+        token
+        for token in re.findall(r"[a-z0-9]+", normalized_location)
+        if len(token) >= 4 and token not in ignored_tokens and not token.isdigit()
+    }
+    if not source_tokens:
+        return True
+
+    resolved_tokens = set(re.findall(r"[a-z0-9]+", resolved_text))
+    overlap = source_tokens & resolved_tokens
+    if len(source_tokens) == 1:
+        return bool(overlap)
+    return len(overlap) >= 2
+
+
+def _extract_place_proximity_reference(query: Optional[str]) -> str:
+    """Extract a free-form reference point from a proximity place query."""
+    normalized_query = re.sub(r"\s+", " ", str(query or "")).strip()
+    if not normalized_query:
+        return ""
+
+    proximity_re = re.compile(
+        r"(?i)\b(?:"
+        r"perto\s+d[aeo]s?|perto\s+de|junto\s+a(?:o|a|os|as)?|"
+        r"ao\s+p[eé]\s+d[aeo]s?|na\s+zona\s+d[aeo]s?|à\s+volta\s+d[aeo]s?|a\s+volta\s+d[aeo]s?|"
+        r"near|nearby|around|close\s+to|next\s+to|in\s+the\s+area\s+of"
+        r")\s+(?P<reference>[^,.;?!]+)"
+    )
+    match = proximity_re.search(normalized_query)
+    if not match:
+        return ""
+
+    reference = match.group("reference").strip(" :;-")
+    reference = re.split(
+        r"(?i)\b(?:"
+        r"com|with|barat[oa]s?|cheap|abert[oa]s?|open|morada|address|website|site|"
+        r"pre[cç]o|price|bilhetes?|tickets?|hor[aá]rio|hours|categoria|category|"
+        r"que|which|e\s+(?:d[áa]?-?me|mostra|lista)|and\s+(?:show|list|give)"
+        r")\b",
+        reference,
+        maxsplit=1,
+    )[0]
+    return reference.strip(" :;-")
+
+
+def _place_result_coordinates(result: Dict[str, Any]) -> Tuple[float, float] | None:
+    """Resolve coordinates for a place result from metadata, catalog, or address."""
+    for source in (result, _place_result_full_data(result)):
+        if not isinstance(source, dict):
+            continue
+        lat = source.get("lat") or source.get("latitude")
+        lon = source.get("lon") or source.get("longitude")
+        try:
+            if lat is not None and lon is not None:
+                return float(lat), float(lon)
+        except (TypeError, ValueError):
+            continue
+
+    location_text = _join_user_facing_parts(
+        [
+            result.get("location", ""),
+            result.get("address", ""),
+            (_place_result_full_data(result) or {}).get("location", ""),
+            (_place_result_full_data(result) or {}).get("address", ""),
+        ]
+    )
+    if not location_text or _normalize_place_hint_text(location_text).strip(" ,.;") in {"lisboa", "lisbon"}:
+        return None
+
+    try:
+        from tools.location_resolver import geocode_location_name
+
+        geocoded = geocode_location_name(location_text, prefer_city=True, allow_aml=True)
+    except Exception as exc:
+        logger.info("Could not geocode VisitLisboa place '%s': %s", location_text, exc)
+        return None
+    if not geocoded:
+        return None
+    if not _geocoded_place_matches_location_text(location_text, geocoded):
+        logger.info(
+            "Rejected weak VisitLisboa geocode for '%s': %s",
+            location_text,
+            geocoded.get("display_name") or geocoded.get("full_display_name"),
+        )
+        return None
+    try:
+        return float(geocoded["lat"]), float(geocoded["lon"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _rank_place_results_by_proximity(
+    results: List[Dict[str, Any]],
+    query: Optional[str],
+) -> Tuple[List[Dict[str, Any]], str]:
+    """Sort place results by distance when the user asks for proximity."""
+    reference = _extract_place_proximity_reference(query)
+    if not reference or not results:
+        return results, ""
+
+    try:
+        from tools.location_resolver import resolve_location_query
+        from tools.utils import haversine_distance
+
+        reference_location = resolve_location_query(reference, prefer_city=True, allow_aml=True)
+    except Exception as exc:
+        logger.info("Could not resolve proximity reference '%s': %s", reference, exc)
+        return results, ""
+    if not reference_location:
+        return results, ""
+
+    try:
+        ref_lat = float(reference_location["lat"])
+        ref_lon = float(reference_location["lon"])
+    except (KeyError, TypeError, ValueError):
+        return results, ""
+
+    ranked: List[Tuple[float, float, int, Dict[str, Any]]] = []
+    unresolved: List[Tuple[int, Dict[str, Any]]] = []
+    for index, result in enumerate(results):
+        coordinates = _place_result_coordinates(result)
+        if not coordinates:
+            unresolved.append((index, result))
+            continue
+        distance_km = haversine_distance(ref_lat, ref_lon, coordinates[0], coordinates[1])
+        enriched = dict(result)
+        enriched["_distance_km"] = distance_km
+        enriched["_distance_reference"] = reference_location.get("display_name") or reference
+        ranked.append((distance_km, -float(result.get("ranking_score") or 0.0), index, enriched))
+
+    if not ranked:
+        return results, ""
+
+    ranked.sort(key=lambda item: (item[0], item[1], item[2]))
+    sorted_results = [item[3] for item in ranked] + [item[1] for item in unresolved]
+    return sorted_results, str(reference_location.get("display_name") or reference)
 
 
 def _query_requests_ranked_places(query: Optional[str]) -> bool:
@@ -2940,9 +3408,10 @@ def _normalize_place_category_filter(category: Optional[str]) -> Optional[str]:
     if not category:
         return None
 
-    normalized = str(category).strip().lower()
+    normalized = _normalize_place_hint_text(str(category).strip())
     for canonical, aliases in _PLACE_CATEGORY_ALIASES.items():
-        if normalized == canonical or normalized in aliases:
+        normalized_aliases = {_normalize_place_hint_text(alias) for alias in aliases}
+        if normalized == canonical or normalized in normalized_aliases:
             return canonical
     return normalized
 
@@ -2953,12 +3422,26 @@ def _place_category_matches(item_category: str, requested_category: Optional[str
         return True
 
     normalized_requested = _normalize_place_category_filter(requested_category)
-    item_category_lower = (item_category or "").lower()
     if not normalized_requested:
         return True
 
-    aliases = _PLACE_CATEGORY_ALIASES.get(normalized_requested, {normalized_requested})
-    return any(alias in item_category_lower for alias in aliases)
+    item_category_key = _normalize_place_hint_text(item_category)
+    if item_category_key == normalized_requested:
+        return True
+
+    item_match_keys = _PLACE_CATEGORY_ITEM_MATCHES.get(normalized_requested, {normalized_requested})
+    if item_category_key in item_match_keys:
+        return True
+
+    # Legacy fallback for coarse provider labels such as "Museums & Monuments".
+    # Query-language aliases (for example "loja") are intentionally not used
+    # here because they can make municipal services look like shopping results.
+    safe_aliases = {
+        alias
+        for alias in _PLACE_CATEGORY_ALIASES.get(normalized_requested, {normalized_requested})
+        if len(alias) >= 5 and " " in alias
+    }
+    return any(_normalize_place_hint_text(alias) in item_category_key for alias in safe_aliases)
 
 
 def _extract_place_query_tokens(query: Optional[str]) -> List[str]:
@@ -2970,6 +3453,7 @@ def _extract_place_query_tokens(query: Optional[str]) -> List[str]:
     return [
         token for token in tokens
         if len(token) >= 3 and token not in _GENERIC_PLACE_QUERY_TOKENS
+        and token not in _PLACE_CATEGORY_QUERY_TOKENS
     ]
 
 
@@ -3147,10 +3631,51 @@ def _extract_requested_schedule_days(query: Optional[str]) -> List[str]:
     """Extracts requested weekdays from a schedule-related place query."""
     normalized_query = _normalize_place_hint_text(query)
     requested_days = []
+    if re.search(r"\b(?:tomorrow|amanha|amanhã)\b", normalized_query):
+        weekday_keys = [
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday",
+            "saturday",
+            "sunday",
+        ]
+        requested_days.append(weekday_keys[(datetime.now() + timedelta(days=1)).weekday()])
     for canonical_day, aliases in _PLACE_QUERY_DAY_ALIASES.items():
         if any(alias in normalized_query for alias in aliases):
             requested_days.append(canonical_day)
-    return requested_days
+    return list(dict.fromkeys(requested_days))
+
+
+def _query_requires_open_on_requested_day(query: Optional[str]) -> bool:
+    """Return whether the user asks for places open on a requested date/day."""
+    normalized_query = _normalize_place_hint_text(query)
+    if not re.search(r"\b(?:open|opens|aberto|aberta|abertos|abertas|abre)\b", normalized_query):
+        return False
+    return bool(_extract_requested_schedule_days(query))
+
+
+def _place_result_is_open_on_requested_day(result: Dict[str, Any], query: Optional[str]) -> bool:
+    """Return whether schedules confirm the place is open on the requested day."""
+    requested_days = _extract_requested_schedule_days(query)
+    if not requested_days:
+        return False
+    schedules = _place_result_full_data(result).get("schedules")
+    if not isinstance(schedules, list):
+        return False
+    for schedule in schedules:
+        hours_by_day = schedule.get("hours") or {}
+        if not isinstance(hours_by_day, dict):
+            continue
+        for requested_day in requested_days:
+            for day_label, hours in hours_by_day.items():
+                if not _schedule_day_matches(str(day_label), requested_day):
+                    continue
+                normalized_hours = _normalize_place_hint_text(str(hours or ""))
+                if normalized_hours and not re.search(r"\b(?:closed|fechado|fechada)\b", normalized_hours):
+                    return True
+    return False
 
 
 def _schedule_day_matches(day_label: str, canonical_day: str) -> bool:
@@ -3664,6 +4189,14 @@ def _fallback_search(query: str, category: str, data: List[Dict], max_results: i
     required_service_terms = _extract_required_service_term_groups(query)
     normalized_query = _normalize_lookup_text(query)
     specific_lookup_phrase = _extract_specific_place_lookup_phrase(query)
+    category_only_query = bool(
+        category
+        and query_lower
+        and not query_tokens
+        and not location_hints
+        and not required_service_terms
+        and not specific_lookup_phrase
+    )
 
     for item in data:
         # Category filter
@@ -3705,7 +4238,7 @@ def _fallback_search(query: str, category: str, data: List[Dict], max_results: i
             continue
 
         # Query filter
-        if query_lower:
+        if query_lower and not category_only_query:
             if query_tokens:
                 matched_tokens, weighted_score = _collect_token_match_stats(query_tokens, normalized_searchable)
                 phrase_score = _phrase_similarity_score(specific_lookup_phrase or normalized_query, item.get('title', ''))
@@ -3731,6 +4264,7 @@ def _fallback_search(query: str, category: str, data: List[Dict], max_results: i
 def search_cultural_events(
     query: Optional[str] = None,
     category: Optional[str] = None,
+    exclude_categories: Optional[str] = None,
     date_filter: Optional[str] = None,
     max_results: int = 10,
     offset: int = 0,
@@ -3750,6 +4284,9 @@ def search_cultural_events(
         category (str, optional): Filter by event category. Options include:
             'Main Events', 'Exhibitions', 'Music', 'Theater', 'Dance',
             'Cinema', 'Sports', 'Fairs', 'Festivals', 'Gastronomy'.
+        exclude_categories (str, optional): Comma-separated event categories
+            to exclude from the result set. Useful for negative preferences
+            such as "events this week, but no concerts".
         date_filter (str, optional): Date range filter. CRITICAL for temporal queries.
             Options: 'today', 'tomorrow', 'this week', 'next week', 'this weekend',
                     'this month', 'next month', 'January', 'February', etc.
@@ -3772,7 +4309,13 @@ def search_cultural_events(
         # Normalize inputs
         query = str(query).strip() if query and str(query).strip() and str(query).lower() != 'none' else None
         category = str(category).strip() if category and str(category).strip() and str(category).lower() != 'none' else None
+        exclude_categories = (
+            str(exclude_categories).strip()
+            if exclude_categories and str(exclude_categories).strip() and str(exclude_categories).lower() != 'none'
+            else None
+        )
         date_filter = str(date_filter).strip() if date_filter and str(date_filter).strip() and str(date_filter).lower() != 'none' else None
+        excluded_category_keys = _parse_excluded_event_categories(exclude_categories)
 
         if not isinstance(max_results, int) or max_results <= 0:
             max_results = 10
@@ -3795,6 +4338,7 @@ def search_cultural_events(
         effective_query = specific_lookup_phrase or query
         free_filter_requested = _query_requests_free_events(effective_query or query)
         outdoor_filter_requested = _query_requests_outdoor_events(effective_query or query)
+        strict_theme_key = _event_strict_theme_key(effective_query or query)
         if free_filter_requested and effective_query:
             effective_query = re.sub(
                 r"\b(?:free(?:\s+entry|\s+admission)?|gratuit[oa]s?|gratis|gr[aá]tis|entrada\s+gratuita)\b",
@@ -3813,9 +4357,15 @@ def search_cultural_events(
         start_date, end_date = parse_date_range(date_filter) if date_filter else (None, None)
 
         # Logging
-        date_info = f"{start_date.strftime('%Y-%m-%d') if start_date else 'any'} to {end_date.strftime('%Y-%m-%d') if end_date else 'any'}"
+        date_connector = "a" if render_language == "pt" else "to"
+        display_end_date = end_date - timedelta(days=1) if start_date and end_date else end_date
+        date_info = (
+            f"{start_date.strftime('%Y-%m-%d') if start_date else 'any'} "
+            f"{date_connector} "
+            f"{display_end_date.strftime('%Y-%m-%d') if display_end_date else 'any'}"
+        )
         logger.info(
-            f"search_cultural_events: query='{query}', category='{category}', effective_query='{effective_query}', dates={date_info}, max={max_results}, offset={offset}"
+            f"search_cultural_events: query='{query}', category='{category}', exclude_categories='{exclude_categories}', effective_query='{effective_query}', dates={date_info}, max={max_results}, offset={offset}"
         )
 
         # ALWAYS load JSON for date filtering (vector store doesn't filter by date)
@@ -3836,6 +4386,14 @@ def search_cultural_events(
             # No events in date range
             today = datetime.now()
             if render_language == "pt":
+                if strict_theme_key:
+                    return (
+                        "❌ Não encontrei eventos confirmados que correspondam a esse tema no período pedido.\n"
+                        f"🧭 **Filtro aplicado:** {date_filter} ({date_info}).\n"
+                        f"📅 **Data de referência:** {today.strftime('%Y-%m-%d')}\n\n"
+                        "💡 Experimenta alargar a janela temporal ou pesquisar por termos próximos como "
+                        "'Festas de Lisboa', 'Santos Populares' ou 'Marchas Populares'."
+                    )
                 return (
                     f"❌ Não encontrei eventos com data confirmada para o filtro '{date_filter}'.\n"
                     f"🧭 **Filtro aplicado:** {date_filter} ({date_info}).\n"
@@ -3851,10 +4409,29 @@ def search_cultural_events(
 
         # Step 2: Filter by category
         if category:
-            category_lower = category.lower()
-            events_data = [e for e in events_data if category_lower in e.get('category', '').lower()]
-            undated_candidates = [e for e in undated_candidates if category_lower in e.get('category', '').lower()]
+            category_keys = _parse_excluded_event_categories(category)
+            excluded_category_keys = {
+                key for key in excluded_category_keys
+                if not any(key == category_key or key in category_key or category_key in key for category_key in category_keys)
+            }
+            events_data = [e for e in events_data if _event_matches_any_category(e, category_keys)]
+            undated_candidates = [e for e in undated_candidates if _event_matches_any_category(e, category_keys)]
             logger.info(f"After category filter: {len(events_data)} events")
+
+        if excluded_category_keys:
+            events_data = [
+                event for event in events_data
+                if not _event_category_is_excluded(event, excluded_category_keys)
+            ]
+            undated_candidates = [
+                event for event in undated_candidates
+                if not _event_category_is_excluded(event, excluded_category_keys)
+            ]
+            logger.info(
+                "After excluded-category filter %s: %d events",
+                sorted(excluded_category_keys),
+                len(events_data),
+            )
 
         if free_filter_requested:
             events_data = [event for event in events_data if _event_matches_free_filter(event)]
@@ -3905,6 +4482,14 @@ def search_cultural_events(
             else:
                 logger.info(f"Query '{query}' contained only generic terms, skipping text filter.")
 
+        if strict_theme_key:
+            events_data = [event for event in events_data if _event_matches_strict_theme(event, strict_theme_key)]
+            undated_candidates = [
+                event for event in undated_candidates
+                if _event_matches_strict_theme(event, strict_theme_key)
+            ]
+            logger.info("After strict theme filter '%s': %d events", strict_theme_key, len(events_data))
+
         exact_lookup_not_found_intro: Optional[str] = None
         if not events_data and specific_lookup_phrase:
             fallback_category = _infer_specific_event_fallback_category(effective_query or query, category)
@@ -3935,13 +4520,40 @@ def search_cultural_events(
                     content_kind="event",
                 )
             if render_language == "pt":
+                if strict_theme_key:
+                    message = (
+                        "❌ Não encontrei eventos confirmados que correspondam a esse tema no período pedido.\n\n"
+                        f"🧭 **Filtro aplicado:** {localized_date_filter} ({date_info}), "
+                        f"{localized_category or 'todas as categorias'}"
+                    )
+                    if query:
+                        message += f", foco temático: {query}"
+                    message += (
+                        ".\n\n💡 Experimenta alargar a janela temporal ou pesquisar por termos próximos como "
+                        "'Festas de Lisboa', 'Santos Populares' ou 'Marchas Populares'."
+                    )
+                    return message
                 message = (
                     "❌ Não encontrei eventos com data confirmada que correspondam ao filtro pedido.\n\n"
                     f"🧭 **Filtro aplicado:** {localized_date_filter} ({date_info}), {localized_category or 'todas as categorias'}"
                 )
                 if query:
                     message += f", foco temático: {query}"
-                message += ".\n\n💡 Experimente termos mais abrangentes, como 'música', 'arte' ou 'festival'."
+                suggestion_pool = [
+                    ("Music", "música"),
+                    ("Exhibitions", "exposições"),
+                    ("Theater Opera & Dance", "teatro"),
+                    ("Main Events", "festival"),
+                    ("Fairs", "feiras"),
+                ]
+                suggestions = [
+                    label for key, label in suggestion_pool
+                    if key.lower() not in excluded_category_keys
+                ][:3]
+                if suggestions:
+                    message += f".\n\n💡 Experimente termos mais abrangentes, como {', '.join(repr(item) for item in suggestions)}."
+                else:
+                    message += ".\n\n💡 Experimente alargar a data, a zona ou remover algum filtro."
             else:
                 message = (
                     "❌ No confirmed-date events matched the requested filter.\n\n"
@@ -3949,7 +4561,21 @@ def search_cultural_events(
                 )
                 if query:
                     message += f", theme focus: {query}"
-                message += ".\n\n💡 Try broader terms such as 'music', 'art', or 'festival'."
+                suggestion_pool = [
+                    ("Music", "music"),
+                    ("Exhibitions", "exhibitions"),
+                    ("Theater Opera & Dance", "theatre"),
+                    ("Main Events", "festival"),
+                    ("Fairs", "fairs"),
+                ]
+                suggestions = [
+                    label for key, label in suggestion_pool
+                    if key.lower() not in excluded_category_keys
+                ][:3]
+                if suggestions:
+                    message += f".\n\n💡 Try broader terms such as {', '.join(repr(item) for item in suggestions)}."
+                else:
+                    message += ".\n\n💡 Try broadening the date range, area, or removing one filter."
             if undated_candidates:
                 if render_language == "pt":
                     message += (
@@ -4013,6 +4639,7 @@ def search_cultural_events(
             output_parts = _format_event_filter_summary(
                 query=query,
                 category=category,
+                exclude_categories=exclude_categories,
                 date_filter=date_filter,
                 start_date=start_date,
                 end_date=end_date,
@@ -4077,6 +4704,7 @@ def search_cultural_events(
         output_parts = _format_event_filter_summary(
             query=query,
             category=category,
+            exclude_categories=exclude_categories,
             date_filter=date_filter,
             start_date=start_date,
             end_date=end_date,
@@ -4306,6 +4934,7 @@ def search_places_attractions(
         tickets_requested = _query_mentions_tickets(query_context)
         schedule_requested = _query_mentions_schedule(query_context)
         open_today_required = _query_requires_open_today(query_context)
+        open_requested_day_required = _query_requires_open_on_requested_day(query_context)
 
         logger.info(
             f"search_places_attractions: query='{query}', effective_query='{effective_query}', category='{category}', max={max_results}, offset={offset}"
@@ -4315,7 +4944,7 @@ def search_places_attractions(
         # Check if we should also search Dados Abertos (hybrid mode)
         search_dados_abertos = _should_search_dados_abertos(effective_query or query)
         requested_category_for_hybrid = _normalize_place_category_filter(category)
-        if requested_category_for_hybrid in {"museums & monuments", "restaurants", "hotels", "view points", "tours"}:
+        if _category_should_suppress_open_data(requested_category_for_hybrid, effective_query or query):
             search_dados_abertos = False
         dados_abertos_results = []
 
@@ -4775,6 +5404,14 @@ def search_places_attractions(
             open_today_results = [result for result in all_results if _place_result_is_open_today(result)]
             if open_today_results:
                 all_results = open_today_results
+        if open_requested_day_required:
+            open_requested_day_results = [
+                result
+                for result in all_results
+                if _place_result_is_open_on_requested_day(result, query_context)
+            ]
+            if open_requested_day_results:
+                all_results = open_requested_day_results
 
         if tickets_requested or schedule_requested:
             all_results.sort(
@@ -4782,6 +5419,7 @@ def search_places_attractions(
                     1 if (not tickets_requested or _place_result_has_ticket_link(result)) else 0,
                     1 if (not schedule_requested or _place_result_has_schedule(result)) else 0,
                     1 if (not open_today_required or _place_result_is_open_today(result)) else 0,
+                    1 if (not open_requested_day_required or _place_result_is_open_on_requested_day(result, query_context)) else 0,
                     float(result.get("ranking_score") or 0.0),
                 ),
                 reverse=True,
@@ -4801,6 +5439,10 @@ def search_places_attractions(
                 preference_query,
                 query_intent,
             )
+        all_results, proximity_reference_label = _rank_place_results_by_proximity(
+            all_results,
+            effective_query or query,
+        )
 
         # =====================================================================
         # STEP 3: Format Output
@@ -4930,6 +5572,16 @@ def search_places_attractions(
         if exact_lookup_not_found_intro and offset == 0:
             output_parts = [exact_lookup_not_found_intro, "", *output_parts]
 
+        if proximity_reference_label and offset == 0:
+            if render_language == "pt":
+                output_parts.append(
+                    f"\U0001f4cf **Ordenação:** resultados com localização resolvida priorizados por distância a **{proximity_reference_label}**."
+                )
+            else:
+                output_parts.append(
+                    f"\U0001f4cf **Sorting:** results with resolved locations are prioritised by distance from **{proximity_reference_label}**."
+                )
+
         if restaurant_preference_partial_match and offset == 0:
             preference_note = _build_restaurant_preference_note(
                 preference_query,
@@ -4995,6 +5647,18 @@ def search_places_attractions(
                 coordinate_line = _format_coordinates_location_line(place.get('lat'), place.get('lon'), address_label, map_label)
                 if coordinate_line:
                     output_parts.append(coordinate_line)
+            if place.get("_distance_km") is not None:
+                distance_label = "Distância" if render_language == "pt" else "Distance"
+                reference_label = place.get("_distance_reference") or proximity_reference_label
+                try:
+                    distance_text = f"{float(place['_distance_km']):.2f} km"
+                except (TypeError, ValueError):
+                    distance_text = ""
+                if distance_text and reference_label:
+                    connector = "de" if render_language == "pt" else "from"
+                    output_parts.append(
+                        f"    - \U0001f4cf **{distance_label}:** {distance_text} {connector} {reference_label}"
+                    )
 
             feature_summary = _format_compact_feature_summary(
                 full_data.get("features") if full_data else None,
@@ -5249,6 +5913,22 @@ def get_place_categories(language: str = "en") -> str:
                 "pt_examples": "Restaurantes e locais ligados à gastronomia.",
             },
             {
+                "keys": {
+                    "hotel",
+                    "apartments & hotel apartments",
+                    "local & rural accommodation",
+                    "guest houses",
+                    "hostels",
+                    "pousadas",
+                    "camping",
+                },
+                "emoji": "🏨",
+                "en": "Hotels & Accommodation",
+                "pt": "Hotéis e Alojamento",
+                "en_examples": "Hotels, guest houses, hostels, apartments and local accommodation.",
+                "pt_examples": "Hotéis, guest houses, hostels, apartamentos e alojamento local.",
+            },
+            {
                 "keys": {"shopping", "tourist offices"},
                 "emoji": "🛍️",
                 "en": "Shopping & Visitor Services",
@@ -5263,6 +5943,33 @@ def get_place_categories(language: str = "en") -> str:
                 "pt": "Cruzeiros no Tejo",
                 "en_examples": "Tagus river cruise options.",
                 "pt_examples": "Opções de cruzeiros no rio Tejo.",
+            },
+            {
+                "keys": {
+                    "18 holes",
+                    "9 holes",
+                    "golf",
+                    "golfs links & sea view",
+                    "other sports",
+                    "running",
+                    "water sports",
+                    "surf spots",
+                    "national surf reserve",
+                    "beaches",
+                },
+                "emoji": "🏄",
+                "en": "Sports, Beaches & Outdoor Activities",
+                "pt": "Desporto, Praias e Atividades ao Ar Livre",
+                "en_examples": "Golf, running, surf, water sports, beaches and outdoor activity places.",
+                "pt_examples": "Golfe, corrida, surf, desportos aquáticos, praias e locais ao ar livre.",
+            },
+            {
+                "keys": {"fado", "bars & nightlife", "cultural centres", "cultural centers", "cultural centres & trips"},
+                "emoji": "🎵",
+                "en": "Culture & Nightlife",
+                "pt": "Cultura e Vida Noturna",
+                "en_examples": "Fado, nightlife and cultural venues.",
+                "pt_examples": "Fado, vida noturna e espaços culturais.",
             },
         ]
         output_parts = [f"### 🏛️ **{title}**\n"]

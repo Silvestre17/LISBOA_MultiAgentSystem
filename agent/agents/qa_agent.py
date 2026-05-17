@@ -88,6 +88,156 @@ def _qa_normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", normalized).strip().lower()
 
 
+def _qa_event_category_key(category: str) -> str:
+    """Return a comparable key for event category labels."""
+    normalized = _qa_normalize_text(category)
+    aliases = {
+        "musica": "music",
+        "music": "music",
+        "concert": "music",
+        "concerts": "music",
+        "concerto": "music",
+        "concertos": "music",
+        "desporto": "sports",
+        "desportos": "sports",
+        "desportivo": "sports",
+        "desportiva": "sports",
+        "desportivos": "sports",
+        "desportivas": "sports",
+        "sport": "sports",
+        "sports": "sports",
+        "festivais": "festivals",
+        "festivals": "festivals",
+        "festival": "festivals",
+        "teatro opera e danca": "theater opera dance",
+        "theater opera dance": "theater opera dance",
+        "exposicoes": "exhibitions",
+        "exhibitions": "exhibitions",
+        "feiras": "fairs",
+        "fairs": "fairs",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _qa_requested_event_category_keys(user_query: str) -> set[str]:
+    """Infer event categories positively requested by the user."""
+    normalized = _qa_normalize_text(user_query)
+    if not normalized:
+        return set()
+    negated_spans = [
+        match.span()
+        for match in re.finditer(
+            r"\b(?:sem|nao|not|without|excluding|except|exclui|excluir|evita|evitar)\b(?:\s+\w+){0,5}",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    ]
+    patterns = {
+        "sports": r"\b(?:desporto|desportos|desportiv[oa]s?|sport|sports|maratona|marathon|trail)\b",
+        "music": r"\b(?:musica|music|concertos?|concerts?|fado|jazz|rock|pop)\b",
+        "festivals": r"\b(?:festivais?|festivals?|arrai(?:al|ais|s)?|santos populares|marchas populares|festas de lisboa)\b",
+        "exhibitions": r"\b(?:exposicoes?|exhibitions?|arte|art)\b",
+        "theater opera dance": r"\b(?:teatro|theatre|theater|opera|danca|dance)\b",
+        "fairs": r"\b(?:feiras?|fairs?|mercado|market)\b",
+    }
+    requested: set[str] = set()
+    for key, pattern in patterns.items():
+        for match in re.finditer(pattern, normalized, flags=re.IGNORECASE):
+            if any(start <= match.start() <= end for start, end in negated_spans):
+                continue
+            requested.add(key)
+            break
+    return requested
+
+
+def _qa_forbidden_event_category_keys(user_query: str) -> set[str]:
+    """Infer event categories explicitly excluded by the user."""
+    normalized = _qa_normalize_text(user_query)
+    if not normalized:
+        return set()
+    category_terms = {
+        "sports": r"(?:desporto|desportos|desportiv[oa]s?|sport|sports)",
+        "music": r"(?:musica|music|concertos?|concerts?|fado|jazz|rock|pop)",
+        "festivals": r"(?:festivais?|festivals?|arrai(?:al|ais|s)?|santos populares|marchas populares)",
+        "exhibitions": r"(?:exposicoes?|exhibitions?|arte|art)",
+        "theater opera dance": r"(?:teatro|theatre|theater|opera|danca|dance)",
+        "fairs": r"(?:feiras?|fairs?|mercado|market)",
+    }
+    forbidden: set[str] = set()
+    for key, term_re in category_terms.items():
+        if re.search(
+            rf"\b(?:sem|nao|not|without|excluding|except|exclui|excluir|evita|evitar)\b(?:\s+\w+){{0,5}}\s+\b{term_re}\b",
+            normalized,
+            flags=re.IGNORECASE,
+        ):
+            forbidden.add(key)
+    return forbidden - _qa_requested_event_category_keys(user_query)
+
+
+_QA_GENERIC_RESEARCHER_INTRO_TITLES = {
+    "atracoes imperdiveis",
+    "atracoes recomendadas",
+    "locais recomendados",
+    "locais essenciais",
+    "must see attractions",
+    "must-see attractions",
+    "recommended places",
+    "essential places",
+    "recommended attractions",
+    "top attractions",
+}
+
+
+def _qa_generic_researcher_intro_key(line: str) -> str:
+    """Return a normalized key for generic intro/card checks."""
+    normalized = _qa_normalize_text(line)
+    normalized = re.sub(r"^(?:[-/]+|\d+[.)]?)\s*", "", normalized).strip()
+    normalized = re.sub(r"^(?:descricao|description)\s+", "", normalized).strip()
+    return normalized
+
+
+def _qa_is_generic_researcher_intro_title(line: str) -> bool:
+    """Return whether a line is a generic researcher intro title."""
+    return _qa_generic_researcher_intro_key(line) in _QA_GENERIC_RESEARCHER_INTRO_TITLES
+
+
+def _qa_is_generic_researcher_intro_sentence(line: str) -> bool:
+    """Return whether a line is generic intro prose, not a concrete result."""
+    normalized = _qa_generic_researcher_intro_key(line)
+    return bool(
+        normalized
+        and re.search(
+            r"\b(?:aqui tens|selecao|essenciais|primeira visita|primeira vez|"
+            r"principais locais|correspondem ao pedido|here is|here are|"
+            r"selection|essential places|first visit|match your request|main places)\b",
+            normalized,
+        )
+    )
+
+
+def _qa_response_has_generic_intro_card_defect(response: str) -> bool:
+    """Return whether generic intro text leaked as duplicated place cards."""
+    generic_title_count = 0
+    lines = str(response or "").splitlines()
+    for index, raw_line in enumerate(lines):
+        stripped = raw_line.strip()
+        if not _qa_is_generic_researcher_intro_title(stripped):
+            continue
+        generic_title_count += 1
+        if re.match(r"^(?:[-*]\s+)?\*\*[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]*\s*", stripped):
+            return True
+        for later_line in lines[index + 1:index + 4]:
+            later = later_line.strip()
+            if not later:
+                continue
+            if _qa_is_generic_researcher_intro_title(later):
+                return True
+            if _qa_is_generic_researcher_intro_sentence(later):
+                return True
+            break
+    return generic_title_count > 1
+
+
 def _qa_clean_requested_anchor_fragment(fragment: str) -> str:
     """Return a compact candidate place name from a user-request fragment."""
     cleaned = re.sub(r"\([^)]*\)", " ", str(fragment or ""))
@@ -318,7 +468,7 @@ _VALID_DOMAINS = {
     "cp.pt", "comboios.live", "ipma.pt", "api.ipma.pt",
     "dados.cm-lisboa.pt", "dados.gov.pt", "cm-lisboa.pt",
     "wikipedia.org", "en.wikipedia.org", "pt.wikipedia.org",
-    "carris.pt", "gateway.carris.pt", "aml.pt",
+    "carris.pt", "gateway.carris.pt", "aml.pt", "google.com",
 }
 
 # IPMA forecast range (max days available)
@@ -386,6 +536,16 @@ class QualityAssuranceAgent(BaseAgent):
         event_patterns = [
             r"\bevents?\b",
             r"\beventos?\b",
+            r"\bmusic\b",
+            r"\bm[uú]sica\b",
+            r"\bsports?\b",
+            r"\bdesporto\b",
+            r"\bdesportiv[oa]s?\b",
+            r"\btheat(?:er|re)\b",
+            r"\bteatro\b",
+            r"\b[oó]pera\b",
+            r"\bdance\b",
+            r"\bdan[çc]a\b",
             r"\bconcerts?\b",
             r"\bconcertos?\b",
             r"\bexhibitions?\b",
@@ -395,6 +555,10 @@ class QualityAssuranceAgent(BaseAgent):
             r"\bcultura\b",
             r"\bcultural\b",
             r"\bfestival(?:es)?\b",
+            r"\barrai(?:al|ais|s)?\b",
+            r"\bsantos populares\b",
+            r"\bmarchas populares\b",
+            r"\bfestas de lisboa\b",
         ]
         planning_patterns = [
             r"\bplan\b",
@@ -467,8 +631,8 @@ class QualityAssuranceAgent(BaseAgent):
         if not cls._is_category_browse_query(user_query):
             return llm_result
 
-        called_workers = {agent for agent in agents_called if agent}
-        if called_workers and not called_workers.issubset({"researcher"}):
+        called_workers = {agent for agent in agents_called if agent and agent not in {"qa", "supervisor"}}
+        if called_workers and not called_workers.issubset({"researcher", "final"}):
             return llm_result
 
         llm_result["required_agents"] = []
@@ -527,8 +691,8 @@ class QualityAssuranceAgent(BaseAgent):
         if not cls._is_event_listing_query(user_query):
             return llm_result
 
-        called_workers = {agent for agent in agents_called if agent}
-        if called_workers and not called_workers.issubset({"researcher"}):
+        called_workers = {agent for agent in agents_called if agent and agent not in {"qa", "supervisor"}}
+        if called_workers and not called_workers.issubset({"researcher", "final"}):
             return llm_result
 
         filtered_required_agents = [] if "researcher" in called_workers else [
@@ -538,6 +702,16 @@ class QualityAssuranceAgent(BaseAgent):
         filtered_missing_data = [
             item for item in llm_result.get("missing_data", [])
             if not cls._is_cross_domain_event_requirement(item)
+            and not re.search(
+                r"\b(?:exaustiv|exhaustiv|listagem|listing|canon|canonical|"
+                r"idioma|language|r[oó]tulos?|labels?|conte[uú]do|content|"
+                r"ingl[eê]s|english|url|slug|morada|address|geogr[aá]fic|"
+                r"ambito|[aâ]mbito|scope|contextual|fora de lisboa|outside lisbon|"
+                r"filtro|filter|filtrad|filtragem|explicit|expl[ií]cit|exclu|"
+                r"ocorr|inteiro|m[eê]s|mes|month)\b",
+                cls._normalize_query(str(item or "")),
+                flags=re.IGNORECASE,
+            )
         ]
         filtered_disclaimers = [
             item for item in llm_result.get("disclaimers", [])
@@ -580,8 +754,8 @@ class QualityAssuranceAgent(BaseAgent):
         if not cls._is_event_listing_query(user_query):
             return llm_result
 
-        called_workers = {agent for agent in agents_called if agent}
-        if called_workers and not called_workers.issubset({"researcher"}):
+        called_workers = {agent for agent in agents_called if agent and agent not in {"qa", "supervisor"}}
+        if called_workers and not called_workers.issubset({"researcher", "final"}):
             return llm_result
 
         combined_output = "\n".join(
@@ -627,6 +801,164 @@ class QualityAssuranceAgent(BaseAgent):
         return llm_result
 
     @classmethod
+    def _normalize_place_partial_no_result_validation(
+        cls,
+        user_query: str,
+        agent_outputs: Dict[str, str],
+        agents_called: List[str],
+        llm_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Accept grounded area-scoped place answers with explicit category gaps.
+
+        Mixed place queries can validly find attractions but no restaurants, or
+        the reverse. In that situation QA must not force a generative repair,
+        because the best answer is the scoped limitation already returned by the
+        Researcher evidence.
+        """
+        if not cls._is_place_listing_query(user_query):
+            return llm_result
+
+        called_workers = {agent for agent in agents_called if agent and agent not in {"qa", "supervisor"}}
+        if called_workers and not called_workers.issubset({"researcher", "final"}):
+            return llm_result
+
+        combined_output = "\n".join(
+            str(value)
+            for key, value in agent_outputs.items()
+            if not str(key).startswith("_") and isinstance(value, str)
+        )
+        normalized_query = cls._normalize_query(user_query)
+        normalized_output = cls._normalize_query(combined_output)
+        if not normalized_output:
+            return llm_result
+
+        asks_food = bool(re.search(r"\b(?:restaurantes?|restaurants?|food|comida|gastronomia|cozinha)\b", normalized_query))
+        asks_places = bool(re.search(r"\b(?:atracoes?|atra[cç][oõ]es?|places?|locais?|monumentos?|museus?)\b", normalized_query))
+        has_place_cards = bool(
+            re.search(r"(?m)^\s*(?:[-*]\s+)?\*\*(?:🏛️|📍|🖼️|📚|🌿)\s+[^*\n]+\*\*", combined_output)
+        )
+        has_food_no_result = bool(
+            re.search(
+                r"\b(?:sem restaurantes confirmados|não encontrei restaurantes confirmados|nao encontrei restaurantes confirmados|"
+                r"no confirmed restaurants|did not find confirmed restaurants)\b",
+                normalized_output,
+                flags=re.IGNORECASE,
+            )
+        )
+        if not (asks_food and asks_places and has_place_cards and has_food_no_result):
+            return llm_result
+
+        llm_result["required_agents"] = []
+        llm_result["missing_data"] = []
+        llm_result["complete"] = True
+
+        normalization_note = (
+            "Normalized QA for mixed place query: explicit category no-result with grounded cards is complete."
+        )
+        reasoning = llm_result.get("reasoning", "")
+        if normalization_note not in reasoning:
+            llm_result["reasoning"] = f"{reasoning} | {normalization_note}".strip(" |")
+
+        return llm_result
+
+    @classmethod
+    def _is_grounded_place_partial_no_result(
+        cls,
+        user_query: str,
+        agent_outputs: Dict[str, str],
+        agents_called: List[str],
+    ) -> bool:
+        """Return whether Researcher provided grounded cards plus an explicit no-result category."""
+        if not cls._is_place_listing_query(user_query):
+            return False
+        called_workers = {agent for agent in agents_called if agent and agent not in {"qa", "supervisor"}}
+        if called_workers and not called_workers.issubset({"researcher", "final"}):
+            return False
+        combined_output = "\n".join(
+            str(value)
+            for key, value in agent_outputs.items()
+            if not str(key).startswith("_") and isinstance(value, str)
+        )
+        normalized_query = cls._normalize_query(user_query)
+        normalized_output = cls._normalize_query(combined_output)
+        asks_food = bool(re.search(r"\b(?:restaurantes?|restaurants?|food|comida|gastronomia|cozinha)\b", normalized_query))
+        asks_places = bool(re.search(r"\b(?:atracoes?|atra[cç][oõ]es?|places?|locais?|monumentos?|museus?)\b", normalized_query))
+        has_place_cards = bool(
+            re.search(r"(?m)^\s*(?:[-*]\s+)?\*\*(?:🏛️|📍|🖼️|📚|🌿)\s+[^*\n]+\*\*", combined_output)
+        )
+        has_explicit_no_result = bool(
+            re.search(
+                r"\b(?:sem restaurantes confirmados|não encontrei restaurantes confirmados|nao encontrei restaurantes confirmados|"
+                r"no confirmed restaurants|did not find confirmed restaurants)\b",
+                normalized_output,
+                flags=re.IGNORECASE,
+            )
+        )
+        return asks_food and asks_places and has_place_cards and has_explicit_no_result
+
+    @classmethod
+    def _normalize_place_partial_fact_check(
+        cls,
+        fact_check: Dict[str, Any],
+        user_query: str,
+        agent_outputs: Dict[str, str],
+        agents_called: List[str],
+    ) -> Dict[str, Any]:
+        """Avoid generative repair for honest mixed-category place limitations."""
+        if not cls._is_grounded_place_partial_no_result(user_query, agent_outputs, agents_called):
+            return fact_check
+
+        benign_patterns = (
+            "Source footer is missing material source(s): Lisboa Aberta",
+            "Structured emoji field labels must start on their own line",
+            "Place cards are missing canonical fields",
+        )
+        benign_disclaimer_patterns = (
+            "Some URLs reference unverified domains",
+            "horários de funcionamento não foram confirmados",
+            "opening hours",
+        )
+
+        def filter_issues(issues: object) -> List[str]:
+            return [
+                str(issue)
+                for issue in list(issues or [])
+                if not any(pattern in str(issue) for pattern in benign_patterns)
+            ]
+
+        def filter_disclaimers(disclaimers: object) -> List[str]:
+            return [
+                str(disclaimer)
+                for disclaimer in list(disclaimers or [])
+                if not any(pattern.lower() in str(disclaimer).lower() for pattern in benign_disclaimer_patterns)
+            ]
+
+        fact_check["critical_issues"] = filter_issues(fact_check.get("critical_issues"))
+        fact_check["disclaimers"] = filter_disclaimers(fact_check.get("disclaimers"))
+        if not fact_check["critical_issues"]:
+            fact_check["valid"] = True
+            fact_check["repairable_agents"] = [
+                agent for agent in list(fact_check.get("repairable_agents") or [])
+                if agent != "researcher"
+            ]
+
+        per_agent = fact_check.get("per_agent")
+        if isinstance(per_agent, dict):
+            for agent_name, agent_check in per_agent.items():
+                if agent_name != "researcher" or not isinstance(agent_check, dict):
+                    continue
+                agent_check["critical_issues"] = filter_issues(agent_check.get("critical_issues"))
+                agent_check["disclaimers"] = filter_disclaimers(agent_check.get("disclaimers"))
+                if not agent_check["critical_issues"]:
+                    agent_check["valid"] = True
+                    agent_check["repairable_agents"] = [
+                        agent for agent in list(agent_check.get("repairable_agents") or [])
+                        if agent != "researcher"
+                    ]
+
+        return fact_check
+
+    @classmethod
     def _is_place_listing_query(cls, user_query: str) -> bool:
         """Detects standalone place/attraction discovery queries that should stay inside researcher scope."""
         query = cls._normalize_query(user_query)
@@ -636,8 +968,27 @@ class QualityAssuranceAgent(BaseAgent):
         place_patterns = [
             r"\battractions?\b",
             r"\batra(?:ç|c)[aã]o(?:es)?\b",
+            r"\batra[cç][oõ]es?\b",
             r"\bplaces?\b",
             r"\blocais?\b",
+            r"\brestaurants?\b",
+            r"\brestaurantes?\b",
+            r"\bhotels?\b",
+            r"\bhot[eé]is\b",
+            r"\balojamentos?\b",
+            r"\bshops?\b",
+            r"\blojas?\b",
+            r"\bcompras\b",
+            r"\bcentros?\s+comerciais?\b",
+            r"\bshopping\b",
+            r"\bcruzeiros?\b",
+            r"\bcruises?\b",
+            r"\bpraias?\b",
+            r"\bbeaches\b",
+            r"\bgolfe?\b",
+            r"\bgolf\b",
+            r"\bfado\b",
+            r"\bnightlife\b",
             r"\bmuseums?\b",
             r"\bmuseus?\b",
             r"\bmonuments?\b",
@@ -882,6 +1233,12 @@ class QualityAssuranceAgent(BaseAgent):
                 flags=re.IGNORECASE | re.DOTALL,
             )
             or re.search(
+                r"(?:apanha em|board at).{0,180}(?:sai em|get off at|alight at).{0,180}"
+                r"(?:linhas?|lines?)\s*(?:\*\*)?\s*:\s*(?:\*\*)?\s*\d{3,4}[A-Z]?",
+                combined_output,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            or re.search(
                 r"(?:paragens|stops).{0,120}(?:apanha em|board at).{0,120}(?:sai em|alight at).{0,160}"
                 r"(?:tempo estimado|estimated travel time)",
                 combined_output,
@@ -935,17 +1292,20 @@ class QualityAssuranceAgent(BaseAgent):
 
         def _is_satisfied_limitation(item: object) -> bool:
             normalized_item = cls._normalize_query(str(item or ""))
-            if any(
-                token in normalized_item
-                for token in (
-                    "ligação de autocarro",
-                    "ligacao de autocarro",
-                    "linha, direção",
-                    "linha, direcao",
-                    "pontos de transferência",
-                    "pontos de transferencia",
-                    "bus route",
-                    "bus option",
+            if (
+                not re.search(r"\b(?:tempo real|real time|perturb|estado|status|disruption)\b", normalized_item)
+                and any(
+                    token in normalized_item
+                    for token in (
+                        "ligação de autocarro",
+                        "ligacao de autocarro",
+                        "linha, direção",
+                        "linha, direcao",
+                        "pontos de transferência",
+                        "pontos de transferencia",
+                        "bus route",
+                        "bus option",
+                    )
                 )
             ):
                 return has_actionable_bus_route
@@ -980,7 +1340,23 @@ class QualityAssuranceAgent(BaseAgent):
             if "tempo real" in normalized_item or "real time" in normalized_item:
                 if has_actionable_bus_realtime:
                     return True
+                if re.search(
+                    r"(?:tempo real carris metropolitana|carris metropolitana real time).{0,220}"
+                    r"(?:nao proximos autocarros|não próximos autocarros|not next buses|not confirm real-time departure)",
+                    normalized_output,
+                    flags=re.IGNORECASE | re.DOTALL,
+                ):
+                    return True
                 return bool(re.search(limitation_patterns["cp_realtime"], normalized_output))
+            if re.search(r"\b(?:percurso final|acesso final|entrada|walk|walking|final access)\b", normalized_item):
+                return bool(
+                    re.search(
+                        r"(?:percurso final|acesso final|final access).{0,180}"
+                        r"(?:nao ficou confirmado|não ficou confirmado|not confirmed)",
+                        normalized_output,
+                        flags=re.IGNORECASE | re.DOTALL,
+                    )
+                )
             if any(token in normalized_item for token in ("on time", "delayed", "disrupted", "atras", "perturb")):
                 return bool(re.search(limitation_patterns["delay_unknown"], normalized_output))
             return False
@@ -1169,7 +1545,8 @@ class QualityAssuranceAgent(BaseAgent):
 
         event_query = bool(
             re.search(
-                r"\b(?:evento|eventos|event|events|concerto|concert|festival|exposi[cç][aã]o|exhibition)\b",
+                r"\b(?:evento|eventos|event|events|concerto|concert|festival|exposi[cç][aã]o|exhibition|"
+                r"desporto|desportiv[oa]s?|sports?|arrai(?:al|ais|s)?|santos populares|marchas populares)\b",
                 query,
                 flags=re.IGNORECASE,
             )
@@ -1226,6 +1603,13 @@ class QualityAssuranceAgent(BaseAgent):
                 missing_data = [
                     item for item in missing_data
                     if not _is_satisfied_event_gap(str(item))
+                    and not re.search(
+                        r"\b(?:exaustiv|exhaustiv|canon|canonical|idioma|language|"
+                        r"r[oó]tulos?|labels?|conte[uú]do|content|ingl[eê]s|english|"
+                        r"pt[-\s]?pt|slug|morada|address|url|link|fonte|source|data|date|evento|event)\b",
+                        cls._normalize_query(str(item or "")),
+                        flags=re.IGNORECASE,
+                    )
                 ]
                 if len(missing_data) != before_count:
                     reasoning_notes.append("grounded event result satisfies requested filters")
@@ -1413,6 +1797,45 @@ class QualityAssuranceAgent(BaseAgent):
                         required_agent="planner",
                     )
                     reasoning_notes.append("missing requested food stop")
+
+                multi_stop_plan_requested = bool(
+                    re.search(
+                        r"\b(?:full\s+day|dia\s+inteiro|1\s+dia|one\s+day|roteiro|itinerario|itinerary|"
+                        r"museums?|museus|viewpoints?|miradouros?|monuments?|monumentos)\b",
+                        normalized_user_query,
+                        flags=re.IGNORECASE,
+                    )
+                )
+                if multi_stop_plan_requested:
+                    route_stop_count = len(
+                        re.findall(
+                            r"(?m)^\s*[-*]\s+\*\*[^*\n]{3,160}\*\*",
+                            combined_output,
+                        )
+                    )
+                    grounded_field_count = len(
+                        re.findall(
+                            r"\*\*(?:Address|Morada|More details|Mais detalhes|Website|Category|Categoria|Hours|Hor[aá]rio|Price|Pre[cç]o)\s*:\*\*",
+                            combined_output,
+                            flags=re.IGNORECASE,
+                        )
+                    )
+                    generic_city_leg = bool(
+                        re.search(
+                            r"\b(?:rossio|baixa|chiado|carmo|marques|marqu[eê]s)\s*(?:->|→)\s*(?:lisbon|lisboa)\b|"
+                            r"\b(?:lisbon|lisboa)\s*(?:->|→)\s*[^:\n]+",
+                            normalized_final_output,
+                            flags=re.IGNORECASE,
+                        )
+                    )
+                    if route_stop_count < 2 or grounded_field_count == 0 or generic_city_leg:
+                        add_gap(
+                            "concrete grounded itinerary stops and non-generic movement legs"
+                            if language == "en"
+                            else "paragens concretas fundamentadas e deslocações não genéricas",
+                            required_agent="planner",
+                        )
+                        reasoning_notes.append("planner final response is too generic for a multi-stop itinerary")
 
             asks_movement_details = bool(
                 re.search(
@@ -1893,6 +2316,12 @@ class QualityAssuranceAgent(BaseAgent):
             agents_called=agents_called,
             llm_result=llm_result,
         )
+        llm_result = self._normalize_place_partial_no_result_validation(
+            user_query=user_query,
+            agent_outputs=agent_outputs,
+            agents_called=agents_called,
+            llm_result=llm_result,
+        )
         llm_result = self._normalize_place_query_validation(
             user_query=user_query,
             agents_called=agents_called,
@@ -1948,6 +2377,12 @@ class QualityAssuranceAgent(BaseAgent):
         fact_check = self._merge_fact_check_results(
             combined_fact_check=combined_fact_check,
             per_agent_fact_checks=per_agent_fact_checks,
+        )
+        fact_check = self._normalize_place_partial_fact_check(
+            fact_check=fact_check,
+            user_query=user_query,
+            agent_outputs=agent_outputs,
+            agents_called=agents_called,
         )
 
         # Merge fact-check disclaimers into LLM result
@@ -2022,6 +2457,12 @@ class QualityAssuranceAgent(BaseAgent):
             language=language,
             agent_name="final",
             intermediate_output=False,
+        )
+        fact_check = self._normalize_place_partial_fact_check(
+            fact_check,
+            user_query,
+            {"final": final_response},
+            ["final"],
         )
         critical_issues = self._dedupe_preserve_order(
             list(result.get("critical_issues", []))
@@ -2180,6 +2621,13 @@ class QualityAssuranceAgent(BaseAgent):
             repaired = clean_response(response.content, _print=False).strip()
             if self._repair_collapsed_structured_draft(draft_response, repaired):
                 return draft_response
+            if (
+                self._repair_added_specific_lookup_intro(draft_response, repaired)
+                or self._repair_promoted_researcher_cards_to_headings(draft_response, repaired)
+                or self._repair_added_missing_value_placeholders(draft_response, repaired)
+                or self._repair_degraded_category_listing(draft_response, repaired)
+            ):
+                return final_post_qa_guard(draft_response, language=language)
             repaired_lower = repaired.lower()
             if any(
                 marker in repaired_lower
@@ -2219,6 +2667,69 @@ class QualityAssuranceAgent(BaseAgent):
         if draft_sections >= 2 and repaired_sections == 0:
             return True
         return False
+
+    @staticmethod
+    def _repair_added_specific_lookup_intro(draft_response: str, repaired_response: str) -> bool:
+        """Return whether QA invented an exact-lookup failure intro not in the draft."""
+        intro_re = re.compile(
+            r"\b(?:não encontrei um (?:evento|local) específico com o nome|"
+            r"nao encontrei um (?:evento|local) especifico com o nome|"
+            r"i could not find a specific (?:event|place) named)\b",
+            flags=re.IGNORECASE,
+        )
+        return bool(intro_re.search(repaired_response or "")) and not bool(intro_re.search(draft_response or ""))
+
+    @staticmethod
+    def _repair_promoted_researcher_cards_to_headings(draft_response: str, repaired_response: str) -> bool:
+        """Return whether QA converted grounded researcher cards into H3 item headings."""
+        draft_has_bullet_cards = bool(
+            re.search(
+                r"(?m)^\s*(?:[-*]\s*)?\*\*[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s+[^*\n]+\*\*\s*$",
+                draft_response or "",
+            )
+            and re.search(r"(?m)^\s{4,}[-*]\s+(?:📂|📍|🕐|🕒|💶|⭐|📞|✉️|🌐|🔗|🎟️)\s+\*\*", draft_response or "")
+        )
+        repaired_has_h3_cards = bool(
+            re.search(
+                r"(?m)^###\s+(?:🛏️|🏛️|🍽️|☕|🥐|🌿|📍|🖼️|🎵|📚|🛍️|📅|🏅|🏷️|🎪)\s+\*\*[^*\n]+\*\*\s*$",
+                repaired_response or "",
+            )
+            and re.search(r"(?m)^[-*]\s+(?:📂|📍|🕐|🕒|💶|⭐|📞|✉️|🌐|🔗|🎟️|📏)\s+\*\*", repaired_response or "")
+        )
+        return draft_has_bullet_cards and repaired_has_h3_cards
+
+    @staticmethod
+    def _repair_added_missing_value_placeholders(draft_response: str, repaired_response: str) -> bool:
+        """Return whether QA introduced user-facing missing-value placeholders."""
+        placeholder_re = re.compile(
+            r"\b(?:não indicado|nao indicado|não disponível|nao disponivel|not available|not indicated|unknown|n/a)\b",
+            flags=re.IGNORECASE,
+        )
+        return bool(placeholder_re.search(repaired_response or "")) and not bool(placeholder_re.search(draft_response or ""))
+
+    @staticmethod
+    def _repair_degraded_category_listing(draft_response: str, repaired_response: str) -> bool:
+        """Return whether QA rewrote a category inventory into unrelated cards."""
+        category_heading_re = re.compile(
+            r"(?i)\b(?:Categorias de Locais(?: Dispon[ií]veis)?|Categorias de Eventos em Lisboa|"
+            r"Categorias de Servi[cç]os|Available Place Categories|Event Categories in Lisbon|"
+            r"Service Categories)\b"
+        )
+        if not category_heading_re.search(draft_response or ""):
+            return False
+
+        category_bullet_re = re.compile(
+            r"(?m)^\s*[-*]\s+[\U0001F300-\U0001FAFF\u2300-\u23FF\u2600-\u27BF\uFE0F\u200D]+\s+\*\*[^*\n]+:\*\*"
+        )
+        draft_count = len(category_bullet_re.findall(draft_response or ""))
+        repaired_count = len(category_bullet_re.findall(repaired_response or ""))
+        if draft_count >= 4 and repaired_count < max(3, draft_count // 2):
+            return True
+
+        if not category_heading_re.search(repaired_response or ""):
+            return True
+
+        return len(re.findall(r"(?i)\*\*(?:Locais de gastronomia|Food and Dining)\*\*", repaired_response or "")) >= 3
 
     def _verify_facts(
         self,
@@ -2470,7 +2981,39 @@ class QualityAssuranceAgent(BaseAgent):
                         f"Temperature inversion: tMin ({tmin_m[0]}°C) > tMax ({tmax_m[0]}°C)"
                     )
 
-        # ── Check 9: Dynamic-data disclaimers ─────────────────────────
+        # ── Check 9: Event category alignment ─────────────────────────
+        checks.append("event_category_alignment")
+        category_labels = [
+            match.strip()
+            for match in re.findall(
+                r"\*\*(?:Categoria|Category):\*\*\s*([^\n\r]+)",
+                combined_output,
+                flags=re.IGNORECASE,
+            )
+            if match.strip()
+        ]
+        if category_labels:
+            response_category_keys = {
+                _qa_event_category_key(re.sub(r"\s*\|.*$", "", label).strip())
+                for label in category_labels
+            }
+            requested_category_keys = _qa_requested_event_category_keys(user_query)
+            forbidden_category_keys = _qa_forbidden_event_category_keys(user_query)
+            if requested_category_keys:
+                unexpected = sorted(response_category_keys - requested_category_keys)
+                if unexpected:
+                    add_critical_issue(
+                        "Event response includes categories outside the user's requested category filter: "
+                        + ", ".join(unexpected[:4])
+                    )
+            forbidden_present = sorted(response_category_keys & forbidden_category_keys)
+            if forbidden_present:
+                add_critical_issue(
+                    "Event response includes a category explicitly excluded by the user: "
+                    + ", ".join(forbidden_present[:4])
+                )
+
+        # ── Check 10: Dynamic-data disclaimers ────────────────────────
         # Adds informational caveats for data that cannot be deterministically
         # verified at runtime (events change daily, bus routes change, etc.).
         checks.append("dynamic_data_disclaimers")
@@ -2507,7 +3050,7 @@ class QualityAssuranceAgent(BaseAgent):
                 "as GTFS data may not reflect the most recent changes."
             )
 
-        # ── Check 10: User-facing output hygiene ───────────────────────
+        # ── Check 11: User-facing output hygiene ───────────────────────
         # Flags backend-oriented fields that should never reach the final UI.
         checks.append("output_hygiene")
         if intermediate_output:
@@ -2601,7 +3144,9 @@ class QualityAssuranceAgent(BaseAgent):
                 r"\b(?:start at|from the|if you prefer|have lunch|i couldn['’]?t|couldn['’]?t confirm|"
                 r"after lunch|allow about|good first stop|walking is|how to get|bel[eé]m stops|"
                 r"by tram|taxi|rideshare|no direct bus routes found|no carris metropolitana stops found|"
-                r"try a more specific|you may need to transfer|consider a metro|appears to be inside lisbon city|carris urban)\b",
+                r"try a more specific|you may need to transfer|consider a metro|appears to be inside lisbon city|carris urban|"
+                r"one of the most recent|world heritage|adult|children|youngster|free with lisboa card|"
+                r"temporarily closed|opening hours|reviews|given its outstanding|maritime museum reflects)\b",
                 body_without_sources,
                 flags=re.IGNORECASE,
             ):
@@ -2648,6 +3193,11 @@ class QualityAssuranceAgent(BaseAgent):
             combined_output,
         ):
             add_critical_issue("Structured emoji field labels must start on their own line.")
+
+        if _qa_response_has_generic_intro_card_defect(combined_output):
+            add_critical_issue(
+                "Generic place-list intro text must not be rendered as a duplicated place card."
+            )
 
         for line in combined_output.splitlines():
             if re.search(r"(?:📞|\*\*(?:Phone|Telefone|Contact|Contacto):\*\*)", line, re.IGNORECASE):

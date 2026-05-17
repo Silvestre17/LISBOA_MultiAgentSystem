@@ -18,6 +18,8 @@ from agent.agents.base import BaseAgent, clean_response, parse_json_response
 from agent.prompts.supervisor import get_supervisor_prompt
 from agent.utils.geographic_scope import (
     build_geographic_out_of_scope_response,
+    extract_aml_municipality_mentions,
+    extract_outside_aml_mentions,
     route_mentions_outside_aml,
 )
 from agent.utils.langsmith_tracing import traceable
@@ -93,6 +95,8 @@ class SupervisorAgent(BaseAgent):
             if len(token) < 4:
                 continue
             for keyword in single_token_keywords:
+                if token[0] != keyword[0]:
+                    continue
                 score = SequenceMatcher(None, token, keyword).ratio()
                 if token in keyword or keyword in token:
                     score += 0.08
@@ -225,6 +229,51 @@ class SupervisorAgent(BaseAgent):
         if weather_only_transport_false_positive:
             return False
 
+        weather_warning_false_positive = (
+            cls._looks_like_weather_query(normalized)
+            and re.search(r"\b(?:aviso|avisos|alerta|alertas|warning|warnings)\b", normalized)
+            and re.search(
+                r"\b(?:vento|wind|chuva|rain|temperatura|temperature|trovoada|thunderstorm|"
+                r"precipitacao|precipitation|meteo|weather)\b",
+                normalized,
+            )
+            and not re.search(
+                r"\b(?:metro|bus|autocarro|comboio|train|tram|el[eé]trico|carris|cp|"
+                r"transportes?|public transport|rota|route|"
+                r"como\s+(?:vou|chego|posso ir|ir)|how\s+(?:do|can)\s+i\s+(?:get|go)|"
+                r"from\s+.+\s+to|de\s+.+\s+para\s+.+\s+(?:de\s+metro|de\s+autocarro|de\s+comboio))\b",
+                normalized,
+            )
+        )
+        if weather_warning_false_positive:
+            return False
+
+        event_calendar_false_positive = (
+            re.search(
+                r"\b(?:eventos?|events?|concertos?|concerts?|festivais?|festivals?|"
+                r"arrai(?:al|ais|s)?|santos populares|marchas populares|festas de lisboa)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+            and re.search(
+                r"\b(?:janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|"
+                r"setembro|outubro|novembro|dezembro|january|february|march|april|"
+                r"may|june|july|august|september|october|november|december|"
+                r"este mes|este m[eê]s|this month|esta semana|this week)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+            and not re.search(
+                r"\b(?:metro|bus|autocarro|comboio|train|carris|transportes?|transport|"
+                r"como\s+(?:vou|chego|posso ir|ir)|how\s+(?:do|can)\s+i\s+(?:get|go)|"
+                r"quero\s+(?:ir|apanhar)|preciso\s+(?:de\s+)?ir|from\s+.+\s+to)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+        if event_calendar_false_positive:
+            return False
+
         transport_patterns = [
             r"\bmetro\b",
             r"\bbus\b",
@@ -334,6 +383,28 @@ class SupervisorAgent(BaseAgent):
         return route_mentions_outside_aml(user_message)
 
     @classmethod
+    def _is_geographic_out_of_scope_query(cls, user_message: str) -> bool:
+        """Detect non-route Lisbon-domain requests that target places outside AML."""
+        if cls._is_geographic_out_of_scope_route(user_message):
+            return False
+        if not route_mentions_outside_aml(user_message):
+            return False
+
+        normalized = cls._normalize_query(user_message)
+        lisbon_domain_terms = (
+            r"weather|forecast|tempo|previs[aã]o|avisos?|warnings?|"
+            r"events?|eventos?|concertos?|concerts?|festival|exposi[cç][aã]o|"
+            r"places?|locais|atra[cç][oõ]es?|attractions?|museus?|museums?|"
+            r"monumentos?|monuments?|miradouros?|viewpoints?|"
+            r"restaurants?|restaurantes?|caf[eé]s?|pastelarias?|"
+            r"farm[aá]cias?|pharmacies|hospitals?|bibliotecas?|libraries|"
+            r"pol[ií]cia|police|parking|estacionamento|servi[cç]os?|services?|"
+            r"roteiro|itiner[aá]rio|itinerary|plano|plan|visitar|visit|"
+            r"melhores|best|recomenda|recommend|onde|where|nearby|perto"
+        )
+        return bool(re.search(rf"\b(?:{lisbon_domain_terms})\b", normalized, flags=re.IGNORECASE))
+
+    @classmethod
     def _is_unsupported_action_request(cls, user_message: str) -> bool:
         """Detects transactional actions that LISBOA can explain but cannot perform."""
         normalized = cls._normalize_query(user_message)
@@ -364,7 +435,15 @@ class SupervisorAgent(BaseAgent):
         normalized = cls._normalize_query(user_message)
         if not normalized:
             return False
-        if not re.search(r"\b(?:tempo real|real[-\s]?time|live|agora|now)\b", normalized):
+        wait_time_catalog_request = bool(
+            re.search(r"\b(?:tempos?\s+de\s+espera|wait\s+times?)\b", normalized)
+            and re.search(r"\b(?:todas?|todos?|all|every)\b", normalized)
+            and re.search(r"\b(?:esta[cç][oõ]es?|stations?|linhas?|lines|metro|subway)\b", normalized)
+        )
+        if (
+            not wait_time_catalog_request
+            and not re.search(r"\b(?:tempo real|real[-\s]?time|live|agora|now)\b", normalized)
+        ):
             return False
         has_transport_catalog_context = bool(
             re.search(
@@ -508,6 +587,19 @@ class SupervisorAgent(BaseAgent):
                 ),
             }
 
+        if self._is_geographic_out_of_scope_query(user_message):
+            return {
+                "reasoning": "Direct geographic out-of-scope domain override",
+                "agents": [],
+                "direct_response": self._sanitize_direct_response(
+                    build_geographic_out_of_scope_response(
+                        user_message,
+                        language=language,
+                        mobility=False,
+                    )
+                ),
+            }
+
         if self._is_obvious_out_of_scope(user_message):
             return {
                 "reasoning": "Direct out-of-scope override",
@@ -548,7 +640,15 @@ class SupervisorAgent(BaseAgent):
 
         tokens = normalized.split()
         anaphoric_tokens = {"it", "that", "those", "there", "same", "isso", "isto", "essa", "esse", "aquela", "aquele"}
-        return len(tokens) <= 6 and any(token in anaphoric_tokens for token in tokens)
+        if len(tokens) <= 6 and any(token in anaphoric_tokens for token in tokens):
+            return True
+        return bool(
+            re.search(
+                r"\b(?:destes|destas|desses|dessas|estes|estas|esses|essas|"
+                r"anteriores|previous|above|listed|these|those)\b",
+                normalized,
+            )
+        )
 
     @classmethod
     def _single_domain_override(cls, user_message: str) -> Optional[Dict[str, Any]]:
@@ -597,7 +697,9 @@ class SupervisorAgent(BaseAgent):
         event_terms = [
             "event", "events", "evento", "eventos", "concert", "concerto",
             "festival", "exhibition", "exposição", "exposicao", "music", "música", "musica",
-            "what's on", "o que há", "o que ha",
+            "what's on", "o que há", "o que ha", "desporto", "desportivo",
+            "desportivos", "sports", "sport", "arraial", "arraiais", "arrais",
+            "santos populares", "marchas populares", "festas de lisboa",
         ]
         place_terms = [
             "attraction", "attractions", "atração", "atrações", "atracao", "atracoes",
@@ -629,6 +731,19 @@ class SupervisorAgent(BaseAgent):
             transport_terms,
             minimum_ratio=0.85,
         )
+        nearest_metro_request = bool(
+            transport_hit
+            and re.search(r"\b(?:metro|station|esta[cç][aã]o|esta[cç][oõ]es)\b", message_lower)
+            and re.search(r"\b(?:mais\s+perto|mais\s+pr[oó]xim[ao]s?|nearest|closest)\b", message_lower)
+        )
+        if nearest_metro_request:
+            return {
+                "reasoning": "Direct nearest-metro override",
+                "agents": ["transport"],
+                "direct_response": None,
+            }
+        if weather_hit and transport_hit and cls._weather_reference_is_route_modifier(message_lower):
+            weather_hit = False
         exact_event_hit = any(
             re.search(pattern, message_lower)
             for pattern in (
@@ -693,14 +808,60 @@ class SupervisorAgent(BaseAgent):
                 "direct_response": None,
             }
 
+        if transport_hit and re.search(
+            r"\b(?:(?:when|quando|a\s+que\s+horas).{0,80}\b(?:next|pr[oó]xim[ao]|bus|autocarro|linha|line)|"
+            r"(?:next|pr[oó]xim[ao]|eta|arrival|chegada).{0,80}\b(?:bus|autocarro|linha|line)|"
+            r"(?:bus|autocarro|linha|line)\s+\d{1,4}[a-z]?)\b",
+            message_lower,
+            flags=re.IGNORECASE,
+        ):
+            return {
+                "reasoning": "Direct live bus-arrival override",
+                "agents": ["transport"],
+                "direct_response": None,
+            }
+
         if service_hit and transport_hit and not any([weather_hit, event_hit, place_hit]):
             needs_service_confirmation = bool(
                 re.search(r"\b(?:confirmar|confirma|h[aá]\s+uma?|chamad[ao]|called|named)\b", message_lower)
             )
+            nearby_service_request = bool(
+                re.search(
+                    r"\b(?:nearest|closest|nearby|mais\s+pr[oó]xim[ao]s?|"
+                    r"pr[oó]xim[ao]s?|perto\s+(?:de|do|da|dos|das)|"
+                    r"junto\s+(?:de|do|da|dos|das)|near)\b",
+                    message_lower,
+                    flags=re.IGNORECASE,
+                )
+            )
+            service_context_before_origin = re.split(
+                r"\b(?:desde|from|a\s+partir\s+de)\b",
+                message_lower,
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )[0]
+            explicit_service_destination = bool(
+                needs_service_confirmation
+                or re.search(
+                    r"\b(?:farm[aá]cia|biblioteca|hospital|mercado|escola|parque|library|pharmacy|market)"
+                    r"\b.{0,100}\b(?:rua|avenida|av\.?|largo|pra[cç]a|travessa|\d{4}-\d{3})\b",
+                    service_context_before_origin,
+                    flags=re.IGNORECASE,
+                )
+                or re.search(
+                    r"\b(?:farm[aá]cia|biblioteca|hospital|mercado|escola|parque|library|pharmacy|market)"
+                    r"\s+[A-ZÁÉÍÓÚÂÊÔÃÕÇ][\wÀ-ÿ'-]+",
+                    user_message,
+                )
+            )
             has_explicit_origin = bool(
                 re.search(r"\b(?:desde|a\s+partir\s+de|from|de|do|da)\s+.+\b(?:para|at[eé]|até|to)\b", message_lower)
+                or re.search(r"\b(?:estou|encontro-me|encontro me|i\s+am|i'm)\s+(?:no|na|em|at)\s+.+\b(?:para|at[eé]|até|to)\b", message_lower)
             )
-            agents = ["transport"] if has_explicit_origin and not needs_service_confirmation else ["researcher", "transport"]
+            if nearby_service_request and not explicit_service_destination:
+                agents = ["researcher"]
+            else:
+                agents = ["transport"] if has_explicit_origin and not needs_service_confirmation else ["researcher", "transport"]
             return {
                 "reasoning": "Direct service-destination mobility override; route/confirmation request should not become an itinerary planner task.",
                 "agents": agents,
@@ -783,7 +944,9 @@ class SupervisorAgent(BaseAgent):
         event_terms = [
             "event", "events", "evento", "eventos", "concert", "concerto",
             "festival", "exhibition", "exposição", "exposicao", "music", "música",
-            "musica", "what's on", "o que há", "o que ha",
+            "musica", "what's on", "o que há", "o que ha", "desporto",
+            "desportivo", "desportivos", "sports", "sport", "arraial", "arraiais",
+            "arrais", "santos populares", "marchas populares", "festas de lisboa",
         ]
         place_terms = [
             "attraction", "attractions", "atração", "atrações", "atracao", "atracoes",
@@ -877,12 +1040,12 @@ class SupervisorAgent(BaseAgent):
             r"\bschedule\b",
             r"\bday trip\b",
             r"\bpasseio\b",
-            r"\bvisitar\b",
-            r"\bvisitando\b",
             r"\bplane(?:ar|ia|ie)\b",
             r"\borganiza(?:r)?\b",
             r"\bir a vários? locais\b",
             r"\bvisit multiple\b",
+            r"\b(?:visitar|visitando)\b.*\b(?:varios|vários|multiple|locais|places|stops|paragens|"
+            r"roteiro|itinerario|itinerary|percurso|rota|route|ordem|order|dia\s+inteiro|full\s+day)\b",
             r"\bpasseio\b.*\b(?:\d+\s*h|\d+\s*horas?|percurso|coerente|alternativo|locais|sitios|s[ií]tios)\b",
             r"\b(?:percurso|rota)\s+(?:a pe|a p[eé]|pedonal|coerente|alternativ[oa])\b",
             r"\bwalk(?:ing)?\s+(?:route|around)\b",
@@ -911,18 +1074,34 @@ class SupervisorAgent(BaseAgent):
                 r"\b(?:nao|não)\s+(?:me\s+)?(?:des|de|d[eê]s|fa[cç]as?|quero|preciso)\s+(?:um\s+|uma\s+)?(?:roteiro|itinerario|itiner[aá]rio|rota|percurso)\b",
                 normalized,
             )
-            or re.search(r"\b(?:sem|without|no)\s+(?:roteiro|itinerario|itinerary|route|walking route)\b", normalized)
+            or re.search(
+                r"\b(?:sem|without|no)\s+(?:(?:criar|fazer|montar|gerar|produzir|give\s+me|make\s+me)\s+)?"
+                r"(?:um\s+|uma\s+|an?\s+)?(?:roteiro|itinerario|itiner[aá]rio|itinerary|route|walking route|plano|plan)\b",
+                normalized,
+            )
             or re.search(r"\bdo\s+not\s+give\s+me\s+(?:an?\s+)?(?:itinerary|route|plan)\b", normalized)
             or re.search(r"\bdon'?t\s+give\s+me\s+(?:an?\s+)?(?:itinerary|route|plan)\b", normalized)
         )
         if not explicit_negation:
             return False
+        planning_context = re.sub(
+            r"\b(?:sem|without|no)\s+(?:(?:criar|fazer|montar|gerar|produzir|give\s+me|make\s+me)\s+)?"
+            r"(?:um\s+|uma\s+|an?\s+)?(?:roteiro|itinerario|itiner[aá]rio|itinerary|route|walking route|plano|plan)\b",
+            "",
+            normalized,
+        )
+        planning_context = re.sub(
+            r"\b(?:nao|não)\s+(?:me\s+)?(?:des|de|d[eê]s|fa[cç]as?|quero|preciso)\s+"
+            r"(?:um\s+|uma\s+)?(?:roteiro|itinerario|itiner[aá]rio|rota|percurso)\b",
+            "",
+            planning_context,
+        )
         return bool(
             re.search(
                 r"\b(?:explica|explicar|resumo|resume|summarize|explain|historia|history|cultura|culture|o que era|what was)\b",
                 normalized,
             )
-            or not re.search(r"\b(?:planeia|planear|plan|visitar|visit|dia|day)\b", normalized)
+            or not re.search(r"\b(?:planeia|planear|plan|visitar|visit|dia|day|roteiro|itinerario|itinerary|route)\b", planning_context)
         )
 
     @classmethod
@@ -970,6 +1149,8 @@ class SupervisorAgent(BaseAgent):
         normalized = cls._normalize_query(user_message)
         if not normalized:
             return False
+        if cls._weather_reference_is_route_modifier(normalized):
+            return False
 
         full_planning_markers = [
             r"\bfull\s+(?:day|itinerary)\b",
@@ -998,6 +1179,34 @@ class SupervisorAgent(BaseAgent):
         ]
         has_route_request = any(re.search(pattern, normalized) for pattern in route_markers)
         return cls._looks_like_weather_query(normalized) and cls._looks_like_transport_query(normalized) and has_route_request
+
+    @classmethod
+    def _weather_reference_is_route_modifier(cls, message_lower: str) -> bool:
+        """Return whether weather wording is only a route preference, not a weather request."""
+        normalized = cls._normalize_query(message_lower)
+        if not normalized:
+            return False
+        has_route_condition = bool(
+            re.search(
+                r"\b(?:com\s+chuva|se\s+chover|se\s+estiver\s+a\s+chover|"
+                r"sem\s+apanhar\s+chuva|evitar\s+chuva|with\s+rain|if\s+it\s+rains|"
+                r"in\s+the\s+rain|avoid\s+rain|rainy)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+        if not has_route_condition:
+            return False
+        explicit_weather_request = bool(
+            re.search(
+                r"\b(?:vai\s+chover|vai\s+estar|previsao|forecast|tempo|weather|meteo|"
+                r"aviso|avisos|alerta|alertas|warning|warnings|temperatura|temperature|"
+                r"vento|wind)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+        return not explicit_weather_request
 
     @classmethod
     def _is_weather_only_outdoor_decision_query(cls, user_message: str) -> bool:
@@ -1043,6 +1252,14 @@ class SupervisorAgent(BaseAgent):
     def _is_category_browse_query(cls, user_message: str) -> bool:
         """Detects category-browsing questions that should not become itinerary plans."""
         normalized = cls._normalize_query(user_message)
+        place_nouns = (
+            r"(?:monumentos?|museus?|locais|lugares|atra[cç][oõ]es?|miradouros?|"
+            r"jardins?|parques?|restaurantes?|cafes?|cafés?|pastelarias?|bairros?|"
+            r"mercados?|bibliotecas?|lojas|centros?\s+comerciais?|hot[eé]is|alojamentos?|"
+            r"cruzeiros?|praias?|golfe?|fado|ruas|viewpoints?|museums?|monuments?|"
+            r"places?|attractions?|gardens?|parks?|restaurants?|cafes?|neighbou?rhoods?|"
+            r"markets?|libraries?|shops?|malls?|hotels?|accommodations?|cruises?|beaches?|golf|streets?)"
+        )
         category_patterns = [
             r"\bwhat kinds? of\b.*\b(?:places?|events?|public services?|services?)\b",
             r"\bwhat types? of\b.*\b(?:places?|events?|public services?|services?)\b",
@@ -1053,6 +1270,10 @@ class SupervisorAgent(BaseAgent):
             r"\b(?:locais|eventos|servi[cç]os)\b.*\b(?:posso procurar|posso explorar|categorias disponiveis|categorias)\b",
             r"\b(?:que|quais|diz-me|fala-me|lista|indica)\b.*\b(?:monumentos?|museus?|locais|atra[cç][oõ]es)\b.*\b(?:visitar|em|no|na|perto)\b",
             r"\b(?:monumentos?|museus?|locais|atra[cç][oõ]es)\b.*\b(?:posso ir visitar|posso visitar|para visitar|vale a pena visitar)\b",
+            rf"\b(?:que|quais|diz-me|fala-me|lista|indica|mostra|recomenda)\b.*\b{place_nouns}\b.*\b(?:visitar|conhecer|ver|morada|endere[cç]o|perto|em|no|na|com)\b",
+            rf"\b{place_nouns}\b.*\b(?:posso\s+(?:visitar|conhecer|ver)|para\s+visitar|vale\s+a\s+pena|morada|endere[cç]o)\b",
+            rf"\b(?:which|what|tell me|list|show me|recommend)\b.*\b{place_nouns}\b.*\b(?:visit|see|address|near|in|around|with)\b",
+            rf"\b{place_nouns}\b.*\b(?:can\s+i\s+visit|to\s+visit|worth\s+visiting|address)\b",
         ]
         return any(re.search(pattern, normalized) for pattern in category_patterns)
 
@@ -1240,56 +1461,26 @@ class SupervisorAgent(BaseAgent):
 
         message_lower = user_message.lower()
 
-        # 1. Check for Out-of-Scope keywords (Locations outside AML)
-        # Note: AML includes Sintra, Cascais, Montijo, Setúbal, etc. - these are IN SCOPE!
-        # CRITICAL: Use word boundaries to avoid false positives
-        # e.g. "porto" must NOT match "aeroporto", "transporte", etc.
-        forbidden_patterns = [
-            r"\bporto\b",
-            r"\baveiro\b",
-            r"\bbraga\b",
-            r"\bcoimbra\b",
-            r"\bfaro\b",
-            r"\balgarve\b",
-            r"\bévora\b",
-            r"\bmadrid\b",
-            r"\bparis\b",
-            r"\blondon\b",
-            r"\bbarcelona\b",
-            r"\bnew york\b",
-            r"\btokyo\b",
-            r"\broma\b",
-            r"\brome\b",
-        ]
-        if any(re.search(pat, message_lower) for pat in forbidden_patterns):
-            oos_msg = self._build_out_of_scope_response(language)
+        # 1. Geographic scope fallback. Keep this aligned with the shared AML
+        # scope helper so official AML municipalities never become false
+        # out-of-scope matches through broad tokens such as "Roma" or "Porto".
+        outside_aml_labels = extract_outside_aml_mentions(user_message)
+        if outside_aml_labels:
+            oos_msg = build_geographic_out_of_scope_response(
+                user_message,
+                language=language,
+                mobility=self._looks_like_transport_query(message_lower),
+            )
             return {
                 "reasoning": "Fallback: Detected out-of-scope location (outside AML)",
                 "agents": [],
                 "direct_response": self._sanitize_direct_response(oos_msg),
             }
 
-        # 2. AML locations that ARE in scope - should trigger transport agent
-        aml_keywords = [
-            "sintra",
-            "cascais",
-            "oeiras",
-            "amadora",
-            "loures",
-            "odivelas",
-            "almada",
-            "seixal",
-            "barreiro",
-            "montijo",
-            "alcochete",
-            "setúbal",
-            "palmela",
-            "sesimbra",
-            "mafra",
-            "vila franca",
-        ]
-        if any(loc in message_lower for loc in aml_keywords):
-            # These are AML locations - use transport agent
+        # 2. AML municipalities are in scope. In fallback mode, route mobility
+        # requests to Transport and let unsupported-data answers be expressed
+        # as data/source limitations, not geographic exclusions.
+        if extract_aml_municipality_mentions(user_message) and self._looks_like_transport_query(message_lower):
             return {
                 "reasoning": "Fallback: AML location detected - using transport agent",
                 "agents": ["transport"],
@@ -1334,6 +1525,17 @@ class SupervisorAgent(BaseAgent):
             "visitar",
             "event",
             "evento",
+            "desporto",
+            "desportivo",
+            "desportivos",
+            "sports",
+            "sport",
+            "arraial",
+            "arraiais",
+            "arrais",
+            "santos populares",
+            "marchas populares",
+            "festas de lisboa",
             "attraction",
             "atração",
             "what to do",

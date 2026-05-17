@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 from agent.agents.base import BaseAgent
 from agent.prompts.weather import get_weather_prompt
+from agent.utils.geographic_scope import extract_aml_municipality_mentions
 from agent.utils.langsmith_tracing import traceable
 from agent.state import AgentState
 from agent.utils.langgraph_compat import ToolNode
@@ -533,12 +534,30 @@ class WeatherAgent(BaseAgent):
     @staticmethod
     def _build_unsupported_location_message(location: str, language: str) -> str:
         """Build a localized response for city-specific weather outside LISBOA's grounded scope."""
+        aml_labels = extract_aml_municipality_mentions(location)
+        aml_place = aml_labels[0] if aml_labels else ""
         if language == "pt":
+            if aml_place:
+                return (
+                    "### 🌤️ **Cobertura Meteorológica na AML**\n\n"
+                    f"⚠️ **{aml_place} está dentro da Área Metropolitana de Lisboa**, mas esta integração "
+                    "meteorológica só confirma previsão IPMA de curto prazo e avisos para Lisboa. "
+                    "Não vou extrapolar esses dados para outro município da AML.\n\n"
+                    "💡 Para uma previsão municipal específica, confirma diretamente no IPMA."
+                )
             return (
                 "### 🌤️ **Âmbito Meteorológico**\n\n"
                 f"⚠️ Não consigo fornecer uma previsão meteorológica específica para {location} neste sistema. "
                 "O **LISBOA está focado em Lisboa/AML**, com previsões IPMA de curto prazo para Lisboa "
                 "e, quando pedido, uma visão geral de Portugal. Para essa localidade, consulta diretamente o IPMA."
+            )
+        if aml_place:
+            return (
+                "### 🌤️ **AML Weather Coverage**\n\n"
+                f"⚠️ **{aml_place} is inside the Lisbon Metropolitan Area**, but this weather integration "
+                "only confirms short-range IPMA forecasts and warnings for Lisbon. "
+                "I will not extrapolate those data to another AML municipality.\n\n"
+                "💡 For a municipality-specific forecast, check IPMA directly."
             )
         return (
             "### 🌤️ **Weather Scope**\n\n"

@@ -122,7 +122,7 @@ CARRIS_LIMITATION_NOTICE = """
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 **Carris Metropolitana API** (this search) covers AML metropolitan / intermunicipal buses:
-• It serves municipalities such as Sintra, Cascais, Oeiras, Amadora, Loures, Odivelas, Almada, Seixal, Montijo and others
+• It serves the 18 AML municipalities: Alcochete, Almada, Amadora, Barreiro, Cascais, Lisboa, Loures, Mafra, Moita, Montijo, Odivelas, Oeiras, Palmela, Seixal, Sesimbra, Setúbal, Sintra and Vila Franca de Xira
 • Many lines also enter **Lisbon municipality** and hubs such as Colégio Militar, Marquês de Pombal, Belém or Oriente
 
 **Carris (Urban Lisbon)** routes are still separate:

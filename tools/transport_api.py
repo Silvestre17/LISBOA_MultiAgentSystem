@@ -44,7 +44,11 @@ from tools.cp_api import (
     get_cp_aml_trains,
     get_cp_station_info,
 )
-from tools.location_resolver import get_location_display_name, normalize_location_text
+from tools.location_resolver import (
+    build_location_ambiguity_preamble,
+    get_location_display_name,
+    normalize_location_text,
+)
 from tools.utils import haversine_distance
 
 # Import from the split modules
@@ -52,6 +56,8 @@ from tools.metrolisboa_api import (
     METRO_LINES,
     fetch_json_with_retry,
     get_landmark_info,
+    get_metro_live_service_evidence,
+    get_metro_regular_service_context,
     get_station_lines,
 )
 
@@ -63,6 +69,9 @@ METRO_STATUS_URL = "https://app.metrolisboa.pt/status/getLinhas.php"
 # User-facing interchanges are often named after the rail/bus hub rather than
 # the official Metro station. Keep these aliases canonical for route math.
 _METRO_STATION_ALIASES: Dict[str, str] = {
+    "baixa chiado": "Baixa-Chiado",
+    "baixa/chiado": "Baixa-Chiado",
+    "baixa - chiado": "Baixa-Chiado",
     "sete rios": "jardim zoológico",
     "terminal sete rios": "jardim zoológico",
     "marques": "Marquês de Pombal",
@@ -437,6 +446,10 @@ _KNOWN_AMBIGUITIES: Dict[str, Dict[str, str]] = {
 
 def _build_ambiguity_preamble(origin: str, destination: str) -> str:
     """Return a short ambiguity note when a bare ambiguous place token is used."""
+    dynamic_note = build_location_ambiguity_preamble(origin, destination, language="pt")
+    if dynamic_note:
+        return dynamic_note
+
     def _detect(value: str) -> Optional[Dict[str, str]]:
         token = (value or "").strip().lower()
         # Only flag a *bare* place name. "Rua Humberto Madeira" clearly means
@@ -493,6 +506,9 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     # Metro route as if the user meant a street. That is misleading. Surface
     # the ambiguity explicitly so the user can disambiguate.
     ambiguity_note = _build_ambiguity_preamble(origin, destination)
+    if ambiguity_note:
+        return f"### 🧭 **Preciso de confirmar o local**\n\n{ambiguity_note}".strip()
+
     origin_display = _format_location_display_name(origin)
     destination_display = _format_location_display_name(destination)
     route_heading = f"🗺️ **Route: {origin_display} → {destination_display}**"
@@ -518,6 +534,20 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     # Check if they are CP train stations
     origin_cp = get_cp_station_info(origin)
     dest_cp = get_cp_station_info(destination)
+
+    # If a name is both a Metro station and a landmark/area, respect the Metro
+    # station in route calculations. This prevents queries such as
+    # "Alvalade -> Campo Pequeno" from being silently reinterpreted as the
+    # football stadium near Campo Grande.
+    if origin_lines:
+        origin_landmark = None
+        origin_display = metro_origin
+    if dest_lines:
+        dest_landmark = None
+        destination_display = metro_destination
+    if origin_lines or dest_lines:
+        route_heading = f"🗺️ **Route: {origin_display} → {destination_display}**"
+        response = f"{ambiguity_note}\n\n{route_heading}\n\n" if ambiguity_note else f"{route_heading}\n\n"
 
     has_landmarks = bool(origin_landmark or dest_landmark)
 
@@ -578,12 +608,12 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     dest_from_landmark = False
 
     if origin_landmark and origin_landmark.get('metro'):
-        eff_origin = origin_landmark['metro']
+        eff_origin = _canonical_metro_station_name(str(origin_landmark['metro']))
         eff_origin_lines = get_station_lines(eff_origin)
         origin_from_landmark = True
 
     if dest_landmark and dest_landmark.get('metro'):
-        eff_dest = dest_landmark['metro']
+        eff_dest = _canonical_metro_station_name(str(dest_landmark['metro']))
         eff_dest_lines = get_station_lines(eff_dest)
         dest_from_landmark = True
 
@@ -604,6 +634,22 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     if eff_origin_lines and eff_dest_lines:
         sources_used.append("[*Metro de Lisboa*](https://www.metrolisboa.pt)")
         response += "🚇 **METRO ROUTE**\n"
+        metro_service_context = get_metro_regular_service_context(language="en")
+        if not metro_service_context["is_regular_service_open"]:
+            response += (
+                "🌙 **Passenger-service timing:** Outside regular operating "
+                f"hours ({metro_service_context['regular_window']}). This is "
+                "the structural Metro route, not a confirmation that trains "
+                "are running now."
+            )
+            live_evidence = get_metro_live_service_evidence()
+            if live_evidence.get("has_live_wait_times"):
+                response += (
+                    " Live waits were detected at "
+                    f"{live_evidence.get('station')}, so special operation may "
+                    "be active; confirm with Metro de Lisboa before leaving."
+                )
+            response += "\n\n"
 
         common_lines = set(eff_origin_lines) & set(eff_dest_lines)
 
@@ -768,13 +814,47 @@ def get_transport_summary(language: str = "pt") -> str:
         str: Combined transport status summary.
     """
     is_pt = (language or "pt").lower().startswith("pt")
-    now_str = datetime.now().strftime('%H:%M')
-    title = "Ponto de situação dos transportes em Lisboa" if is_pt else "Transport Status in Lisbon"
-    direct_answer = (
-        f"Resumo rápido do Metro, autocarros e comboios atualizado às **{now_str}**."
-        if is_pt
-        else f"Quick status for Metro, buses, and suburban trains updated at **{now_str}**."
+    metro_service_context = get_metro_regular_service_context(
+        language="pt" if is_pt else "en"
     )
+    metro_regular_service_open = bool(
+        metro_service_context["is_regular_service_open"]
+    )
+    metro_regular_window = str(metro_service_context["regular_window"])
+    metro_next_regular_open = str(metro_service_context["next_regular_open"])
+    metro_live_evidence: Dict[str, Any] = {}
+    if not metro_regular_service_open:
+        metro_live_evidence = get_metro_live_service_evidence()
+    now_str = str(metro_service_context["checked_at"]) or datetime.now().strftime(
+        '%H:%M'
+    )
+    title = (
+        "Ponto de situação dos transportes em Lisboa"
+        if is_pt
+        else "Transport Status in Lisbon"
+    )
+    if is_pt and not metro_regular_service_open:
+        direct_answer = (
+            f"Resumo rápido atualizado às **{now_str}**. O Metro está fora do "
+            "horário regular de passageiros; abaixo distingo horário de "
+            "exploração e estado de perturbações."
+        )
+    elif not is_pt and not metro_regular_service_open:
+        direct_answer = (
+            f"Quick status updated at **{now_str}**. Metro is outside regular "
+            "passenger-service hours; below I separate operating hours from "
+            "disruption status."
+        )
+    elif is_pt:
+        direct_answer = (
+            "Resumo rápido do Metro, autocarros e comboios atualizado às "
+            f"**{now_str}**."
+        )
+    else:
+        direct_answer = (
+            "Quick status for Metro, buses, and suburban trains updated at "
+            f"**{now_str}**."
+        )
     source_label = "Fonte" if is_pt else "Source"
     updated_label = "Atualizado" if is_pt else "Updated"
     response = "\n".join(
@@ -783,11 +863,45 @@ def get_transport_summary(language: str = "pt") -> str:
             "",
             f"✅ **{'Resposta direta' if is_pt else 'Direct answer'}:** {direct_answer}",
             "",
+            "---",
+            "",
+            "",
         ]
     )
 
     # 1. Metro Status
     response += "- **🚇 Metro de Lisboa**\n"
+    if not metro_regular_service_open:
+        if is_pt:
+            response += (
+                f"    - 🌙 **Serviço ao passageiro:** fora do horário regular "
+                f"({metro_regular_window})\n"
+            )
+            if metro_next_regular_open:
+                response += (
+                    f"    - 🕡 **Próxima abertura regular:** {metro_next_regular_open}\n"
+                )
+            if metro_live_evidence.get("has_live_wait_times"):
+                response += (
+                    "    - 📡 **Possível operação especial:** há tempos de "
+                    f"espera em tempo real em {metro_live_evidence.get('station')}; "
+                    "confirma no operador antes de sair\n"
+                )
+        else:
+            response += (
+                f"    - 🌙 **Passenger service:** outside regular operating "
+                f"hours ({metro_regular_window})\n"
+            )
+            if metro_next_regular_open:
+                response += (
+                    f"    - 🕡 **Next regular opening:** {metro_next_regular_open}\n"
+                )
+            if metro_live_evidence.get("has_live_wait_times"):
+                response += (
+                    "    - 📡 **Possible special operation:** live waits are "
+                    f"available at {metro_live_evidence.get('station')}; confirm "
+                    "with the operator before leaving\n"
+                )
 
     metro_data = fetch_json_with_retry(METRO_STATUS_URL)
     if metro_data and metro_data.get('resposta'):
@@ -803,21 +917,51 @@ def get_transport_summary(language: str = "pt") -> str:
             status = str(resp.get(line_key, "Unknown")).strip() or "Unknown"
             if status.lower() != 'ok':
                 all_ok = False
-            status_label = "Ok" if status.lower() == "ok" else status
+            if status.lower() == "ok":
+                if metro_regular_service_open:
+                    status_label = "Ok"
+                else:
+                    status_label = (
+                        "sem perturbações reportadas na API"
+                        if is_pt
+                        else "no disruption reported by the API"
+                    )
+            else:
+                status_label = status
             response += f"    - {line_info['emoji']} **{line_labels.get(line_key, line_key.title())}:** {status_label}\n"
 
         if all_ok:
-            status_text = "Circulação normal em todas as linhas" if is_pt else "Normal service on all lines"
-            response += f"    - ✅ **{'Estado geral' if is_pt else 'Overall status'}:** {status_text}\n"
+            if metro_regular_service_open:
+                status_text = "Circulação normal em todas as linhas" if is_pt else "Normal service on all lines"
+                response += f"    - ✅ **{'Estado geral' if is_pt else 'Overall status'}:** {status_text}\n"
+            else:
+                status_text = (
+                    "sem perturbações reportadas; isto não confirma circulação disponível agora"
+                    if is_pt
+                    else "no disruption reported; this does not confirm trains are running now"
+                )
+                response += f"    - ℹ️ **{'Estado API' if is_pt else 'API status'}:** {status_text}\n"
         else:
             warning_text = (
                 "Há perturbações reportadas; confirma a linha afetada antes de sair"
                 if is_pt
                 else "Disruptions are reported; check the affected line before leaving"
             )
+            if not metro_regular_service_open:
+                warning_text = (
+                    "há perturbações reportadas e o Metro está fora do horário regular"
+                    if is_pt
+                    else "disruptions are reported and Metro is outside regular hours"
+                )
             response += f"    - ⚠️ **{'Estado geral' if is_pt else 'Overall status'}:** {warning_text}\n"
     else:
-        response += f"    - ❌ **{'Estado' if is_pt else 'Status'}:** {'Dados indisponíveis' if is_pt else 'Data unavailable'}\n"
+        if metro_regular_service_open:
+            response += f"    - ❌ **{'Estado' if is_pt else 'Status'}:** {'Dados indisponíveis' if is_pt else 'Data unavailable'}\n"
+        else:
+            response += (
+                f"    - ⚠️ **{'Estado API' if is_pt else 'API status'}:** "
+                f"{'dados indisponíveis; confirma operação especial no operador' if is_pt else 'data unavailable; confirm special service with the operator'}\n"
+            )
 
     response += "\n"
 
@@ -906,13 +1050,23 @@ def get_transport_summary(language: str = "pt") -> str:
     if is_pt:
         response += (
             "💡 **Antes de sair:**\n"
-            "- Se vais usar Carris Metropolitana ou CP, confirma a partida específica pouco antes de sair, porque alertas e atrasos agregados não identificam sempre a tua linha.\n\n"
+            "- Se vais usar Carris Metropolitana ou CP, confirma a partida específica pouco antes de sair, porque alertas e atrasos agregados não identificam sempre a tua linha.\n"
         )
+        if not metro_regular_service_open:
+            response += (
+                "- Se precisas do Metro agora, confirma no Metro de Lisboa se há operação especial; `Ok` na API significa apenas que não há perturbação reportada.\n"
+            )
+        response += "\n"
     else:
         response += (
             "💡 **Before leaving:**\n"
-            "- If you plan to use Carris Metropolitana or CP, check the specific departure shortly before you leave because aggregate alerts and delays do not always identify your line.\n\n"
+            "- If you plan to use Carris Metropolitana or CP, check the specific departure shortly before you leave because aggregate alerts and delays do not always identify your line.\n"
         )
+        if not metro_regular_service_open:
+            response += (
+                "- If you need Metro now, confirm with Metro de Lisboa whether special service is running; API `Ok` only means no disruption is reported.\n"
+            )
+        response += "\n"
 
     response += f"📌 **{source_label}:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | [*Carris*](https://www.carris.pt) | [*Carris Metropolitana*](https://www.carrismetropolitana.pt) | [*CP*](https://www.cp.pt) | **{updated_label}:** {now_str}\n"
 

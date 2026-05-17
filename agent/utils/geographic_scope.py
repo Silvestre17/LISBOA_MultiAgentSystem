@@ -1,6 +1,6 @@
 # ==========================================================================
 # Master Thesis - Geographic Scope Utilities
-#   - André Filipe Gomes Silvestre, 20240502
+#   - Andre Filipe Gomes Silvestre, 20240502
 #
 #   Shared helpers for keeping LISBOA responses inside the supported
 #   Lisbon Metropolitan Area scope.
@@ -10,6 +10,59 @@ import re
 import unicodedata
 from typing import Iterable, List, Tuple
 
+
+AML_MUNICIPALITY_NAMES: Tuple[str, ...] = (
+    "Alcochete",
+    "Almada",
+    "Amadora",
+    "Barreiro",
+    "Cascais",
+    "Lisboa",
+    "Loures",
+    "Mafra",
+    "Moita",
+    "Montijo",
+    "Odivelas",
+    "Oeiras",
+    "Palmela",
+    "Seixal",
+    "Sesimbra",
+    "Setúbal",
+    "Sintra",
+    "Vila Franca de Xira",
+)
+
+# Approximate municipality-centre points used only as broad fallback anchors
+# when a user names a municipality and live geocoding is unavailable.
+AML_MUNICIPALITY_CENTROIDS: dict[str, tuple[float, float]] = {
+    "Alcochete": (38.7553, -8.9609),
+    "Almada": (38.6765, -9.1651),
+    "Amadora": (38.7597, -9.2397),
+    "Barreiro": (38.6631, -9.0724),
+    "Cascais": (38.6979, -9.4215),
+    "Lisboa": (38.7223, -9.1393),
+    "Loures": (38.8309, -9.1685),
+    "Mafra": (38.9379, -9.3276),
+    "Moita": (38.6508, -8.9904),
+    "Montijo": (38.7067, -8.9739),
+    "Odivelas": (38.7927, -9.1838),
+    "Oeiras": (38.6971, -9.3017),
+    "Palmela": (38.5690, -8.9013),
+    "Seixal": (38.6400, -9.1015),
+    "Sesimbra": (38.4445, -9.1015),
+    "Setúbal": (38.5244, -8.8882),
+    "Sintra": (38.7989, -9.3869),
+    "Vila Franca de Xira": (38.9553, -8.9897),
+}
+
+AML_MUNICIPALITY_ALIASES: Tuple[Tuple[str, str], ...] = (
+    ("lisbon", "Lisboa"),
+    ("setubal", "Setúbal"),
+    ("setúbal", "Setúbal"),
+    ("vila franca", "Vila Franca de Xira"),
+    ("vila franca de xira", "Vila Franca de Xira"),
+    *tuple((name, name) for name in AML_MUNICIPALITY_NAMES),
+)
 
 OUTSIDE_AML_ROUTE_PLACES: Tuple[Tuple[str, str], ...] = (
     ("torres vedras", "Torres Vedras"),
@@ -53,6 +106,28 @@ AML_AMBIGUOUS_PLACE_EXCLUSIONS: Tuple[str, ...] = (
     "porto salvo",
     "porto brandao",
     "porto brandão",
+    "avenida de madrid",
+    "av de madrid",
+    "av. de madrid",
+    "rua de madrid",
+    "praca de londres",
+    "praça de londres",
+    "avenida de londres",
+    "av de londres",
+    "av. de londres",
+    "avenida de paris",
+    "av de paris",
+    "av. de paris",
+    "avenida de berlim",
+    "av de berlim",
+    "av. de berlim",
+    "avenida de roma",
+    "av de roma",
+    "av. de roma",
+    "estacao roma",
+    "estação roma",
+    "roma areeiro",
+    "roma-areeiro",
     "avenida do mexico",
     "avenida do méxico",
     "av do mexico",
@@ -68,6 +143,28 @@ def normalize_scope_text(text: str) -> str:
     normalized = "".join(char for char in normalized if not unicodedata.combining(char))
     normalized = re.sub(r"[!?.,;:]+", " ", normalized.lower())
     return re.sub(r"\s+", " ", normalized).strip()
+
+
+def extract_aml_municipality_mentions(text: str) -> List[str]:
+    """Return official AML municipality labels explicitly mentioned in text."""
+    normalized = f" {normalize_scope_text(text)} "
+    if not normalized.strip():
+        return []
+
+    found: List[Tuple[int, str]] = []
+    seen: set[str] = set()
+    for alias, label in AML_MUNICIPALITY_ALIASES:
+        needle = normalize_scope_text(alias)
+        match = re.search(rf"\b{re.escape(needle)}\b", normalized)
+        if match and label not in seen:
+            seen.add(label)
+            found.append((match.start(), label))
+    return [label for _index, label in sorted(found, key=lambda item: item[0])]
+
+
+def mentions_aml_municipality(text: str) -> bool:
+    """Return whether text explicitly mentions at least one AML municipality."""
+    return bool(extract_aml_municipality_mentions(text))
 
 
 def extract_outside_aml_mentions(text: str) -> List[str]:
@@ -89,13 +186,14 @@ def extract_outside_aml_mentions(text: str) -> List[str]:
         )
 
     found: List[Tuple[int, str]] = []
+    seen: set[str] = set()
     for place, label in OUTSIDE_AML_ROUTE_PLACES:
         needle = normalize_scope_text(place)
         match = re.search(rf"\b{re.escape(needle)}\b", protected)
-        if match and label not in [existing_label for _index, existing_label in found]:
+        if match and label not in seen:
+            seen.add(label)
             found.append((match.start(), label))
-    labels: List[str] = [label for _index, label in sorted(found, key=lambda item: item[0])]
-    return labels
+    return [label for _index, label in sorted(found, key=lambda item: item[0])]
 
 
 def route_mentions_outside_aml(text: str) -> bool:
@@ -117,55 +215,75 @@ def join_scope_labels(labels: Iterable[str], language: str = "pt") -> str:
 def build_geographic_out_of_scope_response(
     user_message: str,
     language: str = "pt",
+    *,
+    mobility: bool = True,
 ) -> str:
-    """Build a friendly route-scope response for outside-AML journeys."""
+    """Build a friendly geographic-scope response for outside-AML requests."""
     labels = extract_outside_aml_mentions(user_message)
     place_text = join_scope_labels(labels, language=language)
     is_pt = language == "pt"
 
     if is_pt:
-        direct = (
-            f"não consigo validar uma rota para **{place_text}** com os dados confirmáveis deste sistema."
-            if place_text
-            else "essa rota sai do âmbito geográfico que consigo validar com qualidade neste sistema."
-        )
+        if mobility:
+            title = "### 🧭 **Fora do Âmbito de Mobilidade do LISBOA**"
+            direct = (
+                f"não consigo validar uma rota para **{place_text}** com os dados confirmáveis deste sistema."
+                if place_text
+                else "essa rota sai do âmbito geográfico que consigo validar com qualidade neste sistema."
+            )
+        else:
+            title = "### 🧭 **Fora do Âmbito Geográfico do LISBOA**"
+            direct = (
+                f"não consigo validar pedidos para **{place_text}** com os dados confirmáveis deste sistema."
+                if place_text
+                else "esse pedido sai do âmbito geográfico que consigo validar com qualidade neste sistema."
+            )
         return "\n".join(
             [
-                "### 🧭 **Fora do Âmbito de Mobilidade do LISBOA**",
+                title,
                 "",
                 f"✅ **Resposta direta:** {direct}",
                 "",
                 "---",
                 "",
-                "O LISBOA está focado na **Área Metropolitana de Lisboa** e valida diretamente Metro, Carris Urban, Carris Metropolitana e CP suburbano/AML.",
+                "O LISBOA está focado na **Área Metropolitana de Lisboa** e só deve responder com detalhe quando consegue validar a informação com as fontes disponíveis.",
                 "",
                 "💡 **Posso ajudar com:**",
-                "- **Metro:** rotas dentro de Lisboa 🚇",
-                "- **Autocarros:** Carris Urban e Carris Metropolitana na AML 🚌",
-                "- **Comboios:** CP suburbano/AML suportado 🚆",
-                "- **Percursos:** planos dentro de Lisboa/AML 🗺️",
+                "- **Meteorologia:** previsão e avisos para Lisboa 🌤️",
+                "- **Mobilidade:** Metro, Carris Urban, Carris Metropolitana e CP suburbano/AML 🚇",
+                "- **Cultura e locais:** eventos, atrações, restaurantes e serviços na AML 📍",
+                "- **Planeamento:** roteiros e percursos dentro de Lisboa/AML 🗺️",
             ]
         ).strip()
 
-    direct = (
-        f"I cannot validate a route to **{place_text}** with this system's confirmable data."
-        if place_text
-        else "that route is outside the geographic scope I can validate with quality in this system."
-    )
+    if mobility:
+        title = "### 🧭 **Outside LISBOA's Mobility Scope**"
+        direct = (
+            f"I cannot validate a route to **{place_text}** with this system's confirmable data."
+            if place_text
+            else "that route is outside the geographic scope I can validate with quality in this system."
+        )
+    else:
+        title = "### 🧭 **Outside LISBOA's Geographic Scope**"
+        direct = (
+            f"I cannot validate requests for **{place_text}** with this system's confirmable data."
+            if place_text
+            else "that request is outside the geographic scope I can validate with quality in this system."
+        )
     return "\n".join(
         [
-            "### 🧭 **Outside LISBOA's Mobility Scope**",
+            title,
             "",
             f"✅ **Direct answer:** {direct}",
             "",
             "---",
             "",
-            "LISBOA is focused on the **Lisbon Metropolitan Area** and directly validates Metro, Carris Urban, Carris Metropolitana, and CP suburban/AML services.",
+            "LISBOA is focused on the **Lisbon Metropolitan Area** and should only answer in detail when it can validate the information with available sources.",
             "",
             "💡 **I can help with:**",
-            "- **Metro:** routes within Lisbon 🚇",
-            "- **Buses:** Carris Urban and Carris Metropolitana in the AML 🚌",
-            "- **Trains:** supported CP suburban/AML rail 🚆",
-            "- **Routes:** plans inside Lisbon/AML 🗺️",
+            "- **Weather:** Lisbon forecasts and warnings 🌤️",
+            "- **Mobility:** Metro, Carris Urban, Carris Metropolitana, and CP suburban/AML 🚇",
+            "- **Culture and places:** events, attractions, restaurants, and services in the AML 📍",
+            "- **Planning:** itineraries and routes inside Lisbon/AML 🗺️",
         ]
     ).strip()

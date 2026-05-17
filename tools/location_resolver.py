@@ -24,6 +24,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+from agent.utils.geographic_scope import (
+    AML_MUNICIPALITY_CENTROIDS,
+    AML_MUNICIPALITY_NAMES,
+    normalize_scope_text,
+)
+
 try:
     from tools.utils import haversine_distance
 except ImportError:
@@ -54,24 +60,12 @@ MAX_DYNAMIC_METRO_WALK_KM = 1.35
 MAX_DYNAMIC_CP_WALK_KM = 1.85
 
 AML_OUTSIDE_LISBON_TOKENS = {
-    "sintra",
-    "cascais",
-    "oeiras",
-    "amadora",
-    "odivelas",
-    "loures",
-    "almada",
+    normalize_scope_text(name)
+    for name in AML_MUNICIPALITY_NAMES
+    if normalize_scope_text(name) != "lisboa"
+} | {
+    "vila franca",
     "cacilhas",
-    "montijo",
-    "barreiro",
-    "moita",
-    "alcochete",
-    "palmela",
-    "setubal",
-    "setúbal",
-    "sesimbra",
-    "mafra",
-    "seixal",
     "costa da caparica",
     "caparica",
 }
@@ -457,6 +451,53 @@ _CURATED_LOCATION_POINTS: Dict[str, Dict[str, Any]] = {
 }
 
 
+def _register_official_aml_municipalities() -> None:
+    """Register all official AML municipalities as broad geocoding fallbacks.
+
+    This is not a curated case workaround: it is the system's geographic scope
+    contract. These anchors are used only when live geocoding cannot resolve a
+    municipality name, and the output remains marked as a broad municipality
+    centre rather than an exact address.
+    """
+    for municipality, (lat, lon) in AML_MUNICIPALITY_CENTROIDS.items():
+        key = normalize_scope_text(municipality)
+        aliases = {
+            key,
+            municipality,
+            f"{key} centro",
+            f"centro de {key}",
+            f"{municipality} centro",
+            f"centro de {municipality}",
+            f"{municipality}, Portugal",
+        }
+        if municipality == "Setúbal":
+            aliases.update({"setubal", "setubal centro", "centro de setubal"})
+        if municipality == "Vila Franca de Xira":
+            aliases.update({"vila franca", "vila franca centro", "centro de vila franca"})
+
+        existing = _CURATED_LOCATION_POINTS.get(key)
+        if existing:
+            existing.setdefault("scope", "aml" if key != "lisboa" else "lisbon_city")
+            existing.setdefault("class", "place")
+            existing.setdefault("type", "municipality")
+            merged_aliases = set(existing.get("aliases", [])) | aliases
+            existing["aliases"] = sorted(alias for alias in merged_aliases if alias)
+            continue
+
+        _CURATED_LOCATION_POINTS[key] = {
+            "display_name": municipality,
+            "lat": lat,
+            "lon": lon,
+            "scope": "aml" if key != "lisboa" else "lisbon_city",
+            "class": "place",
+            "type": "municipality",
+            "aliases": sorted(alias for alias in aliases if alias),
+        }
+
+
+_register_official_aml_municipalities()
+
+
 def _build_nominatim_search_params(query: str) -> Dict[str, Any]:
     """Builds a Nominatim query bounded to Portugal and the AML viewbox.
 
@@ -555,6 +596,11 @@ _LOCATION_CONTEXT_EXTRACTORS: Tuple[re.Pattern, ...] = (
 
 _LOCATION_SUFFIX_SPLITTERS: Tuple[re.Pattern, ...] = (
     re.compile(r"\s*\?\s*.*$"),
+    re.compile(
+        r"\s+(?:e|and)\s+(?:quanto\s+(?:tempo\s+)?(?:demoro|demora|leva)|"
+        r"how\s+long|tempo\s+(?:a\s+p[eé]|de\s+caminhada)|walking\s+time)\b.*$",
+        re.IGNORECASE,
+    ),
     re.compile(
         r"\s*[,;]\s*(?:qual|quais|onde|como|diz|diga|d[aá][- ]?me|mostra|"
         r"tell|show|how|where|which|what)\b.*$",
@@ -727,6 +773,18 @@ _AMBIGUOUS_LOCATION_HINTS = {
     },
 }
 
+_AMBIGUITY_SAME_SITE_RADIUS_KM = 0.35
+_AMBIGUITY_EXCLUDED_RESULT_TYPES = {"fast_food", "restaurant", "cafe", "café"}
+_AMBIGUITY_GENERIC_LOCATION_TERMS = {
+    "loja", "store", "cafe", "café", "restaurante", "restaurant",
+    "padaria", "farmacia", "farmácia", "centro", "comercial",
+    "shopping", "shop", "the", "mais", "proximo", "proxima",
+    "proximos", "proximas", "nearest", "closest", "nearby",
+}
+_AMBIGUITY_LOCALITY_FIELDS = (
+    "suburb", "village", "town", "city", "municipality", "county", "neighbourhood",
+)
+
 
 def _location_is_specific_enough(raw_location: str) -> bool:
     """Return whether a location is specific enough to avoid ambiguity prompts."""
@@ -736,7 +794,11 @@ def _location_is_specific_enough(raw_location: str) -> bool:
         return True
     if _parse_coordinate_pair(cleaned):
         return True
-    if _looks_like_acronym_label(cleaned):
+    # Multi-word acronyms such as "NOVA IMS" are usually institutional labels.
+    # A single all-caps token can also be a retail brand (for example IKEA),
+    # so keep it eligible for dynamic ambiguity checks instead of treating it
+    # as automatically specific.
+    if _looks_like_acronym_label(cleaned) and len(normalized.split()) > 1:
         return True
     if _LOCATION_ADDRESS_HINT_RE.search(cleaned):
         return True
@@ -744,6 +806,9 @@ def _location_is_specific_enough(raw_location: str) -> bool:
         return True
     if normalized in _CURATED_LOCATION_POINTS:
         return True
+    distilled_query = _distilled_location_query(normalized)
+    if distilled_query and distilled_query != normalized:
+        return False
     if len(normalized.split()) > 4:
         return True
     return False
@@ -758,6 +823,216 @@ def _format_ambiguity_candidate(result: Dict[str, Any]) -> str:
     return ", ".join(parts[:3]) if parts else display
 
 
+def _candidate_coordinates(candidate: Dict[str, Any]) -> Tuple[float, float] | None:
+    """Return candidate coordinates when both latitude and longitude are valid."""
+    lat = _safe_float(candidate.get("lat"))
+    lon = _safe_float(candidate.get("lon"))
+    if lat is None or lon is None:
+        return None
+    return lat, lon
+
+
+def _candidate_normalized_text(candidate: Dict[str, Any]) -> str:
+    """Return normalized searchable text for one geocoder candidate."""
+    address = candidate.get("address", {}) or {}
+    address_parts = [
+        str(value)
+        for value in address.values()
+        if isinstance(value, (str, int, float)) and str(value).strip()
+    ]
+    return normalize_location_text(
+        " ".join([str(candidate.get("display_name") or ""), *address_parts])
+    )
+
+
+def _cluster_ambiguity_candidates(
+    candidates: List[Dict[str, Any]],
+    *,
+    radius_km: float = _AMBIGUITY_SAME_SITE_RADIUS_KM,
+) -> List[List[Dict[str, Any]]]:
+    """Group geocoder candidates that point to the same physical site."""
+    clusters: List[List[Dict[str, Any]]] = []
+    for candidate in candidates:
+        coordinates = _candidate_coordinates(candidate)
+        if not coordinates:
+            continue
+        lat, lon = coordinates
+        matched_cluster: List[Dict[str, Any]] | None = None
+        for cluster in clusters:
+            for existing in cluster:
+                existing_coordinates = _candidate_coordinates(existing)
+                if not existing_coordinates:
+                    continue
+                distance_km = haversine_distance(
+                    lat,
+                    lon,
+                    existing_coordinates[0],
+                    existing_coordinates[1],
+                )
+                if distance_km <= radius_km:
+                    matched_cluster = cluster
+                    break
+            if matched_cluster is not None:
+                break
+        if matched_cluster is None:
+            clusters.append([candidate])
+        else:
+            matched_cluster.append(candidate)
+    return clusters
+
+
+def _best_cluster_candidate(cluster: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Choose the most useful representative from a candidate cluster."""
+    preferred = [
+        candidate for candidate in cluster
+        if str(candidate.get("type") or "").lower() not in _AMBIGUITY_EXCLUDED_RESULT_TYPES
+    ]
+    pool = preferred or cluster
+    return max(
+        pool,
+        key=lambda item: (
+            float(item.get("score", 0.0)),
+            _safe_float(item.get("importance")) or 0.0,
+            len(str(item.get("display_name") or "")),
+        ),
+    )
+
+
+def _candidate_locality_score(candidate: Dict[str, Any]) -> int:
+    """Score whether a candidate contains useful locality details."""
+    address = candidate.get("address", {}) or {}
+    score = 0
+    seen: set[str] = set()
+    for field in _AMBIGUITY_LOCALITY_FIELDS:
+        value = str(address.get(field) or "").strip()
+        normalized_value = normalize_location_text(value)
+        if not normalized_value or normalized_value in {"portugal", "lisboa", "lisbon"}:
+            continue
+        if normalized_value in seen:
+            continue
+        seen.add(normalized_value)
+        score += 1
+    return score
+
+
+def _best_brand_cluster_candidate(cluster: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Choose the representative that best identifies a distinct brand site."""
+    preferred = [
+        candidate for candidate in cluster
+        if str(candidate.get("type") or "").lower() not in _AMBIGUITY_EXCLUDED_RESULT_TYPES
+    ]
+    pool = preferred or cluster
+    return max(
+        pool,
+        key=lambda item: (
+            _candidate_locality_score(item),
+            float(item.get("score", 0.0)),
+            _safe_float(item.get("importance")) or 0.0,
+        ),
+    )
+
+
+def _meaningful_location_query_terms(normalized_query: str) -> set[str]:
+    """Return query terms that can distinguish one place from another."""
+    return {
+        term for term in normalized_query.split()
+        if len(term) >= 3 and term not in _AMBIGUITY_GENERIC_LOCATION_TERMS
+    }
+
+
+def _distilled_location_query(normalized_query: str) -> str:
+    """Return a compact brand/place query after removing generic request words."""
+    meaningful_terms = _meaningful_location_query_terms(normalized_query)
+    if not meaningful_terms:
+        return ""
+    ordered_terms = [
+        term for term in normalized_query.split()
+        if term in meaningful_terms
+    ]
+    return " ".join(ordered_terms).strip()
+
+
+def _candidate_matches_all_terms(candidate: Dict[str, Any], terms: set[str]) -> bool:
+    """Return whether a candidate contains every distinguishing query term."""
+    candidate_text = _candidate_normalized_text(candidate)
+    return bool(terms) and all(term in candidate_text for term in terms)
+
+
+def _query_terms_missing_from_display(raw_query: str, display_name: str) -> bool:
+    """Return whether the resolved display name lost user-provided qualifiers."""
+    query_terms = _meaningful_location_query_terms(normalize_location_text(raw_query))
+    if not query_terms:
+        return False
+    display_norm = normalize_location_text(display_name)
+    return any(term not in display_norm for term in query_terms)
+
+
+def _format_brand_ambiguity_candidate(candidate: Dict[str, Any], brand_norm: str) -> str:
+    """Format a brand candidate with locality, not duplicate road variants."""
+    display = str(candidate.get("display_name") or "").strip()
+    if not display:
+        return ""
+    parts = [part.strip() for part in display.split(",") if part.strip()]
+    primary = parts[0] if parts else display
+    address = candidate.get("address", {}) or {}
+
+    locality_parts: List[str] = []
+    seen: set[str] = set()
+    for field in _AMBIGUITY_LOCALITY_FIELDS:
+        value = str(address.get(field) or "").strip()
+        normalized_value = normalize_location_text(value)
+        if not normalized_value or normalized_value in {"portugal", "lisboa", "lisbon"}:
+            continue
+        if normalized_value in seen:
+            continue
+        seen.add(normalized_value)
+        locality_parts.append(value)
+
+    if not locality_parts:
+        for part in parts[1:]:
+            normalized_part = normalize_location_text(part)
+            if (
+                not normalized_part
+                or normalized_part in {"portugal", "lisboa", "lisbon"}
+                or re.fullmatch(r"\d{4}-\d{3}", normalized_part)
+                or re.search(r"\b(?:rua|avenida|estrada|en|viaduto)\b", normalized_part)
+            ):
+                continue
+            if normalized_part not in seen:
+                seen.add(normalized_part)
+                locality_parts.append(part)
+            if len(locality_parts) == 2:
+                break
+    if not locality_parts:
+        for part in parts[1:]:
+            normalized_part = normalize_location_text(part)
+            if (
+                not normalized_part
+                or normalized_part in {"portugal", "lisboa", "lisbon"}
+                or re.fullmatch(r"\d{4}-\d{3}", normalized_part)
+            ):
+                continue
+            locality_parts.append(part)
+            break
+
+    primary_norm = normalize_location_text(primary)
+    if primary_norm == brand_norm and locality_parts:
+        label_parts = [f"{primary} {locality_parts[0]}"]
+        locality_parts = locality_parts[1:]
+    else:
+        label_parts = [primary]
+
+    label_norm = normalize_location_text(" ".join(label_parts))
+    for locality in locality_parts:
+        locality_norm = normalize_location_text(locality)
+        if locality_norm and locality_norm not in label_norm:
+            label_parts.append(locality)
+            label_norm = normalize_location_text(" ".join(label_parts))
+        if len(label_parts) == 3:
+            break
+    return ", ".join(label_parts)
+
+
 def _build_dynamic_location_ambiguity_hints(raw_location: str) -> List[str]:
     """Find generic Nominatim alternatives for underspecified place names."""
     cleaned = clean_location_query_fragment(raw_location)
@@ -770,10 +1045,27 @@ def _build_dynamic_location_ambiguity_hints(raw_location: str) -> List[str]:
             return []
     except NameError:
         pass
+    try:
+        from tools.metrolisboa_api import get_landmark_info
+
+        landmark = get_landmark_info(cleaned)
+        if landmark and not landmark.get("dynamic"):
+            return []
+    except Exception:
+        pass
 
     candidates: List[Dict[str, Any]] = []
     seen: set[Tuple[float, float, str]] = set()
-    for query in _build_query_variants(cleaned)[:3]:
+    distilled_query = _distilled_location_query(normalized)
+    query_variants = _build_query_variants(cleaned)
+    if distilled_query and distilled_query != cleaned:
+        query_variants = [
+            distilled_query,
+            f"{distilled_query}, Lisboa, Portugal",
+            f"{distilled_query}, Lisbon, Portugal",
+            *query_variants,
+        ]
+    for query in list(dict.fromkeys(query_variants))[:6]:
         for result in _fetch_nominatim_results_cached(query):
             lat = _safe_float(result.get("lat"))
             lon = _safe_float(result.get("lon"))
@@ -837,6 +1129,65 @@ def _build_dynamic_location_ambiguity_hints(raw_location: str) -> List[str]:
         primary = normalize_location_text(str(candidate.get("display_name") or "").split(",")[0])
         return re.sub(r"^(?:a|o|the)\s+", "", primary).strip()
 
+    query_terms = _meaningful_location_query_terms(normalized)
+    exact_term_candidates: List[Dict[str, Any]] = []
+    if len(normalized.split()) > 1 and query_terms:
+        exact_term_candidates = [
+            candidate for candidate in candidates[:12]
+            if _candidate_matches_all_terms(candidate, query_terms)
+        ]
+        if exact_term_candidates:
+            exact_term_clusters = _cluster_ambiguity_candidates(exact_term_candidates)
+            if len(exact_term_clusters) == 1:
+                return []
+
+    brand_query_norm = distilled_query or normalized
+    if len(brand_query_norm.split()) <= 3 and len(brand_query_norm) >= 3:
+        brand_like_candidates = [
+            candidate for candidate in candidates[:12]
+            if (
+                _primary_display_key(candidate) == brand_query_norm
+                or _primary_display_key(candidate).startswith(f"{brand_query_norm} ")
+            )
+        ]
+        if not brand_like_candidates and len(normalized.split()) > 1 and not exact_term_candidates:
+            partial_brand_candidates = [
+                candidate for candidate in candidates[:12]
+                if brand_query_norm.startswith(f"{_primary_display_key(candidate)} ")
+            ]
+            if partial_brand_candidates:
+                preferred_partial_candidates = [
+                    candidate for candidate in partial_brand_candidates
+                    if str(candidate.get("type") or "").lower() not in _AMBIGUITY_EXCLUDED_RESULT_TYPES
+                ]
+                partial_clusters = _cluster_ambiguity_candidates(
+                    preferred_partial_candidates or partial_brand_candidates
+                )
+                if len(partial_clusters) == 1:
+                    return []
+                return [f"__NO_CLEAR_MATCH__:{cleaned}"]
+        preferred_brand_candidates = [
+            candidate for candidate in brand_like_candidates
+            if str(candidate.get("type") or "").lower() not in _AMBIGUITY_EXCLUDED_RESULT_TYPES
+        ]
+        if len(preferred_brand_candidates) >= 2:
+            brand_clusters = _cluster_ambiguity_candidates(preferred_brand_candidates)
+            labels: List[str] = []
+            seen_labels: set[str] = set()
+            for cluster in brand_clusters:
+                label = _format_brand_ambiguity_candidate(
+                    _best_brand_cluster_candidate(cluster),
+                    brand_query_norm,
+                )
+                label_key = normalize_location_text(label)
+                if label and label_key not in seen_labels:
+                    seen_labels.add(label_key)
+                    labels.append(label)
+                if len(labels) == 3:
+                    break
+            if len(labels) >= 2:
+                return labels
+
     top_score_for_exact = float(candidates[0].get("score", 0.0))
     exact_primary_candidates = [
         candidate for candidate in candidates[:10]
@@ -877,22 +1228,14 @@ def _build_dynamic_location_ambiguity_hints(raw_location: str) -> List[str]:
     ]
     labels: List[str] = []
     seen_labels: set[str] = set()
-    for candidate in close_candidates:
-        label = _format_ambiguity_candidate(candidate)
+    for cluster in _cluster_ambiguity_candidates(close_candidates):
+        label = _format_ambiguity_candidate(_best_cluster_candidate(cluster))
         label_key = normalize_location_text(label)
         if label and label_key not in seen_labels:
             seen_labels.add(label_key)
             labels.append(label)
         if len(labels) == 3:
             break
-    generic_location_terms = {
-        "loja", "store", "cafe", "café", "restaurante", "restaurant",
-        "padaria", "farmacia", "farmácia", "centro", "comercial",
-    }
-    query_terms = {
-        term for term in normalized.split()
-        if len(term) >= 3 and term not in generic_location_terms
-    }
     if labels and query_terms:
         relevant_labels = [
             label for label in labels
@@ -921,6 +1264,8 @@ def build_location_ambiguity_preamble(
 
     for raw_location in (origin, destination):
         token = normalize_location_text(raw_location)
+        if token in {"lisbon", "lisboa", "lisboa portugal", "lisbon portugal"}:
+            continue
         if token in seen:
             continue
         seen.add(token)
@@ -1128,6 +1473,16 @@ def _build_query_variants(location_name: str) -> List[str]:
     """
     clean_name = str(location_name or "").strip()
     normalized_name = normalize_location_text(clean_name)
+    distilled_name = _distilled_location_query(normalized_name)
+    distilled_variants: List[str] = []
+    if distilled_name and distilled_name != normalized_name:
+        distilled_variants.extend(
+            [
+                distilled_name,
+                f"{distilled_name}, Lisboa, Portugal",
+                f"{distilled_name}, Lisbon, Portugal",
+            ]
+        )
     comma_variants: List[str] = []
     comma_parts = [part.strip() for part in clean_name.split(",") if part.strip()]
     if len(comma_parts) > 1:
@@ -1154,6 +1509,7 @@ def _build_query_variants(location_name: str) -> List[str]:
 
     variants = [
         clean_name,
+        *distilled_variants,
         *comma_variants,
         f"{clean_name}, Lisboa, Portugal",
         f"{clean_name}, Lisbon, Portugal",
@@ -2030,7 +2386,14 @@ def build_dynamic_landmark_info(
 
     raw_query = str(location_name or "").strip()
     display_name = str(resolved.get("display_name") or raw_query).strip()
-    short_name = raw_query if _looks_like_acronym_label(raw_query) else display_name
+    if _query_terms_missing_from_display(raw_query, display_name):
+        display_name = raw_query
+    short_name = (
+        raw_query
+        if _looks_like_acronym_label(raw_query)
+        or _query_terms_missing_from_display(raw_query, display_name)
+        else display_name
+    )
 
     info: Dict[str, Any] = {
         "name": display_name,
@@ -2102,7 +2465,10 @@ def get_location_display_name(location_name: str, detailed: bool = False) -> str
             if normalize_location_text(raw) == normalize_location_text(resolved_display):
                 return resolved_display
             return raw.title()
-        return str(resolved.get("display_name") or raw).strip()
+        resolved_display = str(resolved.get("display_name") or raw).strip()
+        if _query_terms_missing_from_display(raw, resolved_display):
+            return raw
+        return resolved_display
 
     curated_display_name = _CURATED_DISPLAY_NAMES.get(normalize_location_text(raw))
     if curated_display_name:

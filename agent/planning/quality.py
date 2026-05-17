@@ -78,6 +78,13 @@ def validate_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, user_message
     grounded_itinerary_requested = _query_requests_grounded_itinerary(user_message)
     place_cards = [card for card in evidence.cards if getattr(card, "kind", "") in {"place", "food", "event", "service"}]
     food_cards = [card for card in evidence.cards if _evidence_card_is_food(card)]
+    cultural_cards = [card for card in place_cards if _evidence_card_is_cultural(card)]
+    target_area = _extract_single_area_target(user_message)
+    known_area_requested = _is_known_compact_area(target_area)
+    area_has_evidence = bool(
+        target_area
+        and any(_evidence_card_matches_area(card, target_area) for card in place_cards)
+    )
     matched_place_blocks = 0
 
     all_text_fields = [draft.title, draft.direct_answer, *draft.constraints_used, *draft.movement_logic, *draft.weather_strategy, *draft.tips, *draft.limitations]
@@ -92,6 +99,12 @@ def validate_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, user_message
         matched_card = _matching_evidence_card(block.title, evidence)
         if matched_card and getattr(matched_card, "kind", "") in {"place", "food", "event", "service"}:
             matched_place_blocks += 1
+            if (
+                (area_has_evidence or known_area_requested)
+                and target_area
+                and not _evidence_card_matches_area(matched_card, target_area)
+            ):
+                issues.append(f"selected stop outside requested area: {block.title[:60]}")
         if (
             grounded_itinerary_requested
             and place_cards
@@ -144,6 +157,9 @@ def validate_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, user_message
 
     if _query_requests_food_stop(user_message) and food_cards and not _draft_includes_food_stop(draft, food_cards):
         issues.append("requested gastronomy but plan omitted food evidence")
+
+    if _query_requests_cultural_stop(user_message) and cultural_cards and not _draft_includes_cultural_stop(draft, cultural_cards):
+        issues.append("requested cultural stop but plan omitted cultural evidence")
 
     if re.search(r"\b(?:rain|chuva|weather|tempo|umbrella|guarda chuva|indoor|interior)\b", normalize_text(user_message)):
         weather_text = normalize_text(" ".join([*draft.weather_strategy, *[" ".join(block.weather) for block in draft.blocks]]))
@@ -215,12 +231,57 @@ def _query_requests_food_stop(user_message: str) -> bool:
     )
 
 
-def _evidence_card_is_food(card: Any) -> bool:
-    """Return whether an evidence card supports a food or restaurant stop."""
-    if getattr(card, "kind", "") == "food":
-        return True
+def _query_requests_cultural_stop(user_message: str) -> bool:
+    """Return whether the user explicitly asks for culture, museums, or heritage."""
+    normalized = normalize_text(user_message)
+    return bool(
+        re.search(
+            r"\b(?:museum|museu|museums|museus|monument|monumento|monumentos|historic|historical|"
+            r"historico|historica|patrimonio|heritage|culture|cultura|cultural|exhibition|exposicao)\b",
+            normalized,
+        )
+    )
+
+
+def _extract_single_area_target(user_message: str) -> str:
+    """Extract a compact named area when a request is clearly area-bounded."""
+    normalized = normalize_text(user_message)
+    if not re.search(r"\b(?:mini plan|mini plano|2 horas|two hours|pouco tempo|short time|perto|near|around|em|no|na)\b", normalized):
+        return ""
+
+    patterns = (
+        r"\b(?:em|no|na|nos|nas|around|near)\s+(?P<area>[a-z0-9][a-z0-9 /'-]{1,60}?)(?:\s+(?:com|sem|para|durante|e|with|without|for|during|and)\b|[,.;]|$)",
+        r"\b(?:perto de|perto do|perto da|near)\s+(?P<area>[a-z0-9][a-z0-9 /'-]{1,60}?)(?:\s+(?:com|sem|para|durante|e|with|without|for|during|and)\b|[,.;]|$)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, normalized)
+        if not match:
+            continue
+        area = re.sub(r"\s+", " ", match.group("area")).strip(" .:-")
+        if area and area not in {"lisboa", "lisbon"}:
+            return area
+
+    known_areas = (
+        "oriente",
+        "parque das nacoes",
+        "expo",
+        "belem",
+        "alfama",
+        "baixa",
+        "chiado",
+        "campo de ourique",
+        "avenidas novas",
+    )
+    for area in known_areas:
+        if re.search(rf"\b{re.escape(area)}\b", normalized):
+            return area
+    return ""
+
+
+def _evidence_card_text(card: Any) -> str:
+    """Return normalized searchable text for an evidence card."""
     fields = getattr(card, "fields", {}) or {}
-    text = normalize_text(
+    return normalize_text(
         " ".join(
             [
                 str(getattr(card, "title", "")),
@@ -230,9 +291,75 @@ def _evidence_card_is_food(card: Any) -> bool:
             ]
         )
     )
+
+
+def _evidence_card_matches_area(card: Any, target_area: str) -> bool:
+    """Return whether an evidence card belongs to the requested compact area."""
+    area = normalize_text(target_area)
+    if not area:
+        return False
+    text = _evidence_card_text(card)
+    if not text:
+        return False
+
+    if area in {"oriente", "parque das nacoes", "expo", "estacao do oriente"}:
+        if "museu do oriente" in text:
+            return False
+        return bool(
+            re.search(
+                r"\b(?:oriente|parque das nacoes|expo|oceanario|pavilhao do conhecimento|"
+                r"centro vasco da gama|vasco da gama|fil|altice arena|alameda dos oceanos|"
+                r"rua do bojador|rossio dos olivais|1990|1998)\b",
+                text,
+            )
+        )
+    if area == "belem":
+        return bool(re.search(r"\b(?:belem|brasilia|jeronimos|padrao|descobrimentos|imperio|india|1400)\b", text))
+    if area == "alfama":
+        return bool(re.search(r"\b(?:alfama|se de lisboa|catedral de lisboa|santa luzia|portas do sol|mouraria|1100)\b", text))
+    return area in text
+
+
+def _is_known_compact_area(target_area: str) -> bool:
+    """Return whether the area has explicit local-planning semantics."""
+    area = normalize_text(target_area)
+    return area in {
+        "oriente",
+        "parque das nacoes",
+        "expo",
+        "estacao do oriente",
+        "belem",
+        "alfama",
+        "baixa",
+        "chiado",
+        "campo de ourique",
+        "avenidas novas",
+    }
+
+
+def _evidence_card_is_food(card: Any) -> bool:
+    """Return whether an evidence card supports a food or restaurant stop."""
+    if getattr(card, "kind", "") == "food":
+        return True
+    text = _evidence_card_text(card)
     return bool(
         re.search(
             r"\b(?:restaurant|restaurante|gastronomy|gastronomia|food|cuisine|cozinha|pastelaria|pastry|comida)\b",
+            text,
+        )
+    )
+
+
+def _evidence_card_is_cultural(card: Any) -> bool:
+    """Return whether an evidence card supports a cultural or heritage stop."""
+    if _evidence_card_is_food(card):
+        return False
+    text = _evidence_card_text(card)
+    return bool(
+        re.search(
+            r"\b(?:museum|museu|museums|museus|monument|monumento|monumentos|historic|historical|"
+            r"historico|historica|patrimonio|heritage|culture|cultura|cultural|exhibition|exposicao|"
+            r"oceanario|pavilhao do conhecimento|castelo|torre|mosteiro)\b",
             text,
         )
     )
@@ -250,6 +377,26 @@ def _draft_includes_food_stop(draft: PlanDraft, food_cards: Sequence[Any]) -> bo
         if re.search(r"\b(?:restaurant|restaurante|gastronomy|gastronomia|food|cuisine|cozinha|pastelaria|pastry|almoco|almoço|jantar)\b", block_text):
             return True
         if any(food_title and (food_title in block_text or block_text in food_title) for food_title in food_titles):
+            return True
+    return False
+
+
+def _draft_includes_cultural_stop(draft: PlanDraft, cultural_cards: Sequence[Any]) -> bool:
+    """Return whether a plan draft selected at least one cultural evidence stop."""
+    cultural_titles = [normalize_text(getattr(card, "title", "")) for card in cultural_cards]
+    for block in draft.blocks:
+        if getattr(block, "kind", "") in {"museum", "culture", "cultural", "monument", "heritage"}:
+            return True
+        block_text = normalize_text(
+            " ".join([block.title, block.purpose, *block.details, *block.movement, *block.limitations])
+        )
+        if re.search(
+            r"\b(?:museum|museu|monument|monumento|historic|historical|historico|historica|"
+            r"patrimonio|heritage|culture|cultura|cultural|exhibition|exposicao|oceanario)\b",
+            block_text,
+        ):
+            return True
+        if any(title and (title in block_text or block_text in title) for title in cultural_titles):
             return True
     return False
 

@@ -62,11 +62,11 @@ except ImportError:
     from utils import haversine_distance
 
 try:
-    from tools.location_resolver import build_location_ambiguity_preamble
+    from tools.location_resolver import build_location_ambiguity_preamble, get_location_display_name
     from tools.runtime_paths import resolve_runtime_data_dir, seed_runtime_data_dir
     from tools.transport_release_assets import ensure_runtime_data_from_release
 except ImportError:
-    from location_resolver import build_location_ambiguity_preamble
+    from location_resolver import build_location_ambiguity_preamble, get_location_display_name
     from runtime_paths import resolve_runtime_data_dir, seed_runtime_data_dir
     from transport_release_assets import ensure_runtime_data_from_release
 
@@ -1970,8 +1970,12 @@ def carris_find_routes_between(
         dest_lat = float(dest_lat) if dest_lat is not None else 0.0
         dest_lon = float(dest_lon) if dest_lon is not None else 0.0
 
-        origin_display = origin_name.split(",")[0] if origin_name else origin
-        dest_display = dest_name.split(",")[0] if dest_name else destination
+        origin_display = get_location_display_name(origin) or (
+            origin_name.split(",")[0] if origin_name else origin
+        )
+        dest_display = get_location_display_name(destination) or (
+            dest_name.split(",")[0] if dest_name else destination
+        )
 
         response += f"   From: {origin_display}\n"
         response += f"   To: {dest_display}\n\n"
@@ -2163,7 +2167,7 @@ def carris_find_routes_between(
             if distance_km > 1.2:
                 return ""
             walking_minutes = max(1, round(distance_km * 12))
-            return f"     Final walk: ~{walking_minutes} min to destination.\n"
+            return f"     Caminhada final: ~{walking_minutes} min até {dest_display}.\n"
 
         def format_route_line(r: Dict[str, Any]) -> str:
             """Format a single route entry with direction-safe departures and RT hints."""
@@ -2194,7 +2198,7 @@ def carris_find_routes_between(
                 origin_stop_name = stop_hint.get("origin_stop_name")
                 dest_stop_name = stop_hint.get("destination_stop_name")
                 if origin_stop_name and dest_stop_name:
-                    line += f"     Stops: board at {origin_stop_name}; leave at {dest_stop_name}.\n"
+                    line += f"     Stops: board at {origin_stop_name}; leave at stop {dest_stop_name}.\n"
                     line += format_final_walk_line(stop_hint)
                 line += "     ℹ️ No upcoming departures were confirmed today at the matched origin stop.\n\n"
                 return line
@@ -2204,7 +2208,7 @@ def carris_find_routes_between(
             origin_stop_name = stop_hint.get("origin_stop_name")
             dest_stop_name = stop_hint.get("destination_stop_name")
             if origin_stop_name and dest_stop_name:
-                line += f"     Stops: board at {origin_stop_name}; leave at {dest_stop_name}.\n"
+                line += f"     Stops: board at {origin_stop_name}; leave at stop {dest_stop_name}.\n"
                 line += format_final_walk_line(stop_hint)
             shown_times = []
             for dep in departures[:3]:

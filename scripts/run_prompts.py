@@ -91,7 +91,6 @@ APP_PROMPTS_TEST_PROMPTS = [
     ("Onde fica a farmácia de serviço mais próxima do Rossio?", "pt", "researcher"),
     ("Onde posso comer pratos tradicionais em Alfama?", "pt", "researcher"),
     ("Planeia 2 dias a pé para amantes de arquitetura.", "pt", "planner"),
-    
     # App Prompts - ⚡ Quick Actions
     ("Qual é a previsão detalhada para Lisboa hoje? Existem avisos ativos?", "pt", "weather"),
     ("Dá-me o ponto de situação do Metro, autocarros e comboios em Lisboa.", "pt", "transport"),

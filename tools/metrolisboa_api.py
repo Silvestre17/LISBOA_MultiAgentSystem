@@ -33,7 +33,8 @@ import tempfile
 import time
 import unicodedata
 import warnings
-from datetime import datetime, timedelta
+from datetime import datetime, time as datetime_time, timedelta
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Optional, cast
 
 import certifi
@@ -93,6 +94,15 @@ NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 
 # Cache expiration time (24 hours - station data doesn't change frequently)
 CACHE_EXPIRATION_HOURS = 24
+
+# Regular passenger service window published by Metro de Lisboa for normal
+# operating conditions. Line-status APIs report disruptions; an "Ok" line state
+# must not be treated as proof that trains are carrying passengers outside this
+# regular window.
+METRO_TIMEZONE = ZoneInfo("Europe/Lisbon")
+METRO_REGULAR_OPEN_TIME = datetime_time(6, 30)
+METRO_REGULAR_CLOSE_TIME = datetime_time(1, 0)
+METRO_LIVE_SERVICE_SAMPLE_STATIONS: tuple[str, ...] = ("CG", "MP", "SA", "BC", "OR")
 
 # ==========================================================================
 # Metro OAuth2 Token & Station Cache
@@ -754,6 +764,95 @@ LISBON_LANDMARKS = {
 # ==========================================================================
 
 
+def _local_metro_datetime(now: Optional[datetime] = None) -> datetime:
+    """Return a timezone-aware Lisbon datetime for Metro service checks."""
+    if now is None:
+        return datetime.now(METRO_TIMEZONE)
+    if now.tzinfo is None:
+        return now.replace(tzinfo=METRO_TIMEZONE)
+    return now.astimezone(METRO_TIMEZONE)
+
+
+def _minutes_since_midnight(value: datetime_time) -> int:
+    """Return minutes since midnight for a time value."""
+    return value.hour * 60 + value.minute
+
+
+def get_metro_regular_service_context(
+    now: Optional[datetime] = None,
+    *,
+    language: str = "pt",
+) -> Dict[str, Any]:
+    """Describe whether now falls inside Metro's regular service window.
+
+    Metro de Lisboa's status endpoints report line disruptions. They do not, by
+    themselves, prove that passenger service is active outside normal operating
+    hours. The public operating window under normal conditions is 06:30-01:00,
+    every day. Exceptional operations must be confirmed through operator
+    notices/status, not inferred from a generic ``Ok`` line state.
+
+    Args:
+        now: Optional datetime for deterministic validation.
+        language: Language for user-facing summary text.
+
+    Returns:
+        Dictionary with regular service state, current time, and next opening.
+    """
+    local_now = _local_metro_datetime(now)
+    current_minutes = local_now.hour * 60 + local_now.minute
+    open_minutes = _minutes_since_midnight(METRO_REGULAR_OPEN_TIME)
+    close_minutes = _minutes_since_midnight(METRO_REGULAR_CLOSE_TIME)
+    is_open = current_minutes >= open_minutes or current_minutes < close_minutes
+
+    if is_open:
+        next_regular_open = None
+        if current_minutes < close_minutes:
+            regular_close = local_now.replace(
+                hour=METRO_REGULAR_CLOSE_TIME.hour,
+                minute=METRO_REGULAR_CLOSE_TIME.minute,
+                second=0,
+                microsecond=0,
+            )
+        else:
+            regular_close = (local_now + timedelta(days=1)).replace(
+                hour=METRO_REGULAR_CLOSE_TIME.hour,
+                minute=METRO_REGULAR_CLOSE_TIME.minute,
+                second=0,
+                microsecond=0,
+            )
+    else:
+        regular_close = None
+        next_regular_open = local_now.replace(
+            hour=METRO_REGULAR_OPEN_TIME.hour,
+            minute=METRO_REGULAR_OPEN_TIME.minute,
+            second=0,
+            microsecond=0,
+        )
+        if current_minutes >= open_minutes:
+            next_regular_open += timedelta(days=1)
+
+    regular_window = "06:30-01:00"
+    is_pt = (language or "pt").lower().startswith("pt")
+    summary = (
+        f"dentro do horário regular ({regular_window})"
+        if is_open and is_pt
+        else f"inside regular operating hours ({regular_window})"
+        if is_open
+        else f"fora do horário regular ({regular_window})"
+        if is_pt
+        else f"outside regular operating hours ({regular_window})"
+    )
+
+    return {
+        "is_regular_service_open": is_open,
+        "regular_window": regular_window,
+        "checked_at": local_now.strftime("%H:%M"),
+        "next_regular_open": next_regular_open.strftime("%H:%M") if next_regular_open else "",
+        "regular_close": regular_close.strftime("%H:%M") if regular_close else "",
+        "summary": summary,
+    }
+
+
 def _is_cache_valid(last_load: Optional[datetime]) -> bool:
     """Checks if the cache is still valid (not expired)."""
     if last_load is None:
@@ -1334,6 +1433,65 @@ def _is_metro_api_available() -> bool:
     return bool(METRO_CONSUMER_KEY and METRO_CONSUMER_SECRET)
 
 
+def get_metro_live_service_evidence(max_station_checks: int = 5) -> Dict[str, Any]:
+    """Check whether official live waits suggest Metro is carrying passengers.
+
+    This helper is intentionally conservative and is used only as supporting
+    evidence outside the regular service window. Normal operating hours still
+    come from Metro's published timetable; exceptional extended service is only
+    inferred when the authenticated wait-time endpoint exposes positive arrival
+    times at representative interchange stations.
+
+    Args:
+        max_station_checks: Number of representative stations to probe.
+
+    Returns:
+        Dictionary describing whether live passenger-service evidence was found.
+    """
+    if not _is_metro_api_available():
+        return {
+            "checked": False,
+            "has_live_wait_times": False,
+            "reason": "official API credentials unavailable",
+            "sample_stations": [],
+        }
+
+    checked_stations: List[str] = []
+    for station_id in METRO_LIVE_SERVICE_SAMPLE_STATIONS[:max_station_checks]:
+        station_name = METRO_STATION_NAMES.get(station_id, station_id)
+        data = _metro_api_request(f"/tempoEspera/Estacao/{station_id}")
+        if not data or data.get("codigo") != "200":
+            continue
+
+        checked_stations.append(station_name)
+        for entry in data.get("resposta", []) or []:
+            dest_id = str(entry.get("destino", "")).strip()
+            destination = METRO_DESTINATIONS.get(dest_id, dest_id)
+            for wait_key in ("tempoChegada1", "tempoChegada2", "tempoChegada3"):
+                raw_wait = str(entry.get(wait_key, "")).strip()
+                if not raw_wait or raw_wait == "--":
+                    continue
+                try:
+                    wait_seconds = int(float(raw_wait))
+                except ValueError:
+                    continue
+                if 0 < wait_seconds <= 3600:
+                    return {
+                        "checked": True,
+                        "has_live_wait_times": True,
+                        "station": station_name,
+                        "destination": destination,
+                        "wait_seconds": wait_seconds,
+                        "sample_stations": checked_stations,
+                    }
+
+    return {
+        "checked": bool(checked_stations),
+        "has_live_wait_times": False,
+        "sample_stations": checked_stations,
+    }
+
+
 # ==========================================================================
 # Station Data Functions
 # ==========================================================================
@@ -1905,7 +2063,7 @@ def _resolve_named_metro_reference(location_name: str) -> Optional[tuple[float, 
         for station in stations:
             station_name = _normalize_metro_text(str(station.get("stop_name", "")))
             station_id = _normalize_metro_text(str(station.get("stop_id", "")))
-            if target in {station_name, station_id} or target in station_name or station_name in target:
+            if target in {station_name, station_id} or (len(target) >= 4 and target in station_name):
                 try:
                     return float(station["stop_lat"]), float(station["stop_lon"])
                 except (KeyError, TypeError, ValueError):
@@ -2073,6 +2231,27 @@ def get_metro_status() -> str:
         str: Status of each metro line (Yellow, Blue, Green, Red)
              with service disruption details if any.
     """
+    service_context = get_metro_regular_service_context(language="en")
+    regular_service_open = bool(service_context["is_regular_service_open"])
+    regular_window = str(service_context["regular_window"])
+    checked_at = str(service_context["checked_at"])
+    live_service_evidence = (
+        get_metro_live_service_evidence() if not regular_service_open else {}
+    )
+    outside_regular_note = (
+        "🌙 Regular passenger service is outside normal operating hours "
+        f"({regular_window}) at {checked_at}.\n"
+        "ℹ️ Line statuses below report disruptions only; they do not confirm "
+        "that trains are running now. Special extended service must be "
+        "confirmed by Metro de Lisboa notices.\n\n"
+    )
+    if live_service_evidence.get("has_live_wait_times"):
+        outside_regular_note += (
+            "📡 Live wait times were detected at "
+            f"{live_service_evidence.get('station')}; this may indicate special "
+            "operation, but the operator should still be checked before travel.\n\n"
+        )
+
     if _is_metro_api_available():
         data = _metro_api_request("/estadoLinha/todos")
 
@@ -2081,6 +2260,8 @@ def get_metro_status() -> str:
 
             response = "🚇 Metro de Lisboa Status (Official API)\n"
             response += "=" * 45 + "\n\n"
+            if not regular_service_open:
+                response += outside_regular_note
 
             all_ok = True
 
@@ -2091,8 +2272,15 @@ def get_metro_status() -> str:
                 name = line_info["name"]
 
                 if status.lower() == "ok" or status_short.lower() == "normal":
-                    status_emoji = "✅"
-                    status_text = "Normal service"
+                    if regular_service_open:
+                        status_emoji = "✅"
+                        status_text = "Normal service"
+                    else:
+                        status_emoji = "🌙"
+                        status_text = (
+                            "No disruption reported; outside regular passenger "
+                            "service hours"
+                        )
                 else:
                     status_emoji = "⚠️"
                     status_text = status if status.lower() != "ok" else status_short
@@ -2102,7 +2290,14 @@ def get_metro_status() -> str:
                 response += f"   {status_emoji} {status_text}\n\n"
 
             if all_ok:
-                response += "✅ All lines operating normally."
+                if regular_service_open:
+                    response += "✅ All lines operating normally."
+                else:
+                    response += (
+                        "🌙 No line disruptions are reported by the API, but "
+                        "regular passenger service is outside normal operating "
+                        "hours."
+                    )
             else:
                 response += "⚠️ Some lines have service disruptions."
 
@@ -2124,6 +2319,8 @@ def get_metro_status() -> str:
     response = "🚇 Metro de Lisboa Status\n"
     response += "=" * 40 + "\n\n"
     response += _build_metro_fallback_notice()
+    if not regular_service_open:
+        response += outside_regular_note
 
     all_ok = True
 
@@ -2133,8 +2330,15 @@ def get_metro_status() -> str:
         name = line_info["name"]
 
         if status.lower() == "ok":
-            status_emoji = "✅"
-            status_text = "Normal service"
+            if regular_service_open:
+                status_emoji = "✅"
+                status_text = "Normal service"
+            else:
+                status_emoji = "🌙"
+                status_text = (
+                    "No disruption reported; outside regular passenger service "
+                    "hours"
+                )
         else:
             status_emoji = "⚠️"
             status_text = status
@@ -2144,7 +2348,13 @@ def get_metro_status() -> str:
         response += f"   {status_emoji} {status_text}\n\n"
 
     if all_ok:
-        response += "✅ All lines operating normally."
+        if regular_service_open:
+            response += "✅ All lines operating normally."
+        else:
+            response += (
+                "🌙 No line disruptions are reported by the API, but regular "
+                "passenger service is outside normal operating hours."
+            )
     else:
         response += "⚠️ Some lines have service disruptions."
 

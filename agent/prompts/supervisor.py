@@ -22,7 +22,7 @@ Analyze the user's query and output a JSON decision with the agents needed.
 ## ✅ IN SCOPE - Lisbon Metropolitan Area (AML)
 This system covers the **Área Metropolitana de Lisboa (AML)**, which includes:
 - **Lisbon city** (all neighborhoods: Baixa, Alfama, Belém, etc.)
-- **AML municipalities**: Sintra, Cascais, Oeiras, Amadora, Loures, Odivelas, Almada, Seixal, Barreiro, Montijo, Alcochete, Setúbal, Palmela, Sesimbra, Vila Franca de Xira, Mafra
+- **AML municipalities**: Alcochete, Almada, Amadora, Barreiro, Cascais, Lisboa, Loures, Mafra, Moita, Montijo, Odivelas, Oeiras, Palmela, Seixal, Sesimbra, Setúbal, Sintra, Vila Franca de Xira
 - **Transport currently confirmed by LISBOA**: Metro de Lisboa, Carris, Carris Metropolitana, CP trains (Sintra/Cascais/Azambuja lines)
 
 ## Out of Scope - Refuse politely
@@ -134,7 +134,7 @@ Analisa a questão do utilizador e gera uma decisão em JSON com os agentes nece
 ## ✅ DENTRO DO ÂMBITO - Área Metropolitana de Lisboa (AML)
 Este sistema cobre a **Área Metropolitana de Lisboa (AML)**, que inclui:
 - **Cidade de Lisboa** (todos os bairros: Baixa, Alfama, Belém, etc.)
-- **Municípios da AML**: Sintra, Cascais, Oeiras, Amadora, Loures, Odivelas, Almada, Seixal, Barreiro, Montijo, Alcochete, Setúbal, Palmela, Sesimbra, Vila Franca de Xira, Mafra
+- **Municípios da AML**: Alcochete, Almada, Amadora, Barreiro, Cascais, Lisboa, Loures, Mafra, Moita, Montijo, Odivelas, Oeiras, Palmela, Seixal, Sesimbra, Setúbal, Sintra, Vila Franca de Xira
 - **Transportes atualmente confirmados pelo LISBOA**: Metro de Lisboa, Carris, Carris Metropolitana, Comboios CP (linhas Sintra/Cascais/Azambuja)
 
 ## Fora do Âmbito - Recusa educadamente

@@ -1658,6 +1658,7 @@ def test_assistant_connection(provider: str) -> Tuple[bool, Optional[str]]:
 def initialize_assistant(
     provider: str,
     run_connection_probe: bool = True,
+    show_spinner: bool = True,
 ) -> Tuple[bool, Optional[str]]:
     """Initialise the assistant securely and only when needed."""
     lang = st.session_state.get("language", "pt")
@@ -1696,11 +1697,15 @@ def initialize_assistant(
                 ),
             )
 
-        with st.spinner(
+        init_message = (
             "🤖 A iniciar o assistente..."
             if lang == "pt"
             else "🤖 Initializing assistant..."
-        ):
+        )
+        if show_spinner:
+            with st.spinner(init_message):
+                st.session_state.assistant = MultiAgentAssistant()
+        else:
             st.session_state.assistant = MultiAgentAssistant()
 
         if run_connection_probe:
@@ -1716,6 +1721,7 @@ def initialize_assistant(
 
         return True, None
     except Exception as exc:
+        logging.getLogger(__name__).exception("Assistant initialization failed")
         st.session_state.assistant = None
         st.session_state.initialized = False
         st.session_state.error = sanitize_backend_error(str(exc))
@@ -1995,15 +2001,15 @@ def build_sidebar():
             ("🗺️", t("plan_my_day"), t("query_plan")),
         ]
 
-        q_act = None
         for idx, (icon, label, qt) in enumerate(quick_acts):
-            if st.button(
+            st.button(
                 f"{icon} {label}",
                 use_container_width=True,
                 key=f"sidebar_qact_{idx}",
                 disabled=request_locked,
-            ):
-                q_act = qt
+                on_click=queue_pending_request,
+                args=(qt,),
+            )
 
         st.divider()
 
@@ -2050,7 +2056,7 @@ def build_sidebar():
             unsafe_allow_html=True,
         )
 
-        return selected_provider, q_act
+        return selected_provider, None
 
 
 def build_welcome():
@@ -2111,12 +2117,16 @@ def build_welcome():
 
     st.markdown(f"### 💡 {t('try_asking')}")
     cols = st.columns(3)
-    chosen_ex = None
     for i, (ic, lab, qt) in enumerate(examples):
         with cols[i % 3]:
-            if st.button(f"{ic} {lab}", use_container_width=True, key=f"exq_{i}"):
-                chosen_ex = qt
-    return chosen_ex
+            st.button(
+                f"{ic} {lab}",
+                use_container_width=True,
+                key=f"exq_{i}",
+                on_click=queue_pending_request,
+                args=(qt,),
+            )
+    return None
 
 
 def handle_chat_stream(text: str):
@@ -2425,17 +2435,61 @@ def build_user_error_message(error: Exception) -> str:
     return t("error_generic")
 
 
-def run_interaction(user_input: str, user_message_already_rendered: bool = False):
-    """Run one chat turn and optionally skip re-rendering the user message."""
+def run_interaction(
+    user_input: str,
+    user_message_already_rendered: bool = False,
+    selected_provider: Optional[str] = None,
+) -> bool:
+    """Run one chat turn and optionally initialise inside the assistant bubble."""
     if not user_message_already_rendered:
         st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
             st.markdown(user_input)
 
+    provider_to_use = selected_provider or str(
+        st.session_state.get("provider") or Config.MODEL_PROVIDER
+    )
+    needs_initialization = (
+        not st.session_state.initialized
+        or st.session_state.provider != provider_to_use
+        or not st.session_state.get("assistant")
+    )
+
     with st.chat_message("assistant"):
         try:
-            with st.status("🔍 " + t("thinking"), expanded=False) as status:
+            initial_status_label = (
+                "🚀 A preparar o LISBOA para esta pergunta..."
+                if st.session_state.language == "pt"
+                else "🚀 Preparing LISBOA for this prompt..."
+            )
+            if not needs_initialization:
+                initial_status_label = "🔍 " + t("thinking")
+
+            with st.status(initial_status_label, expanded=False) as status:
                 last_status = {"label": "", "ts": 0.0}
+
+                if needs_initialization:
+                    success, error = initialize_assistant(
+                        provider_to_use,
+                        run_connection_probe=False,
+                        show_spinner=False,
+                    )
+                    if not success:
+                        status.update(
+                            label="⚠️ Não foi possível preparar o LISBOA."
+                            if st.session_state.language == "pt"
+                            else "⚠️ Could not prepare LISBOA.",
+                            state="error",
+                        )
+                        error_message = error or t("initialization_failed")
+                        assistant_error = f"⚠️ {error_message}"
+                        st.error(error_message)
+                        st.session_state.messages.append(
+                            {"role": "assistant", "content": assistant_error}
+                        )
+                        return False
+
+                    status.update(label="⚡ " + t("thinking"), state="running")
 
                 def on_status(msg: str):
                     normalized = str(msg or "").strip()
@@ -2489,6 +2543,9 @@ def run_interaction(user_input: str, user_message_already_rendered: bool = False
             st.session_state.messages.append(
                 {"role": "assistant", "content": f"⚠️ {friendly_message}"}
             )
+            return False
+
+    return True
 
 
 def queue_pending_request(user_input: str) -> None:
@@ -3473,6 +3530,22 @@ def main():
 
     pending = st.session_state.get("pending_request")
     request_running = st.session_state.get("request_running", False)
+    request_locked = request_capture_locked(
+        pending,
+        request_running,
+        startup_initializing=st.session_state.get("startup_auto_init_in_progress", False),
+    )
+
+    if q_act and not request_locked:
+        queue_pending_request(q_act)
+        st.rerun()
+
+    if in_text := st.chat_input(t("chat_placeholder"), disabled=request_locked):
+        queue_pending_request(in_text)
+        st.rerun()
+
+    pending = st.session_state.get("pending_request")
+    request_running = st.session_state.get("request_running", False)
     show_landing = not st.session_state.messages and not pending and not request_running
 
     banner_slot = st.empty()
@@ -3487,7 +3560,7 @@ def main():
 
     request_locked = request_capture_locked(
         pending,
-        st.session_state.get("request_running", False),
+        request_running,
         startup_initializing=st.session_state.get("startup_auto_init_in_progress", False),
     )
 
@@ -3514,11 +3587,8 @@ def main():
     else:
         welcome_slot.empty()
 
-    if in_text := st.chat_input(t("chat_placeholder"), disabled=request_locked):
-        chat_request = in_text
-
     new_request = select_new_request(
-        sidebar_request=q_act or None,
+        sidebar_request=None,
         welcome_request=welcome_request,
         chat_request=chat_request,
         pending_request=pending,
@@ -3535,24 +3605,14 @@ def main():
     pending = st.session_state.get("pending_request")
     if pending:
         st.session_state.request_running = True
-        if (
-            not st.session_state.initialized
-            or st.session_state.provider != selected_provider
-        ):
-            success, error = initialize_assistant(
-                selected_provider,
-                run_connection_probe=False,
-            )
-            if not success:
-                st.session_state.request_running = False
-                st.session_state.pop("pending_request", None)
-                st.session_state.pop("pending_request_user_appended", None)
-                st.error(error or t("initialization_failed"))
-                return
         already_appended = bool(st.session_state.pop("pending_request_user_appended", False))
         st.session_state.pop("pending_request", None)
         try:
-            run_interaction(pending, user_message_already_rendered=already_appended)
+            run_interaction(
+                pending,
+                user_message_already_rendered=already_appended,
+                selected_provider=selected_provider,
+            )
         finally:
             st.session_state.request_running = False
         # Trigger one final rerun so the sidebar counter picks up the assistant
