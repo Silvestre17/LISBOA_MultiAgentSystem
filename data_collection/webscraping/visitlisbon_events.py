@@ -78,16 +78,6 @@ def _normalize_text(text):
     return re.sub(r'\s+', ' ', str(text).replace('\xa0', ' ')).strip()
 
 
-def _first_text_match(soup, selectors):
-    """Returns the first non-empty text for the provided CSS selectors."""
-    for selector in selectors:
-        if element := soup.select_one(selector):
-            text = _normalize_text(element.get_text(" ", strip=True))
-            if text:
-                return text
-    return None
-
-
 def _first_element(soup, selectors):
     """Returns the first matching element for a list of selectors."""
     for selector in selectors:

@@ -226,7 +226,7 @@
     {
         "title": "Espaços Verdes",
         "url_portal": "https://dados.gov.pt/pt/datasets/espacos-verdes-2/",
-        "stable_url": "https://dados.gov.pt/pt/datasets/r/6afbde0c-5eae-4f20-977b-06c035fb4edb",
+        "stable_url": "https://services.arcgis.com/1dSrzEWVQn5kHHyK/arcgis/rest/services/Ambiente_DMEVAE/FeatureServer/4/query?where=1%3D1&outFields=*&f=geojson",
         "description": "Identificação da localização espacial de todas as áreas verdes, livres ou expectantes de Lisboa.",
         "file_formats": "geojson",
         "last_updated": "2025-06-06T00:00:00"
@@ -234,7 +234,7 @@
     {
         "title": "Hortas Urbanas",
         "url_portal": "https://dados.gov.pt/pt/datasets/hortas-urbanas/",
-        "stable_url": "https://dados.gov.pt/pt/datasets/r/53c7d535-957d-4dbf-8c6c-0afbc88cf2a9",
+        "stable_url": "https://services.arcgis.com/1dSrzEWVQn5kHHyK/arcgis/rest/services/Ambiente_DMEVAE/FeatureServer/3/query?where=1%3D1&outFields=*&f=geojson",
         "description": "Identificação da localização espacial dos diferentes parques hortícolas da cidade de Lisboa. Spatial location of different Urban Gardening in Lisbon.",
         "file_formats": "geojson",
         "last_updated": "2024-01-22T00:00:00"
@@ -242,7 +242,7 @@
     {
         "title": "Elementos de Água",
         "url_portal": "https://dados.gov.pt/pt/datasets/elementos-de-agua/",
-        "stable_url": "https://dados.gov.pt/pt/datasets/r/2daf5d1f-76d7-48cd-9c1d-47b8e69e4866",
+        "stable_url": "https://services.arcgis.com/1dSrzEWVQn5kHHyK/arcgis/rest/services/Ambiente_DMEVAE/FeatureServer/1/query?where=1%3D1&outFields=*&f=geojson",
         "description": "Identificação da localização espacial dos pontos de água, por tipologia",
         "file_formats": "geojson",
         "last_updated": "2024-01-08T00:00:00"
@@ -250,7 +250,7 @@
     {
         "title": "Corredor Verde",
         "url_portal": "https://dados.gov.pt/pt/datasets/corredor-verde/",
-        "stable_url": "https://dados.gov.pt/pt/datasets/r/727ebd8d-bbfb-4125-9f4d-84a9fbe7329a",
+        "stable_url": "https://services.arcgis.com/1dSrzEWVQn5kHHyK/arcgis/rest/services/Ambiente_DMEVAE/FeatureServer/2/query?where=1%3D1&outFields=*&f=geojson",
         "description": "Estrutura natural contínua, constituída por um conjunto coordenado de espaços verdes que pretendem contribuir para trazer de forma contínua o espaço natural para o interior da cidade.",
         "file_formats": "geojson",
         "last_updated": "2024-07-02T00:00:00"
@@ -258,7 +258,7 @@
     {
         "title": "Arvoredo",
         "url_portal": "https://dados.gov.pt/pt/datasets/arvoredo/",
-        "stable_url": "https://dados.gov.pt/pt/datasets/r/268a877d-6d9b-4868-82d5-55e17b324f04",
+        "stable_url": "https://services.arcgis.com/1dSrzEWVQn5kHHyK/arcgis/rest/services/Ambiente_DMEVAE/FeatureServer/0/query?where=1%3D1&outFields=*&f=geojson",
         "description": "Identificação da localização espacial do arvoredo de Lisboa",
         "file_formats": "geojson",
         "last_updated": "2025-09-10T00:00:00"
@@ -467,6 +467,7 @@
         "title": "Outras Instituições de I&D e Fundações",
         "url_portal": "https://dados.gov.pt/pt/datasets/outras-instituicoes-de-id-e-fundacoes/",
         "stable_url": "https://dados.gov.pt/pt/datasets/r/3e622352-83bc-4796-b10f-dab3ca626bef",
+        "stable_url_comment": "Not updated on 2026-05-18: official dados.cm-lisboa.pt and dados.gov.pt metadata still points to MapaConhecimento/FeatureServer/4, but the current ArcGIS FeatureServer exposes only layer 0, so no exact working GeoJSON replacement was verified.",
         "description": "Conjunto de dados com informação de atores estratégicos de \"Outras Instituições de ID e Fundações\" que atuam na cidade e na região obedecendo a lógicas de cluster, seleccionados pela Direção Municipal de Economia e Inovação. Web map service providing information on \"Other ID Institutions\" strategic actors located in the city and region according to clusters, selected by the Direção Municipal de Economia e Inovação.",
         "file_formats": "geojson",
         "last_updated": "2025-01-02T00:00:00"
@@ -571,6 +572,7 @@
         "title": "Laboratórios Associados",
         "url_portal": "https://dados.gov.pt/pt/datasets/laboratorios-associados/",
         "stable_url": "https://dados.gov.pt/pt/datasets/r/70ed7307-0f5b-4e69-88db-43eb13e262df",
+        "stable_url_comment": "Not updated on 2026-05-18: official dados.cm-lisboa.pt and dados.gov.pt metadata still points to MapaConhecimento/FeatureServer/2, but the current ArcGIS FeatureServer exposes only layer 0, so no exact working GeoJSON replacement was verified.",
         "description": "Conjunto de dados com informação de atores estratégicos de \"Laboratórios Associados\" que atuam na cidade e na região obedecendo a lógicas de cluster, seleccionados pela Direção Municipal de Economia e Inovação. Web map service providing information on \"Associated Laboratory\" strategic actors located in the city and region according to clusters, selected by the Direção Municipal de Economia e Inovação.",
         "file_formats": "geojson",
         "last_updated": "2025-01-02T00:00:00"
@@ -627,6 +629,7 @@
         "title": "Infraestruturas e Parques de Ciência e Tecnologia",
         "url_portal": "https://dados.gov.pt/pt/datasets/infraestruturas-e-parques-de-ciencia-e-tecnologia/",
         "stable_url": "https://dados.gov.pt/pt/datasets/r/3919b6a7-a0ed-4b9f-9da3-79e71fac4cff",
+        "stable_url_comment": "Not updated on 2026-05-18: official dados.cm-lisboa.pt and dados.gov.pt metadata still points to MapaConhecimento/FeatureServer/5, but the current ArcGIS FeatureServer exposes only layer 0, so no exact working GeoJSON replacement was verified.",
         "description": "Conjunto de dados com informação de atores estratégicos de \"Infraestruturas e Parques de Ciência e Tecnologia\" que atuam na cidade e na região obedecendo a lógicas de cluster, seleccionados pela Direção Municipal de Economia e Inovação. Web map service providing information on \"Infrastructure and Science and Technological Parks\" strategic actors located in the city and region according to clusters, selected by the Direção Municipal de Economia e Inovação.",
         "file_formats": "geojson",
         "last_updated": "2025-01-13T00:00:00"
@@ -763,6 +766,7 @@
         "title": "Faculdades, Escolas e Institutos",
         "url_portal": "https://dados.gov.pt/pt/datasets/faculdades-escolas-e-institutos/",
         "stable_url": "https://dados.gov.pt/pt/datasets/r/8912dbcd-b9fb-42f1-b8c7-2c7f38c079b3",
+        "stable_url_comment": "Not updated on 2026-05-18: official dados.cm-lisboa.pt and dados.gov.pt metadata still points to MapaConhecimento/FeatureServer/1, but the current ArcGIS FeatureServer exposes only layer 0, so no exact working GeoJSON replacement was verified.",
         "description": "Conjunto de dados com informação de atores estratégicos de \"Faculdades, Escolas e Institutos\" que atuam na cidade e na região obedecendo a lógicas de cluster, seleccionados pela Direção Municipal de Economia e Inovação. Web map service providing information on \"Higher Education Institutions\" strategic actors located in the city and region according to clusters, selected by the Direção Municipal de Economia e Inovação.",
         "file_formats": "geojson, json-ld",
         "last_updated": "2025-01-13T00:00:00"
@@ -811,6 +815,7 @@
         "title": "Espaços e Ambientes Criativos",
         "url_portal": "https://dados.gov.pt/pt/datasets/espacos-e-ambientes-criativos/",
         "stable_url": "https://dados.gov.pt/pt/datasets/r/3732525c-41f1-404b-b71e-e6be91eb0c5c",
+        "stable_url_comment": "Not updated on 2026-05-18: official dados.cm-lisboa.pt and dados.gov.pt metadata still points to MapaConhecimento/FeatureServer/6, but the current ArcGIS FeatureServer exposes only layer 0, so no exact working GeoJSON replacement was verified.",
         "description": "Conjunto de dados com informação relativa a incubadoras e espaços de aceleração de empresas. Web map service providing information on startup incubator and acccelerator spaces.",
         "file_formats": "geojson",
         "last_updated": "2025-01-13T00:00:00"
@@ -1115,6 +1120,7 @@
         "title": "Centros de Investigação e de Estudos",
         "url_portal": "https://dados.gov.pt/pt/datasets/centros-de-investigacao-e-de-estudos/",
         "stable_url": "https://dados.gov.pt/pt/datasets/r/c524fdf8-224f-4e2c-a5ce-340b5e5f0f00",
+        "stable_url_comment": "Not updated on 2026-05-18: official dados.cm-lisboa.pt and dados.gov.pt metadata still points to MapaConhecimento/FeatureServer/3, but the current ArcGIS FeatureServer exposes only layer 0, so no exact working GeoJSON replacement was verified.",
         "description": "Conjunto de dados com informação de atores estratégicos de \"Centros de Investigação e de Estudos\" que atuam na cidade e na região obedecendo a lógicas de cluster, seleccionados pela Direção Municipal de Economia e Inovação. Web map service providing information on \"Research Centers\" strategic actors located in the city and region according to clusters, selected by the Direção Municipal de Economia e Inovação.",
         "file_formats": "geojson",
         "last_updated": "2024-12-17T00:00:00"
@@ -1315,6 +1321,7 @@
         "title": "Apoio e Financiamento à Inovação",
         "url_portal": "https://dados.gov.pt/pt/datasets/apoio-e-financiamento-a-inovacao/",
         "stable_url": "https://dados.gov.pt/pt/datasets/r/de6d1d37-b652-4cd4-8a0d-02cd31be2d0c",
+        "stable_url_comment": "Not updated on 2026-05-18: official dados.cm-lisboa.pt and dados.gov.pt metadata still points to MapaConhecimento/FeatureServer/7, but the current ArcGIS FeatureServer exposes only layer 0, so no exact working GeoJSON replacement was verified.",
         "description": "Conjunto de dados com informação de atores estratégicos de \"Apoio e Financiamento à Inovação\" que atuam na cidade e na região obedecendo a lógicas de cluster, seleccionados pela Direção Municipal de Economia e Inovação. Web map service providing information on \"Innovation Funding and Support\" strategic actors located in the city and region according to clusters, selected by the Direção Municipal de Economia e Inovação.",
         "file_formats": "geojson",
         "last_updated": "2024-01-05T00:00:00"
