@@ -18,10 +18,33 @@ import threading
 from pathlib import Path
 from typing import Any, Dict
 
+from tools.runtime_paths import is_hosted_space_runtime
+
 
 STARTUP_LOG_SEPARATOR = "=" * 72
 _STARTUP_PRELOAD_LOCK = threading.Lock()
 _STARTUP_PRELOAD_STATUS: Dict[str, Any] | None = None
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    """Return a boolean value from an environment variable."""
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    normalized = raw_value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
+def _reuse_local_transport_data_enabled() -> bool:
+    """Return whether startup may skip remote transport freshness checks."""
+    return (
+        _env_flag("LISBOA_REUSE_LOCAL_TRANSPORT_DATA", False)
+        and not is_hosted_space_runtime()
+    )
 
 
 def _startup_log(message: str = "") -> None:
@@ -303,7 +326,13 @@ def _check_carris_urban_readiness() -> Dict[str, Any]:
         manager = CarrisGTFSManager()
         db_mtime_before = _file_mtime_ns(CARRIS_DB_PATH)
         metadata_before = _load_json_metadata(CARRIS_METADATA_PATH)
-        database_ready = manager.ensure_database(force_update=False)
+        reuse_local_data = _reuse_local_transport_data_enabled()
+        local_stop_count = _count_sqlite_rows(CARRIS_DB_PATH, "stops")
+        database_ready = (
+            local_stop_count > 0
+            if reuse_local_data and local_stop_count > 0
+            else manager.ensure_database(force_update=False)
+        )
         db_mtime_after = _file_mtime_ns(CARRIS_DB_PATH)
         metadata_after = _load_json_metadata(CARRIS_METADATA_PATH)
         stop_count = _count_sqlite_rows(CARRIS_DB_PATH, "stops") if database_ready else 0
@@ -322,6 +351,9 @@ def _check_carris_urban_readiness() -> Dict[str, Any]:
             else "Carris Urban GTFS database is not populated"
         )
         action = (
+            "local SQLite reused; remote freshness check skipped"
+            if reuse_local_data and local_stop_count > 0
+            else
             "restored last-known-good GitHub Release backup"
             if _metadata_restore_changed(metadata_before, metadata_after)
             else
@@ -415,7 +447,13 @@ def _check_cp_readiness() -> Dict[str, Any]:
         db_mtime_before = _file_mtime_ns(manager.db_path)
         zip_mtime_before = _file_mtime_ns(manager.gtfs_zip_path)
         metadata_before = _load_json_metadata(manager.metadata_path)
-        database_ready = manager.ensure_database(force_refresh=False)
+        reuse_local_data = _reuse_local_transport_data_enabled()
+        local_stop_count = _count_sqlite_rows(str(manager.db_path), "stops")
+        database_ready = (
+            local_stop_count > 0
+            if reuse_local_data and local_stop_count > 0
+            else manager.ensure_database(force_refresh=False)
+        )
         db_mtime_after = _file_mtime_ns(manager.db_path)
         zip_mtime_after = _file_mtime_ns(manager.gtfs_zip_path)
         metadata_after = _load_json_metadata(manager.metadata_path)
@@ -436,6 +474,9 @@ def _check_cp_readiness() -> Dict[str, Any]:
             else "CP GTFS SQLite database is not populated"
         )
         action = (
+            "local SQLite reused; remote freshness check skipped"
+            if reuse_local_data and local_stop_count > 0
+            else
             "restored last-known-good GitHub Release backup"
             if _metadata_restore_changed(metadata_before, metadata_after)
             else

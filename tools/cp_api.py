@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import sqlite3
+import time
 import unicodedata
 import zipfile
 from collections import defaultdict
@@ -533,12 +534,34 @@ class CPGTFSManager:
 
         logger.info("Converting GTFS to SQLite...")
 
-        # Remove old database if exists
-        if self.db_path.exists():
-            self.db_path.unlink()
+        temp_db_path = self.db_path.with_name(f"{self.db_path.stem}.tmp{self.db_path.suffix}")
 
+        def _cleanup_temp_database() -> None:
+            """Best-effort cleanup for temporary SQLite files and sidecars."""
+            for candidate in (
+                temp_db_path,
+                Path(f"{temp_db_path}-wal"),
+                Path(f"{temp_db_path}-shm"),
+            ):
+                for attempt in range(3):
+                    try:
+                        candidate.unlink(missing_ok=True)
+                        break
+                    except OSError:
+                        if attempt == 2:
+                            break
+                        time.sleep(0.1)
+
+        if temp_db_path.exists():
+            _cleanup_temp_database()
+            if temp_db_path.exists():
+                logger.warning("Could not remove stale CP temporary database; keeping existing CP database.")
+                return self._database_has_stops()
+
+        conn: Optional[sqlite3.Connection] = None
+        cursor: Optional[sqlite3.Cursor] = None
         try:
-            conn = sqlite3.connect(str(self.db_path))
+            conn = sqlite3.connect(str(temp_db_path))
             cursor = conn.cursor()
 
             # Enable optimizations
@@ -582,7 +605,28 @@ class CPGTFSManager:
             self._create_indexes(cursor)
 
             conn.commit()
+            try:
+                cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except sqlite3.Error:
+                pass
+            try:
+                cursor.close()
+            except sqlite3.Error:
+                pass
+            cursor = None
             conn.close()
+            conn = None
+
+            try:
+                os.replace(str(temp_db_path), str(self.db_path))
+            except PermissionError as exc:
+                logger.warning(
+                    "CP SQLite database is locked by another process; keeping the existing "
+                    "database for this runtime: %s",
+                    exc,
+                )
+                _cleanup_temp_database()
+                return self._database_has_stops()
 
             # Update metadata with DB creation time (preserve download headers)
             metadata = self._load_metadata()
@@ -594,6 +638,17 @@ class CPGTFSManager:
 
         except Exception as e:
             logger.error(f"Error converting GTFS to SQLite: {e}")
+            try:
+                if cursor is not None:
+                    cursor.close()
+            except sqlite3.Error:
+                pass
+            try:
+                if conn is not None:
+                    conn.close()
+            except sqlite3.Error:
+                pass
+            _cleanup_temp_database()
             return False
 
     def _create_tables(self, cursor: sqlite3.Cursor) -> None:

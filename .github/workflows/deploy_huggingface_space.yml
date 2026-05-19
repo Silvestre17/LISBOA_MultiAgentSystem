@@ -21,6 +21,7 @@ on:
   workflow_run:
     workflows: ["Sync Vector Database", "Sync Transport Runtime Data"]
     types: [completed]
+    branches: [main]
 
   workflow_dispatch:
 
