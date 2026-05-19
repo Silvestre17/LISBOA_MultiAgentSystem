@@ -349,6 +349,7 @@ _PLANNER_BELEM_AREA_RE = re.compile(
     re.IGNORECASE,
 )
 
+
 def _planner_area_is_broad_city(area: str) -> bool:
     """Return whether an extracted area is too broad for same-area walking."""
     normalized = _normalize_planner_text(area)
@@ -802,6 +803,8 @@ def _food_card_matches_requested_context(card: Dict[str, str], user_message: str
 def _query_has_explicit_anchor_sequence(user_message: str) -> bool:
     """Return whether the user requested a concrete ordered sequence of places."""
     normalized = _normalize_planner_text(user_message)
+    if _query_has_explicit_start_end_constraint(user_message):
+        return True
     requested_labels = _requested_anchor_labels(user_message)
     if len(requested_labels) < 2:
         return False
@@ -818,6 +821,17 @@ def _query_has_explicit_anchor_sequence(user_message: str) -> bool:
             and re.search(r"\b(?:roteiro|itinerario|itinerary|plano|plan|dia|day|paragens|stops|transportes?|transport)\b", normalized)
         )
     )
+
+
+def _query_has_explicit_start_end_constraint(user_message: str) -> bool:
+    """Return whether a plan names both a starting point and an ending area."""
+    normalized = _normalize_planner_text(user_message)
+    if not (
+        re.search(r"\b(?:comeca|comece|comecar|comecando|inicia|iniciar|iniciando|start|starting)\b", normalized)
+        and re.search(r"\b(?:termina|termine|terminar|terminando|acaba|acabe|acabar|acabando|end|ending|finish|finishing)\b", normalized)
+    ):
+        return False
+    return bool(_extract_requested_plan_origin(user_message) and _extract_requested_plan_area(user_message))
 
 
 def _requested_sequence_transport_limitation_bullets(user_message: str, language: str) -> List[str]:
@@ -3532,6 +3546,14 @@ def _clean_extracted_plan_area(area: str) -> str:
     """Remove origin/constraint tails from an extracted planning area."""
     cleaned = re.sub(r"\s+", " ", area or "").strip(" .:-")
     cleaned = re.sub(
+        r"^\s*(?:o|a|the|meu|minha|my)?\s*"
+        r"(?:hotel|alojamento|base|accommodation)\s+"
+        r"(?:em|no|na|near|around|at|in|perto\s+d(?:e|o|a|os|as))\s+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip(" .:-")
+    cleaned = re.sub(
         r"\s+(?:starting|start|beginning|begin)\s+(?:from|at|in)\b.*$",
         "",
         cleaned,
@@ -3549,6 +3571,20 @@ def _clean_extracted_plan_area(area: str) -> str:
 def _extract_requested_plan_area(user_message: str) -> str:
     """Extract a named target area from a short planning request."""
     text = str(user_message or "").strip()
+    ending_patterns = [
+        r"\b(?:termin\S*|acab\S*|finish|end)\s+(?:perto\s+d(?:e|o|a|os|as)|em|no|na|near|around|at)\s+(?P<area>[^,.;]+?)(?:\s+no\s+segundo\s+dia|\s+on\s+day\s+\d+|[,.;]|$)",
+        r"\b(?:termin\S*|acab\S*|finishing|ending|finish|end)\s+(?:(?:o|a|no|na|on|the)\s+)?(?:primeiro|segundo|terceiro|\d+)(?:\s+dia|\s+day)?\s+(?:perto\s+d(?:e|o|a|os|as)|em|no|na|near|around|at)\s+(?P<area>[^,.;]+?)(?:[,.;]|$)",
+    ]
+    for pattern in ending_patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            area = _clean_extracted_plan_area(match.group("area"))
+            if 2 <= len(area) <= 80:
+                normalized_area = _normalize_planner_text(area)
+                if "baixa" in normalized_area and "chiado" in normalized_area:
+                    return "Baixa e Chiado"
+                return area
+
     patterns = [
         r"\b(?:in|around)\s+(?P<area>[^,.;]+?)\s+(?:starting|start|beginning|begin)\s+(?:from|at|in)\b",
         r"\b(?:em|no|na|nos|nas)\s+(?P<area>[^,.;]+?)\s+a\s+partir\s+d(?:e|o|a|os|as)\b",
@@ -4600,6 +4636,13 @@ def _ensure_requested_origin_target_in_transport_section(
     target_norm = _normalize_planner_text(target)
     if target_norm in {"lisbon", "lisboa"} or re.match(r"^(?:lisbon|lisboa)\s+(?:museums?|museus?|viewpoints?|miradouros?)\b", target_norm):
         return response
+    if _query_has_explicit_start_end_constraint(user_message):
+        return _ensure_requested_start_end_in_transport_section(
+            response,
+            user_message,
+            language,
+            transport_data,
+        )
 
     movement_heading_pattern = r"(?m)^(###\s+.*\*\*(?:Como te deslocas|How to move)\*\*\s*)$"
     normalized_response = _normalize_planner_text(response)
@@ -4724,6 +4767,245 @@ def _planner_last_visible_stop_from_response(response: str, language: str) -> st
     if candidates:
         return candidates[-1]
     return "última paragem" if language == "pt" else "last stop"
+
+
+def _planner_first_visible_stop_from_response(response: str, language: str) -> str:
+    """Extract the first top-level itinerary stop visible in a planner response."""
+    candidates: List[str] = []
+    in_movement = False
+    for raw_line in str(response or "").splitlines():
+        stripped = raw_line.strip()
+        normalized = _normalize_planner_text(stripped)
+        if re.match(r"^###\s+", stripped) and re.search(
+            r"\b(?:como te deslocas|how to move)\b",
+            normalized,
+            flags=re.IGNORECASE,
+        ):
+            in_movement = True
+            continue
+        if in_movement and stripped.startswith("### "):
+            in_movement = False
+        if in_movement:
+            continue
+        if not re.match(r"^[-*]\s+\*\*.+\*\*\s*$", stripped):
+            continue
+        title = re.sub(r"^[-*]\s+", "", stripped)
+        title = re.sub(r"^\*\*|\*\*$", "", title).strip()
+        title = re.sub(r"^[^\wÀ-ÿ]+", "", title).strip()
+        if "â†’" in title or "->" in title:
+            continue
+        if re.search(
+            r"\b(?:resposta direta|direct answer|preco|price|morada|address|horario|hours|fonte|source)\b",
+            _normalize_planner_text(title),
+        ):
+            continue
+        if " Â· " in title:
+            title = title.split(" Â· ", 1)[1].strip()
+        if ":" in title:
+            title = title.rsplit(":", 1)[-1].strip()
+        if title:
+            candidates.append(title)
+
+    if candidates:
+        return candidates[0]
+    return "primeira paragem" if language == "pt" else "first stop"
+
+
+def _strip_direct_start_end_movement_collapse(response: str, origin: str, target: str) -> str:
+    """Remove direct start-to-end movement lines from multi-stop start/end plans."""
+    if not response or not origin or not target:
+        return response
+
+    origin_norm = _normalize_planner_text(origin)
+    target_norm = _normalize_planner_text(target)
+    output: List[str] = []
+    in_movement = False
+    for raw_line in response.splitlines():
+        stripped = raw_line.strip()
+        normalized = _normalize_planner_text(stripped)
+        if re.match(r"^###\s+", stripped) and re.search(
+            r"\b(?:como te deslocas|how to move)\b",
+            normalized,
+        ):
+            in_movement = True
+            output.append(raw_line)
+            continue
+        if in_movement and stripped.startswith("### "):
+            in_movement = False
+        if (
+            in_movement
+            and origin_norm
+            and target_norm
+            and origin_norm in normalized
+            and target_norm in normalized
+            and ("→" in raw_line or "â†’" in raw_line or "->" in raw_line)
+        ):
+            continue
+        output.append(raw_line)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(output)).strip()
+
+
+def _extract_strict_origin_target_transport_bullet(
+    transport_data: str,
+    origin: str,
+    target: str,
+) -> str:
+    """Return only a transport line that explicitly names both leg endpoints."""
+    normalized_origin = _normalize_planner_text(origin)
+    normalized_target = _normalize_planner_text(target)
+    if not normalized_origin or not normalized_target:
+        return ""
+    return _extract_existing_origin_target_transport_line(
+        transport_data,
+        normalized_origin,
+        normalized_target,
+    )
+
+
+def _strip_generic_start_end_movement_warning(response: str) -> str:
+    """Remove broad movement warnings once specific start/end bullets exist."""
+    if not response:
+        return response
+    output: List[str] = []
+    in_movement = False
+    for raw_line in response.splitlines():
+        stripped = raw_line.strip()
+        normalized = _normalize_planner_text(stripped)
+        if re.match(r"^###\s+", stripped) and re.search(
+            r"\b(?:como te deslocas|how to move)\b",
+            normalized,
+        ):
+            in_movement = True
+            output.append(raw_line)
+            continue
+        if in_movement and stripped.startswith("### "):
+            in_movement = False
+        if (
+            in_movement
+            and "→" not in raw_line
+            and "â†’" not in raw_line
+            and "->" not in raw_line
+            and re.search(
+                r"\b(?:ligacao pedida|ligacao concreta|requested connection|exact leg)\b",
+                normalized,
+            )
+            and re.search(r"\b(?:nao ficou confirmad|not confirmed|nao inventei|did not invent)\b", normalized)
+        ):
+            continue
+        output.append(raw_line)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(output)).strip()
+
+
+def _ensure_requested_start_end_in_transport_section(
+    response: str,
+    user_message: str,
+    language: str,
+    transport_data: str,
+) -> str:
+    """Keep explicit start and end constraints visible without collapsing the plan."""
+    if not response or not _query_has_explicit_start_end_constraint(user_message):
+        return response
+
+    origin = _extract_requested_plan_origin(user_message)
+    target = _extract_requested_plan_area(user_message)
+    if not origin or not target:
+        return response
+
+    response = _strip_direct_start_end_movement_collapse(response, origin, target)
+    movement_text = _planner_movement_section_text(response)
+    normalized_movement = _normalize_planner_text(movement_text)
+    first_stop = _planner_first_visible_stop_from_response(response, language)
+    last_stop = _planner_last_visible_stop_from_response(response, language)
+    origin_norm = _normalize_planner_text(origin)
+    target_norm = _normalize_planner_text(target)
+    first_stop_norm = _normalize_planner_text(first_stop)
+    last_stop_norm = _normalize_planner_text(last_stop)
+    generic_first_stop = first_stop_norm in {"primeira paragem", "first stop"}
+    generic_last_stop = last_stop_norm in {"ultima paragem", "last stop"}
+
+    bullets: List[str] = []
+    if origin_norm and first_stop_norm and not generic_first_stop and origin_norm not in normalized_movement:
+        confirmed_start = _extract_strict_origin_target_transport_bullet(
+            transport_data,
+            origin,
+            first_stop,
+        )
+        if confirmed_start:
+            bullets.append(f"- {confirmed_start}")
+        elif language == "pt":
+            bullets.append(
+                f"- ⚠️ **{origin} → {first_stop}:** começa no ponto indicado; a ligação concreta para a primeira paragem não ficou confirmada nos dados recolhidos."
+            )
+        else:
+            bullets.append(
+                f"- ⚠️ **{origin} → {first_stop}:** start from the requested point; the concrete leg to the first stop was not confirmed in the gathered data."
+            )
+
+    has_final_leg = bool(
+        target_norm
+        and last_stop_norm
+        and target_norm in normalized_movement
+        and last_stop_norm in normalized_movement
+        and ("â†’" in movement_text or "->" in movement_text)
+    )
+    if not has_final_leg and target_norm not in _normalize_planner_text(last_stop):
+        if generic_last_stop:
+            confirmed_end = ""
+        else:
+            confirmed_end = _extract_strict_origin_target_transport_bullet(
+                transport_data,
+                last_stop,
+                target,
+            )
+        if confirmed_end:
+            bullets.append(f"- {confirmed_end}")
+        elif not generic_last_stop and language == "pt":
+            bullets.append(
+                f"- ⚠️ **{last_stop} → {target}:** termina no ponto indicado; a ligação concreta não ficou confirmada nos dados recolhidos, por isso não inventei linhas, paragens ou horários."
+            )
+        elif not generic_last_stop:
+            bullets.append(
+                f"- ⚠️ **{last_stop} → {target}:** finish at the requested point; the concrete leg was not confirmed in the gathered data, so I did not invent lines, stops, or schedules."
+            )
+
+    if not bullets:
+        return response
+
+    response = _strip_generic_start_end_movement_warning(response)
+    heading = "### 🚇 **Como te deslocas**" if language == "pt" else "### 🚇 **How to move**"
+    final_notes_pattern = (
+        r"(?m)^###\s+âš ï¸\s+\*\*Notas finais\*\*"
+        if language == "pt"
+        else r"(?m)^###\s+âš ï¸\s+\*\*Final notes\*\*"
+    )
+    section_re = re.compile(
+        r"(?ms)(?P<header>^###\s+.*\*\*(?:Como te deslocas|How to move)\*\*\s*(?:\n|$))"
+        r"(?P<body>.*?)(?=(?:\n---\s*\n|\n###\s+|\nðŸ“Œ\s+\*\*(?:Fonte|Source):|\Z))"
+    )
+
+    def append_to_movement(match: re.Match[str]) -> str:
+        body = match.group("body").rstrip()
+        existing = _normalize_planner_text(body)
+        additions = [
+            bullet for bullet in bullets
+            if _normalize_planner_text(bullet) not in existing
+        ]
+        if not additions:
+            return match.group(0)
+        return f"{match.group('header')}{body}\n" + "\n".join(additions) + "\n"
+
+    if section_re.search(response):
+        return section_re.sub(append_to_movement, response, count=1).strip()
+
+    if re.search(final_notes_pattern, response):
+        return re.sub(
+            final_notes_pattern,
+            f"{heading}\n" + "\n".join(bullets) + "\n\n---\n\n\\g<0>",
+            response,
+            count=1,
+        ).strip()
+
+    return f"{response.rstrip()}\n\n---\n\n{heading}\n" + "\n".join(bullets)
 
 
 def _planner_response_has_return_to_origin_movement(response: str, user_message: str) -> bool:
@@ -8646,7 +8928,7 @@ def _planner_response_missing_requested_plan_components(
         r"\b(?:evento|event|concerto|concert|festival|teatro|theatre|theater|m[uú]sica|music)\b",
         route_text,
     ):
-            return True
+        return True
     return False
 
 

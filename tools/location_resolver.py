@@ -1086,6 +1086,18 @@ def _format_brand_ambiguity_candidate(candidate: Dict[str, Any], brand_norm: str
     primary = parts[0] if parts else display
     address = candidate.get("address", {}) or {}
 
+    street_parts: List[str] = []
+    for field in ("road", "pedestrian", "footway", "street", "house_number", "postcode"):
+        value = str(address.get(field) or "").strip()
+        normalized_value = normalize_location_text(value)
+        if not normalized_value or normalized_value in {"portugal", "lisboa", "lisbon"}:
+            continue
+        if normalized_value not in {normalize_location_text(part) for part in street_parts}:
+            street_parts.append(value)
+    if street_parts and normalize_location_text(primary).startswith(brand_norm):
+        street_label = " ".join(street_parts[:3])
+        return f"{primary}, {street_label}".strip(" ,")
+
     locality_parts: List[str] = []
     seen: set[str] = set()
     for field in _AMBIGUITY_LOCALITY_FIELDS:

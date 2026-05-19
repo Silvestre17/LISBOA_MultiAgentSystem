@@ -5725,13 +5725,6 @@ def _select_researcher_specific_lookup_intro(
 
 def _specific_lookup_intro_name_is_category_noise(line: str) -> bool:
     """Return whether an exact-not-found intro names only category/filter words."""
-    match = re.search(r"\*\*(?P<name>[^*\n]{2,120})\*\*", line or "")
-    if not match:
-        return False
-    normalized = _strip_accents_compat(match.group("name")).lower()
-    tokens = re.findall(r"[a-z0-9]+", normalized)
-    if not tokens:
-        return False
     category_noise = {
         "a", "as", "de", "do", "da", "dos", "das", "e", "em", "o", "os",
         "all", "category", "children", "cinema", "concert", "concerts",
@@ -5740,11 +5733,19 @@ def _specific_lookup_intro_name_is_category_noise(line: str) -> bool:
         "evento", "eventos", "exclui", "excluir", "excluding", "exhibition",
         "exhibitions", "exposicao", "exposicoes", "familia", "festival",
         "festivals", "festivais", "feira", "feiras", "food", "gastronomia",
-        "gastronomy", "kids", "menos", "mes", "month", "music", "musica",
-        "nao", "no", "not", "sem", "sport", "sports", "teatro", "theater",
-        "theatre", "tipo", "todos", "todas", "without",
+        "gastronomy", "ha", "kids", "menos", "mes", "month", "music", "musica",
+        "nao", "no", "not", "qual", "quais", "que", "quero", "queria",
+        "sem", "sport", "sports", "teatro", "theater", "theatre", "tipo",
+        "todos", "todas", "without",
     }
-    return all(token in category_noise for token in tokens)
+    for match in re.finditer(r"\*\*(?P<name>[^*\n]{2,120})\*\*", line or ""):
+        normalized = _strip_accents_compat(match.group("name")).lower()
+        if normalized.strip(" :") in {"resposta direta", "direct answer"}:
+            continue
+        tokens = re.findall(r"[a-z0-9]+", normalized)
+        if tokens and all(token in category_noise for token in tokens):
+            return True
+    return False
 
 
 def _event_card_lookup_key(title: str) -> str:

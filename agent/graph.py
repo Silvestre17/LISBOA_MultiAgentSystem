@@ -1968,6 +1968,13 @@ class MultiAgentAssistant:
                 origin,
                 flags=re.IGNORECASE,
             )
+            origin = re.sub(
+                r"^\s*(?:metro|autocarros?|comboios?|bus(?:es)?|train(?:s)?)\s+"
+                r"(?:de|do|da|desde|from)\s+",
+                "",
+                origin,
+                flags=re.IGNORECASE,
+            )
             origin = re.sub(r"^\s*(?:o|a|os|as|the)\s+", "", origin, flags=re.IGNORECASE)
             destination = re.sub(r"^\s*(?:o|a|os|as|the)\s+", "", destination, flags=re.IGNORECASE)
             destination = re.sub(
@@ -2035,6 +2042,32 @@ class MultiAgentAssistant:
         if re.search(r"\b(?:de\s+comboio|comboio|train)\b", normalized):
             return "de comboio" if language == "pt" else "by train"
         return "com uma alternativa diferente" if language == "pt" else "with a different alternative"
+
+    @staticmethod
+    def _extract_mode_destination_follow_up(message: str, language: str) -> Dict[str, str]:
+        """Extract compact follow-ups such as ``E de metro até ao Saldanha?``."""
+        match = re.search(
+            r"^\s*(?:e\s+)?(?:de\s+|by\s+)?"
+            r"(?P<mode>metro|autocarros?|bus(?:es)?|comboios?|train(?:s)?)\s+"
+            r"(?:at[eé]|para|to)\s+"
+            r"(?:(?:ao|aos|à|às|a|o|os|as|the)\s+)?"
+            r"(?P<destination>[^?!.;,]+)",
+            str(message or ""),
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            return {}
+        destination = re.sub(r"\s+", " ", match.group("destination")).strip(" .,:;?!")
+        if len(destination) < 2:
+            return {}
+        mode = MultiAgentAssistant._fold_context_text(match.group("mode"))
+        if "metro" in mode:
+            mode_hint = "de metro" if language == "pt" else "by metro"
+        elif "comboio" in mode or "train" in mode:
+            mode_hint = "de comboio" if language == "pt" else "by train"
+        else:
+            mode_hint = "de autocarro" if language == "pt" else "by bus"
+        return {"destination": destination, "mode_hint": mode_hint}
 
     @staticmethod
     def _rewrite_transport_alternative_request(
@@ -2260,6 +2293,36 @@ class MultiAgentAssistant:
         return candidate
 
     @staticmethod
+    def _is_new_standalone_domain_request(message: str) -> bool:
+        """Return whether a pending clarification should be cleared for a new request."""
+        folded = MultiAgentAssistant._fold_context_text(message)
+        if not folded:
+            return False
+        has_request_cue = bool(
+            re.match(
+                r"^(?:que|quais|qual|quando|onde|ha|mostra|lista|procura|pesquisa|"
+                r"recomenda|diz|diz-me|quero\s+(?:saber|ver|eventos?|locais|"
+                r"restaurantes?|monumentos?|museus?|roteiro|itinerario)|"
+                r"what|which|where|when|show|list|find|tell|give|recommend)\b",
+                folded,
+            )
+            or "?" in str(message or "")
+        )
+        if not has_request_cue:
+            return False
+        return bool(
+            re.search(
+                r"\b(?:eventos?|events?|desportiv|sports?|musica|music|concertos?|"
+                r"concerts?|festival|festivais|teatro|theatre|exposic|exhibit|"
+                r"monumentos?|monuments?|museus?|museums?|miradouros?|viewpoints?|"
+                r"restaurantes?|restaurants?|fado|gastronom|casas?\s+de\s+banho|"
+                r"wc|sanitarios?|sanitarias?|farmacias?|pharmacies|hospitais?|"
+                r"previsao|meteorologia|weather|roteiro|itinerario|itinerary)\b",
+                folded,
+            )
+        )
+
+    @staticmethod
     def _route_destination_from_location_option(label: str) -> str:
         """Prefer the address part of an ambiguity option while keeping the place name."""
         cleaned = re.sub(r"\s+", " ", str(label or "")).strip(" .,:;")
@@ -2327,6 +2390,12 @@ class MultiAgentAssistant:
 
         options = [opt for opt in pending.get("options") or [] if isinstance(opt, dict)]
         matches = [opt for opt in options if self._location_option_matches_reply(message, opt)]
+        if len(matches) != 1 and self._is_new_standalone_domain_request(message):
+            anchors["pending_location_clarification"] = {}
+            return {
+                "message": message,
+                "routing_reasoning": "Stale pending location clarification ignored because the user asked a new standalone question.",
+            }
         fresh_route_pair = self._extract_route_pair_from_text(message)
         if fresh_route_pair and len(matches) != 1:
             standalone_query = self._standalone_query_from_malformed_pending_route(message, fresh_route_pair)
@@ -2592,6 +2661,25 @@ class MultiAgentAssistant:
     def _resolve_transport_alternative_follow_up(self, message: str, language: str) -> Dict[str, Any]:
         """Resolve short transport alternative follow-ups using the last route only."""
         normalized = self._fold_context_text(message)
+        anchors = self._get_conversation_anchors()
+        last_agents = {str(agent) for agent in anchors.get("last_response_agents") or []}
+        route = anchors.get("last_transport_route") if isinstance(anchors.get("last_transport_route"), dict) else {}
+        mode_destination = self._extract_mode_destination_follow_up(message, language)
+        if mode_destination and "transport" in last_agents:
+            origin = str(route.get("origin") or "").strip()
+            destination = str(mode_destination.get("destination") or "").strip()
+            if origin and destination:
+                rewritten = self._rewrite_transport_alternative_request(
+                    origin=origin,
+                    destination=destination,
+                    mode_hint=str(mode_destination.get("mode_hint") or ""),
+                    language=language,
+                )
+                return {
+                    "message": rewritten,
+                    "agents": ["transport"],
+                    "routing_reasoning": "Conversation route anchor resolved into a mode-specific destination follow-up.",
+                }
         if re.search(
             r"\b(?:from\s+.+?\s+to\s+.+|de\s+.+?\s+(?:para|ate|a|ao)\s+.+)",
             normalized,
@@ -2614,9 +2702,6 @@ class MultiAgentAssistant:
             normalized,
         ):
             return {}
-        anchors = self._get_conversation_anchors()
-        last_agents = {str(agent) for agent in anchors.get("last_response_agents") or []}
-        route = anchors.get("last_transport_route") if isinstance(anchors.get("last_transport_route"), dict) else {}
         if "transport" not in last_agents:
             return {}
         origin = str(route.get("origin") or "").strip()

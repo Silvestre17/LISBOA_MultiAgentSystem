@@ -734,6 +734,9 @@ def _localize_place_category(category: Optional[str], language: str = "en") -> s
         "Monuments": "Monumentos",
         "Restaurants": "Restaurantes",
         "Restaurant": "Restaurante",
+        "Restaurants & Cafes": "Restaurantes e Cafés",
+        "Restaurants & Cafés": "Restaurantes e Cafés",
+        "Restaurants and Cafes": "Restaurantes e Cafés",
         "Attractions": "Atrações",
         "Attraction": "Atração",
         "Hotels": "Hotéis",
@@ -2052,6 +2055,7 @@ _EVENT_SPECIFIC_LOOKUP_NOISE_TOKENS = {
     "fala", "para", "from", "with", "there", "happening", "temos", "tem",
     "this", "week", "today", "tomorrow", "next", "year",
     "ano", "esta", "semana", "este", "proxima", "proximo",
+    "que", "quais", "qual", "ha", "há", "quero", "queria", "nao", "não", "sem",
 }
 _EVENT_SPECIFIC_LOOKUP_HINT_TOKENS = {
     "book", "fair", "feira", "fado", "concert", "concerto", "festival", "exhibition",
@@ -2095,6 +2099,13 @@ def _extract_specific_event_lookup_phrase(query: Optional[str]) -> Optional[str]
         token for token in _extract_lookup_tokens(raw_query)
         if token not in _EVENT_SPECIFIC_LOOKUP_NOISE_TOKENS
     ]
+    category_filter_tokens = {
+        token
+        for term in _EVENT_CATEGORY_FILTER_TERMS
+        for token in _extract_lookup_tokens(term)
+    }
+    if meaningful_tokens and all(token in category_filter_tokens for token in meaningful_tokens):
+        return None
     has_year_marker = bool(re.search(r"(?:'\d{2}\b|\b(?:19|20)\d{2}\b)", raw_query))
 
     has_event_hint = any(token in _EVENT_SPECIFIC_LOOKUP_HINT_TOKENS for token in meaningful_tokens)
