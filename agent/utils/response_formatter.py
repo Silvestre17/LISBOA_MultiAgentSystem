@@ -10412,14 +10412,14 @@ def normalize_transport_timing_artifacts(text: str) -> str:
         cleaned = re.sub(
             r"📡\s+\*\*Tempo real:\*\*\s*h[aá]\s+pr[oó]ximas partidas confirmadas;\s*"
             r"n[aã]o h[aá]\s+alerta operacional espec[ií]fico nesta resposta\.?",
-            "📡 **Tempo real:** feed ativo; sem próximas partidas confirmadas nesta resposta.",
+            "📡 **Tempo real:** próximas partidas confirmadas; sem alerta operacional específico.",
             cleaned,
             flags=re.IGNORECASE,
         )
         cleaned = re.sub(
             r"📡\s+\*\*Real time:\*\*\s*upcoming departures are confirmed;\s*"
             r"no specific operational alert is included in this answer\.?",
-            "📡 **Real time:** live feed active; no upcoming departures were confirmed in this answer.",
+            "📡 **Real time:** upcoming departures confirmed; no specific operational alert reported.",
             cleaned,
             flags=re.IGNORECASE,
         )
@@ -14776,6 +14776,34 @@ def nest_carris_departure_lines_under_route(text: str) -> str:
     return "\n".join(output_lines)
 
 
+def _strip_redundant_single_line_bus_summary(text: str) -> str:
+    """Remove duplicate one-line bus summaries when the same single line card follows."""
+    if not text:
+        return text or ""
+    value = re.sub(
+        r"(?ms)\n---\s*\n+[-*]\s+✅\s+\*\*"
+        r"(?:Linha confirmada|Confirmed line|Only confirmed line):\*\*\s+"
+        r"(?P<line>[A-Za-z0-9]+).*?\n---\s*\n+"
+        r"(?=\*\*🚌\s+(?:Carris|Autocarros|Buses)\*\*\s*\n+\s*[-*]\s+\*\*(?P=line)\*\*:)",
+        "\n---\n\n",
+        text,
+    )
+    value = re.sub(
+        r"(?ms)(✅\s+\*\*Resposta direta:\*\*[^\n]*(?:apenas|s[oó])[^\n]*(?:linha|op[cç][aã]o)[^\n]*\n\n)"
+        r"---\s*\n+[-*]\s+✅\s+\*\*Melhor opção confirmada:\*\*.*?\n---\s*\n+"
+        r"(?=\*\*🚌\s+(?:Carris|Autocarros)\*\*)",
+        r"\1---\n\n",
+        value,
+    )
+    return re.sub(
+        r"(?ms)(✅\s+\*\*Direct answer:\*\*[^\n]*(?:only|one)[^\n]*(?:line|option)[^\n]*\n\n)"
+        r"---\s*\n+[-*]\s+✅\s+\*\*Best confirmed option:\*\*.*?\n---\s*\n+"
+        r"(?=\*\*🚌\s+Buses\*\*)",
+        r"\1---\n\n",
+        value,
+    )
+
+
 def final_visual_pass(text: str) -> str:
     """Apply the final set of visual and consistency repairs in order.
 
@@ -14789,6 +14817,14 @@ def final_visual_pass(text: str) -> str:
     text = promote_leading_planner_title_bullet(text)
     text = dedupe_direct_answer_leading_status_icon(text)
     text = normalize_transport_status_public_language(text)
+    text = _normalize_transport_visual_contract(
+        text,
+        infer_response_language(
+            context_text=text,
+            default="pt" if re.search(r"\b(?:Fonte|Atualizado|Resposta direta)\b", text) else "en",
+        ),
+    )
+    text = _strip_redundant_single_line_bus_summary(text)
     text = strip_visitlisboa_from_transport_status_footer(text)
     text = normalize_two_space_child_bullets(text)
     text = repair_orphan_price_tip_lines(text)
@@ -16481,6 +16517,14 @@ def final_visual_pass(text: str) -> str:
     text = strip_self_referential_accommodation_movement_legs(text)
     text = dedupe_direct_answer_leading_status_icon(text)
     text = normalize_transport_status_public_language(text)
+    text = _normalize_transport_visual_contract(
+        text,
+        infer_response_language(
+            context_text=text,
+            default="pt" if re.search(r"\b(?:Fonte|Atualizado|Resposta direta)\b", text) else "en",
+        ),
+    )
+    text = _strip_redundant_single_line_bus_summary(text)
     text = strip_visitlisboa_from_transport_status_footer(text)
     final_language = infer_visible_label_language(text, default="en")
     text = normalize_researcher_tip_bullets(text, final_language)
@@ -17215,14 +17259,14 @@ def _normalize_transport_visual_contract(text: str, language: str) -> str:
         value = re.sub(
             r"📡\s+\*\*Tempo real:\*\*\s*h[aá]\s+pr[oó]ximas partidas confirmadas;\s*"
             r"n[aã]o h[aá]\s+alerta operacional espec[ií]fico nesta resposta\.?",
-            "📡 **Tempo real:** feed ativo; sem próximas partidas confirmadas nesta resposta.",
+            "📡 **Tempo real:** próximas partidas confirmadas; sem alerta operacional específico.",
             value,
             flags=re.IGNORECASE,
         )
         value = re.sub(
             r"📡\s+\*\*Real time:\*\*\s*upcoming departures are confirmed;\s*"
             r"no specific operational alert is included in this answer\.?",
-            "📡 **Real time:** live feed active; no upcoming departures were confirmed in this answer.",
+            "📡 **Real time:** upcoming departures confirmed; no specific operational alert reported.",
             value,
             flags=re.IGNORECASE,
         )
@@ -17367,7 +17411,32 @@ def _normalize_transport_visual_contract(text: str, language: str) -> str:
     ) or re.search(
         r"(?im)^🗺️\s+\*\*(?:O seu Trajeto de Metro|Your Metro Route)",
         value,
+    ) or (
+        re.search(r"(?im)^###\s+.+→.+$", value)
+        and re.search(r"\b(?:O seu Trajeto de Metro|Your Metro Route)\b", value, flags=re.IGNORECASE)
     ):
+        # QA can turn embedded mode labels and metro subsection labels into H3
+        # headings. Inside a composed route answer those labels must remain
+        # compact sections, otherwise Streamlit renders a broken hierarchy.
+        value = re.sub(
+            r"(?mi)^\s*-\s+\*\*(?P<icon>🚇|🚌|🚋|🚆)\s+"
+            r"(?P<label>Metro|Autocarros?|Autocarro|Carris|Buses?|Trams?|Comboios?|Trains?)\*\*\s*$",
+            r"**\g<icon> \g<label>**",
+            value,
+        )
+        value = re.sub(
+            r"(?mi)^###\s+(?P<icon>🚦|🗺️|🗓️)\s+\*\*"
+            r"(?P<label>Estado das Linhas|Line Status|O seu Trajeto de Metro|Your Metro Route|Próximos Metros|Next Metros):?\*\*"
+            r"(?P<suffix>[^\n]*)$",
+            lambda m: f"{m.group('icon')} **{m.group('label')}:**{m.group('suffix')}",
+            value,
+        )
+        value = re.sub(r"(?m)^---\n(?=\*\*(?:🚇|🚌|🚋|🚆)\s+)", "---\n\n", value)
+        value = re.sub(
+            r"(?m)^(\*\*(?:🚇|🚌|🚋|🚆)\s+[^\n]+\*\*)\n(?=(?:🚦|🗺️|🗓️|⏳))",
+            r"\1\n\n",
+            value,
+        )
         # Convert ``### 🚶 **...**`` / ``### 🔄 **...**`` / ``### 🎯 **...**`` /
         # ``### 📍 **...**`` lines into ``- <emoji> **...**`` bullets.
         value = re.sub(

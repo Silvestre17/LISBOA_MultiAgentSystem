@@ -1828,13 +1828,14 @@ class MultiAgentAssistant:
         transport_follow_up_re = re.compile(
             r"\b(?:como|chego|vou|ir|rota|trajeto|percurso|tempo|horas?|quando|"
             r"proximo|proxima|partida|partidas|apanhar|metro|autocarro|comboio|"
-            r"alternativa|opcao|opcoes|sem|how|get|go|route|time|when|next|"
-            r"departure|catch|bus|train|option|alternative|without)\b",
+            r"transporte|transportes|meios|alternativa|alternativas|opcao|opcoes|outras?|outros?|sem|"
+            r"how|get|go|route|time|when|next|departure|catch|bus|train|transport|"
+            r"transit|modes?|option|options|alternative|without)\b",
             flags=re.IGNORECASE,
         )
         if transport_follow_up_re.search(normalized):
             return {}
-        if re.search(r"\b(?:mais|more|outro|outra|another)\b", normalized):
+        if re.search(r"\b(?:mais|more|outro|outra|outros|outras|another|other)\b", normalized):
             return {}
 
         return {
@@ -1944,6 +1945,7 @@ class MultiAgentAssistant:
             r"(?m)^#{1,6}\s+.*?\*\*(?P<origin>[^*→\n]{2,120})\s*→\s*(?P<destination>[^*\n]{2,160})\*\*\s*$",
             r"(?:Op[cç][oõ]es\s+apenas\s+de\s+[^*\n]+?\s+para|Bus-only\s+options\s+for)\s*(?P<origin>[^→\n]{2,120})\s*→\s*(?P<destination>[^*\n]{2,160})",
             r"(?:Rota\s+de\s+transporte\s+p[úu]blico|Public\s+transport\s+route|Trajeto|Route):\s*(?P<origin>[^→\n]{2,120})\s*→\s*(?P<destination>[^*\n]{2,160})",
+            r"\bfrom\s+(?P<origin>.+?)\s+to\s+(?P<destination>[^?.!\n]{2,160})",
             r"\b(?:de|do|da|desde|from)\s+(?P<origin>.+?)\s+(?:para|aos|às|ao|à|at[eé]|ate|a|to)\s+(?P<destination>[^?.!\n]{2,160})",
         )
         for pattern in patterns:
@@ -1954,6 +1956,14 @@ class MultiAgentAssistant:
             destination = re.sub(r"[*_`#\[\]()]|https?://\S+", "", match.group("destination"))
             origin = re.sub(
                 r"^\s*(?:rota\s+de\s+transporte\s+p[úu]blico|public\s+transport\s+route|trajeto|route)\s*:\s*",
+                "",
+                origin,
+                flags=re.IGNORECASE,
+            )
+            origin = re.sub(
+                r"^\s*(?:uma\s+|um\s+)?(?:alternativa|op[cç][aã]o|meios?\s+de\s+transporte|"
+                r"transportes?|transporte\s+p[úu]blico|transportes\s+p[úu]blicos|public\s+transport)\s+"
+                r"(?:de|do|da|dos|das|from)\s+",
                 "",
                 origin,
                 flags=re.IGNORECASE,
@@ -2006,9 +2016,21 @@ class MultiAgentAssistant:
             normalized,
         ):
             return "comparar metro e comboio" if language == "pt" else "compare metro and train"
+        if re.search(r"\b(?:outros?\s+meios?\s+de\s+transporte|outros?\s+transportes?|meios?\s+de\s+transporte|other\s+(?:transport|transit)\s+modes?|other\s+ways?)\b", normalized):
+            return "comparar meios suportados" if language == "pt" else "compare supported modes"
+        if re.search(
+            r"\b(?:outros?|outras?|mais|other|more)\s+(?:autocarros?|linhas?\s+de\s+autocarro|buses|bus\s+lines?)\b",
+            normalized,
+        ):
+            return "outros autocarros" if language == "pt" else "other buses"
+        if re.search(
+            r"\b(?:outros?|outras?|mais|other|more)\s+(?:eletricos?|linhas?\s+de\s+eletrico|trams|tram\s+lines?)\b",
+            normalized,
+        ):
+            return "outros elétricos" if language == "pt" else "other trams"
         if re.search(r"\b(?:de\s+metro|metro)\b", normalized):
             return "de metro" if language == "pt" else "by metro"
-        if re.search(r"\b(?:de\s+autocarro|autocarro|bus)\b", normalized):
+        if re.search(r"\b(?:de\s+autocarro|autocarros?|bus|buses)\b", normalized):
             return "de autocarro" if language == "pt" else "by bus"
         if re.search(r"\b(?:de\s+comboio|comboio|train)\b", normalized):
             return "de comboio" if language == "pt" else "by train"
@@ -2024,10 +2046,16 @@ class MultiAgentAssistant:
     ) -> str:
         """Builds a natural point-to-point follow-up without turning the mode into a place."""
         if language == "pt":
+            if mode_hint == "comparar meios suportados":
+                return (
+                    f"Quero ir de {origin} para {destination}. "
+                    "Compara os meios de transporte público suportados por dados disponíveis "
+                    "e dá-me outra opção se existir."
+                )
             if mode_hint.startswith("comparar "):
                 compared = mode_hint.removeprefix("comparar ").strip()
                 return (
-                    f"Quero comparar {compared} de {origin} para {destination}. "
+                    f"Quero ir de {origin} para {destination}. Compara {compared}. "
                     "Avalia as opções suportadas por dados disponíveis, explica limitações e recomenda a melhor."
                 )
             if mode_hint == "de metro":
@@ -2040,6 +2068,18 @@ class MultiAgentAssistant:
                     f"Quero ir de autocarro de {origin} para {destination}. "
                     "Usa Carris quando for aplicável e não uses metro como recomendação principal."
                 )
+            if mode_hint == "outros autocarros":
+                return (
+                    f"Quero ir de {origin} para {destination}. "
+                    "Dá-me outros autocarros confirmados pela Carris; "
+                    "se só houver uma linha, diz isso claramente."
+                )
+            if mode_hint == "outros elétricos":
+                return (
+                    f"Quero ir de {origin} para {destination}. "
+                    "Dá-me outros elétricos confirmados pela Carris; "
+                    "se só houver uma linha, diz isso claramente."
+                )
             if mode_hint == "de comboio":
                 return (
                     f"Quero ir de comboio de {origin} para {destination}. "
@@ -2049,12 +2089,17 @@ class MultiAgentAssistant:
                 return f"Quero ir de {origin} para {destination}, evitando autocarro. Dá-me a melhor alternativa suportada."
             if mode_hint == "evitando metro":
                 return f"Quero ir de {origin} para {destination}, evitando metro. Dá-me a melhor alternativa suportada."
-            return f"Quero uma alternativa de transporte de {origin} para {destination}. Dá-me outra opção suportada."
+            return f"Quero ir de {origin} para {destination}. Dá-me uma alternativa diferente suportada."
 
+        if mode_hint == "compare supported modes":
+            return (
+                f"I want to go from {origin} to {destination}. "
+                "Compare the public transport modes supported by available data and give me another option if one exists."
+            )
         if mode_hint.startswith("compare "):
             compared = mode_hint.removeprefix("compare ").strip()
             return (
-                f"I want to compare {compared} from {origin} to {destination}. "
+                f"I want to go from {origin} to {destination}. Compare {compared}. "
                 "Evaluate the options supported by available data, explain limitations, and recommend the best one."
             )
         if mode_hint == "by metro":
@@ -2067,6 +2112,16 @@ class MultiAgentAssistant:
                 f"I want to go by bus from {origin} to {destination}. "
                 "Use Carris when applicable and do not use metro as the main recommendation."
             )
+        if mode_hint == "other buses":
+            return (
+                f"I want to go from {origin} to {destination}. "
+                "Give me other buses confirmed by Carris; if there is only one line, say that clearly."
+            )
+        if mode_hint == "other trams":
+            return (
+                f"I want to go from {origin} to {destination}. "
+                "Give me other trams confirmed by Carris; if there is only one line, say that clearly."
+            )
         if mode_hint == "by train":
             return (
                 f"I want to go by train from {origin} to {destination}. "
@@ -2076,7 +2131,7 @@ class MultiAgentAssistant:
             return f"I want to go from {origin} to {destination}, avoiding bus. Give me the best supported alternative."
         if mode_hint == "avoiding metro":
             return f"I want to go from {origin} to {destination}, avoiding metro. Give me the best supported alternative."
-        return f"I want a transport alternative from {origin} to {destination}. Give me another supported option."
+        return f"I want to go from {origin} to {destination}. Give me a different supported option."
 
     @staticmethod
     def _extract_location_ambiguity_options(text: str) -> Dict[str, Any]:
@@ -2544,11 +2599,16 @@ class MultiAgentAssistant:
             return {}
         if not re.search(
             r"\b(?:alternativa|alternativas|outra\s+opcao|outras\s+opcoes|outro\s+caminho|"
+            r"outros?\s+meios?\s+de\s+transporte|outros?\s+transportes?|meios?\s+de\s+transporte|"
+            r"outros?\s+autocarros?|outras?\s+linhas?\s+de\s+autocarro|mais\s+autocarros?|"
+            r"outros?\s+el[eé]tricos?|outras?\s+linhas?\s+de\s+el[eé]trico|"
             r"(?:metro|autocarro|comboio|bus|train)\s+(?:ou|or)\s+(?:metro|autocarro|comboio|bus|train)|"
             r"e\s+de\s+(?:metro|autocarro|comboio)|(?:ir|vou|preferia|prefiro|preferir|quiser)\s+de\s+(?:metro|autocarro|comboio)|"
             r"(?:preferia|prefiro|preferir|quiser)\s+(?:metro|autocarro|comboio)|"
             r"sem\s+(?:metro|autocarro|comboio)|"
-            r"alternative|another\s+(?:option|route|way)|(?:go|travel|prefer|want)\s+by\s+(?:metro|bus|train)|"
+            r"alternative|another\s+(?:option|route|way)|other\s+(?:transport|transit)\s+modes?|other\s+ways?|"
+            r"other\s+buses?|more\s+buses?|other\s+bus\s+lines?|other\s+trams?|more\s+trams?|other\s+tram\s+lines?|"
+            r"(?:go|travel|prefer|want)\s+by\s+(?:metro|bus|train)|"
             r"(?:prefer|want)\s+(?:metro|bus|train)|"
             r"without\s+(?:metro|bus|train)|by\s+(?:metro|bus|train))\b",
             normalized,
@@ -3598,7 +3658,7 @@ class MultiAgentAssistant:
                 }
 
         if "transport" in effective_agent_set:
-            route_pair = self._extract_route_pair_from_text(final_output) or self._extract_route_pair_from_text(message)
+            route_pair = self._extract_route_pair_from_text(message) or self._extract_route_pair_from_text(final_output)
             if route_pair:
                 anchors["last_transport_route"] = route_pair
             self._store_pending_location_clarification(message, final_output, effective_agent_set)

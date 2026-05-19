@@ -562,6 +562,11 @@ _LOCATION_ADDRESS_HINT_RE = re.compile(
     r"mosteiro|torre|castelo|pal[aá]cio|palacio)\b|\b\d{4}-\d{3}\b",
     re.IGNORECASE,
 )
+_LOCATION_CONCRETE_ADDRESS_HINT_RE = re.compile(
+    r"\b(?:rua|avenida|av\.?|largo|pra[cç]a|travessa|estrada|alameda|cal[cç]ada|"
+    r"campo|campus)\b|\b\d{4}-\d{3}\b",
+    re.IGNORECASE,
+)
 
 _LOCATION_VENUE_LABEL_RE = re.compile(
     r"\b(?:centro\s+comercial|shopping|farm[aá]cia|loja|restaurante|caf[eé]|hotel|"
@@ -800,21 +805,21 @@ _LOCATION_LOCALITY_TERMS = {
     "graca", "graça", "olivais", "benfica", "lumiar",
 }
 _REQUESTED_PLACE_TYPE_COMPATIBILITY = {
-    "bar": {"bar", "pub", "restaurant", "cafe", "café", "amenity", "shop"},
-    "cafe": {"cafe", "café", "restaurant", "bar", "amenity"},
-    "café": {"cafe", "café", "restaurant", "bar", "amenity"},
-    "clinica": {"clinic", "doctors", "hospital", "veterinary", "healthcare", "amenity"},
-    "clínica": {"clinic", "doctors", "hospital", "veterinary", "healthcare", "amenity"},
-    "farmacia": {"pharmacy", "chemist", "healthcare", "amenity", "shop"},
-    "farmácia": {"pharmacy", "chemist", "healthcare", "amenity", "shop"},
-    "hospital": {"hospital", "clinic", "veterinary", "healthcare", "amenity"},
+    "bar": {"bar", "pub", "restaurant", "cafe", "café", "shop"},
+    "cafe": {"cafe", "café", "restaurant", "bar"},
+    "café": {"cafe", "café", "restaurant", "bar"},
+    "clinica": {"clinic", "doctors", "hospital", "veterinary", "healthcare"},
+    "clínica": {"clinic", "doctors", "hospital", "veterinary", "healthcare"},
+    "farmacia": {"pharmacy", "chemist", "healthcare", "shop"},
+    "farmácia": {"pharmacy", "chemist", "healthcare", "shop"},
+    "hospital": {"hospital", "clinic", "veterinary", "healthcare"},
     "hotel": {"hotel", "hostel", "guest_house", "motel", "tourism"},
     "loja": {"shop", "mall", "retail", "commercial", "furniture", "supermarket"},
-    "padaria": {"bakery", "pastry", "shop", "amenity"},
-    "restaurant": {"restaurant", "bar", "pub", "cafe", "amenity"},
-    "restaurante": {"restaurant", "bar", "pub", "cafe", "amenity"},
+    "padaria": {"bakery", "pastry", "shop"},
+    "restaurant": {"restaurant", "bar", "pub", "cafe"},
+    "restaurante": {"restaurant", "bar", "pub", "cafe"},
     "store": {"shop", "mall", "retail", "commercial", "furniture", "supermarket"},
-    "taberna": {"restaurant", "bar", "pub", "cafe", "amenity"},
+    "taberna": {"restaurant", "bar", "pub", "cafe"},
 }
 
 
@@ -832,7 +837,7 @@ def _location_is_specific_enough(raw_location: str) -> bool:
     # as automatically specific.
     if _looks_like_acronym_label(cleaned) and len(normalized.split()) > 1:
         return True
-    if _LOCATION_ADDRESS_HINT_RE.search(cleaned):
+    if _LOCATION_CONCRETE_ADDRESS_HINT_RE.search(cleaned) or _LOCATION_EXACT_ADDRESS_RE.search(cleaned):
         return True
     if normalized in _LOCATION_LOCALITY_TERMS:
         return True
@@ -1031,18 +1036,20 @@ def _candidate_matches_requested_place_type(
     if not requested_types:
         return True
 
-    candidate_text = _candidate_normalized_text(candidate)
+    primary_text = normalize_location_text(
+        str(candidate.get("display_name") or candidate.get("name") or "").split(",")[0]
+    )
     candidate_type_blob = normalize_location_text(
         " ".join(
             [
                 str(candidate.get("class") or ""),
                 str(candidate.get("type") or ""),
-                candidate_text,
+                primary_text,
             ]
         )
     )
     for requested_type in requested_types:
-        if requested_type in candidate_text:
+        if requested_type in primary_text:
             continue
         compatible_tokens = _REQUESTED_PLACE_TYPE_COMPATIBILITY[requested_type]
         if not any(token in candidate_type_blob for token in compatible_tokens):
@@ -1120,7 +1127,7 @@ def _format_brand_ambiguity_candidate(candidate: Dict[str, Any], brand_norm: str
 
     primary_norm = normalize_location_text(primary)
     if primary_norm == brand_norm and locality_parts:
-        label_parts = [f"{primary} {locality_parts[0]}"]
+        label_parts = [f"{primary}, {locality_parts[0]}"]
         locality_parts = locality_parts[1:]
     else:
         label_parts = [primary]
@@ -1282,8 +1289,15 @@ def _build_dynamic_location_ambiguity_hints(raw_location: str) -> List[str]:
             candidate for candidate in brand_like_candidates
             if str(candidate.get("type") or "").lower() not in _AMBIGUITY_EXCLUDED_RESULT_TYPES
         ]
-        if len(preferred_brand_candidates) >= 2:
-            brand_clusters = _cluster_ambiguity_candidates(preferred_brand_candidates)
+        brand_pool = (
+            preferred_brand_candidates
+            if len(preferred_brand_candidates) >= 2
+            else brand_like_candidates
+        )
+        if len(brand_pool) >= 2:
+            brand_clusters = _cluster_ambiguity_candidates(brand_pool)
+            if len(brand_clusters) == 1:
+                return []
             labels: List[str] = []
             seen_labels: set[str] = set()
             for cluster in brand_clusters:

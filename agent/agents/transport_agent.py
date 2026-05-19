@@ -374,6 +374,14 @@ def _clean_query_fragment(part: str) -> str:
         flags=re.IGNORECASE,
     )
     part = re.sub(
+        r"^(?:uma\s+|um\s+)?(?:alternativa|op[cç][aã]o|outra\s+op[cç][aã]o|"
+        r"meios?\s+de\s+transporte|transportes?|transporte)\s+"
+        r"(?:do|da|dos|das|de|from)\s+",
+        "",
+        part,
+        flags=re.IGNORECASE,
+    )
+    part = re.sub(
         r"^(?:autocarro|autocarros|bus|buses)\s+(?:da|de)\s+carris\s+metropolitana\s+(?:de|do|da)\s+",
         "",
         part,
@@ -1401,6 +1409,9 @@ def _extract_route_endpoints(
 
     patterns = [
         r"(?P<origin>.+?)\s*(?:->|→|=>)\s*(?P<destination>.+?)(?:[\?\!\.,;]|$)",
+        r"\b(?:i\s+want\s+to\s+(?:go|get|travel)|we\s+want\s+to\s+(?:go|get|travel)|"
+        r"how\s+(?:do|can)\s+i\s+(?:get|go|travel)|how\s+to\s+(?:get|go|travel))?\s*"
+        r"from\s+(?P<origin>.+?)\s+to\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
         r"\b(?:quero|preciso|tenho)\s+(?:de\s+)?ir\s+(?:desde|a\s+partir\s+(?:dos|das|do|da|de))\s+(?P<origin>.+?)\s+(?:at[eé]|para|ao|a|à)\s+(?P<destination>.+?)(?:\.\s+(?:diz[- ]me|diga[- ]me|tell\s+me|show\s+me)\b|[\?\!;]|$)",
         r"\b(?:quais\s+os\s+)?(?:pr[oó]xim(?:os|as)|next)\s+(?:autocarros?|buses?|el[eé]tricos?|trams?).*?\b(?:at|em|na|no)\s+(?P<origin>.+?)\s+(?:para\s+(?:seguir\s+)?(?:para\s+)?|to\s+)(?P<destination>.+?)(?:[\?\!\.,;]|$)",
         r"\b(?:plan|planeia|planeie|organiza|organize)\b.*?\b(?:em|in)\s+(?P<destination>[^,\?\!\.]+?)\s+"
@@ -1859,10 +1870,18 @@ def _parse_route_mode_preferences(user_message: str) -> Dict[str, bool]:
             r"\b(?:only|just|apenas|s[oó])\b(?:\s+de)?\s+(?:bus|buses|autocarro|autocarros)\b",
             normalized,
         )
+        or re.search(
+            r"\b(?:outros?|outras?|mais|another|other|more)\s+(?:bus|buses|autocarros?|linhas?\s+de\s+autocarro)\b",
+            normalized,
+        )
     )
     tram_only = tram_only or bool(
         re.search(
             r"\b(?:only|just|apenas|s[oó])\b(?:\s+de)?\s+(?:tram|trams|eletrico|eletricos|electrico|electricos)\b",
+            normalized,
+        )
+        or re.search(
+            r"\b(?:outros?|outras?|mais|another|other|more)\s+(?:tram|trams|el[eé]tricos?|linhas?\s+de\s+el[eé]trico)\b",
             normalized,
         )
     )
@@ -1883,6 +1902,13 @@ def _parse_route_mode_preferences(user_message: str) -> Dict[str, bool]:
     alternative_mode_request = bool(
         re.search(
             rf"\b{route_mode_pattern}\b.{{0,40}}\b(?:e/ou|e|ou|or|and|vs|versus)\b.{{0,40}}\b{route_mode_pattern}\b",
+            normalized,
+        )
+        or re.search(
+            r"\b(?:alternativas?|op[cç][oõ]es|outra\s+op[cç][aã]o|outros?\s+meios?\s+de\s+transporte|"
+            r"outros?\s+transportes?|meios?\s+de\s+transporte|compara(?:r)?\s+(?:os\s+)?meios|"
+            r"alternatives?|options?|another\s+option|other\s+(?:transport|transit)\s+modes?|"
+            r"compare\s+(?:the\s+)?(?:transport|transit)\s+modes?)\b",
             normalized,
         )
     )
@@ -1939,6 +1965,11 @@ def _parse_route_mode_preferences(user_message: str) -> Dict[str, bool]:
 def _query_has_route_mode_constraints(user_message: str) -> bool:
     """Returns whether the user explicitly constrained the allowed transport modes for a route."""
     preferences = _parse_route_mode_preferences(user_message)
+    preferences = {
+        key: value
+        for key, value in preferences.items()
+        if key != "alternative_mode_request"
+    }
     return any(preferences.values())
 
 
@@ -2109,8 +2140,20 @@ def _strip_transport_source_lines(text: str) -> str:
 def _strip_embedded_transport_route_block(text: str) -> str:
     """Remove wrapper title/direct-answer lines before embedding a route block."""
     kept: List[str] = []
+    skipping_embedded_alternatives = False
     for raw_line in _strip_transport_source_lines(text).splitlines():
         stripped = raw_line.strip()
+        if re.search(
+            r"\*\*(?:Outras opções que também fazem sentido|Other sensible options):\*\*",
+            stripped,
+            flags=re.IGNORECASE,
+        ):
+            skipping_embedded_alternatives = True
+            continue
+        if skipping_embedded_alternatives:
+            if not stripped:
+                skipping_embedded_alternatives = False
+            continue
         if re.match(r"^###\s+", stripped):
             continue
         if re.match(r"^✅\s+\*\*(?:Resposta direta|Direct answer):\*\*", stripped, flags=re.IGNORECASE):
@@ -3271,7 +3314,7 @@ def _summarize_recommended_carris_option(markdown: str, language: str) -> str:
         summary += "."
         if departures_match:
             summary += f"\n- 🕐 **Próximas partidas:** {departures_match.group('departures').strip()}"
-        summary += "\n- 📡 **Tempo real:** há próximas partidas confirmadas; não há alerta operacional específico nesta resposta."
+        summary += "\n- 📡 **Tempo real:** próximas partidas confirmadas; sem alerta operacional específico."
         return summary
 
     summary = f"- ✅ **Best confirmed option:** take **{route}** ({direction})"
@@ -3288,8 +3331,15 @@ def _summarize_recommended_carris_option(markdown: str, language: str) -> str:
     summary += "."
     if departures_match:
         summary += f"\n- 🕐 **Next departures:** {departures_match.group('departures').strip()}"
-    summary += "\n- 📡 **Real-time:** upcoming departures are confirmed; no specific operational alert is reported in this answer."
+    summary += "\n- 📡 **Real-time:** upcoming departures confirmed; no specific operational alert reported."
     return summary
+
+
+def _count_formatted_carris_options(markdown: str) -> int:
+    """Count route option cards in formatted Carris markdown."""
+    if not markdown:
+        return 0
+    return len(re.findall(r"(?m)^\s*-\s+\*\*[^*\n]{1,16}\*\*:", markdown))
 
 
 def _build_mode_filtered_carris_route_response(
@@ -3350,25 +3400,53 @@ def _build_mode_filtered_carris_route_response(
     recommended = _summarize_recommended_carris_option(selected_markdown, language)
     if language == "pt":
         mode_label = "Elétrico" if is_tram else "Autocarro"
-        title = f"### {'🚋' if is_tram else '🚌'} {origin} → {destination}"
-        direct = (
-            f"✅ **Resposta direta:** encontrei opções de **{mode_label.lower()}** "
-            f"para este trajeto nos dados disponíveis da Carris Urban."
+        title = f"### {'🚋' if is_tram else '🚌'} **{origin} → {destination}**"
+        option_count = _count_formatted_carris_options(selected_markdown)
+        asks_other_same_mode = bool(
+            re.search(
+                r"\b(?:outros?|outras?|mais)\s+(?:autocarros?|el[eé]tricos?|linhas?)\b",
+                _normalize_token(user_message),
+            )
         )
-        section = f"#### {'🚋' if is_tram else '🚌'} {mode_label}s"
+        if asks_other_same_mode and option_count <= 1:
+            direct = (
+                f"✅ **Resposta direta:** só encontrei **uma opção de {mode_label.lower()}** "
+                "confirmada para este trajeto nos dados disponíveis da Carris; "
+                "não vou inventar outras linhas."
+            )
+        else:
+            direct = (
+                f"✅ **Resposta direta:** encontrei opções de **{mode_label.lower()}** "
+                f"para este trajeto nos dados disponíveis da Carris."
+            )
+        section = f"**{'🚋' if is_tram else '🚌'} {mode_label}s**"
         source = f"📌 **Fonte:** [*Carris*](https://www.carris.pt) | **Atualizado:** {datetime.now().strftime('%H:%M')}"
     else:
         mode_label = "Tram" if is_tram else "Bus"
-        title = f"### {'🚋' if is_tram else '🚌'} {origin} → {destination}"
-        direct = (
-            f"✅ **Direct answer:** I found **{mode_label.lower()}** options "
-            f"for this trip in the available Carris Urban data."
+        title = f"### {'🚋' if is_tram else '🚌'} **{origin} → {destination}**"
+        option_count = _count_formatted_carris_options(selected_markdown)
+        asks_other_same_mode = bool(
+            re.search(
+                r"\b(?:another|other|more)\s+(?:bus|buses|tram|trams|lines?)\b",
+                _normalize_token(user_message),
+            )
         )
-        section = "#### 🚋 Trams" if is_tram else "#### 🚌 Buses"
+        if asks_other_same_mode and option_count <= 1:
+            direct = (
+                f"✅ **Direct answer:** I found only **one confirmed {mode_label.lower()} option** "
+                "for this trip in the available Carris data; I will not invent other lines."
+            )
+        else:
+            direct = (
+                f"✅ **Direct answer:** I found **{mode_label.lower()}** options "
+                f"for this trip in the available Carris data."
+            )
+        section = "**🚋 Trams**" if is_tram else "**🚌 Buses**"
         source = f"📌 **Source:** [*Carris*](https://www.carris.pt) | **Updated:** {datetime.now().strftime('%H:%M')}"
 
     parts = [title, "", direct]
-    if recommended:
+    include_recommended = bool(recommended) and not (asks_other_same_mode and option_count <= 1)
+    if include_recommended:
         parts.extend(["", recommended])
     parts.extend(["", "---", "", section, "", selected_markdown, "", source])
     return "\n".join(parts).strip()
@@ -6766,10 +6844,10 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
     if is_metro_route and not _is_generic_public_transport_route_query(user_message):
         return route_result
 
+    route_preferences = _parse_route_mode_preferences(user_message)
     try:
         from tools.carris_api import carris_find_routes_between
 
-        route_preferences = _parse_route_mode_preferences(user_message)
         broad_surface_search = bool(
             route_preferences.get("alternative_mode_request")
             or re.search(
@@ -6830,6 +6908,7 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
             ]
         )
 
+    comparison_requested = bool(route_preferences.get("alternative_mode_request"))
     if valid_carris_result and _is_generic_public_transport_route_query(user_message) and is_metro_route:
         formatted_carris_response = _build_carris_surface_route_response(
             carris_result,
@@ -6837,31 +6916,43 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
             endpoints[0],
             endpoints[1],
         )
-        if not fastest_requested:
+        if not fastest_requested and not comparison_requested:
             return _append_generic_service_area_note(formatted_carris_response, raw_destination, area_destination, language)
 
         updated_label = "Atualizado" if _infer_language(user_message, "") == "pt" else "Updated"
         source_label = "Fonte" if _infer_language(user_message, "") == "pt" else "Source"
-        title = "### 🚇 🚌 Opções de transporte público" if _infer_language(user_message, "") == "pt" else "### 🚇 🚌 Public Transport Options"
+        title = (
+            f"### 🚇🚌 **{endpoints[0]} → {endpoints[1]}**"
+            if _infer_language(user_message, "") == "pt"
+            else f"### 🚇🚌 **{endpoints[0]} → {endpoints[1]}**"
+        )
         bus_title = "**🚌 Autocarros**" if _infer_language(user_message, "") == "pt" else "**🚌 Buses**"
         metro_title = "**🚇 Metro**"
         timestamp = datetime.now().strftime("%H:%M")
         if fastest_requested:
             first_note = (
-                "- **Melhor opção provável:** usa o Metro; os autocarros ficam como alternativa, não como rota principal."
+                "✅ **Resposta direta:** a melhor alternativa provável é o **Metro**; a Carris fica como opção de superfície."
                 if _infer_language(user_message, "") == "pt"
-                else "- **Likely best option:** use the Metro; buses are secondary alternatives, not the main route."
+                else "✅ **Direct answer:** the likely best alternative is **Metro**; Carris remains a surface option."
             )
-            return (
-                f"{title}\n\n"
-                f"{first_note}\n\n"
-                f"{metro_title}\n\n"
-                f"{_strip_transport_source_lines(route_result)}\n\n"
-                "---\n\n"
-                f"{bus_title}\n\n"
-                f"{_strip_transport_source_lines(formatted_carris_response)}\n\n"
-                f"📌 **{source_label}:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | [*Carris*](https://www.carris.pt) | **{updated_label}:** {timestamp}"
+        else:
+            first_note = (
+                "✅ **Resposta direta:** para não repetir só a Carris, há também uma opção de **Metro de Lisboa** suportada pelos dados."
+                if _infer_language(user_message, "") == "pt"
+                else "✅ **Direct answer:** instead of only repeating Carris, there is also a **Metro de Lisboa** option supported by the data."
             )
+        metro_response = _build_deterministic_metro_route_response(user_message, "") or route_result
+        return (
+            f"{title}\n\n"
+            f"{first_note}\n\n"
+            "---\n\n"
+            f"{metro_title}\n\n"
+            f"{_strip_embedded_transport_route_block(metro_response)}\n\n"
+            "---\n\n"
+            f"{bus_title}\n\n"
+            f"{_strip_embedded_transport_route_block(formatted_carris_response)}\n\n"
+            f"📌 **{source_label}:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | [*Carris*](https://www.carris.pt) | **{updated_label}:** {timestamp}"
+        )
 
     if valid_carris_result:
         response = _build_mode_filtered_carris_route_response(
