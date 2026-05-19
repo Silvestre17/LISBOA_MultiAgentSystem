@@ -1777,30 +1777,6 @@ def display_banner():
         unsafe_allow_html=True,
     )
 
-# def render_tracing_panel() -> None:
-#     """Render LangSmith tracing status for the production sidebar."""
-#     st.markdown(f"#### 🧭 {t('tracing')}")
-#
-#     tracing_display = get_langsmith_display_state()
-#     langsmith_project = get_langsmith_project_name()
-#
-#     if tracing_display["state"] == "active":
-#         st.success(t("tracing_active"))
-#         st.caption(f"{t('project')}: {langsmith_project}")
-#         return
-#
-#     if tracing_display["state"] == "auto_disabled_invalid_credentials":
-#         st.warning(t("tracing_auto_disabled_invalid_credentials"))
-#     elif tracing_display["state"] == "auto_disabled_invalid_configuration":
-#         st.warning(t("tracing_auto_disabled_invalid_configuration"))
-#     elif tracing_display["state"].startswith("auto_disabled"):
-#         st.warning(t("tracing_auto_disabled"))
-#     else:
-#         st.warning(t("tracing_disabled"))
-#
-#     if tracing_display["state"].startswith("auto_disabled") and tracing_display.get("reason"):
-#         st.caption(f"{t('tracing_reason')}: {tracing_display['reason']}")
-#
 
 
 def build_sidebar():
@@ -2067,9 +2043,6 @@ def build_sidebar():
                     st.session_state.assistant.reset()
                 st.rerun()
 
-        # LangSmith tracing sidebar panel intentionally disabled in the UI.
-        # render_tracing_panel()
-
         st.markdown(
             f"""
         <div class="sidebar-footer">
@@ -2206,7 +2179,7 @@ def render_assistant_markdown(text: str) -> str:
     # Streamlit rebuilds the DOM from the canonical final markdown.
     final_text = text
     placeholder.empty()
-    st.empty().markdown(final_text)
+    placeholder.markdown(final_text)
     return final_text
 
 
@@ -2228,7 +2201,9 @@ def normalize_streamlit_chat_markdown(text: str) -> str:
     if not text:
         return text or ""
 
-    lines = text.splitlines()
+    from agent.utils.response_formatter import restore_initial_pseudo_heading
+
+    lines = restore_initial_pseudo_heading(text).splitlines()
     output: list[str] = []
     for index, line in enumerate(lines):
         stripped = line.strip()
@@ -2550,7 +2525,6 @@ def run_interaction(
             st.session_state.messages.append(
                 {"role": "assistant", "content": rendered_response}
             )
-            st.markdown(rendered_response)
 
         except Exception as error:
             # Log the FULL traceback to the terminal for debugging

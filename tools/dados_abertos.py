@@ -1063,6 +1063,10 @@ def find_nearby_services(
         alternatives = {
             'pharmacy': 'farmácia', 'hospital': 'hospital', 'school': 'escola',
             'pharmacies': 'farmácia', 'farmacias': 'farmácia', 'farmacia': 'farmácia',
+            'bibliotecas municipais': 'bibliotecas',
+            'biblioteca municipal': 'biblioteca',
+            'municipal libraries': 'libraries',
+            'municipal library': 'libraries',
             'park': 'jardim', 'garden': 'jardim', 'wifi': 'wifi', 'metro': 'metro',
             'fountain': 'fontanário', 'parking': 'estacionamento', 'car parking': 'estacionamento',
             'ecopontos': 'ecoponto', 'recycling': 'ecoponto',
@@ -1088,14 +1092,14 @@ def find_nearby_services(
 
     if matches.empty:
         if is_pt:
-            return f"❌ Não encontrei datasets para: '{service_type}'\n💡 Experimenta: farmácias, hospitais, escolas, jardins, metro, fontanários"
-        return f"❌ No datasets found for: '{service_type}'\n💡 Try: pharmacies, hospitals, schools, parks, metro, fountains"
+            return f"❌ Não encontrei fontes de dados para: '{service_type}'\n💡 Experimenta: farmácias, hospitais, escolas, jardins, metro, fontanários"
+        return f"❌ No data sources found for: '{service_type}'\n💡 Try: pharmacies, hospitals, schools, parks, metro, fountains"
 
     matches = _rank_service_datasets(matches.drop_duplicates(subset="stable_url"), service_type)
     if matches.empty:
         if is_pt:
-            return f"❌ Não encontrei um dataset compatível para: '{service_type}'"
-        return f"❌ No compatible dataset found for: '{service_type}'"
+            return f"❌ Não encontrei uma fonte de dados compatível para: '{service_type}'"
+        return f"❌ No compatible data source found for: '{service_type}'"
 
     selected_title = ""
     selected_feature_count = 0
@@ -1178,13 +1182,17 @@ def find_nearby_services(
             return (
                 (
                     f"❌ Não consegui carregar dados utilizáveis para '{service_type}'.\n"
-                    f"🧪 Datasets tentados: {', '.join(dataset_errors[:3])}"
+                    f"🧪 Fontes testadas: {', '.join(dataset_errors[:3])}"
                 ) if is_pt else (
                     f"❌ Could not load usable data for '{service_type}'.\n"
-                    f"🧪 Tried datasets: {', '.join(dataset_errors[:3])}"
+                    f"🧪 Tried data sources: {', '.join(dataset_errors[:3])}"
                 )
             )
-        return f"❌ Não encontrei datasets para: '{service_type}'" if is_pt else f"❌ No datasets found for: '{service_type}'"
+        return (
+            f"❌ Não encontrei fontes de dados para: '{service_type}'"
+            if is_pt
+            else f"❌ No data sources found for: '{service_type}'"
+        )
 
     # Sort by distance if coordinates provided
     if user_lat is not None and user_lon is not None and results:
@@ -1196,8 +1204,8 @@ def find_nearby_services(
 
     if not results:
         if is_pt:
-            return f"✓ Dataset '{selected_title}' carregado ({selected_feature_count} registos), mas não foi possível extrair dados de localização."
-        return f"✓ Dataset '{selected_title}' loaded ({selected_feature_count} features) but couldn't extract location data."
+            return f"✓ Fonte de dados '{selected_title}' carregada ({selected_feature_count} registos), mas não foi possível extrair dados de localização."
+        return f"✓ Data source '{selected_title}' loaded ({selected_feature_count} features) but couldn't extract location data."
 
     for item in results:
         raw_name = str(item.get("name") or "").strip()
@@ -1243,24 +1251,24 @@ def find_nearby_services(
                 )
 
     if is_pt:
-        response += f"- 🧭 **Fonte do dataset:** {selected_title}\n"
+        response += f"- 🧭 **Fonte dos dados:** {selected_title}\n"
         response += f"- 📊 **Resultados:** {len(results)} {count_label}\n\n"
         if not near_location_name:
-            response += "- ⚠️ **Cobertura:** esta pesquisa mostra apenas os primeiros resultados disponíveis; não é uma listagem exaustiva da AML e horários/contactos só aparecem quando constam do dataset.\n\n"
+            response += "- ⚠️ **Cobertura:** esta pesquisa mostra apenas os primeiros resultados disponíveis; não é uma listagem exaustiva da AML e horários/contactos só aparecem quando constam dos dados.\n\n"
     else:
-        response += f"- 🧭 **Dataset:** {selected_title}\n"
+        response += f"- 🧭 **Data source:** {selected_title}\n"
         response += f"- 📊 **Results:** {len(results)} result(s)\n\n"
         if not near_location_name:
-            response += "- ⚠️ **Coverage:** this search shows only the first available results; it is not an exhaustive AML-wide list, and hours/contacts appear only when present in the dataset.\n\n"
+            response += "- ⚠️ **Coverage:** this search shows only the first available results; it is not an exhaustive AML-wide list, and hours/contacts appear only when present in the data.\n\n"
     water_context = any(
         marker in unicodedata.normalize("NFKD", f"{selected_title} {service_type}").encode("ascii", "ignore").decode("ascii").lower()
         for marker in ("arquitetura da agua", "elementos de agua", "bebedouro", "fontan", "chafariz", "water")
     )
     if water_context:
         response += (
-            "- ⚠️ **Nota:** estes registos identificam elementos/fontes de água no espaço público; a potabilidade não é confirmada pelo dataset.\n\n"
+            "- ⚠️ **Nota:** estes registos identificam elementos/fontes de água no espaço público; a potabilidade não é confirmada pelos dados disponíveis.\n\n"
             if is_pt
-            else "- ⚠️ **Note:** these records identify public water/fountain features; drinkability is not confirmed by the dataset.\n\n"
+            else "- ⚠️ **Note:** these records identify public water/fountain features; drinkability is not confirmed by the available data.\n\n"
         )
 
     for r in results:
@@ -1582,7 +1590,7 @@ def _search_places_raw(query: str, max_results: int = 5) -> List[Dict]:
                     'location': address,
                     'lat': lat,
                     'lon': lon,
-                    'short_description': f"Found in open data dataset: {title}",
+                    'short_description': f"Found in Lisbon municipal open data: {title}",
                     'score': match_score
                 })
 

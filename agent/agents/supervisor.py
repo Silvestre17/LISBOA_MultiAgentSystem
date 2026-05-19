@@ -440,7 +440,7 @@ class SupervisorAgent(BaseAgent):
             r"\bbuy\s+(?:me\s+)?(?:a\s+)?(?:ticket|tickets)\b",
             r"\breserva[-\s]?me\s+(?:uma\s+)?(?:mesa|bilhetes?|hotel|quarto)\b",
             r"\breservar\s+(?:uma\s+)?(?:mesa|bilhetes?|hotel|quarto)\b",
-            r"\breserva\s+(?:uma\s+)?(?:mesa|bilhetes?|hotel|quarto)\b",
+            r"\breserva\s+(?:j[aá]\s+)?(?:uma\s+)?(?:mesa|bilhetes?|hotel|quarto)\b",
             r"\bmarca[-\s]?me\s+(?:uma\s+)?(?:mesa|reserva|bilhetes?|hotel|quarto)\b",
             r"\bmarcar\s+(?:uma\s+)?(?:mesa|reserva|bilhetes?|hotel|quarto)\b",
             r"\bmarca\s+(?:uma\s+)?(?:mesa|reserva|bilhetes?|hotel|quarto)\b",
@@ -521,13 +521,15 @@ class SupervisorAgent(BaseAgent):
         if language == "pt":
             return (
                 "### ⚠️ **Reservas e Compras Não Suportadas**\n\n"
-                "Não consigo fazer reservas, compras ou marcações diretamente, mas posso ajudar-te a decidir com dados verificáveis sobre Lisboa.\n\n"
+                "✅ **Resposta direta:** não consigo fazer reservas, compras ou marcações diretamente, mas posso ajudar-te a decidir com dados verificáveis sobre Lisboa.\n\n"
+                "---\n\n"
                 "- ✅ **Posso confirmar:** contactos, moradas, fontes oficiais e informação pública do local quando estiver disponível.\n"
                 "- 🚫 **Não posso assumir:** disponibilidade de mesa/lugar, preços atuais, bilhetes ainda válidos ou confirmação de reserva."
             )
         return (
             "### ⚠️ **Booking and Purchase Requests**\n\n"
-            "I can't make bookings, purchases, or reservations directly, but I can help you decide with verifiable Lisbon data.\n\n"
+            "✅ **Direct answer:** I can't make bookings, purchases, or reservations directly, but I can help you decide with verifiable Lisbon data.\n\n"
+            "---\n\n"
             "- ✅ **I can confirm:** contacts, addresses, official sources, and public venue information when available.\n"
             "- 🚫 **I cannot assume:** table/seat availability, current prices, still-valid tickets, or booking confirmation."
         )
@@ -1062,7 +1064,7 @@ class SupervisorAgent(BaseAgent):
         if current_domain == "planner":
             return {
                 "reasoning": "Follow-up domain override from current planning intent",
-                "agents": ["planner", "researcher"],
+                "agents": cls._planning_follow_up_agents(user_message),
                 "direct_response": None,
             }
         if current_domain:
@@ -1082,7 +1084,7 @@ class SupervisorAgent(BaseAgent):
         if previous_domain == "planner":
             return {
                 "reasoning": "Follow-up domain override from previous planning query",
-                "agents": ["planner", "researcher"],
+                "agents": cls._planning_follow_up_agents(user_message),
                 "direct_response": None,
             }
         if previous_domain:
@@ -1095,6 +1097,32 @@ class SupervisorAgent(BaseAgent):
         return None
 
     @classmethod
+    def _planning_follow_up_agents(cls, user_message: str) -> List[str]:
+        """Return a grounded planning stack for short planning follow-ups."""
+        normalized = cls._normalize_query(user_message)
+        agents: List[str] = []
+        if (
+            cls._planning_query_mentions_weather(user_message)
+            or re.search(
+                r"\b(?:hoje|amanh[ãa]|today|tomorrow|esta\s+(?:manh[ãa]|tarde|noite)|"
+                r"this\s+(?:morning|afternoon|evening)|fim\s+de\s+semana|weekend|chuva|rain)\b",
+                normalized,
+            )
+        ):
+            agents.append("weather")
+        if (
+            cls._planning_query_requires_transport_context(user_message)
+            or re.search(
+                r"\b(?:menos\s+caminhada|pouca\s+caminhada|low\s+walking|walk\s+less|"
+                r"transporte|transportes|metro|autocarro|comboio|bus|train|return|voltar|hotel)\b",
+                normalized,
+            )
+        ):
+            agents.append("transport")
+        agents.extend(["researcher", "planner"])
+        return [agent for index, agent in enumerate(agents) if agent not in agents[:index]]
+
+    @classmethod
     def _is_planning_query(cls, user_message: str) -> bool:
         """Detects itinerary/planning intent without over-matching words like `today`."""
         message_lower = cls._normalize_query(user_message)
@@ -1105,23 +1133,24 @@ class SupervisorAgent(BaseAgent):
         if cls._is_direct_weather_transport_query(user_message):
             return False
         planning_patterns = [
-            r"\bplan\b",
             r"\bplan my day\b",
             r"\bday plan\b",
             r"\bitinerary\b",
             r"\b(?:itiner[aá]rio|itener[aá]rio|itinerario|itenerario)\b",
             r"\broteiro\b",
-            r"\bplano\b",
-            r"\bagenda\b",
-            r"\bschedule\b",
             r"\bday trip\b",
             r"\bpasseio\b",
+            r"\bplan\b.*\b(?:day|days|afternoon|morning|evening|itinerary|trip|route|visit|stops?|"
+            r"rainy|museum|museums|restaurants?|hotel|transport|return|lisbon|lisboa|bel[eé]m)\b",
+            r"\b(?:plane(?:ar|ia|ie)|organiza(?:r)?|organize|organise|organizing)\b.*\b(?:dia|day|"
+            r"manh[aã]|tarde|noite|roteiro|itiner[aá]rio|itinerary|ordem|order|transportes?|"
+            r"hotel|locais|places|stops?|visitar|visit|almo[cç]o|jantar|lunch|dinner)\b",
+            r"\b(?:plano|plan)\b.*\b(?:dia|day|manh[aã]|tarde|noite|viagem|trip|visita|visit)\b",
+            r"\bschedule\b.*\b(?:day|itinerary|route|visits?|stops?)\b",
             r"\b(?:cria|criar|monta|montar|faz|fazer)\b.*\b(?:itiner[aá]rio|itener[aá]rio|roteiro|plano|dia|manh[aã]|tarde)\b",
             r"\b(?:itiner[aá]rio|itener[aá]rio|roteiro|plano)\b.*\b(?:cria|criar|monta|montar|faz|fazer|inclui|incluir|almo[cç]o|jantar|hotel)\b",
             r"\b(?:estes|estas|esses|essas|these|those)\s+(?:locais|lugares|s[ií]tios|places|stops)\b.*\b(?:dia|day|amanh[aã]|tomorrow|almo[cç]o|jantar|lunch|dinner|hotel)\b",
             r"\b(?:inclui|incluir|with|including)\b.*\b(?:almo[cç]o|jantar|lunch|dinner)\b.*\b(?:dia|day|roteiro|itiner[aá]rio|itener[aá]rio|plano|hotel)\b",
-            r"\bplane(?:ar|ia|ie)\b",
-            r"\borganiza(?:r)?\b",
             r"\bir a vários? locais\b",
             r"\bvisit multiple\b",
             r"\b(?:visitar|visitando)\b.*\b(?:varios|vários|multiple|locais|places|stops|paragens|"
@@ -1492,6 +1521,13 @@ class SupervisorAgent(BaseAgent):
         if decision:
             agents = decision.get("agents", [])
             reasoning = decision.get("reasoning", "")
+            if not agents and decision.get("direct_response"):
+                in_scope_override = self._single_domain_override(user_message)
+                if in_scope_override and in_scope_override.get("agents"):
+                    agents = list(in_scope_override["agents"])
+                    decision["direct_response"] = None
+                    reasoning += " (Removed direct response: current in-scope request needs grounded data)"
+
             if self._negates_itinerary_request(user_message):
                 original_agents = list(agents)
                 agents = [
@@ -1521,6 +1557,9 @@ class SupervisorAgent(BaseAgent):
                 agents = ["weather"]
                 reasoning += " (Reduced to weather: no transport leg requested)"
                 decision["agents"] = agents
+
+            if is_planning_query or weather_only_outdoor_decision:
+                decision["direct_response"] = None
 
             if is_planning_query and not weather_only_outdoor_decision:
                 if "planner" not in agents:
@@ -1718,23 +1757,34 @@ class SupervisorAgent(BaseAgent):
         if any(kw in message_lower for kw in service_keywords):
             if "researcher" not in agents:
                 agents.append("researcher")
-        if self._is_planning_query(message_lower):
-            # Itinerary queries should be grounded consistently across providers.
-            if (
-                self._requires_weather_for_planning(user_message)
-                or self._planning_query_mentions_weather(user_message)
-            ) and "weather" not in agents:
-                agents.append("weather")
-            if (
-                self._planning_query_requires_transport_context(user_message)
-            ) and "transport" not in agents:
-                agents.append("transport")
-            if "researcher" not in agents:
-                agents.append("researcher")
-            if "planner" not in agents:
-                agents.append("planner")
 
-        # If still no agents and not a greeting, default to researcher
+        is_planning = self._is_planning_query(message_lower)
+        is_multi_day = re.search(r"\b(?:plan|itinerary|roteiro|planeia|planejar)\b", user_message, flags=re.IGNORECASE) and re.search(
+            r"\b(?:[2-9]\s*(?:days?|dias?)|seven days|five days|7 days|5 days|weekend|fim de semana)\b",
+            user_message,
+            flags=re.IGNORECASE,
+        )
+        if is_planning or is_multi_day:
+            # Itinerary queries should be grounded consistently across providers.
+            if is_multi_day:
+                for agent in ["weather", "transport", "researcher", "planner"]:
+                    if agent not in agents:
+                        agents.append(agent)
+            else:
+                if (
+                    self._requires_weather_for_planning(user_message)
+                    or self._planning_query_mentions_weather(user_message)
+                ) and "weather" not in agents:
+                    agents.append("weather")
+                if (
+                    self._planning_query_requires_transport_context(user_message)
+                ) and "transport" not in agents:
+                    agents.append("transport")
+                if "researcher" not in agents:
+                    agents.append("researcher")
+                if "planner" not in agents:
+                    agents.append("planner")
+
         if not agents:
             agents = ["researcher"]
 

@@ -41,7 +41,7 @@ Use this exact top-level structure:
 
 ---
 
-### 🧭 **Plan Basis**
+### 🧭 **Constraints Used**
     - [constraint actually used]
 
 ---

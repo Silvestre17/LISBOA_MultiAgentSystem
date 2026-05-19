@@ -2948,11 +2948,11 @@ def _summarize_carris_frequency_result(
     if no_service_match:
         if language == "pt":
             return [
-                "    - **Serviço programado hoje:** não foram encontradas partidas na base GTFS.",
+                "    - **Serviço programado hoje:** não foram encontradas partidas nos dados de horário disponíveis.",
                 "    - **Como confirmar:** peça-me as próximas partidas numa paragem específica desta linha ou confirme em carris.pt.",
             ]
         return [
-            "    - **Scheduled service today:** no departures were found in the GTFS timetable.",
+            "    - **Scheduled service today:** no departures were found in the available timetable data.",
             "    - **How to confirm:** ask me for departures at a specific stop on this line or check carris.pt.",
         ]
 
@@ -3958,7 +3958,7 @@ def _build_future_cp_schedule_limit_response(user_message: str, language: str) -
             "",
             "---",
             "",
-            "- 🗓️ **Data limit:** LISBOA's CP tool confirms current/near-term departures, but it does not accept a specific future date and time.",
+            "- 🗓️ **Data limit:** LISBOA's confirmed CP coverage supports current/near-term departures, but it does not accept a specific future date and time.",
             "- 🚆 **What I can do now:** explain the suburban/AML route logic and confirm next departures on the travel day.",
             "- 🔎 **For an exact answer:** ask on the day of travel or ask only for the route, without real-time times.",
             "",
@@ -4395,8 +4395,8 @@ def _localize_metro_status_text(
     if normalized == "ok":
         if not regular_service_open:
             if language == "pt":
-                return "sem perturbações reportadas na API; fora do horário regular"
-            return "no disruption reported by the API; outside regular hours"
+                return "sem perturbações reportadas; fora do horário regular"
+            return "no reported disruption; outside regular hours"
         return "circulação normal" if language == "pt" else "normal service"
     if normalized == "unknown":
         return "estado em tempo real indisponível" if language == "pt" else "real-time status unavailable"
@@ -5803,7 +5803,11 @@ def _format_carris_next_departures_output(
         if not stripped or stripped == "---":
             continue
         if "Carris GTFS-RT" in stripped:
-            freshness_note = re.sub(r"^\(?\s*", "", stripped).rstrip(")")
+            freshness_note = (
+                "dados em tempo real da Carris disponíveis."
+                if language == "pt"
+                else "Carris real-time data available."
+            )
             continue
         if "Real-Time Data Active" in stripped:
             freshness_note = (
@@ -8694,7 +8698,7 @@ class TransportAgent(BaseAgent):
                             "---",
                             "",
                             "💡 **O que isto significa:**",
-                            "- 🚆 A tool da CP usada pelo LISBOA cobre comboios suburbanos/AML.",
+                            "- 🚆 A cobertura confirmada do LISBOA para CP centra-se em comboios suburbanos/AML.",
                             "- 🧭 Serviços de longo curso ou destinos fora da AML ficam fora do âmbito confirmado.",
                         ]
                     ).strip()
@@ -8707,7 +8711,7 @@ class TransportAgent(BaseAgent):
                         "---",
                         "",
                         "💡 **What this means:**",
-                        "- 🚆 LISBOA's CP tool covers suburban/AML rail data.",
+                        "- 🚆 LISBOA's confirmed CP coverage is focused on suburban/AML rail data.",
                         "- 🧭 Long-distance services or destinations outside the AML are outside the confirmed scope.",
                     ]
                 ).strip()
@@ -8739,7 +8743,7 @@ class TransportAgent(BaseAgent):
                     lines.extend(
                         [
                             "- ⏰ **Próximo comboio hoje:** sem mais partidas confirmadas",
-                            f"- 📊 **Serviço noutros dias:** {other_days_count} viagens no GTFS disponível",
+                            f"- 📊 **Serviço noutros dias:** {other_days_count} viagens nos dados de horário disponíveis",
                             "",
                             "💡 **Antes de sair:** confirma no site/app da CP a primeira partida disponível para a data em que vais viajar.",
                         ]
@@ -8761,7 +8765,7 @@ class TransportAgent(BaseAgent):
                 lines.extend(
                     [
                         "- ⏰ **Next train today:** no more confirmed departures",
-                        f"- 📊 **Service on other days:** {other_days_count} trips in the available GTFS data",
+                        f"- 📊 **Service on other days:** {other_days_count} trips in the available timetable data",
                         "",
                         "💡 **Before leaving:** check the CP website/app for the first available departure on your travel date.",
                     ]
@@ -8930,13 +8934,13 @@ class TransportAgent(BaseAgent):
                 status_lower = raw_status.lower().strip()
                 if "no disruption reported" in status_lower:
                     localized_status = (
-                        "sem perturbações reportadas na API; fora do horário regular"
+                        "sem perturbações reportadas; fora do horário regular"
                         if language == "pt" and "outside" in status_lower
-                        else "no disruption reported by the API; outside regular hours"
+                        else "no reported disruption; outside regular hours"
                         if "outside" in status_lower
-                        else "sem perturbações reportadas na API"
+                        else "sem perturbações reportadas"
                         if language == "pt"
-                        else "no disruption reported by the API"
+                        else "no reported disruption"
                     )
                 elif any(token in status_lower for token in ["normal service", "all lines operating normally", "serviço normal", "circulação normal", "ok"]):
                     localized_status = "circulação normal" if language == "pt" else "normal service"
@@ -9019,9 +9023,9 @@ class TransportAgent(BaseAgent):
                     if language == "pt":
                         if outside_regular:
                             answer_text = (
-                                "Não há perturbações reportadas pela API, mas o Metro está fora do horário regular de passageiros neste momento."
+                                "Não há perturbações reportadas, mas o Metro está fora do horário regular de passageiros neste momento."
                                 if asks_disruption_polarity
-                                else "As linhas não têm perturbações reportadas pela API, mas isso não confirma circulação agora porque o Metro está fora do horário regular."
+                                else "As linhas não têm perturbações reportadas, mas isso não confirma circulação agora porque o Metro está fora do horário regular."
                             )
                         else:
                             answer_text = (
@@ -9033,9 +9037,9 @@ class TransportAgent(BaseAgent):
                     else:
                         if outside_regular:
                             answer_text = (
-                                "No disruptions are reported by the API, but Metro is outside regular passenger-service hours right now."
+                                "No disruptions are reported, but Metro is outside regular passenger-service hours right now."
                                 if asks_disruption_polarity
-                                else "The lines have no API-reported disruption, but that does not confirm trains are running now because Metro is outside regular hours."
+                                else "The lines have no reported disruption, but that does not confirm trains are running now because Metro is outside regular hours."
                             )
                         else:
                             answer_text = (
@@ -9108,9 +9112,9 @@ class TransportAgent(BaseAgent):
                     else f"### 🚋 {route_short_name} live snapshot"
                 )
                 summary_line = (
-                    f"- 📡 **Feed:** Carris GTFS-RT ativo às {feed_timestamp}."
+                    f"- 📡 **Dados em tempo real:** Carris ativo às {feed_timestamp}."
                     if language == "pt"
-                    else f"- 📡 **Feed:** Carris GTFS-RT active at {feed_timestamp}."
+                    else f"- 📡 **Real-time data:** Carris active at {feed_timestamp}."
                 )
                 active_line = (
                     f"- 🚋 **Veículos ativos:** {total_active} elétrico(s) {route_short_name} em circulação."

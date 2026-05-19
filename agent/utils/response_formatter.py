@@ -331,6 +331,34 @@ def infer_response_language(
     """
     normalized_default = default if default in {"pt", "en"} else "en"
 
+    def _explicit_label_language(text: str) -> Optional[str]:
+        """Detect language from explicit LISBOA output labels."""
+        if not text:
+            return None
+        if re.search(r"\*\*Direct answer:\*\*", text, flags=re.IGNORECASE):
+            return "en"
+        if re.search(r"\*\*Resposta direta:\*\*", text, flags=re.IGNORECASE):
+            return "pt"
+        en_labels = len(
+            re.findall(
+                r"\*\*(?:Source|Updated|Address|Description|Category|Price|Hours|Phone|More details):?\*\*",
+                text,
+                flags=re.IGNORECASE,
+            )
+        )
+        pt_labels = len(
+            re.findall(
+                r"\*\*(?:Fonte|Atualizado|Morada|Descrição|Categoria|Preço|Horário|Telefone|Mais detalhes):?\*\*",
+                text,
+                flags=re.IGNORECASE,
+            )
+        )
+        if en_labels > pt_labels:
+            return "en"
+        if pt_labels > en_labels:
+            return "pt"
+        return None
+
     # langdetect on tiny inputs ("ok", "ok\nok") is noisy, so require at least
     # 15 non-whitespace characters before trusting its verdict.
     _LANG_DETECT_MIN_LEN = 15
@@ -399,6 +427,10 @@ def infer_response_language(
     combined = context_text.strip()
     if not combined:
         return normalized_default
+
+    explicit_language = _explicit_label_language(combined)
+    if explicit_language:
+        return explicit_language
 
     verdict = _classify(combined)
     if verdict:
@@ -772,7 +804,8 @@ def normalize_transactional_refusal_style(text: str) -> str:
     ):
         return (
             "### ⚠️ **Booking and Purchase Requests**\n\n"
-            "I can't make bookings, purchases, or reservations directly, but I can help you decide with verifiable Lisbon data.\n\n"
+            "✅ **Direct answer:** I can't make bookings, purchases, or reservations directly, but I can help you decide with verifiable Lisbon data.\n\n"
+            "---\n\n"
             "- ✅ **I can confirm:** contacts, addresses, official sources, and public venue information when available.\n"
             "- 🚫 **I cannot assume:** table/seat availability, current prices, still-valid tickets, or booking confirmation."
         )
@@ -782,7 +815,8 @@ def normalize_transactional_refusal_style(text: str) -> str:
     ):
         return (
             "### ⚠️ **Reservas e Compras Não Suportadas**\n\n"
-            "Não consigo fazer reservas, compras ou marcações diretamente, mas posso ajudar-te a decidir com dados verificáveis sobre Lisboa.\n\n"
+            "✅ **Resposta direta:** não consigo fazer reservas, compras ou marcações diretamente, mas posso ajudar-te a decidir com dados verificáveis sobre Lisboa.\n\n"
+            "---\n\n"
             "- ✅ **Posso confirmar:** contactos, moradas, fontes oficiais e informação pública do local quando estiver disponível.\n"
             "- 🚫 **Não posso assumir:** disponibilidade de mesa/lugar, preços atuais, bilhetes ainda válidos ou confirmação de reserva."
         )
@@ -14805,6 +14839,133 @@ def _strip_redundant_single_line_bus_summary(text: str) -> str:
     )
 
 
+_INITIAL_PSEUDO_HEADING_BULLET_RE = re.compile(
+    r"^\s*[-*]\s+(?:"
+    r"\*\*(?P<emoji_a>[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+)\s+"
+    r"(?P<label_a>[^*\n]{2,140})\*\*"
+    r"|(?P<emoji_b>[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+)\s+"
+    r"\*\*(?P<label_b>[^*\n]{2,140})\*\*"
+    r")\s*$"
+)
+_DIRECT_ANSWER_MARKDOWN_RE = re.compile(
+    r"^\s*(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s+)?"
+    r"\*\*(?:Resposta direta|Direct answer):\*\*",
+    re.IGNORECASE,
+)
+_OPENING_CHECK_BULLET_RE = re.compile(
+    r"^\s*[-*]\s*(?:✅|☑️|✔️)\s*(?P<body>.+?)\s*$",
+    re.IGNORECASE,
+)
+_REFUSAL_HEADING_RE = re.compile(
+    r"\b(?:Reservas e Compras|Booking and Purchase|Requests?|Não Suportad[ao]s?|"
+    r"Unsupported|Fora do Âmbito|Out of Scope)\b",
+    re.IGNORECASE,
+)
+
+
+def restore_initial_pseudo_heading(text: str) -> str:
+    """Promote a top bullet pseudo-heading back to a Streamlit-safe heading.
+
+    Some final guards intentionally convert bold card-like lines into list
+    items. When the first line is the response title and the next content line
+    is the direct answer, that conversion makes Streamlit render the title as a
+    bullet instead of a section heading. This repair is deliberately limited to
+    the first non-empty line so real result cards remain unchanged.
+    """
+    if not text or not isinstance(text, str):
+        return text or ""
+
+    lines = text.splitlines()
+    first_index = next((idx for idx, line in enumerate(lines) if line.strip()), None)
+    if first_index is None:
+        return text
+
+    match = _INITIAL_PSEUDO_HEADING_BULLET_RE.match(lines[first_index])
+    if not match:
+        return text
+
+    scan_index = first_index + 1
+    while scan_index < len(lines) and not lines[scan_index].strip():
+        scan_index += 1
+    if scan_index < len(lines) and lines[scan_index].strip() == "---":
+        scan_index += 1
+        while scan_index < len(lines) and not lines[scan_index].strip():
+            scan_index += 1
+
+    if scan_index >= len(lines) or not _DIRECT_ANSWER_MARKDOWN_RE.match(lines[scan_index]):
+        return text
+
+    emoji = (match.group("emoji_a") or match.group("emoji_b") or "").strip()
+    label = (match.group("label_a") or match.group("label_b") or "").strip()
+    if not emoji or not label:
+        return text
+
+    lines[first_index] = f"### {emoji} **{label}**"
+    repaired = "\n".join(lines)
+    if text.endswith("\n"):
+        repaired += "\n"
+    return repaired
+
+
+def normalize_opening_direct_answer_contract(text: str, language: str | None = None) -> str:
+    """Normalize the first answer sentence into the canonical direct-answer line."""
+    if not text or not isinstance(text, str):
+        return text or ""
+    if re.search(r"\*\*(?:Resposta direta|Direct answer):\*\*", text, flags=re.IGNORECASE):
+        return text
+
+    lines = text.splitlines()
+    heading_index = next((idx for idx, line in enumerate(lines) if line.strip()), None)
+    if heading_index is None:
+        return text
+    heading = lines[heading_index].strip()
+    if not heading.startswith("### "):
+        return text
+
+    answer_index = heading_index + 1
+    while answer_index < len(lines) and not lines[answer_index].strip():
+        answer_index += 1
+    if answer_index >= len(lines):
+        return text
+
+    answer = lines[answer_index].strip()
+    direct_body = ""
+    check_match = _OPENING_CHECK_BULLET_RE.match(answer)
+    if check_match:
+        direct_body = check_match.group("body").strip()
+    elif _REFUSAL_HEADING_RE.search(_strip_markdown_formatting(heading)):
+        if not answer.startswith(("###", "---", "- ", "* ", "📌")):
+            direct_body = answer
+
+    if not direct_body:
+        return text
+
+    inferred_language = (
+        language
+        if language in {"pt", "en"}
+        else infer_response_language(context_text=f"{heading}\n{direct_body}", default="en")
+    )
+    label = "Resposta direta" if inferred_language == "pt" else "Direct answer"
+    direct_body = re.sub(r"^(?:✅|☑️|✔️)\s*", "", direct_body).strip()
+    lines[answer_index] = f"✅ **{label}:** {direct_body}"
+
+    next_index = answer_index + 1
+    while next_index < len(lines) and not lines[next_index].strip():
+        next_index += 1
+    if (
+        next_index < len(lines)
+        and lines[next_index].strip() != "---"
+        and not _SOURCE_LINE_RE.match(lines[next_index].strip())
+        and lines[next_index].strip().startswith(("- ", "* ", "### "))
+    ):
+        lines[answer_index + 1:next_index] = ["", "---", ""]
+
+    repaired = "\n".join(lines)
+    if text.endswith("\n"):
+        repaired += "\n"
+    return repaired
+
+
 def final_visual_pass(text: str) -> str:
     """Apply the final set of visual and consistency repairs in order.
 
@@ -14815,6 +14976,8 @@ def final_visual_pass(text: str) -> str:
     if not text or not isinstance(text, str):
         return text or ""
 
+    text = restore_initial_pseudo_heading(text)
+    text = normalize_opening_direct_answer_contract(text)
     text = promote_leading_planner_title_bullet(text)
     text = dedupe_direct_answer_leading_status_icon(text)
     text = normalize_transport_status_public_language(text)
@@ -19683,6 +19846,8 @@ def final_post_qa_guard(text: str, language: str = "en") -> str:
     guarded = re.sub(r"(?m)^---\n(?=\S)", "---\n\n", guarded)
     guarded = re.sub(r"(?m)^(###\s+[^\n]+)\n(?=\S)", r"\1\n\n", guarded)
     guarded = re.sub(r"(?m)([^\n])\n(###\s+)", r"\1\n\n\2", guarded)
+    guarded = restore_initial_pseudo_heading(guarded)
+    guarded = normalize_opening_direct_answer_contract(guarded, language)
     return guarded.strip()
 
 

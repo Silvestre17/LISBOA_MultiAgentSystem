@@ -15,7 +15,7 @@ import logging
 import os
 import re
 import time as time_module
-from concurrent.futures import as_completed
+from concurrent.futures import TimeoutError as FuturesTimeoutError, as_completed
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -613,6 +613,55 @@ class BaseAgent:
         """
         return tool_args
 
+    def _tool_failure_limitation(self, language: str = "en") -> str:
+        """Return a scoped, user-facing limitation for failed tool execution."""
+        is_pt = str(language or "").lower().startswith("pt")
+        agent_name = str(self.agent_name or "").lower()
+
+        if "weather" in agent_name:
+            return (
+                "Não consegui obter dados meteorológicos confirmados neste momento. "
+                "Tenta novamente mais tarde ou confirma diretamente no IPMA antes de saíres."
+                if is_pt
+                else "I could not obtain confirmed weather data right now. "
+                "Try again later or confirm directly with IPMA before leaving."
+            )
+        if "transport" in agent_name:
+            return (
+                "Não consegui validar os dados de mobilidade pedidos neste momento. "
+                "Usa isto como uma limitação temporária e confirma a viagem no operador antes de sair."
+                if is_pt
+                else "I could not validate the requested mobility data right now. "
+                "Treat this as a temporary limitation and confirm the trip with the operator before leaving."
+            )
+        if "researcher" in agent_name:
+            return (
+                "Não consegui consultar os dados locais necessários neste momento. "
+                "Posso responder melhor se reformulares com o nome oficial do local, serviço ou evento."
+                if is_pt
+                else "I could not consult the required local data right now. "
+                "I can answer better if you rephrase with the official place, service, or event name."
+            )
+        return (
+            "Não consegui confirmar os dados necessários neste momento."
+            if is_pt
+            else "I could not confirm the required data right now."
+        )
+
+    @staticmethod
+    def _looks_like_tool_failure(result: Any) -> bool:
+        """Return whether a tool result contains internal failure wording."""
+        text = str(result or "").strip()
+        if not text:
+            return False
+        return bool(
+            re.search(
+                r"\b(?:error executing|execution error|execution failed|tool '.+?' not found|timed out|timeout)\b",
+                text,
+                flags=re.IGNORECASE,
+            )
+        )
+
     def _format_tool_result_for_fallback(
         self,
         *,
@@ -623,6 +672,9 @@ class BaseAgent:
     ) -> str:
         """Formats a tool result for ReAct fallback paths when a subclass exposes a formatter."""
         raw_result = str(result)
+        if self._looks_like_tool_failure(raw_result):
+            return self._tool_failure_limitation(language)
+
         formatter = getattr(self, "_format_deterministic_tool_result", None)
         if callable(formatter):
             try:
@@ -844,7 +896,30 @@ class BaseAgent:
         Returns:
             Formatted tool result as string, or None if no tool call detected.
         """
-        parsed = parse_json_response(content)
+        parsed = None
+        raw_content = str(content or "").strip()
+        json_candidates = [
+            match.group(1)
+            for match in re.finditer(
+                r"```(?:json)?\s*(\{.*?\})\s*```",
+                raw_content,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+        ]
+        if raw_content:
+            json_candidates.append(raw_content)
+
+        for candidate in json_candidates:
+            try:
+                candidate_parsed = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate_parsed, dict):
+                parsed = candidate_parsed
+                break
+
+        if parsed is None:
+            parsed = parse_json_response(content)
         if not isinstance(parsed, dict):
             return None
 
@@ -857,6 +932,9 @@ class BaseAgent:
         )
         if not tool_name:
             return None
+        if not isinstance(tool_args, dict):
+            tool_args = {}
+        tool_args = self._preprocess_tool_args(str(tool_name), tool_args)
 
         for tool in self.tools:
             if tool.name == tool_name:
@@ -869,15 +947,18 @@ class BaseAgent:
                         language=language,
                     )
                 except Exception as e:
-                    return f"Error executing {tool_name}: {str(e)}"
+                    logger.debug("Tool execution failed for JSON fallback %s: %s", tool_name, e)
+                    return self._tool_failure_limitation(language)
 
-        return f"Tool '{tool_name}' not found."
+        logger.debug("JSON fallback requested unknown tool %s", tool_name)
+        return self._tool_failure_limitation(language)
 
     def execute_tools_parallel(
         self,
         tool_calls: List[Dict],
         max_workers: int = 4,
-        timeout: float = 30.0
+        timeout: float = 30.0,
+        language: str = "en",
     ) -> Dict[str, str]:
         """
         Execute multiple tool calls in parallel for faster processing.
@@ -887,14 +968,14 @@ class BaseAgent:
             max_workers: Maximum concurrent workers.
             timeout: Maximum wait time passed to `as_completed()` while waiting
                 for the batch to finish.
+            language: Response language used for user-facing failure messages.
 
         Returns:
             Dict mapping tool call IDs to results.
 
         Notes:
-            If the overall wait exceeds `timeout`, `as_completed()` may raise a
-            timeout-related exception to the caller. Individual tool execution
-            errors are captured and returned as error strings.
+            Individual tool execution errors and timeout-related failures are
+            captured as scoped user-facing limitations.
         """
         if not tool_calls:
             return {}
@@ -909,13 +990,14 @@ class BaseAgent:
             tool_id = tool_call.get('id', f'call_{hash(tool_name)}')
 
             if tool_name not in tool_map:
-                return (tool_id, f"Tool '{tool_name}' not found.")
+                return (tool_id, self._tool_failure_limitation(language))
 
             try:
                 result = self._invoke_tool(tool_map[tool_name], tool_args, tool_name=tool_name)
                 return (tool_id, str(result))
             except Exception as e:
-                return (tool_id, f"Error executing {tool_name}: {str(e)}")
+                logger.debug("Parallel tool execution failed for %s: %s", tool_name, e)
+                return (tool_id, self._tool_failure_limitation(language))
 
         # Limit workers to number of tools
         num_workers = min(max_workers, len(tool_calls))
@@ -926,14 +1008,24 @@ class BaseAgent:
                 for tc in tool_calls
             }
 
-            for future in as_completed(future_to_tool, timeout=timeout):
-                try:
-                    tool_id, result = future.result()
-                    results[tool_id] = result
-                except Exception as e:
-                    tool_call = future_to_tool[future]
-                    tool_id = tool_call.get('id', 'unknown')
-                    results[tool_id] = f"Execution error: {str(e)}"
+            try:
+                completed_futures = as_completed(future_to_tool, timeout=timeout)
+                for future in completed_futures:
+                    try:
+                        tool_id, result = future.result()
+                        results[tool_id] = result
+                    except Exception as e:
+                        tool_call = future_to_tool[future]
+                        tool_id = tool_call.get('id', 'unknown')
+                        logger.debug("Parallel tool future failed for %s: %s", tool_id, e)
+                        results[tool_id] = self._tool_failure_limitation(language)
+            except FuturesTimeoutError:
+                logger.warning("Parallel tool execution timed out after %.1f seconds", timeout)
+
+            for future, tool_call in future_to_tool.items():
+                tool_id = tool_call.get('id', 'unknown')
+                if tool_id not in results:
+                    results[tool_id] = self._tool_failure_limitation(language)
 
         return results
 
@@ -1076,7 +1168,14 @@ class BaseAgent:
             duplicate_detected = False
             for duplicate_index, tool_call in enumerate(response.tool_calls):
                 tool_name = tool_call.get("name")
+                if not tool_call.get("id"):
+                    tool_call["id"] = f"call_{iteration}_{duplicate_index}"
                 tool_args = tool_call.get("args", {})
+                tool_args = self._preprocess_tool_args(
+                    str(tool_name or ""),
+                    tool_args if isinstance(tool_args, dict) else {},
+                )
+                tool_call["args"] = tool_args
                 try:
                     args_str = json.dumps(tool_args, sort_keys=True)
                 except Exception:
@@ -1139,13 +1238,17 @@ class BaseAgent:
                 if verbose:
                     print(f"      [PARALLEL] Executing {len(tools_to_execute)} tools in parallel...")
 
-                tool_results = self.execute_tools_parallel(tools_to_execute, max_workers=4)
+                tool_results = self.execute_tools_parallel(
+                    tools_to_execute,
+                    max_workers=4,
+                    language=fallback_language,
+                )
 
                 for tool_call in tools_to_execute:
                     tool_id = tool_call.get("id", f"call_{iteration}")
                     tool_name = tool_call.get("name", "unknown")
                     tool_args = tool_call.get("args", {})
-                    result = tool_results.get(tool_id, f"Tool '{tool_name}' execution failed.")
+                    result = tool_results.get(tool_id, self._tool_failure_limitation(fallback_language))
                     last_tool_results.append(
                         {"name": tool_name, "args": tool_args, "result": str(result)}
                     )
@@ -1186,12 +1289,12 @@ class BaseAgent:
                                     )
                                     print(f"      [TOOL] Result: {preview}")
                             except Exception as e:
-                                tool_result = f"Error executing {tool_name}: {str(e)}"
+                                tool_result = self._tool_failure_limitation(fallback_language)
                                 print(f"      [ERROR] Tool {tool_name} failed: {str(e)[:150]}")
                             break
 
                     if tool_result is None:
-                        tool_result = f"Tool '{tool_name}' not found."
+                        tool_result = self._tool_failure_limitation(fallback_language)
 
                     messages.append(
                         ToolMessage(content=str(tool_result), tool_call_id=tool_id)

@@ -3160,7 +3160,10 @@ def _build_structured_plan_fallback(
         ]
     selected_cards = _select_planner_cards_for_request(clean_cards, user_message)
     requested_labels = _requested_anchor_labels(user_message, combined_places)
-    strict_requested_sequence = _query_has_explicit_anchor_sequence(user_message)
+    strict_requested_sequence = (
+        _query_has_explicit_anchor_sequence(user_message)
+        or _query_has_explicit_start_end_constraint(user_message)
+    )
     if strict_requested_sequence:
         ordered_labels = _requested_anchor_labels(user_message, combined_places)
         seen_ordered = {_normalize_planner_text(label) for label in ordered_labels}
@@ -3974,6 +3977,78 @@ def _query_requests_return_to_origin(user_message: str) -> bool:
     )
 
 
+def _query_requests_return_to_hotel(user_message: str) -> bool:
+    """Return whether the user asks to return to an accommodation anchor."""
+    normalized = _normalize_planner_text(user_message)
+    return bool(
+        re.search(
+            r"\b(?:regress\w*|voltar|volta|retornar|return(?:ing)?|back)\b"
+            r".{0,80}\b(?:hotel|base|alojamento|accommodation)\b",
+            normalized,
+        )
+        or re.search(
+            r"\b(?:hotel|base|alojamento|accommodation)\b"
+            r".{0,80}\b(?:regress\w*|voltar|volta|retornar|return(?:ing)?|back)\b",
+            normalized,
+        )
+    )
+
+
+def _extract_requested_hotel_anchor(user_message: str, language: str) -> str:
+    """Extract a concrete hotel/accommodation location when the user provides one."""
+    text = str(user_message or "").strip()
+    patterns = [
+        r"\b(?:hotel|alojamento|accommodation)\s+(?:no|na|em|in|near|perto\s+d(?:e|o|a|os|as)|at)\s+(?P<area>[^,.;]+)",
+        r"\b(?:meu|minha|my|the)\s+(?:hotel|alojamento|accommodation)\s+(?:no|na|em|in|near|perto\s+d(?:e|o|a|os|as)|at)\s+(?P<area>[^,.;]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        area = re.sub(r"\s+", " ", match.group("area")).strip(" .:-")
+        area = re.sub(
+            r"\s+(?:and|e)\s+(?:return|regress|voltar|volta|retornar|back)\b.*$",
+            "",
+            area,
+            flags=re.IGNORECASE,
+        ).strip(" .:-")
+        if area and _normalize_planner_text(area) not in {"meu", "minha", "my", "the"}:
+            return f"hotel em {area}" if language == "pt" else f"hotel in {area}"
+    return ""
+
+
+def _planner_requested_return_target(user_message: str, language: str) -> str:
+    """Return the requested return target without conflating origin and hotel."""
+    if _query_requests_return_to_hotel(user_message):
+        hotel_anchor = _extract_requested_hotel_anchor(user_message, language)
+        if hotel_anchor:
+            return hotel_anchor
+        origin = _extract_requested_plan_origin(user_message)
+        if re.search(r"\b(?:hotel|alojamento|accommodation)\b", origin, flags=re.IGNORECASE):
+            return origin
+        return (
+            "hotel (localização não indicada)"
+            if language == "pt"
+            else "your hotel (location not specified)"
+        )
+
+    origin = _extract_requested_plan_origin(user_message)
+    normalized = _normalize_planner_text(user_message)
+    if not origin and "hotel" in normalized and "saldanha" in normalized:
+        return "hotel no Saldanha" if language == "pt" else "hotel in Saldanha"
+    return origin
+
+
+def _planner_return_target_is_unknown_hotel(user_message: str, target: str) -> bool:
+    """Return whether the return target is a hotel without a usable location."""
+    return _query_requests_return_to_hotel(user_message) and bool(
+        re.search(
+            r"\b(?:localizacao nao indicada|location not specified)\b",
+            _normalize_planner_text(target),
+        )
+    )
+
+
 def _planner_return_to_origin_item(
     cards: List[Dict[str, str]],
     user_message: str,
@@ -3982,24 +4057,32 @@ def _planner_return_to_origin_item(
     """Build a grounded return-leg limitation when the user asks to return to base."""
     if not cards or not _query_requests_return_to_origin(user_message):
         return ""
-    origin = _extract_requested_plan_origin(user_message)
-    if not origin:
-        normalized = _normalize_planner_text(user_message)
-        if "hotel" in normalized and "saldanha" in normalized:
-            origin = "hotel no Saldanha" if language == "pt" else "hotel in Saldanha"
-    if not origin:
+    target = _planner_requested_return_target(user_message, language)
+    if not target:
         return ""
     last_card = cards[-1]
     last_name = _planner_card_display_name(last_card) or str(last_card.get("name") or "").strip()
     if not last_name:
         return ""
+    if _planner_return_target_is_unknown_hotel(user_message, target):
+        if language == "pt":
+            return (
+                f"🚇 **{last_name} → {target}:** inclui o regresso pedido ao hotel, mas a "
+                "localização do hotel não foi indicada; não usei o ponto de partida como se fosse o hotel "
+                "e não inventei linhas, paragens ou horários."
+            )
+        return (
+            f"🚇 **{last_name} → {target}:** includes the requested return to the hotel, but the "
+            "hotel location was not provided; I did not treat the starting point as the hotel "
+            "or invent lines, stops, or schedules."
+        )
     if language == "pt":
         return (
-            f"🚇 **{last_name} → {origin}:** regresso ao ponto de partida; a ligação exata "
+            f"🚇 **{last_name} → {target}:** regresso ao ponto indicado; a ligação exata "
             "não ficou confirmada nos dados recolhidos, por isso não inventei linhas, paragens ou horários."
         )
     return (
-        f"🚇 **{last_name} → {origin}:** return to the starting point; the exact leg was not "
+        f"🚇 **{last_name} → {target}:** return to the requested point; the exact leg was not "
         "confirmed in the gathered data, so I did not invent lines, stops, or schedules."
     )
 
@@ -5008,23 +5091,24 @@ def _ensure_requested_start_end_in_transport_section(
     return f"{response.rstrip()}\n\n---\n\n{heading}\n" + "\n".join(bullets)
 
 
-def _planner_response_has_return_to_origin_movement(response: str, user_message: str) -> bool:
+def _planner_response_has_return_to_origin_movement(
+    response: str,
+    user_message: str,
+    language: str,
+) -> bool:
     """Return whether the movement section explicitly includes the requested return."""
     if not _query_requests_return_to_origin(user_message):
         return True
 
-    origin = _extract_requested_plan_origin(user_message)
-    normalized_user = _normalize_planner_text(user_message)
-    if not origin and "hotel" in normalized_user and "saldanha" in normalized_user:
-        origin = "hotel no Saldanha"
-    origin_norm = _normalize_planner_text(origin)
+    target = _planner_requested_return_target(user_message, language)
+    target_norm = _normalize_planner_text(target)
     movement_text = _planner_movement_section_text(response) or str(response or "")
 
     for line in movement_text.splitlines():
         normalized_line = _normalize_planner_text(line)
         if "→" not in line and "->" not in line:
             continue
-        if origin_norm and origin_norm not in normalized_line:
+        if target_norm and target_norm not in normalized_line:
             continue
         if re.search(r"\b(?:regress\w*|volta|voltar|retorno|return|back)\b", normalized_line):
             return True
@@ -5040,33 +5124,44 @@ def _ensure_requested_return_to_origin_in_transport_section(
     if (
         not response
         or not _query_requests_return_to_origin(user_message)
-        or _planner_response_has_return_to_origin_movement(response, user_message)
+        or _planner_response_has_return_to_origin_movement(response, user_message, language)
     ):
         return response
 
-    origin = _extract_requested_plan_origin(user_message)
-    normalized_user = _normalize_planner_text(user_message)
-    if not origin and "hotel" in normalized_user and "saldanha" in normalized_user:
-        origin = "hotel no Saldanha" if language == "pt" else "hotel in Saldanha"
-    if not origin:
-        origin = "ponto de partida" if language == "pt" else "starting point"
+    target = _planner_requested_return_target(user_message, language)
+    if not target:
+        target = "ponto indicado" if language == "pt" else "requested point"
 
     last_stop = _planner_last_visible_stop_from_response(response, language)
     if language == "pt":
         heading = "### 🚇 **Como te deslocas**"
-        bullet = (
-            f"- 🚇 **{last_stop} → {origin}:** inclui o regresso ao ponto de partida; "
-            "a ligação exata não ficou confirmada nos dados recolhidos, por isso não inventei "
-            "linhas, paragens ou horários."
-        )
+        if _planner_return_target_is_unknown_hotel(user_message, target):
+            bullet = (
+                f"- 🚇 **{last_stop} → {target}:** inclui o regresso pedido ao hotel, mas a "
+                "localização do hotel não foi indicada; não usei o ponto de partida como se fosse o hotel "
+                "e não inventei linhas, paragens ou horários."
+            )
+        else:
+            bullet = (
+                f"- 🚇 **{last_stop} → {target}:** inclui o regresso ao ponto indicado; "
+                "a ligação exata não ficou confirmada nos dados recolhidos, por isso não inventei "
+                "linhas, paragens ou horários."
+            )
         final_notes_pattern = r"(?m)^###\s+⚠️\s+\*\*Notas finais\*\*"
     else:
         heading = "### 🚇 **How to move**"
-        bullet = (
-            f"- 🚇 **{last_stop} → {origin}:** includes the return to the starting point; "
-            "the exact leg was not confirmed in the gathered data, so I did not invent "
-            "lines, stops, or schedules."
-        )
+        if _planner_return_target_is_unknown_hotel(user_message, target):
+            bullet = (
+                f"- 🚇 **{last_stop} → {target}:** includes the requested return to the hotel, but the "
+                "hotel location was not provided; I did not treat the starting point as the hotel "
+                "or invent lines, stops, or schedules."
+            )
+        else:
+            bullet = (
+                f"- 🚇 **{last_stop} → {target}:** includes the return to the requested point; "
+                "the exact leg was not confirmed in the gathered data, so I did not invent "
+                "lines, stops, or schedules."
+            )
         final_notes_pattern = r"(?m)^###\s+⚠️\s+\*\*Final notes\*\*"
 
     section_re = re.compile(
@@ -6047,6 +6142,13 @@ def _build_card_based_renderer_fallback(
             item for item in movement_items
             if _movement_item_matches_requested_sequence(item, user_message)
         ]
+    strict_sequence_limitations = (
+        _requested_sequence_transport_limitation_bullets(user_message, language)
+        if strict_requested_sequence and _query_requests_movement_details(user_message)
+        else []
+    )
+    if strict_requested_sequence and not movement_items and strict_sequence_limitations:
+        movement_items = strict_sequence_limitations
     same_area_walking_items = _planner_same_area_walking_items(
         selected_cards,
         user_message,
@@ -6066,7 +6168,7 @@ def _build_card_based_renderer_fallback(
     if same_area_walking_items and (
         _query_requests_movement_details(user_message)
         or _query_requests_low_walk_plan(user_message)
-    ):
+    ) and not strict_requested_sequence:
         if movement_items and _extract_requested_plan_origin(user_message):
             movement_items = list(dict.fromkeys([*movement_items, *same_area_walking_items]))
         else:
@@ -6116,10 +6218,10 @@ def _build_card_based_renderer_fallback(
             filtered_movement_items.append(item)
         if filtered_movement_items:
             movement_items = filtered_movement_items
-        elif same_area_walking_items:
+        elif same_area_walking_items and not strict_requested_sequence:
             movement_items = same_area_walking_items
         elif _query_requests_movement_details(user_message) or _query_requests_public_transport(user_message):
-            movement_items = [
+            movement_items = strict_sequence_limitations or [
                 (
                     "As ligações exatas entre as paragens selecionadas não ficaram confirmadas nos dados recolhidos; "
                     "não inventei linhas, paragens ou durações."
@@ -6203,6 +6305,20 @@ def _build_card_based_renderer_fallback(
         language,
         transport_data,
     )
+    if strict_sequence_limitations and not any(
+        _normalize_planner_text(item) in _normalize_planner_text(rendered)
+        for item in strict_sequence_limitations
+    ):
+        movement_heading = "### 🚇 **Como te deslocas**" if is_pt else "### 🚇 **How to move**"
+        movement_section = "\n\n---\n\n" + "\n".join(
+            [movement_heading, "", *[f"- {item}" for item in strict_sequence_limitations]]
+        )
+        if re.search(r"\n\n---\n\n###\s+💡", rendered):
+            rendered = re.sub(r"\n\n---\n\n###\s+💡", f"{movement_section}\n\n---\n\n### 💡", rendered, count=1)
+        elif re.search(r"\n\n###\s+⚠️", rendered):
+            rendered = re.sub(r"\n\n###\s+⚠️", f"{movement_section}\n\n### ⚠️", rendered, count=1)
+        else:
+            rendered = f"{rendered.rstrip()}{movement_section}"
     return final_post_qa_guard(rendered, language=language)
 
 

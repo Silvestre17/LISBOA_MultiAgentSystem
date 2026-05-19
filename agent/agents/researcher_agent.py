@@ -2343,7 +2343,7 @@ class ResearcherAgent(BaseAgent):
             "all", "not", "no", "nao", "sem", "without", "except",
             "excluding", "exclui", "excluir", "menos", "procura", "procurar",
             "search", "find", "show", "mostrar", "mostra", "lista", "list", "diz",
-            "me", "sabes", "conheces", "podes", "dizer", "quero", "queria",
+            "me", "sabes", "conheces", "podes", "dizer", "quero", "queria", "mas", "but",
             "music", "musica",
             "concert", "concerts", "concerto", "concertos", "sport",
             "sports", "desporto", "desportos", "desportivo", "desportiva",
@@ -5863,14 +5863,12 @@ class ResearcherAgent(BaseAgent):
         card_terms = ("lisboa card", "lisbon card")
         benefit_terms = (
             "included", "include", "free", "discount", "benefit", "benefits",
-            "entrada", "incluido", "incluida", "gratuito", "desconto", "beneficio", "beneficios",
+            "entrada", "incluido", "incluida", "gratuito", "gratuita", "gratis",
+            "desconto", "beneficio", "beneficios",
             "relevant", "relevance", "apply", "applicable", "suitable", "works", "good for", "for visiting",
         )
         if not (any(term in normalized for term in card_terms) and any(term in normalized for term in benefit_terms)):
             return False
-        # Generic Lisboa Card questions ("What is included in the Lisboa Card?",
-        # "Quais os benefícios do Lisboa Card?") have no specific attraction subject and
-        # must NOT trigger the per-place lookup; they belong on the general knowledge path.
         subject = cls._extract_lisboa_card_subject(user_message).strip()
         if not subject or subject.lower() == user_message.strip().lower():
             return False
@@ -5897,32 +5895,66 @@ class ResearcherAgent(BaseAgent):
             maxsplit=1,
         )
         subject = split_match[0].strip() if split_match else subject
-        include_match = re.search(
-            r"(?i)\b(?:inclui|include|includes|included)\s+(?:o|a|os|as|the)?\s*(?P<subject>.+?)(?:\?|$)",
-            subject,
-        )
-        if include_match:
-            subject = include_match.group("subject")
+
         english_match = re.search(
             r"(?i)\b(?:is|are)\s+(?P<subject>.+?)\s+(?:included|free|discounted)\b",
             subject,
         )
-        if english_match:
-            subject = english_match.group("subject")
-        subject = re.sub(
-            r"(?i)\b(?:is|are|does|do|isn't|aren't|the|a|an|o|os|as|um|uma|est[aá]|fica|fica-se|para|with|in|on|no|na|nos|nas|com|can|can't|cannot|o|a|os|as)\b",
-            " ",
+        portuguese_match = re.search(
+            r"(?i)\b(?:[ée]|est[aá]|ficam?|s[aã]o)\s+(?P<subject>.+?)\s+(?:inclu[ií]d[ao]s?|gratu[ií]t[ao]s?)\b",
             subject,
         )
-        subject = re.sub(
+        portuguese_match_reverse = re.search(
+            r"(?i)(?P<subject>.+?)\s+(?:[ée]|est[aá]|ficam?|s[aã]o)\s+(?:inclu[ií]d[ao]s?|gratu[ií]t[ao]s?)\b",
+            subject,
+        )
+
+        candidate = subject
+        if english_match:
+            candidate = english_match.group("subject")
+        elif portuguese_match:
+            candidate = portuguese_match.group("subject")
+        elif portuguese_match_reverse:
+            candidate = portuguese_match_reverse.group("subject")
+        else:
+            include_match = re.search(
+                r"(?i)\b(?:inclui|include|includes|included)\s+(?:o|a|os|as|the)?\s*(?P<subject>.+?)(?:\?|$)",
+                subject,
+            )
+            if include_match:
+                candidate = include_match.group("subject")
+
+        cleaned = re.sub(
+            r"(?i)\b(?:is|are|does|do|isn't|aren't|the|a|an|o|os|as|um|uma|[ée]|est[aá]|fica|fica-se|para|with|in|on|no|na|nos|nas|com|can|can't|cannot|o|a|os|as)\b",
+            " ",
+            candidate,
+        )
+        cleaned = re.sub(
             r"(?i)\b(?:included|include|includes|inclui|incluem|inclu[ií]d[ao]s?|free|discount|benefit|benefits|entrada|gratuito|desconto|benef[ií]cios?|relevant|relevante|apply|applicable|suitable|works|for|visiting)\b",
             " ",
-            subject,
+            cleaned,
         )
-        subject = re.sub(r"(?i)\b(?:lisboa card|lisbon card|card)\b", " ", subject)
-        subject = re.sub(r"[^\wÀ-ÿ\s'-]+", " ", subject)
-        subject = re.sub(r"\s+", " ", subject).strip()
-        return subject or user_message
+        cleaned = re.sub(r"(?i)\b(?:lisboa card|lisbon card|card)\b", " ", cleaned)
+        cleaned = re.sub(r"[^\wÀ-ÿ\s'-]+", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+        if not cleaned or len(cleaned) < 3:
+            fallback = re.sub(
+                r"(?i)\b(?:is|are|does|do|isn't|aren't|the|a|an|o|os|as|um|uma|[ée]|est[aá]|fica|fica-se|para|with|in|on|no|na|nos|nas|com|can|can't|cannot|o|a|os|as)\b",
+                " ",
+                subject,
+            )
+            fallback = re.sub(
+                r"(?i)\b(?:included|include|includes|inclui|incluem|inclu[ií]d[ao]s?|free|discount|benefit|benefits|entrada|gratuito|desconto|benef[ií]cios?|relevant|relevante|apply|applicable|suitable|works|for|visiting)\b",
+                " ",
+                fallback,
+            )
+            fallback = re.sub(r"(?i)\b(?:lisboa card|lisbon card|card)\b", " ", fallback)
+            fallback = re.sub(r"[^\wÀ-ÿ\s'-]+", " ", fallback)
+            fallback = re.sub(r"\s+", " ", fallback).strip()
+            return fallback or user_message
+
+        return cleaned
 
     @staticmethod
     def _localize_lisboa_card_benefit(benefit: str, language: str) -> str:
@@ -5934,6 +5966,18 @@ class ResearcherAgent(BaseAgent):
         value = re.sub(r"\bwith\s+Lisboa\s+Card\b", "com Lisboa Card", value, flags=re.IGNORECASE)
         value = re.sub(r"\bexhibitions\b", "exposições", value, flags=re.IGNORECASE)
         return value
+
+    @staticmethod
+    def _classify_lisboa_card_benefit(benefit: str) -> str:
+        """Classify a Lisboa Card benefit as free admission, discount, or unknown."""
+        value = _normalize_researcher_intent_text(benefit)
+        if not value:
+            return "unknown"
+        if re.search(r"\b(?:free|gratuito|gratuita|gratuits?|incluido|incluida|included)\b", value):
+            return "free"
+        if re.search(r"(?:\d+\s*%|discount|desconto|reduced|reducao|reduzid[ao]|off\b)", value):
+            return "discount"
+        return "unknown"
 
     @staticmethod
     def _query_requests_nearby_lisboa_card_places(user_message: str) -> bool:
@@ -6037,18 +6081,21 @@ class ResearcherAgent(BaseAgent):
         title = str(best_place.get("title") or subject).strip()
         if language == "pt" and subject and _score_specific_place_lookup_match(best_place, subject) >= 55:
             title = subject
-        benefit = self._localize_lisboa_card_benefit(
-            str(best_place.get("lisboa_card_benefit") or best_place.get("lisboa_card_discount") or "").strip(),
-            language,
-        )
+        raw_benefit = str(best_place.get("lisboa_card_benefit") or best_place.get("lisboa_card_discount") or "").strip()
+        benefit_type = self._classify_lisboa_card_benefit(raw_benefit)
+        benefit = self._localize_lisboa_card_benefit(raw_benefit, language)
         url = str(best_place.get("url") or "").strip()
         website = str(best_place.get("website") or "").strip()
         tickets = str(best_place.get("tickets") or best_place.get("ticket_url") or "").strip()
         address = str(best_place.get("address") or best_place.get("location") or "").strip()
         card_lines: List[str] = [f"### 🎫 **{heading}: {title}**", ""]
         if benefit:
-            if is_pt:
-                card_lines.append(f"✅ **Sim, mas como desconto:** o {title} está listado com **{benefit}**, não como entrada gratuita.")
+            if benefit_type == "free" and is_pt:
+                card_lines.append(f"✅ **Sim:** **{title}** está listado com **{benefit}**.")
+            elif benefit_type == "free":
+                card_lines.append(f"✅ **Yes:** {title} is listed with **{benefit}**.")
+            elif is_pt:
+                card_lines.append(f"✅ **Sim, mas como desconto:** **{title}** está listado com **{benefit}**, não como entrada gratuita.")
             else:
                 card_lines.append(f"✅ **Yes, but as a discount:** {title} is listed with **{benefit}**, not free entry.")
         else:

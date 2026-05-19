@@ -2052,10 +2052,11 @@ _EVENT_SPECIFIC_LOOKUP_NOISE_TOKENS = {
     "tell", "about", "details", "detail", "information", "info", "event", "events",
     "evento", "eventos", "more", "please", "show", "find", "me", "the", "this",
     "that", "these", "those", "what", "which", "and", "how", "sobre", "diz",
-    "fala", "para", "from", "with", "there", "happening", "temos", "tem",
+    "fala", "para", "em", "in", "from", "with", "there", "happening", "temos", "tem",
     "this", "week", "today", "tomorrow", "next", "year",
     "ano", "esta", "semana", "este", "proxima", "proximo",
     "que", "quais", "qual", "ha", "há", "quero", "queria", "nao", "não", "sem",
+    "mostra", "mostrar", "lista", "lisboa", "lisbon", "mas", "but",
 }
 _EVENT_SPECIFIC_LOOKUP_HINT_TOKENS = {
     "book", "fair", "feira", "fado", "concert", "concerto", "festival", "exhibition",
@@ -4625,7 +4626,7 @@ def search_cultural_events(
                 ]
                 suggestions = [
                     label for key, label in suggestion_pool
-                    if key.lower() not in excluded_category_keys
+                    if _normalize_event_category_key(key) not in excluded_category_keys
                 ][:3]
                 if suggestions:
                     message += f".\n\n💡 Experimente termos mais abrangentes, como {', '.join(repr(item) for item in suggestions)}."
@@ -4653,7 +4654,7 @@ def search_cultural_events(
                 ]
                 suggestions = [
                     label for key, label in suggestion_pool
-                    if key.lower() not in excluded_category_keys
+                    if _normalize_event_category_key(key) not in excluded_category_keys
                 ][:3]
                 if suggestions:
                     message += f".\n\n💡 Try broader terms such as {', '.join(repr(item) for item in suggestions)}."

@@ -2303,7 +2303,8 @@ class MultiAgentAssistant:
                 r"^(?:que|quais|qual|quando|onde|ha|mostra|lista|procura|pesquisa|"
                 r"recomenda|diz|diz-me|quero\s+(?:saber|ver|eventos?|locais|"
                 r"restaurantes?|monumentos?|museus?|roteiro|itinerario)|"
-                r"what|which|where|when|show|list|find|tell|give|recommend)\b",
+                r"what|which|where|when|show|list|find|tell|give|recommend|"
+                r"eventos?|events?|metro|comboio|train|autocarro|bus)\b",
                 folded,
             )
             or "?" in str(message or "")
@@ -2317,7 +2318,9 @@ class MultiAgentAssistant:
                 r"monumentos?|monuments?|museus?|museums?|miradouros?|viewpoints?|"
                 r"restaurantes?|restaurants?|fado|gastronom|casas?\s+de\s+banho|"
                 r"wc|sanitarios?|sanitarias?|farmacias?|pharmacies|hospitais?|"
-                r"previsao|meteorologia|weather|roteiro|itinerario|itinerary)\b",
+                r"previsao|meteorologia|weather|roteiro|itinerario|itinerary|"
+                r"metro|comboio|train|autocarro|bus|transportes?|transport|"
+                r"atrasos?|delays?|perturbacoes?|disruptions?|estado|status)\b",
                 folded,
             )
         )
@@ -6797,44 +6800,6 @@ class MultiAgentAssistant:
         agents_to_call = routing.get("agents", [])
         direct_response = routing.get("direct_response")
         reasoning = routing.get("reasoning", "")
-        is_planning_query = self.supervisor._is_planning_query(message)
-        if (
-            is_planning_query
-            and not self.supervisor._is_weather_only_outdoor_decision_query(message)
-        ):
-            required_planning_agents = ["researcher", "planner"]
-            if self.supervisor._planning_query_requires_transport_context(message):
-                required_planning_agents.insert(0, "transport")
-            if (
-                self.supervisor._requires_weather_for_planning(message)
-                or self.supervisor._planning_query_mentions_weather(message)
-            ):
-                required_planning_agents.insert(0, "weather")
-            agents_to_call = [
-                agent
-                for agent in [*required_planning_agents, *list(agents_to_call or [])]
-                if agent
-            ]
-            agents_to_call = [
-                agent
-                for index, agent in enumerate(agents_to_call)
-                if agent not in agents_to_call[:index]
-            ]
-            direct_response = None
-            reasoning = (
-                reasoning
-                + " | Deterministic override: planning request requires planner synthesis with grounded context."
-            ).strip(" |")
-        if re.search(r"\b(?:plan|itinerary|roteiro|planeia|planejar)\b", message, flags=re.IGNORECASE) and re.search(
-            r"\b(?:[2-9]\s*(?:day|days|dia|dias)|seven days|five days|7 days|5 days|weekend|fim de semana)\b",
-            message,
-            flags=re.IGNORECASE,
-        ):
-            required_planning_agents = ["weather", "transport", "researcher", "planner"]
-            agents_to_call = [agent for agent in required_planning_agents if agent not in agents_to_call] + list(agents_to_call)
-            agents_to_call = [agent for index, agent in enumerate(agents_to_call) if agent and agent not in agents_to_call[:index]]
-            direct_response = None
-            reasoning = (reasoning + " | Deterministic override: multi-day planning requires planner synthesis.").strip(" |")
         planning_follow_up_context = self._build_planning_follow_up_context(message)
 
         if verbose:
@@ -6868,37 +6833,36 @@ class MultiAgentAssistant:
                 tags=query_tags,
             )
 
-        # Map internal agent names to user-friendly display names
-        name_map_pt = {
-            "weather": "Meteorologia 🌤️",
-            "transport": "Transportes 🚇",
-            "researcher": "Pesquisa Local 🔎",
-            "planner": "Planeador 📅",
-        }
-        name_map_en = {
-            "weather": "Weather 🌤️",
-            "transport": "Transport 🚇",
-            "researcher": "Local Search 🔎",
-            "planner": "Planner 📅",
-        }
-        name_map = name_map_pt if ui_language == "pt" else name_map_en
+        data_check_status = (
+            "🔎 A consultar dados relevantes..."
+            if ui_language == "pt"
+            else "🔎 Checking relevant data..."
+        )
+        retry_data_check_status = (
+            "🔄 A consultar dados adicionais..."
+            if ui_language == "pt"
+            else "🔄 Checking additional data..."
+        )
+        validation_status = (
+            "🔍 A validar a resposta..."
+            if ui_language == "pt"
+            else "🔍 Validating the answer..."
+        )
+        final_response_status = (
+            "✍️ A preparar a resposta final..."
+            if ui_language == "pt"
+            else "✍️ Preparing the final response..."
+        )
+        evidence_response_status = (
+            "⚠️ A preparar resposta com os dados confirmados..."
+            if ui_language == "pt"
+            else "⚠️ Preparing an answer with confirmed data..."
+        )
 
-        # Notify status: Agents selected
+        # Notify status: relevant data lookup selected
         if agents_to_call:
-            # Filter out planner from the "Consulting" list as it runs last
-            consulting: list[str] = [
-                str(name_map.get(a, a or ""))
-                for a in agents_to_call
-                if a and a != "planner"
-            ]
-
-            if consulting and on_status_change:
-                msg = (
-                    f"🚀 Vou consultar: {', '.join(consulting)}..."
-                    if ui_language == "pt"
-                    else f"🚀 Consulting: {', '.join(consulting)}..."
-                )
-                on_status_change(msg)
+            if on_status_change:
+                on_status_change(data_check_status)
 
         # Step 2: Handle direct response (no agents needed)
         if direct_response and not agents_to_call:
@@ -6936,13 +6900,7 @@ class MultiAgentAssistant:
                 print(f"      [{execution_mode}] Executing {len(workers)} agents: {workers}")
 
             if on_status_change:
-                friendly_workers = [name_map.get(w, w) for w in workers]
-                msg = (
-                    f"⏳ A aguardar respostas de: {', '.join(friendly_workers)}..."
-                    if ui_language == "pt"
-                    else f"⏳ Waiting for: {', '.join(friendly_workers)}..."
-                )
-                on_status_change(msg)
+                on_status_change(data_check_status)
 
             # Context for agents: language instruction + minimal follow-up context
             # Workers should focus on the CURRENT query, not be biased by history
@@ -7176,12 +7134,7 @@ class MultiAgentAssistant:
                 print("\n   [QA] Validating completeness...")
 
             if on_status_change:
-                msg = (
-                    "🔍 A validar completude dos dados..."
-                    if ui_language == "pt"
-                    else "🔍 Validating data completeness..."
-                )
-                on_status_change(msg)
+                on_status_change(validation_status)
 
             messages_list = self.state.get("messages", [])
             qa_history = (
@@ -7283,13 +7236,7 @@ class MultiAgentAssistant:
                         print(f"   [QA RETRY] Calling additional agents: {retry_agents}")
 
                     if on_status_change:
-                        friendly_retry = [name_map.get(a, a) for a in retry_agents]
-                        msg = (
-                            f"🔄 A recolher dados adicionais: {', '.join(friendly_retry)}..."
-                            if ui_language == "pt"
-                            else f"🔄 Gathering additional data: {', '.join(friendly_retry)}..."
-                        )
-                        on_status_change(msg)
+                        on_status_change(retry_data_check_status)
 
                     run_retry_in_parallel = self._should_execute_agent_batch_in_parallel(retry_agents)
 
@@ -7485,11 +7432,7 @@ class MultiAgentAssistant:
                     "\n   [QA] Blocking planner synthesis because evidence-supported data is still incomplete"
                 )
             if on_status_change:
-                on_status_change(
-                    "⚠️ A consolidar resposta suportada por evidência sem itinerário final..."
-                    if effective_language == "pt"
-                    else "⚠️ Consolidating an evidence-supported answer without final itinerary synthesis..."
-                )
+                on_status_change(evidence_response_status)
 
         if preserve_direct_researcher_answer:
             response_agents_to_call = [
@@ -7525,7 +7468,7 @@ class MultiAgentAssistant:
                 )
 
             if on_status_change:
-                on_status_change("✍️ A escrever o itinerário final...")
+                on_status_change(final_response_status)
 
             try:
                 response = self.agents["planner"].synthesize(message, agent_outputs)
