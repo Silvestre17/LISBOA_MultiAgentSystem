@@ -108,6 +108,8 @@ class TTLCache:
         self._cache: Dict[str, Tuple[Any, float]] = {}
         self._lock = Lock()
         self.default_ttl = default_ttl
+        self._last_cleanup = 0.0
+        self._cleanup_interval = min(max(default_ttl, 1), 60)
 
     def _make_key(self, func_name: str, args: tuple, kwargs: dict) -> str:
         """Creates a cache key from function signature."""
@@ -133,7 +135,11 @@ class TTLCache:
     def set(self, key: str, value: Any, ttl: Optional[int] = None):
         """Set cache value with TTL."""
         ttl = ttl if ttl is not None else self.default_ttl
-        expiry = time.time() + ttl
+        current_time = time.time()
+        if current_time - self._last_cleanup >= self._cleanup_interval:
+            self.cleanup_expired(current_time=current_time)
+
+        expiry = current_time + ttl
         with self._lock:
             self._cache[key] = (value, expiry)
 
@@ -142,9 +148,9 @@ class TTLCache:
         with self._lock:
             self._cache.clear()
 
-    def cleanup_expired(self):
+    def cleanup_expired(self, current_time: Optional[float] = None):
         """Remove all expired entries."""
-        current_time = time.time()
+        current_time = current_time if current_time is not None else time.time()
         with self._lock:
             expired_keys = [
                 k for k, (_, expiry) in self._cache.items()
@@ -152,10 +158,11 @@ class TTLCache:
             ]
             for k in expired_keys:
                 del self._cache[k]
+            self._last_cleanup = current_time
 
 
 # Global cache instances with different TTLs for different data types
-weather_cache = TTLCache(default_ttl=300)    # 5 minutes for weather
+weather_cache = TTLCache(default_ttl=300)     # 5 minutes for weather
 transport_cache = TTLCache(default_ttl=60)    # 1 minute for transport
 static_cache = TTLCache(default_ttl=3600)     # 1 hour for static data
 
@@ -300,12 +307,6 @@ class LatencyTracker:
                 'max': round(max(latencies), 2),
                 'p95': round(latencies[p95_idx] if p95_idx < count else latencies[-1], 2)
             }
-
-    def get_all_stats(self) -> Dict[str, Dict[str, float]]:
-        """Get statistics for all operations."""
-        with self._lock:
-            operations = list(self._metrics.keys())
-        return {op: self.get_stats(op) for op in operations}
 
 
 # Global latency tracker

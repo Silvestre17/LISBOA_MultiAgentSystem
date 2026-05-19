@@ -103,6 +103,9 @@ OUTSIDE_AML_ROUTE_PLACES: Tuple[Tuple[str, str], ...] = (
 )
 
 AML_AMBIGUOUS_PLACE_EXCLUSIONS: Tuple[str, ...] = (
+    "guarda-chuva",
+    "guarda chuva",
+    "guarda de chuva",
     "porto salvo",
     "porto brandao",
     "porto brandão",
@@ -160,11 +163,6 @@ def extract_aml_municipality_mentions(text: str) -> List[str]:
             seen.add(label)
             found.append((match.start(), label))
     return [label for _index, label in sorted(found, key=lambda item: item[0])]
-
-
-def mentions_aml_municipality(text: str) -> bool:
-    """Return whether text explicitly mentions at least one AML municipality."""
-    return bool(extract_aml_municipality_mentions(text))
 
 
 def extract_outside_aml_mentions(text: str) -> List[str]:

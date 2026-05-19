@@ -144,7 +144,7 @@ LANGUAGE_OPTIONS = {
 TRANSLATIONS = {
     "en": {
         "app_title": "LISBOA",
-        "app_subtitle": "Your Intelligent Urban & Tourism Assistant",
+        "app_subtitle": "Lisbon Tourism and Urban Mobility Prototype",
         "settings": "System Settings",
         "language": "Language",
         "llm_provider": "AI Provider",
@@ -204,7 +204,7 @@ TRANSLATIONS = {
         "ex_query_events": "Find live music events this weekend.",
         "ex_query_services": "Where is the nearest 24h pharmacy?",
         "ex_query_food": "Find traditional Portuguese cuisine in Alfama.",
-        "ex_query_planning": "Plan a 2-day walking tour for architecture lovers.",
+        "ex_query_planning": "Plan a short architecture walk through Baixa and Chiado.",
         "error_generic": "Service temporarily unavailable. Please try again later.",
         "history_window_notice": "Showing the last {count} messages to keep the interface responsive. The full conversation is still kept for the assistant.",
         "thinking": "Analyzing live city data...",
@@ -295,6 +295,8 @@ TRANSLATIONS = {
         "info_author_degree": "Data Science and Advanced Analytics",
         "info_author_affiliation": "NOVA IMS - Universidade NOVA de Lisboa",
         "info_author_year": "Academic year 2025/2026",
+        "info_supervisors_label": "Supervisors",
+        "info_supervisors_names": "Prof. Dr. Bruno Jardim   •   Prof. Dr. Miguel de Castro Neto",
         "info_author_github": "GitHub",
         "info_author_linkedin": "LinkedIn",
         "discover_eyebrow": "New here?",
@@ -304,7 +306,7 @@ TRANSLATIONS = {
     },
     "pt": {
         "app_title": "LISBOA",
-        "app_subtitle": "O seu Assistente Urbano Inteligente",
+        "app_subtitle": "Lisbon Tourism and Urban Mobility Prototype",
         "settings": "Configurações",
         "language": "Idioma / Language",
         "llm_provider": "Motor de IA",
@@ -364,7 +366,7 @@ TRANSLATIONS = {
         "ex_query_events": "Encontra eventos de música ao vivo para este fim de semana.",
         "ex_query_services": "Onde fica a farmácia de serviço mais próxima do Rossio?",
         "ex_query_food": "Onde posso comer pratos tradicionais em Alfama?",
-        "ex_query_planning": "Planeia 2 dias a pé para amantes de arquitetura.",
+        "ex_query_planning": "Planeia uma caminhada curta de arquitetura pela Baixa e Chiado.",
         "error_generic": "Serviço temporariamente indisponível. Tente novamente mais tarde.",
         "history_window_notice": "A mostrar apenas as últimas {count} mensagens para manter a interface fluida. A conversa completa continua disponível para o assistente.",
         "thinking": "A processar dados urbanos...",
@@ -455,6 +457,8 @@ TRANSLATIONS = {
         "info_author_degree": "Data Science and Advanced Analytics",
         "info_author_affiliation": "NOVA IMS - Universidade NOVA de Lisboa",
         "info_author_year": "Ano letivo 2025/2026",
+        "info_supervisors_label": "Orientadores",
+        "info_supervisors_names": "Prof. Dr. Bruno Jardim      •      Prof. Dr. Miguel de Castro Neto",
         "info_author_github": "GitHub",
         "info_author_linkedin": "LinkedIn",
         "discover_eyebrow": "Primeira visita?",
@@ -731,7 +735,7 @@ footer {{ visibility: hidden; }}
 
 .top-banner-container p {{
     color: rgba(255,255,255,0.95);
-    font-size: 1.15rem;
+    font-size: 1.5rem;
     font-weight: 400;
     position: relative;
     z-index: 1;
@@ -745,6 +749,8 @@ footer {{ visibility: hidden; }}
 
 .sidebar-logo {{
     display: flex;
+    flex-direction: column;
+    align-items: center;
     justify-content: center;
     margin-bottom: 20px;
     margin-top: -3rem;
@@ -753,6 +759,15 @@ footer {{ visibility: hidden; }}
 .sidebar-logo img {{
     max-width: 180px;
     drop-shadow: 0px 5px 15px rgba(0,0,0,0.1);
+}}
+.sidebar-logo-subtitle {{
+    margin-top: 0.35rem;
+    color: #334155;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0;
+    line-height: 1.25;
+    text-align: center;
 }}
 
 /* Language selector: avoids OS emoji flag rendering and Streamlit widget truncation */
@@ -1168,6 +1183,16 @@ button[kind="secondary"]:hover {{
     color: var(--text-muted);
     font-size: 0.8rem;
     line-height: 1.4;
+}}
+.sidebar-footer-supervisors {{
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.35;
+    margin-top: 0.45rem;
+}}
+.sidebar-footer-supervisors strong {{
+    color: var(--text-main);
+    font-weight: 700;
 }}
 
 /* ============ INFO PAGE SECTIONS ============ */
@@ -2050,6 +2075,7 @@ def build_sidebar():
         <div class="sidebar-footer">
             <div class="sidebar-footer-version">{t("footer_version")}</div>
             <div class="sidebar-footer-made">{t("footer_made")}</div>
+            <div class="sidebar-footer-supervisors"><strong>{html.escape(t("info_supervisors_label"))}:</strong> {html.escape(t("info_supervisors_names"))}</div>
             <div class="sidebar-footer-made" style="margin-top:2px;">{format_lisbon_now()}</div>
         </div>
         """,
@@ -3484,7 +3510,9 @@ def run_info_page() -> None:
         f'<p class="info-author-meta"><strong>{html.escape(t("info_author_role"))}</strong> · '
         f'{html.escape(t("info_author_degree"))}'
         f'<span class="info-author-secondary">{html.escape(t("info_author_affiliation"))}</span>'
-        f'<span class="info-author-secondary">{html.escape(t("info_author_year"))}</span></p>'
+        f'<span class="info-author-secondary">{html.escape(t("info_author_year"))}</span><br>'
+        f'<span class="info-author-secondary"><strong>{html.escape(t("info_supervisors_label"))}:</strong> '
+        f'{html.escape(t("info_supervisors_names"))}</span></p>'
         '</div>'
         '<div class="info-author-links">'
         f'<a class="info-author-link info-author-link-github" href="https://github.com/Silvestre17" target="_blank" rel="noopener noreferrer"><span>{html.escape(t("info_author_github"))}</span></a>'

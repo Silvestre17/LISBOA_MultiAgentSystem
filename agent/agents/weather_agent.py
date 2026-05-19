@@ -20,7 +20,10 @@ if TYPE_CHECKING:
 
 from agent.agents.base import BaseAgent
 from agent.prompts.weather import get_weather_prompt
-from agent.utils.geographic_scope import extract_aml_municipality_mentions
+from agent.utils.geographic_scope import (
+    extract_aml_municipality_mentions,
+    extract_outside_aml_mentions,
+)
 from agent.utils.langsmith_tracing import traceable
 from agent.state import AgentState
 from agent.utils.langgraph_compat import ToolNode
@@ -137,6 +140,45 @@ class WeatherAgent(BaseAgent):
     def _infer_weather_query_language(user_message: str) -> str:
         """Adds a small PT-PT heuristic for short follow-ups where generic language inference is weak."""
         query = (user_message or "").lower()
+        english_markers = [
+            "what",
+            "how",
+            "should",
+            "wear",
+            "weather",
+            "forecast",
+            "rain",
+            "temperature",
+            "wind",
+            "walking",
+            "today",
+            "tomorrow",
+            "tonight",
+            "umbrella",
+        ]
+        portuguese_markers = [
+            "amanhã",
+            "amanha",
+            "daqui",
+            "semana",
+            "previsão",
+            "previsao",
+            "avisos",
+            "hoje",
+            "tempo",
+            "próxim",
+            "proxim",
+            "chuva",
+            "vento",
+            "temperatura",
+            "vestir",
+            "roupa",
+            "casaco",
+        ]
+        if any(marker in query for marker in english_markers) and not any(
+            marker in query for marker in portuguese_markers
+        ):
+            return "en"
         pt_markers = [
             "amanhã",
             "amanha",
@@ -529,7 +571,9 @@ class WeatherAgent(BaseAgent):
                 "portugal",
             }
             if candidate and candidate_norm not in allowed_locations:
-                return candidate
+                outside_mentions = extract_outside_aml_mentions(candidate)
+                if outside_mentions:
+                    return outside_mentions[0]
 
         return None
 
@@ -723,12 +767,12 @@ class WeatherAgent(BaseAgent):
         if language == "pt":
             return (
                 "### 🌤️ **Previsão Meteorológica**\n\n"
-                "⚠️ Só tenho previsão meteorológica fiável do IPMA para Lisboa para os próximos 5 dias, "
+                "✅ **Resposta direta:** só tenho previsão meteorológica fiável do IPMA para Lisboa para os próximos 5 dias, "
                 "por isso não consigo confirmar o tempo para esse horizonte sem inventar dados."
             )
         return (
             "### 🌤️ **Weather Forecast**\n\n"
-            "⚠️ I only have reliable IPMA weather forecast data for Lisbon for the next 5 days, "
+            "✅ **Direct answer:** I only have reliable IPMA weather forecast data for Lisbon for the next 5 days, "
             "so I can't confirm the weather for that time horizon without inventing data."
         )
 
@@ -1177,7 +1221,7 @@ class WeatherAgent(BaseAgent):
                     advice_parts.append("uma camada que corte o vento")
                 temperature_note = f" porque a previsão fica entre **{minimum}°C e {maximum}°C**" if minimum and maximum else ""
                 suitability = "Parece adequado para caminhar" if any(term in normalized for term in ["adequado", "bom para", "evitar", "passeio"]) else "Para caminhar ao ar livre"
-                return f"{rain_answer}👟 {suitability}, {', '.join(advice_parts)}{temperature_note}."
+                return f"{rain_answer}✅ **Resposta direta:** 👟 {suitability}, {', '.join(advice_parts)}{temperature_note}."
             advice_parts = ["wear a **light jacket**"]
             if rain and float(rain.get("probability", 0) or 0) >= 35:
                 advice_parts.append("carry a compact umbrella or rain shell")
@@ -1185,7 +1229,7 @@ class WeatherAgent(BaseAgent):
                 advice_parts.append("add a wind-resistant layer")
             temperature_note = f" because the forecast is around **{minimum}°C to {maximum}°C**" if minimum and maximum else ""
             suitability = "It looks suitable for a walk" if any(term in normalized for term in ["suitable", "good for", "avoid", "riverside"]) else "For walking outdoors"
-            return f"{rain_answer}👟 {suitability}, {', '.join(advice_parts)}{temperature_note}."
+            return f"{rain_answer}✅ **Direct answer:** 👟 {suitability}, {', '.join(advice_parts)}{temperature_note}."
 
         if "wind" in normalized or "vento" in normalized:
             wind = cls._extract_wind_summary(tool_text)
@@ -1212,8 +1256,8 @@ class WeatherAgent(BaseAgent):
             minimum = cls._extract_temperature_min(tool_text)
             rain = cls._extract_rain_summary(tool_text)
             if is_pt:
-                return f"🧥 Sim, leva um **casaco leve**{cls._jacket_reason(minimum, rain, is_pt)}."
-            return f"🧥 Yes, bring a **light jacket**{cls._jacket_reason(minimum, rain, is_pt)}."
+                return f"✅ **Resposta direta:** 🧥 Sim, leva um **casaco leve**{cls._jacket_reason(minimum, rain, is_pt)}."
+            return f"✅ **Direct answer:** 🧥 Yes, bring a **light jacket**{cls._jacket_reason(minimum, rain, is_pt)}."
 
         if any(term in normalized for term in ["sailing", "sail", "vela", "boat", "barco", "safe", "seguro"]):
             wind = cls._extract_wind_summary(tool_text)
@@ -1460,11 +1504,9 @@ class WeatherAgent(BaseAgent):
         """
         # Extract explicit language preference from context if provided
         import re
+        query_language = self._infer_weather_query_language(user_message)
         language_match = re.search(r"User language:\s*(en|pt)", context, re.IGNORECASE)
-        if language_match:
-            language = language_match.group(1).lower()
-        else:
-            language = self._infer_weather_query_language(user_message)
+        language = query_language or (language_match.group(1).lower() if language_match else "en")
         if self._is_climate_average_query(user_message):
             return finalize_worker_response(
                 self._build_climate_average_limit_message(language),

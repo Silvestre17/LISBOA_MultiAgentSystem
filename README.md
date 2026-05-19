@@ -72,7 +72,7 @@ LISBOA is a Master's thesis project at NOVA IMS that implements an intelligent m
 - **Thesis title:** *LISBOA: Lisbon Itinerary System Based On AI*
 - **Subtitle:** *A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon*
 - **Author:** André Filipe Gomes Silvestre, 20240502
-- **Supervisor:** Prof. Dr. Bruno Jardim
+- **Supervisors:** Prof. Dr. Bruno Jardim; Prof. Dr. Miguel de Castro Neto
 - **Institution:** NOVA IMS, Master's in Data Science and Advanced Analytics
 - **Academic year:** 2025/2026
 

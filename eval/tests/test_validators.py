@@ -407,7 +407,8 @@ class TestQAFinalResponseAudit:
 
         assert "Não foram encontradas paragens da Carris Metropolitana perto de Campo de Ourique." in repaired
         assert "Dica" in repaired
-        assert "Carris Urbana" in repaired
+        assert "Carris" in repaired
+        assert "Carris Urbana" not in repaired
         assert "No Carris Metropolitana" not in repaired
         assert "Carris Urban\n" not in repaired
         assert "Carris Urban**" not in repaired

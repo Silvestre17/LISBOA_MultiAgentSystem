@@ -58,9 +58,10 @@ def render_plan_markdown(draft: PlanDraft, sources: Dict[str, SourceRef], langua
         for item in constraint_items:
             lines.append(f"    - {item}")
 
-    if draft.blocks:
+    visible_blocks = draft.blocks[:8]
+    if visible_blocks:
         lines.extend(["", "---", "", f"### 📍 **{'Roteiro sugerido' if is_pt else 'Suggested route'}**"])
-        for index, block in enumerate(draft.blocks[:5], start=1):
+        for index, block in enumerate(visible_blocks, start=1):
             block_title = _clean_inline(block.title) or (f"Bloco {index}" if is_pt else f"Block {index}")
             block_title = re.sub(r"^(?:Block|Bloco)\s*\d+\s*[·:-]\s*", "", block_title, flags=re.IGNORECASE).strip()
             lines.extend(["", f"**🏷️ {block_title}**"])
@@ -69,7 +70,7 @@ def render_plan_markdown(draft: PlanDraft, sources: Dict[str, SourceRef], langua
             for detail in _clean_list(block.details, max_items=9):
                 lines.append(_format_detail_bullet(detail, is_pt))
             for movement in _clean_list(block.movement, max_items=3):
-                lines.append(f"    - 🚇 {movement}")
+                lines.append(_format_movement_bullet(movement, is_pt=is_pt, indent="    "))
             for weather in _clean_list(block.weather, max_items=2):
                 lines.append(f"    - ☔ {weather}")
             for limitation in _clean_list(block.limitations, max_items=2):
@@ -80,7 +81,7 @@ def render_plan_markdown(draft: PlanDraft, sources: Dict[str, SourceRef], langua
         _clean_list(draft.movement_logic, max_items=6),
         block_titles=block_titles,
     )
-    movement_items = _ensure_adjacent_short_walks(movement_items, draft.blocks[:5], is_pt=is_pt)
+    movement_items = _ensure_adjacent_short_walks(movement_items, visible_blocks, is_pt=is_pt)
     weather_items = [
         item for item in _clean_list(draft.weather_strategy, max_items=6)
         if not _is_placeholder_weather_item(item)
@@ -129,9 +130,21 @@ def _append_movement_section(lines: List[str], items: Iterable[str], *, is_pt: b
     cleaned = _clean_list(list(items), max_items=6)
     if not cleaned:
         return
-    lines.extend(["", "---", "", f"### 🚇 **{'Como te deslocas' if is_pt else 'How to move'}**"])
+    emoji = _movement_section_emoji(cleaned)
+    lines.extend(["", "---", "", f"### {emoji} **{'Como te deslocas' if is_pt else 'How to move'}**"])
     for item in cleaned:
         lines.append(_format_movement_bullet(item, is_pt=is_pt, indent=""))
+
+
+def _movement_section_emoji(items: Iterable[str]) -> str:
+    """Choose a movement-section icon that matches the visible guidance."""
+    normalized = _normalize_for_match(" ".join(str(item or "") for item in items))
+    transport_signal = re.search(
+        r"\b(?:metro|carris|autocarro|bus|tram|eletrico|elétrico|train|comboio|cp|linha|line)\b",
+        normalized,
+    )
+    walk_signal = re.search(r"\b(?:walk|walking|caminh\w*|andar|pe|pé)\b", normalized)
+    return "🚶" if walk_signal and not transport_signal else "🚇"
 
 
 def _format_movement_bullet(item: str, *, is_pt: bool, indent: str = "    ") -> str:
@@ -311,6 +324,8 @@ def _shared_walkable_zone(previous: object, current: object) -> str:
 def _movement_icon_for_text(text: str) -> str:
     """Choose a compact icon for a movement item."""
     normalized = _normalize_for_match(text)
+    if re.search(r"^(?:walking plan|plano a pe|plano a pé)\b", normalized):
+        return "🚶"
     if re.search(r"\b(?:transport|transporte)\b", normalized):
         return "🚇"
     if re.search(r"\b(?:walk|walking|caminh\w*|andar)\b", normalized):
@@ -594,12 +609,20 @@ def _is_placeholder_weather_item(item: str) -> bool:
         for marker in (
             "weather was not confirmed",
             "weather was not provided",
+            "not confirmed",
+            "please verify the current forecast",
+            "verify the current forecast",
+            "no weather warnings confirmed",
             "no weather-specific",
             "no additional weather",
+            "forecast not confirmed",
             "sem adaptação meteorológica",
             "meteorologia não",
             "tempo não confirmado",
             "tempo nao confirmado",
+            "sem meteorologia confirmada",
+            "previsão não confirmada",
+            "previsao nao confirmada",
         )
     )
 

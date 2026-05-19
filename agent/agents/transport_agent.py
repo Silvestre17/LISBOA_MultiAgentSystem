@@ -1287,6 +1287,10 @@ def _extract_route_endpoints(user_message: str) -> Optional[Tuple[str, str]]:
         r"\b(?:i'?m|i am)\s+(?:at|in)\s+(?P<origin>.+?)\s+and\s+(?:i\s+)?(?:need|want)\s+to\s+(?:go|get)\s+to\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
         r"\bde\s+metro\s+de\s+(?P<origin>.+?)\s+at[eé]\s+(?:a|ao|à)?\s*(?P<destination>.+?)(?:[\?\!\.,;]|$)",
         r"\bde\s+metro\s+de\s+(?P<origin>.+?)\s+para\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
+        r"\bdos\s+(?P<origin>.+?)\s+a\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
+        r"\bdas\s+(?P<origin>.+?)\s+a\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
+        r"\bdo\s+(?P<origin>.+?)\s+a\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
+        r"\bda\s+(?P<origin>.+?)\s+a\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
         r"\bde\s+(?P<origin>.+?)\s+at[eé]\s+(?:a|ao|à)?\s*(?P<destination>.+?)(?:[\?\!\.,;]|$)",
         r"\bde\s+(?P<origin>.+?)\s+para\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
         r"\bde\s+(?P<origin>.+?)\s+a\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
@@ -1908,16 +1912,34 @@ def _is_generic_public_transport_route_query(user_message: str) -> bool:
         "public transit",
         "transit",
     ]
-    return any(marker in normalized for marker in generic_markers)
+    if any(marker in normalized for marker in generic_markers):
+        return True
+    if not _extract_route_endpoints(user_message):
+        return False
+    return bool(
+        re.search(
+            r"\b(?:como\s+(?:posso\s+)?(?:ir|vou|chego)|quero\s+(?:ir|chegar)|"
+            r"preciso\s+(?:de\s+)?ir|qual\s+(?:e\s+)?(?:a\s+)?(?:melhor|forma)|"
+            r"how\s+(?:do\s+i\s+)?(?:get|go)|want\s+to\s+(?:go|get)|"
+            r"best\s+(?:way|option))\b",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _strip_transport_source_lines(text: str) -> str:
     """Remove per-tool source footers before composing multi-mode route sections."""
-    lines = [
-        raw_line.rstrip()
-        for raw_line in str(text or "").splitlines()
-        if not re.match(r"^\s*📌\s+\*\*(?:Fontes?|Sources?):", raw_line.strip(), flags=re.IGNORECASE)
-    ]
+    lines = []
+    for raw_line in str(text or "").splitlines():
+        stripped = raw_line.strip()
+        if re.match(
+            r"^\s*(?:📌|ðŸ“Œ)?\s*\*\*(?:Fontes?|Sources?):",
+            stripped,
+            flags=re.IGNORECASE,
+        ):
+            continue
+        lines.append(raw_line.rstrip())
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
@@ -3189,6 +3211,85 @@ def _build_mode_filtered_carris_route_response(
     return "\n".join(parts).strip()
 
 
+def _build_carris_surface_route_response(
+    route_result: str,
+    user_message: str,
+    origin: str,
+    destination: str,
+) -> str:
+    """Return a clean Carris Urban surface route answer."""
+    language = _infer_language(user_message, "")
+    preferences = _parse_route_mode_preferences(user_message)
+    if (
+        preferences["bus_only"]
+        or preferences["tram_only"]
+        or preferences["exclude_bus"]
+        or preferences["exclude_tram"]
+    ):
+        return _build_mode_filtered_carris_route_response(
+            route_result,
+            user_message,
+            origin,
+            destination,
+        )
+
+    tram_markdown = _format_carris_mode_section_markdown(
+        _extract_carris_mode_section(route_result, "TRAMS"),
+        language,
+        max_entries=2,
+    )
+    bus_markdown = _format_carris_mode_section_markdown(
+        _extract_carris_mode_section(route_result, "BUSES"),
+        language,
+        max_entries=2,
+    )
+    if not tram_markdown and not bus_markdown:
+        return route_result
+
+    timestamp = datetime.now().strftime("%H:%M")
+    is_pt = language == "pt"
+    title = f"### 🚌🚋 **{origin} → {destination}**"
+    alternative_requested = bool(
+        re.search(
+            r"\b(?:alternativas?|op[cç][oõ]es|options|autocarro|autocarros|bus|buses|"
+            r"el[eé]trico|eletrico|tram|trams)\b",
+            user_message,
+            flags=re.IGNORECASE,
+        )
+    )
+    direct = (
+        f"✅ **Resposta direta:** encontrei uma opção direta na Carris Urban entre **{origin}** e **{destination}**."
+        if is_pt and not alternative_requested
+        else f"✅ **Resposta direta:** encontrei opções de superfície na Carris Urban entre **{origin}** e **{destination}**."
+        if is_pt
+        else f"✅ **Direct answer:** I found a direct Carris Urban option between **{origin}** and **{destination}**."
+        if not alternative_requested
+        else f"✅ **Direct answer:** I found Carris Urban surface options between **{origin}** and **{destination}**."
+    )
+    source = (
+        f"📌 **Fonte:** [*Carris*](https://www.carris.pt) | **Atualizado:** {timestamp}"
+        if is_pt
+        else f"📌 **Source:** [*Carris*](https://www.carris.pt) | **Updated:** {timestamp}"
+    )
+    parts = [title, "", direct, "", "---", ""]
+    if tram_markdown:
+        parts.extend([
+            "### 🚋 **Elétrico**" if is_pt else "### 🚋 **Tram**",
+            "",
+            tram_markdown,
+            "",
+        ])
+    if bus_markdown:
+        parts.extend([
+            "### 🚌 **Autocarros**" if is_pt else "### 🚌 **Buses**",
+            "",
+            bus_markdown,
+            "",
+        ])
+    parts.append(source)
+    return "\n".join(parts).strip()
+
+
 def _clean_metropolitana_direct_bus_block(text: str) -> str:
     """Removes wrapper lines from Carris Metropolitana direct-bus output for embedding in summaries."""
     cleaned_lines: List[str] = []
@@ -3334,7 +3435,7 @@ def _format_metropolitana_no_direct_summary(
     ]
     if any(marker in _normalize_token(text) for marker in scope_markers):
         summary_lines.append(
-            "- ⚠️ **Âmbito:** para trajetos dentro da cidade de Lisboa, confirme também Carris Urbana ou uma combinação Metro + autocarro."
+            "- ⚠️ **Âmbito:** para trajetos dentro da cidade de Lisboa, confirma também a Carris ou uma combinação Metro + autocarro."
             if language == "pt"
             else "- ⚠️ **Scope:** for Lisbon city-only trips, also confirm Carris Urban or a Metro + bus combination."
         )
@@ -3792,7 +3893,7 @@ def _build_unsupported_transport_scope_response(
         [labels[mode] for mode in unsupported_modes if mode in labels],
         language,
     )
-    supported_scope_pt = "Metro, Carris Urbana, Carris Metropolitana e CP suburbanos/AML"
+    supported_scope_pt = "Metro, Carris, Carris Metropolitana e CP suburbanos/AML"
     supported_scope_en = "Metro, Carris Urban, Carris Metropolitana, and CP suburban/AML services"
     is_long_distance_only = unsupported_modes == ["long_distance_cp"]
     unsupported_sources = {
@@ -3814,7 +3915,7 @@ def _build_unsupported_transport_scope_response(
                     "",
                     "**Para decidir no momento:**",
                     "- Abre as duas apps e compara o preço final, o tempo estimado de recolha e o tempo total antes de aceitar.",
-                    "- Se preferires dados verificados pelo sistema, reformula a viagem com Metro, Carris Urbana, Carris Metropolitana ou CP suburbanos/AML.",
+                    "- Se preferires dados verificados pelo sistema, reformula a viagem com Metro, Carris, Carris Metropolitana ou CP suburbanos/AML.",
                 ]
             ).strip()
         return "\n".join(
@@ -6363,7 +6464,7 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
             carris_result = ""
 
         if carris_result and not _tool_result_indicates_no_match(carris_result):
-            return _build_mode_filtered_carris_route_response(
+            return _build_carris_surface_route_response(
                 carris_result,
                 user_message,
                 endpoints[0],
@@ -6406,6 +6507,54 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
             )
             if cp_bridge:
                 return cp_bridge
+
+        if _is_generic_public_transport_route_query(user_message) and not fastest_requested:
+            try:
+                from tools.carris_api import carris_find_routes_between
+
+                route_preferences = _parse_route_mode_preferences(user_message)
+                broad_surface_search = bool(
+                    route_preferences.get("alternative_mode_request")
+                    or re.search(
+                        r"\b(?:alternativas?|op[cç][oõ]es|options|sem\s+metro|without\s+metro)\b",
+                        user_message,
+                        flags=re.IGNORECASE,
+                    )
+                )
+                urban_carris_result = str(
+                    carris_find_routes_between.invoke(
+                        {
+                            "origin": endpoints[0],
+                            "destination": endpoints[1],
+                            "search_radius_km": 0.8 if broad_surface_search else 0.4,
+                        }
+                    )
+                ).strip()
+            except Exception:
+                urban_carris_result = ""
+            if (
+                (not urban_carris_result or _tool_result_indicates_no_match(urban_carris_result))
+                and not broad_surface_search
+            ):
+                try:
+                    urban_carris_result = str(
+                        carris_find_routes_between.invoke(
+                            {
+                                "origin": endpoints[0],
+                                "destination": endpoints[1],
+                                "search_radius_km": 0.8,
+                            }
+                        )
+                    ).strip()
+                except Exception:
+                    urban_carris_result = ""
+            if urban_carris_result and not _tool_result_indicates_no_match(urban_carris_result):
+                return _build_carris_surface_route_response(
+                    urban_carris_result,
+                    user_message,
+                    endpoints[0],
+                    endpoints[1],
+                )
 
         metropolitana_bridge = _build_metropolitana_bridge_for_partial_metro_route(
             user_message=user_message,
@@ -6451,12 +6600,26 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
     try:
         from tools.carris_api import carris_find_routes_between
 
+        route_preferences = _parse_route_mode_preferences(user_message)
+        broad_surface_search = bool(
+            route_preferences.get("alternative_mode_request")
+            or re.search(
+                r"\b(?:alternativas?|op[cç][oõ]es|options|sem\s+metro|without\s+metro)\b",
+                user_message,
+                flags=re.IGNORECASE,
+            )
+        )
         carris_result = str(
             carris_find_routes_between.invoke(
-                {"origin": endpoints[0], "destination": endpoints[1]}
+                {
+                    "origin": endpoints[0],
+                    "destination": endpoints[1],
+                    "search_radius_km": 0.8 if broad_surface_search else 0.4,
+                }
             )
         ).strip()
     except Exception:
+        broad_surface_search = False
         carris_result = ""
 
     valid_carris_result = carris_result and not any(
@@ -6468,6 +6631,35 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
             "Não foi possível localizar",
         ]
     )
+
+    if (
+        not valid_carris_result
+        and _is_generic_public_transport_route_query(user_message)
+        and not broad_surface_search
+    ):
+        try:
+            from tools.carris_api import carris_find_routes_between
+
+            carris_result = str(
+                carris_find_routes_between.invoke(
+                    {
+                        "origin": endpoints[0],
+                        "destination": endpoints[1],
+                        "search_radius_km": 0.8,
+                    }
+                )
+            ).strip()
+        except Exception:
+            carris_result = ""
+        valid_carris_result = carris_result and not any(
+            marker in carris_result
+            for marker in [
+                "No direct Carris route found",
+                "Could not locate",
+                "Sem rota direta",
+                "NÃ£o foi possÃ­vel localizar",
+            ]
+        )
 
     if valid_carris_result and _is_generic_public_transport_route_query(user_message) and is_metro_route:
         updated_label = "Atualizado" if _infer_language(user_message, "") == "pt" else "Updated"
@@ -6520,11 +6712,14 @@ def _route_response_uses_carris_urban(response: str) -> bool:
     normalized = _normalize_token(response)
     if "carris metropolitana" in normalized:
         return False
+    if "carris urban" in normalized or "carris urbana" in normalized:
+        return True
     return bool(
         re.search(
             r"(?im)^(?:####?\s*)?(?:🚌\s*)?(?:autocarros|buses|el[eé]tricos|trams)\b|"
             r"\b(?:direct routes found|rotas diretas encontradas)\b|"
-            r"\b(?:linha|line)\s+\d{2,3}[A-Z]?\b",
+            r"\b(?:linha|line)\s+\d{2,3}[A-Z]?\b|"
+            r"\*\*\d{2,3}[A-Z]?\*\*",
             response,
         )
     )
@@ -7752,10 +7947,14 @@ class TransportAgent(BaseAgent):
             "metro" in normalized_query
             and any(term in normalized_query for term in ["comboio", "comboios", "train", "trains"])
         )
+        compares_bus_train = (
+            any(term in normalized_query for term in ["autocarro", "autocarros", "bus", "buses"])
+            and any(term in normalized_query for term in ["comboio", "comboios", "train", "trains"])
+        )
         asks_comparison = bool(
             re.search(r"\b(mais rapid[oa]|mais barat[oa]|faster|fastest|cheaper|cheapest|compare|comparar)\b", normalized_query)
         )
-        return compares_metro_train and asks_comparison
+        return (compares_metro_train or compares_bus_train) and asks_comparison
 
     @staticmethod
     def _extract_duration_minutes(summary_text: str) -> Optional[int]:
@@ -7820,6 +8019,170 @@ class TransportAgent(BaseAgent):
 
         return bullets
 
+    @staticmethod
+    def _clean_nested_mode_option(response: str) -> str:
+        """Remove nested title/footer noise from an embedded mode-option answer."""
+        cleaned = _strip_transport_source_lines(str(response or "")).strip()
+        cleaned = re.sub(r"(?m)^###\s+[^\n]+\n*", "", cleaned).strip()
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned
+
+    def _build_bus_train_comparison_response(
+        self,
+        *,
+        user_message: str,
+        context: str,
+        origin: str,
+        destination: str,
+        language: str,
+    ) -> Optional[str]:
+        """Compare bus and train options without collapsing the request to CP only."""
+        bus_query = (
+            f"Quero ir de autocarro de {origin} para {destination}."
+            if language == "pt"
+            else f"I want to go by bus from {origin} to {destination}."
+        )
+        bus_response = self._build_mode_constrained_route_response(
+            user_message=bus_query,
+            context=context,
+            language=language,
+        ) or ""
+
+        train_query = (
+            f"Quero ir de {origin} para {destination}."
+            if language == "pt"
+            else f"I want to go from {origin} to {destination}."
+        )
+        train_response = self._build_nearest_cp_destination_response(train_query, language) or ""
+        if not train_response:
+            train_tool = self._get_tool_by_name("plan_train_trip")
+            if train_tool:
+                raw_train = str(
+                    self._invoke_tool(
+                        train_tool,
+                        {"origin": origin, "destination": destination},
+                        tool_name="plan_train_trip",
+                    )
+                ).strip()
+                if raw_train:
+                    train_response = self._format_deterministic_tool_result(
+                        tool_name="plan_train_trip",
+                        tool_args={"origin": origin, "destination": destination},
+                        result=raw_train,
+                        language=language,
+                        user_message=user_message,
+                    )
+
+        if not bus_response and not train_response:
+            return None
+
+        cleaned_bus = self._clean_nested_mode_option(bus_response)
+        cleaned_train = self._clean_nested_mode_option(train_response)
+        cleaned_train = re.sub(
+            r"(?mis)\n+---\n+\s*(?:###\s+)?🚌\s+\*\*(?:Autocarro|Bus)\*\*[\s\S]*$",
+            "",
+            cleaned_train,
+        ).strip()
+        cleaned_train = re.split(
+            r"(?mis)\n+\s*(?:---\s*\n+)?(?:#{1,6}\s+)?(?:\*\*)?🚌\s+(?:Autocarro|Bus)(?:\*\*)?.*$",
+            cleaned_train,
+            maxsplit=1,
+        )[0].strip()
+        cleaned_train = re.sub(
+            r"(?m)^###\s+🚆\s+\*\*(?:Comboio / CP|Train / CP)\*\*$",
+            "#### 🚆 **Horários CP**" if language == "pt" else "#### 🚆 **CP Timetable**",
+            cleaned_train,
+        )
+        cleaned_train = re.sub(
+            r"(?m)^\*\*🚆\s+(?:Comboio / CP|Train / CP)\*\*$",
+            "#### 🚆 **Horários CP**" if language == "pt" else "#### 🚆 **CP Timetable**",
+            cleaned_train,
+        )
+        normalized_bus = _normalize_token(cleaned_bus)
+        normalized_train = _normalize_token(cleaned_train)
+        bus_confirmed = bool(cleaned_bus and not re.search(r"\b(?:nao consegui|couldn't confirm|could not confirm)\b", normalized_bus))
+        train_confirmed = bool(cleaned_train and not re.search(r"\b(?:nao consegui|couldn't confirm|could not confirm)\b", normalized_train))
+
+        origin_display = _get_transport_display_name(origin)
+        destination_display = _get_transport_display_name(destination)
+        arrow = "\u2192"
+        if language == "pt":
+            title = f"### 🚌🚆 **{origin_display} {arrow} {destination_display}**"
+            direct = (
+                "✅ **Resposta direta:** comparei autocarro e comboio com os dados disponíveis."
+            )
+            bus_heading = "### 🚌 **Autocarro**"
+            train_heading = "### 🚆 **Comboio / CP**"
+            if train_confirmed and not bus_confirmed:
+                recommendation = "- **Melhor opção suportada:** comboio/CP, com o acesso inicial indicado na opção ferroviária."
+            elif bus_confirmed and not train_confirmed:
+                recommendation = "- **Melhor opção suportada:** autocarro, porque não consegui confirmar uma ligação ferroviária aplicável."
+            elif bus_confirmed and train_confirmed:
+                recommendation = "- **Melhor opção:** compara a próxima partida real; ambas têm dados suficientes para serem consideradas."
+            else:
+                recommendation = "- **Melhor opção:** não consigo escolher com segurança porque nenhuma alternativa ficou totalmente confirmada."
+            unavailable_bus = f"- ⚠️ Não consegui confirmar uma opção de autocarro entre **{origin_display}** e **{destination_display}**."
+            unavailable_train = f"- ⚠️ Não consegui confirmar uma opção ferroviária entre **{origin_display}** e **{destination_display}**."
+            source_line = self._build_transport_source_line(
+                language,
+                [
+                    "[*Carris*](https://www.carris.pt)",
+                    "[*Carris Metropolitana*](https://www.carrismetropolitana.pt)",
+                    "[*CP*](https://www.cp.pt)",
+                ],
+            )
+        else:
+            title = f"### 🚌🚆 **{origin_display} {arrow} {destination_display}**"
+            direct = "✅ **Direct answer:** I compared bus and train using the available data."
+            bus_heading = "### 🚌 **Bus**"
+            train_heading = "### 🚆 **Train / CP**"
+            if train_confirmed and not bus_confirmed:
+                recommendation = "- **Best supported option:** train/CP, with the initial access leg shown in the rail option."
+            elif bus_confirmed and not train_confirmed:
+                recommendation = "- **Best supported option:** bus, because I could not confirm an applicable rail connection."
+            elif bus_confirmed and train_confirmed:
+                recommendation = "- **Best option:** compare the next real departure; both options have enough data to consider."
+            else:
+                recommendation = "- **Best option:** I cannot choose safely because neither alternative was fully confirmed."
+            unavailable_bus = f"- ⚠️ I could not confirm a bus option between **{origin_display}** and **{destination_display}**."
+            unavailable_train = f"- ⚠️ I could not confirm a rail option between **{origin_display}** and **{destination_display}**."
+            source_line = self._build_transport_source_line(
+                language,
+                [
+                    "[*Carris*](https://www.carris.pt)",
+                    "[*Carris Metropolitana*](https://www.carrismetropolitana.pt)",
+                    "[*CP*](https://www.cp.pt)",
+                ],
+            )
+
+        return "\n".join(
+            [
+                title,
+                "",
+                direct,
+                "",
+                "---",
+                "",
+                bus_heading,
+                "",
+                cleaned_bus or unavailable_bus,
+                "",
+                "---",
+                "",
+                train_heading,
+                "",
+                cleaned_train or unavailable_train,
+                "",
+                "---",
+                "",
+                "### ✅ **Recomendação**" if language == "pt" else "### ✅ **Recommendation**",
+                "",
+                recommendation,
+                "",
+                source_line,
+            ]
+        ).strip()
+
     def _build_mode_comparison_response(
         self,
         user_message: str,
@@ -7835,6 +8198,16 @@ class TransportAgent(BaseAgent):
             return None
 
         origin, destination = endpoints
+        requested_modes = _requested_route_option_modes(user_message)
+        if {"bus", "train"}.issubset(requested_modes) and "metro" not in requested_modes:
+            return self._build_bus_train_comparison_response(
+                user_message=user_message,
+                context=context,
+                origin=origin,
+                destination=destination,
+                language=language,
+            )
+
         metro_response = _build_deterministic_metro_route_response(user_message, context) or ""
         if metro_response:
             self._record_tool_call(
@@ -8782,7 +9155,7 @@ class TransportAgent(BaseAgent):
         sections: List[str] = []
         origin_display = _get_transport_display_name(origin)
         destination_display = _get_transport_display_name(destination)
-        carris_urban_label = "Carris Urbana" if language == "pt" else "Carris Urban"
+        carris_urban_label = "Carris" if language == "pt" else "Carris Urban"
         prefer_metropolitana = _looks_like_carris_metropolitana_query(
             user_message,
             endpoints=(origin, destination),
@@ -8980,8 +9353,119 @@ class TransportAgent(BaseAgent):
         preferences = _parse_route_mode_preferences(user_message)
         origin, destination = endpoints
         language = language or infer_response_language(user_query=user_message, default="en")
-        carris_urban_label = "Carris Urbana" if language == "pt" else "Carris Urban"
+        carris_urban_label = "Carris" if language == "pt" else "Carris Urban"
         prefer_metropolitana = _looks_like_carris_metropolitana_query(user_message, endpoints=endpoints)
+        requested_modes = _requested_route_option_modes(user_message)
+
+        surface_alternative_request = bool(
+            preferences.get("alternative_mode_request")
+            and requested_modes
+            and requested_modes <= {"bus", "tram"}
+        )
+        if surface_alternative_request:
+            urban_tool = self._get_tool_by_name("carris_find_routes_between")
+            urban_result = (
+                str(
+                    self._invoke_tool(
+                        urban_tool,
+                        {"origin": origin, "destination": destination, "search_radius_km": 0.8},
+                        tool_name="carris_find_routes_between",
+                    )
+                ).strip()
+                if urban_tool and not prefer_metropolitana
+                else ""
+            )
+            if urban_result and not _tool_result_indicates_no_match(urban_result):
+                return _build_carris_surface_route_response(
+                    urban_result,
+                    user_message,
+                    origin,
+                    destination,
+                )
+
+            metropolitan_tool_name = "find_bus_routes" if prefer_metropolitana else "find_direct_bus_lines"
+            metropolitan_tool = self._get_tool_by_name(metropolitan_tool_name)
+            metropolitan_result = (
+                str(
+                    self._invoke_tool(
+                        metropolitan_tool,
+                        {"origin": origin, "destination": destination},
+                        tool_name=metropolitan_tool_name,
+                    )
+                ).strip()
+                if metropolitan_tool
+                else ""
+            )
+            metropolitan_block = _localize_metropolitana_direct_bus_block(
+                _clean_metropolitana_direct_bus_block(metropolitan_result),
+                language,
+            )
+            if (
+                metropolitan_result
+                and not _tool_result_indicates_no_match(metropolitan_result)
+                and metropolitan_block
+            ):
+                if language == "pt":
+                    return "\n".join(
+                        [
+                            f"### 🚌🚋 **{origin} → {destination}**",
+                            "",
+                            "✅ **Resposta direta:** encontrei uma opção de autocarro de superfície nos dados disponíveis; não confirmei uma opção de elétrico para esta ligação.",
+                            "",
+                            "---",
+                            "",
+                            "### 🚌 **Autocarro**",
+                            "",
+                            metropolitan_block,
+                            "",
+                            self._build_transport_source_line(
+                                language,
+                                ["[*Carris Metropolitana*](https://www.carrismetropolitana.pt)"],
+                            ),
+                        ]
+                    ).strip()
+                return "\n".join(
+                    [
+                        f"### 🚌🚋 **{origin} → {destination}**",
+                        "",
+                        "✅ **Direct answer:** I found a surface bus option in the available data; I could not confirm a tram option for this trip.",
+                        "",
+                        "---",
+                        "",
+                        "### 🚌 **Bus**",
+                        "",
+                        metropolitan_block,
+                        "",
+                        self._build_transport_source_line(
+                            language,
+                            ["[*Carris Metropolitana*](https://www.carrismetropolitana.pt)"],
+                        ),
+                    ]
+                ).strip()
+
+            if language == "pt":
+                return (
+                    f"### 🚌🚋 **{origin} → {destination}**\n\n"
+                    "⚠️ **Resposta direta:** não consegui confirmar opções de autocarro ou elétrico para esta ligação com os dados de superfície disponíveis.\n\n"
+                    + self._build_transport_source_line(
+                        language,
+                        [
+                            "[*Carris*](https://www.carris.pt)",
+                            "[*Carris Metropolitana*](https://www.carrismetropolitana.pt)",
+                        ],
+                    )
+                )
+            return (
+                f"### 🚌🚋 **{origin} → {destination}**\n\n"
+                "⚠️ **Direct answer:** I could not confirm bus or tram options for this trip with the available surface-transport data.\n\n"
+                + self._build_transport_source_line(
+                    language,
+                    [
+                        "[*Carris*](https://www.carris.pt)",
+                        "[*Carris Metropolitana*](https://www.carrismetropolitana.pt)",
+                    ],
+                )
+            )
 
         if (
             (preferences["metro_only"] or "metro" in _normalize_token(user_message))
@@ -9409,6 +9893,26 @@ class TransportAgent(BaseAgent):
                 return response
             return f"{ambiguity_preamble}\n\n{response}".strip()
 
+        def finalize_direct_route_response(response: str) -> str:
+            """Finalize a generic route answer and record the consulted route layers."""
+            if endpoints:
+                self._record_tool_call(
+                    "get_route_between_stations",
+                    {"origin": endpoints[0], "destination": endpoints[1]},
+                )
+                if _route_response_uses_carris_urban(response):
+                    self._record_tool_call(
+                        "carris_find_routes_between",
+                        {"origin": endpoints[0], "destination": endpoints[1]},
+                    )
+            finalized_response = self._finalize_transport_response(
+                response,
+                user_message=user_message,
+                language=resolved_language,
+                ensure_wait_times=True,
+            )
+            return with_ambiguity_preamble(finalized_response)
+
         if ambiguity_preamble:
             return self._finalize_transport_response(
                 ambiguity_preamble,
@@ -9463,6 +9967,32 @@ class TransportAgent(BaseAgent):
                 flags=re.IGNORECASE,
             )
         )
+        requested_route_modes = _requested_route_option_modes(user_message) if endpoints else set()
+        surface_only_route_modes = bool(requested_route_modes) and requested_route_modes <= {"bus", "tram"}
+        if endpoints and surface_only_route_modes:
+            constrained_route_response = self._build_mode_constrained_route_response(
+                user_message=user_message,
+                context=context,
+                language=resolved_language,
+            )
+            if constrained_route_response:
+                finalized_response = self._finalize_transport_response(
+                    constrained_route_response,
+                    user_message=user_message,
+                    language=resolved_language,
+                )
+                return with_ambiguity_preamble(finalized_response)
+
+        if (
+            endpoints
+            and _is_generic_public_transport_route_query(user_message)
+            and not surface_only_route_modes
+            and not (early_cp_tool_spec and explicit_train_context)
+        ):
+            early_direct_route_response = _build_deterministic_route_tool_response(user_message)
+            if early_direct_route_response:
+                return finalize_direct_route_response(early_direct_route_response)
+
         nearest_cp_destination_response = None
         if not (early_cp_tool_spec and explicit_train_context):
             nearest_cp_destination_response = self._build_nearest_cp_destination_response(
@@ -9706,23 +10236,7 @@ class TransportAgent(BaseAgent):
         if not cp_tool_spec and not carris_metropolitana_tool_spec:
             direct_route_response = _build_deterministic_route_tool_response(user_message)
             if direct_route_response:
-                if endpoints:
-                    self._record_tool_call(
-                        "get_route_between_stations",
-                        {"origin": endpoints[0], "destination": endpoints[1]},
-                    )
-                    if _route_response_uses_carris_urban(direct_route_response):
-                        self._record_tool_call(
-                            "carris_find_routes_between",
-                            {"origin": endpoints[0], "destination": endpoints[1]},
-                        )
-                finalized_response = self._finalize_transport_response(
-                    direct_route_response,
-                    user_message=user_message,
-                    language=resolved_language,
-                    ensure_wait_times=True,
-                )
-                return with_ambiguity_preamble(finalized_response)
+                return finalize_direct_route_response(direct_route_response)
 
         direct_tool_response = self._run_direct_tool_fallback(user_message)
         if direct_tool_response:
@@ -9938,12 +10452,15 @@ class TransportAgent(BaseAgent):
 
         if "carris metropolitana" in normalized:
             add("carris_metropolitana")
+        elif "carris urban" in normalized or "carris urbana" in normalized:
+            add("carris")
 
         has_carris_direct = bool(
             re.search(
                 r"(?im)^(?:####?\s*)?(?:🚌\s*)?(?:autocarros|buses|el[eé]tricos|trams)\b|"
                 r"\b(?:direct routes found|rotas diretas encontradas)\b|"
-                r"\b(?:linha|line)\s+\d{2,3}[A-Z]?\b",
+                r"\b(?:linha|line)\s+\d{2,3}[A-Z]?\b|"
+                r"\*\*\d{2,3}[A-Z]?\*\*",
                 raw,
             )
         )

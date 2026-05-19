@@ -776,14 +776,43 @@ _AMBIGUOUS_LOCATION_HINTS = {
 _AMBIGUITY_SAME_SITE_RADIUS_KM = 0.35
 _AMBIGUITY_EXCLUDED_RESULT_TYPES = {"fast_food", "restaurant", "cafe", "café"}
 _AMBIGUITY_GENERIC_LOCATION_TERMS = {
+    "a", "as", "o", "os", "um", "uma", "uns", "umas",
+    "de", "da", "das", "do", "dos", "em", "na", "nas", "no", "nos",
+    "ao", "aos", "perto", "near", "in", "at", "the",
+    "lisboa", "lisbon", "portugal",
+    "rua", "avenida", "av", "praça", "praca", "largo", "estrada",
     "loja", "store", "cafe", "café", "restaurante", "restaurant",
+    "taberna", "bar", "hotel", "hospital", "clinica", "clínica",
     "padaria", "farmacia", "farmácia", "centro", "comercial",
-    "shopping", "shop", "the", "mais", "proximo", "proxima",
+    "shopping", "shop", "mais", "proximo", "proxima",
     "proximos", "proximas", "nearest", "closest", "nearby",
 }
 _AMBIGUITY_LOCALITY_FIELDS = (
     "suburb", "village", "town", "city", "municipality", "county", "neighbourhood",
 )
+_LOCATION_LOCALITY_TERMS = {
+    "alcochete", "almada", "amadora", "barreiro", "cascais", "lisboa",
+    "loures", "mafra", "moita", "montijo", "odivelas", "oeiras",
+    "palmela", "seixal", "sesimbra", "setubal", "setúbal", "sintra",
+    "vila", "franca", "xira", "alges", "algés", "belem", "belém",
+}
+_REQUESTED_PLACE_TYPE_COMPATIBILITY = {
+    "bar": {"bar", "pub", "restaurant", "cafe", "café", "amenity", "shop"},
+    "cafe": {"cafe", "café", "restaurant", "bar", "amenity"},
+    "café": {"cafe", "café", "restaurant", "bar", "amenity"},
+    "clinica": {"clinic", "doctors", "hospital", "veterinary", "healthcare", "amenity"},
+    "clínica": {"clinic", "doctors", "hospital", "veterinary", "healthcare", "amenity"},
+    "farmacia": {"pharmacy", "chemist", "healthcare", "amenity", "shop"},
+    "farmácia": {"pharmacy", "chemist", "healthcare", "amenity", "shop"},
+    "hospital": {"hospital", "clinic", "veterinary", "healthcare", "amenity"},
+    "hotel": {"hotel", "hostel", "guest_house", "motel", "tourism"},
+    "loja": {"shop", "mall", "retail", "commercial", "furniture", "supermarket"},
+    "padaria": {"bakery", "pastry", "shop", "amenity"},
+    "restaurant": {"restaurant", "bar", "pub", "cafe", "amenity"},
+    "restaurante": {"restaurant", "bar", "pub", "cafe", "amenity"},
+    "store": {"shop", "mall", "retail", "commercial", "furniture", "supermarket"},
+    "taberna": {"restaurant", "bar", "pub", "cafe", "amenity"},
+}
 
 
 def _location_is_specific_enough(raw_location: str) -> bool:
@@ -967,6 +996,75 @@ def _query_terms_missing_from_display(raw_query: str, display_name: str) -> bool
     return any(term not in display_norm for term in query_terms)
 
 
+def _candidate_matches_distinctive_name_terms(
+    raw_query: str,
+    candidate: Dict[str, Any],
+) -> bool:
+    """Return whether a candidate preserves the requested place name."""
+    query_terms = _meaningful_location_query_terms(normalize_location_text(raw_query))
+    if not query_terms:
+        return True
+    name_terms = {
+        term for term in query_terms
+        if term not in _LOCATION_LOCALITY_TERMS
+    }
+    required_terms = name_terms or query_terms
+    candidate_text = _candidate_normalized_text(candidate)
+    return all(term in candidate_text for term in required_terms)
+
+
+def _candidate_matches_requested_place_type(
+    raw_query: str,
+    candidate: Dict[str, Any],
+) -> bool:
+    """Return whether a candidate's OSM type fits an explicit venue type."""
+    normalized_query = normalize_location_text(raw_query)
+    requested_types = [
+        term for term in _REQUESTED_PLACE_TYPE_COMPATIBILITY
+        if re.search(rf"\b{re.escape(term)}\b", normalized_query)
+    ]
+    if not requested_types:
+        return True
+
+    candidate_text = _candidate_normalized_text(candidate)
+    candidate_type_blob = normalize_location_text(
+        " ".join(
+            [
+                str(candidate.get("class") or ""),
+                str(candidate.get("type") or ""),
+                candidate_text,
+            ]
+        )
+    )
+    for requested_type in requested_types:
+        if requested_type in candidate_text:
+            continue
+        compatible_tokens = _REQUESTED_PLACE_TYPE_COMPATIBILITY[requested_type]
+        if not any(token in candidate_type_blob for token in compatible_tokens):
+            return False
+    return True
+
+
+def _query_mentions_explicit_place_type(raw_query: str) -> bool:
+    """Return whether the query names a venue/service type."""
+    normalized_query = normalize_location_text(raw_query)
+    return any(
+        re.search(rf"\b{re.escape(term)}\b", normalized_query)
+        for term in _REQUESTED_PLACE_TYPE_COMPATIBILITY
+    )
+
+
+def _candidate_is_plausible_for_location_query(
+    raw_query: str,
+    candidate: Dict[str, Any],
+) -> bool:
+    """Return whether a geocoder result is safe enough for routing."""
+    return (
+        _candidate_matches_distinctive_name_terms(raw_query, candidate)
+        and _candidate_matches_requested_place_type(raw_query, candidate)
+    )
+
+
 def _format_brand_ambiguity_candidate(candidate: Dict[str, Any], brand_norm: str) -> str:
     """Format a brand candidate with locality, not duplicate road variants."""
     display = str(candidate.get("display_name") or "").strip()
@@ -1113,6 +1211,15 @@ def _build_dynamic_location_ambiguity_hints(raw_location: str) -> List[str]:
             )
             candidates.append(scored)
 
+    plausible_candidates = [
+        candidate for candidate in candidates
+        if _candidate_is_plausible_for_location_query(cleaned, candidate)
+    ]
+    if plausible_candidates:
+        candidates = plausible_candidates
+    elif _query_mentions_explicit_place_type(cleaned) and _meaningful_location_query_terms(normalized):
+        return [f"__NO_CLEAR_MATCH__:{cleaned}"]
+
     if len(candidates) < 2:
         return []
 
@@ -1242,7 +1349,8 @@ def _build_dynamic_location_ambiguity_hints(raw_location: str) -> List[str]:
             if any(term in normalize_location_text(label) for term in query_terms)
         ]
         if not relevant_labels and re.search(
-            r"\b(?:loja|store|cafe|café|restaurante|restaurant|padaria|farm[áa]cia)\b",
+            r"\b(?:loja|store|cafe|café|restaurante|restaurant|taberna|bar|hotel|"
+            r"hospital|cl[ií]nica|padaria|farm[áa]cia)\b",
             cleaned,
             flags=re.IGNORECASE,
         ):
@@ -1867,14 +1975,24 @@ def geocode_location_name(
             )
             candidates.append(scored)
 
+    distinctive_candidates = [
+        candidate for candidate in candidates
+        if _candidate_is_plausible_for_location_query(query_clean, candidate)
+    ]
+    if distinctive_candidates:
+        candidates = distinctive_candidates
+    elif _meaningful_location_query_terms(query_norm):
+        candidates = []
+
     if not candidates:
         curated = _resolve_curated_location_point(query_clean)
         if curated:
             if not allow_aml and curated["scope"] != "lisbon_city":
                 return None
-            curated["raw_query"] = raw_query
-            curated["cleaned_query"] = query_clean
-            return curated
+            if _candidate_is_plausible_for_location_query(query_clean, curated):
+                curated["raw_query"] = raw_query
+                curated["cleaned_query"] = query_clean
+                return curated
         return None
 
     candidates.sort(

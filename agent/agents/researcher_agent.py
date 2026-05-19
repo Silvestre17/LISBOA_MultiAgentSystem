@@ -1073,6 +1073,10 @@ class ResearcherAgent(BaseAgent):
                 "brunch",
                 "cafe",
                 "café",
+                "casa de fado",
+                "casas de fado",
+                "fado house",
+                "fado houses",
             ]
         ):
             signals.append("Restaurants")
@@ -1134,7 +1138,7 @@ class ResearcherAgent(BaseAgent):
             signals.append("Running")
         elif any(term in query for term in ["sports", "sport", "desporto", "desportos"]):
             signals.append("Sports")
-        if "fado" in query:
+        if "fado" in query and "Restaurants" not in signals:
             signals.append("Fado")
         elif any(term in query for term in ["nightlife", "bar", "bars", "vida noturna", "vida nocturna"]):
             signals.append("Nightlife")
@@ -1352,6 +1356,80 @@ class ResearcherAgent(BaseAgent):
         if bullet_card_count:
             return bullet_card_count
         return len(re.findall(r"(?m)^\s*\*\*[^\n*]+\*\*\s*$", text))
+
+    @staticmethod
+    def _trim_ranked_result_cards(result: str, max_cards: int) -> str:
+        """Keep only the first requested item cards in a Markdown result."""
+        text = str(result or "")
+        if max_cards <= 0 or not text.strip():
+            return text
+
+        category_only_labels = {
+            "attractions",
+            "compras",
+            "exposicoes",
+            "exposições",
+            "food & dining",
+            "locais e atracoes",
+            "locais e atrações",
+            "museums & monuments",
+            "museus e monumentos",
+            "restaurants",
+            "restaurantes",
+            "shopping",
+        }
+        card_start_re = re.compile(r"^\s*(?:[-*]\s+)?\*\*[^*\n]+?\*\*\s*$")
+
+        def is_item_card_heading(line: str) -> bool:
+            if not card_start_re.match(line.strip()):
+                return False
+            label = re.sub(r"^\s*(?:[-*]\s+)?\*\*", "", line.strip())
+            label = re.sub(r"\*\*\s*$", "", label).strip()
+            normalized = unicodedata.normalize("NFKD", label).encode("ascii", "ignore").decode("ascii")
+            normalized = re.sub(r"[^a-zA-Z0-9& ]+", " ", normalized).strip().lower()
+            normalized = re.sub(r"\s+", " ", normalized)
+            return normalized not in category_only_labels
+
+        lines = text.splitlines()
+        first_card_index = next(
+            (index for index, line in enumerate(lines) if is_item_card_heading(line)),
+            None,
+        )
+        if first_card_index is None:
+            return text
+
+        intro = lines[:first_card_index]
+        blocks: List[List[str]] = []
+        tail: List[str] = []
+        current_block: List[str] = []
+        for line in lines[first_card_index:]:
+            stripped = line.strip()
+            if stripped.startswith("📌"):
+                if current_block:
+                    blocks.append(current_block)
+                    current_block = []
+                tail.append(line)
+                continue
+            if is_item_card_heading(line):
+                if current_block:
+                    blocks.append(current_block)
+                current_block = [line]
+                continue
+            if current_block:
+                current_block.append(line)
+            else:
+                tail.append(line)
+        if current_block:
+            blocks.append(current_block)
+
+        if len(blocks) <= max_cards:
+            return text
+
+        kept_lines: List[str] = [*intro]
+        for block in blocks[:max_cards]:
+            kept_lines.extend(block)
+        kept_lines.extend(tail)
+        return "\n".join(kept_lines).strip()
 
     def _remember_search_context(
         self,
@@ -2065,13 +2143,17 @@ class ResearcherAgent(BaseAgent):
             return False
         category_noise = {
             "de", "do", "da", "dos", "das", "em", "in", "o", "a", "os", "as",
-            "event", "events", "evento", "eventos", "todos", "todas",
+            "e", "and", "que", "what", "which", "event", "events", "evento", "eventos", "todos", "todas",
             "all", "not", "no", "nao", "sem", "without", "except",
-            "excluding", "exclui", "excluir", "menos", "music", "musica",
+            "excluding", "exclui", "excluir", "menos", "procura", "procurar",
+            "search", "find", "show", "mostrar", "mostra", "lista", "list", "diz",
+            "me", "sabes", "conheces", "podes", "dizer", "quero", "queria",
+            "music", "musica",
             "concert", "concerts", "concerto", "concertos", "sport",
             "sports", "desporto", "desportos", "desportivo", "desportiva",
             "desportivos", "desportivas", "festival", "festivals",
-            "festivais", "teatro", "theatre", "theater", "exposicao",
+            "festivais", "teatro", "theatre", "theater", "danca", "dança",
+            "dance", "exposicao",
             "exposicoes", "exhibition", "exhibitions", "categoria",
             "category", "tipo", "types", "kinds", "lisboa", "lisbon",
             "gastronomia", "gastronomico", "gastronomicos", "gastronomica",
@@ -2083,6 +2165,7 @@ class ResearcherAgent(BaseAgent):
             "principal", "summit", "conference", "congress", "forum", "expo",
             "este", "esta", "mes", "month", "semana", "week", "hoje",
             "today", "amanha", "tomorrow", "junho", "june", "maio", "may",
+            "para", "com", "perto", "near",
         }
         return all(token in category_noise for token in tokens)
 
@@ -2315,6 +2398,40 @@ class ResearcherAgent(BaseAgent):
         return list(dict.fromkeys(filters))
 
     @staticmethod
+    def _clean_place_focus_subject(subject: Optional[str]) -> Optional[str]:
+        """Remove generic request modifiers from an extracted place subject."""
+        value = re.sub(r"\s+", " ", str(subject or "")).strip(" .?!,;:")
+        if not value:
+            return None
+        suffix_patterns = (
+            r"\s*,?\s+(?:with|including|plus)\s+(?:practical\s+)?(?:visit\s+)?"
+            r"(?:info(?:rmation)?|details|opening\s+hours?|tickets?)\b.*$",
+            r"\s+(?:and|plus|including)\s+nearby\s+(?:cultural\s+)?"
+            r"(?:stops?|places?|attractions?|museums?|monuments?)\b.*$",
+            r"\s*,?\s+(?:com|incluindo)\s+(?:informação|informacao|dados|detalhes)\s+"
+            r"(?:prática|pratica|de\s+visita)\b.*$",
+            r"\s+(?:e|mais)\s+(?:locais|paragens|atrações|atracoes)\s+"
+            r"(?:culturais\s+)?(?:próxim[oa]s|proxim[oa]s)\b.*$",
+        )
+        for pattern in suffix_patterns:
+            value = re.sub(pattern, "", value, flags=re.IGNORECASE).strip(" .?!,;:")
+        normalized_value = _normalize_researcher_intent_text(value)
+        if normalized_value in {
+            "info",
+            "information",
+            "details",
+            "practical info",
+            "practical visit info",
+            "visit info",
+            "informacao",
+            "informacao pratica",
+            "detalhes",
+            "detalhes praticos",
+        }:
+            return None
+        return value or None
+
+    @staticmethod
     def _extract_place_focus_query(user_message: str) -> Optional[str]:
         """Extracts a focused place subject from broader PT/EN lookup phrasings."""
         query = (user_message or "").strip()
@@ -2325,7 +2442,9 @@ class ResearcherAgent(BaseAgent):
         if quoted_match:
             quoted_subject = next((group for group in quoted_match.groups() if group), "").strip(" .?!")
             if quoted_subject:
-                return quoted_subject
+                cleaned_subject = ResearcherAgent._clean_place_focus_subject(quoted_subject)
+                if cleaned_subject:
+                    return cleaned_subject
 
         visit_area_match = re.search(
             r"\b(?:visit|visiting|explore|visitar|conhecer|explorar)\s+(?:a\s+|o\s+|os\s+|as\s+)?(?P<subject>[A-ZÀ-Ýa-zà-ÿ0-9][A-ZÀ-Ýa-zà-ÿ0-9 '\-/]{1,80}?)(?=\s+(?:tomorrow|today|tonight|amanh[aã]|hoje|esta noite|this week|this weekend)\b|[\?\!\.,]|$)",
@@ -2336,7 +2455,9 @@ class ResearcherAgent(BaseAgent):
             subject = visit_area_match.group("subject").strip(" .?!,")
             subject = re.sub(r"^(?:in|em|no|na|nos|nas)\s+", "", subject, flags=re.IGNORECASE)
             if subject:
-                return subject
+                cleaned_subject = ResearcherAgent._clean_place_focus_subject(subject)
+                if cleaned_subject:
+                    return cleaned_subject
 
         named_lookup_re = re.compile(
             r"\b(?:tell me about|what about|more about|details about|information about|where is|where's|find|show me|d[aá][- ]?me(?: mais)? detalhes? sobre(?: o| a| os| as)?|detalhes? sobre(?: o| a| os| as)?|sobre(?: o| a| os| as)?|fala[- ]?me(?: mais)? sobre(?: o| a| os| as)?|fala[- ]?me(?: mais)? (?:de|do|da|dos|das)|fale[- ]?me(?: mais)? (?:de|do|da|dos|das)|diz[- ]?me(?: mais)? sobre(?: o| a| os| as)?|diz[- ]?me (?:de|do|da|dos|das)|diz[- ]?me onde(?: e| é| fica)(?: o| a| os| as)?|onde(?: e| é| fica)(?: o| a| os| as)?|encontra(?:r)?|mostrar(?:-me)?)\b",
@@ -2346,7 +2467,9 @@ class ResearcherAgent(BaseAgent):
             subject = named_lookup_re.sub(" ", query)
             subject = re.sub(r"\s+", " ", subject).strip(" .?!")
             if subject:
-                return subject
+                cleaned_subject = ResearcherAgent._clean_place_focus_subject(subject)
+                if cleaned_subject:
+                    return cleaned_subject
 
         tokens = re.findall(r"[a-zA-ZÀ-ÿ0-9']+", query)
         has_title_like_casing = any(char.isupper() for char in query)
@@ -2361,14 +2484,48 @@ class ResearcherAgent(BaseAgent):
                         if any(char.isupper() for char in token) and token.lower() not in _NON_PROPER_PLACE_WORDS
                     ]
                     if 1 <= len(proper_nouns) <= 4:
-                        return " ".join(proper_nouns)
+                        cleaned_subject = ResearcherAgent._clean_place_focus_subject(" ".join(proper_nouns))
+                        if cleaned_subject:
+                            return cleaned_subject
                     return None
-                return query.strip(" .?!")
+                cleaned_subject = ResearcherAgent._clean_place_focus_subject(query.strip(" .?!"))
+                if cleaned_subject:
+                    return cleaned_subject
 
         specific_lookup = _extract_specific_place_lookup_phrase(user_message)
         if specific_lookup:
-            return specific_lookup
+            cleaned_subject = ResearcherAgent._clean_place_focus_subject(specific_lookup)
+            if cleaned_subject:
+                return cleaned_subject
 
+        return None
+
+    @staticmethod
+    def _extract_place_area_filter(user_message: str) -> Optional[str]:
+        """Extract an area filter from broad place listing prompts."""
+        query = str(user_message or "").strip()
+        if not query:
+            return None
+        matches = list(
+            re.finditer(
+                r"\b(?:in|near|around|em|no|na|nos|nas|perto\s+de|perto\s+do|perto\s+da)\s+"
+                r"(?P<area>[A-ZÀ-Ýa-zà-ÿ0-9][A-ZÀ-Ýa-zà-ÿ0-9 '\-/]{1,80})",
+                query,
+                flags=re.IGNORECASE,
+            )
+        )
+        for match in reversed(matches):
+            area = re.sub(r"\s+", " ", match.group("area")).strip(" .?!,;:")
+            area = re.sub(
+                r"\s+(?:with|including|for|that|where|which|com|incluindo|para|que|"
+                r"e\s+(?:com|usando|transporte)|and\s+(?:with|using|transport))\b.*$",
+                "",
+                area,
+                flags=re.IGNORECASE,
+            ).strip(" .?!,;:")
+            cleaned_area = ResearcherAgent._clean_place_focus_subject(area)
+            if cleaned_area:
+                return cleaned_area
         return None
 
     @staticmethod
@@ -2387,7 +2544,8 @@ class ResearcherAgent(BaseAgent):
                 r"restaurant|restaurants|restaurante|restaurantes|place|places|local|locais|"
                 r"attraction|attractions|atra[cç][aã]o|atra[cç][oõ]es|viewpoint|viewpoints|"
                 r"miradouro|miradouros|palace|palaces|pal[aá]cio|pal[aá]cios|castle|castles|"
-                r"castelo|castelos|church|churches|igreja|igrejas|monastery|monasteries|"
+                r"castelo|castelos|church|churches|igreja|igrejas|cathedral|cathedrals|"
+                r"catedral|catedrais|sé|monastery|monasteries|"
                 r"mosteiro|mosteiros|tower|towers|torre|torres|heritage|patrim[oó]nio|"
                 r"hotels?|hot[eé]is|alojamentos?|hostels?|guest\s+houses?|pousadas?|"
                 r"shops?|lojas?|compras|centros?\s+comerciais?|shopping|malls?|"
@@ -2397,6 +2555,7 @@ class ResearcherAgent(BaseAgent):
         )
         if has_place_like_query:
             event_keywords = [keyword for keyword in event_keywords if keyword != "show"]
+        focus_query = ResearcherAgent._extract_place_focus_query(user_message) or ResearcherAgent._extract_place_area_filter(user_message)
         directed_lookup_markers = [
             "where is", "where's", "onde fica", "onde é", "onde e", "tell me about", "what about",
             "more about", "details about", "information about", "sobre",
@@ -2406,10 +2565,10 @@ class ResearcherAgent(BaseAgent):
             "closest to", "nearest to", "near ",
             "mais perto", "mais próximo", "perto de", "perto do", "perto da",
         ]
-        if any(keyword in query for keyword in history_keywords + event_keywords):
+        if any(keyword in query for keyword in event_keywords):
             return False
-
-        focus_query = ResearcherAgent._extract_place_focus_query(user_message)
+        if any(keyword in query for keyword in history_keywords) and not (focus_query and has_place_like_query):
+            return False
         if ResearcherAgent._extract_service_types(user_message):
             return bool(ResearcherAgent._extract_near_location_name(user_message) or focus_query)
 
@@ -2666,18 +2825,22 @@ class ResearcherAgent(BaseAgent):
             "agosto", "august", "setembro", "september", "outubro", "october",
             "novembro", "november", "dezembro", "december",
         }
+        connector_tokens = {"e", "and", "a", "ate", "to", "through", "until"}
         date_tokens = {
             "hoje", "today", "amanha", "tomorrow", "semana", "week", "mes", "month",
-            "fim", "weekend", "noite", "tonight",
+            "fim", "weekend", "noite", "tonight", "esta", "este", "this", "next",
+            "proxima", "proximo",
         }
         generic_event_tokens = {
             "evento", "eventos", "event", "events", "festival", "festivals", "festivais",
             "musica", "music", "desporto", "sports", "feira", "feiras", "fairs",
-            "exposicao", "exposicoes", "exhibition", "exhibitions",
+            "exposicao", "exposicoes", "exhibition", "exhibitions", "teatro",
+            "theatre", "theater", "danca", "dance", "cinema", "concertos",
+            "concert", "concerts",
         }
         if any(token in month_tokens for token in tokens):
-            return all(token in month_tokens | generic_event_tokens for token in tokens)
-        return bool(tokens and all(token in date_tokens | generic_event_tokens for token in tokens))
+            return all(token in month_tokens | connector_tokens | generic_event_tokens for token in tokens)
+        return bool(tokens and all(token in date_tokens | connector_tokens | generic_event_tokens for token in tokens))
 
     @staticmethod
     def _query_requests_evening_events(user_message: str) -> bool:
@@ -3529,7 +3692,7 @@ class ResearcherAgent(BaseAgent):
         places_tool = self._get_tool_by_name("search_places_attractions")
         nearby_tool = self._get_tool_by_name("find_nearby_services")
         structured_subject = self._normalize_structured_plan_text(structured_plan.get("subject")) if structured_plan else None
-        place_focus_query = structured_subject or self._extract_place_focus_query(user_message)
+        place_focus_query = structured_subject or self._extract_place_focus_query(user_message) or self._extract_place_area_filter(user_message)
         specific_lookup = _extract_specific_place_lookup_phrase(user_message)
         if structured_subject and not specific_lookup:
             specific_lookup = structured_subject
@@ -3723,15 +3886,37 @@ class ResearcherAgent(BaseAgent):
             return self._run_direct_tool_fallback(user_message, language)
 
         category_hint = self._infer_place_category_hint(user_message)
+        requested_count = self._extract_requested_result_count(user_message)
         query_text = user_message if category_hint and not specific_lookup else (place_focus_query or user_message)
-        max_results = self._extract_requested_result_count(user_message) or 5
+        max_results = requested_count or 5
+        overfetch_result_count = requested_count if (
+            requested_count and category_hint and place_focus_query and not specific_lookup
+        ) else None
+        tool_max_results = max_results
+        if overfetch_result_count:
+            tool_max_results = max(max_results, min(8, overfetch_result_count + 2))
+        if category_hint and place_focus_query and requested_count and not specific_lookup:
+            if category_hint == "Restaurants":
+                query_text = (
+                    f"restaurantes em {place_focus_query}"
+                    if language == "pt"
+                    else f"restaurants in {place_focus_query}"
+                )
+            elif category_hint == "Museums & Monuments":
+                wants_monuments = bool(re.search(r"\b(?:monument|monuments|monumento|monumentos)\b", user_message, re.IGNORECASE))
+                label = "monumentos conhecidos" if wants_monuments and language == "pt" else "well-known monuments" if wants_monuments else "museus e monumentos" if language == "pt" else "museums and monuments"
+                connector = "em" if language == "pt" else "in"
+                query_text = f"{label} {connector} {place_focus_query}"
+            else:
+                connector = "em" if language == "pt" else "in"
+                query_text = f"{category_hint} {connector} {place_focus_query}"
         if is_broad_attractions:
             query_text = "must-see attractions first time visitors Lisbon iconic monuments museums palaces castles historic sites"
             max_results = 6
         elif self._is_visit_place_context_query(user_message) and place_focus_query and not category_hint:
             query_text = f"attractions monuments museums in {place_focus_query}"
 
-        args = {"query": query_text, "max_results": max_results, "offset": 0, "language": language}
+        args = {"query": query_text, "max_results": tool_max_results, "offset": 0, "language": language}
         if specific_lookup and not is_broad_attractions:
             args["specific_lookup"] = True
         if is_broad_attractions:
@@ -3742,6 +3927,8 @@ class ResearcherAgent(BaseAgent):
             args["category"] = category_hint
 
         result = str(self._invoke_tool(places_tool, args, tool_name="search_places_attractions")).strip()
+        if overfetch_result_count:
+            result = self._trim_ranked_result_cards(result, overfetch_result_count)
         if is_broad_attractions and language == "pt":
             rewrite_result = getattr(self, "_rewrite_broad_attractions_result", None)
             if callable(rewrite_result):
@@ -4028,6 +4215,45 @@ class ResearcherAgent(BaseAgent):
                 return True
         return False
 
+    @staticmethod
+    def _planner_evidence_query_is_context_only(query: str) -> bool:
+        """Return whether a planner evidence query is trip context, not a POI.
+
+        Planner evidence searches should retrieve verifiable VisitLisboa place
+        cards. Temporal/base phrases such as "amanhã a partir do hotel no
+        Saldanha" are useful for ordering and transport, but searching them as
+        Museums & Monuments creates fake itinerary stops.
+        """
+        normalized = ResearcherAgent._normalize_event_preference_text(query)
+        if not normalized:
+            return True
+
+        has_temporal_or_start_context = bool(
+            re.search(
+                r"\b(?:amanha|tomorrow|hoje|today|tonight|esta noite|"
+                r"full day|dia inteiro|starting|start|comecando|comecar|partir|base)\b",
+                normalized,
+            )
+        )
+        has_accommodation_context = bool(
+            re.search(
+                r"\b(?:hotel|hoteis|alojamento|alojamentos|accommodation|"
+                r"stay|staying|my hotel|meu hotel)\b",
+                normalized,
+            )
+        )
+        if has_temporal_or_start_context and has_accommodation_context:
+            return True
+
+        return bool(
+            re.fullmatch(
+                r"(?:o\s+|a\s+|the\s+)?(?:meu\s+|my\s+)?"
+                r"(?:hotel|alojamento|accommodation)"
+                r"(?:\s+(?:no|na|em|in|near|perto|around)\s+[a-z0-9 ]{2,60})?",
+                normalized,
+            )
+        )
+
     def _extract_planner_evidence_query_plan(self, user_message: str, language: str) -> Optional[Dict[str, List[Dict[str, Any]]]]:
         """Ask the LLM for VisitLisboa queries that will feed itinerary synthesis.
 
@@ -4080,6 +4306,8 @@ class ResearcherAgent(BaseAgent):
             output: List[Dict[str, Any]] = []
             seen_queries: set[str] = set()
             allowed_categories = {
+                "Museums",
+                "Monuments",
                 "Museums & Monuments",
                 "View Points",
                 "Restaurants",
@@ -4105,6 +4333,8 @@ class ResearcherAgent(BaseAgent):
                 normalized_ascii_query = unicodedata.normalize("NFKD", query)
                 normalized_ascii_query = normalized_ascii_query.encode("ascii", "ignore").decode("ascii").lower()
                 normalized_ascii_query = re.sub(r"\s+", " ", normalized_ascii_query).strip()
+                if self._planner_evidence_query_is_context_only(normalized_ascii_query):
+                    continue
                 if self._planner_evidence_query_matches_exclusion(normalized_ascii_query, excluded_areas):
                     continue
                 if default_category == "Museums & Monuments" and re.fullmatch(r"se\s+de(?:\s+lisboa)?", normalized_ascii_query):
@@ -4118,6 +4348,11 @@ class ResearcherAgent(BaseAgent):
                 category = str(raw_entry.get("category") or default_category).strip()
                 if category not in allowed_categories:
                     category = default_category
+                if (
+                    default_category == "Museums & Monuments"
+                    and re.search(r"\b(?:museu|museum)\b", normalized_ascii_query)
+                ):
+                    category = "Museums"
                 if default_category == "Museums & Monuments" and category == "General":
                     category = default_category
                 try:
@@ -4196,6 +4431,62 @@ class ResearcherAgent(BaseAgent):
         planner_query_plan = self._extract_planner_evidence_query_plan(query, language)
         planned_cultural_queries = list(planner_query_plan.get("cultural_queries", [])) if planner_query_plan else []
         planned_food_queries = list(planner_query_plan.get("food_queries", [])) if planner_query_plan else []
+        explicit_cultural_query_keys = {
+            self._normalize_for_deterministic_routing(str(item.get("query") or ""))
+            for item in planned_cultural_queries
+            if isinstance(item, dict) and item.get("specific_lookup")
+        }
+        deterministic_cultural_queries: List[Dict[str, Any]] = []
+        deterministic_food_queries: List[Dict[str, Any]] = []
+        try:
+            from agent.agents.planner_agent import _requested_anchor_labels
+
+            requested_anchor_queries = _requested_anchor_labels(query)
+        except Exception:
+            requested_anchor_queries = []
+        if requested_anchor_queries:
+            existing_queries = {
+                _normalize_researcher_intent_text(str(item.get("query") or ""))
+                for item in [*planned_cultural_queries, *planned_food_queries]
+                if isinstance(item, dict)
+            }
+            for anchor in requested_anchor_queries[:8]:
+                anchor_text = re.sub(r"\s+", " ", str(anchor or "")).strip()
+                anchor_key = _normalize_researcher_intent_text(anchor_text)
+                if (
+                    not anchor_text
+                    or anchor_key in existing_queries
+                    or self._planner_evidence_query_is_context_only(anchor_text)
+                ):
+                    continue
+                existing_queries.add(anchor_key)
+                is_food_anchor = bool(
+                    re.search(
+                        r"\b(?:restaurante|restaurant|taberna|taverna|cafe|caf[eé]|pastelaria|fado)\b",
+                        anchor_key,
+                    )
+                )
+                anchor_category = (
+                    "Museums"
+                    if re.search(r"\b(?:museu|museum)\b", anchor_key)
+                    else "Museums & Monuments"
+                )
+                entry = {
+                    "query": anchor_text,
+                    "category": "Restaurants" if is_food_anchor else anchor_category,
+                    "max_results": 1,
+                    "specific_lookup": True,
+                    "language": language,
+                }
+                if is_food_anchor:
+                    deterministic_food_queries.append(entry)
+                else:
+                    deterministic_cultural_queries.append(entry)
+                    explicit_cultural_query_keys.add(
+                        self._normalize_for_deterministic_routing(anchor_text)
+                    )
+            planned_cultural_queries = [*deterministic_cultural_queries, *planned_cultural_queries]
+            planned_food_queries = [*deterministic_food_queries, *planned_food_queries]
 
         has_historic_monument_need = bool(
             re.search(r"\b(historic|historical|sights?|sightseeing|hist[oó]ric[oa]s?|monument|monumento|monumentos|patrim[oó]nio|heritage)\b", normalized)
@@ -4242,7 +4533,20 @@ class ResearcherAgent(BaseAgent):
             if area_match:
                 candidate_area = re.sub(r"\s+", " ", area_match.group("area")).strip(" .:-")
                 candidate_key = self._normalize_for_deterministic_routing(candidate_area)
-                if candidate_key and candidate_key not in {"lisboa", "lisbon", "aml"}:
+                prefix_window = _normalize_researcher_intent_text(
+                    query[max(0, area_match.start() - 50):area_match.start()]
+                )
+                is_accommodation_area = bool(
+                    re.search(
+                        r"\b(?:hotel|alojamento|accommodation|stay|staying|base)\b",
+                        prefix_window,
+                    )
+                )
+                if (
+                    candidate_key
+                    and candidate_key not in {"lisboa", "lisbon", "aml"}
+                    and not is_accommodation_area
+                ):
                     end_area = candidate_area
         if has_historic_monument_need and requests_food_stop:
             default_cultural_query = (
@@ -4331,7 +4635,26 @@ class ResearcherAgent(BaseAgent):
                         "language": language,
                     }
                 )
-            if len(planned_cultural_queries) > 4 and end_area_cultural_query_added:
+            if deterministic_cultural_queries or explicit_cultural_query_keys:
+                explicit_keys = {
+                    *explicit_cultural_query_keys,
+                    *{
+                        self._normalize_for_deterministic_routing(str(item.get("query") or ""))
+                        for item in deterministic_cultural_queries
+                    },
+                }
+                explicit_queries = [
+                    item
+                    for item in planned_cultural_queries
+                    if self._normalize_for_deterministic_routing(str(item.get("query") or "")) in explicit_keys
+                ]
+                other_queries = [
+                    item
+                    for item in planned_cultural_queries
+                    if item not in explicit_queries
+                ]
+                planned_cultural_queries = explicit_queries + other_queries[: max(0, 6 - len(explicit_queries))]
+            elif len(planned_cultural_queries) > 4 and end_area_cultural_query_added:
                 end_area_key = self._normalize_for_deterministic_routing(end_area)
                 end_area_queries = [
                     item
@@ -4471,21 +4794,41 @@ class ResearcherAgent(BaseAgent):
                     }
                 )
             if len(planned_cultural_queries) > 4:
-                end_area_key = self._normalize_for_deterministic_routing(end_area)
-                if end_area_key:
-                    end_area_queries = [
+                if deterministic_cultural_queries or explicit_cultural_query_keys:
+                    explicit_keys = {
+                        *explicit_cultural_query_keys,
+                        *{
+                            self._normalize_for_deterministic_routing(str(item.get("query") or ""))
+                            for item in deterministic_cultural_queries
+                        },
+                    }
+                    explicit_queries = [
                         item
                         for item in planned_cultural_queries
-                        if end_area_key in self._normalize_for_deterministic_routing(str(item.get("query") or ""))
-                    ][:1]
+                        if self._normalize_for_deterministic_routing(str(item.get("query") or "")) in explicit_keys
+                    ]
                     other_queries = [
                         item
                         for item in planned_cultural_queries
-                        if item not in end_area_queries
+                        if item not in explicit_queries
                     ]
-                    planned_cultural_queries = end_area_queries + other_queries[: max(0, 4 - len(end_area_queries))]
+                    planned_cultural_queries = explicit_queries + other_queries[: max(0, 6 - len(explicit_queries))]
                 else:
-                    planned_cultural_queries = planned_cultural_queries[:4]
+                    end_area_key = self._normalize_for_deterministic_routing(end_area)
+                    if end_area_key:
+                        end_area_queries = [
+                            item
+                            for item in planned_cultural_queries
+                            if end_area_key in self._normalize_for_deterministic_routing(str(item.get("query") or ""))
+                        ][:1]
+                        other_queries = [
+                            item
+                            for item in planned_cultural_queries
+                            if item not in end_area_queries
+                        ]
+                        planned_cultural_queries = end_area_queries + other_queries[: max(0, 4 - len(end_area_queries))]
+                    else:
+                        planned_cultural_queries = planned_cultural_queries[:4]
         if has_broader_itinerary_need and requests_food_stop:
             default_general_food_query = (
                 "restaurantes de gastronomia tradicional em Lisboa"
@@ -4546,7 +4889,30 @@ class ResearcherAgent(BaseAgent):
                 return (0 if is_area_specific else 1, 1 if is_generic_lisbon else 0)
 
             if end_area_key:
-                planned_cultural_queries = sorted(planned_cultural_queries, key=area_query_priority)[:4]
+                if deterministic_cultural_queries or explicit_cultural_query_keys:
+                    explicit_keys = {
+                        *explicit_cultural_query_keys,
+                        *{
+                            self._normalize_for_deterministic_routing(str(item.get("query") or ""))
+                            for item in deterministic_cultural_queries
+                        },
+                    }
+                    explicit_queries = [
+                        item
+                        for item in planned_cultural_queries
+                        if self._normalize_for_deterministic_routing(str(item.get("query") or "")) in explicit_keys
+                    ]
+                    other_queries = [
+                        item
+                        for item in planned_cultural_queries
+                        if item not in explicit_queries
+                    ]
+                    planned_cultural_queries = explicit_queries + sorted(
+                        other_queries,
+                        key=area_query_priority,
+                    )[: max(0, 6 - len(explicit_queries))]
+                else:
+                    planned_cultural_queries = sorted(planned_cultural_queries, key=area_query_priority)[:4]
                 planned_food_queries = sorted(planned_food_queries, key=area_query_priority)[:2]
 
         if has_historic_monument_need and planned_cultural_queries:
@@ -4788,6 +5154,16 @@ class ResearcherAgent(BaseAgent):
             r"\b(?:parking|car\s+parks?|park\s+my\s+car|estacionamento|estacionar|parques?\s+de\s+estacionamento)\b",
             normalized_query,
         ))
+        accommodation_with_parking_filter = bool(
+            parking_context
+            and re.search(
+                r"\b(?:hotel|hotels|hoteis|hostels?|guest\s+houses?|accommodation|lodging|stay|"
+                r"alojamentos?|pousadas?|apartamentos?)\b",
+                normalized_query,
+            )
+        )
+        if accommodation_with_parking_filter:
+            return []
         car_parking_context = bool(re.search(
             r"\b(?:car|cars|carro|carros|automovel|automoveis|viatura|viaturas|automobile|vehicle)\b",
             normalized_query,
@@ -5986,6 +6362,18 @@ class ResearcherAgent(BaseAgent):
                 language=language,
             ))
 
+        if not is_greeting and hasattr(self, "tools") and self._is_direct_place_lookup_query(user_message):
+            if verbose:
+                print("      [RESEARCHER] Using deterministic direct place lookup...")
+
+            response = self._run_direct_place_lookup(user_message, language)
+            return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
+                response,
+                agent_name="researcher",
+                user_query=user_message,
+                language=language,
+            ))
+
         if not is_greeting:
             structured_response = self._maybe_run_structured_query_plan(user_message, language)
             if structured_response:
@@ -6039,7 +6427,11 @@ class ResearcherAgent(BaseAgent):
                     language=language,
                 ))
 
-        if not is_greeting and self._is_history_culture_query(user_message):
+        if (
+            not is_greeting
+            and self._is_history_culture_query(user_message)
+            and not self._is_direct_place_lookup_query(user_message)
+        ):
             if verbose:
                 print("      [RESEARCHER] Using deterministic history/culture lookup...")
 
@@ -6051,12 +6443,9 @@ class ResearcherAgent(BaseAgent):
                 language=language,
             ))
 
-        if not is_greeting and hasattr(self, "tools") and (
-            self._is_direct_place_lookup_query(user_message)
-            or self._is_broad_attractions_query(user_message)
-        ):
+        if not is_greeting and hasattr(self, "tools") and self._is_broad_attractions_query(user_message):
             if verbose:
-                print("      [RESEARCHER] Using deterministic direct place lookup...")
+                print("      [RESEARCHER] Using deterministic broad attractions lookup...")
 
             response = self._run_direct_place_lookup(user_message, language)
             return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(

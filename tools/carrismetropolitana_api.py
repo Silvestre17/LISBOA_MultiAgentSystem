@@ -2333,7 +2333,7 @@ def find_bus_routes(
             origin_loc.get("lat"), origin_loc.get("lon")
         ):
             response += (
-                f"ℹ️ **{origin}** appears to be inside Lisbon city, where this trip may be better served by **Carris Urbana** / Carris Urban (carris.pt) instead of Carris Metropolitana.\n"
+                f"ℹ️ **{origin}** appears to be inside Lisbon city, where this trip may be better served by **Carris** / Carris Urban (carris.pt) instead of Carris Metropolitana.\n"
             )
         else:
             response += f"❌ **No Carris Metropolitana stops found near {origin}.**\n"
@@ -2363,7 +2363,7 @@ def find_bus_routes(
         dest_loc = dest_resolved.get("location")
         if dest_loc and is_within_lisbon_city(dest_loc.get("lat"), dest_loc.get("lon")):
             response += (
-                f"ℹ️ **{destination}** appears to be inside Lisbon city, where this trip may be better served by **Carris Urbana** / Carris Urban (carris.pt) instead of Carris Metropolitana.\n"
+                f"ℹ️ **{destination}** appears to be inside Lisbon city, where this trip may be better served by **Carris** / Carris Urban (carris.pt) instead of Carris Metropolitana.\n"
             )
         else:
             response += f"❌ **No Carris Metropolitana stops found near {destination}.**\n"

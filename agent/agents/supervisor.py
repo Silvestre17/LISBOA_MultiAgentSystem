@@ -181,7 +181,18 @@ class SupervisorAgent(BaseAgent):
             r"\btemperature\b",
             r"\bwind\b",
             r"\bforecast\b",
+            r"\bgood\s+weather\b",
+            r"\bsuitable\b",
             r"\bumbrella\b",
+            r"\baverage\s+climate\b",
+            r"\bclimatology\b",
+            r"\bclimate\s+average\b",
+            r"\bwhat\s+(?:should|do)\s+i\s+wear\b",
+            r"\bwhat\s+to\s+wear\b",
+            r"\bdress(?:ing)?\b",
+            r"\bwear(?:ing)?\b",
+            r"\bclothing\b",
+            r"\bjacket\b",
             r"\bmeteo\b",
             r"\bchover\b",
             r"\bprevis[aã]o\b",
@@ -189,10 +200,23 @@ class SupervisorAgent(BaseAgent):
             r"\btemperatura\b",
             r"\bvento\b",
             r"\bsol\b",
+            r"\bbom\s+tempo\b",
+            r"\badequad[ao]\b",
+            r"\bclima\s+medio\b",
+            r"\bmedias?\s+(?:historicas?\s+)?(?:do\s+)?clima\b",
+            r"\bo\s+que\s+(?:devo|posso)\s+vestir\b",
+            r"\bdevo\s+levar\s+(?:casaco|guarda[-\s]?chuva)\b",
+            r"\bvestir\b",
+            r"\broupa\b",
+            r"\bcasaco\b",
+            r"\bguarda[-\s]?chuva\b",
             r"\bsailing\b",
             r"\bsail\b",
             r"\bsea conditions\b",
             r"\bmarine forecast\b",
+            r"\bagitacao\s+maritima\b",
+            r"\bestado\s+do\s+mar\b",
+            r"\bondulacao\b",
             r"\bcomo est[aá] o tempo\b",
             r"\bqual (?:é|e) o tempo\b(?!\s+de\s+espera)",
             r"\btempo em\b",
@@ -234,7 +258,8 @@ class SupervisorAgent(BaseAgent):
             and re.search(r"\b(?:aviso|avisos|alerta|alertas|warning|warnings)\b", normalized)
             and re.search(
                 r"\b(?:vento|wind|chuva|rain|temperatura|temperature|trovoada|thunderstorm|"
-                r"precipitacao|precipitation|meteo|weather)\b",
+                r"precipitacao|precipitation|meteo|weather|agitacao|ondulacao|"
+                r"maritima|maritime|swell|waves|sea)\b",
                 normalized,
             )
             and not re.search(
@@ -1034,12 +1059,17 @@ class SupervisorAgent(BaseAgent):
             r"\bplan my day\b",
             r"\bday plan\b",
             r"\bitinerary\b",
+            r"\b(?:itiner[aá]rio|itener[aá]rio|itinerario|itenerario)\b",
             r"\broteiro\b",
             r"\bplano\b",
             r"\bagenda\b",
             r"\bschedule\b",
             r"\bday trip\b",
             r"\bpasseio\b",
+            r"\b(?:cria|criar|monta|montar|faz|fazer)\b.*\b(?:itiner[aá]rio|itener[aá]rio|roteiro|plano|dia|manh[aã]|tarde)\b",
+            r"\b(?:itiner[aá]rio|itener[aá]rio|roteiro|plano)\b.*\b(?:cria|criar|monta|montar|faz|fazer|inclui|incluir|almo[cç]o|jantar|hotel)\b",
+            r"\b(?:estes|estas|esses|essas|these|those)\s+(?:locais|lugares|s[ií]tios|places|stops)\b.*\b(?:dia|day|amanh[aã]|tomorrow|almo[cç]o|jantar|lunch|dinner|hotel)\b",
+            r"\b(?:inclui|incluir|with|including)\b.*\b(?:almo[cç]o|jantar|lunch|dinner)\b.*\b(?:dia|day|roteiro|itiner[aá]rio|itener[aá]rio|plano|hotel)\b",
             r"\bplane(?:ar|ia|ie)\b",
             r"\borganiza(?:r)?\b",
             r"\bir a vários? locais\b",
@@ -1135,9 +1165,12 @@ class SupervisorAgent(BaseAgent):
             r"\b(?:optimized|optimised|optimal|efficient|feasible)\b",
             r"\b(?:otimizad[oa]s?|optimizado|otimizar|eficiente|vi[aá]vel)\b",
             r"\b(?:itinerary|roteiro|percurso|route|rota)\b",
+            r"\b(?:itiner[aá]rio|itener[aá]rio|plano)\b",
             r"\b(?:one|1|um)\s+(?:day|dia)\b",
             r"\b(?:full\s+day|dia\s+inteiro)\b",
             r"\b(?:multiple|v[aá]rios?|varios?)\s+(?:places|stops|locais|s[ií]tios|paragens)\b",
+            r"\b(?:hotel|alojamento|accommodation)\b.*\b(?:locais|lugares|s[ií]tios|places|stops|almo[cç]o|jantar)\b",
+            r"\b(?:almo[cç]o|jantar|lunch|dinner)\b.*\b(?:hotel|locais|lugares|s[ií]tios|places|stops)\b",
             r"\b(?:monuments?|monumentos?).*\b(?:food|gastronomy|restaurant|restaurants|gastronomia|restaurante|almo[cç]o|jantar)\b",
             r"\b(?:food|gastronomy|restaurant|restaurants|gastronomia|restaurante|almo[cç]o|jantar).*\b(?:monuments?|monumentos?)\b",
         ]
@@ -1214,7 +1247,36 @@ class SupervisorAgent(BaseAgent):
         normalized = cls._normalize_query(user_message)
         if not normalized or not cls._looks_like_weather_query(normalized):
             return False
-        if cls._is_planning_query(user_message):
+        clothing_advice = bool(
+            re.search(
+                r"\b(?:what\s+(?:should|do)\s+i\s+wear|what\s+to\s+wear|dress(?:ing)?|"
+                r"wear(?:ing)?|clothing|jacket|umbrella|o\s+que\s+(?:devo|posso)\s+vestir|"
+                r"devo\s+levar\s+(?:casaco|guarda[-\s]?chuva)|vestir|roupa|casaco|"
+                r"guarda[-\s]?chuva)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+        outdoor_advice = bool(
+            re.search(
+                r"\b(?:bom\s+tempo|good\s+weather|suitable|adequad[ao]|"
+                r"passeio|caminhar|walk|walking|outdoor|ar\s+livre|"
+                r"ao\s+ar\s+livre)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+        explicit_itinerary = bool(
+            re.search(
+                r"\b(?:itinerary|roteiro|plan(?:ear)?|planeia|organiza|agenda|day\s+plan|"
+                r"plano\s+do\s+dia)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+        if cls._is_planning_query(user_message) and not (clothing_advice or outdoor_advice):
+            return False
+        if (clothing_advice or outdoor_advice) and explicit_itinerary:
             return False
         if cls._is_direct_weather_transport_query(user_message):
             return False
@@ -1224,7 +1286,9 @@ class SupervisorAgent(BaseAgent):
         ):
             return False
         outdoor_activity = re.search(
-            r"\b(?:walk|walking|caminhar|passeio|outdoor|ar livre|viewpoint|miradouro|cycling|bicicleta)\b",
+            r"\b(?:walk|walking(?:\s+around)?|caminhar|passeio|outdoor|ar livre|"
+            r"viewpoint|miradouro|cycling|bicicleta|dress(?:ing)?|wear(?:ing)?|"
+            r"clothing|jacket|umbrella|vestir|roupa|casaco|guarda[-\s]?chuva)\b",
             normalized,
         )
         if not outdoor_activity:

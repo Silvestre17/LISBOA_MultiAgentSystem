@@ -1247,6 +1247,7 @@ def _localize_place_feature_text(value: Any, language: str = "en") -> str:
         "Contemporary": "Contemporâneo",
         "Seafood": "Marisco",
         "International": "Internacional",
+        "Vegetarian": "Opções vegetarianas",
         "Paid Parking": "Estacionamento pago",
         "Sea or River view": "Vista mar/rio",
         "Wi-Fi": "Wi-Fi",
@@ -1537,7 +1538,11 @@ _LEADING_LOOKUP_PREFIX_RE = re.compile(
 )
 _TRAILING_LOOKUP_SUFFIX_RE = re.compile(
     r"\b(?:wheelchair accessible|accessible|accessibility|open|closed|opening hours|hours|"
-    r"cadeira de rodas|acessivel|acessível|aberto|aberta|fechado|fechada|horarios|horários)\b.*$"
+    r"tickets?|practical visit info|practical info|nearby cultural stops?|nearby places?|"
+    r"nearby attractions?|cadeira de rodas|acessivel|acessível|aberto|aberta|fechado|fechada|"
+    r"horarios|horários|bilhetes?|informação prática|informacao pratica|detalhes práticos|"
+    r"detalhes praticos|locais próximos|locais proximos|paragens culturais próximas|"
+    r"paragens culturais proximas|atrações próximas|atracoes proximas)\b.*$"
 )
 
 
@@ -1567,6 +1572,9 @@ _KNOWN_PLACE_LOOKUP_ALIASES = {
     "monumento dos descobrimentos": "Monument to the Discoveries",
     "torre de belem": "Torre de Belém",
     "tour de belem": "Torre de Belém",
+    "lisbon cathedral": "Sé de Lisboa",
+    "catedral de lisboa": "Sé de Lisboa",
+    "se de lisboa": "Sé de Lisboa",
 }
 
 
@@ -1580,6 +1588,20 @@ def _apply_known_place_lookup_alias(query: Optional[str]) -> Optional[str]:
     for alias, canonical in _KNOWN_PLACE_LOOKUP_ALIASES.items():
         if len(alias) >= 4 and re.search(rf"\b{re.escape(alias)}\b", normalized):
             return canonical
+
+    shopping_center_match = re.match(
+        r"^(?:centro comercial|shopping center|shopping centre|mall)\s+(?P<name>[a-z0-9 ]{2,80})$",
+        normalized,
+    ) or re.match(
+        r"^(?P<name>[a-z0-9 ]{2,80})\s+(?:centro comercial|shopping center|shopping centre|mall)$",
+        normalized,
+    )
+    if shopping_center_match:
+        name = shopping_center_match.group("name").strip()
+        name = re.sub(r"\b(?:do|da|dos|das|de|the)\b", " ", name)
+        name = re.sub(r"\s+", " ", name).strip()
+        if name:
+            return f"{name.title()} Shopping Center"
     return query
 
 
@@ -3495,7 +3517,8 @@ def _extract_specific_place_lookup_phrase(query: Optional[str]) -> Optional[str]
     normalized_raw_query = _normalize_lookup_text(query)
     if re.search(
         r"\b(?:restaurants|restaurantes|museums|museus|monuments|monumentos|"
-        r"places|locais|attractions|atra[cç][oõ]es|hotels|hot[eé]is)\b",
+        r"places|locais|attractions|atra[cç][oõ]es|hotels|hot[eé]is|"
+        r"beaches|praias|shops|lojas|shopping|malls?|centros?\s+comerciais?)\b",
         normalized_raw_query,
     ):
         return None
@@ -5564,6 +5587,23 @@ def search_places_attractions(
                 return f"No places found matching: '{query or 'all'}' in VisitLisboa or Open Data registries."
 
         # Keep cards concise and aligned with the response-quality contract.
+        if exact_lookup_not_found_intro and specific_lookup_query and all_results:
+            requested_signature = _normalize_specific_place_signature(specific_lookup_query)
+            has_matching_result = any(
+                requested_signature
+                and requested_signature
+                in {
+                    _normalize_specific_place_signature(result.get("title")),
+                    _normalize_specific_place_signature(
+                        _localize_place_title(result.get("title", ""), language=render_language)
+                    ),
+                    _normalize_specific_place_signature(result.get("name")),
+                }
+                for result in all_results
+            )
+            if has_matching_result:
+                exact_lookup_not_found_intro = ""
+
         display_cap = min(max_results, MAX_USER_FACING_RESULTS)
         display_count = min(display_cap, 2) if exact_lookup_not_found_intro and offset == 0 else display_cap
 

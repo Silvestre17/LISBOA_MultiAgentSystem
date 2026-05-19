@@ -77,7 +77,7 @@ class EvidenceBundle:
         if self.limitations:
             sections.append("## LIMITATIONS")
             sections.extend(f"- {item}" for item in self.limitations[:8])
-        return "\n\n".join(sections[: max_cards * 2])
+        return "\n\n".join(sections)
 
 
 def normalize_text(text: str) -> str:
@@ -283,7 +283,7 @@ def _extract_research_cards(text: str, *, default_kind: str) -> List[EvidenceCar
     sources = _detect_sources(text)
     sections = _split_markdown_cards(text)
     cards: List[EvidenceCard] = []
-    for index, section in enumerate(sections[:10], start=1):
+    for index, section in enumerate(sections[:24], start=1):
         title = _clean_title(section[0]) if section else ""
         if _is_non_card_title(title):
             continue
@@ -305,6 +305,9 @@ def _extract_research_cards(text: str, *, default_kind: str) -> List[EvidenceCar
             "Hours",
             "Horário",
             "Horários",
+            "Features",
+            "Características",
+            "Caracteristicas",
             "Website",
             "More details",
             "Mais detalhes",

@@ -1047,26 +1047,17 @@ def get_transport_summary(language: str = "pt") -> str:
         response += f"    - ⚠️ **{'Estado' if is_pt else 'Status'}:** {'Dados indisponíveis' if is_pt else 'Data unavailable'}\n"
 
     response += "\n"
-    if is_pt:
-        response += (
-            "💡 **Antes de sair:**\n"
-            "- Se vais usar Carris Metropolitana ou CP, confirma a partida específica pouco antes de sair, porque alertas e atrasos agregados não identificam sempre a tua linha.\n"
-        )
-        if not metro_regular_service_open:
+    if not metro_regular_service_open:
+        if is_pt:
             response += (
-                "- Se precisas do Metro agora, confirma no Metro de Lisboa se há operação especial; `Ok` na API significa apenas que não há perturbação reportada.\n"
+                "⚠️ **Nota operacional:**\n"
+                "- Se precisas do Metro agora, confirma no Metro de Lisboa se há operação especial; `Ok` significa apenas que não há perturbação reportada.\n\n"
             )
-        response += "\n"
-    else:
-        response += (
-            "💡 **Before leaving:**\n"
-            "- If you plan to use Carris Metropolitana or CP, check the specific departure shortly before you leave because aggregate alerts and delays do not always identify your line.\n"
-        )
-        if not metro_regular_service_open:
+        else:
             response += (
-                "- If you need Metro now, confirm with Metro de Lisboa whether special service is running; API `Ok` only means no disruption is reported.\n"
+                "⚠️ **Operational note:**\n"
+                "- If you need Metro now, confirm with Metro de Lisboa whether special service is running; `Ok` only means no disruption is reported.\n\n"
             )
-        response += "\n"
 
     response += f"📌 **{source_label}:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | [*Carris*](https://www.carris.pt) | [*Carris Metropolitana*](https://www.carrismetropolitana.pt) | [*CP*](https://www.cp.pt) | **{updated_label}:** {now_str}\n"
 
