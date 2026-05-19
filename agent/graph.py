@@ -2038,6 +2038,14 @@ class MultiAgentAssistant:
         normalized_label = MultiAgentAssistant._fold_context_text(label)
         if not normalized_label:
             return False
+
+        match_reply = MultiAgentAssistant._fold_location_match_text(reply)
+        match_label = MultiAgentAssistant._fold_location_match_text(label)
+        if match_reply == match_label:
+            return True
+        if len(match_label) >= 8 and match_label in match_reply:
+            return True
+
         if normalized_reply == normalized_label:
             return True
         if len(normalized_reply) >= 3 and normalized_reply in normalized_label:
@@ -2045,13 +2053,70 @@ class MultiAgentAssistant:
 
         stop_terms = {
             "and", "ate", "com", "da", "das", "de", "do", "dos", "em",
-            "from", "na", "nas", "no", "nos", "of", "para", "the", "to",
+            "from", "ir", "na", "nas", "no", "nos", "of", "para", "quero",
+            "the", "to", "want",
         }
         reply_terms = {
-            term for term in normalized_reply.split()
+            term for term in match_reply.split()
             if len(term) >= 3 and term not in stop_terms
         }
-        return bool(reply_terms and all(term in normalized_label for term in reply_terms))
+        label_terms = {
+            term for term in match_label.split()
+            if len(term) >= 3 and term not in stop_terms
+        }
+        if len(label_terms) >= 2 and label_terms.issubset(reply_terms):
+            return True
+        return bool(reply_terms and reply_terms.issubset(label_terms))
+
+    @staticmethod
+    def _fold_location_match_text(text: str) -> str:
+        """Normalize a location string for option and route-side matching."""
+        folded = MultiAgentAssistant._fold_context_text(text)
+        return re.sub(r"[^a-z0-9]+", " ", folded).strip()
+
+    @staticmethod
+    def _location_fragment_matches_route_side(fragment: str, route_side: str) -> bool:
+        """Return whether an ambiguity fragment refers to one side of a route."""
+        folded_fragment = MultiAgentAssistant._fold_location_match_text(fragment)
+        folded_side = MultiAgentAssistant._fold_location_match_text(route_side)
+        if not folded_fragment or not folded_side:
+            return False
+        return (
+            folded_fragment == folded_side
+            or folded_fragment in folded_side
+            or folded_side in folded_fragment
+        )
+
+    @staticmethod
+    def _standalone_query_from_malformed_pending_route(message: str, route_pair: Dict[str, str]) -> str:
+        """Extract a new standalone query accidentally placed after a route ``to``."""
+        candidates = [
+            re.sub(r"\s+", " ", match.group("candidate")).strip(" .,:;?!")
+            for match in re.finditer(
+                r"\b(?:para|to)\s+(?P<candidate>.+)$",
+                str(message or ""),
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+        ]
+        candidates.append(re.sub(r"\s+", " ", str(route_pair.get("destination") or "")).strip(" .,:;?!"))
+        candidate = next((item for item in candidates if len(item) >= 8), "")
+        if len(candidate) < 8:
+            return ""
+        folded = MultiAgentAssistant._fold_context_text(candidate)
+        if not re.match(
+            r"^(?:quero|queria|gostava|podes|pode|diz|diz-me|lista|mostra|"
+            r"qual|quais|que|ha|onde|como|what|where|which|show|list|give|tell|find)\b",
+            folded,
+        ):
+            return ""
+        if not re.search(
+            r"\b(?:eventos?|cultura|atracoes|atra[cç][oõ]es|locais|lugares|"
+            r"tempo|previsao|meteorologia|farmacias?|hospitais?|restaurantes?|"
+            r"roteiro|itinerario|itinerary|events?|weather|places?|restaurants?)\b",
+            folded,
+        ):
+            return ""
+        return candidate
 
     @staticmethod
     def _route_destination_from_location_option(label: str) -> str:
@@ -2092,9 +2157,18 @@ class MultiAgentAssistant:
             return
 
         fragment = str(ambiguity.get("fragment") or route_pair.get("destination") or "").strip()
+        ambiguous_field = "destination"
+        if self._location_fragment_matches_route_side(fragment, route_pair.get("origin", "")):
+            ambiguous_field = "origin"
+        elif self._location_fragment_matches_route_side(fragment, route_pair.get("destination", "")):
+            ambiguous_field = "destination"
+
         anchors["pending_location_clarification"] = {
             "kind": "transport_route",
-            "origin": route_pair.get("origin", ""),
+            "ambiguous_field": ambiguous_field,
+            "ambiguous_fragment": fragment,
+            "origin": route_pair.get("origin", "") if ambiguous_field == "destination" else "",
+            "destination": route_pair.get("destination", "") if ambiguous_field == "origin" else "",
             "destination_fragment": fragment,
             "options": list(ambiguity.get("options") or []),
             "source_message": message[:300],
@@ -2110,24 +2184,29 @@ class MultiAgentAssistant:
         if pending.get("kind") != "transport_route":
             return {}
 
-        normalized = self._fold_context_text(message)
-        has_fresh_route = bool(
-            re.search(r"\b(?:de|do|da|desde|from)\s+.+\b(?:para|aos|as|ao|a|ate|to)\s+.+", normalized)
-        )
-        if has_fresh_route:
-            anchors["pending_location_clarification"] = {}
-            return {}
-
         options = [opt for opt in pending.get("options") or [] if isinstance(opt, dict)]
         matches = [opt for opt in options if self._location_option_matches_reply(message, opt)]
-        origin = str(pending.get("origin") or "").strip()
+        fresh_route_pair = self._extract_route_pair_from_text(message)
+        if fresh_route_pair and len(matches) != 1:
+            standalone_query = self._standalone_query_from_malformed_pending_route(message, fresh_route_pair)
+            anchors["pending_location_clarification"] = {}
+            if standalone_query:
+                return {
+                    "message": standalone_query,
+                    "routing_reasoning": "Stale pending location clarification ignored because the user asked a new standalone question.",
+                }
+            return {}
+
+        ambiguous_field = str(pending.get("ambiguous_field") or "destination").strip().lower()
+        if ambiguous_field not in {"origin", "destination"}:
+            ambiguous_field = "destination"
         response_language = str(pending.get("language") or "").strip()
         if response_language not in {"pt", "en"}:
             response_language = language
         selected_label = ""
         if len(matches) == 1:
             selected_label = str(matches[0].get("label") or "").strip()
-            destination = self._route_destination_from_location_option(selected_label)
+            resolved_location = self._route_destination_from_location_option(selected_label)
         else:
             original_reply = re.sub(r"\s+", " ", str(message or "")).strip(" .,:;?!")
             area_only_reply = bool(
@@ -2148,7 +2227,11 @@ class MultiAgentAssistant:
                 cleaned_reply,
                 flags=re.IGNORECASE,
             ).strip(" .,:;?!")
-            fragment = re.sub(r"\s+", " ", str(pending.get("destination_fragment") or "")).strip(" .,:;?!")
+            fragment = re.sub(
+                r"\s+",
+                " ",
+                str(pending.get("ambiguous_fragment") or pending.get("destination_fragment") or ""),
+            ).strip(" .,:;?!")
             base_fragment = re.sub(
                 r"\s+(?:em|no|na|nos|nas|perto\s+de|near|in)\s+.+$",
                 "",
@@ -2158,18 +2241,29 @@ class MultiAgentAssistant:
             if not cleaned_reply:
                 return {}
             if area_only_reply and base_fragment and self._fold_context_text(cleaned_reply) not in self._fold_context_text(base_fragment):
-                destination = f"{base_fragment} no {cleaned_reply}" if response_language == "pt" else f"{base_fragment} in {cleaned_reply}"
+                resolved_location = f"{base_fragment} no {cleaned_reply}" if response_language == "pt" else f"{base_fragment} in {cleaned_reply}"
             else:
-                destination = cleaned_reply
-            selected_label = destination
+                resolved_location = cleaned_reply
+            selected_label = resolved_location
+
+        if ambiguous_field == "origin":
+            origin = resolved_location
+            destination = str(pending.get("destination") or "").strip()
+        else:
+            origin = str(pending.get("origin") or "").strip()
+            destination = resolved_location
+
         if not origin or not destination:
             return {}
 
         anchors["pending_location_clarification"] = {}
-        anchors["expected_transport_destination"] = {
-            "label": selected_label,
-            "route_destination": destination,
-        }
+        if ambiguous_field == "destination":
+            anchors["expected_transport_destination"] = {
+                "label": selected_label,
+                "route_destination": destination,
+            }
+        else:
+            anchors["expected_transport_destination"] = {}
         if response_language == "pt":
             rewritten = f"Quero ir de {origin} para {destination}."
         else:
@@ -2929,6 +3023,14 @@ class MultiAgentAssistant:
         normalized = re.sub(r"\s+", " ", (message or "").lower()).strip()
         if not normalized:
             return {"message": message}
+
+        malformed_route_pair = self._extract_route_pair_from_text(message)
+        standalone_query = self._standalone_query_from_malformed_pending_route(message, malformed_route_pair)
+        if standalone_query and self._fold_location_match_text(standalone_query) != self._fold_location_match_text(message):
+            return {
+                "message": standalone_query,
+                "routing_reasoning": "Malformed route prefix ignored because the segment after the route connector is a standalone question.",
+            }
 
         pending_location = self._resolve_pending_location_clarification_follow_up(message, language)
         if pending_location:

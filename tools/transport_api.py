@@ -836,13 +836,13 @@ def get_transport_summary(language: str = "pt") -> str:
     if is_pt and not metro_regular_service_open:
         direct_answer = (
             f"Resumo rápido atualizado às **{now_str}**. O Metro está fora do "
-            "horário regular de passageiros; abaixo distingo horário de "
-            "exploração e estado de perturbações."
+            "horário regular de passageiros; abaixo separo disponibilidade do "
+            "serviço e perturbações reportadas."
         )
     elif not is_pt and not metro_regular_service_open:
         direct_answer = (
             f"Quick status updated at **{now_str}**. Metro is outside regular "
-            "passenger-service hours; below I separate operating hours from "
+            "passenger-service hours; below I separate service availability from "
             "disruption status."
         )
     elif is_pt:
@@ -922,9 +922,9 @@ def get_transport_summary(language: str = "pt") -> str:
                     status_label = "Ok"
                 else:
                     status_label = (
-                        "sem perturbações reportadas na API"
+                        "sem perturbações reportadas"
                         if is_pt
-                        else "no disruption reported by the API"
+                        else "no disruptions reported"
                     )
             else:
                 status_label = status
@@ -936,11 +936,11 @@ def get_transport_summary(language: str = "pt") -> str:
                 response += f"    - ✅ **{'Estado geral' if is_pt else 'Overall status'}:** {status_text}\n"
             else:
                 status_text = (
-                    "sem perturbações reportadas; isto não confirma circulação disponível agora"
+                    "sem perturbações reportadas; isto não significa que haja serviço ao passageiro neste momento"
                     if is_pt
-                    else "no disruption reported; this does not confirm trains are running now"
+                    else "no disruptions reported; this does not mean passenger service is available right now"
                 )
-                response += f"    - ℹ️ **{'Estado API' if is_pt else 'API status'}:** {status_text}\n"
+                response += f"    - ℹ️ **{'Disponibilidade agora' if is_pt else 'Current availability'}:** {status_text}\n"
         else:
             warning_text = (
                 "Há perturbações reportadas; confirma a linha afetada antes de sair"
@@ -959,7 +959,7 @@ def get_transport_summary(language: str = "pt") -> str:
             response += f"    - ❌ **{'Estado' if is_pt else 'Status'}:** {'Dados indisponíveis' if is_pt else 'Data unavailable'}\n"
         else:
             response += (
-                f"    - ⚠️ **{'Estado API' if is_pt else 'API status'}:** "
+                f"    - ⚠️ **{'Disponibilidade agora' if is_pt else 'Current availability'}:** "
                 f"{'dados indisponíveis; confirma operação especial no operador' if is_pt else 'data unavailable; confirm special service with the operator'}\n"
             )
 
@@ -1045,19 +1045,6 @@ def get_transport_summary(language: str = "pt") -> str:
     except Exception as e:
         logger.warning(f"CP train data failed: {e}")
         response += f"    - ⚠️ **{'Estado' if is_pt else 'Status'}:** {'Dados indisponíveis' if is_pt else 'Data unavailable'}\n"
-
-    response += "\n"
-    if not metro_regular_service_open:
-        if is_pt:
-            response += (
-                "⚠️ **Nota operacional:**\n"
-                "- Se precisas do Metro agora, confirma no Metro de Lisboa se há operação especial; `Ok` significa apenas que não há perturbação reportada.\n\n"
-            )
-        else:
-            response += (
-                "⚠️ **Operational note:**\n"
-                "- If you need Metro now, confirm with Metro de Lisboa whether special service is running; `Ok` only means no disruption is reported.\n\n"
-            )
 
     response += f"📌 **{source_label}:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | [*Carris*](https://www.carris.pt) | [*Carris Metropolitana*](https://www.carrismetropolitana.pt) | [*CP*](https://www.cp.pt) | **{updated_label}:** {now_str}\n"
 

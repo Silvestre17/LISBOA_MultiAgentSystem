@@ -14167,6 +14167,132 @@ def insert_direct_answer_separator(text: str) -> str:
     return "\n".join(repaired_lines)
 
 
+def dedupe_direct_answer_leading_status_icon(text: str) -> str:
+    """Remove duplicated status icons immediately after the direct-answer label."""
+    if not text:
+        return text or ""
+
+    direct_dup_re = re.compile(
+        r"(?m)^(?P<prefix>\s*(?:[-*]\s*)?✅\s+\*\*(?:Resposta direta|Direct answer):\*\*)"
+        r"\s*✅\s*(?P<answer>[^\n]+)$",
+        flags=re.IGNORECASE,
+    )
+
+    def _replacement(match: re.Match[str]) -> str:
+        answer = match.group("answer").strip()
+        if answer.startswith("**") and answer.endswith("**") and answer.count("**") == 2:
+            answer = answer[2:-2].strip()
+        return f"{match.group('prefix')} {answer}"
+
+    return direct_dup_re.sub(_replacement, text)
+
+
+def normalize_transport_status_public_language(text: str) -> str:
+    """Remove implementation-facing transport status wording from final answers."""
+    if not text:
+        return text or ""
+
+    value = re.sub(
+        r"\*\*(?:Estado API):\*\*",
+        "**Disponibilidade agora:**",
+        text,
+        flags=re.IGNORECASE,
+    )
+    value = re.sub(
+        r"\*\*(?:API status):\*\*",
+        "**Current availability:**",
+        value,
+        flags=re.IGNORECASE,
+    )
+    value = re.sub(
+        r"\bsem perturbações reportadas na API\b",
+        "sem perturbações reportadas",
+        value,
+        flags=re.IGNORECASE,
+    )
+    value = re.sub(
+        r"\bno disruptions? reported by the API\b",
+        "no disruptions reported",
+        value,
+        flags=re.IGNORECASE,
+    )
+    value = re.sub(
+        r"sem perturbações reportadas;\s*isto não confirma circulação disponível agora",
+        "sem perturbações reportadas; isto não significa que haja serviço ao passageiro neste momento",
+        value,
+        flags=re.IGNORECASE,
+    )
+    value = re.sub(
+        r"no disruptions? reported;\s*this does not confirm trains are running now",
+        "no disruptions reported; this does not mean passenger service is available right now",
+        value,
+        flags=re.IGNORECASE,
+    )
+    value = re.sub(
+        r"Se precisas do Metro agora,\s*confirma no Metro de Lisboa se há operação especial;\s*`?Ok`?\s*significa apenas que não há perturbação reportada\.",
+        "Se precisas do Metro agora, confirma no Metro de Lisboa se há operação especial; a ausência de perturbações reportadas não garante serviço ao passageiro neste momento.",
+        value,
+        flags=re.IGNORECASE,
+    )
+    value = re.sub(
+        r"If you need Metro now,\s*confirm with Metro de Lisboa whether special service is running;\s*`?Ok`?\s*only means no disruption is reported\.",
+        "If you need Metro now, confirm with Metro de Lisboa whether special service is running; no reported disruptions do not guarantee passenger service right now.",
+        value,
+        flags=re.IGNORECASE,
+    )
+    value = re.sub(
+        r"(?mi)^\s*⚠️\s+\*\*(?:Nota operacional|Operational note):\*\*\s*\n"
+        r"\s*[-*]\s*(?:Se precisas do Metro agora|If you need Metro now)[^\n]*\n?",
+        "",
+        value,
+    )
+    value = re.sub(
+        r"(?mi)^\s*[-*]\s*(?:Se precisas do Metro agora|If you need Metro now)[^\n]*\n?",
+        "",
+        value,
+    )
+    return value
+
+
+def strip_visitlisboa_from_transport_status_footer(text: str) -> str:
+    """Remove stale VisitLisboa links from pure transport-status source footers."""
+    if not text:
+        return text or ""
+
+    normalized = _strip_accents_compat(_strip_markdown_formatting(text)).lower()
+    if not re.search(
+        r"\b(?:ponto de situacao dos transportes em lisboa|transport status in lisbon)\b",
+        normalized,
+    ):
+        return text
+
+    source_line_re = re.compile(r"(?m)^(\s*📌\s+\*\*(?:Fonte|Source):\*\*\s*)(?P<body>.*)$")
+
+    def _clean_source_line(match: re.Match[str]) -> str:
+        body = match.group("body").strip()
+        updated = ""
+        updated_match = re.search(
+            r"\s*\|\s*(\*\*(?:Atualizado|Updated):\*\*\s*[^|]+)\s*$",
+            body,
+            flags=re.IGNORECASE,
+        )
+        if updated_match:
+            updated = updated_match.group(1).strip()
+            body = body[:updated_match.start()].strip()
+
+        kept_sources = [
+            part.strip()
+            for part in body.split("|")
+            if part.strip() and "visitlisboa.com" not in part.lower()
+        ]
+        if not kept_sources:
+            return ""
+        suffix = f" | {updated}" if updated else ""
+        return f"{match.group(1)}{' | '.join(kept_sources)}{suffix}"
+
+    return source_line_re.sub(_clean_source_line, text)
+
+
 def collapse_duplicate_event_section_headings(text: str) -> str:
     """Collapse repeated generic event headings separated only by a short intro."""
     if not text or not re.search(r"\b(?:Eventos encontrados|Events found)\b", text, flags=re.IGNORECASE):
@@ -14290,6 +14416,9 @@ def final_visual_pass(text: str) -> str:
         return text or ""
 
     text = promote_leading_planner_title_bullet(text)
+    text = dedupe_direct_answer_leading_status_icon(text)
+    text = normalize_transport_status_public_language(text)
+    text = strip_visitlisboa_from_transport_status_footer(text)
     text = normalize_two_space_child_bullets(text)
     text = repair_orphan_price_tip_lines(text)
     text = repair_misclassified_inventory_heading(text)
@@ -15957,6 +16086,9 @@ def final_visual_pass(text: str) -> str:
     text = repair_transport_markdown_fragmentation(text)
     text = nest_carris_departure_lines_under_route(text)
     text = strip_self_referential_accommodation_movement_legs(text)
+    text = dedupe_direct_answer_leading_status_icon(text)
+    text = normalize_transport_status_public_language(text)
+    text = strip_visitlisboa_from_transport_status_footer(text)
     text = ensure_blank_lines_before_headers(text)
     text = ensure_blank_lines_after_headers(text)
     # Collapse triple blank lines that may have been reintroduced.
@@ -17125,6 +17257,9 @@ def _final_contract_pass(text: str, language: str = "en") -> str:
     value = re.sub(r"[\u10A0-\u10FF]+", "", value)
     value = enforce_language_labels(value, lang)
     value = normalize_visitlisboa_source_footer_links(value, lang)
+    value = dedupe_direct_answer_leading_status_icon(value)
+    value = normalize_transport_status_public_language(value)
+    value = strip_visitlisboa_from_transport_status_footer(value)
     value = re.sub(
         r"\b(Estimated total time|Estimated travel time|Best transport|Best public transport|Route|Walk|Metro|Transfer|Exit|Tempo total estimado|Melhor transporte|Rota|Percurso):(?=\S)",
         r"\1: ",
@@ -17134,6 +17269,9 @@ def _final_contract_pass(text: str, language: str = "en") -> str:
     value = re.sub(r"(?<=[A-Za-zÀ-ÿ])\s*:\s*(?=\d)", ": ", value)
     value = re.sub(r"(?m)^(\s*[-*]\s*)🚶\s+\*\*(Exit|Sa[ií]da):\s*\*\*", r"\1📍 **\2:**", value)
     value = re.sub(r"(?m)^#{1,6}\s*(?:[*_`~\s]|[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D])*$\n?", "", value)
+    value = dedupe_direct_answer_leading_status_icon(value)
+    value = normalize_transport_status_public_language(value)
+    value = strip_visitlisboa_from_transport_status_footer(value)
     value = re.sub(r"\n{3,}", "\n\n", value)
     return value.strip()
 
@@ -19039,6 +19177,9 @@ def final_post_qa_guard(text: str, language: str = "en") -> str:
     if _is_category_inventory_response(guarded):
         guarded = normalize_category_inventory_response(guarded, language)
     guarded = strip_internal_qa_annotations(guarded)
+    guarded = dedupe_direct_answer_leading_status_icon(guarded)
+    guarded = normalize_transport_status_public_language(guarded)
+    guarded = strip_visitlisboa_from_transport_status_footer(guarded)
     guarded = re.sub(r"(?m)^---\n(?=\S)", "---\n\n", guarded)
     guarded = re.sub(r"(?m)^(###\s+[^\n]+)\n(?=\S)", r"\1\n\n", guarded)
     guarded = re.sub(r"(?m)([^\n])\n(###\s+)", r"\1\n\n\2", guarded)
