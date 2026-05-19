@@ -642,6 +642,56 @@ class SupervisorAgent(BaseAgent):
         return strip_unsupported_closing_offers(text).strip()
 
     @classmethod
+    def _should_route_complex_query_with_llm(cls, user_message: str) -> bool:
+        """Return whether a high-entropy query should bypass single-domain rules.
+
+        The deterministic single-domain overrides are useful for short, obvious
+        requests, but they should not pre-empt the supervisor model when the
+        user expresses preferences, exclusions, trade-offs, or multiple
+        information needs. Hard safety/scope gates still run before this check.
+        """
+        normalized = cls._normalize_query(user_message)
+        if not normalized:
+            return False
+        if cls._looks_like_follow_up(user_message) and len(normalized.split()) <= 7:
+            return False
+        if cls._is_weather_only_outdoor_decision_query(user_message):
+            return False
+        if cls._is_direct_weather_transport_query(user_message):
+            return False
+
+        tokens = normalized.split()
+        if len(tokens) < 8:
+            return False
+
+        preference_markers = (
+            r"\b(?:prefer|preference|personalized|personalised|avoid|without|excluding|except|not\s+too|"
+            r"least|fewest|best|recommend|suggest|different|hidden|local|authentic|budget|cheap|"
+            r"accessible|wheelchair|rain|rainy|children|kids|elderly|"
+            r"prefiro|preferencia|preferencia|personalizado|evitar|sem|excluir|exceto|excepto|"
+            r"nao\s+quero|não\s+quero|menos|melhor|recomenda|sugere|diferente|local|autentico|"
+            r"autêntico|barato|orcamento|orçamento|acessivel|acessível|cadeira\s+de\s+rodas|"
+            r"chuva|criancas|crianças|idosos?)\b"
+        )
+        multi_need_markers = (
+            r"\b(?:and|also|with|including|include|plus|then|after|before|"
+            r"e|tambem|também|com|inclui|incluindo|depois|antes)\b"
+        )
+        domain_terms = {
+            "weather": r"\b(?:weather|tempo|meteorolog|chuva|rain|forecast|previsao|previsão)\b",
+            "transport": r"\b(?:metro|bus|buses|autocarro|comboio|train|cp|transport|transportes|route|rota)\b",
+            "researcher": r"\b(?:event|evento|restaurant|restaurante|museum|museu|monument|monumento|fado|farmacia|farmácia|hospital|library|biblioteca|place|local)\b",
+            "planner": r"\b(?:plan|itinerary|roteiro|plano|planeia|organiza|dia|day|afternoon|tarde)\b",
+        }
+        matched_domains = {
+            name for name, pattern in domain_terms.items()
+            if re.search(pattern, normalized, flags=re.IGNORECASE)
+        }
+        has_preference = bool(re.search(preference_markers, normalized, flags=re.IGNORECASE))
+        has_multi_need = bool(re.search(multi_need_markers, normalized, flags=re.IGNORECASE))
+        return has_preference or (has_multi_need and len(matched_domains) >= 2)
+
+    @classmethod
     def _looks_like_follow_up(cls, user_message: str) -> bool:
         """Detects short anaphoric follow-ups that truly need previous-turn context."""
         normalized = cls._normalize_query(user_message)
@@ -1384,9 +1434,11 @@ class SupervisorAgent(BaseAgent):
         if direct_override:
             return direct_override
 
-        single_domain_override = self._single_domain_override(user_message)
-        if single_domain_override:
-            return single_domain_override
+        defer_single_domain_override = self._should_route_complex_query_with_llm(user_message)
+        if not defer_single_domain_override:
+            single_domain_override = self._single_domain_override(user_message)
+            if single_domain_override:
+                return single_domain_override
 
         follow_up_override = self._follow_up_domain_override(user_message, conversation_history)
         if follow_up_override:
@@ -1457,7 +1509,10 @@ class SupervisorAgent(BaseAgent):
                 flags=re.IGNORECASE,
             ):
                 is_planning_query = True
-                agents = [agent for agent in ["weather", "transport", "researcher", "planner", *agents] if agent]
+                planning_stack = ["transport", "researcher", "planner"]
+                if self._requires_weather_for_planning(user_message) or self._planning_query_mentions_weather(user_message):
+                    planning_stack.insert(0, "weather")
+                agents = [agent for agent in [*planning_stack, *agents] if agent]
                 agents = [agent for index, agent in enumerate(agents) if agent not in agents[:index]]
                 reasoning += " (Deterministic override: multi-day planning requires full planning route)"
 
@@ -1490,6 +1545,16 @@ class SupervisorAgent(BaseAgent):
                 if "weather" not in agents:
                     agents.append("weather")
                     reasoning += " (Added weather agent: planning for near-future date)"
+
+            if (
+                is_planning_query
+                and "weather" in agents
+                and not weather_only_outdoor_decision
+                and not self._requires_weather_for_planning(user_message)
+                and not self._planning_query_mentions_weather(user_message)
+            ):
+                agents = [agent for agent in agents if agent != "weather"]
+                reasoning += " (Removed weather agent: itinerary duration is not a weather/date request)"
 
             # Enforce rejection for out of scope queries even if LLM tries to answer
             reasoning_lower = reasoning.lower()
@@ -1719,11 +1784,6 @@ class SupervisorAgent(BaseAgent):
             r"\bnext\s+\d+\s+days?\b",
             r"\bpr[óo]ximos?\s+(?:dois|tr[êe]s|quatro|cinco|seis|sete)\s+dias?\b",
             r"\bnext\s+(?:two|three|four|five|six|seven)\s+days?\b",
-            r"\b(?:dois|tr[êe]s|quatro|cinco|seis|sete)\s+dias?\b",
-            r"\b(?:two|three|four|five|six|seven)\s+days?\b",
-            # Day plans
-            r"\bday\s+\d+\b",
-            r"\b(\d+)[oa]?\s+dia\b",
             # Weekend
             r"\bweekend\b",
             r"\bfim de semana\b",

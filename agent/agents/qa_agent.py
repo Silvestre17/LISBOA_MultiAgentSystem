@@ -29,6 +29,7 @@ from agent.utils.response_formatter import (
     _place_response_missing_required_fields,
     final_post_qa_guard,
     final_visual_pass,
+    infer_visible_label_language,
     infer_response_language,
 )
 
@@ -1212,7 +1213,7 @@ class QualityAssuranceAgent(BaseAgent):
         )
         normalized_output = cls._normalize_query(combined_output)
         if (
-            re.search(r"\b(?:ambiguidade|ambiguity)\b", combined_output, flags=re.IGNORECASE)
+            re.search(r"\b(?:ambiguidade|ambiguity|preciso de confirmar|i need to confirm)\b", combined_output, flags=re.IGNORECASE)
             and re.search(
                 r"\b(?:indica|especifica|specify|morada|address|zona|area|ponto de referência|landmark)\b",
                 combined_output,
@@ -1244,11 +1245,43 @@ class QualityAssuranceAgent(BaseAgent):
                 combined_output,
                 flags=re.IGNORECASE | re.DOTALL,
             )
+            or re.search(
+                r"(?:apanha em|board at).{0,420}(?:sai em|leave at|alight at).{0,420}"
+                r"(?:tempo estimado|estimated travel time|~\s*\d+\s*min)",
+                combined_output,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
         )
         has_actionable_bus_realtime = bool(
             re.search(
                 r"(?:pr[oó]ximas partidas|next departures).{0,220}"
                 r"(?:tempo real|real-time|em tempo real|live|atraso|delay)",
+                combined_output,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+        )
+        has_actionable_departures = bool(
+            re.search(
+                r"\b(?:pr[oó]ximas partidas|next departures)\b",
+                combined_output,
+                flags=re.IGNORECASE,
+            )
+        )
+        has_declared_realtime_limitation = bool(
+            re.search(
+                r"(?:tempo real|real[- ]?time|live).{0,260}"
+                r"(?:confirmad|confirmar|sem dados|no real[- ]?time|not confirmed|not available|"
+                r"indispon[ií]vel|pode ficar desatualizad|may become stale)",
+                normalized_output,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+        )
+        has_quality_route_limitation = bool(
+            re.search(
+                r"(?:pouca caminhada|menos caminhada|low walking|less walking|rain|chuva|chover).{0,700}"
+                r"(?:nao ficou confirmad|não ficou confirmad|nao foi confirmad|não foi confirmad|"
+                r"not confirmed|nao consigo confirmar|não consigo confirmar|cannot confirm|"
+                r"continua a ser|confirmed option|opcao confirmada|opção confirmada)",
                 combined_output,
                 flags=re.IGNORECASE | re.DOTALL,
             )
@@ -1260,6 +1293,20 @@ class QualityAssuranceAgent(BaseAgent):
             )
             + " "
             + combined_output
+        )
+        has_generic_service_area_route = bool(
+            re.search(
+                r"\b(?:veterinario|veterinaria|veterinary|farmacia|pharmacy|restaurante|restaurant|taberna|loja|store|shop)\b",
+                combined_query_output,
+                flags=re.IGNORECASE,
+            )
+            and re.search(
+                r"(?:usei|used).{0,120}(?:ponto de referencia|ponto de referência|destination reference|area)|"
+                r"(?:nao consigo confirmar|não consigo confirmar|cannot confirm|no specific confirmed).{0,220}"
+                r"(?:morada|address|nome especifico|nome específico|specific name|veterinario|veterinary|servico|service)",
+                normalized_output,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
         )
         requested_cm_line_match = re.search(
             r"\b(?:linha|line)\s+(?P<line>\d{3,4}[A-Z]?)\b",
@@ -1340,6 +1387,10 @@ class QualityAssuranceAgent(BaseAgent):
             if "tempo real" in normalized_item or "real time" in normalized_item:
                 if has_actionable_bus_realtime:
                     return True
+                if has_actionable_bus_route and has_actionable_departures:
+                    return True
+                if has_declared_realtime_limitation:
+                    return True
                 if re.search(
                     r"(?:tempo real carris metropolitana|carris metropolitana real time).{0,220}"
                     r"(?:nao proximos autocarros|não próximos autocarros|not next buses|not confirm real-time departure)",
@@ -1357,6 +1408,21 @@ class QualityAssuranceAgent(BaseAgent):
                         flags=re.IGNORECASE | re.DOTALL,
                     )
                 )
+            if has_generic_service_area_route and re.search(
+                r"\b(?:veterinario|veterinaria|veterinary|servico|serviço|service|morada|address|"
+                r"localizacao|localização|location|ponto de chegada|ultima perna|última perna|last leg|final walk)\b",
+                normalized_item,
+            ):
+                return True
+            if any(
+                token in normalized_item
+                for token in (
+                    "pouca caminhada", "menos caminhada", "low walking", "less walking",
+                    "walking", "walk", "chuva", "rain", "rota detalhada alternativa",
+                    "alternative route",
+                )
+            ):
+                return has_quality_route_limitation
             if any(token in normalized_item for token in ("on time", "delayed", "disrupted", "atras", "perturb")):
                 return bool(re.search(limitation_patterns["delay_unknown"], normalized_output))
             return False
@@ -1406,6 +1472,30 @@ class QualityAssuranceAgent(BaseAgent):
         reasoning = str(llm_result.get("reasoning", "") or "").strip()
         reasoning_notes: List[str] = []
 
+        planning_without_weather = bool(
+            re.search(r"\b(?:plan|planning|itinerary|roteiro|itinerario|itiner[aá]rio|afternoon|day|tarde|dia)\b", query)
+            and not re.search(
+                r"\b(?:weather|forecast|rain|rainy|temperature|wind|umbrella|"
+                r"chuva|chover|previs[aã]o|temperatura|vento|guarda[-\s]?chuva)\b",
+                query,
+            )
+        )
+        if planning_without_weather:
+            weather_gap_re = re.compile(
+                r"\b(?:weather|forecast|rain|rain probability|temperature|wind|warnings?|"
+                r"meteorolog|previs[aã]o|chuva|probabilidade de chuva|temperatura|vento|avisos?)\b",
+                flags=re.IGNORECASE,
+            )
+            before_count = len(missing_data)
+            missing_data = [
+                item for item in missing_data
+                if not weather_gap_re.search(cls._normalize_query(str(item or "")))
+            ]
+            if len(missing_data) != before_count:
+                reasoning_notes.append("removed QA gap for weather data not requested by the planning query")
+            if "weather" in required_agents:
+                required_agents = [agent for agent in required_agents if agent != "weather"]
+
         rejected_mode_markers = {
             "metro": r"\b(?:n[aã]o\s+(?:quero|usar|uses?|meter)|sem|without|no)\s+metro\b|\bmetro\b.{0,30}\b(?:n[aã]o|sem|without|no)\b",
             "bus": r"\b(?:n[aã]o\s+(?:quero|usar|uses?|meter)|sem|without|no)\s+(?:autocarro|bus|ônibus|onibus)\b|\b(?:autocarro|bus)\b.{0,30}\b(?:n[aã]o|sem|without|no)\b",
@@ -1431,7 +1521,7 @@ class QualityAssuranceAgent(BaseAgent):
                 required_agents.append(required_agent)
 
         expected_language = infer_response_language(user_query=user_query, default=language or "en")
-        output_language = infer_response_language(context_text=combined_output, default=expected_language)
+        output_language = infer_visible_label_language(combined_output, default=expected_language)
         if combined_output.strip() and output_language != expected_language:
             add_gap(
                 "response language should match the user's English query"
@@ -2040,6 +2130,9 @@ class QualityAssuranceAgent(BaseAgent):
             "not available",
             "unavailable",
             "not possible",
+            "not explicitly verified",
+            "not fully verified",
+            "does not fully verify",
             "could not confirm",
             "cannot confirm",
             "can't confirm",
@@ -2082,6 +2175,7 @@ class QualityAssuranceAgent(BaseAgent):
             (("evento", "event", "titulo", "title", "data", "date", "localizacao", "location", "crianca", "children", "kids", "familia", "family"), ("evento", "event", "crianca", "children", "kids", "familia", "family", "gratuit", "free")),
             (("fertagus", "ferry", "barreiro", "transtejo", "soflusa", "operator", "operador", "ambito", "scope"), ("fertagus", "ferry", "barreiro", "transtejo", "soflusa", "operator", "operador", "ambito", "scope")),
             (("partida", "departure", "eta", "arrival", "route", "rota", "linha", "ligacao"), ("partida", "departure", "eta", "arrival", "route", "rota", "linha", "ligacao")),
+            (("subjective", "touristy", "authentic", "quiet", "best", "relevance", "ranking", "criteria"), ("subjective", "touristy", "authentic", "quiet", "prioritised", "prioritized", "compatible signals", "verifiable details")),
         ]
 
         def _has_stated_limitation(output_tokens: tuple[str, ...]) -> bool:
@@ -2449,6 +2543,11 @@ class QualityAssuranceAgent(BaseAgent):
             agent_outputs=agent_outputs,
             llm_result=llm_result,
         )
+        llm_result = self._normalize_transport_query_validation(
+            agent_outputs=agent_outputs,
+            agents_called=agents_called,
+            llm_result=llm_result,
+        )
 
         # ── Phase 2: Deterministic fact verification ─────────────────
         combined_output = "\n".join(
@@ -2500,6 +2599,11 @@ class QualityAssuranceAgent(BaseAgent):
 
         llm_result["critical_issues"] = fact_check.get("critical_issues", [])
         llm_result["repairable_agents"] = fact_check.get("repairable_agents", [])
+        if not llm_result.get("missing_data") and not llm_result.get("critical_issues"):
+            llm_result["required_agents"] = []
+            llm_result["complete"] = True
+        else:
+            llm_result["complete"] = False
         llm_result["needs_repair"] = bool(
             fact_check.get("critical_issues") or llm_result.get("missing_data")
         )
@@ -3124,10 +3228,30 @@ class QualityAssuranceAgent(BaseAgent):
             "event", "evento", "exhibition", "exposição", "exposicao",
             "festival", "concert", "concerto", "spectacle", "espectáculo",
         }
+        event_keyword_pattern = (
+            r"\b(?:"
+            + "|".join(re.escape(keyword) for keyword in sorted(event_keywords, key=len, reverse=True))
+            + r")s?\b"
+        )
         is_event_category_listing = bool(
             re.search(r"\b(?:event categories|categorias de eventos)\b", output_lower)
         )
-        if any(kw in output_lower for kw in event_keywords) and not is_event_category_listing:
+        event_source_present = bool(
+            re.search(
+                r"visitlisboa\.com/(?:en/events|pt-pt/eventos)|"
+                r"visitlisboa\s+(?:events|eventos)|search_cultural_events",
+                output_lower,
+                flags=re.IGNORECASE,
+            )
+        )
+        user_asked_events = bool(
+            re.search(event_keyword_pattern, _qa_normalize_text(user_query), flags=re.IGNORECASE)
+        )
+        if (
+            (event_source_present or user_asked_events)
+            and re.search(event_keyword_pattern, output_lower, flags=re.IGNORECASE)
+            and not is_event_category_listing
+        ):
             disclaimers.append(
                 "Event details (dates, times, ticket prices) should be confirmed at "
                 "visitlisboa.com, as this data is synced daily and may have changed."

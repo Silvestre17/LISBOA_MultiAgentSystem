@@ -504,7 +504,10 @@ def _query_requests_time_specific_visit(user_message: str) -> bool:
     normalized = normalize_text(user_message)
     return bool(
         re.search(
-            r"\b(evening|tonight|night|afternoon|morning|today|tomorrow|noite|esta noite|fim de tarde|tarde|manha|manhã|hoje|amanha|amanhã)\b",
+            r"\b(evening|tonight|night|afternoon|morning|today|tomorrow|"
+            r"itinerary|route|day plan|plan|visit|visiting|"
+            r"noite|esta noite|fim de tarde|tarde|manha|manhã|hoje|amanha|amanhã|"
+            r"roteiro|itinerario|itinerário|plano|planeia|planear|programa|dia|visita|visitar)\b",
             normalized,
         )
     )

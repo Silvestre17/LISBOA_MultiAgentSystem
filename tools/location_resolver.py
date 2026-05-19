@@ -795,6 +795,9 @@ _LOCATION_LOCALITY_TERMS = {
     "loures", "mafra", "moita", "montijo", "odivelas", "oeiras",
     "palmela", "seixal", "sesimbra", "setubal", "setúbal", "sintra",
     "vila", "franca", "xira", "alges", "algés", "belem", "belém",
+    "restelo", "chiado", "baixa", "alfama", "arroios", "saldanha",
+    "campolide", "ajuda", "alcantara", "alcântara", "mouraria",
+    "graca", "graça", "olivais", "benfica", "lumiar",
 }
 _REQUESTED_PLACE_TYPE_COMPATIBILITY = {
     "bar": {"bar", "pub", "restaurant", "cafe", "café", "amenity", "shop"},
@@ -830,6 +833,8 @@ def _location_is_specific_enough(raw_location: str) -> bool:
     if _looks_like_acronym_label(cleaned) and len(normalized.split()) > 1:
         return True
     if _LOCATION_ADDRESS_HINT_RE.search(cleaned):
+        return True
+    if normalized in _LOCATION_LOCALITY_TERMS:
         return True
     if normalized in _CURATED_QUERY_VARIANTS or normalized in _CURATED_DISPLAY_NAMES:
         return True

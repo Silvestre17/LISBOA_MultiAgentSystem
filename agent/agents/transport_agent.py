@@ -82,11 +82,129 @@ def _normalize_token(text: str) -> str:
     return normalized.lower().strip()
 
 
+def _expand_route_address_abbreviations(text: str) -> str:
+    """Expand common street abbreviations before regex endpoint extraction."""
+    value = str(text or "")
+    replacements = (
+        (r"\bR\.\s+", "Rua "),
+        (r"\bAv\.\s+", "Avenida "),
+        (r"\bTv\.\s+", "Travessa "),
+        (r"\bLgo\.\s+", "Largo "),
+        (r"\bPç\.\s+", "Praça "),
+        (r"\bPrac\.\s+", "Praça "),
+        (r"\bEstr\.\s+", "Estrada "),
+        (r"\bAl\.\s+", "Alameda "),
+    )
+    for pattern, replacement in replacements:
+        value = re.sub(pattern, replacement, value, flags=re.IGNORECASE)
+    return value
+
+
+def _generic_service_area_endpoint(endpoint: str) -> str:
+    """Return an area reference for generic service queries such as veterinario em Alges."""
+    value = re.sub(r"\s+", " ", str(endpoint or "")).strip(" .,:;?!")
+    if not value:
+        return ""
+
+    match = re.match(
+        r"^(?:o|a|os|as|um|uma|uns|umas|the|a|an)?\s*"
+        r"(?P<service>"
+        r"veterin[áa]rios?|veterin[áa]rias?|veterinary|"
+        r"cl[ií]nicas?\s+veterin[áa]rias?|hospital\s+veterin[áa]rio|"
+        r"farm[áa]cias?|pharmac(?:y|ies)|restaurantes?|restaurants?|"
+        r"caf[eé]s?|cafes?|tabernas?|bares?|bars?|lojas?|stores?|shops?"
+        r")\s+"
+        r"(?:em|no|na|nos|nas|perto\s+de|junto\s+de|in|near|around)\s+"
+        r"(?P<area>.+)$",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return ""
+
+    area = re.sub(r"\s+", " ", match.group("area")).strip(" .,:;?!")
+    area = re.sub(
+        r"\s+(?:de\s+metro|de\s+autocarro|de\s+comboio|by\s+metro|by\s+bus|by\s+train)\b.*$",
+        "",
+        area,
+        flags=re.IGNORECASE,
+    ).strip(" .,:;?!")
+    if len(area) < 2:
+        return ""
+    return area
+
+
+def _ambiguity_preamble_is_no_clear_match(text: str) -> bool:
+    """Return whether an ambiguity note is a no-match prompt rather than real alternatives."""
+    normalized = _normalize_token(text)
+    return bool(
+        re.search(
+            r"\b(?:preciso de confirmar|i need to confirm|nao encontrei uma correspondencia clara|could not find a clear match)\b",
+            normalized,
+        )
+    )
+
+
+def _insert_before_source_footer(text: str, note: str) -> str:
+    """Insert a short limitation note before the final source footer."""
+    if not text or not note:
+        return text
+    marker_re = re.compile(r"\n\n(?=📌\s+\*\*(?:Fonte|Source):)", flags=re.IGNORECASE)
+    if marker_re.search(text):
+        return marker_re.sub(f"\n\n{note}\n\n", text, count=1)
+    return f"{text.rstrip()}\n\n{note}"
+
+
+def _append_generic_service_area_note(
+    response: str,
+    raw_destination: str,
+    area_destination: str,
+    language: str,
+) -> str:
+    """Clarify that a generic service route uses the area as the destination anchor."""
+    if not response or not raw_destination or not area_destination:
+        return response
+    raw_key = _normalize_token(raw_destination)
+    area_key = _normalize_token(area_destination)
+    if not raw_key or not area_key or raw_key == area_key:
+        return response
+    note = (
+        f"⚠️ **Nota:** como não há uma morada/nome específico confirmado para **{raw_destination}**, "
+        f"usei **{area_destination}** como ponto de referência de chegada."
+        if language == "pt"
+        else f"⚠️ **Note:** because no specific confirmed address/name was available for **{raw_destination}**, "
+        f"I used **{area_destination}** as the destination reference."
+    )
+    if _normalize_token(note) in _normalize_token(response):
+        return response
+    direct_re = re.compile(
+        r"(?m)^(?P<line>✅\s+\*\*(?:Resposta direta|Direct answer):\*\*\s+[^\n]+)$",
+        flags=re.IGNORECASE,
+    )
+    direct_match = direct_re.search(response)
+    if direct_match:
+        direct_note = (
+            f" Como não há uma morada/nome específico confirmado para **{raw_destination}**, "
+            f"usei **{area_destination}** como ponto de referência de chegada."
+            if language == "pt"
+            else f" Because no specific confirmed address/name was available for **{raw_destination}**, "
+            f"I used **{area_destination}** as the destination reference."
+        )
+        return direct_re.sub(lambda match: f"{match.group('line')}{direct_note}", response, count=1)
+    return _insert_before_source_footer(response, note)
+
+
 def _strip_endpoint_mode_clauses(value: str) -> str:
     """Remove transport-mode constraints accidentally captured as place text."""
     cleaned = str(value or "").strip()
     mode_terms = (
         r"metro|autocarros?|bus(?:es)?|el[eé]tricos?|trams?|comboios?|trains?|cp|carris"
+    )
+    quality_terms = (
+        r"caminhad|andar|walk(?:ing)?|transfer[eê]ncias?|transbordos?|escadas?|stairs?|"
+        r"acess[ií]vel|accessible|cadeira\s+de\s+rodas|wheelchair|mobilidade|chuva|"
+        r"chover|rain(?:y|s|ing)?|bagagem|luggage|malas?|idosos?|elderly|"
+        r"crian[cç]as?|children|kids"
     )
     cleanup_patterns = (
         rf"\s+(?:que|qual|which|what)\s+(?:{mode_terms})\b.*$",
@@ -96,6 +214,12 @@ def _strip_endpoint_mode_clauses(value: str) -> str:
         rf"\s+(?:com|using|by)\s+(?:{mode_terms})\b.*$",
         rf"\s+(?:de|por)\s+(?:{mode_terms})\b.*$",
         r"\s+(?:quanto\s+tempo|a\s+que\s+horas|quando|how\s+long|when)\b.*$",
+        rf"\s+(?:com|sem|with|without)\s+(?=[^,;.!?]*(?:{quality_terms})).*$",
+        rf"\s+(?:e|and)\s+(?:com|sem|with|without)\s+(?=[^,;.!?]*(?:{quality_terms})).*$",
+        rf"\s+(?:e\s+)?(?:se|if)\s+(?=[^,;.!?]*(?:{quality_terms})).*$",
+        rf"\s+(?:e|and)\s+(?:se|if)\s+(?=[^,;.!?]*(?:{quality_terms})).*$",
+        rf"\s+(?:em\s+caso\s+de|caso|in\s+case\s+of)\s+(?=[^,;.!?]*(?:{quality_terms})).*$",
+        rf"\s+(?:à|a|na|no|in)\s+(?=[^,;.!?]*(?:{quality_terms})).*$",
     )
     for pattern in cleanup_patterns:
         cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE).strip(" .?!,;:")
@@ -1257,23 +1381,32 @@ def _build_metro_wait_lines(targets: List[Tuple[str, str]], language: str) -> Li
     return realtime_lines
 
 
-def _extract_route_endpoints(user_message: str) -> Optional[Tuple[str, str]]:
+def _extract_route_endpoints(
+    user_message: str,
+    *,
+    collapse_generic_service_area: bool = True,
+) -> Optional[Tuple[str, str]]:
     """Extracts route endpoints from common PT/EN route phrasings."""
     if _query_requests_metro_line_wait_times(user_message):
         return None
 
-    shorthand_pair = _extract_metro_station_pair_from_shorthand(user_message)
+    route_text = _expand_route_address_abbreviations(user_message)
+
+    shorthand_pair = _extract_metro_station_pair_from_shorthand(route_text)
     if shorthand_pair:
         return shorthand_pair
 
-    if _looks_like_itinerary_request_without_explicit_route(user_message):
+    if _looks_like_itinerary_request_without_explicit_route(route_text):
         return None
 
     patterns = [
         r"(?P<origin>.+?)\s*(?:->|→|=>)\s*(?P<destination>.+?)(?:[\?\!\.,;]|$)",
         r"\b(?:quero|preciso|tenho)\s+(?:de\s+)?ir\s+(?:desde|a\s+partir\s+(?:dos|das|do|da|de))\s+(?P<origin>.+?)\s+(?:at[eé]|para|ao|a|à)\s+(?P<destination>.+?)(?:\.\s+(?:diz[- ]me|diga[- ]me|tell\s+me|show\s+me)\b|[\?\!;]|$)",
         r"\b(?:quais\s+os\s+)?(?:pr[oó]xim(?:os|as)|next)\s+(?:autocarros?|buses?|el[eé]tricos?|trams?).*?\b(?:at|em|na|no)\s+(?P<origin>.+?)\s+(?:para\s+(?:seguir\s+)?(?:para\s+)?|to\s+)(?P<destination>.+?)(?:[\?\!\.,;]|$)",
-        r"\b(?:plan|planeia|planeie|organiza|organize)\b.*?\b(?:em|in)\s+(?P<destination>[^,\?\!\.]+?)\s+(?:a\s+partir\s+(?:dos|das|do|da|de)|desde|from)\s+(?P<origin>[^,\?\!\.]+?)(?:\s*,|\s+com\b|\s+with\b|\s+e\b|\s+and\b|[\?\!\.]|$)",
+        r"\b(?:plan|planeia|planeie|organiza|organize)\b.*?\b(?:em|in)\s+(?P<destination>[^,\?\!\.]+?)\s+"
+        r"(?:a\s+partir\s+(?:dos|das|do|da|de)|desde|from|starting\s+from|start\s+from|"
+        r"starting\s+at|come[cç]ando\s+(?:em|no|na|nos|nas|do|da|dos|das|de))\s+"
+        r"(?P<origin>[^,\?\!\.]+?)(?:\s*,|\s+com\b|\s+with\b|\s+e\b|\s+and\b|[\?\!\.]|$)",
         r"\b(?:plan|planeia|planeie|organiza|organize)\b.*?\b(?:em|in)\s+(?P<destination>[^,\?\!\.]+),\s*(?:diz[- ]me|diga[- ]me|tell me|show me)\s+como\s+l[aá]\s+chegar\s+a\s+partir\s+(?:dos|das|do|da|de)\s+(?P<origin>.+?)(?:\s+e\b|[\?\!\.,;]|$)",
         r"\b(?:plan|planeia|planeie|organiza|organize)\b.*?\b(?:em|in)\s+(?P<destination>[^,\?\!\.]+),\s*(?:tell me|show me)\s+how\s+to\s+get\s+there\s+from\s+(?P<origin>.+?)(?:\s+and\b|[\?\!\.,;]|$)",
         r"\b(?:como\s+(?:é\s+que\s+)?(?:fa[cç]o\s+para\s+)?(?:posso\s+)?ir|como\s+(?:é\s+que\s+)?vou|como\s+chego)\s+(?:dos|das|do|da|de)\s+(?P<origin>.+?)\s+(?:para|ao|a|à|até)\s+(?P<destination>.+?)(?:\s*\?\s*(?:d[aá]\s+para|posso|can\s+i)\b|[\?\!\.,;]|$)",
@@ -1321,7 +1454,11 @@ def _extract_route_endpoints(user_message: str) -> Optional[Tuple[str, str]]:
         planner_fragment_terms = (
             "dia", "dias", "day", "days", "roteiro", "itinerario", "itinerary",
             "plano", "plan", "casal", "senior", "ritmo", "orcamento", "budget",
-            "gastronomia", "museus", "monumentos", "chuva", "preferencias", "preferences",
+            "gastronomia", "museus", "monumentos", "chuva", "chover", "rain", "rainy",
+            "caminhada", "caminhar", "walking", "walk", "andar", "transbordo",
+            "transbordos", "transferencia", "transferencias", "escadas", "bagagem",
+            "luggage", "mala", "malas", "idosos", "elderly", "criancas", "children",
+            "kids", "preferencias", "preferences",
         )
         if any(re.search(rf"\b{re.escape(term)}\b", normalized) for term in planner_fragment_terms):
             return False
@@ -1333,10 +1470,12 @@ def _extract_route_endpoints(user_message: str) -> Optional[Tuple[str, str]]:
         return True
 
     for pattern in patterns:
-        match = re.search(pattern, user_message, flags=re.IGNORECASE)
+        match = re.search(pattern, route_text, flags=re.IGNORECASE)
         if match:
             origin = _clean_query_fragment(match.group("origin"))
             destination = _clean_query_fragment(match.group("destination"))
+            if collapse_generic_service_area:
+                destination = _generic_service_area_endpoint(destination) or destination
             if origin and destination and _valid_endpoint(origin) and _valid_endpoint(destination):
                 return origin, destination
 
@@ -1801,6 +1940,30 @@ def _query_has_route_mode_constraints(user_message: str) -> bool:
     """Returns whether the user explicitly constrained the allowed transport modes for a route."""
     preferences = _parse_route_mode_preferences(user_message)
     return any(preferences.values())
+
+
+def _query_has_route_quality_preferences(user_message: str) -> bool:
+    """Return whether a route asks for qualitative optimization beyond modes.
+
+    These requests should still use deterministic transport tools for evidence,
+    but should avoid the shortest static fast path so the LLM can synthesize
+    trade-offs and explicit limitations from the gathered route data.
+    """
+    normalized = _normalize_token(user_message)
+    if not normalized:
+        return False
+    return bool(
+        re.search(
+            r"\b(?:menos\s+caminhada|pouca\s+caminhada|caminhar\s+pouco|least\s+walking|"
+            r"less\s+walking|minimal\s+walking|menos\s+transbordos?|menos\s+transferencias?|"
+            r"menos\s+transferências?|fewest\s+transfers?|least\s+transfers?|sem\s+escadas|"
+            r"step[-\s]?free|acessivel|acessível|accessible|cadeira\s+de\s+rodas|wheelchair|"
+            r"mobilidade\s+reduzida|reduced\s+mobility|com\s+chuva|se\s+chover|rain|rainy|"
+            r"bagagem|luggage|mala|malas|idosos?|elderly|criancas|crianças|kids|children)\b",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _requested_route_option_modes(user_message: str) -> set[str]:
@@ -6432,9 +6595,13 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
     if _query_requests_metro_line_wait_times(user_message):
         return None
 
+    raw_endpoints = _extract_route_endpoints(user_message, collapse_generic_service_area=False)
     endpoints = _extract_route_endpoints(user_message)
     if not endpoints:
         return None
+    language = _infer_language(user_message, "")
+    raw_destination = raw_endpoints[1] if raw_endpoints else endpoints[1]
+    area_destination = _generic_service_area_endpoint(raw_destination)
 
     if _query_has_wait_departure_intent(user_message) and re.search(
         r"\b(carris|autocarro|autocarros|bus|buses|tram|trams|el[eé]trico|eletrico)\b",
@@ -6464,12 +6631,13 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
             carris_result = ""
 
         if carris_result and not _tool_result_indicates_no_match(carris_result):
-            return _build_carris_surface_route_response(
+            response = _build_carris_surface_route_response(
                 carris_result,
                 user_message,
                 endpoints[0],
                 endpoints[1],
             )
+            return _append_generic_service_area_note(response, raw_destination, area_destination, language)
 
     from tools.transport_api import get_route_between_stations
 
@@ -6549,12 +6717,13 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
                 except Exception:
                     urban_carris_result = ""
             if urban_carris_result and not _tool_result_indicates_no_match(urban_carris_result):
-                return _build_carris_surface_route_response(
+                response = _build_carris_surface_route_response(
                     urban_carris_result,
                     user_message,
                     endpoints[0],
                     endpoints[1],
                 )
+                return _append_generic_service_area_note(response, raw_destination, area_destination, language)
 
         metropolitana_bridge = _build_metropolitana_bridge_for_partial_metro_route(
             user_message=user_message,
@@ -6662,6 +6831,15 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
         )
 
     if valid_carris_result and _is_generic_public_transport_route_query(user_message) and is_metro_route:
+        formatted_carris_response = _build_carris_surface_route_response(
+            carris_result,
+            user_message,
+            endpoints[0],
+            endpoints[1],
+        )
+        if not fastest_requested:
+            return _append_generic_service_area_note(formatted_carris_response, raw_destination, area_destination, language)
+
         updated_label = "Atualizado" if _infer_language(user_message, "") == "pt" else "Updated"
         source_label = "Fonte" if _infer_language(user_message, "") == "pt" else "Source"
         title = "### 🚇 🚌 Opções de transporte público" if _infer_language(user_message, "") == "pt" else "### 🚇 🚌 Public Transport Options"
@@ -6681,28 +6859,20 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
                 f"{_strip_transport_source_lines(route_result)}\n\n"
                 "---\n\n"
                 f"{bus_title}\n\n"
-                f"{_strip_transport_source_lines(carris_result)}\n\n"
+                f"{_strip_transport_source_lines(formatted_carris_response)}\n\n"
                 f"📌 **{source_label}:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | [*Carris*](https://www.carris.pt) | **{updated_label}:** {timestamp}"
             )
-        return (
-            f"{title}\n\n"
-            f"{bus_title}\n\n"
-            f"{_strip_transport_source_lines(carris_result)}\n\n"
-            "---\n\n"
-            f"{metro_title}\n\n"
-            f"{_strip_transport_source_lines(route_result)}\n\n"
-            f"📌 **{source_label}:** [*Carris*](https://www.carris.pt) | [*Metro de Lisboa*](https://www.metrolisboa.pt) | **{updated_label}:** {timestamp}"
-        )
 
     if valid_carris_result:
-        return _build_mode_filtered_carris_route_response(
+        response = _build_mode_filtered_carris_route_response(
             carris_result,
             user_message,
             endpoints[0],
             endpoints[1],
         )
+        return _append_generic_service_area_note(response, raw_destination, area_destination, language)
 
-    return route_result
+    return _append_generic_service_area_note(route_result, raw_destination, area_destination, language)
 
 
 def _route_response_uses_carris_urban(response: str) -> bool:
@@ -6748,6 +6918,8 @@ def _build_deterministic_transport_tool_call(user_message: str) -> Optional[AIMe
         return _build_tool_call("get_transport_summary", {"language": language})
 
     if _query_has_route_mode_constraints(query):
+        return None
+    if _query_has_route_quality_preferences(query) and _extract_route_endpoints(query):
         return None
     if _query_requests_future_cp_schedule(query) or _query_requests_broad_carris_catalog(query):
         return None
@@ -9872,6 +10044,11 @@ class TransportAgent(BaseAgent):
             "get_carris_metropolitana_stop_info",
         }
         endpoints = [] if deterministic_tool_name in non_route_tool_names else _extract_route_endpoints(user_message)
+        quality_sensitive_route = bool(
+            endpoints
+            and _query_has_route_quality_preferences(user_message)
+            and not _query_has_route_mode_constraints(user_message)
+        )
         ambiguity_preamble = ""
         if endpoints:
             try:
@@ -9913,7 +10090,7 @@ class TransportAgent(BaseAgent):
             )
             return with_ambiguity_preamble(finalized_response)
 
-        if ambiguity_preamble:
+        if ambiguity_preamble and not _ambiguity_preamble_is_no_clear_match(ambiguity_preamble):
             return self._finalize_transport_response(
                 ambiguity_preamble,
                 user_message=user_message,
@@ -9946,16 +10123,17 @@ class TransportAgent(BaseAgent):
                 language=resolved_language,
             )
 
-        cp_multileg_response = self._build_cp_multileg_response(
-            user_message=user_message,
-            language=resolved_language,
-        )
-        if cp_multileg_response:
-            return self._finalize_transport_response(
-                cp_multileg_response,
+        if not quality_sensitive_route:
+            cp_multileg_response = self._build_cp_multileg_response(
                 user_message=user_message,
                 language=resolved_language,
             )
+            if cp_multileg_response:
+                return self._finalize_transport_response(
+                    cp_multileg_response,
+                    user_message=user_message,
+                    language=resolved_language,
+                )
 
         early_cp_tool_spec = _build_cp_tool_spec(user_message)
         explicit_train_context = bool(
@@ -9987,6 +10165,7 @@ class TransportAgent(BaseAgent):
             endpoints
             and _is_generic_public_transport_route_query(user_message)
             and not surface_only_route_modes
+            and not quality_sensitive_route
             and not (early_cp_tool_spec and explicit_train_context)
         ):
             early_direct_route_response = _build_deterministic_route_tool_response(user_message)
@@ -9994,7 +10173,7 @@ class TransportAgent(BaseAgent):
                 return finalize_direct_route_response(early_direct_route_response)
 
         nearest_cp_destination_response = None
-        if not (early_cp_tool_spec and explicit_train_context):
+        if not quality_sensitive_route and not (early_cp_tool_spec and explicit_train_context):
             nearest_cp_destination_response = self._build_nearest_cp_destination_response(
                 user_message=user_message,
                 language=resolved_language,
@@ -10175,6 +10354,7 @@ class TransportAgent(BaseAgent):
             and not cp_tool_spec
             and not explicit_surface_mode
             and not _is_generic_public_transport_route_query(user_message)
+            and not quality_sensitive_route
         ):
             deterministic_response = _build_deterministic_metro_route_response(
                 user_message=user_message,
@@ -10234,7 +10414,7 @@ class TransportAgent(BaseAgent):
         carris_metropolitana_tool_spec = _build_carris_metropolitana_tool_spec(user_message)
 
         if not cp_tool_spec and not carris_metropolitana_tool_spec:
-            direct_route_response = _build_deterministic_route_tool_response(user_message)
+            direct_route_response = None if quality_sensitive_route else _build_deterministic_route_tool_response(user_message)
             if direct_route_response:
                 return finalize_direct_route_response(direct_route_response)
 
@@ -10328,6 +10508,11 @@ class TransportAgent(BaseAgent):
         endpoints = _extract_route_endpoints(user_message)
         if endpoints:
             if route_mentions_outside_aml(user_message):
+                return None
+            if (
+                _query_has_route_quality_preferences(user_message)
+                and not _query_has_route_mode_constraints(user_message)
+            ):
                 return None
             return _build_tool_call(
                 "get_route_between_stations",

@@ -86,7 +86,7 @@ _STRUCTURED_QUERY_PLAN_INTENTS: frozenset[str] = frozenset({
 _RESEARCHER_FOOD_INTENT_RE = re.compile(
     r"\b(?:restaurant|restaurante|restaurants|restaurantes|food|comida|comer|cuisine|cozinha|"
     r"gastronom\w*|tradicional|traditional|almoco|almoço|lunch|jantar|dinner|"
-    r"cafe|café|coffee|pastelaria|pastry|padaria|bakery|bar|bars)\b",
+    r"seafood|marisco|fish|peixe|cafe|café|coffee|pastelaria|pastry|padaria|bakery|bar|bars)\b",
     re.IGNORECASE,
 )
 
@@ -567,6 +567,10 @@ class ResearcherAgent(BaseAgent):
             "Return ONLY valid JSON with keys: intent, subject, near_location, service_types, dataset_name, date_filter, category_hint. "
             f"intent must be one of [{intents}]. "
             f"service_types must be an array using only [{service_types}]. "
+            "Restaurants, cafes, bars, fado venues, hotels, museums, attractions, viewpoints, and tourist places "
+            "are place_lookup requests with category_hint, not nearby_services. "
+            "Use nearby_services/service_types only for explicit municipal or public-service facilities such as "
+            "pharmacies, hospitals, markets, restrooms, police, schools, libraries, parking, Wi-Fi, or recycling. "
             f"For day-month references without a year, assume {current_year} and output YYYY-MM-DD. "
             "For month-only filters, keep the month name exactly as written by the user. "
             "For generic nearby-service queries, keep subject null unless the user names a specific facility. "
@@ -599,12 +603,39 @@ class ResearcherAgent(BaseAgent):
             and self._extract_event_date_filter(user_message) is None
             and self._has_explicit_calendar_reference(user_message)
         )
+        researcher_domain_marker = bool(
+            re.search(
+                r"\b(?:eventos?|events?|restaurantes?|restaurants?|fado|museus?|museums?|"
+                r"monumentos?|monuments?|miradouros?|viewpoints?|locais?|places?|"
+                r"farm[aá]cias?|pharmacies|hospitais?|hospitals?|bibliotecas?|libraries|"
+                r"mercados?|markets?|servi[cç]os?|services)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+        preference_or_exclusion = bool(
+            re.search(
+                r"\b(?:sem|nao|não|evitar|excluir|excepto|exceto|menos|prefiro|prefer|"
+                r"not|without|avoid|excluding|except|best|melhor|recomenda|recomendar|"
+                r"sugere|suggest|autentico|autêntico|authentic|local|barato|cheap|"
+                r"orcamento|orçamento|budget|vista|view|tejo|tagus|familia|família|"
+                r"family|criancas|crianças|kids|acessivel|acessível|accessible)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+        complex_researcher_query = (
+            researcher_domain_marker
+            and preference_or_exclusion
+            and len(normalized.split()) >= 8
+        )
 
         return (
             any(marker in normalized for marker in dataset_markers)
             or any(marker in normalized for marker in unsupported_service_markers)
             or named_service_with_nearby
             or event_with_explicit_calendar
+            or complex_researcher_query
         )
 
     def _extract_structured_query_plan(self, user_message: str) -> Optional[Dict[str, Any]]:
@@ -635,6 +666,19 @@ class ResearcherAgent(BaseAgent):
         service_types = self._normalize_structured_service_types(payload.get("service_types"))
         date_filter = self._normalize_structured_date_filter(payload.get("date_filter"), user_message)
 
+        if self._query_should_use_visitlisboa_place_catalog(user_message, category_hint):
+            inferred_place_category = self._infer_place_category_hint(user_message)
+            normalized_message = _normalize_researcher_intent_text(user_message)
+            intent = "place_lookup"
+            service_types = []
+            category_hint = (
+                "Restaurants"
+                if inferred_place_category == "Restaurants" and _RESEARCHER_FOOD_INTENT_RE.search(normalized_message)
+                else self._canonical_structured_place_category_hint(category_hint)
+                or inferred_place_category
+                or category_hint
+            )
+
         if subject and near_location and subject.lower() == near_location.lower():
             subject = None
 
@@ -647,6 +691,156 @@ class ResearcherAgent(BaseAgent):
             "date_filter": date_filter,
             "category_hint": category_hint,
         }
+
+    @staticmethod
+    def _canonical_structured_place_category_hint(value: Any) -> Optional[str]:
+        """Map an LLM-emitted category hint to a supported VisitLisboa category."""
+        normalized = ResearcherAgent._normalize_event_preference_text(str(value or ""))
+        if not normalized:
+            return None
+        exact_categories = {
+            "museums & monuments": "Museums & Monuments",
+            "museums": "Museums & Monuments",
+            "monuments": "Museums & Monuments",
+            "restaurants": "Restaurants",
+            "restaurant": "Restaurants",
+            "hotels": "Hotels",
+            "hotel": "Hotels",
+            "view points": "View Points",
+            "viewpoints": "View Points",
+            "beaches": "Beaches",
+            "shopping": "Shopping",
+            "nightlife": "Nightlife",
+            "parks & gardens": "Parks & Gardens",
+            "parks": "Parks & Gardens",
+            "gardens": "Parks & Gardens",
+            "tours": "Tours",
+            "tejo cruises": "Tejo Cruises",
+        }
+        if normalized in exact_categories:
+            return exact_categories[normalized]
+        alias_patterns = (
+            ("Museums & Monuments", r"\b(?:museu|museus|museum|monumento|monument|palacio|palace|castelo|castle)\b"),
+            ("Restaurants", r"\b(?:restaurante|restaurant|gastronomia|food|dining|fado|marisco|seafood)\b"),
+            ("View Points", r"\b(?:miradouro|viewpoint|vista|view)\b"),
+            ("Parks & Gardens", r"\b(?:jardim|garden|parque|park)\b"),
+            ("Beaches", r"\b(?:praia|beach|surf)\b"),
+            ("Shopping", r"\b(?:compras|shopping|lojas|shops?)\b"),
+            ("Nightlife", r"\b(?:nightlife|vida\s+noturna|bar|bars)\b"),
+            ("Tours", r"\b(?:tour|tours|visita|visitas|experience|experiencia|experiência)\b"),
+        )
+        for category, pattern in alias_patterns:
+            if re.search(pattern, normalized, flags=re.IGNORECASE):
+                return category
+        return None
+
+    @staticmethod
+    def _structured_subject_looks_like_generic_place_query(value: Any) -> bool:
+        """Return whether a structured subject is a category query, not a name."""
+        normalized = ResearcherAgent._normalize_event_preference_text(str(value or ""))
+        if not normalized:
+            return False
+        if len(normalized.split()) > 6:
+            return True
+        return bool(
+            re.search(
+                r"\b(?:restaurants?|restaurantes?|museums?|museus?|monuments?|monumentos?|"
+                r"events?|eventos?|places?|locais?|attractions?|atracoes?|atrações?|"
+                r"best|melhor|recomenda|suggest|with|com|near|perto|view|vista|"
+                r"tejo|tagus|food|seafood|marisco|cheap|barato|budget|orcamento|orçamento|"
+                r"without|sem|not|nao|não|avoid|evitar)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+
+    @staticmethod
+    def _query_should_use_visitlisboa_place_catalog(user_message: str, category_hint: Any = None) -> bool:
+        """Return whether an LLM structured plan must stay in the tourism/place catalogue."""
+        normalized = _normalize_researcher_intent_text(user_message)
+        if not normalized:
+            return False
+
+        canonical_hint = ResearcherAgent._canonical_structured_place_category_hint(category_hint)
+        if canonical_hint in {
+            "Restaurants",
+            "Museums & Monuments",
+            "Hotels",
+            "View Points",
+            "Beaches",
+            "Shopping",
+            "Nightlife",
+            "Parks & Gardens",
+            "Tours",
+            "Tejo Cruises",
+        }:
+            return True
+
+        explicit_dataset_or_service = bool(
+            re.search(
+                r"\b(?:lisboa aberta|dados abertos|dataset|datasets|municipal|public service|"
+                r"servico municipal|servicos municipais|serviço municipal|serviços municipais)\b",
+                normalized,
+            )
+        )
+        restaurant_or_food_request = bool(_RESEARCHER_FOOD_INTENT_RE.search(normalized))
+        restaurant_word_present = bool(
+            re.search(r"\b(?:restaurant|restaurants|restaurante|restaurantes|dining|jantar|dinner|almoco|almoço|lunch)\b", normalized)
+        )
+        market_only_request = bool(
+            re.search(r"\b(?:market|markets|mercado|mercados|feira|feiras)\b", normalized)
+            and not restaurant_word_present
+        )
+        if restaurant_or_food_request and not explicit_dataset_or_service and not market_only_request:
+            return True
+
+        return bool(
+            re.search(
+                r"\b(?:museu|museus|museum|museums|monumento|monumentos|monument|monuments|"
+                r"miradouro|miradouros|viewpoint|viewpoints|hotel|hotels|fado|"
+                r"attraction|attractions|atracao|atracoes|atração|atrações|tourist places|locais turisticos)\b",
+                normalized,
+            )
+            and not explicit_dataset_or_service
+        )
+
+    @staticmethod
+    def _append_subjective_place_preference_caveat(result: str, user_message: str, language: str) -> str:
+        """Add a caveat when requested place preferences are subjective and unverifiable."""
+        if not result:
+            return result or ""
+
+        normalized_query = _normalize_researcher_intent_text(user_message)
+        if not re.search(
+            r"\b(?:not overly touristy|not touristy|less touristy|touristy|tourist trap|"
+            r"hidden gem|authentic|local vibe|local feel|quiet|not crowded|cosy|cozy|romantic|"
+            r"pouco turistico|menos turistico|turistico|armadilha turistica|autentico|"
+            r"ambiente local|calmo|pouco cheio|romantico)\b",
+            normalized_query,
+        ):
+            return result
+
+        visible_result = _normalize_researcher_intent_text(result)
+        if re.search(
+            r"\b(?:subjective filter|subjective criteria|not fully verified|not explicitly verified|"
+            r"criterios subjetivos|nao permitem verificar|não permitem verificar|nao ficou confirmado)\b",
+            visible_result,
+        ):
+            return result
+
+        if (language or "").lower().startswith("pt"):
+            caveat = (
+                "⚠️ **Limitação:** critérios subjetivos como serem pouco turísticos, autênticos ou calmos "
+                "não ficam explicitamente confirmados nos dados disponíveis; priorizei locais com sinais "
+                "compatíveis e detalhes verificáveis."
+            )
+        else:
+            caveat = (
+                "⚠️ **Limitation:** subjective filters such as how touristy, authentic, or quiet a place feels "
+                "are not explicitly verified in the available place data; I prioritised venues with compatible "
+                "signals and verifiable details."
+            )
+        return f"{result.rstrip()}\n\n{caveat}"
 
     @staticmethod
     def _structured_service_tool_label(service_type: str) -> Optional[str]:
@@ -1128,7 +1322,7 @@ class ResearcherAgent(BaseAgent):
             ]
         ):
             signals.append("Shopping")
-        if any(term in query for term in ["cruise", "cruises", "cruzeiro", "cruzeiros", "tejo", "tagus"]):
+        if any(term in query for term in ["cruise", "cruises", "cruzeiro", "cruzeiros", "boat tour", "river tour"]):
             signals.append("Tejo Cruises")
         if any(term in query for term in ["beach", "beaches", "praia", "praias", "surf"]):
             signals.append("Beaches")
@@ -1153,6 +1347,8 @@ class ResearcherAgent(BaseAgent):
         so retrieval remains broader and can return the requested mix.
         """
         signals = cls._infer_place_category_signals(user_message)
+        if "Restaurants" in signals and _RESEARCHER_FOOD_INTENT_RE.search(user_message or ""):
+            return "Restaurants"
         if len(signals) != 1:
             return None
         return signals[0]
@@ -3694,8 +3890,15 @@ class ResearcherAgent(BaseAgent):
         structured_subject = self._normalize_structured_plan_text(structured_plan.get("subject")) if structured_plan else None
         place_focus_query = structured_subject or self._extract_place_focus_query(user_message) or self._extract_place_area_filter(user_message)
         specific_lookup = _extract_specific_place_lookup_phrase(user_message)
-        if structured_subject and not specific_lookup:
+        if (
+            structured_subject
+            and not specific_lookup
+            and not self._structured_subject_looks_like_generic_place_query(structured_subject)
+        ):
             specific_lookup = structured_subject
+        structured_category_hint = self._canonical_structured_place_category_hint(
+            structured_plan.get("category_hint") if structured_plan else None
+        )
         service_types = self._extract_service_types(user_message)
         for structured_service in structured_plan.get("service_types", []) if structured_plan else []:
             tool_label = self._structured_service_tool_label(structured_service)
@@ -3736,7 +3939,7 @@ class ResearcherAgent(BaseAgent):
                 "language": language,
                 "specific_lookup": True,
             }
-            exact_category_hint = self._infer_place_category_hint(user_message)
+            exact_category_hint = self._infer_place_category_hint(user_message) or structured_category_hint
             if exact_category_hint:
                 exact_args["category"] = exact_category_hint
 
@@ -3774,6 +3977,11 @@ class ResearcherAgent(BaseAgent):
                         language,
                     )
                     source_line = self._build_places_source_line(exact_result, language)
+                    exact_result = self._append_subjective_place_preference_caveat(
+                        exact_result,
+                        user_message,
+                        language,
+                    )
                     if history_section:
                         if used_external_history_source:
                             source_line = self._extend_place_source_line_with_history(source_line)
@@ -3885,7 +4093,7 @@ class ResearcherAgent(BaseAgent):
         if not places_tool:
             return self._run_direct_tool_fallback(user_message, language)
 
-        category_hint = self._infer_place_category_hint(user_message)
+        category_hint = self._infer_place_category_hint(user_message) or structured_category_hint
         requested_count = self._extract_requested_result_count(user_message)
         query_text = user_message if category_hint and not specific_lookup else (place_focus_query or user_message)
         max_results = requested_count or 5
@@ -3963,6 +4171,11 @@ class ResearcherAgent(BaseAgent):
             offset=0,
         )
         source_line = self._build_places_source_line(result, language)
+        result = self._append_subjective_place_preference_caveat(
+            result,
+            user_message,
+            language,
+        )
         return f"{result}\n\n{source_line}".strip()
 
     def _run_direct_tool_fallback(self, user_message: str, language: str) -> str:
@@ -5084,13 +5297,21 @@ class ResearcherAgent(BaseAgent):
                     )
 
         if _RESEARCHER_FOOD_INTENT_RE.search(normalized):
+            default_food_query = {
+                "query": "restaurantes de gastronomia tradicional em Lisboa",
+                "category": "Restaurants",
+                "max_results": 5,
+                "language": language,
+                "specific_lookup": False,
+            } if language == "pt" else {
+                "query": "traditional Portuguese restaurants in Lisbon",
+                "category": "Restaurants",
+                "max_results": 5,
+                "language": language,
+                "specific_lookup": False,
+            }
             food_queries = planned_food_queries or [
-                {
-                    "query": "restaurantes de gastronomia tradicional em Lisboa",
-                    "category": "Restaurants",
-                    "max_results": 5,
-                    "language": language,
-                }
+                default_food_query
             ]
             if requests_pastry_stop:
                 pastry_query = {
@@ -5108,12 +5329,26 @@ class ResearcherAgent(BaseAgent):
                         != str(pastry_query["query"]).strip().lower()
                     ],
                 ]
-            for food_args in food_queries[:2]:
+            food_blocks_added = False
+            executed_food_query_keys: set[str] = set()
+
+            def run_food_query(food_args: Dict[str, Any]) -> None:
+                nonlocal food_blocks_added, place_blocks_added
+                query_key = self._normalize_for_deterministic_routing(str(food_args.get("query") or ""))
+                if not query_key or query_key in executed_food_query_keys:
+                    return
+                executed_food_query_keys.add(query_key)
                 result = str(self._invoke_tool(places_tool, food_args, tool_name="search_places_attractions")).strip()
                 result = self._localize_place_card_titles_with_llm(result, language)
-                if result:
+                if result and self._count_ranked_results(result) > 0:
                     result_blocks.append(result)
                     place_blocks_added = True
+                    food_blocks_added = True
+
+            for food_args in food_queries[:2]:
+                run_food_query(food_args)
+            if not food_blocks_added:
+                run_food_query(default_food_query)
 
         if not result_blocks:
             generic_args = {"query": query, "max_results": 5, "language": language}
@@ -6304,6 +6539,18 @@ class ResearcherAgent(BaseAgent):
                     language=language,
                 ))
 
+        if not is_greeting:
+            structured_response = self._maybe_run_structured_query_plan(user_message, language)
+            if structured_response:
+                if verbose:
+                    print("      [RESEARCHER] Using structured LLM-assisted deterministic routing...")
+                return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
+                    structured_response,
+                    agent_name="researcher",
+                    user_query=user_message,
+                    language=language,
+                ))
+
         if not is_greeting and self._is_visit_place_context_query(user_message):
             if verbose:
                 print("      [RESEARCHER] Using deterministic visit-area place lookup...")
@@ -6373,18 +6620,6 @@ class ResearcherAgent(BaseAgent):
                 user_query=user_message,
                 language=language,
             ))
-
-        if not is_greeting:
-            structured_response = self._maybe_run_structured_query_plan(user_message, language)
-            if structured_response:
-                if verbose:
-                    print("      [RESEARCHER] Using structured LLM-assisted deterministic routing...")
-                return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
-                    structured_response,
-                    agent_name="researcher",
-                    user_query=user_message,
-                    language=language,
-                ))
 
         if not is_greeting and self._is_generic_research_discovery_query(user_message):
             if verbose:

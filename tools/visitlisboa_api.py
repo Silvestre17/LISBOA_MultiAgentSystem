@@ -2953,6 +2953,22 @@ def _extract_place_proximity_reference(query: Optional[str]) -> str:
     return reference.strip(" :;-")
 
 
+def _is_broad_linear_proximity_reference(reference: str) -> bool:
+    """Return whether a proximity anchor is too broad for point-distance ranking."""
+    normalized = _normalize_place_hint_text(str(reference or "")).lower()
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if not normalized:
+        return False
+
+    return bool(
+        re.search(
+            r"\b(?:tagus|tejo|rio\s+tejo|tagus\s+river|riverfront|riverside|"
+            r"waterfront|estuary|estuario|frente\s+ribeirinha|margem\s+do\s+tejo)\b",
+            normalized,
+        )
+    )
+
+
 def _place_result_coordinates(result: Dict[str, Any]) -> Tuple[float, float] | None:
     """Resolve coordinates for a place result from metadata, catalog, or address."""
     for source in (result, _place_result_full_data(result)):
@@ -3006,6 +3022,8 @@ def _rank_place_results_by_proximity(
     """Sort place results by distance when the user asks for proximity."""
     reference = _extract_place_proximity_reference(query)
     if not reference or not results:
+        return results, ""
+    if _is_broad_linear_proximity_reference(reference):
         return results, ""
 
     try:

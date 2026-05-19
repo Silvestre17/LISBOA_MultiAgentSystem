@@ -639,6 +639,109 @@ class BaseAgent:
 
         return clean_response(raw_result)
 
+    @staticmethod
+    def _compact_tool_evidence_for_synthesis(last_tool_results: List[Dict[str, Any]]) -> str:
+        """Build a bounded evidence packet for final LLM synthesis fallback.
+
+        Args:
+            last_tool_results: Tool results captured during the ReAct loop.
+
+        Returns:
+            Concatenated user-facing evidence text with internal tool metadata
+            stripped from the visible packet.
+        """
+        evidence_blocks: List[str] = []
+        for index, payload in enumerate(last_tool_results[-4:], start=1):
+            raw_result = str(payload.get("result") or "").strip()
+            if not raw_result:
+                continue
+            cleaned_result = clean_response(raw_result, _print=False).strip()
+            if not cleaned_result:
+                continue
+            if len(cleaned_result) > 3500:
+                truncated = cleaned_result[:3500]
+                cleaned_result = truncated.rsplit("\n", 1)[0].strip() or truncated.strip()
+                cleaned_result = f"{cleaned_result}\n[truncated]"
+            evidence_blocks.append(f"Evidence {index}:\n{cleaned_result}")
+        return "\n\n".join(evidence_blocks).strip()
+
+    def _try_synthesize_tool_fallback_with_llm(
+        self,
+        *,
+        user_query: str,
+        language: str,
+        last_tool_results: List[Dict[str, Any]],
+    ) -> Optional[str]:
+        """Ask the base LLM to synthesize tool evidence before raw fallback output.
+
+        The method is intentionally conservative: if the synthesis is empty,
+        incomplete, or leaks internal implementation wording, callers keep the
+        existing deterministic fallback.
+
+        Args:
+            user_query: Original user question.
+            language: Expected response language.
+            last_tool_results: Tool results captured during the ReAct loop.
+
+        Returns:
+            Synthesized final answer, or ``None`` when unsafe.
+        """
+        evidence = self._compact_tool_evidence_for_synthesis(last_tool_results)
+        if not evidence:
+            return None
+
+        is_pt = str(language or "").lower().startswith("pt")
+        language_instruction = (
+            "Respond entirely in European Portuguese."
+            if is_pt
+            else "Respond entirely in English."
+        )
+        direct_label = "Resposta direta" if is_pt else "Direct answer"
+        source_label = "Fonte" if is_pt else "Source"
+        system_prompt = (
+            "You are LISBOA's final evidence synthesizer. Use only the evidence "
+            "provided below. Do not add facts, times, routes, prices, openings, "
+            "or availability that are not present in the evidence. Do not mention "
+            "tools, APIs, debug traces, raw IDs, or implementation details. "
+            "Answer the user's exact request first, keep the Markdown clean for "
+            "Streamlit, preserve useful emojis and indentation, omit missing "
+            "fields, and finish with one source footer only when the evidence "
+            f"contains a source. {language_instruction}"
+        )
+        human_prompt = (
+            f"User question:\n{user_query}\n\n"
+            f"Required direct-answer label: {direct_label}\n"
+            f"Required source label, if factual sources are present: {source_label}\n\n"
+            "Grounded evidence:\n"
+            f"{evidence}\n\n"
+            "Return only the final user-facing answer."
+        )
+
+        try:
+            response = self._safe_llm_invoke(
+                self.llm,
+                [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=human_prompt),
+                ],
+                retries=1,
+            )
+        except Exception as exc:
+            logger.debug("LLM tool-fallback synthesis failed for %s: %s", self.agent_name, exc)
+            return None
+
+        raw_content = str(getattr(response, "content", response) or "")
+        synthesized = clean_response(raw_content, _print=False).strip()
+        if _cleaned_response_looks_incomplete(synthesized, raw_content):
+            return None
+        if re.search(
+            r"\b(?:tool(?:s|_call)?|debug|trace|raw\s+id|implementation|api)\b",
+            synthesized,
+            flags=re.IGNORECASE,
+        ):
+            return None
+        return synthesized
+
     def _record_tool_call(self, tool_name: str, args: dict) -> None:
         """Records a tool call to the agent's internal log."""
         if not hasattr(self, "_tool_calls_log") or self._tool_calls_log is None:
@@ -969,8 +1072,9 @@ class BaseAgent:
 
             # --- Loop Detection: Check for duplicate tool calls ---
             new_calls = []
+            duplicate_tool_messages = []
             duplicate_detected = False
-            for tool_call in response.tool_calls:
+            for duplicate_index, tool_call in enumerate(response.tool_calls):
                 tool_name = tool_call.get("name")
                 tool_args = tool_call.get("args", {})
                 try:
@@ -981,11 +1085,23 @@ class BaseAgent:
 
                 if signature in called_tools:
                     duplicate_detected = True
+                    duplicate_tool_messages.append(
+                        ToolMessage(
+                            content=(
+                                "Duplicate tool call skipped because an equivalent "
+                                "result is already available in the conversation."
+                            ),
+                            tool_call_id=tool_call.get("id", f"duplicate_{iteration}_{duplicate_index}"),
+                        )
+                    )
                     if verbose:
-                        print(f"      [LOOP] Duplicate tool call detected: {tool_name}. Breaking loop.")
+                        print(f"      [LOOP] Duplicate tool call detected: {tool_name}. Skipping duplicate.")
                 else:
                     called_tools.add(signature)
                     new_calls.append(tool_call)
+
+            if duplicate_tool_messages:
+                messages.extend(duplicate_tool_messages)
 
             # If all calls are duplicates, force response generation
             if duplicate_detected and not new_calls:
@@ -993,6 +1109,13 @@ class BaseAgent:
                     print("      [LOOP] All tool calls are duplicates. Forcing response.")
                 # Return last tool result if available
                 if last_tool_results:
+                    synthesized = self._try_synthesize_tool_fallback_with_llm(
+                        user_query=fallback_query,
+                        language=fallback_language,
+                        last_tool_results=last_tool_results,
+                    )
+                    if synthesized:
+                        return synthesized
                     latest = last_tool_results[-1]
                     return self._format_tool_result_for_fallback(
                         tool_name=latest["name"],
@@ -1088,6 +1211,15 @@ class BaseAgent:
 
         cleaned_response = clean_response(response.content)
         if _cleaned_response_looks_incomplete(cleaned_response, getattr(response, "content", "")) and last_tool_results:
+            synthesized = self._try_synthesize_tool_fallback_with_llm(
+                user_query=fallback_query,
+                language=fallback_language,
+                last_tool_results=last_tool_results,
+            )
+            if synthesized:
+                if verbose:
+                    print("      [FALLBACK] Final reply looked incomplete. Returning LLM synthesis of tool evidence.")
+                return synthesized
             formatted_tool_results = [
                 self._format_tool_result_for_fallback(
                     tool_name=payload["name"],
