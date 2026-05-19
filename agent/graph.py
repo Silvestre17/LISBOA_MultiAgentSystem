@@ -6454,7 +6454,6 @@ class MultiAgentAssistant:
                     print(f"   [ROUTING] Supervisor failed ({type(exc).__name__}): {exc}")
                 routing = self.supervisor._fallback_routing(
                     user_message=message,
-                    llm_response="",
                     language=effective_language,
                 )
                 routing["reasoning"] = (
@@ -7074,7 +7073,7 @@ class MultiAgentAssistant:
         # Step 5: Filter out failed agent outputs (errors must never reach user)
         clean_outputs = {}
         for aname, aoutput in agent_outputs.items():
-            if isinstance(aoutput, str) and aoutput.startswith("Error:"):
+            if isinstance(aoutput, str) and re.match(r"^Error(?:\s*\(|:)", aoutput):
                 if verbose:
                     print(f"   [FILTER] Removing failed agent output: {aname}")
                 continue

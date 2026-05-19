@@ -195,6 +195,13 @@ def _clean_requested_anchor_fragment(fragment: str) -> str:
     if _PLANNER_PROCEDURAL_ANCHOR_RE.search(_normalize_planner_text(cleaned)):
         return ""
     cleaned = re.sub(
+        r"^\s*(?:come\S*|iniciar|inicia|starting|start|termin\S*|acab\S*|ending|end)\s+"
+        r"(?:no|na|nos|nas|em|at|from|in|the)?\s+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
         r"^\s*(?:o|a|os|as|um|uma|uns|umas|no|na|nos|nas|em|at|from|the|"
         r"de|do|da|dos|das)\s+",
         "",
@@ -428,6 +435,17 @@ def _requested_anchor_labels(user_message: str, evidence_data: str = "") -> List
             normalized_query,
         )
     )
+    explicit_start_end_sequence = bool(
+        origin_label
+        and re.search(
+            r"\b(?:comeca|comece|comecar|comecando|inicia|iniciar|iniciando|start|starting)\b",
+            normalized_query,
+        )
+        and re.search(
+            r"\b(?:termina|termine|terminar|acaba|acabe|acabar|end|ending|finish)\b",
+            normalized_query,
+        )
+    )
 
     def add_label(label: str) -> None:
         key = _normalize_planner_text(label)
@@ -456,6 +474,7 @@ def _requested_anchor_labels(user_message: str, evidence_data: str = "") -> List
         normalized_label = _normalize_planner_text(label)
         if (
             start_as_origin_only
+            and not explicit_start_end_sequence
             and normalized_label == origin_label
             and normalized_label not in exact_evidence_names
         ):
@@ -5224,7 +5243,7 @@ def _build_card_based_renderer_fallback(
         or len(_requested_meal_kinds(user_message)) > 1
     ) else 6
     if strict_requested_sequence:
-        ordered_labels = _requested_anchor_labels(user_message, "\n".join([places_data or "", events_data or ""]))
+        ordered_labels = _extract_requested_anchor_phrases(user_message)
         seen_ordered = {_normalize_planner_text(label) for label in ordered_labels}
         requested_labels = [
             *ordered_labels,
