@@ -14,6 +14,7 @@ ENV PYTHONUNBUFFERED=1 \
     VECTOR_DB_DIR=/tmp/lisboa_runtime/vector_db \
     HF_HOME=/tmp/lisboa_runtime/huggingface \
     XDG_CACHE_HOME=/tmp/lisboa_runtime/cache \
+    TZ=Europe/Lisbon \
     OTEL_SDK_DISABLED=true \
     ANONYMIZED_TELEMETRY=false \
     CHROMA_TELEMETRY=false \
@@ -25,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     libgomp1 \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

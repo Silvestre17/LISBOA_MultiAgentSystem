@@ -100,14 +100,56 @@ jobs:
           cat > hf_space_build/README.md <<'EOF'
           ---
           title: LISBOA
+          emoji: 🗺️
+          colorFrom: red
+          colorTo: yellow
           sdk: docker
+          python_version: 3.12.13
           app_port: 8501
+          header: mini
+          fullWidth: true
+          disable_embedding: false
+          pinned: true
+          thumbnail: https://huggingface.co/spaces/AndreSilvestre17/lisboa/resolve/main/img/BannerLSIBOA_21-9_optimized.webp
+          startup_duration_timeout: 1h
+          suggested_hardware: cpu-basic
           license: mit
+          short_description: Lisbon AI Assistant for Tourism and Urban Mobility
+          tags:
+            - Streamlit
+            - Docker
+            - Multi-Agent Systems
+            - Tourism
+            - Urban Mobility
+            - Lisbon
+            - Academic Research
           ---
 
-          # LISBOA
+          # LISBOA | Lisbon AI Urban Assistant
 
-          Private Hugging Face Space deployment for the LISBOA thesis prototype.
+          LISBOA is a non-commercial Master's thesis prototype developed at NOVA IMS. It explores a multi-agent AI approach for Lisbon tourism and urban mobility assistance, combining LLM orchestration with grounded data sources such as IPMA weather, Metro de Lisboa, Carris, Carris Metropolitana, CP, VisitLisboa, Lisboa Aberta, and curated local knowledge.
+
+          ## Purpose
+
+          This Space hosts the user-facing LISBOA prototype for academic demonstration and user-study evaluation. It allows participants to interact with the system through a public web interface while the implementation continues to evolve during the thesis period.
+
+          ## Core Capabilities
+
+          - Weather forecasts and warnings for Lisbon using IPMA data.
+          - Transport status and mobility support across Lisbon-area operators.
+          - Tourism and local-information answers grounded in curated Lisbon sources.
+          - Itinerary-style assistance when the user asks for planning.
+          - Portuguese and English interaction.
+
+          ## Research Context
+
+          - Project: LISBOA: Lisbon Itinerary System Based On AI
+          - Scope: Master's Thesis Prototype, Non-Commercial Academic Use
+          - Institution: NOVA IMS, Universidade NOVA de Lisboa
+
+          ## Data and Runtime Notes
+
+          The prototype depends on external public APIs and release-backed runtime datasets. Availability and freshness can vary when upstream services are temporarily unavailable.
           EOF
 
       - name: Sync to Hugging Face Space
