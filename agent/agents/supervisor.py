@@ -1143,12 +1143,13 @@ class SupervisorAgent(BaseAgent):
             r"\bplan\b.*\b(?:day|days|afternoon|morning|evening|itinerary|trip|route|visit|stops?|"
             r"rainy|museum|museums|restaurants?|hotel|transport|return|lisbon|lisboa|bel[eé]m)\b",
             r"\b(?:plane(?:ar|ia|ie)|organiza(?:r)?|organize|organise|organizing)\b.*\b(?:dia|day|"
-            r"manh[aã]|tarde|noite|roteiro|itiner[aá]rio|itinerary|ordem|order|transportes?|"
-            r"hotel|locais|places|stops?|visitar|visit|almo[cç]o|jantar|lunch|dinner)\b",
+            r"manh(?:a)?|morning|tarde|afternoon|noite|evening|roteiro|itiner[aá]rio|itinerary|"
+            r"ordem|order|transportes?|hotel|locais|places|stops?|paragens?|visitar|visit|"
+            r"comer|eat|food|meal|refei[cç][aã]o|almo[cç]o|jantar|lunch|dinner)\b",
             r"\b(?:plano|plan)\b.*\b(?:dia|day|manh[aã]|tarde|noite|viagem|trip|visita|visit)\b",
             r"\bschedule\b.*\b(?:day|itinerary|route|visits?|stops?)\b",
-            r"\b(?:cria|criar|monta|montar|faz|fazer)\b.*\b(?:itiner[aá]rio|itener[aá]rio|roteiro|plano|dia|manh[aã]|tarde)\b",
-            r"\b(?:itiner[aá]rio|itener[aá]rio|roteiro|plano)\b.*\b(?:cria|criar|monta|montar|faz|fazer|inclui|incluir|almo[cç]o|jantar|hotel)\b",
+            r"\b(?:cria|criar|monta|montar|faz|fazer)\b.*\b(?:itiner[aá]rio|itener[aá]rio|roteiro|plano|dia|manh(?:a)?|tarde)\b",
+            r"\b(?:itiner[aá]rio|itener[aá]rio|roteiro|plano)\b.*\b(?:cria|criar|monta|montar|faz|fazer|inclui|incluir|comer|refei[cç][aã]o|almo[cç]o|jantar|hotel)\b",
             r"\b(?:estes|estas|esses|essas|these|those)\s+(?:locais|lugares|s[ií]tios|places|stops)\b.*\b(?:dia|day|amanh[aã]|tomorrow|almo[cç]o|jantar|lunch|dinner|hotel)\b",
             r"\b(?:inclui|incluir|with|including)\b.*\b(?:almo[cç]o|jantar|lunch|dinner)\b.*\b(?:dia|day|roteiro|itiner[aá]rio|itener[aá]rio|plano|hotel)\b",
             r"\bir a vários? locais\b",
@@ -1166,6 +1167,9 @@ class SupervisorAgent(BaseAgent):
             r"\b(?:this\s+)?afternoon\b.*\b(?:history|historical|pastry|custard|tart|pastel|stop)\b",
             r"\b\d+\s*(?:h|hours?|horas?)\b.*\b(?:walk|passeio|percurso|itinerary|roteiro)\b",
             r"\b\d+\s*minutes?\b.*\b(?:walk|cultural|dinner|stop)\b",
+            r"\b(?:plane(?:ar|ia|ie)|organiza(?:r)?|cria|criar|faz|fazer|plan|organize|organise)\b"
+            r".*\b(?:a\s+partir\s+de|desde|starting\s+from|start(?:ing)?\s+at)\b"
+            r".*\b(?:comer|eat|food|meal|refei[cç][aã]o|almo[cç]o|jantar|lunch|dinner|paragens?|stops?)\b",
         ]
         if any(re.search(pattern, message_lower) for pattern in planning_patterns):
             return True

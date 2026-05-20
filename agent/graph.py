@@ -4578,7 +4578,10 @@ class MultiAgentAssistant:
             from agent.agents.planner_agent import (
                 _build_card_based_itinerary_fallback,
                 _build_structured_plan_fallback,
+                _card_kind_for_plan_block,
+                _extract_compact_plan_area_anchor,
                 _extract_visitlisboa_place_cards,
+                _planner_card_matches_area,
                 _planner_response_has_markdown_contract_defects,
                 _planner_response_has_minimum_user_value,
                 _planner_response_has_transport_quality_defects,
@@ -4618,7 +4621,8 @@ class MultiAgentAssistant:
                 needs_food = bool(
                     re.search(
                         r"\b(?:food|comida|restaurant|restaurante|pastry|pastelaria|"
-                        r"pastel|cafe|coffee|lunch|dinner|almo[cç]o|jantar)\b",
+                        r"pastel|cafe|coffee|lunch|dinner|almo[cç]o|almocar|"
+                        r"comer|refei[cç][aã]o|meal|eat|jantar)\b",
                         normalized_request,
                     )
                 )
@@ -4630,7 +4634,24 @@ class MultiAgentAssistant:
                         flags=re.IGNORECASE,
                     )
                 )
-                if len(current_cards) >= 2 and (not needs_food or has_food_evidence):
+                compact_area = _extract_compact_plan_area_anchor(message)
+                if compact_area and current_cards:
+                    compact_area_cards = [
+                        card for card in current_cards
+                        if _planner_card_matches_area(card, compact_area)
+                    ]
+                    compact_has_place = any(
+                        _card_kind_for_plan_block(card) != "food"
+                        for card in compact_area_cards
+                    )
+                    compact_has_food = any(
+                        _card_kind_for_plan_block(card) == "food"
+                        for card in compact_area_cards
+                    )
+                    if compact_has_place and (not needs_food or compact_has_food):
+                        planner_evidence_cache["value"] = current_researcher_data
+                        return current_researcher_data
+                elif len(current_cards) >= 2 and (not needs_food or has_food_evidence):
                     planner_evidence_cache["value"] = current_researcher_data
                     return current_researcher_data
 
@@ -5084,8 +5105,17 @@ class MultiAgentAssistant:
         final_output = final_post_qa_guard(final_output, language=language)
         if planner_involved or plan_like_request:
             from agent.agents.planner_agent import (
+                _build_card_based_itinerary_fallback,
+                _build_structured_plan_fallback,
                 _ensure_requested_return_to_origin_in_transport_section,
+                _ensure_requested_origin_target_in_transport_section,
+                _planner_response_has_minimum_user_value,
+                _planner_response_missing_requested_food_stop,
+                _repair_planner_address_map_links,
+                _repair_planner_visitlisboa_details_links,
                 _repair_meal_locality_in_response,
+                _repair_visible_transport_sources,
+                _strip_irrelevant_planner_movement_items,
             )
 
             meal_places_data = "\n\n".join(
@@ -5115,6 +5145,71 @@ class MultiAgentAssistant:
                 message,
                 language,
             )
+            if (
+                not _planner_response_has_minimum_user_value(final_output)
+                or _planner_response_missing_requested_food_stop(final_output, message)
+            ):
+                researcher_data = str(agent_outputs.get("researcher", "") or "")
+                try:
+                    enriched_researcher_data = _load_planner_evidence_once()
+                except (NameError, UnboundLocalError):
+                    enriched_researcher_data = researcher_data
+                if enriched_researcher_data:
+                    researcher_data = enriched_researcher_data
+                    agent_outputs["researcher"] = researcher_data
+                rebuilt_plan = _build_card_based_itinerary_fallback(
+                    user_message=message,
+                    language=language,
+                    weather_data=str(agent_outputs.get("weather", "") or ""),
+                    transport_data=str(agent_outputs.get("transport", "") or ""),
+                    places_data=researcher_data,
+                    events_data=str(agent_outputs.get("events", "") or agent_outputs.get("_events_context", "") or ""),
+                    qa_disclaimers=agent_outputs.get("_qa_disclaimers"),
+                    conversation_context=str(agent_outputs.get("_conversation_context", "") or ""),
+                ) or _build_structured_plan_fallback(
+                    user_message=message,
+                    language=language,
+                    weather_data=str(agent_outputs.get("weather", "") or ""),
+                    transport_data=str(agent_outputs.get("transport", "") or ""),
+                    places_data=researcher_data,
+                    events_data=str(agent_outputs.get("events", "") or agent_outputs.get("_events_context", "") or ""),
+                    qa_disclaimers=agent_outputs.get("_qa_disclaimers"),
+                    conversation_context=str(agent_outputs.get("_conversation_context", "") or ""),
+                )
+                if (
+                    rebuilt_plan
+                    and _planner_response_has_minimum_user_value(rebuilt_plan)
+                    and not _planner_response_missing_requested_food_stop(rebuilt_plan, message)
+                ):
+                    final_output = _strip_irrelevant_planner_movement_items(
+                        rebuilt_plan,
+                        message,
+                        language,
+                    )
+                    final_output = _ensure_requested_origin_target_in_transport_section(
+                        final_output,
+                        message,
+                        language,
+                        str(agent_outputs.get("transport", "") or ""),
+                    )
+                    final_output = _repair_planner_address_map_links(final_output)
+                    final_output = _repair_planner_visitlisboa_details_links(
+                        final_output,
+                        places_data=researcher_data,
+                        language=language,
+                    )
+                    final_output = _repair_visible_transport_sources(final_output)
+                    final_output = _repair_meal_locality_in_response(
+                        final_output,
+                        user_message=message,
+                        places_data=researcher_data,
+                        language=language,
+                    )
+                    final_output = _ensure_requested_return_to_origin_in_transport_section(
+                        final_visual_pass(final_output),
+                        message,
+                        language,
+                    )
 
         self._update_conversation_anchors(message, final_output, effective_agents)
 
@@ -5672,6 +5767,9 @@ class MultiAgentAssistant:
                 _normalize_planner_text,
                 _order_historic_food_cards,
                 _planner_card_display_name,
+                _query_has_explicit_anchor_sequence,
+                _query_has_explicit_start_end_constraint,
+                _requested_anchor_labels,
                 _select_planner_cards_for_request,
             )
             from tools.carris_api import carris_find_routes_between
@@ -5685,6 +5783,20 @@ class MultiAgentAssistant:
         requested_target = _extract_requested_plan_area(user_message)
         normalized_requested_origin = _normalize_planner_text(requested_origin)
         normalized_requested_target = _normalize_planner_text(requested_target)
+        requested_labels = _requested_anchor_labels(user_message, researcher_text)
+        explicit_origin_target_request = bool(
+            _query_has_explicit_start_end_constraint(user_message)
+            or (
+                _query_has_explicit_anchor_sequence(user_message)
+                and len(requested_labels) == 2
+                and re.search(r"\b(?:de|from)\s+.+\s+(?:para|ate|to)\s+.+", normalized_user_message)
+            )
+        )
+        same_requested_endpoint = bool(
+            normalized_requested_origin
+            and normalized_requested_target
+            and normalized_requested_origin == normalized_requested_target
+        )
         transport_has_requested_route_detail = bool(
             normalized_requested_origin
             and normalized_requested_target
@@ -5705,6 +5817,8 @@ class MultiAgentAssistant:
         if (
             requested_origin
             and requested_target
+            and explicit_origin_target_request
+            and not same_requested_endpoint
             and not mode_constrained_away_from_metro
             and not transport_has_requested_route_detail
         ):

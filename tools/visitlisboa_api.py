@@ -61,6 +61,29 @@ COLLECTION_PDF = "lisbon_pdf"
 COLLECTION_PLACES = "lisbon_places"
 COLLECTION_EVENTS = "lisbon_events"
 MAX_USER_FACING_RESULTS = 5
+MAX_PROXIMITY_RANK_CANDIDATES = 5
+_LISBON_POSTAL_PREFIX_COORDS: Dict[str, Tuple[float, float]] = {
+    "1000": (38.7360, -9.1380),
+    "1050": (38.7350, -9.1500),
+    "1070": (38.7330, -9.1600),
+    "1100": (38.7130, -9.1350),
+    "1150": (38.7200, -9.1400),
+    "1170": (38.7230, -9.1300),
+    "1200": (38.7100, -9.1470),
+    "1250": (38.7200, -9.1500),
+    "1269": (38.7180, -9.1450),
+    "1300": (38.7040, -9.1790),
+    "1350": (38.7110, -9.1660),
+    "1400": (38.7000, -9.2070),
+    "1500": (38.7480, -9.1900),
+    "1600": (38.7580, -9.1650),
+    "1700": (38.7480, -9.1380),
+    "1750": (38.7650, -9.1550),
+    "1800": (38.7680, -9.1120),
+    "1900": (38.7350, -9.1260),
+    "1950": (38.7350, -9.1070),
+    "1990": (38.7680, -9.0960),
+}
 
 
 # ==========================================================================
@@ -3042,6 +3065,52 @@ def _place_result_coordinates(result: Dict[str, Any]) -> Tuple[float, float] | N
         return None
 
 
+def _place_result_stored_coordinates(result: Dict[str, Any]) -> Tuple[float, float] | None:
+    """Return coordinates already present in a result or its full catalogue row."""
+    for source in (result, _place_result_full_data(result)):
+        if not isinstance(source, dict):
+            continue
+        lat = source.get("lat") or source.get("latitude")
+        lon = source.get("lon") or source.get("longitude")
+        try:
+            if lat is not None and lon is not None:
+                return float(lat), float(lon)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _place_result_postal_centroid(result: Dict[str, Any]) -> Tuple[float, float] | None:
+    """Return an approximate Lisbon postal-zone centroid for fast proximity ranking."""
+    text = _join_user_facing_parts(
+        [
+            result.get("location", ""),
+            result.get("address", ""),
+            (_place_result_full_data(result) or {}).get("location", ""),
+            (_place_result_full_data(result) or {}).get("address", ""),
+        ]
+    )
+    postal_match = re.search(r"\b(?P<prefix>\d{4})-\d{3}\b", text)
+    if not postal_match:
+        return None
+    return _LISBON_POSTAL_PREFIX_COORDS.get(postal_match.group("prefix"))
+
+
+def _place_result_coordinates_for_proximity(result: Dict[str, Any]) -> Tuple[float, float, bool] | None:
+    """Return fast coordinates for proximity ranking.
+
+    The boolean flag is true when the coordinate is an approximate postal-zone
+    centroid rather than a precise venue coordinate.
+    """
+    exact_coordinates = _place_result_stored_coordinates(result)
+    if exact_coordinates:
+        return exact_coordinates[0], exact_coordinates[1], False
+    approximate_coordinates = _place_result_postal_centroid(result)
+    if approximate_coordinates:
+        return approximate_coordinates[0], approximate_coordinates[1], True
+    return None
+
+
 def _rank_place_results_by_proximity(
     results: List[Dict[str, Any]],
     query: Optional[str],
@@ -3070,10 +3139,12 @@ def _rank_place_results_by_proximity(
     except (KeyError, TypeError, ValueError):
         return results, ""
 
+    candidate_results = results[:MAX_PROXIMITY_RANK_CANDIDATES]
+    deferred_results = results[MAX_PROXIMITY_RANK_CANDIDATES:]
     ranked: List[Tuple[float, float, int, Dict[str, Any]]] = []
     unresolved: List[Tuple[int, Dict[str, Any]]] = []
-    for index, result in enumerate(results):
-        coordinates = _place_result_coordinates(result)
+    for index, result in enumerate(candidate_results):
+        coordinates = _place_result_coordinates_for_proximity(result)
         if not coordinates:
             unresolved.append((index, result))
             continue
@@ -3081,13 +3152,14 @@ def _rank_place_results_by_proximity(
         enriched = dict(result)
         enriched["_distance_km"] = distance_km
         enriched["_distance_reference"] = reference_location.get("display_name") or reference
+        enriched["_distance_approximate"] = coordinates[2]
         ranked.append((distance_km, -float(result.get("ranking_score") or 0.0), index, enriched))
 
     if not ranked:
         return results, ""
 
     ranked.sort(key=lambda item: (item[0], item[1], item[2]))
-    sorted_results = [item[3] for item in ranked] + [item[1] for item in unresolved]
+    sorted_results = [item[3] for item in ranked] + [item[1] for item in unresolved] + deferred_results
     return sorted_results, str(reference_location.get("display_name") or reference)
 
 
@@ -5022,6 +5094,7 @@ def search_places_attractions(
             specific_lookup_query = _apply_known_place_lookup_alias(specific_lookup_query) or specific_lookup_query
         query_intent = _infer_place_query_intent(effective_query or query, category)
         query_context = query or effective_query or ""
+        proximity_reference = _extract_place_proximity_reference(effective_query or query)
         if (
             _normalize_place_category_filter(category) == "restaurants"
             and re.search(
@@ -5069,11 +5142,25 @@ def search_places_attractions(
                     if requested_category == "museums & monuments" and query_intent == "museum_only":
                         category_prefix = "Museums"
                     search_query = f"{category_prefix} {search_query}"
+                if proximity_reference:
+                    if requested_category == "restaurants":
+                        search_query = "Restaurants Portuguese cuisine cafés Lisbon"
+                    elif requested_category == "view points":
+                        search_query = "View Points viewpoints miradouros Lisbon"
+                    elif requested_category == "parks & gardens":
+                        search_query = "Parks Gardens parks gardens Lisbon"
+                    elif requested_category in {"museums & monuments", "museums"}:
+                        search_query = "Museums monuments cultural sites Lisbon"
+                    elif category:
+                        search_query = f"{category} Lisbon"
+                    else:
+                        search_query = "places attractions Lisbon"
 
                 query_context = query or effective_query or search_query
 
-                query_tokens = _extract_place_query_tokens(effective_query or search_query)
-                location_hints = _extract_place_location_hints(effective_query or search_query)
+                token_query = search_query if proximity_reference else (effective_query or search_query)
+                query_tokens = _extract_place_query_tokens(token_query)
+                location_hints = [] if proximity_reference else _extract_place_location_hints(effective_query or search_query)
                 ranking_requested = _query_requests_ranked_places(effective_query or search_query) or query_intent == "top_attractions"
                 lisboa_card_requested = _query_mentions_lisboa_card(query_context)
                 tickets_requested = _query_mentions_tickets(query_context)
@@ -5129,7 +5216,7 @@ def search_places_attractions(
                     ])
 
                     geography_text = _join_user_facing_parts([metadata.get('title', ''), metadata.get('url', ''), raw_location])
-                    if not _place_within_requested_geography(geography_text, query):
+                    if not proximity_reference and not _place_within_requested_geography(geography_text, query):
                         continue
 
                     if not _matches_required_service_terms(service_anchor_text, required_service_terms):
@@ -5150,7 +5237,7 @@ def search_places_attractions(
 
                     token_hits, token_weighted_score = _collect_token_match_stats(query_tokens, normalized_searchable)
                     title_hits, title_weighted_score = _collect_token_match_stats(query_tokens, normalized_title)
-                    phrase_score = _phrase_similarity_score(effective_query or search_query, metadata.get('title', ''))
+                    phrase_score = _phrase_similarity_score(token_query, metadata.get('title', ''))
 
                     if query_tokens and token_hits == 0 and phrase_score <= 0 and vector_score > 1.25:
                         continue
@@ -5322,6 +5409,25 @@ def search_places_attractions(
             _append_unique_place_results(combined_visitlisboa, fallback_results, seen_visitlisboa_keys, limit=fallback_limit)
             visitlisboa_results = combined_visitlisboa
 
+        if proximity_reference and len(visitlisboa_results) < requested_window:
+            proximity_items = _fallback_search(
+                query=None,
+                category=category,
+                data=_load_places_json(),
+                max_results=80,
+            )
+            proximity_results = [_convert_raw_place_to_result(item) for item in proximity_items]
+            proximity_pool: List[Dict[str, Any]] = []
+            seen_proximity_keys: set[str] = set()
+            _append_unique_place_results(proximity_pool, visitlisboa_results, seen_proximity_keys)
+            _append_unique_place_results(proximity_pool, proximity_results, seen_proximity_keys)
+            ranked_proximity_results, proximity_label = _rank_place_results_by_proximity(
+                proximity_pool,
+                effective_query or query,
+            )
+            if proximity_label:
+                visitlisboa_results = ranked_proximity_results[: max(requested_window, max_results)]
+
         if query_intent == "top_attractions":
             supplemental_items = _fallback_search(
                 query=None,
@@ -5443,7 +5549,7 @@ def search_places_attractions(
             # Add any Dados Abertos results that don't duplicate
             _append_unique_place_results(all_results, dados_abertos_results, existing_keys)
 
-        if effective_query or query:
+        if (effective_query or query) and not proximity_reference:
             geographically_valid_results = [
                 result
                 for result in all_results
@@ -5462,7 +5568,7 @@ def search_places_attractions(
             if geographically_valid_results:
                 all_results = geographically_valid_results
 
-        if effective_query or query:
+        if (effective_query or query) and not proximity_reference:
             output_location_hints = _extract_place_location_hints(effective_query or query)
             if output_location_hints:
                 matching_area_results = [
@@ -5767,7 +5873,12 @@ def search_places_attractions(
                 distance_label = "Distância" if render_language == "pt" else "Distance"
                 reference_label = place.get("_distance_reference") or proximity_reference_label
                 try:
-                    distance_text = f"{float(place['_distance_km']):.2f} km"
+                    distance_value = float(place["_distance_km"])
+                    distance_text = (
+                        f"~{distance_value:.1f} km"
+                        if place.get("_distance_approximate")
+                        else f"{distance_value:.2f} km"
+                    )
                 except (TypeError, ValueError):
                     distance_text = ""
                 if distance_text and reference_label:

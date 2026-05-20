@@ -391,7 +391,7 @@ def _extract_fields(lines: Sequence[str]) -> Dict[str, str]:
     field_re = re.compile(r"^\s*[-*•]?\s*(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s*)?\*\*(?P<label>[^*:]{2,40}):?\*\*\s*:??\s*(?P<value>.+)$")
     plain_field_re = re.compile(
         r"^\s*[-*•]?\s*(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s*)?"
-        r"(?P<label>Description|Descrição|Descricao|Category|Categoria|When|Quando|Venue|Local|Location|Address|Morada|Price|Preço|Preco|Hours|Horário|Horario|Horários|Horarios|Today|Hoje|Website|URL|More details|Mais detalhes|Tickets|Bilhetes)\s*:\s*(?P<value>.+)$",
+        r"(?P<label>Description|Descrição|Descricao|Category|Categoria|When|Quando|Venue|Local|Location|Address|Morada|Price|Preço|Preco|Hours|Horário|Horario|Horários|Horarios|Today|Hoje|Features|Características|Caracteristicas|Rating|Avaliação|Avaliacao|Phone|Telefone|Email|E-mail|Distance|Distância|Distancia|Website|URL|More details|Mais detalhes|Tickets|Bilhetes)\s*:\s*(?P<value>.+)$",
         flags=re.IGNORECASE,
     )
     raw_url_re = re.compile(r"^\s*[-*•]?\s*(?:🔗\s*)?(?P<url>https?://\S+)\s*$", flags=re.IGNORECASE)
@@ -445,10 +445,20 @@ def _canonical_field_label(label: str) -> str:
         "horarios": "Hours",
         "today": "Hours",
         "hoje": "Hours",
+        "features": "Features",
+        "caracteristicas": "Features",
+        "rating": "Rating",
+        "avaliacao": "Rating",
+        "phone": "Phone",
+        "telefone": "Phone",
+        "email": "Email",
+        "e-mail": "Email",
+        "distance": "Distance",
+        "distancia": "Distance",
         "website": "Website",
         "url": "Website",
-        "more details": "Website",
-        "mais detalhes": "Website",
+        "more details": "More details",
+        "mais detalhes": "More details",
         "tickets": "Tickets",
         "bilhetes": "Tickets",
     }

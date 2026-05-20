@@ -85,7 +85,7 @@ _STRUCTURED_QUERY_PLAN_INTENTS: frozenset[str] = frozenset({
 
 _RESEARCHER_FOOD_INTENT_RE = re.compile(
     r"\b(?:restaurant|restaurante|restaurants|restaurantes|food|comida|comer|cuisine|cozinha|"
-    r"gastronom\w*|tradicional|traditional|almoco|almoço|lunch|jantar|dinner|"
+    r"gastronom\w*|tradicional|traditional|almoco|almocar|almoço|almoçar|lunch|jantar|dinner|"
     r"seafood|marisco|fish|peixe|cafe|café|coffee|pastelaria|pastry|padaria|bakery|bar|bars)\b",
     re.IGNORECASE,
 )
@@ -4359,12 +4359,13 @@ class ResearcherAgent(BaseAgent):
         query = _normalize_researcher_intent_text(user_message)
         has_strong_planning_intent = bool(
             re.search(
-                r"\b(plan|itinerary|route plan|roteiro|planeia|planejar|plano|agenda|full day|day trip|dia inteiro)\b",
+                r"\b(plan|itinerary|itinerario|route plan|roteiro|planeia|planejar|plano|agenda|"
+                r"full day|half day|half-day|day trip|dia inteiro|meio dia)\b",
                 query,
             )
         )
         has_soft_time_planning_hint = bool(
-            re.search(r"\b(afternoon|evening|fim de tarde|tarde|noite)\b", query)
+            re.search(r"\b(morning|manha|afternoon|evening|fim de tarde|tarde|noite)\b", query)
         )
         if (
             not has_strong_planning_intent
@@ -4375,7 +4376,11 @@ class ResearcherAgent(BaseAgent):
         has_planning_intent = has_strong_planning_intent or has_soft_time_planning_hint
         has_place_need = bool(
             re.search(
-                r"\b(cultural|culture|cultura|historic|historical|sights?|sightseeing|historic[oa]s?|stop|paragem|museum|museu|gallery|galeria|monument|monumento|monumentos|viewpoint|miradouro|restaurant|restaurante|restaurants|restaurantes|food|comida|comer|cuisine|cozinha|gastronom\w*|tradicional|traditional|almoco|jantar|dinner|event|evento)\b",
+                r"\b(cultural|culture|cultura|historic|historical|sights?|sightseeing|historic[oa]s?|"
+                r"stop|paragem|museum|museu|gallery|galeria|monument|monumento|monumentos|"
+                r"viewpoint|miradouro|restaurant|restaurante|restaurants|restaurantes|food|comida|"
+                r"comer|cuisine|cozinha|gastronom\w*|tradicional|traditional|almoco|almocar|"
+                r"jantar|dinner|lunch|event|evento)\b",
                 query,
             )
         )
@@ -4652,11 +4657,27 @@ class ResearcherAgent(BaseAgent):
         deterministic_cultural_queries: List[Dict[str, Any]] = []
         deterministic_food_queries: List[Dict[str, Any]] = []
         try:
-            from agent.agents.planner_agent import _requested_anchor_labels
+            from agent.agents.planner_agent import (
+                _extract_compact_plan_area_anchor,
+                _extract_requested_plan_area,
+                _extract_requested_plan_origin,
+                _planner_local_area_profile,
+                _query_has_explicit_start_end_constraint,
+                _requested_anchor_labels,
+            )
 
             requested_anchor_queries = _requested_anchor_labels(query)
+            planner_origin_anchor = _extract_requested_plan_origin(query)
+            planner_area_anchor = _extract_compact_plan_area_anchor(query) or _extract_requested_plan_area(query)
+            planner_area_key, planner_area_label, _planner_area_blockers = _planner_local_area_profile(query)
+            planner_has_start_end = _query_has_explicit_start_end_constraint(query)
         except Exception:
             requested_anchor_queries = []
+            planner_origin_anchor = ""
+            planner_area_anchor = ""
+            planner_area_key = ""
+            planner_area_label = ""
+            planner_has_start_end = False
         if requested_anchor_queries:
             existing_queries = {
                 _normalize_researcher_intent_text(str(item.get("query") or ""))
@@ -4755,10 +4776,17 @@ class ResearcherAgent(BaseAgent):
                         prefix_window,
                     )
                 )
+                is_start_area = bool(
+                    re.search(
+                        r"\b(?:comecar|comecando|iniciar|iniciando|start|starting|a\s+partir|desde)\b",
+                        prefix_window,
+                    )
+                )
                 if (
                     candidate_key
                     and candidate_key not in {"lisboa", "lisbon", "aml"}
                     and not is_accommodation_area
+                    and not is_start_area
                 ):
                     end_area = candidate_area
         if has_historic_monument_need and requests_food_stop:
@@ -4902,8 +4930,8 @@ class ResearcherAgent(BaseAgent):
                 planned_food_queries = planned_food_queries[:2]
         has_broader_itinerary_need = bool(
             re.search(
-                r"\b(?:roteiro|itiner[aá]rio|dia|dias|day|days|full\s+day|"
-                r"afternoon|evening|manh[aã]|tarde|noite)\b",
+                r"\b(?:roteiro|itiner[aá]rio|plano|plan|dia|dias|day|days|full\s+day|"
+                r"short\s+plan|plano\s+curto|afternoon|evening|manh[aã]|tarde|noite)\b",
                 normalized,
             )
         )
@@ -5127,6 +5155,191 @@ class ResearcherAgent(BaseAgent):
                 else:
                     planned_cultural_queries = sorted(planned_cultural_queries, key=area_query_priority)[:4]
                 planned_food_queries = sorted(planned_food_queries, key=area_query_priority)[:2]
+
+        compact_anchor = re.sub(
+            r"\s+",
+            " ",
+            str(planner_origin_anchor or planner_area_anchor or "").strip(" .:-"),
+        )
+        compact_anchor_key = self._normalize_for_deterministic_routing(compact_anchor)
+        is_compact_start_area_plan = bool(
+            compact_anchor_key
+            and compact_anchor_key not in {"lisboa", "lisbon", "aml", "centro de lisboa", "central lisbon"}
+            and not planner_has_start_end
+            and re.search(
+                r"\b(?:meio\s+dia|half\s+day|[2-5]\s+horas?|[2-5]\s+hours?|"
+                r"come[cç]ar|come[cç]ando|iniciar|iniciando|start|starting|"
+                r"a\s+partir|desde|from)\b",
+                normalized,
+            )
+        )
+        if is_compact_start_area_plan:
+
+            def query_uses_compact_proximity(item: Dict[str, Any]) -> bool:
+                item_query = self._normalize_for_deterministic_routing(str(item.get("query") or ""))
+                return bool(
+                    compact_anchor_key
+                    and compact_anchor_key in item_query
+                    and re.search(
+                        r"\b(?:perto|junto|zona|volta|near|nearby|around|close\s+to)\b",
+                        item_query,
+                    )
+                )
+
+            if not requests_event_stop and not any(
+                query_uses_compact_proximity(item) for item in planned_cultural_queries
+            ):
+                planned_cultural_queries.insert(
+                    0,
+                    {
+                        "query": (
+                            f"locais culturais e monumentos perto de {compact_anchor}"
+                            if language == "pt"
+                            else f"cultural sites and monuments near {compact_anchor}"
+                        ),
+                        "category": "Museums & Monuments",
+                        "max_results": 5,
+                        "specific_lookup": False,
+                        "language": language,
+                    },
+                )
+            if not requests_event_stop:
+                compact_experience_queries: List[Dict[str, Any]] = []
+                if re.search(r"\b(?:miradouro|miradouros|viewpoint|viewpoints|vista|views)\b", normalized):
+                    compact_experience_queries.append(
+                        {
+                            "query": (
+                                f"miradouros perto de {compact_anchor}"
+                                if language == "pt"
+                                else f"viewpoints near {compact_anchor}"
+                            ),
+                            "category": "View Points",
+                            "max_results": 4,
+                            "specific_lookup": False,
+                            "language": language,
+                        }
+                    )
+                if re.search(r"\b(?:parque|parques|jardim|jardins|park|parks|garden|gardens)\b", normalized):
+                    compact_experience_queries.append(
+                        {
+                            "query": (
+                                f"parques e jardins perto de {compact_anchor}"
+                                if language == "pt"
+                                else f"parks and gardens near {compact_anchor}"
+                            ),
+                            "category": "Parks & Gardens",
+                            "max_results": 4,
+                            "specific_lookup": False,
+                            "language": language,
+                        }
+                    )
+                existing_cultural_keys = {
+                    self._normalize_for_deterministic_routing(str(item.get("query") or ""))
+                    for item in planned_cultural_queries
+                    if isinstance(item, dict)
+                }
+                for experience_query in reversed(compact_experience_queries):
+                    experience_key = self._normalize_for_deterministic_routing(str(experience_query.get("query") or ""))
+                    if experience_key and experience_key not in existing_cultural_keys:
+                        planned_cultural_queries.insert(0, experience_query)
+                        existing_cultural_keys.add(experience_key)
+            if requests_food_stop and not any(
+                query_uses_compact_proximity(item) for item in planned_food_queries
+            ):
+                planned_food_queries = [
+                    {
+                        "query": (
+                            f"restaurantes perto de {compact_anchor}"
+                            if language == "pt"
+                            else f"restaurants near {compact_anchor}"
+                        ),
+                        "category": "Restaurants",
+                        "max_results": 5,
+                        "specific_lookup": False,
+                        "language": language,
+                    },
+                    *planned_food_queries,
+                ]
+                area_food_query = ""
+                if planner_area_key and planner_area_label:
+                    area_parts = [
+                        re.sub(r"\s+", " ", part).strip(" .:-")
+                        for part in re.split(r"\s*/\s*", planner_area_label)
+                    ]
+                    area_parts = [
+                        part for part in area_parts
+                        if part and self._normalize_for_deterministic_routing(part) != compact_anchor_key
+                    ]
+                    area_reference = area_parts[0] if area_parts else ""
+                    if area_reference:
+                        area_food_query = (
+                            f"restaurantes perto de {area_reference}"
+                            if language == "pt"
+                            else f"restaurants near {area_reference}"
+                        )
+                if area_food_query:
+                    planned_food_queries.insert(
+                        1,
+                        {
+                            "query": area_food_query,
+                            "category": "Restaurants",
+                            "max_results": 5,
+                            "specific_lookup": False,
+                            "language": language,
+                        },
+                    )
+            elif requests_food_stop:
+                canonical_food_query = (
+                    f"restaurantes perto de {compact_anchor}"
+                    if language == "pt"
+                    else f"restaurants near {compact_anchor}"
+                )
+                area_food_query = ""
+                if planner_area_key and planner_area_label:
+                    area_parts = [
+                        re.sub(r"\s+", " ", part).strip(" .:-")
+                        for part in re.split(r"\s*/\s*", planner_area_label)
+                    ]
+                    area_parts = [
+                        part for part in area_parts
+                        if part and self._normalize_for_deterministic_routing(part) != compact_anchor_key
+                    ]
+                    area_reference = area_parts[0] if area_parts else ""
+                    if area_reference:
+                        area_food_query = (
+                            f"restaurantes perto de {area_reference}"
+                            if language == "pt"
+                            else f"restaurants near {area_reference}"
+                        )
+                canonical_entries = [
+                    {
+                        "query": canonical_food_query,
+                        "category": "Restaurants",
+                        "max_results": 5,
+                        "specific_lookup": False,
+                        "language": language,
+                    },
+                ]
+                if area_food_query:
+                    canonical_entries.append(
+                        {
+                            "query": area_food_query,
+                            "category": "Restaurants",
+                            "max_results": 5,
+                            "specific_lookup": False,
+                            "language": language,
+                        }
+                    )
+                planned_food_queries = [
+                    *canonical_entries,
+                    *[
+                        item
+                        for item in planned_food_queries
+                        if not query_uses_compact_proximity(item)
+                    ],
+                ]
+            planned_cultural_queries = planned_cultural_queries[:5]
+            planned_food_queries = planned_food_queries[:2]
 
         if has_historic_monument_need and planned_cultural_queries:
             planned_query_text = " ".join(str(item.get("query") or "") for item in planned_cultural_queries)

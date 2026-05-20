@@ -221,8 +221,6 @@ class Config:
     # Default is set to a valid model name to avoid runtime errors.
     # > SUPER IMPORTANT: Choose model
     DEFAULT_GPT_MODEL_NAME = "gpt-5.4-mini"
-    # DEFAULT_GPT_MODEL_NAME = "gpt-5.4"
-    # DEFAULT_GPT_MODEL_NAME = "gpt-5.2"
     OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", DEFAULT_GPT_MODEL_NAME)
 
     # LM Studio model (Local server on port 1234)

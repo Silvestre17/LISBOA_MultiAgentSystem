@@ -262,7 +262,7 @@ def _ensure_adjacent_short_walks(items: List[str], blocks: List[object], *, is_p
             else:
                 suffix = "; keep this as a walking leg if conditions allow"
             additions.append(f"🚶 {previous_name} → {current_name}: short walk in the {zone} area{suffix}.")
-    return additions + output
+    return output + additions
 
 
 def _departure_window_for_time(time_value: str, *, early_minutes: int = 20, late_minutes: int = 15) -> str:
