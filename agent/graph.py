@@ -5289,6 +5289,28 @@ class MultiAgentAssistant:
         )
         return not lowered.startswith(failed_markers)
 
+    @staticmethod
+    def _qa_flags_missing_transit(qa_result: Optional[Dict[str, object]]) -> bool:
+        """Return whether the QA result flags missing transit/transport details."""
+        if not qa_result:
+            return False
+        missing_data = qa_result.get("missing_data") or []
+        reasoning = str(qa_result.get("reasoning") or "").lower()
+        transit_keywords = [
+            "transport", "transit", "route", "leg", "connection", "departure",
+            "carris", "metro", "viagem", "itinerário", "deslocação", "deslocacao",
+            "comboio", "train", "autocarro", "bus", "elétrico", "tram", "cp",
+            "carrismetropolitana", "carris metropolitana", "linha", "line",
+            "paragem", "estação", "estacao", "stop", "station"
+        ]
+        for item in missing_data:
+            lowered_item = str(item).lower()
+            if any(kw in lowered_item for kw in transit_keywords):
+                return True
+        if any(kw in reasoning for kw in transit_keywords):
+            return True
+        return False
+
     @classmethod
     def _filter_planner_qa_retry_agents(
         cls,
@@ -5328,6 +5350,16 @@ class MultiAgentAssistant:
                 and not cls._planner_retry_should_fetch_transport(user_message)
             ):
                 skipped.append(agent_name)
+                continue
+            if (
+                agent_name == "transport"
+                and (
+                    cls._qa_flags_missing_transit(qa_result)
+                    or "transport" in ((qa_result or {}).get("required_agents") or [])
+                    or "transport" in ((qa_result or {}).get("repairable_agents") or [])
+                )
+            ):
+                filtered.append(agent_name)
                 continue
             if (
                 agent_name in worker_set

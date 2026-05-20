@@ -6758,7 +6758,7 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
             if cp_bridge:
                 return cp_bridge
 
-        if _is_generic_public_transport_route_query(user_message) and not fastest_requested:
+        if _is_generic_public_transport_route_query(user_message) and not fastest_requested and not (is_metro_route and not _route_result_is_metro_only_partial(route_result)):
             try:
                 from tools.carris_api import carris_find_routes_between
 
@@ -6920,7 +6920,7 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
             endpoints[0],
             endpoints[1],
         )
-        if not fastest_requested and not comparison_requested:
+        if not fastest_requested and not comparison_requested and not (is_metro_route and not _route_result_is_metro_only_partial(route_result)):
             return _append_generic_service_area_note(formatted_carris_response, raw_destination, area_destination, language)
 
         updated_label = "Atualizado" if _infer_language(user_message, "") == "pt" else "Updated"

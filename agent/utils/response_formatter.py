@@ -18687,6 +18687,53 @@ def repair_transport_markdown_fragmentation(text: str) -> str:
     return value
 
 
+def deduplicate_weather_headers(text: str) -> str:
+    """Ensure that we don't have multiple consecutive weather headers and clean up associated dividers."""
+    if not text:
+        return text
+
+    lines = text.splitlines()
+    cleaned_lines: list[str] = []
+
+    weather_keywords = [
+        "previsão meteorológica", "previsao meteorologica", "resumo meteorológico", "resumo meteorologico",
+        "weather forecast", "weather summary", "meteorologia", "weather in lisbon", "tempo em lisboa"
+    ]
+
+    for line in lines:
+        stripped = line.strip()
+        is_weather_header = False
+
+        if stripped.startswith("###") and any(emoji in stripped for emoji in ["🌤️", "🌧️", "☔", "⛈️", "⛅", "☀"]):
+            is_weather_header = True
+        elif stripped.startswith("###") and any(kw in stripped.lower() for kw in weather_keywords):
+            is_weather_header = True
+
+        if is_weather_header:
+            has_recent = False
+            for prev_line in reversed(cleaned_lines):
+                prev_stripped = prev_line.strip()
+                if not prev_stripped or prev_stripped == "---":
+                    continue
+                if prev_stripped.startswith("###") and (
+                    any(emoji in prev_stripped for emoji in ["🌤️", "🌧️", "☔", "⛈️", "⛅", "☀"])
+                    or any(kw in prev_stripped.lower() for kw in weather_keywords)
+                ):
+                    has_recent = True
+                    break
+                else:
+                    break
+
+            if has_recent:
+                while cleaned_lines and cleaned_lines[-1].strip() in ("", "---"):
+                    cleaned_lines.pop()
+                continue
+
+        cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines)
+
+
 def repair_service_lookup_heading_wrapper(text: str) -> str:
     """Restore specific municipal-service headings after generic QA wrapping."""
     if not text:
@@ -18984,6 +19031,7 @@ def final_post_qa_guard(text: str, language: str = "en") -> str:
     text = repair_split_metro_route_heading(text)
     text = repair_weather_heading_runons(text, language)
     text = ensure_weather_direct_answer_label(text, language)
+    text = deduplicate_weather_headers(text)
     text = _final_contract_pass(text, language)
     text = normalize_transport_station_accents(text)
 

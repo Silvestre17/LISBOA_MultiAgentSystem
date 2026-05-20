@@ -59,6 +59,7 @@ from tools.metrolisboa_api import (
     get_metro_live_service_evidence,
     get_metro_regular_service_context,
     get_station_lines,
+    get_metro_wait_time,
 )
 
 logger = logging.getLogger(__name__)
@@ -681,6 +682,20 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                     step += 1
 
                 response += f"   {step}. Board at **{eff_origin.title()}** {direction}\n"
+                try:
+                    clean_dir = None
+                    if direction:
+                        clean_dir = direction.replace("→", "").replace("**", "").replace("direção", "").replace("direction", "").replace("towards", "").strip()
+                    wait_time_info = get_metro_wait_time.func(station=eff_origin, direction=clean_dir, line=line)
+                    if wait_time_info and not wait_time_info.startswith("❌"):
+                        lines = wait_time_info.splitlines()
+                        filtered_lines = [wait_line for wait_line in lines if not wait_line.startswith("🚇") and not wait_line.startswith("===") and not wait_line.startswith("📍 Updated:")]
+                        filtered_lines = [wait_line for wait_line in filtered_lines if wait_line.strip()]
+                        if filtered_lines:
+                            formatted_wait_info = "\n".join(f"      {wait_line}" for wait_line in filtered_lines)
+                            response += f"      ⏱️ **Real-time Wait Info**:\n{formatted_wait_info}\n"
+                except Exception as e:
+                    logger.error(f"Error getting wait time in direct routing: {e}")
                 step += 1
 
                 response += f"   {step}. Exit at **{eff_dest.title()}**\n"
@@ -728,12 +743,40 @@ def get_route_between_stations(origin: str, destination: str) -> str:
 
                 dir1 = _get_metro_direction(l1, eff_origin, best_hub)
                 response += f"   {step}. {l1_info['emoji']} Board at **{eff_origin.title()}** {dir1}\n"
+                try:
+                    clean_dir = None
+                    if dir1:
+                        clean_dir = dir1.replace("→", "").replace("**", "").replace("direção", "").replace("direction", "").replace("towards", "").strip()
+                    wait_time_info = get_metro_wait_time.func(station=eff_origin, direction=clean_dir, line=l1)
+                    if wait_time_info and not wait_time_info.startswith("❌"):
+                        lines = wait_time_info.splitlines()
+                        filtered_lines = [wait_line for wait_line in lines if not wait_line.startswith("🚇") and not wait_line.startswith("===") and not wait_line.startswith("📍 Updated:")]
+                        filtered_lines = [wait_line for wait_line in filtered_lines if wait_line.strip()]
+                        if filtered_lines:
+                            formatted_wait_info = "\n".join(f"      {wait_line}" for wait_line in filtered_lines)
+                            response += f"      ⏱️ **Real-time Wait Info**:\n{formatted_wait_info}\n"
+                except Exception as e:
+                    logger.error(f"Error getting wait time in transfer routing (leg 1): {e}")
                 step += 1
                 response += f"   {step}. Exit at **{best_hub}**\n"
                 step += 1
 
                 dir2 = _get_metro_direction(l2, best_hub, eff_dest)
                 response += f"   {step}. {l2_info['emoji']} Transfer to **{l2_info['name']}** {dir2}\n"
+                try:
+                    clean_dir = None
+                    if dir2:
+                        clean_dir = dir2.replace("→", "").replace("**", "").replace("direção", "").replace("direction", "").replace("towards", "").strip()
+                    wait_time_info = get_metro_wait_time.func(station=best_hub, direction=clean_dir, line=l2)
+                    if wait_time_info and not wait_time_info.startswith("❌"):
+                        lines = wait_time_info.splitlines()
+                        filtered_lines = [wait_line for wait_line in lines if not wait_line.startswith("🚇") and not wait_line.startswith("===") and not wait_line.startswith("📍 Updated:")]
+                        filtered_lines = [wait_line for wait_line in filtered_lines if wait_line.strip()]
+                        if filtered_lines:
+                            formatted_wait_info = "\n".join(f"      {wait_line}" for wait_line in filtered_lines)
+                            response += f"      ⏱️ **Real-time Wait Info**:\n{formatted_wait_info}\n"
+                except Exception as e:
+                    logger.error(f"Error getting wait time in transfer routing (leg 2): {e}")
                 step += 1
                 response += f"   {step}. Exit at **{eff_dest.title()}**\n"
 

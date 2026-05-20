@@ -3610,11 +3610,12 @@ def main():
         already_appended = bool(st.session_state.pop("pending_request_user_appended", False))
         st.session_state.pop("pending_request", None)
         try:
-            run_interaction(
-                pending,
-                user_message_already_rendered=already_appended,
-                selected_provider=selected_provider,
-            )
+            with chat_history_slot:
+                run_interaction(
+                    pending,
+                    user_message_already_rendered=already_appended,
+                    selected_provider=selected_provider,
+                )
         finally:
             st.session_state.request_running = False
         # Trigger one final rerun so the sidebar counter picks up the assistant

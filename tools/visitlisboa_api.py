@@ -2759,12 +2759,6 @@ _PLACE_CATEGORY_QUERY_TOKENS = {
     "tagus", "tejo", "tour", "tours",
 }
 
-_VISITLISBOA_ONLY_HYBRID_CATEGORIES = {
-    "museums & monuments", "restaurants", "hotels", "view points", "tours",
-    "shopping", "tejo cruises", "beaches", "fado", "nightlife", "sports", "golf",
-    "running", "water sports",
-}
-
 _GENERIC_PLACE_QUERY_TOKENS = {
     "best", "good", "top", "lisbon", "lisboa", "place", "places", "attraction",
     "attractions", "nearby", "today", "see", "visit", "thing", "things", "related",
@@ -2779,12 +2773,33 @@ _GENERIC_PLACE_QUERY_TOKENS = {
     "cultural", "culture", "cultura", "stop", "paragem", "gallery", "galleries",
     "galeria", "galerias", "viewpoint", "viewpoints", "near", "area", "zona",
     "relaxed", "calm", "evening", "noite", "saldanha", "transport", "public", "real",
+    # Portuguese conversational & filler terms
+    "quero", "saber", "obter", "sobre", "encontrar", "sugerir", "recomendar",
+    "mostrar", "ver", "ir", "gostaria", "estou", "procurar", "algum", "alguma",
+    "alguns", "algumas", "quais", "como", "onde", "quem", "esta", "está", "este",
+    "aquilo", "isto", "uma", "um", "uns", "umas", "ao", "do", "da", "dos", "das",
+    "no", "na", "nos", "nas", "pelo", "pela", "pelos", "pelas",
+    # English conversational & filler terms
+    "want", "know", "get", "find", "suggest", "recommend", "show", "go",
+    "would", "looking", "some", "any", "at", "in", "on", "of", "to",
+    # Temporal & timing terms
+    "tomorrow", "tonight", "now", "hoje", "amanhã", "amanha", "agora", "tarde",
+    "manhã", "manha", "fim-de-semana", "fim de semana", "weekend", "morning",
+    "afternoon",
 }
+
 _SPECIFIC_PLACE_LOOKUP_TYPE_TOKENS = {
     "museum", "museums", "museu", "museus",
     "monument", "monuments", "monumento", "monumentos",
 }
+
 _SPECIFIC_PLACE_LOOKUP_NOISE_TOKENS = _GENERIC_PLACE_QUERY_TOKENS - _SPECIFIC_PLACE_LOOKUP_TYPE_TOKENS
+
+_VISITLISBOA_ONLY_HYBRID_CATEGORIES = {
+    "museums & monuments", "restaurants", "hotels", "view points", "tours",
+    "shopping", "tejo cruises", "beaches", "fado", "nightlife", "sports", "golf",
+    "running", "water sports",
+}
 _BROAD_PLACE_LOOKUP_CONNECTORS = {
     "in", "near", "with", "around", "for", "by", "at",
     "em", "perto", "com", "para", "por", "junto",

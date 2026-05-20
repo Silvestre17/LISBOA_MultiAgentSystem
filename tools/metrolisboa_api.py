@@ -2343,7 +2343,6 @@ def get_metro_status() -> str:
             status_emoji = "⚠️"
             status_text = status
             all_ok = False
-
         response += f"{emoji} {name}\n"
         response += f"   {status_emoji} {status_text}\n\n"
 
@@ -2358,20 +2357,23 @@ def get_metro_status() -> str:
     else:
         response += "⚠️ Some lines have service disruptions."
 
+    response += f"📍 Updated: {datetime.now().strftime('%H:%M:%S')}"
+
     return response
 
 
 @tool
-def get_metro_wait_time(station: str, direction: Optional[str] = None) -> str:
+def get_metro_wait_time(station: str, direction: Optional[str] = None, line: Optional[str] = None) -> str:
     """
     Gets real-time waiting times for the next metro trains at a specific station.
 
     Args:
         station: Station name (e.g., 'Campo Grande', 'Aeroporto', 'Baixa-Chiado').
         direction: Optional requested direction/terminal to filter to one platform only.
+        line: Optional line name to filter waiting times (e.g., 'Amarela', 'Azul', 'Verde', 'Vermelha').
 
     Returns:
-        str: Formatted waiting times for all platforms at the station.
+        str: Formatted waiting times for all platforms or the requested line/direction.
     """
     if not _is_metro_api_available():
         return _build_metro_realtime_unavailable_message("Metro wait times are")
@@ -2420,6 +2422,22 @@ def get_metro_wait_time(station: str, direction: Optional[str] = None) -> str:
             available_destinations=available_destinations,
         )
 
+    normalized_line = None
+    if line:
+        line_map = {
+            "amarela": "amarela",
+            "yellow": "amarela",
+            "amarelo": "amarela",
+            "azul": "azul",
+            "blue": "azul",
+            "verde": "verde",
+            "green": "verde",
+            "vermelha": "vermelha",
+            "red": "vermelha",
+            "vermelho": "vermelha",
+        }
+        normalized_line = line_map.get(line.lower().strip())
+
     response = f"🚇 Metro Wait Times at {station_name}\n"
     response += "=" * 50 + "\n\n"
 
@@ -2448,14 +2466,39 @@ def get_metro_wait_time(station: str, direction: Optional[str] = None) -> str:
 
         line_emoji = "🚇"
         dest_lower = dest_name.lower()
+        dest_norm = _normalize_metro_text(dest_name)
+        dest_line = None
         if dest_lower in ["odivelas", "rato", "campo grande", "lumiar"]:
             line_emoji = "🟡"
+            dest_line = "amarela"
         elif dest_lower in ["reboleira", "santa apolónia", "terreiro do paço"]:
             line_emoji = "🔵"
+            dest_line = "azul"
         elif dest_lower in ["telheiras", "cais do sodré"]:
             line_emoji = "🟢"
+            dest_line = "verde"
         elif dest_lower in ["aeroporto", "são sebastião", "alameda"]:
             line_emoji = "🔴"
+            dest_line = "vermelha"
+        else:
+            for line_id, line_data in METRO_LINES.items():
+                if any(dest_norm == _normalize_metro_text(s) for s in line_data.get("stations", [])):
+                    dest_line = line_id
+                    line_emoji = line_data.get("emoji", "🚇")
+                    break
+
+        destination_on_requested_line = bool(
+            normalized_line
+            and any(
+                dest_norm == _normalize_metro_text(station)
+                for station in METRO_LINES.get(normalized_line, {}).get("stations", [])
+            )
+        )
+        if normalized_line and dest_line != normalized_line and not destination_on_requested_line:
+            continue
+        if normalized_line and destination_on_requested_line:
+            line_emoji = METRO_LINES.get(normalized_line, {}).get("emoji", line_emoji)
+            dest_line = normalized_line
 
         if dest_name not in destinations_seen:
             destinations_seen[dest_name] = True
@@ -2468,7 +2511,7 @@ def get_metro_wait_time(station: str, direction: Optional[str] = None) -> str:
             response += f"   ⏳ Following: {time2}, {time3}\n\n"
 
     if not destinations_seen:
-        return f"❌ No trains currently scheduled at {station_name}."
+        return f"❌ No scheduled trains found for the requested criteria at {station_name}."
 
     response += f"📍 Updated: {datetime.now().strftime('%H:%M:%S')}"
 
