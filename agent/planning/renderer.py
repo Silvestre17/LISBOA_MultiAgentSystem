@@ -143,7 +143,10 @@ def _movement_section_emoji(items: Iterable[str]) -> str:
         r"\b(?:metro|carris|autocarro|bus|tram|eletrico|elétrico|train|comboio|cp|linha|line)\b",
         normalized,
     )
-    walk_signal = re.search(r"\b(?:walk|walking|caminh\w*|andar|pe|pé)\b", normalized)
+    walk_signal = re.search(
+        r"\b(?:walk|walking|caminh\w*|andar|pe|pé|desloca\w*|local|wayfinding)\b",
+        normalized,
+    )
     return "🚶" if walk_signal and not transport_signal else "🚇"
 
 
@@ -328,7 +331,7 @@ def _movement_icon_for_text(text: str) -> str:
         return "🚶"
     if re.search(r"\b(?:transport|transporte)\b", normalized):
         return "🚇"
-    if re.search(r"\b(?:walk|walking|caminh\w*|andar)\b", normalized):
+    if re.search(r"\b(?:walk|walking|caminh\w*|andar|desloca\w*|local|wayfinding)\b", normalized):
         return "🚶"
     if re.search(r"\b(?:bus|carris|autocarro)\b", normalized):
         return "🚌"
@@ -467,7 +470,7 @@ def _source_footer(
     for block in draft.blocks:
         used_ids.extend(block.source_ids)
     if not used_ids:
-        used_ids = list(sources.keys())
+        return ""
     deduped = [source_id for source_id in dict.fromkeys(used_ids) if source_id in sources]
     deduped = [
         source_id for source_id in deduped

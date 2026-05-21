@@ -18,6 +18,30 @@ from agent.planning.models import PlanDraft
 
 PLACEHOLDER_RE = re.compile(r"\b(?:N/?A|unknown|not available|not provided|TBD|\+ info|null|none)\b", re.IGNORECASE)
 RAW_FIELD_RE = re.compile(r"\b(?:Location|Address|Website|Phone|Category|Description|Morada|Telefone|Categoria|Descrição)\s*:", re.IGNORECASE)
+COUNT_TOKEN_RE = (
+    r"(?:\d{1,2}|um|uma|one|dois|duas|two|tres|three|quatro|four|"
+    r"cinco|five|seis|six|sete|seven|oito|eight)"
+)
+COUNT_WORDS = {
+    "um": 1,
+    "uma": 1,
+    "one": 1,
+    "dois": 2,
+    "duas": 2,
+    "two": 2,
+    "tres": 3,
+    "three": 3,
+    "quatro": 4,
+    "four": 4,
+    "cinco": 5,
+    "five": 5,
+    "seis": 6,
+    "six": 6,
+    "sete": 7,
+    "seven": 7,
+    "oito": 8,
+    "eight": 8,
+}
 
 
 def parse_plan_draft_json(content: str) -> PlanDraft | None:
@@ -50,6 +74,24 @@ def parse_plan_draft_json(content: str) -> PlanDraft | None:
     return PlanDraft.from_dict(payload)
 
 
+def _requested_max_blocks(user_message: str) -> int:
+    """Return the maximum block count allowed by explicit user cardinality."""
+    normalized = normalize_text(user_message)
+    requested = 0
+    pattern = re.compile(
+        rf"\b(?P<count>{COUNT_TOKEN_RE})\s+"
+        r"(?P<unit>museus?|museums?|monumentos?|monuments?|atracoes|attractions?|"
+        r"locais|lugares|sitios|sites|places|stops|paragens|restaurantes?|restaurants?|"
+        r"food\s+stops?|meal\s+stops?|lunch\s+stops?|dinner\s+stops?|miradouros?|viewpoints?|eventos?|events?)\b",
+        re.IGNORECASE,
+    )
+    for match in pattern.finditer(normalized):
+        token = match.group("count")
+        count = int(token) if token.isdigit() else COUNT_WORDS.get(token, 0)
+        requested += max(0, min(count, 8))
+    return max(5, min(8, requested or 5))
+
+
 def validate_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, user_message: str = "") -> List[str]:
     """Return blocking issues for a structured plan draft.
 
@@ -68,7 +110,7 @@ def validate_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, user_message
         issues.append("missing direct answer")
     if len(draft.blocks) < 1:
         issues.append("missing plan blocks")
-    if len(draft.blocks) > 5:
+    if len(draft.blocks) > _requested_max_blocks(user_message):
         issues.append("too many plan blocks")
 
     user_norm = normalize_text(user_message)

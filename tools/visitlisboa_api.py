@@ -2863,7 +2863,7 @@ _PUBLIC_SERVICE_FOCUS_TERMS = {
 _OUTSIDE_LISBON_CITY_MARKERS = {
     "cascais", "sintra", "almada", "setubal", "setúbal", "oeiras", "amadora",
     "loures", "odivelas", "montijo", "seixal", "sesimbra", "barreiro", "mafra",
-    "alcochete", "moita", "palmela", "vila franca", "vila franca de xira",
+    "ericeira", "estoril", "carcavelos", "alcochete", "moita", "palmela", "vila franca", "vila franca de xira",
     "santa iria", "azóia", "azoia", "entroncamento", "alcobaca", "alcobaça",
     "batalha", "fatima", "fátima", "obidos", "óbidos", "tomar", "porto",
     "coimbra", "aveiro", "braga", "evora", "évora",
@@ -3920,6 +3920,14 @@ def _query_explicitly_mentions_outside_lisbon(query: Optional[str]) -> bool:
     return any(marker in normalized_query for marker in _OUTSIDE_LISBON_CITY_MARKERS)
 
 
+def _query_requests_lisbon_city_only(query: Optional[str]) -> bool:
+    """Return whether the user explicitly scoped results to Lisbon city."""
+    normalized_query = _normalize_place_hint_text(query)
+    if not normalized_query or _query_explicitly_mentions_outside_lisbon(query):
+        return False
+    return bool(re.search(r"\b(?:lisboa|lisbon)\b", normalized_query))
+
+
 def _place_within_requested_geography(location_text: str, query: Optional[str]) -> bool:
     """Keeps Lisbon-city queries focused on Lisbon unless the user explicitly asked otherwise."""
     if not location_text:
@@ -4648,6 +4656,20 @@ def search_cultural_events(
                 if _event_matches_strict_theme(event, strict_theme_key)
             ]
             logger.info("After strict theme filter '%s': %d events", strict_theme_key, len(events_data))
+
+        if _query_requests_lisbon_city_only(query):
+            lisbon_city_events = [
+                event for event in events_data
+                if _event_within_requested_geography(event, query)
+            ]
+            lisbon_city_undated = [
+                event for event in undated_candidates
+                if _event_within_requested_geography(event, query)
+            ]
+            if lisbon_city_events:
+                events_data = lisbon_city_events
+                undated_candidates = lisbon_city_undated
+                logger.info("After Lisbon-city scope filter: %d events", len(events_data))
 
         exact_lookup_not_found_intro: Optional[str] = None
         if not events_data and specific_lookup_phrase:

@@ -1520,7 +1520,7 @@ class QualityAssuranceAgent(BaseAgent):
             if required_agent and required_agent not in required_agents:
                 required_agents.append(required_agent)
 
-        expected_language = infer_response_language(user_query=user_query, default=language or "en")
+        expected_language = language if language in {"pt", "en"} else infer_response_language(user_query=user_query, default="en")
         output_language = infer_visible_label_language(combined_output, default=expected_language)
         if combined_output.strip() and output_language != expected_language:
             add_gap(
@@ -2145,6 +2145,10 @@ class QualityAssuranceAgent(BaseAgent):
             "no results",
             "did not find",
             "could not find",
+            "do not have a confirmed structured source",
+            "i do not have a confirmed structured source",
+            "não tenho uma fonte estruturada",
+            "nao tenho uma fonte estruturada",
             "não confirmado",
             "não confirmada",
             "não confirmados",
@@ -2162,6 +2166,13 @@ class QualityAssuranceAgent(BaseAgent):
             "nao consigo confirmar",
             "indisponivel",
             "sem dados em tempo real",
+            "sem horario",
+            "sem horário",
+            "sem horario noturno",
+            "sem horário noturno",
+            "nao equivale",
+            "não equivale",
+            "does not mean service is available",
             "fora do ambito",
             "sem cobertura",
         )
@@ -2170,11 +2181,12 @@ class QualityAssuranceAgent(BaseAgent):
             (("previsao", "previsão", "forecast", "temperatura", "temperature", "precipitacao", "precipitação", "weather", "tempo"), ("previsao", "previsão", "forecast", "ipma", "dias", "days", "horizonte")),
             (("tarifa", "preco", "price", "fare", "barato", "cheapest"), ("tarifa", "preco", "price", "fare")),
             (("tempo real", "real time", "real-time", "live", "on time", "delay", "atras", "pontual", "perturb"), ("tempo real", "real time", "real-time", "live", "delay", "atras", "pontual", "perturb")),
-            (("horario", "opening", "hours", "evening", "tonight", "availability", "disponibilidade", "aberto", "fechado"), ("horario", "opening", "hours", "evening", "tonight", "availability", "disponibilidade", "aberto", "fechado")),
+            (("horario", "opening", "hours", "evening", "tonight", "night", "noturno", "servico", "service", "availability", "disponibilidade", "aberto", "fechado"), ("horario", "opening", "hours", "evening", "tonight", "night", "noturno", "periodo noturno", "night period", "servico", "service", "availability", "disponibilidade", "aberto", "fechado")),
             (("gratuito", "gratuita", "free", "gratuit"), ("gratuito", "gratuita", "free", "gratuit")),
             (("evento", "event", "titulo", "title", "data", "date", "localizacao", "location", "crianca", "children", "kids", "familia", "family"), ("evento", "event", "crianca", "children", "kids", "familia", "family", "gratuit", "free")),
             (("fertagus", "ferry", "barreiro", "transtejo", "soflusa", "operator", "operador", "ambito", "scope"), ("fertagus", "ferry", "barreiro", "transtejo", "soflusa", "operator", "operador", "ambito", "scope")),
             (("partida", "departure", "eta", "arrival", "route", "rota", "linha", "ligacao"), ("partida", "departure", "eta", "arrival", "route", "rota", "linha", "ligacao")),
+            (("veterinario", "veterinaria", "veterinary", "vet", "clinica", "clinic", "contacto", "contact", "morada", "address", "localizacao", "location", "distancia", "distance", "horario", "hours"), ("veterinario", "veterinaria", "veterinary", "vet", "fonte estruturada", "structured source", "clinica", "clinic")),
             (("subjective", "touristy", "authentic", "quiet", "best", "relevance", "ranking", "criteria"), ("subjective", "touristy", "authentic", "quiet", "prioritised", "prioritized", "compatible signals", "verifiable details")),
         ]
 
@@ -2845,7 +2857,7 @@ class QualityAssuranceAgent(BaseAgent):
                 ]
             ):
                 return draft_response
-            repaired = final_visual_pass(repaired)
+            repaired = final_post_qa_guard(final_visual_pass(repaired), language=language)
             return repaired or draft_response
         except Exception as exc:
             logger.warning("QA final repair pass failed, keeping draft response: %s", exc)

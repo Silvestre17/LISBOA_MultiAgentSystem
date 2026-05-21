@@ -84,7 +84,7 @@ Hard rules:
 - For selected places/events, preserve useful evidence fields as detail strings with these labels when present: Description, Address, Hours, Price, Website, When, Venue, Tickets. Omit any missing field; never write N/A, unknown, or + info.
 - For time-specific plans, do not choose a place whose evidence says it is closed for that period. If all strong matches are closed or lack hours, either choose a weaker open-ended stop and state the limitation, or frame the closed venue only as exterior/context, not as an enterable visit.
 - Avoid static skeletons. Every block must explain purpose plus at least one useful detail, movement, weather adaptation, or limitation.
-- Keep one-day plans to 2 to 4 blocks. Multi-day plans may use up to 5 blocks.
+- Keep one-day plans compact by default, but respect explicit user cardinality such as "5 sites", "3 museums and 1 restaurant", or required waypoints when evidence exists. Do not add extra filler blocks beyond what is useful.
 - Use source_ids only from the evidence. If unsure, leave the source_ids list empty and state the limitation.
 
 JSON schema:

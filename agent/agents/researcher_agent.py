@@ -851,6 +851,26 @@ class ResearcherAgent(BaseAgent):
         return str(definition.get("tool_label") or "").strip() or None
 
     @staticmethod
+    def _service_type_identity(service_type: str) -> str:
+        """Return a stable identity for equivalent Lisboa Aberta service labels."""
+        normalized = unicodedata.normalize("NFKD", service_type or "")
+        normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+        normalized = re.sub(r"[^a-z0-9]+", " ", normalized).strip()
+        if any(marker in normalized for marker in ("sanitario", "instalac", "restroom", "toilet", "wc")):
+            return "public_restrooms"
+        if any(marker in normalized for marker in ("wifi", "wi fi", "internet")):
+            return "wifi"
+        if "farmac" in normalized:
+            return "pharmacies"
+        if "hospital" in normalized:
+            return "hospitals"
+        if "bibliotec" in normalized or "librar" in normalized:
+            return "libraries"
+        if "mercado" in normalized or "market" in normalized:
+            return "markets"
+        return normalized
+
+    @staticmethod
     def _structured_service_category(service_type: str) -> Optional[str]:
         """Resolve a canonical structured service enum to the best Lisboa Aberta taxonomy hint."""
         definition = _STRUCTURED_SERVICE_TYPE_DEFINITIONS.get(service_type)
@@ -2890,6 +2910,25 @@ class ResearcherAgent(BaseAgent):
         if central_match:
             return central_match.group("location").strip()
 
+        service_location_match = re.search(
+            r"\b(?:farm[aá]cias?|pharmac(?:y|ies)|hospitais?|hospitals?|cl[ií]nicas?|clinics?|"
+            r"bibliotecas?|libraries|escolas?|schools?|mercados?|markets?|jardins?|gardens?|"
+            r"parques?|parks?|sanit[aá]rios?|toilets?|restrooms?|casas?\s+de\s+banho|"
+            r"wi[-\s]?fi|internet|pol[ií]cia|police|bombeiros?|firefighters?|"
+            r"estacionamento|parking|embaixadas?|embassies)\b"
+            r".{0,80}\b(?:em|no|na|nos|nas|in|at|near|perto\s+de|perto\s+do|perto\s+da)\s+"
+            r"(?P<location>.+?)(?:\s+(?:com|with|que|which|abert[oa]s?|open|morada|address|"
+            r"perto|near|recomendas|recommend|usar|use)\b|[\?\!\.,;]|$)",
+            user_message,
+            flags=re.IGNORECASE,
+        )
+        if service_location_match:
+            location = ResearcherAgent._clean_nearby_location_text(
+                service_location_match.group("location")
+            )
+            if location:
+                return location
+
         patterns = [
             r"\b(?:como\s+(?:chego|vou|posso\s+ir)|how\s+(?:do|can)\s+i\s+(?:get|go))\b.{0,100}"
             r"\b(?:desde|from|a\s+partir\s+(?:de|do|da))\s+(?P<location>.+?)(?:[\?\!\.,;]|$)",
@@ -2938,6 +2977,25 @@ class ResearcherAgent(BaseAgent):
         cleaned = re.sub(r"\s+", " ", str(location or "")).strip(" .?!,;:")
         if not cleaned:
             return None
+        normalized_cleaned = unicodedata.normalize("NFKD", cleaned)
+        normalized_cleaned = normalized_cleaned.encode("ascii", "ignore").decode("ascii").lower()
+        normalized_cleaned = re.sub(r"\s+", " ", normalized_cleaned).strip()
+        if normalized_cleaned in {
+            "mim",
+            "me",
+            "my",
+            "eu",
+            "aqui",
+            "here",
+            "minha localizacao",
+            "minha localizacao atual",
+            "localizacao atual",
+            "current location",
+            "my location",
+            "where i am",
+            "onde estou",
+        }:
+            return None
         try:
             from tools.location_resolver import clean_location_query_fragment
 
@@ -2946,6 +3004,11 @@ class ResearcherAgent(BaseAgent):
             pass
 
         split_patterns = (
+            r"\b(?:posso|podemos|consigo|devo|can\s+i|can\s+we|should\s+i)\s+"
+            r"(?:usar|utilizar|visitar|entrar|ir|use|visit|enter|go)\b.*$",
+            r"\b(?:i|we)\s+(?:can|could|should)\s+(?:use|visit|enter|go)\b.*$",
+            r"\b(?:posso|podemos|consigo|devo|i\s+can|we\s+can|can\s+i|can\s+we|should\s+i)\s*$",
+            r"\b(?:recomendas|aconselhas|sugeres|recommend|suggest)\b.*$",
             r"\s*[,;:]\s*(?:qual|quais|onde|há|ha|existe|consegues|diz|mostra|which|what|where|show|tell)\b",
             r"\b(?:e|and)\s+(?:quanto\s+(?:tempo\s+)?(?:demoro|demora|leva)|how\s+long|tempo\s+(?:a\s+p[eé]|de\s+caminhada)|walking\s+time)\b.*$",
             r"\b(?:if|when|se|quando)\b",
@@ -2962,7 +3025,113 @@ class ResearcherAgent(BaseAgent):
         for pattern in split_patterns:
             parts = re.split(pattern, cleaned, maxsplit=1, flags=re.IGNORECASE)
             cleaned = parts[0].strip(" .?!,;:")
+        normalized_cleaned = unicodedata.normalize("NFKD", cleaned)
+        normalized_cleaned = normalized_cleaned.encode("ascii", "ignore").decode("ascii").lower()
+        normalized_cleaned = re.sub(r"\s+", " ", normalized_cleaned).strip()
+        if normalized_cleaned in {"mim", "me", "aqui", "here", "minha localizacao", "current location", "my location"}:
+            return None
         return cleaned or None
+
+    @staticmethod
+    def _query_references_user_current_location(user_message: str) -> bool:
+        """Return whether the user asks for proximity to their own location."""
+        normalized = unicodedata.normalize("NFKD", user_message or "")
+        normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+        return bool(
+            re.search(
+                r"\b(?:perto\s+de\s+mim|perto\s+da\s+minha\s+localizacao|"
+                r"perto\s+daqui|near\s+me|near\s+my\s+location|nearby|close\s+to\s+me)\b",
+                normalized,
+            )
+        )
+
+    @staticmethod
+    def _build_current_location_clarification(language: str) -> str:
+        """Ask for a usable reference point instead of geocoding 'me'."""
+        if language == "pt":
+            return "\n".join(
+                [
+                    "### 🧭 **Preciso da tua localização de referência**",
+                    "",
+                    "✅ **Resposta direta:** consigo procurar serviços perto de ti, mas preciso de uma morada, zona, ponto de referência ou estação/paragem próxima.",
+                    "",
+                    "---",
+                    "",
+                    "- Exemplo: “estou no Rossio”, “perto da NOVA IMS” ou “junto ao Cais do Sodré”.",
+                ]
+            )
+        return "\n".join(
+            [
+                "### 🧭 **I Need Your Reference Location**",
+                "",
+                "✅ **Direct answer:** I can search services near you, but I need an address, area, landmark, or nearby station/stop.",
+                "",
+                "---",
+                "",
+                "- Example: “I am at Rossio”, “near NOVA IMS”, or “by Cais do Sodré”.",
+            ]
+        )
+
+    @staticmethod
+    def _is_unsupported_private_service_query(user_message: str) -> bool:
+        """Detect private-service discovery requests not covered by LISBOA datasets."""
+        normalized = unicodedata.normalize("NFKD", user_message or "")
+        normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+        if not re.search(r"\b(?:veterinari\w*|veterinary|vet|vets)\b", normalized):
+            return False
+        return bool(
+            re.search(
+                r"\b(?:onde|where|perto|near|em|in|no|na|find|encontra|mostra|"
+                r"lista|recommend|recomenda|hospital|clinica|clinic)\b",
+                normalized,
+            )
+        )
+
+    @staticmethod
+    def _build_unsupported_private_service_response(user_message: str, language: str) -> str:
+        """Build a conservative answer for private services without structured coverage."""
+        nearby_location = ResearcherAgent._clean_nearby_location_text(
+            ResearcherAgent._extract_near_location_name(user_message)
+        )
+        if not nearby_location:
+            location_match = re.search(
+                r"\b(?:veterinari\w*|veterinary|vet|vets)\b.{0,80}"
+                r"\b(?:em|no|na|nos|nas|in|near|perto\s+de|perto\s+do|perto\s+da)\s+"
+                r"(?P<location>.+?)(?:[\?\!\.,;]|$)",
+                user_message or "",
+                flags=re.IGNORECASE,
+            )
+            if location_match:
+                nearby_location = ResearcherAgent._clean_nearby_location_text(
+                    location_match.group("location")
+                )
+        scope_pt = f" em **{nearby_location}**" if nearby_location else ""
+        scope_en = f" in **{nearby_location}**" if nearby_location else ""
+        if language == "pt":
+            lines = [
+                "### 🐾 **Serviço não confirmado nos dados disponíveis**",
+                "",
+                f"✅ **Resposta direta:** não tenho uma fonte estruturada confirmada para listar veterinários{scope_pt}.",
+                "",
+                "---",
+                "",
+                "- Não vou inventar clínicas, moradas, horários ou contactos sem fonte local confirmada.",
+                "- Se tiveres o **nome** ou a **morada** do local, posso usar essa informação para ajudar com o percurso ou com contexto prático.",
+                "- Para disponibilidade clínica, urgências ou marcações, confirma diretamente com o estabelecimento.",
+            ]
+            return "\n".join(lines)
+        lines = [
+            "### 🐾 **Service Not Confirmed In Available Data**",
+            "",
+            f"✅ **Direct answer:** I do not have a confirmed structured source for veterinary clinics{scope_en}.",
+            "",
+            "---",
+            "",
+            "- I will not invent clinics, addresses, opening hours, or contacts without confirmed local data.",
+            "- If you provide the **name** or **address**, I can use that information for directions or practical context.",
+            "- For clinical availability, emergencies, or appointments, confirm directly with the provider.",
+        ]
+        return "\n".join(lines)
 
     @staticmethod
     def _extract_event_location_constraint(user_message: str) -> Optional[str]:
@@ -3285,6 +3454,12 @@ class ResearcherAgent(BaseAgent):
         outdoor_event_query = self._is_outdoor_event_query(user_message)
         raw_extracted_focus_query = self._extract_event_focus_query(user_message)
         location_constraint = self._extract_event_location_constraint(user_message)
+        if not location_constraint and re.search(
+            r"\b(?:em|in|no|na|within)\s+(?:lisboa|lisbon)\b",
+            self._normalize_event_preference_text(user_message),
+            flags=re.IGNORECASE,
+        ):
+            location_constraint = "Lisboa"
         needs_evening_event = self._query_requests_evening_events(user_message)
         broad_date_discovery = (
             not structured_plan
@@ -3902,12 +4077,15 @@ class ResearcherAgent(BaseAgent):
         service_types = self._extract_service_types(user_message)
         for structured_service in structured_plan.get("service_types", []) if structured_plan else []:
             tool_label = self._structured_service_tool_label(structured_service)
-            if tool_label and tool_label not in service_types:
+            existing_service_ids = {self._service_type_identity(service_type) for service_type in service_types}
+            if tool_label and self._service_type_identity(tool_label) not in existing_service_ids:
                 service_types.append(tool_label)
         nearby_location = self._normalize_structured_plan_text(structured_plan.get("near_location")) if structured_plan else None
         nearby_location = self._clean_nearby_location_text(nearby_location)
         nearby_location = nearby_location or self._extract_near_location_name(user_message)
         service_types = self._filter_location_anchored_service_types(service_types, nearby_location)
+        if service_types and self._query_references_user_current_location(user_message) and not nearby_location:
+            return self._build_current_location_clarification(language)
         is_broad_attractions = self._is_broad_attractions_query(user_message)
         area_labels = extract_aml_municipality_mentions(user_message)
         area_label = area_labels[0] if len(area_labels) == 1 else ""
@@ -4004,7 +4182,11 @@ class ResearcherAgent(BaseAgent):
                 if not category_hint and structured_plan:
                     normalized_structured_services = structured_plan.get("service_types", [])
                     for structured_service in normalized_structured_services:
-                        if self._structured_service_tool_label(structured_service) == service_type:
+                        structured_label = self._structured_service_tool_label(structured_service)
+                        if (
+                            structured_label
+                            and self._service_type_identity(structured_label) == self._service_type_identity(service_type)
+                        ):
                             category_hint = self._structured_service_category(structured_service)
                             break
                 if category_hint:
@@ -4213,6 +4395,8 @@ class ResearcherAgent(BaseAgent):
                     self._extract_near_location_name(user_message)
                 )
                 service_types = self._filter_location_anchored_service_types(service_types, nearby_location)
+                if service_types and self._query_references_user_current_location(user_message) and not nearby_location:
+                    return self._build_current_location_clarification(language)
                 blocks: List[str] = []
                 missing_services: List[str] = []
 
@@ -4664,6 +4848,8 @@ class ResearcherAgent(BaseAgent):
                 _planner_local_area_profile,
                 _query_has_explicit_start_end_constraint,
                 _requested_anchor_labels,
+                _requested_plan_total_stop_count,
+                _requested_plan_type_counts,
             )
 
             requested_anchor_queries = _requested_anchor_labels(query)
@@ -4671,6 +4857,8 @@ class ResearcherAgent(BaseAgent):
             planner_area_anchor = _extract_compact_plan_area_anchor(query) or _extract_requested_plan_area(query)
             planner_area_key, planner_area_label, _planner_area_blockers = _planner_local_area_profile(query)
             planner_has_start_end = _query_has_explicit_start_end_constraint(query)
+            planner_requested_counts = _requested_plan_type_counts(query)
+            planner_requested_stop_count = _requested_plan_total_stop_count(query)
         except Exception:
             requested_anchor_queries = []
             planner_origin_anchor = ""
@@ -4678,6 +4866,8 @@ class ResearcherAgent(BaseAgent):
             planner_area_key = ""
             planner_area_label = ""
             planner_has_start_end = False
+            planner_requested_counts = {}
+            planner_requested_stop_count = 0
         if requested_anchor_queries:
             existing_queries = {
                 _normalize_researcher_intent_text(str(item.get("query") or ""))
@@ -5203,9 +5393,55 @@ class ResearcherAgent(BaseAgent):
                         "language": language,
                     },
                 )
+            if not requests_event_stop and planner_area_key and planner_area_label:
+                area_parts = [
+                    re.sub(r"\s+", " ", part).strip(" .:-")
+                    for part in re.split(r"\s*/\s*", planner_area_label)
+                ]
+                area_parts = [
+                    part for part in area_parts
+                    if part and self._normalize_for_deterministic_routing(part) != compact_anchor_key
+                ]
+                area_reference = area_parts[0] if area_parts else ""
+                area_reference_key = self._normalize_for_deterministic_routing(area_reference)
+                existing_cultural_keys = {
+                    self._normalize_for_deterministic_routing(str(item.get("query") or ""))
+                    for item in planned_cultural_queries
+                    if isinstance(item, dict)
+                }
+                if area_reference and not any(
+                    area_reference_key in query_key
+                    and re.search(r"\b(?:perto|junto|zona|volta|near|nearby|around|close\s+to)\b", query_key)
+                    for query_key in existing_cultural_keys
+                ):
+                    planned_cultural_queries.insert(
+                        1,
+                        {
+                            "query": (
+                                f"locais culturais e monumentos perto de {area_reference}"
+                                if language == "pt"
+                                else f"cultural sites and monuments near {area_reference}"
+                            ),
+                            "category": "Museums & Monuments",
+                            "max_results": 5,
+                            "specific_lookup": False,
+                            "language": language,
+                        },
+                    )
             if not requests_event_stop:
                 compact_experience_queries: List[Dict[str, Any]] = []
-                if re.search(r"\b(?:miradouro|miradouros|viewpoint|viewpoints|vista|views)\b", normalized):
+                explicit_viewpoint_request = bool(
+                    re.search(r"\b(?:miradouro|miradouros|viewpoint|viewpoints|vista|views)\b", normalized)
+                )
+                generic_compact_route_request = bool(
+                    has_broader_itinerary_need
+                    and not re.search(
+                        r"\b(?:museu|museus|museum|museums|monumento|monumentos|monument|monuments|"
+                        r"interior|indoor|chuva|rain|evento|event)\b",
+                        normalized,
+                    )
+                )
+                if explicit_viewpoint_request or generic_compact_route_request:
                     compact_experience_queries.append(
                         {
                             "query": (
@@ -5340,6 +5576,54 @@ class ResearcherAgent(BaseAgent):
                 ]
             planned_cultural_queries = planned_cultural_queries[:5]
             planned_food_queries = planned_food_queries[:2]
+
+        requested_cultural_results = max(
+            5,
+            min(
+                8,
+                max(
+                    int(planner_requested_counts.get("museum", 0) or 0)
+                    + int(planner_requested_counts.get("monument", 0) or 0),
+                    int(planner_requested_counts.get("total", 0) or 0),
+                    int(planner_requested_stop_count or 0),
+                ),
+            ),
+        )
+        requested_food_results = max(5, min(8, int(planner_requested_counts.get("food", 0) or 0)))
+        if planner_requested_counts.get("museum") and not any(
+            re.search(r"\b(?:museu|museum)\b", self._normalize_for_deterministic_routing(str(item.get("query") or "")))
+            for item in planned_cultural_queries
+        ):
+            planned_cultural_queries.insert(
+                0,
+                {
+                    "query": "museus em Lisboa" if language == "pt" else "museums in Lisbon",
+                    "category": "Museums & Monuments",
+                    "max_results": requested_cultural_results,
+                    "specific_lookup": False,
+                    "language": language,
+                },
+            )
+        if planner_requested_counts.get("viewpoint") and not any(
+            re.search(r"\b(?:miradouro|viewpoint|view\s+point)\b", self._normalize_for_deterministic_routing(str(item.get("query") or "")))
+            for item in planned_cultural_queries
+        ):
+            planned_cultural_queries.insert(
+                0,
+                {
+                    "query": "miradouros em Lisboa" if language == "pt" else "viewpoints in Lisbon",
+                    "category": "View Points",
+                    "max_results": requested_cultural_results,
+                    "specific_lookup": False,
+                    "language": language,
+                },
+            )
+        for item in planned_cultural_queries:
+            if isinstance(item, dict):
+                item["max_results"] = max(int(item.get("max_results") or 5), requested_cultural_results)
+        for item in planned_food_queries:
+            if isinstance(item, dict):
+                item["max_results"] = max(int(item.get("max_results") or 5), requested_food_results)
 
         if has_historic_monument_need and planned_cultural_queries:
             planned_query_text = " ".join(str(item.get("query") or "") for item in planned_cultural_queries)
@@ -5711,14 +5995,19 @@ class ResearcherAgent(BaseAgent):
         ]
 
         extracted: List[str] = []
+        seen_identities: set[str] = set()
         for markers, normalized_service in service_catalog:
             if normalized_service == "jardins" and parking_context:
                 continue
-            if any(marker in normalized_query for marker in markers) and normalized_service not in extracted:
+            if any(marker in normalized_query for marker in markers):
                 if normalized_service == "parking" and bike_parking_context:
                     continue
                 if normalized_service == "parking" and car_parking_context:
                     normalized_service = "car parking"
+                identity = ResearcherAgent._service_type_identity(normalized_service)
+                if identity in seen_identities:
+                    continue
+                seen_identities.add(identity)
                 extracted.append(normalized_service)
         return extracted
 
@@ -6718,6 +7007,20 @@ class ResearcherAgent(BaseAgent):
                         language=language,
                     ),
                 )
+
+        if not is_greeting and self._is_unsupported_private_service_query(user_message):
+            if verbose:
+                print("      [RESEARCHER] Using private-service coverage guard...")
+            response = self._build_unsupported_private_service_response(user_message, language)
+            return self._remember_deterministic_response_for_retry(
+                user_message,
+                finalize_worker_response(
+                    response,
+                    agent_name="researcher",
+                    user_query=user_message,
+                    language=language,
+                ),
+            )
 
         messages = self._build_messages(self.system_prompt, user_message, context, language=language)
 

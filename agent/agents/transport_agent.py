@@ -1779,6 +1779,25 @@ def _parse_route_mode_preferences(user_message: str) -> Dict[str, bool]:
         "apenas metro",
         "apenas de metro",
     ]
+    train_only_phrases = [
+        "train only",
+        "only train",
+        "only trains",
+        "only by train",
+        "by train only",
+        "cp only",
+        "only cp",
+        "so comboio",
+        "só comboio",
+        "so de comboio",
+        "só de comboio",
+        "so comboios",
+        "só comboios",
+        "apenas comboio",
+        "apenas comboios",
+        "apenas de comboio",
+        "apenas de comboios",
+    ]
     exclude_bus_phrases = [
         "without bus",
         "without buses",
@@ -1836,13 +1855,40 @@ def _parse_route_mode_preferences(user_message: str) -> Dict[str, bool]:
         "nao usar metro",
         "não usar metro",
     ]
+    exclude_train_phrases = [
+        "without train",
+        "without trains",
+        "without taking a train",
+        "without taking trains",
+        "without using a train",
+        "without using trains",
+        "without cp",
+        "avoiding train",
+        "avoid train",
+        "no train",
+        "no trains",
+        "not by train",
+        "sem comboio",
+        "sem comboios",
+        "sem cp",
+        "evitar comboio",
+        "evitando comboio",
+        "nao quero comboio",
+        "não quero comboio",
+        "nao quero comboios",
+        "não quero comboios",
+        "nao usar comboio",
+        "não usar comboio",
+    ]
 
     bus_only = any(phrase in normalized for phrase in bus_only_phrases)
     tram_only = any(phrase in normalized for phrase in tram_only_phrases)
     metro_only = any(phrase in normalized for phrase in metro_only_phrases)
+    train_only = any(phrase in normalized for phrase in train_only_phrases)
     exclude_bus = any(phrase in normalized for phrase in exclude_bus_phrases)
     exclude_tram = any(phrase in normalized for phrase in exclude_tram_phrases)
     exclude_metro = any(phrase in normalized for phrase in exclude_metro_phrases)
+    exclude_train = any(phrase in normalized for phrase in exclude_train_phrases)
 
     exclusion_prefix = r"(?:sem|evitar|evitando|evito|dispensar|prefiro\s+evitar|n[aã]o\s+quero|without|avoid|avoiding|no)"
     optional_use = r"(?:\s+(?:usar|apanhar|tomar|using|taking|take|catch))?"
@@ -1861,6 +1907,12 @@ def _parse_route_mode_preferences(user_message: str) -> Dict[str, bool]:
     exclude_metro = exclude_metro or bool(
         re.search(
             rf"\b{exclusion_prefix}{optional_use}\s+(?:o\s+|a\s+|the\s+)?metro\b",
+            normalized,
+        )
+    )
+    exclude_train = exclude_train or bool(
+        re.search(
+            rf"\b{exclusion_prefix}{optional_use}\s+(?:o\s+|a\s+|the\s+)?(?:cp|comboio|comboios|train|trains)\b",
             normalized,
         )
     )
@@ -1888,6 +1940,12 @@ def _parse_route_mode_preferences(user_message: str) -> Dict[str, bool]:
     metro_only = metro_only or bool(
         re.search(
             r"\b(?:only|just|apenas|s[oó])\b(?:\s+de)?\s+metro\b",
+            normalized,
+        )
+    )
+    train_only = train_only or bool(
+        re.search(
+            r"\b(?:only|just|apenas|s[oó])\b(?:\s+de)?\s+(?:cp|comboio|comboios|train|trains)\b",
             normalized,
         )
     )
@@ -1941,6 +1999,12 @@ def _parse_route_mode_preferences(user_message: str) -> Dict[str, bool]:
                 normalized,
             )
         )
+        train_only = train_only or bool(
+            re.search(
+                r"\b(?:de|by|via|using)\s+(?:o\s+|a\s+|the\s+)?(?:cp|comboio|comboios|train|trains)\b",
+                normalized,
+            )
+        )
 
     if exclude_tram and re.search(r"\b(bus|buses|autocarro|autocarros)\b", normalized):
         bus_only = True
@@ -1955,9 +2019,11 @@ def _parse_route_mode_preferences(user_message: str) -> Dict[str, bool]:
         "bus_only": bus_only,
         "tram_only": tram_only,
         "metro_only": metro_only,
+        "train_only": train_only,
         "exclude_bus": exclude_bus,
         "exclude_tram": exclude_tram,
         "exclude_metro": exclude_metro,
+        "exclude_train": exclude_train,
         "alternative_mode_request": alternative_mode_request,
     }
 
@@ -2618,6 +2684,7 @@ def _build_cp_bridge_for_partial_metro_route(
         or preferences["bus_only"]
         or preferences["tram_only"]
         or preferences["exclude_metro"]
+        or preferences["exclude_train"]
     ):
         return None
     normalized_request = _normalize_token(user_message)
@@ -6941,9 +7008,9 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
             )
         else:
             first_note = (
-                "✅ **Resposta direta:** para não repetir só a Carris, há também uma opção de **Metro de Lisboa** suportada pelos dados."
+                "✅ **Resposta direta:** encontrei uma opção de **Metro de Lisboa** e uma opção de **autocarro Carris** suportadas pelos dados."
                 if _infer_language(user_message, "") == "pt"
-                else "✅ **Direct answer:** instead of only repeating Carris, there is also a **Metro de Lisboa** option supported by the data."
+                else "✅ **Direct answer:** I found a **Metro de Lisboa** option and a **Carris bus** option supported by the data."
             )
         metro_response = _build_deterministic_metro_route_response(user_message, "") or route_result
         return (
@@ -8027,7 +8094,12 @@ class TransportAgent(BaseAgent):
             return None
 
         preferences = _parse_route_mode_preferences(user_message)
-        if preferences["metro_only"] or preferences["bus_only"] or preferences["tram_only"]:
+        if (
+            preferences["metro_only"]
+            or preferences["bus_only"]
+            or preferences["tram_only"]
+            or preferences["exclude_train"]
+        ):
             return None
         if re.search(
             r"\b(?:sem|evitar|n[aã]o\s+quero|without|avoid|no)\s+(?:cp|comboio|comboios|train|trains)\b",
@@ -9755,6 +9827,60 @@ class TransportAgent(BaseAgent):
                 f"📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Updated:** {timestamp}"
             )
 
+        if (
+            preferences["exclude_train"]
+            and not any(
+                preferences[key]
+                for key in (
+                    "metro_only",
+                    "bus_only",
+                    "tram_only",
+                    "exclude_bus",
+                    "exclude_tram",
+                    "exclude_metro",
+                )
+            )
+        ):
+            synthetic_request = (
+                f"Como vou de {origin} para {destination} de metro ou autocarro?"
+                if language == "pt"
+                else f"How do I get from {origin} to {destination} by metro or bus?"
+            )
+            non_train_response = self._build_explicit_multi_mode_route_response(
+                user_message=synthetic_request,
+                context=context,
+                origin=origin,
+                destination=destination,
+                language=language,
+            )
+            if non_train_response:
+                return non_train_response
+            if language == "pt":
+                return (
+                    f"### 🚇🚌 **{origin} → {destination} sem comboio**\n\n"
+                    "⚠️ **Resposta direta:** não consegui confirmar uma alternativa sem CP/comboio com os dados de Metro, Carris e Carris Metropolitana disponíveis.\n\n"
+                    + self._build_transport_source_line(
+                        language,
+                        [
+                            "[*Metro de Lisboa*](https://www.metrolisboa.pt)",
+                            "[*Carris*](https://www.carris.pt)",
+                            "[*Carris Metropolitana*](https://www.carrismetropolitana.pt)",
+                        ],
+                    )
+                )
+            return (
+                f"### 🚇🚌 **{origin} → {destination} without train**\n\n"
+                "⚠️ **Direct answer:** I could not confirm a non-CP/train alternative with the available Metro, Carris, and Carris Metropolitana data.\n\n"
+                + self._build_transport_source_line(
+                    language,
+                    [
+                        "[*Metro de Lisboa*](https://www.metrolisboa.pt)",
+                        "[*Carris*](https://www.carris.pt)",
+                        "[*Carris Metropolitana*](https://www.carrismetropolitana.pt)",
+                    ],
+                )
+            )
+
         if not any(preferences.values()):
             return None
 
@@ -10243,6 +10369,20 @@ class TransportAgent(BaseAgent):
         requested_route_modes = _requested_route_option_modes(user_message) if endpoints else set()
         surface_only_route_modes = bool(requested_route_modes) and requested_route_modes <= {"bus", "tram"}
         if endpoints and surface_only_route_modes:
+            constrained_route_response = self._build_mode_constrained_route_response(
+                user_message=user_message,
+                context=context,
+                language=resolved_language,
+            )
+            if constrained_route_response:
+                finalized_response = self._finalize_transport_response(
+                    constrained_route_response,
+                    user_message=user_message,
+                    language=resolved_language,
+                )
+                return with_ambiguity_preamble(finalized_response)
+
+        if endpoints and _query_has_route_mode_constraints(user_message):
             constrained_route_response = self._build_mode_constrained_route_response(
                 user_message=user_message,
                 context=context,

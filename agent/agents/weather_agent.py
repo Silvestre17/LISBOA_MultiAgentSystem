@@ -35,6 +35,31 @@ from agent.utils.response_formatter import (
 FORECAST_HORIZON_DAYS = 5
 FORECAST_MAX_OFFSET = FORECAST_HORIZON_DAYS - 1
 
+_WEATHER_COUNT_WORDS = {
+    "one": 1,
+    "um": 1,
+    "uma": 1,
+    "two": 2,
+    "dois": 2,
+    "duas": 2,
+    "three": 3,
+    "tres": 3,
+    "four": 4,
+    "quatro": 4,
+    "five": 5,
+    "cinco": 5,
+    "six": 6,
+    "seis": 6,
+    "seven": 7,
+    "sete": 7,
+    "eight": 8,
+    "oito": 8,
+    "nine": 9,
+    "nove": 9,
+    "ten": 10,
+    "dez": 10,
+}
+
 _MONTH_NAME_TO_NUMBER = {
     "january": 1,
     "february": 2,
@@ -139,7 +164,7 @@ class WeatherAgent(BaseAgent):
     @staticmethod
     def _infer_weather_query_language(user_message: str) -> str:
         """Adds a small PT-PT heuristic for short follow-ups where generic language inference is weak."""
-        query = (user_message or "").lower()
+        query = WeatherAgent._normalize_weather_query(user_message)
         english_markers = [
             "what",
             "how",
@@ -174,6 +199,14 @@ class WeatherAgent(BaseAgent):
             "vestir",
             "roupa",
             "casaco",
+            "chapeu",
+            "bone",
+            "protetor",
+            "protector",
+            "guarda chuva",
+            "devo",
+            "levo",
+            "levar",
         ]
         if any(marker in query for marker in english_markers) and not any(
             marker in query for marker in portuguese_markers
@@ -191,6 +224,18 @@ class WeatherAgent(BaseAgent):
             "tempo",
             "próxim",
             "proxim",
+            "chuva",
+            "vento",
+            "temperatura",
+            "casaco",
+            "chapeu",
+            "bone",
+            "protetor",
+            "protector",
+            "guarda chuva",
+            "devo",
+            "levo",
+            "levar",
         ]
         if any(marker in query for marker in pt_markers) or re.search(r"[ãõáéíóúç]", query):
             return "pt"
@@ -329,6 +374,17 @@ class WeatherAgent(BaseAgent):
         explicit_days = re.search(r"\b([1-5])\s*(?:-|\s)?\s*(?:day|days|dia|dias)\b", normalized)
         if explicit_days:
             return {"day_offset": 0, "days": int(explicit_days.group(1)), "label": "range"}
+        explicit_word_days = re.search(
+            r"\b(one|two|three|four|five|um|uma|dois|duas|tres|quatro|cinco)\s+"
+            r"(?:day|days|dia|dias)\b",
+            normalized,
+        )
+        if explicit_word_days:
+            return {
+                "day_offset": 0,
+                "days": _WEATHER_COUNT_WORDS[explicit_word_days.group(1)],
+                "label": "range",
+            }
 
         if any(term in normalized for term in ["week", "this week", "semana", "esta semana"]):
             return {"day_offset": 0, "days": FORECAST_HORIZON_DAYS, "label": "range"}
@@ -426,6 +482,7 @@ class WeatherAgent(BaseAgent):
         """Normalize weather query text for accent-insensitive capability checks."""
         normalized = unicodedata.normalize("NFKD", user_message or "")
         normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
+        normalized = re.sub(r"\bguarda[-\s]?chuva\b", "guarda chuva", normalized)
         normalized = re.sub(r"\bs[\?\s]*bado\b", "sabado", normalized)
         normalized = re.sub(r"\bter\?a\b", "terca", normalized)
         return re.sub(r"\s+", " ", normalized).strip()
@@ -733,9 +790,16 @@ class WeatherAgent(BaseAgent):
     @classmethod
     def _is_beyond_forecast_horizon_query(cls, user_message: str) -> bool:
         """Returns whether the query clearly asks for weather beyond IPMA's 5-day horizon."""
-        query = (user_message or "").lower()
+        query = cls._normalize_weather_query(user_message)
 
         if re.search(r"\b([6-9]|\d{2,})\s*(?:-|\s)?\s*(?:day|days|dia|dias)\b", query):
+            return True
+        word_days = re.search(
+            r"\b(six|seven|eight|nine|ten|seis|sete|oito|nove|dez)\s+"
+            r"(?:day|days|dia|dias)\b",
+            query,
+        )
+        if word_days and _WEATHER_COUNT_WORDS.get(word_days.group(1), 0) > FORECAST_HORIZON_DAYS:
             return True
 
         beyond_horizon_patterns = [
@@ -822,6 +886,16 @@ class WeatherAgent(BaseAgent):
             "barco",
             "safe",
             "seguro",
+            "hat",
+            "cap",
+            "sunscreen",
+            "sun cream",
+            "sunblock",
+            "chapeu",
+            "bone",
+            "protetor solar",
+            "protector solar",
+            "oculos de sol",
         ]
         return any(term in normalized for term in advice_terms)
 
@@ -1197,6 +1271,16 @@ class WeatherAgent(BaseAgent):
             "ar livre",
             "umbrella",
             "guarda chuva",
+            "hat",
+            "cap",
+            "sunscreen",
+            "sun cream",
+            "sunblock",
+            "chapeu",
+            "bone",
+            "protetor solar",
+            "protector solar",
+            "oculos de sol",
         ]
 
         if (
@@ -1212,21 +1296,135 @@ class WeatherAgent(BaseAgent):
             maximum = cls._extract_temperature_max(tool_text)
             rain = cls._extract_rain_summary(tool_text)
             wind = cls._extract_wind_summary(tool_text)
-            rain_answer = f"{cls._rain_direct_answer(rain, is_pt)}\n\n" if rain else ""
+            min_temp = cls._temperature_to_float(minimum)
+            max_temp = cls._temperature_to_float(maximum)
+            asks_sun_protection = bool(
+                re.search(
+                    r"\b(?:hat|cap|sunscreen|sun cream|sunblock|chapeu|bone|protetor solar|protector solar|oculos de sol)\b",
+                    normalized,
+                )
+            )
+            asks_umbrella = bool(re.search(r"\b(?:umbrella|guarda[-\s]?chuva|impermeavel|rain shell)\b", normalized))
+            asks_jacket = bool(re.search(r"\b(?:jacket|coat|casaco)\b", normalized))
+            asks_rain_context = bool(
+                asks_umbrella
+                or re.search(r"\b(?:rain|raining|chuva|chover|precipitacao|precipitation)\b", normalized)
+            )
+            rain_answer = f"{cls._rain_direct_answer(rain, is_pt)}\n\n" if rain and asks_rain_context else ""
+            explicitly_requested_items = sum([asks_sun_protection, asks_umbrella, asks_jacket])
+            if explicitly_requested_items > 1:
+                probability = float(rain.get("probability", 0) or 0) if rain else 0.0
+                warm_note = bool(max_temp is not None and max_temp >= 24)
+                advice_lines: list[str] = []
+                if asks_jacket:
+                    advice_lines.append(
+                        (
+                            f"- 🧥 **Casaco:** sim, leva um casaco leve{cls._jacket_reason(minimum, rain, is_pt)}."
+                            if is_pt
+                            else f"- 🧥 **Jacket:** yes, bring a light jacket{cls._jacket_reason(minimum, rain, is_pt)}."
+                        )
+                    )
+                if asks_umbrella:
+                    if probability < 25:
+                        advice_lines.append(
+                            "- ☂️ **Guarda-chuva:** não parece necessário; a chuva está pouco provável."
+                            if is_pt
+                            else "- ☂️ **Umbrella:** probably not needed; rain looks unlikely."
+                        )
+                    else:
+                        advice_lines.append(
+                            "- ☂️ **Guarda-chuva:** leva um compacto ou impermeável, porque há possibilidade de chuva."
+                            if is_pt
+                            else "- ☂️ **Umbrella:** bring a compact umbrella or rain shell because rain is possible."
+                        )
+                if asks_sun_protection:
+                    sun_item = (
+                        "chapéu/boné e protetor solar"
+                        if is_pt and ("protetor" in normalized or "protector" in normalized)
+                        else "chapéu ou boné"
+                        if is_pt
+                        else "a hat/cap and sunscreen"
+                        if re.search(r"\b(?:sunscreen|sun cream|sunblock)\b", normalized)
+                        else "a hat or cap"
+                    )
+                    sun_reason = (
+                        f" porque a máxima prevista chega a **{maximum}°C**"
+                        if warm_note and maximum
+                        else " se fores estar ao ar livre durante muito tempo"
+                        if is_pt
+                        else f" because the forecast high reaches **{maximum}°C**"
+                        if warm_note and maximum
+                        else " if you will be outdoors for a long period"
+                    )
+                    advice_lines.append(
+                        (
+                            f"- 🧢 **Sol:** leva **{sun_item}**{sun_reason}."
+                            if is_pt
+                            else f"- 🧢 **Sun:** bring **{sun_item}**{sun_reason}."
+                        )
+                    )
+                direct_line = (
+                    "✅ **Resposta direta:** sim, ajusta o que levas às condições previstas para os itens que perguntaste."
+                    if is_pt
+                    else "✅ **Direct answer:** yes, adjust what you bring to the forecast conditions for the items you asked about."
+                )
+                return f"{rain_answer}{direct_line}\n\n" + "\n".join(advice_lines)
+            if asks_sun_protection:
+                warm_note = bool(max_temp is not None and max_temp >= 24)
+                if is_pt:
+                    item = "chapéu/boné e protetor solar" if "protetor" in normalized or "protector" in normalized else "chapéu ou boné"
+                    reason = (
+                        f", sobretudo nas horas de maior sol, porque a máxima prevista chega a **{maximum}°C**"
+                        if warm_note and maximum
+                        else " se fores estar ao ar livre durante muito tempo"
+                    )
+                    return f"✅ **Resposta direta:** sim, leva **{item}**{reason}."
+                item = "a hat/cap and sunscreen" if re.search(r"\b(?:sunscreen|sun cream|sunblock)\b", normalized) else "a hat or cap"
+                reason = (
+                    f", especially around the sunniest hours, because the forecast high reaches **{maximum}°C**"
+                    if warm_note and maximum
+                    else " if you will be outdoors for a long period"
+                )
+                return f"✅ **Direct answer:** yes, bring **{item}**{reason}."
+            if asks_umbrella:
+                probability = float(rain.get("probability", 0) or 0) if rain else 0.0
+                if is_pt:
+                    if probability < 25:
+                        return f"{rain_answer}✅ **Resposta direta:** não parece necessário levares guarda-chuva; a chuva está pouco provável."
+                    return f"{rain_answer}✅ **Resposta direta:** leva um **guarda-chuva compacto** ou impermeável, porque há possibilidade de chuva."
+                if probability < 25:
+                    return f"{rain_answer}✅ **Direct answer:** you probably do not need an umbrella; rain looks unlikely."
+                return f"{rain_answer}✅ **Direct answer:** bring a **compact umbrella** or rain shell because rain is possible."
+            if asks_jacket:
+                if is_pt:
+                    return f"{rain_answer}✅ **Resposta direta:** 🧥 Sim, leva um **casaco leve**{cls._jacket_reason(minimum, rain, is_pt)}."
+                return f"{rain_answer}✅ **Direct answer:** 🧥 Yes, bring a **light jacket**{cls._jacket_reason(minimum, rain, is_pt)}."
             if is_pt:
-                advice_parts = ["leva **casaco leve**"]
+                advice_parts = []
+                if min_temp is not None and min_temp <= 17:
+                    advice_parts.append("leva **casaco leve**")
+                if max_temp is not None and max_temp >= 27:
+                    advice_parts.append("leva água e proteção solar")
                 if rain and float(rain.get("probability", 0) or 0) >= 35:
                     advice_parts.append("guarda-chuva compacto ou impermeável")
                 if wind:
                     advice_parts.append("uma camada que corte o vento")
+                if not advice_parts:
+                    advice_parts.append("leva roupa confortável")
                 temperature_note = f" porque a previsão fica entre **{minimum}°C e {maximum}°C**" if minimum and maximum else ""
                 suitability = "Parece adequado para caminhar" if any(term in normalized for term in ["adequado", "bom para", "evitar", "passeio"]) else "Para caminhar ao ar livre"
                 return f"{rain_answer}✅ **Resposta direta:** 👟 {suitability}, {', '.join(advice_parts)}{temperature_note}."
-            advice_parts = ["wear a **light jacket**"]
+            advice_parts = []
+            if min_temp is not None and min_temp <= 17:
+                advice_parts.append("wear a **light jacket**")
+            if max_temp is not None and max_temp >= 27:
+                advice_parts.append("bring water and sun protection")
             if rain and float(rain.get("probability", 0) or 0) >= 35:
                 advice_parts.append("carry a compact umbrella or rain shell")
             if wind:
                 advice_parts.append("add a wind-resistant layer")
+            if not advice_parts:
+                advice_parts.append("wear comfortable clothes")
             temperature_note = f" because the forecast is around **{minimum}°C to {maximum}°C**" if minimum and maximum else ""
             suitability = "It looks suitable for a walk" if any(term in normalized for term in ["suitable", "good for", "avoid", "riverside"]) else "For walking outdoors"
             return f"{rain_answer}✅ **Direct answer:** 👟 {suitability}, {', '.join(advice_parts)}{temperature_note}."
@@ -1328,6 +1526,16 @@ class WeatherAgent(BaseAgent):
         """Extract the maximum temperature from a weather tool response."""
         match = re.search(r"(?:Temperature|Temperatura)?\D*\d+(?:\.\d+)?°C\s+(?:to|a)\s+(\d+(?:\.\d+)?)°C", tool_text, re.IGNORECASE)
         return match.group(1) if match else None
+
+    @staticmethod
+    def _temperature_to_float(value: Optional[str]) -> Optional[float]:
+        """Convert a weather temperature token to a float when possible."""
+        if value is None:
+            return None
+        try:
+            return float(str(value).replace(",", "."))
+        except ValueError:
+            return None
 
     @staticmethod
     def _extract_wind_summary(tool_text: str) -> Optional[str]:
@@ -1506,7 +1714,13 @@ class WeatherAgent(BaseAgent):
         import re
         query_language = self._infer_weather_query_language(user_message)
         language_match = re.search(r"User language:\s*(en|pt)", context, re.IGNORECASE)
-        language = query_language or (language_match.group(1).lower() if language_match else "en")
+        context_language = language_match.group(1).lower() if language_match else ""
+        weak_short_query = len(self._normalize_weather_query(user_message).split()) <= 4
+        language = (
+            context_language
+            if context_language and weak_short_query
+            else query_language or context_language or "en"
+        )
         if self._is_climate_average_query(user_message):
             return finalize_worker_response(
                 self._build_climate_average_limit_message(language),

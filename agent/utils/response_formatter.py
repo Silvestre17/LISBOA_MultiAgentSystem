@@ -931,6 +931,28 @@ def canonicalize_weather_source_line(
     return _replace_source_line(text, replacement)
 
 
+def _is_pure_weather_limitation(text: str) -> bool:
+    """Return whether a weather answer is only a capability or horizon limit."""
+    if not text:
+        return False
+    visible = _strip_accents_compat(_strip_markdown_formatting(text)).lower()
+    has_limit = bool(
+        re.search(
+            r"\b(?:so tenho|only have|nao consigo|can't|cannot|fora do horizonte|outside.*horizon|"
+            r"sem inventar dados|without inventing data|cobertura meteorologica disponivel|available weather coverage)\b",
+            visible,
+        )
+    )
+    has_live_weather_fact = bool(
+        re.search(
+            r"\b(?:\d+(?:\.\d+)?\s*(?:°|º)?c\b|chuva\s*:|rain\s*:|vento\s*:|wind\s*:|"
+            r"temperatura\s*:|temperature\s*:|avisos meteorologicos ativos|active weather warnings)\b",
+            visible,
+        )
+    )
+    return has_limit and not has_live_weather_fact
+
+
 def canonicalize_weather_terms(text: str, language: str = "en") -> str:
     """Normalizes common weather labels to the requested display language."""
     if not text or language not in {"en", "pt"}:
@@ -4429,22 +4451,37 @@ def _has_visible_visitlisboa_place_content(text: str) -> bool:
     if re.search(r"\b(?:evento|eventos|events found|eventos encontrados|data/hora|date/time)\b", normalized):
         return False
     has_transport_context = bool(re.search(r"\b(?:metro de lisboa|carris|cp trains|comboios suburbanos cp)\b", normalized))
+    structured_place_field_re = re.compile(
+        r"(?im)^\s*(?:[-*]\s*)?(?:[^\w\s*]{1,8}\s*)?"
+        r"\*\*(?:Categoria|Category|Morada|Address|Preço|Price|Hor[aá]rio|Hours|"
+        r"Avalia[cç][aã]o|Rating|Telefone|Phone|Email|Website|Mais detalhes|More details)\*\*\s*:"
+    )
     has_place_field_evidence = bool(
-        re.search(
-            r"\b(?:categoria|category|morada|address|preco|price|horario|hours|"
-            r"avaliacao|rating|tripadvisor|telefone|phone|email|website oficial|official website|"
-            r"lisboa card|bilhetes|tickets)\b",
-            normalized,
-        )
+        structured_place_field_re.search(body)
+        or "visitlisboa.com/en/places" in normalized
+        or "visitlisboa.com/pt-pt/locais" in normalized
+        or "tripadvisor" in normalized
+        or "lisboa card" in normalized
     )
     if has_transport_context and not has_place_field_evidence:
         return False
+    has_weather_context = bool(
+        re.search(
+            r"\b(?:previsao meteorologica|weather forecast|temperatura|temperature|"
+            r"chuva|rain|vento|wind|avisos meteorologicos|weather warnings|ipma)\b",
+            normalized,
+        )
+    )
+    if has_weather_context and not has_place_field_evidence:
+        return False
     return bool(
+        has_place_field_evidence
+        or
         re.search(
             r"\b(?:roteiro sugerido|suggested route|locais e atracoes|places and attractions|"
             r"paragem historica|historic stop|atracao|attraction|museu|museum|monumento|monument|"
             r"castelo|castle|torre|tower|restaurante|restaurant|almoco|lunch|jantar|dinner|"
-            r"centro comercial|shopping|compras|lisboa card|tripadvisor|preco|price|horario|hours|"
+            r"centro comercial|shopping|compras|lisboa card|tripadvisor|preco|price|"
             r"website oficial|official website)\b",
             normalized,
         )
@@ -7981,6 +8018,45 @@ def preserve_contextual_destination_name(text: str, user_query: str, language: s
     return text
 
 
+def normalize_transport_night_request_answer(text: str, user_query: str, language: str) -> str:
+    """Keep night-service constraints separate from current live departures."""
+    query_norm = _strip_accents_compat(user_query or "").lower()
+    if not re.search(r"\b(?:noite|noturno|noturna|tonight|night|at night)\b", query_norm):
+        return text
+    if not text:
+        return text
+    if "Período noturno" in text or "Night period" in text:
+        return text
+
+    note = (
+        "🌙 **Período noturno:** a rota/paragens acima são suportadas pelos dados consultados, "
+        "mas as partidas em tempo real não confirmam por si só serviço à noite. "
+        "Sem horário noturno confirmado nesta resposta, confirma a disponibilidade no momento da viagem. "
+        "Ausência de perturbações reportadas não equivale a serviço disponível fora do horário de operação."
+        if language == "pt"
+        else "🌙 **Night period:** the route/stops above are supported by the consulted data, "
+        "but live next departures do not by themselves confirm night service. "
+        "Without a confirmed night timetable in this answer, confirm availability at travel time. "
+        "No reported disruption does not mean service is available outside operating hours."
+    )
+
+    value = re.sub(
+        r"(?ms)\n?🗓️\s+\*\*(?:Pr[oó]ximos Metros|Next Metros)[^\n]*\n+(?:\s*-\s+\*\*.*?(?:\n|$))+",
+        "\n",
+        text,
+    )
+    value = re.sub(
+        r"(?mi)^\s*-\s*(?:🕐\s*)?\*\*(?:Pr[oó]ximas partidas|Next departures):\*\*[^\n]*(?:\n|$)",
+        "",
+        value,
+    )
+    if "---" in value:
+        value = value.replace("---", f"---\n\n{note}\n\n---", 1)
+    else:
+        value = f"{value.rstrip()}\n\n{note}"
+    return re.sub(r"\n{3,}", "\n\n", value).strip()
+
+
 def finalize_worker_response(
     text: str,
     agent_name: str,
@@ -8026,11 +8102,17 @@ def finalize_worker_response(
         finalized = canonicalize_weather_terms(finalized, language=preferred_language)
         finalized = strip_weather_update_lines(finalized)
         finalized = structure_weather_markdown(finalized)
-        finalized = canonicalize_weather_source_line(
-            finalized,
-            language=preferred_language,
-            timestamp=weather_timestamp,
-        )
+        if _is_pure_weather_limitation(finalized):
+            finalized = "\n".join(
+                line for line in finalized.splitlines()
+                if not _SOURCE_LINE_RE.match(line.strip())
+            ).strip()
+        else:
+            finalized = canonicalize_weather_source_line(
+                finalized,
+                language=preferred_language,
+                timestamp=weather_timestamp,
+            )
     elif agent_name == "researcher":
         if re.search(
             r"(?i)\b(?:Event Categories in Lisbon|Categorias de Eventos em Lisboa|Place Categories|Categorias de Locais|Service Categories|Categorias de Serviços)\b",
@@ -8284,6 +8366,11 @@ def finalize_worker_response(
                         "- For a door-to-door route, also provide your starting point.\n\n"
                         f"📌 **Source:** [*Metro de Lisboa*](https://www.metrolisboa.pt) | **Updated:** {timestamp}"
                     )
+            finalized = normalize_transport_night_request_answer(
+                finalized,
+                user_query=user_query,
+                language=preferred_language,
+            )
             finalized = preserve_contextual_destination_name(finalized, user_query, preferred_language)
         else:
             finalized = strip_raw_worker_sections_from_planner(finalized)
@@ -9455,9 +9542,14 @@ def ensure_single_source_footer_at_end(text: str) -> str:
     source_lines: list[str] = []
 
     for index, line in enumerate(lines):
-        if _SOURCE_LINE_RE.match(line.strip()):
+        stripped = line.strip()
+        if _SOURCE_LINE_RE.match(stripped) or re.match(
+            r"^[^A-Za-z0-9#\[]*\s*\*\*(?:Source|Fonte):\*\*.*$",
+            stripped,
+            flags=re.IGNORECASE,
+        ):
             source_indices.append(index)
-            source_lines.append(line.strip())
+            source_lines.append(stripped)
 
     if not source_lines:
         return text
@@ -12323,8 +12415,21 @@ def repair_route_value_bold_markers(text: str) -> str:
 
 def repair_route_bullet_label_markers(text: str) -> str:
     """Repair route bullets whose label lost its opening bold marker."""
-    if not text or ":**" not in text:
+    if not text or (":**" not in text and "**:" not in text):
         return text or ""
+
+    close_before_colon_re = re.compile(
+        r"(?m)^(?P<prefix>\s*[-*]\s+)"
+        r"(?P<route>(?!\*\*)[^*\n:]{2,180}(?:\u2192|->)[^*\n:]{2,180})"
+        r"\*\*:\s*\*\*(?P<value>.+?)$"
+    )
+    text = close_before_colon_re.sub(
+        lambda match: (
+            f"{match.group('prefix')}**{match.group('route').strip()}:** "
+            f"**{match.group('value').strip()}"
+        ),
+        text,
+    )
 
     route_bullet_re = re.compile(
         r"(?m)^(?P<prefix>\s*[-*]\s+)"
@@ -16044,6 +16149,7 @@ def final_visual_pass(text: str) -> str:
     text = normalize_invalid_markdown_links(text)
     text = strip_internal_sections(text)
     text = strip_internal_qa_annotations(text)
+    text = re.sub(r"(?mi)^\s*Could not (?:geocode|resolve location)\b.*$", "", text)
     text = replace_pt_technical_vocabulary(text)
     text = linkify_phone_numbers(text)
     text = strip_placeholder_map_field_lines(text)
@@ -16913,6 +17019,7 @@ def render_lisboa_planner_markdown(text: str, language: str = "en") -> str:
         "weather": re.compile(r"(?i)^(?:weather strategy|estrat[eé]gia meteorol[oó]gica)$"),
         "limitations": re.compile(r"(?i)^(?:limitations|limita[cç][oõ]es|limits|limites)$"),
     }
+    schema_section_seen = False
     for raw_line in body.splitlines():
         stripped = raw_line.strip()
         if not stripped or re.match(r"^-{3,}$", stripped):
@@ -16925,6 +17032,7 @@ def render_lisboa_planner_markdown(text: str, language: str = "en") -> str:
                 if pattern.match(heading_text):
                     current = key
                     matched = True
+                    schema_section_seen = True
                     break
             if matched:
                 continue
@@ -16985,6 +17093,8 @@ def render_lisboa_planner_markdown(text: str, language: str = "en") -> str:
         bullet = _planner_format_bullet(cleaned)
         if bullet:
             plan_output.append(bullet)
+    if schema_section_seen and not plan_output:
+        return text.strip()
     if plan_output:
         output.extend(["", *plan_output, "", "---"])
 
@@ -17056,7 +17166,7 @@ def _normalize_weather_warning_layout(text: str, language: str) -> str:
         "HOT_WEATHER", "COLD_WEATHER",
     ]
     for raw in labels:
-        text = re.sub(rf"\b{re.escape(raw)}\b", _normalize_warning_display_label(raw, language), text, flags=re.IGNORECASE)
+        text = re.sub(rf"\b{re.escape(raw)}\b", _normalize_warning_display_label(raw, language), text)
 
     # Repair a known Markdown corruption where a formatter joins the warning
     # title and the level label into one bold token.
@@ -19024,6 +19134,7 @@ def final_post_qa_guard(text: str, language: str = "en") -> str:
         return text or ""
 
     text = strip_internal_qa_annotations(text)
+    text = re.sub(r"(?mi)^\s*Could not (?:geocode|resolve location)\b.*$", "", text)
     text = repair_transport_markdown_fragmentation(text)
     text = repair_service_lookup_heading_wrapper(text)
     text = repair_indoor_heading_fragmentation(text)

@@ -375,6 +375,8 @@ class SupervisorAgent(BaseAgent):
         message_lower = cls._normalize_query(user_message)
         if cls._has_lisbon_context(message_lower):
             return False
+        if re.search(r"\b\d{4}-\d{3}\b", str(user_message or "")):
+            return False
 
         out_of_scope_patterns = [
             r"\b(?:todos?|todas?|all|every)\b.{0,80}\b(?:portugal|pa[ií]s|country|national)\b",
@@ -662,10 +664,6 @@ class SupervisorAgent(BaseAgent):
         if cls._is_direct_weather_transport_query(user_message):
             return False
 
-        tokens = normalized.split()
-        if len(tokens) < 8:
-            return False
-
         preference_markers = (
             r"\b(?:prefer|preference|personalized|personalised|avoid|without|excluding|except|not\s+too|"
             r"least|fewest|best|recommend|suggest|different|hidden|local|authentic|budget|cheap|"
@@ -679,11 +677,21 @@ class SupervisorAgent(BaseAgent):
             r"\b(?:and|also|with|including|include|plus|then|after|before|"
             r"e|tambem|também|com|inclui|incluindo|depois|antes)\b"
         )
+        cardinality_markers = (
+            r"\b(?:\d{1,2}|um|uma|one|dois|duas|two|tres|three|quatro|four|cinco|five|"
+            r"seis|six|sete|seven|oito|eight)\s+"
+            r"(?:museus?|museums?|monumentos?|monuments?|locais|lugares|sitios|sítios|"
+            r"places|stops|paragens|restaurantes?|restaurants?|miradouros?|viewpoints?)\b"
+        )
+        anchor_constraint_markers = (
+            r"\b(?:passa(?:r|ndo)?\s+(?:por|pelo|pela)|via|pass\s+through|stop\s+at|"
+            r"termina|termine|terminar|acaba|acabe|acabar|finish|ending|end)\b"
+        )
         domain_terms = {
             "weather": r"\b(?:weather|tempo|meteorolog|chuva|rain|forecast|previsao|previsão)\b",
             "transport": r"\b(?:metro|bus|buses|autocarro|comboio|train|cp|transport|transportes|route|rota)\b",
             "researcher": r"\b(?:event|evento|restaurant|restaurante|museum|museu|monument|monumento|fado|farmacia|farmácia|hospital|library|biblioteca|place|local)\b",
-            "planner": r"\b(?:plan|itinerary|roteiro|plano|planeia|organiza|dia|day|afternoon|tarde)\b",
+            "planner": r"\b(?:plan|itinerary|roteiro|plano|planeia|organiza|dia|day|afternoon|tarde|passa(?:r|ndo)?|terminar|acabar|stops?|paragens?)\b",
         }
         matched_domains = {
             name for name, pattern in domain_terms.items()
@@ -691,7 +699,12 @@ class SupervisorAgent(BaseAgent):
         }
         has_preference = bool(re.search(preference_markers, normalized, flags=re.IGNORECASE))
         has_multi_need = bool(re.search(multi_need_markers, normalized, flags=re.IGNORECASE))
-        return has_preference or (has_multi_need and len(matched_domains) >= 2)
+        has_cardinality = bool(re.search(cardinality_markers, normalized, flags=re.IGNORECASE))
+        has_anchor_constraints = bool(re.search(anchor_constraint_markers, normalized, flags=re.IGNORECASE))
+        tokens = normalized.split()
+        if len(tokens) < 8 and not (has_preference or has_cardinality or has_anchor_constraints):
+            return False
+        return has_preference or has_cardinality or has_anchor_constraints or (has_multi_need and len(matched_domains) >= 2)
 
     @classmethod
     def _looks_like_follow_up(cls, user_message: str) -> bool:
@@ -1132,6 +1145,8 @@ class SupervisorAgent(BaseAgent):
             return False
         if cls._is_direct_weather_transport_query(user_message):
             return False
+        if cls._is_transport_line_route_query(user_message):
+            return False
         planning_patterns = [
             r"\bplan my day\b",
             r"\bday plan\b",
@@ -1170,11 +1185,41 @@ class SupervisorAgent(BaseAgent):
             r"\b(?:plane(?:ar|ia|ie)|organiza(?:r)?|cria|criar|faz|fazer|plan|organize|organise)\b"
             r".*\b(?:a\s+partir\s+de|desde|starting\s+from|start(?:ing)?\s+at)\b"
             r".*\b(?:comer|eat|food|meal|refei[cç][aã]o|almo[cç]o|jantar|lunch|dinner|paragens?|stops?)\b",
+            r"\b(?:come[cç]a|come[cç]ar|inicia|iniciar|start|starting)\b.*"
+            r"\b(?:passa(?:r|ndo)?\s+(?:por|pelo|pela)|via|termina|terminar|acaba|acabar|end|finish)\b",
+            r"\b(?:passa(?:r|ndo)?\s+(?:por|pelo|pela)|via|pass\s+through)\b.*"
+            r"\b(?:termina|terminar|acaba|acabar|end|finish|roteiro|itinerary|plano|plan)\b",
+            r"\b(?:quero|queria|gostava|ver|visitar|visit|see|show|mostra|inclui|include)\b.*"
+            r"\b(?:\d{1,2}|um|uma|one|dois|duas|two|tres|three|quatro|four|cinco|five|seis|six|sete|seven|oito|eight)\s+"
+            r"(?:museus?|museums?|monumentos?|monuments?|locais|lugares|sitios|s[ií]tios|places|stops|paragens|restaurantes?|restaurants?|miradouros?|viewpoints?)\b",
         ]
         if any(re.search(pattern, message_lower) for pattern in planning_patterns):
             return True
 
         return False
+
+    @classmethod
+    def _is_transport_line_route_query(cls, user_message: str) -> bool:
+        """Return whether the user asks about a fixed transport line route."""
+        normalized = cls._normalize_query(user_message)
+        if not normalized:
+            return False
+        has_line = bool(
+            re.search(
+                r"\b(?:linha\s*)?(?:tram|eletrico|el[eé]trico|bus|autocarro|carris)?\s*\d{1,3}[a-z]?\b",
+                normalized,
+            )
+        )
+        has_route_question = bool(
+            re.search(
+                r"\b(?:route|rota|percurso|trajeto|stops?|paragens?|frequency|frequencia|horarios?|schedule)\b",
+                normalized,
+            )
+        )
+        has_personal_plan_intent = bool(
+            re.search(r"\b(?:planeia|organiza|roteiro|itinerary|plan my|para mim|for me|dia|day)\b", normalized)
+        )
+        return has_line and has_route_question and not has_personal_plan_intent
 
     @classmethod
     def _negates_itinerary_request(cls, user_message: str) -> bool:
@@ -1233,22 +1278,65 @@ class SupervisorAgent(BaseAgent):
             r"\bsaindo de\b",
             r"\bpartindo de\b",
             r"\bcome[cç]ar em\b",
+            r"\bcome[cç]ar no\b",
+            r"\bcome[cç]ar na\b",
+            r"\ba come[cç]ar em\b",
+            r"\ba come[cç]ar no\b",
+            r"\ba come[cç]ar na\b",
             r"\bcome[cç]ando em\b",
+            r"\bcome[cç]ando no\b",
+            r"\bcome[cç]ando na\b",
         ]
         return any(re.search(pattern, normalized) for pattern in origin_patterns)
+
+    @classmethod
+    def _planning_query_has_route_constraint(cls, user_message: str) -> bool:
+        """Return whether a plan has movement constraints beyond a local start anchor."""
+        normalized = cls._normalize_query(user_message)
+        if not normalized:
+            return False
+        route_constraint_patterns = [
+            r"\b(?:termina|termine|terminar|terminando|acaba|acabe|acabar|acabando|"
+            r"finish|finishes|finishing|ending|ends?|end)\b",
+            r"\b(?:passa(?:r|ndo)?\s+(?:por|pelo|pela)|via|pass\s+through|stop\s+at)\b",
+            r"\b(?:voltar|regressar|return|back)\s+(?:ao|a|à|para|to)\b",
+            r"\b(?:hotel|alojamento|accommodation)\b.*\b(?:voltar|regressar|return|back)\b",
+            r"\b(?:ate|até|by)\s+\d{1,2}(?::\d{2})?\b",
+            r"\b\d{1,2}(?::\d{2})?\s*(?:h|am|pm)\b.*\b(?:passa|passar|termina|acaba|finish|end)\b",
+        ]
+        return any(re.search(pattern, normalized) for pattern in route_constraint_patterns)
+
+    @classmethod
+    def _planning_query_explicitly_requests_transport(cls, user_message: str) -> bool:
+        """Return whether the user explicitly asks for transport inside an itinerary."""
+        normalized = cls._normalize_query(user_message)
+        if not normalized:
+            return False
+        return bool(
+            re.search(
+                r"\b(?:transportes?\s+p[úu]blicos?|public\s+transport|transit|metro|"
+                r"autocarros?|bus|buses|comboios?|train|trains|cp|carris|el[eé]tricos?|tram|trams|"
+                r"menos\s+caminhada|pouca\s+caminhada|low\s+walking|walk\s+less|sem\s+andar\s+muito)\b",
+                normalized,
+            )
+        )
 
     @classmethod
     def _planning_query_requires_transport_context(cls, user_message: str) -> bool:
         """Return whether itinerary quality depends on movement feasibility."""
         normalized = cls._normalize_query(user_message)
-        if cls._looks_like_transport_query(normalized) or cls._planning_query_has_origin_anchor(user_message):
+        has_origin_anchor = cls._planning_query_has_origin_anchor(user_message)
+        has_route_constraint = cls._planning_query_has_route_constraint(user_message)
+        if cls._planning_query_explicitly_requests_transport(user_message):
+            return True
+        if has_origin_anchor and has_route_constraint:
+            return True
+        if cls._looks_like_transport_query(normalized) and not has_origin_anchor:
             return True
 
         movement_patterns = [
             r"\b(?:optimized|optimised|optimal|efficient|feasible)\b",
             r"\b(?:otimizad[oa]s?|optimizado|otimizar|eficiente|vi[aá]vel)\b",
-            r"\b(?:itinerary|roteiro|percurso|route|rota)\b",
-            r"\b(?:itiner[aá]rio|itener[aá]rio|plano)\b",
             r"\b(?:one|1|um)\s+(?:day|dia)\b",
             r"\b(?:full\s+day|dia\s+inteiro)\b",
             r"\b(?:multiple|v[aá]rios?|varios?)\s+(?:places|stops|locais|s[ií]tios|paragens)\b",
@@ -1543,11 +1631,15 @@ class SupervisorAgent(BaseAgent):
 
             # Check if this is a planning query that requires weather.
             is_planning_query = self._is_planning_query(user_message)
-            if re.search(r"\b(?:plan|itinerary|roteiro|planeia|planejar)\b", user_message, flags=re.IGNORECASE) and re.search(
-                r"\b(?:[2-9]\s*(?:days?|dias?)|seven days|five days|7 days|5 days|weekend|fim de semana)\b",
-                user_message,
-                flags=re.IGNORECASE,
-            ):
+            is_multi_day = bool(
+                re.search(r"\b(?:plan|itinerary|roteiro|planeia|planejar)\b", user_message, flags=re.IGNORECASE)
+                and re.search(
+                    r"\b(?:[2-9]\s*(?:days?|dias?)|seven days|five days|7 days|5 days|weekend|fim de semana)\b",
+                    user_message,
+                    flags=re.IGNORECASE,
+                )
+            )
+            if is_multi_day:
                 is_planning_query = True
                 planning_stack = ["transport", "researcher", "planner"]
                 if self._requires_weather_for_planning(user_message) or self._planning_query_mentions_weather(user_message):
@@ -1574,11 +1666,13 @@ class SupervisorAgent(BaseAgent):
                     agents.append("researcher")
                     reasoning += " (Added researcher agent: planning needs place/activity grounding)"
 
-                if (
-                    self._planning_query_requires_transport_context(user_message)
-                ) and "transport" not in agents:
+                requires_transport_context = self._planning_query_requires_transport_context(user_message)
+                if requires_transport_context and "transport" not in agents:
                     agents.append("transport")
                     reasoning += " (Added transport agent: itinerary quality depends on movement feasibility)"
+                elif not requires_transport_context and not is_multi_day and "transport" in agents:
+                    agents = [agent for agent in agents if agent != "transport"]
+                    reasoning += " (Removed transport agent: local itinerary start anchor can be handled by planner after POI grounding)"
 
             # Force weather agent for near-future planning
             if is_planning_query and (
