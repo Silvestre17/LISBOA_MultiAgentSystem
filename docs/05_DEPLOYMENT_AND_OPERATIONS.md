@@ -157,16 +157,13 @@ Resumable sync behaviour:
 > [!TIP]
 > Run these in order, escalating only when faster checks pass.
 
-### 1. Syntax and dataset integrity (fast)
+### 1. Syntax
 
 ```bash
 python scripts/syntax_check.py
-python -m pytest eval/tests/ -q
 ```
 
-`eval/tests/` currently protects deterministic dataset shape and validator helpers (`test_dataset_integrity.py`, `test_validators.py`). It is intentionally lean and not the main proof of user-facing answer quality.
-
-### 2. Prompt smoke runs (recommended for prompt/agent changes)
+### 2. Prompt Smoke Runs (recommended for prompt/agent changes)
 
 ```bash
 python scripts/run_prompts.py --suite smoke

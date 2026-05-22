@@ -68,9 +68,7 @@ files = [
     r"tools\location_resolver.py",
     r"tools\utils.py",
     "eval/runtime_utils.py",
-    "eval/validators/transport_validator.py",
     "eval/validators/response_heuristics.py",
-    "eval/tests/test_validators.py",
 ]
 
 passed = 0

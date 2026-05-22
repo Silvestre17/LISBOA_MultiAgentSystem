@@ -17,11 +17,9 @@ eval/
 |-- llm_judge.py
 |-- validators/
 |   |-- response_heuristics.py
-|   `-- transport_validator.py
 |-- tests/
 |   |-- README.md
 |   |-- test_dataset_integrity.py
-|   `-- test_validators.py
 `-- results/
 ```
 
