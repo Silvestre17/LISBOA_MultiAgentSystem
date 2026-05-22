@@ -2169,6 +2169,23 @@ def carris_find_routes_between(
             walking_minutes = max(1, round(distance_km * 12))
             return f"     Caminhada final: ~{walking_minutes} min até {dest_display}.\n"
 
+        def format_initial_walk_line(stop_hint: Dict[str, str]) -> str:
+            """Return an initial walking estimate from origin to boarding stop."""
+            hinted_origin = origin_stop_by_id.get(str(stop_hint.get("origin_stop_id")))
+            if not hinted_origin:
+                return ""
+            distance_km = haversine_distance(
+                origin_lat,
+                origin_lon,
+                hinted_origin["lat"],
+                hinted_origin["lon"],
+            )
+            if distance_km <= 0.12 or distance_km > 1.6:
+                return ""
+            walking_minutes = max(1, round(distance_km * 12))
+            origin_stop_name = stop_hint.get("origin_stop_name") or hinted_origin.get("name") or "paragem"
+            return f"     Caminhada inicial: ~{walking_minutes} min até {origin_stop_name}.\n"
+
         def format_route_line(r: Dict[str, Any]) -> str:
             """Format a single route entry with direction-safe departures and RT hints."""
             stop_hint = get_route_stop_hint(r["route_short_name"])
@@ -2198,6 +2215,7 @@ def carris_find_routes_between(
                 origin_stop_name = stop_hint.get("origin_stop_name")
                 dest_stop_name = stop_hint.get("destination_stop_name")
                 if origin_stop_name and dest_stop_name:
+                    line += format_initial_walk_line(stop_hint)
                     line += f"     Stops: board at {origin_stop_name}; leave at stop {dest_stop_name}.\n"
                     line += format_final_walk_line(stop_hint)
                 line += "     ℹ️ No upcoming departures were confirmed today at the matched origin stop.\n\n"
@@ -2208,6 +2226,7 @@ def carris_find_routes_between(
             origin_stop_name = stop_hint.get("origin_stop_name")
             dest_stop_name = stop_hint.get("destination_stop_name")
             if origin_stop_name and dest_stop_name:
+                line += format_initial_walk_line(stop_hint)
                 line += f"     Stops: board at {origin_stop_name}; leave at stop {dest_stop_name}.\n"
                 line += format_final_walk_line(stop_hint)
             shown_times = []

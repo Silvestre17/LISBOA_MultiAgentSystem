@@ -1445,6 +1445,7 @@ class QualityAssuranceAgent(BaseAgent):
         agent_outputs: Dict[str, str],
         llm_result: Dict[str, Any],
         language: str,
+        agents_called: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Adds deterministic completeness guards for common multi-part query failures."""
         query = cls._normalize_query(user_query)
@@ -1473,10 +1474,17 @@ class QualityAssuranceAgent(BaseAgent):
         reasoning_notes: List[str] = []
 
         planning_without_weather = bool(
-            re.search(r"\b(?:plan|planning|itinerary|roteiro|itinerario|itiner[aá]rio|afternoon|day|tarde|dia)\b", query)
+            re.search(
+                r"\b(?:plan|planning|plano|planeia|planear|faz|cria|create|make|itinerary|"
+                r"roteiro|itinerario|itiner[aá]rio|passeio|visit|visitar|morning|afternoon|"
+                r"evening|day|manh[aã]|tarde|noite|dia)\b",
+                query,
+            )
             and not re.search(
                 r"\b(?:weather|forecast|rain|rainy|temperature|wind|umbrella|"
-                r"chuva|chover|previs[aã]o|temperatura|vento|guarda[-\s]?chuva)\b",
+                r"chuva|chover|previs[aã]o|temperatura|vento|guarda[-\s]?chuva|"
+                r"today|tonight|tomorrow|this\s+week|weekend|hoje|esta\s+noite|"
+                r"amanh[aã]|esta\s+semana|fim\s+de\s+semana)\b",
                 query,
             )
         )
@@ -1495,6 +1503,79 @@ class QualityAssuranceAgent(BaseAgent):
                 reasoning_notes.append("removed QA gap for weather data not requested by the planning query")
             if "weather" in required_agents:
                 required_agents = [agent for agent in required_agents if agent != "weather"]
+
+        planning_without_transport = bool(
+            re.search(
+                r"\b(?:plan|planning|plano|planeia|planear|faz|cria|create|make|itinerary|"
+                r"roteiro|itinerario|itiner[aá]rio|passeio|visit|visitar|morning|afternoon|"
+                r"evening|day|manh[aã]|tarde|noite|dia)\b",
+                query,
+            )
+            and not re.search(
+                r"\b(?:metro|carris|cp|autocarro|autocarros|bus|buses|comboio|comboios|train|tram|"
+                r"el[eé]trico|transportes?|public transport|transporte p[uú]blico|"
+                r"desloca[cç][aã]o|desloca[cç][oõ]es|movement|transfer|transfers|"
+                r"como\s+(?:chego|vou|ir|me\s+desloco)|how\s+(?:do\s+i\s+)?get|how\s+to\s+move|"
+                r"rota\s+de|rotas\s+entre|percurso\s+de|trajeto\s+de|route\s+(?:from|between)|"
+                r"liga[cç][aã]o\s+entre)\b",
+                query,
+            )
+        )
+        if planning_without_transport:
+            transport_gap_re = re.compile(
+                r"\b(?:transport|transportes?|public transport|transporte p[uú]blico|route|routes|"
+                r"rota|rotas|percurso|trajeto|connection|liga[cç][aã]o|movement|desloca[cç][aã]o|"
+                r"desloca[cç][oõ]es|metro|carris|cp|comboio|autocarro|bus|train|tram|"
+                r"line|linha|operator|operador|paragem|stop|station|esta[cç][aã]o)\b",
+                flags=re.IGNORECASE,
+            )
+            before_count = len(missing_data)
+            missing_data = [
+                item for item in missing_data
+                if not transport_gap_re.search(cls._normalize_query(str(item or "")))
+            ]
+            if len(missing_data) != before_count:
+                reasoning_notes.append("removed QA gap for public transport data not requested by the planning query")
+            if "transport" in required_agents:
+                required_agents = [agent for agent in required_agents if agent != "transport"]
+
+        pre_planner_audit = "planner" in set(agents_called or []) and "final" not in agent_outputs
+        if pre_planner_audit:
+            has_planning_evidence = bool(
+                re.search(
+                    r"\*\*(?:Categoria|Category|Morada|Address|Mais detalhes|More details|Website|"
+                    r"Restaurante|Restaurant|Museu|Museum|Miradouro|View Point|Viewpoint)\b",
+                    combined_output,
+                    flags=re.IGNORECASE,
+                )
+                or (
+                    re.search(
+                        r"\b(?:VisitLisboa|Locais encontrados|Places found|Resultados|Results|"
+                        r"Eventos encontrados|Events found)\b",
+                        combined_output,
+                        flags=re.IGNORECASE,
+                    )
+                    and re.search(r"(?m)^\s*-\s+", combined_output)
+                )
+            )
+            if has_planning_evidence:
+                planner_synthesis_gap_re = re.compile(
+                    r"\b(?:itiner[aá]rio final|final itinerary|sequ[eê]ncia|sequence|ordem|order|"
+                    r"proximidade|proximity|vi[aá]vel|feasible|integrado no plano|integrated into the plan|"
+                    r"local para almo[cç]o explicitamente selecionado|lunch venue.*integrated|"
+                    r"paragens fundamentadas suficientes|grounded stops|dados can[oó]nicos(?: completos| dos locais)?|"
+                    r"campos can[oó]nicos|complete canonical fields|canonical place data|"
+                    r"local para almo[cç]o|s[ií]tio para almo[cç]ar|"
+                    r"lunch stop|lunch place|notas? pr[aá]ticas de desloca[cç][aã]o|movement notes?)\b",
+                    flags=re.IGNORECASE,
+                )
+                before_count = len(missing_data)
+                missing_data = [
+                    item for item in missing_data
+                    if not planner_synthesis_gap_re.search(cls._normalize_query(str(item or "")))
+                ]
+                if len(missing_data) != before_count:
+                    reasoning_notes.append("removed pre-planner gaps that belong to planner synthesis, not worker evidence")
 
         rejected_mode_markers = {
             "metro": r"\b(?:n[aã]o\s+(?:quero|usar|uses?|meter)|sem|without|no)\s+metro\b|\bmetro\b.{0,30}\b(?:n[aã]o|sem|without|no)\b",
@@ -2091,12 +2172,13 @@ class QualityAssuranceAgent(BaseAgent):
         llm_result["required_agents"] = cls._dedupe_preserve_order(required_agents)
         llm_result["disclaimers"] = cls._dedupe_preserve_order(disclaimers)
         llm_result["critical_issues"] = cls._dedupe_preserve_order(critical_issues)
-        if llm_result["missing_data"]:
+        if llm_result["missing_data"] or llm_result["required_agents"]:
             llm_result["complete"] = False
         elif not llm_result.get("critical_issues"):
             llm_result["complete"] = True
         else:
             llm_result["complete"] = False
+        llm_result["needs_repair"] = not bool(llm_result["complete"])
 
         if reasoning_notes:
             note = " | ".join(reasoning_notes)
@@ -2550,6 +2632,7 @@ class QualityAssuranceAgent(BaseAgent):
             agent_outputs=agent_outputs,
             llm_result=llm_result,
             language=language,
+            agents_called=agents_called,
         )
         llm_result = self._normalize_stated_limitations(
             agent_outputs=agent_outputs,

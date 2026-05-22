@@ -67,7 +67,7 @@ def render_plan_markdown(draft: PlanDraft, sources: Dict[str, SourceRef], langua
             lines.extend(["", f"**🏷️ {block_title}**"])
             if block.purpose:
                 lines.append(f"    - 📝 {_clean_inline(block.purpose)}")
-            for detail in _clean_list(block.details, max_items=9):
+            for detail in _clean_list(block.details, max_items=13):
                 lines.append(_format_detail_bullet(detail, is_pt))
             for movement in _clean_list(block.movement, max_items=3):
                 lines.append(_format_movement_bullet(movement, is_pt=is_pt, indent="    "))
@@ -248,6 +248,7 @@ def _ensure_adjacent_short_walks(items: List[str], blocks: List[object], *, is_p
         zone = _shared_walkable_zone(previous, current)
         if not zone:
             continue
+        zone_label = "centro de Lisboa" if is_pt and zone == "central_lisbon" else "central Lisbon" if zone == "central_lisbon" else zone
         current_time = _block_time(str(getattr(current, "title", "") or ""))
         if is_pt:
             if current_time and re.search(r"(?:almo|lunch)", _normalize_for_match(str(getattr(current, "title", "") or ""))):
@@ -256,7 +257,7 @@ def _ensure_adjacent_short_walks(items: List[str], blocks: List[object], *, is_p
                 suffix = f"; sai cerca de {departure_text} para chegares ao almoço das {current_time}"
             else:
                 suffix = "; mantém esta ligação a pé se o tempo permitir"
-            additions.append(f"🚶 {previous_name} → {current_name}: caminhada curta na zona {zone}{suffix}.")
+            additions.append(f"🚶 {previous_name} → {current_name}: caminhada curta na zona {zone_label}{suffix}.")
         else:
             if current_time and re.search(r"(?:almo|lunch)", _normalize_for_match(str(getattr(current, "title", "") or ""))):
                 depart_window = _departure_window_for_time(current_time)
@@ -264,7 +265,7 @@ def _ensure_adjacent_short_walks(items: List[str], blocks: List[object], *, is_p
                 suffix = f"; leave around {departure_text} to arrive for the {current_time} lunch"
             else:
                 suffix = "; keep this as a walking leg if conditions allow"
-            additions.append(f"🚶 {previous_name} → {current_name}: short walk in the {zone} area{suffix}.")
+            additions.append(f"🚶 {previous_name} → {current_name}: short walk in the {zone_label} area{suffix}.")
     return output + additions
 
 
@@ -308,6 +309,9 @@ def _shared_walkable_zone(previous: object, current: object) -> str:
     central_markers = (
         "carmo", "baixa", "chiado", "correeiros", "douradores", "praca do comercio",
         "praça do comercio", "rua augusta", "largo da se", "largo da sé", "se de lisboa",
+        "marques de pombal", "marquês de pombal", "avenida da liberdade",
+        "portas de santo antao", "portas de santo antão", "sao pedro de alcantara",
+        "são pedro de alcântara", "rua do alecrim", "rua ivens",
     )
     belem_markers = (
         "belem", "belém", "brasilia", "brasília", "jeronimos", "jerónimos",
@@ -318,7 +322,7 @@ def _shared_walkable_zone(previous: object, current: object) -> str:
     previous_belem = any(marker in previous_text for marker in belem_markers)
     current_belem = any(marker in current_text for marker in belem_markers)
     if previous_central and current_central and not (previous_belem or current_belem):
-        return "Baixa/Chiado"
+        return "central_lisbon"
     if previous_belem and current_belem and not (previous_central or current_central):
         return "Belém"
     return ""
@@ -331,14 +335,14 @@ def _movement_icon_for_text(text: str) -> str:
         return "🚶"
     if re.search(r"\b(?:transport|transporte)\b", normalized):
         return "🚇"
-    if re.search(r"\b(?:walk|walking|caminh\w*|andar|desloca\w*|local|wayfinding)\b", normalized):
-        return "🚶"
     if re.search(r"\b(?:bus|carris|autocarro)\b", normalized):
         return "🚌"
     if re.search(r"\b(?:tram|electrico|eletrico|elétrico)\b", normalized):
         return "🚋"
     if re.search(r"\b(?:train|comboio|cp)\b", normalized):
         return "🚆"
+    if re.search(r"\b(?:walk|walking|caminh\w*|andar|desloca\w*|local|wayfinding)\b", normalized):
+        return "🚶"
     if re.search(r"\b(?:time|tempo|min|minute|minuto)\b", normalized):
         return "⏱️"
     if re.search(r"\b(?:route|percurso|rota)\b", normalized):
@@ -554,6 +558,9 @@ def _format_detail_bullet(detail: str, is_pt: bool) -> str:
         "duration": ("⏱️", "Duração" if is_pt else "Duration"),
         "duração": ("⏱️", "Duração" if is_pt else "Duration"),
         "duracao": ("⏱️", "Duração" if is_pt else "Duration"),
+        "distance": ("📏", "Distância" if is_pt else "Distance"),
+        "distância": ("📏", "Distância" if is_pt else "Distance"),
+        "distancia": ("📏", "Distância" if is_pt else "Distance"),
         "hours": ("🕒", "Horário" if is_pt else "Hours"),
         "horário": ("🕒", "Horário" if is_pt else "Hours"),
         "horario": ("🕒", "Horário" if is_pt else "Hours"),
@@ -572,6 +579,8 @@ def _format_detail_bullet(detail: str, is_pt: bool) -> str:
         "rating": ("⭐", "Avaliação" if is_pt else "Rating"),
         "avaliação": ("⭐", "Avaliação" if is_pt else "Rating"),
         "avaliacao": ("⭐", "Avaliação" if is_pt else "Rating"),
+        "suggested schedule": ("🕒", "Horário sugerido" if is_pt else "Suggested schedule"),
+        "horario sugerido": ("🕒", "Horário sugerido" if is_pt else "Suggested schedule"),
         "suggested time": ("⏱️", "Tempo sugerido" if is_pt else "Suggested time"),
         "tempo sugerido": ("⏱️", "Tempo sugerido" if is_pt else "Suggested time"),
         "more details": ("🔗", "Mais detalhes" if is_pt else "More details"),

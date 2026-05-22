@@ -710,6 +710,8 @@ class ResearcherAgent(BaseAgent):
             "viewpoints": "View Points",
             "beaches": "Beaches",
             "shopping": "Shopping",
+            "tourist offices": "Tourist Offices",
+            "tourist office": "Tourist Offices",
             "nightlife": "Nightlife",
             "parks & gardens": "Parks & Gardens",
             "parks": "Parks & Gardens",
@@ -725,6 +727,7 @@ class ResearcherAgent(BaseAgent):
             ("View Points", r"\b(?:miradouro|viewpoint|vista|view)\b"),
             ("Parks & Gardens", r"\b(?:jardim|garden|parque|park)\b"),
             ("Beaches", r"\b(?:praia|beach|surf)\b"),
+            ("Tourist Offices", r"\b(?:tourist\s+offices?|postos?\s+de\s+turismo|informa[cç][aã]o\s+tur[ií]stica)\b"),
             ("Shopping", r"\b(?:compras|shopping|lojas|shops?)\b"),
             ("Nightlife", r"\b(?:nightlife|vida\s+noturna|bar|bars)\b"),
             ("Tours", r"\b(?:tour|tours|visita|visitas|experience|experiencia|experiência)\b"),
@@ -1323,6 +1326,18 @@ class ResearcherAgent(BaseAgent):
         if any(
             term in query
             for term in [
+                "tourist office",
+                "tourist offices",
+                "posto de turismo",
+                "postos de turismo",
+                "informação turística",
+                "informacao turistica",
+            ]
+        ):
+            signals.append("Tourist Offices")
+        if any(
+            term in query
+            for term in [
                 "shopping",
                 "shop",
                 "shops",
@@ -1333,12 +1348,6 @@ class ResearcherAgent(BaseAgent):
                 "centros comerciais",
                 "mall",
                 "malls",
-                "tourist office",
-                "tourist offices",
-                "posto de turismo",
-                "postos de turismo",
-                "informação turística",
-                "informacao turistica",
             ]
         ):
             signals.append("Shopping")
@@ -2916,7 +2925,7 @@ class ResearcherAgent(BaseAgent):
             r"parques?|parks?|sanit[aá]rios?|toilets?|restrooms?|casas?\s+de\s+banho|"
             r"wi[-\s]?fi|internet|pol[ií]cia|police|bombeiros?|firefighters?|"
             r"estacionamento|parking|embaixadas?|embassies)\b"
-            r".{0,80}\b(?:em|no|na|nos|nas|in|at|near|perto\s+de|perto\s+do|perto\s+da)\s+"
+            r".{0,80}?\b(?:perto\s+de|perto\s+do|perto\s+da|near|em|no|na|nos|nas|in|at)\s+"
             r"(?P<location>.+?)(?:\s+(?:com|with|que|which|abert[oa]s?|open|morada|address|"
             r"perto|near|recomendas|recommend|usar|use)\b|[\?\!\.,;]|$)",
             user_message,
@@ -3021,6 +3030,12 @@ class ResearcherAgent(BaseAgent):
             r"\b(?:para|to)\s+(?:usar|use|ir|go|chegar|reach|esta\s+noite|hoje|amanh[ãa]|agora|mais\s+tarde|tonight|this\s+evening|today|tomorrow|now|later)\b",
             r"\b(?:for|during)\s+(?:tonight|this\s+evening|today|tomorrow|later|the\s+evening)\b",
             r"\b(?:com|with)\s+(?:morada|address|endereço|distância|distance|horário|hours?|telefone|phone)\b.*$",
+            r"\b(?:nos|nas|com|usando|usa|usar|limita(?:r|ndo)?(?:-te)?\s+a|apenas\s+com)\s+"
+            r"(?:os\s+)?(?:dados|fontes?|datasets?|lisboa\s+aberta)\b.*$",
+            r"\b(?:in|from|using|with|limited\s+to|only\s+from)\s+(?:the\s+)?"
+            r"(?:available\s+)?(?:data|datasets?|sources?|open\s+data)\b.*$",
+            r"\b(?:dados|fontes?|datasets?|data|sources?)\s+(?:da|do|de|from)\s+"
+            r"(?:lisboa\s+aberta|available\s+data|open\s+data)\b.*$",
         )
         for pattern in split_patterns:
             parts = re.split(pattern, cleaned, maxsplit=1, flags=re.IGNORECASE)
@@ -4064,6 +4079,14 @@ class ResearcherAgent(BaseAgent):
         nearby_tool = self._get_tool_by_name("find_nearby_services")
         structured_subject = self._normalize_structured_plan_text(structured_plan.get("subject")) if structured_plan else None
         place_focus_query = structured_subject or self._extract_place_focus_query(user_message) or self._extract_place_area_filter(user_message)
+        transactional_lookup = bool(
+            re.search(
+                r"\b(?:book|reserve|reservation|booking|buy|purchase|"
+                r"reservar|reserva|marcar|marca|comprar|compra)\b",
+                user_message or "",
+                flags=re.IGNORECASE,
+            )
+        )
         specific_lookup = _extract_specific_place_lookup_phrase(user_message)
         if (
             structured_subject
@@ -4133,6 +4156,39 @@ class ResearcherAgent(BaseAgent):
                 shown_count = self._count_ranked_results(exact_result)
                 accept_clean_exact = not has_fallback_intro and not exact_result.startswith("❌")
                 accept_fallback_with_alternatives = has_fallback_intro and shown_count > 0
+                if transactional_lookup and accept_clean_exact:
+                    source_line = self._build_places_source_line(exact_result, language)
+                    if language == "pt":
+                        direct_note = (
+                            "### ⚠️ **Reserva não suportada**\n\n"
+                            "✅ **Resposta direta:** não consigo fazer a reserva diretamente; abaixo estão apenas os detalhes confirmados do local para contactares pelos canais oficiais.\n\n"
+                            "---"
+                        )
+                    else:
+                        direct_note = (
+                            "### ⚠️ **Booking Not Supported**\n\n"
+                            "✅ **Direct answer:** I cannot make the booking directly; below are only the confirmed venue details so you can contact the official channels.\n\n"
+                            "---"
+                        )
+                    return f"{direct_note}\n\n{exact_result}\n\n{source_line}".strip()
+                if transactional_lookup and not accept_clean_exact:
+                    source_line = self._build_places_source_line(exact_result, language)
+                    target_label = place_focus_query or specific_lookup or ("o local pedido" if language == "pt" else "the requested venue")
+                    if language == "pt":
+                        return (
+                            "### ⚠️ **Reserva não suportada**\n\n"
+                            f"✅ **Resposta direta:** não consigo fazer reservas e não encontrei detalhes oficiais confirmados para **{target_label}** nos dados disponíveis.\n\n"
+                            "---\n\n"
+                            "- Posso ajudar com morada, contactos ou transporte se indicares o website oficial ou a morada do local.\n\n"
+                            f"{source_line}"
+                        ).strip()
+                    return (
+                        "### ⚠️ **Booking Not Supported**\n\n"
+                        f"✅ **Direct answer:** I cannot make bookings, and I could not confirm official details for **{target_label}** in the available data.\n\n"
+                        "---\n\n"
+                        "- I can still help with address, contact details, or transport if you provide the official website or venue address.\n\n"
+                        f"{source_line}"
+                    ).strip()
                 if accept_clean_exact or accept_fallback_with_alternatives:
                     base_args = {key: value for key, value in exact_args.items() if key not in {"max_results", "offset"}}
                     remembered_page_size = (
@@ -4890,11 +4946,18 @@ class ResearcherAgent(BaseAgent):
                         anchor_key,
                     )
                 )
-                anchor_category = (
-                    "Museums"
-                    if re.search(r"\b(?:museu|museum)\b", anchor_key)
-                    else "Museums & Monuments"
-                )
+                if re.search(r"\b(?:museu|museum)\b", anchor_key):
+                    anchor_category = "Museums"
+                elif re.search(r"\b(?:miradouro|viewpoint|view\s+point)\b", anchor_key):
+                    anchor_category = "View Points"
+                elif re.search(r"\b(?:jardim|jardins|garden|gardens|parque|park|parks)\b", anchor_key):
+                    anchor_category = "Parks & Gardens"
+                elif re.search(r"\b(?:mercado|market|markets)\b", anchor_key):
+                    anchor_category = "Shopping"
+                elif re.search(r"\b(?:teatro|theatre|theater|cinema)\b", anchor_key):
+                    anchor_category = "Culture"
+                else:
+                    anchor_category = "Museums & Monuments"
                 entry = {
                     "query": anchor_text,
                     "category": "Restaurants" if is_food_anchor else anchor_category,
@@ -4916,6 +4979,23 @@ class ResearcherAgent(BaseAgent):
             re.search(r"\b(historic|historical|sights?|sightseeing|hist[oó]ric[oa]s?|monument|monumento|monumentos|patrim[oó]nio|heritage)\b", normalized)
         )
         requests_food_stop = bool(_RESEARCHER_FOOD_INTENT_RE.search(normalized))
+        requests_traditional_food = bool(
+            requests_food_stop
+            and re.search(
+                r"\b(?:gastronomia\s+tradicional|cozinha\s+tradicional|cozinha\s+portuguesa|"
+                r"comida\s+portuguesa|tradicional|traditional\s+portuguese|portuguese\s+cuisine)\b",
+                normalized,
+            )
+        )
+        requests_budget_food = bool(
+            requests_food_stop
+            and re.search(
+                r"\b(?:barat\w*|econ[oó]mic\w*|baixo\s+custo|low\s+cost|"
+                r"cheap|budget|under\s+20|<\s*20|menos\s+de\s+20)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
         requests_pastry_stop = bool(_RESEARCHER_CAFE_INTENT_RE.search(normalized))
         pastry_area = "Belém" if re.search(r"\b(?:bel[eé]m|belem)\b", normalized) else "Lisbon"
         requests_event_stop = bool(
@@ -5130,7 +5210,7 @@ class ResearcherAgent(BaseAgent):
                 re.search(r"\b(?:museum|museums|museu|museus)\b", normalized)
             )
             requests_viewpoint_day = bool(
-                re.search(r"\b(?:viewpoint|viewpoints|view\s+point|miradouro|miradouros)\b", normalized)
+                re.search(r"\b(?:viewpoint|viewpoints|view\s+point|views?|vista|vistas|miradouro|miradouros)\b", normalized)
             )
             default_general_cultural_query = (
                 "museus em Lisboa"
@@ -5266,6 +5346,21 @@ class ResearcherAgent(BaseAgent):
                 if language == "pt"
                 else "traditional Portuguese restaurants in Lisbon"
             )
+            if requests_budget_food:
+                planned_food_queries.insert(
+                    0,
+                    {
+                        "query": (
+                            "restaurantes < 20 em Lisboa"
+                            if language == "pt"
+                            else "restaurants under 20 in Lisbon"
+                        ),
+                        "category": "Restaurants",
+                        "max_results": 8,
+                        "specific_lookup": False,
+                        "language": language,
+                    },
+                )
             if not planned_food_queries:
                 planned_food_queries = [
                     {
@@ -5376,6 +5471,41 @@ class ResearcherAgent(BaseAgent):
                     )
                 )
 
+            if requests_traditional_food:
+                existing_food_keys = {
+                    self._normalize_for_deterministic_routing(str(item.get("query") or ""))
+                    for item in planned_food_queries
+                    if isinstance(item, dict)
+                }
+                traditional_food_queries = [
+                    (
+                        f"restaurantes de gastronomia tradicional perto de {compact_anchor}"
+                        if language == "pt"
+                        else f"traditional Portuguese restaurants near {compact_anchor}"
+                    ),
+                    (
+                        "restaurantes de gastronomia tradicional em Lisboa"
+                        if language == "pt"
+                        else "traditional Portuguese restaurants in Lisbon"
+                    ),
+                ]
+                traditional_entries: List[Dict[str, Any]] = []
+                for food_query in traditional_food_queries:
+                    food_query_key = self._normalize_for_deterministic_routing(food_query)
+                    if food_query_key and food_query_key not in existing_food_keys:
+                        existing_food_keys.add(food_query_key)
+                        traditional_entries.append(
+                            {
+                                "query": food_query,
+                                "category": "Restaurants",
+                                "max_results": 5,
+                                "specific_lookup": False,
+                                "language": language,
+                            }
+                        )
+                if traditional_entries:
+                    planned_food_queries = [*traditional_entries, *planned_food_queries]
+
             if not requests_event_stop and not any(
                 query_uses_compact_proximity(item) for item in planned_cultural_queries
             ):
@@ -5482,13 +5612,18 @@ class ResearcherAgent(BaseAgent):
             if requests_food_stop and not any(
                 query_uses_compact_proximity(item) for item in planned_food_queries
             ):
+                compact_food_query = (
+                    f"restaurantes de gastronomia tradicional perto de {compact_anchor}"
+                    if requests_traditional_food and language == "pt"
+                    else f"traditional Portuguese restaurants near {compact_anchor}"
+                    if requests_traditional_food
+                    else f"restaurantes perto de {compact_anchor}"
+                    if language == "pt"
+                    else f"restaurants near {compact_anchor}"
+                )
                 planned_food_queries = [
                     {
-                        "query": (
-                            f"restaurantes perto de {compact_anchor}"
-                            if language == "pt"
-                            else f"restaurants near {compact_anchor}"
-                        ),
+                        "query": compact_food_query,
                         "category": "Restaurants",
                         "max_results": 5,
                         "specific_lookup": False,
@@ -5509,7 +5644,11 @@ class ResearcherAgent(BaseAgent):
                     area_reference = area_parts[0] if area_parts else ""
                     if area_reference:
                         area_food_query = (
-                            f"restaurantes perto de {area_reference}"
+                            f"restaurantes de gastronomia tradicional perto de {area_reference}"
+                            if requests_traditional_food and language == "pt"
+                            else f"traditional Portuguese restaurants near {area_reference}"
+                            if requests_traditional_food
+                            else f"restaurantes perto de {area_reference}"
                             if language == "pt"
                             else f"restaurants near {area_reference}"
                         )
@@ -5526,7 +5665,11 @@ class ResearcherAgent(BaseAgent):
                     )
             elif requests_food_stop:
                 canonical_food_query = (
-                    f"restaurantes perto de {compact_anchor}"
+                    f"restaurantes de gastronomia tradicional perto de {compact_anchor}"
+                    if requests_traditional_food and language == "pt"
+                    else f"traditional Portuguese restaurants near {compact_anchor}"
+                    if requests_traditional_food
+                    else f"restaurantes perto de {compact_anchor}"
                     if language == "pt"
                     else f"restaurants near {compact_anchor}"
                 )
@@ -5543,7 +5686,11 @@ class ResearcherAgent(BaseAgent):
                     area_reference = area_parts[0] if area_parts else ""
                     if area_reference:
                         area_food_query = (
-                            f"restaurantes perto de {area_reference}"
+                            f"restaurantes de gastronomia tradicional perto de {area_reference}"
+                            if requests_traditional_food and language == "pt"
+                            else f"traditional Portuguese restaurants near {area_reference}"
+                            if requests_traditional_food
+                            else f"restaurantes perto de {area_reference}"
                             if language == "pt"
                             else f"restaurants near {area_reference}"
                         )
@@ -5574,6 +5721,35 @@ class ResearcherAgent(BaseAgent):
                         if not query_uses_compact_proximity(item)
                     ],
                 ]
+            if requests_budget_food:
+                budget_areas = [compact_anchor]
+                if planner_area_key and planner_area_label:
+                    budget_areas.extend(
+                        re.sub(r"\s+", " ", part).strip(" .:-")
+                        for part in re.split(r"\s*/\s*", planner_area_label)
+                        if part.strip()
+                    )
+                budget_entries: List[Dict[str, Any]] = []
+                seen_budget_areas: set[str] = set()
+                for area in budget_areas:
+                    area_key = self._normalize_for_deterministic_routing(area)
+                    if not area_key or area_key in seen_budget_areas:
+                        continue
+                    seen_budget_areas.add(area_key)
+                    budget_entries.append(
+                        {
+                            "query": (
+                                f"restaurantes < 20 perto de {area}"
+                                if language == "pt"
+                                else f"restaurants under 20 near {area}"
+                            ),
+                            "category": "Restaurants",
+                            "max_results": 8,
+                            "specific_lookup": False,
+                            "language": language,
+                        }
+                    )
+                planned_food_queries = [*budget_entries, *planned_food_queries]
             planned_cultural_queries = planned_cultural_queries[:5]
             planned_food_queries = planned_food_queries[:2]
 
@@ -5590,10 +5766,22 @@ class ResearcherAgent(BaseAgent):
             ),
         )
         requested_food_results = max(5, min(8, int(planner_requested_counts.get("food", 0) or 0)))
-        if planner_requested_counts.get("museum") and not any(
-            re.search(r"\b(?:museu|museum)\b", self._normalize_for_deterministic_routing(str(item.get("query") or "")))
+        museum_count_requested = int(planner_requested_counts.get("museum", 0) or 0)
+        has_broad_museum_query = any(
+            (
+                re.search(r"\b(?:museus|museums)\b", self._normalize_for_deterministic_routing(str(item.get("query") or "")))
+                or (
+                    str(item.get("category") or "") == "Museums & Monuments"
+                    and not bool(item.get("specific_lookup"))
+                    and re.search(
+                        r"\b(?:museu|museum)\b",
+                        self._normalize_for_deterministic_routing(str(item.get("query") or "")),
+                    )
+                )
+            )
             for item in planned_cultural_queries
-        ):
+        )
+        if museum_count_requested and not has_broad_museum_query:
             planned_cultural_queries.insert(
                 0,
                 {
@@ -5605,7 +5793,7 @@ class ResearcherAgent(BaseAgent):
                 },
             )
         if planner_requested_counts.get("viewpoint") and not any(
-            re.search(r"\b(?:miradouro|viewpoint|view\s+point)\b", self._normalize_for_deterministic_routing(str(item.get("query") or "")))
+            re.search(r"\b(?:miradouro|viewpoint|view\s+point|views?|vista|vistas)\b", self._normalize_for_deterministic_routing(str(item.get("query") or "")))
             for item in planned_cultural_queries
         ):
             planned_cultural_queries.insert(
@@ -5624,6 +5812,61 @@ class ResearcherAgent(BaseAgent):
         for item in planned_food_queries:
             if isinstance(item, dict):
                 item["max_results"] = max(int(item.get("max_results") or 5), requested_food_results)
+
+        def dedupe_planner_queries(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            """Deduplicate equivalent planner search calls while preserving intent."""
+            deduped: List[Dict[str, Any]] = []
+            by_key: Dict[tuple[str, str, bool], Dict[str, Any]] = {}
+            for raw_item in items:
+                if not isinstance(raw_item, dict):
+                    continue
+                query_key = self._normalize_for_deterministic_routing(str(raw_item.get("query") or ""))
+                category_key = self._normalize_for_deterministic_routing(str(raw_item.get("category") or ""))
+                specific_lookup = bool(raw_item.get("specific_lookup"))
+                if not query_key:
+                    continue
+                key = (query_key, category_key, specific_lookup)
+                existing = by_key.get(key)
+                if existing is None:
+                    item = dict(raw_item)
+                    by_key[key] = item
+                    deduped.append(item)
+                    continue
+                existing["max_results"] = max(
+                    int(existing.get("max_results") or 5),
+                    int(raw_item.get("max_results") or 5),
+                )
+                existing["language"] = existing.get("language") or raw_item.get("language") or language
+            return deduped
+
+        planned_cultural_queries = dedupe_planner_queries(planned_cultural_queries)
+        planned_food_queries = dedupe_planner_queries(planned_food_queries)
+        if is_compact_start_area_plan and compact_anchor_key:
+
+            def compact_query_priority(item: Dict[str, Any]) -> tuple[int, int]:
+                """Prioritize local/proximity evidence before broad Lisbon recall."""
+                query_text = self._normalize_for_deterministic_routing(str(item.get("query") or ""))
+                mentions_anchor = bool(compact_anchor_key and compact_anchor_key in query_text)
+                asks_proximity = bool(
+                    re.search(
+                        r"\b(?:perto|junto|zona|volta|near|nearby|around|close\s+to)\b",
+                        query_text,
+                    )
+                )
+                is_generic_lisbon = bool(
+                    re.search(r"\b(?:lisboa|lisbon)\b", query_text)
+                    and not mentions_anchor
+                )
+                if mentions_anchor and asks_proximity:
+                    return (0, 0)
+                if mentions_anchor:
+                    return (1, 0)
+                if is_generic_lisbon:
+                    return (3, 0)
+                return (2, 0)
+
+            planned_cultural_queries = sorted(planned_cultural_queries, key=compact_query_priority)
+            planned_food_queries = sorted(planned_food_queries, key=compact_query_priority)
 
         if has_historic_monument_need and planned_cultural_queries:
             planned_query_text = " ".join(str(item.get("query") or "") for item in planned_cultural_queries)

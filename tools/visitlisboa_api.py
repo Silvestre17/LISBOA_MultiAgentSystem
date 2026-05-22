@@ -104,7 +104,7 @@ def parse_date_range(date_query: Optional[str]) -> Tuple[Optional[datetime], Opt
     if not date_query:
         return None, None
 
-    date_query = date_query.lower().strip()
+    date_query = re.sub(r"[_-]+", " ", date_query.lower().strip())
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
     # Handle specific keywords
@@ -842,6 +842,8 @@ def _localize_place_title(title: Optional[str], language: str = "en") -> str:
     localized = raw
     for pattern, replacement in generic_replacements:
         localized = re.sub(pattern, replacement, localized)
+    localized = re.sub(r"\|\s*Restaurant\b", "| Restaurante", localized, flags=re.IGNORECASE)
+    localized = re.sub(r"\|\s*Museum\b", "| Museu", localized, flags=re.IGNORECASE)
     return localized
 
 
@@ -877,6 +879,17 @@ def _localize_visitlisboa_description(
     raw = re.sub(r"\s+", " ", (description or "").strip())
     if not raw or language != "pt":
         return raw
+
+    fixed_translations = {
+        "Typical Portuguese cuisine.": "Cozinha portuguesa típica.",
+        "Traditional Portuguese cuisine.": "Cozinha portuguesa tradicional.",
+        "Restaurant opened on 11 January 1993. Portuguese cuisine.": "Restaurante aberto em 11 de janeiro de 1993, com cozinha portuguesa.",
+        "Portuguese cuisine.": "Cozinha portuguesa.",
+        "Light meals just off Avenida da Liberdade.": "Refeições leves junto à Avenida da Liberdade.",
+    }
+    fixed = fixed_translations.get(raw)
+    if fixed:
+        return fixed
 
     english_markers = [
         " the ",
@@ -1355,7 +1368,7 @@ def _place_icon_for_category(category: str) -> str:
 
 def _localize_event_date_filter(date_filter: Optional[str], language: str = "en") -> str:
     """Localizes common date-filter labels for user-facing summaries."""
-    raw = (date_filter or "all available dates").strip()
+    raw = re.sub(r"[_-]+", " ", (date_filter or "all available dates").strip())
     if language != "pt":
         return raw
 
@@ -2730,8 +2743,8 @@ _PLACE_CATEGORY_ALIASES = {
     "shopping": {
         "shopping", "shop", "shops", "store", "stores", "loja", "lojas",
         "compras", "centro comercial", "centros comerciais", "mall", "malls",
-        "tourist office", "tourist offices", "posto de turismo", "postos de turismo",
     },
+    "tourist offices": {"tourist office", "tourist offices", "posto de turismo", "postos de turismo", "tourism info"},
     "tejo cruises": {"tejo cruises", "cruise", "cruises", "cruzeiro", "cruzeiros", "tejo", "tagus"},
     "beaches": {"beach", "beaches", "praia", "praias", "surf"},
     "fado": {"fado"},
@@ -2752,7 +2765,8 @@ _PLACE_CATEGORY_ITEM_MATCHES = {
     },
     "view points": {"view points"},
     "parks & gardens": {"parks & gardens", "gardens & parks", "nature", "natural reserves"},
-    "shopping": {"shopping", "tourist offices"},
+    "shopping": {"shopping"},
+    "tourist offices": {"tourist offices"},
     "tejo cruises": {"tejo cruises", "traditional boats", "nautical tours & others", "marinas & ports"},
     "beaches": {"beaches", "surf spots", "national surf reserve"},
     "fado": {"fado"},
@@ -2820,8 +2834,8 @@ _SPECIFIC_PLACE_LOOKUP_NOISE_TOKENS = _GENERIC_PLACE_QUERY_TOKENS - _SPECIFIC_PL
 
 _VISITLISBOA_ONLY_HYBRID_CATEGORIES = {
     "museums & monuments", "restaurants", "hotels", "view points", "tours",
-    "shopping", "tejo cruises", "beaches", "fado", "nightlife", "sports", "golf",
-    "running", "water sports",
+    "shopping", "tourist offices", "tejo cruises", "beaches", "fado", "nightlife",
+    "sports", "golf", "running", "water sports",
 }
 _BROAD_PLACE_LOOKUP_CONNECTORS = {
     "in", "near", "with", "around", "for", "by", "at",
@@ -3330,6 +3344,7 @@ def _infer_restaurant_preference_flags(
     query_intent: Optional[str],
 ) -> Dict[str, bool]:
     """Infer restaurant preference constraints explicitly requested by the user."""
+    raw_query = str(query or "").lower()
     normalized = _normalize_lookup_text(query)
     if not normalized and query_intent not in {"food", "traditional_food"}:
         return {}
@@ -3356,9 +3371,11 @@ def _infer_restaurant_preference_flags(
         "low_price": bool(
             re.search(
                 r"\b(?:preco baixo|baixo preco|barato|barata|economico|economica|"
-                r"budget|cheap|low price|under 20|ate 20)\b",
+                r"budget|cheap|low price|low cost|affordable|under 20|ate 20|"
+                r"menos de 20|baixo custo)\b|<\s*20",
                 normalized,
             )
+            or re.search(r"<\s*20|menos\s+de\s+20|under\s+20", raw_query)
         ),
         "accessibility": bool(
             re.search(
@@ -5125,6 +5142,10 @@ def search_places_attractions(
             )
         ):
             query_intent = "traditional_food"
+        restaurant_preference_flags_for_search = _infer_restaurant_preference_flags(
+            effective_query or query,
+            query_intent,
+        )
         tickets_requested = _query_mentions_tickets(query_context)
         schedule_requested = _query_mentions_schedule(query_context)
         open_today_required = _query_requires_open_today(query_context)
@@ -5193,6 +5214,12 @@ def search_places_attractions(
                 search_k = requested_window * 2
                 if query_intent in {"top_attractions", "museum_monument"} and not specific_lookup_query:
                     search_k = max(search_k, requested_window * 5, 15)
+                if (
+                    requested_category == "restaurants"
+                    and restaurant_preference_flags_for_search
+                    and not specific_lookup_query
+                ):
+                    search_k = max(search_k, requested_window * 8, 40)
 
                 results_with_scores = kb.search_with_scores(
                     query=search_query,
@@ -5345,6 +5372,12 @@ def search_places_attractions(
                 selection_window = requested_window
                 if tickets_requested or schedule_requested:
                     selection_window = max(requested_window * 4, 12)
+                if (
+                    requested_category == "restaurants"
+                    and restaurant_preference_flags_for_search
+                    and not specific_lookup_query
+                ):
+                    selection_window = max(selection_window, requested_window * 6, 24)
                 for item in scored_candidates[:selection_window]:
                     metadata = item['metadata']
                     # Attempt to get real address/location
@@ -5408,12 +5441,17 @@ def search_places_attractions(
             or bool(specific_lookup_query)
             or query_intent != "top_attractions"
         )
-        if should_use_json_fallback and (len(visitlisboa_results) < requested_window or tickets_requested or schedule_requested):
+        if should_use_json_fallback and (
+            len(visitlisboa_results) < requested_window
+            or tickets_requested
+            or schedule_requested
+            or restaurant_preference_flags_for_search
+        ):
             fallback_items = _fallback_search(
                 query=effective_query or query,
                 category=category,
                 data=_load_places_json(),
-                max_results=5000 if (tickets_requested or schedule_requested) else requested_window * 2,
+                max_results=5000 if (tickets_requested or schedule_requested or restaurant_preference_flags_for_search) else requested_window * 2,
             )
             fallback_results = [_convert_raw_place_to_result(item) for item in fallback_items]
             if tickets_requested or schedule_requested:
@@ -5427,7 +5465,7 @@ def search_places_attractions(
             combined_visitlisboa: List[Dict[str, Any]] = []
             seen_visitlisboa_keys: set[str] = set()
             _append_unique_place_results(combined_visitlisboa, visitlisboa_results, seen_visitlisboa_keys)
-            fallback_limit = None if (tickets_requested or schedule_requested) else requested_window
+            fallback_limit = None if (tickets_requested or schedule_requested or restaurant_preference_flags_for_search) else requested_window
             _append_unique_place_results(combined_visitlisboa, fallback_results, seen_visitlisboa_keys, limit=fallback_limit)
             visitlisboa_results = combined_visitlisboa
 
@@ -5670,6 +5708,12 @@ def search_places_attractions(
             all_results,
             effective_query or query,
         )
+        if all_results and restaurant_output and restaurant_preference_flags:
+            all_results, restaurant_preference_partial_match = _rank_restaurant_results_for_preferences(
+                all_results,
+                preference_query,
+                query_intent,
+            )
 
         # =====================================================================
         # STEP 3: Format Output
@@ -5818,13 +5862,21 @@ def search_places_attractions(
 
         if proximity_reference_label and offset == 0:
             if render_language == "pt":
-                output_parts.append(
-                    f"\U0001f4cf **Ordenação:** resultados com localização resolvida priorizados por distância a **{proximity_reference_label}**."
+                ordering_text = (
+                    f"\U0001f4cf **Ordenação:** preferências pedidas priorizadas; "
+                    f"distância a **{proximity_reference_label}** usada como contexto."
+                    if restaurant_preference_flags
+                    else f"\U0001f4cf **Ordenação:** resultados com localização resolvida priorizados por distância a **{proximity_reference_label}**."
                 )
+                output_parts.append(ordering_text)
             else:
-                output_parts.append(
-                    f"\U0001f4cf **Sorting:** results with resolved locations are prioritised by distance from **{proximity_reference_label}**."
+                ordering_text = (
+                    f"\U0001f4cf **Sorting:** requested preferences are prioritised; "
+                    f"distance from **{proximity_reference_label}** is used as context."
+                    if restaurant_preference_flags
+                    else f"\U0001f4cf **Sorting:** results with resolved locations are prioritised by distance from **{proximity_reference_label}**."
                 )
+                output_parts.append(ordering_text)
 
         if restaurant_preference_partial_match and offset == 0:
             preference_note = _build_restaurant_preference_note(

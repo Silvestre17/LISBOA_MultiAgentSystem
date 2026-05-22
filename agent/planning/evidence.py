@@ -283,7 +283,7 @@ def _extract_research_cards(text: str, *, default_kind: str) -> List[EvidenceCar
     sources = _detect_sources(text)
     sections = _split_markdown_cards(text)
     cards: List[EvidenceCard] = []
-    for index, section in enumerate(sections[:24], start=1):
+    for index, section in enumerate(sections[:48], start=1):
         title = _clean_title(section[0]) if section else ""
         if _is_non_card_title(title):
             continue
@@ -360,7 +360,12 @@ def _split_markdown_cards(text: str) -> List[List[str]]:
     lines = [line.rstrip() for line in text.splitlines()]
     cards: List[List[str]] = []
     current: List[str] = []
-    header_re = re.compile(r"^\s*(?:###\s+|[-*•]\s+)?(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s*)?\*\*[^*]{2,120}\*\*\s*$")
+    header_re = re.compile(
+        r"^\s*(?:###\s+|[-*•]\s+)?"
+        r"(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s*)?"
+        r"\*\*(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s*)?"
+        r"[^*]{2,120}\*\*\s*$"
+    )
     alt_header_re = re.compile(r"^\s*###\s+")
     for line in lines:
         stripped = line.strip()

@@ -175,6 +175,57 @@ class SupervisorAgent(BaseAgent):
     def _looks_like_weather_query(cls, message_lower: str) -> bool:
         """Detects weather queries without over-matching generic PT words like `tempo`."""
         normalized = cls._normalize_query(message_lower)
+        explicit_weather_clothing_advice = bool(
+            re.search(
+                r"\b(?:what\s+(?:should|do)\s+i\s+wear|what\s+to\s+wear|"
+                r"o\s+que\s+(?:devo|posso)\s+vestir|devo\s+levar|should\s+i\s+(?:take|bring|wear))\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+        outdoor_exposure_weather_advice = bool(
+            re.search(
+                r"\b(?:today|tomorrow|tonight|morning|afternoon|evening|hoje|amanha|"
+                r"manha|tarde|noite)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+            and re.search(
+                r"\b(?:outside|outdoor|queue|waiting|wait|stand|standing|fila|fora|"
+                r"exterior|ar\s+livre|esperar|ficar|caminhar|walk|walking)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+        acquisition_or_discovery_lookup = bool(
+            re.search(
+                r"\b(?:where|onde|find|procurar|available|disponiveis|disponivel|which|quais|"
+                r"shops?|stores?|lojas?|shopping|tour|tours|visita(?:s)?\s+guiada(?:s)?)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+            and re.search(
+                r"\b(?:roupa|clothes|clothing|casacos?|jackets?|vestuario|vestu[aá]rio|"
+                r"umbrella|guarda[-\s]?chuva|raincoat|impermeavel|imperme[aá]vel|poncho|"
+                r"sunscreen|protetor\s+solar|hat|chapeu|chap[eé]u|walking\s+tours?|"
+                r"guided\s+tours?|visita(?:s)?\s+guiada(?:s)?)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+        if acquisition_or_discovery_lookup and not explicit_weather_clothing_advice:
+            return False
+        if explicit_weather_clothing_advice or outdoor_exposure_weather_advice:
+            return True
+        if re.search(
+            r"\b(?:lojas?|shops?|shopping|comprar|buy|store|stores)\b"
+            r".{0,50}\b(?:roupa|clothes|clothing|casacos?|jackets?|vestuario|vestu[aá]rio)\b|"
+            r"\b(?:roupa|clothes|clothing|casacos?|jackets?|vestuario|vestu[aá]rio)\b"
+            r".{0,50}\b(?:lojas?|shops?|shopping|comprar|buy|store|stores)\b",
+            normalized,
+            flags=re.IGNORECASE,
+        ):
+            return False
         weather_patterns = [
             r"\bweather\b",
             r"\brain\b",
@@ -457,6 +508,34 @@ class SupervisorAgent(BaseAgent):
         return any(re.search(pattern, normalized) for pattern in unsupported_patterns)
 
     @classmethod
+    def _unsupported_action_has_supported_lookup_target(cls, user_message: str) -> bool:
+        """Return whether an unsupported transaction still has useful Lisbon lookup value."""
+        normalized = cls._normalize_query(user_message)
+        if not normalized:
+            return False
+        if route_mentions_outside_aml(user_message):
+            return False
+        if cls._is_geographic_out_of_scope_query(user_message):
+            return False
+        transactional_target = bool(
+            re.search(
+                r"\b(?:at|for|in|near|no|na|em|para|pelo|pela)\s+"
+                r"[a-z0-9][a-z0-9'\- ]{2,80}",
+                normalized,
+            )
+        )
+        lisbon_lookup_context = bool(
+            cls._has_lisbon_context(normalized)
+            or re.search(
+                r"\b(?:restaurante|restaurant|mesa|table|bilhetes?|tickets?|"
+                r"concerto|concert|evento|event|ccb|teatro|theatre|hotel|"
+                r"ramiro|lisboa|lisbon)\b",
+                normalized,
+            )
+        )
+        return transactional_target and lisbon_lookup_context
+
+    @classmethod
     def _is_broad_realtime_transport_dump_request(cls, user_message: str) -> bool:
         """Detect requests that ask for an unusably broad live transport dump."""
         normalized = cls._normalize_query(user_message)
@@ -467,6 +546,18 @@ class SupervisorAgent(BaseAgent):
             and re.search(r"\b(?:todas?|todos?|all|every)\b", normalized)
             and re.search(r"\b(?:esta[cç][oõ]es?|stations?|linhas?|lines|metro|subway)\b", normalized)
         )
+        if (
+            wait_time_catalog_request
+            and re.search(r"\b(?:metro|subway)\b", normalized)
+            and re.search(r"\b(?:linhas?|lines)\b", normalized)
+            and not re.search(
+                r"\b(?:paragens?|stops|esta[cÃ§][oÃµ]es?|stations?|"
+                r"ve[iÃí]culos?|vehicles?|partidas?|departures?|"
+                r"comboios?|trains?|autocarros?|buses|servi[cÃ§]os?|services?)\b",
+                normalized,
+            )
+        ):
+            return False
         if (
             not wait_time_catalog_request
             and not re.search(r"\b(?:tempo real|real[-\s]?time|live|agora|now)\b", normalized)
@@ -591,7 +682,26 @@ class SupervisorAgent(BaseAgent):
                 "direct_response": self._sanitize_direct_response(self._build_greeting_response(language)),
             }
 
+        if self._is_unsupported_action_request(user_message) and route_mentions_outside_aml(user_message):
+            return {
+                "reasoning": "Direct geographic out-of-scope transactional request",
+                "agents": [],
+                "direct_response": self._sanitize_direct_response(
+                    build_geographic_out_of_scope_response(
+                        user_message,
+                        language=language,
+                        mobility=False,
+                    )
+                ),
+            }
+
         if self._is_unsupported_action_request(user_message):
+            if self._unsupported_action_has_supported_lookup_target(user_message):
+                return {
+                    "reasoning": "Unsupported transaction with a supported Lisbon lookup target",
+                    "agents": ["researcher"],
+                    "direct_response": None,
+                }
             return {
                 "reasoning": "Direct unsupported transactional action override",
                 "agents": [],
@@ -663,6 +773,25 @@ class SupervisorAgent(BaseAgent):
             return False
         if cls._is_direct_weather_transport_query(user_message):
             return False
+        if not cls._is_planning_query(user_message):
+            research_terms = (
+                r"\b(?:eventos?|events?|concertos?|concerts?|festivais?|festivals?|"
+                r"exposi[cç][oõ]es?|exhibitions?|cultura|culture|"
+                r"atra[cç][oõ]es?|attractions?|museus?|museums?|monumentos?|monuments?|"
+                r"locais|places?|restaurantes?|restaurants?|fado|"
+                r"farm[aá]cias?|pharmacies|hospitais?|hospitals?|bibliotecas?|libraries|"
+                r"servi[cç]os?|services?)\b"
+            )
+            operational_terms = (
+                r"\b(?:weather|tempo|previs[aã]o|chuva|rain|metro|autocarros?|bus|"
+                r"comboios?|train|transportes?|transport|rota|route|como\s+(?:vou|chego|posso\s+ir))\b"
+            )
+            if re.search(research_terms, normalized, flags=re.IGNORECASE) and not re.search(
+                operational_terms,
+                normalized,
+                flags=re.IGNORECASE,
+            ):
+                return False
 
         preference_markers = (
             r"\b(?:prefer|preference|personalized|personalised|avoid|without|excluding|except|not\s+too|"
@@ -876,7 +1005,22 @@ class SupervisorAgent(BaseAgent):
                 r"\bo que visitar\b",
             )
         )
+        shopping_hit = bool(
+            re.search(
+                r"\b(?:shops?|stores?|shopping|lojas?|compras?|comprar|buy|"
+                r"clothes|clothing|roupa|vestu[aá]rio|casacos?|jackets?)\b",
+                message_lower,
+                flags=re.IGNORECASE,
+            )
+            and re.search(
+                r"\b(?:near|perto|em|no|na|where|onde|comprar|buy|shops?|stores?|lojas?)\b",
+                message_lower,
+                flags=re.IGNORECASE,
+            )
+        )
         place_hit = exact_place_hit or cls._contains_domain_keyword(message_lower, place_terms, minimum_ratio=0.82)
+        if shopping_hit:
+            place_hit = True
         if transport_hit and not exact_place_hit:
             place_hit = False
         service_hit = cls._contains_domain_keyword(message_lower, service_terms, minimum_ratio=0.84)
@@ -995,6 +1139,25 @@ class SupervisorAgent(BaseAgent):
                 "direct_response": None,
             }
 
+        if weather_hit and place_hit and not any([transport_hit, event_hit, service_hit]):
+            needs_place_lookup = shopping_hit or bool(
+                re.search(
+                    r"\b(?:where|onde|which|qual|quais|recommend|recomendas?|suggest|"
+                    r"find|encontra|procurar|comprar|buy|shops?|stores?|lojas?)\b",
+                    message_lower,
+                    flags=re.IGNORECASE,
+                )
+            )
+            return {
+                "reasoning": (
+                    "Direct weather-aware place lookup override"
+                    if needs_place_lookup
+                    else "Direct weather advice override with incidental place context"
+                ),
+                "agents": ["weather", "researcher"] if needs_place_lookup else ["weather"],
+                "direct_response": None,
+            }
+
         if weather_hit and transport_hit and not any([event_hit, service_hit]):
             agents = ["weather", "transport"]
             if cls._direct_weather_transport_query_needs_local_context(message_lower):
@@ -1073,10 +1236,32 @@ class SupervisorAgent(BaseAgent):
                 return "researcher"
             return None
 
+        last_user_message = None
+        for msg in reversed(conversation_history):
+            if isinstance(msg, HumanMessage) and msg.content:
+                last_user_message = str(msg.content)
+                break
+
         current_domain = infer_domain(user_message)
+        previous_domain = infer_domain(last_user_message or "")
         if current_domain == "planner":
             return {
                 "reasoning": "Follow-up domain override from current planning intent",
+                "agents": cls._planning_follow_up_agents(user_message),
+                "direct_response": None,
+            }
+        mode_only_follow_up = bool(
+            current_domain == "transport"
+            and previous_domain == "planner"
+            and re.search(
+                r"^\s*(?:e\s+)?(?:de\s+)?(?:metro|autocarro|autocarros|bus|comboio|train|tram|el[eÃé]trico)\s*\??\s*$|"
+                r"^\s*(?:and\s+)?(?:by\s+)?(?:metro|bus|train|tram)\s*\??\s*$",
+                cls._normalize_query(user_message),
+            )
+        )
+        if mode_only_follow_up:
+            return {
+                "reasoning": "Mode-only follow-up resolved against previous itinerary",
                 "agents": cls._planning_follow_up_agents(user_message),
                 "direct_response": None,
             }
@@ -1086,14 +1271,6 @@ class SupervisorAgent(BaseAgent):
                 "agents": [current_domain],
                 "direct_response": None,
             }
-
-        last_user_message = None
-        for msg in reversed(conversation_history):
-            if isinstance(msg, HumanMessage) and msg.content:
-                last_user_message = str(msg.content)
-                break
-
-        previous_domain = infer_domain(last_user_message or "")
         if previous_domain == "planner":
             return {
                 "reasoning": "Follow-up domain override from previous planning query",
@@ -1323,7 +1500,7 @@ class SupervisorAgent(BaseAgent):
 
     @classmethod
     def _planning_query_requires_transport_context(cls, user_message: str) -> bool:
-        """Return whether itinerary quality depends on movement feasibility."""
+        """Return whether the itinerary request requires transport-tool evidence."""
         normalized = cls._normalize_query(user_message)
         has_origin_anchor = cls._planning_query_has_origin_anchor(user_message)
         has_route_constraint = cls._planning_query_has_route_constraint(user_message)
@@ -1334,18 +1511,16 @@ class SupervisorAgent(BaseAgent):
         if cls._looks_like_transport_query(normalized) and not has_origin_anchor:
             return True
 
-        movement_patterns = [
-            r"\b(?:optimized|optimised|optimal|efficient|feasible)\b",
-            r"\b(?:otimizad[oa]s?|optimizado|otimizar|eficiente|vi[aá]vel)\b",
-            r"\b(?:one|1|um)\s+(?:day|dia)\b",
-            r"\b(?:full\s+day|dia\s+inteiro)\b",
-            r"\b(?:multiple|v[aá]rios?|varios?)\s+(?:places|stops|locais|s[ií]tios|paragens)\b",
-            r"\b(?:hotel|alojamento|accommodation)\b.*\b(?:locais|lugares|s[ií]tios|places|stops|almo[cç]o|jantar)\b",
-            r"\b(?:almo[cç]o|jantar|lunch|dinner)\b.*\b(?:hotel|locais|lugares|s[ií]tios|places|stops)\b",
-            r"\b(?:monuments?|monumentos?).*\b(?:food|gastronomy|restaurant|restaurants|gastronomia|restaurante|almo[cç]o|jantar)\b",
-            r"\b(?:food|gastronomy|restaurant|restaurants|gastronomia|restaurante|almo[cç]o|jantar).*\b(?:monuments?|monumentos?)\b",
-        ]
-        return any(re.search(pattern, normalized) for pattern in movement_patterns)
+        named_far_zone_re = re.compile(
+            r"\b(?:bel[eé]m|oriente|parque das nac[oõ]es|cascais|sintra|oeiras|"
+            r"almada|cacilhas|montijo|mafra|ericeira)\b",
+            flags=re.IGNORECASE,
+        )
+        mentioned_far_zones = {
+            match.group(0).lower()
+            for match in named_far_zone_re.finditer(normalized)
+        }
+        return len(mentioned_far_zones) >= 2
 
     @classmethod
     def _is_direct_weather_transport_query(cls, user_message: str) -> bool:
@@ -1445,6 +1620,29 @@ class SupervisorAgent(BaseAgent):
                 flags=re.IGNORECASE,
             )
         )
+        shopping_lookup = bool(
+            re.search(
+                r"\b(?:where|onde|comprar|buy|shops?|stores?|lojas?|shopping)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+            and re.search(
+                r"\b(?:roupa|clothes|clothing|casacos?|jackets?|vestuario|vestu[aá]rio|"
+                r"umbrella|guarda[-\s]?chuva|raincoat|impermeavel|imperme[aá]vel|poncho|"
+                r"sunscreen|protetor\s+solar|hat|chapeu|chap[eé]u)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+        if shopping_lookup:
+            return False
+        if re.search(
+            r"\b(?:walking\s+tours?|guided\s+tours?|visita(?:s)?\s+guiada(?:s)?|"
+            r"que\s+visitas|which\s+tours?)\b",
+            normalized,
+            flags=re.IGNORECASE,
+        ):
+            return False
         if cls._is_planning_query(user_message) and not (clothing_advice or outdoor_advice):
             return False
         if (clothing_advice or outdoor_advice) and explicit_itinerary:
@@ -1459,7 +1657,8 @@ class SupervisorAgent(BaseAgent):
         outdoor_activity = re.search(
             r"\b(?:walk|walking(?:\s+around)?|caminhar|passeio|outdoor|ar livre|"
             r"viewpoint|miradouro|cycling|bicicleta|dress(?:ing)?|wear(?:ing)?|"
-            r"clothing|jacket|umbrella|vestir|roupa|casaco|guarda[-\s]?chuva)\b",
+            r"clothing|jacket|umbrella|vestir|roupa|casaco|guarda[-\s]?chuva|"
+            r"outside|queue|waiting|fila|fora|exterior|ar\s+livre)\b",
             normalized,
         )
         if not outdoor_activity:
@@ -1487,6 +1686,13 @@ class SupervisorAgent(BaseAgent):
     def _is_category_browse_query(cls, user_message: str) -> bool:
         """Detects category-browsing questions that should not become itinerary plans."""
         normalized = cls._normalize_query(user_message)
+        if re.search(
+            r"\b(?:ordem|order|sequ[eê]ncia|sequence|roteiro|itiner[aá]rio|itinerary|"
+            r"plano|plan|agenda|almo[cç]o|lunch|jantar|dinner|meio\s+dia|half[-\s]?day|"
+            r"manh[aã]|morning|tarde|afternoon|hor[aá]rio|schedule)\b",
+            normalized,
+        ):
+            return False
         place_nouns = (
             r"(?:monumentos?|museus?|locais|lugares|atra[cç][oõ]es?|miradouros?|"
             r"jardins?|parques?|restaurantes?|cafes?|cafés?|pastelarias?|bairros?|"
@@ -1641,7 +1847,9 @@ class SupervisorAgent(BaseAgent):
             )
             if is_multi_day:
                 is_planning_query = True
-                planning_stack = ["transport", "researcher", "planner"]
+                planning_stack = ["researcher", "planner"]
+                if self._planning_query_requires_transport_context(user_message):
+                    planning_stack.insert(0, "transport")
                 if self._requires_weather_for_planning(user_message) or self._planning_query_mentions_weather(user_message):
                     planning_stack.insert(0, "weather")
                 agents = [agent for agent in [*planning_stack, *agents] if agent]
@@ -1653,6 +1861,14 @@ class SupervisorAgent(BaseAgent):
                 agents = ["weather"]
                 reasoning += " (Reduced to weather: no transport leg requested)"
                 decision["agents"] = agents
+
+            if not is_planning_query and "planner" in agents:
+                single_domain_guard = self._single_domain_override(user_message)
+                guarded_agents = list(single_domain_guard.get("agents") or []) if single_domain_guard else []
+                if guarded_agents and "planner" not in guarded_agents:
+                    agents = guarded_agents
+                    reasoning += " (Removed planner: current query is a direct research/status request, not an itinerary.)"
+                    decision["direct_response"] = None
 
             if is_planning_query or weather_only_outdoor_decision:
                 decision["direct_response"] = None
@@ -1669,7 +1885,7 @@ class SupervisorAgent(BaseAgent):
                 requires_transport_context = self._planning_query_requires_transport_context(user_message)
                 if requires_transport_context and "transport" not in agents:
                     agents.append("transport")
-                    reasoning += " (Added transport agent: itinerary quality depends on movement feasibility)"
+                    reasoning += " (Added transport agent: request includes explicit or cross-zone movement constraints)"
                 elif not requires_transport_context and not is_multi_day and "transport" in agents:
                     agents = [agent for agent in agents if agent != "transport"]
                     reasoning += " (Removed transport agent: local itinerary start anchor can be handled by planner after POI grounding)"
@@ -1884,6 +2100,14 @@ class SupervisorAgent(BaseAgent):
                     agents.append("planner")
 
         if not agents:
+            if not self._has_lisbon_context(message_lower):
+                return {
+                    "reasoning": "Fallback: out-of-scope query without Lisbon/AML domain evidence",
+                    "agents": [],
+                    "direct_response": self._sanitize_direct_response(
+                        self._build_out_of_scope_response(language)
+                    ),
+                }
             agents = ["researcher"]
 
         return {

@@ -1260,6 +1260,10 @@ class WeatherAgent(BaseAgent):
             "walk outdoors",
             "riverside",
             "outdoors",
+            "outside",
+            "queue",
+            "waiting outside",
+            "stand outside",
             "adequado",
             "evitar",
             "bom para",
@@ -1269,6 +1273,10 @@ class WeatherAgent(BaseAgent):
             "passeio",
             "andar ao ar livre",
             "ar livre",
+            "fila",
+            "cá fora",
+            "ca fora",
+            "ficar fora",
             "umbrella",
             "guarda chuva",
             "hat",
@@ -1347,15 +1355,18 @@ class WeatherAgent(BaseAgent):
                         if re.search(r"\b(?:sunscreen|sun cream|sunblock)\b", normalized)
                         else "a hat or cap"
                     )
-                    sun_reason = (
-                        f" porque a máxima prevista chega a **{maximum}°C**"
-                        if warm_note and maximum
-                        else " se fores estar ao ar livre durante muito tempo"
-                        if is_pt
-                        else f" because the forecast high reaches **{maximum}°C**"
-                        if warm_note and maximum
-                        else " if you will be outdoors for a long period"
-                    )
+                    if is_pt:
+                        sun_reason = (
+                            f" porque a máxima prevista chega a **{maximum}°C**"
+                            if warm_note and maximum
+                            else " se fores estar ao ar livre durante muito tempo"
+                        )
+                    else:
+                        sun_reason = (
+                            f" because the forecast high reaches **{maximum}°C**"
+                            if warm_note and maximum
+                            else " if you will be outdoors for a long period"
+                        )
                     advice_lines.append(
                         (
                             f"- 🧢 **Sol:** leva **{sun_item}**{sun_reason}."
@@ -1412,7 +1423,10 @@ class WeatherAgent(BaseAgent):
                 if not advice_parts:
                     advice_parts.append("leva roupa confortável")
                 temperature_note = f" porque a previsão fica entre **{minimum}°C e {maximum}°C**" if minimum and maximum else ""
-                suitability = "Parece adequado para caminhar" if any(term in normalized for term in ["adequado", "bom para", "evitar", "passeio"]) else "Para caminhar ao ar livre"
+                if any(term in normalized for term in ["fila", "ca fora", "cá fora", "ficar fora"]):
+                    suitability = "Para esperar numa fila ao ar livre"
+                else:
+                    suitability = "Parece adequado para caminhar" if any(term in normalized for term in ["adequado", "bom para", "evitar", "passeio"]) else "Para caminhar ao ar livre"
                 return f"{rain_answer}✅ **Resposta direta:** 👟 {suitability}, {', '.join(advice_parts)}{temperature_note}."
             advice_parts = []
             if min_temp is not None and min_temp <= 17:
@@ -1426,7 +1440,10 @@ class WeatherAgent(BaseAgent):
             if not advice_parts:
                 advice_parts.append("wear comfortable clothes")
             temperature_note = f" because the forecast is around **{minimum}°C to {maximum}°C**" if minimum and maximum else ""
-            suitability = "It looks suitable for a walk" if any(term in normalized for term in ["suitable", "good for", "avoid", "riverside"]) else "For walking outdoors"
+            if any(term in normalized for term in ["queue", "waiting outside", "stand outside", "outside"]):
+                suitability = "For queueing outside"
+            else:
+                suitability = "It looks suitable for a walk" if any(term in normalized for term in ["suitable", "good for", "avoid", "riverside"]) else "For walking outdoors"
             return f"{rain_answer}✅ **Direct answer:** 👟 {suitability}, {', '.join(advice_parts)}{temperature_note}."
 
         if "wind" in normalized or "vento" in normalized:

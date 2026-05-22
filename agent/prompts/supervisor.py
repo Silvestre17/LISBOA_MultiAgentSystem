@@ -68,9 +68,10 @@ If a query is plausibly about Lisbon/AML but the domain is ambiguous, route it t
 7. **Transport-only queries** → `["transport"]`
 8. **Places/Events queries** → `["researcher"]`
    - Questions like "which monuments can I visit in Belém?" or "tell me museums in Alfama" are place browsing, not itinerary planning, unless the user asks for an ordered route, schedule, optimization, or multiple-stop day plan.
+   - "I want to explore local culture. What major events are happening this week?" is an events listing with a date filter → `["researcher"]`, not planner. "This week" only means a temporal filter unless the user asks for a plan, order, route, or schedule.
 9. **Public Services queries** (pharmacies, hospitals, clinics, schools, parks, police, libraries, markets, parking, post offices/public counters) → `["researcher"]` (uses Lisboa Aberta open data)
-10. **Complex/Itineraries** → `["transport", "researcher", "planner"]` when route/place evidence is needed; add `weather` only for explicit weather, rain, heat/cold, outdoor safety, today/tomorrow/this-week, weekend, or dated plans.
-    - Optimized/efficient itineraries, one-day routes, and plans with multiple stops need `transport` even without an explicit origin because movement feasibility affects answer quality.
+10. **Complex/Itineraries** → `["researcher", "planner"]` by default; add `transport` only when the user asks for public transport, exact route legs, low-walking constraints, cross-zone movement, or the answer would need operator/line claims. Add `weather` only for explicit weather, rain, heat/cold, outdoor safety, today/tomorrow/this-week, weekend, or dated plans.
+    - Optimized/efficient itineraries should first use the planner's ordering and grounded place evidence. Do not add `transport` just because the user says "starting at/from"; an origin anchor alone can be handled by the planner.
 11. **Conditional/Weather-dependent** → `["weather", "researcher", "planner"]`
 12. **Frequency/Headway questions** (e.g., "How often does the 28E run?") → `["transport"]`
 
@@ -180,9 +181,10 @@ Se a pergunta parecer plausivelmente sobre Lisboa/AML mas o domínio for ambígu
 7. **Transportes na AML** → `["transport"]`
 8. **Locais/Eventos** → `["researcher"]`
    - Perguntas como "que monumentos posso visitar em Belém?" ou "diz-me museus em Alfama" são pesquisa de locais, não planeamento de itinerário, salvo se o utilizador pedir ordem, roteiro, otimização, horários ou um plano com várias paragens.
+   - "Quero explorar a cultura local. Que grandes eventos há esta semana?" é listagem de eventos com filtro temporal → `["researcher"]`, não planner. "Esta semana" só é filtro temporal salvo se o utilizador pedir plano, ordem, rota ou agenda organizada.
 9. **Serviços Públicos** (farmácias, hospitais, clínicas, escolas, parques, polícia, bibliotecas, mercados, estacionamento, correios/balcões públicos) → `["researcher"]` (usa dados abertos de Lisboa)
-10. **Complexo/Itinerários** → `["transport", "researcher", "planner"]` quando são necessários locais/rotas; adiciona `weather` apenas para meteorologia, chuva, calor/frio, segurança ao ar livre, hoje/amanhã/esta semana, fim de semana ou datas explícitas.
-    - Roteiros otimizados/eficientes, percursos de um dia e planos com várias paragens precisam de `transport` mesmo sem origem explícita, porque a viabilidade das deslocações afeta a qualidade da resposta.
+10. **Complexo/Itinerários** → `["researcher", "planner"]` por defeito; adiciona `transport` só quando o utilizador pede transporte público, pernas exatas de rota, pouca caminhada, deslocações entre zonas distantes, ou quando a resposta precisaria de alegações sobre operadores/linhas. Adiciona `weather` apenas para meteorologia, chuva, calor/frio, segurança ao ar livre, hoje/amanhã/esta semana, fim de semana ou datas explícitas.
+    - Roteiros otimizados/eficientes devem usar primeiro a ordenação do planner e evidência fundamentada de locais. Não adiciones `transport` só porque o utilizador diz "a começar em/desde"; uma âncora de origem isolada pode ser tratada pelo planner.
 11. **Frequência/Intervalo** (ex: "De quanto em quanto tempo passa o 28E?") → `["transport"]`
 
 # RESPOSTAS FORA DO ÂMBITO (USA ESTES MODELOS ESPECÍFICOS)

@@ -44,6 +44,7 @@ from tools.cp_api import (
     get_cp_aml_trains,
     get_cp_station_info,
 )
+from tools.carris_api import carris_find_routes_between
 from tools.location_resolver import (
     build_location_ambiguity_preamble,
     get_location_display_name,
@@ -838,6 +839,48 @@ def get_route_between_stations(origin: str, destination: str) -> str:
         else:
             response += f"⚠️ No direct train line linking {origin_train_station} and {dest_train_station}.\n"
             response += "   You may need to transfer at a major hub (e.g., Entrecampos, Oriente, Sete Rios).\n\n"
+
+    needs_carris_fallback = (
+        not any(("Metro de Lisboa" in source or "CP" in source or "Carris" in source) for source in sources_used)
+        or re.search(r"\b(?:not on Metro|Neither location is a known Metro station|No direct train line)\b", response)
+    )
+    has_carris_route_evidence = bool(
+        re.search(
+            r"\b(?:CARRIS URBAN|TRAM\s*&\s*BUS OPTIONS|Carris\s+\*\*|Linhas?:|Lines?:)\b",
+            response,
+            flags=re.IGNORECASE,
+        )
+    )
+    if needs_carris_fallback and not has_carris_route_evidence:
+        try:
+            carris_output = str(
+                carris_find_routes_between.func(
+                    origin=origin,
+                    destination=destination,
+                    search_radius_km=0.6,
+                )
+                or ""
+            ).strip()
+        except Exception as exc:
+            logger.debug("Carris multimodal fallback failed: %s", exc)
+            carris_output = ""
+        if carris_output and not re.match(
+            r"^\s*(?:❌|No route|Sem rota|Não encontrei|Nao encontrei)",
+            carris_output,
+            re.IGNORECASE,
+        ):
+            carris_body = "\n".join(
+                line for line in carris_output.splitlines()
+                if not re.match(
+                    r"^\s*(?:📌\s*)?\*\*(?:Fonte|Source):",
+                    line.strip(),
+                    flags=re.IGNORECASE,
+                )
+            ).strip()
+            if carris_body:
+                response += "🚌 **CARRIS URBAN / TRAM & BUS OPTIONS**\n"
+                response += carris_body + "\n\n"
+                sources_used.append("[*Carris*](https://www.carris.pt)")
 
     return response + _build_route_source_line(sources_used)
 

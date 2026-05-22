@@ -25,6 +25,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import quote
@@ -887,6 +888,12 @@ button[kind="secondary"]:hover {{
 [data-testid="stChatMessage"] p {{
     margin-bottom: 0.3rem;
     line-height: 1.5;
+    overflow-wrap: anywhere;
+    word-break: normal;
+}}
+[data-testid="stChatMessage"] li {{
+    overflow-wrap: anywhere;
+    word-break: normal;
 }}
 
 /* Bold text in chat - accent color */
@@ -2140,6 +2147,18 @@ def handle_chat_stream(text: str):
     lines = text.split("\n")
     for i, line in enumerate(lines):
         suffix = "\n" if i < len(lines) - 1 else ""
+        if (
+            len(line) > 120
+            and (
+                re.search(r"^\s*(?:#{1,6}\s+|[-*]\s+|\d+[.)]\s+)", line)
+                or "**" in line
+                or "](" in line
+                or re.search(r"\bhttps?://", line)
+            )
+        ):
+            yield line + suffix
+            time.sleep(0.03)
+            continue
         # Short lines: emit whole line at once
         if len(line) <= 120:
             yield line + suffix
@@ -2201,15 +2220,37 @@ def normalize_streamlit_chat_markdown(text: str) -> str:
     if not text:
         return text or ""
 
-    from agent.utils.response_formatter import restore_initial_pseudo_heading
+    from agent.utils.response_formatter import (
+        ensure_transport_time_route_paragraph_breaks,
+        ensure_streamlit_standalone_label_blocks,
+        repair_split_planner_field_lines,
+        restore_initial_pseudo_heading,
+    )
 
     lines = restore_initial_pseudo_heading(text).splitlines()
     output: list[str] = []
+    in_fenced_code = False
+    field_label_re = re.compile(
+        r"^\*\*(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s*)?"
+        r"(?:Morada|Address|Localiza(?:ção|cao)|Location|Descrição|Descricao|Description|"
+        r"Categoria|Category|Horário|Horario|Hours|Opening hours|Preço|Preco|Price|"
+        r"Website|Site oficial|Telefone|Phone|Email|Bilhetes|Tickets|Data/Hora|Date/Time|"
+        r"Duração|Duracao|Duration|Características|Caracteristicas|Features):\*\*$",
+        flags=re.IGNORECASE,
+    )
     for index, line in enumerate(lines):
         stripped = line.strip()
         next_line = lines[index + 1] if index + 1 < len(lines) else ""
+        if stripped.startswith("```"):
+            in_fenced_code = not in_fenced_code
+            output.append(line)
+            continue
+        if in_fenced_code:
+            output.append(line)
+            continue
         if (
-            re.match(r"^\*\*(?:🏷️|📍|🏛️|🍽️|☕|🥐|🎭)\s+[^*]+\*\*$", stripped)
+            re.match(r"^\*\*[^*\n]{2,180}:?\*\*$", stripped)
+            and not field_label_re.match(stripped)
             and re.match(r"^\s{4,}[-*]\s+", next_line)
         ):
             output.append(f"- {stripped}")
@@ -2220,7 +2261,11 @@ def normalize_streamlit_chat_markdown(text: str) -> str:
                 output.append(re.sub(r"^\s{4,}([-*]\s+)", r"\1", line))
                 continue
         output.append(line)
-    normalized = "\n".join(output)
+    normalized = repair_split_planner_field_lines(
+        ensure_streamlit_standalone_label_blocks(
+            ensure_transport_time_route_paragraph_breaks("\n".join(output))
+        )
+    )
     if text.endswith("\n"):
         normalized += "\n"
     return normalized
@@ -2236,11 +2281,22 @@ def clean_response_for_display(text: str) -> str:
 
     cleaned = re.sub(r"【.*?】", "", text or "")
     cleaned = cleaned.replace("\x00", "").strip()
-    display_language = infer_response_language(
-        context_text=cleaned,
-        default=st.session_state.get("language", "en"),
+    display_language = ""
+    assistant = st.session_state.get("assistant")
+    if assistant is not None:
+        user_context = getattr(assistant, "state", {}).get("user_context", {})
+        if isinstance(user_context, dict):
+            display_language = str(user_context.get("language") or "").strip().lower()
+    if display_language not in {"pt", "en"}:
+        display_language = infer_response_language(
+            context_text=cleaned,
+            default=st.session_state.get("language", "en"),
+        )
+    return final_post_qa_guard(
+        final_visual_pass(cleaned),
+        language=display_language,
+        repair_sources=False,
     )
-    return final_post_qa_guard(final_visual_pass(cleaned), language=display_language)
 
 
 def count_user_interactions(messages: list[dict[str, Any]]) -> int:
@@ -2436,6 +2492,70 @@ def build_user_error_message(error: Exception) -> str:
     return t("error_generic")
 
 
+def _progress_key(text: str) -> str:
+    """Return an accent-insensitive key for progress message routing."""
+    normalized = unicodedata.normalize("NFKD", str(text or ""))
+    return "".join(char for char in normalized if not unicodedata.combining(char)).lower()
+
+
+def normalize_progress_message(message: str, language: str) -> str:
+    """Return one concise, localized, user-facing progress message."""
+    is_pt = language == "pt"
+    cleaned = re.sub(r"\s+", " ", str(message or "")).strip().replace("**", "")
+    key = _progress_key(cleaned)
+
+    labels = {
+        "prepare": "🚀 Preparar LISBOA" if is_pt else "🚀 Preparing LISBOA",
+        "interpret": "🧠 Interpretar pedido" if is_pt else "🧠 Understanding request",
+        "weather": "🌤️ Verificar tempo" if is_pt else "🌤️ Checking weather",
+        "transport": "🚌 Otimizar rota" if is_pt else "🚌 Optimizing route",
+        "events": "🎭 Procurar eventos" if is_pt else "🎭 Finding events",
+        "places": "📍 Procurar locais" if is_pt else "📍 Finding places",
+        "municipal": "🏛️ Consultar dados municipais" if is_pt else "🏛️ Checking municipal data",
+        "planner": "🗺️ Organizar plano" if is_pt else "🗺️ Organizing plan",
+        "validate": "🔎 Verificar resposta" if is_pt else "🔎 Checking answer",
+        "final": "✅ Finalizar resposta" if is_pt else "✅ Finalizing answer",
+        "default": "⚡ Preparar resposta" if is_pt else "⚡ Preparing answer",
+    }
+
+    if not key:
+        return labels["default"]
+    if re.search(r"\b(?:qa|validat\w*|validac\w*|validacao|verificar|checking|check|review|revis)\b", key):
+        return labels["validate"]
+    if re.search(r"\b(?:answer\s+ready|response\s+ready|final(?:\s+answer)?|resposta\s+final|complete|completed|pronta|done)\b", key):
+        return labels["final"]
+    if re.search(r"\b(?:init|startup|prepar|lisboa)\b", key):
+        return labels["prepare"]
+    if re.search(r"\b(?:interpret|understand|supervisor|routing|pedido|request)\b", key):
+        return labels["interpret"]
+    if re.search(r"\b(?:weather|tempo|meteo|forecast|previs|warning|aviso|rain|chuva)\b", key):
+        return labels["weather"]
+    if re.search(r"\b(?:transport|route|rota|metro|carris|cp|train|comboio|bus|autocarro|tram|horario|schedule|departure|partida)\b", key):
+        return labels["transport"]
+    if re.search(r"\b(?:event|evento|cultural)\b", key):
+        return labels["events"]
+    if re.search(r"\b(?:municipal|lisboa aberta|service|servico|dados municipais)\b", key):
+        return labels["municipal"]
+    if re.search(r"\b(?:research|place|places|local|locais|attraction|atrac|restaurant|restaurante|museum|museu)\b", key):
+        return labels["places"]
+    if re.search(r"\b(?:planner|plan|planning|itinerary|roteiro|itinerario|organizar|organizing)\b", key):
+        return labels["planner"]
+    return labels["default"]
+
+
+def write_progress_step(
+    status_container: Any,
+    label: str,
+    seen_statuses: set[str],
+    language: str,
+) -> str:
+    """Update only the current progress label without keeping a visible history."""
+    normalized = normalize_progress_message(label, language)
+    seen_statuses.add(normalized)
+    status_container.update(label=normalized, state="running", expanded=False)
+    return normalized
+
+
 def run_interaction(
     user_input: str,
     user_message_already_rendered: bool = False,
@@ -2459,15 +2579,20 @@ def run_interaction(
     with st.chat_message("assistant"):
         try:
             initial_status_label = (
-                "🚀 A preparar o LISBOA para esta pergunta..."
+                "🚀 Preparar LISBOA"
                 if st.session_state.language == "pt"
-                else "🚀 Preparing LISBOA for this prompt..."
+                else "🚀 Preparing LISBOA"
             )
             if not needs_initialization:
-                initial_status_label = "🔍 " + t("thinking")
+                initial_status_label = (
+                    "🧠 Interpretar pedido"
+                    if st.session_state.language == "pt"
+                    else "🧠 Understanding request"
+                )
 
             with st.status(initial_status_label, expanded=False) as status:
-                last_status = {"label": "", "ts": 0.0}
+                seen_statuses: set[str] = set()
+                last_status = {"label": ""}
 
                 if needs_initialization:
                     success, error = initialize_assistant(
@@ -2490,22 +2615,30 @@ def run_interaction(
                         )
                         return False
 
-                    status.update(label="⚡ " + t("thinking"), state="running")
+                    write_progress_step(
+                        status,
+                        "🧠 Interpretar pedido"
+                        if st.session_state.language == "pt"
+                        else "🧠 Understanding request",
+                        seen_statuses,
+                        st.session_state.language,
+                    )
 
                 def on_status(msg: str):
                     normalized = str(msg or "").strip()
                     if not normalized:
                         return
 
-                    now = time.perf_counter()
                     if normalized == last_status["label"]:
-                        return
-                    if last_status["label"] and (now - last_status["ts"]) < 0.12:
                         return
 
                     last_status["label"] = normalized
-                    last_status["ts"] = now
-                    status.update(label="⚡ " + normalized, state="running")
+                    write_progress_step(
+                        status,
+                        normalized,
+                        seen_statuses,
+                        st.session_state.language,
+                    )
 
                 resp = st.session_state.assistant.chat(
                     user_input,
@@ -2516,8 +2649,9 @@ def run_interaction(
                 status.update(
                     label="✅ Resposta pronta!"
                     if st.session_state.language == "pt"
-                    else "✅ Response ready!",
+                    else "✅ Answer ready!",
                     state="complete",
+                    expanded=False,
                 )
 
             sanitized = clean_response_for_display(resp)

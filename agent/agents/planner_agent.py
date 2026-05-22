@@ -9,7 +9,7 @@
 import re
 import unicodedata
 from datetime import datetime
-from typing import Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence
 from urllib.parse import quote_plus
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -169,8 +169,11 @@ _PLANNER_ANCHOR_KEYWORD_RE = re.compile(
 )
 _PLANNER_GENERIC_ANCHOR_RE = re.compile(
     r"\b(?:monumentos?|atracoes?|atra[cç][oõ]es?|museus?|restaurantes?|"
-    r"gastronomia|comida|cozinha|eventos?|cultura|historicos?|tradicional|"
-    r"imperdiveis|locais|sitios|places|sights|restaurants?|food|culture|events?)\b",
+    r"miradouros?|viewpoints?|view\s+points?|views?|vistas?|vista|lookouts?|lookout|"
+    r"gastronomia|comida|cozinha|almo[cç]o|almoco|almo[cç]ar|almocar|"
+    r"jantar|refei[cç][aã]o|refeicao|refei[cç][oõ]es|refeicoes|"
+    r"eventos?|cultura|historicos?|tradicional|imperdiveis|locais|sitios|"
+    r"places|sights|restaurants?|food|meals?|lunch|dinner|culture|events?)\b",
     re.IGNORECASE,
 )
 _PLANNER_ANCHOR_LIST_SPLIT_RE = re.compile(
@@ -187,6 +190,33 @@ _PLANNER_PROCEDURAL_ANCHOR_RE = re.compile(
     r"como\s+(?:me|nos)?\s*desloc|rota|percurso|trajeto|transportes?)\b",
     re.IGNORECASE,
 )
+
+
+def _planner_anchor_part_is_generic_component(part: str) -> bool:
+    """Return whether a phrase is a requested component, not a place anchor."""
+    normalized = _normalize_planner_text(part)
+    if not normalized:
+        return True
+    normalized = re.sub(
+        r"^(?:\d{1,2}|um|uma|one|dois|duas|two|tres|three|quatro|four|cinco|five)\s+",
+        "",
+        normalized,
+    )
+    normalized = re.sub(r"\b(?:pela|na|no|da|do|de|em|with|for|the)\b", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return bool(
+        re.fullmatch(
+            r"(?:museus?|museums?|galerias?|galleries|monumentos?|monuments?|"
+            r"miradouros?|viewpoints?|view\s+points?|views?|vistas?|vista|lookouts?|lookout|"
+            r"restaurantes?|restaurants?|gastronomia|comida|cozinha|food|meal|meals|"
+            r"almo[cç]o|almoco|almo[cç]ar|almocar|lunch|jantar|dinner|"
+            r"cidade|city|tradicional|traditional|cultural|cultura|historico|historicos|historic|local|locais)"
+            r"(?:\s+(?:cidade|city|tradicional|traditional|cultural|cultura|historico|historicos|historic|local|locais))*",
+            normalized,
+        )
+    )
+
+
 _PLANNER_ANCHOR_CONSTRAINT_TAIL_RE = re.compile(
     r"\s+(?:e\s+com|and\s+with|com|with|inclui|include|including|"
     r"pass(?:a(?:r|ndo)?|e(?:m)?)\s+(?:por|pelo|pela)|via|through|"
@@ -221,8 +251,25 @@ def _trim_planner_anchor_constraint_tail(value: str) -> str:
 def _clean_requested_anchor_fragment(fragment: str) -> str:
     """Return a compact candidate place name from a user-request fragment."""
     cleaned = re.sub(r"\([^)]*\)", " ", str(fragment or ""))
+    cleaned = re.sub(
+        r"^\s*(?:(?:roteiro|itiner[aá]rio|plano|route|itinerary|plan)\s+)?"
+        r"(?:de\s+|for\s+)?(?:meio\s+dia|half[-\s]?day|\d+\s*(?:h|hora|horas|hours?))\s+"
+        r"(?:de|desde|from)\s+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
     if _PLANNER_PROCEDURAL_ANCHOR_RE.search(_normalize_planner_text(cleaned)):
         return ""
+    colon_match = re.match(r"^\s*(?P<prefix>[^:]{2,80})\s*:\s*(?P<place>.+)$", cleaned)
+    if colon_match:
+        prefix_key = _normalize_planner_text(colon_match.group("prefix"))
+        if re.search(
+            r"\b(?:pontos?|zonas?|areas?|areas?|locais|sitios|sítios|paragens?|"
+            r"stops?|places?|spots?|areas?|waypoints?|distantes?|diferentes?|seguintes?)\b",
+            prefix_key,
+        ):
+            cleaned = colon_match.group("place")
     embedded_start = _PLANNER_EMBEDDED_START_ANCHOR_RE.search(cleaned)
     if embedded_start:
         cleaned = embedded_start.group("place")
@@ -247,13 +294,19 @@ def _clean_requested_anchor_fragment(fragment: str) -> str:
         flags=re.IGNORECASE,
     )
     cleaned = re.sub(
+        r"\s+(?:e|and)\s+(?:mant[eé]m|mantem|preserva|keep|keeping|passa|passar|via)\b.*$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
         r"\s+(?:termin\S*|acab\S*|ending|finish(?:ing)?|end)\b.*$",
         "",
         cleaned,
         flags=re.IGNORECASE,
     )
     cleaned = re.sub(
-        r"\s+(?:as|at|pelas|por\s+volta|durante|during|com|with|inclui|include|"
+        r"\s+(?:as|às|at|pelas|por\s+volta|durante|during|com|with|inclui|include|"
         r"including|pass(?:a(?:r|ndo)?|e(?:m)?)\s+(?:por|pelo|pela)|via|through|depois|then|"
         r"sem|using|usando|how|como|transportes?|rota|route)\b.*$",
         "",
@@ -295,6 +348,32 @@ def _requested_anchor_fragment_is_specific(fragment: str) -> bool:
         return False
     if _PLANNER_GENERIC_ANCHOR_RE.fullmatch(normalized):
         return False
+    generic_parts = [
+        part.strip()
+        for part in re.split(r"\s+(?:e|and)\s+", normalized)
+        if part.strip()
+    ]
+    if generic_parts and all(_PLANNER_GENERIC_ANCHOR_RE.fullmatch(part) for part in generic_parts):
+        return False
+    counted_generic = re.match(
+        r"^(?:\d{1,2}|um|uma|one|dois|duas|two|tres|three|quatro|four|cinco|five)\s+(.+)$",
+        normalized,
+    )
+    if counted_generic:
+        counted_parts = [
+            part.strip()
+            for part in re.split(r"\s+(?:e|and)\s+", counted_generic.group(1).strip())
+            if part.strip()
+        ]
+        if counted_parts and all(_PLANNER_GENERIC_ANCHOR_RE.fullmatch(part) for part in counted_parts):
+            return False
+    component_parts = [
+        part.strip()
+        for part in re.split(r"\s+(?:e|and)\s+", normalized)
+        if part.strip()
+    ]
+    if component_parts and all(_planner_anchor_part_is_generic_component(part) for part in component_parts):
+        return False
     if _PLANNER_ANCHOR_KEYWORD_RE.search(normalized):
         return True
     if re.search(r"\b[A-Z0-9]{2,}\b", cleaned):
@@ -306,10 +385,44 @@ def _requested_anchor_fragment_is_specific(fragment: str) -> bool:
 
 def _split_requested_anchor_fragment(fragment: str) -> List[str]:
     """Split a user-provided place list into specific place candidates."""
-    raw_parts = [
-        _clean_requested_anchor_fragment(part)
-        for part in _PLANNER_ANCHOR_LIST_SPLIT_RE.split(str(fragment or ""))
-    ]
+    raw_parts = []
+    for part in _PLANNER_ANCHOR_LIST_SPLIT_RE.split(str(fragment or "")):
+        cleaned_part = _clean_requested_anchor_fragment(part)
+        if not cleaned_part:
+            continue
+        route_split = re.split(
+            r"\s+(?:to|para|ate|até)\s+",
+            cleaned_part,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )
+        if (
+            len(route_split) == 2
+            and _requested_anchor_fragment_is_specific(route_split[0].strip(" .:-"))
+            and _requested_anchor_fragment_is_specific(route_split[1].strip(" .:-"))
+        ):
+            raw_parts.append(route_split[0].strip(" .:-"))
+            continue
+        conjoined_parts = re.split(
+            r"\s+(?:e|and)\s+(?=[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ0-9])",
+            cleaned_part,
+        )
+        if len(conjoined_parts) <= 1:
+            raw_parts.append(cleaned_part)
+            continue
+        expanded_parts = [candidate.strip(" .:-") for candidate in conjoined_parts if candidate.strip(" .:-")]
+        starts_with_specific_venue_type = bool(re.match(
+            r"(?i)^\s*(?:museu|museum|pal[aá]cio|palace|mosteiro|monastery|"
+            r"igreja|church|teatro|theatre|theater|restaurante|restaurant)\b",
+            cleaned_part,
+        ))
+        if starts_with_specific_venue_type and not any(
+            _PLANNER_ANCHOR_KEYWORD_RE.search(_normalize_planner_text(candidate))
+            for candidate in expanded_parts[1:]
+        ):
+            raw_parts.append(cleaned_part)
+        else:
+            raw_parts.extend(expanded_parts)
     raw_parts = [part for part in raw_parts if part]
     if len(raw_parts) > 1:
         anchored_parts = [
@@ -318,7 +431,11 @@ def _split_requested_anchor_fragment(fragment: str) -> List[str]:
             if _PLANNER_ANCHOR_KEYWORD_RE.search(_normalize_planner_text(part))
             or re.fullmatch(r"[A-Z0-9][A-Z0-9 -]{1,20}", part.strip())
         ]
-        if len(anchored_parts) == 1 and anchored_parts[0] == raw_parts[0]:
+        if (
+            len(anchored_parts) == 1
+            and anchored_parts[0] == raw_parts[0]
+            and not re.search(r"[,;/]|\s+(?:e|and)\s+", str(fragment or ""), flags=re.IGNORECASE)
+        ):
             whole = _clean_requested_anchor_fragment(fragment)
             if _requested_anchor_fragment_is_specific(whole):
                 return [whole]
@@ -347,12 +464,16 @@ def _extract_requested_anchor_phrases(user_message: str) -> List[str]:
                 labels.append(candidate)
 
     endpoint_patterns = [
+        r"\bfrom\s+(?P<origin>[^,.;]+?)\s+(?:via|through)\s+(?P<waypoint>[^,.;]+?)\s+to\s+(?P<destination>[^,.;]+)",
+        r"\bde\s+(?P<origin>[^,.;]+?)\s+(?:via|por|pela|pelo)\s+(?P<waypoint>[^,.;]+?)\s+(?:para|ate|até)\s+(?P<destination>[^,.;]+)",
         r"\bde\s+(?P<origin>[^,.;]+?)\s+(?:para|ate|até)\s+(?P<destination>[^,.;]+)",
         r"\bfrom\s+(?P<origin>[^,.;]+?)\s+to\s+(?P<destination>[^,.;]+)",
     ]
     for pattern in endpoint_patterns:
         for match in re.finditer(pattern, text, flags=re.IGNORECASE):
             add_fragment(match.group("origin"))
+            if "waypoint" in match.groupdict():
+                add_fragment(match.group("waypoint"))
             add_fragment(match.group("destination"))
 
     single_place_patterns = [
@@ -399,7 +520,7 @@ def _requested_anchor_time_constraints(user_message: str) -> List[tuple[str, str
     if not text.strip():
         return []
 
-    time_re = r"(?P<time>\d{1,2}(?:[:hH]\d{2})?)"
+    time_re = r"(?P<time>\d{1,2}(?:[:hH]\d{0,2})?)"
     patterns = [
         (
             r"\b(?:pass(?:a(?:r|ndo)?|e(?:m)?)|visita(?:r|ndo)?|visite(?:m)?|visit|stop(?:ping)?|via)\s+"
@@ -408,10 +529,52 @@ def _requested_anchor_time_constraints(user_message: str) -> List[tuple[str, str
             + time_re
         ),
         (
+            r"\b(?:almo[cç](?:ar|a|o|ando)?|lunch|jantar|dinner)\s+"
+            r"(?:(?:em|no|na|at)\s+)?(?P<place>[^,.;]+?)\s+"
+            r"(?:as|às|pelas|por\s+volta\s+d(?:as?|e)?|around|at)\s+"
+            + time_re
+        ),
+        (
+            r"\b(?:almo[cç](?:ar|a|o|ando)?|lunch|jantar|dinner)\s+"
+            r"(?:as|às|pelas|por\s+volta\s+d(?:as?|e)?|around|at)\s+"
+            + time_re
+            + r"\s+(?:em|no|na|at)\s+(?P<place>[^,.;]+)"
+        ),
+        (
+            r"\b(?:reserva|booking|reservation|reserved|booked)\s+"
+            r"(?:as|às|pelas|por\s+volta\s+d(?:as?|e)?|around|at)\s+"
+            + time_re
+            + r"\s+(?:em|no|na|at)\s+(?P<place>[^,.;]+)"
+        ),
+        (
+            r"\b(?:mant[eé]m|mantem|preserva|keep|keeping)\s+"
+            r"(?:(?:o|a|os|as|the)\s+)?(?P<place>[^,.;]+?)\s+"
+            r"(?:as|às|pelas|por\s+volta\s+d(?:as?|e)?|around|at|by)\s+"
+            + time_re
+        ),
+        (
+            r"\b(?:reserva|booking|reservation|reserved|booked)\s+"
+            r"(?:(?:em|no|na|at)\s+)?(?P<place>[^,.;]+?)\s+"
+            r"(?:as|às|pelas|por\s+volta\s+d(?:as?|e)?|around|at)\s+"
+            + time_re
+        ),
+        (
+            r"\b(?:estar|chegar|arrive|be)\s+(?:(?:em|no|na|at)\s+)"
+            r"(?P<place>[^,.;]+?)\s+"
+            r"(?:até|ate|by|as|às|at)\s+"
+            + time_re
+        ),
+        (
             r"\b(?:as|às|at)\s+"
             + time_re
             + r"\s+(?:pass(?:a(?:r|ndo)?|e(?:m)?)\s+(?:por|pelo|pela)|visita(?:r|ndo)?|visite(?:m)?|visit|stop\s+at)\s+"
             r"(?P<place>[^,.;]+)"
+        ),
+        (
+            r"\b(?:as|às|at)\s+"
+            + time_re
+            + r"\s+(?:almo[cç](?:ar|a|o)?|lunch|jantar|dinner)\s+"
+            r"(?:(?:em|no|na|at)\s+)?(?P<place>[^,.;]+)"
         ),
     ]
 
@@ -435,7 +598,7 @@ def _requested_anchor_time_constraints(user_message: str) -> List[tuple[str, str
 
 def _normalize_requested_time_label(value: str) -> str:
     """Normalize a user-supplied hour into HH:MM."""
-    match = re.match(r"^\s*(?P<hour>\d{1,2})(?:[:hH](?P<minute>\d{2}))?\s*$", str(value or ""))
+    match = re.match(r"^\s*(?P<hour>\d{1,2})(?:[:hH](?P<minute>\d{0,2}))?\s*$", str(value or ""))
     if not match:
         return ""
     hour = int(match.group("hour"))
@@ -448,6 +611,20 @@ def _normalize_requested_time_label(value: str) -> str:
 def _requested_time_label_for_card(card: Dict[str, str], user_message: str) -> str:
     """Return the explicit requested time for a selected card, if any."""
     for label, time_label in _requested_anchor_time_constraints(user_message):
+        if _card_kind_for_plan_block(card) == "food":
+            title_key = _normalize_planner_text(_planner_card_display_name(card) or card.get("name", ""))
+            label_key = _normalize_planner_text(label)
+            direct_food_time_match = bool(
+                title_key
+                and label_key
+                and (
+                    title_key == label_key
+                    or title_key in label_key
+                    or (len(label_key.split()) >= 2 and label_key in title_key)
+                )
+            )
+            if not direct_food_time_match:
+                continue
         if _planner_card_matches_requested_label(card, label):
             return time_label
     return ""
@@ -570,13 +747,21 @@ def _requested_anchor_labels(user_message: str, evidence_data: str = "") -> List
     )
     explicit_start_end_sequence = bool(
         origin_label
-        and re.search(
-            r"\b(?:comeca|comece|comecar|comecando|inicia|iniciar|iniciando|start|starting)\b",
-            normalized_query,
-        )
-        and re.search(
-            r"\b(?:termina|termine|terminar|acaba|acabe|acabar|end|ending|finish)\b",
-            normalized_query,
+        and (
+            (
+                re.search(
+                    r"\b(?:comeca|comece|comecar|comecando|inicia|iniciar|iniciando|start|starting)\b",
+                    normalized_query,
+                )
+                and re.search(
+                    r"\b(?:termina|termine|terminar|acaba|acabe|acabar|end|ending|finish)\b",
+                    normalized_query,
+                )
+            )
+            or re.search(
+                r"\b(?:from\s+.+\s+to|de\s+.+\s+(?:para|ate))\b",
+                normalized_query,
+            )
         )
     )
 
@@ -661,6 +846,25 @@ def _query_requests_movement_details(user_message: str) -> bool:
     )
 
 
+def _query_requests_stop_by_stop_movement(user_message: str) -> bool:
+    """Return whether the user asks for movement between itinerary stops."""
+    normalized = _normalize_planner_text(user_message)
+    return bool(
+        re.search(
+            r"\b(?:"
+            r"(?:transportes?|deslocacoes|deslocacao|ligacoes|percurso|trajeto|route|movement)\s+entre\s+"
+            r"(?:todas\s+as\s+)?(?:paragens|pontos|stops)|"
+            r"entre\s+(?:todas\s+as\s+)?(?:paragens|pontos|stops)|"
+            r"de\s+paragem\s+em\s+paragem|cada\s+paragem|cada\s+ponto|"
+            r"between\s+(?:all\s+)?(?:itinerary\s+)?stops|"
+            r"each\s+stop|every\s+stop|stop[-\s]?to[-\s]?stop"
+            r")\b",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _query_requests_custard_tart_stop(user_message: str) -> bool:
     """Return whether the user explicitly asked for a pastel de nata stop."""
     normalized = _normalize_planner_text(user_message)
@@ -729,6 +933,9 @@ def _query_requests_low_walk_plan(user_message: str) -> bool:
             r"pouca\s+distancia|baixa\s+distancia|low\s+walk|less\s+walking|"
             r"desloca\w*\s+curtas?|transfer(?:e)?s?\s+curtos?|short\s+transfers?|"
             r"short\s+walks?|minimal\s+walking|reduced\s+mobility|"
+            r"sem\s+grandes\s+caminhadas?|sem\s+muita\s+caminhada|"
+            r"evita(?:r)?\s+(?:muita\s+)?caminhada|evita(?:r)?\s+caminhar|"
+            r"avoid(?:ing)?\s+(?:too\s+much\s+)?walking|avoid(?:ing)?\s+long\s+walks?|"
             r"pouco\s+tempo\s+a\s+pe|pouco\s+tempo\s+a\s+p[eé])\b",
             normalized,
         )
@@ -739,6 +946,12 @@ def _query_requests_walking_only_plan(user_message: str) -> bool:
     """Return whether the user requested a plan primarily done on foot."""
     normalized = _normalize_planner_text(user_message)
     if not normalized or _query_requests_public_transport(user_message):
+        return False
+    if _query_requests_low_walk_plan(user_message) or re.search(
+        r"\b(?:evita(?:r)?|avoid(?:ing)?|sem|without|menos|less|minimal|pouca|pouco|reduced)\b"
+        r".{0,45}\b(?:caminh\w*|walk(?:ing|s)?)\b",
+        normalized,
+    ):
         return False
     return bool(
         re.search(
@@ -811,6 +1024,12 @@ def _extract_requested_plan_duration_minutes(user_message: str) -> Optional[int]
     normalized = _normalize_planner_text(user_message)
     if not normalized:
         return None
+
+    if (
+        re.search(r"\b(?:meio\s+dia|half\s+day|half-day)\b", normalized)
+        and re.search(r"\b(?:roteiro|itinerario|itinerary|plano|plan|visitar|visit|paragens|stops)\b", normalized)
+    ):
+        return 4 * 60
 
     hour_minute_match = re.search(
         r"\b(?P<hours>\d{1,2})\s*h(?:\s*(?P<minutes>\d{1,2}))?\b",
@@ -897,15 +1116,173 @@ def _planner_time_allocations_for_cards(
     return allocations
 
 
+def _planner_explicit_start_minutes(user_message: str) -> int | None:
+    """Return an explicit itinerary start time if the user supplied one."""
+    normalized = _normalize_planner_text(user_message)
+    explicit_start = re.search(
+        r"\b(?:a\s+partir\s+d(?:as?|e)|desde\s+as|come[cç]ar\s+as|come[cç]ando\s+as|"
+        r"start(?:ing)?\s+at|from)\s+(?P<hour>\d{1,2})(?:[:h](?P<minute>\d{2}))?\b",
+        normalized,
+    )
+    if explicit_start:
+        hour = int(explicit_start.group("hour"))
+        minute = int(explicit_start.group("minute") or 0)
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            return hour * 60 + minute
+    return None
+
+
+def _planner_default_start_minutes(user_message: str) -> int:
+    """Infer a practical default start time for bounded itinerary schedules."""
+    explicit_start = _planner_explicit_start_minutes(user_message)
+    if explicit_start is not None:
+        return explicit_start
+    normalized = _normalize_planner_text(user_message)
+    if re.search(r"\b(?:tarde|afternoon)\b", normalized):
+        return 14 * 60
+    if re.search(r"\b(?:noite|evening|jantar|dinner)\b", normalized):
+        return 18 * 60
+    if re.search(r"\b(?:almoco|lunch)\b", normalized):
+        return 10 * 60
+    return 9 * 60 + 30
+
+
+def _planner_schedule_labels_for_cards(
+    cards: Sequence[Dict[str, str]],
+    allocations: Sequence[int],
+    user_message: str,
+) -> List[str]:
+    """Return human-readable suggested time windows for bounded plans."""
+    if not cards or not allocations:
+        return []
+    current_minutes = _planner_default_start_minutes(user_message)
+    explicit_start = _planner_explicit_start_minutes(user_message)
+    if explicit_start is None and re.search(r"\b(?:almoco|almocar|lunch)\b", _normalize_planner_text(user_message)):
+        first_food_index = next(
+            (
+                index
+                for index, card in enumerate(cards[: len(allocations)])
+                if _card_kind_for_plan_block(card) == "food"
+            ),
+            -1,
+        )
+        if first_food_index >= 0:
+            minutes_before_food = sum(allocation for allocation in allocations[:first_food_index] if allocation > 0)
+            current_minutes = max(9 * 60, 12 * 60 - minutes_before_food)
+    if explicit_start is None:
+        timed_anchor_index = next(
+            (
+                index
+                for index, card in enumerate(cards[: len(allocations)])
+                if _requested_time_label_for_card(card, user_message)
+            ),
+            -1,
+        )
+        if timed_anchor_index >= 0:
+            timed_label = _requested_time_label_for_card(cards[timed_anchor_index], user_message)
+            timed_minutes = _time_label_to_minutes(timed_label)
+            if timed_minutes is not None:
+                minutes_before_anchor = sum(
+                    allocation
+                    for allocation in allocations[:timed_anchor_index]
+                    if allocation > 0
+                )
+                anchor_allocation = allocations[timed_anchor_index] if timed_anchor_index < len(allocations) else 0
+                anchor_offset = min(15, max(0, anchor_allocation // 3))
+                current_minutes = max(
+                    8 * 60,
+                    timed_minutes - anchor_offset - minutes_before_anchor,
+                )
+    labels: List[str] = []
+    for allocation in list(allocations)[: len(cards)]:
+        if allocation <= 0:
+            labels.append("")
+            continue
+        end_minutes = current_minutes + allocation
+        labels.append(
+            f"{(current_minutes // 60) % 24:02d}:{current_minutes % 60:02d}-"
+            f"{(end_minutes // 60) % 24:02d}:{end_minutes % 60:02d}"
+        )
+        current_minutes = end_minutes
+    return labels
+
+
+def _query_requests_budget_food(user_message: str) -> bool:
+    """Return whether the user explicitly asks for a low-cost meal stop."""
+    normalized_query = _normalize_planner_text(user_message)
+    has_food_context = bool(
+        re.search(
+            r"\b(?:restaurante|restaurantes|restaurant|restaurants|comer|food|meal|"
+            r"almo[cç]o|almoco|almo[cç]ar|almocar|jantar|dinner|lunch)\b",
+            normalized_query,
+        )
+    )
+    return bool(
+        re.search(
+            r"\b(?:barat\w*|econ[oó]mic\w*|baixo\s+custo|low\s+cost|cheap|budget|affordable|"
+            r"under\s+20|menos\s+de\s+20)\b",
+            normalized_query,
+        )
+        or (
+            has_food_context
+            and re.search(
+                r"\b(?:ate|max(?:imo)?|maximum|below|under|menos\s+de)\s*\d{1,3}\b(?!\s*h)",
+                normalized_query,
+            )
+        )
+    )
+
+
+def _food_card_budget_rank(card: Dict[str, str]) -> int:
+    """Rank food cards by explicit price evidence; lower is cheaper."""
+    raw_basis = " ".join(
+        str(card.get(key, "") or "")
+        for key in ("name", "category", "description", "features", "price")
+    ).lower()
+    raw_basis = unicodedata.normalize("NFKD", raw_basis)
+    raw_basis = "".join(char for char in raw_basis if not unicodedata.combining(char))
+    basis = _normalize_planner_text(
+        " ".join(
+            str(card.get(key, "") or "")
+            for key in ("name", "category", "description", "features", "price")
+        )
+    )
+    if re.search(r"(?:<|menos\s+de|under|ate|até)\s*20\s*(?:€|eur|euros?|\?)?", raw_basis):
+        return 0
+    if re.search(r"\b(?:low\s+cost|baixo\s+custo|barat\w*|cheap|budget)\b", basis):
+        return 0
+    if re.search(r"20\s*(?:€|eur|euros?|\?)?\s*(?:a|to|-)\s*50\s*(?:€|eur|euros?|\?)?", raw_basis):
+        return 1
+    if re.search(r"(?:>|mais\s+de|over)\s*50\s*(?:€|eur|euros?|\?)?", raw_basis):
+        return 2
+    return 3
+
+
+def _score_food_budget_fit(card: Dict[str, str], user_message: str) -> int:
+    """Score food cards against explicit low-cost meal preferences."""
+    if not _query_requests_budget_food(user_message):
+        return 0
+    rank = _food_card_budget_rank(card)
+    if rank == 0:
+        return 180
+    if rank == 1:
+        return -180
+    if rank == 2:
+        return -320
+    return -90
+
+
 def _food_card_matches_requested_context(card: Dict[str, str], user_message: str) -> bool:
     """Return whether a food card fits explicit cafe/time-of-day constraints."""
     normalized_query = _normalize_planner_text(user_message)
     basis = _normalize_planner_text(
         " ".join(
             str(card.get(key, ""))
-            for key in ("name", "category", "description", "features", "hours")
+            for key in ("name", "category", "description", "features", "hours", "price")
         )
     )
+    if _query_requests_budget_food(user_message) and _food_card_budget_rank(card) != 0:
+        return False
     if re.search(r"\b(?:tradicional|traditional|tipic\w*|typical|portuguesa|portuguese)\b", normalized_query):
         if not re.search(
             r"\b(?:tradicional|traditional|tipic\w*|typical|portuguesa|portuguese|"
@@ -956,6 +1333,8 @@ def _query_has_explicit_anchor_sequence(user_message: str) -> bool:
 def _query_has_explicit_start_end_constraint(user_message: str) -> bool:
     """Return whether a plan names both a starting point and an ending area."""
     normalized = _normalize_planner_text(user_message)
+    if re.search(r"\bfrom\s+[^,.;]+?\s+to\s+[^,.;]+", normalized):
+        return bool(_extract_requested_plan_origin(user_message) and _extract_requested_plan_area(user_message))
     if not (
         re.search(r"\b(?:comeca|comece|comecar|comecando|inicia|iniciar|iniciando|start|starting)\b", normalized)
         and re.search(r"\b(?:termina|termine|terminar|terminando|acaba|acabe|acabar|acabando|end|ending|finish|finishing)\b", normalized)
@@ -1051,10 +1430,18 @@ def _planner_response_missing_requested_movement(
         movement_text = _planner_movement_section_text(response)
         requested_labels = _requested_anchor_labels(user_message)
         if len(requested_labels) >= 2:
+            stop_by_stop_movement = _query_requests_stop_by_stop_movement(user_message)
             origin = _normalize_planner_text(requested_labels[0])
             destination = _normalize_planner_text(requested_labels[-1])
             normalized_movement = _normalize_planner_text(movement_text)
-            if not normalized_movement or origin not in normalized_movement or destination not in normalized_movement:
+            if (
+                not stop_by_stop_movement
+                and (
+                    not normalized_movement
+                    or origin not in normalized_movement
+                    or destination not in normalized_movement
+                )
+            ):
                 return True
             has_explicit_limitation = bool(
                 re.search(
@@ -1075,6 +1462,15 @@ def _planner_response_missing_requested_movement(
                 line for line in movement_text.splitlines()
                 if _planner_text_has_route_arrow(line)
             ]
+            if stop_by_stop_movement:
+                route_blocks = _planner_response_route_blocks(response)
+                required_legs = min(4, max(0, len(route_blocks) - 1))
+                covered_legs = [
+                    line for line in movement_leg_lines
+                    if not re.search(r"\b(?:percurso base|base route)\b", _normalize_planner_text(line))
+                ]
+                if required_legs >= 2:
+                    return len(covered_legs) < required_legs
             if (
                 movement_leg_lines
                 and not _query_requests_food_stop(user_message)
@@ -1093,7 +1489,10 @@ def _planner_response_missing_requested_movement(
         or re.search(r"\bcarris\b", _normalize_planner_text(transport_data), flags=re.IGNORECASE)
     )
     if transport_has_cross_zone_evidence:
-        return not _has_concrete_cross_zone_movement(response)
+        return not (
+            _has_concrete_cross_zone_movement(response)
+            or _has_explicit_cross_zone_limitation(response)
+        )
     return not (
         _has_concrete_cross_zone_movement(response)
         or _has_explicit_cross_zone_limitation(response)
@@ -1254,7 +1653,10 @@ def _query_requests_central_corridor_plan(user_message: str) -> bool:
 def _planner_local_area_profile(user_message: str) -> tuple[str, str, tuple[str, ...]]:
     """Return a requested compact-area profile and far-area blockers."""
     normalized = _normalize_planner_text(user_message)
-    target_area = _normalize_planner_text(_extract_requested_plan_area(user_message))
+    target_area = _normalize_planner_text(
+        _extract_requested_plan_area(user_message)
+        or _extract_compact_plan_area_anchor(user_message)
+    )
     probe = f"{normalized} {target_area}"
     if not (
         _query_describes_single_area_plan(user_message)
@@ -1314,14 +1716,26 @@ def _planner_local_area_profile(user_message: str) -> tuple[str, str, tuple[str,
             "Alfama",
             ("belem", "torre de belem", "padrao dos descobrimentos", "oriente", "parque das nacoes", "expo"),
         )
-    if re.search(r"\b(?:marques de pombal|marques pombal|avenida da liberdade|parque eduardo vii)\b", probe):
+    if re.search(
+        r"\b(?:marques|marques de pombal|marques pombal|avenida da liberdade|parque eduardo vii|"
+        r"saldanha|picoas|sao sebastiao|gulbenkian)\b",
+        probe,
+    ):
         return (
             "marques_de_pombal",
-            "Marquês de Pombal / Avenida da Liberdade",
+            "Marquês de Pombal / Avenida da Liberdade / Saldanha",
             (
                 "oeiras",
                 "2784",
                 "palacio marques de pombal",
+                "madragoa",
+                "esperanca",
+                "madre de deus",
+                "azulejo",
+                "ajuda",
+                "janelas verdes",
+                "1249",
+                "1349",
                 "belem",
                 "torre de belem",
                 "padrao dos descobrimentos",
@@ -1400,7 +1814,9 @@ def _planner_response_has_local_area_drift(response: str, user_message: str) -> 
         "marques_de_pombal": re.compile(
             r"\b(?:marques\s+de\s+pombal|marques\s+pombal|avenida\s+da\s+liberdade|"
             r"parque\s+eduardo\s+vii|rua\s+de\s+santa\s+marta|rua\s+rosa\s+araujo|"
-            r"rodrigues\s+sampaio|1250|1150|1050)\b"
+            r"rodrigues\s+sampaio|gulbenkian|berna|tomas\s+ribeiro|tom[aá]s\s+ribeiro|"
+            r"sao\s+pedro\s+de\s+alcantara|s\s+pedro\s+de\s+alcantara|torel|"
+            r"1250|1150|1050|1067|1070)\b"
         ),
     }
     allowed_re = area_allowed_re.get(area_key)
@@ -2712,8 +3128,22 @@ def _extract_plan_constraints(user_message: str, conversation_context: str, lang
         add("ritmo calmo e poucas subidas", "slow pace and low-gradient walking")
     if re.search(r"\b(public transport|transportes publicos|metro|carris|cp|bus|tram|autocarro|comboio)\b", combined):
         add("usar transporte público", "use public transport")
-    if re.search(r"\b(cheap|cheaper|budget|barato|barata|baixo custo|econ[oó]mico)\b", combined):
+    if re.search(r"\b(cheap|cheaper|budget|barato|barata|baixo custo|econ[oó]mico)\b", combined) or _query_requests_budget_food(user_message):
         add("manter custos baixos", "keep costs low")
+    for place, time_label in _requested_anchor_time_constraints(user_message):
+        if place and time_label:
+            add(f"passar por {place} às {time_label}", f"be at {place} at {time_label}")
+    deadline_match = re.search(
+        r"\b(?:termin\S*|acab\S*|finish(?:ing)?|end(?:ing)?)\s+"
+        r"(?:até|ate|by|as|às|at)(?:\s+(?:as|às))?\s+"
+        r"(?P<time>\d{1,2}(?:[:hH]\d{0,2})?)",
+        user_message,
+        flags=re.IGNORECASE,
+    )
+    if deadline_match:
+        deadline = _normalize_requested_time_label(deadline_match.group("time").rstrip("hH"))
+        if deadline:
+            add(f"terminar até {deadline}", f"finish by {deadline}")
     for area in _extract_excluded_plan_areas(user_message):
         label = area.title()
         add(f"evitar {label}", f"avoid {label}")
@@ -2898,7 +3328,29 @@ def _filter_planner_cards_for_request_constraints(
                 and not _planner_dict_card_is_closed(card)
                 for card in filtered
             )
-            if _query_requests_food_stop(user_message) and not area_has_cultural and original_has_cultural:
+            if not _planner_cards_satisfy_requested_counts(area_cards, user_message):
+                supplemental_count_cards = [
+                    card for card in filtered
+                    if card not in area_cards
+                    and any(
+                        _planner_card_matches_requested_count_type(card, count_type)
+                        for count_type, requested_count in _requested_plan_type_counts(user_message).items()
+                        if count_type in {"museum", "monument", "viewpoint", "event"}
+                        and requested_count > 0
+                    )
+                    and not _planner_dict_card_is_closed(card)
+                ]
+                supplemental_count_cards = sorted(
+                    supplemental_count_cards,
+                    key=lambda card: _score_card_for_requested_count_type(card, "total", user_message),
+                    reverse=True,
+                )
+                filtered = _dedupe_planner_cards([
+                    *area_cards,
+                    *supplemental_count_cards,
+                    *filtered,
+                ])
+            elif _query_requests_food_stop(user_message) and not area_has_cultural and original_has_cultural:
                 nearby_cultural_cards = [
                     card for card in filtered
                     if _card_kind_for_plan_block(card) not in {"food", "event"}
@@ -3717,7 +4169,18 @@ def _build_structured_plan_fallback(
 
     if visible_days == 1:
         block_count = 0
-        visible_cards = clean_cards[:3]
+        visible_card_count = max(3, _requested_plan_required_component_count(user_message))
+        if _query_has_explicit_anchor_sequence(user_message):
+            visible_card_count = max(
+                visible_card_count,
+                len(_requested_anchor_labels(user_message)) + _requested_plan_required_component_count(user_message),
+            )
+        visible_cards = clean_cards[: min(8, visible_card_count)]
+        visible_cards = _move_requested_end_card_last(visible_cards, user_message)
+        visible_cards = _cluster_visible_cards_by_requested_route_areas(visible_cards, user_message)
+        visible_cards = _position_requested_meal_cards_for_plan_window(visible_cards, user_message)
+        visible_cards = _position_compact_local_food_stop(visible_cards, user_message)
+        visible_cards = _move_requested_end_card_last(visible_cards, user_message)
         time_allocations = _planner_time_allocations_for_cards(
             visible_cards,
             _extract_requested_plan_duration_minutes(user_message),
@@ -3889,6 +4352,12 @@ def _clean_extracted_plan_area(area: str) -> str:
         cleaned,
         flags=re.IGNORECASE,
     ).strip(" .:-")
+    cleaned = re.sub(
+        r"\s+(?:e|and)\s+(?:mant[eé]m|mantem|preserva|keep|keeping|passa|passar|via)\b.*$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip(" .:-")
     return _trim_planner_anchor_constraint_tail(cleaned)
 
 
@@ -3896,8 +4365,9 @@ def _extract_requested_plan_area(user_message: str) -> str:
     """Extract a named target area from a short planning request."""
     text = str(user_message or "").strip()
     ending_patterns = [
-        r"\b(?:termin\S*|acab\S*|finishing|ending|finish|end)\s+(?:perto\s+d(?:e|o|a|os|as)|em|no|na|near|around|at)\s+(?P<area>[^,.;]+?)(?:\s+no\s+segundo\s+dia|\s+on\s+day\s+\d+|[,.;]|$)",
-        r"\b(?:termin\S*|acab\S*|finishing|ending|finish|end)\s+(?:(?:o|a|no|na|on|the)\s+)?(?:primeiro|segundo|terceiro|\d+)(?:\s+dia|\s+day)?\s+(?:perto\s+d(?:e|o|a|os|as)|em|no|na|near|around|at)\s+(?P<area>[^,.;]+?)(?:[,.;]|$)",
+        r"\b(?:termin\S*|acab\S*|finishing|ending|finish|end)\s+(?:até|ate|by|as|às|at)(?:\s+(?:as|às))?\s+\d{1,2}(?:[:hH]\d{0,2})?\s+(?:em|no|na|near|around|at|in)\s+(?P<area>[^,.;]+?)(?:\s+(?:e|and|com|with|passa|passar|via)\b|[,.;]|$)",
+        r"\b(?:termin\S*|acab\S*|finishing|ending|finish|end)\s+(?:perto\s+d(?:e|o|a|os|as)|em|no|na|near|around|at|in)\s+(?P<area>[^,.;]+?)(?:\s+(?:e|and|mant[eé]m|mantem|preserva|keep|keeping|com|with|passa|passar|via)\b|\s+no\s+segundo\s+dia|\s+on\s+day\s+\d+|[,.;]|$)",
+        r"\b(?:termin\S*|acab\S*|finishing|ending|finish|end)\s+(?:(?:o|a|no|na|on|the)\s+)?(?:primeiro|segundo|terceiro|\d+)(?:\s+dia|\s+day)?\s+(?:perto\s+d(?:e|o|a|os|as)|em|no|na|near|around|at|in)\s+(?P<area>[^,.;]+?)(?:[,.;]|$)",
     ]
     for pattern in ending_patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -3909,14 +4379,53 @@ def _extract_requested_plan_area(user_message: str) -> str:
                     return "Baixa e Chiado"
                 return area
 
+    from_to_match = re.search(
+        r"\bfrom\s+[^,.;]+?\s+(?:via|through)\s+[^,.;]+?\s+to\s+(?P<area>[^,.;]+?)(?:\s+(?:with|including|and|for)\b|[,.;]|$)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if from_to_match:
+        area = _clean_extracted_plan_area(from_to_match.group("area"))
+        if 2 <= len(area) <= 80:
+            return area
+    from_to_match = re.search(
+        r"\bfrom\s+[^,.;]+?\s+to\s+(?P<area>[^,.;]+?)(?:\s+(?:with|including|via|through|and|for)\b|[,.;]|$)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if from_to_match:
+        area = _clean_extracted_plan_area(from_to_match.group("area"))
+        if 2 <= len(area) <= 80:
+            return area
+    pt_from_to_match = re.search(
+        r"\bde\s+[^,.;]+?\s+(?:via|por|pela|pelo)\s+[^,.;]+?\s+(?:para|ate|até)\s+(?P<area>[^,.;]+?)"
+        r"(?:\s+(?:com|inclui|incluindo|and|e|for|para\s+almo[cç]ar)\b|[,.;]|$)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if pt_from_to_match:
+        area = _clean_extracted_plan_area(pt_from_to_match.group("area"))
+        if 2 <= len(area) <= 80:
+            return area
+    pt_from_to_match = re.search(
+        r"\bde\s+[^,.;]+?\s+(?:para|ate|até)\s+(?P<area>[^,.;]+?)"
+        r"(?:\s+(?:com|inclui|incluindo|via|through|and|e|for|para\s+almo[cç]ar)\b|[,.;]|$)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if pt_from_to_match:
+        area = _clean_extracted_plan_area(pt_from_to_match.group("area"))
+        if 2 <= len(area) <= 80:
+            return area
+
     patterns = [
         r"\b(?:in|around)\s+(?P<area>[^,.;]+?)\s+(?:starting|start|beginning|begin)\s+(?:from|at|in)\b",
         r"\b(?:em|no|na|nos|nas)\s+(?P<area>[^,.;]+?)\s+a\s+partir\s+d(?:e|o|a|os|as)\b",
         r"\b(?:zona\s+anterior|previous\s+area|restri[cç][aã]o\s+de\s+zona|area\s+constraint)\s*:\s*\*{0,2}(?P<area>[^,.;\n*]+)",
         r"\b(?:come[cç]ar|come[cç]ando|come[cç]a|iniciar|iniciando|start|starting|begin|beginning)\s+(?:em|no|na|nos|nas|at|from|in)\s+(?P<area>[^,.;]+?)(?:\s+(?:com|with|e|and|para|for)\b|[,.;]|$)",
         r"\b(?:perto\s+d(?:e|o|a|os|as)|junto\s+a|near|around|close\s+to)\s+(?P<area>[^,.;]+?)(?:\s+(?:com|with|e|and|para|for|sem|without)\b|[,.;]|$)",
-        r"\b(?:termin\S*|acab\S*|finishing|ending|finish|end)\s+(?:perto\s+d(?:e|o|a|os|as)|em|no|na|near|around|at)\s+(?P<area>[^,.;]+?)(?:\s+no\s+segundo\s+dia|\s+on\s+day\s+\d+|[,.;]|$)",
-        r"\b(?:termin\S*|acab\S*|finishing|ending|finish|end)\s+(?:(?:o|a|no|na|on|the)\s+)?(?:primeiro|segundo|terceiro|\d+)(?:\s+dia|\s+day)?\s+(?:perto\s+d(?:e|o|a|os|as)|em|no|na|near|around|at)\s+(?P<area>[^,.;]+?)(?:[,.;]|$)",
+        r"\b(?:termin\S*|acab\S*|finishing|ending|finish|end)\s+(?:perto\s+d(?:e|o|a|os|as)|em|no|na|near|around|at|in)\s+(?P<area>[^,.;]+?)(?:\s+(?:e|and|mant[eé]m|mantem|preserva|keep|keeping|com|with|passa|passar|via)\b|\s+no\s+segundo\s+dia|\s+on\s+day\s+\d+|[,.;]|$)",
+        r"\b(?:termin\S*|acab\S*|finishing|ending|finish|end)\s+(?:(?:o|a|no|na|on|the)\s+)?(?:primeiro|segundo|terceiro|\d+)(?:\s+dia|\s+day)?\s+(?:perto\s+d(?:e|o|a|os|as)|em|no|na|near|around|at|in)\s+(?P<area>[^,.;]+?)(?:[,.;]|$)",
         r"\b(?:through|via|por|pela|pelo)\s+(?P<area>[^,.;]+?)(?:\s+(?:with|com|sem|without|para|for)\b|[,.;]|$)",
         r"\baround\s+(?P<area>[^,.;]+?)(?:\s+starting\b|\s+from\b|\s+with\b|$)",
         r"\bin\s+(?P<area>[^,.;]+?)(?:\s+starting\b|\s+from\b|\s+with\b|$)",
@@ -4532,13 +5041,14 @@ def _extract_requested_plan_origin(user_message: str) -> str:
     """Extract an origin anchor from a short planning request."""
     text = str(user_message or "").strip()
     patterns = [
-        r"\b(?:come[cç](?:ar|a|e|ando)|iniciar|iniciando|starting|start)\s+(?:no|na|em|at|from|in)\s+(?P<origin>[^,.;]+?)(?:[,.;]|\s+às\b|\s+as\b|\s+at\b|$)",
+        r"\b(?:come[cç](?:ar|a|e|ando)|iniciar|iniciando|starting|start)\s+(?:perto\s+d(?:e|o|a|os|as)|junto\s+a|near|close\s+to|no|na|em|at|from|in)\s+(?P<origin>[^,.;]+?)(?:[,.;]|\s+às\b|\s+as\b|\s+at\b|$)",
+        r"\bfrom\s+(?P<origin>[^,.;]+?)\s+to\b",
         r"\bstarting\s+from\s+(?P<origin>[^,.;]+?)(?:[,.;]?\s+with\b|[,.;]?\s+include\b|$)",
         r"\b(?:how\s+(?:i|we|to)\s+)?(?:get|go|travel)\s+there\s+from\s+(?P<origin>[^,.;]+?)(?:[,.;]|$)",
         r"\bfrom\s+(?P<origin>[^,.;]+?)(?:[,.;]?\s+(?:with|including|and|for|through|via|ending|end|finish)\b|[,.;]|$)",
+        r"\bdesde\s+(?:o|a|os|as)?\s*(?P<origin>[^,.;]+?)(?:[,.;]?\s+com\b|[,.;]?\s+inclui\b|$)",
         r"\bcomo\s+(?:vou|vamos|chego|chegar|ir)\s+(?:la|lá|ali|a[ií])\s+(?:desde|a\s+partir\s+d(?:e|o|a|os|as))\s+(?P<origin>[^,.;]+?)(?:[,.;]|$)",
         r"\bcomo\s+(?:chegar|ir|vou|vamos)\s+(?:desde|a\s+partir\s+d(?:e|o|a|os|as))\s+(?P<origin>[^,.;]+?)(?:[,.;]|$)",
-        r"\bfrom\s+(?P<origin>[^,.;]+?)\s+to\b",
         r"\ba partir d(?:e|o|a|os|as)\s+(?P<origin>[^,.;]+?)(?:[,.;]?\s+com\b|[,.;]?\s+inclui\b|$)",
         r"\bde\s+(?P<origin>[^,.;]+?)\s+para\b",
     ]
@@ -4559,6 +5069,7 @@ def _extract_requested_plan_origin(user_message: str) -> str:
                 origin,
                 flags=re.IGNORECASE,
             ).strip(" .:-")
+            origin = _clean_requested_anchor_fragment(origin)
             origin = _trim_planner_anchor_constraint_tail(origin)
             if 2 <= len(origin) <= 80:
                 return origin
@@ -4886,6 +5397,8 @@ def _extract_requested_origin_target_transport_bullet(
     if transfer_required:
         line_value = ""
     time_value = time_match.group("time").strip() if time_match else ""
+    if time_value and not re.search(r"\d", time_value):
+        time_value = ""
     board = board_match.group("board").strip() if board_match else origin
     board = re.sub(r"\s*\([^)]*\)\s*$", "", board).strip()
     exit_station = exit_match.group("exit").strip() if exit_match else ""
@@ -4932,7 +5445,8 @@ def _extract_origin_target_route_block(text: str, normalized_origin: str, normal
         return ""
 
     blocks = re.split(
-        r"(?m)(?=^🗺️\s+\*\*(?:Route|Rota|Trajeto|Percurso)\s*:)",
+        r"(?m)(?=^(?:🗺️\s+\*\*(?:Route|Rota|Trajeto|Percurso)\s*:|"
+        r"###\s+.*\*\*[^*\n]*(?:→|->)[^*\n]*\*\*))",
         str(text),
     )
     for block in blocks:
@@ -5021,14 +5535,17 @@ def _extract_requested_origin_target_carris_bullet(
     user-facing movement bullet instead of falling back to an unconfirmed-leg
     warning.
     """
-    if not re.search(r"\b(?:direct routes found|rotas diretas|routes:)\b", text, re.IGNORECASE):
+    if not (
+        re.search(r"\b(?:direct routes found|rotas diretas|routes:|carris urban|autocarros|buses)\b", text, re.IGNORECASE)
+        or re.search(r"(?m)^\s*[-*]\s*\*\*\d{1,4}[A-Za-z]?\*\*\s*:", text)
+    ):
         return ""
 
     lines = text.splitlines()
     candidates: list[dict[str, str]] = []
     current_mode = ""
     route_line_re = re.compile(
-        r"^\s*(?P<line>\d{1,4}[A-Za-z]?)\s*:\s*(?P<headsign>[^\n]+?)\s*$",
+        r"^\s*(?:[-*]\s*)?(?:\*\*)?(?P<line>\d{1,4}[A-Za-z]?)(?:\*\*)?\s*:\s*(?P<headsign>[^\n]+?)\s*$",
         flags=re.IGNORECASE,
     )
     for index, raw_line in enumerate(lines):
@@ -5041,23 +5558,23 @@ def _extract_requested_origin_target_carris_bullet(
             continue
         block = "\n".join(lines[index: index + 8])
         stops_match = re.search(
-            r"Stops:\s*board at\s+(?P<board>[^;\n]+);\s*leave at\s+(?P<leave>[^\n]+)",
+            r"(?:\*\*)?Stops:\*{0,2}\s*board at\s+(?:\*\*)?(?P<board>[^;*\n]+)(?:\*\*)?;\s*leave at\s+(?:\*\*)?(?P<leave>[^*\n]+)(?:\*\*)?",
             block,
             flags=re.IGNORECASE,
         )
         if not stops_match:
             stops_match = re.search(
-                r"Paragens:\s*apanh[ae]\s+em\s+(?P<board>[^;\n]+);\s*sai\s+em\s+(?P<leave>[^\n]+)",
+                r"(?:\*\*)?Paragens:\*{0,2}\s*apanh[ae]\s+em\s+(?:\*\*)?(?P<board>[^;*\n]+)(?:\*\*)?;\s*sai\s+em\s+(?:\*\*)?(?P<leave>[^*\n]+)(?:\*\*)?",
                 block,
                 flags=re.IGNORECASE,
             )
         walk_match = re.search(
-            r"(?:Final walk|Caminhada final):\s*(?P<walk>~?\s*\d+\s*min[^\n.]*)",
+            r"(?:\*\*)?(?:Final walk|Caminhada final):\*{0,2}\s*(?P<walk>~?\s*\d+\s*min[^\n.]*)",
             block,
             flags=re.IGNORECASE,
         )
         next_match = re.search(
-            r"(?:Next|Pr[oó]ximas partidas):\s*(?P<next>[^\n]+)",
+            r"(?:\*\*)?(?:Next|Pr[oó]ximas partidas):\*{0,2}\s*(?P<next>[^\n]+)",
             block,
             flags=re.IGNORECASE,
         )
@@ -5066,13 +5583,19 @@ def _extract_requested_origin_target_carris_bullet(
             block,
             flags=re.IGNORECASE,
         )
+        if not time_match:
+            time_match = re.search(
+                r"(?:\*\*)?(?:Tempo estimado|Estimated time|Estimated travel time):\*{0,2}\s*(?P<time>~?\s*\d+\s*min)",
+                block,
+                flags=re.IGNORECASE,
+            )
         candidates.append({
             "line": match.group("line").strip(),
             "headsign": match.group("headsign").strip(),
             "board": stops_match.group("board").strip() if stops_match else "",
             "leave": re.sub(r"\.\s*$", "", stops_match.group("leave").strip()) if stops_match else "",
-            "walk": re.sub(r"\s+", " ", walk_match.group("walk")).strip() if walk_match else "",
-            "next": re.sub(r"\s+", " ", next_match.group("next")).strip() if next_match else "",
+            "walk": re.sub(r"\s+", " ", walk_match.group("walk")).strip(" *") if walk_match else "",
+            "next": re.sub(r"\s+", " ", next_match.group("next")).strip(" *") if next_match else "",
             "time": re.sub(r"\s+", " ", time_match.group("time")).strip() if time_match else "",
             "mode": current_mode,
         })
@@ -5097,6 +5620,8 @@ def _extract_requested_origin_target_carris_bullet(
     travel_time = re.sub(r"(?i)(\d)\s*min\b", r"\1 min", best.get("time", ""))
 
     if language == "pt":
+        board = re.sub(r"^(?:stop|paragem)\s+", "", board, flags=re.IGNORECASE).strip()
+        leave = re.sub(r"^(?:stop|paragem)\s+", "", leave, flags=re.IGNORECASE).strip()
         walk_pt = re.sub(r"\bto destination\b", "até ao destino", walk, flags=re.IGNORECASE)
         parts = [f"🚌 **{origin} → {target}:** Carris **{line}**"]
         if headsign:
@@ -5285,6 +5810,11 @@ def _ensure_requested_origin_target_in_transport_section(
 ) -> str:
     """Ensure planner movement guidance keeps the user's stated origin and target visible."""
     if not response or not str(transport_data or "").strip():
+        return response
+    if (
+        _query_has_explicit_anchor_sequence(user_message)
+        and len(_requested_anchor_labels(user_message, transport_data)) > 2
+    ):
         return response
 
     origin = _extract_requested_plan_origin(user_message)
@@ -5830,6 +6360,11 @@ def _planner_card_description_for_language(description: str, language: str) -> s
             "Typical Portuguese cuisine.": "Cozinha portuguesa típica.",
             "Traditional Portuguese cuisine.": "Cozinha portuguesa tradicional.",
             "Typical Portuguese food.": "Comida portuguesa típica.",
+            "Restaurant opened on 11 January 1993. Portuguese cuisine.": (
+                "Restaurante aberto em 11 de janeiro de 1993, com cozinha portuguesa."
+            ),
+            "Portuguese cuisine.": "Cozinha portuguesa.",
+            "Light meals just off Avenida da Liberdade.": "Refeições leves junto à Avenida da Liberdade.",
         }
         fixed = fixed_translations.get(text)
         if fixed:
@@ -6507,7 +7042,7 @@ def _build_card_based_itinerary_fallback(
     prior_place_context = conversation_context if _query_references_previous_place_set(user_message) else ""
     combined_context = "\n".join([prior_place_context, places_data or "", events_data or ""])
     requested_label_count = len(_requested_anchor_labels(user_message, combined_context))
-    requested_stop_count = _requested_plan_total_stop_count(user_message)
+    requested_stop_count = _requested_plan_required_component_count(user_message)
     card_limit = 24 if _query_requests_food_stop(user_message) or requested_stop_count >= 4 else 12
     if requested_label_count >= 3:
         card_limit = max(card_limit, 48)
@@ -6659,6 +7194,11 @@ def _build_card_based_renderer_fallback(
             user_message,
             language,
         )[:selection_limit]
+    selected_cards = _ensure_selected_cards_satisfy_requested_counts(
+        selected_cards,
+        cards,
+        user_message,
+    )[:selection_limit]
     selected_cards = _insert_requested_cultural_stop_if_needed(
         selected_cards,
         cards,
@@ -6682,7 +7222,7 @@ def _build_card_based_renderer_fallback(
             or re.search(r"\b(?:pequeno|curto|compacto|meio\s+dia|half\s+day|short|small|compact)\b", normalized_query)
         )
         and len(selected_cards) > 3
-        and _requested_plan_total_stop_count(user_message) <= 3
+        and _requested_plan_required_component_count(user_message) <= 3
         and not (
             strict_requested_sequence
             and _requested_plan_total_stop_count(user_message) > 0
@@ -6712,11 +7252,89 @@ def _build_card_based_renderer_fallback(
     is_pt = language == "pt"
     blocks: List[PlanBlock] = []
     block_limit = _selection_limit_for_requested_cardinality(user_message, 8 if selection_limit > 6 else 5)
+    required_visible_cards = _requested_plan_required_component_count(user_message) + len(
+        _requested_anchor_labels(user_message, "\n".join([places_data or "", events_data or ""]))
+    )
+    if required_visible_cards > 0:
+        block_limit = min(8, max(block_limit, required_visible_cards))
+    visible_cards = selected_cards[:block_limit]
+    end_area = _extract_requested_plan_area(user_message)
+    end_key = _normalize_planner_text(end_area)
+    if end_key:
+        exact_end_visible = any(
+            _normalize_planner_text(_planner_card_display_name(card) or card.get("name", "")) == end_key
+            for card in visible_cards
+        )
+        if not exact_end_visible:
+            exact_end_card = next(
+                (
+                    card
+                    for card in selected_cards
+                    if _normalize_planner_text(_planner_card_display_name(card) or card.get("name", "")) == end_key
+                ),
+                None,
+            )
+            if exact_end_card:
+                visible_cards = [
+                    *[card for card in visible_cards[: max(0, block_limit - 1)] if card is not exact_end_card],
+                    exact_end_card,
+                ]
+            elif not any(_planner_card_matches_area(card, end_area) for card in visible_cards):
+                area_end_card = next(
+                    (
+                        card
+                        for card in selected_cards[block_limit:]
+                        if _planner_card_matches_area(card, end_area)
+                    ),
+                    None,
+                )
+                if area_end_card:
+                    visible_cards = [*visible_cards[: max(0, block_limit - 1)], area_end_card]
+    visible_cards = _move_requested_end_card_last(visible_cards, user_message)
+    if _query_treats_start_anchor_as_origin_only(user_message):
+        origin_key = _normalize_planner_text(_extract_requested_plan_origin(user_message))
+
+        def is_origin_anchor(card: Dict[str, str]) -> bool:
+            title_key = _normalize_planner_text(_planner_card_display_name(card) or card.get("name", ""))
+            return (
+                bool(origin_key)
+                and title_key == origin_key
+                and str(card.get("source_id") or "").strip() == "user_request"
+            )
+
+        if any(is_origin_anchor(card) for card in visible_cards):
+            visible_cards = [card for card in visible_cards if not is_origin_anchor(card)]
+            for candidate in selected_cards:
+                if len(visible_cards) >= block_limit:
+                    break
+                if is_origin_anchor(candidate) or candidate in visible_cards:
+                    continue
+                visible_cards.append(candidate)
+            visible_cards = _move_requested_end_card_last(visible_cards, user_message)
+    visible_cards = _limit_visible_cards_to_requested_anchor_sequence(
+        visible_cards,
+        selected_cards,
+        requested_labels,
+        user_message,
+        language,
+    )
+    visible_cards = _position_requested_meal_cards_for_plan_window(visible_cards, user_message)
+    visible_cards = _position_compact_local_food_stop(visible_cards, user_message)
+    visible_cards = _limit_visible_cards_for_requested_type_counts(visible_cards, user_message)
+    visible_cards = _cluster_visible_cards_by_requested_route_areas(visible_cards, user_message)
+    visible_cards = _position_requested_meal_cards_for_plan_window(visible_cards, user_message)
+    visible_cards = _position_compact_local_food_stop(visible_cards, user_message)
+    visible_cards = _move_requested_end_card_last(visible_cards, user_message)
     time_allocations = _planner_time_allocations_for_cards(
-        selected_cards[:block_limit],
+        visible_cards,
         _extract_requested_plan_duration_minutes(user_message),
     )
-    for index, card in enumerate(selected_cards[:block_limit], start=1):
+    schedule_labels = _planner_schedule_labels_for_cards(
+        visible_cards,
+        time_allocations,
+        user_message,
+    )
+    for index, card in enumerate(visible_cards, start=1):
         details = (
             _card_details_for_itinerary_block(card, language=language)
             if historic_food_request or event_food_request
@@ -6725,6 +7343,11 @@ def _build_card_based_renderer_fallback(
         if len(time_allocations) >= index and time_allocations[index - 1] > 0:
             details = [
                 f"Suggested time: ~{time_allocations[index - 1]} min",
+                *details,
+            ]
+        if len(schedule_labels) >= index and schedule_labels[index - 1]:
+            details = [
+                f"Suggested schedule: {schedule_labels[index - 1]}",
                 *details,
             ]
         display_name = _planner_card_display_name(card)
@@ -6770,6 +7393,7 @@ def _build_card_based_renderer_fallback(
         and not _is_planner_transport_status_summary(item)
         and _planner_transport_bullet_is_actionable(item)
     ]
+    sequence_movement_items: List[str] = []
     if strict_requested_sequence:
         sequence_movement_items = _extract_requested_sequence_transport_bullets(
             transport_data,
@@ -6790,12 +7414,12 @@ def _build_card_based_renderer_fallback(
     if strict_requested_sequence and not movement_items and strict_sequence_limitations:
         movement_items = strict_sequence_limitations
     same_area_walking_items = _planner_same_area_walking_items(
-        selected_cards,
+        visible_cards,
         user_message,
         language,
     )
     first_leg_item = _planner_origin_to_first_stop_item(
-        selected_cards,
+        visible_cards,
         user_message,
         language,
     )
@@ -6844,7 +7468,7 @@ def _build_card_based_renderer_fallback(
                 )
             ]
     if movement_items:
-        selected_context = _planner_selected_card_context(selected_cards)
+        selected_context = _planner_selected_card_context(visible_cards)
         filtered_movement_items: List[str] = []
         for item in movement_items:
             if _movement_item_is_self_referential_origin(item, user_message):
@@ -6875,7 +7499,7 @@ def _build_card_based_renderer_fallback(
         else:
             movement_items = []
     consecutive_transition_items = _planner_consecutive_stop_transition_items(
-        selected_cards[:block_limit],
+        visible_cards,
         movement_items,
         user_message,
         language,
@@ -6962,7 +7586,7 @@ def _build_card_based_renderer_fallback(
         language,
         transport_data,
     )
-    if strict_sequence_limitations and not any(
+    if strict_sequence_limitations and not sequence_movement_items and not any(
         _normalize_planner_text(item) in _normalize_planner_text(rendered)
         for item in strict_sequence_limitations
     ):
@@ -7195,7 +7819,29 @@ def _select_planner_cards_for_request(cards: List[Dict[str, str]], user_message:
                 and not _planner_dict_card_is_closed(card)
                 for card in original_usable_cards
             )
-            if _query_requests_food_stop(user_message) and not area_has_cultural and original_has_cultural:
+            if not _planner_cards_satisfy_requested_counts(area_cards, user_message):
+                supplemental_count_cards = [
+                    card for card in original_usable_cards
+                    if card not in area_cards
+                    and any(
+                        _planner_card_matches_requested_count_type(card, count_type)
+                        for count_type, requested_count in _requested_plan_type_counts(user_message).items()
+                        if count_type in {"museum", "monument", "viewpoint", "event"}
+                        and requested_count > 0
+                    )
+                    and not _planner_dict_card_is_closed(card)
+                ]
+                supplemental_count_cards = sorted(
+                    supplemental_count_cards,
+                    key=lambda card: _score_card_for_requested_count_type(card, "total", user_message),
+                    reverse=True,
+                )
+                usable_cards = _dedupe_planner_cards([
+                    *area_cards,
+                    *supplemental_count_cards,
+                    *original_usable_cards,
+                ])
+            elif _query_requests_food_stop(user_message) and not area_has_cultural and original_has_cultural:
                 nearby_cultural_cards = [
                     card for card in original_usable_cards
                     if _card_kind_for_plan_block(card) not in {"food", "event"}
@@ -7392,7 +8038,7 @@ def _select_planner_cards_for_request(cards: List[Dict[str, str]], user_message:
                 r"\b(?:pequeno|curto|compacto|meio\s+dia|half\s+day|short|small|compact)\b",
                 normalized,
             )
-            and _requested_plan_total_stop_count(user_message) <= 3
+            and _requested_plan_required_component_count(user_message) <= 3
         )
 
         def local_fit_score(card: Dict[str, str]) -> int:
@@ -7528,7 +8174,7 @@ _PLANNER_COUNT_UNIT_RE = re.compile(
     r"(?P<unit>museus?|museums?|galerias?|galleries|monumentos?|monuments?|"
     r"atracoes|attractions?|locais|lugares|sitios|sites|places|stops|paragens|pois?|"
     r"restaurantes?|restaurants?|cafes?|cafeterias?|pastelarias?|food\s+stops?|meal\s+stops?|lunch\s+stops?|dinner\s+stops?|"
-    r"miradouros?|viewpoints?|view\s+points?|lookouts?|eventos?|events?)\b",
+    r"miradouros?|viewpoints?|view\s+points?|views?|vistas?|lookouts?|eventos?|events?)\b",
     re.IGNORECASE,
 )
 
@@ -7560,7 +8206,7 @@ def _requested_plan_type_counts(user_message: str) -> Dict[str, int]:
             count_type = "museum"
         elif re.search(r"\b(?:monumentos?|monuments?)\b", unit):
             count_type = "monument"
-        elif re.search(r"\b(?:miradouros?|viewpoints?|view point|lookouts?)\b", unit):
+        elif re.search(r"\b(?:miradouros?|viewpoints?|view point|views?|vistas?|lookouts?)\b", unit):
             count_type = "viewpoint"
         elif re.search(r"\b(?:eventos?|events?)\b", unit):
             count_type = "event"
@@ -7579,20 +8225,33 @@ def _requested_plan_total_stop_count(user_message: str) -> int:
     return max(counts.get("total", 0), specific_total)
 
 
+def _requested_plan_required_component_count(user_message: str) -> int:
+    """Return the minimum visible stops needed to satisfy explicit components."""
+    counts = _requested_plan_type_counts(user_message)
+    requested_total = _requested_plan_total_stop_count(user_message)
+    if _query_requests_food_stop(user_message) and counts.get("food", 0) <= 0:
+        requested_total += 1
+    return min(8, requested_total)
+
+
 def _selection_limit_for_requested_cardinality(user_message: str, default: int) -> int:
     """Expand card selection limits when the user asks for more stops."""
-    requested_total = _requested_plan_total_stop_count(user_message)
+    requested_total = _requested_plan_required_component_count(user_message)
     if requested_total <= 0:
         return default
     return min(8, max(default, requested_total))
 
 
+def _planner_card_named_content_basis(card: Dict[str, str]) -> str:
+    """Return a matching basis that excludes broad VisitLisboa category labels."""
+    return _normalize_planner_text(
+        " ".join(str(card.get(key, "")) for key in ("name", "description", "features", "url", "details_url"))
+    )
+
+
 def _planner_card_matches_requested_count_type(card: Dict[str, str], count_type: str) -> bool:
     """Return whether a candidate card satisfies a requested stop type."""
     kind = _card_kind_for_plan_block(card)
-    basis = _normalize_planner_text(
-        " ".join(str(card.get(key, "")) for key in ("name", "category", "description", "features", "url", "details_url"))
-    )
     if count_type == "food":
         return kind == "food"
     if count_type == "event":
@@ -7600,18 +8259,61 @@ def _planner_card_matches_requested_count_type(card: Dict[str, str], count_type:
     if count_type == "viewpoint":
         return _planner_card_is_viewpoint(card)
     if count_type == "museum":
+        named_basis = _planner_card_named_content_basis(card)
         return bool(
             kind == "museum"
-            and re.search(r"\b(?:museus?|museums?|galerias?|galleries|oceanario|aquarium|pavilhao\s+do\s+conhecimento)\b", basis)
+            and re.search(
+                r"\b(?:museus?|museums?|galerias?|galleries|oceanario|aquarium|pavilhao\s+do\s+conhecimento)\b",
+                named_basis,
+            )
         )
     if count_type == "monument":
+        named_basis = _planner_card_named_content_basis(card)
         return bool(
             kind == "museum"
-            and re.search(r"\b(?:monumentos?|monuments?|mosteiro|monastery|torre|tower|padrao|cathedral|catedral|igreja|church|castelo|castle|palacio|palace)\b", basis)
+            and re.search(
+                r"\b(?:monumentos?|monuments?|mosteiro|monastery|torre|tower|padrao|cathedral|catedral|igreja|church|castelo|castle|palacio|palace)\b",
+                named_basis,
+            )
         )
     if count_type == "cultural":
         return kind not in {"food", "event"}
     return True
+
+
+def _planner_cards_satisfy_requested_counts(cards: List[Dict[str, str]], user_message: str) -> bool:
+    """Return whether a candidate pool can satisfy explicit typed counts."""
+    counts = {
+        key: value
+        for key, value in _requested_plan_type_counts(user_message).items()
+        if key in {"museum", "monument", "viewpoint", "event"} and value > 0
+    }
+    if not counts:
+        return True
+    return all(
+        sum(
+            1 for card in cards
+            if _planner_card_matches_requested_count_type(card, count_type)
+            and not _planner_dict_card_is_closed(card)
+        ) >= requested_count
+        for count_type, requested_count in counts.items()
+    )
+
+
+def _score_planner_card_opening_fit(card: Dict[str, str], user_message: str) -> int:
+    """Score whether a card's opening hours fit the likely itinerary window."""
+    if not str(card.get("hours") or "").strip():
+        return 0
+    normalized = _normalize_planner_text(user_message)
+    if re.search(r"\b(?:noite|evening|jantar|dinner)\b", normalized):
+        probe_minutes = (18 * 60, 19 * 60, 20 * 60)
+    elif re.search(r"\b(?:tarde|afternoon)\b", normalized):
+        probe_minutes = (14 * 60, 15 * 60, 16 * 60)
+    elif re.search(r"\b(?:almoco|almocar|lunch)\b", normalized):
+        probe_minutes = (10 * 60 + 30, 11 * 60 + 30, 12 * 60, 13 * 60 + 30)
+    else:
+        probe_minutes = (10 * 60, 11 * 60 + 30, 14 * 60 + 30)
+    return 0 if any(_card_open_at_minutes(card, minutes) for minutes in probe_minutes) else -160
 
 
 def _score_card_for_requested_count_type(card: Dict[str, str], count_type: str, user_message: str) -> int:
@@ -7619,13 +8321,15 @@ def _score_card_for_requested_count_type(card: Dict[str, str], count_type: str, 
     normalized = _normalize_planner_text(user_message)
     compact_far_penalty = _compact_central_plan_far_area_penalty(card, user_message)
     sequence_fit_score = _requested_sequence_area_fit_score(card, user_message)
+    opening_fit_score = _score_planner_card_opening_fit(card, user_message)
     if count_type == "food":
-        return _score_food_plan_card(card) + sequence_fit_score
+        return _score_food_plan_card(card, user_message) + sequence_fit_score + opening_fit_score
     if count_type == "viewpoint":
         return (
             _score_cultural_stop_card(card, normalized)
             + (80 if _planner_card_is_viewpoint(card) else -40)
             + sequence_fit_score
+            + opening_fit_score
             - compact_far_penalty
         )
     if count_type == "event":
@@ -7635,10 +8339,11 @@ def _score_card_for_requested_count_type(card: Dict[str, str], count_type: str, 
             _score_local_area_plan_card(card, normalized, user_message)
             + _score_historic_plan_card(card)
             + sequence_fit_score
+            + opening_fit_score
             - compact_far_penalty
         )
     if _query_requests_food_stop(user_message) and _card_kind_for_plan_block(card) == "food":
-        return _score_food_plan_card(card) + sequence_fit_score
+        return _score_food_plan_card(card, user_message) + sequence_fit_score + opening_fit_score
     if _card_kind_for_plan_block(card) == "food":
         return -30
     if _card_kind_for_plan_block(card) == "event" and not _is_event_planning_request(normalized):
@@ -7652,7 +8357,8 @@ def _compact_central_plan_far_area_penalty(card: Dict[str, str], user_message: s
     if not re.search(r"\b(?:curt[ao]|compact[ao]|meio\s+dia|half\s+day|short|small|tarde|afternoon)\b", normalized_query):
         return 0
     if not re.search(
-        r"\b(?:chiado|cais\s+do\s+sodre|sodre|baixa|rossio|marques\s+de\s+pombal|avenida|liberdade|carmo|santos)\b",
+        r"\b(?:chiado|cais\s+do\s+sodre|sodre|baixa|rossio|marques|marques\s+de\s+pombal|"
+        r"saldanha|picoas|avenida|liberdade|carmo|santos)\b",
         normalized_query,
     ):
         return 0
@@ -7660,7 +8366,8 @@ def _compact_central_plan_far_area_penalty(card: Dict[str, str], user_message: s
         " ".join(str(card.get(key, "")) for key in ("name", "category", "address", "description", "features", "url", "details_url"))
     )
     if re.search(
-        r"\b(?:madre\s+de\s+deus|azulejo|marvila|belem|belem|benfica|fronteira|campo\s+pequeno|"
+        r"\b(?:madre\s+de\s+deus|azulejo|madragoa|esperanca|janelas\s+verdes|ajuda|1249|1349|"
+        r"marvila|belem|belem|benfica|fronteira|campo\s+pequeno|"
         r"parque\s+das\s+nacoes|oriente|expo|lumiar|ajuda)\b",
         basis,
     ):
@@ -7769,6 +8476,48 @@ def _select_cards_by_requested_counts(cards: List[Dict[str, str]], user_message:
     return _dedupe_planner_cards(selected)[: min(8, max(requested_total, len(selected)))]
 
 
+def _ensure_selected_cards_satisfy_requested_counts(
+    selected_cards: List[Dict[str, str]],
+    all_cards: List[Dict[str, str]],
+    user_message: str,
+) -> List[Dict[str, str]]:
+    """Add grounded cards when an earlier ordering step dropped typed counts."""
+    counts = {
+        key: value
+        for key, value in _requested_plan_type_counts(user_message).items()
+        if key in {"museum", "monument", "viewpoint", "event"} and value > 0
+    }
+    if not counts:
+        return selected_cards
+
+    result = list(selected_cards)
+    for count_type, requested_count in counts.items():
+        current_count = sum(
+            1 for card in result
+            if _planner_card_matches_requested_count_type(card, count_type)
+        )
+        if current_count >= requested_count:
+            continue
+        used_keys = {
+            _normalize_planner_text(_planner_card_display_name(card) or card.get("name", ""))
+            for card in result
+        }
+        candidates = sorted(
+            [
+                card for card in all_cards
+                if _planner_card_matches_requested_count_type(card, count_type)
+                and _normalize_planner_text(_planner_card_display_name(card) or card.get("name", "")) not in used_keys
+                and not _planner_dict_card_is_closed(card)
+            ],
+            key=lambda card: _score_card_for_requested_count_type(card, count_type, user_message),
+            reverse=True,
+        )
+        for card in candidates[: max(0, requested_count - current_count)]:
+            result.append(card)
+            used_keys.add(_normalize_planner_text(_planner_card_display_name(card) or card.get("name", "")))
+    return _dedupe_planner_cards(result)
+
+
 def _requested_food_option_limit(user_message: str) -> int:
     """Return the maximum number of food stops implied by the user's wording."""
     if not _query_requests_food_stop(user_message):
@@ -7812,6 +8561,8 @@ def _limit_food_cards_for_user_request(cards: List[Dict[str, str]], user_message
 def _requested_cultural_stop_limit(user_message: str) -> int:
     """Return the maximum number of cultural stops explicitly requested by the user."""
     counts = _requested_plan_type_counts(user_message)
+    if any(counts.get(key, 0) > 0 for key in ("museum", "monument", "viewpoint", "event")):
+        return 0
     explicit_cultural = counts.get("total", 0) if _query_requests_cultural_stop(user_message) else 0
     if explicit_cultural > 0:
         return explicit_cultural
@@ -7852,17 +8603,25 @@ def _requested_viewpoint_stop_limit(user_message: str) -> int:
         return requested_viewpoints
 
     normalized = _normalize_planner_text(user_message)
-    if re.search(r"\b(?:um|uma|one|1)\s+(?:miradouro|viewpoint|view\s+point|lookout)\b", normalized):
+    if re.search(r"\b(?:um|uma|one|1)\s+(?:miradouro|viewpoint|view\s+point|view|vista|lookout)\b", normalized):
         return 1
     return 0
 
 
 def _planner_card_is_viewpoint(card: Dict[str, str]) -> bool:
     """Return whether a planner card is a viewpoint/lookout stop."""
-    basis = _normalize_planner_text(
-        " ".join(str(card.get(key, "")) for key in ("name", "category", "description", "url", "details_url"))
+    strong_basis = _normalize_planner_text(
+        " ".join(str(card.get(key, "")) for key in ("name", "category", "url", "details_url"))
     )
-    return bool(re.search(r"\b(?:miradouro|viewpoint|view\s+point|lookout|panoramic)\b", basis))
+    if re.search(r"\b(?:miradouro|viewpoint|view\s+point|lookout)\b", strong_basis):
+        return True
+    description_basis = _normalize_planner_text(
+        " ".join(str(card.get(key, "")) for key in ("description", "features"))
+    )
+    return bool(
+        _card_kind_for_plan_block(card) != "food"
+        and re.search(r"\b(?:panoramic\s+view|city\s+view|vista\s+panoramica|vista\s+sobre\s+a\s+cidade)\b", description_basis)
+    )
 
 
 def _limit_viewpoint_cards_for_user_request(cards: List[Dict[str, str]], user_message: str) -> List[Dict[str, str]]:
@@ -7907,6 +8666,65 @@ def _limit_specific_count_cards_for_user_request(cards: List[Dict[str, str]], us
                 continue
         output.append(card)
     return output
+
+
+def _limit_visible_cards_for_requested_type_counts(
+    cards: List[Dict[str, str]],
+    user_message: str,
+) -> List[Dict[str, str]]:
+    """Apply explicit typed counts after sequence/end positioning has run."""
+    if not cards:
+        return cards
+    counts = {
+        key: value
+        for key, value in _requested_plan_type_counts(user_message).items()
+        if key in {"museum", "monument", "event", "viewpoint"} and value > 0
+    }
+    if not counts:
+        return cards
+
+    timed_labels = {
+        _normalize_planner_text(label)
+        for label, _time_label in _requested_anchor_time_constraints(user_message)
+        if label
+    }
+    end_area = _extract_requested_plan_area(user_message)
+    end_key = _normalize_planner_text(end_area)
+
+    def is_protected(card: Dict[str, str]) -> bool:
+        title_key = _normalize_planner_text(_planner_card_display_name(card) or card.get("name", ""))
+        if end_key and (
+            title_key == end_key
+            or _planner_card_matches_area(card, end_area)
+        ):
+            return True
+        return any(
+            label and (
+                label == title_key
+                or _planner_card_matches_requested_label(card, label)
+            )
+            for label in timed_labels
+        )
+
+    keep_flags = [True] * len(cards)
+    for count_type, limit in counts.items():
+        matching_indices = [
+            index
+            for index, card in enumerate(cards)
+            if keep_flags[index] and _planner_card_matches_requested_count_type(card, count_type)
+        ]
+        if len(matching_indices) <= limit:
+            continue
+        removable = [
+            index for index in matching_indices
+            if not is_protected(cards[index])
+        ]
+        for index in reversed(removable):
+            if len([idx for idx in matching_indices if keep_flags[idx]]) <= limit:
+                break
+            keep_flags[index] = False
+
+    return [card for card, keep in zip(cards, keep_flags) if keep]
 
 
 def _limit_cards_for_user_cardinality(cards: List[Dict[str, str]], user_message: str) -> List[Dict[str, str]]:
@@ -8002,6 +8820,96 @@ def _requested_anchor_cards_in_order(
     return ordered_cards
 
 
+def _limit_visible_cards_to_requested_anchor_sequence(
+    visible_cards: List[Dict[str, str]],
+    candidate_cards: List[Dict[str, str]],
+    requested_labels: List[str],
+    user_message: str,
+    language: str,
+) -> List[Dict[str, str]]:
+    """Keep explicit multi-anchor plans focused on the user's requested sequence."""
+    requested_counts = _requested_plan_type_counts(user_message)
+    total_only_count_matches_anchor_sequence = bool(
+        set(requested_counts) == {"total"}
+        and requested_counts.get("total", 0) <= len(requested_labels)
+    )
+    if (
+        not _query_has_explicit_anchor_sequence(user_message)
+        or len(requested_labels) < 2
+        or (requested_counts and not total_only_count_matches_anchor_sequence)
+    ):
+        return visible_cards
+
+    all_candidates = _dedupe_planner_cards([*visible_cards, *candidate_cards])
+    limited: List[Dict[str, str]] = []
+
+    def already_used(card: Dict[str, str]) -> bool:
+        key = _normalize_planner_text(_planner_card_display_name(card) or card.get("name", ""))
+        return bool(key) and any(
+            key == _normalize_planner_text(_planner_card_display_name(existing) or existing.get("name", ""))
+            for existing in limited
+        )
+
+    for label in requested_labels:
+        matched_card = next(
+            (
+                card for card in all_candidates
+                if _card_kind_for_plan_block(card) != "food"
+                and not already_used(card)
+                and _planner_card_matches_requested_label(card, label)
+            ),
+            None,
+        )
+        if matched_card is None:
+            matched_card = next(
+                (
+                    card for card in all_candidates
+                    if _card_kind_for_plan_block(card) != "food"
+                    and not already_used(card)
+                    and _planner_card_matches_area(card, label)
+                ),
+                None,
+            )
+        if matched_card is None:
+            placeholder = _requested_anchor_cards_in_order([label], all_candidates, language)
+            matched_card = placeholder[0] if placeholder else None
+        if matched_card and not already_used(matched_card):
+            limited.append(matched_card)
+
+    if not limited:
+        return visible_cards
+
+    if _query_requests_food_stop(user_message):
+        meal_kinds = _requested_meal_kinds(user_message) or ["lunch"]
+        food_candidates = [
+            card for card in all_candidates
+            if _card_kind_for_plan_block(card) == "food"
+            and _food_card_matches_requested_context(card, user_message)
+        ]
+        labelled_food_cards: List[Dict[str, str]] = []
+        for meal_kind in meal_kinds[:2]:
+            best_food = max(
+                food_candidates,
+                key=lambda card: _score_food_card_for_meal_context(card, meal_kind, user_message, limited),
+                default=None,
+            )
+            if best_food:
+                labelled_food_cards.append(
+                    _label_food_card_for_meal(
+                        best_food,
+                        meal_kind,
+                        language,
+                        force_label=len(meal_kinds) > 1 or not _food_card_has_meal_label(best_food),
+                    )
+                )
+        for food_card in labelled_food_cards:
+            insert_at = min(max(1, len(limited) - 1), len(limited))
+            if not already_used(food_card):
+                limited.insert(insert_at, food_card)
+
+    return _dedupe_planner_cards(limited)
+
+
 def _food_card_has_meal_label(card: Dict[str, str]) -> bool:
     """Return whether a food card is already explicitly tied to lunch or dinner."""
     basis = _normalize_planner_text(
@@ -8048,14 +8956,18 @@ def _score_food_card_for_meal_context(
 ) -> int:
     """Score a restaurant by how well it fits the route area for a meal slot."""
     card_basis = _normalize_planner_text(
-        " ".join(str(card.get(key, "") or "") for key in ("name", "address", "description", "features", "distance"))
+        " ".join(str(card.get(key, "") or "") for key in ("name", "address", "description", "features", "distance", "hours"))
     )
+    route_cards = [
+        item for item in planned_cards
+        if _card_kind_for_plan_block(item) != "food"
+    ]
     plan_basis = _normalize_planner_text(
         " ".join(
             [user_message]
             + [
                 " ".join(str(item.get(key, "") or "") for key in ("name", "address", "description", "category"))
-                for item in planned_cards
+                for item in route_cards
             ]
         )
     )
@@ -8063,6 +8975,15 @@ def _score_food_card_for_meal_context(
         return 0
 
     score = 0
+    traditional_requested = _query_requests_traditional_portuguese_food(plan_basis)
+    if traditional_requested:
+        if _food_text_has_traditional_portuguese_marker(card_basis):
+            score += 220
+        elif _food_text_has_non_traditional_cuisine_marker(card_basis):
+            score -= 240
+
+    if _planner_dict_card_is_closed(card):
+        score -= 300
     card_is_belem = bool(_PLANNER_BELEM_AREA_RE.search(card_basis))
     card_is_central = bool(_PLANNER_CENTRAL_AREA_RE.search(card_basis))
     card_is_saldanha_axis = bool(
@@ -8075,6 +8996,19 @@ def _score_food_card_for_meal_context(
     plan_mentions_remote_east = bool(re.search(r"\b(?:parque das nacoes|oriente|olivais|expo)\b", plan_basis))
     hotel_or_end_near_saldanha = bool(re.search(r"\b(?:hotel|saldanha|avenidas novas|picoas)\b", plan_basis))
     preferred_area_key, _preferred_area_label, _preferred_blockers = _planner_local_area_profile(user_message)
+
+    if meal_kind == "lunch" and _query_has_explicit_anchor_sequence(user_message):
+        anchors = _requested_anchor_labels(user_message)
+        anchor_basis = _normalize_planner_text(" ".join(anchors))
+        if any(_planner_card_matches_area(card, anchor) for anchor in anchors):
+            score += 180
+        elif card_is_saldanha_axis and not re.search(
+            r"\b(?:marques|saldanha|picoas|avenida\s+da\s+liberdade|liberdade)\b",
+            anchor_basis,
+        ):
+            score -= 180
+        elif not (card_is_belem or card_is_central):
+            score -= 60
 
     if meal_kind == "lunch" and preferred_area_key in {"central_corridor", "alfama"}:
         if card_is_central:
@@ -8130,6 +9064,49 @@ def _score_food_card_for_meal_context(
     return score
 
 
+def _query_requests_traditional_portuguese_food(text: str) -> bool:
+    """Return whether a planning request asks for Portuguese/traditional food."""
+    normalized = _normalize_planner_text(text)
+    return bool(
+        re.search(
+            r"\b(?:gastronomia\s+tradicional|cozinha\s+tradicional|comida\s+tradicional|"
+            r"comida\s+portuguesa|cozinha\s+portuguesa|pratos?\s+portugues(?:es|as)|"
+            r"almo[cç]o\s+tradicional|jantar\s+tradicional|refei[cç][aã]o\s+tradicional|"
+            r"restaurante\s+tradicional|tradicional\s+portuguesa|portuguesa\s+tradicional|"
+            r"tasca|taberna|fado|"
+            r"traditional\s+portuguese|typical\s+portuguese|portuguese\s+cuisine|local\s+cuisine)\b",
+            normalized,
+        )
+    )
+
+
+def _food_text_has_traditional_portuguese_marker(text: str) -> bool:
+    """Return whether a restaurant card carries Portuguese/traditional food signals."""
+    normalized = _normalize_planner_text(text)
+    return bool(
+        re.search(
+            r"\b(?:cozinha\s+tradicional\s+portuguesa|gastronomia\s+tradicional|"
+            r"cozinha\s+portuguesa|comida\s+portuguesa|tradicional\s+portuguesa|"
+            r"portuguesa\s+tradicional|traditional\s+portuguese|typical\s+portuguese|"
+            r"portuguese\s+cuisine|portuguese\s+food|tasca|taberna|fado|petiscos)\b",
+            normalized,
+        )
+    )
+
+
+def _food_text_has_non_traditional_cuisine_marker(text: str) -> bool:
+    """Return whether a restaurant card mainly signals a non-Portuguese cuisine."""
+    normalized = _normalize_planner_text(text)
+    return bool(
+        re.search(
+            r"\b(?:international|internacional|fusion|italian|italiana|pizzaria|pizza|"
+            r"sushi|japanese|japonesa|asian|asiatica|burger|hamburger|brasserie|"
+            r"french|francesa|mexican|mexicana|indian|indiana)\b",
+            normalized,
+        )
+    )
+
+
 def _insert_requested_food_stop_if_needed(
     selected_cards: List[Dict[str, str]],
     all_cards: List[Dict[str, str]],
@@ -8149,7 +9126,17 @@ def _insert_requested_food_stop_if_needed(
             if _card_kind_for_plan_block(card) != "food"
             or _food_card_has_meal_label(card)
         ]
+    budget_requested = _query_requests_budget_food(user_message)
     existing_food_count = sum(1 for card in selected_cards if _card_kind_for_plan_block(card) == "food")
+    if existing_food_count >= required_food_count and len(result) == len(selected_cards):
+        if budget_requested and any(
+            _card_kind_for_plan_block(card) == "food" and _food_card_budget_rank(card) != 0
+            for card in result
+        ):
+            result = [card for card in result if _card_kind_for_plan_block(card) != "food"]
+            existing_food_count = 0
+        else:
+            return selected_cards
     if existing_food_count >= required_food_count and len(result) == len(selected_cards):
         return selected_cards
 
@@ -8164,7 +9151,7 @@ def _insert_requested_food_stop_if_needed(
             and _food_card_matches_requested_context(card, user_message)
             and _normalize_planner_text(_planner_card_display_name(card) or card.get("name", "")) not in selected_keys
         ],
-        key=lambda card: _score_food_plan_card(card)
+        key=lambda card: _score_food_plan_card(card, user_message)
         + _score_food_card_for_meal_context(card, requested_meals[0] if requested_meals else "lunch", user_message, result),
         reverse=True,
     )
@@ -8178,7 +9165,7 @@ def _insert_requested_food_stop_if_needed(
                 candidate for candidate in food_candidates
                 if _normalize_planner_text(_planner_card_display_name(candidate) or candidate.get("name", "")) not in used_food_keys
             ],
-            key=lambda candidate: _score_food_plan_card(candidate)
+            key=lambda candidate: _score_food_plan_card(candidate, user_message)
             + _score_food_card_for_meal_context(candidate, meal_kind, user_message, result),
             reverse=True,
         )
@@ -8281,6 +9268,219 @@ def _insert_requested_cultural_stop_if_needed(
     return _dedupe_planner_cards([*selected_cards[:insert_at], cultural_card, *selected_cards[insert_at:]])
 
 
+def _query_treats_start_anchor_as_origin_only(user_message: str) -> bool:
+    """Return whether a requested start point is an origin, not a visit stop."""
+    normalized_query = _normalize_planner_text(user_message)
+    return bool(
+        re.search(
+            r"\b(?:comeca|comece|comecar|comecando|inicia|iniciar|iniciando|start|starting)\b",
+            normalized_query,
+        )
+        and not re.search(
+            r"\b(?:visitar|visit|inclui|include|including|pass(?:ar|e|em)\s+por|pass\s+through)\b",
+            normalized_query,
+        )
+    )
+
+
+def _position_requested_meal_cards_for_plan_window(
+    cards: List[Dict[str, str]],
+    user_message: str,
+) -> List[Dict[str, str]]:
+    """Place requested meal stops in a plausible itinerary slot without hard-coded venues."""
+    if len(cards) < 2:
+        return cards
+    normalized_query = _normalize_planner_text(user_message)
+    if not re.search(r"\b(?:almoco|almocar|lunch)\b", normalized_query):
+        return cards
+    result = list(cards)
+    food_index = next(
+        (
+            index
+            for index, card in enumerate(result)
+            if _card_kind_for_plan_block(card) == "food"
+        ),
+        -1,
+    )
+    if food_index < 0:
+        return cards
+    end_area = _extract_requested_plan_area(user_message)
+    end_key = _normalize_planner_text(end_area)
+    protected_last = bool(
+        end_key
+        and result
+        and (
+            _normalize_planner_text(_planner_card_display_name(result[-1]) or result[-1].get("name", "")) == end_key
+            or _planner_card_matches_area(result[-1], end_area)
+        )
+    )
+    movable_end = len(result) - 1 if protected_last else len(result)
+    first_non_food_index = next(
+        (
+            index
+            for index, card in enumerate(result[:movable_end])
+            if _card_kind_for_plan_block(card) != "food"
+        ),
+        -1,
+    )
+    if protected_last and end_area and _planner_card_matches_area(result[food_index], end_area):
+        food_card = result.pop(food_index)
+        insert_at = max(1, len(result) - 1)
+        result.insert(insert_at, food_card)
+        return result
+    if first_non_food_index < 0 or food_index > first_non_food_index:
+        return cards
+    food_card = result.pop(food_index)
+    if protected_last and end_area and _planner_card_matches_area(food_card, end_area):
+        insert_at = max(1, len(result) - 1)
+        result.insert(insert_at, food_card)
+        return result
+    insert_after = first_non_food_index
+    if food_index < first_non_food_index:
+        insert_after -= 1
+    insert_at = min(insert_after + 1, len(result) - (1 if protected_last else 0))
+    result.insert(max(0, insert_at), food_card)
+    return result
+
+
+def _position_compact_local_food_stop(
+    cards: List[Dict[str, str]],
+    user_message: str,
+) -> List[Dict[str, str]]:
+    """Place a nearby meal stop early in compact local plans.
+
+    Compact half-day plans with an origin anchor should avoid sending the user
+    past a nearby requested lunch stop and then backtracking. This only moves a
+    grounded food card when it is clearly close to the requested compact area.
+    """
+    if len(cards) < 3 or not _query_requests_food_stop(user_message):
+        return cards
+    if _query_has_explicit_anchor_sequence(user_message):
+        return cards
+    target_area = _extract_compact_plan_area_anchor(user_message)
+    if not target_area:
+        return cards
+    if not (
+        _extract_requested_plan_duration_minutes(user_message)
+        or re.search(
+            r"\b(?:curt[ao]|compact[ao]|meio\s+dia|half\s+day|short|small|pequeno)\b",
+            _normalize_planner_text(user_message),
+        )
+    ):
+        return cards
+
+    food_index = next(
+        (index for index, card in enumerate(cards) if _card_kind_for_plan_block(card) == "food"),
+        -1,
+    )
+    if food_index <= 1:
+        return cards
+
+    food_card = cards[food_index]
+    distance_km = _planner_card_distance_km(food_card)
+    area_key, _area_label, _blockers = _planner_local_area_profile(user_message)
+    food_basis = _normalize_planner_text(
+        " ".join(
+            str(food_card.get(key, "") or "")
+            for key in ("name", "address", "description", "features", "distance")
+        )
+    )
+    near_requested_area = bool(
+        _planner_card_matches_area(food_card, target_area)
+        or (distance_km is not None and distance_km <= 1.5)
+        or (
+            area_key == "marques_de_pombal"
+            and re.search(
+                r"\b(?:marques|saldanha|picoas|avenida\s+da\s+liberdade|"
+                r"tomas\s+ribeiro|tom[aá]s\s+ribeiro|1050|1067|1070|1250)\b",
+                food_basis,
+            )
+        )
+    )
+    if not near_requested_area:
+        return cards
+
+    reordered = list(cards)
+    food = reordered.pop(food_index)
+    reordered.insert(1, food)
+    return reordered
+
+
+def _cluster_visible_cards_by_requested_route_areas(
+    cards: List[Dict[str, str]],
+    user_message: str,
+) -> List[Dict[str, str]]:
+    """Group visible stops around explicit route anchors without dropping evidence.
+
+    This keeps flexible LLM-selected evidence, but avoids route backtracking when
+    the user gives anchors such as "pass by X at 11:30" and "end in Y".
+    """
+    if len(cards) < 3:
+        return cards
+
+    end_area = _extract_requested_plan_area(user_message)
+    end_key = _normalize_planner_text(end_area)
+    origin = _extract_requested_plan_origin(user_message)
+    origin_key = _normalize_planner_text(origin)
+    origin_only = _query_treats_start_anchor_as_origin_only(user_message)
+
+    anchor_areas: List[str] = []
+    seen_areas: set[str] = set()
+
+    def add_anchor_area(label: str) -> None:
+        area_key = _normalize_planner_text(label)
+        if not area_key or area_key in seen_areas:
+            return
+        if _planner_area_is_broad_city(area_key):
+            return
+        if end_key and area_key == end_key:
+            return
+        if origin_only and origin_key and area_key == origin_key:
+            return
+        if not any(_planner_card_matches_area(card, label) for card in cards):
+            return
+        seen_areas.add(area_key)
+        anchor_areas.append(label)
+
+    if origin and not origin_only:
+        add_anchor_area(origin)
+    for label, _time_label in _requested_anchor_time_constraints(user_message):
+        add_anchor_area(label)
+    for label in _requested_anchor_labels(user_message):
+        add_anchor_area(label)
+
+    if not anchor_areas and not end_key:
+        return cards
+
+    remaining = list(cards)
+
+    def pop_matching(predicate: Callable[[Dict[str, str]], bool]) -> List[Dict[str, str]]:
+        matched: List[Dict[str, str]] = []
+        kept: List[Dict[str, str]] = []
+        for card in remaining:
+            if predicate(card):
+                matched.append(card)
+            else:
+                kept.append(card)
+        remaining[:] = kept
+        return matched
+
+    ordered: List[Dict[str, str]] = []
+    for area in anchor_areas:
+        ordered.extend(
+            pop_matching(
+                lambda card, area=area: _card_kind_for_plan_block(card) != "food"
+                and _planner_card_matches_area(card, area)
+            )
+        )
+
+    end_cards: List[Dict[str, str]] = []
+    if end_key:
+        end_cards = pop_matching(lambda card: _planner_card_matches_area(card, end_area))
+
+    return _dedupe_planner_cards([*ordered, *remaining, *end_cards])
+
+
 def _move_requested_origin_card_first(cards: List[Dict[str, str]], user_message: str) -> List[Dict[str, str]]:
     """Move the explicitly requested starting anchor to the first visible stop."""
     if not cards:
@@ -8293,13 +9493,7 @@ def _move_requested_origin_card_first(cards: List[Dict[str, str]], user_message:
     normalized_origin = _normalize_planner_text(origin)
     if not normalized_origin:
         return cards
-    start_as_origin_only = bool(
-        re.search(r"\b(?:comeca|comece|comecar|comecando|inicia|iniciar|iniciando|start|starting)\b", normalized_query)
-        and not re.search(
-            r"\b(?:visitar|visit|inclui|include|including|pass(?:ar|e|em)\s+por|pass\s+through)\b",
-            normalized_query,
-        )
-    )
+    start_as_origin_only = _query_treats_start_anchor_as_origin_only(user_message)
     for index, card in enumerate(cards):
         title_key = _normalize_planner_text(_planner_card_display_name(card) or card.get("name", ""))
         if start_as_origin_only and title_key != normalized_origin:
@@ -8334,7 +9528,11 @@ def _move_requested_end_card_last(cards: List[Dict[str, str]], user_message: str
     for index in range(len(cards) - 1, -1, -1):
         card = cards[index]
         title_key = _normalize_planner_text(_planner_card_display_name(card) or card.get("name", ""))
-        if title_key == end_key or _planner_card_matches_area(card, end_area):
+        if title_key == end_key:
+            return [*cards[:index], *cards[index + 1:], card]
+    for index in range(len(cards) - 1, -1, -1):
+        card = cards[index]
+        if _planner_card_matches_area(card, end_area):
             return [*cards[:index], *cards[index + 1:], card]
     return cards
 
@@ -8590,7 +9788,7 @@ def _score_architecture_plan_card(card: Dict[str, str]) -> int:
     return score
 
 
-def _score_food_plan_card(card: Dict[str, str]) -> int:
+def _score_food_plan_card(card: Dict[str, str], user_message: str = "") -> int:
     """Score a card as a traditional-food itinerary stop."""
     basis = _normalize_planner_text(
         " ".join(str(card.get(key, "")) for key in ("name", "category", "address", "description", "features", "hours", "distance"))
@@ -8602,12 +9800,18 @@ def _score_food_plan_card(card: Dict[str, str]) -> int:
         score += 20
     if re.search(r"\b(?:italian|italiana|pizzaria|pizza|burger|hamburger|sushi|fusion|international|internacional)\b", basis):
         score -= 35
+    if _query_requests_traditional_portuguese_food(user_message):
+        if _food_text_has_traditional_portuguese_marker(basis):
+            score += 120
+        elif _food_text_has_non_traditional_cuisine_marker(basis):
+            score -= 160
     if re.search(r"\b(?:lisboa|baixa|alfama|chiado|prata|douradores|correeiros|belem|bel[eé]m|brasilia|bras[ií]lia)\b", basis):
         score += 10
     if card.get("address") or card.get("url") or card.get("details_url") or card.get("website_url"):
         score += 12
     if str(card.get("source_id") or "").strip() in {"local_context", "user_request"}:
         score -= 35
+    score += _score_food_budget_fit(card, user_message)
     if _card_open_at_minutes(card, 12 * 60 + 45):
         score += 30
     elif card.get("hours"):
@@ -8734,6 +9938,14 @@ def _score_local_area_plan_card(card: Dict[str, str], normalized_query: str, use
             and re.search(r"\b(?:marques\s+de\s+pombal|parque\s+eduardo\s+vii)\b", basis)
         ):
             score += 35
+    area_key, _area_label, _blockers = _planner_local_area_profile(user_message)
+    if area_key == "marques_de_pombal" and re.search(
+        r"\b(?:saldanha|picoas|sao\s+sebastiao|avenida\s+da\s+liberdade|liberdade|"
+        r"barata\s+salgueiro|salitre|parque\s+eduardo\s+vii|gulbenkian|berna|"
+        r"restauradores|1250|1269|1050|1067)\b",
+        basis,
+    ):
+        score += 45
     distance_km = _planner_card_distance_km(card)
     if distance_km is not None and _card_kind_for_plan_block(card) != "food":
         if distance_km <= 0.75:
@@ -9384,7 +10596,8 @@ def _replace_meal_blocks_with_contextual_evidence(
     """Replace weak meal selections with better area-matched evidence cards."""
     if not _query_requests_food_stop(user_message):
         return
-    food_candidates = [card for card in evidence.cards if card.kind == "food"]
+    all_food_candidates = [card for card in evidence.cards if card.kind == "food"]
+    food_candidates = [card for card in all_food_candidates if not _evidence_card_is_closed(card)] or all_food_candidates
     if not food_candidates:
         return
 
@@ -9445,7 +10658,8 @@ def _repair_meal_locality_in_response(
         return response or ""
 
     evidence = build_evidence_bundle(places_data=places_data)
-    food_candidates = [card for card in evidence.cards if card.kind == "food"]
+    all_food_candidates = [card for card in evidence.cards if card.kind == "food"]
+    food_candidates = [card for card in all_food_candidates if not _evidence_card_is_closed(card)] or all_food_candidates
     if not food_candidates:
         return response
 
@@ -9641,7 +10855,7 @@ def _score_evidence_food_card(
     if card is None:
         return -999
     card_dict = _evidence_card_to_planner_card(card)
-    return _score_food_plan_card(card_dict) + _score_food_card_for_meal_context(
+    return _score_food_plan_card(card_dict, user_message) + _score_food_card_for_meal_context(
         card_dict,
         meal_kind,
         user_message,
@@ -10325,9 +11539,316 @@ def _planner_response_block_title(block: str) -> str:
     return title
 
 
+def _merge_planner_movement_sections(response: str, language: str) -> str:
+    """Merge duplicated planner movement sections into one Streamlit-safe block."""
+    if not str(response or "").strip():
+        return response
+    lines = str(response).splitlines()
+
+    def is_movement_heading(line: str) -> bool:
+        return bool(
+            re.match(
+                r"^###\s+.*\*\*(?:Como te deslocas|How to move)\*\*\s*$",
+                line.strip(),
+                flags=re.IGNORECASE,
+            )
+        )
+
+    sections: List[tuple[int, int, List[str]]] = []
+    for index, line in enumerate(lines):
+        if not is_movement_heading(line):
+            continue
+        start = index
+        previous = index - 1
+        while previous >= 0 and not lines[previous].strip():
+            previous -= 1
+        if previous >= 0 and lines[previous].strip() == "---":
+            start = previous
+        end = index + 1
+        while end < len(lines):
+            stripped = lines[end].strip()
+            if (
+                stripped == "---"
+                or stripped.startswith("### ")
+                or _PLANNER_SOURCE_LINE_RE.match(stripped)
+            ):
+                break
+            end += 1
+        sections.append((start, end, lines[index + 1:end]))
+
+    if len(sections) <= 1:
+        return response
+
+    heading = "### 🚇 **Como te deslocas**" if language == "pt" else "### 🚇 **How to move**"
+    bullets: List[str] = []
+    seen: set[str] = set()
+    for _start, _end, body_lines in sections:
+        for raw_line in body_lines:
+            stripped = raw_line.strip()
+            if not re.match(r"^[-*]\s+", stripped):
+                continue
+            key = _normalize_planner_text(stripped)
+            if key and key not in seen:
+                seen.add(key)
+                bullets.append(stripped)
+
+    if not bullets:
+        return response
+
+    merged_section = f"{heading}\n\n" + "\n".join(bullets)
+    first_start = sections[0][0]
+    last_end = sections[-1][1]
+    before = "\n".join(lines[:first_start]).rstrip()
+    after = "\n".join(lines[last_end:]).lstrip()
+    prefix = f"{before}\n\n---\n\n" if before else ""
+    suffix = f"\n\n{after}" if after else ""
+    return f"{prefix}{merged_section}{suffix}".strip()
+
+
+def _ensure_stop_by_stop_movement_in_response(
+    response: str,
+    user_message: str,
+    language: str,
+) -> str:
+    """Ensure explicit stop-by-stop movement requests cover consecutive stops."""
+    cleaned = _merge_planner_movement_sections(response, language)
+    movement_text = _planner_movement_section_text(cleaned)
+    if not _query_requests_stop_by_stop_movement(user_message) and not movement_text:
+        return cleaned
+
+    blocks = _planner_response_route_blocks(cleaned)
+    title_blocks = [
+        (title, block)
+        for block in blocks
+        for title in [_planner_response_block_title(block)]
+        if title
+    ]
+    titles = [title for title, _block in title_blocks]
+    if len(titles) < 2:
+        return cleaned
+
+    existing_bullets = [
+        line.strip()
+        for line in movement_text.splitlines()
+        if re.match(r"^[-*]\s+", line.strip())
+    ]
+    normalized_query = _normalize_planner_text(user_message)
+    wants_public_transport = _query_requests_public_transport(user_message) or bool(
+        re.search(r"\btransportes?\b", normalized_query)
+    )
+    is_pt = language == "pt"
+    requested_areas = [
+        area for area in [
+            *[label for label, _time_label in _requested_anchor_time_constraints(user_message)],
+            *_requested_anchor_labels(user_message),
+            _extract_requested_plan_area(user_message),
+        ]
+        if _normalize_planner_text(area) and not _planner_area_is_broad_city(_normalize_planner_text(area))
+    ]
+
+    def block_matches_area(block: str, title: str, area: str) -> bool:
+        return _planner_card_matches_area(
+            {
+                "name": title,
+                "address": block,
+                "description": block,
+                "category": block,
+            },
+            area,
+        )
+
+    def existing_bullet_for_pair(
+        origin: str,
+        origin_block: str,
+        destination: str,
+        destination_block: str,
+        used_indexes: set[int],
+    ) -> str:
+        origin_key = _normalize_planner_text(origin)
+        destination_key = _normalize_planner_text(destination)
+        for index, bullet in enumerate(existing_bullets):
+            if index in used_indexes:
+                continue
+            if not _planner_text_has_route_arrow(bullet):
+                continue
+            bullet_key = _normalize_planner_text(bullet)
+            if origin_key and destination_key and origin_key in bullet_key and destination_key in bullet_key:
+                used_indexes.add(index)
+                return bullet
+
+        origin_areas = [
+            area for area in requested_areas
+            if block_matches_area(origin_block, origin, area)
+        ]
+        destination_areas = [
+            area for area in requested_areas
+            if block_matches_area(destination_block, destination, area)
+        ]
+        if not origin_areas or not destination_areas:
+            return ""
+
+        origin_area_keys = {_normalize_planner_text(area) for area in origin_areas}
+        destination_area_keys = {_normalize_planner_text(area) for area in destination_areas}
+        if origin_area_keys & destination_area_keys:
+            return ""
+        for index, bullet in enumerate(existing_bullets):
+            if index in used_indexes:
+                continue
+            if not _planner_text_has_route_arrow(bullet):
+                continue
+            bullet_key = _normalize_planner_text(bullet)
+            if any(key and key in bullet_key for key in origin_area_keys) and any(
+                key and key in bullet_key for key in destination_area_keys
+            ):
+                used_indexes.add(index)
+                return bullet
+        return ""
+
+    ordered_bullets: List[str] = []
+    seen_bullets: set[str] = set()
+    used_bullet_indexes: set[int] = set()
+    if title_blocks:
+        first_title, first_block = title_blocks[0]
+        first_leg_item = _planner_origin_to_first_stop_item(
+            [
+                {
+                    "name": first_title,
+                    "address": first_block,
+                    "description": first_block,
+                    "category": first_block,
+                }
+            ],
+            user_message,
+            language,
+        )
+        if first_leg_item:
+            first_leg_bullet = (
+                first_leg_item
+                if re.match(r"^[-*]\s+", first_leg_item.strip())
+                else f"- {first_leg_item}"
+            )
+            first_leg_key = _normalize_planner_text(first_leg_bullet)
+            requested_origin_key = _normalize_planner_text(_extract_requested_plan_origin(user_message))
+            first_title_key = _normalize_planner_text(first_title)
+            already_has_first_leg = False
+            if requested_origin_key and first_title_key:
+                for bullet in existing_bullets:
+                    if not _planner_text_has_route_arrow(bullet):
+                        continue
+                    bullet_key = _normalize_planner_text(bullet)
+                    origin_pos = bullet_key.find(requested_origin_key)
+                    first_pos = bullet_key.find(first_title_key)
+                    if origin_pos >= 0 and first_pos >= 0 and origin_pos < first_pos:
+                        already_has_first_leg = True
+                        break
+            if first_leg_key and not already_has_first_leg:
+                seen_bullets.add(first_leg_key)
+                ordered_bullets.append(first_leg_bullet)
+
+    for (origin, origin_block), (destination, destination_block) in zip(title_blocks, title_blocks[1:5]):
+        existing = existing_bullet_for_pair(
+            origin,
+            origin_block,
+            destination,
+            destination_block,
+            used_bullet_indexes,
+        )
+        if existing:
+            bullet_key = _normalize_planner_text(existing)
+            if bullet_key and bullet_key not in seen_bullets:
+                seen_bullets.add(bullet_key)
+                ordered_bullets.append(existing)
+            continue
+        origin_key = _normalize_planner_text(origin)
+        destination_key = _normalize_planner_text(destination)
+        if origin_key and destination_key and any(
+            origin_key in _normalize_planner_text(bullet)
+            and destination_key in _normalize_planner_text(bullet)
+            for bullet in ordered_bullets
+        ):
+            continue
+        origin_area_keys = {
+            _normalize_planner_text(area)
+            for area in requested_areas
+            if block_matches_area(origin_block, origin, area)
+        }
+        destination_area_keys = {
+            _normalize_planner_text(area)
+            for area in requested_areas
+            if block_matches_area(destination_block, destination, area)
+        }
+        same_requested_area = bool(origin_area_keys & destination_area_keys)
+        if wants_public_transport and not same_requested_area:
+            ordered_bullets.append(
+                (
+                    f"- 🚇 **{origin} → {destination}:** a ligação de transporte público exata "
+                    "entre estas paragens não ficou confirmada nos dados recolhidos; não inventei linha, paragem ou duração."
+                )
+                if is_pt
+                else (
+                    f"- 🚇 **{origin} → {destination}:** the exact public-transport leg between these stops "
+                    "was not confirmed in the gathered data; I did not invent a line, stop, or duration."
+                )
+            )
+        else:
+            ordered_bullets.append(
+                (
+                    f"- 🚶 **{origin} → {destination}:** faz esta transição como deslocação curta/local; "
+                    "confirma no mapa a melhor rua de ligação no momento."
+                )
+                if is_pt
+                else (
+                    f"- 🚶 **{origin} → {destination}:** treat this as a short/local transition; "
+                    "check the best walking link on the map when you go."
+                )
+            )
+
+    if not ordered_bullets:
+        return cleaned
+
+    heading = "### 🚇 **Como te deslocas**" if is_pt else "### 🚇 **How to move**"
+    section_re = re.compile(
+        r"(?ms)(?P<header>^###\s+.*\*\*(?:Como te deslocas|How to move)\*\*\s*\n)"
+        r"(?P<body>.*?)(?=(?:\n---\s*\n|\n###\s+|\n📌\s+\*\*(?:Fonte|Source):|\Z))",
+        flags=re.MULTILINE,
+    )
+
+    def replace_section(match: re.Match[str]) -> str:
+        return f"{match.group('header')}\n" + "\n".join(ordered_bullets) + "\n"
+
+    if section_re.search(cleaned):
+        return section_re.sub(replace_section, cleaned, count=1).strip()
+
+    movement_section = f"{heading}\n\n" + "\n".join(ordered_bullets)
+    insert_pattern = (
+        r"(?m)^###\s+.*\*\*Notas finais\*\*"
+        if is_pt
+        else r"(?m)^###\s+.*\*\*Final notes\*\*"
+    )
+    if re.search(insert_pattern, cleaned):
+        return re.sub(insert_pattern, f"{movement_section}\n\n---\n\n\\g<0>", cleaned, count=1).strip()
+    source_match = re.search(r"(?m)^📌\s+\*\*(?:Fonte|Source):\*\*.*$", cleaned)
+    if source_match:
+        before = cleaned[:source_match.start()].rstrip()
+        source = cleaned[source_match.start():].strip()
+        return f"{before}\n\n---\n\n{movement_section}\n\n{source}".strip()
+    return f"{cleaned.rstrip()}\n\n---\n\n{movement_section}".strip()
+
+
 def _planner_response_block_matches_requested_type(block: str, count_type: str) -> bool:
     """Return whether a rendered itinerary block satisfies a requested count type."""
     basis = _normalize_planner_text(block)
+    basis_without_broad_category = _normalize_planner_text(
+        "\n".join(
+            line
+            for line in block.splitlines()
+            if not re.search(
+                r"\*\*(?:categoria|category)\s*:?\*\*.*\b(?:museums?\s*&\s*monuments?|museus?\s*&\s*monumentos?)\b",
+                line,
+                flags=re.IGNORECASE,
+            )
+        )
+    )
     if count_type == "food":
         return bool(
             re.search(
@@ -10341,7 +11862,7 @@ def _planner_response_block_matches_requested_type(block: str, count_type: str) 
             re.search(
                 r"\b(?:museu|museus|museum|museums|galeria|gallery|galleries|"
                 r"oceanario|ocean[aá]rio|aquarium|pavilhao do conhecimento|pavilh[aã]o do conhecimento)\b",
-                basis,
+                basis_without_broad_category,
             )
         )
     if count_type == "monument":
@@ -10372,7 +11893,10 @@ def _planner_response_missing_requested_counts(response: str, user_message: str)
         return False
     blocks = _planner_response_route_blocks(response)
     if not blocks:
-        return False
+        # Explicit counts need a parseable itinerary body. If the route section
+        # cannot be read, retry instead of accepting a plan that may have
+        # ignored constraints such as "2 museums" or "1 viewpoint".
+        return True
     minimum_count_request = bool(
         re.search(r"\b(?:pelo\s+menos|no\s+minimo|no\s+m[ií]nimo|at\s+least|minimum)\b", _normalize_planner_text(user_message))
     )
@@ -10395,13 +11919,122 @@ def _planner_response_missing_requested_counts(response: str, user_message: str)
     return False
 
 
+def _planner_route_block_ranges(response: str) -> List[tuple[int, int, str]]:
+    """Return line ranges for visible route blocks in the suggested route."""
+    lines = str(response or "").splitlines()
+    ranges: List[tuple[int, int, str]] = []
+    in_route = False
+    route_end = len(lines)
+    current_start: int | None = None
+
+    for index, raw_line in enumerate(lines):
+        stripped = raw_line.strip()
+        normalized_line = _normalize_planner_text(stripped)
+        if re.search(r"\b(?:roteiro sugerido|suggested route)\b", normalized_line):
+            in_route = True
+            continue
+        if in_route and stripped.startswith("### "):
+            route_end = index
+            break
+        if not in_route:
+            continue
+        is_top_level_title = bool(
+            raw_line[:1] not in {" ", "\t"}
+            and re.match(r"^(?:[-*]\s+)?\*\*[^*\n]{2,180}\*\*", stripped)
+        )
+        if is_top_level_title:
+            if current_start is not None:
+                ranges.append((current_start, index, "\n".join(lines[current_start:index]).strip()))
+            current_start = index
+
+    if current_start is not None:
+        ranges.append((current_start, route_end, "\n".join(lines[current_start:route_end]).strip()))
+    return ranges
+
+
+def _planner_response_block_is_protected(block: str, user_message: str, *, is_last: bool) -> bool:
+    """Return whether a route block must stay despite typed count caps."""
+    normalized_block = _normalize_planner_text(block)
+    title_key = _normalize_planner_text(_planner_response_block_title(block))
+    for label, time_label in _requested_anchor_time_constraints(user_message):
+        label_key = _normalize_planner_text(label)
+        if label_key and label_key in normalized_block and time_label in block:
+            return True
+
+    end_area = _extract_requested_plan_area(user_message)
+    end_key = _normalize_planner_text(end_area)
+    if (
+        is_last
+        and end_key
+        and (
+            end_key in title_key
+            or title_key in end_key
+            or end_key in normalized_block
+        )
+    ):
+        return True
+    return False
+
+
+def _repair_response_requested_type_counts(response: str, user_message: str) -> str:
+    """Remove extra typed itinerary blocks while preserving explicit anchors."""
+    counts = {
+        key: value
+        for key, value in _requested_plan_type_counts(user_message).items()
+        if key in {"museum", "monument", "event", "viewpoint"} and value > 0
+    }
+    if not counts or not response:
+        return response or ""
+    if re.search(r"\b(?:pelo\s+menos|no\s+minimo|no\s+m[ií]nimo|at\s+least|minimum)\b", _normalize_planner_text(user_message)):
+        return response
+
+    block_ranges = _planner_route_block_ranges(response)
+    if not block_ranges:
+        return response
+
+    remove_line_indexes: set[int] = set()
+    last_block_index = len(block_ranges) - 1
+    for count_type, requested_count in counts.items():
+        matching = [
+            (index, start, end, block)
+            for index, (start, end, block) in enumerate(block_ranges)
+            if _planner_response_block_matches_requested_type(block, count_type)
+        ]
+        if len(matching) <= requested_count:
+            continue
+        removable = [
+            (index, start, end, block)
+            for index, start, end, block in matching
+            if not _planner_response_block_is_protected(
+                block,
+                user_message,
+                is_last=index == last_block_index,
+            )
+        ]
+        current_count = len(matching)
+        for _index, start, end, _block in reversed(removable):
+            if current_count <= requested_count:
+                break
+            remove_line_indexes.update(range(start, end))
+            current_count -= 1
+
+    if not remove_line_indexes:
+        return response
+
+    repaired_lines = [
+        line for index, line in enumerate(str(response).splitlines())
+        if index not in remove_line_indexes
+    ]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(repaired_lines)).strip()
+
+
 def _planner_response_violates_requested_end(response: str, user_message: str) -> bool:
     """Return whether an explicit ending anchor is not the final visible stop."""
     normalized_query = _normalize_planner_text(user_message)
     if not re.search(
         r"\b(?:termina|termine|terminar|terminando|acaba|acabe|acabar|acabando|end|ending|finish|finishing)\b",
         normalized_query,
-    ):
+    ) and not re.search(r"\bfrom\s+[^,.;]+?\s+to\s+[^,.;]+", normalized_query):
         return False
     requested_end = _extract_requested_plan_area(user_message)
     requested_key = _normalize_planner_text(requested_end)
@@ -10409,7 +12042,10 @@ def _planner_response_violates_requested_end(response: str, user_message: str) -
         return False
     blocks = _planner_response_route_blocks(response)
     if not blocks:
-        return False
+        # An explicit start/end request needs a visible ordered itinerary. If
+        # the route section cannot be parsed, accept no silent success here:
+        # let the planner/QA retry instead of shipping an uncheckable plan.
+        return True
     last_title = _normalize_planner_text(_planner_response_block_title(blocks[-1]))
     return bool(
         last_title
@@ -10432,6 +12068,56 @@ def _planner_response_has_closed_timed_stop(response: str, user_message: str) ->
         if has_requested_time and re.search(r"\b(?:hoje fechado|fechado hoje|today closed|closed today)\b", normalized_block):
             return True
     return False
+
+
+def _planner_response_has_unusable_closed_stop(response: str, user_message: str) -> bool:
+    """Return whether a plan includes a closed visit/meal stop as usable."""
+    if re.search(r"\b(?:exterior|outside|fachada|facade)\b", _normalize_planner_text(user_message)):
+        return False
+    for block in _planner_response_route_blocks(response):
+        normalized_block = _normalize_planner_text(block)
+        if not re.search(r"\b(?:hoje fechado|fechado hoje|today closed|closed today)\b", normalized_block):
+            continue
+        if re.search(r"\b(?:restaurante|restaurant|almoco|lunch|jantar|dinner|museu|museum|visita|visit)\b", normalized_block):
+            return True
+    return False
+
+
+def _planner_response_missing_requested_time_constraints(response: str, user_message: str) -> bool:
+    """Return whether requested pass-through times are absent from the route."""
+    time_constraints = _requested_anchor_time_constraints(user_message)
+    if not time_constraints:
+        return False
+    blocks = _planner_response_route_blocks(response)
+    if not blocks:
+        # Explicit cardinalities are only meaningful if the final answer has a
+        # parseable itinerary body. Otherwise the plan may look fluent while
+        # silently ignoring requested counts such as "2 museums".
+        return True
+    for label, time_label in time_constraints:
+        normalized_label = _normalize_planner_text(label)
+        if not normalized_label or not time_label:
+            continue
+        matching_blocks = [
+            block for block in blocks
+            if normalized_label in _normalize_planner_text(block)
+        ]
+        if not matching_blocks:
+            return True
+        if not any(time_label in block for block in matching_blocks):
+            return True
+    return False
+
+
+def _planner_response_violates_explicit_preference_contract(response: str, user_message: str) -> bool:
+    """Return whether a plan ignores explicit stop counts, end, or timed anchors."""
+    return bool(
+        _planner_response_missing_requested_counts(response, user_message)
+        or _planner_response_violates_requested_end(response, user_message)
+        or _planner_response_has_closed_timed_stop(response, user_message)
+        or _planner_response_has_unusable_closed_stop(response, user_message)
+        or _planner_response_missing_requested_time_constraints(response, user_message)
+    )
 
 
 def _planner_response_has_low_fit_infrastructure_stop(response: str, user_message: str) -> bool:
@@ -10791,7 +12477,11 @@ class PlannerAgent(BaseAgent):
         rendered = final_post_qa_guard(rendered, language=language)
         if not _planner_response_matches_schema(rendered):
             return ""
+        if _planner_response_missing_requested_counts(rendered, user_message):
+            return ""
         if _planner_response_has_markdown_contract_defects(rendered):
+            return ""
+        if _planner_response_has_local_area_drift(rendered, user_message):
             return ""
         if not _planner_response_has_minimum_user_value(rendered):
             return ""
@@ -10807,6 +12497,7 @@ class PlannerAgent(BaseAgent):
         events_data: str = "",
         qa_disclaimers: list[str] | None = None,
         conversation_context: str = "",
+        output_language: str | None = None,
     ) -> str:
         """
         Creates an itinerary from gathered data.
@@ -10823,7 +12514,7 @@ class PlannerAgent(BaseAgent):
         Returns:
             str: Formatted itinerary.
         """
-        language = infer_response_language(user_query=user_message, default="en")
+        language = output_language if output_language in {"pt", "en"} else infer_response_language(user_query=user_message, default="en")
         # Preferred path: the planner decides content in JSON, then a deterministic
         # renderer guarantees LISBOA visual structure. This avoids asking the LLM
         # to simultaneously plan and hand-format Markdown. Fallbacks are only
@@ -10859,10 +12550,12 @@ class PlannerAgent(BaseAgent):
                     "\n".join([places_data or "", events_data or ""]),
                 )
                 and not _planner_response_violates_requested_start(structured_plan, user_message)
+                and not _planner_response_has_local_area_drift(structured_plan, user_message)
+                and not _planner_response_violates_explicit_preference_contract(structured_plan, user_message)
                 and not _planner_response_mixes_distant_walking_areas(structured_plan, user_message)
                 and not _planner_response_uses_excluded_area(structured_plan, user_message)
             ):
-                return _ensure_multi_day_response_quality(
+                finalized_plan = _ensure_multi_day_response_quality(
                     structured_plan,
                     user_message=user_message,
                     language=language,
@@ -10873,6 +12566,14 @@ class PlannerAgent(BaseAgent):
                     qa_disclaimers=qa_disclaimers,
                     conversation_context=conversation_context,
                 )
+                finalized_plan = _repair_response_requested_type_counts(finalized_plan, user_message)
+                finalized_plan = _ensure_stop_by_stop_movement_in_response(
+                    finalized_plan,
+                    user_message,
+                    language,
+                )
+                if not _planner_response_violates_explicit_preference_contract(finalized_plan, user_message):
+                    return finalized_plan
             structured_plan = ""
 
         specific_plan = _build_specific_planner_fallback(
@@ -10889,6 +12590,8 @@ class PlannerAgent(BaseAgent):
             if (
                 _planner_response_has_minimum_user_value(specific_plan)
                 and not _planner_response_violates_requested_start(specific_plan, user_message)
+                and not _planner_response_has_local_area_drift(specific_plan, user_message)
+                and not _planner_response_violates_explicit_preference_contract(specific_plan, user_message)
                 and not _planner_response_missing_requested_food_stop(specific_plan, user_message)
                 and not _planner_response_missing_requested_movement(
                     specific_plan,
@@ -10896,7 +12599,7 @@ class PlannerAgent(BaseAgent):
                     transport_data,
                 )
             ):
-                return _ensure_multi_day_response_quality(
+                finalized_plan = _ensure_multi_day_response_quality(
                     specific_plan,
                     user_message=user_message,
                     language=language,
@@ -10907,6 +12610,14 @@ class PlannerAgent(BaseAgent):
                     qa_disclaimers=qa_disclaimers,
                     conversation_context=conversation_context,
                 )
+                finalized_plan = _repair_response_requested_type_counts(finalized_plan, user_message)
+                finalized_plan = _ensure_stop_by_stop_movement_in_response(
+                    finalized_plan,
+                    user_message,
+                    language,
+                )
+                if not _planner_response_violates_explicit_preference_contract(finalized_plan, user_message):
+                    return finalized_plan
 
         card_based_plan = _build_card_based_itinerary_fallback(
             user_message=user_message,
@@ -10922,9 +12633,11 @@ class PlannerAgent(BaseAgent):
             if (
                 _planner_response_has_minimum_user_value(card_based_plan)
                 and not _planner_response_violates_requested_start(card_based_plan, user_message)
+                and not _planner_response_has_local_area_drift(card_based_plan, user_message)
+                and not _planner_response_violates_explicit_preference_contract(card_based_plan, user_message)
                 and not _planner_response_missing_requested_food_stop(card_based_plan, user_message)
             ):
-                return _ensure_multi_day_response_quality(
+                finalized_plan = _ensure_multi_day_response_quality(
                     card_based_plan,
                     user_message=user_message,
                     language=language,
@@ -10935,6 +12648,14 @@ class PlannerAgent(BaseAgent):
                     qa_disclaimers=qa_disclaimers,
                     conversation_context=conversation_context,
                 )
+                finalized_plan = _repair_response_requested_type_counts(finalized_plan, user_message)
+                finalized_plan = _ensure_stop_by_stop_movement_in_response(
+                    finalized_plan,
+                    user_message,
+                    language,
+                )
+                if not _planner_response_violates_explicit_preference_contract(finalized_plan, user_message):
+                    return finalized_plan
 
         # Legacy path: retained as a fallback when the JSON path cannot produce a
         # valid, grounded PlanDraft.
@@ -11144,6 +12865,7 @@ class PlannerAgent(BaseAgent):
                 "\n".join([places_data or "", events_data or ""]),
             )
             or _planner_response_violates_requested_start(cleaned_response, user_message)
+            or _planner_response_violates_explicit_preference_contract(cleaned_response, user_message)
             or _planner_response_has_local_area_drift(cleaned_response, user_message)
             or _planner_response_mixes_distant_walking_areas(cleaned_response, user_message)
             or _planner_response_uses_excluded_area(cleaned_response, user_message)
@@ -11409,7 +13131,8 @@ class PlannerAgent(BaseAgent):
             language,
         )
 
-        return _ensure_multi_day_response_quality(
+        cleaned_response = _repair_response_requested_type_counts(cleaned_response, user_message)
+        final_response = _ensure_multi_day_response_quality(
             cleaned_response,
             user_message=user_message,
             language=language,
@@ -11420,6 +13143,8 @@ class PlannerAgent(BaseAgent):
             qa_disclaimers=qa_disclaimers,
             conversation_context=conversation_context,
         )
+        final_response = _repair_response_requested_type_counts(final_response, user_message)
+        return _ensure_stop_by_stop_movement_in_response(final_response, user_message, language)
 
     def synthesize(self, user_message: str, agent_outputs: Dict[str, str]) -> str:
         """
@@ -11444,6 +13169,7 @@ class PlannerAgent(BaseAgent):
         conversation_context = agent_outputs.get("_conversation_context", "")
         if not isinstance(conversation_context, str):
             conversation_context = ""
+        output_language = str(agent_outputs.get("_language") or "").strip().lower()
 
         return self.invoke(
             user_message=user_message,
@@ -11453,6 +13179,7 @@ class PlannerAgent(BaseAgent):
             events_data="",  # Events come from researcher too
             qa_disclaimers=qa_disclaimers,
             conversation_context=conversation_context,
+            output_language=output_language if output_language in {"pt", "en"} else None,
         )
 
 
