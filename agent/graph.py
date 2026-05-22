@@ -1026,23 +1026,13 @@ class MultiAgentAssistant:
 
     def _get_conversation_anchors(self) -> Dict[str, Any]:
         """Return mutable structured anchors used for multi-turn planning follow-ups."""
-        user_ctx = self.state.setdefault("user_context", {})
-        anchors = user_ctx.setdefault(
-            "conversation_anchors",
-            {
-                "last_itinerary_destinations": [],
-                "current_selected_destination": "",
-                "excluded_areas": [],
-                "user_preferences": [],
-                "last_plan_summary": "",
-                "last_plan_text": "",
-                "last_response_agents": [],
-                "last_research_context": {},
-                "last_transport_route": {},
-                "pending_location_clarification": {},
-                "expected_transport_destination": {},
-            },
-        )
+        user_ctx = self.state.get("user_context")
+        if user_ctx is None:
+            from agent.state import UserContext
+            user_ctx = UserContext()
+            self.state["user_context"] = user_ctx
+
+        anchors = user_ctx.get("conversation_anchors")
         if not isinstance(anchors, dict):
             anchors = {
                 "last_itinerary_destinations": [],
@@ -6246,7 +6236,8 @@ class MultiAgentAssistant:
         """Return whether the QA result flags missing transit/transport details."""
         if not qa_result:
             return False
-        missing_data = qa_result.get("missing_data") or []
+        missing_data = qa_result.get("missing_data")
+        missing_list: list = missing_data if isinstance(missing_data, list) else []
         reasoning = str(qa_result.get("reasoning") or "").lower()
         transit_keywords = [
             "transport", "transit", "route", "leg", "connection", "departure",
@@ -6255,7 +6246,7 @@ class MultiAgentAssistant:
             "carrismetropolitana", "carris metropolitana", "linha", "line",
             "paragem", "estação", "estacao", "stop", "station"
         ]
-        for item in missing_data:
+        for item in missing_list:
             lowered_item = str(item).lower()
             if any(kw in lowered_item for kw in transit_keywords):
                 return True
@@ -6303,12 +6294,18 @@ class MultiAgentAssistant:
             ):
                 skipped.append(agent_name)
                 continue
+            qa_dict = qa_result or {}
+            required_agents = qa_dict.get("required_agents")
+            required_list: list = required_agents if isinstance(required_agents, list) else []
+            repairable_agents = qa_dict.get("repairable_agents")
+            repairable_list: list = repairable_agents if isinstance(repairable_agents, list) else []
+
             if (
                 agent_name == "transport"
                 and (
                     cls._qa_flags_missing_transit(qa_result)
-                    or "transport" in ((qa_result or {}).get("required_agents") or [])
-                    or "transport" in ((qa_result or {}).get("repairable_agents") or [])
+                    or "transport" in required_list
+                    or "transport" in repairable_list
                 )
             ):
                 filtered.append(agent_name)
@@ -6502,18 +6499,25 @@ class MultiAgentAssistant:
                 return False
             return True
 
-        critical_issues = qa_result.get("critical_issues") or []
-        if isinstance(critical_issues, (str, bytes)):
-            critical_issues = [critical_issues]
-        if any(_issue_requires_block(issue) for issue in critical_issues):
+        critical_issues = qa_result.get("critical_issues")
+        critical_list: list = []
+        if isinstance(critical_issues, list):
+            critical_list = critical_issues
+        elif isinstance(critical_issues, (str, bytes)):
+            critical_list = [critical_issues]
+
+        if any(_issue_requires_block(issue) for issue in critical_list):
             return True
 
         fact_check = qa_result.get("fact_check", {})
         if isinstance(fact_check, dict):
-            fact_critical_issues = fact_check.get("critical_issues") or []
-            if isinstance(fact_critical_issues, (str, bytes)):
-                fact_critical_issues = [fact_critical_issues]
-            return any(_issue_requires_block(issue) for issue in fact_critical_issues)
+            fact_critical_issues = fact_check.get("critical_issues")
+            fact_critical_list: list = []
+            if isinstance(fact_critical_issues, list):
+                fact_critical_list = fact_critical_issues
+            elif isinstance(fact_critical_issues, (str, bytes)):
+                fact_critical_list = [fact_critical_issues]
+            return any(_issue_requires_block(issue) for issue in fact_critical_list)
         return False
 
     @staticmethod
@@ -7802,8 +7806,10 @@ class MultiAgentAssistant:
         if on_status_change:
             raw_on_status_change = on_status_change
 
-            def on_status_change(status_message: str) -> None:
+            def _wrapped_status_change(status_message: str) -> None:
                 raw_on_status_change(_plain_progress_status(status_message))
+
+            on_status_change = _wrapped_status_change  # pyright: ignore[reportRedeclaration]
 
         self._append_user_message(message)
         start_time = time.time()

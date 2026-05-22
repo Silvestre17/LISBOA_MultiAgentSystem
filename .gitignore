@@ -6,6 +6,7 @@ transport_runtime_artifacts/
 
 # Specific Files
 .github/copilot-instructions.md
+.claude/
 desktop.ini
 test_**.txt
 logs_**.txt

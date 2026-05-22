@@ -27,6 +27,11 @@ from agent.state import (
     WeatherContext,
     create_initial_state,
 )
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agent.graph import MultiAgentAssistant, create_multiagent_assistant, get_all_tools
+    import agent.agents as agents
 
 
 def __getattr__(name: str):
@@ -56,7 +61,7 @@ def __getattr__(name: str):
     raise AttributeError(f"module 'agent' has no attribute {name!r}")
 
 
-__all__ = [
+__all__ = [  # pyright: ignore[reportUnsupportedDunderAll]
     # Graph
     "get_all_tools",
     "MultiAgentAssistant",

@@ -5078,7 +5078,7 @@ def search_cultural_events(
 
 
 @tool
-def search_places_attractions(
+def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
     query: Optional[str] = None,
     category: Optional[str] = None,
     max_results: int = 10,

@@ -11,7 +11,7 @@
 import re
 import unicodedata
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 _PT_CATEGORY_VALUE_MAP = {
@@ -6432,7 +6432,7 @@ def _build_researcher_place_intro_lines(
     ]
 
 
-def _parse_structured_event_cards(text: str, language: str = "en") -> tuple[list[str], list[dict[str, object]], str]:
+def _parse_structured_event_cards(text: str, language: str = "en") -> tuple[list[str], list[dict[str, Any]], str]:
     """Parse structured event-card markdown into intro lines, event dicts, and a source line."""
     if not text:
         return [], [], ""
@@ -6486,7 +6486,7 @@ def _parse_structured_event_cards(text: str, language: str = "en") -> tuple[list
         r"^[-*]\s+\*\*(?P<emoji>[\U0001F300-\U0001FAFF\u2300-\u27BF\uFE0F\u200D]+)\s+(?P<title>.+?)\*\*\s*$"
     )
 
-    def _new_event(icon: str, title: str) -> dict[str, object]:
+    def _new_event(icon: str, title: str) -> dict[str, Any]:
         return {
             "icon": icon,
             "title": title,
@@ -6503,7 +6503,7 @@ def _parse_structured_event_cards(text: str, language: str = "en") -> tuple[list
             "extra_lines": [],
         }
 
-    def _assign_line(line: str, event: dict[str, object]) -> None:
+    def _assign_line(line: str, event: dict[str, Any]) -> None:
         for segment in re.split(
             r"\s+(?:\|\||--|—|–|\||- )\s+(?=(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]|https?://|\*\*))",
             re.sub(r"^(?:[-*•]\s+)?", "", line.strip()),
@@ -6524,8 +6524,9 @@ def _parse_structured_event_cards(text: str, language: str = "en") -> tuple[list
                 continue
             match = bullet_re.match(stripped)
             if not match:
-                if stripped not in event["extra_lines"]:
-                    event["extra_lines"].append(stripped)
+                extra_list = event.get("extra_lines")
+                if isinstance(extra_list, list) and stripped not in extra_list:
+                    extra_list.append(stripped)
                 continue
             emoji = (match.group("emoji") or "").strip()
             label = _strip_accents_compat((match.group("label") or "").strip().rstrip(":")).lower()
@@ -6558,13 +6559,14 @@ def _parse_structured_event_cards(text: str, language: str = "en") -> tuple[list
                     return
                 event[normalized_key] = cleaned_value
                 continue
-            if stripped not in event["extra_lines"]:
-                event["extra_lines"].append(stripped)
+            extra_list = event.get("extra_lines")
+            if isinstance(extra_list, list) and stripped not in extra_list:
+                extra_list.append(stripped)
 
     intro_lines: list[str] = []
-    events: list[dict[str, object]] = []
+    events: list[dict[str, Any]] = []
     source_line = ""
-    current_event: Optional[dict[str, object]] = None
+    current_event: Optional[dict[str, Any]] = None
 
     def _flush() -> None:
         nonlocal current_event
@@ -7032,7 +7034,7 @@ def format_researcher_event_cards(text: str, language: str = "en", user_query: s
             base,
         )
 
-    def _new_event(icon: str, title: str) -> dict[str, object]:
+    def _new_event(icon: str, title: str) -> dict[str, Any]:
         return {
             "icon": icon,
             "title": title,
@@ -7053,7 +7055,7 @@ def format_researcher_event_cards(text: str, language: str = "en", user_query: s
         url_match = re.search(r"https?://\S+", value)
         return url_match.group(0).rstrip(").,;") if url_match else ""
 
-    def _assign_segment(segment: str, event: dict[str, object]) -> None:
+    def _assign_segment(segment: str, event: dict[str, Any]) -> None:
         stripped = segment.strip()
         if not stripped:
             return
@@ -7138,7 +7140,7 @@ def format_researcher_event_cards(text: str, language: str = "en", user_query: s
             return
         event["extra_lines"].append(plain)
 
-    def _flush_event(event: Optional[dict[str, object]], output_lines: list[str]) -> None:
+    def _flush_event(event: Optional[dict[str, Any]], output_lines: list[str]) -> None:
         if not event:
             return
         if output_lines and output_lines[-1] != "":
@@ -7174,14 +7176,16 @@ def format_researcher_event_cards(text: str, language: str = "en", user_query: s
         )
         if tickets_link:
             output_lines.append(f"    - 🎟️ {tickets_link}")
-        for extra_line in event["extra_lines"]:
-            if not _event_has_note_like_description(str(extra_line)) and not str(extra_line).strip().startswith(("⚠️", "🔎", "💡")):
-                output_lines.append(f"    - {str(extra_line)}")
+        extra_lines = event.get("extra_lines")
+        if isinstance(extra_lines, list):
+            for extra_line in extra_lines:
+                if not _event_has_note_like_description(str(extra_line)) and not str(extra_line).strip().startswith(("⚠️", "🔎", "💡")):
+                    output_lines.append(f"    - {str(extra_line)}")
         output_lines.append("")
 
     lines = text.splitlines()
     output_lines: list[str] = []
-    current_event: Optional[dict[str, object]] = None
+    current_event: Optional[dict[str, Any]] = None
     transformed = False
     skipping_summary_block = False
 
@@ -7317,10 +7321,10 @@ def format_researcher_card(text: str, language: str = "en", user_query: str = ""
     labels = _researcher_card_labels(language)
     lines = text.splitlines()
     output_lines: list[str] = []
-    rendered_cards: list[dict[str, object]] = []
+    rendered_cards: list[dict[str, Any]] = []
     saw_intro_text = False
     transformed = False
-    current_card: Optional[dict[str, object]] = None
+    current_card: Optional[dict[str, Any]] = None
 
     def flush_card() -> None:
         nonlocal current_card
@@ -7605,8 +7609,10 @@ def format_researcher_card(text: str, language: str = "en", user_query: str = ""
                 current_card["description"] = description_value
         else:
             extra_line = _clean_place_field_value(normalized_line, "extra")
-            if extra_line and extra_line not in current_card["extra_lines"]:
-                current_card["extra_lines"].append(extra_line)
+            if extra_line:
+                extra_list = current_card.get("extra_lines")
+                if isinstance(extra_list, list) and extra_line not in extra_list:
+                    extra_list.append(extra_line)
 
     flush_card()
 

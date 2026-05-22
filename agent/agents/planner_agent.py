@@ -8064,7 +8064,7 @@ def _select_planner_cards_for_request(cards: List[Dict[str, str]], user_message:
                 card for score, card in cultural_scored_cards[1:]
                 if (
                     score >= 25
-                    or _planner_card_distance_km(card) is not None and _planner_card_distance_km(card) <= 2.5
+                    or ((dist := _planner_card_distance_km(card)) is not None and dist <= 2.5)
                     or _planner_card_matches_area(card, _extract_compact_plan_area_anchor(user_message))
                 )
             ]

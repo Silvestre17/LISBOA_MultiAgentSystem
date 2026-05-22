@@ -40,6 +40,7 @@ class UserContext(TypedDict, total=False):
     requires_bilingual_note: bool
     available_time: int
     mobility: str
+    conversation_anchors: dict
 
 
 class WeatherContext(TypedDict, total=False):
