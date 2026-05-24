@@ -166,30 +166,40 @@ def find_nearest_stops_for_place(
 ) -> Dict[str, Any]:
     """Resolve a place to nearby metro, train, and Carris Urban stops using coordinates."""
     try:
-        from tools.carris_api import _get_db_connection, geocode_location
+        from tools.carris_api import get_carris_urban_db_connection
     except ImportError:
         return {}
 
-    lat, lon, display_name = geocode_location(place_name)
-    if lat is None or lon is None:
-        try:
-            from tools.location_resolver import geocode_location_name
-        except ImportError:
-            geocoded = None
-        else:
-            geocoded = geocode_location_name(place_name, prefer_city=True, allow_aml=True)
-
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    display_name: Optional[str] = None
+    try:
+        from tools.location_resolver import geocode_location_name
+        geocoded = geocode_location_name(place_name, prefer_city=True, allow_aml=True)
         if geocoded:
             lat = geocoded.get("lat")
             lon = geocoded.get("lon")
-            display_name = geocoded.get("display_name") or geocoded.get("full_display_name") or display_name
+            display_name = geocoded.get("display_name") or geocoded.get("full_display_name")
+    except ImportError:
+        logger.debug("location_resolver not available; will try Carris geocoder for '%s'", place_name)
+    except Exception as exc:
+        logger.debug("location_resolver geocoding failed for '%s': %s", place_name, exc)
+
+    if lat is None or lon is None:
+        try:
+            from tools.carris_api import geocode_location as _carris_geocode
+            lat, lon, display_name = _carris_geocode(place_name)
+        except ImportError:
+            logger.debug("Carris geocoder not available for '%s'", place_name)
+        except Exception as exc:
+            logger.debug("Carris geocoder failed for '%s': %s", place_name, exc)
 
     if lat is None or lon is None:
         return {}
 
     landmark = get_landmark_info(place_name) or {}
     nearby_stops: List[Dict[str, Any]] = []
-    connection = _get_db_connection()
+    connection = get_carris_urban_db_connection()
     if connection:
         try:
             cursor = connection.cursor()

@@ -525,8 +525,17 @@ def _search_wikipedia(query: str, language: str = "pt") -> Optional[str]:
         # We avoid 'sentences=...' to get the full intro.
         summary = page.summary
 
+        safe_page_url = str(page.url or "")
+        if "(" in safe_page_url or ")" in safe_page_url:
+            try:
+                from urllib.parse import urlparse, urlunparse
+                parsed = urlparse(safe_page_url)
+                encoded_path = parsed.path.replace("(", "%28").replace(")", "%29")
+                safe_page_url = urlunparse(parsed._replace(path=encoded_path))
+            except Exception:
+                pass
         return f"""📚 **Wikipédia: {page.title}**
-🔗 URL: {page.url}
+🔗 [Wikipedia]({safe_page_url})
 
 {summary}
 """
@@ -563,7 +572,16 @@ def _fetch_wikipedia_rest_summary(page_title: str, language: str = "pt") -> Opti
     page_url = str(payload.get("content_urls", {}).get("desktop", {}).get("page") or "").strip()
     if not summary:
         return None
-    url_line = f"🔗 URL: {page_url}" if page_url else f"🔗 URL: https://{normalized_language}.wikipedia.org/wiki/{quote(resolved_title.replace(' ', '_'), safe='_')}"
+    page_url = page_url or f"https://{normalized_language}.wikipedia.org/wiki/{quote(resolved_title.replace(' ', '_'), safe='_')}"
+    if "(" in page_url or ")" in page_url:
+        try:
+            from urllib.parse import urlparse, urlunparse
+            parsed = urlparse(page_url)
+            encoded_path = parsed.path.replace("(", "%28").replace(")", "%29")
+            page_url = urlunparse(parsed._replace(path=encoded_path))
+        except Exception:
+            pass
+    url_line = f"🔗 [Wikipedia]({page_url})"
     return f"📚 **Wikipédia: {resolved_title}**\n{url_line}\n\n{summary}\n"
 
 # ==========================================================================

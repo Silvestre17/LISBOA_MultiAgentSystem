@@ -493,8 +493,6 @@ class WeatherAgent(BaseAgent):
         tokens = re.findall(r"[a-z]+", normalized_query or "")
         if any(token in {"tomorrow", "amanha"} for token in tokens):
             return True
-        # Common accent/typing corruptions observed in prompt runs: amahna,
-        # amanha with swapped letters, and close edit-distance variants.
         for token in tokens:
             if token.startswith("aman") or token.startswith("amah"):
                 if abs(len(token) - len("amanha")) <= 2:
@@ -582,19 +580,27 @@ class WeatherAgent(BaseAgent):
             "londres": "Londres",
             "london": "London",
         }
-        weather_terms = [
-            "weather",
-            "tempo",
-            "forecast",
-            "previsao",
-            "rain",
-            "chuva",
-            "temperature",
-            "temperatura",
-            "wind",
-            "vento",
-        ]
-        if not any(term in normalized for term in weather_terms):
+        local_business_context = bool(
+            re.search(
+                r"\b(?:hotel|hotels|hoteis|hotéis|restaurante|restaurantes|restaurant|"
+                r"restaurants|bar|bares|cafe|caf[eé]|terra[cç]o|esplanada|loja|lojas)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+        explicit_weather_re = (
+            r"\b(?:weather|tempo|forecast|previs[aã]o|rain|rains|raining|chuva|"
+            r"chover|chove|chovendo|temperature|temperatura|wind|windy|vento|"
+            r"ventando|nublado|cloudy|frio|cold|quente|warm|hot|sol|sunny)\b"
+        )
+        strong_weather_re = (
+            r"\b(?:weather|tempo|forecast|previs[aã]o|rain|rains|raining|chuva|"
+            r"chover|chove|chovendo|temperature|temperatura|wind|windy|vento|"
+            r"ventando|nublado|cloudy)\b"
+        )
+        if not re.search(explicit_weather_re, normalized, flags=re.IGNORECASE):
+            return None
+        if local_business_context and not re.search(strong_weather_re, normalized, flags=re.IGNORECASE):
             return None
 
         raw_message = str(user_message or "")
@@ -729,27 +735,58 @@ class WeatherAgent(BaseAgent):
             "primavera",
             "outono",
         ]
+        short_range_anchor_terms = [
+            "today",
+            "tonight",
+            "tomorrow",
+            "this week",
+            "this weekend",
+            "now",
+            "next few days",
+            "hoje",
+            "amanha",
+            "amanhã",
+            "esta noite",
+            "esta semana",
+            "este fim de semana",
+            "este fim-de-semana",
+            "agora",
+            "proximos dias",
+            "próximos dias",
+        ]
         has_climate_term = any(term in normalized for term in climate_terms)
         has_average_term = any(term in normalized for term in average_terms)
         has_month_or_season = any(term in normalized for term in month_or_season_terms)
+        has_short_range_anchor = any(term in normalized for term in short_range_anchor_terms)
         asks_temperature = bool(re.search(r"\b(temperature|temperatura|temp)\b", normalized))
-        return has_climate_term or (has_average_term and has_month_or_season and asks_temperature)
+        if has_climate_term:
+            return True
+        if has_average_term and has_month_or_season and asks_temperature:
+            return True
+        if has_month_or_season and not has_short_range_anchor:
+            return True
+        return False
 
     @staticmethod
     def _build_climate_average_limit_message(language: str) -> str:
         """Builds a localized message for unsupported climatology-average requests."""
+        timestamp = datetime.now().strftime("%H:%M")
         if language == "pt":
             return (
                 "### 🌤️ **Âmbito Meteorológico**\n\n"
                 "⚠️ Não tenho dados climatológicos ou médias históricas neste sistema. "
                 "A cobertura meteorológica disponível é previsão IPMA de curto prazo para Lisboa, "
-                "até 5 dias, e avisos atuais."
+                "até 5 dias, e avisos atuais.\n\n"
+                "📌 **Fonte:** [*IPMA*](https://www.ipma.pt) | **Atualizado:** "
+                f"{timestamp}"
             )
         return (
             "### 🌤️ **Weather Scope**\n\n"
             "⚠️ I don't have climatology data or historical weather averages in this system. "
             "The available weather coverage is short-range IPMA forecasts for Lisbon, "
-            "up to 5 days, plus current warnings."
+            "up to 5 days, plus current warnings.\n\n"
+            "📌 **Source:** [*IPMA*](https://www.ipma.pt/en/) | **Updated:** "
+            f"{timestamp}"
         )
 
     @classmethod

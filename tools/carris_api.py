@@ -850,6 +850,16 @@ def _get_db_connection() -> Optional[sqlite3.Connection]:
         return None
 
 
+def get_carris_urban_db_connection() -> Optional[sqlite3.Connection]:
+    """Public entry-point for Carris Urban GTFS SQLite access.
+
+    External callers (e.g. transport_api) should use this instead of the
+    private ``_get_db_connection`` so that internal Carris implementation
+    details can evolve independently.
+    """
+    return _get_db_connection()
+
+
 def _get_active_services(
     conn: sqlite3.Connection, date: Optional[datetime] = None
 ) -> List[str]:
@@ -1505,6 +1515,81 @@ def carris_get_stops(query: str = "", limit: Optional[int] = None) -> str:
         return f"Erro ao pesquisar paragens: {e}"
 
 
+def _compact_route_stop_names(stop_names: List[str], max_names: int = 12) -> List[str]:
+    """Return a compact representative stop sequence."""
+    cleaned = [str(name or "").strip() for name in stop_names if str(name or "").strip()]
+    if len(cleaned) <= max_names:
+        return cleaned
+    head_count = max(3, max_names // 2)
+    tail_count = max(3, max_names - head_count)
+    return [*cleaned[:head_count], "...", *cleaned[-tail_count:]]
+
+
+def _sample_route_stop_sequences(
+    conn: sqlite3.Connection,
+    route_ids: List[str],
+    *,
+    max_sequences: int = 4,
+    max_stop_names: int = 12,
+) -> List[Dict[str, Any]]:
+    """Sample representative GTFS stop sequences for Carris route variants."""
+    if not route_ids:
+        return []
+
+    cursor = conn.cursor()
+    placeholders = ",".join(["?"] * len(route_ids))
+    cursor.execute(
+        f"""
+        SELECT
+            t.trip_id,
+            t.route_id,
+            COALESCE(t.direction_id, 0) AS direction_id,
+            COALESCE(t.shape_id, '') AS shape_id,
+            r.route_short_name,
+            COALESCE(r.route_long_name, '') AS route_long_name,
+            COUNT(st.stop_id) AS stop_count
+        FROM trips t
+        JOIN routes r ON t.route_id = r.route_id
+        JOIN stop_times st ON t.trip_id = st.trip_id
+        WHERE t.route_id IN ({placeholders})
+        GROUP BY t.route_id, COALESCE(t.direction_id, 0), COALESCE(t.shape_id, ''), r.route_short_name, r.route_long_name
+        ORDER BY r.route_short_name, r.route_long_name, COALESCE(t.direction_id, 0), stop_count DESC
+        LIMIT ?
+        """,
+        [*route_ids, max_sequences],
+    )
+    trips = cursor.fetchall()
+    samples: List[Dict[str, Any]] = []
+
+    for trip in trips:
+        cursor.execute(
+            """
+            SELECT s.stop_name
+            FROM stop_times st
+            JOIN stops s ON st.stop_id = s.stop_id
+            WHERE st.trip_id = ?
+            ORDER BY st.stop_sequence
+            """,
+            (trip["trip_id"],),
+        )
+        stop_names = [row["stop_name"] for row in cursor.fetchall()]
+        if not stop_names:
+            continue
+        samples.append(
+            {
+                "route_short_name": trip["route_short_name"],
+                "variant": trip["route_long_name"] or "Variant without long name",
+                "direction_id": trip["direction_id"],
+                "stop_count": len(stop_names),
+                "first_stop": stop_names[0],
+                "last_stop": stop_names[-1],
+                "stops": _compact_route_stop_names(stop_names, max_names=max_stop_names),
+            }
+        )
+
+    return samples
+
+
 @tool
 def carris_get_routes(route_type: str = "", route_id: str = "", limit: int = 50) -> str:
     """
@@ -1549,32 +1634,50 @@ def carris_get_routes(route_type: str = "", route_id: str = "", limit: int = 50)
 
         cursor.execute(sql, params)
         rows = cursor.fetchall()
-        conn.close()
 
         if not rows:
+            conn.close()
             filter_msg = f" (tipo: {route_type})" if route_type else ""
             return f"Nenhuma rota Carris encontrada{filter_msg}"
 
         if route_id:
             variants = []
             route_short_names = []
+            route_ids = []
             for route in rows:
+                route_ids.append(route["route_id"])
                 short_name = route["route_short_name"]
                 long_name = route["route_long_name"] or "Sem designação na fonte"
                 if short_name not in route_short_names:
                     route_short_names.append(short_name)
                 if long_name not in variants:
                     variants.append(long_name)
+            stop_sequences = _sample_route_stop_sequences(conn, route_ids)
+            conn.close()
 
             title_route = ", ".join(route_short_names) or route_id
             icon = "🚋" if any(name.endswith("E") for name in route_short_names) else "🚌"
             response = f"### {icon} **Carris Urban route {title_route}**\n\n"
             response += "- **Operator:** Carris Urban\n"
-            response += "- **Route variants in GTFS:**\n"
+            response += "- **Source data:** official Carris data\n"
+            response += "- **Route variants:**\n"
             for variant in variants[:6]:
                 response += f"    - {variant}\n"
             if len(variants) > 6:
                 response += f"    - ... and {len(variants) - 6} more variants\n"
+            if stop_sequences:
+                response += "\n- **Representative stop sequences:**\n"
+                for sample in stop_sequences:
+                    stops = " -> ".join(sample["stops"])
+                    response += (
+                        f"    - **{sample['variant']}** "
+                        f"({sample['stop_count']} stops; {sample['first_stop']} -> {sample['last_stop']}): "
+                        f"{stops}\n"
+                    )
+                response += (
+                    "\n- **Limitation:** these are representative stop sequences; "
+                    "live vehicle position and next departures require the real-time/departure tools."
+                )
             return response.strip()
 
         trams = [r for r in rows if r["route_short_name"].endswith("E")]
@@ -1602,9 +1705,12 @@ def carris_get_routes(route_type: str = "", route_id: str = "", limit: int = 50)
             response += "\n"
 
         response += f"Total: {len(trams)} elétricos + {len(buses)} autocarros\n"
+        conn.close()
         return response
 
     except Exception as e:
+        with contextlib.suppress(Exception):
+            conn.close()
         logger.error(f"Error getting routes: {e}")
         return f"Erro ao obter rotas: {e}"
 
@@ -2589,16 +2695,18 @@ def carris_vehicle_eta(route_short_name: str, stop_name: str) -> str:
 def carris_get_service_frequency(
     route_short_name: str,
     stop_name: Optional[str] = None,
+    language: str = "en",
 ) -> str:
     """
     Estimates bus/tram service frequency (headway) for a Carris route.
     Calculates average time between departures by time window (morning, midday, afternoon, evening).
-    Uses GTFS stop_times data since frequencies.txt is not available.
+    Uses stop_times data since frequencies.txt is not available.
 
     Args:
         route_short_name: Route number (e.g., '28E', '15E', '738', '714').
         stop_name: Optional stop name to check frequency at a specific stop.
                    If not provided, uses the first stop of the route.
+        language: Output language code ('pt' for Portuguese, 'en' for English).
 
     Returns:
         str: Formatted frequency information by time window.
@@ -2622,15 +2730,22 @@ def carris_get_service_frequency(
         route = cursor.fetchone()
         if not route:
             conn.close()
-            return f"Route '{route_short_name}' not found in Carris data."
+            return (
+                f"Linha '{route_short_name}' não encontrada nos dados da Carris."
+                if language == "pt"
+                else f"Route '{route_short_name}' not found in Carris data."
+            )
 
         route_id = route["route_id"]
 
-        # Get active services for today
         active_services = _get_active_services(conn)
         if not active_services:
             conn.close()
-            return "No active services found for today."
+            return (
+                "Sem serviços ativos encontrados para hoje."
+                if language == "pt"
+                else "No active services found for today."
+            )
 
         ph_s = ",".join(["?" for _ in active_services])
 
@@ -2643,11 +2758,14 @@ def carris_get_service_frequency(
             stop_row = cursor.fetchone()
             if not stop_row:
                 conn.close()
-                return f"Stop '{stop_name}' not found."
+                return (
+                    f"Paragem '{stop_name}' não encontrada."
+                    if language == "pt"
+                    else f"Stop '{stop_name}' not found."
+                )
             stop_id = stop_row["stop_id"]
             stop_display = stop_row["stop_name"]
         else:
-            # Use first stop on the route (stop_sequence = 1 or min)
             cursor.execute(
                 f"""
                 SELECT st.stop_id, s.stop_name
@@ -2663,7 +2781,11 @@ def carris_get_service_frequency(
             stop_row = cursor.fetchone()
             if not stop_row:
                 conn.close()
-                return f"No scheduled trips found for route '{route_short_name}' today."
+                return (
+                    f"Sem viagens programadas para a linha '{route_short_name}' hoje."
+                    if language == "pt"
+                    else f"No scheduled trips found for route '{route_short_name}' today."
+                )
             stop_id = stop_row["stop_id"]
             stop_display = stop_row["stop_name"]
 
@@ -2683,6 +2805,8 @@ def carris_get_service_frequency(
         conn.close()
 
         if not rows:
+            if language == "pt":
+                return f"Sem partidas para a linha '{route_short_name}' na paragem '{stop_display}' hoje."
             return f"No departures found for route '{route_short_name}' at '{stop_display}' today."
 
         # Parse times into minutes since midnight
@@ -2696,19 +2820,31 @@ def carris_get_service_frequency(
 
         departures = sorted(set(departures))
 
-        # Define time windows
+        is_pt = language == "pt"
+
         windows = [
-            ("🌅 Morning (06:00-09:59)", 360, 600),
-            ("☀️ Midday (10:00-13:59)", 600, 840),
-            ("🌤️ Afternoon (14:00-17:59)", 840, 1080),
-            ("🌙 Evening (18:00-22:59)", 1080, 1380),
-            ("🌃 Night (23:00-05:59)", 1380, 1800),
+            ("🌅 Manhã (06:00-09:59)" if is_pt else "🌅 Morning (06:00-09:59)", 360, 600),
+            ("☀️ Meio do dia (10:00-13:59)" if is_pt else "☀️ Midday (10:00-13:59)", 600, 840),
+            ("🌤️ Tarde (14:00-17:59)" if is_pt else "🌤️ Afternoon (14:00-17:59)", 840, 1080),
+            ("🌙 Fim do dia (18:00-22:59)" if is_pt else "🌙 Evening (18:00-22:59)", 1080, 1380),
+            ("🌃 Noite (23:00-05:59)" if is_pt else "🌃 Night (23:00-05:59)", 1380, 1800),
         ]
 
         icon = "🚋" if route_short_name.upper().endswith("E") else "🚌"
-        response = f"### {icon} **Route {route_short_name} service frequency**\n\n"
-        response += f"- 📍 **Stop:** {stop_display}\n"
-        response += f"- 📊 **Total departures today (Paragens):** {len(departures)}\n\n"
+        title = (
+            f"### {icon} **Frequência da linha {route_short_name}**\n\n"
+            if is_pt
+            else f"### {icon} **Route {route_short_name} service frequency**\n\n"
+        )
+        response = title
+        if is_pt:
+            response += f"- 📍 **Paragem:** {stop_display}\n"
+            response += f"- 📊 **Total de passagens hoje:** {len(departures)}\n\n"
+        else:
+            response += f"- 📍 **Stop:** {stop_display}\n"
+            response += f"- 📊 **Total departures today:** {len(departures)}\n\n"
+
+        frequency_windows: list[tuple[str, int]] = []
 
         for window_name, start_min, end_min in windows:
             window_deps = [d for d in departures if start_min <= d < end_min]
@@ -2716,27 +2852,69 @@ def carris_get_service_frequency(
             if len(window_deps) < 2:
                 if len(window_deps) == 1:
                     t = window_deps[0]
-                    response += f"**{window_name}**\n"
-                    response += f"    - 🕒 One departure: {_format_service_clock(t)}\n"
+                    response += f"- **{window_name}**\n"
+                    label = "Uma partida" if is_pt else "One departure"
+                    response += f"    - 🕒 {label}: {_format_service_clock(t)}\n"
                 else:
-                    response += f"**{window_name}**\n"
-                    response += "    - No service\n"
+                    response += f"- **{window_name}**\n"
+                    response += f"    - {'Sem serviço' if is_pt else 'No service'}\n"
                 continue
 
-            # Calculate headways between consecutive departures
             headways = [window_deps[i + 1] - window_deps[i] for i in range(len(window_deps) - 1)]
             avg_headway = sum(headways) / len(headways)
             min_headway = min(headways)
             max_headway = max(headways)
 
+            clean_window_name = re.sub(r"^[^\w]+", "", window_name).split("(", 1)[0].strip().lower()
+            frequency_windows.append((clean_window_name, round(avg_headway)))
+
             first_dep = window_deps[0]
             last_dep = window_deps[-1]
 
-            response += f"**{window_name}**\n"
-            response += f"    - ⏱️ **Avg frequency:** {avg_headway:.0f} min · **Min/Max:** {min_headway}-{max_headway} min\n"
-            response += f"    - 🕒 **First:** {_format_service_clock(first_dep)} · **Last:** {_format_service_clock(last_dep)} · {icon} **Departures:** {len(window_deps)}\n\n"
+            response += f"- **{window_name}**\n"
+            if is_pt:
+                response += f"    - ⏱️ **Freq. média:** {avg_headway:.0f} min · **Mín/Máx:** {min_headway}-{max_headway} min\n"
+                response += f"    - 🕒 **Primeira:** {_format_service_clock(first_dep)} · **Última:** {_format_service_clock(last_dep)} · {icon} **Passagens:** {len(window_deps)}\n\n"
+            else:
+                response += f"    - ⏱️ **Avg frequency:** {avg_headway:.0f} min · **Min/Max:** {min_headway}-{max_headway} min\n"
+                response += f"    - 🕒 **First:** {_format_service_clock(first_dep)} · **Last:** {_format_service_clock(last_dep)} · {icon} **Departures:** {len(window_deps)}\n\n"
 
-        response += "⚠️ Frequencies can vary with traffic and service changes.\n"
+        response += (
+            "⚠️ As frequências podem variar com o tráfego e alterações ao serviço.\n"
+            if is_pt
+            else "⚠️ Frequencies can vary with traffic and service changes.\n"
+        )
+
+        if frequency_windows:
+            if len(frequency_windows) == 1:
+                w, mins = frequency_windows[0]
+                direct = (
+                    f"A linha {route_short_name} circula em média de {mins} em {mins} minutos durante a {w}."
+                    if is_pt
+                    else f"The {route_short_name} runs every {mins} minutes on average in the {w}."
+                )
+            else:
+                if is_pt:
+                    joined = " e ".join(
+                        f"de {mins} em {mins} minutos durante a {w}"
+                        for w, mins in frequency_windows[:2]
+                    )
+                    direct = f"A linha {route_short_name} circula {joined}."
+                else:
+                    joined = " and ".join(
+                        f"every {mins} minutes in the {w}"
+                        for w, mins in frequency_windows[:2]
+                    )
+                    direct = f"The {route_short_name} runs {joined}."
+        else:
+            direct = (
+                f"Encontrei partidas para a linha {route_short_name}, mas não foram suficientes num período para calcular uma frequência regular."
+                if is_pt
+                else f"I found departures for route {route_short_name}, but there were not enough departures in a time window to calculate a regular frequency."
+            )
+
+        da_label = "✅ **Resposta direta:**" if is_pt else "✅ **Direct answer:**"
+        response = response.replace(title, f"{title}{da_label} {direct}\n\n", 1)
 
         return response
 

@@ -9,15 +9,10 @@
 #     - Multiple specialized tools for Lisbon data
 # ==========================================================================
 
-# Required libraries:
-# pip install langgraph langchain-core
-
 import json
 import logging
 import re
 import unicodedata
-
-# Always need as_completed for collecting parallel results
 import time as time_module
 from concurrent.futures import as_completed
 from datetime import datetime
@@ -1962,15 +1957,131 @@ class MultiAgentAssistant:
         if plan_like_request and not direct_mobility_opener:
             return False
         if re.search(
+            r"\b(?:eventos?|events?|m[uú]sica|music|concertos?|concerts?|festival|festivais|"
+            r"fado|cultura|culture|teatr|theatre|exposi[cç]|exhibit|espetacul|spectacle)\b",
+            normalized,
+        ) and not direct_mobility_opener:
+            return False
+        _norm_no_neg = re.sub(
+            r"\b(?:no|not|without|sem|n[aã]o|nem|sans)\s+"
+            r"(?:metro|bus|autocarro|autocarros|comboio|train|carris|tram|el[eé]trico|"
+            r"cp\b|fertagus|transportes?|transport|barco|ferry)\b",
+            "",
+            normalized,
+        )
+        _transport_mode_word_re = re.compile(
+            r"\b(?:metro|bus|autocarro|autocarros|comboio|train|carris|tram|el[eé]trico|"
+            r"cp\b|fertagus|transportes?|transport|barco|ferry)\b"
+        )
+        if re.search(r"\b(?:walk(?:ing)?|a\s+p[eé]|a\s+pe|a\s+caminhar|caminhando)\b", normalized):
+            if not _transport_mode_word_re.search(_norm_no_neg):
+                return False
+        if re.search(
             r"\b(?:como\s+(?:vou|chego|posso\s+ir)|quero\s+ir|vou\s+de|rota|trajeto|percurso|"
             r"transporte|transportes|metro|autocarros?|comboios?|eletricos?|"
             r"how\s+(?:do|can)\s+i\s+(?:get|go)|i\s+want\s+to\s+go|route|journey|"
             r"transport|transit|metro|bus|buses|train|trains|tram|trams)\b",
-            normalized,
+            _norm_no_neg,
         ):
             return True
         return bool(
             re.search(r"\b(?:from\s+.+?\s+to\s+.+|de\s+.+?\s+(?:para|ate|a|ao)\s+.+)\b", normalized)
+        )
+
+    @classmethod
+    def _simple_walking_route_slots(cls, message: str) -> tuple[str, str] | None:
+        """Extract origin/destination for simple walking-only route requests."""
+        raw = re.sub(r"\s+", " ", str(message or "")).strip(" .?!")
+        if not raw:
+            return None
+        normalized = cls._fold_context_text(raw)
+        has_explicit_walk_keyword = bool(
+            re.search(r"\b(?:walk(?:ing)?|on\s+foot|by\s+foot|a\s+pe|caminhar|caminhada)\b", normalized)
+        )
+        _transport_mode_names = (
+            r"(?:metro|bus|buses|autocarro|autocarros|comboio|comboios|train|trains|"
+            r"carris|tram|trams|eletrico|eletricos)"
+        )
+        _neg_transport_multi_re = re.compile(
+            rf"\b(?:no|without|sem|nem|sem\s+usar|sem\s+apanhar)\s+"
+            rf"(?:{_transport_mode_names}(?:\s*,\s*|\s+(?:or|ou|e)\s+))*{_transport_mode_names}\b",
+            re.IGNORECASE,
+        )
+        negated_transport_count = sum(
+            len(re.findall(rf"\b{_transport_mode_names}\b", m.group(), re.IGNORECASE))
+            for m in _neg_transport_multi_re.finditer(normalized)
+        )
+        positive_transport_probe = _neg_transport_multi_re.sub("", normalized).strip()
+        if not has_explicit_walk_keyword and negated_transport_count < 2:
+            return None
+        if re.search(
+            r"\b(?:planeia|plan(?:ear|ning)?|roteiro|itinerario|itinerary|plano|dia\s+inteiro|full\s+day|"
+            r"visitar|visit|bairro|neighbou?rhood)\b",
+            normalized,
+        ):
+            return None
+        if re.search(
+            r"\b(?:metro|bus|buses|autocarro|autocarros|comboio|comboios|train|trains|"
+            r"carris|tram|trams|eletrico|eletricos|transportes?)\b",
+            positive_transport_probe,
+        ):
+            return None
+
+        patterns = [
+            r"\bfrom\s+(?P<origin>.+?)\s+to\s+(?P<destination>.+?)(?:[,.;?!]|$)",
+            r"\b(?:de|do|da)\s+(?P<origin>.+?)\s+(?:para|ate|até|ao|à|a(?!\s+p[ée]))\s+(?P<destination>.+?)(?:[,.;?!]|$)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, raw, flags=re.IGNORECASE)
+            if not match:
+                continue
+            origin = re.sub(r"(?i)^(?:walk(?:ing)?|ir|vou|a\s+pé|a\s+pe)\s+", "", match.group("origin"))
+            destination = match.group("destination")
+            destination = re.sub(
+                r"(?i)\s+(?:no|without|sem|nem)\s+(?:metro|bus|autocarro|comboio|train|transportes?).*$",
+                "",
+                destination,
+            )
+            origin = re.sub(r"(?i)^(?:o|a|os|as|ao|à|aos|às|the)\s+", "", origin).strip()
+            destination = re.sub(r"(?i)^(?:o|a|os|as|ao|à|aos|às|the)\s+", "", destination).strip()
+            origin = re.sub(r"\s+", " ", origin).strip(" .,:;?!")
+            destination = re.sub(r"\s+", " ", destination).strip(" .,:;?!")
+            if origin and destination and cls._fold_context_text(destination) not in {"pe", "a pe"} and origin.lower() != destination.lower():
+                return origin, destination
+        return None
+
+    @staticmethod
+    def _build_simple_walking_route_response(
+        origin: str,
+        destination: str,
+        language: str,
+    ) -> str:
+        """Build a direct high-level answer for walking-only point-to-point requests."""
+        if language == "pt":
+            guidance = (
+                f"Segue a pé de **{origin}** para **{destination}** usando o percurso pedonal mais direto "
+                "e mantendo margem para orientação local."
+            )
+            return (
+                f"### 🚶 **A pé de {origin} para {destination}**\n\n"
+                f"✅ **Resposta direta:** {guidance}\n\n"
+                "---\n\n"
+                "### 🧭 **Limitação**\n\n"
+                "- O LISBOA não tem navegação pedonal curva-a-curva nem cálculo exato de distância para este percurso.\n"
+                "- Trato isto como orientação pedonal de alto nível, não como rota GPS detalhada."
+            )
+
+        guidance = (
+            f"Walk from **{origin}** to **{destination}** using the most direct pedestrian corridor "
+            "and keep some buffer for local wayfinding."
+        )
+        return (
+            f"### 🚶 **Walking from {origin} to {destination}**\n\n"
+            f"✅ **Direct answer:** {guidance}\n\n"
+            "---\n\n"
+            "### 🧭 **Limitation**\n\n"
+            "- LISBOA does not currently provide turn-by-turn pedestrian navigation or exact walking distance for this route.\n"
+            "- Treat this as high-level walking guidance, not a detailed GPS route."
         )
 
     def _resolve_transport_destination_clarification_follow_up(
@@ -2588,7 +2699,8 @@ class MultiAgentAssistant:
                 r"recomenda|diz|diz-me|quero\s+(?:saber|ver|eventos?|locais|"
                 r"restaurantes?|monumentos?|museus?|roteiro|itinerario)|"
                 r"what|which|where|when|show|list|find|tell|give|recommend|"
-                r"eventos?|events?|metro|comboio|train|fertagus|ferry|barco|boat|"
+                r"eventos?|events?|museus?|museums?|locais?|places?|"
+                r"metro|comboio|train|fertagus|ferry|barco|boat|"
                 r"uber|bolt|taxi|autocarro|bus)\b",
                 folded,
             )
@@ -2753,6 +2865,20 @@ class MultiAgentAssistant:
                     cleaned_reply,
                     flags=re.IGNORECASE,
                 ).strip(" .,:;?!")
+            if re.match(
+                r"^(?:que|qual|quais|como|quando|onde|porque|por\s+que|"
+                r"mostra|diz-me|lista|procura|recomenda|conta-me|fala-me|"
+                r"what|which|how|when|where|why|show|tell|list|find|give|recommend)\b",
+                self._fold_context_text(cleaned_reply),
+            ):
+                anchors["pending_location_clarification"] = {}
+                return {
+                    "message": message,
+                    "routing_reasoning": (
+                        "Stale pending location clarification discarded: "
+                        "user asked a fresh question, not a location reply."
+                    ),
+                }
             fragment = re.sub(
                 r"\s+",
                 " ",
@@ -2996,17 +3122,18 @@ class MultiAgentAssistant:
         route = anchors.get("last_transport_route") if isinstance(anchors.get("last_transport_route"), dict) else {}
         current_route_pair = self._extract_route_pair_from_text(message)
         if current_route_pair and self._has_current_turn_transport_route_request(message):
-            anchors["pending_location_clarification"] = {}
-            rewritten_message = self._rewrite_explicit_transport_route_with_temporal_constraint(
-                message,
-                current_route_pair,
-                language,
-            )
-            return {
-                "message": rewritten_message,
-                "agents": ["transport"],
-                "routing_reasoning": "Current turn contains an explicit transport route, so stale route anchors were not reused.",
-            }
+            if not route_mentions_outside_aml(message):
+                anchors["pending_location_clarification"] = {}
+                rewritten_message = self._rewrite_explicit_transport_route_with_temporal_constraint(
+                    message,
+                    current_route_pair,
+                    language,
+                )
+                return {
+                    "message": rewritten_message,
+                    "agents": ["transport"],
+                    "routing_reasoning": "Current turn contains an explicit transport route, so stale route anchors were not reused.",
+                }
         mode_destination = self._extract_mode_destination_follow_up(message, language)
         if mode_destination and "transport" in last_agents:
             origin = str(route.get("origin") or "").strip()
@@ -3762,6 +3889,15 @@ class MultiAgentAssistant:
             r"tomorrow\s+morning|this\s+morning|esta noite|tonight|fim de semana|weekend|\d+\s+dias?)\b",
             folded,
         )
+        long_range_temporal = re.search(
+            r"\b(?:janeiro|fevereiro|marco|mar[cç]o|abril|maio|junho|julho|agosto|"
+            r"setembro|outubro|novembro|dezembro|january|february|march|april|may|"
+            r"june|july|august|september|october|november|december|verao|ver[aã]o|"
+            r"inverno|primavera|outono|summer|winter|spring|autumn)\b",
+            folded,
+        )
+        if long_range_temporal and not explicit_temporal:
+            return {}
         outdoor_context = re.search(
             r"\b(?:fora|exterior|ar\s+livre|outdoor|outside|fila|queue|esperar|waiting|"
             r"andar|walk|walking|visita|visit|museu|museum|terra[cç]o|terrace)\b",
@@ -3841,12 +3977,12 @@ class MultiAgentAssistant:
             ).strip(" .,:;?!")
             if target and len(target) <= 80:
                 rewritten = (
-                    f"Find confirmed place details for {target} in Lisbon. "
+                    f"Find confirmed place details for \"{target}\" in Lisbon. "
                     "The user asked for a booking/reservation, but LISBOA cannot perform transactions. "
                     "Answer that booking is not supported, then provide only confirmed contact, address, website, and official details if available."
                     if language != "pt"
                     else (
-                        f"Procura detalhes confirmados para {target} em Lisboa. "
+                        f"Procura detalhes confirmados para \"{target}\" em Lisboa. "
                         "O utilizador pediu uma reserva/compra, mas o LISBOA não faz transações. "
                         "Responde que a reserva não é suportada e mostra apenas contacto, morada, website e detalhes oficiais confirmados se existirem."
                     )
@@ -3871,17 +4007,18 @@ class MultiAgentAssistant:
 
         current_route_pair = self._extract_route_pair_from_text(message)
         if current_route_pair and self._has_current_turn_transport_route_request(message):
-            anchors["pending_location_clarification"] = {}
-            rewritten_message = self._rewrite_explicit_transport_route_with_temporal_constraint(
-                message,
-                current_route_pair,
-                language,
-            )
-            return {
-                "message": rewritten_message,
-                "agents": ["transport"],
-                "routing_reasoning": "Current turn contains a complete transport route, so previous route context was not reused.",
-            }
+            if not route_mentions_outside_aml(message):
+                anchors["pending_location_clarification"] = {}
+                rewritten_message = self._rewrite_explicit_transport_route_with_temporal_constraint(
+                    message,
+                    current_route_pair,
+                    language,
+                )
+                return {
+                    "message": rewritten_message,
+                    "agents": ["transport"],
+                    "routing_reasoning": "Current turn contains a complete transport route, so previous route context was not reused.",
+                }
 
         if re.search(
             r"\b(?:estado|status|perturba[cç][oõ]es|avarias?|servi[cç]o|circula[cç][aã]o|"
@@ -4110,6 +4247,9 @@ class MultiAgentAssistant:
         asks_route = bool(re.search(r"\b(?:how do i get|como chego|como vou|ir de|go from|get from|from|desde|a partir de)\b", normalized))
         if uses_there and asks_route:
             if not destination:
+                previous_destinations = anchors.get("last_itinerary_destinations") or []
+                if not previous_destinations and not anchors.get("last_plan_text"):
+                    return {"message": message}
                 clarification = (
                     "Which destination from the previous plan do you want directions to?"
                     if language != "pt"
@@ -4923,17 +5063,6 @@ class MultiAgentAssistant:
         else:
             final_output = formatted
 
-        # Prepend a visually formatted bilingual note when the user wrote in a
-        # language other than PT or EN (e.g., FR, DE, JA). The assistant is
-        # optimized for PT-PT and EN, so the final response is provided in
-        # English along with a small note explaining why.
-        user_ctx = self.state.get("user_context") or {}
-        if user_ctx.get("requires_bilingual_note") and final_output.strip():
-            detected = user_ctx.get("detected_language") or "und"
-            note = build_bilingual_note(detected)
-            if note and note not in final_output:
-                final_output = f"{note}\n\n{final_output}"
-
         planner_involved = "planner" in effective_agents
         single_domain_agents = [
             agent_name for agent_name in effective_agents if agent_name in {"weather", "researcher", "transport"}
@@ -5219,6 +5348,7 @@ class MultiAgentAssistant:
                 _planner_response_has_minimum_user_value,
                 _planner_response_has_closed_timed_stop,
                 _planner_response_has_transport_quality_defects,
+                _planner_response_has_local_area_drift,
                 _planner_response_loses_transport_leg_evidence,
                 _planner_response_violates_explicit_preference_contract,
                 _planner_response_missing_requested_movement,
@@ -5237,6 +5367,7 @@ class MultiAgentAssistant:
                 _repair_visible_transport_sources,
                 _repair_meal_locality_in_response,
                 _repair_response_requested_type_counts,
+                _repair_response_requested_meal_time,
             )
 
             planner_evidence_cache: dict[str, str] = {}
@@ -5311,6 +5442,7 @@ class MultiAgentAssistant:
                 or not _planner_response_has_minimum_user_value(final_output)
                 or _planner_response_has_closed_timed_stop(final_output, message)
                 or _planner_response_has_transport_quality_defects(final_output, message, str(agent_outputs.get("transport", "") or ""))
+                or _planner_response_has_local_area_drift(final_output, message)
                 or _planner_response_loses_transport_leg_evidence(final_output, str(agent_outputs.get("transport", "") or ""))
                 or _planner_response_violates_explicit_preference_contract(final_output, message)
                 or _planner_response_missing_requested_movement(final_output, message, str(agent_outputs.get("transport", "") or ""))
@@ -5343,7 +5475,19 @@ class MultiAgentAssistant:
                         if enriched_researcher_data
                         else []
                     )
-                    if enriched_cards and len(enriched_cards) >= max(2, len(researcher_cards)):
+                    compact_area = _extract_compact_plan_area_anchor(message)
+                    compact_enriched_cards = (
+                        [
+                            card for card in enriched_cards
+                            if _planner_card_matches_area(card, compact_area)
+                        ]
+                        if compact_area
+                        else []
+                    )
+                    if (
+                        compact_enriched_cards
+                        or (enriched_cards and len(enriched_cards) >= max(2, len(researcher_cards)))
+                    ):
                         researcher_data = enriched_researcher_data
                         agent_outputs["researcher"] = researcher_data
                 rebuilt_plan = _build_card_based_itinerary_fallback(
@@ -5417,6 +5561,7 @@ class MultiAgentAssistant:
                 places_data=meal_places_data,
                 language=language,
             )
+            final_output = _repair_response_requested_meal_time(final_output, message, language)
             final_output = final_post_qa_guard(final_visual_pass(final_output), language=language)
         if plan_response_needs_rebuild:
             final_output = _strip_irrelevant_planner_movement_items(
@@ -5586,6 +5731,7 @@ class MultiAgentAssistant:
                 _planner_response_has_minimum_user_value,
                 _planner_response_has_closed_timed_stop,
                 _planner_response_has_transport_quality_defects,
+                _planner_response_has_local_area_drift,
                 _planner_response_loses_transport_leg_evidence,
                 _planner_response_violates_explicit_preference_contract,
                 _planner_response_missing_requested_movement,
@@ -5637,6 +5783,7 @@ class MultiAgentAssistant:
                 or not _planner_response_has_minimum_user_value(final_output)
                 or _planner_response_has_closed_timed_stop(final_output, message)
                 or _planner_response_has_transport_quality_defects(final_output, message, str(agent_outputs.get("transport", "") or ""))
+                or _planner_response_has_local_area_drift(final_output, message)
                 or _planner_response_loses_transport_leg_evidence(final_output, str(agent_outputs.get("transport", "") or ""))
                 or _planner_response_violates_explicit_preference_contract(final_output, message)
                 or _planner_response_missing_requested_movement(
@@ -5719,6 +5866,21 @@ class MultiAgentAssistant:
             )
             final_output = _repair_visible_transport_sources(final_output)
             final_output = canonicalize_planner_source_line(final_output, language=language)
+            if (
+                not re.search(r"(?mi)^(?:📌\s*)?\*\*(?:Fonte|Source):\*\*|^(?:📌\s*)?(?:Fonte|Source):", final_output)
+                and re.search(r"\b(?:VisitLisboa|visitlisboa\.com|Morada|Address|Mais detalhes|More details)\b", str(agent_outputs.get("researcher") or ""))
+            ):
+                timestamp = datetime.now().strftime("%H:%M")
+                if language == "pt":
+                    final_output = (
+                        f"{final_output.rstrip()}\n\n"
+                        f"📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) | **Atualizado:** {timestamp}"
+                    )
+                else:
+                    final_output = (
+                        f"{final_output.rstrip()}\n\n"
+                        f"📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places) | **Updated:** {timestamp}"
+                    )
             final_output = final_post_qa_guard(final_visual_pass(final_output), language=language)
 
         if (
@@ -5769,6 +5931,7 @@ class MultiAgentAssistant:
                 _ensure_requested_return_to_origin_in_transport_section,
                 _ensure_requested_origin_target_in_transport_section,
                 _planner_response_has_minimum_user_value,
+                _planner_response_has_local_area_drift,
                 _planner_response_has_closed_timed_stop,
                 _planner_response_missing_requested_counts,
                 _planner_response_missing_requested_food_stop,
@@ -5779,6 +5942,7 @@ class MultiAgentAssistant:
                 _repair_planner_visitlisboa_details_links,
                 _repair_meal_locality_in_response,
                 _repair_response_requested_type_counts,
+                _repair_response_requested_meal_time,
                 _repair_visible_transport_sources,
                 _strip_irrelevant_planner_movement_items,
             )
@@ -5805,6 +5969,7 @@ class MultiAgentAssistant:
                 language=language,
             )
             final_output = _repair_response_requested_type_counts(final_output, message)
+            final_output = _repair_response_requested_meal_time(final_output, message, language)
             final_output = final_post_qa_guard(final_visual_pass(final_output), language=language)
             final_output = _ensure_requested_return_to_origin_in_transport_section(
                 final_output,
@@ -5814,6 +5979,7 @@ class MultiAgentAssistant:
             if (
                 not _planner_response_matches_schema(final_output)
                 or not _planner_response_has_minimum_user_value(final_output)
+                or _planner_response_has_local_area_drift(final_output, message)
                 or _planner_response_has_closed_timed_stop(final_output, message)
                 or _planner_response_missing_requested_counts(final_output, message)
                 or _planner_response_missing_requested_food_stop(final_output, message)
@@ -5850,6 +6016,7 @@ class MultiAgentAssistant:
                 if (
                     rebuilt_plan
                     and _planner_response_has_minimum_user_value(rebuilt_plan)
+                    and not _planner_response_has_local_area_drift(rebuilt_plan, message)
                     and not _planner_response_missing_requested_food_stop(rebuilt_plan, message)
                 ):
                     final_output = _strip_irrelevant_planner_movement_items(
@@ -5877,6 +6044,7 @@ class MultiAgentAssistant:
                         language=language,
                     )
                     final_output = _repair_response_requested_type_counts(final_output, message)
+                    final_output = _repair_response_requested_meal_time(final_output, message, language)
                     final_output = _ensure_requested_return_to_origin_in_transport_section(
                         final_visual_pass(final_output),
                         message,
@@ -5889,6 +6057,7 @@ class MultiAgentAssistant:
                 _build_structured_plan_fallback,
                 _ensure_requested_origin_target_in_transport_section,
                 _planner_response_has_minimum_user_value,
+                _planner_response_has_local_area_drift,
                 _planner_response_missing_requested_counts,
                 _planner_response_missing_requested_food_stop,
                 _planner_response_missing_requested_movement,
@@ -5898,6 +6067,7 @@ class MultiAgentAssistant:
                 _repair_planner_address_map_links,
                 _repair_planner_visitlisboa_details_links,
                 _repair_response_requested_type_counts,
+                _repair_response_requested_meal_time,
                 _repair_visible_transport_sources,
                 _strip_irrelevant_planner_movement_items,
             )
@@ -5913,6 +6083,7 @@ class MultiAgentAssistant:
                     value
                     and _planner_response_matches_schema(value)
                     and _planner_response_has_minimum_user_value(value)
+                    and not _planner_response_has_local_area_drift(value, message)
                     and not _planner_response_missing_requested_counts(value, message)
                     and not _planner_response_missing_requested_food_stop(value, message)
                     and not _planner_response_violates_explicit_preference_contract(value, message)
@@ -5936,13 +6107,13 @@ class MultiAgentAssistant:
                     final_output = rescue_output
                 else:
                     researcher_data = str(agent_outputs.get("researcher", "") or "")
-                    if not researcher_data:
-                        try:
-                            researcher_data = _load_planner_evidence_once()
-                            if researcher_data:
-                                agent_outputs["researcher"] = researcher_data
-                        except (NameError, UnboundLocalError):
-                            researcher_data = ""
+                    try:
+                        enriched_researcher_data = _load_planner_evidence_once()
+                    except (NameError, UnboundLocalError):
+                        enriched_researcher_data = ""
+                    if enriched_researcher_data:
+                        researcher_data = enriched_researcher_data
+                        agent_outputs["researcher"] = researcher_data
                     rebuilt_plan = _build_card_based_itinerary_fallback(
                         user_message=message,
                         language=language,
@@ -5984,6 +6155,7 @@ class MultiAgentAssistant:
                 )
                 final_output = _repair_visible_transport_sources(final_output)
                 final_output = _repair_response_requested_type_counts(final_output, message)
+                final_output = _repair_response_requested_meal_time(final_output, message, language)
                 final_output = canonicalize_planner_source_line(
                     final_visual_pass(final_output),
                     language=language,
@@ -6039,9 +6211,23 @@ class MultiAgentAssistant:
 
         if planner_involved or plan_like_request:
             try:
-                from agent.agents.planner_agent import _ensure_stop_by_stop_movement_in_response
+                from agent.agents.planner_agent import (
+                    _ensure_planner_rhythm_guidance,
+                    _ensure_stop_by_stop_movement_in_response,
+                    _neutralize_today_hours_for_future_plan,
+                )
 
                 final_output = _ensure_stop_by_stop_movement_in_response(
+                    final_output,
+                    message,
+                    language,
+                )
+                final_output = _neutralize_today_hours_for_future_plan(
+                    final_output,
+                    message,
+                    language,
+                )
+                final_output = _ensure_planner_rhythm_guidance(
                     final_output,
                     message,
                     language,
@@ -6057,6 +6243,130 @@ class MultiAgentAssistant:
             final_output = _repair_visible_transport_sources(final_output)
             final_output = canonicalize_planner_source_line(final_output, language=language)
             final_output = final_post_qa_guard(final_visual_pass(final_output), language=language)
+            researcher_tool_names = {
+                str(call.get("tool_name") or "")
+                for call in getattr(self.agents.get("researcher"), "get_tool_calls_log", lambda: [])()
+            }
+            if (
+                not re.search(r"(?mi)^(?:📌\s*)?\*\*(?:Fonte|Source):\*\*|^(?:📌\s*)?(?:Fonte|Source):", final_output)
+                and (
+                    "search_places_attractions" in researcher_tool_names
+                    or re.search(r"\b(?:VisitLisboa|visitlisboa\.com|Morada|Address|Mais detalhes|More details)\b", str(agent_outputs.get("researcher") or ""))
+                )
+            ):
+                timestamp = datetime.now().strftime("%H:%M")
+                if language == "pt":
+                    final_output = (
+                        f"{final_output.rstrip()}\n\n"
+                        f"📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) | **Atualizado:** {timestamp}"
+                    )
+                else:
+                    final_output = (
+                        f"{final_output.rstrip()}\n\n"
+                        f"📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places) | **Updated:** {timestamp}"
+                    )
+
+        if (
+            not planner_involved
+            and single_domain_agents == ["researcher"]
+            and isinstance(agent_outputs.get("researcher"), str)
+        ):
+            researcher_agent = self.agents.get("researcher")
+            filter_excluded_museum_venues = getattr(
+                researcher_agent,
+                "_filter_event_result_for_excluded_museum_venues",
+                None,
+            )
+            if callable(filter_excluded_museum_venues):
+                filtered_final_output = filter_excluded_museum_venues(
+                    final_output,
+                    message,
+                    language,
+                )
+                if filtered_final_output != final_output:
+                    final_output = final_post_qa_guard(
+                        final_visual_pass(filtered_final_output),
+                        language=language,
+                    )
+            is_history_query = bool(
+                getattr(researcher_agent, "_is_history_culture_query", lambda _msg: False)(message)
+            )
+            if is_history_query:
+                worker_text = str(agent_outputs.get("researcher") or "").strip()
+                source_lines = [
+                    line.strip()
+                    for line in worker_text.splitlines()
+                    if re.match(r"^\s*📌\s+\*\*(?:Fonte|Source):\*\*", line.strip())
+                ]
+                body_lines = [
+                    line for line in worker_text.splitlines()
+                    if not re.match(r"^\s*📌\s+\*\*(?:Fonte|Source):\*\*", line.strip())
+                ]
+                body = "\n".join(body_lines)
+                body = re.sub(r"(?m)^\s*###\s+📚\s+\*\*[^*\n]+\*\*\s*$", "", body)
+                body = re.sub(r"(?m)^\s*###\s+📚\s+[^\n]+\s*$", "", body)
+                body = re.sub(r"(?m)^\s*[-*]\s+\*\*📚\s+[^*\n]+\*\*\s*$", "", body)
+                body = re.sub(r"(?m)^\s*###\s+🎭\s+\*\*(?:Cultural Events|Eventos Culturais)\*\*\s*$", "", body)
+                body = re.sub(
+                    r"(?mi)^\s*✅\s+\*\*(?:Direct answer|Resposta direta):\*\*\s*"
+                    r"(?:I found events relevant to the request|encontrei eventos relevantes para o pedido)\.?\s*$",
+                    "",
+                    body,
+                )
+                body = re.sub(r"(?m)^\s{4,}([-*]\s+)", r"\1", body)
+                body = re.sub(r"\n{3,}", "\n\n", body).strip()
+                if body and len(body) > 80:
+                    subject = message
+                    extract_subject = getattr(researcher_agent, "_extract_history_culture_subject", None)
+                    if callable(extract_subject):
+                        subject = extract_subject(message) or subject
+                    title = (
+                        f"### 📚 **Contexto histórico: {subject}**"
+                        if language == "pt"
+                        else f"### 📚 **Historical Context: {subject}**"
+                    )
+                    direct = (
+                        "✅ **Resposta direta:** encontrei contexto histórico fundamentado para o pedido, sem sugestões de eventos."
+                        if language == "pt"
+                        else "✅ **Direct answer:** I found grounded historical context for the request, without suggesting events."
+                    )
+                    final_output = f"{title}\n\n{direct}\n\n---\n\n{body}".strip()
+                    if source_lines:
+                        final_output = f"{final_output}\n\n{source_lines[-1]}"
+                    final_output = final_post_qa_guard(final_visual_pass(final_output), language=language)
+                    final_output = re.sub(
+                        r"(?mi)^\s*[-*]\s+\*\*📚\s+(?:Historical context|Contexto histórico):[^\n]+\*\*\s*\n?",
+                        "",
+                        final_output,
+                    ).strip()
+
+        user_ctx = self.state.get("user_context") or {}
+        if user_ctx.get("requires_bilingual_note") and final_output.strip():
+            detected = user_ctx.get("detected_language") or "und"
+            note = build_bilingual_note(detected)
+            if note and note not in final_output:
+                direct_answer_match = re.search(
+                    r"(?s)^(?P<head>###\s+[^\n]+\n\n"
+                    r"✅\s+\*\*(?:Direct answer|Resposta direta):\*\*[^\n]+)"
+                    r"\n\n---\n\n",
+                    final_output,
+                )
+                if direct_answer_match:
+                    final_output = (
+                        f"{direct_answer_match.group('head')}\n\n{note}\n\n---\n\n"
+                        f"{final_output[direct_answer_match.end():].lstrip()}"
+                    )
+                elif final_output.lstrip().startswith("### "):
+                    final_output = re.sub(
+                        r"^(###\s+[^\n]+)\n+",
+                        lambda match: f"{match.group(1)}\n\n{note}\n\n---\n\n",
+                        final_output,
+                        count=1,
+                    )
+                else:
+                    final_output = f"{note}\n\n{final_output}"
+
+        final_output = final_post_qa_guard(final_visual_pass(final_output), language=language)
 
         self._update_conversation_anchors(message, final_output, effective_agents)
 
@@ -6596,6 +6906,23 @@ class MultiAgentAssistant:
         normalized_transport_text = "".join(
             char for char in normalized_transport_text if not unicodedata.combining(char)
         ).lower()
+        positive_transport_probe = re.sub(
+            r"\b(?:no|without|sem|sem\s+usar|sem\s+apanhar)\s+"
+            r"(?:metro|bus|buses|autocarro|autocarros|comboio|comboios|train|trains|"
+            r"carris|tram|trams|eletrico|eletricos)\b",
+            "",
+            normalized_user_message,
+        )
+        walking_only_request = bool(
+            re.search(r"\b(?:walk(?:ing)?|on\s+foot|by\s+foot|a\s+pe|caminhar|caminhada)\b", normalized_user_message)
+            and not re.search(
+                r"\b(?:metro|bus|buses|autocarro|autocarros|comboio|comboios|train|trains|"
+                r"carris|tram|trams|eletrico|eletricos|transportes?)\b",
+                positive_transport_probe,
+            )
+        )
+        if walking_only_request:
+            return
         requires_central_belem_leg = bool(
             re.search(r"\b(?:se de lisboa|carmo|baixa|chiado|rossio|praca do comercio)\b", normalized_user_message)
             and re.search(r"\b(?:belem|torre de belem|padrao dos descobrimentos|jeronimos)\b", normalized_user_message)
@@ -6740,7 +7067,8 @@ class MultiAgentAssistant:
         selected_cards = _select_planner_cards_for_request(cards, user_message)[:6]
         if _is_historic_gastronomy_day_request(_normalize_planner_text(user_message)):
             selected_cards = _order_historic_food_cards(
-                _select_planner_cards_for_request(cards, user_message)
+                _select_planner_cards_for_request(cards, user_message),
+                user_message,
             )[:6]
         if requires_event_food_leg:
             selected_cards = self._planner_event_food_route_cards(cards, selected_cards)
@@ -6936,6 +7264,24 @@ class MultiAgentAssistant:
             from tools.transport_api import get_route_between_stations
         except Exception as exc:
             logger.warning("Planner route repair helpers unavailable: %s", exc)
+            return response
+
+        normalized_user_message = _normalize_planner_text(user_message)
+        positive_transport_probe = re.sub(
+            r"\b(?:no|without|sem|sem\s+usar|sem\s+apanhar)\s+"
+            r"(?:metro|bus|buses|autocarro|autocarros|comboio|comboios|train|trains|"
+            r"carris|tram|trams|eletrico|eletricos)\b",
+            "",
+            normalized_user_message,
+        )
+        if (
+            re.search(r"\b(?:walk(?:ing)?|on\s+foot|by\s+foot|a\s+pe|caminhar|caminhada)\b", normalized_user_message)
+            and not re.search(
+                r"\b(?:metro|bus|buses|autocarro|autocarros|comboio|comboios|train|trains|"
+                r"carris|tram|trams|eletrico|eletricos|transportes?)\b",
+                positive_transport_probe,
+            )
+        ):
             return response
 
         origin = _extract_requested_plan_origin(user_message)
@@ -7867,6 +8213,52 @@ class MultiAgentAssistant:
             user_ctx["ui_language"] = ui_language
             user_ctx["detected_language"] = detected_language or effective_language
             user_ctx["requires_bilingual_note"] = requires_bilingual_note
+
+        if self.supervisor._is_capability_query(message):
+            capability_response = self.supervisor._sanitize_direct_response(
+                self.supervisor._build_full_capability_response(effective_language)
+            )
+            return self._finalize_chat_response(
+                response=capability_response,
+                message=message,
+                language=effective_language,
+                agents_to_call=[],
+                routing_reasoning="Direct capability query override before contextual follow-up resolution.",
+                agent_outputs={},
+                direct_response_used=True,
+                start_time=start_time,
+                workers=[],
+                run_workers_in_parallel=False,
+                qa_result=None,
+                retry_agents_used=[],
+                final_repair_ran=False,
+                simple_weather_fact_check=None,
+            )
+
+        simple_walking_slots = self._simple_walking_route_slots(message)
+        if simple_walking_slots:
+            origin, destination = simple_walking_slots
+            direct_walking_response = self._build_simple_walking_route_response(
+                origin,
+                destination,
+                effective_language,
+            )
+            return self._finalize_chat_response(
+                response=direct_walking_response,
+                message=message,
+                language=effective_language,
+                agents_to_call=[],
+                routing_reasoning="Direct walking-only route guidance; no public-transport mode requested.",
+                agent_outputs={},
+                direct_response_used=True,
+                start_time=start_time,
+                workers=[],
+                run_workers_in_parallel=False,
+                qa_result=None,
+                retry_agents_used=[],
+                final_repair_ran=False,
+                simple_weather_fact_check=None,
+            )
 
         contextual_resolution = self._resolve_contextual_follow_up(message, effective_language)
         contextual_language = str(contextual_resolution.get("language") or "").strip()
@@ -8849,6 +9241,40 @@ class MultiAgentAssistant:
                     )
                 ):
                     should_run_final_repair = False
+                if should_run_final_repair and not qa_result.get("missing_data") and critical_issues:
+                    non_repairable_researcher_issues = [
+                        issue for issue in critical_issues
+                        if re.search(
+                            r"\b(?:unverified\s+domains?|verify\s+links?|ticket|tickets|bilhetes?|"
+                            r"event\s+details|dates?,?\s+times?|prices?|visitlisboa|synced\s+daily|"
+                            r"changed|confirmad[oa]s?|confirmar|ao vivo|live|museu|museum|"
+                            r"classificad[oa]s?|venues?|espa[cç]os?)\b",
+                            str(issue or ""),
+                            flags=re.IGNORECASE,
+                        )
+                    ]
+                    if len(non_repairable_researcher_issues) == len(critical_issues):
+                        should_run_final_repair = False
+            if should_run_final_repair:
+                researcher_agent = self.agents.get("researcher")
+                is_history_query = bool(
+                    getattr(researcher_agent, "_is_history_culture_query", lambda _msg: False)(message)
+                )
+                response_text = str(response or "")
+                has_event_card_structure = bool(
+                    re.search(
+                        r"\b(?:Date/Time|Data/Hora|Data e Hora|Tickets?|Bilhetes?|Entrada(?:\s+Livre)?)\s*:",
+                        response_text,
+                        flags=re.IGNORECASE,
+                    )
+                    or re.search(r"(?m)^\s*(?:📅|🎫|🎟️)\s+\*\*", response_text)
+                )
+                if (
+                    is_history_query
+                    and len(response_text.strip()) > 200
+                    and not has_event_card_structure
+                ):
+                    should_run_final_repair = False
 
         if not planner_fallback_used and should_run_final_repair:
             if verbose:
@@ -9294,7 +9720,7 @@ class MultiAgentAssistant:
     def _extract_structured_section_parts(text: str) -> tuple[str, List[str], Optional[str]]:
         """Removes per-section source lines while collecting links and timestamps for a combined footer."""
         source_line_re = re.compile(
-            r"^(?:[-*•]\s*)?(?:📌\s*)?(?:\*\*)?(?:Fontes?|Sources?)(?:\*\*)?:.*$",
+            r"^(?:[-*•]\s*)?(?:📌\s*)?(?:\*\*)?(?:Fontes?|Sources?)\s*:?(?:\*\*)?\s*:?.*$",
             re.IGNORECASE,
         )
         timestamp_re = re.compile(r"(?:Atualizado|Updated):\s*(\d{2}:\d{2})", re.IGNORECASE)
@@ -9487,7 +9913,14 @@ class MultiAgentAssistant:
         for agent_name, output in (agent_outputs or {}).items():
             if str(agent_name).startswith("_") or not isinstance(output, str):
                 continue
-            _, links, timestamp = self._extract_structured_section_parts(output)
+            body, links, timestamp = self._extract_structured_section_parts(output)
+            body_norm = unicodedata.normalize("NFKD", str(body or "")).encode("ascii", "ignore").decode("ascii").lower()
+            if links and not re.search(
+                r"\b(?:lisboa aberta|dados abertos|dados\.cm-lisboa|open data|municipal|"
+                r"servicos municipais|municipal services|cm-lisboa)\b",
+                body_norm,
+            ):
+                links = [link for link in links if "dados.cm-lisboa.pt" not in link.lower() and "lisboa aberta" not in link.lower()]
             has_weather_evidence = True
             if agent_name == "transport":
                 agents_registry = getattr(self, "agents", {})

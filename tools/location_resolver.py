@@ -602,6 +602,11 @@ _LOCATION_CONTEXT_EXTRACTORS: Tuple[re.Pattern, ...] = (
 _LOCATION_SUFFIX_SPLITTERS: Tuple[re.Pattern, ...] = (
     re.compile(r"\s*\?\s*.*$"),
     re.compile(
+        r"\s*(?:hoje|amanh[ãa]|today|tomorrow|morning|afternoon|evening)?\s*(?:[,;]|\s+)\s*"
+        r"(?:em\s+que\s+demora|quanto\s+(?:tempo\s+)?(?:demoro|demora|leva)|how\s+long)\b.*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
         r"\s+(?:e|and)\s+(?:quanto\s+(?:tempo\s+)?(?:demoro|demora|leva)|"
         r"how\s+long|tempo\s+(?:a\s+p[eé]|de\s+caminhada)|walking\s+time)\b.*$",
         re.IGNORECASE,
@@ -1390,6 +1395,32 @@ def _build_dynamic_location_ambiguity_hints(raw_location: str) -> List[str]:
     return labels if len(labels) >= 2 else []
 
 
+_TEMPORAL_FRAGMENT_TOKENS = frozenset({
+    "manha", "manhã", "tarde", "noite", "madrugada",
+    "hoje", "amanha", "amanhã", "ontem",
+    "agora", "ja", "já", "depois", "antes",
+    "morning", "afternoon", "evening", "night", "midnight", "noon",
+    "today", "tomorrow", "yesterday", "now", "later", "soon",
+    "que", "em", "de", "do", "da", "no", "na", "para", "a", "o",
+    "as", "às", "ao", "à",
+    "demora", "demorar", "tempo", "quanto", "quantos", "quantas",
+    "how", "long", "what", "time",
+})
+
+
+def _is_temporal_only_fragment(token: str) -> bool:
+    """Return whether a fragment is composed only of temporal/grammatical fillers."""
+    if not token:
+        return True
+    cleaned = re.sub(r"[^\w\s]", " ", token).strip()
+    if not cleaned:
+        return True
+    words = [w for w in cleaned.split() if w]
+    if not words:
+        return True
+    return all(w in _TEMPORAL_FRAGMENT_TOKENS for w in words)
+
+
 def build_location_ambiguity_preamble(
     origin: str = "",
     destination: str = "",
@@ -1404,6 +1435,8 @@ def build_location_ambiguity_preamble(
     for raw_location in (origin, destination):
         token = normalize_location_text(raw_location)
         if token in {"lisbon", "lisboa", "lisboa portugal", "lisbon portugal"}:
+            continue
+        if _is_temporal_only_fragment(token):
             continue
         if token in seen:
             continue

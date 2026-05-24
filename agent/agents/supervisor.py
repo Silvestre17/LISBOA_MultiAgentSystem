@@ -288,6 +288,31 @@ class SupervisorAgent(BaseAgent):
     def _looks_like_transport_query(cls, message_lower: str) -> bool:
         """Detects transport and routing queries from natural PT/EN phrasing, not only explicit mode words."""
         normalized = cls._normalize_query(message_lower)
+        has_carris_route_code = bool(
+            re.search(r"\b\d{1,4}e\b", normalized, flags=re.IGNORECASE)
+            or re.search(
+                r"\b(?:linha|route|line|rota|tram|el[eé]trico|autocarro|bus|"
+                r"o|a|do|da|no|na|the)\s+\d{2,4}[a-z]?\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+        carris_operational_route_query = bool(
+            has_carris_route_code
+            and re.search(
+                r"\b(?:funciona|funcionar|circula|circular|passa|passar|"
+                r"detalhes?|details?|rota|route|percurso|trajeto|trajecto|"
+                r"paragens?|stops?|onde\s+est[aá]|where\s+is|agora|now|"
+                r"apanh[ao]r?|catch|running|run|service|status|"
+                r"para\b|ao\b|at[eé]\b|direction|direc[cç][aã]o|destino|"
+                r"terminus|terminal|sentido)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+            and not cls._looks_like_weather_query(normalized)
+        )
+        if carris_operational_route_query:
+            return True
         weather_only_transport_false_positive = (
             cls._looks_like_weather_query(normalized)
             and re.search(
@@ -348,6 +373,24 @@ class SupervisorAgent(BaseAgent):
             )
         )
         if event_calendar_false_positive:
+            return False
+
+        _walk_norm_no_neg = re.sub(
+            r"\b(?:no|not|without|sem|n[aã]o|nem|sans)\s+"
+            r"(?:metro|bus|autocarro|autocarros|comboio|train|carris|tram|el[eé]trico|"
+            r"cp\b|fertagus|transportes?|transport|barco|ferry)\b",
+            "",
+            normalized,
+        )
+        walking_context_false_positive = (
+            re.search(r"\ba\s+p[eé]\b|walking|a\s+pe\b|walk\b|passeio\s+a\s+p[eé]|a\s+caminhar|caminhando", normalized)
+            and not re.search(
+                r"\b(?:metro|bus|autocarro|autocarros|comboio|train|carris|tram|el[eé]trico|"
+                r"cp\b|fertagus|transportes?|transport|barco|ferry|paragem|esta[cç][aã]o)\b",
+                _walk_norm_no_neg,
+            )
+        )
+        if walking_context_false_positive:
             return False
 
         transport_patterns = [
@@ -551,9 +594,9 @@ class SupervisorAgent(BaseAgent):
             and re.search(r"\b(?:metro|subway)\b", normalized)
             and re.search(r"\b(?:linhas?|lines)\b", normalized)
             and not re.search(
-                r"\b(?:paragens?|stops|esta[cÃ§][oÃµ]es?|stations?|"
+                r"\b(?:paragens?|stops|esta[cç][oõ]es?|stations?|"
                 r"ve[iÃí]culos?|vehicles?|partidas?|departures?|"
-                r"comboios?|trains?|autocarros?|buses|servi[cÃ§]os?|services?)\b",
+                r"comboios?|trains?|autocarros?|buses|servi[cç]os?|services?)\b",
                 normalized,
             )
         ):
@@ -646,31 +689,92 @@ class SupervisorAgent(BaseAgent):
         if language == "en":
             return (
                 "### 🧭 **Outside LISBOA's Scope**\n\n"
-                "✅ **Direct answer:** that falls outside what I can validate with quality in this system.\n\n"
+                "✅ **Direct answer:** that falls outside what I can validate with quality in this Lisbon/AML system.\n\n"
                 "---\n\n"
                 "LISBOA is focused on the **Lisbon Metropolitan Area**.\n\n"
                 "💡 **I can help with:**\n"
-                "- **Weather:** forecasts and warnings for Lisbon 🌤️\n"
-                "- **Mobility:** Metro, buses, suburban trains, and trams 🚇\n"
-                "- **Culture:** events and activities 🎭\n"
-                "- **Places:** restaurants, attractions, and nearby services 📍\n"
-                "- **Planning:** personalized routes and itineraries 🗺️\n"
-                "- **Knowledge:** Lisbon history and culture 📚\n\n"
+                "- **Weather:** forecasts, warnings, and IPMA data for Lisbon and AML 🌤️\n"
+                "- **Transport:** Metro, Carris Urban, Carris Metropolitana, and CP suburban/AML 🚇\n"
+                "- **Culture & Events:** museums, exhibitions, festivals, concerts, and activities 🎭\n"
+                "- **Places & Services:** restaurants, attractions, pharmacies, hospitals, parking, and public services 📍\n"
+                "- **Planning:** personalized itineraries and day plans for Lisbon/AML 🗺️\n"
+                "- **History & Knowledge:** Lisbon history, neighborhoods, culture, and Lisboa Card guide 📚\n\n"
                 "Ask me about Lisbon/AML and I will use confirmable data whenever possible."
             )
         return (
             "### 🧭 **Fora do Âmbito do LISBOA**\n\n"
-            "✅ **Resposta direta:** isso fica fora do que consigo validar com qualidade neste sistema.\n\n"
+            "✅ **Resposta direta:** isso fica fora do que consigo validar com qualidade neste sistema focado em Lisboa/AML.\n\n"
             "---\n\n"
             "O LISBOA está focado na **Área Metropolitana de Lisboa**.\n\n"
             "💡 **Posso ajudar com:**\n"
-            "- **Meteorologia:** previsão e avisos para Lisboa 🌤️\n"
-            "- **Mobilidade:** Metro, autocarros, comboios suburbanos e elétricos 🚇\n"
-            "- **Cultura:** eventos e atividades 🎭\n"
-            "- **Locais:** restaurantes, atrações e serviços próximos 📍\n"
-            "- **Planeamento:** roteiros e percursos personalizados 🗺️\n"
-            "- **Conhecimento:** história e cultura de Lisboa 📚\n\n"
+            "- **Meteorologia:** previsão, avisos e dados IPMA para Lisboa/AML 🌤️\n"
+            "- **Transportes:** Metro, Carris Urban, Carris Metropolitana e CP suburbano/AML 🚇\n"
+            "- **Cultura & Eventos:** museus, exposições, festivais, concertos e atividades 🎭\n"
+            "- **Locais & Serviços:** restaurantes, atrações, farmácias, hospitais, estacionamento e serviços públicos 📍\n"
+            "- **Planeamento:** roteiros personalizados e planos de dia para Lisboa/AML 🗺️\n"
+            "- **História & Conhecimento:** história de Lisboa, bairros, cultura e Guia Lisboa Card 📚\n\n"
             "Pergunta-me por Lisboa/AML e eu respondo com dados confirmáveis sempre que possível."
+        )
+
+    @classmethod
+    def _is_capability_query(cls, user_message: str) -> bool:
+        """Detects queries asking what LISBOA can do, without a specific Lisbon topic."""
+        normalized = cls._normalize_query(user_message)
+        if not normalized:
+            return False
+        capability_patterns = [
+            r"\bwhat\s+can\s+(?:you|lisboa|the\s+assistant)\s+(?:do|help|assist)\b",
+            r"\bwhat\s+(?:do\s+you|can\s+you|are\s+you\s+able\s+to)\s+(?:do|know|help\s+with|assist\s+with)\b",
+            r"\bwhat\s+(?:are\s+your|your)\s+(?:capabilities|features|functions)\b",
+            r"\bwhat\s+can\s+i\s+(?:ask|request)\b",
+            r"\bhow\s+can\s+(?:you|lisboa)\s+help\b",
+            r"\btell\s+me\s+what\s+you\s+(?:do|can)\b",
+            r"\bwhat\s+(?:topics?|areas?|domains?)\s+(?:do\s+you|can\s+you)\s+cover\b",
+            r"\bo\s+que\s+(?:e\s+que\s+o?\s*)?(?:o\s+)?(?:lisboa|assistente)?\s*consegue\s+fazer\b",
+            r"\bo\s+que\s+(?:sabes?|podes?)\s+fazer\b",
+            r"\bque\s+(?:capacidades?|funcionalidades?|funcoes?|fun[cç][oõ]es?)\s+(?:tens?|tem)\b",
+            r"\bcomo\s+(?:me\s+podes?|podes?\s+me)\s+ajudar\b",
+            r"\bo\s+que\s+posso\s+(?:pedir|perguntar|pedir-te)\b",
+            r"\bem\s+que\s+(?:me\s+podes?|podes?\s+me)\s+ajudar\b",
+            r"\bque\s+(?:tipos?\s+de\s+)?(?:perguntas?|questoes?)\s+(?:posso|podes?)\b",
+            r"\bhelp\s*$",
+            r"\bajuda\s*$",
+        ]
+        return any(re.search(p, normalized, flags=re.IGNORECASE) for p in capability_patterns)
+
+    @staticmethod
+    def _build_full_capability_response(language: str) -> str:
+        """Builds the canonical all-6-capabilities response."""
+        if language == "pt":
+            return (
+                "### 🤖 **O que o LISBOA consegue fazer**\n\n"
+                "Sou o teu **Assistente Urbano de Lisboa**, especializado na "
+                "**Área Metropolitana de Lisboa (AML)**. Aqui está o que podes pedir:\n\n"
+                "- 🌤️ **Meteorologia** — previsões do tempo, avisos e dados IPMA para Lisboa e AML\n"
+                "- 🚌 **Transportes** — rotas de metro, autocarro, elétrico e comboio; "
+                "estado do serviço e informação em tempo real\n"
+                "- 🏛️ **Cultura & Eventos** — museus, exposições, festivais, concertos e atividades em Lisboa\n"
+                "- 📍 **Locais & Serviços** — restaurantes, atrações, farmácias, hospitais, "
+                "estacionamento e serviços públicos via dados abertos\n"
+                "- 🗓️ **Planeamento** — itinerários personalizados e planos de dia para Lisboa/AML\n"
+                "- 📚 **História & Conhecimento** — história de Lisboa, bairros, cultura e Guia Lisboa Card\n\n"
+                "Experimenta perguntar, por exemplo: *\"Como ir de Belém ao Oriente?\"*, "
+                "*\"Que eventos há este fim de semana?\"* ou *\"Planeia-me um dia em Alfama.\"*"
+            )
+        return (
+            "### 🤖 **What LISBOA Can Do**\n\n"
+            "I'm your **Lisbon Urban Assistant**, specialized in the "
+            "**Lisbon Metropolitan Area (AML)**. Here's what you can ask me:\n\n"
+            "- 🌤️ **Weather** — forecasts, warnings, and IPMA data for Lisbon and AML\n"
+            "- 🚌 **Transport** — metro, bus, tram, and train routes; "
+            "service status and real-time information\n"
+            "- 🏛️ **Culture & Events** — museums, exhibitions, festivals, concerts, and activities in Lisbon\n"
+            "- 📍 **Places & Services** — restaurants, attractions, pharmacies, hospitals, "
+            "parking, and public services via open data\n"
+            "- 🗓️ **Planning** — personalized itineraries and day plans for Lisbon/AML\n"
+            "- 📚 **History & Knowledge** — Lisbon's history, neighborhoods, culture, and Lisboa Card guide\n\n"
+            "Try asking: *\"How do I get from Belém to Oriente?\"*, "
+            "*\"What events are on this weekend?\"*, or *\"Plan me a day in Alfama.\"*"
         )
 
     def _direct_routing_override(self, user_message: str, language: str) -> Optional[Dict[str, Any]]:
@@ -680,6 +784,13 @@ class SupervisorAgent(BaseAgent):
                 "reasoning": "Direct greeting override",
                 "agents": [],
                 "direct_response": self._sanitize_direct_response(self._build_greeting_response(language)),
+            }
+
+        if self._is_capability_query(user_message):
+            return {
+                "reasoning": "Direct capability query override",
+                "agents": [],
+                "direct_response": self._sanitize_direct_response(self._build_full_capability_response(language)),
             }
 
         if self._is_unsupported_action_request(user_message) and route_mentions_outside_aml(user_message):
@@ -889,10 +1000,7 @@ class SupervisorAgent(BaseAgent):
                 "direct_response": None,
             }
 
-        # A single recommendation for one museum/monument in a constrained time
-        # window is not an itinerary. Route it to Researcher so the after-hours
-        # availability guard can answer conservatively instead of publishing a
-        # generic planner skeleton.
+        # Single time-windowed museum recommendation → researcher (not planner skeleton).
         if (
             re.search(r"\b(?:recomendas?|recommend|suggest|qual|which)\b", message_lower)
             and re.search(r"\b(?:museu|museus|museum|museums|monumento|monument)\b", message_lower)
@@ -945,8 +1053,31 @@ class SupervisorAgent(BaseAgent):
             )
         )
 
-        transport_hit = cls._looks_like_transport_query(message_lower) or cls._contains_domain_keyword(
+        _msg_no_neg_transport = re.sub(
+            r"\b(?:no|not|without|sem|n[aã]o|nem|sans)\s+"
+            r"(?:metro|bus|autocarro|autocarros|comboio|train|carris|tram|el[eé]trico|"
+            r"cp\b|fertagus|transportes?|transport|barco|ferry)\b",
+            "",
             message_lower,
+        )
+        _explicit_walk_route = (
+            re.search(r"\b(?:walk(?:ing)?|a\s+p[eé]|a\s+pe|caminhando|a\s+caminhar)\b", message_lower)
+            and re.search(
+                r"\b(?:from|de|do|da|desde)\s+.{1,60}?\s+(?:to|para|até|ate|a|à|ao)\b",
+                message_lower,
+            )
+            and not cls._contains_domain_keyword(
+                _msg_no_neg_transport, transport_terms, minimum_ratio=0.85
+            )
+        )
+        if _explicit_walk_route:
+            return {
+                "reasoning": "Explicit walking route between two locations; no positive transport mode — walking guidance via planner and researcher.",
+                "agents": ["planner", "researcher"],
+                "direct_response": None,
+            }
+        transport_hit = cls._looks_like_transport_query(message_lower) or cls._contains_domain_keyword(
+            _msg_no_neg_transport,
             transport_terms,
             minimum_ratio=0.85,
         )
@@ -1369,6 +1500,11 @@ class SupervisorAgent(BaseAgent):
             r"\b(?:quero|queria|gostava|ver|visitar|visit|see|show|mostra|inclui|include)\b.*"
             r"\b(?:\d{1,2}|um|uma|one|dois|duas|two|tres|three|quatro|four|cinco|five|seis|six|sete|seven|oito|eight)\s+"
             r"(?:museus?|museums?|monumentos?|monuments?|locais|lugares|sitios|s[ií]tios|places|stops|paragens|restaurantes?|restaurants?|miradouros?|viewpoints?)\b",
+            r"\b(?:plane(?:ar|ia|ie)|planear|plan(?:eia)?)\b.*\b\d+\s*dias?\b",
+            r"\b\d+\s*dias?\b.*\b(?:plane(?:ar|ia|ie)|planear|itiner[aá]rio|roteiro)\b",
+            r"\bdia\s+inteiro\b",
+            r"\btarde\s+inteira\b",
+            r"\bmanh[aã]\s+inteira\b",
         ]
         if any(re.search(pattern, message_lower) for pattern in planning_patterns):
             return True
@@ -1775,9 +1911,7 @@ class SupervisorAgent(BaseAgent):
 
         messages = [SystemMessage(content=system_prompt)]
 
-        # Inject minimal follow-up context (NOT raw messages - that confuses routing)
         if conversation_history and self._looks_like_follow_up(user_message):
-            # Extract ONLY the last user query for follow-up detection
             last_user_queries = []
             for msg in reversed(conversation_history):
                 if isinstance(msg, HumanMessage) and msg.content:
@@ -1890,7 +2024,6 @@ class SupervisorAgent(BaseAgent):
                     agents = [agent for agent in agents if agent != "transport"]
                     reasoning += " (Removed transport agent: local itinerary start anchor can be handled by planner after POI grounding)"
 
-            # Force weather agent for near-future planning
             if is_planning_query and (
                 self._requires_weather_for_planning(user_message)
                 or self._planning_query_mentions_weather(user_message)
@@ -1909,10 +2042,8 @@ class SupervisorAgent(BaseAgent):
                 agents = [agent for agent in agents if agent != "weather"]
                 reasoning += " (Removed weather agent: itinerary duration is not a weather/date request)"
 
-            # Enforce rejection for out of scope queries even if LLM tries to answer
             reasoning_lower = reasoning.lower()
             if not agents and any(k in reasoning_lower for k in ["matemática", "math", "fora de âmbito", "out of scope", "trivia", "trivialidade"]):
-                # Only override if LLM didn't provide a direct_response
                 if not decision.get("direct_response"):
                     decision["direct_response"] = self._build_out_of_scope_response(language)
 

@@ -930,6 +930,9 @@ class ResearcherAgent(BaseAgent):
         if not self._should_try_structured_query_plan(user_message):
             return None
 
+        if self._is_transactional_place_lookup_query(user_message):
+            return self._run_direct_place_lookup(user_message, language)
+
         structured_plan = self._extract_structured_query_plan(user_message)
         if not structured_plan:
             return None
@@ -946,6 +949,19 @@ class ResearcherAgent(BaseAgent):
         ):
             return self._run_direct_place_lookup(user_message, language, structured_plan=structured_plan)
         return None
+
+    @staticmethod
+    def _is_transactional_place_lookup_query(user_message: str) -> bool:
+        """Return whether a booking/buying request targets a specific place."""
+        return bool(
+            _extract_specific_place_lookup_phrase(user_message)
+            and re.search(
+                r"\b(?:book|reserve|buy|purchase|tickets?|table|hotel|room|"
+                r"reservar|reserva|comprar|compra|bilhetes?|entradas?|mesa|marcar|marca)\b",
+                user_message or "",
+                flags=re.IGNORECASE,
+            )
+        )
 
     def _replay_same_deterministic_response_once(self, user_message: str) -> Optional[str]:
         """Return a cached deterministic response once when the same message is retried immediately."""
@@ -966,11 +982,7 @@ class ResearcherAgent(BaseAgent):
         }
         return response
 
-    # Patterns that indicate the user is asking us to recall something already
-    # mentioned in a previous assistant turn (anaphoric / lookback intent).
-    # These are kept conservative so generic factual or category queries do
-    # not get misrouted. Patterns tolerate the SMS abbreviation "q" for "que"
-    # and ignore leading discourse markers ("mas", "e", "então", "só", "afinal").
+    # Anaphoric lookback patterns; conservative to avoid misrouting factual queries.
     _CONVERSATIONAL_RECALL_PATTERNS: Tuple[re.Pattern, ...] = (
         re.compile(
             r"\b(?:qual\s+(?:foi|era|é)|que\s+(?:foi|era))\s+"
@@ -2119,7 +2131,7 @@ class ResearcherAgent(BaseAgent):
             "music", "música", "musica", "show", "theatre", "teatro",
             "dance", "dança", "danca", "cinema", "what's on", "o que há", "o que ha",
             "fair", "fairs", "feira", "feiras", "book fair",
-            "summit", "conference", "congress", "forum", "expo",
+            "summit", "conference", "congress", "forum", "expo", "games week", "gaming",
             "sport", "sports", "desporto", "desportivo", "desportivos",
             "arraial", "arraiais", "arrais", "santos populares", "marchas populares",
             "festas de lisboa", "gastronomia", "gastronomy", "família", "familia",
@@ -2167,6 +2179,7 @@ class ResearcherAgent(BaseAgent):
     def _is_mixed_event_place_query(user_message: str) -> bool:
         """Detects mixed queries that ask for both places and events in the same turn."""
         query = (user_message or "").lower()
+        normalized_query = ResearcherAgent._normalize_event_preference_text(user_message)
         event_terms = [
             "event", "events", "evento", "eventos", "concert", "concerto",
             "festival", "festivals", "exhibition", "exposição", "exposicao",
@@ -2184,7 +2197,28 @@ class ResearcherAgent(BaseAgent):
             "hospital", "hospitals", "attraction", "attractions", "place", "places",
             "monument", "monuments", "monumento", "monumentos",
         ]
-        return any(term in query for term in event_terms) and any(term in query for term in place_terms)
+        has_event_terms = any(term in query for term in event_terms)
+        has_place_terms = any(term in query for term in place_terms)
+        if not (has_event_terms and has_place_terms):
+            return False
+
+        place_term_re = (
+            r"(?:museums?|museus?|restaurants?|restaurantes?|pharmacies|pharmacy|"
+            r"farmacias?|hospitals?|attractions?|places?|monuments?|monumentos?)"
+        )
+        negated_place_re = (
+            r"\b(?:sem|nao|not|without|avoid|excluding|except|menos|"
+            r"nao\s+me\s+mostres?|nao\s+me\s+sugiras?|do\s+not\s+show|"
+            r"don\s+t\s+show|do\s+not\s+suggest|don\s+t\s+suggest)\b"
+            rf"(?:\s+\w+){{0,6}}\s+\b{place_term_re}\b"
+        )
+        stripped_query = re.sub(negated_place_re, " ", normalized_query, flags=re.IGNORECASE)
+        stripped_query = re.sub(r"\bno\s+(?:more\s+)?museums?\b", " ", stripped_query, flags=re.IGNORECASE)
+        positive_place_terms = [
+            term for term in place_terms
+            if re.search(rf"\b{re.escape(term)}\b", stripped_query, flags=re.IGNORECASE)
+        ]
+        return bool(positive_place_terms)
 
     @staticmethod
     def _extract_event_date_filter(user_message: str) -> Optional[str]:
@@ -2370,10 +2404,10 @@ class ResearcherAgent(BaseAgent):
             "de", "do", "da", "dos", "das", "em", "in", "o", "a", "os", "as",
             "e", "and", "que", "what", "which", "event", "events", "evento", "eventos", "todos", "todas",
             "all", "not", "no", "nao", "sem", "without", "except",
-            "excluding", "exclui", "excluir", "menos", "procura", "procurar",
-            "search", "find", "show", "mostrar", "mostra", "lista", "list", "diz",
+            "excluding", "exclui", "excluir", "menos", "procura", "procurar", "encontra", "encontrar",
+            "search", "find", "show", "mostrar", "mostra", "mostres", "lista", "list", "diz",
             "me", "sabes", "conheces", "podes", "dizer", "quero", "queria", "mas", "but",
-            "music", "musica",
+            "music", "musica", "live", "vivo", "ao",
             "concert", "concerts", "concerto", "concertos", "sport",
             "sports", "desporto", "desportos", "desportivo", "desportiva",
             "desportivos", "desportivas", "festival", "festivals",
@@ -2381,6 +2415,7 @@ class ResearcherAgent(BaseAgent):
             "dance", "exposicao",
             "exposicoes", "exhibition", "exhibitions", "categoria",
             "category", "tipo", "types", "kinds", "lisboa", "lisbon",
+            "museum", "museums", "museu", "museus",
             "gastronomia", "gastronomico", "gastronomicos", "gastronomica",
             "gastronomicas", "gastronomy", "gastronomic", "culinaria",
             "culinario", "culinary", "food", "wine", "vinho", "familia",
@@ -2388,9 +2423,9 @@ class ResearcherAgent(BaseAgent):
             "cinema", "film", "films", "movie", "movies", "fair", "fairs",
             "feira", "feiras", "market", "mercado", "main", "principais",
             "principal", "summit", "conference", "congress", "forum", "expo",
-            "este", "esta", "mes", "month", "semana", "week", "hoje",
+            "este", "esta", "fim", "weekend", "mes", "month", "semana", "week", "hoje",
             "today", "amanha", "tomorrow", "junho", "june", "maio", "may",
-            "para", "com", "perto", "near",
+            "para", "com", "perto", "near", "fado", "jazz", "rock", "pop",
         }
         return all(token in category_noise for token in tokens)
 
@@ -2429,8 +2464,10 @@ class ResearcherAgent(BaseAgent):
         normalized = cls._normalize_event_preference_text(user_message)
         if not normalized:
             return []
+        normalized = re.sub(r"\bno\s+(?:more\s+)?museums?\b", " ", normalized, flags=re.IGNORECASE)
 
         category_terms = {
+            "Fado": ("fado",),
             "Music": (
                 "music", "musica", "concert", "concerts", "concerto", "concertos",
             ),
@@ -2488,6 +2525,7 @@ class ResearcherAgent(BaseAgent):
         query = cls._normalize_event_preference_text(user_message or "")
         if not query:
             return []
+        query = re.sub(r"\bno\s+(?:more\s+)?museums?\b", " ", query, flags=re.IGNORECASE)
 
         category_patterns = (
             ("Music", r"\b(?:music|musica|concerts?|concertos?|fado|jazz|rock|pop)\b"),
@@ -2762,6 +2800,7 @@ class ResearcherAgent(BaseAgent):
             "event", "events", "evento", "eventos", "concert", "concerto",
             "festival", "exhibition", "exposição", "exposicao", "show",
             "fair", "fairs", "feira", "feiras", "book fair",
+            "summit", "conference", "congress", "forum", "expo", "games week",
         ]
         has_place_like_query = bool(
             re.search(
@@ -2780,6 +2819,12 @@ class ResearcherAgent(BaseAgent):
         )
         if has_place_like_query:
             event_keywords = [keyword for keyword in event_keywords if keyword != "show"]
+        if ResearcherAgent._query_excludes_museum_venues(user_message) and re.search(
+            r"\b(?:live\s+music|m[uú]sica\s+ao\s+vivo|music|m[uú]sica|concerts?|concertos?|events?|eventos?)\b",
+            query,
+            flags=re.IGNORECASE,
+        ):
+            return False
         focus_query = ResearcherAgent._extract_place_focus_query(user_message) or ResearcherAgent._extract_place_area_filter(user_message)
         directed_lookup_markers = [
             "where is", "where's", "onde fica", "onde é", "onde e", "tell me about", "what about",
@@ -2895,9 +2940,21 @@ class ResearcherAgent(BaseAgent):
         """Detects history/culture questions that should use the dedicated grounded lookup path."""
         normalized = unicodedata.normalize("NFKD", user_message or "")
         normalized = normalized.encode("ascii", "ignore").decode("ascii").lower()
-        if re.search(
-            r"\b(event|events|evento|eventos|festival|festivals|concert|concerto|show|what's on|o que ha|esta semana|this week|fim de semana|weekend)\b",
-            normalized,
+        negated_event_cue = bool(
+            re.search(
+                r"\b(?:sem\s+eventos?|nao\s+(?:me\s+)?(?:mostres?|sugiras?|incluas?)\s+eventos?|"
+                r"do\s+not\s+(?:suggest|show|include)\s+events?|"
+                r"don'?\s*t\s+(?:suggest|show|include)\s+events?|"
+                r"no\s+events?|without\s+events?|not\s+events?)\b",
+                normalized,
+            )
+        )
+        if (
+            re.search(
+                r"\b(event|events|evento|eventos|festival|festivals|concert|concerto|show|what's on|o que ha|esta semana|this week|fim de semana|weekend)\b",
+                normalized,
+            )
+            and not negated_event_cue
         ):
             return False
         if re.search(r"\b(history|historical|historia|culture|cultura)\b", normalized):
@@ -3168,7 +3225,8 @@ class ResearcherAgent(BaseAgent):
                 ResearcherAgent._clean_nearby_location_text(match.group("location")) or ""
             )
             if location and not ResearcherAgent._event_location_constraint_is_filter(location):
-                return location
+                location = re.sub(r"\s+ao\s+vivo\b", "", location, flags=re.IGNORECASE).strip(" .?!,;:")
+                return location or None
         return None
 
     @staticmethod
@@ -3218,6 +3276,18 @@ class ResearcherAgent(BaseAgent):
             "theatre", "theater", "danca", "dance", "cinema", "concertos",
             "concert", "concerts",
         }
+        filter_clause_tokens = {
+            "mas", "but", "sem", "without", "nao", "not", "menos", "except", "excluding",
+            "excluindo", "exclude", "excluir", "fado", "rock", "pop", "jazz", "classico",
+            "classical", "live", "indoor", "outdoor", "exterior", "interior",
+            "gratis", "gratuito", "free", "pago",
+        }
+        normalized_for_filter = re.sub(r"\bao\s+vivo\b", "", normalized).strip()
+        if not normalized_for_filter:
+            return True
+        filter_tokens = re.findall(r"[a-z0-9]+", normalized_for_filter)
+        if any(token in filter_clause_tokens for token in filter_tokens):
+            return True
         if any(token in month_tokens for token in tokens):
             return all(token in month_tokens | connector_tokens | generic_event_tokens for token in tokens)
         return bool(tokens and all(token in date_tokens | connector_tokens | generic_event_tokens for token in tokens))
@@ -3551,7 +3621,8 @@ class ResearcherAgent(BaseAgent):
                     else f"{location_constraint} free events"
                 )
             elif focus_query:
-                focus_query = f"{location_constraint} {focus_query}"
+                if not specific_lookup:
+                    focus_query = f"{location_constraint} {focus_query}"
             else:
                 focus_query = f"{location_constraint} eventos" if language == "pt" else f"{location_constraint} events"
 
@@ -3581,12 +3652,22 @@ class ResearcherAgent(BaseAgent):
             result = str(self._invoke_tool(events_tool, args, tool_name="search_cultural_events")).strip()
         if language == "pt":
             result = result.replace("Family & Kids", "Família e Crianças")
-        if location_constraint and not self._event_result_mentions_location(result, location_constraint):
-            return self._event_constraint_limitation(
-                language=language,
-                location=location_constraint,
-                needs_evening=needs_evening_event,
+        result = self._filter_event_result_for_excluded_museum_venues(result, user_message, language)
+        if re.search(r"\b(?:m[uú]sica\s+ao\s+vivo|musica\s+ao\s+vivo|live\s+music)\b", user_message, flags=re.IGNORECASE):
+            live_note = (
+                "⚠️ **Nota:** os dados confirmam a categoria **Música**; quando a página não explicita atuação ao vivo, confirma no detalhe do evento antes de ir."
+                if language == "pt"
+                else "⚠️ **Note:** the data confirms the **Music** category; when the page does not explicitly say it is live, confirm on the event page before going."
             )
+            if live_note not in result:
+                result = f"{result.rstrip()}\n\n{live_note}"
+        if location_constraint and not self._event_result_mentions_location(result, location_constraint):
+            if not self._has_specific_lookup_fallback_intro(result):
+                return self._event_constraint_limitation(
+                    language=language,
+                    location=location_constraint,
+                    needs_evening=needs_evening_event,
+                )
         if needs_evening_event and not self._event_result_has_evening_time(result):
             return self._event_constraint_limitation(
                 language=language,
@@ -3611,6 +3692,93 @@ class ResearcherAgent(BaseAgent):
         )
         source_line = self._build_events_source_line(language)
         return f"{result}\n\n{source_line}".strip()
+
+    @classmethod
+    def _query_excludes_museum_venues(cls, user_message: str) -> bool:
+        """Return whether the user explicitly excludes museums from event results."""
+        normalized = cls._normalize_event_preference_text(user_message)
+        broad_negation = bool(
+            re.search(
+                r"\b(?:sem|nao|not|without|avoid|excluding|except|menos|"
+                r"nao\s+me\s+mostres?|nao\s+me\s+sugiras?|do\s+not\s+show|"
+                r"don\s+t\s+show|do\s+not\s+suggest|don\s+t\s+suggest)\b"
+                r"(?:\s+\w+){0,6}\s+\b(?:museus?|museums?)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+        targeted_en = bool(
+            re.search(
+                r"\bno\s+(?:more\s+)?museums?\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+        return broad_negation or targeted_en
+
+    @classmethod
+    def _filter_event_result_for_excluded_museum_venues(
+        cls,
+        result: str,
+        user_message: str,
+        language: str,
+    ) -> str:
+        """Remove event cards hosted at venues explicitly excluded as museums."""
+        if not result or not cls._query_excludes_museum_venues(user_message):
+            return result
+
+        lines = result.splitlines()
+        intro: list[str] = []
+        cards: list[list[str]] = []
+        current: list[str] = []
+        for line in lines:
+            if re.match(r"^\s*[-*]\s+\*\*.+\*\*\s*$", line):
+                if current:
+                    cards.append(current)
+                current = [line]
+            elif current:
+                current.append(line)
+            else:
+                intro.append(line)
+        if current:
+            cards.append(current)
+        if not cards:
+            return result
+
+        kept_cards: list[list[str]] = []
+        removed = 0
+        for card in cards:
+            block = "\n".join(card)
+            if re.search(r"\b(?:museu|museus|museum|museums)\b", block, flags=re.IGNORECASE):
+                removed += 1
+                continue
+            kept_cards.append(card)
+        if not removed:
+            return result
+        if not kept_cards:
+            heading = "### 🎭 **Sem eventos confirmados**" if language == "pt" else "### 🎭 **No confirmed events**"
+            direct_label = "Resposta direta" if language == "pt" else "Direct answer"
+            direct = (
+                f"Não encontrei eventos que respeitem a exclusão de museus nos dados disponíveis; omiti {removed} resultado(s) associado(s) a museus."
+                if language == "pt"
+                else f"I did not find events that respect the museum exclusion in the available data; I omitted {removed} museum-associated result(s)."
+            )
+            return f"{heading}\n\n✅ **{direct_label}:** {direct}"
+
+        note = (
+            f"⚠️ Omiti {removed} evento(s) associado(s) a espaços identificados como museu, conforme pediste."
+            if language == "pt"
+            else f"⚠️ I omitted {removed} event(s) associated with venues identified as museums, as requested."
+        )
+        output_lines = intro
+        while output_lines and not output_lines[-1].strip():
+            output_lines.pop()
+        output_lines.extend(["", note, ""])
+        for index, card in enumerate(kept_cards):
+            if index:
+                output_lines.append("")
+            output_lines.extend(card)
+        return "\n".join(output_lines).strip()
 
     @staticmethod
     def _should_add_place_history_context(user_message: str, result: str) -> bool:
@@ -3705,6 +3873,19 @@ class ResearcherAgent(BaseAgent):
                 "- Together with Belém Tower, it has been a UNESCO World Heritage Site since 1983.",
             ]
 
+        if "marvila" in normalized_subject:
+            if language == "pt":
+                return [
+                    "- Marvila situa-se na zona oriental de Lisboa, numa área historicamente marcada pela ligação ao Tejo e por antigas quintas, conventos e núcleos industriais.",
+                    "- A sua leitura urbana combina uma frente ribeirinha de armazéns e atividade produtiva com bairros residenciais desenvolvidos ao longo do século XX.",
+                    "- Nas últimas décadas, antigas áreas industriais e logísticas de Marvila e do Beato ganharam nova centralidade cultural, criativa e residencial.",
+                ]
+            return [
+                "- Marvila is in eastern Lisbon, in an area historically shaped by the Tagus waterfront and by former estates, convents, warehouses, and industrial uses.",
+                "- Its urban fabric combines riverside productive spaces with residential neighbourhoods that expanded through the twentieth century.",
+                "- In recent decades, former industrial and logistics areas around Marvila and Beato have gained renewed cultural, creative, and residential importance.",
+            ]
+
         if "torre de belem" in normalized_subject or "belem tower" in normalized_subject:
             if language == "pt":
                 return [
@@ -3791,7 +3972,13 @@ class ResearcherAgent(BaseAgent):
             "",
             text,
         )
-        text = re.sub(r"\[[^\]]+\]\(([^)]+)\)", lambda match: match.group(0).split("](", 1)[0].lstrip("["), text)
+        text = re.sub(r"(?m)^\s*🔗\s*\[[^\]]+\]\((?:[^()]|\([^()]*\))+\)\s*$", "", text)
+        text = re.sub(r"(?m)^\s*🔗\s*(?:URL:\s*)?https?://\S+\s*$", "", text)
+        text = re.sub(
+            r"\[[^\]]+\]\((?:[^()]|\([^()]*\))+\)",
+            lambda match: match.group(0).split("](", 1)[0].lstrip("["),
+            text,
+        )
         text = re.sub(r"(?m)^#{1,6}\s+", "", text)
         text = re.sub(r"\s+", " ", text).strip()
         sentences = re.split(r"(?<=[.!?])\s+", text)
@@ -3853,11 +4040,27 @@ class ResearcherAgent(BaseAgent):
         if not subject or not self._should_add_place_history_context(user_message, result):
             return "", False
         canonical_subject = self._extract_primary_place_title(result) or subject
-        curated_facts = self._known_place_history_facts(canonical_subject, language)
         used_external_history_source = False
-        if curated_facts:
-            compact_history = "\n".join(curated_facts)
-        else:
+        compact_history = ""
+
+        knowledge_tool = self._get_tool_by_name("search_lisbon_knowledge")
+        if knowledge_tool:
+            raw_knowledge = str(
+                self._invoke_tool(
+                    knowledge_tool,
+                    {"query": canonical_subject, "max_results": 3},
+                    tool_name="search_lisbon_knowledge",
+                )
+            ).strip()
+            if raw_knowledge and not raw_knowledge.startswith(("❌", "Error:")) and len(raw_knowledge) > 80:
+                compact_history = self._compact_history_result(raw_knowledge, language, canonical_subject)
+
+        if not compact_history:
+            curated_facts = self._known_place_history_facts(canonical_subject, language)
+            if curated_facts:
+                compact_history = "\n".join(curated_facts)
+
+        if not compact_history:
             history_tool = self._get_tool_by_name("search_history_culture")
             if not history_tool:
                 return "", False
@@ -4146,17 +4349,14 @@ class ResearcherAgent(BaseAgent):
 
             exact_result = str(self._invoke_tool(places_tool, exact_args, tool_name="search_places_attractions")).strip()
             exact_result = self._localize_place_card_titles_with_llm(exact_result, language)
-            # Accept the specific-lookup result when either (a) it is a clean exact
-            # match, or (b) it is a "specific not found, here are alternatives"
-            # response that nevertheless surfaces ranked alternatives.
-            # Falling through to the broad lookup in case (b) would re-call the tool with
-            # weaker arguments and return less useful data, while doubling the tool-call cost.
+            # Accept clean exact match OR fallback-with-ranked-alternatives to avoid a costlier broader retry.
             if exact_result and not exact_result.startswith("Error:"):
                 has_fallback_intro = self._has_specific_lookup_fallback_intro(exact_result)
                 shown_count = self._count_ranked_results(exact_result)
                 accept_clean_exact = not has_fallback_intro and not exact_result.startswith("❌")
                 accept_fallback_with_alternatives = has_fallback_intro and shown_count > 0
                 if transactional_lookup and accept_clean_exact:
+                    exact_result = self._filter_transactional_place_contact_fields(exact_result)
                     source_line = self._build_places_source_line(exact_result, language)
                     if language == "pt":
                         direct_note = (
@@ -4330,7 +4530,6 @@ class ResearcherAgent(BaseAgent):
 
         if not places_tool:
             return self._run_direct_tool_fallback(user_message, language)
-
         category_hint = self._infer_place_category_hint(user_message) or structured_category_hint
         requested_count = self._extract_requested_result_count(user_message)
         query_text = user_message if category_hint and not specific_lookup else (place_focus_query or user_message)
@@ -4415,6 +4614,21 @@ class ResearcherAgent(BaseAgent):
             language,
         )
         return f"{result}\n\n{source_line}".strip()
+
+    @staticmethod
+    def _filter_transactional_place_contact_fields(result: str) -> str:
+        """Keep only non-transactional contact/navigation fields in place cards."""
+        if not result:
+            return result or ""
+        blocked_field_re = re.compile(
+            r"^\s*[-*]\s+.*?\*\*(?:"
+            r"Hor[aá]rio|Opening hours|Hours|Pre[cç]o|Price|Bilhetes|Tickets|"
+            r"Avalia[cç][aã]o|Rating|Disponibilidade|Availability"
+            r"):\*\*",
+            flags=re.IGNORECASE,
+        )
+        kept_lines = [line for line in result.splitlines() if not blocked_field_re.match(line)]
+        return "\n".join(kept_lines).strip()
 
     def _run_direct_tool_fallback(self, user_message: str, language: str) -> str:
         """
@@ -4534,9 +4748,34 @@ class ResearcherAgent(BaseAgent):
                     )
 
         if any(keyword in message_lower for keyword in history_keywords) or self._is_history_culture_query(user_message):
+            subject = self._extract_history_culture_subject(user_message) or user_message
+            knowledge_tool = self._get_tool_by_name("search_lisbon_knowledge")
+            if knowledge_tool:
+                raw_knowledge = str(
+                    self._invoke_tool(
+                        knowledge_tool,
+                        {"query": subject, "max_results": 5},
+                        tool_name="search_lisbon_knowledge",
+                    )
+                ).strip()
+                raw_knowledge = re.sub(r"\n?📅\s+\*\*Related Events:\*\*.*", "", raw_knowledge, flags=re.DOTALL).strip()
+                raw_knowledge = re.sub(r"\n?🏛️\s+\*\*Related Places:\*\*.*", "", raw_knowledge, flags=re.DOTALL).strip()
+                compact_knowledge = self._compact_history_result(raw_knowledge, language, subject)
+                if compact_knowledge and not re.search(
+                    r"\b(?:Lisbon Knowledge Search Results|Guide\s*/\s*PDF Knowledge|Guia\s+Lxcard)\b",
+                    compact_knowledge,
+                    flags=re.IGNORECASE,
+                ):
+                    timestamp = datetime.now().strftime("%H:%M")
+                    heading = f"### 📚 Contexto histórico: {subject}" if language == "pt" else f"### 📚 Historical Context: {subject}"
+                    source = (
+                        f"📌 **Fonte:** *Guia Lisboa Card* | **Atualizado:** {timestamp}"
+                        if language == "pt"
+                        else f"📌 **Source:** *Lisboa Card Guide* | **Updated:** {timestamp}"
+                    )
+                    return f"{heading}\n\n{compact_knowledge}\n\n{source}"
             tool = self._get_tool_by_name("search_history_culture")
             if tool:
-                subject = self._extract_history_culture_subject(user_message) or user_message
                 raw_history = str(
                     self._invoke_tool(
                         tool,
@@ -6101,11 +6340,16 @@ class ResearcherAgent(BaseAgent):
         if not result_blocks:
             return ""
 
-        heading = "### 🔵 **Evidência para planeamento**" if language == "pt" else "### 🔵 **Planning Evidence**"
+        if event_blocks_added and place_blocks_added:
+            heading = "### 🎭 **Locais e eventos**" if language == "pt" else "### 🎭 **Places and events**"
+        elif event_blocks_added:
+            heading = "### 🎭 **Eventos culturais**" if language == "pt" else "### 🎭 **Cultural events**"
+        else:
+            heading = "### 🏛️ **Locais e atrações**" if language == "pt" else "### 🏛️ **Places and attractions**"
         note = (
-            "✅ **Resposta direta:** Recolhi cards completos para o planeador usar sem inventar campos."
+            "✅ **Resposta direta:** Aqui tens os resultados mais relevantes que encontrei para o que pediste."
             if language == "pt"
-            else "✅ **Direct answer:** I gathered complete cards for the planner to use without inventing fields."
+            else "✅ **Direct answer:** Here are the most relevant results I found for what you asked."
         )
         combined = "\n\n".join(result_blocks)
         if event_blocks_added and place_blocks_added:
@@ -6928,6 +7172,7 @@ class ResearcherAgent(BaseAgent):
         subject = query
         subject_patterns = [
             r"^.*?\bhistory\s+(?:of|about)\s+",
+            r"^.*?\bhistorical\s+context\s+(?:of|about|for)\s+",
             r"^.*?\bhistorical\s+(?:facts\s+)?(?:about|on)\s+",
             r"^.*?\bhistoria\s+(?:de|do|da|dos|das|sobre)\s+",
             r"^.*?\bcultura\s+(?:de|do|da|dos|das|sobre)\s+",
@@ -6955,6 +7200,21 @@ class ResearcherAgent(BaseAgent):
         )
         subject = re.sub(
             r"(?i)\bwithout\s+(?:an?\s+)?(?:route|plan|itinerary)\b.*$",
+            "",
+            subject,
+        )
+        subject = re.sub(
+            r"(?i)\b(?:,?\s*(?:and\s+)?)?(?:do\s+not|don't)\s+(?:suggest|show|include)\s+events?\b.*$",
+            "",
+            subject,
+        )
+        subject = re.sub(
+            r"(?i)\b(?:,?\s*(?:e\s+)?)?(?:sem\s+eventos?|n[ãa]o\s+(?:me\s+)?(?:mostres?|sugiras?|incluas?)\s+eventos?)\b.*$",
+            "",
+            subject,
+        )
+        subject = re.sub(
+            r"(?i)\b(?:em|in)\s+(?:pt-pt|portugu[eê]s(?:\s+europeu)?|english|ingl[eê]s)\b.*$",
             "",
             subject,
         )
@@ -7082,7 +7342,23 @@ class ResearcherAgent(BaseAgent):
                 query_lower,
             ):
                 language = "en"
-            return cls._build_tool_call("search_history_culture", {"query": subject, "language": language})
+            return cls._build_tool_call("search_lisbon_knowledge", {"query": subject or query, "max_results": 5})
+
+        if cls._is_direct_event_lookup_query(query) and not cls._is_mixed_event_place_query(query):
+            language = cls._infer_research_query_language(query)
+            args: Dict[str, Any] = {"max_results": 5, "language": language}
+            date_filters = cls._extract_event_date_filters(query)
+            category_hint = cls._infer_event_category_hint(query)
+            focus_query = cls._extract_event_focus_query(query)
+            if date_filters:
+                args["date_filter"] = date_filters[0]
+            if category_hint:
+                args["category"] = category_hint
+            if focus_query:
+                args["query"] = focus_query
+            elif category_hint:
+                args["query"] = category_hint
+            return cls._build_tool_call("search_cultural_events", args)
 
         if "service categories" in query_lower or (
             re.search(r"\b(public services?|servi[cç]os p[úu]blicos)\b", query_lower)
@@ -7313,7 +7589,82 @@ class ResearcherAgent(BaseAgent):
             if verbose:
                 print("      [RESEARCHER] Using deterministic history/culture lookup...")
 
-            response = self._run_direct_tool_fallback(user_message, language)
+            knowledge_tool = self._get_tool_by_name("search_lisbon_knowledge")
+            if knowledge_tool:
+                subject = self._extract_history_culture_subject(user_message) or user_message
+                raw_knowledge = str(
+                    self._invoke_tool(
+                        knowledge_tool,
+                        {"query": subject, "max_results": 5},
+                        tool_name="search_lisbon_knowledge",
+                    )
+                ).strip()
+                raw_knowledge = re.sub(
+                    r"\n?📅\s+\*\*Related Events:\*\*.*",
+                    "",
+                    raw_knowledge,
+                    flags=re.DOTALL,
+                ).strip()
+                raw_knowledge = re.sub(
+                    r"\n?🏛️\s+\*\*Related Places:\*\*.*",
+                    "",
+                    raw_knowledge,
+                    flags=re.DOTALL,
+                ).strip()
+                prose_lines = [
+                    line.strip() for line in raw_knowledge.splitlines()
+                    if len(line.strip()) > 60
+                    and not re.search(
+                        r"Guia\s+Lxcard|p\.\d{1,3}\s+—|Lisboa\s+Knowledge\s+Search|"
+                        r"Guide\s*/\s*PDF\s+Knowledge|🔍\s+\*\*Lisbon\s+Knowledge\s+Search",
+                        line.strip(),
+                        flags=re.IGNORECASE,
+                    )
+                ]
+                has_prose_content = len(prose_lines) >= 1
+                compact_knowledge = self._compact_history_result(raw_knowledge, language, subject)
+                if compact_knowledge and has_prose_content:
+                    timestamp = datetime.now().strftime("%H:%M")
+                    heading = f"### 📚 Contexto histórico: {subject}" if language == "pt" else f"### 📚 Historical Context: {subject}"
+                    source = (
+                        f"📌 **Fonte:** *Guia Lisboa Card* | **Atualizado:** {timestamp}"
+                        if language == "pt"
+                        else f"📌 **Source:** *Lisboa Card Guide* | **Updated:** {timestamp}"
+                    )
+                    return self._remember_deterministic_response_for_retry(
+                        user_message,
+                        finalize_worker_response(
+                            f"{heading}\n\n{compact_knowledge}\n\n{source}",
+                            agent_name="researcher",
+                            user_query=user_message,
+                            language=language,
+                        ),
+                    )
+
+            subject = self._extract_history_culture_subject(user_message) or user_message
+            history_tool = self._get_tool_by_name("search_history_culture")
+            if history_tool:
+                raw_history = str(
+                    self._invoke_tool(
+                        history_tool,
+                        {"query": subject, "language": language},
+                        tool_name="search_history_culture",
+                    )
+                ).strip()
+                compact_history = self._compact_history_result(raw_history, language, subject)
+                if compact_history:
+                    timestamp = datetime.now().strftime("%H:%M")
+                    heading = f"### 📚 Contexto histórico: {subject}" if language == "pt" else f"### 📚 Historical Context: {subject}"
+                    source = (
+                        f"📌 **Fonte:** [*Wikipedia/Web*](https://www.wikipedia.org/) | **Atualizado:** {timestamp}"
+                        if language == "pt"
+                        else f"📌 **Source:** [*Wikipedia/Web*](https://www.wikipedia.org/) | **Updated:** {timestamp}"
+                    )
+                    response = f"{heading}\n\n{compact_history}\n\n{source}"
+                else:
+                    response = raw_history
+            else:
+                response = self._run_direct_tool_fallback(user_message, language)
             return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
                 response,
                 agent_name="researcher",
@@ -7344,6 +7695,40 @@ class ResearcherAgent(BaseAgent):
                     user_query=user_message,
                     language=language,
                 ))
+
+        if not is_greeting and self._is_transactional_place_lookup_query(user_message):
+            if verbose:
+                print("      [RESEARCHER] Using deterministic transactional place lookup...")
+            response = self._run_direct_place_lookup(user_message, language)
+            return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
+                response,
+                agent_name="researcher",
+                user_query=user_message,
+                language=language,
+            ))
+
+        if (
+            not is_greeting
+            and self._is_direct_event_lookup_query(user_message)
+            and not self._is_mixed_event_place_query(user_message)
+            and not self._is_free_museum_event_query(user_message)
+        ):
+            if verbose:
+                print("      [RESEARCHER] Using deterministic direct event lookup...")
+
+            response = self._run_direct_event_lookup(user_message, language)
+            finalized_response = finalize_worker_response(
+                response,
+                agent_name="researcher",
+                user_query=user_message,
+                language=language,
+            )
+            finalized_response = self._filter_event_result_for_excluded_museum_venues(
+                finalized_response,
+                user_message,
+                language,
+            )
+            return self._remember_deterministic_response_for_retry(user_message, finalized_response)
 
         if not is_greeting:
             structured_response = self._maybe_run_structured_query_plan(user_message, language)
@@ -7408,12 +7793,18 @@ class ResearcherAgent(BaseAgent):
                 print("      [RESEARCHER] Using deterministic direct event lookup...")
 
             response = self._run_direct_event_lookup(user_message, language)
-            return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
+            finalized_response = finalize_worker_response(
                 response,
                 agent_name="researcher",
                 user_query=user_message,
                 language=language,
-            ))
+            )
+            finalized_response = self._filter_event_result_for_excluded_museum_venues(
+                finalized_response,
+                user_message,
+                language,
+            )
+            return self._remember_deterministic_response_for_retry(user_message, finalized_response)
 
         if not is_greeting and hasattr(self, "tools") and self._is_direct_place_lookup_query(user_message):
             if verbose:

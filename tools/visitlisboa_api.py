@@ -695,6 +695,7 @@ def _event_matches_any_category(event: Dict[str, Any], category_keys: set[str]) 
 
 
 _EXCLUDED_EVENT_TEXT_TERMS: Dict[str, Tuple[str, ...]] = {
+    "fado": ("fado",),
     "music": ("music", "musica", "concert", "concerts", "concerto", "concertos", "fado", "jazz"),
     "fairs": ("fair", "fairs", "feira", "feiras", "market", "markets", "mercado", "mercados"),
     "exhibitions": ("exhibition", "exhibitions", "exposicao", "exposicoes"),
@@ -1595,6 +1596,9 @@ def _normalize_lookup_text(text: Optional[str]) -> str:
 
 
 _KNOWN_PLACE_LOOKUP_ALIASES = {
+    "oceanario": "Oceanário de Lisboa",
+    "oceanario de lisboa": "Oceanário de Lisboa",
+    "lisbon oceanarium": "Oceanário de Lisboa",
     "jeronimos": "Jerónimos Monastery",
     "jeronimos monastery": "Jerónimos Monastery",
     "mosteiro dos jeronimos": "Jerónimos Monastery",
@@ -1957,23 +1961,27 @@ def _build_specific_lookup_fallback_intro(
 ) -> str:
     """Build an explicit intro when an exact named lookup is not found."""
     safe_name = requested_name.strip() or ("esse pedido" if language == "pt" else "that request")
-    if language == "pt":
-        if content_kind == "event":
+    if content_kind == "event":
+        if language == "pt":
             return (
-                f"❌ Não encontrei um evento específico com o nome **{safe_name}** na base de dados disponível. "
-                "Como alternativa, deixo abaixo eventos do mesmo tipo, estilo ou afinidade temática."
+                f"Não encontrei um evento específico com o nome **{safe_name}** "
+                "na base de dados de eventos disponível. Este caminho não usa pesquisa web "
+                "para eventos, por isso não vou inventar datas, bilhetes, local, horário ou "
+                "disponibilidade. Se procura um evento confirmado, indique o estilo ou bairro."
             )
         return (
-            f"❌ Não encontrei um local específico com o nome **{safe_name}** na base de dados disponível. "
+            f"I could not find a specific event named **{safe_name}** "
+            "in the available events database. This events path has no current web "
+            "search, so I will not invent dates, tickets, venue, schedule, or availability. "
+            "If you want a confirmed event, please indicate the style or neighbourhood."
+        )
+    if language == "pt":
+        return (
+            f"Não encontrei um local específico com o nome **{safe_name}** na base de dados disponível. "
             "Como alternativa, deixo abaixo locais do mesmo tipo, estilo ou afinidade temática."
         )
-    if content_kind == "event":
-        return (
-            f"❌ I could not find a specific event named **{safe_name}** in the available database. "
-            "As an alternative, here are events with a similar type, style, or thematic affinity."
-        )
     return (
-        f"❌ I could not find a specific place named **{safe_name}** in the available database. "
+        f"I could not find a specific place named **{safe_name}** in the available database. "
         "As an alternative, here are places with a similar type, style, or thematic affinity."
     )
 
@@ -2089,15 +2097,16 @@ _EVENT_SPECIFIC_LOOKUP_NOISE_TOKENS = {
     "evento", "eventos", "more", "please", "show", "find", "me", "the", "this",
     "that", "these", "those", "what", "which", "and", "how", "sobre", "diz",
     "fala", "para", "em", "in", "from", "with", "there", "happening", "temos", "tem",
+    "de", "do", "da", "dos", "das", "fim", "weekend",
     "this", "week", "today", "tomorrow", "next", "year",
     "ano", "esta", "semana", "este", "proxima", "proximo",
-    "que", "quais", "qual", "ha", "há", "quero", "queria", "nao", "não", "sem",
+    "que", "quais", "qual", "ha", "há", "quero", "queria", "algum", "alguma", "alguns", "algumas", "nao", "não", "sem",
     "mostra", "mostrar", "lista", "lisboa", "lisbon", "mas", "but",
 }
 _EVENT_SPECIFIC_LOOKUP_HINT_TOKENS = {
     "book", "fair", "feira", "fado", "concert", "concerto", "festival", "exhibition",
     "exposicao", "exposição", "music", "musica", "música", "theatre", "teatro",
-    "summit", "conference", "congress", "forum", "expo",
+    "summit", "conference", "congress", "forum", "expo", "games",
 }
 _EVENT_CATEGORY_FILTER_TERMS = {
     "ao vivo", "live music", "musica", "música", "music", "concert", "concerts",
@@ -2146,6 +2155,10 @@ def _extract_specific_event_lookup_phrase(query: Optional[str]) -> Optional[str]
     has_year_marker = bool(re.search(r"(?:'\d{2}\b|\b(?:19|20)\d{2}\b)", raw_query))
 
     has_event_hint = any(token in _EVENT_SPECIFIC_LOOKUP_HINT_TOKENS for token in meaningful_tokens)
+    if has_event_hint:
+        entity_tokens = [token for token in meaningful_tokens if token not in category_filter_tokens]
+        if entity_tokens:
+            return " ".join(entity_tokens[:6])
     if meaningful_tokens and len(meaningful_tokens) <= 6 and (has_year_marker or has_event_hint):
         return " ".join(meaningful_tokens)
 
@@ -3648,6 +3661,28 @@ def _is_broad_specific_place_phrase(phrase: Optional[str]) -> bool:
 
 def _extract_specific_place_lookup_phrase(query: Optional[str]) -> Optional[str]:
     """Extracts a specific place name from quoted or 'tell me about' queries."""
+    raw_query = (query or '').strip()
+    transactional_patterns = (
+        r"\b(?:bilhetes?|tickets?|entradas?)\s+(?:para|for|to|at|em|no|na|nos|nas)?\s*(?:o|a|os|as|the)?\s+(?P<subject>[A-ZÀ-ÿ0-9][A-ZÀ-ÿ0-9 '&/.-]{1,80})",
+        r"\b(?:book|reserve|buy|purchase|reservar|reserva|reserva[-\s]?me|marcar|marca|marca[-\s]?me|comprar|compra|compra[-\s]?me)\b"
+        r"(?:\s+(?:me|por\s+mim|para\s+mim))?\s+(?:bilhetes?|tickets?|entradas?|mesa|table|hotel|quarto|room)?"
+        r"(?:\s+(?:para|for|to|at|em|no|na|nos|nas))?\s*(?:o|a|os|as|the)?\s+(?P<subject>[A-ZÀ-ÿ0-9][A-ZÀ-ÿ0-9 '&/.-]{1,80})",
+    )
+    for pattern in transactional_patterns:
+        match = re.search(pattern, raw_query, flags=re.IGNORECASE)
+        if not match:
+            continue
+        candidate = re.sub(
+            r"\s+(?:tonight|today|tomorrow|esta\s+noite|hoje|amanh[ãa]|this\s+weekend|este\s+fim\s+de\s+semana|às?\s+\d{1,2}[:h]?\d{0,2}).*$",
+            "",
+            match.group("subject"),
+            flags=re.IGNORECASE,
+        ).strip(" .,:;?!")
+        candidate = re.sub(r"^(?:o|a|os|as|the)\s+", "", candidate, flags=re.IGNORECASE).strip(" .,:;?!")
+        candidate = _apply_known_place_lookup_alias(candidate) or candidate
+        if _normalize_lookup_text(candidate):
+            return _normalize_lookup_text(candidate)
+
     normalized_raw_query = _normalize_lookup_text(query)
     if re.search(
         r"\b(?:restaurants|restaurantes|museums|museus|monuments|monumentos|"
@@ -3680,7 +3715,6 @@ def _extract_specific_place_lookup_phrase(query: Optional[str]) -> Optional[str]
             return None
         return extracted
 
-    raw_query = (query or '').strip()
     meaningful_tokens = [
         token for token in _extract_lookup_tokens(raw_query)
         if token not in _SPECIFIC_PLACE_LOOKUP_NOISE_TOKENS
@@ -4627,8 +4661,6 @@ def search_cultural_events(
             undated_candidates = [event for event in undated_candidates if _event_has_outdoor_context(event)]
             logger.info(f"After outdoor-event filter: {len(events_data)} events")
 
-        category_filtered_pool = list(events_data)
-
         # Step 3: Filter by query (TOKEN-BASED matching for better recall)
         query_scores: Dict[int, float] = {}
         strong_specific_event_ids: set[int] = set()
@@ -4690,23 +4722,10 @@ def search_cultural_events(
 
         exact_lookup_not_found_intro: Optional[str] = None
         if not events_data and specific_lookup_phrase:
-            fallback_category = _infer_specific_event_fallback_category(effective_query or query, category)
-            fallback_candidates = list(category_filtered_pool)
-            if fallback_category and not category:
-                fallback_category_lower = fallback_category.lower()
-                fallback_candidates = [
-                    event for event in fallback_candidates
-                    if fallback_category_lower in event.get('category', '').lower()
-                ]
-
-            if fallback_candidates:
-                events_data = fallback_candidates
-                query_scores = {id(event): 0.0 for event in events_data}
-                exact_lookup_not_found_intro = _build_specific_lookup_fallback_intro(
-                    specific_lookup_phrase,
-                    language=render_language,
-                    content_kind="event",
-                )
+            logger.info(
+                "Specific event lookup %r had no strong VisitLisboa match; skipping thematic alternatives.",
+                specific_lookup_phrase,
+            )
 
         if not events_data:
             localized_date_filter = _localize_event_date_filter(date_filter, language=render_language)
@@ -4812,8 +4831,8 @@ def search_cultural_events(
             if exact_matches:
                 events_data = exact_matches
                 exact_lookup_not_found_intro = None
-            elif exact_lookup_not_found_intro is None:
-                exact_lookup_not_found_intro = _build_specific_lookup_fallback_intro(
+            else:
+                return _build_specific_lookup_fallback_intro(
                     specific_lookup_phrase,
                     language=render_language,
                     content_kind="event",
@@ -5117,6 +5136,22 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
         # Normalize inputs
         query = str(query).strip() if query and str(query).strip() and str(query).lower() != 'none' else None
         category = str(category).strip() if category and str(category).strip() and str(category).lower() != 'none' else None
+        if (
+            category
+            and _normalize_place_category_filter(category) in {"museums_monuments", "museums & monuments"}
+            and query
+            and re.search(
+                r"\b(?:walking\s+route|roteiro|itinerary|viewpoints?|miradouros?|"
+                r"restaurants?|restaurantes?|caf[eé]s?|food|gastronomia|bairro)\b",
+                _normalize_lookup_text(query),
+                flags=re.IGNORECASE,
+            )
+        ):
+            logger.info(
+                "Ignoring over-specific Museums & Monuments filter for mixed place itinerary query: %r",
+                query,
+            )
+            category = None
 
         if not isinstance(max_results, int) or max_results <= 0:
             max_results = 10
@@ -6070,8 +6105,23 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
                 details_url = _preserve_source_url(place['url'])
                 output_parts.append(f"    - 🔗 **{details_label}:** {_format_markdown_link('VisitLisboa', details_url)}")
 
-        # Source breakdown
-        return "\n".join(output_parts)
+        output_text = "\n".join(output_parts)
+        if (
+            restaurant_output
+            and restaurant_preference_flags.get("vegetarian")
+            and not _RESTAURANT_VEGETARIAN_EVIDENCE_RE.search(_normalize_lookup_text(output_text))
+        ):
+            if render_language == "pt":
+                output_text += (
+                    "\n\n⚠️ **Limitação:** os dados disponíveis não confirmam opções vegetarianas/vegan "
+                    "para os resultados listados."
+                )
+            else:
+                output_text += (
+                    "\n\n⚠️ **Limitation:** the available data does not confirm vegetarian/vegan options "
+                    "for the listed results."
+                )
+        return output_text
 
     except Exception as e:
         logger.error(f"Error in search_places_attractions: {e}")

@@ -308,29 +308,14 @@ def clean_response(content: str, _print: bool = True) -> str:
     if not content:
         return ""
 
-    # CRITICAL: Detect and remove Qwen3 "thinking out loud" pattern
-    # Pattern: Model starts answering a DIFFERENT question and reasons through it
-    # Example: "How do I get to airport from Rossio?\n\nWe are in English...\n\nStep-by-step:..."
-
-    # FIRST: Check if entire response is a "thinking" block about a wrong question
-    # This is the CRITICAL fix for the hallucination bug where the model answers
-    # a completely different question than what was asked
     wrong_question_patterns = [
-        # Full response is about getting to airport when that wasn't the question
-        r"^How do I get to (?:the )?airport.*$",
-        # Model "thinking" about the question
         r"^We are in (?:English|Portuguese)\.\s*The user wants to.*$",
-        # Internal planning that leaked through
         r"^Step-by-step:.*$",
-        # "Note:" at the very start indicates internal reasoning
-        r"^Note:.*Rossio is a major station.*$",
-        # Important internal marker
         r"^Important:.*(?:is served by|does NOT).*$",
     ]
 
     for pattern in wrong_question_patterns:
         if re.match(pattern, content, flags=re.DOTALL | re.IGNORECASE):
-            # The entire response is internal reasoning - return error message
             return "Ocorreu um erro ao processar. / An error occurred while processing."
 
     thinking_patterns = [
@@ -567,6 +552,7 @@ class BaseAgent:
         self._llm_usage_events = []
         self._llm_usage_call_index = 0
         self._tool_calls_log = []
+        self._tool_result_cache: Dict[str, Any] = {}
 
     def get_llm_usage_events(self) -> List[Dict[str, Any]]:
         """Returns a defensive copy of the raw LLM usage events."""
@@ -598,10 +584,24 @@ class BaseAgent:
         resolved_args = args if isinstance(args, dict) else {}
         resolved_name = str(tool_name or getattr(tool, "name", "unknown")).strip() or "unknown"
         resolved_args = self._preprocess_tool_args(resolved_name, resolved_args)
+        cache_key = json.dumps(
+            {"tool": resolved_name, "args": resolved_args},
+            sort_keys=True,
+            ensure_ascii=False,
+            default=str,
+        )
+        tool_cache = getattr(self, "_tool_result_cache", None)
+        if isinstance(tool_cache, dict) and cache_key in tool_cache:
+            if verbose:
+                print(f"      [TOOL] Reusing cached {resolved_name} result for identical args")
+            return tool_cache[cache_key]
         self._record_tool_call(resolved_name, resolved_args)
         if verbose:
             print(f"      [TOOL] Calling {resolved_name} with args: {resolved_args}")
-        return tool.invoke(resolved_args)
+        result = tool.invoke(resolved_args)
+        if isinstance(tool_cache, dict):
+            tool_cache[cache_key] = result
+        return result
 
     def _preprocess_tool_args(self, tool_name: str, tool_args: dict) -> dict:
         """Hook for subclasses to sanitize LLM-emitted tool arguments.

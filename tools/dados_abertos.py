@@ -1231,6 +1231,7 @@ def find_nearby_services(
     item_icon, heading = _service_icon_and_heading(selected_title, service_type)
     count_label = "resultado" if len(results) == 1 else "resultados"
     response = f"### {item_icon} **{heading}**\n\n"
+    displayed_results = results
 
     if near_location_name and results:
         nearest = results[0]
@@ -1239,18 +1240,53 @@ def find_nearby_services(
             nearest_name = _display_result_name(nearest.get("name"))
             duplicate_name_indexes.clear()
             walk_minutes = max(1, round(float(nearest_distance) * 12))
+            cleaned_address = _clean_display_address(nearest.get("address"))
+            if cleaned_address:
+                if nearest.get("lat") is not None and nearest.get("lon") is not None:
+                    map_query = f"{nearest['lat']:.6f},{nearest['lon']:.6f}"
+                elif "lisboa" in cleaned_address.lower():
+                    map_query = cleaned_address
+                else:
+                    map_query = f"{cleaned_address}, Lisboa, Portugal"
+                map_url = f"https://www.google.com/maps/search/?api=1&query={quote_plus(map_query)}"
+            elif nearest.get("lat") is not None and nearest.get("lon") is not None:
+                map_url = f"https://www.google.com/maps/search/?api=1&query={nearest['lat']:.6f}%2C{nearest['lon']:.6f}"
+                cleaned_address = "Abrir localização" if is_pt else "Open location"
+            else:
+                map_url = ""
             if is_pt:
                 response += (
-                    f"- ✅ **Mais perto:** {nearest_name} "
-                    f"({nearest_distance:.2f} km de {near_location_name}; cerca de {walk_minutes} min a pé)\n\n"
+                    f"✅ **Resposta direta:** o resultado mais próximo que encontrei é **{nearest_name}**, "
+                    f"a {nearest_distance:.2f} km de {near_location_name} (cerca de {walk_minutes} min a pé).\n\n"
+                )
+                if cleaned_address and map_url:
+                    response += f"- 📍 **Morada/localização:** [{cleaned_address}]({map_url})\n"
+                response += (
+                    f"- ⚠️ **Cobertura:** dados municipais de **{selected_title}**; "
+                    "não confirmam horário atual, farmácia de serviço ou disponibilidade clínica.\n\n"
                 )
             else:
                 response += (
-                    f"- ✅ **Nearest:** {nearest_name} "
-                    f"({nearest_distance:.2f} km from {near_location_name}; about {walk_minutes} min walking)\n\n"
+                    f"✅ **Direct answer:** the closest result I found is **{nearest_name}**, "
+                    f"{nearest_distance:.2f} km from {near_location_name} (about {walk_minutes} min walking).\n\n"
+                )
+                if cleaned_address and map_url:
+                    response += f"- 📍 **Address/location:** [{cleaned_address}]({map_url})\n"
+                response += (
+                    f"- ⚠️ **Coverage:** municipal data from **{selected_title}**; "
+                    "it does not confirm current hours, duty pharmacy status, or clinical availability.\n\n"
+                )
+            displayed_results = results[1:]
+            if displayed_results:
+                response += (
+                    "### Alternativas próximas\n\n"
+                    if is_pt
+                    else "### Nearby alternatives\n\n"
                 )
 
-    if is_pt:
+    if near_location_name and results:
+        pass
+    elif is_pt:
         response += f"- 🧭 **Fonte dos dados:** {selected_title}\n"
         response += f"- 📊 **Resultados:** {len(results)} {count_label}\n\n"
         if not near_location_name:
@@ -1271,7 +1307,7 @@ def find_nearby_services(
             else "- ⚠️ **Note:** these records identify public water/fountain features; drinkability is not confirmed by the available data.\n\n"
         )
 
-    for r in results:
+    for r in displayed_results:
         display_name = _display_result_name(r.get("name"))
         response += f"- {item_icon} **{display_name}**\n"
         cleaned_address = _clean_display_address(r.get('address'))
@@ -1384,7 +1420,7 @@ def get_dataset_details(dataset_name: str) -> str:
     response = f"📊 Dataset: {title}\n"
     response += f"{'=' * 50}\n\n"
     response += f"📝 Description: {description}\n\n"
-    response += f"🔗 URL: {stable_url}\n"
+    response += f"🔗 [Dataset]({stable_url})\n"
     response += f"📅 Last Updated: {last_updated}\n\n"
 
     # Try to fetch and inspect schema

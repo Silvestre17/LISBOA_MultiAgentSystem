@@ -72,12 +72,6 @@ _PT_LANGUAGE_HINTS_RE = re.compile(
     re.IGNORECASE,
 )
 _STRONG_PT_QUERY_RE = re.compile(
-    # NOTE: "lisboa" is intentionally excluded here. It is a proper noun
-    # shared by Portuguese and English ("the Lisboa Card", "near Lisboa")
-    # and triggering a strong-PT classification on it mis-routes English
-    # queries about Lisbon into the PT response/label/footer pipeline.
-    # Keep it in the weaker hint regex so PT-only short queries like
-    # "tempo em Lisboa" still work, but never as a strong PT signal.
     r"\b(quero|queria|quiser|preciso|vou|ir|como|qual|quais|d[aá]-?me|fala[- ]?me|fale[- ]?me|"
     r"tenho|existem|h[aá]|linhas?|perturba[cç][aã]o|perturba[cç][oõ]es|recomendas?|sugeres?|puder|afinal|para|ao|à|até|ate|entre|perto|amanh[aã]|hoje)\b|"
     r"\be\s+se\b",
@@ -95,7 +89,7 @@ _EN_LANGUAGE_HINTS_RE = re.compile(
     re.IGNORECASE,
 )
 _STRONG_EN_QUERY_RE = re.compile(
-    r"\b(find|tell me|give me|show me|i want|i need|how|what|where|when|which|nearest|closest|walking time|public restroom|from|to)\b",
+    r"\b(help me|find|tell me|give me|show me|i want|i need|how|what|where|when|which|nearest|closest|walking time|public restroom|from|to)\b",
     re.IGNORECASE,
 )
 _EVENT_HINTS_RE = re.compile(
@@ -110,6 +104,16 @@ _PLACE_HINTS_RE = re.compile(
 
 def _has_researcher_event_hint(query: str) -> bool:
     """Return whether a query explicitly asks for events, avoiding verb-only "show" false positives."""
+    if re.search(
+        r"\b(?:sem\s+eventos?|nao\s+(?:me\s+)?(?:mostres?|sugiras?|incluas?)\s+eventos?|"
+        r"n[aã]o\s+(?:me\s+)?(?:mostres?|sugiras?|incluas?)\s+eventos?|"
+        r"do\s+not\s+(?:suggest|show|include)\s+events?|"
+        r"don'?\s*t\s+(?:suggest|show|include)\s+events?|"
+        r"no\s+events?|without\s+events?|not\s+events?)\b",
+        query or "",
+        flags=re.IGNORECASE,
+    ):
+        return False
     match = _EVENT_HINTS_RE.search(query or "")
     if not match:
         return False
@@ -601,6 +605,16 @@ def resolve_output_language(
     if re.search(r"[¿¡]", query):
         return "en", True, "es"
 
+    explicit_non_supported_language = [
+        (r"\b(?:en|in)\s+fran[cç]ais\b|\b(?:en|in)\s+french\b", "fr"),
+        (r"\b(?:en|in)\s+espa[nñ]ol\b|\b(?:en|in)\s+spanish\b", "es"),
+        (r"\b(?:auf|in)\s+deutsch\b|\b(?:in)\s+german\b", "de"),
+        (r"\b(?:in)\s+italian\b|\bin\s+italiano\b", "it"),
+    ]
+    for pattern, iso in explicit_non_supported_language:
+        if re.search(pattern, query, flags=re.IGNORECASE):
+            return "en", True, iso
+
     # Explicit PT/EN hints take priority so short greetings ("Olá", "Hello")
     # are never flagged as French/Turkish/etc. by langdetect noise.
     pt_hint = bool(_PT_LANGUAGE_HINTS_RE.search(query))
@@ -646,6 +660,13 @@ def resolve_output_language(
         and not pt_hint
         and len(query) <= 40
         and re.search(r"\b(?:and|also|or|what\s+about|how\s+about)\b", query, flags=re.IGNORECASE)
+    ):
+        return "en", False, "en"
+
+    if (
+        not pt_hint
+        and not has_pt_unique
+        and _STRONG_EN_QUERY_RE.search(query)
     ):
         return "en", False, "en"
 
@@ -832,6 +853,15 @@ def strip_unsupported_closing_offers(text: str) -> str:
     skipping_offer_block = False
     for line in text.splitlines():
         stripped = line.strip()
+
+        if re.match(
+            r"^(?:💡\s*)?\*\*(?:I can help with|Posso ajudar com):\*\*\s*$",
+            stripped,
+            flags=re.IGNORECASE,
+        ):
+            skipping_offer_block = False
+            cleaned_lines.append(line)
+            continue
 
         if skipping_offer_block:
             if not stripped:
@@ -2096,6 +2126,22 @@ def _structure_transport_route_dump_markdown(text: str, language: str | None = N
 
     lines = [line.rstrip() for line in text.splitlines()]
     is_pt = language == "pt" if language in {"pt", "en"} else _looks_like_pt_transport_text(text)
+    requested_route_note = ""
+    requested_route_note_match = re.search(
+        r"\*\*(?:Nota sobre a linha|Note on line)\s+(?P<code>\d{1,4}[A-Za-z]?):\*\*",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if requested_route_note_match:
+        route_code = requested_route_note_match.group("code").strip()
+        requested_route_note = (
+            f"⚠️ **Nota sobre a linha {route_code}:** não encontrei a **{route_code}** "
+            "como opção confirmada para esta origem/destino nos dados Carris disponíveis; "
+            "por isso mostro alternativas Carris confirmadas."
+            if is_pt
+            else f"⚠️ **Note on line {route_code}:** I could not confirm **{route_code}** "
+            "for this origin/destination in the available Carris data, so I show confirmed Carris alternatives."
+        )
 
     route_title_re = re.compile(
         r"^\s*\*{0,2}Routes\*{0,2}\s*:\s*(?P<origin>.+?)\s*(?:->|→)\s*(?P<destination>.+?)\s*$",
@@ -2310,6 +2356,8 @@ def _structure_transport_route_dump_markdown(text: str, language: str | None = N
             output_lines.append(
                 f"✅ **Direct answer:** {confidence_label} is **{mode_word} {line_value}**{direction_suffix}{travel_suffix}{leg_suffix}."
             )
+        if requested_route_note:
+            output_lines.extend(["", requested_route_note])
         output_lines.extend(["", "---", ""])
 
     if summary.get("direct_count"):
@@ -2931,8 +2979,12 @@ def canonicalize_transport_terms(text: str, language: str = "en") -> str:
             (r"\*\*(\d+) linha\(s\) direta\(s\) encontrada\(s\):\*\*", r"**\1 direct line(s) found:**"),
             (r"Alguns\s+comboios\s+com\s*\+(\d+)min atraso", r"Some trains are delayed by \1 min"),
             (r"Alguns\s+t*trains?\s+com\s*\+(\d+)min atraso", r"Some trains are delayed by \1 min"),
+            (r"Alguns\s+t*trains?\s+com\s*\+(\d+)\s*min\s+de\s+atraso", r"Some trains are delayed by \1 min"),
             (r"ou estação", "or station"),
             (r"Partidas restantes Today", "Remaining departures today"),
+            (r"\.\.\.\s+e\s+mais\s+(\d+)\s+partidas\s+Today\.?", r"... and \1 more departures today."),
+            (r"\.\.\.\s+e\s+mais\s+(\d+)\s+partidas\s+hoje\.?", r"... and \1 more departures today."),
+            (r"\(\s*Paragens\s*\)", "(stops)"),
             (r"\bHoje\b", "Today"),
             (r"\bParagem:\b", "Stop:"),
             (r"\bTotal de passagens hoje:\b", "Total departures today:"),
@@ -3667,9 +3719,21 @@ def clean_researcher_tool_artifacts(text: str) -> str:
         ),
     ])
 
+    _raw_tool_url_re = re.compile(r"^([-*•]?\s*)🔗\s+URL:\s+(https?://\S+)(.*)")
+
     cleaned_lines = []
     for line in text.splitlines():
         stripped = line.strip()
+        url_match = _raw_tool_url_re.match(stripped)
+        if url_match:
+            _url, _rest = url_match.group(2), url_match.group(3).strip()
+            try:
+                _domain = urlparse(_url).netloc.lstrip("www.") or _url
+            except Exception:
+                _domain = "link"
+            _trailing = f" — {_rest}" if _rest else ""
+            line = f"🔗 [{_domain}]({_url}){_trailing}"
+            stripped = line.strip()
         if any(pattern.match(stripped) for pattern in artifact_patterns):
             continue
         cleaned_lines.append(line)
@@ -3971,10 +4035,10 @@ def canonicalize_visitlisboa_source_line(
     kind = infer_researcher_source_kind(user_query=user_query, text=text)
     has_visitlisboa = "visitlisboa" in lower_text
     has_lisboa_aberta = (
-        "lisboa aberta" in lower_text
-        or "open data:" in lower_text
-        or "dados abertos" in lower_text
-        or "dados.cm-lisboa.pt" in lower_text
+        "lisboa aberta" in lower_body
+        or "open data:" in lower_body
+        or "dados abertos" in lower_body
+        or "dados.cm-lisboa.pt" in lower_body
     )
     visitlisboa_source_exists = any(
         _SOURCE_LINE_RE.match(line.strip()) and "visitlisboa" in line.lower()
@@ -4045,6 +4109,8 @@ def canonicalize_visitlisboa_source_line(
         replacement += f" | **Updated:** {timestamp}"
 
     replacement = normalize_visitlisboa_source_footer_links(replacement, language)
+    if not any(_SOURCE_LINE_RE.match(line.strip()) for line in text.splitlines()):
+        return f"{text.rstrip()}\n\n{replacement}".strip()
     return _replace_source_line(
         text,
         replacement,
@@ -8277,7 +8343,16 @@ def finalize_worker_response(
             researcher_kind != "events"
             and _is_researcher_history_text_response(finalized, user_query)
         )
-        if researcher_kind == "events" and not already_structured_event_cards:
+        mixed_researcher_query = bool(
+            _has_researcher_event_hint(user_query or "")
+            and _has_researcher_place_hint(user_query or "")
+        )
+        if (
+            researcher_kind == "events"
+            and not mixed_researcher_query
+            and not already_structured_event_cards
+            and not _is_specific_lookup_fallback_intro(finalized)
+        ):
             event_structured = format_researcher_event_cards(
                 finalized,
                 language=preferred_language,
@@ -9091,7 +9166,26 @@ def generate_response_title(
                 "história", "history", "cultura", "culture", "origem", "origin",
                 "fundação", "founded", "tradição", "tradition",
             ]
+            negated_event_request = bool(
+                re.search(
+                    r"\b(?:sem\s+eventos?|nao\s+(?:me\s+)?(?:mostres?|sugiras?|incluas?)\s+eventos?|"
+                    r"n[aã]o\s+(?:me\s+)?(?:mostres?|sugiras?|incluas?)\s+eventos?|"
+                    r"do\s+not\s+(?:suggest|show|include)\s+events?|"
+                    r"don'?\s*t\s+(?:suggest|show|include)\s+events?|"
+                    r"no\s+events?|without\s+events?|not\s+events?)\b",
+                    query_lower,
+                    flags=re.IGNORECASE,
+                )
+            )
 
+            if any(kw in query_lower for kw in history_kw) and (
+                negated_event_request or not any(kw in query_lower for kw in event_kw)
+            ):
+                return (
+                    "### \U0001f4da História e Cultura"
+                    if language == "pt"
+                    else "### \U0001f4da History & Culture"
+                )
             if any(kw in query_lower for kw in event_kw):
                 return (
                     "### \U0001f3ad Eventos Culturais"
@@ -9133,12 +9227,6 @@ def generate_response_title(
                     "### \U0001f3e5 Serviços Essenciais"
                     if language == "pt"
                     else "### \U0001f3e5 Essential Services"
-                )
-            elif any(kw in query_lower for kw in history_kw):
-                return (
-                    "### \U0001f4da História e Cultura"
-                    if language == "pt"
-                    else "### \U0001f4da History & Culture"
                 )
             else:
                 return (
@@ -9849,7 +9937,7 @@ def normalize_category_inventory_response(text: str, language: str = "en") -> st
     lines = cleaned.splitlines()
     if any(
         re.match(
-            r"^\s*[-*]\s+(?:ðŸ“|📝)\s+\*\*(?:Descrição|Description):\*\*\s+.+?:\s*\d+",
+            r"^\s*[-*]\s+(?:📝|📝)\s+\*\*(?:Descrição|Description):\*\*\s+.+?:\s*\d+",
             line,
             flags=re.IGNORECASE,
         )
@@ -9890,7 +9978,7 @@ def normalize_category_inventory_response(text: str, language: str = "en") -> st
             title_text = raw_line
             desc_text = ""
             desc_match = re.match(
-                r"^[-*]\s+(?:ðŸ“|📝)\s+\*\*(?:Descrição|Description):\*\*\s*(?P<title>.+)$",
+                r"^[-*]\s+(?:📝|📝)\s+\*\*(?:Descrição|Description):\*\*\s*(?P<title>.+)$",
                 title_text,
                 flags=re.IGNORECASE,
             )
@@ -10489,7 +10577,7 @@ def normalize_flat_cp_train_response(text: str) -> str:
         return text or ""
     is_pt = bool(
         re.search(
-            r"\b(?:Resposta direta|Resumo da viagem|Pr[oóÃ³]ximas|Partidas restantes hoje|Fonte)\b",
+            r"\b(?:Resposta direta|Resumo da viagem|Pr[oó]ximas|Partidas restantes hoje|Fonte)\b",
             text,
             flags=re.IGNORECASE,
         )
@@ -11640,6 +11728,90 @@ def strip_standalone_generic_intro_description_lines(text: str) -> str:
     return generic_intro_re.sub("", text)
 
 
+def strip_generic_researcher_pseudo_cards(text: str) -> str:
+    """Remove pseudo-cards that only restate a generic researcher direct answer."""
+    if not text:
+        return text or ""
+
+    card_heading_re = re.compile(r"^\s*[-*]\s+\*\*(?P<title>[^*\n]{2,180})\*\*\s*$")
+    material_field_re = re.compile(
+        r"\*\*(?:Data/Hora|Data|Quando|When|Date/Time|Local|Venue|Morada|Address|"
+        r"Mais detalhes|More details|Bilhetes|Tickets|Site|Website|Fonte|Source):\*\*",
+        flags=re.IGNORECASE,
+    )
+
+    def _normalized_line(value: str) -> str:
+        return _strip_accents_compat(value or "").lower()
+
+    def _is_direct_answer_description_line(value: str) -> bool:
+        normalized = _normalized_line(value)
+        return bool(
+            re.search(
+                r"\b(?:descricao|description)\s*:\s*(?:[^\w\s]\s*)?"
+                r"(?:\*{0,2})?(?:resposta direta|direct answer)\s*:",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+
+    def _generic_pseudo_title(title: str) -> bool:
+        normalized = _normalized_line(_strip_markdown_formatting(title)).strip(" .:-")
+        return bool(
+            re.search(
+                r"\b(?:eventos gratuitos encontrados|free events found|"
+                r"museus e eventos gratuitos|free museums and events|"
+                r"eventos encontrados|events found)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
+
+    def _block_has_material_field(block: list[str]) -> bool:
+        return bool(material_field_re.search("\n".join(block)))
+
+    lines = text.splitlines()
+    output: list[str] = []
+    i = 0
+    while i < len(lines):
+        raw_line = lines[i]
+        stripped = raw_line.strip()
+        heading_match = card_heading_re.match(stripped)
+        if not heading_match:
+            if not _is_direct_answer_description_line(stripped):
+                output.append(raw_line)
+            i += 1
+            continue
+
+        block = [raw_line]
+        j = i + 1
+        while j < len(lines):
+            next_stripped = lines[j].strip()
+            if (
+                next_stripped == "---"
+                or next_stripped.startswith("### ")
+                or _SOURCE_LINE_RE.match(next_stripped)
+                or card_heading_re.match(next_stripped)
+            ):
+                break
+            block.append(lines[j])
+            j += 1
+
+        generic_title = _generic_pseudo_title(heading_match.group("title"))
+        direct_answer_description = any(_is_direct_answer_description_line(line.strip()) for line in block[1:])
+        if generic_title and (direct_answer_description or not _block_has_material_field(block)):
+            i = j
+            continue
+
+        filtered_block = [
+            line for line in block
+            if not _is_direct_answer_description_line(line.strip())
+        ]
+        output.extend(filtered_block)
+        i = j
+
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(output)).strip()
+
+
 def localize_common_price_fragments(text: str, language: str = "en") -> str:
     """Localize common VisitLisboa feature fragments that can bypass label repair."""
     if not text or not (language or "").lower().startswith("pt"):
@@ -11738,6 +11910,10 @@ def normalize_researcher_card_field_indentation(text: str) -> str:
         r"^[-*]\s+\*\*(?P<icon>🏛️|🎭|🍽️|☕|🥐|🌿|📍|🖼️|🎵|📚|🛍️|🛏️|🏨|⛵|🏄|🌊|🌅|📅|🏅|🏃|⚽|🏷️|🎪|🪖)\s+"
         r"(?P<title>[^*\n]+?)\*\*\s*$"
     )
+    list_card_heading_icon_outside_re = re.compile(
+        r"^[-*]\s+(?P<icon>🏛️|🎭|🍽️|☕|🥐|🌿|📍|🖼️|🎵|📚|🛍️|🛏️|🏨|⛵|🏄|🌊|🌅|📅|🏅|🏃|⚽|🏷️|🎪|🪖)\s+"
+        r"\*\*(?P<title>[^*\n]+?)\*\*\s*$"
+    )
     h3_card_heading_re = re.compile(
         r"^#{1,6}\s+(?P<icon>🏛️|🎭|🍽️|☕|🥐|🌿|📍|🖼️|🎵|📚|🛍️|🛏️|🏨|⛵|🏄|🌊|🌅|📅|🏅|🏃|⚽|🏷️|🎪|🪖)\s+"
         r"(?:\*\*)?(?P<title>.+?)(?:\*\*)?\s*$"
@@ -11748,7 +11924,7 @@ def normalize_researcher_card_field_indentation(text: str) -> str:
         r"Hours|Horário|Price|Preço|Rating|Avaliação|Phone|Telefone|Email|E-mail|Website|Site|"
         r"More details|Mais detalhes|Tickets|Bilhetes|Date/Time|Data/Hora|When|Quando|Duration|Duração|"
         r"Schedule|Horários|Opening hours|Horário de funcionamento|Highlights|Destaques|"
-        r"Venue|Local|Distance|Distância|Distancia)(?::\*\*|\*\*\s*:)",
+        r"Features|Características|Caracteristicas|Venue|Local|Distance|Distância|Distancia)(?::\*\*|\*\*\s*:)",
         re.IGNORECASE,
     )
     non_card_titles = {
@@ -11790,6 +11966,7 @@ def normalize_researcher_card_field_indentation(text: str) -> str:
         match = (
             bold_card_heading_re.match(stripped)
             or list_card_heading_re.match(stripped)
+            or list_card_heading_icon_outside_re.match(stripped)
             or h3_card_heading_re.match(stripped)
         )
         if not match:
@@ -11828,7 +12005,7 @@ def normalize_researcher_card_field_indentation(text: str) -> str:
             else:
                 output_lines.append(raw_line)
             continue
-        if stripped.startswith("**") or list_card_heading_re.match(stripped):
+        if stripped.startswith("**") or list_card_heading_re.match(stripped) or list_card_heading_icon_outside_re.match(stripped):
             heading_match = _card_heading_match(stripped)
             in_card = bool(heading_match)
             if heading_match:
@@ -13423,6 +13600,117 @@ def ensure_top_level_event_card_spacing(text: str) -> str:
     return clean_newlines("\n".join(output_lines)).strip()
 
 
+def normalize_event_plain_field_bullets(text: str, language: str = "en") -> str:
+    """Nest plain event metadata bullets under the active event card."""
+    if not text or not re.search(r"\b(?:VisitLisboa Events|VisitLisboa Eventos)\b", text, flags=re.IGNORECASE):
+        return text or ""
+
+    is_pt = (language or "").lower().startswith("pt")
+    text = re.sub(
+        r"(?mi)^(\s+-\s+🕐\s+)\*\*(?:Opening hours|Hours):\*\*",
+        r"\1**Schedule:**",
+        text,
+    )
+    text = re.sub(
+        r"(?mi)^(\s+-\s+🕐\s+)\*\*(?:Today|Hoje):\*\*",
+        r"\1**Schedule:**",
+        text,
+    )
+    text = re.sub(
+        r"(?mi)^(\s+-\s+🕐\s+)\*\*(?:Horário de funcionamento|Horário):\*\*",
+        r"\1**Horários:**",
+        text,
+    )
+    field_map = {
+        "schedule": ("🕐", "Horários" if is_pt else "Schedule"),
+        "opening hours": ("🕐", "Horários" if is_pt else "Schedule"),
+        "hours": ("🕐", "Horários" if is_pt else "Schedule"),
+        "opening hours / schedule": ("🕐", "Horários" if is_pt else "Schedule"),
+        "opening hours/schedule": ("🕐", "Horários" if is_pt else "Schedule"),
+        "horarios": ("🕐", "Horários" if is_pt else "Schedule"),
+        "horários": ("🕐", "Horários" if is_pt else "Schedule"),
+        "horario": ("🕐", "Horários" if is_pt else "Schedule"),
+        "horário": ("🕐", "Horários" if is_pt else "Schedule"),
+        "horario / horarios": ("🕐", "Horários" if is_pt else "Schedule"),
+        "horário / horários": ("🕐", "Horários" if is_pt else "Schedule"),
+        "when": ("📅", "Data/Hora" if is_pt else "Date/Time"),
+        "quando": ("📅", "Data/Hora" if is_pt else "Date/Time"),
+        "date/time": ("📅", "Data/Hora" if is_pt else "Date/Time"),
+        "data/hora": ("📅", "Data/Hora" if is_pt else "Date/Time"),
+        "duration": ("⏱️", "Duração" if is_pt else "Duration"),
+        "duracao": ("⏱️", "Duração" if is_pt else "Duration"),
+        "duração": ("⏱️", "Duração" if is_pt else "Duration"),
+        "category": ("📂", "Categoria" if is_pt else "Category"),
+        "categoria": ("📂", "Categoria" if is_pt else "Category"),
+        "price": ("💰", "Preço" if is_pt else "Price"),
+        "preco": ("💰", "Preço" if is_pt else "Price"),
+        "preço": ("💰", "Preço" if is_pt else "Price"),
+        "note": ("💡", "Nota" if is_pt else "Note"),
+        "nota": ("💡", "Nota" if is_pt else "Note"),
+    }
+    top_event_re = re.compile(
+        r"^-\s+\*\*(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s*)?[^*]{2,180}\*\*\s*$"
+    )
+    plain_field_re = re.compile(r"^(?P<label>[^:]{2,80}):\s*(?P<value>.+)$")
+    output_lines: list[str] = []
+    inside_event_card = False
+
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if _SOURCE_LINE_RE.match(stripped) or stripped.startswith("### "):
+            inside_event_card = False
+            output_lines.append(raw_line)
+            continue
+        if top_event_re.match(stripped):
+            inside_event_card = True
+            output_lines.append(raw_line)
+            continue
+        if inside_event_card and raw_line == stripped and stripped.startswith(("- ", "* ")):
+            body = re.sub(r"^\s*[-*]\s+", "", stripped).strip()
+            body = re.sub(r"^[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s*", "", body)
+            body = re.sub(r"^\*\*(?P<label>[^*:]{2,80})\s*:\*\*\s*", r"\g<label>: ", body)
+            field_match = plain_field_re.match(body)
+            if field_match:
+                label = field_match.group("label").strip()
+                value = field_match.group("value").strip()
+                label_key = _strip_accents_compat(label).lower()
+                if label_key in {"today", "hoje"}:
+                    label_key = (
+                        "schedule"
+                        if re.search(
+                            r"\b(?:from|monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+                            r"segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo|duration|dura[cç][aã]o)\b",
+                            value,
+                            flags=re.IGNORECASE,
+                        )
+                        else "when"
+                    )
+                if label_key == "source completeness note":
+                    continue
+                mapped = field_map.get(label_key)
+                if mapped and value:
+                    icon, public_label = mapped
+                    output_lines.append(f"    - {icon} **{public_label}:** {value}")
+                    continue
+        output_lines.append(raw_line)
+
+    value = "\n".join(output_lines)
+    schedule_label = "Horários" if is_pt else "Schedule"
+    value = re.sub(
+        r"(?mi)^-\s+(?:🕐\s+)?\*\*(?:Today|Hoje|Opening hours|Hours|Opening hours\s*/\s*schedule|"
+        r"Horário|Horários|Horário\s*/\s*Horários|Schedule)\s*:\*\*\s*(?P<value>.+)$",
+        lambda match: f"    - 🕐 **{schedule_label}:** {match.group('value').strip()}",
+        value,
+    )
+    value = re.sub(
+        r"(?mi)^-\s+(?:Today|Hoje|Opening hours|Hours|Opening hours\s*/\s*schedule|"
+        r"Horário|Horários|Horário\s*/\s*Horários|Schedule)\s*:\s*(?P<value>.+)$",
+        lambda match: f"    - 🕐 **{schedule_label}:** {match.group('value').strip()}",
+        value,
+    )
+    return clean_newlines(value).strip()
+
+
 def normalize_event_answer_contract(text: str, language: str = "en") -> str:
     """Repair event-list answers after QA without changing event evidence."""
     if not text or not isinstance(text, str):
@@ -13455,10 +13743,10 @@ def normalize_event_answer_contract(text: str, language: str = "en") -> str:
         _detail_link_replacement,
         text,
     )
-    value = ensure_top_level_event_card_spacing(value)
+    value = normalize_event_plain_field_bullets(ensure_top_level_event_card_spacing(value), language)
 
     if re.search(r"\*\*(?:Resposta direta|Direct answer):\*\*", value, flags=re.IGNORECASE):
-        return value
+        return normalize_event_plain_field_bullets(value, language)
 
     lines = value.splitlines()
     heading_index = next(
@@ -13500,7 +13788,10 @@ def normalize_event_answer_contract(text: str, language: str = "en") -> str:
         lines.insert(insert_after + 1, "---")
         lines.insert(insert_after + 2, "")
 
-    return ensure_top_level_event_card_spacing(clean_newlines("\n".join(lines)).strip())
+    return normalize_event_plain_field_bullets(
+        ensure_top_level_event_card_spacing(clean_newlines("\n".join(lines)).strip()),
+        language,
+    )
 
 
 def repair_duplicate_event_date_value_labels(text: str) -> str:
@@ -16373,6 +16664,7 @@ def final_visual_pass(text: str) -> str:
     text = normalize_metro_route_label_lines(text)
     text = normalize_event_card_field_indentation(text)
     text = normalize_event_answer_contract(text, infer_visible_label_language(text, default="en"))
+    text = normalize_event_plain_field_bullets(text, infer_visible_label_language(text, default="en"))
     text = repair_duplicate_event_date_value_labels(text)
     text = normalize_transport_comparison_info_notes(text)
     text = repair_malformed_heading_bullets(text)
@@ -18148,6 +18440,7 @@ def _normalize_researcher_visual_contract(text: str, language: str) -> str:
     value = re.sub(r"\bFrom Monday to Saturday\b", "De segunda-feira a sábado" if language == "pt" else "From Monday to Saturday", value)
     value = re.sub(r"\bminutes duration\b", "minutos de duração" if language == "pt" else "minutes duration", value)
     value = value.replace("arquitectura", "arquitetura")
+    value = strip_generic_researcher_pseudo_cards(value)
     return value.strip()
 
 
@@ -18368,6 +18661,167 @@ def repair_split_planner_field_lines(text: str) -> str:
         i += 1
 
     return "\n".join(output)
+
+
+def dedupe_planner_cards_by_stable_fields(text: str, language: str = "en") -> str:
+    """Remove planner cards that reuse the same stable address or website.
+
+    Args:
+        text: Markdown response after planner card normalization.
+        language: Output language code.
+
+    Returns:
+        Markdown with duplicate place cards removed from suggested-route
+        sections.
+    """
+    if not text:
+        return text or ""
+
+    route_heading_re = re.compile(r"^###\s+📍\s+\*\*(?:Roteiro sugerido|Suggested route)\*\*", re.IGNORECASE)
+    card_re = re.compile(
+        r"^\s*[-*]\s+\*\*(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s+)?[^*\n]{2,160}\*\*\s*$"
+    )
+    field_key_re = re.compile(
+        r"\*\*(?:Morada|Address|Website|Site):\*\*\s*(?P<value>[^\n]+)",
+        re.IGNORECASE,
+    )
+
+    def _stable_card_key(block: list[str]) -> str:
+        block_text = "\n".join(block)
+        values: list[str] = []
+        for match in field_key_re.finditer(block_text):
+            value = match.group("value").strip()
+            url_match = re.search(r"\((https?://[^)]+)\)", value)
+            values.append(url_match.group(1) if url_match else value)
+        if not values:
+            return ""
+        return _strip_accents_compat(re.sub(r"\s+", " ", " | ".join(values))).lower().strip()
+
+    lines = text.splitlines()
+    output: list[str] = []
+    seen_keys: set[str] = set()
+    in_route_section = False
+    dropped_duplicate = False
+    inserted_note = False
+    i = 0
+
+    while i < len(lines):
+        raw_line = lines[i]
+        stripped = raw_line.strip()
+        if route_heading_re.match(stripped):
+            in_route_section = True
+            seen_keys.clear()
+            dropped_duplicate = False
+            inserted_note = False
+            output.append(raw_line)
+            i += 1
+            continue
+
+        route_section_ends = (
+            in_route_section
+            and (
+                stripped == "---"
+                or (stripped.startswith("### ") and not route_heading_re.match(stripped))
+                or _SOURCE_LINE_RE.match(stripped)
+            )
+        )
+        if route_section_ends:
+            if dropped_duplicate and not inserted_note:
+                note = (
+                    "- ⚠️ **Nota:** os dados disponíveis não confirmavam paragens distintas adicionais para todos os cartões gerados."
+                    if (language or "").lower().startswith("pt")
+                    else "- ⚠️ **Note:** the available data did not confirm distinct additional stops for every generated card."
+                )
+                if output and output[-1].strip():
+                    output.append("")
+                output.append(note)
+                inserted_note = True
+            in_route_section = False
+            output.append(raw_line)
+            i += 1
+            continue
+
+        if in_route_section and card_re.match(raw_line):
+            block = [raw_line]
+            j = i + 1
+            while j < len(lines):
+                next_stripped = lines[j].strip()
+                if (
+                    route_heading_re.match(next_stripped)
+                    or next_stripped == "---"
+                    or next_stripped.startswith("### ")
+                    or _SOURCE_LINE_RE.match(next_stripped)
+                    or card_re.match(lines[j])
+                ):
+                    break
+                block.append(lines[j])
+                j += 1
+            key = _stable_card_key(block)
+            if key and key in seen_keys:
+                dropped_duplicate = True
+                i = j
+                continue
+            if key:
+                seen_keys.add(key)
+            output.extend(block)
+            i = j
+            continue
+
+        output.append(raw_line)
+        i += 1
+
+    if in_route_section and dropped_duplicate and not inserted_note:
+        note = (
+            "- ⚠️ **Nota:** os dados disponíveis não confirmavam paragens distintas adicionais para todos os cartões gerados."
+            if (language or "").lower().startswith("pt")
+            else "- ⚠️ **Note:** the available data did not confirm distinct additional stops for every generated card."
+        )
+        if output and output[-1].strip():
+            output.append("")
+        output.append(note)
+
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(output)).strip()
+
+
+def group_repeated_walking_limitations(text: str, language: str = "en") -> str:
+    """Collapse repeated generic walking caveats into one movement-section note."""
+    if not text:
+        return text or ""
+
+    is_pt = (language or "").lower().startswith("pt")
+    if is_pt:
+        pattern = re.compile(
+            r"(?m)^(?P<prefix>\s*[-*]\s+🚶\s+\*\*[^*\n]+:\*\*)\s*"
+            r"deslocação a pé estimada\s+—\s+não tenho dados exatos de percurso pedonal entre estes pontos; "
+            r"consulte a distância no mapa antes de partir\.\s*$"
+        )
+        replacement = r"\g<prefix> deslocação a pé entre paragens próximas."
+        note = (
+            "- ⚠️ **Limitação pedonal:** não tenho dados exatos de percurso pedonal para estas pernas; "
+            "confirma a distância antes de partir."
+        )
+        heading_re = re.compile(r"(?m)^(###\s+🚶\s+\*\*Como te deslocas\*\*\s*)$")
+    else:
+        pattern = re.compile(
+            r"(?m)^(?P<prefix>\s*[-*]\s+🚶\s+\*\*[^*\n]+:\*\*)\s*"
+            r"estimated walking segment\s+—\s+no exact pedestrian route data available for this leg; "
+            r"check the distance on a map before you go\.\s*$"
+        )
+        replacement = r"\g<prefix> walking between nearby stops."
+        note = (
+            "- ⚠️ **Walking limitation:** exact pedestrian-route data is unavailable for these legs; "
+            "check the distance before leaving."
+        )
+        heading_re = re.compile(r"(?m)^(###\s+🚶\s+\*\*How to move\*\*\s*)$")
+
+    if len(pattern.findall(text)) < 2:
+        return text
+
+    value = pattern.sub(replacement, text)
+    if note in value:
+        return value
+
+    return heading_re.sub(rf"\1\n\n{note}", value, count=1)
 
 
 def _drop_nonmaterial_carris_urban_source_from_metropolitana_answer(text: str) -> str:
@@ -19473,6 +19927,30 @@ def split_merged_transport_semantic_headings(text: str) -> str:
     return merged_heading_re.sub(_split, text)
 
 
+def normalize_transport_minor_heading_layout(text: str) -> str:
+    """Keep transport mode sections and status labels visually balanced."""
+    if not text:
+        return text or ""
+
+    value = re.sub(
+        r"(?mi)^\s*[-*]\s+\*\*(?P<icon>🚇|🚌|🚆|🚋)\s+"
+        r"(?P<title>Metro|Metro de Lisboa|Buses?|Autocarros?|Carris|Train|Comboio|Tram|El[eé]trico)\*\*\s*$",
+        lambda match: f"### {match.group('icon')} **{match.group('title').strip()}**",
+        text,
+    )
+    value = re.sub(
+        r"(?mi)^###\s+(?P<icon>🚦)\s+\*\*(?P<label>Line Status|Estado das Linhas|Estado das linhas):\*\*\s*$",
+        lambda match: f"{match.group('icon')} **{match.group('label').strip()}:**",
+        value,
+    )
+    value = re.sub(
+        r"(?m)^((?:🚦)\s+\*\*(?:Line Status|Estado das Linhas|Estado das linhas):\*\*)\n(?=\s*[-*]\s+)",
+        r"\1\n\n",
+        value,
+    )
+    return clean_newlines(value).strip()
+
+
 def normalize_dangling_anchor_conjunctions(text: str) -> str:
     """Remove dangling conjunctions accidentally captured as part of place anchors."""
     if not text:
@@ -19513,6 +19991,172 @@ def strip_self_anchor_movement_warnings(text: str) -> str:
     return "\n".join(output_lines)
 
 
+def promote_inline_day_labels_to_headers(text: str, language: str = "en") -> str:
+    """Promote inline multi-day labels to H4 day headers."""
+    if not text or not isinstance(text, str):
+        return text or ""
+
+    is_pt = (language or "").lower().startswith("pt")
+    pattern = re.compile(
+        r"(?m)^\s*[-*]\s+"
+        r"(?:🗓️\s*)?"
+        r"\*\*"
+        r"(?:🗓️\s*)?"
+        r"(?:Dia|Day)\s+(?P<num>\d{1,2})"
+        r"(?:\s*[—\-:–]\s*)?"
+        r"(?P<inside_theme>[^*\n]*?)"
+        r"\*\*"
+        r"(?P<after_theme>[^\n]*)$"
+    )
+
+    def _replace(match: re.Match[str]) -> str:
+        num = match.group("num")
+        inside_theme = (match.group("inside_theme") or "").strip(" .,:;-—–")
+        after_theme = (match.group("after_theme") or "").strip(" .,:;-—–")
+        full_line = match.group(0)
+        if re.search(
+            r"\b(?:\d{1,2}:\d{2}|\d{1,3}\s*(?:min|minutos|minutes|h\b|horas?)|"
+            r"come[cç]a|reserva|allow|start\s+around|pausa\s+de\s+almo[cç]o|lunch\s+around)\b",
+            full_line,
+            flags=re.IGNORECASE,
+        ):
+            return full_line
+        theme = " ".join(part for part in (inside_theme, after_theme) if part)
+        theme = re.sub(r"\*+$", "", theme).strip(" .,:;-—–")
+        label = f"Dia {num}" if is_pt else f"Day {num}"
+        if theme:
+            return f"\n#### 🗓️ **{label} — {theme}**\n"
+        return f"\n#### 🗓️ **{label}**\n"
+
+    promoted = pattern.sub(_replace, text)
+    promoted = re.sub(r"\n{3,}", "\n\n", promoted)
+    return promoted.strip() + ("\n" if text.endswith("\n") else "")
+
+
+def reconcile_event_title_with_negative_body(text: str, language: str = "en") -> str:
+    """Reconcile no-result event bodies with their heading."""
+    if not text or not isinstance(text, str):
+        return text or ""
+
+    body_signals_no_results = bool(
+        re.search(
+            r"\b(?:n[aã]o\s+encontrei(?:\s+(?:um\s+)?(?:evento|eventos))?"
+            r"|n[aã]o\s+consegui\s+confirmar"
+            r"|n[aã]o\s+h[aá]\s+eventos?\s+confirmad"
+            r"|sem\s+eventos?\s+confirmad"
+            r"|could\s+not\s+(?:find|confirm)"
+            r"|did\s+not\s+find\s+events?"
+            r"|no\s+confirmed\s+events?"
+            r"|no\s+events?\s+(?:found|matching))\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+    if not body_signals_no_results:
+        return text
+
+    has_confirmed_event_schedule = bool(
+        re.search(
+            r"(?mi)^\s*[-*]\s+(?:[^\w\s#*-]\s*)?\*\*(?:Data/Hora|Date/Time|Data|Date|Quando):\*\*",
+            text,
+        )
+    )
+    if has_confirmed_event_schedule:
+        return text
+
+    new_heading = (
+        "### 🎭 **Sem eventos confirmados**"
+        if (language or "").lower().startswith("pt")
+        else "### 🎭 **No confirmed events**"
+    )
+    reconciled = re.sub(
+        r"(?mi)^###\s+(?:🎭|🔵)\s+\*\*(?:Eventos encontrados|Events found)\*\*\s*$",
+        new_heading,
+        text,
+        count=1,
+    )
+    reconciled = re.sub(
+        r"(?mi)^✅\s+\*\*(?:Resposta direta|Direct answer):\*\*\s+"
+        r"(?:encontrei\s+eventos\s+relevantes\s+para\s+o\s+pedido\.?"
+        r"|i\s+found\s+events?\s+relevant\s+to\s+the\s+request\.?)\s*$",
+        "",
+        reconciled,
+    )
+    has_h3_now = bool(
+        re.search(
+            r"(?mi)^###\s+(?:🎭|🔵)\s+\*\*(?:Sem eventos confirmados|No confirmed events)\*\*\s*$",
+            reconciled,
+        )
+    )
+    if has_h3_now:
+        reconciled = re.sub(
+            r"(?mi)^\s*[-*]\s+\*\*(?:🎭|🔵)\s+(?:Sem eventos confirmados|No confirmed events)\*\*\s*$\n?",
+            "",
+            reconciled,
+        )
+    else:
+        reconciled = re.sub(
+            r"(?mi)^\s*[-*]\s+\*\*(?:🎭|🔵)\s+(?P<title>Sem eventos confirmados|No confirmed events)\*\*\s*$",
+            lambda m: f"### 🎭 **{m.group('title')}**",
+            reconciled,
+            count=1,
+        )
+        reconciled = re.sub(
+            r"(?mi)^\s*[-*]\s+\*\*(?:🎭|🔵)\s+(?:Sem eventos confirmados|No confirmed events)\*\*\s*$\n?",
+            "",
+            reconciled,
+        )
+    if not re.search(r"(?m)^###\s+", reconciled):
+        lines = reconciled.splitlines()
+        source_lines = [line for line in lines if _SOURCE_LINE_RE.match(line.strip())]
+        body_lines = [line for line in lines if not _SOURCE_LINE_RE.match(line.strip())]
+        body = re.sub(r"\n{2,}", "\n", "\n".join(body_lines)).strip()
+        if body:
+            direct_label = "Resposta direta" if (language or "").lower().startswith("pt") else "Direct answer"
+            source_block = ("\n\n" + "\n".join(source_lines)) if source_lines else ""
+            reconciled = f"{new_heading}\n\n✅ **{direct_label}:** {body}{source_block}"
+    return re.sub(r"\n{3,}", "\n\n", reconciled).strip()
+
+
+def _strip_unsupported_climate_advice(text: str) -> str:
+    """Remove weather advice sections when the answer says climatology is unavailable."""
+    if not text or not re.search(
+        r"(?i)(?:n[aã]o\s+tenho\s+dados\s+climatol[oó]gicos|"
+        r"n[aã]o\s+consigo\s+confirmar\s+climatologia|"
+        r"do\s+not\s+have\s+climatological|don't\s+have\s+climatological|"
+        r"cannot\s+confirm\s+climatolog)",
+        text,
+    ):
+        return text
+    stripped = re.sub(
+        r"(?ms)\n+---\n+\s*###\s+[^\w\s#*-]?\s*\*\*(?:Conselho de guarda-chuva|Umbrella advice)\*\*.*?(?=\n\n📌\s+\*\*(?:Fonte|Source):|\Z)",
+        "",
+        text,
+    ).strip()
+    stripped = re.sub(
+        r"(?mi)\n+(?:Em geral|In general),[^\n]*(?:guarda-chuva|umbrella)[^\n]*(?=\n|$)",
+        "",
+        stripped,
+    ).strip()
+    stripped = re.sub(
+        r"(?mi)\n+(?:Se quiser,\s*)?posso ajudar a interpretar a previs[aã]o mais perto da data[^\n]*(?=\n|$)",
+        "",
+        stripped,
+    ).strip()
+    stripped = re.sub(
+        r"(?mi)\n+(?:If you want,\s*)?I can help interpret the forecast closer to your trip date[^\n]*(?=\n|$)",
+        "",
+        stripped,
+    ).strip()
+    stripped = re.sub(
+        r"(?mi)\n+[^\n]*\b(?:outubro|october|m[eê]s|month|season|esta[cç][aã]o)\b[^\n]*"
+        r"\b(?:precipita[cç][aã]o|precipitation|chuva|rain|chuvoso|wet)\b[^\n]*(?=\n|$)",
+        "",
+        stripped,
+    ).strip()
+    return stripped
+
+
 def final_post_qa_guard(
     text: str,
     language: str = "en",
@@ -19529,11 +20173,15 @@ def final_post_qa_guard(
         return text or ""
 
     text = strip_internal_qa_annotations(text)
+    text = reconcile_event_title_with_negative_body(text, language)
+    text = _strip_unsupported_climate_advice(text)
+    text = promote_inline_day_labels_to_headers(text, language)
     text = re.sub(r"(?mi)^\s*Could not (?:geocode|resolve location)\b.*$", "", text)
     text = normalize_dangling_anchor_conjunctions(text)
     text = strip_self_anchor_movement_warnings(text)
     text = promote_transport_semantic_bold_headings(text)
     text = split_merged_transport_semantic_headings(text)
+    text = normalize_transport_minor_heading_layout(text)
     text = repair_transport_markdown_fragmentation(text)
     text = repair_service_lookup_heading_wrapper(text)
     text = repair_indoor_heading_fragmentation(text)
@@ -19583,11 +20231,56 @@ def final_post_qa_guard(
         guarded = repair_split_metro_route_heading(guarded)
         guarded = promote_transport_semantic_bold_headings(guarded)
         guarded = split_merged_transport_semantic_headings(guarded)
+        guarded = normalize_transport_minor_heading_layout(guarded)
         guarded = normalize_dangling_anchor_conjunctions(guarded)
         guarded = strip_self_anchor_movement_warnings(guarded)
     guarded = re.sub(r"\*\*([^*\n:]{2,80}):\s+\*\*(?=\s|$)", r"**\1:**", guarded)
     guarded = re.sub(r"\*\*([^*\n:]{2,80}):\s*\*\*(?=\s|$)", r"**\1:**", guarded)
+    guarded = re.sub(
+        r"(?mi)^\s*[-*]\s+🚌\s+\*\*(?P<title>Route\s+\d{1,4}[A-Za-z]?\s+service\s+frequency)(?P<answer>[A-Z][^*\n]{12,220})\*\*\s*🚍?\s*$",
+        r"### 🚌 **\g<title>**\n\n✅ **Direct answer:** \g<answer>",
+        guarded,
+    )
+    guarded = re.sub(
+        r"(?mi)^\s*[-*]\s+(?:\S+\s+)?\*\*(?P<title>Route\s+\d{1,4}[A-Za-z]?\s+service\s+frequency)\s*"
+        r"(?P<label>Direct answer|Resposta direta):\s*(?P<answer>[^*\n]{12,260})\*\*\s*(?:\S+)?\s*$",
+        lambda match: (
+            f"### 🚌 **{match.group('title').strip()}**\n\n"
+            f"✅ **{match.group('label').strip()}:** {match.group('answer').strip()}"
+        ),
+        guarded,
+    )
     guarded = re.sub(r"\b(Carris\s+\d{1,4}[A-Za-z]?)\*\*(?=\s)", r"\1", guarded)
+    guarded = re.sub(
+        r"\b(Board at|Exit at|Alight at|Get off at)(?=[A-ZÀ-ÖØ-Þ])",
+        r"\1 ",
+        guarded,
+    )
+    guarded = re.sub(
+        r"\b(Embarca em|Sai em|Saia em|Apanha em)(?=[A-ZÀ-ÖØ-Þ])",
+        r"\1 ",
+        guarded,
+    )
+    guarded = re.sub(
+        r"(?i)\babout\s+\*\*(?P<duration>\d+\s*min)\s+to\s+\*\*(?P<place>[^*\n]+)\*\*",
+        r"about **\g<duration>** to **\g<place>**",
+        guarded,
+    )
+    guarded = re.sub(
+        r"(?i)\bcerca\s+de\s+\*\*(?P<duration>\d+\s*min)\s+at[eé]\s+\*\*(?P<place>[^*\n]+)\*\*",
+        r"cerca de **\g<duration>** até **\g<place>**",
+        guarded,
+    )
+    guarded = re.sub(
+        r"\*\*(?P<label>[^*\n]{1,80}?\(\d{1,2}):\*\*\s*(?P<range>\d{2}\s*[-–]\s*\d{1,2}:\d{2}\):)",
+        r"**\g<label>:\g<range>**",
+        guarded,
+    )
+    guarded = re.sub(
+        r"\b(?P<hour>\d{1,2}):\*\*\s*(?P<minute>\d{2})(?=\s*[-–]\s*\d{1,2}:\d{2})",
+        r"\g<hour>:\g<minute>",
+        guarded,
+    )
     guarded = re.sub(r"\b(para|to)(?=[A-ZÁÉÍÓÚÂÊÔÃÕÇ])", r"\1 ", guarded)
     guarded = re.sub(
         r"\bpara\s+([A-ZÁÉÍÓÚÂÊÔÃÕÇ][^*\n]{1,80})\*\*(?=\s|$|[.,;])",
@@ -19660,7 +20353,7 @@ def final_post_qa_guard(
     guarded = re.sub(r"(?mi)^\s*(?:Distance|Distância|Distancia|Lines|Linhas)\s*:\s*not provided\s*$\n?", "", guarded)
     guarded = re.sub(r"(?m)^#{1,6}\s*(?:[*_`~\s]|[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D])*$\n?", "", guarded)
     guarded = re.sub(r"(?m)(^\s*###\s+.+\n)(?:\s*\1)+", r"\1", guarded)
-    guarded = re.sub(r"(?m)\*\*\s*\*\*", "", guarded)
+    guarded = re.sub(r"\*\*[ \t]*\*\*", "", guarded)
     guarded = re.sub(r"(?m)(\*\*[^*\n]+)\*\*\*\*", r"\1**", guarded)
     guarded = re.sub(r"(?m)^\s*⚠️\s*(?:⚠️\s*)+", "⚠️ ", guarded)
     guarded = re.sub(
@@ -20128,6 +20821,8 @@ def final_post_qa_guard(
     guarded = normalize_planner_item_card_indentation(guarded)
     guarded = repair_researcher_inline_card_fields(guarded)
     guarded = repair_split_planner_field_lines(guarded)
+    guarded = dedupe_planner_cards_by_stable_fields(guarded, language)
+    guarded = group_repeated_walking_limitations(guarded, language)
     guarded = ensure_final_notes_heading_for_limitation_bullets(guarded, language)
     guarded = normalize_final_notes_heading_and_duplicates(guarded, language)
     guarded = normalize_feature_lines_mislabeled_as_description(guarded, language)
@@ -20216,6 +20911,23 @@ def final_post_qa_guard(
         guarded = service_heading_match.group(1).strip()
     if (language or "").lower().startswith("pt"):
         guarded = re.sub(r"(?mi)^Aviso:\s*", "⚠️ **Aviso:** ", guarded)
+        guarded = guarded.replace("Próximas ChegadasHorários programados", "Percurso da linha")
+        guarded = re.sub(r"\*\*Operator:\*\*", "**Operador:**", guarded)
+        guarded = re.sub(
+            r"\*\*Source data:\*\*\s*official Carris GTFS static data \(routes, trips, stop_times, stops\)",
+            "**Dados de origem:** GTFS estático oficial da Carris (routes, trips, stop_times, stops)",
+            guarded,
+            flags=re.IGNORECASE,
+        )
+        guarded = re.sub(
+            r"\*\*Limitation:\*\*\s*these are representative GTFS trip stop sequences;?\s*"
+            r"(?:em tempo real|Em tempo real|live)?\s*vehicle position\s*(?:e|and)?\s*"
+            r"(?:Próximas partidas|next departures)?.*?(?=\n|$)",
+            "**Limitação:** estas são sequências representativas de paragens do GTFS; posição do veículo em tempo real e próximas partidas requerem as ferramentas de tempo real/partidas.",
+            guarded,
+            flags=re.IGNORECASE,
+        )
+        guarded = guarded.replace("posição do tempo real", "posição em tempo real")
     is_location_ambiguity_response = bool(
         re.search(r"\b(?:Ambiguidade em|Ambiguity in|Preciso de confirmar o local|Location needs confirmation)\b", guarded)
     )
@@ -20310,6 +21022,7 @@ def final_post_qa_guard(
     guarded = normalize_researcher_card_field_indentation(guarded)
     guarded = strip_repeated_researcher_section_cards(guarded)
     guarded = strip_standalone_generic_intro_description_lines(guarded)
+    guarded = strip_generic_researcher_pseudo_cards(guarded)
     guarded = localize_common_price_fragments(guarded, language)
     guarded = re.sub(
         r"(?i)(até ao|ate ao)\s+\*{4}(?P<dest>[^*\n]+)\*\*",
@@ -20342,6 +21055,7 @@ def final_post_qa_guard(
     guarded = repair_transport_markdown_fragmentation(guarded)
     guarded = promote_transport_semantic_bold_headings(guarded)
     guarded = split_merged_transport_semantic_headings(guarded)
+    guarded = normalize_transport_minor_heading_layout(guarded)
     guarded = normalize_dangling_anchor_conjunctions(guarded)
     guarded = strip_self_anchor_movement_warnings(guarded)
     guarded = re.sub(r"(?m)^---\s*\n(###\s+)", r"---\n\n\1", guarded)
@@ -20371,15 +21085,19 @@ def final_post_qa_guard(
             guarded = re.sub(r"^(\s*###\s+[^\n]+\n+)", rf"\1{direct}\n\n---\n\n", guarded, count=1)
     guarded = promote_leading_planner_title_bullet(guarded)
     guarded = normalize_event_answer_contract(guarded, language)
+    guarded = normalize_event_plain_field_bullets(guarded, language)
     guarded = strip_category_noise_specific_lookup_intro(guarded)
     guarded = normalize_nearby_service_direct_answer(guarded, language)
     guarded = strip_standalone_generic_intro_description_lines(guarded)
+    guarded = strip_generic_researcher_pseudo_cards(guarded)
     guarded = localize_common_price_fragments(guarded, language)
     if (language or "").lower().startswith("en"):
         guarded = re.sub(r"\*\*Comboio / CP\*\*", "**Train / CP**", guarded)
         guarded = re.sub(r"\*\*Autocarro\*\*", "**Bus**", guarded)
         guarded = re.sub(r"\*\*Acesso à CP\*\*", "**Access to CP rail**", guarded)
     guarded = normalize_two_space_child_bullets(guarded)
+    guarded = dedupe_planner_cards_by_stable_fields(guarded, language)
+    guarded = group_repeated_walking_limitations(guarded, language)
     guarded = strip_transport_placeholder_time_lines(guarded)
     guarded = strip_orphan_warning_headings(guarded)
     guarded = normalize_transport_status_title_heading(guarded)
@@ -20443,6 +21161,106 @@ def final_post_qa_guard(
     guarded = restore_initial_pseudo_heading(guarded)
     guarded = strip_category_noise_specific_lookup_intro(guarded)
     guarded = normalize_opening_direct_answer_contract(guarded, language)
+    guarded = re.sub(r"(?m)^---(?=###\s+)", "---\n\n", guarded)
+    guarded = re.sub(
+        r"(?ms)(\n---\s*\n+)(?:[ \t]{4,}[-*]\s+[^\n]+\n)+(?:\s*\n)?(?=\s*---\s*\n)",
+        r"\1",
+        guarded,
+    )
+    guarded = re.sub(
+        r"(?ms)^---\s*\n+(?:[ \t]{4,}[-*]\s+[^\n]+\n)+(?:\s*\n)?---\s*\n+",
+        "---\n\n",
+        guarded,
+    )
+    guarded = re.sub(r"(?m)(?:^---\s*\n\s*){2,}", "---\n\n", guarded)
+    guarded = re.sub(r"\n(?:---\s*\n\s*){2,}", "\n---\n\n", guarded)
+    guarded = re.sub(r":\*\*\s*:\s*", r":** ", guarded)
+    guarded = re.sub(
+        r"\*\*(Board at|Exit at|Alight at|Get off at)(?=[A-ZÀ-ÖØ-Þ])",
+        r"**\1 ",
+        guarded,
+    )
+    guarded = re.sub(
+        r"\*\*(Embarca em|Sai em|Saia em|Apanha em)(?=[A-ZÀ-ÖØ-Þ])",
+        r"**\1 ",
+        guarded,
+    )
+    guarded = re.sub(
+        r"(?i)\*\*(?P<duration>\d+\s*min)\s+to\s+\*\*(?P<place>[^*\n]+)\*\*",
+        r"**\g<duration>** to **\g<place>**",
+        guarded,
+    )
+    guarded = re.sub(
+        r"(?i)\*\*(?P<duration>\d+\s*min)\s+at[eé]\s+\*\*(?P<place>[^*\n]+)\*\*",
+        r"**\g<duration>** até **\g<place>**",
+        guarded,
+    )
+    guarded = re.sub(
+        r"\*\*(?P<label>[^*\n]{1,80}?\(\d{1,2}):\*\*\s*(?P<range>\d{2}\s*[-–]\s*\d{1,2}:\d{2}\):)",
+        r"**\g<label>:\g<range>**",
+        guarded,
+    )
+    guarded = re.sub(
+        r"\b(?P<hour>\d{1,2}):\*\*\s*(?P<minute>\d{2})(?=\s*[-–]\s*\d{1,2}:\d{2})",
+        r"\g<hour>:\g<minute>",
+        guarded,
+    )
+    if (language or "").lower().startswith("en"):
+        guarded = guarded.replace("বাইরে", "outside")
+        guarded = re.sub(r"[\u0980-\u09FF]+", "", guarded)
+    guarded = _strip_unsupported_climate_advice(guarded)
+    if (
+        re.search(r"(?i)(?:no\s+\*\*CP\*\*\s+suburban\s+rail\s+line\s+serves|nenhuma\s+linha\s+suburbana\s+da\s+\*\*CP\*\*)", guarded)
+        and "cp.pt" not in guarded.lower()
+    ):
+        guarded = re.sub(
+            r"(?m)^(\s*📌\s+\*\*(?:Fonte|Source):\*\*\s+\[\*Metro de Lisboa\*\]\(https://www\.metrolisboa\.pt\))",
+            r"\1 | [*CP*](https://www.cp.pt)",
+            guarded,
+            count=1,
+        )
+    guarded = re.sub(r",\s*,+", ",", guarded)
+    guarded = guarded.replace("%2C%2C", "%2C")
+    guarded = reconcile_event_title_with_negative_body(guarded, language)
+    if "Lisboa Aberta" in guarded and re.search(r"(?im)^📌\s+\*\*(?:Source|Fonte):\*\*.*VisitLisboa.*Lisboa Aberta", guarded):
+        _body_no_sources = "\n".join(
+            line for line in guarded.splitlines() if not _SOURCE_LINE_RE.match(line.strip())
+        )
+        _body_open_data = _strip_accents_compat(_body_no_sources).lower()
+        if not re.search(
+            r"\b(?:lisboa aberta|dados abertos|dados\.cm-lisboa|open data|municipal|"
+            r"servicos municipais|municipal services|cm-lisboa)\b",
+            _body_open_data,
+        ):
+            guarded = re.sub(r"\s*\|\s*\[\*Lisboa Aberta\*\]\(https://dados\.cm-lisboa\.pt/\)", "", guarded)
+            guarded = re.sub(r"\[\*Lisboa Aberta\*\]\(https://dados\.cm-lisboa\.pt/\)\s*\|\s*", "", guarded)
+    guarded = re.sub(r"(?mi)^\s*[-*•]?\s*📍\s+\*\*(?:Fonte|Source):\*\*.*(?:\n|$)", "", guarded)
+    guarded = re.sub(r"(?m)(?:^---\s*\n\s*){2,}", "---\n\n", guarded)
+    guarded = re.sub(r"\n(?:---\s*\n\s*){2,}", "\n---\n\n", guarded)
+    guarded = re.sub(r"(?m)^---\n(?=\S)", "---\n\n", guarded)
+    guarded = re.sub(r"(?m)^(###\s+[^\n]+)\n(?=✅\s+\*\*)", r"\1\n\n", guarded)
+    guarded = re.sub(r"\n{3,}", "\n\n", guarded)
+    if "visitlisboa.com" in guarded.lower() and not any(_SOURCE_LINE_RE.match(line.strip()) for line in guarded.splitlines()):
+        timestamp = datetime.now().strftime("%H:%M")
+        lower_guarded = guarded.lower()
+        has_places = "visitlisboa.com/en/places" in lower_guarded or "visitlisboa.com/pt-pt/locais" in lower_guarded
+        has_events = "visitlisboa.com/en/events" in lower_guarded or "visitlisboa.com/pt-pt/eventos" in lower_guarded
+        if (language or "").lower().startswith("pt"):
+            links = []
+            if has_places:
+                links.append("[*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais)")
+            if has_events:
+                links.append("[*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos)")
+            if links:
+                guarded = f"{guarded.strip()}\n\n📌 **Fonte:** {' | '.join(links)} | **Atualizado:** {timestamp}"
+        else:
+            links = []
+            if has_places:
+                links.append("[*VisitLisboa Places*](https://www.visitlisboa.com/en/places)")
+            if has_events:
+                links.append("[*VisitLisboa Events*](https://www.visitlisboa.com/en/events)")
+            if links:
+                guarded = f"{guarded.strip()}\n\n📌 **Source:** {' | '.join(links)} | **Updated:** {timestamp}"
     return guarded.strip()
 
 

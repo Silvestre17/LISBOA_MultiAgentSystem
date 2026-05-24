@@ -709,7 +709,8 @@ class QualityAssuranceAgent(BaseAgent):
                 r"ingl[eê]s|english|url|slug|morada|address|geogr[aá]fic|"
                 r"ambito|[aâ]mbito|scope|contextual|fora de lisboa|outside lisbon|"
                 r"filtro|filter|filtrad|filtragem|explicit|expl[ií]cit|exclu|"
-                r"ocorr|inteiro|m[eê]s|mes|month)\b",
+                r"museu|museum|classificad|espa[cç]os?|venue|venues|"
+                r"ocorr|inteiro|m[eê]s|mes|month|ao vivo|live|efetivamente)\b",
                 cls._normalize_query(str(item or "")),
                 flags=re.IGNORECASE,
             )
@@ -1119,6 +1120,145 @@ class QualityAssuranceAgent(BaseAgent):
             llm_result["reasoning"] = (
                 f"{reasoning} | {normalization_note}".strip(" |")
             )
+
+        return llm_result
+
+    @classmethod
+    def _is_history_knowledge_query(cls, user_query: str) -> bool:
+        """Detects history, culture, and factual Lisbon-knowledge queries."""
+        query = cls._normalize_query(user_query)
+        if not query:
+            return False
+        has_history_cue = bool(
+            re.search(
+                r"\b(history|historical|historia|histor[ií]a|cultura|culture|"
+                r"conta[-\s]?me|tell\s+me|fala[-\s]?me|explain|explica|contexto|context|"
+                r"origin|origem|founded|fundad|built|constru[ií]d|heritage|patrimonio|"
+                r"monument|monumento|legad|legacy|epoch|[eé]poca|seculo|century|"
+                r"quando\s+foi|when\s+was|o\s+que\s+[eé]|what\s+is|who\s+built|"
+                r"who\s+was|what\s+happened|o\s+que\s+aconteceu)\b",
+                query,
+            )
+        )
+        negated_event_cue = bool(
+            re.search(
+                r"\b(?:sem\s+eventos?|nao\s+(?:me\s+)?(?:mostres?|sugiras?|incluas?)\s+eventos?|"
+                r"n[aã]o\s+(?:me\s+)?(?:mostres?|sugiras?|incluas?)\s+eventos?|"
+                r"do\s+not\s+(?:suggest|show|include)\s+events?|"
+                r"don't\s+(?:suggest|show|include)\s+events?|"
+                r"no\s+events?|without\s+events?|not\s+events?)\b",
+                query,
+            )
+        )
+        has_event_cue = (
+            bool(
+                re.search(
+                    r"\b(eventos?|events?|concertos?|concerts?|festival|hoje|hoje\s+a\s+noite|"
+                    r"this\s+week(?:end)?|esta\s+semana|este\s+fim\s+de\s+semana|o\s+que\s+acontece|"
+                    r"what.s\s+on)\b",
+                    query,
+                )
+            )
+            and not negated_event_cue
+        )
+        has_planning_cue = bool(
+            re.search(r"\b(roteiro|itiner|plano|plan|organiza|cria\s+um)\b", query)
+        )
+        return has_history_cue and not has_event_cue and not has_planning_cue
+
+    @classmethod
+    def _normalize_history_knowledge_validation(
+        cls,
+        user_query: str,
+        agent_outputs: Dict[str, str],
+        agents_called: List[str],
+        llm_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Accept grounded history/knowledge researcher prose as complete."""
+        if not cls._is_history_knowledge_query(user_query):
+            return llm_result
+
+        called_workers = {agent for agent in agents_called if agent and agent not in {"qa", "supervisor"}}
+        if not called_workers or "researcher" not in called_workers:
+            return llm_result
+
+        combined_output = "\n".join(
+            str(value)
+            for key, value in agent_outputs.items()
+            if not str(key).startswith("_") and isinstance(value, str)
+        )
+        has_substantive_output = len(combined_output.strip()) > 200
+
+        has_event_card_structure = bool(
+            re.search(
+                r"\b(?:Data/Hora|Data e Hora|Bilhetes?|Tickets?|Entrada(?:\s+Livre)?)\s*:",
+                combined_output,
+                flags=re.IGNORECASE,
+            )
+            or re.search(
+                r"(?m)^\s*(?:📅|🎫|🎟️)\s+\*\*",
+                combined_output,
+            )
+        )
+
+        if not has_substantive_output or has_event_card_structure:
+            return llm_result
+
+        def _is_history_knowledge_gap(item: object) -> bool:
+            raw = str(item or "")
+            normalized_item = unicodedata.normalize("NFKD", raw)
+            normalized_item = "".join(
+                c for c in normalized_item if not unicodedata.combining(c)
+            ).lower()
+            return bool(
+                re.search(
+                    r"histor|conhecimento|knowledge|factual|factos|facts|contextual|"
+                    r"sintese|synthesis|coerente|coherent|coerencia|coherence|"
+                    r"estruturado.*histor|histor.*estruturado|structured.*histor|"
+                    r"conteudo.*histor|histor.*conteudo|dados.*histor|histor.*dados|"
+                    r"contexto.*histor|histor.*contexto|cultural.*context|context.*cultural|"
+                    r"resposta.*pt.?pt|pt.?pt.*resposta|sintese.*pergunta|pergunta.*sintese|"
+                    r"informacao.*histor|histor.*informacao|texto.*histor|histor.*texto|"
+                    r"specific.*identification|identificacao.*especific|identificacao.*precisa|"
+                    r"source.*evidence|evidencia.*fonte|fonte.*evidencia|generic.*wikipedia|"
+                    r"wikipedia.*generica|more.*specific.*source|fonte.*mais.*especific|"
+                    r"event.*details|detalhes.*evento|dates.*times.*ticket|"
+                    r"visitlisboa.*event|event.*visitlisboa",
+                    normalized_item,
+                )
+            )
+
+        llm_result["required_agents"] = [
+            a for a in llm_result.get("required_agents", []) if a != "researcher"
+        ]
+        llm_result["missing_data"] = [
+            item for item in llm_result.get("missing_data", [])
+            if not _is_history_knowledge_gap(item)
+        ]
+        if not llm_result.get("required_agents") and not llm_result.get("missing_data"):
+            llm_result["complete"] = True
+            llm_result["needs_repair"] = False
+            llm_result["repairable_agents"] = []
+            llm_result["critical_issues"] = [
+                item for item in llm_result.get("critical_issues", [])
+                if not _is_history_knowledge_gap(item)
+            ]
+            fact_check = llm_result.get("fact_check") or {}
+            if isinstance(fact_check, dict):
+                fact_check["critical_issues"] = [
+                    item for item in fact_check.get("critical_issues", [])
+                    if not _is_history_knowledge_gap(item)
+                ]
+                fact_check["repairable_agents"] = []
+                llm_result["fact_check"] = fact_check
+
+        normalization_note = (
+            "Normalized QA for history/knowledge query: prose/factual answers are "
+            "complete without structured place-card fields."
+        )
+        reasoning = llm_result.get("reasoning", "")
+        if normalization_note not in reasoning:
+            llm_result["reasoning"] = f"{reasoning} | {normalization_note}".strip(" |")
 
         return llm_result
 
@@ -2618,6 +2758,12 @@ class QualityAssuranceAgent(BaseAgent):
             agents_called=agents_called,
             llm_result=llm_result,
         )
+        llm_result = self._normalize_history_knowledge_validation(
+            user_query=user_query,
+            agent_outputs=agent_outputs,
+            agents_called=agents_called,
+            llm_result=llm_result,
+        )
         llm_result = self._normalize_weather_query_validation(
             agents_called=agents_called,
             llm_result=llm_result,
@@ -2703,6 +2849,13 @@ class QualityAssuranceAgent(BaseAgent):
             fact_check.get("critical_issues") or llm_result.get("missing_data")
         )
         llm_result["fact_check"] = fact_check
+
+        llm_result = self._normalize_history_knowledge_validation(
+            user_query=user_query,
+            agent_outputs=agent_outputs,
+            agents_called=agents_called,
+            llm_result=llm_result,
+        )
         return llm_result
 
     def assess_final_response(

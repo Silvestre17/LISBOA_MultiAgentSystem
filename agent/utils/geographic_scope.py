@@ -216,7 +216,7 @@ def build_geographic_out_of_scope_response(
     *,
     mobility: bool = True,
 ) -> str:
-    """Build a friendly geographic-scope response for outside-AML requests."""
+    """Build a context-aware geographic-scope response for outside-AML requests."""
     labels = extract_outside_aml_mentions(user_message)
     place_text = join_scope_labels(labels, language=language)
     is_pt = language == "pt"
@@ -244,13 +244,15 @@ def build_geographic_out_of_scope_response(
                 "",
                 "---",
                 "",
-                "O LISBOA está focado na **Área Metropolitana de Lisboa** e só deve responder com detalhe quando consegue validar a informação com as fontes disponíveis.",
+                "O LISBOA está focado na **Área Metropolitana de Lisboa**.",
                 "",
                 "💡 **Posso ajudar com:**",
                 "- **Meteorologia:** previsão e avisos para Lisboa 🌤️",
                 "- **Mobilidade:** Metro, Carris Urban, Carris Metropolitana e CP suburbano/AML 🚇",
-                "- **Cultura e locais:** eventos, atrações, restaurantes e serviços na AML 📍",
+                "- **Cultura e eventos:** museus, exposições, festivais, concertos e atividades na AML 🎭",
+                "- **Locais e serviços:** restaurantes, atrações, farmácias, hospitais, estacionamento e serviços públicos 📍",
                 "- **Planeamento:** roteiros e percursos dentro de Lisboa/AML 🗺️",
+                "- **História e conhecimento:** história de Lisboa, bairros, cultura e Guia Lisboa Card 📚",
             ]
         ).strip()
 
@@ -276,12 +278,14 @@ def build_geographic_out_of_scope_response(
             "",
             "---",
             "",
-            "LISBOA is focused on the **Lisbon Metropolitan Area** and should only answer in detail when it can validate the information with available sources.",
+            "LISBOA is focused on the **Lisbon Metropolitan Area**.",
             "",
             "💡 **I can help with:**",
             "- **Weather:** Lisbon forecasts and warnings 🌤️",
             "- **Mobility:** Metro, Carris Urban, Carris Metropolitana, and CP suburban/AML 🚇",
-            "- **Culture and places:** events, attractions, restaurants, and services in the AML 📍",
+            "- **Culture and events:** museums, exhibitions, festivals, concerts, and activities in the AML 🎭",
+            "- **Places and services:** restaurants, attractions, pharmacies, hospitals, parking, and public services 📍",
             "- **Planning:** itineraries and routes inside Lisbon/AML 🗺️",
+            "- **History and knowledge:** Lisbon history, neighborhoods, culture, and Lisboa Card guide 📚",
         ]
     ).strip()
