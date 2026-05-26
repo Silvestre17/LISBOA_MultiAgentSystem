@@ -264,43 +264,67 @@ def fetch_geojson_with_retry(url: str) -> Optional[Dict[str, Any]]:
         logger.warning("Skipping unavailable Lisboa Aberta dataset URL: %s (%s)", url, unavailable_reason)
         return None
 
+    last_index = MAX_RETRIES - 1
+
+    def _backoff(attempt: int) -> None:
+        """Sleep with exponential backoff (2s, 4s, 8s ...) between retries."""
+        time.sleep(BACKOFF_FACTOR ** (attempt + 1))
+
     for attempt in range(MAX_RETRIES):
         try:
             logger.info(f"Fetching GeoJSON (attempt {attempt + 1}/{MAX_RETRIES}): {url[:80]}...")
 
             response = requests.get(url, timeout=REQUEST_TIMEOUT)
-            if response.status_code >= 400:
+
+            # Permanent client errors will not recover on retry.
+            if 400 <= response.status_code < 500 and response.status_code != 429:
                 reason = f"HTTP {response.status_code}"
                 _mark_dataset_url_unavailable(url, reason, response.status_code)
                 logger.warning("Lisboa Aberta dataset unavailable: %s -> %s", url, reason)
                 return None
-            response.raise_for_status()
+
+            # Transient server/throttle errors are worth retrying.
+            if response.status_code >= 500 or response.status_code == 429:
+                reason = f"HTTP {response.status_code}"
+                if attempt < last_index:
+                    logger.warning("Lisboa Aberta transient %s for %s; retrying.", reason, url[:80])
+                    _backoff(attempt)
+                    continue
+                _mark_dataset_url_unavailable(url, reason, response.status_code)
+                logger.warning("Lisboa Aberta dataset temporarily unavailable: %s -> %s", url, reason)
+                return None
 
             data = response.json()
 
             if not is_valid_geojson(data):
-                logger.error("Invalid GeoJSON structure")
+                logger.error("Invalid GeoJSON structure (attempt %d/%d)", attempt + 1, MAX_RETRIES)
+                if attempt < last_index:
+                    _backoff(attempt)
+                    continue
                 return None
 
             feature_count = len(data.get('features', []))
             logger.info(f"\033[1;32m✅ Fetched {feature_count} features\033[0m")
             return data
 
-        except requests.exceptions.Timeout:
-            reason = "network timeout"
+        except (requests.exceptions.Timeout, requests.exceptions.RequestException) as exc:
+            reason = "network timeout" if isinstance(exc, requests.exceptions.Timeout) else "network unavailable"
+            logger.debug(
+                "Lisboa Aberta request issue for %s (attempt %d/%d): %s",
+                url, attempt + 1, MAX_RETRIES, exc,
+            )
+            if attempt < last_index:
+                _backoff(attempt)
+                continue
             _mark_dataset_url_unavailable(url, reason, 503)
             logger.warning("Lisboa Aberta dataset temporarily unavailable: %s -> %s", url, reason)
-            return None
-
-        except requests.exceptions.RequestException as e:
-            reason = "network unavailable"
-            _mark_dataset_url_unavailable(url, reason, 503)
-            logger.warning("Lisboa Aberta dataset temporarily unavailable: %s -> %s", url, reason)
-            logger.debug("Lisboa Aberta request exception for %s: %s", url, e)
             return None
 
         except json.JSONDecodeError:
-            logger.error("Response is not valid JSON")
+            logger.error("Response is not valid JSON (attempt %d/%d)", attempt + 1, MAX_RETRIES)
+            if attempt < last_index:
+                _backoff(attempt)
+                continue
             return None
 
     return None
@@ -798,6 +822,7 @@ def find_nearby_services(
         cleaned = re.sub(r"(?i)<br\s*/?>", ", ", cleaned)
         cleaned = re.sub(r"<[^>]+>", " ", cleaned)
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,;\n\t")
+        cleaned = re.sub(r"(?<=[^\s([{])\(", " (", cleaned)
         return re.sub(r"\s+,", ",", cleaned)
 
     def _record_matches_requested_service(
@@ -943,11 +968,17 @@ def find_nearby_services(
             if len(token) > 3 and token not in {"near", "perto", "para", "with"}
         }
         parking_request = bool(
-            re.search(r"\b(parking|estacion|car\s*park|parque\s+de\s+estacionamento)\b", requested_norm)
+            re.search(r"\b(parking|estacion\w*|car\s*park|parques?\s+de\s+estacionamento)\b", requested_norm)
+        )
+        non_car_parking_request = bool(
+            re.search(
+                r"\b(tuktuk|tuk\s*tuk|bicic\w*|velociped\w*|bike|bicycle|motocicl\w*|scooter\w*)\b",
+                requested_norm,
+            )
         )
         car_parking_request = bool(
             parking_request
-            and re.search(r"\b(car|cars|auto|automovel|automoveis|carro|viatura|vehicle|vehicles)\b", requested_norm)
+            and not non_car_parking_request
         )
 
         def _is_non_car_parking_dataset(row: pd.Series) -> bool:
@@ -1254,6 +1285,14 @@ def find_nearby_services(
                 cleaned_address = "Abrir localização" if is_pt else "Open location"
             else:
                 map_url = ""
+            # Keep duty-pharmacy/clinical caveats limited to health services.
+            service_signature = unicodedata.normalize(
+                "NFKD", f"{selected_title} {service_type}"
+            ).encode("ascii", "ignore").decode("ascii").lower()
+            health_context = any(
+                marker in service_signature
+                for marker in ("farmac", "parafarmac", "hospital", "saude", "clinic", "pharmac", "health", "medic")
+            )
             if is_pt:
                 response += (
                     f"✅ **Resposta direta:** o resultado mais próximo que encontrei é **{nearest_name}**, "
@@ -1261,9 +1300,14 @@ def find_nearby_services(
                 )
                 if cleaned_address and map_url:
                     response += f"- 📍 **Morada/localização:** [{cleaned_address}]({map_url})\n"
+                coverage_tail_pt = (
+                    "não confirmam horário atual, farmácia de serviço ou disponibilidade clínica."
+                    if health_context
+                    else "não confirmam o horário atual nem a disponibilidade em tempo real."
+                )
                 response += (
                     f"- ⚠️ **Cobertura:** dados municipais de **{selected_title}**; "
-                    "não confirmam horário atual, farmácia de serviço ou disponibilidade clínica.\n\n"
+                    f"{coverage_tail_pt}\n\n"
                 )
             else:
                 response += (
@@ -1272,9 +1316,14 @@ def find_nearby_services(
                 )
                 if cleaned_address and map_url:
                     response += f"- 📍 **Address/location:** [{cleaned_address}]({map_url})\n"
+                coverage_tail_en = (
+                    "it does not confirm current hours, duty pharmacy status, or clinical availability."
+                    if health_context
+                    else "it does not confirm current hours or real-time availability."
+                )
                 response += (
                     f"- ⚠️ **Coverage:** municipal data from **{selected_title}**; "
-                    "it does not confirm current hours, duty pharmacy status, or clinical availability.\n\n"
+                    f"{coverage_tail_en}\n\n"
                 )
             displayed_results = results[1:]
             if displayed_results:

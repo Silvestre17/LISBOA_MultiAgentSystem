@@ -368,7 +368,7 @@ def _clean_query_fragment(part: str) -> str:
         flags=re.IGNORECASE,
     )
     part = re.sub(
-        r"\b(?:(?:de|por|em)\s+transportes?\s+p[úu]blicos?|"
+        r"\b(?:(?:de|por|em)\s+transportes?(?:\s+p[úu]blicos?)?|"
         r"(?:by|using|via|in)\s+public\s+transport)\b",
         "",
         part,
@@ -1445,6 +1445,7 @@ def _extract_route_endpoints(
         return None
 
     patterns = [
+        r"^\s*(?:metro|comboio|train|bus|autocarro)\s*:\s*(?P<origin>.+?)\s+(?:para|at[eé]|to)\s+(?P<destination>.+?)(?:[\?\!\.,;]|$)",
         r"(?P<origin>.+?)\s*(?:->|→|=>)\s*(?P<destination>.+?)(?:[\?\!\.,;]|$)",
         r"\b(?:i\s+want\s+to\s+(?:go|get|travel)|we\s+want\s+to\s+(?:go|get|travel)|"
         r"how\s+(?:do|can)\s+i\s+(?:get|go|travel)|how\s+to\s+(?:get|go|travel))?\s*"
@@ -2777,6 +2778,28 @@ def _build_cp_bridge_for_partial_metro_route(
     if not destination_station:
         return None
 
+    origin_cp = get_cp_station_info(origin)
+    if origin_cp:
+        origin_station = str(origin_cp.get("name") or origin).strip()
+        if origin_station and _normalize_token(origin_station) != _normalize_token(destination_station):
+            try:
+                raw_direct_train = str(
+                    plan_train_trip.invoke(
+                        {"origin": origin_station, "destination": destination_station}
+                    )
+                ).strip()
+            except Exception:
+                raw_direct_train = ""
+            if raw_direct_train and not _tool_result_indicates_no_match(raw_direct_train):
+                train_block = _strip_transport_source_lines(raw_direct_train)
+                train_block = normalize_cp_no_more_trains_message(train_block, language).strip()
+                timestamp = datetime.now().strftime("%H:%M")
+                if language == "pt":
+                    source = f"📌 **Fonte:** [*CP*](https://www.cp.pt) | **Atualizado:** {timestamp}"
+                else:
+                    source = f"📌 **Source:** [*CP*](https://www.cp.pt) | **Updated:** {timestamp}"
+                return f"{train_block}\n\n{source}".strip()
+
     cp_access_hubs: tuple[tuple[str, str], ...] = (
         ("Oriente", "Oriente"),
         ("Entrecampos", "Entrecampos"),
@@ -3966,9 +3989,10 @@ def _upsert_realtime_wait_section(response: str, lines: List[str], language: str
 
 def _infer_language(user_message: str, context: str) -> str:
     """Infers response language from context and the user message."""
-    if "PT-PT" in context or "Portuguese" in context:
+    normalized_context = str(context or "").lower()
+    if "PT-PT" in context or "Portuguese" in context or re.search(r"\blanguage\s*:\s*pt\b", normalized_context):
         return "pt"
-    if "English" in context:
+    if "English" in context or re.search(r"\blanguage\s*:\s*en\b", normalized_context):
         return "en"
 
     resolved_language, _requires_note, _detected = resolve_output_language(user_message, ui_default="en")
@@ -6911,7 +6935,7 @@ def _build_deterministic_metro_route_response(
     return "\n".join(response_lines).strip()
 
 
-def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]:
+def _build_deterministic_route_tool_response(user_message: str, language: Optional[str] = None) -> Optional[str]:
     """Returns the raw route-tool guidance for non-metro-direct routes."""
     if _query_requests_metro_line_wait_times(user_message):
         return None
@@ -6920,7 +6944,7 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
     endpoints = _extract_route_endpoints(user_message)
     if not endpoints:
         return None
-    language = _infer_language(user_message, "")
+    language = language or _infer_language(user_message, "")
     raw_destination = raw_endpoints[1] if raw_endpoints else endpoints[1]
     area_destination = _generic_service_area_endpoint(raw_destination)
 
@@ -6982,6 +7006,14 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
     fastest_requested = bool(
         re.search(r"\b(fastest|quickest|mais r[aá]pid[ao]|mais depressa)\b", user_message, flags=re.IGNORECASE)
     )
+
+    def localized_metro_route_or_raw() -> str:
+        localized_route = _build_deterministic_metro_route_response(
+            user_message=user_message,
+            context=f"User language: {language}",
+        )
+        return localized_route or route_result
+
     if is_metro_route and _route_result_is_metro_only_partial(route_result):
         broad_destination = _bare_aml_municipality_label(endpoints[1])
         cp_first = bool(broad_destination and not bus_or_tram_requested)
@@ -7082,10 +7114,10 @@ def _build_deterministic_route_tool_response(user_message: str) -> Optional[str]
             )
 
     if fastest_requested and is_metro_route and _is_generic_public_transport_route_query(user_message):
-        return route_result
+        return localized_metro_route_or_raw()
 
     if is_metro_route and not _is_generic_public_transport_route_query(user_message):
-        return route_result
+        return localized_metro_route_or_raw()
 
     route_preferences = _parse_route_mode_preferences(user_message)
     try:
@@ -7238,9 +7270,15 @@ def _build_deterministic_sequence_route_response(
     if len(labels) < 2:
         return None
     normalized = _normalize_token(user_message)
+    # A query with exactly two endpoints is a single point-to-point route (e.g.
+    # "proximo comboio de Entrecampos para Sintra", "autocarro de X para Y"). The
+    # normal route path handles it with correct operator selection, so it must NOT be
+    # rendered through the multi-stop "route legs between itinerary stops" builder.
+    # Only treat two endpoints as a sequence when explicit itinerary/multi-leg wording
+    # is present. (Previously this required a route-phrasing match like "como vou",
+    # so single-mode phrasings such as "comboio de A para B" leaked into the legs path.)
     simple_point_to_point_route = (
         len(labels) == 2
-        and re.search(r"\b(?:how do i get|how to get|get from|from|como vou|como chego|ir de)\b", normalized)
         and not re.search(r"\b(?:itinerary|roteiro|plano|plan|stops|paragens|legs?|trechos?|entre paragens)\b", normalized)
     )
     if simple_point_to_point_route:
@@ -9037,6 +9075,18 @@ class TransportAgent(BaseAgent):
         if tool_name == "get_route_between_stations":
             origin = str(tool_args.get("origin") or "").strip()
             destination = str(tool_args.get("destination") or "").strip()
+            if (
+                language == "pt"
+                and origin
+                and destination
+                and re.search(r"\b(?:METRO ROUTE|Your Metro Route|Direct answer|Line Status)\b", cleaned_result)
+            ):
+                localized_route = _build_deterministic_metro_route_response(
+                    user_message=f"Quero ir de metro de {origin} para {destination}",
+                    context="User language: pt",
+                )
+                if localized_route:
+                    return localized_route
             if origin and destination and _route_result_is_metro_only_partial(cleaned_result):
                 broad_destination = _bare_aml_municipality_label(destination)
                 bus_requested = bool(_requested_route_option_modes(user_message) & {"bus"})
@@ -11066,7 +11116,10 @@ class TransportAgent(BaseAgent):
             and not route_preferences.get("alternative_mode_request")
             and not (early_cp_tool_spec and explicit_train_context)
         ):
-            early_direct_route_response = _build_deterministic_route_tool_response(user_message)
+            early_direct_route_response = _build_deterministic_route_tool_response(
+                user_message,
+                language=resolved_language,
+            )
             if early_direct_route_response:
                 return finalize_direct_route_response(early_direct_route_response)
 
@@ -11321,7 +11374,11 @@ class TransportAgent(BaseAgent):
         carris_metropolitana_tool_spec = _build_carris_metropolitana_tool_spec(user_message)
 
         if not cp_tool_spec and not carris_metropolitana_tool_spec:
-            direct_route_response = None if quality_sensitive_route else _build_deterministic_route_tool_response(user_message)
+            direct_route_response = (
+                None
+                if quality_sensitive_route
+                else _build_deterministic_route_tool_response(user_message, language=resolved_language)
+            )
             if direct_route_response:
                 return finalize_direct_route_response(direct_route_response)
 

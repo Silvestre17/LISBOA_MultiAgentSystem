@@ -70,9 +70,13 @@ If a query is plausibly about Lisbon/AML but the domain is ambiguous, route it t
 8. **Places/Events queries** → `["researcher"]`
    - Questions like "which monuments can I visit in Belém?" or "tell me museums in Alfama" are place browsing, not itinerary planning, unless the user asks for an ordered route, schedule, optimization, or multiple-stop day plan.
    - "I want to explore local culture. What major events are happening this week?" is an events listing with a date filter → `["researcher"]`, not planner. "This week" only means a temporal filter unless the user asks for a plan, order, route, or schedule.
+   - Preference lookups such as "cheap vegetarian restaurant near Chiado and open today" are still direct `["researcher"]` requests, not planner requests.
+   - Pre-visit checklist questions such as "I'm going to Oceanário tomorrow. What should I confirm before?" or "I want to visit the zoo with a child; what should I check?" → `["researcher"]`. They need grounded venue details and a practical checklist, not planner synthesis, route synthesis, or weather unless the user explicitly asks for weather.
 9. **Public Services queries** (pharmacies, hospitals, clinics, schools, parks, police, libraries, markets, parking, post offices/public counters) → `["researcher"]` (uses Lisboa Aberta open data)
 10. **Complex/Itineraries** → `["researcher", "planner"]` by default; add `transport` only when the user asks for public transport, exact route legs, low-walking constraints, cross-zone movement, or the answer would need operator/line claims. Add `weather` only for explicit weather, rain, heat/cold, outdoor safety, today/tomorrow/this-week, weekend, or dated plans.
     - Optimized/efficient itineraries should first use the planner's ordering and grounded place evidence. Do not add `transport` just because the user says "starting at/from"; an origin anchor alone can be handled by the planner.
+    - If the user asks for a route plus nearby things to see (e.g. "How do I get from A to B and what can I visit nearby?"), use `["transport", "researcher"]`, not planner. The user asked for two direct worker answers, not an itinerary.
+    - Climate-average or typical-weather questions must use `["weather"]`; never answer from memory or cite IPMA for facts that were not returned by the weather worker.
 11. **Conditional/Weather-dependent** → `["weather", "researcher", "planner"]`
 12. **Frequency/Headway questions** (e.g., "How often does the 28E run?") → `["transport"]`
 
@@ -195,9 +199,13 @@ Se a pergunta parecer plausivelmente sobre Lisboa/AML mas o domínio for ambígu
 8. **Locais/Eventos** → `["researcher"]`
    - Perguntas como "que monumentos posso visitar em Belém?" ou "diz-me museus em Alfama" são pesquisa de locais, não planeamento de itinerário, salvo se o utilizador pedir ordem, roteiro, otimização, horários ou um plano com várias paragens.
    - "Quero explorar a cultura local. Que grandes eventos há esta semana?" é listagem de eventos com filtro temporal → `["researcher"]`, não planner. "Esta semana" só é filtro temporal salvo se o utilizador pedir plano, ordem, rota ou agenda organizada.
+   - Pesquisas com preferências como "restaurante vegetariano barato perto do Chiado e aberto hoje" continuam a ser pedidos diretos para `["researcher"]`, não planner.
+   - Perguntas de checklist antes da visita, como "Vou ao Oceanário amanhã. O que devo confirmar antes?" ou "Quero ir ao Jardim Zoológico com uma criança; o que devo confirmar?" → `["researcher"]`. Precisam de detalhes fundamentados do local e checklist prático, não de planner, rota ou meteo salvo se o utilizador pedir meteorologia explicitamente.
 9. **Serviços Públicos** (farmácias, hospitais, clínicas, escolas, parques, polícia, bibliotecas, mercados, estacionamento, correios/balcões públicos) → `["researcher"]` (usa dados abertos de Lisboa)
 10. **Complexo/Itinerários** → `["researcher", "planner"]` por defeito; adiciona `transport` só quando o utilizador pede transporte público, pernas exatas de rota, pouca caminhada, deslocações entre zonas distantes, ou quando a resposta precisaria de alegações sobre operadores/linhas. Adiciona `weather` apenas para meteorologia, chuva, calor/frio, segurança ao ar livre, hoje/amanhã/esta semana, fim de semana ou datas explícitas.
     - Roteiros otimizados/eficientes devem usar primeiro a ordenação do planner e evidência fundamentada de locais. Não adiciones `transport` só porque o utilizador diz "a começar em/desde"; uma âncora de origem isolada pode ser tratada pelo planner.
+    - Se o utilizador pede uma rota e também locais para ver perto do destino (ex.: "Como vou de A a B e o que há para ver lá perto?"), usa `["transport", "researcher"]`, não planner. O pedido são duas respostas diretas de workers, não um roteiro.
+    - Perguntas sobre clima típico/médias meteorológicas devem ir para `["weather"]`; nunca respondas de memória nem cites IPMA para factos que não vieram do worker de meteorologia.
 11. **Frequência/Intervalo** (ex: "De quanto em quanto tempo passa o 28E?") → `["transport"]`
 
 # RESPOSTAS FORA DO ÂMBITO

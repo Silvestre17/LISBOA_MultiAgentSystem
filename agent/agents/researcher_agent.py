@@ -1228,11 +1228,62 @@ class ResearcherAgent(BaseAgent):
         ]
         place_terms = [
             "museum", "museu", "monument", "monumento", "place", "places",
-            "attraction", "attractions", "belem", "belém",
+            "attraction", "attractions", "visit", "visita", "visitar",
+            "passeio", "sugere", "recomenda", "short visit", "visita curta",
+            "belem", "belém",
         ]
         return any(term in query for term in accessibility_terms) and (
             any(term in query for term in place_terms)
             or bool(ResearcherAgent._extract_place_focus_query(user_message))
+        )
+
+    @staticmethod
+    def _extract_current_location_anchor(user_message: str) -> Optional[str]:
+        """Extract a compact current-location anchor such as "estou no Rossio"."""
+        patterns = [
+            r"\b(?:estou|encontro[-\s]?me|i\s+am|i'm)\s+"
+            r"(?:no|na|em|at)\s+"
+            r"(?P<location>[A-ZÀ-Ýa-zà-ÿ0-9][A-ZÀ-Ýa-zà-ÿ0-9 '\-/]{1,60})",
+            r"\b(?:mobilidade\s+reduzida|cadeira\s+de\s+rodas|wheelchair|reduced\s+mobility)\b"
+            r".{0,60}?\b(?:no|na|em|at)\s+"
+            r"(?P<location>[A-ZÀ-Ýa-zà-ÿ0-9][A-ZÀ-Ýa-zà-ÿ0-9 '\-/]{1,60})",
+        ]
+        match = next(
+            (
+                found
+                for pattern in patterns
+                for found in [re.search(pattern, user_message or "", flags=re.IGNORECASE)]
+                if found
+            ),
+            None,
+        )
+        if not match:
+            return None
+        location = re.sub(
+            r"\s*(?:;|,|\.)?\s*(?:sugere|recomenda|suggest|recommend|quero|i\s+want|"
+            r"com\s+|with\s+|para\s+|for\s+).*$",
+            "",
+            match.group("location"),
+            flags=re.IGNORECASE,
+        )
+        location = ResearcherAgent._clean_place_focus_subject(location.strip(" .,:;?!"))
+        return location or None
+
+    @staticmethod
+    def _is_accessibility_focus_noise(focus_query: Optional[str], user_message: str) -> bool:
+        """Return whether an extracted focus is only accessibility phrasing noise."""
+        if not focus_query:
+            return False
+        normalized_focus = _normalize_researcher_intent_text(focus_query)
+        if normalized_focus in {
+            "uso", "use", "using", "tenho", "have", "i", "im", "i am",
+            "cadeira", "wheelchair", "mobilidade", "accessibility",
+        }:
+            return True
+        normalized_message = _normalize_researcher_intent_text(user_message)
+        return bool(
+            normalized_focus in {"rodas", "reduced", "mobility"}
+            and re.search(r"\b(?:cadeira de rodas|wheelchair|mobilidade reduzida|reduced mobility)\b", normalized_message)
         )
 
     def _run_accessibility_place_lookup(self, user_message: str, language: str) -> str:
@@ -1242,16 +1293,36 @@ class ResearcherAgent(BaseAgent):
             return self._run_direct_tool_fallback(user_message, language)
 
         focus_query = self._extract_place_focus_query(user_message)
-        args = {"query": focus_query or user_message, "max_results": 5, "offset": 0, "language": language}
+        if self._is_accessibility_focus_noise(focus_query, user_message):
+            focus_query = None
+        current_location = self._extract_current_location_anchor(user_message)
+        if focus_query:
+            query = focus_query
+        elif current_location:
+            query = (
+                f"locais e atrações perto de {current_location}"
+                if language == "pt"
+                else f"places and attractions near {current_location}"
+            )
+        else:
+            query = user_message
+        args = {"query": query, "max_results": 5, "offset": 0, "language": language}
         specific_lookup = _extract_specific_place_lookup_phrase(user_message)
         specific_tokens = re.findall(r"[a-z0-9]+", (specific_lookup or "").lower())
         broad_type_tokens = {"museum", "museums", "museu", "museus", "monument", "monuments"}
         broad_category_lookup = len(specific_tokens) <= 2 and any(
             token in broad_type_tokens for token in specific_tokens
         )
-        if specific_lookup and not broad_category_lookup:
+        if specific_lookup and not broad_category_lookup and focus_query:
             args["specific_lookup"] = True
         category_hint = self._infer_place_category_hint(user_message) or self._infer_place_category_hint(focus_query or "")
+        generic_accessibility_visit = current_location and not focus_query and not re.search(
+            r"\b(?:restaurantes?|restaurants?|jantar|dinner|almo[cç]o|lunch|comer|eat)\b",
+            user_message,
+            flags=re.IGNORECASE,
+        )
+        if generic_accessibility_visit:
+            category_hint = "Museums & Monuments"
         if category_hint:
             args["category"] = category_hint
 
@@ -1268,7 +1339,121 @@ class ResearcherAgent(BaseAgent):
             offset=0,
         )
         source_line = self._build_places_source_line(result, language)
-        return f"{result}\n\n{source_line}".strip()
+        if language == "pt":
+            note = (
+                "⚠️ **Mobilidade reduzida:** os dados de locais confirmam nomes, moradas e detalhes turísticos "
+                "quando disponíveis; acessos sem degraus, elevadores operacionais e apoio no local devem ser "
+                "confirmados diretamente com o espaço antes da deslocação."
+            )
+            if current_location and not focus_query:
+                note += " Como o pedido é uma recomendação de visita e não uma rota para um destino escolhido, não calculei uma rota porta-a-porta."
+        else:
+            note = (
+                "⚠️ **Reduced mobility:** place data confirms names, addresses, and tourism details where available; "
+                "step-free access, working lifts, and on-site assistance should be confirmed directly before travelling."
+            )
+            if current_location and not focus_query:
+                note += " Because this is a visit recommendation rather than a route to a chosen destination, I did not calculate a door-to-door route."
+        return f"{result}\n\n{note}\n\n{source_line}".strip()
+
+    @staticmethod
+    def _extract_visit_confirmation_target(user_message: str) -> Optional[str]:
+        """Extract the named venue from pre-visit checklist questions."""
+        query = str(user_message or "").strip()
+        patterns = [
+            r"\b(?:quero\s+ir|vou|pretendo\s+ir|i\s+want\s+to\s+go|i\s+am\s+going|i'?m\s+going)\s+"
+            r"(?:ao|à|a|para\s+o|para\s+a|to)\s+"
+            r"(?P<target>[A-ZÀ-Ýa-zà-ÿ0-9][A-ZÀ-Ýa-zà-ÿ0-9 '&’\-/]{2,90}?)"
+            r"(?=\s+(?:com|with|antes|before|e\s+|and\s+|o\s+que|what\s+|"
+            r"hoje|amanh[ãa]|today|tomorrow|este|esta|this|next|pr[óo]xim[oa])|[.?!;,]|$)",
+            r"\b(?:visitar|visit)\s+(?:o\s+|a\s+|os\s+|as\s+)?"
+            r"(?P<target>[A-ZÀ-Ýa-zà-ÿ0-9][A-ZÀ-Ýa-zà-ÿ0-9 '&’\-/]{2,90}?)"
+            r"(?=\s+(?:com|with|antes|before|e\s+|and\s+|o\s+que|what\s+|"
+            r"hoje|amanh[ãa]|today|tomorrow|este|esta|this|next|pr[óo]xim[oa])|[.?!;,]|$)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, query, flags=re.IGNORECASE)
+            if not match:
+                continue
+            target = ResearcherAgent._clean_place_focus_subject(match.group("target").strip(" .,:;?!"))
+            target = re.sub(
+                r"\s+\b(?:hoje|amanh[ãa]|today|tomorrow|este|esta|this|next|pr[óo]xim[oa])\b.*$",
+                "",
+                target,
+                flags=re.IGNORECASE,
+            ).strip()
+            if target:
+                return target
+        return ResearcherAgent._extract_place_focus_query(user_message)
+
+    @staticmethod
+    def _is_visit_confirmation_checklist_query(user_message: str) -> bool:
+        """Detect venue-specific "what should I confirm before going?" questions."""
+        normalized = (user_message or "").lower()
+        if not re.search(
+            r"\b(?:o\s+que\s+(?:devo\s+)?confirmar|que\s+(?:devo\s+)?confirmar|"
+            r"confirmar\s+antes|what\s+should\s+i\s+(?:check|confirm)|"
+            r"what\s+to\s+(?:check|confirm)|check\s+before|confirm\s+before)\b",
+            normalized,
+        ):
+            return False
+        return bool(ResearcherAgent._extract_visit_confirmation_target(user_message))
+
+    def _run_visit_confirmation_checklist_lookup(self, user_message: str, language: str) -> str:
+        """Lookup the named venue and render a grounded pre-visit checklist."""
+        tool = self._get_tool_by_name("search_places_attractions")
+        if not tool:
+            return self._run_direct_tool_fallback(user_message, language)
+
+        target = self._extract_visit_confirmation_target(user_message) or user_message
+        args = {
+            "query": target,
+            "specific_lookup": True,
+            "max_results": 1,
+            "offset": 0,
+            "language": language,
+        }
+        result = str(self._invoke_tool(tool, args, tool_name="search_places_attractions")).strip()
+        base_args = {key: value for key, value in args.items() if key not in {"max_results", "offset"}}
+        self._remember_search_context(
+            domain="places",
+            tool_name="search_places_attractions",
+            base_args=base_args,
+            page_size=int(args["max_results"]),
+            shown_count=self._count_ranked_results(result),
+            language=language,
+            source_query=user_message,
+            offset=0,
+        )
+        child_context = bool(re.search(r"\b(?:criança|crianças|filh[ao]s?|kids?|children|child)\b", user_message, re.IGNORECASE))
+        if language == "pt":
+            checklist = [
+                "### ✅ **O que confirmar antes da visita**",
+                "- 🕒 **Horário e última entrada:** confirma se há alterações no dia da visita.",
+                "- 🎟️ **Bilhetes e preço:** confirma preço, compra online e regras de entrada.",
+            ]
+            if child_context:
+                checklist.append("- 👧 **Com criança:** confirma idade recomendada, atividades infantis, alimentação, WC e zonas de descanso.")
+            checklist.extend([
+                "- ♿ **Acessibilidade e deslocação:** confirma elevadores, acessos sem degraus e a melhor entrada se isso for relevante.",
+                "- 🌦️ **Condições no dia:** para espaços com zonas exteriores, confirma meteorologia e eventuais alterações operacionais.",
+            ])
+            intro = f"### 🧾 **Antes da visita: {target}**\n\n✅ **Resposta direta:** confirma estes pontos práticos antes da visita; abaixo deixo os dados confirmados que encontrei."
+        else:
+            checklist = [
+                "### ✅ **What to confirm before visiting**",
+                "- 🕒 **Opening hours and last entry:** check whether the schedule changes on your visit day.",
+                "- 🎟️ **Tickets/price:** confirm price, online purchase, and entry rules.",
+            ]
+            if child_context:
+                checklist.append("- 👧 **With a child:** confirm recommended ages, child-friendly activities, food, toilets, and rest areas.")
+            checklist.extend([
+                "- ♿ **Accessibility and route:** confirm lifts, step-free access, and the best entrance if relevant.",
+                "- 🌦️ **Day-of conditions:** for outdoor areas, check weather and operational changes.",
+            ])
+            intro = f"### 🧾 **Before visiting {target}**\n\n✅ **Direct answer:** confirm these practical points before going; below are the confirmed details I found."
+        source_line = self._build_places_source_line(result, language)
+        return f"{intro}\n\n---\n\n{result}\n\n---\n\n" + "\n".join(checklist) + f"\n\n{source_line}"
 
     @staticmethod
     def _infer_place_category_signals(user_message: str) -> List[str]:
@@ -1299,6 +1484,11 @@ class ResearcherAgent(BaseAgent):
                 "cuisine",
                 "lunch",
                 "dinner",
+                "almoco",
+                "almoço",
+                "jantar",
+                "refeicao",
+                "refeição",
                 "brunch",
                 "cafe",
                 "café",
@@ -1373,7 +1563,14 @@ class ResearcherAgent(BaseAgent):
             signals.append("Running")
         elif any(term in query for term in ["sports", "sport", "desporto", "desportos"]):
             signals.append("Sports")
-        if "fado" in query and "Restaurants" not in signals:
+        fado_venue_request = bool(
+            re.search(
+                r"\b(?:casas?\s+de\s+fado|fado\s+houses?|bar(?:es)?\s+de\s+fado|fado\s+venues?)\b",
+                query,
+                flags=re.IGNORECASE,
+            )
+        )
+        if "fado" in query and ("Restaurants" not in signals or fado_venue_request):
             signals.append("Fado")
         elif any(term in query for term in ["nightlife", "bar", "bars", "vida noturna", "vida nocturna"]):
             signals.append("Nightlife")
@@ -1388,7 +1585,11 @@ class ResearcherAgent(BaseAgent):
         so retrieval remains broader and can return the requested mix.
         """
         signals = cls._infer_place_category_signals(user_message)
-        if "Restaurants" in signals and _RESEARCHER_FOOD_INTENT_RE.search(user_message or ""):
+        if (
+            "Restaurants" in signals
+            and _RESEARCHER_FOOD_INTENT_RE.search(user_message or "")
+            and len(signals) == 1
+        ):
             return "Restaurants"
         if len(signals) != 1:
             return None
@@ -1442,6 +1643,142 @@ class ResearcherAgent(BaseAgent):
         if language == "pt":
             return "📌 **Fonte:** [*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos)"
         return "📌 **Source:** [*VisitLisboa Events*](https://www.visitlisboa.com/en/events)"
+
+    @staticmethod
+    def _extract_first_area_after_pattern(user_message: str, pattern: str) -> Optional[str]:
+        """Extract a compact area fragment following a component-specific pattern."""
+        match = re.search(
+            pattern
+            + r".{0,50}?\b(?:em|no|na|in|near|perto\s+de|perto\s+do|perto\s+da)\s+"
+            r"(?P<area>[A-ZÀ-Ýa-zà-ÿ0-9][A-ZÀ-Ýa-zà-ÿ0-9 '\-/]{1,60})",
+            user_message or "",
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            return None
+        area = re.sub(r"\s+", " ", match.group("area")).strip(" .?!,;:")
+        area = re.sub(
+            r"\s+(?:e|and|com|with|para|for|perto|near)\b.*$",
+            "",
+            area,
+            flags=re.IGNORECASE,
+        ).strip(" .?!,;:")
+        return area or None
+
+    @staticmethod
+    def _extract_primary_near_area(user_message: str) -> Optional[str]:
+        """Extract the first explicit nearby area for component-level searches."""
+        match = re.search(
+            r"\b(?:perto\s+de|perto\s+do|perto\s+da|near)\s+"
+            r"(?P<area>[A-ZÀ-Ýa-zà-ÿ0-9][A-ZÀ-Ýa-zà-ÿ0-9 '\-/]{1,60})",
+            user_message or "",
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            return None
+        area = re.sub(r"\s+", " ", match.group("area")).strip(" .?!,;:")
+        area = re.sub(
+            r"\s+(?:e|and|com|with|para|for|miradouro|bar|casas?\s+de\s+fado)\b.*$",
+            "",
+            area,
+            flags=re.IGNORECASE,
+        ).strip(" .?!,;:")
+        return area or None
+
+    @classmethod
+    def _build_multi_place_component_specs(cls, user_message: str, language: str) -> list[dict[str, str]]:
+        """Build component-level place searches for explicit multi-place requests."""
+        signals = list(dict.fromkeys(cls._infer_place_category_signals(user_message)))
+        if len(signals) < 2:
+            return []
+
+        is_pt = (language or "").lower().startswith("pt")
+        near_area = cls._extract_primary_near_area(user_message)
+        fado_area = cls._extract_first_area_after_pattern(
+            user_message,
+            r"\b(?:casas?\s+de\s+fado|fado\s+houses?|bar(?:es)?\s+de\s+fado|fado)\b",
+        )
+        specs: list[dict[str, str]] = []
+
+        def add(category: str, label_pt: str, label_en: str, query: str) -> None:
+            specs.append({
+                "category": category,
+                "label": label_pt if is_pt else label_en,
+                "query": query.strip() or user_message,
+            })
+
+        if "Restaurants" in signals:
+            area = near_area or cls._extract_place_area_filter(user_message)
+            add(
+                "Restaurants",
+                "Restaurante / refeição",
+                "Restaurant / meal",
+                f"restaurante jantar barato perto de {area}" if area else user_message,
+            )
+        if "View Points" in signals:
+            area = near_area or cls._extract_place_area_filter(user_message)
+            add(
+                "View Points",
+                "Miradouro",
+                "Viewpoint",
+                f"miradouro perto de {area}" if area else user_message,
+            )
+        if "Fado" in signals:
+            add(
+                "Fado",
+                "Fado",
+                "Fado",
+                f"bar de fado em {fado_area}" if fado_area else user_message,
+            )
+        if "Parks & Gardens" in signals:
+            area = near_area or cls._extract_place_area_filter(user_message)
+            add(
+                "Parks & Gardens",
+                "Jardim / parque",
+                "Garden / park",
+                f"jardim perto de {area}" if area else user_message,
+            )
+
+        return specs if len(specs) >= 2 else []
+
+    def _run_multi_component_place_lookup(self, places_tool: Any, user_message: str, language: str) -> str:
+        """Run separate grounded searches for explicit multi-component place requests."""
+        specs = self._build_multi_place_component_specs(user_message, language)
+        if not specs:
+            return ""
+
+        is_pt = (language or "").lower().startswith("pt")
+        title = "### 🔎 **Locais pedidos**" if is_pt else "### 🔎 **Requested places**"
+        direct = (
+            "✅ **Resposta direta:** procurei separadamente cada componente pedido para não reduzir o pedido a uma só categoria."
+            if is_pt
+            else "✅ **Direct answer:** I searched each requested component separately instead of reducing the request to one category."
+        )
+        sections: list[str] = [title, "", direct, "", "---"]
+        used_material = False
+        for spec in specs:
+            args = {
+                "query": spec["query"],
+                "category": spec["category"],
+                "max_results": 1,
+                "offset": 0,
+                "language": language,
+            }
+            result = str(self._invoke_tool(places_tool, args, tool_name="search_places_attractions")).strip()
+            result = re.sub(r"(?mi)^ðŸ“Œ\s*\*\*(?:Fonte|Source):\*\*.*$", "", result).strip()
+            sections.extend(["", f"### **{spec['label']}**", ""])
+            if result and not result.startswith(("Error:", "\u274c")) and not re.match(r"(?i)^n[aã]o (?:foram|foi|encontrei)", result):
+                used_material = True
+                sections.append(result)
+            else:
+                sections.append(
+                    f"- **Limitação:** não encontrei um resultado confirmado para **{spec['label']}** com os filtros pedidos."
+                    if is_pt
+                    else f"- **Limitation:** I did not find a confirmed result for **{spec['label']}** with the requested filters."
+                )
+
+        sections.extend(["", self._build_places_source_line("\n".join(sections), language)])
+        return "\n".join(sections).strip() if used_material else "\n".join(sections).strip()
 
     @staticmethod
     def _has_specific_lookup_fallback_intro(result: str) -> bool:
@@ -1900,6 +2237,8 @@ class ResearcherAgent(BaseAgent):
     def _is_broad_attractions_query(user_message: str) -> bool:
         """Detects broad attraction-list queries that should bypass free-form synthesis."""
         query = (user_message or "").lower()
+        if re.search(r"\b(?:near|nearby|around|perto\s+d[eoa]?|junto\s+d[eoa]?)\b", query):
+            return False
         attraction_phrases = [
             "atrações imperdíveis",
             "atracoes imperdiveis",
@@ -2224,6 +2563,8 @@ class ResearcherAgent(BaseAgent):
     def _extract_event_date_filter(user_message: str) -> Optional[str]:
         """Extracts a lightweight date filter for direct event tool lookups."""
         query = (user_message or "").lower()
+        query_key = unicodedata.normalize("NFKD", query)
+        query_key = query_key.encode("ascii", "ignore").decode("ascii")
         mappings = [
             (["this weekend", "este fim de semana", "fim de semana"], "this weekend"),
             (["next week", "próxima semana", "proxima semana"], "next week"),
@@ -2235,6 +2576,18 @@ class ResearcherAgent(BaseAgent):
         ]
         for terms, date_filter in mappings:
             if any(term in query for term in terms):
+                return date_filter
+        weekday_mappings = [
+            (["monday", "segunda feira", "segunda"], "monday"),
+            (["tuesday", "terca feira", "terca"], "tuesday"),
+            (["wednesday", "quarta feira", "quarta"], "wednesday"),
+            (["thursday", "quinta feira", "quinta"], "thursday"),
+            (["friday", "sexta feira", "sexta"], "friday"),
+            (["saturday", "sabado"], "saturday"),
+            (["sunday", "domingo"], "sunday"),
+        ]
+        for terms, date_filter in weekday_mappings:
+            if any(re.search(rf"\b{re.escape(term)}\b", query_key) for term in terms):
                 return date_filter
         return None
 
@@ -2300,6 +2653,14 @@ class ResearcherAgent(BaseAgent):
         """Detects explicit outdoor-event discovery requests."""
         normalized_query = unicodedata.normalize("NFKD", user_message or "")
         normalized_query = normalized_query.encode("ascii", "ignore").decode("ascii").lower()
+        if re.search(
+            r"\b(?:sem|nao|no|not|without|avoid|evitar|excluir|excluding|except|menos)\b"
+            r"(?:\s+\w+){0,6}\s+\b(?:outdoor|outdoors|open\s+air|outside|ao\s+ar\s+livre|ar\s+livre|exterior)\b"
+            r"|\b(?:que\s+nao\s+sejam|que\s+nao\s+seja|not\s+outdoors?|not\s+outside)\b",
+            normalized_query,
+            flags=re.IGNORECASE,
+        ):
+            return False
         outdoor_terms = [
             "outdoor", "outdoors", "open air", "open-air", "outside",
             "ao ar livre", "ar livre", "exterior",
@@ -2563,9 +2924,10 @@ class ResearcherAgent(BaseAgent):
         cls,
         focus_query: Optional[str],
         excluded_categories: list[str],
+        user_message: str = "",
     ) -> Optional[str]:
-        """Remove pure negative-preference tokens from event text search focus."""
-        if not focus_query or not excluded_categories:
+        """Remove filters/categories from the text focus while preserving real themes."""
+        if not focus_query:
             return focus_query
         normalized_focus = cls._normalize_event_preference_text(focus_query)
         if not normalized_focus:
@@ -2577,9 +2939,23 @@ class ResearcherAgent(BaseAgent):
             "seja", "sejam", "tambem", "tambem", "que",
             "quero", "queria", "gostava", "cultural", "culturais", "mas", "but",
             "mostra", "mostrar", "mais", "dois", "outro", "outros",
+            "event", "events", "evento", "eventos", "concert", "concerts",
+            "concerto", "concertos", "music", "musica", "museu", "museus",
+            "museum", "museums", "children", "child", "kids", "family",
+            "familia", "criancas", "miudos", "sports", "sport", "desporto",
+            "desportos", "exhibition", "exhibitions", "exposicao", "exposicoes",
+            "domingo", "sunday", "sabado", "saturday", "segunda", "monday",
+            "terca", "tuesday", "quarta", "wednesday", "quinta", "thursday",
+            "sexta", "friday", "livre", "outdoor", "outdoors", "open", "air",
+            "outside", "exterior", "gratis", "gratuito", "gratuitos", "gratuita",
+            "gratuitas", "free",
         }
+        if cls._query_excludes_museum_venues(user_message):
+            blocked_tokens.update({"museu", "museus", "museum", "museums"})
+        if "Fado" in excluded_categories:
+            blocked_tokens.update({"fado"})
         if "Music" in excluded_categories:
-            blocked_tokens.update({"music", "musica", "concert", "concerts", "concerto", "concertos"})
+            blocked_tokens.update({"music", "musica", "concert", "concerts", "concerto", "concertos", "fado", "jazz", "rock", "pop"})
         if "Exhibitions" in excluded_categories:
             blocked_tokens.update({"exhibition", "exhibitions", "exposicao", "exposicoes", "arte"})
         if "Theater Opera & Dance" in excluded_categories:
@@ -2716,7 +3092,12 @@ class ResearcherAgent(BaseAgent):
         )
         if visit_area_match:
             subject = visit_area_match.group("subject").strip(" .?!,")
-            subject = re.sub(r"^(?:in|em|no|na|nos|nas)\s+", "", subject, flags=re.IGNORECASE)
+            subject = re.sub(
+                r"^(?:in|near|around|em|no|na|nos|nas|perto\s+d[eoa]?|junto\s+d[eoa]?)\s+",
+                "",
+                subject,
+                flags=re.IGNORECASE,
+            )
             if subject:
                 cleaned_subject = ResearcherAgent._clean_place_focus_subject(subject)
                 if cleaned_subject:
@@ -2842,7 +3223,9 @@ class ResearcherAgent(BaseAgent):
         if ResearcherAgent._extract_service_types(user_message):
             return bool(ResearcherAgent._extract_near_location_name(user_message) or focus_query)
 
+        place_category_signals = ResearcherAgent._infer_place_category_signals(user_message)
         has_place_hint = ResearcherAgent._infer_place_category_hint(user_message) is not None
+        has_multi_place_intent = len(place_category_signals) >= 2
         has_directional_lookup = any(marker in query for marker in directed_lookup_markers)
         has_field_specific_lookup = has_place_hint and bool(
             re.search(
@@ -2889,6 +3272,8 @@ class ResearcherAgent(BaseAgent):
         if has_place_hint and has_recommendation_lookup:
             return True
         if has_place_hint and has_place_like_query and (has_area_filter or has_listing_lookup):
+            return True
+        if has_multi_place_intent and has_place_like_query and (has_area_filter or has_listing_lookup):
             return True
 
         return False
@@ -3238,14 +3623,18 @@ class ResearcherAgent(BaseAgent):
         temporal_suffix_re = re.compile(
             r"\s+(?:este\s+m[eê]s|esta\s+semana|este\s+fim\s+de\s+semana|"
             r"pr[oó]xima\s+semana|pr[oó]ximo\s+m[eê]s|hoje|amanh[aã]|"
+            r"segunda(?:-|\s+)?feira|ter[cç]a(?:-|\s+)?feira|quarta(?:-|\s+)?feira|"
+            r"quinta(?:-|\s+)?feira|sexta(?:-|\s+)?feira|s[aá]bado|domingo|"
             r"janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|"
             r"setembro|outubro|novembro|dezembro|this\s+month|this\s+week|"
             r"this\s+weekend|next\s+week|next\s+month|today|tomorrow|"
+            r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
             r"january|february|march|april|may|june|july|august|"
             r"september|october|november|december)\b.*$",
             flags=re.IGNORECASE,
         )
-        return temporal_suffix_re.sub("", value).strip(" .?!,;:")
+        value = temporal_suffix_re.sub("", value).strip(" .?!,;:")
+        return re.sub(r"\s+(?:no|na|nos|nas|ao|aos|à|às|on|at)$", "", value, flags=re.IGNORECASE).strip(" .?!,;:")
 
     @staticmethod
     def _event_location_constraint_is_filter(location: str) -> bool:
@@ -3326,6 +3715,7 @@ class ResearcherAgent(BaseAgent):
         language: str,
         location: str,
         needs_evening: bool,
+        requests_free: bool = False,
     ) -> str:
         """Build a conservative event limitation when constraints cannot be verified."""
         if language == "pt":
@@ -3340,9 +3730,10 @@ class ResearcherAgent(BaseAgent):
             if needs_evening:
                 constraints.append("hoje à noite")
             scope = " e ".join(constraints) if constraints else "com esses critérios"
+            event_noun = "evento gratuito" if requests_free else "evento"
             return (
                 f"{title}\n\n"
-                f"✅ **Resposta direta:** não consegui confirmar um evento gratuito {scope} com os dados disponíveis.\n\n"
+                f"✅ **Resposta direta:** não consegui confirmar um {event_noun} {scope} com os dados disponíveis.\n\n"
                 "---\n\n"
                 "⚠️ Para não inventar proximidade, horário ou disponibilidade, não apresento eventos genéricos de Lisboa como se cumprissem esses critérios.\n\n"
                 f"{self._build_events_source_line(language)}"
@@ -3359,9 +3750,10 @@ class ResearcherAgent(BaseAgent):
         if needs_evening:
             constraints.append("tonight")
         scope = " and ".join(constraints) if constraints else "with those criteria"
+        event_noun = "free event" if requests_free else "event"
         return (
             f"{title}\n\n"
-            f"✅ **Direct answer:** I could not confirm a free event {scope} with the available data.\n\n"
+            f"✅ **Direct answer:** I could not confirm an {event_noun} {scope} with the available data.\n\n"
             "---\n\n"
             "⚠️ To avoid inventing proximity, schedule, or availability, I am not presenting generic Lisbon events as if they matched those criteria.\n\n"
             f"{self._build_events_source_line(language)}"
@@ -3575,18 +3967,27 @@ class ResearcherAgent(BaseAgent):
                 flags=re.IGNORECASE,
             )
         )
+        cleaned_raw_focus_query = self._clean_event_focus_for_exclusions(
+            raw_extracted_focus_query,
+            excluded_categories,
+            user_message,
+        )
+        precise_theme_focus = bool(
+            cleaned_raw_focus_query
+            and re.search(
+                r"\b(?:jazz|rock|pop|fado|santos|arraiais|marchas)\b",
+                self._normalize_event_preference_text(cleaned_raw_focus_query),
+                flags=re.IGNORECASE,
+            )
+        )
         if broad_date_discovery:
             extracted_focus_query = None
         elif (
             category_date_discovery or category_discovery
-        ) and not strict_theme_focus and str(raw_extracted_focus_query or "").lower() not in {"live music", "música ao vivo", "musica ao vivo"}:
+        ) and not strict_theme_focus and not precise_theme_focus and str(raw_extracted_focus_query or "").lower() not in {"live music", "música ao vivo", "musica ao vivo"}:
             extracted_focus_query = None
         else:
-            extracted_focus_query = raw_extracted_focus_query
-        extracted_focus_query = self._clean_event_focus_for_exclusions(
-            extracted_focus_query,
-            excluded_categories,
-        )
+            extracted_focus_query = cleaned_raw_focus_query
         if broad_date_discovery or category_date_discovery or category_discovery:
             specific_lookup = None
         elif not structured_plan and date_filter and not extracted_focus_query:
@@ -3613,6 +4014,19 @@ class ResearcherAgent(BaseAgent):
             focus_query = "eventos gratuitos" if language == "pt" else "free events"
         elif requests_free_event and focus_query and not re.search(r"\b(?:gratuit|gratis|gr[aá]tis|free)\b", focus_query, flags=re.IGNORECASE):
             focus_query = f"{focus_query} gratuitos" if language == "pt" else f"{focus_query} free"
+        excludes_outdoor_event = bool(
+            re.search(
+                r"\b(?:sem|nao|não|no|not|without|avoid|evitar|excluir|excluding|except|menos)\b"
+                r"(?:\s+\w+){0,6}\s+\b(?:outdoor|outdoors|open\s+air|outside|ao\s+ar\s+livre|ar\s+livre|exterior)\b"
+                r"|\b(?:que\s+nao\s+sejam|que\s+não\s+sejam|que\s+nao\s+seja|que\s+não\s+seja|not\s+outdoors?|not\s+outside)\b",
+                self._normalize_event_preference_text(user_message),
+                flags=re.IGNORECASE,
+            )
+        )
+        if excludes_outdoor_event and not focus_query:
+            focus_query = "sem eventos ao ar livre" if language == "pt" else "not outdoor events"
+        elif excludes_outdoor_event and focus_query and not re.search(r"\b(?:ar\s+livre|outdoor|outside)\b", focus_query, flags=re.IGNORECASE):
+            focus_query = f"{focus_query} sem eventos ao ar livre" if language == "pt" else f"{focus_query} not outdoor"
         if location_constraint:
             if requests_free_event:
                 focus_query = (
@@ -3667,12 +4081,14 @@ class ResearcherAgent(BaseAgent):
                     language=language,
                     location=location_constraint,
                     needs_evening=needs_evening_event,
+                    requests_free=requests_free_event,
                 )
         if needs_evening_event and not self._event_result_has_evening_time(result):
             return self._event_constraint_limitation(
                 language=language,
                 location=location_constraint or "",
                 needs_evening=True,
+                requests_free=requests_free_event,
             )
         if result.startswith("❌") and not result.lstrip().startswith("###"):
             heading = "### 🎭 **Eventos encontrados**" if language == "pt" else "### 🎭 **Events found**"
@@ -3755,21 +4171,46 @@ class ResearcherAgent(BaseAgent):
             kept_cards.append(card)
         if not removed:
             return result
-        if not kept_cards:
-            heading = "### 🎭 **Sem eventos confirmados**" if language == "pt" else "### 🎭 **No confirmed events**"
-            direct_label = "Resposta direta" if language == "pt" else "Direct answer"
-            direct = (
-                f"Não encontrei eventos que respeitem a exclusão de museus nos dados disponíveis; omiti {removed} resultado(s) associado(s) a museus."
-                if language == "pt"
-                else f"I did not find events that respect the museum exclusion in the available data; I omitted {removed} museum-associated result(s)."
+        place_result = bool(
+            re.search(
+                r"\b(?:VisitLisboa Locais|Locais e atra[cç][oõ]es|Places and attractions|"
+                r"Local encontrado|Place found)\b",
+                result,
+                flags=re.IGNORECASE,
             )
+        )
+        if not kept_cards:
+            if place_result:
+                heading = "### 🏛️ **Sem locais confirmados**" if language == "pt" else "### 🏛️ **No confirmed places**"
+            else:
+                heading = "### 🎭 **Sem eventos confirmados**" if language == "pt" else "### 🎭 **No confirmed events**"
+            direct_label = "Resposta direta" if language == "pt" else "Direct answer"
+            if place_result:
+                direct = (
+                    f"Não encontrei locais que respeitem a exclusão de museus nos dados disponíveis; omiti {removed} resultado(s) associado(s) a museus."
+                    if language == "pt"
+                    else f"I did not find places that respect the museum exclusion in the available data; I omitted {removed} museum-associated result(s)."
+                )
+            else:
+                direct = (
+                    f"Não encontrei eventos que respeitem a exclusão de museus nos dados disponíveis; omiti {removed} resultado(s) associado(s) a museus."
+                    if language == "pt"
+                    else f"I did not find events that respect the museum exclusion in the available data; I omitted {removed} museum-associated result(s)."
+                )
             return f"{heading}\n\n✅ **{direct_label}:** {direct}"
 
-        note = (
-            f"⚠️ Omiti {removed} evento(s) associado(s) a espaços identificados como museu, conforme pediste."
-            if language == "pt"
-            else f"⚠️ I omitted {removed} event(s) associated with venues identified as museums, as requested."
-        )
+        if place_result:
+            note = (
+                f"⚠️ Omiti {removed} local(is) associado(s) a museus, conforme pediste."
+                if language == "pt"
+                else f"⚠️ I omitted {removed} place(s) associated with museums, as requested."
+            )
+        else:
+            note = (
+                f"⚠️ Omiti {removed} evento(s) associado(s) a espaços identificados como museu, conforme pediste."
+                if language == "pt"
+                else f"⚠️ I omitted {removed} event(s) associated with venues identified as museums, as requested."
+            )
         output_lines = intro
         while output_lines and not output_lines[-1].strip():
             output_lines.pop()
@@ -4335,6 +4776,15 @@ class ResearcherAgent(BaseAgent):
                 language=language,
             )
 
+        if places_tool and not service_types and not specific_lookup:
+            multi_component_response = self._run_multi_component_place_lookup(
+                places_tool=places_tool,
+                user_message=user_message,
+                language=language,
+            )
+            if multi_component_response:
+                return multi_component_response
+
         if places_tool and place_focus_query and specific_lookup and not is_broad_attractions and not service_types:
             exact_args = {
                 "query": place_focus_query,
@@ -4559,7 +5009,7 @@ class ResearcherAgent(BaseAgent):
             query_text = "must-see attractions first time visitors Lisbon iconic monuments museums palaces castles historic sites"
             max_results = 6
         elif self._is_visit_place_context_query(user_message) and place_focus_query and not category_hint:
-            query_text = f"attractions monuments museums in {place_focus_query}"
+            query_text = f"near {place_focus_query}"
 
         args = {"query": query_text, "max_results": tool_max_results, "offset": 0, "language": language}
         if specific_lookup and not is_broad_attractions:
@@ -7547,6 +7997,18 @@ class ResearcherAgent(BaseAgent):
             "You MUST use a tool (like search_places_attractions) to get real data. "
             "Do NOT answer from your knowledge base. Call the tool now."
         )
+
+        if not is_greeting and self._is_visit_confirmation_checklist_query(user_message):
+            if verbose:
+                print("      [RESEARCHER] Using deterministic place lookup for visit-confirmation checklist...")
+
+            response = self._run_visit_confirmation_checklist_lookup(user_message, language)
+            return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
+                response,
+                agent_name="researcher",
+                user_query=user_message,
+                language=language,
+            ))
 
         if not is_greeting and self._is_accessibility_place_query(user_message):
             if verbose:

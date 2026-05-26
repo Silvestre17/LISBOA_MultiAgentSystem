@@ -94,9 +94,36 @@ def _normalize_station(text: str) -> str:
     return normalize_location_text(text)
 
 
+def _strip_transport_endpoint_qualifier(location: str) -> str:
+    """Remove mode labels that agents may add around otherwise valid endpoints."""
+    raw = str(location or "").strip()
+    if not raw:
+        return raw
+    cleaned = re.sub(
+        r"(?i)^\s*(?:"
+        r"metro|metropolitano|metro\s+station|estação\s+de\s+metro|estacao\s+de\s+metro|"
+        r"station|estação|estacao"
+        r")\s*[:\-–—]\s*",
+        "",
+        raw,
+    )
+    cleaned = re.sub(
+        r"(?i)^\s*linha\s+(?:azul|amarela|verde|vermelha|blue|yellow|green|red)\s*[:\-–—]\s*",
+        "",
+        cleaned,
+    )
+    cleaned = re.sub(
+        r"(?i)\s*\((?:metro|metropolitano|metro\s+station|estação\s+de\s+metro|estacao\s+de\s+metro)\)\s*$",
+        "",
+        cleaned,
+    )
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned or raw
+
+
 def _canonical_metro_station_name(station_name: str) -> str:
     """Return the official Metro station name for known user-facing aliases."""
-    raw = str(station_name or "").strip()
+    raw = _strip_transport_endpoint_qualifier(station_name)
     return _METRO_STATION_ALIASES.get(_normalize_station(raw), raw)
 
 
@@ -126,7 +153,7 @@ def _format_metro_line_suffix(line_value: str) -> str:
 
 def _format_location_display_name(location: str, detailed: bool = False) -> str:
     """Formats route endpoints and landmark labels without breaking acronyms like NOVA IMS."""
-    raw = str(location or "").strip()
+    raw = _strip_transport_endpoint_qualifier(location)
     if not raw:
         return raw
 
@@ -512,6 +539,9 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     Returns:
         str: Multi-modal route suggestions with Metro, train, and bus options.
     """
+    origin = _strip_transport_endpoint_qualifier(origin)
+    destination = _strip_transport_endpoint_qualifier(destination)
+
     # Phase 1.4 ambiguity preamble: when a bare island/region name (currently
     # "Madeira") is used as origin or destination, Nominatim would silently
     # resolve it to "Rua Humberto Madeira" in Lisbon and we would render a

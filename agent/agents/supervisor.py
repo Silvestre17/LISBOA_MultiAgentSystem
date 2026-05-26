@@ -269,6 +269,7 @@ class SupervisorAgent(BaseAgent):
             r"\bestado\s+do\s+mar\b",
             r"\bondulacao\b",
             r"\bcomo est[aá] o tempo\b",
+            r"\bque tempo faz\b",
             r"\bqual (?:é|e) o tempo\b(?!\s+de\s+espera)",
             r"\btempo em\b",
             r"\btempo hoje\b",
@@ -393,6 +394,38 @@ class SupervisorAgent(BaseAgent):
         if walking_context_false_positive:
             return False
 
+        route_intent_markers = bool(
+            re.search(
+                r"\b(?:metro|bus|autocarro|comboio|train|tram|el[eé]trico|carris|cp|"
+                r"transportes?|public transport|rota|route|percurso|trajeto|"
+                r"como\s+(?:vou|chego|posso ir|ir)|how\s+(?:do|can)\s+i\s+(?:get|go)|"
+                r"get from|go from|apanhar|catch|partida|departure|hor[áa]rio|schedule)\b",
+                normalized,
+            )
+        )
+        generic_de_para_false_positive = (
+            re.search(
+                r"\b(?:receita|recipe|cozinhar|cooking|ingredientes?|ingredients?|"
+                r"bom\s+para|boa\s+para|s[ií]tio\s+indoor|sitio\s+indoor|"
+                r"passar\s+\d+\s+hora|crian[cç]a|bilhetes?|tickets?|morada|address|"
+                r"pre[cç]o|price|abert[oa]|website)\b",
+                normalized,
+            )
+            and not route_intent_markers
+        )
+        generic_food_place_de_para_false_positive = (
+            re.search(
+                r"\b(?:jantar|dinner|almoco|lunch|restaurantes?|restaurants?|"
+                r"casas?\s+de\s+fado|fado\s+houses?|bar(?:es)?\s+de\s+fado|"
+                r"bares?|bars?|miradouros?|viewpoints?)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+            and not route_intent_markers
+        )
+        if generic_de_para_false_positive or generic_food_place_de_para_false_positive:
+            return False
+
         transport_patterns = [
             r"\bmetro\b",
             r"\bbus\b",
@@ -489,6 +522,8 @@ class SupervisorAgent(BaseAgent):
             r"\bpython\b",
             r"\bjavascript\b",
             r"\bsql\b",
+            r"\b(?:receita|recipe)\b",
+            r"\b(?:cozinhar|cooking)\b",
             r"\bmandarim\b",
             r"\bjapan\b",
             r"\bjap[aã]o\b",
@@ -543,6 +578,7 @@ class SupervisorAgent(BaseAgent):
             r"\bfazer\s+(?:uma\s+)?reserva\b",
             r"\bfaz\s+(?:uma\s+)?reserva\b",
             r"\bcompra[-\s]?me\s+(?:bilhetes?|entradas?)\b",
+            r"\b(?:quero\s+)?comprar\s+(?:um\s+|uma\s+)?(?:bilhetes?|entradas?|tickets?)\b",
             r"\bcomprar\s+(?:bilhetes?|entradas?)\s+(?:por mim|para mim)\b",
             r"\bcompra\s+(?:bilhetes?|entradas?)\s+(?:por mim|para mim)\b",
             r"\b(?:consegues|consegue|podes|pode|poderias|podias)\s+(?:comprar|reservar|marcar)\s+(?:bilhetes?|entradas?|tickets?|mesa|reserva)\b",
@@ -595,7 +631,7 @@ class SupervisorAgent(BaseAgent):
             and re.search(r"\b(?:linhas?|lines)\b", normalized)
             and not re.search(
                 r"\b(?:paragens?|stops|esta[cç][oõ]es?|stations?|"
-                r"ve[iÃí]culos?|vehicles?|partidas?|departures?|"
+                r"ve[ií]culos?|vehicles?|partidas?|departures?|"
                 r"comboios?|trains?|autocarros?|buses|servi[cç]os?|services?)\b",
                 normalized,
             )
@@ -793,6 +829,13 @@ class SupervisorAgent(BaseAgent):
                 "direct_response": self._sanitize_direct_response(self._build_full_capability_response(language)),
             }
 
+        if self._is_visit_confirmation_checklist_query(user_message):
+            return {
+                "reasoning": "Direct pre-visit checklist override; answer needs grounded place details, not planning or route synthesis.",
+                "agents": ["researcher"],
+                "direct_response": None,
+            }
+
         if self._is_unsupported_action_request(user_message) and route_mentions_outside_aml(user_message):
             return {
                 "reasoning": "Direct geographic out-of-scope transactional request",
@@ -807,6 +850,19 @@ class SupervisorAgent(BaseAgent):
             }
 
         if self._is_unsupported_action_request(user_message):
+            normalized_transaction = self._normalize_query(user_message)
+            if re.search(r"\b(?:uber|bolt|taxi|taxis|taxi|taxis|t[aá]xi|t[aá]xis|ride\s*hailing)\b", normalized_transaction):
+                return {
+                    "reasoning": "Unsupported ride-hailing booking routed to transport for mobility-scope limitation.",
+                    "agents": ["transport"],
+                    "direct_response": None,
+                }
+            if re.search(r"\b(?:comboio|comboios|train|trains|cp|metro|autocarro|autocarros|bus|buses|carris)\b", normalized_transaction):
+                return {
+                    "reasoning": "Unsupported transport ticket purchase routed to transport for supported schedule/route information.",
+                    "agents": ["transport"],
+                    "direct_response": None,
+                }
             if self._unsupported_action_has_supported_lookup_target(user_message):
                 return {
                     "reasoning": "Unsupported transaction with a supported Lisbon lookup target",
@@ -858,6 +914,33 @@ class SupervisorAgent(BaseAgent):
             }
 
         return None
+
+    @classmethod
+    def _is_visit_confirmation_checklist_query(cls, user_message: str) -> bool:
+        """Detect venue-specific pre-visit checklist requests."""
+        normalized = cls._normalize_query(user_message)
+        if not re.search(
+            r"\b(?:o\s+que\s+(?:devo\s+)?confirmar|que\s+(?:devo\s+)?confirmar|"
+            r"confirmar\s+antes|what\s+should\s+i\s+(?:check|confirm)|"
+            r"what\s+to\s+(?:check|confirm)|check\s+before|confirm\s+before)\b",
+            normalized,
+            flags=re.IGNORECASE,
+        ):
+            return False
+        return bool(
+            re.search(
+                r"\b(?:vou|quero\s+ir|pretendo\s+ir|visitar|visit|going|go)\b"
+                r".{0,100}\b(?:ao|a|à|para|to|o|a)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+            or re.search(
+                r"\b(?:oceanario|oceanário|jardim\s+zoologico|jardim\s+zoológico|maat|ccb|"
+                r"mosteiro|museu|museum|castelo|castle|torre|tower|palacio|palácio)\b",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        )
 
     @staticmethod
     def _sanitize_direct_response(text: Optional[str]) -> Optional[str]:
@@ -1032,6 +1115,8 @@ class SupervisorAgent(BaseAgent):
             "attraction", "attractions", "atração", "atrações", "atracao", "atracoes",
             "museum", "museu", "monument", "monumento", "miradouro", "places", "locais",
             "restaurant", "restaurante", "what to visit", "o que visitar",
+            "pavilhão", "pavilhao", "sítio", "sitio", "indoor", "bilhete", "bilhetes",
+            "ticket", "tickets", "morada", "address", "preço", "preco", "price",
         ]
         service_terms = [
             "pharmacy", "farmácia", "farmacia", "hospital", "school", "escola",
@@ -1052,6 +1137,26 @@ class SupervisorAgent(BaseAgent):
                 flags=re.IGNORECASE,
             )
         )
+        reduced_mobility_visit_request = bool(
+            re.search(
+                r"\b(?:mobilidade\s+reduzida|cadeira\s+de\s+rodas|wheelchair|"
+                r"reduced\s+mobility|step[-\s]?free|acess[ií]vel|acessibilidade)\b",
+                message_lower,
+                flags=re.IGNORECASE,
+            )
+            and re.search(
+                r"\b(?:sugere|recomenda|suggest|recommend|visita\s+curta|short\s+visit|"
+                r"pouca\s+caminhada|little\s+walking|transporte\s+simples|simple\s+transport)\b",
+                message_lower,
+                flags=re.IGNORECASE,
+            )
+        )
+        if reduced_mobility_visit_request:
+            return {
+                "reasoning": "Direct reduced-mobility visit recommendation override; this needs grounded place evidence, not a route from the origin to itself.",
+                "agents": ["researcher"],
+                "direct_response": None,
+            }
 
         _msg_no_neg_transport = re.sub(
             r"\b(?:no|not|without|sem|n[aã]o|nem|sans)\s+"
@@ -1110,6 +1215,12 @@ class SupervisorAgent(BaseAgent):
             )
         )
         event_hit = exact_event_hit or cls._contains_domain_keyword(message_lower, event_terms, minimum_ratio=0.84)
+        if event_hit and not exact_event_hit and re.search(
+            r"\b(?:what\s+(?:can|should)\s+i\s+(?:visit|see)|o\s+que\s+h(?:a|\u00e1|\u00e3)?\s+(?:para\s+)?(?:ver|visitar)|"
+            r"l\s+perto|nearby)\b",
+            message_lower,
+        ):
+            event_hit = False
         if weather_hit and event_hit and not re.search(
             r"\b(?:weather|forecast|rain|temperature|wind|umbrella|tempo|meteo|previs[aã]o|chuva|temperatura|vento|guarda[-\s]?chuva)\b",
             message_lower,
@@ -1132,8 +1243,20 @@ class SupervisorAgent(BaseAgent):
                 r"\blocais\b",
                 r"\brestaurants?\b",
                 r"\brestaurantes?\b",
+                r"\bcasas?\s+de\s+fado\b",
+                r"\bfado\s+houses?\b",
+                r"\bbar(?:es)?\s+de\s+fado\b",
                 r"\bwhat to visit\b",
+                r"\bwhat (?:can|should) i (?:visit|see)\b",
+                r"\bwhat .* nearby\b",
                 r"\bo que visitar\b",
+                r"\bo que h(?:a|\u00e1|\u00e3)?\s+(?:para\s+)?(?:ver|visitar)\b",
+                r"\bo que h\s+(?:para\s+)?(?:ver|visitar)\b",
+                r"\bo que existe\s+(?:para\s+)?(?:ver|visitar)\b",
+                r"\bl(?:a|\u00e1)\s+perto\b",
+                r"\bl\s+perto\b",
+                r"\bperto\s+(?:de\s+)?l(?:a|\u00e1)\b",
+                r"\bperto\s+(?:de\s+)?l\b",
             )
         )
         shopping_hit = bool(
@@ -1240,21 +1363,63 @@ class SupervisorAgent(BaseAgent):
                     message_lower,
                 )
             )
+            if not explicit_point_to_point:
+                explicit_point_to_point = bool(
+                    re.search(r"\b(?:desde|from|de|do|da)\s+.+\b(?:a|ao)\s+.+", message_lower)
+                )
             operational_route_request = bool(
                 re.search(
                     r"\b(?:rota|route|transporte|transport|como\s+(?:vou|chego|posso\s+ir)|"
+                    r"how\s+(?:do|can)\s+i\s+(?:get|go)|"
                     r"(?:quero|preciso|tenho)\s+(?:de\s+)?ir|"
                     r"a\s+que\s+horas|quando\s+devo\s+sair|sair|apanhar|catch|leave|"
                     r"chegar\s+(?:a|à|as|às))\b",
                     message_lower,
                 )
             )
+            nearby_place_request = bool(
+                re.search(
+                    r"\b(?:what\s+(?:can|should)\s+i\s+(?:visit|see)|what\s+.*nearby|"
+                    r"nearby|around\s+there|o\s+que\s+h(?:a|\u00e1|\u00e3)?\s+(?:para\s+)?(?:ver|visitar)|"
+                    r"o\s+que\s+h\s+(?:para\s+)?(?:ver|visitar)|"
+                    r"o\s+que\s+existe\s+(?:para\s+)?(?:ver|visitar)|l(?:a|\u00e1)\s+perto|l\s+perto|"
+                    r"perto\s+(?:de\s+)?l(?:a|\u00e1)|perto\s+(?:de\s+)?l)\b",
+                    message_lower,
+                )
+            )
+            if explicit_point_to_point and operational_route_request and nearby_place_request:
+                return {
+                    "reasoning": "Direct route plus nearby-place lookup override; answer needs transport and researcher, not planner.",
+                    "agents": ["transport", "researcher"],
+                    "direct_response": None,
+                }
             if explicit_point_to_point and operational_route_request:
                 return {
                     "reasoning": "Direct place-destination mobility override; point-to-point transport should not become an itinerary planner task.",
                     "agents": ["transport"],
                     "direct_response": None,
                 }
+
+        pure_weather_question = (
+            weather_hit
+            and re.search(
+                r"\b(?:que\s+tempo|como\s+est[aá]\s+o\s+tempo|vai\s+chover|"
+                r"previs[aã]o|forecast|weather|avisos?|warnings?)\b",
+                message_lower,
+            )
+            and not re.search(
+                r"\b(?:onde|where|recomenda|recommend|sugere|suggest|encontra|find|"
+                r"eventos?|events?|museus?|museums?|restaurantes?|restaurants?|"
+                r"farm[aá]cias?|pharmacies|bibliotecas?|libraries|mercados?|markets?)\b",
+                message_lower,
+            )
+        )
+        if pure_weather_question:
+            return {
+                "reasoning": "Direct weather override; place/service word is an incidental location fragment.",
+                "agents": ["weather"],
+                "direct_response": None,
+            }
 
         if weather_hit and not any([transport_hit, event_hit, place_hit, service_hit]):
             return {
@@ -1274,7 +1439,8 @@ class SupervisorAgent(BaseAgent):
             needs_place_lookup = shopping_hit or bool(
                 re.search(
                     r"\b(?:where|onde|which|qual|quais|recommend|recomendas?|suggest|"
-                    r"find|encontra|procurar|comprar|buy|shops?|stores?|lojas?)\b",
+                    r"find|encontra|procurar|comprar|buy|preciso|need|quero|want|"
+                    r"shops?|stores?|lojas?)\b",
                     message_lower,
                     flags=re.IGNORECASE,
                 )
@@ -1385,7 +1551,7 @@ class SupervisorAgent(BaseAgent):
             current_domain == "transport"
             and previous_domain == "planner"
             and re.search(
-                r"^\s*(?:e\s+)?(?:de\s+)?(?:metro|autocarro|autocarros|bus|comboio|train|tram|el[eÃé]trico)\s*\??\s*$|"
+                r"^\s*(?:e\s+)?(?:de\s+)?(?:metro|autocarro|autocarros|bus|comboio|train|tram|el[eé]trico)\s*\??\s*$|"
                 r"^\s*(?:and\s+)?(?:by\s+)?(?:metro|bus|train|tram)\s*\??\s*$",
                 cls._normalize_query(user_message),
             )
@@ -1455,6 +1621,44 @@ class SupervisorAgent(BaseAgent):
             return False
         if cls._is_transport_line_route_query(user_message):
             return False
+        pure_weather_request = (
+            cls._looks_like_weather_query(message_lower)
+            and re.search(
+                r"\b(?:que\s+tempo|como\s+est[aá]\s+o\s+tempo|vai\s+chover|"
+                r"previs[aã]o|forecast|weather|avisos?|warnings?)\b",
+                message_lower,
+            )
+            and not re.search(
+                r"\b(?:planeia|plan(?:ear)?|organiza|roteiro|itiner[aá]rio|itinerary|"
+                r"faz\s+uma\s+(?:manh[aã]|tarde|noite)|dia\s+inteiro|full\s+day)\b",
+                message_lower,
+            )
+        )
+        if pure_weather_request:
+            return False
+        simple_lookup_with_preferences = bool(
+            re.search(
+                r"\b(?:restaurants?|restaurantes?|museums?|museus?|monuments?|monumentos?|"
+                r"places?|locais|attractions?|atra[c\u00e7][o\u00f5]es?|bibliotecas?|libraries|"
+                r"farm[a\u00e1]cias?|pharmacies|hospitais?|hospitals)\b",
+                message_lower,
+            )
+            and re.search(
+                r"\b(?:near|perto|nearby|open|abert[oa]s?|cheap|barat[oa]s?|"
+                r"vegetarian[oa]s?|vegan[oa]s?|accessible|acess[i\u00ed]vel|wheelchair|"
+                r"cadeira\s+de\s+rodas|today|hoje|tonight|esta\s+noite)\b",
+                message_lower,
+            )
+            and not re.search(
+                r"\b(?:planeia|plan(?:ear)?|organiza|organize|itinerary|itiner[a\u00e1]rio|"
+                r"roteiro|dia\s+inteiro|full\s+day|half\s+day|meio\s+dia|"
+                r"\d+\s*(?:dias?|days?)|v[a\u00e1]rios?\s+locais|multiple\s+places|"
+                r"ordem|order|schedule|agenda)\b",
+                message_lower,
+            )
+        )
+        if simple_lookup_with_preferences:
+            return False
         planning_patterns = [
             r"\bplan my day\b",
             r"\bday plan\b",
@@ -1466,7 +1670,7 @@ class SupervisorAgent(BaseAgent):
             r"\bplan\b.*\b(?:day|days|afternoon|morning|evening|itinerary|trip|route|visit|stops?|"
             r"rainy|museum|museums|restaurants?|hotel|transport|return|lisbon|lisboa|bel[eé]m)\b",
             r"\b(?:plane(?:ar|ia|ie)|organiza(?:r)?|organize|organise|organizing)\b.*\b(?:dia|day|"
-            r"manh(?:a)?|morning|tarde|afternoon|noite|evening|roteiro|itiner[aá]rio|itinerary|"
+            r"manh(?:a)?|morning|tarde|afternoon|noite|evening|horas?|hours?|roteiro|itiner[aá]rio|itinerary|"
             r"ordem|order|transportes?|hotel|locais|places|stops?|paragens?|visitar|visit|"
             r"comer|eat|food|meal|refei[cç][aã]o|almo[cç]o|jantar|lunch|dinner)\b",
             r"\b(?:plano|plan)\b.*\b(?:dia|day|manh[aã]|tarde|noite|viagem|trip|visita|visit)\b",
@@ -1497,8 +1701,13 @@ class SupervisorAgent(BaseAgent):
             r"\b(?:passa(?:r|ndo)?\s+(?:por|pelo|pela)|via|termina|terminar|acaba|acabar|end|finish)\b",
             r"\b(?:passa(?:r|ndo)?\s+(?:por|pelo|pela)|via|pass\s+through)\b.*"
             r"\b(?:termina|terminar|acaba|acabar|end|finish|roteiro|itinerary|plano|plan)\b",
+            # NOTE: indefinite articles (um/uma/one) are intentionally excluded from the
+            # count list. "quero um restaurante" means "I want A restaurant" (a simple
+            # lookup), not "1 restaurant" as an itinerary count. Real itinerary counts use
+            # digits or two+ (dois/two/...). Multi-component plans like "faz uma tarde com
+            # um museu e um miradouro" are still caught by the afternoon/plan patterns above.
             r"\b(?:quero|queria|gostava|ver|visitar|visit|see|show|mostra|inclui|include)\b.*"
-            r"\b(?:\d{1,2}|um|uma|one|dois|duas|two|tres|three|quatro|four|cinco|five|seis|six|sete|seven|oito|eight)\s+"
+            r"\b(?:\d{1,2}|dois|duas|two|tr[eê]s|three|quatro|four|cinco|five|seis|six|sete|seven|oito|eight)\s+"
             r"(?:museus?|museums?|monumentos?|monuments?|locais|lugares|sitios|s[ií]tios|places|stops|paragens|restaurantes?|restaurants?|miradouros?|viewpoints?)\b",
             r"\b(?:plane(?:ar|ia|ie)|planear|plan(?:eia)?)\b.*\b\d+\s*dias?\b",
             r"\b\d+\s*dias?\b.*\b(?:plane(?:ar|ia|ie)|planear|itiner[aá]rio|roteiro)\b",
