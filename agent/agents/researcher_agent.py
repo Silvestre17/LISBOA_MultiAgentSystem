@@ -86,7 +86,21 @@ _STRUCTURED_QUERY_PLAN_INTENTS: frozenset[str] = frozenset({
 _RESEARCHER_FOOD_INTENT_RE = re.compile(
     r"\b(?:restaurant|restaurante|restaurants|restaurantes|food|comida|comer|cuisine|cozinha|"
     r"gastronom\w*|tradicional|traditional|almoco|almocar|almoço|almoçar|lunch|jantar|dinner|"
-    r"seafood|marisco|fish|peixe|cafe|café|coffee|pastelaria|pastry|padaria|bakery|bar|bars)\b",
+    r"seafood|marisco|fish|peixe|cafe|café|coffee|pastelaria|pastry|padaria|bakery|bar|bars|"
+    r"vegetarian|vegetariana|vegetariano|vegetarianas|vegetarianos|"
+    r"vegan|vegano|vegana|veganos|veganas)\b",
+    re.IGNORECASE,
+)
+
+# Diet/cuisine preferences that are NOT restaurant tokens on their own (e.g.,
+# "vegetariana"), but that imply a restaurant intent when paired with a food
+# context. They drive the same Restaurants category routing but are also
+# consumed by the deterministic place lookup to add a transparent caveat when
+# the underlying VisitLisboa data does not visibly confirm the preference.
+_RESEARCHER_DIET_PREFERENCE_RE = re.compile(
+    r"\b(?:vegetarian|vegetariana|vegetariano|vegetarianas|vegetarianos|"
+    r"vegan|vegano|vegana|veganos|veganas|"
+    r"sem\s+gluten|gluten[- ]free|kosher|halal)\b",
     re.IGNORECASE,
 )
 
@@ -808,6 +822,180 @@ class ResearcherAgent(BaseAgent):
         )
 
     @staticmethod
+    def _append_diet_preference_caveat(result: str, user_message: str, language: str) -> str:
+        """Add a caveat when the request named a diet preference (vegetarian/vegan/etc.)
+        but the rendered cards do not visibly confirm that preference in the source
+        fields.
+
+        For dietary preferences, weak nearby restaurant matches are not
+        "otherwise-valid" if the source fields do not visibly confirm the
+        preference. In that case return a precise limitation instead of listing
+        Fado venues, seafood restaurants, bars, or generic restaurants as if they
+        satisfied the vegetarian/vegan request.
+        """
+        if not result:
+            return result or ""
+        normalized_query = _normalize_researcher_intent_text(user_message)
+        if not _RESEARCHER_DIET_PREFERENCE_RE.search(normalized_query):
+            return result
+
+        evidence_lines = []
+        for raw_line in str(result).splitlines():
+            folded_line = _normalize_researcher_intent_text(raw_line)
+            if re.search(
+                r"\b(?:resposta\s+direta|direct\s+answer|limita[cç][aã]o|limitation|"
+                r"nota|note|fonte|source|sem\s+locais|no\s+confirmed|no\s+places)\b",
+                folded_line,
+            ):
+                continue
+            evidence_lines.append(raw_line)
+        evidence_text = _normalize_researcher_intent_text("\n".join(evidence_lines))
+        vegan_requested = bool(
+            re.search(r"\b(?:vegan|vegano|vegana|veganos|veganas)\b", normalized_query)
+        )
+        diet_term_pattern = (
+            r"(?:vegetarian|vegetariana|vegetariano|vegetarianas|vegetarianos|"
+            r"vegan|vegano|vegana|veganos|veganas)"
+        )
+        negative_diet_evidence = bool(
+            re.search(
+                rf"\b(?:nao|não|not|cannot|could\s+not|does\s+not|do\s+not|sem)\b"
+                rf".{{0,80}}\b(?:confirm\w*|verif\w*|fully|explicit\w*|menu|"
+                rf"op[cç][oõ]es?)\b.{{0,80}}\b{diet_term_pattern}\b",
+                evidence_text,
+            )
+            or re.search(
+                rf"\b{diet_term_pattern}\b.{{0,80}}\b(?:not\s+(?:fully|confirmed)|"
+                rf"nao\s+confirm\w*|não\s+confirm\w*|unconfirmed|sem\s+confirm\w*)\b",
+                evidence_text,
+            )
+        )
+        diet_evidence_confirmed = bool(
+            re.search(r"\b(?:vegan|vegano|vegana|veganos|veganas)\b", evidence_text)
+            if vegan_requested
+            else _RESEARCHER_DIET_PREFERENCE_RE.search(evidence_text)
+        ) and not negative_diet_evidence
+        if diet_evidence_confirmed:
+            return result
+
+        is_pt = (language or "").lower().startswith("pt")
+        if is_pt:
+            if vegan_requested:
+                return (
+                    "✅ **Resposta direta:** não encontrei nos dados disponíveis uma opção vegan "
+                    "que cumpra os critérios pedidos.\n\n"
+                    "⚠️ **Limitação:** os resultados de restauração próximos podem mencionar "
+                    "restaurantes ou opções vegetarianas, mas não confirmam explicitamente uma "
+                    "opção vegan; por isso não trato esses locais como resposta confirmada."
+                )
+            return (
+                "✅ **Resposta direta:** não encontrei nos dados disponíveis uma opção de restaurante "
+                "vegetariana/vegan que cumpra os critérios pedidos.\n\n"
+                "⚠️ **Limitação:** os resultados de restauração próximos não confirmam explicitamente "
+                "menu vegetariano/vegan nos campos disponíveis; por isso não listo Fado, bares, museus "
+                "ou restaurantes genéricos como se satisfizessem o pedido."
+            )
+
+        if vegan_requested:
+            return (
+                "✅ **Direct answer:** I could not find a vegan option in the available data "
+                "that satisfies the requested criteria.\n\n"
+                "⚠️ **Limitation:** nearby dining results may mention restaurants or vegetarian "
+                "options, but they do not explicitly confirm a vegan option, so I am not treating "
+                "those venues as confirmed matches."
+            )
+        return (
+            "✅ **Direct answer:** I could not find a restaurant option in the available data "
+            "that explicitly satisfies the vegetarian/vegan preference and the requested criteria.\n\n"
+            "⚠️ **Limitation:** nearby dining results do not explicitly confirm vegetarian/vegan "
+            "menus in the available fields, so I am not listing Fado venues, bars, museums, "
+            "or generic restaurants as if they matched the request."
+        )
+
+    @staticmethod
+    def _query_requests_metro_proximity(user_message: str) -> bool:
+        """Return whether the user asks if a service/place is near a Metro station."""
+        normalized = _normalize_researcher_intent_text(user_message)
+        return bool(
+            re.search(
+                r"\b(?:perto\s+do\s+metro|junto\s+ao\s+metro|proximo\s+do\s+metro|"
+                r"proxima\s+do\s+metro|near\s+(?:the\s+)?metro|close\s+to\s+(?:the\s+)?metro|"
+                r"near\s+the\s+subway)\b",
+                normalized,
+            )
+        )
+
+    @staticmethod
+    def _extract_first_coordinates_from_text(text: str) -> Optional[tuple[float, float]]:
+        """Return the first ``(lat, lon)`` coordinate pair found in a Markdown response.
+
+        Falls back to either the explicit ``query=lat%2Clon`` Google Maps URL form
+        (used by Lisboa Aberta service blocks) or a plain ``lat, lon`` numeric
+        pair in parentheses. Returns ``None`` when no coordinates are found.
+        """
+        if not text:
+            return None
+        match = re.search(
+            r"query=(-?\d{1,2}\.\d{3,7})%2C(-?\d{1,2}\.\d{3,7})",
+            text,
+        )
+        if not match:
+            match = re.search(
+                r"\((-?\d{1,2}\.\d{3,7})\s*,\s*(-?\d{1,2}\.\d{3,7})\)",
+                text,
+            )
+        if not match:
+            return None
+        try:
+            return float(match.group(1)), float(match.group(2))
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _format_metro_proximity_note(cls, text: str, language: str) -> str:
+        """Compute the nearest Metro de Lisboa station to the first coordinate
+        present in ``text`` and return a Markdown bullet. Returns an empty string
+        when coordinates cannot be extracted or no Metro station is within range.
+        Defensive against tool import failures so the caller can fall through to
+        an honest limitation instead of breaking the whole response.
+        """
+        coords = cls._extract_first_coordinates_from_text(text)
+        if not coords:
+            return ""
+        try:
+            from tools.metrolisboa_api import find_nearest_metro_station
+        except ImportError:
+            return ""
+        try:
+            nearest = find_nearest_metro_station(coords[0], coords[1], max_results=1, max_dist_km=5.0)
+        except Exception:
+            return ""
+        if not nearest:
+            return ""
+        station = nearest[0]
+        name = str(station.get("stop_name") or station.get("name") or "").strip()
+        if not name:
+            return ""
+        distance_km = float(station.get("distance_km") or 0.0)
+        walk_min = max(1, round(distance_km * 12))
+        is_pt = (language or "").lower().startswith("pt")
+        if distance_km <= 0.4:
+            proximity = "muito perto" if is_pt else "very close"
+        elif distance_km <= 0.8:
+            proximity = "perto" if is_pt else "close by"
+        else:
+            proximity = "a uma distância moderada" if is_pt else "at a moderate walking distance"
+        if is_pt:
+            return (
+                f"🚇 **Proximidade ao Metro:** a estação **{name}** fica a "
+                f"~{distance_km:.2f} km ({proximity}, cerca de {walk_min} min a pé)."
+            )
+        return (
+            f"🚇 **Metro proximity:** **{name}** station is ~{distance_km:.2f} km away "
+            f"({proximity}, about {walk_min} min walking)."
+        )
+
+    @staticmethod
     def _append_subjective_place_preference_caveat(result: str, user_message: str, language: str) -> str:
         """Add a caveat when requested place preferences are subjective and unverifiable."""
         if not result:
@@ -1496,6 +1684,20 @@ class ResearcherAgent(BaseAgent):
                 "casas de fado",
                 "fado house",
                 "fado houses",
+                # Diet/cuisine preferences imply a restaurant intent on their
+                # own (e.g., "uma opção vegetariana barata"). Without these the
+                # query falls through to a generic place search and returns
+                # unrelated Fado venues or bars ordered by distance.
+                "vegetarian",
+                "vegetariana",
+                "vegetariano",
+                "vegetarianas",
+                "vegetarianos",
+                "vegan",
+                "vegano",
+                "vegana",
+                "veganos",
+                "veganas",
             ]
         ):
             signals.append("Restaurants")
@@ -3455,6 +3657,9 @@ class ResearcherAgent(BaseAgent):
             pass
 
         split_patterns = (
+            r"\s+(?:e|and)\s+(?:uma?|um|one|outr[ao]|another)?\s*"
+            r"(?:farm[aá]cias?|pharmac(?:y|ies)|bibliotecas?|libraries|"
+            r"hospitais?|hospitals?|mercados?|markets?|servi[cç]os?|services?)\b.*$",
             r"\b(?:posso|podemos|consigo|devo|can\s+i|can\s+we|should\s+i)\s+"
             r"(?:usar|utilizar|visitar|entrar|ir|use|visit|enter|go)\b.*$",
             r"\b(?:i|we)\s+(?:can|could|should)\s+(?:use|visit|enter|go)\b.*$",
@@ -3485,6 +3690,10 @@ class ResearcherAgent(BaseAgent):
         normalized_cleaned = unicodedata.normalize("NFKD", cleaned)
         normalized_cleaned = normalized_cleaned.encode("ascii", "ignore").decode("ascii").lower()
         normalized_cleaned = re.sub(r"\s+", " ", normalized_cleaned).strip()
+        if normalized_cleaned in {"metro", "estacao de metro", "estacoes de metro", "transportes", "transporte"}:
+            return None
+        if re.match(r"^(?:metro|estacao de metro|estacoes de metro|transportes?|public transport)\b", normalized_cleaned):
+            return None
         if normalized_cleaned in {"mim", "me", "aqui", "here", "minha localizacao", "current location", "my location"}:
             return None
         return cleaned or None
@@ -4712,6 +4921,83 @@ class ResearcherAgent(BaseAgent):
         lines.extend(["", f"📌 **Source:** [*VisitLisboa Events*](https://www.visitlisboa.com/en/events) | **Updated:** {timestamp}"])
         return "\n".join(lines)
 
+    @staticmethod
+    def _is_indoor_alternative_query(user_message: str) -> bool:
+        """Return whether a query asks for a rain-safe indoor place alternative."""
+        normalized = _normalize_researcher_intent_text(user_message)
+        if not normalized:
+            return False
+        return bool(
+            re.search(r"\b(?:indoor|interior|interiores|cobert[oa]s?)\b", normalized)
+            and re.search(r"\b(?:alternativa|alternative|opcao|option|local|place)\b", normalized)
+        )
+
+    def _run_indoor_alternative_lookup(self, user_message: str, language: str) -> str:
+        """Run a conservative indoor/cost-aware place lookup.
+
+        This path keeps "near transport" as a preference instead of a transport
+        route request and avoids broad sports/outdoor catalogues for rain-safe
+        alternatives.
+        """
+        places_tool = self._get_tool_by_name("search_places_attractions")
+        if not places_tool:
+            return self._run_direct_tool_fallback(user_message, language)
+
+        explicit_area_match = re.search(
+            r"\b(?:em|in)\s+(?P<location>[A-Za-zÀ-ÿ0-9'’ .\-/]{2,60})"
+            r"\s*,?\s+(?:perto\s+de\s+transporte|near\s+public\s+transport)\b",
+            user_message or "",
+            flags=re.IGNORECASE,
+        )
+        explicit_area = (
+            re.sub(r"\s+", " ", explicit_area_match.group("location")).strip(" .,:;?!")
+            if explicit_area_match
+            else None
+        )
+        near_location = self._clean_nearby_location_text(
+            self._extract_near_location_name(user_message)
+        )
+        area_location = self._extract_place_area_filter(user_message)
+        location = explicit_area or near_location or area_location or "Lisboa"
+        query = (
+            f"museus e espaços culturais interiores baratos em {location}"
+            if language == "pt"
+            else f"low-cost indoor cultural places in {location}"
+        )
+        args = {
+            "query": query,
+            "category": "Museums & Monuments",
+            "max_results": 5,
+            "offset": 0,
+            "language": language,
+        }
+        result = str(self._invoke_tool(places_tool, args, tool_name="search_places_attractions")).strip()
+        result = self._localize_place_card_titles_with_llm(result, language)
+        source_line = self._build_places_source_line(result, language)
+        if result and not result.startswith(("❌", "Error:")):
+            direct = (
+                "✅ **Resposta direta:** priorizei alternativas interiores/cobertas e compatíveis com baixo custo; confirma sempre preço e abertura no dia."
+                if language == "pt"
+                else "✅ **Direct answer:** I prioritised indoor/covered alternatives compatible with low cost; confirm price and opening hours on the day."
+            )
+            return f"### 🏛️ **Alternativa indoor**\n\n{direct}\n\n---\n\n{result}\n\n{source_line}".strip()
+
+        if language == "pt":
+            return (
+                "### 🏛️ **Alternativa indoor**\n\n"
+                f"⚠️ **Resposta direta:** não consegui confirmar uma alternativa interior barata perto de **{location}** nos dados disponíveis.\n\n"
+                "---\n\n"
+                "- Para não inventar preços, horários ou acessos, prefiro deixar a limitação explícita.\n\n"
+                f"{source_line}"
+            ).strip()
+        return (
+            "### 🏛️ **Indoor Alternative**\n\n"
+            f"⚠️ **Direct answer:** I could not confirm a low-cost indoor alternative near **{location}** in the available data.\n\n"
+            "---\n\n"
+            "- I am keeping the limitation explicit instead of inventing prices, hours, or access details.\n\n"
+            f"{source_line}"
+        ).strip()
+
     def _run_direct_place_lookup(
         self,
         user_message: str,
@@ -4866,6 +5152,11 @@ class ResearcherAgent(BaseAgent):
                         user_message,
                         language,
                     )
+                    exact_result = self._append_diet_preference_caveat(
+                        exact_result,
+                        user_message,
+                        language,
+                    )
                     if history_section:
                         if used_external_history_source:
                             source_line = self._extend_place_source_line_with_history(source_line)
@@ -4918,8 +5209,40 @@ class ResearcherAgent(BaseAgent):
                     service_blocks,
                     language=language,
                 )
-                if nearest_summary:
+                if nearest_summary and not re.search(
+                    r"\bCobertura\b|\*\*(?:Servi[cç]o|Service):\*\*",
+                    nearest_summary,
+                    flags=re.IGNORECASE,
+                ):
                     combined = f"{nearest_summary}\n\n---\n\n{combined}"
+                heading = (
+                    "### 🏛️ **Serviços municipais**"
+                    if language == "pt"
+                    else "### 🏛️ **Municipal services**"
+                )
+                direct_note = (
+                    "✅ **Resposta direta:** encontrei os serviços municipais pedidos nos dados da Lisboa Aberta."
+                    if language == "pt"
+                    else "✅ **Direct answer:** I found the requested municipal services in Lisboa Aberta data."
+                )
+                # Answer an explicit "perto do metro?" sub-question with a
+                # grounded proximity note. The note is computed against the
+                # coordinates of the main result (first detected pair in the
+                # combined block). If no coordinates are extractable or no
+                # Metro station is within range, we fall back to an honest
+                # limitation instead of silently dropping the sub-question.
+                metro_proximity_note = ""
+                if self._query_requests_metro_proximity(user_message):
+                    metro_proximity_note = self._format_metro_proximity_note(combined, language)
+                    if not metro_proximity_note:
+                        metro_proximity_note = (
+                            "🚇 **Proximidade ao Metro:** não consegui calcular a distância exata a uma estação de Metro de Lisboa a partir dos dados disponíveis; confirma no mapa antes de te deslocares."
+                            if language == "pt"
+                            else "🚇 **Metro proximity:** I could not compute the exact distance to a Lisbon Metro station from the available data; check the map before going."
+                        )
+                combined = f"{heading}\n\n{direct_note}\n\n---\n\n{combined}"
+                if metro_proximity_note:
+                    combined = f"{combined}\n\n{metro_proximity_note}"
                 time_sensitive_requested = bool(re.search(
                     r"\b(evening|tonight|late|after\s+hours|this\s+evening|now|right\s+now|open|opened|"
                     r"hours?|opening\s+hours?|hor[áa]rios?|hor[áa]rio\s+atual|"
@@ -5059,6 +5382,11 @@ class ResearcherAgent(BaseAgent):
         )
         source_line = self._build_places_source_line(result, language)
         result = self._append_subjective_place_preference_caveat(
+            result,
+            user_message,
+            language,
+        )
+        result = self._append_diet_preference_caveat(
             result,
             user_message,
             language,
@@ -7042,6 +7370,9 @@ class ResearcherAgent(BaseAgent):
             if "farm" in normalized_block or "pharmac" in normalized_block:
                 icon = "💊"
                 label = "Farmácia" if is_pt else "Pharmacy"
+            elif "bibliotec" in normalized_block or "librar" in normalized_block:
+                icon = "📚"
+                label = "Biblioteca" if is_pt else "Library"
             elif "hospit" in normalized_block or "cuidados" in normalized_block:
                 icon = "🏥"
                 label = "Hospital"
@@ -7055,6 +7386,11 @@ class ResearcherAgent(BaseAgent):
                 continue
 
             nearest_match = re.search(
+                r"(?m)^✅\s+O resultado mais próximo que encontrei é\s+\*\*(?P<name>[^*]+)\*\*,?\s+a\s+"
+                r"(?P<distance>[0-9]+(?:\.[0-9]+)?\s*km)\b",
+                block or "",
+                flags=re.IGNORECASE,
+            ) or re.search(
                 r"(?m)^-\s*✅\s*\*\*(?:Mais perto|Closest):\*\*\s*(?P<name>.+?)(?:\s*\((?P<distance>[0-9]+(?:\.[0-9]+)?\s*km)[^)]*\))?\s*$",
                 block or "",
                 flags=re.IGNORECASE,
@@ -7063,6 +7399,49 @@ class ResearcherAgent(BaseAgent):
             if not item_match:
                 continue
             name = item_match.group("name").strip()
+            name_key = (
+                unicodedata.normalize("NFKD", name)
+                .encode("ascii", "ignore")
+                .decode("ascii")
+                .strip(" :")
+                .lower()
+            )
+            field_labels = {
+                "morada/localizacao",
+                "morada",
+                "localizacao",
+                "address/location",
+                "address",
+                "telefone",
+                "phone",
+                "email",
+                "website",
+                "categoria",
+                "category",
+                "distancia",
+                "distance",
+                "servico",
+                "service",
+            }
+            if name_key in field_labels:
+                for candidate in re.finditer(
+                    r"(?m)^-\s*(?:[^\w*]+\s*)?\*\*(?P<name>[^*]+)\*\*",
+                    block or "",
+                ):
+                    candidate_name = candidate.group("name").strip()
+                    candidate_key = (
+                        unicodedata.normalize("NFKD", candidate_name)
+                        .encode("ascii", "ignore")
+                        .decode("ascii")
+                        .strip(" :")
+                        .lower()
+                    )
+                    if candidate_key not in field_labels:
+                        name = candidate_name
+                        item_match = candidate
+                        break
+                else:
+                    continue
             tail = (block or "")[item_match.end(): item_match.end() + 500]
             distance_match = re.search(r"\*\*(?:Distância|Distance):\*\*\s*(?P<distance>[0-9]+(?:\.[0-9]+)?\s*km)", tail, re.IGNORECASE)
             raw_distance = ""
@@ -8034,6 +8413,18 @@ class ResearcherAgent(BaseAgent):
                 language=language,
             ))
 
+        if not is_greeting and self._is_indoor_alternative_query(user_message):
+            if verbose:
+                print("      [RESEARCHER] Using deterministic indoor alternative lookup...")
+
+            response = self._run_indoor_alternative_lookup(user_message, language)
+            return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
+                response,
+                agent_name="researcher",
+                user_query=user_message,
+                language=language,
+            ))
+
         if not is_greeting and self._is_planner_evidence_request(user_message):
             if verbose:
                 print("      [RESEARCHER] Returning deterministic planner evidence cards...")
@@ -8231,7 +8622,7 @@ class ResearcherAgent(BaseAgent):
             if verbose:
                 print("      [RESEARCHER] Using deterministic Lisboa Aberta service lookup...")
 
-            response = self._run_direct_tool_fallback(user_message, language)
+            response = self._run_direct_place_lookup(user_message, language)
             return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
                 response,
                 agent_name="researcher",

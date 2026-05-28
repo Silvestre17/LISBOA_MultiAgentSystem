@@ -16,7 +16,10 @@ from agent.planning.evidence import EvidenceBundle, normalize_text
 from agent.planning.models import PlanDraft
 
 
-PLACEHOLDER_RE = re.compile(r"\b(?:N/?A|unknown|not available|not provided|TBD|\+ info|null|none)\b", re.IGNORECASE)
+PLACEHOLDER_RE = re.compile(
+    r"\b(?:n\s*/\s*a|unknown|not available|not provided|TBD|\+ info|null|none)\b",
+    re.IGNORECASE,
+)
 RAW_FIELD_RE = re.compile(r"\b(?:Location|Address|Website|Phone|Category|Description|Morada|Telefone|Categoria|Descrição)\s*:", re.IGNORECASE)
 COUNT_TOKEN_RE = (
     r"(?:\d{1,2}|um|uma|one|dois|duas|two|tres|three|quatro|four|"
@@ -120,7 +123,10 @@ def validate_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, user_message
     grounded_itinerary_requested = _query_requests_grounded_itinerary(user_message)
     place_cards = [card for card in evidence.cards if getattr(card, "kind", "") in {"place", "food", "event", "service"}]
     food_cards = [card for card in evidence.cards if _evidence_card_is_food(card)]
+    cafe_cards = [card for card in evidence.cards if _evidence_card_is_cafe(card)]
     cultural_cards = [card for card in place_cards if _evidence_card_is_cultural(card)]
+    viewpoint_cards = [card for card in place_cards if _evidence_card_is_viewpoint(card)]
+    garden_cards = [card for card in place_cards if _evidence_card_is_garden(card)]
     target_area = _extract_single_area_target(user_message)
     known_area_requested = _is_known_compact_area(target_area)
     area_has_evidence = bool(
@@ -200,8 +206,24 @@ def validate_plan_draft(draft: PlanDraft, evidence: EvidenceBundle, user_message
     if _query_requests_food_stop(user_message) and food_cards and not _draft_includes_food_stop(draft, food_cards):
         issues.append("requested gastronomy but plan omitted food evidence")
 
+    # A requested cafe/pastry stop is distinct from a meal: an existing lunch must
+    # not silently satisfy it. Flag only when cafe/pastry evidence is actually
+    # available, so the model is asked to use real grounded options on retry.
+    if _query_requests_cafe_stop(user_message) and cafe_cards and not _draft_includes_cafe_stop(draft):
+        issues.append("requested cafe/pastry stop but plan omitted cafe evidence")
+
     if _query_requests_cultural_stop(user_message) and cultural_cards and not _draft_includes_cultural_stop(draft, cultural_cards):
         issues.append("requested cultural stop but plan omitted cultural evidence")
+
+    # Viewpoints and gardens are explicit requested components in many revisions
+    # ("mantém o jardim e o miradouro"). Flag only when matching evidence exists,
+    # so a dropped-but-available stop is restored on retry instead of replaced by
+    # a generic placeholder.
+    if _query_requests_viewpoint_stop(user_message) and viewpoint_cards and not _draft_includes_token_stop(draft, _VIEWPOINT_TOKEN_RE):
+        issues.append("requested viewpoint but plan omitted viewpoint evidence")
+
+    if _query_requests_garden_stop(user_message) and garden_cards and not _draft_includes_token_stop(draft, _GARDEN_TOKEN_RE):
+        issues.append("requested garden but plan omitted garden evidence")
 
     if re.search(r"\b(?:rain|chuva|weather|tempo|umbrella|guarda chuva|indoor|interior)\b", normalize_text(user_message)):
         weather_text = normalize_text(" ".join([*draft.weather_strategy, *[" ".join(block.weather) for block in draft.blocks]]))
@@ -271,6 +293,72 @@ def _query_requests_food_stop(user_message: str) -> bool:
             normalized,
         )
     )
+
+
+_CAFE_TOKEN_RE = re.compile(
+    r"\b(?:cafe|cafes|cafetaria|pastelaria|pastelarias|pastel|pasteis|"
+    r"nata|natas|brunch|coffee|pastry|pastries)\b"
+)
+
+
+def _query_requests_cafe_stop(user_message: str) -> bool:
+    """Return whether the user explicitly asks for a cafe or pastry stop."""
+    return bool(_CAFE_TOKEN_RE.search(normalize_text(user_message)))
+
+
+def _evidence_card_is_cafe(card: Any) -> bool:
+    """Return whether an evidence card supports a cafe or pastry stop."""
+    if getattr(card, "kind", "") in {"coffee", "pastry"}:
+        return True
+    return bool(_CAFE_TOKEN_RE.search(_evidence_card_text(card)))
+
+
+def _draft_includes_cafe_stop(draft: PlanDraft) -> bool:
+    """Return whether a plan draft selected a distinct cafe or pastry stop."""
+    for block in draft.blocks:
+        if getattr(block, "kind", "") in {"coffee", "pastry"}:
+            return True
+        block_text = normalize_text(
+            " ".join([block.title, block.purpose, *block.details, *block.limitations])
+        )
+        if _CAFE_TOKEN_RE.search(block_text):
+            return True
+    return False
+
+
+_VIEWPOINT_TOKEN_RE = re.compile(r"\b(?:miradouro|miradouros|viewpoint|viewpoints|lookout|panoram\w*|vista\s+panoram\w*)\b")
+_GARDEN_TOKEN_RE = re.compile(r"\b(?:jardim|jardins|garden|gardens|parque|parques|park|parks)\b")
+
+
+def _query_requests_viewpoint_stop(user_message: str) -> bool:
+    """Return whether the user explicitly asks for a viewpoint/lookout stop."""
+    return bool(_VIEWPOINT_TOKEN_RE.search(normalize_text(user_message)))
+
+
+def _query_requests_garden_stop(user_message: str) -> bool:
+    """Return whether the user explicitly asks for a garden or park stop."""
+    return bool(_GARDEN_TOKEN_RE.search(normalize_text(user_message)))
+
+
+def _evidence_card_is_viewpoint(card: Any) -> bool:
+    """Return whether an evidence card supports a viewpoint stop."""
+    return bool(_VIEWPOINT_TOKEN_RE.search(_evidence_card_text(card)))
+
+
+def _evidence_card_is_garden(card: Any) -> bool:
+    """Return whether an evidence card supports a garden or park stop."""
+    return bool(_GARDEN_TOKEN_RE.search(_evidence_card_text(card)))
+
+
+def _draft_includes_token_stop(draft: PlanDraft, token_re: "re.Pattern[str]") -> bool:
+    """Return whether any plan block matches the given category token regex."""
+    for block in draft.blocks:
+        block_text = normalize_text(
+            " ".join([block.title, block.purpose, *block.details, *block.limitations])
+        )
+        if token_re.search(block_text):
+            return True
+    return False
 
 
 def _query_requests_cultural_stop(user_message: str) -> bool:

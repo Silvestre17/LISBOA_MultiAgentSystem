@@ -977,7 +977,7 @@ def find_common_routes(
     origin_stop_ids: List[str], dest_stop_ids: List[str]
 ) -> List[Dict[str, Any]]:
     """
-    Finds bus lines that serve both origin and destination stops.
+    Finds direction-confirmed bus lines between origin and destination stops.
 
     Args:
         origin_stop_ids: List of stop IDs near origin.
@@ -994,11 +994,14 @@ def find_common_routes(
 
     stop_map = {s["id"]: s for s in stops}
 
+    origin_stop_id_set = {str(stop_id) for stop_id in origin_stop_ids}
+    dest_stop_id_set = {str(stop_id) for stop_id in dest_stop_ids}
+
     # Get lines serving origin stops
     origin_lines = set()
     origin_stop_lines = {}
     for stop_id in origin_stop_ids:
-        stop = stop_map.get(stop_id)
+        stop = stop_map.get(str(stop_id))
         if stop:
             for line in stop.get("lines", []):
                 origin_lines.add(line)
@@ -1009,7 +1012,7 @@ def find_common_routes(
     dest_lines = set()
     dest_stop_lines = {}
     for stop_id in dest_stop_ids:
-        stop = stop_map.get(stop_id)
+        stop = stop_map.get(str(stop_id))
         if stop:
             for line in stop.get("lines", []):
                 dest_lines.add(line)
@@ -1024,9 +1027,79 @@ def find_common_routes(
 
     line_map = {line_data["id"]: line_data for line_data in lines}
 
-    route_options = []
-    for line_id in common_lines:
+    def _path_stop_id(path_item: Dict[str, Any]) -> str:
+        """Return the stop id from a Carris Metropolitana pattern path item."""
+        stop = path_item.get("stop") or {}
+        return str(stop.get("id") or stop.get("stop_id") or "")
+
+    def _pattern_stop_record(path_item: Dict[str, Any]) -> Dict[str, Any]:
+        """Return a stop-like record from a pattern path item."""
+        stop = path_item.get("stop") or {}
+        return {
+            "id": str(stop.get("id") or stop.get("stop_id") or ""),
+            "name": stop.get("name") or stop.get("short_name") or stop.get("id") or "",
+            "lat": stop.get("lat"),
+            "lon": stop.get("lon"),
+            "lines": stop.get("lines", []),
+        }
+
+    route_options: List[Dict[str, Any]] = []
+    for line_id in sorted(common_lines):
         line_info = line_map.get(line_id, {})
+        pattern_candidates: List[Dict[str, Any]] = []
+        for pattern_id in line_info.get("patterns", []) or []:
+            pattern_data = fetch_json_with_retry(f"{CARRIS_PATTERNS_URL}/{pattern_id}")
+            if not isinstance(pattern_data, dict):
+                continue
+
+            indexed_path = [
+                (_path_stop_id(path_item), index, path_item)
+                for index, path_item in enumerate(pattern_data.get("path", []) or [])
+            ]
+            indexed_path = [(stop_id, index, item) for stop_id, index, item in indexed_path if stop_id]
+            origin_matches = [
+                (stop_id, index, item)
+                for stop_id, index, item in indexed_path
+                if stop_id in origin_stop_id_set
+            ]
+            dest_matches = [
+                (stop_id, index, item)
+                for stop_id, index, item in indexed_path
+                if stop_id in dest_stop_id_set
+            ]
+            for origin_stop_id, origin_index, origin_item in origin_matches:
+                for dest_stop_id, dest_index, dest_item in dest_matches:
+                    if origin_index >= dest_index:
+                        continue
+                    origin_stop = stop_map.get(origin_stop_id) or _pattern_stop_record(origin_item)
+                    dest_stop = stop_map.get(dest_stop_id) or _pattern_stop_record(dest_item)
+                    pattern_candidates.append(
+                        {
+                            "line_id": line_id,
+                            "short_name": line_info.get("short_name", line_id),
+                            "long_name": line_info.get("long_name", ""),
+                            "color": line_info.get("color", "#CCCCCC"),
+                            "text_color": line_info.get("text_color", "#FFFFFF"),
+                            "localities": line_info.get("localities", []),
+                            "origin_stop": origin_stop,
+                            "dest_stop": dest_stop,
+                            "pattern_id": pattern_id,
+                            "headsign": pattern_data.get("headsign") or "",
+                            "stops_between": dest_index - origin_index,
+                        }
+                    )
+
+        if pattern_candidates:
+            route_options.append(
+                min(
+                    pattern_candidates,
+                    key=lambda item: (
+                        int(item.get("stops_between") or 999),
+                        str(item.get("short_name") or ""),
+                    ),
+                )
+            )
+            continue
 
         route_option = {
             "line_id": line_id,
@@ -1037,10 +1110,19 @@ def find_common_routes(
             "localities": line_info.get("localities", []),
             "origin_stop": origin_stop_lines.get(line_id, {}),
             "dest_stop": dest_stop_lines.get(line_id, {}),
+            "headsign": "",
+            "stops_between": None,
+            "direction_unconfirmed": True,
         }
         route_options.append(route_option)
 
-    route_options.sort(key=lambda x: x.get("short_name", ""))
+    route_options.sort(
+        key=lambda x: (
+            1 if x.get("direction_unconfirmed") else 0,
+            int(x.get("stops_between") or 999),
+            x.get("short_name", ""),
+        )
+    )
     return route_options
 
 
@@ -1051,9 +1133,9 @@ def resolve_location(
     Intelligently resolves a location name to bus stops.
 
     Uses a multi-step approach:
-    1. Try direct name match in Carris stops
-    2. If few results, use geocoding to get coordinates
-    3. Find stops near the geocoded coordinates
+    1. Try precise geocoding for the requested place/area.
+    2. Find stops near the geocoded coordinates.
+    3. Fall back to stop-name matches when geocoding is unavailable.
 
     Args:
         location_name: Any location name (POI, address, landmark).
@@ -1074,24 +1156,20 @@ def resolve_location(
     clean_name = location_name.strip()
     broad_municipality_key = _bare_municipality_key(clean_name)
 
-    # Step 1: Try direct name match
+    # First collect stop-name matches, but do not let broad substring matches
+    # beat geocoding. A query such as "Areeiro" should resolve to the Lisbon
+    # area when geocoding can identify it, not to unrelated suburban street
+    # stops whose names happen to contain the same word.
     # A bare municipality such as "Oeiras" or "Almada" is a broad area, not a
     # stop-name query. Searching stops by substring first can otherwise choose
     # unrelated homonyms such as "Av Conde Oeiras 1" and present them as the
     # requested destination. For exact municipality names, resolve the area
     # centre first and only use stop-name matches as a last diagnostic fallback.
     name_matches = [] if broad_municipality_key else find_stops_by_name(clean_name, max_results=max_stops)
+    if name_matches:
+        result["name_match_candidates"] = name_matches
 
-    if len(name_matches) >= 3:
-        result["method"] = "name_match"
-        result["stops"] = name_matches
-        result["success"] = True
-        logger.info(
-            f"Resolved '{clean_name}' via name match ({len(name_matches)} stops)"
-        )
-        return result
-
-    # Step 2: Try geocoding
+    # Step 1/2: Try geocoding and nearby stops.
     geocoded = geocode_location(clean_name)
     if not geocoded and broad_municipality_key:
         fallback_lat, fallback_lon = CARRIS_METROPOLITANA_CITY_FALLBACKS[broad_municipality_key]
@@ -2374,8 +2452,39 @@ def find_bus_routes(
     dest_stop_ids = [s["id"] for s in dest_stops]
 
     route_options = find_common_routes(origin_stop_ids, dest_stop_ids)
+    fallback_resolution_note = ""
+    if not route_options:
+        fallback_sets = []
+        origin_name_matches = origin_resolved.get("name_match_candidates") or []
+        dest_name_matches = dest_resolved.get("name_match_candidates") or []
+        if dest_name_matches:
+            fallback_sets.append((origin_stops, dest_name_matches, destination))
+        if origin_name_matches:
+            fallback_sets.append((origin_name_matches, dest_stops, origin))
+        if origin_name_matches and dest_name_matches:
+            fallback_sets.append((origin_name_matches, dest_name_matches, f"{origin} / {destination}"))
+
+        seen_fallbacks = set()
+        for candidate_origin_stops, candidate_dest_stops, fallback_label in fallback_sets:
+            origin_ids = tuple(str(s.get("id") or "") for s in candidate_origin_stops if s.get("id"))
+            dest_ids = tuple(str(s.get("id") or "") for s in candidate_dest_stops if s.get("id"))
+            key = (origin_ids, dest_ids)
+            if not origin_ids or not dest_ids or key in seen_fallbacks:
+                continue
+            seen_fallbacks.add(key)
+            candidate_options = find_common_routes(list(origin_ids), list(dest_ids))
+            if candidate_options:
+                route_options = candidate_options
+                fallback_resolution_note = (
+                    f"ℹ️ Usei paragens cujo nome corresponde a **{fallback_label}** "
+                    "porque a geocodificação inicial não produziu uma ligação direta confirmada.\n\n"
+                )
+                break
 
     if route_options:
+        if fallback_resolution_note:
+            response += fallback_resolution_note
+
         def _coord_suffix(stop: Dict[str, Any]) -> str:
             """Return an internal coordinate suffix for downstream linkification."""
             lat = stop.get("lat")
@@ -2399,57 +2508,60 @@ def find_bus_routes(
                     "dest_stop": dest_stop,
                     "lines": [],
                 }
-            grouped_routes[key]["lines"].append(route.get("short_name", "?"))
+            grouped_routes[key]["lines"].append(
+                {
+                    "short_name": route.get("short_name", "?"),
+                    "headsign": route.get("headsign", ""),
+                    "stops_between": route.get("stops_between"),
+                    "direction_unconfirmed": bool(route.get("direction_unconfirmed")),
+                }
+            )
 
         response += f"✅ **{len(grouped_routes)} direct route option(s) found** ({len(route_options)} line match(es)).\n\n"
 
         for i, ((origin_name, dest_name), group) in enumerate(
             list(grouped_routes.items())[:5], 1
         ):
-            lines_str = ", ".join(sorted(group["lines"]))
+            line_labels = []
+            has_unconfirmed_direction = False
+            stop_counts = []
+            for line in group["lines"]:
+                short_name = str(line.get("short_name") or "?")
+                headsign = str(line.get("headsign") or "").strip()
+                if headsign:
+                    line_labels.append(f"{short_name} → {headsign}")
+                else:
+                    line_labels.append(short_name)
+                if line.get("direction_unconfirmed"):
+                    has_unconfirmed_direction = True
+                if line.get("stops_between") is not None:
+                    stop_counts.append(int(line["stops_between"]))
+            lines_str = ", ".join(sorted(set(line_labels)))
 
             response += f"- 🚌 **Option {i}**\n"
             response += f"    - 🚏 **Board at:** {origin_name}{_coord_suffix(group['origin_stop'])}\n"
             response += f"    - 🚏 **Alight at:** {dest_name}{_coord_suffix(group['dest_stop'])}\n"
             response += f"    - 🚍 **Lines:** {lines_str}\n"
+            if stop_counts:
+                response += f"    - 🧭 **Confirmed direction:** origin stop appears before destination stop in the official pattern ({min(stop_counts)} stops on-board).\n"
+            if has_unconfirmed_direction:
+                response += "    - ⚠️ **Direction:** line overlap found, but the official stop order could not be confirmed from patterns.\n"
             response += "\n"
 
         if len(grouped_routes) > 5:
             response += f"... and {len(grouped_routes) - 5} more route options available.\n\n"
 
-        response += "⚠️ **Note:** verify that the bus runs in your intended direction on carrismetropolitana.pt.\n\n"
+        if any(route.get("direction_unconfirmed") for route in route_options):
+            response += "⚠️ **Note:** verify that the bus runs in your intended direction on carrismetropolitana.pt for options marked as unconfirmed.\n\n"
     else:
-        response += "❌ **No direct bus routes found**\n\n"
-        response += "💡 **Suggestions:**\n"
-        response += "    - You may need to transfer buses.\n"
-        response += "    - Consider a Metro + bus combination.\n"
-        response += "    - Try a nearby major stop or a more precise address.\n\n"
-
-        response += "📊 **Lines available near your locations:**\n"
-
-        origin_all_lines = set()
-        for stop in origin_stops:
-            origin_all_lines.update(stop.get("lines", []))
-
-        dest_all_lines = set()
-        for stop in dest_stops:
-            dest_all_lines.update(stop.get("lines", []))
-
-        if origin_all_lines:
-            response += (
-                f"- **Near {origin}:** {', '.join(sorted(list(origin_all_lines))[:10])}"
-            )
-            if len(origin_all_lines) > 10:
-                response += f" (+{len(origin_all_lines) - 10} more)"
-            response += "\n"
-
-        if dest_all_lines:
-            response += (
-                f"- **Near {destination}:** {', '.join(sorted(list(dest_all_lines))[:10])}"
-            )
-            if len(dest_all_lines) > 10:
-                response += f" (+{len(dest_all_lines) - 10} more)"
-            response += "\n"
+        response += "❌ **Sem rota direta de autocarro confirmada**\n\n"
+        response += (
+            "ℹ️ **Limitação:** não encontrei uma ligação direta de autocarro "
+            "entre estes pontos na Carris Metropolitana. "
+            "Se o destino for uma zona ampla, indica uma paragem, estação ou "
+            "morada mais precisa para procurar o próximo autocarro concreto.\n"
+        )
+        return response
 
     # Check if in Lisbon city
     origin_loc = origin_resolved.get("location")

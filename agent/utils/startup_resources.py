@@ -117,6 +117,13 @@ def _metadata_restore_changed(before: Dict[str, Any], after: Dict[str, Any]) -> 
     return bool(after_restore and after_restore != before_restore)
 
 
+def _metadata_seed_restore_changed(before: Dict[str, Any], after: Dict[str, Any]) -> bool:
+    """Return whether metadata shows a new repository seed restore."""
+    before_restore = before.get("_runtime_seed_restore") if before else None
+    after_restore = after.get("_runtime_seed_restore") if after else None
+    return bool(after_restore and after_restore != before_restore)
+
+
 def _format_runtime_restore(metadata: Dict[str, Any]) -> str | None:
     """Format release-restore metadata for startup diagnostics."""
     restore = metadata.get("_runtime_release_restore")
@@ -356,6 +363,9 @@ def _check_carris_urban_readiness() -> Dict[str, Any]:
             else
             "restored last-known-good GitHub Release backup"
             if _metadata_restore_changed(metadata_before, metadata_after)
+            else
+            "restored repository seed SQLite"
+            if _metadata_seed_restore_changed(metadata_before, metadata_after)
             else
             "downloaded GTFS and rebuilt SQLite"
             if db_mtime_before != db_mtime_after or metadata_before != metadata_after

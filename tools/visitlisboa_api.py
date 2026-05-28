@@ -435,14 +435,83 @@ def calculate_temporal_relevance_score(
     return max(0.0, min(100.0, score))
 
 
-def format_event_dates(event: Dict, language: str = "en") -> str:
+def _event_date_entry_window(date_entry: Dict) -> Tuple[Optional[datetime], Optional[datetime]]:
+    """Extract a comparable date window from a VisitLisboa event date entry.
+
+    Args:
+        date_entry: Raw date entry from the VisitLisboa event payload.
+
+    Returns:
+        Tuple[Optional[datetime], Optional[datetime]]: Inclusive start and
+        exclusive end date when available. Returns ``(None, None)`` when the
+        entry has no parseable ISO date.
+    """
+    try:
+        if date_entry.get('type') == 'range':
+            start_iso = date_entry.get('start', {}).get('datetime_iso')
+            end_iso = date_entry.get('end', {}).get('datetime_iso') or start_iso
+        else:
+            start_iso = date_entry.get('date', {}).get('datetime_iso')
+            end_iso = start_iso
+
+        if not start_iso:
+            return None, None
+        start = datetime.strptime(start_iso, '%Y-%m-%d')
+        end = datetime.strptime(end_iso, '%Y-%m-%d') if end_iso else start
+        return start, end + timedelta(days=1)
+    except (TypeError, ValueError):
+        return None, None
+
+
+def _select_event_date_entries_for_display(
+    date_entries: List[Dict],
+    start_date: Optional[datetime],
+    end_date: Optional[datetime],
+) -> List[Dict]:
+    """Choose the event date entries that should be shown to the user.
+
+    If a query date window is active, display only entries overlapping that
+    window. This prevents a correctly filtered "tomorrow" event from rendering
+    stale or unrelated recurrence dates from the raw event payload. Without a
+    query window, prefer current/future entries and fall back to the raw list.
+    """
+    if not date_entries:
+        return []
+
+    if start_date or end_date:
+        window_start = start_date or datetime.min
+        window_end = end_date or datetime.max
+        matching_entries: List[Dict] = []
+        for entry in date_entries:
+            entry_start, entry_end = _event_date_entry_window(entry)
+            if entry_start and entry_end and entry_start < window_end and entry_end > window_start:
+                matching_entries.append(entry)
+        if matching_entries:
+            return matching_entries
+
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    future_entries: List[Dict] = []
+    for entry in date_entries:
+        entry_start, entry_end = _event_date_entry_window(entry)
+        if entry_start and entry_end and entry_end > today:
+            future_entries.append(entry)
+    return future_entries or date_entries
+
+
+def format_event_dates(
+    event: Dict,
+    language: str = "en",
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+) -> str:
     """Formats event dates for display."""
     dates = event.get('dates', [])
     if not dates:
         return "Data a confirmar" if language == "pt" else "Date TBA"
 
+    display_dates = _select_event_date_entries_for_display(dates, start_date, end_date)
     formatted = []
-    for date_entry in dates[:3]:  # Show max 3 dates
+    for date_entry in display_dates[:3]:  # Show max 3 dates
         if date_entry.get('type') == 'single':
             date_info = date_entry.get('date', {})
             display = date_info.get('display_text', '')
@@ -463,11 +532,11 @@ def format_event_dates(event: Dict, language: str = "en") -> str:
                 connector = "a" if language == "pt" else "to"
                 formatted.append(f"{start} {connector} {end}")
 
-    if len(dates) > 3:
+    if len(display_dates) > 3:
         if language == "pt":
-            formatted.append(f"(+{len(dates) - 3} datas)")
+            formatted.append(f"(+{len(display_dates) - 3} datas)")
         else:
-            formatted.append(f"(+{len(dates) - 3} more dates)")
+            formatted.append(f"(+{len(display_dates) - 3} more dates)")
 
     if formatted:
         return " | ".join(formatted)
@@ -5174,7 +5243,12 @@ def search_cultural_events(
             venue_name = str(event.get('venue_name') or '').strip()
             if venue_name and venue_name.lower() not in loc.lower():
                 loc = f"{venue_name}, {loc}"
-            dates_str = format_event_dates(event, language=render_language)
+            dates_str = format_event_dates(
+                event,
+                language=render_language,
+                start_date=start_date,
+                end_date=end_date,
+            )
             duration = event.get('_duration_days', get_event_duration_days(event))
             duration_label = _format_event_duration_label(duration, language=render_language)
             description_summary = _localize_visitlisboa_description(

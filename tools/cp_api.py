@@ -164,6 +164,7 @@ CP_KEY_STATIONS = {
     "amadora": {"name": "Amadora", "lines": ["sintra"], "description": "Suburban hub"},
 
     # Azambuja Line
+    "azambuja": {"name": "Azambuja", "lines": ["azambuja"], "description": "Northern terminus on the Azambuja suburban line"},
     "vila_franca": {"name": "Vila Franca de Xira", "lines": ["azambuja"], "description": "Northern suburbs"},
     "alverca": {"name": "Alverca", "lines": ["azambuja"], "description": "Industrial zone"},
 
@@ -2001,11 +2002,7 @@ def plan_train_trip(origin: str, destination: str) -> str:
 
         # Summary box at top
         response += "📊 **Resumo da viagem**\n"
-        if multi_route:
-            routes_str = ", ".join(distinct_routes)
-            response += f"    - 🚆 **Linhas:** {routes_str}\n"
-        else:
-            response += f"    - 🚆 **Linha:** {route_name}\n"
+        response += f"    - 🚆 **Linha:** {route_name}\n"
         # Show duration range if trips vary, otherwise single value
         if min_duration == max_duration:
             response += f"    - ⏱️ **Duração:** {min_duration} min\n"

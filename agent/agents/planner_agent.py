@@ -3826,7 +3826,14 @@ def _planner_response_missing_requested_food_stop(response: str, user_message: s
     a requested gastronomy, cafe, lunch, dinner, or restaurant component.
     """
     normalized_query = _normalize_planner_text(user_message)
-    if not re.search(r"\b(?:plan|planeia|planear|plano|itinerary|itinerario|roteiro|programa|day|dia|manha|morning|tarde|afternoon|horas?|hours?|quero|want|chego|arrive|depois|then|ver|see|faz|make)\b", normalized_query):
+    if not re.search(
+        r"\b(?:plan|planeia|planear|plano|itinerary|itinerario|roteiro|programa|"
+        r"day|dia|manha|morning|tarde|afternoon|horas?|hours?|quero|want|"
+        r"chego|arrive|depois|then|ver|see|faz|make|adiciona|adicionar|"
+        r"acrescenta|acrescentar|inclui|incluir|mantem|mant[eé]m|troca|trocar|"
+        r"substitui|substituir|add|include|keep|preserve|swap|replace)\b",
+        normalized_query,
+    ):
         return False
     if not re.search(
         r"\b(?:gastronom\w*|restaurants?|restaurantes?|food|comida|comer|refei[cç][aã]o|meal|"
@@ -4528,7 +4535,18 @@ def _clean_extracted_plan_area(area: str) -> str:
         cleaned,
         flags=re.IGNORECASE,
     ).strip(" .:-")
-    return _trim_planner_anchor_constraint_tail(cleaned)
+    cleaned = _trim_planner_anchor_constraint_tail(cleaned)
+    # Reject phrases that describe a preference/quality rather than a place, e.g.
+    # "uma opção ainda mais barata" captured from "troca o almoço por ...". These
+    # are never Lisbon area names and would otherwise leak into placeholder/title
+    # labels such as "Jardim em uma opção ainda mais barata".
+    if cleaned and re.search(
+        r"\b(?:op[cç][aã]o|op[cç][oõ]es|option|options|barat[oa]s?|cheap\w*|"
+        r"econ[oó]mic\w*|refei[cç][aã]o|meal|almo[cç]o|almoco|lunch|jantar|dinner)\b",
+        _normalize_planner_text(cleaned),
+    ):
+        return ""
+    return cleaned
 
 
 def _extract_requested_plan_area(user_message: str) -> str:
@@ -7421,6 +7439,20 @@ def _build_card_based_renderer_fallback(
         user_message,
         language,
     )[:selection_limit]
+    selected_cards = _insert_requested_component_stop_if_needed(
+        selected_cards,
+        cards,
+        user_message,
+        re.compile(r"\b(?:jardim|jardins|garden|gardens|parque|parques|park|parks)\b"),
+        re.compile(r"\b(?:jardim|jardins|garden|gardens|parque|parques|park|parks)\b"),
+    )[:selection_limit]
+    selected_cards = _insert_requested_component_stop_if_needed(
+        selected_cards,
+        cards,
+        user_message,
+        re.compile(r"\b(?:miradouro|miradouros|viewpoint|viewpoints|view\s+point|lookout|vista)\b"),
+        re.compile(r"\b(?:miradouro|miradouros|viewpoint|viewpoints|view\s+point|lookout|vista|panoram)\b"),
+    )[:selection_limit]
     type_placeholders = _requested_type_placeholder_cards(selected_cards, user_message, language)
     if type_placeholders:
         selected_cards = _dedupe_planner_cards([*type_placeholders, *selected_cards])[:selection_limit]
@@ -9651,6 +9683,104 @@ def _insert_requested_cultural_stop_if_needed(
     return _dedupe_planner_cards([*selected_cards[:insert_at], cultural_card, *selected_cards[insert_at:]])
 
 
+def _planner_card_matches_component(card: Dict[str, str], token_re: "re.Pattern[str]") -> bool:
+    """Return whether a planner evidence card visibly supports a component type."""
+    card_text = _normalize_planner_text(
+        " ".join(
+            str(card.get(field) or "")
+            for field in (
+                "name",
+                "title",
+                "category",
+                "description",
+                "features",
+                "source",
+            )
+        )
+    )
+    return bool(token_re.search(card_text))
+
+
+def _insert_requested_component_stop_if_needed(
+    selected_cards: List[Dict[str, str]],
+    all_cards: List[Dict[str, str]],
+    user_message: str,
+    request_re: "re.Pattern[str]",
+    card_re: "re.Pattern[str]",
+) -> List[Dict[str, str]]:
+    """Insert a grounded card for an explicit component if selection omitted it."""
+    normalized_query = _normalize_planner_text(user_message)
+    if not request_re.search(normalized_query):
+        return selected_cards
+
+    selected_keys = {
+        _normalize_planner_text(_planner_card_display_name(card) or card.get("name", ""))
+        for card in selected_cards
+    }
+    selected_has_component = any(
+        _planner_card_matches_component(card, card_re)
+        for card in selected_cards
+    )
+    selected_has_named_component = any(
+        card_re.search(_normalize_planner_text(_planner_card_display_name(card) or card.get("name", "")))
+        for card in selected_cards
+    )
+    has_named_candidate = any(
+        card_re.search(_normalize_planner_text(_planner_card_display_name(card) or card.get("name", "")))
+        and _normalize_planner_text(_planner_card_display_name(card) or card.get("name", "")) not in selected_keys
+        for card in all_cards
+    )
+    if selected_has_component and selected_has_named_component:
+        named_component_cards = [
+            card for card in selected_cards
+            if card_re.search(_normalize_planner_text(_planner_card_display_name(card) or card.get("name", "")))
+        ]
+        if named_component_cards:
+            return _dedupe_planner_cards([named_component_cards[0], *selected_cards])
+        return selected_cards
+    if selected_has_component and not has_named_candidate:
+        component_cards = [
+            card for card in selected_cards
+            if _planner_card_matches_component(card, card_re)
+        ]
+        if component_cards:
+            return _dedupe_planner_cards([component_cards[0], *selected_cards])
+        return selected_cards
+
+    target_area = _extract_requested_plan_area(user_message)
+    candidates = [
+        card for card in all_cards
+        if _planner_card_matches_component(card, card_re)
+        and _normalize_planner_text(_planner_card_display_name(card) or card.get("name", "")) not in selected_keys
+    ]
+    if target_area:
+        area_candidates = [
+            card for card in candidates
+            if _planner_card_matches_area(card, target_area)
+        ]
+        if area_candidates:
+            candidates = area_candidates
+    candidates = sorted(
+        candidates,
+        key=lambda card: (
+            bool(
+                card_re.search(
+                    _normalize_planner_text(
+                        _planner_card_display_name(card) or card.get("name", "")
+                    )
+                )
+            ),
+            _planner_card_matches_area(card, target_area) if target_area else False,
+            _score_local_area_plan_card(card, normalized_query, user_message),
+            _score_historic_plan_card(card),
+        ),
+        reverse=True,
+    )
+    if not candidates:
+        return selected_cards
+    return _dedupe_planner_cards([candidates[0], *selected_cards])
+
+
 def _query_treats_start_anchor_as_origin_only(user_message: str) -> bool:
     """Return whether a requested start point is an origin, not a visit stop."""
     normalized_query = _normalize_planner_text(user_message)
@@ -11506,9 +11636,13 @@ def _card_fallback_title(user_message: str, language: str) -> str:
         return "Plano de eventos culturais" if language == "pt" else "Cultural events plan"
     if "principe real" in normalized or "príncipe real" in str(user_message).lower():
         return "Noite descontraída no Príncipe Real" if language == "pt" else "Relaxed evening around Príncipe Real"
-    if re.search(r"\b(?:museum|museu|museums|museus)\b", normalized):
-        return "Dia de museus em Lisboa" if language == "pt" else "Lisbon museum day"
     excluded_areas = set(_extract_excluded_plan_areas(user_message))
+    museum_is_excluded = bool(
+        {"museu", "museus", "museum", "museums"}.intersection(excluded_areas)
+        or re.search(r"\b(?:sem|evita|evitar|no|not|avoid)\s+(?:museu|museus|museum|museums)\b", normalized)
+    )
+    if re.search(r"\b(?:museum|museu|museums|museus)\b", normalized) and not museum_is_excluded:
+        return "Dia de museus em Lisboa" if language == "pt" else "Lisbon museum day"
     if "belem" in normalized and "belem" not in excluded_areas:
         return "Plano para Belém" if language == "pt" else "Belém plan"
     return "Roteiro sugerido" if language == "pt" else "Suggested itinerary"
@@ -11566,8 +11700,14 @@ def _card_fallback_direct_answer(
             return "Parte de Saldanha, usa o metro como eixo principal até à zona da Avenida/Rato e mantém uma única paragem cultural no Príncipe Real."
         return "Start from Saldanha, use the metro as the main public-transport leg toward Avenida/Rato, and keep one cultural stop around Príncipe Real."
     if is_pt:
-        return "Segue a ordem abaixo; usei apenas locais e deslocações apoiados pela evidência recolhida."
-    return "Follow the order below; I used only places and movement details supported by the gathered evidence."
+        return (
+            "Segue a ordem abaixo; usei locais fundamentados e mantive limitações explícitas "
+            "quando as deslocações exatas não ficaram confirmadas."
+        )
+    return (
+        "Follow the order below; I used grounded places and kept limitations explicit "
+        "where exact movement legs were not confirmed."
+    )
 
 
 def _build_specific_planner_fallback(
@@ -11887,7 +12027,7 @@ def _planner_response_missing_requested_plan_components(
     ):
         return True
     if re.search(r"\b(?:jardim|jardins|garden|gardens|parque|parques|park|parks)\b", normalized_query) and not re.search(
-        r"\b(?:jardim|garden|parque|park)\b",
+        r"\b(?:jardim|jardins|garden|gardens|botanical|parque|parques|park|parks)\b",
         route_text,
     ):
         return True
@@ -11920,17 +12060,69 @@ def _ensure_requested_component_placeholders_in_response(response: str, user_mes
     is_pt = language == "pt"
     area = _extract_requested_plan_area(user_message).strip() or ("Lisboa" if is_pt else "Lisbon")
     additions: List[str] = []
+    final_notes: List[str] = []
 
     def add_card(icon: str, title: str, category: str, limitation: str) -> None:
         additions.extend([
             "",
             f"- **{icon} {title}**",
             f"    - 🏷️ **{'Categoria' if is_pt else 'Category'}:** {category}",
-            f"    - **{'Limitação' if is_pt else 'Limitation'}:** {limitation}",
+            f"    - ⚠️ **{'Limitação' if is_pt else 'Limitation'}:** {limitation}",
             "",
         ])
 
-    if _query_requests_food_stop(user_message) and not re.search(
+    def add_final_note(note: str) -> None:
+        if note and note not in final_notes:
+            final_notes.append(note)
+
+    def insert_final_notes(text: str) -> str:
+        if not final_notes:
+            return text
+        lines = str(text).splitlines()
+        output: List[str] = []
+        inserted_notes = False
+        for line in lines:
+            output.append(line)
+            normalized_line = _normalize_planner_text(line)
+            if (
+                not inserted_notes
+                and line.strip().startswith("### ")
+                and re.search(r"\b(?:notas finais|final notes)\b", normalized_line)
+            ):
+                output.extend(["", *final_notes])
+                inserted_notes = True
+        if inserted_notes:
+            return re.sub(r"\n{3,}", "\n\n", "\n".join(output)).strip()
+
+        output = []
+        for line in lines:
+            if not inserted_notes and _PLANNER_SOURCE_LINE_RE.match(line.strip()):
+                output.extend([*final_notes, ""])
+                inserted_notes = True
+            output.append(line)
+        if not inserted_notes:
+            output.extend(["", *final_notes])
+        return re.sub(r"\n{3,}", "\n\n", "\n".join(output)).strip()
+
+    if _query_requests_cafe_stop(user_message) and not re.search(
+        r"\b(?:cafe|coffee|pastelaria|pastry|brunch|pausa\s+gastronomica|food\s+break)\b",
+        route_text,
+    ):
+        add_final_note(
+            (
+                "- Café/pastelaria: pediste uma paragem de café distinta da refeição, "
+                "mas os dados recolhidos não confirmaram um café/pastelaria compatível com as restrições; "
+                "não publiquei uma paragem genérica como se fosse um local fundamentado."
+            )
+            if is_pt
+            else (
+                "- Cafe/pastry: you asked for a cafe stop distinct from the meal, "
+                "but the gathered data did not confirm a cafe/pastry venue compatible with the constraints; "
+                "I did not publish a generic stop as if it were grounded."
+            )
+        )
+
+    if not _query_requests_cafe_stop(user_message) and _query_requests_food_stop(user_message) and not re.search(
         r"\b(?:restaurante|restaurant|almo[cç]o|lunch|jantar|dinner|cafe|coffee|pastelaria|pastry|gastronom)\b",
         route_text,
     ):
@@ -11974,28 +12166,32 @@ def _ensure_requested_component_placeholders_in_response(response: str, user_mes
             ),
         )
 
-    if not additions:
+    if not additions and not final_notes:
         return response
 
-    lines = str(response).splitlines()
-    output: List[str] = []
-    in_route = False
-    inserted = False
-    for raw_line in lines:
-        stripped = raw_line.strip()
-        if re.search(r"\b(?:roteiro sugerido|suggested route)\b", _normalize_planner_text(stripped)):
-            in_route = True
+    updated_response = response
+    if additions:
+        lines = str(updated_response).splitlines()
+        output: List[str] = []
+        in_route = False
+        inserted = False
+        for raw_line in lines:
+            stripped = raw_line.strip()
+            if re.search(r"\b(?:roteiro sugerido|suggested route)\b", _normalize_planner_text(stripped)):
+                in_route = True
+                output.append(raw_line)
+                continue
+            if in_route and stripped.startswith("### "):
+                if not inserted:
+                    output.extend(additions)
+                    inserted = True
+                in_route = False
             output.append(raw_line)
-            continue
-        if in_route and stripped.startswith("### "):
-            if not inserted:
-                output.extend(additions)
-                inserted = True
-            in_route = False
-        output.append(raw_line)
-    if in_route and not inserted:
-        output.extend(additions)
-    return re.sub(r"\n{3,}", "\n\n", "\n".join(output)).strip()
+        if in_route and not inserted:
+            output.extend(additions)
+        updated_response = re.sub(r"\n{3,}", "\n\n", "\n".join(output)).strip()
+
+    return insert_final_notes(updated_response)
 
 
 def _ensure_budget_food_limitation_in_response(response: str, user_message: str, language: str) -> str:
@@ -13348,6 +13544,11 @@ class PlannerAgent(BaseAgent):
                 )
                 finalized_plan = _repair_response_requested_type_counts(finalized_plan, user_message)
                 finalized_plan = _ensure_stop_by_stop_movement_in_response(
+                    finalized_plan,
+                    user_message,
+                    language,
+                )
+                finalized_plan = _ensure_requested_component_placeholders_in_response(
                     finalized_plan,
                     user_message,
                     language,

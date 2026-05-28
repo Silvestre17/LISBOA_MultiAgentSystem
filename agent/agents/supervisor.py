@@ -728,13 +728,13 @@ class SupervisorAgent(BaseAgent):
                 "✅ **Direct answer:** that falls outside what I can validate with quality in this Lisbon/AML system.\n\n"
                 "---\n\n"
                 "LISBOA is focused on the **Lisbon Metropolitan Area**.\n\n"
-                "💡 **I can help with:**\n"
-                "- **Weather:** forecasts, warnings, and IPMA data for Lisbon and AML 🌤️\n"
-                "- **Transport:** Metro, Carris Urban, Carris Metropolitana, and CP suburban/AML 🚇\n"
-                "- **Culture & Events:** museums, exhibitions, festivals, concerts, and activities 🎭\n"
-                "- **Places & Services:** restaurants, attractions, pharmacies, hospitals, parking, and public services 📍\n"
-                "- **Planning:** personalized itineraries and day plans for Lisbon/AML 🗺️\n"
-                "- **History & Knowledge:** Lisbon history, neighborhoods, culture, and Lisboa Card guide 📚\n\n"
+                "💡 **Supported scope:**\n"
+                "- 🌤️ **Weather:** forecasts, warnings, and IPMA data for Lisbon and AML\n"
+                "- 🚇 **Transport:** Metro, Carris Urban, Carris Metropolitana, and CP suburban/AML\n"
+                "- 🎭 **Culture & Events:** museums, exhibitions, festivals, concerts, and activities\n"
+                "- 📍 **Places & Services:** restaurants, attractions, pharmacies, hospitals, parking, and public services\n"
+                "- 🗺️ **Planning:** personalized itineraries and day plans for Lisbon/AML\n"
+                "- 📚 **History & Knowledge:** Lisbon history, neighborhoods, culture, and Lisboa Card guide\n\n"
                 "Ask me about Lisbon/AML and I will use confirmable data whenever possible."
             )
         return (
@@ -742,13 +742,13 @@ class SupervisorAgent(BaseAgent):
             "✅ **Resposta direta:** isso fica fora do que consigo validar com qualidade neste sistema focado em Lisboa/AML.\n\n"
             "---\n\n"
             "O LISBOA está focado na **Área Metropolitana de Lisboa**.\n\n"
-            "💡 **Posso ajudar com:**\n"
-            "- **Meteorologia:** previsão, avisos e dados IPMA para Lisboa/AML 🌤️\n"
-            "- **Transportes:** Metro, Carris Urban, Carris Metropolitana e CP suburbano/AML 🚇\n"
-            "- **Cultura & Eventos:** museus, exposições, festivais, concertos e atividades 🎭\n"
-            "- **Locais & Serviços:** restaurantes, atrações, farmácias, hospitais, estacionamento e serviços públicos 📍\n"
-            "- **Planeamento:** roteiros personalizados e planos de dia para Lisboa/AML 🗺️\n"
-            "- **História & Conhecimento:** história de Lisboa, bairros, cultura e Guia Lisboa Card 📚\n\n"
+            "💡 **Âmbito suportado:**\n"
+            "- 🌤️ **Meteorologia:** previsão, avisos e dados IPMA para Lisboa/AML\n"
+            "- 🚇 **Transportes:** Metro, Carris Urban, Carris Metropolitana e CP suburbano/AML\n"
+            "- 🎭 **Cultura & Eventos:** museus, exposições, festivais, concertos e atividades\n"
+            "- 📍 **Locais & Serviços:** restaurantes, atrações, farmácias, hospitais, estacionamento e serviços públicos\n"
+            "- 🗺️ **Planeamento:** roteiros personalizados e planos de dia para Lisboa/AML\n"
+            "- 📚 **História & Conhecimento:** história de Lisboa, bairros, cultura e Guia Lisboa Card\n\n"
             "Pergunta-me por Lisboa/AML e eu respondo com dados confirmáveis sempre que possível."
         )
 
@@ -1098,6 +1098,20 @@ class SupervisorAgent(BaseAgent):
 
         if cls._is_planning_query(user_message) and not direct_weather_transport:
             return None
+
+        if (
+            re.search(
+                r"\b(?:alternativa|alternative|op[cç][aã]o|option|local|sitio|s[ií]tio|place)\b",
+                message_lower,
+            )
+            and re.search(r"\b(?:indoor|interior|interiores|cobert[oa]s?)\b", message_lower)
+            and re.search(r"\b(?:perto\s+de\s+transporte|near\s+(?:public\s+)?transport)\b", message_lower)
+        ):
+            return {
+                "reasoning": "Direct indoor-place alternative override; transport is a proximity constraint, not a route request.",
+                "agents": ["researcher"],
+                "direct_response": None,
+            }
 
         weather_hit = cls._looks_like_weather_query(message_lower)
         transport_terms = [
@@ -1562,6 +1576,16 @@ class SupervisorAgent(BaseAgent):
                 "agents": cls._planning_follow_up_agents(user_message),
                 "direct_response": None,
             }
+        if previous_domain == "planner" and re.search(
+            r"\b(?:adiciona|acrescenta|mant[eé]m|continua|ajusta|troca|substitui|"
+            r"garante|evita|remove|add|keep|continue|adjust|replace|avoid|remove)\b",
+            cls._normalize_query(user_message),
+        ):
+            return {
+                "reasoning": "Planning revision follow-up resolved against previous itinerary context",
+                "agents": cls._planning_follow_up_agents(user_message),
+                "direct_response": None,
+            }
         if current_domain:
             return {
                 "reasoning": f"Follow-up domain override from current query ({current_domain})",
@@ -1636,6 +1660,16 @@ class SupervisorAgent(BaseAgent):
         )
         if pure_weather_request:
             return False
+        if re.search(
+            r"\b(?:quero|queria|gostava|preciso|faz|fazer|planeia|organiza|monta)\b.*"
+            r"\b(?:tarde|manh[aã]|noite|afternoon|morning|evening)\b.*"
+            r"\b(?:almo[cç]o|lunch|jantar|dinner|miradouro|viewpoint|jardim|garden|"
+            r"caf[eé]|coffee|restaurante|restaurant)\b.*"
+            r"\b(?:almo[cç]o|lunch|jantar|dinner|miradouro|viewpoint|jardim|garden|"
+            r"caf[eé]|coffee|restaurante|restaurant)\b",
+            message_lower,
+        ):
+            return True
         simple_lookup_with_preferences = bool(
             re.search(
                 r"\b(?:restaurants?|restaurantes?|museums?|museus?|monuments?|monumentos?|"
@@ -1675,6 +1709,12 @@ class SupervisorAgent(BaseAgent):
             r"comer|eat|food|meal|refei[cç][aã]o|almo[cç]o|jantar|lunch|dinner)\b",
             r"\b(?:plano|plan)\b.*\b(?:dia|day|manh[aã]|tarde|noite|viagem|trip|visita|visit)\b",
             r"\bschedule\b.*\b(?:day|itinerary|route|visits?|stops?)\b",
+            r"\b(?:quero|queria|gostava|preciso|faz|fazer|planeia|organiza|monta)\b.*"
+            r"\b(?:tarde|manh[aã]|noite|afternoon|morning|evening)\b.*"
+            r"\b(?:almo[cç]o|lunch|jantar|dinner|miradouro|viewpoint|jardim|garden|"
+            r"caf[eé]|coffee|restaurante|restaurant)\b.*"
+            r"\b(?:almo[cç]o|lunch|jantar|dinner|miradouro|viewpoint|jardim|garden|"
+            r"caf[eé]|coffee|restaurante|restaurant)\b",
             r"\b(?:cria|criar|monta|montar|faz|fazer)\b.*\b(?:itiner[aá]rio|itener[aá]rio|roteiro|plano|dia|manh(?:a)?|tarde)\b",
             r"\b(?:itiner[aá]rio|itener[aá]rio|roteiro|plano)\b.*\b(?:cria|criar|monta|montar|faz|fazer|inclui|incluir|comer|refei[cç][aã]o|almo[cç]o|jantar|hotel)\b",
             r"\b(?:estes|estas|esses|essas|these|those)\s+(?:locais|lugares|s[ií]tios|places|stops)\b.*\b(?:dia|day|amanh[aã]|tomorrow|almo[cç]o|jantar|lunch|dinner|hotel)\b",

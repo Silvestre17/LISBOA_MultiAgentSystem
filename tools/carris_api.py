@@ -32,7 +32,9 @@ import json
 import logging
 import os
 import re
+import shutil
 import sqlite3
+import stat
 import time
 import unicodedata
 import zipfile
@@ -437,18 +439,58 @@ class CarrisGTFSManager:
         except Exception as e:
             logger.warning(f"Could not save metadata: {e}")
 
-    def _database_has_stops(self) -> bool:
-        """Return whether the local Carris SQLite database has stop rows."""
-        if not os.path.exists(self.db_path):
+    def _database_file_has_stops(self, db_path: str) -> bool:
+        """Return whether a Carris SQLite database file has stop rows."""
+        if not os.path.exists(db_path):
             return False
 
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(db_path) as conn:
                 count = conn.execute("SELECT COUNT(*) FROM stops").fetchone()[0]
             return int(count or 0) > 0
         except sqlite3.Error as exc:
             logger.warning(f"Carris database validation failed: {exc}")
             return False
+
+    def _database_has_stops(self) -> bool:
+        """Return whether the local Carris SQLite database has stop rows."""
+        return self._database_file_has_stops(self.db_path)
+
+    def restore_database_from_seed(self) -> bool:
+        """Restore Carris runtime files from the repository seed database."""
+        source_db = SOURCE_CARRIS_DATA_DIR / "carris.db"
+        source_metadata = SOURCE_CARRIS_DATA_DIR / "metadata.json"
+        target_db = Path(self.db_path)
+        target_metadata = Path(self.metadata_path)
+
+        try:
+            if source_db.resolve() == target_db.resolve():
+                return False
+        except OSError:
+            return False
+
+        if not self._database_file_has_stops(str(source_db)):
+            return False
+
+        try:
+            self._ensure_data_dir()
+            shutil.copy2(source_db, target_db)
+            target_db.chmod(target_db.stat().st_mode | stat.S_IWUSR | stat.S_IRUSR)
+            if source_metadata.exists():
+                shutil.copy2(source_metadata, target_metadata)
+                target_metadata.chmod(target_metadata.stat().st_mode | stat.S_IWUSR | stat.S_IRUSR)
+            metadata = self._load_metadata()
+            metadata["_runtime_seed_restore"] = {
+                "source": str(source_db),
+                "restored_at": datetime.now().isoformat(),
+                "size_bytes": target_db.stat().st_size,
+            }
+            self._save_metadata(metadata)
+        except Exception as exc:
+            logger.warning(f"Could not restore Carris repository seed database: {exc}")
+            return False
+
+        return self._database_has_stops()
 
     def restore_database_from_release(self) -> bool:
         """Restore Carris runtime files from the last-known-good release asset."""
@@ -798,6 +840,10 @@ class CarrisGTFSManager:
                 f"SQLite database created: {db_size:.1f} MB (optimized schema v2.0)"
             )
 
+            if not self._database_has_stops():
+                logger.error("Carris GTFS conversion produced an empty stops table")
+                return False
+
             return True
 
         except Exception as e:
@@ -807,9 +853,18 @@ class CarrisGTFSManager:
     def ensure_database(self, force_update: bool = False) -> bool:
         """Ensures database exists and is up-to-date."""
         if not force_update and os.path.exists(self.db_path):
+            local_database_ready = self._database_has_stops()
             needs_update, remote_date = self.check_for_updates()
             if not needs_update:
-                return True
+                if local_database_ready:
+                    return True
+                if self.restore_database_from_seed():
+                    logger.warning("Restored Carris repository seed database because local SQLite was empty")
+                    return True
+                if self.restore_database_from_release():
+                    logger.warning("Restored Carris last-known-good release backup because local SQLite was empty")
+                    return True
+                return False
         else:
             needs_update = True
             _, remote_date = self.check_for_updates()
@@ -817,10 +872,21 @@ class CarrisGTFSManager:
         if needs_update or force_update:
             gtfs_content = self.download_gtfs()
             if gtfs_content:
-                return self.convert_to_sqlite(gtfs_content, remote_date or "unknown")
+                if self.convert_to_sqlite(gtfs_content, remote_date or "unknown"):
+                    return True
+                if self.restore_database_from_seed():
+                    logger.warning("Using Carris repository seed database after GTFS conversion failure")
+                    return True
+                if self.restore_database_from_release():
+                    logger.warning("Using Carris last-known-good release backup after GTFS conversion failure")
+                    return True
+                return False
             else:
-                if os.path.exists(self.db_path):
+                if os.path.exists(self.db_path) and self._database_has_stops():
                     logger.warning("Using stale database due to download failure")
+                    return True
+                if self.restore_database_from_seed():
+                    logger.warning("Using Carris repository seed database due to download failure")
                     return True
                 if self.restore_database_from_release():
                     logger.warning("Using Carris last-known-good release backup due to download failure")
@@ -1354,13 +1420,14 @@ def _get_directional_departures_for_route(
     active_services: List[str],
     current_time: str,
     limit: int = 4,
+    use_realtime: bool = True,
 ) -> List[Dict[str, Any]]:
     """Returns next direction-safe departures for a route from origin toward destination."""
     if not active_services or not origin_stops or not dest_stops:
         return []
 
     cursor = conn.cursor()
-    rt_vehicles = fetch_gtfs_rt_vehicles()
+    rt_vehicles = fetch_gtfs_rt_vehicles() if use_realtime else []
     rt_by_trip = {v["trip_id"]: v for v in rt_vehicles if v.get("trip_id")}
 
     origin_ids = [s["id"] for s in origin_stops[:12]]
@@ -2014,7 +2081,7 @@ def carris_get_next_departures(
 
 @tool
 def carris_find_routes_between(
-    origin: str, destination: str, search_radius_km: float = 0.4
+    origin: str, destination: str, search_radius_km: float = 0.4, start_time: str = ""
 ) -> str:
     """
     Finds Carris routes connecting two locations with real-time estimates.
@@ -2023,6 +2090,7 @@ def carris_find_routes_between(
         origin: Origin location (e.g., "Rossio", "Praça do Comércio")
         destination: Destination (e.g., "Belém", "Parque das Nações")
         search_radius_km: Initial search radius (default: 0.4km)
+        start_time: Optional same-day departure reference time in HH:MM format.
 
     Returns:
         Route options with real-time waiting times.
@@ -2188,7 +2256,7 @@ def carris_find_routes_between(
 
         if not routes_found:
             conn.close()
-            response += f"No direct Carris route found (radius: {final_radius}km).\n"
+            response += f"No direct Carris route found (radius: {final_radius:.1f}km).\n"
             response += "   Suggestions:\n"
             response += "   - Use Metro (faster for long distances)\n"
             response += (
@@ -2203,9 +2271,20 @@ def carris_find_routes_between(
         response += f"✅ **Direct routes found:** {len(unique_routes)}\n\n"
 
         now = datetime.now()
-        current_time = now.strftime("%H:%M:%S")
+        requested_start = str(start_time or "").strip()
+        if requested_start:
+            try:
+                datetime.strptime(requested_start, "%H:%M")
+                current_time = f"{requested_start}:00"
+            except ValueError:
+                current_time = now.strftime("%H:%M:%S")
+                requested_start = ""
+        else:
+            current_time = now.strftime("%H:%M:%S")
         active_services = _get_active_services(conn, now)
-        freshness_note = _build_gtfs_rt_freshness_note()
+        if requested_start:
+            response += f"🕒 Reference departure time: {requested_start}\n\n"
+        freshness_note = "" if requested_start else _build_gtfs_rt_freshness_note()
         if freshness_note:
             response += freshness_note + "\n\n"
 
@@ -2312,6 +2391,7 @@ def carris_find_routes_between(
                 active_services=active_services,
                 current_time=current_time,
                 limit=4,
+                use_realtime=not bool(requested_start),
             )
 
             if not departures:
@@ -2348,17 +2428,56 @@ def carris_find_routes_between(
             line += "\n"
             return line
 
+        def score_formatted_route_line(route_line: str) -> int:
+            """Score route bullets by current usefulness for passenger display."""
+            next_match = re.search(r"^\s*Next:\s*(?P<times>[^\n]+)", route_line, flags=re.MULTILINE)
+            travel_match = re.search(r"^\s*~(?P<travel>\d+)min travel", route_line, flags=re.MULTILINE)
+            walk_minutes = [
+                int(match.group("walk"))
+                for match in re.finditer(r"Caminhada (?:inicial|final):\s*~(?P<walk>\d+)\s*min", route_line)
+            ]
+
+            if not next_match:
+                return 9999 + sum(walk_minutes)
+
+            clock_match = re.search(r"(\d{2}:\d{2})", next_match.group("times"))
+            if requested_start and clock_match:
+                reference_minutes = time_str_to_minutes(requested_start)
+                departure_minutes = time_str_to_minutes(clock_match.group(1))
+                wait_minutes = departure_minutes - reference_minutes
+                if wait_minutes < 0:
+                    wait_minutes += 24 * 60
+            else:
+                wait_minutes = _minutes_until_clock_time(clock_match.group(1)) if clock_match else None
+            travel_minutes = int(travel_match.group("travel")) if travel_match else 999
+            return (wait_minutes if wait_minutes is not None else 999) + travel_minutes + sum(walk_minutes)
+
+        def choose_display_route_lines(route_lines: List[str], max_lines: int = 5) -> Tuple[List[str], int]:
+            """Keep currently useful route options and hide clearly stale alternatives."""
+            scored_lines = sorted(
+                ((score_formatted_route_line(line), line) for line in route_lines),
+                key=lambda item: item[0],
+            )
+            actionable_lines = [line for score, line in scored_lines if score <= 120]
+            if actionable_lines:
+                visible_lines = actionable_lines[:max_lines]
+            elif scored_lines:
+                visible_lines = [scored_lines[0][1]]
+            else:
+                visible_lines = []
+            return visible_lines, max(0, len(route_lines) - len(visible_lines))
+
         if trams:
             response += "TRAMS\n" + "-" * 40 + "\n"
-            for r in trams:
-                response += format_route_line(r)
+            tram_lines, _ = choose_display_route_lines([format_route_line(r) for r in trams])
+            for line in tram_lines:
+                response += line
 
         if buses:
             response += "BUSES\n" + "-" * 40 + "\n"
-            for r in buses[:5]:
-                response += format_route_line(r)
-            if len(buses) > 5:
-                response += f"   ... and {len(buses) - 5} more routes\n\n"
+            bus_lines, _ = choose_display_route_lines([format_route_line(r) for r in buses])
+            for line in bus_lines:
+                response += line
 
         conn.close()
         return response
