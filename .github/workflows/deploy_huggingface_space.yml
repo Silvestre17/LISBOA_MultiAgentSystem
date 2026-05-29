@@ -106,7 +106,7 @@ jobs:
           sdk: docker
           python_version: 3.12.13
           app_port: 8501
-          header: mini
+          header: default
           fullWidth: true
           disable_embedding: false
           pinned: true
