@@ -16749,6 +16749,75 @@ def ensure_route_direct_answer_visual_contract(text: str) -> str:
     return "\n".join(lines[: heading_index + 1] + insertion + after).strip()
 
 
+_CAPABILITY_LIST_ITEM_RE = re.compile(
+    r"^(?P<indent>\s*)"
+    r"(?P<icon>[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+)\s+"
+    r"\*\*(?P<label>"
+    r"Meteorologia|Weather|Transportes?|Transport|Cultura\s*&\s*Eventos|"
+    r"Culture\s*&\s*Events|Locais\s*&\s*Servi[cç]os|Places\s*&\s*Services|"
+    r"Planeamento|Planning|Roteiros|Itineraries|"
+    r"Hist[oó]ria\s*&\s*Conhecimento|History\s*&\s*Knowledge|"
+    r"Locais\s+e\s+eventos|Places\s+and\s+events"
+    r")\*\*\s*(?P<sep>[—–-])\s*(?P<body>\S.*)$",
+    re.IGNORECASE,
+)
+
+_CAPABILITY_BULLET_ITEM_RE = re.compile(
+    r"^\s*[-*]\s+"
+    r"[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s+"
+    r"\*\*(?:"
+    r"Meteorologia|Weather|Transportes?|Transport|Cultura\s*&\s*Eventos|"
+    r"Culture\s*&\s*Events|Locais\s*&\s*Servi[cç]os|Places\s*&\s*Services|"
+    r"Planeamento|Planning|Roteiros|Itineraries|"
+    r"Hist[oó]ria\s*&\s*Conhecimento|History\s*&\s*Knowledge|"
+    r"Locais\s+e\s+eventos|Places\s+and\s+events"
+    r")\*\*",
+    re.IGNORECASE,
+)
+
+
+def normalize_capability_list_markdown(text: str) -> str:
+    """Turn loose capability lines into real Markdown bullets for Streamlit."""
+    if not text or "**" not in text:
+        return text or ""
+
+    lines = str(text).splitlines()
+    output: list[str] = []
+    changed = False
+
+    def append_line(line: str) -> None:
+        nonlocal changed
+        if (
+            output
+            and not output[-1].strip()
+            and len(output) >= 2
+            and _CAPABILITY_BULLET_ITEM_RE.match(output[-2])
+            and _CAPABILITY_BULLET_ITEM_RE.match(line)
+        ):
+            output.pop()
+            changed = True
+        output.append(line)
+
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if stripped.startswith(("-", "*", "###")):
+            append_line(raw_line)
+            continue
+        match = _CAPABILITY_LIST_ITEM_RE.match(raw_line)
+        if not match:
+            output.append(raw_line)
+            continue
+        if output and output[-1].strip() and not output[-1].lstrip().startswith(("-", "*")):
+            output.append("")
+        append_line(
+            f"{match.group('indent')}- {match.group('icon')} "
+            f"**{match.group('label')}** — {match.group('body').strip()}"
+        )
+        changed = True
+
+    return "\n".join(output) if changed else text
+
+
 def final_visual_pass(text: str) -> str:
     """Apply the final set of visual and consistency repairs in order.
 
@@ -16765,6 +16834,7 @@ def final_visual_pass(text: str) -> str:
     text = promote_leading_planner_title_bullet(text)
     text = dedupe_direct_answer_leading_status_icon(text)
     text = normalize_leading_status_icon_sequences(text)
+    text = normalize_capability_list_markdown(text)
     text = collapse_repeated_direct_answer_labels(text)
     text = normalize_transport_status_public_language(text)
     text = ensure_route_direct_answer_visual_contract(text)

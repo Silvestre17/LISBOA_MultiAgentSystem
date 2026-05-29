@@ -127,6 +127,37 @@ class SupervisorAgent(BaseAgent):
             "obrigada",
         }
 
+    @staticmethod
+    def _is_non_informative_message(user_message: str) -> bool:
+        """Return whether a message has no alphanumeric user intent."""
+        raw = str(user_message or "").strip()
+        return not raw or not any(char.isalnum() for char in raw)
+
+    @staticmethod
+    def _build_non_informative_message_response(language: str) -> str:
+        """Build a render-safe prompt for empty or punctuation-only turns."""
+        if language == "pt":
+            return (
+                "Olá! 👋 Em que te posso ajudar na Área Metropolitana de Lisboa?\n\n"
+                "Aqui está o que posso ajudar na AML/Lisboa:\n\n"
+                "- 🌤️ **Meteorologia** — previsões, avisos, dados IPMA\n"
+                "- 🚌 **Transportes** — metro, autocarro, elétrico, comboio e estado em tempo real\n"
+                "- 🏛️ **Cultura & Eventos** — museus, exposições, festivais, concertos\n"
+                "- 📍 **Locais & Serviços** — restaurantes, farmácias, hospitais, estacionamento\n"
+                "- 🗓️ **Planeamento** — itinerários personalizados e planos de dia\n"
+                "- 📚 **História & Conhecimento** — história de Lisboa, bairros, Guia Lisboa Card"
+            )
+        return (
+            "Hi! 👋 How can I help you in the Lisbon Metropolitan Area?\n\n"
+            "Here is what I can help with in Lisbon/AML:\n\n"
+            "- 🌤️ **Weather** — forecasts, warnings, and IPMA data\n"
+            "- 🚌 **Transport** — metro, bus, tram, train, and real-time status\n"
+            "- 🏛️ **Culture & Events** — museums, exhibitions, festivals, concerts\n"
+            "- 📍 **Places & Services** — restaurants, pharmacies, hospitals, parking\n"
+            "- 🗓️ **Planning** — personalized itineraries and day plans\n"
+            "- 📚 **History & Knowledge** — Lisbon history, neighbourhoods, Lisboa Card guide"
+        )
+
     @classmethod
     def _has_lisbon_context(cls, message_lower: str) -> bool:
         """Returns whether the query clearly references Lisbon/AML topics."""
@@ -815,6 +846,15 @@ class SupervisorAgent(BaseAgent):
 
     def _direct_routing_override(self, user_message: str, language: str) -> Optional[Dict[str, Any]]:
         """Handles trivial direct responses before invoking the supervisor LLM."""
+        if self._is_non_informative_message(user_message):
+            return {
+                "reasoning": "Mensagem vazia/pontuação apenas, sem pedido claro",
+                "agents": [],
+                "direct_response": self._sanitize_direct_response(
+                    self._build_non_informative_message_response(language)
+                ),
+            }
+
         if self._is_greeting_only(user_message):
             return {
                 "reasoning": "Direct greeting override",
