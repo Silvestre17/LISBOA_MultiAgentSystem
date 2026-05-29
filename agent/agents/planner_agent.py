@@ -1684,7 +1684,7 @@ def _planner_response_has_unrequested_sequence_stops(response: str, user_message
         if re.search(r"\b(?:roteiro sugerido|suggested route)\b", normalized_line):
             in_route_section = True
             continue
-        if in_route_section and stripped.startswith("### "):
+        if in_route_section and (stripped == "---" or stripped.startswith("### ") or _PLANNER_SOURCE_LINE_RE.match(stripped)):
             break
         if not in_route_section:
             continue
@@ -1789,7 +1789,21 @@ def _planner_local_area_profile(user_message: str) -> tuple[str, str, tuple[str,
         return (
             "alfama",
             "Alfama",
-            ("belem", "torre de belem", "padrao dos descobrimentos", "oriente", "parque das nacoes", "expo"),
+            (
+                "belem",
+                "brasilia",
+                "1400",
+                "torre de belem",
+                "padrao dos descobrimentos",
+                "descobrimentos",
+                "mosteiro dos jeronimos",
+                "jeronimos",
+                "imperio",
+                "india",
+                "oriente",
+                "parque das nacoes",
+                "expo",
+            ),
         )
     if re.search(r"\b(?:marvila|beato|madre\s+de\s+deus|xabregas|poco\s+do\s+bispo|poco\s+bispo|1950)\b", probe):
         return (
@@ -1879,10 +1893,12 @@ def _planner_local_area_profile(user_message: str) -> tuple[str, str, tuple[str,
             "Baixa / Chiado / Alfama",
             (
                 "belem",
+                "brasilia",
                 "torre de belem",
                 "padrao dos descobrimentos",
                 "mosteiro dos jeronimos",
                 "jeronimos",
+                "1400",
                 "oriente",
                 "parque das nacoes",
                 "expo",
@@ -1950,18 +1966,21 @@ def _planner_response_has_local_area_drift(response: str, user_message: str) -> 
     in_route_section = False
     current_block: list[str] = []
     card_blocks: list[str] = []
-    card_heading_re = re.compile(r"^[-*]\s+\*\*(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D]+\s+)?[^*\n]+\*\*")
+    card_heading_re = re.compile(
+        r"^(?:[-*]\s+)?(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D]+\s+)?"
+        r"\*\*(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D]+\s+)?[^*\n]+\*\*"
+    )
     for raw_line in str(response or "").splitlines():
         stripped = raw_line.strip()
         normalized_line = _normalize_planner_text(stripped)
         if re.search(r"\b(?:roteiro sugerido|suggested route)\b", normalized_line):
             in_route_section = True
             continue
-        if in_route_section and stripped.startswith("### "):
+        if in_route_section and (stripped == "---" or stripped.startswith("### ") or _PLANNER_SOURCE_LINE_RE.match(stripped)):
             break
         if not in_route_section:
             continue
-        if card_heading_re.match(stripped):
+        if raw_line[:1] not in {" ", "\t"} and card_heading_re.match(stripped):
             if current_block:
                 card_blocks.append("\n".join(current_block))
             current_block = [stripped]
@@ -3444,6 +3463,8 @@ def _filter_planner_cards_for_request_constraints(
 
     target_area = _extract_compact_plan_area_anchor(user_message)
     if target_area and _query_describes_single_area_plan(user_message):
+        strict_area_key, _strict_area_label, _strict_area_blockers = _planner_local_area_profile(user_message)
+        strict_named_area_plan = bool(strict_area_key)
         area_cards = [
             card for card in filtered
             if _planner_card_matches_area(card, target_area)
@@ -3465,60 +3486,69 @@ def _filter_planner_cards_for_request_constraints(
                 for card in filtered
             )
             if not _planner_cards_satisfy_requested_counts(area_cards, user_message):
-                supplemental_count_cards = [
-                    card for card in filtered
-                    if card not in area_cards
-                    and any(
-                        _planner_card_matches_requested_count_type(card, count_type)
-                        for count_type, requested_count in _requested_plan_type_counts(user_message).items()
-                        if count_type in {"museum", "monument", "viewpoint", "event"}
-                        and requested_count > 0
+                if strict_named_area_plan:
+                    filtered = area_cards
+                else:
+                    supplemental_count_cards = [
+                        card for card in filtered
+                        if card not in area_cards
+                        and any(
+                            _planner_card_matches_requested_count_type(card, count_type)
+                            for count_type, requested_count in _requested_plan_type_counts(user_message).items()
+                            if count_type in {"museum", "monument", "viewpoint", "event"}
+                            and requested_count > 0
+                        )
+                        and not _planner_dict_card_is_closed(card)
+                    ]
+                    supplemental_count_cards = sorted(
+                        supplemental_count_cards,
+                        key=lambda card: _score_card_for_requested_count_type(card, "total", user_message),
+                        reverse=True,
                     )
-                    and not _planner_dict_card_is_closed(card)
-                ]
-                supplemental_count_cards = sorted(
-                    supplemental_count_cards,
-                    key=lambda card: _score_card_for_requested_count_type(card, "total", user_message),
-                    reverse=True,
-                )
-                filtered = _dedupe_planner_cards([
-                    *area_cards,
-                    *supplemental_count_cards,
-                    *filtered,
-                ])
+                    filtered = _dedupe_planner_cards([
+                        *area_cards,
+                        *supplemental_count_cards,
+                        *filtered,
+                    ])
             elif _query_requests_food_stop(user_message) and not area_has_cultural and original_has_cultural:
-                nearby_cultural_cards = [
-                    card for card in filtered
-                    if _card_kind_for_plan_block(card) not in {"food", "event"}
-                    and not _planner_dict_card_is_closed(card)
-                ]
-                filtered = _dedupe_planner_cards([*nearby_cultural_cards, *area_cards, *filtered])
+                if strict_named_area_plan:
+                    filtered = area_cards
+                else:
+                    nearby_cultural_cards = [
+                        card for card in filtered
+                        if _card_kind_for_plan_block(card) not in {"food", "event"}
+                        and not _planner_dict_card_is_closed(card)
+                    ]
+                    filtered = _dedupe_planner_cards([*nearby_cultural_cards, *area_cards, *filtered])
             elif (
                 _query_requests_food_stop(user_message)
                 and len(open_area_cultural_cards) < 2
                 and original_has_cultural
             ):
-                normalized_query = _normalize_planner_text(user_message)
-                supplemental_cultural_cards = sorted(
-                    [
-                        card for card in filtered
-                        if card not in area_cards
-                        and _card_kind_for_plan_block(card) not in {"food", "event"}
-                        and not _planner_dict_card_is_closed(card)
-                        and _compact_central_plan_far_area_penalty(card, user_message) < 100
-                    ],
-                    key=lambda card: _score_local_area_plan_card(card, normalized_query, user_message),
-                    reverse=True,
-                )
-                supplemental_cultural_cards = [
-                    card for card in supplemental_cultural_cards
-                    if _score_local_area_plan_card(card, normalized_query, user_message) >= 0
-                ]
-                filtered = _dedupe_planner_cards([
-                    *area_cards,
-                    *supplemental_cultural_cards[: max(0, 2 - len(open_area_cultural_cards))],
-                    *filtered,
-                ])
+                if strict_named_area_plan:
+                    filtered = area_cards
+                else:
+                    normalized_query = _normalize_planner_text(user_message)
+                    supplemental_cultural_cards = sorted(
+                        [
+                            card for card in filtered
+                            if card not in area_cards
+                            and _card_kind_for_plan_block(card) not in {"food", "event"}
+                            and not _planner_dict_card_is_closed(card)
+                            and _compact_central_plan_far_area_penalty(card, user_message) < 100
+                        ],
+                        key=lambda card: _score_local_area_plan_card(card, normalized_query, user_message),
+                        reverse=True,
+                    )
+                    supplemental_cultural_cards = [
+                        card for card in supplemental_cultural_cards
+                        if _score_local_area_plan_card(card, normalized_query, user_message) >= 0
+                    ]
+                    filtered = _dedupe_planner_cards([
+                        *area_cards,
+                        *supplemental_cultural_cards[: max(0, 2 - len(open_area_cultural_cards))],
+                        *filtered,
+                    ])
             else:
                 filtered = area_cards
 
@@ -3543,6 +3573,55 @@ def _filter_planner_cards_for_request_constraints(
             filtered = [card for card in filtered if card not in blocker_cards]
 
     return filtered
+
+
+def _strict_named_area_lacks_requested_component(
+    cards: List[Dict[str, str]],
+    user_message: str,
+) -> bool:
+    """Return whether a strict local-area plan lacks requested local evidence.
+
+    For compact named-area plans, missing components should become explicit
+    limitations instead of prompting the LLM to invent or borrow a stop from a
+    different neighbourhood.
+    """
+    target_area = _extract_compact_plan_area_anchor(user_message)
+    if not target_area or not _query_describes_single_area_plan(user_message):
+        return False
+    strict_area_key, _strict_area_label, _strict_area_blockers = _planner_local_area_profile(user_message)
+    if not strict_area_key:
+        return False
+
+    area_cards = [
+        card for card in cards
+        if _planner_card_matches_area(card, target_area)
+        and not _planner_dict_card_is_closed(card)
+    ]
+    if not area_cards:
+        return False
+
+    normalized_query = _normalize_planner_text(user_message)
+    if re.search(r"\b(?:jardim|jardins|garden|gardens|parque|parques|park|parks)\b", normalized_query):
+        has_area_garden = any(
+            re.search(
+                r"\b(?:jardim|jardins|garden|gardens|parque|parques|park|parks|nature)\b",
+                _normalize_planner_text(
+                    " ".join(
+                        str(card.get(key, ""))
+                        for key in ("name", "category", "description", "features", "url", "details_url")
+                    )
+                ),
+            )
+            for card in area_cards
+        )
+        if not has_area_garden:
+            return True
+
+    if re.search(r"\b(?:miradouro|miradouros|viewpoint|viewpoints|view\s+point|lookout|vista)\b", normalized_query):
+        if not any(_planner_card_is_viewpoint(card) for card in area_cards):
+            return True
+
+    return False
 
 
 def _planner_response_uses_excluded_area(response: str, user_message: str) -> bool:
@@ -4543,6 +4622,15 @@ def _clean_extracted_plan_area(area: str) -> str:
     if cleaned and re.search(
         r"\b(?:op[cç][aã]o|op[cç][oõ]es|option|options|barat[oa]s?|cheap\w*|"
         r"econ[oó]mic\w*|refei[cç][aã]o|meal|almo[cç]o|almoco|lunch|jantar|dinner)\b",
+        _normalize_planner_text(cleaned),
+    ):
+        return ""
+    # Reject anaphoric scaffolding that is never a real Lisbon area name, e.g.
+    # "zona anterior" / "previous area" leaking from revision continuity text and
+    # ending up in placeholder titles such as "Jardim em zona anterior".
+    if cleaned and re.search(
+        r"\b(?:zona\s+anterior|area\s+anterior|previous\s+area|"
+        r"paragens?\s+anteriores|previous\s+stops?)\b",
         _normalize_planner_text(cleaned),
     ):
         return ""
@@ -8651,7 +8739,7 @@ def _compact_central_plan_far_area_penalty(card: Dict[str, str], user_message: s
         return 0
     if not re.search(
         r"\b(?:chiado|cais\s+do\s+sodre|sodre|baixa|rossio|marques|marques\s+de\s+pombal|"
-        r"saldanha|picoas|avenida|liberdade|carmo|santos)\b",
+        r"saldanha|picoas|avenida|liberdade|carmo|santos|alfama|mouraria)\b",
         normalized_query,
     ):
         return 0
@@ -8660,7 +8748,7 @@ def _compact_central_plan_far_area_penalty(card: Dict[str, str], user_message: s
     )
     if re.search(
         r"\b(?:madre\s+de\s+deus|azulejo|madragoa|esperanca|janelas\s+verdes|ajuda|1249|1349|"
-        r"marvila|belem|belem|benfica|fronteira|campo\s+pequeno|"
+        r"marvila|belem|belem|brasilia|1400|jeronimos|benfica|fronteira|campo\s+pequeno|"
         r"parque\s+das\s+nacoes|oriente|expo|lumiar|ajuda)\b",
         basis,
     ):
@@ -12155,6 +12243,11 @@ def _ensure_requested_component_placeholders_in_response(response: str, user_mes
         r"\b(?:jardim|garden|parque|park)\b",
         route_text,
     ):
+        garden_note = (
+            "- **Jardim/parque:** pediste um jardim/parque nesta zona, mas os dados recolhidos não confirmaram uma paragem verificável desse tipo; não publiquei um jardim fora da zona como substituto."
+            if is_pt
+            else "- **Garden/park:** you asked for a garden/park in this area, but the gathered data did not confirm a verifiable stop of that type; I did not publish an out-of-area garden as a substitute."
+        )
         add_card(
             "🌳",
             f"Jardim em {area}" if is_pt else f"Garden in {area}",
@@ -12165,6 +12258,11 @@ def _ensure_requested_component_placeholders_in_response(response: str, user_mes
                 else "The user explicitly requested a garden/park, but the final selection did not preserve a confirmed result of that type."
             ),
         )
+        if not re.search(
+            r"\b(?:jardim/parque|garden/park)\b.*\b(?:confirmado|confirmed)\b",
+            _normalize_planner_text(response),
+        ):
+            add_final_note(garden_note)
 
     if not additions and not final_notes:
         return response
@@ -12179,6 +12277,13 @@ def _ensure_requested_component_placeholders_in_response(response: str, user_mes
             stripped = raw_line.strip()
             if re.search(r"\b(?:roteiro sugerido|suggested route)\b", _normalize_planner_text(stripped)):
                 in_route = True
+                output.append(raw_line)
+                continue
+            if in_route and stripped == "---":
+                if not inserted:
+                    output.extend(additions)
+                    inserted = True
+                in_route = False
                 output.append(raw_line)
                 continue
             if in_route and stripped.startswith("### "):
@@ -12276,7 +12381,7 @@ def _planner_response_route_blocks(response: str) -> List[str]:
         if re.search(r"\b(?:roteiro sugerido|suggested route)\b", normalized_line):
             in_route = True
             continue
-        if in_route and stripped.startswith("### "):
+        if in_route and (stripped == "---" or stripped.startswith("### ") or _PLANNER_SOURCE_LINE_RE.match(stripped)):
             break
         if not in_route:
             continue
@@ -12286,7 +12391,11 @@ def _planner_response_route_blocks(response: str) -> List[str]:
             continue
         is_top_level_title = bool(
             raw_line[:1] not in {" ", "\t"}
-            and re.match(r"^(?:[-*]\s+)?\*\*[^*\n]{2,180}\*\*", stripped)
+            and re.match(
+                r"^(?:[-*]\s+)?(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D]+\s+)?"
+                r"\*\*(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D]+\s+)?[^*\n]{2,180}\*\*",
+                stripped,
+            )
         )
         if is_top_level_title:
             if current:
@@ -12303,7 +12412,11 @@ def _planner_response_route_blocks(response: str) -> List[str]:
 def _planner_response_block_title(block: str) -> str:
     """Return the visible title for an itinerary block."""
     first_line = str(block or "").splitlines()[0] if str(block or "").splitlines() else ""
-    match = re.match(r"^(?:[-*]\s+)?\*\*(?P<title>[^*\n]{2,180})\*\*", first_line.strip())
+    match = re.match(
+        r"^(?:[-*]\s+)?(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D]+\s+)?"
+        r"\*\*(?P<title>(?:[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D]+\s+)?[^*\n]{2,180})\*\*",
+        first_line.strip(),
+    )
     if not match:
         return ""
     title = re.sub(r"^[^\wÀ-ÿ0-9]+", "", match.group("title")).strip()
@@ -12676,6 +12789,13 @@ def _ensure_planner_rhythm_guidance(
         r"[1-3]\s*h\b|[1-3]\s+horas?)\b",
         response,
         flags=re.IGNORECASE,
+    ):
+        return response
+
+    if re.search(
+        r"(?m)^\s*(?:[-*]\s*)?(?:\*\*)?(?:[^\w\n]{0,8}\s*)?"
+        r"(?:[01]?\d|2[0-3])[:h][0-5]\d\b",
+        response,
     ):
         return response
 
@@ -13348,6 +13468,11 @@ class PlannerAgent(BaseAgent):
         # bounded fallbacks can explain the limitation.
         if not evidence.cards:
             return ""
+        if _strict_named_area_lacks_requested_component(
+            [_evidence_card_to_planner_card(card) for card in evidence.cards],
+            user_message,
+        ):
+            return ""
 
         messages = build_structured_plan_messages(
             user_message=user_message,
@@ -13496,6 +13621,64 @@ class PlannerAgent(BaseAgent):
         # to simultaneously plan and hand-format Markdown. Fallbacks are only
         # used after this evidence-driven synthesis path cannot produce a valid
         # evidence-supported plan.
+        evidence_for_constraints = build_evidence_bundle(
+            weather_data=weather_data,
+            transport_data=transport_data,
+            places_data=places_data,
+            events_data=events_data,
+            qa_disclaimers=qa_disclaimers,
+        )
+        if _strict_named_area_lacks_requested_component(
+            [_evidence_card_to_planner_card(card) for card in evidence_for_constraints.cards],
+            user_message,
+        ):
+            constrained_plan = _build_card_based_itinerary_fallback(
+                user_message=user_message,
+                language=language,
+                weather_data=weather_data,
+                transport_data=transport_data,
+                places_data=places_data,
+                events_data=events_data,
+                qa_disclaimers=qa_disclaimers,
+                conversation_context=conversation_context,
+            )
+            if constrained_plan:
+                constrained_plan = _ensure_multi_day_response_quality(
+                    constrained_plan,
+                    user_message=user_message,
+                    language=language,
+                    weather_data=weather_data,
+                    transport_data=transport_data,
+                    places_data=places_data,
+                    events_data=events_data,
+                    qa_disclaimers=qa_disclaimers,
+                    conversation_context=conversation_context,
+                )
+                constrained_plan = _repair_response_requested_type_counts(constrained_plan, user_message)
+                constrained_plan = _ensure_requested_component_placeholders_in_response(
+                    constrained_plan,
+                    user_message,
+                    language,
+                )
+                constrained_plan = _ensure_budget_food_limitation_in_response(
+                    constrained_plan,
+                    user_message,
+                    language,
+                )
+                constrained_plan = _ensure_stop_by_stop_movement_in_response(
+                    constrained_plan,
+                    user_message,
+                    language,
+                )
+                if (
+                    _planner_response_has_minimum_user_value(constrained_plan)
+                    and not _planner_response_has_local_area_drift(constrained_plan, user_message)
+                    and not _planner_response_violates_explicit_preference_contract(constrained_plan, user_message)
+                    and not _planner_response_mixes_distant_walking_areas(constrained_plan, user_message)
+                    and not _planner_response_uses_excluded_area(constrained_plan, user_message)
+                ):
+                    return constrained_plan
+
         structured_plan = self._try_structured_json_plan(
             user_message=user_message,
             language=language,
@@ -13553,7 +13736,12 @@ class PlannerAgent(BaseAgent):
                     user_message,
                     language,
                 )
-                if not _planner_response_violates_explicit_preference_contract(finalized_plan, user_message):
+                if (
+                    not _planner_response_violates_explicit_preference_contract(finalized_plan, user_message)
+                    and not _planner_response_has_local_area_drift(finalized_plan, user_message)
+                    and not _planner_response_mixes_distant_walking_areas(finalized_plan, user_message)
+                    and not _planner_response_uses_excluded_area(finalized_plan, user_message)
+                ):
                     return finalized_plan
             structured_plan = ""
 
@@ -13597,7 +13785,12 @@ class PlannerAgent(BaseAgent):
                     user_message,
                     language,
                 )
-                if not _planner_response_violates_explicit_preference_contract(finalized_plan, user_message):
+                if (
+                    not _planner_response_violates_explicit_preference_contract(finalized_plan, user_message)
+                    and not _planner_response_has_local_area_drift(finalized_plan, user_message)
+                    and not _planner_response_mixes_distant_walking_areas(finalized_plan, user_message)
+                    and not _planner_response_uses_excluded_area(finalized_plan, user_message)
+                ):
                     return finalized_plan
 
         card_based_plan = _build_card_based_itinerary_fallback(
@@ -13635,7 +13828,12 @@ class PlannerAgent(BaseAgent):
                     user_message,
                     language,
                 )
-                if not _planner_response_violates_explicit_preference_contract(finalized_plan, user_message):
+                if (
+                    not _planner_response_violates_explicit_preference_contract(finalized_plan, user_message)
+                    and not _planner_response_has_local_area_drift(finalized_plan, user_message)
+                    and not _planner_response_mixes_distant_walking_areas(finalized_plan, user_message)
+                    and not _planner_response_uses_excluded_area(finalized_plan, user_message)
+                ):
                     return finalized_plan
 
         # Legacy path: retained as a fallback when the JSON path cannot produce a

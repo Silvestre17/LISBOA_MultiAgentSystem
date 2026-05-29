@@ -3122,6 +3122,7 @@ def canonicalize_transport_terms(text: str, language: str = "en") -> str:
             (r"Consider using Carris buses or CP trains\.?", "Considera uma alternativa fora do Metro."),
             (r"(?m)^\s+Considera uma alternativa fora do Metro\.", "- 💡 **Alternativa:** considera uma opção fora do Metro."),
             (r"\*\*CP TRAINS\*\*", "**Comboios CP**"),
+            (r"\*\*CARRIS URBAN / TRAM & BUS OPTIONS\*\*", "**Opções de autocarro e elétrico (Carris)**"),
             (r"✅\s+\*\*Direct Train Route Available\*\*", "✅ **Ligação direta de comboio confirmada**"),
             (r"🚆\s+Take\s+\*\*([^*\n]+)\*\*", r"🚆 Usa **\1**"),
             (r"No direct train line linking ([^.]+)\.?", r"Não foi confirmada uma ligação direta da CP entre \1."),
@@ -16551,6 +16552,7 @@ def strip_unverified_generic_planner_cards(text: str, language: str | None = Non
     lines = text.splitlines()
     output: list[str] = []
     removed_placeholder = False
+    removed_placeholder_types: set[str] = set()
     index = 0
     while index < len(lines):
         line = lines[index]
@@ -16575,6 +16577,13 @@ def strip_unverified_generic_planner_cards(text: str, language: str | None = Non
                 and not _PLANNER_LIMITATION_LABEL_RE.search(block_text)
             ):
                 removed_placeholder = True
+                normalized_block = _strip_accents_compat(block_text).lower()
+                if re.search(r"\b(?:jardim|jardins|garden|gardens|parque|parques|park|parks)\b", normalized_block):
+                    removed_placeholder_types.add("garden")
+                if re.search(r"\b(?:miradouro|miradouros|viewpoint|viewpoints|lookout)\b", normalized_block):
+                    removed_placeholder_types.add("viewpoint")
+                if re.search(r"\b(?:restaurante|restaurant|almoco|lunch|jantar|dinner|refeicao|meal)\b", normalized_block):
+                    removed_placeholder_types.add("food")
                 index = scan
                 continue
 
@@ -16590,11 +16599,30 @@ def strip_unverified_generic_planner_cards(text: str, language: str | None = Non
         return text
 
     is_pt = (language or infer_response_language(context_text=cleaned, default="en")).lower().startswith("pt")
-    note = (
-        "- **Limitação:** uma paragem pedida não ficou confirmada nos dados recolhidos; não publiquei um ponto genérico como se fosse um local verificado."
-        if is_pt
-        else "- **Limitation:** one requested stop was not confirmed in the gathered data; I did not publish a generic point as a verified place."
-    )
+    if "garden" in removed_placeholder_types:
+        note = (
+            "- **Limitação:** o jardim/parque pedido não ficou confirmado nos dados recolhidos; não publiquei um ponto genérico como se fosse um local verificado."
+            if is_pt
+            else "- **Limitation:** the requested garden/park was not confirmed in the gathered data; I did not publish a generic point as a verified place."
+        )
+    elif "viewpoint" in removed_placeholder_types:
+        note = (
+            "- **Limitação:** o miradouro pedido não ficou confirmado nos dados recolhidos; não publiquei um ponto genérico como se fosse um local verificado."
+            if is_pt
+            else "- **Limitation:** the requested viewpoint was not confirmed in the gathered data; I did not publish a generic point as a verified place."
+        )
+    elif "food" in removed_placeholder_types:
+        note = (
+            "- **Limitação:** a paragem de refeição pedida não ficou confirmada nos dados recolhidos; não publiquei um ponto genérico como se fosse um local verificado."
+            if is_pt
+            else "- **Limitation:** the requested meal stop was not confirmed in the gathered data; I did not publish a generic point as a verified place."
+        )
+    else:
+        note = (
+            "- **Limitação:** uma paragem pedida não ficou confirmada nos dados recolhidos; não publiquei um ponto genérico como se fosse um local verificado."
+            if is_pt
+            else "- **Limitation:** one requested stop was not confirmed in the gathered data; I did not publish a generic point as a verified place."
+        )
     if note in cleaned:
         return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 

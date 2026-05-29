@@ -3804,7 +3804,12 @@ class ResearcherAgent(BaseAgent):
         """Extract a location constraint from event discovery wording."""
         nearby_location = ResearcherAgent._extract_near_location_name(user_message)
         if nearby_location:
-            return nearby_location
+            # Mirror the pattern path below: drop trailing date/window words
+            # ("near Rossio this weekend") and reject pure filter/generic phrases
+            # so a contaminated location does not trip the event limitation guard.
+            nearby_location = ResearcherAgent._strip_event_temporal_suffix(nearby_location)
+            if nearby_location and not ResearcherAgent._event_location_constraint_is_filter(nearby_location):
+                return nearby_location
 
         patterns = (
             r"\b(?:perto|junto)\s+(?:de|do|da|dos|das)?\s+(?P<location>.+?)(?:\s+(?:hoje|amanh[ãa]|esta\s+noite|à\s+noite|a\s+noite|tonight|today|tomorrow)\b|[,;?.!]|$)",
@@ -3873,6 +3878,10 @@ class ResearcherAgent(BaseAgent):
             "exposicao", "exposicoes", "exhibition", "exhibitions", "teatro",
             "theatre", "theater", "danca", "dance", "cinema", "concertos",
             "concert", "concerts",
+            # Venue-type words an exclusion can leak into the captured location,
+            # e.g. "no museums events this weekend" -> "museums events". On their
+            # own (without a real place token) these are not a location.
+            "museu", "museus", "museum", "museums",
         }
         filter_clause_tokens = {
             "mas", "but", "sem", "without", "nao", "not", "menos", "except", "excluding",

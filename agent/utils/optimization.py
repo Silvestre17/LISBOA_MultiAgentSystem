@@ -60,8 +60,6 @@ class HTTPSessionPool:
             )
             self._session.mount('http://', adapter)
             self._session.mount('https://', adapter)
-            # Set default timeout
-            self._session.timeout = (3, 10)  # (connect, read) timeouts
         return self._session
 
     def get(self, url: str, **kwargs) -> requests.Response:

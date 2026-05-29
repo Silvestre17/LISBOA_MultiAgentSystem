@@ -663,14 +663,21 @@ CSS = f"""
     --text-muted: #5e5e5e;
     --shadow-sm: 0 10px 28px rgba(15, 23, 42, 0.07);
     --shadow-md: 0 18px 44px rgba(148, 148, 148, 0.16);
+    --font-ui: 'Inter', 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif;
+    --font-display: 'Montserrat', 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif;
 }}
 
 /* Base Fonts */
 html, body, [class*="css"]  {{
-    font-family: 'Inter', sans-serif;
+    font-family: var(--font-ui);
 }}
 h1, h2, h3, h4, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {{
-    font-family: 'Montserrat', sans-serif !important;
+    font-family: var(--font-display) !important;
+}}
+
+[data-testid="stSpinner"],
+[data-testid="stSpinner"] * {{
+    font-family: var(--font-ui) !important;
 }}
 
 /* Container width & layout */
@@ -842,7 +849,7 @@ footer {{ visibility: hidden; }}
 button {{
     border-radius: 12px !important;
     font-weight: 600 !important;
-    font-family: 'Inter', sans-serif;
+    font-family: var(--font-ui);
     transition: all 0.3s ease !important;
 }}
 
@@ -871,7 +878,7 @@ button[kind="secondary"]:hover {{
 
 /* Chat Inputs */
 [data-testid="stChatInput"] input {{
-    font-family: 'Inter', sans-serif !important;
+    font-family: var(--font-ui) !important;
 }}
 [data-testid="stChatInput"] > div {{
     border-radius: 16px !important;
@@ -1730,9 +1737,9 @@ def initialize_assistant(
             )
 
         init_message = (
-            "🤖 A iniciar o assistente..."
+            "🤖️ A iniciar o assistente..."
             if lang == "pt"
-            else "🤖 Initializing assistant..."
+            else "🤖️ Initializing assistant..."
         )
         if show_spinner:
             with st.spinner(init_message):
@@ -2037,7 +2044,7 @@ def build_sidebar():
         if st.session_state.initialized and hasattr(st.session_state, "assistant") and st.session_state.assistant:
             model_name = getattr(st.session_state.assistant, "model_name", None)
             if model_name:
-                st.caption(f"🤖 {model_name}")
+                st.caption(f"🤖️ {model_name}")
 
         if st.session_state.messages:
             if st.button(

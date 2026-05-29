@@ -1438,8 +1438,10 @@ class MultiAgentAssistant:
             return False
         return bool(
             re.search(
-                r"\b(?:forget|ignore|discard|drop|reset|clear|start over)\s+"
+                r"\b(?:forget|ignore|discard|drop|reset|clear)\s+"
                 r"(?:that|this|the)?\s*(?:plan|itinerary|context|previous|above)?\b|"
+                r"\b(?:start\s+over|begin\s+again|come[cç]ar\s+(?:de\s+novo|do\s+zero)|"
+                r"recome[cç]ar(?:\s+do\s+zero)?)\b|"
                 r"\b(?:new|fresh)\s+(?:question|topic|request)\b|"
                 r"\b(?:esquece|ignora|descarta|limpa|reinicia)\s+"
                 r"(?:isso|isto|esse|essa|o\s+plano|o\s+contexto|a\s+conversa\s+anterior)?\b|"
@@ -1457,7 +1459,9 @@ class MultiAgentAssistant:
         patterns = (
             r"^\s*(?:forget|ignore|discard|drop|reset|clear)\s+"
             r"(?:that|this|the)?\s*(?:plan|itinerary|context|previous|above)?\s*[\.;:,\-]*\s*(?P<rest>.+)$",
-            r"^\s*(?:start\s+over|new\s+question|fresh\s+question|new\s+topic|fresh\s+topic)\s*[\.;:,\-]*\s*(?P<rest>.+)$",
+            r"^\s*(?:start\s+over|begin\s+again|recome[cç]ar(?:\s+do\s+zero)?|"
+            r"come[cç]ar\s+(?:de\s+novo|do\s+zero)|new\s+question|fresh\s+question|"
+            r"new\s+topic|fresh\s+topic)\s*[\.;:,\-]*\s*(?P<rest>.+)$",
             r"^\s*(?:esquece|ignora|descarta|limpa|reinicia)\s+"
             r"(?:isso|isto|esse|essa|o\s+plano|o\s+contexto|a\s+conversa\s+anterior)?\s*[\.;:,\-]*\s*(?P<rest>.+)$",
             r"^\s*(?:nova|novo)\s+(?:pergunta|pedido|tema)\s*[\.;:,\-]*\s*(?P<rest>.+)$",
@@ -2588,6 +2592,31 @@ class MultiAgentAssistant:
         return {}
 
     @staticmethod
+    def _canonical_route_mode(text: str) -> str:
+        """Return the explicit travel mode named in a route query, if any.
+
+        Detects both the post-positioned form (``de comboio`` / ``by train``)
+        and the natural noun form before the route (``próximo comboio de A para
+        B``, ``metro do Rossio para o Oriente``, ``next bus from A to B``).
+        Conservative on purpose: only whole transport-mode words match, so an
+        operator/place name such as ``Metropolitano`` or ``Carris
+        Metropolitana`` is not misread, and it returns ``""`` when no explicit
+        mode is present (e.g. an unscoped multimodal request).
+        """
+        folded = MultiAgentAssistant._fold_context_text(text)
+        if not folded:
+            return ""
+        if re.search(r"\b(?:comboios?|trains?)\b", folded):
+            return "train"
+        if re.search(r"\b(?:autocarros?|bus|buses)\b", folded):
+            return "bus"
+        if re.search(r"\b(?:el[eé]tricos?|trams?)\b", folded):
+            return "tram"
+        if re.search(r"\bmetro\b", folded):
+            return "metro"
+        return ""
+
+    @staticmethod
     def _transport_follow_up_mode_hint(message: str, language: str) -> str:
         """Return a transport-mode preference expressed in an elliptical follow-up."""
         normalized = MultiAgentAssistant._fold_context_text(message)
@@ -2614,7 +2643,7 @@ class MultiAgentAssistant:
             normalized,
         ):
             return "comparar metro e comboio" if language == "pt" else "compare metro and train"
-        if re.search(r"\b(?:outros?\s+meios?\s+de\s+transporte|outros?\s+transportes?|meios?\s+de\s+transporte|other\s+(?:transport|transit)\s+modes?|other\s+ways?)\b", normalized):
+        if re.search(r"\b(?:outros?\s+meios?\s+de\s+transporte|outros?\s+transportes?|meios?\s+de\s+transporte|other\s+(?:transport|transit)\s+modes?|other\s+ways)\b", normalized):
             return "comparar meios suportados" if language == "pt" else "compare supported modes"
         if re.search(
             r"\b(?:outros?|outras?|mais|other|more)\s+(?:autocarros?|linhas?\s+de\s+autocarro|buses|bus\s+lines?)\b",
@@ -3337,7 +3366,8 @@ class MultiAgentAssistant:
         reverse_requested = bool(
             re.search(
                 r"\b(?:sentido\s+contrario|ao\s+contrario|rota\s+inversa|inverter\s+rota|"
-                r"sentido\s+inverso|volta|reverse|opposite\s+direction|other\s+way\s+round|"
+                r"sentido\s+inverso|volta|reverse|opposite\s+direction|"
+                r"other\s+way(?:\s+(?:round|around))?|"
                 r"way\s+back)\b",
                 normalized,
             )
@@ -3351,11 +3381,22 @@ class MultiAgentAssistant:
                     "com uma alternativa diferente",
                     "with a different alternative",
                 }:
-                    rewritten = (
-                        f"Como vou de {destination} para {origin}?"
+                    # The follow-up names no mode: preserve the previous route's
+                    # explicit mode so reversing a train/metro/bus trip keeps that
+                    # mode instead of silently widening to a multimodal answer.
+                    previous_mode = str(route.get("mode") or "").strip()
+                    mode_phrase = {
+                        "metro": "de metro" if language == "pt" else "by metro",
+                        "bus": "de autocarro" if language == "pt" else "by bus",
+                        "train": "de comboio" if language == "pt" else "by train",
+                        "tram": "de elétrico" if language == "pt" else "by tram",
+                    }.get(previous_mode, "")
+                    base = (
+                        f"Como vou de {destination} para {origin}"
                         if language == "pt"
-                        else f"How do I get from {destination} to {origin}?"
+                        else f"How do I get from {destination} to {origin}"
                     )
+                    rewritten = f"{base} {mode_phrase}?" if mode_phrase else f"{base}?"
                 else:
                     rewritten = self._rewrite_transport_alternative_request(
                         origin=destination,
@@ -3584,7 +3625,8 @@ class MultiAgentAssistant:
         reverse_requested_temporal = bool(
             re.search(
                 r"\b(?:sentido\s+contrario|ao\s+contrario|rota\s+inversa|inverter\s+rota|"
-                r"sentido\s+inverso|volta|reverse|opposite\s+direction|other\s+way\s+round|"
+                r"sentido\s+inverso|volta|reverse|opposite\s+direction|"
+                r"other\s+way(?:\s+(?:round|around))?|"
                 r"way\s+back)\b",
                 normalized,
             )
@@ -5190,6 +5232,10 @@ class MultiAgentAssistant:
         if "transport" in effective_agent_set:
             route_pair = self._extract_route_pair_from_text(message) or self._extract_route_pair_from_text(final_output)
             if route_pair:
+                route_pair = dict(route_pair)
+                # Remember the requested mode so an opposite-direction follow-up
+                # ("E no sentido contrário?") can keep it instead of widening.
+                route_pair["mode"] = self._canonical_route_mode(message)
                 anchors["last_transport_route"] = route_pair
             self._store_pending_location_clarification(message, final_output, effective_agent_set)
         else:

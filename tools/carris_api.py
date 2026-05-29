@@ -2293,50 +2293,82 @@ def carris_find_routes_between(
         origin_stop_by_id = {str(s["id"]): s for s in origin_stops}
         dest_stop_by_id = {str(s["id"]): s for s in dest_stops}
 
-        def get_route_stop_hint(route_short_name: str) -> Dict[str, str]:
-            """Return the matched origin/destination stops for a direct route."""
+        def _stop_pair_score(row: sqlite3.Row) -> float:
+            origin_stop = origin_stop_by_id.get(str(row["origin_stop_id"]), {})
+            dest_stop = dest_stop_by_id.get(str(row["destination_stop_id"]), {})
+            return float(origin_stop.get("distance_km", 99.0)) + float(
+                dest_stop.get("distance_km", 99.0)
+            )
+
+        def _build_route_stop_hints() -> Dict[str, Dict[str, Any]]:
+            """Resolve the best boarding/alighting stop pair for every candidate route in one query.
+
+            The previous implementation issued one heavy ``stop_times`` self-join
+            per route (an N+1 pattern that dominated Carris route latency: with N
+            direct routes it ran N near-identical joins). Every per-route query
+            reused the same origin/destination stop-id filters and differed only
+            by ``route_short_name``, so the joins collapse into a single windowed
+            query. ``ROW_NUMBER() ... <= 80`` per route mirrors the prior
+            per-route ``ORDER BY ... LIMIT 80``, so the rows considered for each
+            route - and therefore the selected hint - are identical.
+
+            Returns:
+                Mapping of ``route_short_name`` to the chosen stop-hint row.
+            """
             if not origin_stops or not dest_stops:
                 return {}
-
+            route_names = list(unique_routes.keys())
+            if not route_names:
+                return {}
             origin_ids_hint = [s["id"] for s in origin_stops]
             dest_ids_hint = [s["id"] for s in dest_stops]
+            ph_routes = ",".join(["?" for _ in route_names])
             ph_origin = ",".join(["?" for _ in origin_ids_hint])
             ph_dest = ",".join(["?" for _ in dest_ids_hint])
             cursor.execute(
                 f"""
-                SELECT
-                    st_o.stop_id AS origin_stop_id,
-                    st_d.stop_id AS destination_stop_id,
-                    t.trip_headsign AS headsign,
-                    so.stop_name AS origin_stop_name,
-                    sd.stop_name AS destination_stop_name
-                FROM stop_times st_o
-                JOIN stop_times st_d ON st_o.trip_id = st_d.trip_id
-                    AND st_o.stop_sequence < st_d.stop_sequence
-                JOIN trips t ON st_o.trip_id = t.trip_id
-                JOIN routes r ON t.route_id = r.route_id
-                JOIN stops so ON st_o.stop_id = so.stop_id
-                JOIN stops sd ON st_d.stop_id = sd.stop_id
-                WHERE r.route_short_name = ?
-                  AND st_o.stop_id IN ({ph_origin})
-                  AND st_d.stop_id IN ({ph_dest})
-                ORDER BY st_o.stop_sequence, st_d.stop_sequence
-                LIMIT 80
-                """,
-                [route_short_name, *origin_ids_hint, *dest_ids_hint],
-            )
-            rows = cursor.fetchall()
-            if not rows:
-                return {}
-
-            def stop_pair_score(row: sqlite3.Row) -> float:
-                origin_stop = origin_stop_by_id.get(str(row["origin_stop_id"]), {})
-                dest_stop = dest_stop_by_id.get(str(row["destination_stop_id"]), {})
-                return float(origin_stop.get("distance_km", 99.0)) + float(
-                    dest_stop.get("distance_km", 99.0)
+                SELECT route_short_name, origin_stop_id, destination_stop_id,
+                       headsign, origin_stop_name, destination_stop_name
+                FROM (
+                    SELECT
+                        r.route_short_name AS route_short_name,
+                        st_o.stop_id AS origin_stop_id,
+                        st_d.stop_id AS destination_stop_id,
+                        t.trip_headsign AS headsign,
+                        so.stop_name AS origin_stop_name,
+                        sd.stop_name AS destination_stop_name,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY r.route_short_name
+                            ORDER BY st_o.stop_sequence, st_d.stop_sequence
+                        ) AS _rn
+                    FROM stop_times st_o
+                    JOIN stop_times st_d ON st_o.trip_id = st_d.trip_id
+                        AND st_o.stop_sequence < st_d.stop_sequence
+                    JOIN trips t ON st_o.trip_id = t.trip_id
+                    JOIN routes r ON t.route_id = r.route_id
+                    JOIN stops so ON st_o.stop_id = so.stop_id
+                    JOIN stops sd ON st_d.stop_id = sd.stop_id
+                    WHERE r.route_short_name IN ({ph_routes})
+                      AND st_o.stop_id IN ({ph_origin})
+                      AND st_d.stop_id IN ({ph_dest})
                 )
+                WHERE _rn <= 80
+                """,
+                [*route_names, *origin_ids_hint, *dest_ids_hint],
+            )
+            grouped: Dict[str, List[sqlite3.Row]] = {}
+            for row in cursor.fetchall():
+                grouped.setdefault(row["route_short_name"], []).append(row)
+            return {
+                name: dict(min(rows, key=_stop_pair_score))
+                for name, rows in grouped.items()
+            }
 
-            return dict(min(rows, key=stop_pair_score))
+        route_stop_hints = _build_route_stop_hints()
+
+        def get_route_stop_hint(route_short_name: str) -> Dict[str, str]:
+            """Return the matched origin/destination stops for a direct route."""
+            return route_stop_hints.get(route_short_name, {})
 
         def format_final_walk_line(stop_hint: Dict[str, str]) -> str:
             """Return a final walking estimate from the alighting stop to destination."""

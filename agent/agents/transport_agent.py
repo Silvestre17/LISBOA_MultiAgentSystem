@@ -8195,12 +8195,68 @@ class TransportAgent(BaseAgent):
         return bool(
             re.fullmatch(
                 rf"(?:(?:mas\s+e|e|and|what about|how about|same|also|agora|now)\s+)?"
+                rf"(?:(?:s[oó]|apenas|just)\s+)?"
                 rf"(?:(?:de|by)\s+)?{mode_pattern}"
                 rf"(?:\s+(?:ou|or|e|and)\s+(?:(?:de|by)\s+)?{mode_pattern})*"
-                r"(?:\s+only)?",
+                r"(?:\s+(?:only|apenas|s[oó]))?",
                 normalized,
             )
         )
+
+    @staticmethod
+    def _is_reverse_direction_follow_up(user_message: str) -> bool:
+        """Returns whether a short follow-up asks for the reverse of the last route.
+
+        Matches endpoint-free anaphoric requests such as "E no sentido
+        contrário?", "ao contrário", "de volta", "the other way", or
+        "return trip". A leading connector ("e", "and", "agora") and a trailing
+        politeness/repetition token are tolerated, but anything that adds a new
+        endpoint must not match, so the check uses ``re.fullmatch`` over the
+        normalized message.
+        """
+        normalized = re.sub(r"[!?.,;:]+", "", (user_message or "").strip().lower())
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        if not normalized:
+            return False
+        reverse_pattern = (
+            r"(?:no\s+)?sentido\s+(?:contr[aá]rio|inverso|oposto)|"
+            r"no\s+outro\s+sentido|ao\s+contr[aá]rio|"
+            r"(?:o\s+)?caminho\s+(?:de\s+)?(?:volta|regresso)|"
+            r"de\s+volta|de\s+regresso|"
+            r"(?:the\s+)?(?:other|opposite|reverse)\s+(?:way|direction)|"
+            r"(?:the\s+)?way\s+back|return\s+trip|going\s+back|back\s+again"
+        )
+        return bool(
+            re.fullmatch(
+                rf"(?:(?:mas\s+e|e|and|what about|how about|agora|now|tamb[eé]m|also)\s+)?"
+                rf"(?:{reverse_pattern})"
+                rf"(?:\s+(?:de\s+novo|outra\s+vez|por\s+favor|please))?",
+                normalized,
+            )
+        )
+
+    @staticmethod
+    def _compose_route_follow_up_query(
+        origin: str, destination: str, mode: Optional[str], language: str
+    ) -> str:
+        """Builds a clean directional route question from cached endpoints/mode."""
+        if language == "pt":
+            mode_phrase = {
+                "metro": "de metro",
+                "bus": "de autocarro",
+                "train": "de comboio",
+                "tram": "de elétrico",
+            }.get(mode or "", "")
+            base = f"Como vou de {origin} para {destination}"
+            return f"{base} {mode_phrase}?" if mode_phrase else f"{base}?"
+        mode_phrase = {
+            "metro": "by metro",
+            "bus": "by bus",
+            "train": "by train",
+            "tram": "by tram",
+        }.get(mode or "", "")
+        base = f"How do I get from {origin} to {destination}"
+        return f"{base} {mode_phrase}?" if mode_phrase else f"{base}?"
 
     def _rewrite_metro_line_wait_follow_up(self, user_message: str, language: str) -> str:
         """Rewrites short Metro line wait follow-ups using the latest wait-time context."""
@@ -8311,6 +8367,21 @@ class TransportAgent(BaseAgent):
         metro_wait_follow_up = self._rewrite_metro_line_wait_follow_up(user_message, language)
         if metro_wait_follow_up != user_message:
             return metro_wait_follow_up
+
+        # Reverse-direction follow-ups ("E no sentido contrário?", "de volta",
+        # "the other way") carry no endpoints of their own, so resolve them by
+        # swapping the previously remembered route. A new mode named in the
+        # follow-up wins; otherwise the previous mode is preserved.
+        if self._is_reverse_direction_follow_up(user_message):
+            last_context = getattr(self, "_last_transport_context", None) or {}
+            reverse_origin = str(last_context.get("destination") or "").strip()
+            reverse_destination = str(last_context.get("origin") or "").strip()
+            if reverse_origin and reverse_destination:
+                reverse_mode = self._extract_follow_up_mode(user_message) or last_context.get("mode")
+                return self._compose_route_follow_up_query(
+                    reverse_origin, reverse_destination, reverse_mode, language
+                )
+            return user_message
 
         if not self._is_referential_mode_follow_up(user_message):
             return user_message
