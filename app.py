@@ -692,15 +692,34 @@ header[data-testid="stHeader"] {{ background: transparent; box-shadow: none; }}
 footer {{ visibility: hidden; }}
 #MainMenu {{ visibility: hidden; }}
 
+/* Hide Streamlit's hover anchor-link icons on all headings for a cleaner UI.
+   These inline elements also disrupted the banner title layout. */
+[data-testid="stHeaderActionElements"] {{ display: none !important; }}
+
 /* Custom Banner Component */
+/* Wrapper establishes a container context so the banner scales to the
+   available content width (not the viewport), which is what matters in
+   Streamlit where the sidebar reduces the usable width. */
+.top-banner {{
+    container-type: inline-size;
+    display: block;
+    width: 100%;
+}}
 .top-banner-container {{
-    background: linear-gradient(135deg, rgba(255, 64, 17, 0.15) 0%, rgba(255, 107, 71, 0.35) 30%, rgba(246, 218, 0, 0.35) 100%), url('{banner_url}');
+    background: linear-gradient(135deg, rgba(255, 64, 17, 0.35) 0%, rgba(246, 218, 0, 0.25) 30%,
+    rgba(14, 224, 113, 0.20) 70%, rgba(55, 119, 255, 0.25) 100%),
+    linear-gradient(90deg, rgba(19, 19, 19, 0.35) 0%, rgba(23, 22, 19, 0.35) 100%),
+    url('{banner_url}');
     background-size: cover;
-    background-position: center;
-    border-radius: 20px;
-    padding: 4rem 3.5rem;
+    background-position: center 36%;
+    border-radius: clamp(14px, 2.5cqi, 20px);
+    padding: 2.35rem 1.45rem;
+    min-height: 11.5rem;
     margin-bottom: 2rem;
-    box-shadow: 0 8px 32px rgba(255, 64, 17, 0.25), 0 2px 8px rgba(0,0,0,0.1);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    box-shadow: 0 18px 42px rgba(255, 64, 17, 0.23), 0 3px 12px rgba(0,0,0,0.12);
     position: relative;
     overflow: hidden;
 }}
@@ -733,20 +752,66 @@ footer {{ visibility: hidden; }}
 .top-banner-container h1 {{
     color: white;
     margin: 0;
-    font-size: 4.8rem;
-    font-weight: 700;
-    text-shadow: 0 2px 4px rgba(0,0,0,0.2);
-    letter-spacing: -0.04em;
+    padding: 0;
+    font-size: 3rem;
+    line-height: 0.94;
+    font-weight: 800;
+    text-shadow: 0 4px 14px rgba(0,0,0,0.26);
+    letter-spacing: 0;
+    overflow-wrap: break-word;
     position: relative;
     z-index: 1;
 }}
 
 .top-banner-container p {{
     color: rgba(255,255,255,0.95);
-    font-size: 1.5rem;
-    font-weight: 400;
+    font-size: 1.04rem;
+    margin: 0.72rem 0 0 0;
+    font-weight: 600;
+    line-height: 1.28;
+    max-width: 42rem;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.26);
     position: relative;
     z-index: 1;
+}}
+
+@container (min-width: 340px) {{
+    .top-banner-container {{
+        min-height: 12.75rem;
+        padding: 2.7rem 1.85rem;
+    }}
+    .top-banner-container h1 {{
+        font-size: 3.85rem;
+    }}
+    .top-banner-container p {{
+        font-size: 1.12rem;
+    }}
+}}
+
+@container (min-width: 560px) {{
+    .top-banner-container {{
+        min-height: 15.25rem;
+        padding: 3.25rem 2.7rem;
+    }}
+    .top-banner-container h1 {{
+        font-size: 5.3rem;
+    }}
+    .top-banner-container p {{
+        font-size: 1.38rem;
+    }}
+}}
+
+@container (min-width: 780px) {{
+    .top-banner-container {{
+        min-height: 17.25rem;
+        padding: 3.9rem 3.5rem;
+    }}
+    .top-banner-container h1 {{
+        font-size: 6.35rem;
+    }}
+    .top-banner-container p {{
+        font-size: 1.55rem;
+    }}
 }}
 
 /* Sidebar specific aesthetics */
@@ -1005,10 +1070,15 @@ button[kind="secondary"]:hover {{
 }}
 
 /* Welcome Discover CTA */
+.welcome-discover-wrap {{
+    container-type: inline-size;
+    display: block;
+    width: 100%;
+}}
 .welcome-discover {{
     position: relative;
     margin: 28px auto 18px;
-    padding: clamp(20px, 3vw, 32px) clamp(22px, 3.5vw, 40px);
+    padding: clamp(20px, 3cqi, 32px) clamp(22px, 3.5cqi, 40px);
     border-radius: 22px;
     background:
         radial-gradient(circle at 12% 18%, rgba(246, 218, 0, 0.32), transparent 55%),
@@ -1019,7 +1089,7 @@ button[kind="secondary"]:hover {{
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    gap: clamp(16px, 3vw, 32px);
+    gap: clamp(16px, 3cqi, 32px);
     overflow: hidden;
 }}
 .welcome-discover::before {{
@@ -1049,7 +1119,7 @@ button[kind="secondary"]:hover {{
 }}
 .welcome-discover h3 {{
     margin: 0 0 6px;
-    font-size: clamp(1.25rem, 2.4vw, 1.65rem);
+    font-size: clamp(1.25rem, 4cqi, 1.65rem);
     font-weight: 800;
     color: #1f2937;
     line-height: 1.25;
@@ -1086,7 +1156,7 @@ button[kind="secondary"]:hover {{
     width: 18px;
     height: 18px;
 }}
-@media (max-width: 760px) {{
+@container (max-width: 620px) {{
     .welcome-discover {{
         grid-template-columns: 1fr;
         text-align: left;
@@ -1262,6 +1332,22 @@ button[kind="secondary"]:hover {{
     font-weight: 700;
     color: var(--primary-red);
     font-size: 1.05em;
+}}
+
+/* ============ RESPONSIVE TABLES IN CHAT ============ */
+/* Transport/itinerary answers may contain wide tables. On narrow screens
+   let them scroll horizontally inside the message instead of breaking the
+   page layout. */
+[data-testid="stChatMessage"] table {{
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+}}
+[data-testid="stChatMessage"] table th,
+[data-testid="stChatMessage"] table td {{
+    white-space: nowrap;
 }}
 
 </style>
@@ -1783,9 +1869,11 @@ if small_logo_path:
 def display_banner():
     st.markdown(
         f"""
-        <div class="top-banner-container">
-            <h1>{t("app_title")}</h1>
-            <p>{t("app_subtitle")}</p>
+        <div class="top-banner">
+            <div class="top-banner-container">
+                <h1>{t("app_title")}</h1>
+                <p>{t("app_subtitle")}</p>
+            </div>
         </div>
     """,
         unsafe_allow_html=True,
@@ -2088,19 +2176,21 @@ def build_welcome():
 
     st.markdown(
         f"""
-        <div class="welcome-discover">
-            <div>
-                <span class="welcome-discover-eyebrow">✨ {t('discover_eyebrow')}</span>
-                <h3>{t('discover_title')}</h3>
-                <p>{t('discover_subtitle')}</p>
+        <div class="welcome-discover-wrap">
+            <div class="welcome-discover">
+                <div>
+                    <span class="welcome-discover-eyebrow">✨ {t('discover_eyebrow')}</span>
+                    <h3>{t('discover_title')}</h3>
+                    <p>{t('discover_subtitle')}</p>
+                </div>
+                <a class="welcome-discover-cta" href="{info_href}" target="_self" rel="noopener">
+                    <span>ℹ️ {t('discover_cta')}</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <line x1="5" y1="12" x2="19" y2="12"/>
+                        <polyline points="13 6 19 12 13 18"/>
+                    </svg>
+                </a>
             </div>
-            <a class="welcome-discover-cta" href="{info_href}" target="_self" rel="noopener">
-                <span>ℹ️ {t('discover_cta')}</span>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <line x1="5" y1="12" x2="19" y2="12"/>
-                    <polyline points="13 6 19 12 13 18"/>
-                </svg>
-            </a>
         </div>
         """,
         unsafe_allow_html=True,
@@ -2724,10 +2814,11 @@ def run_info_page() -> None:
             padding: clamp(1.4rem, 4vw, 3.7rem);
             margin-bottom: 1.2rem;
             border-radius: 8px;
-            background:
-                linear-gradient(90deg, rgba(13, 18, 32, 0.88) 0%, rgba(13, 18, 32, 0.62) 45%, rgba(13, 18, 32, 0.22) 100%),
-                linear-gradient(180deg, rgba(13, 18, 32, 0.12) 0%, rgba(13, 18, 32, 0.75) 100%),
-                var(--info-hero-image, linear-gradient(135deg, #111827, #334155));
+            background:               
+                linear-gradient(90deg, rgba(255, 64, 17, 0.10) 0%, rgba(246, 218, 0, 0.15) 30%, 
+                rgba(14, 224, 113, 0.10) 70%, rgba(55, 119, 255, 0.10) 100%),
+                linear-gradient(180deg, rgba(5, 5, 6, 0.72) 0%, rgba(3, 4, 4, 0.75) 100%),
+                var(--info-hero-image, linear-gradient(135deg, #111318, #3b424c));
             background-position: center;
             background-size: cover;
             box-shadow: 0 22px 60px rgba(15, 23, 42, 0.18);
