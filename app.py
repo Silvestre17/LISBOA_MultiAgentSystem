@@ -145,7 +145,7 @@ LANGUAGE_OPTIONS = {
 TRANSLATIONS = {
     "en": {
         "app_title": "LISBOA",
-        "app_subtitle": "Lisbon Tourism and Urban Mobility Prototype",
+        "app_subtitle": "Lisbon Itinerary System Based On AI",
         "settings": "System Settings",
         "language": "Language",
         "llm_provider": "AI Provider",
@@ -307,7 +307,7 @@ TRANSLATIONS = {
     },
     "pt": {
         "app_title": "LISBOA",
-        "app_subtitle": "Lisbon Tourism and Urban Mobility Prototype",
+        "app_subtitle": "Lisbon Itinerary System Based On AI",
         "settings": "Configurações",
         "language": "Idioma / Language",
         "llm_provider": "Motor de IA",
