@@ -232,7 +232,7 @@ _ACCESSIBILITY_CLAIM_RE = re.compile(
     re.IGNORECASE,
 )
 _INLINE_OFFER_RE = re.compile(
-    r"(?:\s+|^)(?:If you want(?:,)?|If you['’]d like(?:,)?|Would you like me to|Let me know if|I can also|I can help(?: you)?|I can bring|I can fetch|I can filter|I can get updated|Se quiser(?:es)?(?:,)?|Se preferir(?:,)?|Posso também|Posso tambem|Posso detalhar|Posso filtrar|Posso trazer|Posso ver|Posso verificar|Posso procurar|Quer que eu)\b.*$",
+    r"(?:\s+|^)(?:If you want(?:,)?|If you['’]d like(?:,)?|Would you like me to|Let me know if|I can also|(?<!how\s)I can help(?: you)?|I can bring|I can fetch|I can filter|I can get updated|Se quiser(?:es)?(?:,)?|Se preferir(?:,)?|Posso também|Posso tambem|Posso detalhar|Posso filtrar|Posso trazer|Posso ver|Posso verificar|Posso procurar|Quer que eu)\b.*$",
     re.IGNORECASE | re.MULTILINE,
 )
 _TRANSPORT_WEATHER_BLOCK_RE = re.compile(
@@ -6408,6 +6408,74 @@ def _strip_event_card_separators(text: str) -> str:
     return clean_newlines("\n".join(lines)).strip()
 
 
+def _query_asks_event_end_date(user_query: str) -> bool:
+    """Return whether the user is asking when an event or festival ends."""
+    normalized = _strip_accents_compat(user_query or "").lower()
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if not normalized:
+        return False
+    return bool(
+        re.search(
+            r"\b(?:quando\s+(?:termina|acaba|encerra)|ate\s+quando|"
+            r"qual\s+(?:e\s+)?a\s+data\s+(?:de\s+)?(?:fim|termino)|"
+            r"data\s+(?:final|de\s+fim)|"
+            r"when\s+(?:does|do|is|are|will)\b.{0,60}\b(?:end|finish|close)|"
+            r"until\s+when|end\s+date|finishing\s+date)\b",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _extract_event_end_date_from_when(when_value: str) -> str:
+    """Extract the end side of an event date range, when one is explicit."""
+    value = _strip_markdown_formatting(str(when_value or "")).strip()
+    if not value:
+        return ""
+    parts = [
+        part.strip(" \t\r\n.;,")
+        for part in re.split(
+            r"\s+(?:a|ate|até|to|until|through)\s+|\s+[–—-]\s+",
+            value,
+            flags=re.IGNORECASE,
+        )
+        if part.strip(" \t\r\n.;,")
+    ]
+    if len(parts) < 2:
+        return ""
+    end_date = parts[-1]
+    if not re.search(r"\b20\d{2}\b", end_date):
+        years = re.findall(r"\b(20\d{2})\b", value)
+        if years:
+            end_date = f"{end_date} {years[-1]}"
+    return end_date.strip()
+
+
+def _build_event_end_date_direct_line(
+    events: list[dict[str, object]],
+    user_query: str,
+    language: str = "en",
+) -> str:
+    """Build a direct answer for event end-date questions from parsed event cards."""
+    if not events or not _query_asks_event_end_date(user_query):
+        return ""
+    for event in events:
+        title = _strip_event_title_leading_emojis(str(event.get("title") or "")).strip()
+        end_date = _extract_event_end_date_from_when(str(event.get("when") or ""))
+        if not title or not end_date:
+            continue
+        if language == "pt":
+            return (
+                f"✅ **Resposta direta:** **{title}** termina em **{end_date}**, "
+                "segundo os dados da VisitLisboa."
+            )
+        return (
+            f"✅ **Direct answer:** **{title}** ends on **{end_date}**, "
+            "according to the VisitLisboa data."
+        )
+    return ""
+
+
 def _build_researcher_event_intro_lines(
     events: list[dict[str, object]],
     user_query: str,
@@ -6425,6 +6493,15 @@ def _build_researcher_event_intro_lines(
     )
     music_markers = ("musica", "música", "music", "ao vivo", "live")
     one_event = len(events) == 1
+
+    end_date_direct = _build_event_end_date_direct_line(events, user_query, language)
+    if end_date_direct:
+        return [
+            "### 🎭 Evento Cultural" if is_pt and one_event else "### 🎭 Eventos Culturais"
+            if is_pt
+            else "### 🎭 Cultural Event" if one_event else "### 🎭 Cultural Events",
+            end_date_direct,
+        ]
 
     if one_event and not any(marker in normalized_query for marker in general_markers):
         title = str(events[0].get("title") or "").strip()
@@ -7049,6 +7126,15 @@ def reconcile_researcher_event_response(
         intro_lines = [line for line in primary_intro if not _event_has_note_like_description(line)] or [line for line in fallback_intro if not _event_has_note_like_description(line)]
     if not intro_lines:
         intro_lines = _build_researcher_event_intro_lines(merged_events, user_query=user_query, language=language)
+    end_date_direct = _build_event_end_date_direct_line(merged_events, user_query, language)
+    if end_date_direct:
+        heading = next((line for line in intro_lines if line.strip().startswith("###")), "")
+        if not heading:
+            if language == "pt":
+                heading = "### 🎭 Evento Cultural" if len(merged_events) == 1 else "### 🎭 Eventos Culturais"
+            else:
+                heading = "### 🎭 Cultural Event" if len(merged_events) == 1 else "### 🎭 Cultural Events"
+        intro_lines = [heading, end_date_direct]
     direct_label = "Resposta direta" if language == "pt" else "Direct answer"
     direct_re = re.compile(r"\*\*(?:Resposta direta|Direct answer):\*\*", flags=re.IGNORECASE)
     if intro_lines and not any(direct_re.search(line) for line in intro_lines):
@@ -12792,6 +12878,47 @@ def normalize_place_hours_limitation_language(text: str, language: str = "en") -
     )
 
 
+def strip_clear_english_description_lines_from_pt_cards(text: str, language: str = "en") -> str:
+    """Drop clearly English description fields from Portuguese card output.
+
+    VisitLisboa records and QA repairs can occasionally surface English prose in
+    a Portuguese card. Rather than publishing mixed-language text, keep the
+    grounded structured fields and remove only description lines whose body is
+    clearly English prose.
+    """
+    if not text or not (language or "").lower().startswith("pt"):
+        return text or ""
+
+    english_markers = (
+        "restaurant serving", "restaurant in", "with an", "with a ",
+        "affordable price", "price range", "cuisine", "located in",
+        "offers", "serves", "features", "available on", "official page",
+        "rated ", "listed as", "on tripadvisor", "with wi", "under 20",
+        "good option",
+    )
+    pt_markers = (
+        "restaurante", "cozinha", "comida", "localizado", "localizada",
+        "preço", "horário", "entrada", "gratuita", "lisboa",
+    )
+    desc_line_re = re.compile(
+        r"(?mi)^\s*[-*]\s+📝\s+\*\*(?:Descri[cç][aã]o|Descricao|Description):\*\*\s*(?P<body>[^\n]+)\n?",
+    )
+
+    def _replace(match: re.Match[str]) -> str:
+        body = _strip_accents_compat(_strip_markdown_formatting(match.group("body"))).lower()
+        if re.match(r"^\s*dica\s*:", body):
+            return ""
+        english_score = sum(1 for marker in english_markers if marker in body)
+        has_pt_marker = any(marker in body for marker in pt_markers)
+        if english_score >= 1 and not has_pt_marker:
+            return ""
+        if english_score >= 2:
+            return ""
+        return match.group(0)
+
+    return desc_line_re.sub(_replace, text)
+
+
 def refine_generic_researcher_direct_answer(text: str, language: str = "en") -> str:
     """Replace vague researcher direct answers with evidence-aware phrasing."""
     if not text:
@@ -12817,6 +12944,13 @@ def refine_generic_researcher_direct_answer(text: str, language: str = "en") -> 
     )
     has_river_context = bool(re.search(r"\b(?:tagus|tejo|river|riverside|waterfront|view|vista|beira-rio|rio)\b", visible))
     has_seafood_context = bool(re.search(r"\b(?:seafood|marisco|peixe|fish|bacalhau)\b", visible))
+    has_asian_context = bool(
+        re.search(
+            r"\b(?:asiatic|asian|japanese|japones|japonesa|chinese|chines|"
+            r"chinesa|sushi|jncquoi\s+asia|noori\s+sushi)\b",
+            visible,
+        )
+    )
     has_diet_context = bool(
         re.search(
             r"\b(?:vegetarian|vegetarianas?|vegetarianos?|vegetariana|vegetariano|"
@@ -12857,6 +12991,8 @@ def refine_generic_researcher_direct_answer(text: str, language: str = "en") -> 
                 "✅ **Resposta direta:** encontrei opções de restauração relevantes, mas os dados disponíveis "
                 "não confirmam totalmente a preferência vegetariana/vegan e todos os critérios pedidos."
             )
+        elif has_asian_context:
+            direct = "✅ **Resposta direta:** encontrei opções de restauração asiática confirmadas nos dados disponíveis."
         elif has_seafood_context and has_river_context:
             direct = "✅ **Resposta direta:** encontrei opções de restauração ligadas a peixe/marisco e zona ribeirinha que correspondem ao pedido."
         elif has_seafood_context:
@@ -12893,6 +13029,8 @@ def refine_generic_researcher_direct_answer(text: str, language: str = "en") -> 
             "✅ **Direct answer:** I found relevant restaurant options, but the available data does not fully "
             "confirm the vegetarian/vegan preference and all requested criteria."
         )
+    elif has_asian_context:
+        direct = "✅ **Direct answer:** I found Asian restaurant options confirmed in the available data."
     elif has_seafood_context and has_river_context:
         direct = "✅ **Direct answer:** I found seafood or riverside restaurant options that match the request."
     elif has_seafood_context:
@@ -15927,6 +16065,19 @@ def collapse_repeated_direct_answer_labels(text: str) -> str:
     if not text or not isinstance(text, str):
         return text or ""
 
+    def _strip_inline_label_repeats(body: str) -> str:
+        label_prefix_re = re.compile(
+            r"^\s*(?:\*\*\s*(?:Resposta direta|Direct answer)\s*:\s*\*\*|"
+            r"(?:Resposta direta|Direct answer)\s*:)\s*",
+            flags=re.IGNORECASE,
+        )
+        repaired = body or ""
+        while True:
+            cleaned = label_prefix_re.sub("", repaired, count=1)
+            if cleaned == repaired:
+                return cleaned.strip()
+            repaired = cleaned
+
     direct_line_re = re.compile(
         r"(?mi)^(?P<indent>\s*)(?P<bullet>[-*]\s*)?"
         r"(?:(?P<marker>\S+)\s+)?"
@@ -15940,10 +16091,15 @@ def collapse_repeated_direct_answer_labels(text: str) -> str:
             repaired.append(line)
             continue
         seen += 1
+        body = _strip_inline_label_repeats(match.group("body").strip())
         if seen == 1:
-            repaired.append(line)
+            prefix = f"{match.group('indent')}{match.group('bullet') or ''}"
+            marker = (match.group("marker") or "").strip()
+            if marker:
+                prefix = f"{prefix}{marker} "
+            prefix = f"{prefix}**{match.group('label')}:**"
+            repaired.append(f"{prefix} {body}".rstrip())
             continue
-        body = match.group("body").strip()
         if not body:
             continue
         if body[0].islower():
@@ -16816,6 +16972,19 @@ def normalize_capability_list_markdown(text: str) -> str:
         changed = True
 
     return "\n".join(output) if changed else text
+
+
+def restore_capability_section_headings(text: str) -> str:
+    """Restore capability-list section headings after generic visual cleanup."""
+    if not text:
+        return text or ""
+    return re.sub(
+        r"(?mi)^(?!###\s)(?P<heading>(?:💡|🤖)\s+\*\*"
+        r"(?:Áreas suportadas|Areas suportadas|Supported Areas|Como posso ajudar|How I Can Help)"
+        r"\*\*)\s*$",
+        r"### \g<heading>",
+        text,
+    )
 
 
 def final_visual_pass(text: str) -> str:
@@ -17988,6 +18157,10 @@ def final_visual_pass(text: str) -> str:
     text = normalize_event_answer_contract(text, infer_visible_label_language(text, default="en"))
     text = normalize_event_plain_field_bullets(text, infer_visible_label_language(text, default="en"))
     text = repair_duplicate_event_date_value_labels(text)
+    text = strip_clear_english_description_lines_from_pt_cards(
+        text,
+        infer_visible_label_language(text, default="en"),
+    )
     text = normalize_transport_comparison_info_notes(text)
     text = repair_malformed_heading_bullets(text)
     text = normalize_standalone_transport_metric_bullets(text)
@@ -18630,6 +18803,7 @@ def final_visual_pass(text: str) -> str:
     text = ensure_blank_lines_before_headers(text)
     text = ensure_blank_lines_after_headers(text)
     text = repair_transport_wait_time_markdown(text)
+    text = restore_capability_section_headings(text)
     # Collapse triple blank lines that may have been reintroduced.
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
@@ -22384,6 +22558,7 @@ def final_post_qa_guard(
     guarded = normalize_final_notes_heading_and_duplicates(guarded, language)
     guarded = normalize_feature_lines_mislabeled_as_description(guarded, language)
     guarded = normalize_known_field_lines_mislabeled_as_description(guarded, language)
+    guarded = strip_clear_english_description_lines_from_pt_cards(guarded, language)
     guarded = localize_visitlisboa_feature_values(guarded, language)
     guarded = normalize_pt_residual_schedule_language(guarded, language)
     guarded = normalize_standalone_planner_section_headings(guarded, language)

@@ -226,6 +226,11 @@ def _strip_endpoint_mode_clauses(value: str) -> str:
         rf"\s+(?:e|and)\s+(?:se|if)\s+(?=[^,;.!?]*(?:{quality_terms})).*$",
         rf"\s+(?:em\s+caso\s+de|caso|in\s+case\s+of)\s+(?=[^,;.!?]*(?:{quality_terms})).*$",
         rf"\s+(?:à|a|na|no|in)\s+(?=[^,;.!?]*(?:{quality_terms})).*$",
+        r"\s+(?:quais?\s+(?:s[aã]o\s+)?(?:as\s+|os\s+)?melhores?\s+op[cç][oõ]es"
+        r"(?:\s+de\s+transporte)?|qual\s+(?:e|é)\s+a\s+melhor\s+op[cç][aã]o"
+        r"(?:\s+de\s+transporte)?|melhores?\s+op[cç][oõ]es(?:\s+de\s+transporte)?|"
+        r"op[cç][oõ]es\s+de\s+transporte|what\s+(?:are|'re)\s+the\s+best\s+"
+        r"(?:transport\s+)?options|best\s+(?:transport\s+)?options|transport\s+options)\b.*$",
     )
     for pattern in cleanup_patterns:
         cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE).strip(" .?!,;:")

@@ -3329,6 +3329,7 @@ class QualityAssuranceAgent(BaseAgent):
                 or self._repair_promoted_researcher_cards_to_headings(draft_response, repaired)
                 or self._repair_added_missing_value_placeholders(draft_response, repaired)
                 or self._repair_degraded_category_listing(draft_response, repaired)
+                or self._repair_collapsed_event_results_to_no_result(draft_response, repaired)
             ):
                 return final_post_qa_guard(draft_response, language=language)
             repaired_lower = repaired.lower()
@@ -3433,6 +3434,28 @@ class QualityAssuranceAgent(BaseAgent):
             return True
 
         return len(re.findall(r"(?i)\*\*(?:Locais de gastronomia|Food and Dining)\*\*", repaired_response or "")) >= 3
+
+    @staticmethod
+    def _repair_collapsed_event_results_to_no_result(draft_response: str, repaired_response: str) -> bool:
+        """Return whether QA collapsed grounded event cards into a false no-result answer."""
+        draft = draft_response or ""
+        repaired = repaired_response or ""
+        draft_has_event_results = bool(
+            re.search(r"(?mi)^###\s+[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]*\s*\*\*(?:Eventos encontrados|Events Found)\*\*", draft)
+            and (
+                "visitlisboa.com/en/events/" in draft.lower()
+                or re.search(r"(?mi)^\s{4,}[-*]\s+(?:🗓️|📅)\s+\*\*(?:Quando|Data/Hora|When|Date)", draft)
+            )
+        )
+        repaired_no_result = bool(
+            re.search(
+                r"(?i)\b(?:sem eventos confirmados|no confirmed events|"
+                r"não consegui confirmar um evento|nao consegui confirmar um evento|"
+                r"não encontrei eventos|nao encontrei eventos)\b",
+                repaired,
+            )
+        )
+        return draft_has_event_results and repaired_no_result
 
     def _verify_facts(
         self,

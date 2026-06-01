@@ -1617,6 +1617,7 @@ def _format_event_filter_summary(
         date_window = "intervalo aberto" if language == "pt" else "open range"
 
     normalized_query = (query or "").strip()
+    display_query = normalized_query if _expand_event_query_tokens(normalized_query) else ""
     normalized_category = (category or "").strip()
     normalized_category = _localize_event_category(normalized_category, language=language)
     excluded_labels = [
@@ -1629,8 +1630,8 @@ def _format_event_filter_summary(
         scope_parts.append(normalized_category if normalized_category else "todas as categorias")
         if excluded_labels:
             scope_parts.append(f"sem {', '.join(dict.fromkeys(excluded_labels))}")
-        if normalized_query:
-            scope_parts.append(f"foco temático: {normalized_query}")
+        if display_query:
+            scope_parts.append(f"foco temático: {display_query}")
         else:
             scope_parts.append("pesquisa geral de eventos")
         return [
@@ -1642,8 +1643,8 @@ def _format_event_filter_summary(
     scope_parts.append(normalized_category if normalized_category else "all categories")
     if excluded_labels:
         scope_parts.append(f"excluding {', '.join(dict.fromkeys(excluded_labels))}")
-    if normalized_query:
-        scope_parts.append(f"theme focus: {normalized_query}")
+    if display_query:
+        scope_parts.append(f"theme focus: {display_query}")
     else:
         scope_parts.append("broad event discovery")
     return [
@@ -2398,6 +2399,8 @@ _EVENT_GENERIC_QUERY_TERMS = {
     'find', 'finding', 'search', 'show', 'mostrar', 'mostra', 'encontra', 'encontre',
     'procura', 'procure', 'descobre', 'discover', 'want', 'quero',
     'this', 'week', 'esta', 'semana', 'what', 'which', 'que', 'quais',
+    'ha', 'há', 'neste', 'nesta', 'mes', 'mês', 'month', 'proximo', 'proximos',
+    'proxima', 'proximas', 'next', 'upcoming',
     'there', 'happening', 'temos', 'have', 'local', 'locais',
     'tell', 'about', 'details', 'detail', 'information', 'info', 'specific',
     'sobre', 'diz', 'fala', 'me', 'more', 'please', 'year', 'ano',
@@ -3482,6 +3485,12 @@ _RESTAURANT_NON_TRADITIONAL_EVIDENCE_RE = re.compile(
     r"japanese|japones|sushi|burger|hamburguer|fusion|steakhouse|"
     r"contemporary|contemporaneo|asian|asiatico)\b"
 )
+_RESTAURANT_ASIAN_EVIDENCE_RE = re.compile(
+    r"\b(?:asian|asiatic[oa]s?|asiatico|asiatica|japanese|japones(?:a|as|es)?|"
+    r"sushi|chinese|chines(?:a|as|es)?|thai|tailandes(?:a|as|es)?|"
+    r"indian|indian[oa]s?|korean|corean[oa]s?|vietnamese|vietnamita|"
+    r"ramen|noodles?|dim\s+sum|bao)\b"
+)
 _RESTAURANT_ACCESSIBILITY_EVIDENCE_RE = re.compile(
     r"\b(?:accessibility|accessible|acessibilidade|acessivel|wheelchair|"
     r"mobilidade reduzida|cadeira de rodas)\b"
@@ -3557,6 +3566,15 @@ def _infer_restaurant_preference_flags(
                 normalized,
             )
         ),
+        "asian": bool(
+            re.search(
+                r"\b(?:asian|asiatic[oa]s?|asiatico|asiatica|japanese|japones(?:a|as|es)?|"
+                r"sushi|chinese|chines(?:a|as|es)?|thai|tailandes(?:a|as|es)?|"
+                r"indian|indian[oa]s?|korean|corean[oa]s?|vietnamese|vietnamita|"
+                r"ramen|noodles?|dim\s+sum|bao)\b",
+                normalized,
+            )
+        ),
         "no_seafood": bool(
             re.search(
                 r"\b(?:sem|without|no|avoid|evitar|excluir|não\s+quero|nao\s+quero)\b"
@@ -3596,6 +3614,7 @@ def _score_restaurant_preference_result(
     non_traditional = bool(_RESTAURANT_NON_TRADITIONAL_EVIDENCE_RE.search(lookup_text))
     accessible = bool(_RESTAURANT_ACCESSIBILITY_EVIDENCE_RE.search(lookup_text))
     vegetarian = bool(_RESTAURANT_VEGETARIAN_EVIDENCE_RE.search(lookup_text))
+    asian = bool(_RESTAURANT_ASIAN_EVIDENCE_RE.search(lookup_text))
     seafood = bool(_RESTAURANT_SEAFOOD_EVIDENCE_RE.search(lookup_text))
     low_price = bool(_RESTAURANT_LOW_PRICE_EVIDENCE_RE.search(evidence_text))
     mid_price = bool(_RESTAURANT_MID_PRICE_EVIDENCE_RE.search(evidence_text))
@@ -3634,6 +3653,16 @@ def _score_restaurant_preference_result(
         else:
             hard_negative = True
 
+    if preference_flags.get("asian"):
+        if asian:
+            score += 5.0
+            matched_constraints += 1
+        elif traditional:
+            score -= 5.0
+            hard_negative = True
+        else:
+            score -= 2.0
+
     if preference_flags.get("no_seafood"):
         if seafood:
             score -= 6.0
@@ -3646,6 +3675,15 @@ def _score_restaurant_preference_result(
         hard_negative = True
 
     return score, matched_constraints, hard_negative
+
+
+def _restaurant_result_has_asian_evidence(result: Dict[str, Any]) -> bool:
+    """Return whether a restaurant result explicitly evidences Asian cuisine."""
+    return bool(
+        _RESTAURANT_ASIAN_EVIDENCE_RE.search(
+            _normalize_lookup_text(_restaurant_preference_text(result))
+        )
+    )
 
 
 def _rank_restaurant_results_for_preferences(
@@ -3719,6 +3757,8 @@ def _build_restaurant_preference_note(query: Optional[str], language: str = "en"
             "low_price": "preço baixo",
             "accessibility": "acessibilidade",
             "vegetarian": "opção vegetariana",
+            "asian": "cozinha asiática",
+            "no_seafood": "sem marisco/peixe",
         }
         requested = ", ".join(labels[key] for key in preference_flags)
         return (
@@ -3731,6 +3771,8 @@ def _build_restaurant_preference_note(query: Optional[str], language: str = "en"
         "low_price": "low price",
         "accessibility": "accessibility",
         "vegetarian": "vegetarian option",
+        "asian": "Asian cuisine",
+        "no_seafood": "no seafood/fish",
     }
     requested = ", ".join(labels[key] for key in preference_flags)
     return (
@@ -5463,8 +5505,13 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
 
         requested_window = max_results + offset
         render_language = _infer_visitlisboa_output_language(query, language)
+        requested_category_for_lookup = _normalize_place_category_filter(category)
+        broad_restaurant_preference_query = (
+            requested_category_for_lookup == "restaurants"
+            and bool(_infer_restaurant_preference_flags(query, "food"))
+        )
         specific_lookup_query = _extract_specific_place_lookup_phrase(query)
-        if specific_lookup and query and not specific_lookup_query:
+        if specific_lookup and query and not specific_lookup_query and not broad_restaurant_preference_query:
             specific_lookup_query = _normalize_lookup_text(query)
         effective_query = _apply_known_place_lookup_alias(specific_lookup_query or query)
         if specific_lookup_query:
@@ -5519,6 +5566,12 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
             try:
                 requested_category = _normalize_place_category_filter(category)
                 search_query = effective_query or query or "places and attractions in Lisbon"
+                if (
+                    requested_category == "restaurants"
+                    and restaurant_preference_flags_for_search.get("asian")
+                    and not specific_lookup_query
+                ):
+                    search_query = f"Asian Japanese sushi Chinese Thai Indian restaurants Lisbon {search_query}"
                 if query_intent == "top_attractions":
                     search_query = f"iconic attractions monuments viewpoints historic sites {search_query}"
                 if category:
@@ -6140,6 +6193,29 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
                 preference_query,
                 query_intent,
             )
+            if restaurant_preference_flags.get("asian") and not any(
+                _restaurant_result_has_asian_evidence(result) for result in all_results
+            ):
+                if render_language == "pt":
+                    return (
+                        "### 🍽️ **Restaurantes asiáticos**\n\n"
+                        "✅ **Resposta direta:** não encontrei restaurantes com cozinha asiática "
+                        "confirmada nos dados de locais consultados.\n\n"
+                        "---\n\n"
+                        "- **Limitação:** não vou listar restaurantes genéricos, tradicionais "
+                        "ou internacionais como se fossem asiáticos sem evidência explícita. "
+                        "Experimente uma cozinha mais específica, como sushi, japonês, chinês, "
+                        "tailandês ou indiano."
+                    )
+                return (
+                    "### 🍽️ **Asian Restaurants**\n\n"
+                    "✅ **Direct answer:** I did not find restaurants with confirmed Asian "
+                    "cuisine in the consulted places data.\n\n"
+                    "---\n\n"
+                    "- **Limitation:** I will not list generic, traditional, or international "
+                    "restaurants as Asian without explicit evidence. Try a more specific cuisine "
+                    "such as sushi, Japanese, Chinese, Thai, or Indian."
+                )
 
         # =====================================================================
         # STEP 3: Format Output

@@ -4480,18 +4480,6 @@ def _build_structured_plan_fallback(
             day_cards = day_card_groups[day_index] if day_index < len(day_card_groups) else []
             if day_cards:
                 lines.append(f"- **{label}:** {theme}." if is_pt else f"- **{label}:** {theme}.")
-                if is_pt:
-                    lines.append(
-                        "    - 🕒 **Ritmo sugerido:** começa por volta das 10:00; "
-                        "reserva 60-90 min para visitas principais, 20-30 min entre paragens próximas "
-                        "e almoço entre 13:00-14:30."
-                    )
-                else:
-                    lines.append(
-                        "    - 🕒 **Suggested rhythm:** start around 10:00; "
-                        "allow 60-90 min for main visits, 20-30 min between nearby stops, "
-                        "and lunch around 13:00-14:30."
-                    )
                 for card in day_cards[:3]:
                     kind = _card_kind_for_plan_block(card)
                     icon = "🍽️" if kind == "food" else "🏛️"
@@ -12780,75 +12768,8 @@ def _ensure_planner_rhythm_guidance(
     user_message: str,
     language: str,
 ) -> str:
-    """Add suggested times/durations when a plan lacks a usable rhythm."""
-    if not response:
-        return response
-    if re.search(
-        r"\b(?:dura[cç][aã]o|duration|45\s*(?:min|minutos)|60\s*(?:min|minutos)|"
-        r"75\s*(?:min|minutos)|90\s*(?:min|minutos)|120\s*(?:min|minutos)|"
-        r"[1-3]\s*h\b|[1-3]\s+horas?)\b",
-        response,
-        flags=re.IGNORECASE,
-    ):
-        return response
-
-    if re.search(
-        r"(?m)^\s*(?:[-*]\s*)?(?:\*\*)?(?:[^\w\n]{0,8}\s*)?"
-        r"(?:[01]?\d|2[0-3])[:h][0-5]\d\b",
-        response,
-    ):
-        return response
-
-    is_pt = language == "pt"
-    day_count = _extract_requested_day_count(user_message) or 0
-    if day_count <= 0 and re.search(r"\b(?:dia\s+inteiro|full\s+day|1\s+dia|one\s+day)\b", _normalize_planner_text(user_message)):
-        day_count = 1
-    if day_count <= 0:
-        return response
-
-    if is_pt:
-        if day_count == 1:
-            bullets = [
-                "- **09:30-11:00:** primeira paragem cultural ou miradouro principal.",
-                "- **11:00-13:00:** ruas próximas e segunda paragem, com pausas curtas.",
-                "- **13:00-14:30:** almoço no bairro/zona do plano.",
-                "- **14:30-17:30:** continuação do percurso; reserva 60-90 min para visitas principais.",
-                "- **18:00-20:30:** fim de tarde e jantar, se o roteiro incluir noite.",
-            ]
-        else:
-            bullets = [
-                f"- **Dia {index}:** começa por volta das 10:00; reserva 60-90 min para cada museu, monumento ou miradouro principal, 20-30 min entre paragens próximas e uma pausa de almoço entre 13:00-14:30."
-                for index in range(1, min(day_count, 5) + 1)
-            ]
-        section = "### 🕒 **Ritmo sugerido**\n\n" + "\n".join(bullets)
-    else:
-        if day_count == 1:
-            bullets = [
-                "- **09:30-11:00:** first main cultural stop or viewpoint.",
-                "- **11:00-13:00:** nearby streets and a second stop, with short breaks.",
-                "- **13:00-14:30:** lunch in the same neighbourhood/plan area.",
-                "- **14:30-17:30:** continue the route; allow 60-90 min for major visits.",
-                "- **18:00-20:30:** late afternoon and dinner, if the plan extends into the evening.",
-            ]
-        else:
-            bullets = [
-                f"- **Day {index}:** start around 10:00; allow 60-90 min for each main museum, monument, or viewpoint, 20-30 min between nearby stops, and lunch around 13:00-14:30."
-                for index in range(1, min(day_count, 5) + 1)
-            ]
-        section = "### 🕒 **Suggested rhythm**\n\n" + "\n".join(bullets)
-
-    insert_heading = r"(?m)^###\s+.*\*\*(?:Como te deslocas|How to move)\*\*"
-    if re.search(insert_heading, response):
-        return re.sub(insert_heading, f"{section}\n\n---\n\n\\g<0>", response, count=1).strip()
-    final_notes_heading = r"(?m)^###\s+.*\*\*(?:Notas finais|Final notes)\*\*"
-    if re.search(final_notes_heading, response):
-        return re.sub(final_notes_heading, f"{section}\n\n---\n\n\\g<0>", response, count=1).strip()
-    source_match = _PLANNER_SOURCE_LINE_RE.search(response)
-    if source_match:
-        before = response[:source_match.start()].rstrip()
-        source = response[source_match.start():].strip()
-        return f"{before}\n\n---\n\n{section}\n\n{source}".strip()
-    return f"{response.rstrip()}\n\n---\n\n{section}".strip()
+    """Keep planner timing LLM-owned instead of injecting a generic schedule."""
+    return response
 
 
 def _planner_response_block_matches_requested_type(block: str, count_type: str) -> bool:

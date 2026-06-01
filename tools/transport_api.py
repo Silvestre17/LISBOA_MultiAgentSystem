@@ -117,7 +117,16 @@ def _strip_transport_endpoint_qualifier(location: str) -> str:
         "",
         cleaned,
     )
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = re.sub(
+        r"(?i)\s+(?:quais?\s+(?:s[aã]o\s+)?(?:as\s+|os\s+)?melhores?\s+op[cç][oõ]es"
+        r"(?:\s+de\s+transporte)?|qual\s+(?:e|é)\s+a\s+melhor\s+op[cç][aã]o"
+        r"(?:\s+de\s+transporte)?|melhores?\s+op[cç][oõ]es(?:\s+de\s+transporte)?|"
+        r"op[cç][oõ]es\s+de\s+transporte|what\s+(?:are|'re)\s+the\s+best\s+"
+        r"(?:transport\s+)?options|best\s+(?:transport\s+)?options|transport\s+options)\b.*$",
+        "",
+        cleaned,
+    )
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" \t\r\n,.;:!?")
     return cleaned or raw
 
 

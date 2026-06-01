@@ -2325,37 +2325,79 @@ def carris_find_routes_between(
             ph_routes = ",".join(["?" for _ in route_names])
             ph_origin = ",".join(["?" for _ in origin_ids_hint])
             ph_dest = ",".join(["?" for _ in dest_ids_hint])
-            cursor.execute(
-                f"""
-                SELECT route_short_name, origin_stop_id, destination_stop_id,
-                       headsign, origin_stop_name, destination_stop_name
-                FROM (
-                    SELECT
-                        r.route_short_name AS route_short_name,
-                        st_o.stop_id AS origin_stop_id,
-                        st_d.stop_id AS destination_stop_id,
-                        t.trip_headsign AS headsign,
-                        so.stop_name AS origin_stop_name,
-                        sd.stop_name AS destination_stop_name,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY r.route_short_name
-                            ORDER BY st_o.stop_sequence, st_d.stop_sequence
-                        ) AS _rn
-                    FROM stop_times st_o
-                    JOIN stop_times st_d ON st_o.trip_id = st_d.trip_id
-                        AND st_o.stop_sequence < st_d.stop_sequence
-                    JOIN trips t ON st_o.trip_id = t.trip_id
-                    JOIN routes r ON t.route_id = r.route_id
-                    JOIN stops so ON st_o.stop_id = so.stop_id
-                    JOIN stops sd ON st_d.stop_id = sd.stop_id
-                    WHERE r.route_short_name IN ({ph_routes})
-                      AND st_o.stop_id IN ({ph_origin})
-                      AND st_d.stop_id IN ({ph_dest})
+
+            def _build_route_stop_hints_legacy() -> Dict[str, Dict[str, Any]]:
+                """Fallback for runtimes without SQLite window-function support."""
+                hints: Dict[str, Dict[str, Any]] = {}
+                for route_short_name in route_names:
+                    cursor.execute(
+                        f"""
+                        SELECT
+                            st_o.stop_id AS origin_stop_id,
+                            st_d.stop_id AS destination_stop_id,
+                            t.trip_headsign AS headsign,
+                            so.stop_name AS origin_stop_name,
+                            sd.stop_name AS destination_stop_name
+                        FROM stop_times st_o
+                        JOIN stop_times st_d ON st_o.trip_id = st_d.trip_id
+                            AND st_o.stop_sequence < st_d.stop_sequence
+                        JOIN trips t ON st_o.trip_id = t.trip_id
+                        JOIN routes r ON t.route_id = r.route_id
+                        JOIN stops so ON st_o.stop_id = so.stop_id
+                        JOIN stops sd ON st_d.stop_id = sd.stop_id
+                        WHERE r.route_short_name = ?
+                          AND st_o.stop_id IN ({ph_origin})
+                          AND st_d.stop_id IN ({ph_dest})
+                        ORDER BY st_o.stop_sequence, st_d.stop_sequence
+                        LIMIT 80
+                        """,
+                        [route_short_name, *origin_ids_hint, *dest_ids_hint],
+                    )
+                    rows = cursor.fetchall()
+                    if rows:
+                        hints[route_short_name] = dict(min(rows, key=_stop_pair_score))
+                return hints
+
+            if sqlite3.sqlite_version_info < (3, 25, 0):
+                return _build_route_stop_hints_legacy()
+
+            try:
+                cursor.execute(
+                    f"""
+                    SELECT route_short_name, origin_stop_id, destination_stop_id,
+                           headsign, origin_stop_name, destination_stop_name
+                    FROM (
+                        SELECT
+                            r.route_short_name AS route_short_name,
+                            st_o.stop_id AS origin_stop_id,
+                            st_d.stop_id AS destination_stop_id,
+                            t.trip_headsign AS headsign,
+                            so.stop_name AS origin_stop_name,
+                            sd.stop_name AS destination_stop_name,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY r.route_short_name
+                                ORDER BY st_o.stop_sequence, st_d.stop_sequence
+                            ) AS _rn
+                        FROM stop_times st_o
+                        JOIN stop_times st_d ON st_o.trip_id = st_d.trip_id
+                            AND st_o.stop_sequence < st_d.stop_sequence
+                        JOIN trips t ON st_o.trip_id = t.trip_id
+                        JOIN routes r ON t.route_id = r.route_id
+                        JOIN stops so ON st_o.stop_id = so.stop_id
+                        JOIN stops sd ON st_d.stop_id = sd.stop_id
+                        WHERE r.route_short_name IN ({ph_routes})
+                          AND st_o.stop_id IN ({ph_origin})
+                          AND st_d.stop_id IN ({ph_dest})
+                    )
+                    WHERE _rn <= 80
+                    """,
+                    [*route_names, *origin_ids_hint, *dest_ids_hint],
                 )
-                WHERE _rn <= 80
-                """,
-                [*route_names, *origin_ids_hint, *dest_ids_hint],
-            )
+            except sqlite3.OperationalError as exc:
+                message = str(exc).lower()
+                if "over" in message or "row_number" in message or "syntax" in message:
+                    return _build_route_stop_hints_legacy()
+                raise
             grouped: Dict[str, List[sqlite3.Row]] = {}
             for row in cursor.fetchall():
                 grouped.setdefault(row["route_short_name"], []).append(row)

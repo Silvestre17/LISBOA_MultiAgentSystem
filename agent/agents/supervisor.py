@@ -138,6 +138,7 @@ class SupervisorAgent(BaseAgent):
         """Build a render-safe prompt for empty or punctuation-only turns."""
         if language == "pt":
             return (
+                "### 🤖 **Como posso ajudar**\n\n"
                 "Olá! 👋 Em que te posso ajudar na Área Metropolitana de Lisboa?\n\n"
                 "Aqui está o que posso ajudar na AML/Lisboa:\n\n"
                 "- 🌤️ **Meteorologia** — previsões, avisos, dados IPMA\n"
@@ -148,6 +149,7 @@ class SupervisorAgent(BaseAgent):
                 "- 📚 **História & Conhecimento** — história de Lisboa, bairros, Guia Lisboa Card"
             )
         return (
+            "### 🤖 **How I Can Help**\n\n"
             "Hi! 👋 How can I help you in the Lisbon Metropolitan Area?\n\n"
             "Here is what I can help with in Lisbon/AML:\n\n"
             "- 🌤️ **Weather** — forecasts, warnings, and IPMA data\n"

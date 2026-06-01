@@ -2675,7 +2675,8 @@ class ResearcherAgent(BaseAgent):
             "summit", "conference", "congress", "forum", "expo", "games week", "gaming",
             "sport", "sports", "desporto", "desportivo", "desportivos",
             "arraial", "arraiais", "arrais", "santos populares", "marchas populares",
-            "festas de lisboa", "gastronomia", "gastronomy", "família", "familia",
+            "festas de lisboa", "santo antónio", "santo antonio", "festas de santo",
+            "gastronomia", "gastronomy", "família", "familia",
             "famílias", "familias", "crianças", "criancas", "kids", "children",
         ]
         named_lookup_markers = [
@@ -2890,7 +2891,8 @@ class ResearcherAgent(BaseAgent):
         query = (user_message or "").lower()
         normalized_query = ResearcherAgent._normalize_event_preference_text(user_message)
         if re.search(
-            r"\b(?:arrai(?:al|ais|s)?|santos populares|marchas populares|festas de lisboa)\b",
+            r"\b(?:arrai(?:al|ais|s)?|santos populares|marchas populares|"
+            r"festas de lisboa|santo ant[oó]nio|festas de santo)\b",
             normalized_query,
             flags=re.IGNORECASE,
         ):
@@ -3835,7 +3837,8 @@ class ResearcherAgent(BaseAgent):
         if not value:
             return ""
         temporal_suffix_re = re.compile(
-            r"\s+(?:este\s+m[eê]s|esta\s+semana|este\s+fim\s+de\s+semana|"
+            r"\s+(?:este\s+m[eê]s|neste\s+m[eê]s|esta\s+semana|nesta\s+semana|"
+            r"este\s+fim\s+de\s+semana|neste\s+fim\s+de\s+semana|"
             r"pr[oó]xima\s+semana|pr[oó]ximo\s+m[eê]s|hoje|amanh[aã]|"
             r"segunda(?:-|\s+)?feira|ter[cç]a(?:-|\s+)?feira|quarta(?:-|\s+)?feira|"
             r"quinta(?:-|\s+)?feira|sexta(?:-|\s+)?feira|s[aá]bado|domingo|"
