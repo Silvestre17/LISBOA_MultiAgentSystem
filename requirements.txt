@@ -2,9 +2,8 @@
 # Master Thesis - Production App Dependencies
 #   - André Filipe Gomes Silvestre, 20240502
 #
-# LISBOA: Lisbon Itenerary System Based On AI
+# LISBOA: Lisbon Itinerary System Based On AI
 # A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon
-# and Mobility Itinerary Planning
 #
 # Installation: pip install -r requirements.txt
 #

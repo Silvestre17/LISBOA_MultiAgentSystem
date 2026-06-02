@@ -152,13 +152,101 @@ jobs:
           The prototype depends on external public APIs and release-backed runtime datasets. Availability and freshness can vary when upstream services are temporarily unavailable.
           EOF
 
-      - name: Sync to Hugging Face Space
-        uses: huggingface/hub-sync@v0.1.0
+      - name: Setup Python
+        uses: actions/setup-python@v6
         with:
-          github_repo_id: ${{ github.repository }}
-          huggingface_repo_id: AndreSilvestre17/lisboa
-          hf_token: ${{ secrets.HF_TOKEN }}
-          repo_type: space
-          space_sdk: docker
-          private: true
-          subdirectory: hf_space_build
+          python-version: "3.12"
+
+      - name: Install Hugging Face Hub client
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --upgrade "huggingface_hub>=1.1,<2"
+
+      - name: Upload deploy bundle to Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_REPO_ID: AndreSilvestre17/lisboa
+          HF_REPO_TYPE: space
+          HF_HUB_DISABLE_PROGRESS_BARS: "1"
+        run: |
+          set -euo pipefail
+
+          if [ -z "${HF_TOKEN:-}" ]; then
+            echo "::error::HF_TOKEN secret is not configured"
+            exit 1
+          fi
+
+          if [ ! -d hf_space_build ]; then
+            echo "::error::Deploy bundle directory 'hf_space_build' does not exist"
+            exit 1
+          fi
+
+          FILE_COUNT=$(find hf_space_build -type f ! -path '*/.git/*' ! -path '*/.github/*' | wc -l | tr -d ' ')
+          if [ "${FILE_COUNT}" -eq 0 ]; then
+            echo "::error::Deploy bundle has no files to upload"
+            exit 1
+          fi
+
+          echo "Uploading ${FILE_COUNT} files to https://huggingface.co/spaces/${HF_REPO_ID}"
+
+          python <<'PY'
+          import os
+          import time
+
+          from huggingface_hub import HfApi
+          from huggingface_hub.utils import HfHubHTTPError
+
+
+          def main() -> None:
+              repo_id = os.environ["HF_REPO_ID"]
+              repo_type = os.environ["HF_REPO_TYPE"]
+              run_id = os.environ.get("GITHUB_RUN_ID", "local")
+              api = HfApi(token=os.environ["HF_TOKEN"])
+
+              max_attempts = 4
+              for attempt in range(1, max_attempts + 1):
+                  try:
+                      # Idempotent bootstrap: ensures the Space exists (and keeps
+                      # its sdk/visibility on first creation) without failing when
+                      # it is already present. No-op for an existing repository.
+                      api.create_repo(
+                          repo_id=repo_id,
+                          repo_type=repo_type,
+                          space_sdk="docker",
+                          private=True,
+                          exist_ok=True,
+                      )
+                      commit_info = api.upload_folder(
+                          repo_id=repo_id,
+                          repo_type=repo_type,
+                          folder_path="hf_space_build",
+                          path_in_repo=".",
+                          ignore_patterns=[".git*", ".github*"],
+                          delete_patterns="*",
+                          commit_message=f"Deploy LISBOA Space from GitHub run {run_id}",
+                      )
+                      print(f"Upload completed: {commit_info.commit_url}")
+                      print(f"View at: https://huggingface.co/spaces/{repo_id}")
+                      return
+                  except HfHubHTTPError as exc:
+                      status_code = getattr(exc.response, "status_code", None)
+                      if status_code in (429, 500, 502, 503, 504) and attempt < max_attempts:
+                          delay_seconds = 30 * attempt
+                          reason = (
+                              "429 Too Many Requests"
+                              if status_code == 429
+                              else f"HTTP {status_code}"
+                          )
+                          print(
+                              f"Hugging Face returned {reason}; "
+                              f"retrying in {delay_seconds}s "
+                              f"(attempt {attempt}/{max_attempts})."
+                          )
+                          time.sleep(delay_seconds)
+                          continue
+                      raise
+
+
+          if __name__ == "__main__":
+              main()
+          PY
