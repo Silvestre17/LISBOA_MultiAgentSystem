@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <strong>Multi-agent assistance for Lisbon tourism and urban mobility, grounded in RAG, live APIs, municipal open data, and a research-grade evaluation pipeline.</strong>
+  <strong>Multi-agent assistance for Lisbon tourism and urban mobility, grounded in RAG, provider-backed data integrations, municipal open data, and a research evaluation pipeline.</strong>
 </p>
 
 <p align="center">
@@ -32,7 +32,7 @@
 <a id="overview"></a>
 ## 📍 Overview
 
-LISBOA is a Master's thesis project at NOVA IMS that implements an intelligent multi-agent system for personalized tourist planning and urban mobility support in the Lisbon Metropolitan Area. It combines Retrieval-Augmented Generation (RAG), real-time transport and weather APIs, municipal open data, and a Streamlit interface to support grounded, context-aware answers.
+LISBOA is a Master's thesis project at NOVA IMS that implements a multi-agent system for personalized tourist planning and urban mobility support in the Lisbon Metropolitan Area. It combines Retrieval-Augmented Generation (RAG), weather and transport integrations, municipal open data, and a Streamlit interface to support grounded, context-aware answers.
 
 > [!IMPORTANT]
 > The supported user-facing entrypoint is `app.py`. The runtime is the multi-agent system implemented by `MultiAgentAssistant` in [`agent/graph.py`](./agent/graph.py).
@@ -201,7 +201,7 @@ LISBOA_MultiAgentSystem/
 ├── data/                           # Persistent vector DB and local transport data
 ├── docs/                           # Repository documentation
 ├── eval/                           # Benchmarking, ablation, judge, validators, statistics
-├── tests/                          # Lean deterministic checks and optional live smoke tests
+├── eval/tests/                     # Lean deterministic checks and dataset validators
 ├── .github/workflows/              # Scraping and vector sync automation
 ├── app.py                          # Supported Streamlit entrypoint
 ├── config.py                       # Runtime configuration and provider selection
@@ -242,13 +242,13 @@ Need a guided reading order? Open [`docs/00_INDEX.md`](./docs/00_INDEX.md).
 git clone https://github.com/Silvestre17/LISBOA_MultiAgentSystem.git
 cd LISBOA_MultiAgentSystem
 
-# 2. Install (production runtime)
+# 2. Install the supported runtime
 pip install -r requirements.txt
 # ...or full local env (scraping, eval, notebooks, CUDA-enabled PyTorch):
 # conda env create -f environment_local_gpu.yml && conda activate lisboa_thesis2026
 
 # 3. Configure secrets
-copy .env.example .env   # edit with your provider keys
+cp .env.example .env     # Windows PowerShell: Copy-Item .env.example .env
 
 # 4. Build vector store and launch
 python tools/vector_store.py
@@ -278,11 +278,19 @@ python -m eval.run_ablation  --mode run_test
 
 Artefacts land under `eval/results/{benchmark,ablation,statistics,figures}/`. See [`eval/README.md`](./eval/README.md) for the current validation policy.
 
+## Known Limitations
+
+- LISBOA is a research prototype, not a production travel, booking, ticketing, reservation, or transaction service.
+- Live or current data is available only where the implemented provider integrations support it. VisitLisboa content, local vector stores, and transport runtime assets may be cached, scraped, scheduled, or release-based.
+- Mobility coverage is limited to implemented Lisbon/AML operators and tools: Metro de Lisboa, Carris Urban, Carris Metropolitana, CP suburban rail, and the repository's supported multimodal routing logic.
+- The planner synthesizes evidence gathered by the worker agents. It does not independently verify facts beyond the repository's QA and formatting guardrails.
+- Public evaluation artifacts cover the automated benchmark, ablation, statistics, figures, and deterministic checks included under `eval/`. User-study material should be treated as separate unless explicitly published.
+
 ## ⚙️ Automation
 
 Two GitHub Actions workflows keep the knowledge base fresh:
 
-1. [`data_pipeline.yml`](./.github/workflows/data_pipeline.yml) scrapes VisitLisboa content **daily at 04:00 UTC**. Places are refreshed weekly on **Mondays** during scheduled runs. Manual runs can choose `events`, `places`, or `both` without changing the automatic behaviour.
+1. [`data_pipeline.yml`](./.github/workflows/data_pipeline.yml) scrapes VisitLisboa content **daily at 04:00 Europe/Lisbon time**. Places are refreshed weekly on **Mondays** during scheduled runs. Manual runs can choose `events`, `places`, or `both` without changing the automatic behaviour.
 2. [`sync_vector_db.yml`](./.github/workflows/sync_vector_db.yml) runs after the scraping workflow completes successfully and performs incremental vector synchronization.
 
 > [!NOTE]
@@ -291,6 +299,31 @@ Two GitHub Actions workflows keep the knowledge base fresh:
 ## 📄 License
 
 This project is licensed under the MIT License. See [`LICENSE`](./LICENSE) for details.
+
+### Citation
+
+If you use this repository before a final thesis, paper, or DOI-based citation is available, please cite it as software using APA 7th edition:
+
+> Silvestre, A. (2026). *LISBOA: Lisbon itinerary system based on AI: A multi-agent approach for personalized tourism and urban mobility in Lisbon* [Computer software]. GitHub. https://github.com/Silvestre17/LISBOA_MultiAgentSystem
+
+A BibTeX entry is also provided for convenience:
+
+```bibtex
+@software{silvestre2026lisboa,
+  author = {Silvestre, André},
+  title = {LISBOA: Lisbon Itinerary System Based On AI: A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon},
+  year = {2026},
+  type = {Computer software},
+  publisher = {GitHub},
+  url = {https://github.com/Silvestre17/LISBOA_MultiAgentSystem}
+}
+```
+
+### Responsible Use and Privacy
+
+LISBOA is a research prototype developed for academic evaluation and demonstration purposes. Users should verify operational decisions, including departures, disruptions, opening hours, prices, accessibility conditions, and ticket information, with the official providers before acting.
+
+Do not enter sensitive personal data, credentials, private identifiers, or confidential information in prompts, logs, notebooks, or evaluation artifacts.
 
 ---
 

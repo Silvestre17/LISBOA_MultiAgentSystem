@@ -3,7 +3,7 @@
 This document describes the runtime architecture implemented in the repository today. The supported default path is the multi-agent flow inside `MultiAgentAssistant` in `agent/graph.py`.
 
 > [!IMPORTANT]
-> The production runtime is the multi-agent system. The former compatibility path has been removed from the supported app flow.
+> The supported runtime is the multi-agent system. The former compatibility path has been removed from the supported app flow.
 
 ## 🖼️ Conceptual Framework Figure
 
@@ -21,7 +21,7 @@ This document describes the runtime architecture implemented in the repository t
 | State | `agent/state.py` | shared `AgentState` and user-context schema |
 | LLM provider factory | `agent/llm_factory.py` | provider creation and per-agent binding (Azure OpenAI, OpenAI, LM Studio) |
 | Specialized agents | `agent/agents/` | domain routing, retrieval, validation, synthesis |
-| Tool & data layer | `tools/` | live APIs, ChromaDB semantic search, Lisboa Aberta on-demand discovery, web fallback |
+| Tool & data layer | `tools/` | provider-backed APIs, ChromaDB semantic search, Lisboa Aberta on-demand discovery, web fallback |
 
 ## 🔁 End-to-End Runtime Flow
 

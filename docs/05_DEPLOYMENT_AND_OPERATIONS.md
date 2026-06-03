@@ -95,7 +95,7 @@ Legacy `LANGCHAIN_*` tracing aliases are still accepted by the runtime for backw
 
 ## 🚀 First Run
 
-For the production-style Streamlit runtime:
+For the supported Streamlit runtime:
 
 ```bash
 pip install -r requirements.txt
@@ -219,7 +219,7 @@ The analysis notebook `eval/benchmark_ablation_analysis.ipynb` also exports late
 
 | Workflow | Trigger | Purpose | Main outputs |
 |----------|---------|---------|--------------|
-| `data_pipeline.yml` | daily at **04:00 UTC**, plus manual trigger with `events` / `places` / `both` | scrape VisitLisboa events daily and places weekly on Mondays, while manual runs can target either dataset or both | updated JSON artefacts under `data_collection/webscraping/` |
+| `data_pipeline.yml` | daily at **04:00 Europe/Lisbon time**, plus manual trigger with `events` / `places` / `both` | scrape VisitLisboa events daily and places weekly on Mondays, while manual runs can target either dataset or both | updated JSON artefacts under `data_collection/webscraping/` |
 | `sync_vector_db.yml` | `workflow_run` after `Update Lisbon Data`, plus manual trigger | incrementally sync ChromaDB collections, persist pending checkpoints, and commit durable vector DB progress after each sync iteration | updated artefacts under `data/vector_db/`, including `_sync_state/` when work remains |
 
 ### Exit-code protocol used by the Sync Workflow

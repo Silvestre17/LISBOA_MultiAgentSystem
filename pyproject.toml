@@ -19,7 +19,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "lisboa"
 version = "1.0.0"
-description = "Multi-agent assistant for Lisbon tourism and resident mobility, grounded in live APIs, municipal open data, and retrieval."
+description = "Multi-agent assistant for Lisbon tourism and resident mobility, grounded in provider data integrations, municipal open data, and retrieval."
 authors = [
     { name = "André Filipe Gomes Silvestre", email = "20240502@novaims.unl.pt" },
 ]
@@ -57,6 +57,5 @@ exclude = ["tests*", "data*", "docs*", "_*", "__pycache__*"]
 
 [tool.pytest.ini_options]
 testpaths = [
-    "tests",
     "eval/tests",
 ]

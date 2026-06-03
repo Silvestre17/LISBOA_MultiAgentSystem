@@ -1,6 +1,6 @@
 # 📍 LISBOA Project Overview
 
-LISBOA is a Master's thesis project for the Lisbon Metropolitan Area that combines multi-agent orchestration, live public APIs, municipal open data, and semantic retrieval. The documented public entrypoint is `app.py`.
+LISBOA is a Master's thesis project for the Lisbon Metropolitan Area that combines multi-agent orchestration, provider-backed data integrations, municipal open data, and semantic retrieval. The documented public entrypoint is `app.py`.
 
 ## 👥 Who LISBOA Serves
 
@@ -16,7 +16,7 @@ LISBOA is a Master's thesis project for the Lisbon Metropolitan Area that combin
 | Project name | **LISBOA** |
 | Thesis Title | *LISBOA: Lisbon Itinerary System Based On AI* |
 | Thesis Subtitle | *A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon* |
-| Author | André Filipe Gomes Silvestre, 20240502 |
+| Author | André Filipe Gomes Silvestre |
 | Supervisors | Prof. Dr. Bruno Jardim; Prof. Dr. Miguel de Castro Neto |
 | Institution | NOVA IMS |
 | Academic year | 2025/2026 |
