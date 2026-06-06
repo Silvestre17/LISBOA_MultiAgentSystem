@@ -5,6 +5,9 @@ data/cp/
 transport_runtime_artifacts/
 
 # Specific Files
+LISBOA_Survey_Forms_*.xlsx
+eval/results/figures/user_study_*.png
+eval/results/figures/user_study_*.svg
 .github/copilot-instructions.md
 .claude/
 desktop.ini
@@ -17,6 +20,7 @@ AGENTS.md
 
 # Specific Folders
 _/
+eval/results/user_study/
 .gemini/
 .agents/
 .ruff_cache/
