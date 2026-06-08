@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://github.com/Silvestre17/LISBOA_MultiAgentSystem">
-    <img src="./img/BannerLSIBOA_21-9.png" alt="LISBOA Project Banner" style="width: 100%; height: 300px; object-fit: cover; object-position: center bottom;">
+    <img src="./img/BannerLSIBOA_21-9.png" alt="LISBOA Project Banner" style="width: 100%; height: auto;">
   </a>
 </p>
 
