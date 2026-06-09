@@ -1071,6 +1071,40 @@ def _is_pure_weather_limitation(text: str) -> bool:
     return has_limit and not has_live_weather_fact
 
 
+_WEATHER_FIELD_LABEL_RE = (
+    r"(?:Condi[cç][aã]o|Condi[cç][oõ]es|Conditions?|Condition|"
+    r"Temperatura|Temperature|Chuva|Rain|Vento|Wind)"
+)
+
+
+def collapse_repeated_weather_field_labels(text: str) -> str:
+    """Collapse duplicated weather field labels into a single clean label.
+
+    The forecast-synthesis LLM occasionally stutters a label, producing lines
+    like "☁️ **Condição:** Condição:Condição: Condições: parcialmente nublado".
+    This keeps the (bold) label once and drops the redundant repeats, regardless
+    of bold markers, PT/EN spelling, or singular/plural, so the value stays clean.
+    """
+    if not text:
+        return text or ""
+    label = _WEATHER_FIELD_LABEL_RE
+    # Bold label immediately followed by duplicate plain labels -> keep bold only.
+    text = re.sub(
+        rf"(\*\*\s*{label}\s*:\s*\*\*\s*)(?:{label}\s*:\s*)+",
+        r"\1",
+        text,
+        flags=re.IGNORECASE,
+    )
+    # Plain label run with no bold anchor -> keep a single leading label.
+    text = re.sub(
+        rf"(?<![*\w])({label}\s*:)\s*(?:{label}\s*:\s*)+",
+        r"\1 ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return text
+
+
 def canonicalize_weather_terms(text: str, language: str = "en") -> str:
     """Normalizes common weather labels to the requested display language."""
     if not text or language not in {"en", "pt"}:
@@ -4270,6 +4304,24 @@ def infer_researcher_source_kind(user_query: str = "", text: str = "") -> Option
     if not combined:
         return None
 
+    # Structural headings win over footer source links: a response that renders
+    # place/attraction cards is about places even when its source footer also
+    # cites the events catalogue (the researcher may probe both tools for a
+    # place lookup). Without this, a "/eventos" link in the footer would
+    # misclassify the answer as events and trigger a destructive event reconcile.
+    if text_lower:
+        if re.search(
+            r"(?mi)^###\s+[^\n]*\b(?:locais e atra[cç][oõ]es|places and attractions)\b",
+            text_lower,
+        ):
+            return "places"
+        if re.search(
+            r"(?mi)^###\s+[^\n]*\b(?:eventos encontrados|events found|"
+            r"sem eventos confirmados|no confirmed events)\b",
+            text_lower,
+        ):
+            return "events"
+
     if "/eventos" in combined or "/events" in combined or _has_researcher_event_hint(combined):
         return "events"
     if "/locais" in combined or "/places" in combined or _has_researcher_place_hint(combined):
@@ -4305,11 +4357,22 @@ def canonicalize_visitlisboa_source_line(
     query_lower = user_query.lower()
     kind = infer_researcher_source_kind(user_query=user_query, text=text)
     has_visitlisboa = "visitlisboa" in lower_text
+    source_has_lisboa_aberta = any(
+        _SOURCE_LINE_RE.match(line.strip()) and "lisboa aberta" in line.lower()
+        for line in text.splitlines()
+    )
+    zoo_place_body = bool(
+        re.search(
+            r"\b(?:jardim\s+zoologico|zoo(?:\s+de\s+lisboa)?|lisbon\s+zoo)\b",
+            _strip_accents_compat(body_without_source).lower(),
+        )
+    )
     has_lisboa_aberta = (
         "lisboa aberta" in lower_body
         or "open data:" in lower_body
         or "dados abertos" in lower_body
         or "dados.cm-lisboa.pt" in lower_body
+        or (source_has_lisboa_aberta and zoo_place_body)
     )
     visitlisboa_source_exists = any(
         _SOURCE_LINE_RE.match(line.strip()) and "visitlisboa" in line.lower()
@@ -4702,6 +4765,11 @@ def material_source_ids_for_response(text: str) -> List[str]:
     body = _source_material_body(text)
     lowered = body.lower()
     normalized = _strip_accents_compat(body).lower()
+    source_footer = next(
+        (line.strip() for line in text.splitlines() if _SOURCE_LINE_RE.match(line.strip())),
+        "",
+    )
+    source_footer_lower = source_footer.lower()
     source_ids: list[str] = []
 
     def add(source_id: str) -> None:
@@ -4793,6 +4861,10 @@ def material_source_ids_for_response(text: str) -> List[str]:
     has_explicit_open_data_evidence = bool(
         "dados.cm-lisboa.pt" in lowered
         or "lisboa aberta" in normalized
+        or (
+            "lisboa aberta" in source_footer_lower
+            and re.search(r"\b(?:jardim\s+zoologico|zoo(?:\s+de\s+lisboa)?|lisbon\s+zoo)\b", normalized)
+        )
         or re.search(
             r"\b(?:fonte do dataset|dataset source|servicos municipais|municipal services|"
             r"farmacias proxim|nearby pharmacies|hospitais proxim|nearby hospitals)\b",
@@ -5770,6 +5842,10 @@ def _clean_place_field_value(value: str, field_key: str) -> str:
     elif field_key in {"website", "tickets", "details", "today", "hours", "distance", "coordinates", "rating", "address", "category", "lisboa_card", "email"}:
         if _looks_like_missing_researcher_value(cleaned):
             return ""
+    if field_key == "category":
+        normalized_category = _strip_accents_compat(cleaned).lower()
+        if normalized_category.startswith(("lisboa aberta:", "open data:")):
+            return ""
     if field_key == "address":
         cleaned = _normalize_display_address_spacing(cleaned)
 
@@ -5783,6 +5859,17 @@ def _clean_scraped_place_price_text(value: str) -> str:
         return ""
 
     cleaned = re.sub(r"^(?:link|links)\s+", "", cleaned, flags=re.IGNORECASE)
+    # Drop scraped booking-flow boilerplate that VisitLisboa appends after the
+    # actual price (e.g. "... ; Book a date and time + TICKET LISBOA CARD Please
+    # enter your Lisboa Card number. Once the booking is"). Mirrors the planner's
+    # price cleaner so the researcher place-card path is equally noise-free; the
+    # corrupted/English remnant otherwise trips QA into a destructive repair.
+    cleaned = re.split(
+        r"\s*[;.+]?\s*(?:book\s+a\s+date|ticket\s+lisboa\s+card|please\s+enter|once\s+the\s+booking)",
+        cleaned,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip(" .;+")
     cleaned = re.sub(
         r"\bChildren\s+Free\s+until\s*\(age\)\s*:\s*(\d+)",
         r"Children free until age \1",
@@ -6814,6 +6901,33 @@ def _build_researcher_place_intro_lines(
     area_suffix_pt = f" em {area_label}" if area_label else " em Lisboa"
     area_suffix_en = f" in {area_label}" if area_label else " in Lisbon"
     count_label = str(len(cards))
+    exact_location_lookup = bool(
+        len(cards) == 1
+        and re.search(
+            r"\b(?:onde\s+(?:fica|e|esta)|morada\s+de|localizacao\s+de|"
+            r"where\s+(?:is|can\s+i\s+find)|address\s+of|location\s+of|located)\b",
+            normalized_query,
+        )
+    )
+    if exact_location_lookup:
+        title = str(cards[0].get("title") or "").strip()
+        address = str(cards[0].get("address") or "").strip()
+        address = re.sub(r"\[([^\]]+)\]\s*\([^)]+\)", r"\1", address).strip()
+        address = _strip_markdown_formatting(address).strip()
+        title_for_sentence = f"**{title}**" if title else ("**o local pedido**" if is_pt else "**the requested place**")
+        if is_pt:
+            direct = (
+                f"✅ **Resposta direta:** {title_for_sentence} fica em **{address}**."
+                if address
+                else f"✅ **Resposta direta:** encontrei os detalhes disponíveis para {title_for_sentence}."
+            )
+            return ["### 🏛️ Locais e atrações", direct]
+        direct = (
+            f"✅ **Direct answer:** {title_for_sentence} is at **{address}**."
+            if address
+            else f"✅ **Direct answer:** I found the available details for {title_for_sentence}."
+        )
+        return ["### 🏛️ Places and attractions", direct]
 
     if is_pt:
         if any(marker in normalized_query for marker in must_see_markers):
@@ -8617,6 +8731,7 @@ def finalize_worker_response(
         finalized = format_response(finalized)
         weather_timestamp = weather_timestamp or extract_update_time(finalized)
         finalized = canonicalize_weather_terms(finalized, language=preferred_language)
+        finalized = collapse_repeated_weather_field_labels(finalized)
         finalized = strip_weather_update_lines(finalized)
         finalized = structure_weather_markdown(finalized)
         if _is_pure_weather_limitation(finalized):
@@ -8743,11 +8858,18 @@ def finalize_worker_response(
             finalized,
             language=preferred_language,
         )
+        zoo_place_response = bool(
+            re.search(
+                r"(?i)\b(?:jardim\s+zool[oó]gico|zoo(?:\s+de\s+lisboa)?|lisbon\s+zoo)\b",
+                "\n".join([user_query or "", finalized or ""]),
+            )
+        )
         service_lookup_response = bool(
             re.search(
                 r"(?i)(Fonte do dataset|Dataset:|Lisboa Aberta|dados\.cm-lisboa\.pt)",
                 finalized,
             )
+            and not zoo_place_response
         )
 
         def ensure_service_lookup_heading(value: str) -> str:
@@ -8853,6 +8975,13 @@ def finalize_worker_response(
                 count=1,
                 flags=re.IGNORECASE,
             )
+        if zoo_place_response and finalized and not re.match(r"^\s*###\s+", finalized):
+            place_title = (
+                "### 🏛️ **Locais e atrações**"
+                if preferred_language == "pt"
+                else "### 🏛️ **Places and Attractions**"
+            )
+            finalized = f"{place_title}\n\n{finalized.strip()}"
         finalized = remove_stale_visitlisboa_from_weather_footer(finalized)
         if researcher_kind == "events":
             finalized = strip_event_filter_summary_cards(finalized)
@@ -16271,6 +16400,8 @@ def normalize_municipal_service_visual_contract(text: str) -> str:
     if not text or not re.search(r"\b(?:Lisboa Aberta|dados\.cm-lisboa\.pt)\b", text, re.IGNORECASE):
         return text or ""
     plain = _strip_accents_compat(_strip_markdown_formatting(text)).lower()
+    if re.search(r"\b(?:jardim\s+zoologico|zoo(?:\s+de\s+lisboa)?|lisbon\s+zoo)\b", plain):
+        return text
     if not re.search(
         r"\b(?:servicos municipais|servicos mais proximos|farmacias perto|bibliotecas perto|"
         r"hospitais perto|mercados perto|estacoes de metro)\b",
@@ -19860,6 +19991,11 @@ def _normalize_researcher_visual_contract(text: str, language: str) -> str:
         visible_body = "\n".join(
             line for line in value.splitlines() if not _SOURCE_LINE_RE.match(line.strip())
         )
+        # Strip URLs before keyword classification: a path segment such as a
+        # ticket link ".../Eventos/14759" must not make a place answer (e.g. a
+        # monument card) be retitled "Eventos encontrados". Only real content
+        # words should drive the section title.
+        visible_body = re.sub(r"https?://\S+", " ", visible_body)
         visible = _strip_accents_compat(_strip_markdown_formatting(visible_body)).lower()
         has_food_card_heading = any(
             re.match(r"\s*[-*]\s+\*\*", line)
@@ -23013,7 +23149,10 @@ def final_post_qa_guard(
             line for line in guarded.splitlines() if not _SOURCE_LINE_RE.match(line.strip())
         )
         _body_open_data = _strip_accents_compat(_body_no_sources).lower()
-        if not re.search(
+        _zoo_open_data_place = bool(
+            re.search(r"\b(?:jardim\s+zoologico|zoo(?:\s+de\s+lisboa)?|lisbon\s+zoo)\b", _body_open_data)
+        )
+        if not _zoo_open_data_place and not re.search(
             r"\b(?:lisboa aberta|dados abertos|dados\.cm-lisboa|open data|municipal|"
             r"servicos municipais|municipal services|cm-lisboa)\b",
             _body_open_data,

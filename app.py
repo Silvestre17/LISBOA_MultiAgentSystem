@@ -2687,7 +2687,8 @@ def run_interaction(
                     else "🧠 Understanding request"
                 )
 
-            with st.status(initial_status_label, expanded=False) as status:
+            status_placeholder = st.empty()
+            with status_placeholder.status(initial_status_label, expanded=False) as status:
                 seen_statuses: set[str] = set()
                 last_status = {"label": ""}
 
@@ -2751,6 +2752,7 @@ def run_interaction(
                     expanded=False,
                 )
 
+            status_placeholder.empty()
             sanitized = clean_response_for_display(resp)
             rendered_response = render_assistant_markdown(sanitized)
             st.session_state.messages.append(

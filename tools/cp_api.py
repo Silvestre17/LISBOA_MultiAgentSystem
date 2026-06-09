@@ -1512,20 +1512,29 @@ def _format_gtfs_clock(total_minutes: int) -> str:
 
 
 @tool
-def get_train_status() -> str:
+def get_train_status(language: str = "en") -> str:
     """
     Gets real-time status of CP trains serving the Lisbon Metropolitan Area (AML).
 
     This function combines real-time data from comboios.live API with
     GTFS static schedule data for comprehensive train information.
 
+    Args:
+        language (str): Output language, ``"pt"`` or ``"en"`` (default ``"en"``).
+
     Returns:
         str: List of AML trains with status, delays, and positions.
     """
+    is_pt = str(language or "en").lower().startswith("pt")
+
     aml_trains = get_cp_aml_trains()
 
     if not aml_trains:
-        return "❌ Failed to fetch train status. The API may be temporarily unavailable."
+        return (
+            "❌ Não foi possível obter o estado dos comboios. A API pode estar temporariamente indisponível."
+            if is_pt
+            else "❌ Failed to fetch train status. The API may be temporarily unavailable."
+        )
 
     aml_stations = load_cp_aml_stations()
 
@@ -1545,22 +1554,40 @@ def get_train_status() -> str:
     delayed_trains = sum(1 for t in visible_trains if (t.get('delay') or 0) > 0)
     on_time_trains = max(total_trains - delayed_trains, 0)
 
-    response = "### 🚆 **CP Suburban Trains around Lisbon**\n\n"
+    title = "Comboios suburbanos CP em Lisboa" if is_pt else "CP Suburban Trains around Lisbon"
+    response = f"### 🚆 **{title}**\n\n"
     if delayed_trains > 0:
-        response += (
-            f"**Short answer:** No — CP suburban trains around Lisbon are **not running normally right now**. "
-            f"The live snapshot shows **{total_trains} trains** serving AML, with **{delayed_trains} delayed**.\n\n"
-        )
+        if is_pt:
+            response += (
+                f"**Resposta curta:** Não — os comboios suburbanos da CP na zona de Lisboa "
+                f"**não estão a circular com normalidade** neste momento. O retrato em tempo real "
+                f"mostra **{total_trains} comboios** na AML, dos quais **{delayed_trains} com atraso**.\n\n"
+            )
+        else:
+            response += (
+                f"**Short answer:** No — CP suburban trains around Lisbon are **not running normally right now**. "
+                f"The live snapshot shows **{total_trains} trains** serving AML, with **{delayed_trains} delayed**.\n\n"
+            )
     else:
-        response += (
-            f"**Short answer:** Yes — the supported CP suburban trains around Lisbon are currently shown without delays "
-            f"in the live snapshot (**{total_trains} trains** serving AML).\n\n"
-        )
+        if is_pt:
+            response += (
+                f"**Resposta curta:** Sim — os comboios suburbanos da CP na zona de Lisboa estão neste momento "
+                f"sem atrasos no retrato em tempo real (**{total_trains} comboios** na AML).\n\n"
+            )
+        else:
+            response += (
+                f"**Short answer:** Yes — the supported CP suburban trains around Lisbon are currently shown without delays "
+                f"in the live snapshot (**{total_trains} trains** serving AML).\n\n"
+            )
 
-    response += "**Current situation**\n"
-    response += f"    - 📊 **Tracked suburban trains:** {total_trains}\n"
-    response += f"    - ✅ **Shown without delay:** {on_time_trains}\n"
-    response += f"    - ⚠️ **Delayed:** {delayed_trains}\n\n"
+    # Overall snapshot. Column-0 bullets render reliably in Streamlit, unlike the
+    # 4-space-indented bullets that previously floated under a bold paragraph. The
+    # emoji is kept inside the bold span so the deterministic formatter does not
+    # promote the ⚠️ stat into a standalone warning callout (which would split the list).
+    response += f"**{'Situação atual' if is_pt else 'Current situation'}**\n\n"
+    response += f"- **📊 {'Comboios monitorizados' if is_pt else 'Tracked suburban trains'}:** {total_trains}\n"
+    response += f"- **✅ {'Sem atraso' if is_pt else 'Shown without delay'}:** {on_time_trains}\n"
+    response += f"- **⚠️ {'Com atraso' if is_pt else 'Delayed'}:** {delayed_trains}\n\n"
 
     # Display by service type
     service_order = ['Urbanos Lisboa']
@@ -1580,17 +1607,17 @@ def get_train_status() -> str:
         }.get(service_name, '🚆')
 
         delayed_service_trains = [train for train in trains if (train.get('delay') or 0) > 0]
-        on_time_service_count = len(trains) - len(delayed_service_trains)
 
-        response += f"{service_emoji} **{service_name}**\n"
-        response += f"    - ✅ **Shown without delay:** {on_time_service_count}\n"
-        response += f"    - ⚠️ **Delayed:** {len(delayed_service_trains)}\n"
+        response += f"**{service_emoji} {service_name}**\n\n"
 
         if not delayed_service_trains:
-            response += "\n"
+            response += (
+                f"- **✅ {'Estado' if is_pt else 'Status'}:** "
+                f"{'Sem atrasos assinalados' if is_pt else 'No delays reported'}\n\n"
+            )
             continue
 
-        response += "    - **Main delays:**\n"
+        response += f"**{'Principais atrasos' if is_pt else 'Main delays'}:**\n\n"
 
         for train in delayed_service_trains[:5]:
             train_number = train.get('trainNumber', 'N/A')
@@ -1606,11 +1633,11 @@ def get_train_status() -> str:
             # Delay in seconds, convert to minutes
             delay_minutes = delay // 60 if delay else 0
             if delay_minutes == 0:
-                delay_str = "✅ On time"
+                delay_str = "✅ À tabela" if is_pt else "✅ On time"
             elif delay_minutes > 0:
-                delay_str = f"{delay_minutes} min late"
+                delay_str = f"{delay_minutes} min de atraso" if is_pt else f"{delay_minutes} min late"
             else:
-                delay_str = "✅ Ahead"
+                delay_str = "✅ Adiantado" if is_pt else "✅ Ahead"
 
             status_emoji = {
                 'IN_TRANSIT': '🚆',
@@ -1618,21 +1645,35 @@ def get_train_status() -> str:
                 'STOPPED': '⏸️'
             }.get(status, '❓')
 
-            disruption_note = " (with disruptions)" if has_disruptions else ""
+            if has_disruptions:
+                disruption_note = " (com perturbações)" if is_pt else " (with disruptions)"
+            else:
+                disruption_note = ""
             response += (
-                f"        - {status_emoji} **#{train_number}:** {origin_name} → {dest_name}, "
+                f"- {status_emoji} **#{train_number}:** {origin_name} → {dest_name} — "
                 f"**{delay_str}**{disruption_note}\n"
             )
 
         if len(delayed_service_trains) > 5:
-            response += f"    - ... and {len(delayed_service_trains) - 5} more delayed {service_name} trains.\n"
+            extra = len(delayed_service_trains) - 5
+            if is_pt:
+                train_word = "comboio" if extra == 1 else "comboios"
+                response += f"- … e mais {extra} {train_word} {service_name} com atraso.\n"
+            else:
+                train_word = "train" if extra == 1 else "trains"
+                response += f"- ... and {extra} more delayed {service_name} {train_word}.\n"
         response += "\n"
 
-    response += f"📍 **AML Coverage:** {len(aml_stations)} stations\n"
-    response += "🔗 **Supported CP Lines:** Cascais, Sintra, Azambuja, Sado\n"
-    response += "ℹ️ **Not covered here:** Fertagus live operations are outside the CP source used by LISBOA.\n"
-    response += "💡 **Quick Tip:** Ask about a specific station or line for departure-level detail.\n"
-    response += "ℹ️ Long-distance services are excluded from this LISBOA CP view.\n"
+    response += f"- 📍 **{'Cobertura AML' if is_pt else 'AML coverage'}:** {len(aml_stations)} {'estações' if is_pt else 'stations'}\n"
+    response += f"- 🔗 **{'Linhas CP suportadas' if is_pt else 'Supported CP lines'}:** Cascais, Sintra, Azambuja, Sado\n\n"
+    if is_pt:
+        response += "ℹ️ **Fora deste âmbito:** as operações em tempo real da Fertagus estão fora da fonte CP usada pela LISBOA.\n\n"
+        response += "💡 **Dica rápida:** pergunta por uma estação ou linha específica para detalhe ao nível das partidas.\n\n"
+        response += "ℹ️ Os serviços de longo curso estão excluídos desta vista CP da LISBOA.\n"
+    else:
+        response += "ℹ️ **Not covered here:** Fertagus live operations are outside the CP source used by LISBOA.\n\n"
+        response += "💡 **Quick tip:** Ask about a specific station or line for departure-level detail.\n\n"
+        response += "ℹ️ Long-distance services are excluded from this LISBOA CP view.\n"
 
     return response
 
@@ -1717,7 +1758,7 @@ def search_cp_stations(query: str) -> str:
 
 
 @tool
-def get_train_schedule(station_name: str, limit: int = 10) -> str:
+def get_train_schedule(station_name: str, limit: int = 10, language: str = "en") -> str:
     """
     Gets upcoming train departures from a CP station using GTFS schedule data.
 
@@ -1726,14 +1767,20 @@ def get_train_schedule(station_name: str, limit: int = 10) -> str:
     Args:
         station_name: Station name to search for.
         limit: Maximum number of departures to show (default 10).
+        language: Output language, ``"pt"`` or ``"en"`` (default ``"en"``).
 
     Returns:
         str: Upcoming departures with times and destinations.
     """
+    is_pt = str(language or "en").lower().startswith("pt")
+
     # Find the station
     stops = search_gtfs_stop(station_name, limit=5)
 
     if not stops:
+        if is_pt:
+            return (f"❌ Estação '{station_name}' não encontrada.\n\n"
+                    "💡 Tenta procurar por: Oriente, Rossio, Cais do Sodré, Cascais, Sintra")
         return (f"❌ Station '{station_name}' not found.\n\n"
                 "💡 Try searching for: Oriente, Rossio, Cais do Sodré, Cascais, Sintra")
 
@@ -1746,6 +1793,12 @@ def get_train_schedule(station_name: str, limit: int = 10) -> str:
     departures = get_stop_departures(stop_id, limit=limit)
 
     if not departures:
+        if is_pt:
+            return (f"❌ Sem partidas programadas para **{stop_name}** hoje.\n\n"
+                    "Possíveis motivos:\n"
+                    "- Não há mais comboios hoje\n"
+                    "- Horário de feriado\n"
+                    "- Dados GTFS ainda indisponíveis")
         return (f"❌ No scheduled departures found for **{stop_name}** today.\n\n"
                 "This may be due to:\n"
                 "- No more trains today\n"
@@ -1753,9 +1806,11 @@ def get_train_schedule(station_name: str, limit: int = 10) -> str:
                 "- GTFS data not yet available")
 
     now = datetime.now()
-    response = f"🚆 **Departures from {stop_name}**\n"
-    response += f"📅 {_format_pt_datetime(now)}\n"
-    response += "=" * 50 + "\n\n"
+    title = f"Próximas partidas de {stop_name}" if is_pt else f"Departures from {stop_name}"
+    # Clean markdown: heading + column-0 bullet list (no literal '='/'-' rules that
+    # render as setext headings or floating text in Streamlit).
+    response = f"### 🚆 **{title}**\n\n"
+    response += f"📅 {_format_pt_datetime(now)}\n\n"
 
     for dep in departures:
         dep_time = dep['departure_time']
@@ -1771,13 +1826,15 @@ def get_train_schedule(station_name: str, limit: int = 10) -> str:
         except (IndexError, ValueError):
             time_str = dep_time
 
-        response += f"🕐 **{time_str}** → {headsign}\n"
+        line = f"- 🕐 **{time_str}** → {headsign}"
         if route_name:
-            response += f"   🚆 {route_name}\n"
-        response += "\n"
+            line += f" · 🚆 {route_name}"
+        response += line + "\n"
 
-    response += "-" * 50 + "\n"
-    response += "💡 Podes perguntar por atrasos em tempo real de um comboio específico.\n"
+    if is_pt:
+        response += "\n💡 Podes perguntar por atrasos em tempo real de um comboio específico.\n"
+    else:
+        response += "\n💡 You can ask about real-time delays for a specific train.\n"
 
     return response
 

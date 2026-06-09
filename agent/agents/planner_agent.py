@@ -144,6 +144,7 @@ _PLANNER_SOURCE_LINE_RE = re.compile(
 _PLANNER_ROUTE_ARROW_RE = re.compile(
     r"\s*(?:\u2192|->|\u00e2\u2020\u2019|\u00c3\u00a2\u00e2\u20ac\u00a0\u00e2\u20ac\u2122)\s*"
 )
+_PLANNER_TRANSPORT_BULLET_SCAN_LIMIT = 18
 
 
 def _normalize_planner_text(text: str) -> str:
@@ -3193,7 +3194,10 @@ def _build_planner_evidence_packet(
     requested_days = _extract_requested_day_count(user_message)
     allowed_places = _extract_allowed_place_names("\n".join([places_data or "", events_data or ""]))
     weather_bullets = _extract_weather_fact_bullets(weather_data, language, max_items=5)
-    transport_bullets = _extract_planner_fallback_bullets(transport_data, max_items=6)
+    transport_bullets = _extract_planner_fallback_bullets(
+        transport_data,
+        max_items=_PLANNER_TRANSPORT_BULLET_SCAN_LIMIT,
+    )
     place_bullets = _extract_planner_fallback_bullets(places_data, max_items=8)
     event_bullets = _extract_planner_fallback_bullets(events_data, max_items=6)
 
@@ -4281,7 +4285,10 @@ def _build_structured_plan_fallback(
         item
         for item in (
             _fallback_bullet_body(bullet)
-            for bullet in _extract_planner_fallback_bullets(transport_data, max_items=6)
+            for bullet in _extract_planner_fallback_bullets(
+                transport_data,
+                max_items=_PLANNER_TRANSPORT_BULLET_SCAN_LIMIT,
+            )
         )
         if item
         and not _is_generic_transport_heading(item)
@@ -5846,8 +5853,13 @@ def _extract_requested_origin_target_carris_bullet(
     )
     for index, raw_line in enumerate(lines):
         stripped = raw_line.strip()
-        if re.match(r"^(?:TRAMS?|EL[ÉE]TRICOS?|ELECTRICOS?|BUSES|AUTOCARROS?)$", stripped, flags=re.IGNORECASE):
-            current_mode = stripped.lower()
+        section_label = re.sub(r"^#{1,6}\s*", "", stripped).strip()
+        if re.match(
+            r"^(?:TRAMS?|EL[ÉE]TRICOS?|ELECTRICOS?|BUSES|AUTOCARROS?)$",
+            section_label,
+            flags=re.IGNORECASE,
+        ):
+            current_mode = section_label.lower()
             continue
         match = route_line_re.match(stripped)
         if not match:
@@ -5860,12 +5872,19 @@ def _extract_requested_origin_target_carris_bullet(
         )
         if not stops_match:
             stops_match = re.search(
-                r"(?:\*\*)?Paragens:\*{0,2}\s*apanh[ae]\s+em\s+(?:\*\*)?(?P<board>[^;*\n]+)(?:\*\*)?;\s*sai\s+em\s+(?:\*\*)?(?P<leave>[^*\n]+)(?:\*\*)?",
+                r"(?:\*\*)?Paragens:\*{0,2}\s*(?:apanh[ae]|embarcar)\s+em\s+"
+                r"(?:\*\*)?(?P<board>[^;*\n]+)(?:\*\*)?;\s*(?:sai|sair)\s+em\s+"
+                r"(?:\*\*)?(?P<leave>[^*\n]+)(?:\*\*)?",
                 block,
                 flags=re.IGNORECASE,
             )
+        initial_walk_match = re.search(
+            r"(?:\*\*)?(?:Initial walk|Caminhada inicial):\*{0,2}\s*(?P<walk>~?\s*\d+\s*min[^\n]*)",
+            block,
+            flags=re.IGNORECASE,
+        )
         walk_match = re.search(
-            r"(?:\*\*)?(?:Final walk|Caminhada final):\*{0,2}\s*(?P<walk>~?\s*\d+\s*min[^\n.]*)",
+            r"(?:\*\*)?(?:Final walk|Caminhada final):\*{0,2}\s*(?P<walk>~?\s*\d+\s*min[^\n]*)",
             block,
             flags=re.IGNORECASE,
         )
@@ -5881,7 +5900,8 @@ def _extract_requested_origin_target_carris_bullet(
         )
         if not time_match:
             time_match = re.search(
-                r"(?:\*\*)?(?:Tempo estimado|Estimated time|Estimated travel time):\*{0,2}\s*(?P<time>~?\s*\d+\s*min)",
+                r"(?:\*\*)?(?:Tempo estimado|Tempo em ve[íi]culo|Estimated time|Estimated travel time|Vehicle time):"
+                r"\*{0,2}\s*(?P<time>~?\s*\d+\s*min)",
                 block,
                 flags=re.IGNORECASE,
             )
@@ -5890,7 +5910,8 @@ def _extract_requested_origin_target_carris_bullet(
             "headsign": match.group("headsign").strip(),
             "board": stops_match.group("board").strip() if stops_match else "",
             "leave": re.sub(r"\.\s*$", "", stops_match.group("leave").strip()) if stops_match else "",
-            "walk": re.sub(r"\s+", " ", walk_match.group("walk")).strip(" *") if walk_match else "",
+            "initial_walk": re.sub(r"\s+", " ", initial_walk_match.group("walk")).strip(" *.") if initial_walk_match else "",
+            "walk": re.sub(r"\s+", " ", walk_match.group("walk")).strip(" *.") if walk_match else "",
             "next": re.sub(r"\s+", " ", next_match.group("next")).strip(" *") if next_match else "",
             "time": re.sub(r"\s+", " ", time_match.group("time")).strip() if time_match else "",
             "mode": current_mode,
@@ -5911,6 +5932,7 @@ def _extract_requested_origin_target_carris_bullet(
     headsign = re.sub(r"^(?:para|to)\s+", "", best.get("headsign", ""), flags=re.IGNORECASE).strip()
     board = best.get("board", "")
     leave = best.get("leave", "")
+    initial_walk = best.get("initial_walk", "")
     walk = best.get("walk", "")
     next_departures = best.get("next", "")
     travel_time = re.sub(r"(?i)(\d)\s*min\b", r"\1 min", best.get("time", ""))
@@ -5922,13 +5944,15 @@ def _extract_requested_origin_target_carris_bullet(
         parts = [f"🚌 **{origin} → {target}:** Carris **{line}**"]
         if headsign:
             parts.append(f"para **{headsign}**")
+        if initial_walk:
+            parts.append(f"; caminhada inicial {initial_walk}")
         if board and leave:
             parts.append(f"; apanha em **{board}** e sai em **{leave}**")
         if walk_pt:
             parts.append(f"; caminhada final {walk_pt}")
         if travel_time:
             parts.append(f"(**{travel_time}**)")
-        sentence = " ".join(parts).replace(" ** ;", " **;").replace("** ;", "**;").strip() + "."
+        sentence = " ".join(parts).replace(" ** ;", " **;").replace("** ;", "**;").replace(" ;", ";").strip() + "."
         if next_departures:
             next_departures_pt = re.sub(r"\(stop\s+", "(paragem ", next_departures, flags=re.IGNORECASE)
             sentence += f" Próximas partidas: {next_departures_pt}."
@@ -5937,13 +5961,15 @@ def _extract_requested_origin_target_carris_bullet(
     parts = [f"🚌 **{origin} → {target}:** take Carris **{line}**"]
     if headsign:
         parts.append(f"towards **{headsign}**")
+    if initial_walk:
+        parts.append(f"; initial walk {initial_walk}")
     if board and leave:
         parts.append(f"; board at **{board}** and leave at **{leave}**")
     if walk:
         parts.append(f"; final walk {walk}")
     if travel_time:
         parts.append(f"(**{travel_time}**)")
-    sentence = " ".join(parts).replace(" ** ;", " **;").replace("** ;", "**;").strip() + "."
+    sentence = " ".join(parts).replace(" ** ;", " **;").replace("** ;", "**;").replace(" ;", ";").strip() + "."
     if next_departures:
         sentence += f" Next departures: {next_departures}."
     return sentence
@@ -6799,6 +6825,16 @@ def _clean_structured_card_detail_value(value: str, label_key: str) -> str:
         return ""
     if label_key == "address" and normalized in {"lisboa", "lisbon"}:
         return ""
+    if label_key == "price":
+        cleaned = re.split(
+            r"\s*;\s*(?:book\s+a\s+date|ticket\s+lisboa\s+card|please\s+enter)",
+            cleaned,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0].strip(" .;")
+        normalized = _normalize_planner_text(cleaned)
+        if not cleaned or re.search(r"\b(?:please\s+enter|once\s+the\s+booking|ticket\s+lisboa\s+card)\b", normalized):
+            return ""
     if label_key == "description" and _planner_text_is_negative_result(cleaned):
         return ""
     if label_key == "description" and re.match(
@@ -7535,6 +7571,7 @@ def _build_card_based_renderer_fallback(
     if historic_food_request and not strict_requested_sequence:
         selected_cards = _order_historic_food_cards(selected_cards, user_message)
     selected_cards = _limit_cards_for_user_cardinality(selected_cards, user_message)
+    selected_cards = _limit_visible_cards_for_requested_type_counts(selected_cards, user_message)
     selected_cards = _move_requested_origin_card_first(selected_cards, user_message)
     selected_cards = _drop_origin_name_collision_cards(selected_cards, user_message)
     selected_cards = _move_requested_end_card_last(selected_cards, user_message)
@@ -7649,6 +7686,19 @@ def _build_card_based_renderer_fallback(
     visible_cards = _position_requested_meal_cards_for_plan_window(visible_cards, user_message)
     visible_cards = _position_compact_local_food_stop(visible_cards, user_message)
     visible_cards = _move_requested_end_card_last(visible_cards, user_message)
+    if _query_requests_food_stop(user_message) and not any(
+        _card_kind_for_plan_block(card) == "food"
+        for card in visible_cards
+    ):
+        visible_cards = _insert_requested_food_stop_if_needed(
+            visible_cards,
+            selected_cards,
+            user_message,
+            language,
+        )
+        visible_cards = _position_requested_meal_cards_for_plan_window(visible_cards, user_message)
+        visible_cards = _position_compact_local_food_stop(visible_cards, user_message)
+        visible_cards = _limit_visible_cards_for_requested_type_counts(visible_cards, user_message)
     time_allocations = _planner_time_allocations_for_cards(
         visible_cards,
         _extract_requested_plan_duration_minutes(user_message),
@@ -7735,7 +7785,10 @@ def _build_card_based_renderer_fallback(
         item
         for item in (
             _fallback_bullet_body(bullet)
-            for bullet in _extract_planner_fallback_bullets(transport_data, max_items=5)
+            for bullet in _extract_planner_fallback_bullets(
+                transport_data,
+                max_items=_PLANNER_TRANSPORT_BULLET_SCAN_LIMIT,
+            )
         )
         if item
         and not _is_generic_transport_heading(item)
@@ -9062,10 +9115,7 @@ def _limit_visible_cards_for_requested_type_counts(
 
     def is_protected(card: Dict[str, str]) -> bool:
         title_key = _normalize_planner_text(_planner_card_display_name(card) or card.get("name", ""))
-        if end_key and (
-            title_key == end_key
-            or _planner_card_matches_area(card, end_area)
-        ):
+        if end_key and title_key == end_key:
             return True
         return any(
             label and (
@@ -9093,7 +9143,24 @@ def _limit_visible_cards_for_requested_type_counts(
                 break
             keep_flags[index] = False
 
-    return [card for card, keep in zip(cards, keep_flags) if keep]
+    kept_cards = [card for card, keep in zip(cards, keep_flags) if keep]
+    if re.search(r"\b(?:pelo\s+menos|no\s+minimo|no\s+m[ií]nimo|at\s+least|minimum)\b", _normalize_planner_text(user_message)):
+        return kept_cards
+
+    requested_types = set(counts)
+    allow_food = _query_requests_food_stop(user_message)
+    filtered_cards = [
+        card for card in kept_cards
+        if (
+            (allow_food and _card_kind_for_plan_block(card) == "food")
+            or any(
+                _planner_card_matches_requested_count_type(card, count_type)
+                for count_type in requested_types
+            )
+            or is_protected(card)
+        )
+    ]
+    return filtered_cards or kept_cards
 
 
 def _limit_cards_for_user_cardinality(cards: List[Dict[str, str]], user_message: str) -> List[Dict[str, str]]:
@@ -11067,6 +11134,14 @@ def _planner_text_is_internal_context_marker(text: str) -> bool:
     )
 
 
+def _clean_card_price_detail_for_plan_block(value: str, *, language: str) -> str:
+    """Return a display-safe price field for planner blocks."""
+    cleaned = _clean_structured_card_detail_value(value, "price")
+    if not cleaned:
+        return ""
+    return _planner_detail_value_for_language(cleaned, "price", language)
+
+
 def _card_details_for_plan_block(card: Dict[str, str], *, language: str = "en") -> List[str]:
     """Convert a place card into semantic planner detail fields."""
     details: List[str] = []
@@ -11087,7 +11162,9 @@ def _card_details_for_plan_block(card: Dict[str, str], *, language: str = "en") 
     if card.get("hours"):
         details.append(f"Hours: {card['hours']}")
     if card.get("price"):
-        details.append(f"Price: {card['price']}")
+        price = _clean_card_price_detail_for_plan_block(card["price"], language=language)
+        if price:
+            details.append(f"Price: {price}")
     if card.get("features"):
         details.append(f"Features: {card['features']}")
     if card.get("rating"):
@@ -11118,7 +11195,9 @@ def _card_details_for_itinerary_block(card: Dict[str, str], *, language: str = "
     if card.get("hours"):
         details.append(f"Hours: {card['hours']}")
     if card.get("price"):
-        details.append(f"Price: {card['price']}")
+        price = _clean_card_price_detail_for_plan_block(card["price"], language=language)
+        if price:
+            details.append(f"Price: {price}")
     if card.get("features"):
         details.append(f"Features: {card['features']}")
     _append_card_link_details(details, card, language=language)
@@ -11614,10 +11693,25 @@ def _is_planner_transport_status_summary(item: str) -> bool:
     return False
 
 
+def _planner_transport_detail_fragment_is_orphan(item: str) -> bool:
+    """Return whether a transport detail is unsafe as a standalone movement bullet."""
+    normalized = _normalize_planner_text(item)
+    return bool(
+        re.match(
+            r"^(?:caminhada\s+(?:inicial|final)|initial\s+walk|final\s+walk|"
+            r"tempo\s+em\s+veiculo|vehicle\s+time|proximas\s+partidas|next\s+departures|"
+            r"paragens|stops)\b",
+            normalized,
+        )
+    )
+
+
 def _planner_transport_bullet_is_actionable(item: str) -> bool:
     """Return whether a movement bullet contains route-level user value."""
     normalized = _normalize_planner_text(item)
     if not normalized:
+        return False
+    if _planner_transport_detail_fragment_is_orphan(item):
         return False
     if item.count("**") % 2:
         return False

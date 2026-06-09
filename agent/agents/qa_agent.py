@@ -3330,6 +3330,7 @@ class QualityAssuranceAgent(BaseAgent):
                 or self._repair_added_missing_value_placeholders(draft_response, repaired)
                 or self._repair_degraded_category_listing(draft_response, repaired)
                 or self._repair_collapsed_event_results_to_no_result(draft_response, repaired)
+                or self._repair_flipped_place_answer_to_event_no_result(draft_response, repaired)
             ):
                 return final_post_qa_guard(draft_response, language=language)
             repaired_lower = repaired.lower()
@@ -3434,6 +3435,44 @@ class QualityAssuranceAgent(BaseAgent):
             return True
 
         return len(re.findall(r"(?i)\*\*(?:Locais de gastronomia|Food and Dining)\*\*", repaired_response or "")) >= 3
+
+    @staticmethod
+    def _repair_flipped_place_answer_to_event_no_result(draft_response: str, repaired_response: str) -> bool:
+        """Return whether QA flipped a grounded place answer into an event no-result.
+
+        A place/attraction lookup that returned a real venue card (e.g. "Onde fica
+        o Mosteiro dos Jerónimos?") must never be repaired into "no confirmed
+        events": that discards the correct answer and switches the response domain.
+        The repair pass sometimes does this because the researcher also runs an
+        events search whose empty result is present in the worker outputs.
+        """
+        draft = draft_response or ""
+        repaired = repaired_response or ""
+        draft_is_place_answer = bool(
+            re.search(
+                r"(?mi)^###\s+[\U0001F300-\U0001FAFF☀-➿️‍]*\s*"
+                r"\*\*(?:Locais e atra[cç][oõ]es|Places and Attractions)\*\*",
+                draft,
+            )
+            or re.search(r"(?m)^\s{4,}[-*]\s+(?:📂|📍|🕒|🕐|💶|⭐|📞|✉️|🌐|🔗)\s+\*\*", draft)
+        )
+        # Never fire when the draft itself is already an event answer: a genuine
+        # "no confirmed events" result for an events query must be preserved.
+        draft_is_event_answer = bool(
+            re.search(
+                r"(?mi)^###\s+[^\n]*\*\*(?:Eventos encontrados|Events Found|"
+                r"Sem eventos confirmados|No confirmed events)\*\*",
+                draft,
+            )
+        )
+        repaired_event_no_result = bool(
+            re.search(
+                r"(?i)\b(?:sem eventos confirmados|no confirmed events|"
+                r"n[aã]o consegui confirmar um evento|n[aã]o encontrei eventos)\b",
+                repaired,
+            )
+        )
+        return draft_is_place_answer and not draft_is_event_answer and repaired_event_no_result
 
     @staticmethod
     def _repair_collapsed_event_results_to_no_result(draft_response: str, repaired_response: str) -> bool:

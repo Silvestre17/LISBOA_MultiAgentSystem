@@ -1725,7 +1725,12 @@ class ResearcherAgent(BaseAgent):
             signals.append("Hotels")
         if any(term in query for term in ["viewpoint", "view point", "miradouro", "scenic view"]):
             signals.append("View Points")
-        if any(term in query for term in ["garden", "jardim", "parque", "park"]):
+        # "jardim zoológico" is a zoo, not a botanical garden. The substring
+        # "jardim" must not force a Parks & Gardens filter, which would hide the
+        # zoo (categorized as Nature, not Parks & Gardens). Leaving the category
+        # broad lets semantic search surface the zoo, matching a bare "zoo" query.
+        zoo_request = bool(re.search(r"\bzoos?\b|zool[oó]gic", query))
+        if not zoo_request and any(term in query for term in ["garden", "jardim", "parque", "park"]):
             signals.append("Parks & Gardens")
         if any(
             term in query
@@ -5021,6 +5026,14 @@ class ResearcherAgent(BaseAgent):
         nearby_tool = self._get_tool_by_name("find_nearby_services")
         structured_subject = self._normalize_structured_plan_text(structured_plan.get("subject")) if structured_plan else None
         place_focus_query = structured_subject or self._extract_place_focus_query(user_message) or self._extract_place_area_filter(user_message)
+        normalized_lookup_text = _normalize_researcher_intent_text(user_message)
+        zoo_lookup_subject = ""
+        if re.search(
+            r"\b(?:jardim\s+zoologico|zoo(?:\s+de\s+lisboa)?|lisbon\s+zoo)\b",
+            normalized_lookup_text,
+        ):
+            zoo_lookup_subject = "jardim zoológico" if language == "pt" else "Lisbon Zoo"
+            place_focus_query = zoo_lookup_subject
         transactional_lookup = bool(
             re.search(
                 r"\b(?:book|reserve|reservation|booking|buy|purchase|"
@@ -5030,6 +5043,8 @@ class ResearcherAgent(BaseAgent):
             )
         )
         specific_lookup = _extract_specific_place_lookup_phrase(user_message)
+        if zoo_lookup_subject:
+            specific_lookup = zoo_lookup_subject
         if (
             structured_subject
             and not specific_lookup
@@ -5045,6 +5060,8 @@ class ResearcherAgent(BaseAgent):
             existing_service_ids = {self._service_type_identity(service_type) for service_type in service_types}
             if tool_label and self._service_type_identity(tool_label) not in existing_service_ids:
                 service_types.append(tool_label)
+        if zoo_lookup_subject:
+            service_types = []
         nearby_location = self._normalize_structured_plan_text(structured_plan.get("near_location")) if structured_plan else None
         nearby_location = self._clean_nearby_location_text(nearby_location)
         nearby_location = nearby_location or self._extract_near_location_name(user_message)
@@ -5091,7 +5108,9 @@ class ResearcherAgent(BaseAgent):
                 "language": language,
                 "specific_lookup": True,
             }
-            exact_category_hint = self._infer_place_category_hint(user_message) or structured_category_hint
+            exact_category_hint = None if zoo_lookup_subject else (
+                self._infer_place_category_hint(user_message) or structured_category_hint
+            )
             if exact_category_hint:
                 exact_args["category"] = exact_category_hint
 
@@ -5316,6 +5335,8 @@ class ResearcherAgent(BaseAgent):
         if not places_tool:
             return self._run_direct_tool_fallback(user_message, language)
         category_hint = self._infer_place_category_hint(user_message) or structured_category_hint
+        if zoo_lookup_subject:
+            category_hint = None
         requested_count = self._extract_requested_result_count(user_message)
         query_text = user_message if category_hint and not specific_lookup else (place_focus_query or user_message)
         max_results = requested_count or 5
@@ -5343,7 +5364,7 @@ class ResearcherAgent(BaseAgent):
         if is_broad_attractions:
             query_text = "must-see attractions first time visitors Lisbon iconic monuments museums palaces castles historic sites"
             max_results = 6
-        elif self._is_visit_place_context_query(user_message) and place_focus_query and not category_hint:
+        elif self._is_visit_place_context_query(user_message) and place_focus_query and not category_hint and not zoo_lookup_subject:
             query_text = f"near {place_focus_query}"
 
         args = {"query": query_text, "max_results": tool_max_results, "offset": 0, "language": language}
@@ -5351,7 +5372,7 @@ class ResearcherAgent(BaseAgent):
             args["specific_lookup"] = True
         if is_broad_attractions:
             args["category"] = "Museums & Monuments"
-        elif self._is_visit_place_context_query(user_message) and place_focus_query and not category_hint:
+        elif self._is_visit_place_context_query(user_message) and place_focus_query and not category_hint and not zoo_lookup_subject:
             args["category"] = "Museums & Monuments"
         elif category_hint:
             args["category"] = category_hint
@@ -7181,6 +7202,11 @@ class ResearcherAgent(BaseAgent):
             r"\b(?:bike|bikes|bicycle|bicycles|bicicleta|bicicletas|velocipede|velocipedes|velocipedo|velocipedos)\b",
             normalized_query,
         ))
+        # "jardim zoológico"/"zoo" is a zoo attraction, not a municipal garden
+        # facility. The substring "jardim" must not divert it to the Lisboa Aberta
+        # "Jardins - Parques Urbanos" dataset; let it fall through to the
+        # attractions search (where the zoo is found via semantic retrieval).
+        zoo_context = bool(re.search(r"\bzoos?\b|zoolog", normalized_query))
         service_catalog = [
             (("pharmacy", "pharmacies", "farm", "pharmac"), "farm\u00e1cias"),
             (
@@ -7275,6 +7301,8 @@ class ResearcherAgent(BaseAgent):
         seen_identities: set[str] = set()
         for markers, normalized_service in service_catalog:
             if normalized_service == "jardins" and parking_context:
+                continue
+            if normalized_service == "jardins" and zoo_context:
                 continue
             if any(marker in normalized_query for marker in markers):
                 if normalized_service == "parking" and bike_parking_context:

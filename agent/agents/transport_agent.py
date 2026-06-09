@@ -1690,6 +1690,39 @@ def _extract_destination_only_target(user_message: str) -> Optional[str]:
     return None
 
 
+def _build_missing_origin_clarification(destination: str, language: str) -> str:
+    """Ask the user for an origin instead of inventing one or returning nothing.
+
+    Used as a graceful fallback for destination-only route questions when the
+    transport data layer is momentarily unavailable, so the user never sees an
+    empty answer and we never fabricate a starting point.
+    """
+    dest = (destination or "").strip()
+    if language == "pt":
+        return "\n".join(
+            [
+                f"### 🧭 **Indica-me a tua origem para chegar a {dest}**",
+                "",
+                f"✅ **Resposta direta:** consigo calcular o percurso até **{dest}**, mas preciso de saber de onde partes.",
+                "",
+                "---",
+                "",
+                "- Diz-me uma morada, zona, estação ou paragem de partida (ex.: “do Rossio”, “de Alvalade”, “da estação do Oriente”).",
+            ]
+        )
+    return "\n".join(
+        [
+            f"### 🧭 **Tell me your starting point to reach {dest}**",
+            "",
+            f"✅ **Direct answer:** I can work out the route to **{dest}**, but I need to know where you're starting from.",
+            "",
+            "---",
+            "",
+            "- Give me a starting address, area, station, or stop (e.g. “from Rossio”, “from Alvalade”, “from Oriente station”).",
+        ]
+    )
+
+
 def _build_destination_only_transport_overview_response(
     user_message: str,
     context: str,
@@ -1704,7 +1737,13 @@ def _build_destination_only_transport_overview_response(
     except ImportError:
         return None
 
-    overview = find_nearest_stops_for_place(destination)
+    try:
+        overview = find_nearest_stops_for_place(destination)
+    except Exception:
+        # Data layer momentarily unavailable (e.g. a transient DB/network error):
+        # never fail into an empty response and never invent an origin — ask for
+        # the user's starting point so the next turn can produce a real route.
+        return _build_missing_origin_clarification(destination, _infer_language(user_message, context))
     if not overview:
         return None
 
@@ -3122,15 +3161,20 @@ def _extract_carris_mode_section(route_result: str, section_name: str) -> str:
     """Extracts the requested BUSES or TRAMS section from Carris Urban route output."""
     lines = (route_result or "").splitlines()
     target = section_name.upper().strip()
+    section_aliases = {
+        "BUSES": {"BUSES", "AUTOCARROS"},
+        "TRAMS": {"TRAMS", "ELÉTRICOS", "ELETRICOS", "ELECTRICOS"},
+    }
     collecting = False
     section_lines: List[str] = []
 
     for line in lines:
         stripped = line.strip()
-        if stripped in {"TRAMS", "BUSES"}:
-            if collecting and stripped != target:
+        section_label = re.sub(r"^#{1,6}\s*", "", stripped).strip().upper()
+        if section_label in section_aliases["TRAMS"] | section_aliases["BUSES"]:
+            if collecting and section_label not in section_aliases.get(target, {target}):
                 break
-            collecting = stripped == target
+            collecting = section_label in section_aliases.get(target, {target})
             if collecting:
                 section_lines.append(line)
             continue
@@ -3146,7 +3190,13 @@ def _extract_carris_mode_section(route_result: str, section_name: str) -> str:
 
 def _carris_section_has_routes(section: str) -> bool:
     """Returns whether a Carris section contains at least one concrete route line."""
-    return bool(re.search(r"^\s*\d{1,4}[A-Z]?\s*:", section or "", flags=re.MULTILINE))
+    return bool(
+        re.search(
+            r"^\s*(?:[-*]\s*)?(?:\*\*)?\d{1,4}[A-Z]?(?:\*\*)?\s*:",
+            section or "",
+            flags=re.MULTILINE,
+        )
+    )
 
 
 def _parse_carris_route_entries(section: str) -> List[Dict[str, Any]]:
@@ -3156,12 +3206,17 @@ def _parse_carris_route_entries(section: str) -> List[Dict[str, Any]]:
 
     for raw_line in (section or "").splitlines():
         stripped = raw_line.strip()
-        if not stripped or stripped in {"BUSES", "TRAMS"} or re.fullmatch(r"[-=]{3,}", stripped):
+        section_label = re.sub(r"^#{1,6}\s*", "", stripped).strip().upper()
+        if (
+            not stripped
+            or section_label in {"BUSES", "TRAMS", "AUTOCARROS", "ELÉTRICOS", "ELETRICOS", "ELECTRICOS"}
+            or re.fullmatch(r"[-=]{3,}", stripped)
+        ):
             continue
         if re.match(r"^\.\.\.\s+and\s+\d+\s+more\s+routes?\.?$", stripped, flags=re.IGNORECASE):
             continue
 
-        route_match = re.match(r"^(\d{1,4}[A-Z]?)\s*:\s*(.+)$", stripped)
+        route_match = re.match(r"^(?:[-*]\s*)?(?:\*\*)?(\d{1,4}[A-Z]?)(?:\*\*)?\s*:\s*(.+)$", stripped)
         if route_match:
             if current:
                 entries.append(current)
@@ -3391,6 +3446,9 @@ def _format_carris_route_detail(
     stripped = (detail or "").strip()
     if not stripped:
         return []
+    stripped = re.sub(r"^[-*•]\s+", "", stripped).strip()
+    if not stripped:
+        return []
 
     if re.fullmatch(r"check schedule\.?", stripped, re.IGNORECASE):
         frequency_result = frequency_lookup(route) if frequency_lookup and route else ""
@@ -3407,12 +3465,12 @@ def _format_carris_route_detail(
             "    - **How to confirm:** ask me for departures at a specific stop on this line.",
         ]
 
-    next_match = re.match(r"^(?:\*\*)?Next(?:\*\*)?:\s*(.+)$", stripped, re.IGNORECASE)
+    next_match = re.match(r"^(?:\*\*)?(?:Next|Pr[oó]ximas partidas)(?:\*\*)?:\s*(.+)$", stripped, re.IGNORECASE)
     if next_match:
         detail_text = next_match.group(1).strip()
-        stop_match = re.search(r"\(stop\s+(.+)\)\s*$", detail_text, re.IGNORECASE)
+        stop_match = re.search(r"\((?:stop|paragem)\s+(.+)\)\s*$", detail_text, re.IGNORECASE)
         stop_name = stop_match.group(1).strip() if stop_match else ""
-        times_text = re.sub(r"\s*\(stop\s+(.+)\)\s*$", "", detail_text, flags=re.IGNORECASE).strip()
+        times_text = re.sub(r"\s*\((?:stop|paragem)\s+(.+)\)\s*$", "", detail_text, flags=re.IGNORECASE).strip()
         lines: List[str] = []
         if times_text:
             if language == "pt":
@@ -3427,7 +3485,8 @@ def _format_carris_route_detail(
         return lines
 
     stops_match = re.match(
-        r"^Stops:\s*board at\s+(?P<board>.+?);\s*leave at(?:\s+stop)?\s+(?P<leave>.+?)\.?$",
+        r"^(?:Stops|Paragens):\s*(?:board at|embarcar em|apanh[ae] em)\s+(?:\*\*)?(?P<board>.+?)(?:\*\*)?;\s*"
+        r"(?:leave at(?:\s+stop)?|sair em|sai em)\s+(?:\*\*)?(?P<leave>.+?)(?:\*\*)?\.?$",
         stripped,
         flags=re.IGNORECASE,
     )
@@ -3493,7 +3552,11 @@ def _format_carris_route_detail(
             "    - **Validation:** the direct Carris connection exists in the data; confirm the departure shortly before leaving.",
         ]
 
-    travel_match = re.match(r"^~\s*(\d+)\s*min(?:\s*travel)?$", stripped, re.IGNORECASE)
+    travel_match = re.match(
+        r"^(?:(?:Tempo em ve[íi]culo|Tempo estimado|Estimated travel time|Vehicle time):\s*)?~\s*(\d+)\s*min(?:\s*travel)?$",
+        stripped,
+        re.IGNORECASE,
+    )
     if travel_match:
         travel_text = f"~{travel_match.group(1)} min"
         if language == "pt":
@@ -3518,7 +3581,11 @@ def _format_carris_mode_section_markdown(
     def has_confirmed_departures(entry: Dict[str, Any]) -> bool:
         """Return whether the route entry includes concrete departure evidence."""
         return any(
-            re.match(r"^(?:\*\*)?Next(?:\*\*)?:\s*.+", str(detail).strip(), flags=re.IGNORECASE)
+            re.match(
+                r"^(?:\*\*)?(?:Next|Pr[oó]ximas partidas)(?:\*\*)?:\s*.+",
+                str(detail).strip(),
+                flags=re.IGNORECASE,
+            )
             for detail in entry.get("details", [])
         )
 
@@ -3526,7 +3593,8 @@ def _format_carris_mode_section_markdown(
         """Extract the estimated in-vehicle travel time for route ranking."""
         for detail in entry.get("details", []):
             match = re.match(
-                r"^~\s*(\d+)\s*min(?:\s*travel)?$",
+                r"^(?:(?:Tempo em ve[íi]culo|Tempo estimado|Estimated travel time|Vehicle time):\s*)?"
+                r"~\s*(\d+)\s*min(?:\s*travel)?$",
                 str(detail).strip(),
                 flags=re.IGNORECASE,
             )
@@ -3540,7 +3608,7 @@ def _format_carris_mode_section_markdown(
         current_minutes = now.hour * 60 + now.minute
         for detail in entry.get("details", []):
             next_match = re.match(
-                r"^(?:\*\*)?Next(?:\*\*)?:\s*(?P<body>.+)$",
+                r"^(?:\*\*)?(?:Next|Pr[oó]ximas partidas)(?:\*\*)?:\s*(?P<body>.+)$",
                 str(detail).strip(),
                 flags=re.IGNORECASE,
             )
@@ -3617,7 +3685,8 @@ def _summarize_recommended_carris_option(
     route = route_match.group("route").strip()
     direction = route_match.group("direction").strip()
     stops_match = re.search(
-        r"\*\*(?:Paragens|Stops):\*\*\s*(?:apanha em|board at)\s+\*\*(?P<board>[^*]+)\*\*;\s*(?:sai em|alight at)\s+\*\*(?P<leave>[^*]+)\*\*",
+        r"\*\*(?:Paragens|Stops):\*\*\s*(?:apanha em|board at)\s+\*\*(?P<board>[^*]+)\*\*;\s*"
+        r"(?:sai em|alight at)\s+\*\*(?P<leave>[^*]+)\*\*",
         first_block,
         flags=re.IGNORECASE,
     )
@@ -3627,7 +3696,7 @@ def _summarize_recommended_carris_option(
         flags=re.IGNORECASE,
     )
     travel_match = re.search(
-        r"\*\*(?:Tempo estimado|Estimated travel time):\*\*\s*(?P<travel>[^\n]+)",
+        r"\*\*(?:Tempo estimado|Tempo em veículo|Estimated travel time|Vehicle time):\*\*\s*(?P<travel>[^\n]+)",
         first_block,
         flags=re.IGNORECASE,
     )
@@ -6648,7 +6717,10 @@ def _build_cp_tool_spec(user_message: str) -> Optional[Dict[str, Any]]:
         if match:
             return {
                 "name": "get_train_schedule",
-                "args": {"station_name": _resolve_cp_station_name(match.group("station"))},
+                "args": {
+                    "station_name": _resolve_cp_station_name(match.group("station")),
+                    "language": infer_response_language(user_query=user_message, default="en"),
+                },
             }
 
     if route_name and re.search(
@@ -6676,7 +6748,10 @@ def _build_cp_tool_spec(user_message: str) -> Optional[Dict[str, Any]]:
         }
 
     if re.search(r"\b(status|delay|delays|running|atrasos?|a funcionar)\b", query_lower):
-        return {"name": "get_train_status", "args": {}}
+        return {
+            "name": "get_train_status",
+            "args": {"language": infer_response_language(user_query=user_message, default="en")},
+        }
 
     if re.search(
         r"(?:\b(cp|train|comboio)s?\b.*\b(routes|lines|linhas)\b)|(?:\b(routes|lines|linhas)\b.*\b(cp|train|comboio)s?\b)",
@@ -8131,9 +8206,17 @@ class TransportAgent(BaseAgent):
 
     def _preprocess_tool_args(self, tool_name: str, tool_args: dict) -> dict:
         """Sanitize LLM-emitted location arguments before invoking the tool."""
-        if not isinstance(tool_args, dict) or not tool_args:
-            return tool_args
-        cleaned = dict(tool_args)
+        cleaned = dict(tool_args) if isinstance(tool_args, dict) else {}
+        # CP train-status/schedule output is fully localized at the source. Inject
+        # the active conversation language so PT queries never fall back to English
+        # labels, even when the tool is called without a language arg.
+        if tool_name in ("get_train_status", "get_train_schedule") and "language" not in cleaned:
+            cleaned["language"] = infer_response_language(
+                user_query=str(getattr(self, "_active_user_message", "") or ""),
+                default="en",
+            )
+        if not cleaned:
+            return cleaned
         for key in self._LOCATION_ARG_KEYS:
             if key in cleaned:
                 cleaned[key] = self._clean_location_arg(cleaned[key])

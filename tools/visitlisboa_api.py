@@ -849,6 +849,7 @@ def _localize_place_category(category: Optional[str], language: str = "en") -> s
         "Restaurants and Cafes": "Restaurantes e Cafés",
         "Attractions": "Atrações",
         "Attraction": "Atração",
+        "Nature": "Natureza",
         "Hotels": "Hotéis",
         "View Points": "Miradouros",
         "Parks & Gardens": "Parques e Jardins",
@@ -909,6 +910,7 @@ def _localize_place_title(title: Optional[str], language: str = "en") -> str:
         "Museum of Illusions": "Museu das Ilusões",
         "Roman Galleries": "Galerias Romanas",
         "Jerónimos Monastery": "Mosteiro dos Jerónimos",
+        "Lisbon Zoo": "Jardim Zoológico de Lisboa",
         "Jeronimos Monastery": "Mosteiro dos Jerónimos",
         "Combatant's Museum in Forte do Bom Sucesso": "Museu dos Combatentes no Forte do Bom Sucesso",
         "Beaches of Ericeira": "Praias da Ericeira",
@@ -1065,6 +1067,19 @@ def _compact_place_ticket_price_text(value: Optional[str], language: str = "en",
 
     cleaned = re.sub(r"^(?:link|links)\s+", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"^Price\s*:\s*", "", cleaned, flags=re.IGNORECASE)
+    # Drop scraped booking-flow boilerplate VisitLisboa appends to ticket text
+    # (e.g. "Book a date and time + TICKET LISBOA CARD Please enter your Lisboa
+    # Card number. Once the booking is ..."). It is not a price and, left in,
+    # corrupts the card and trips the QA repair pass. Keep only the real price
+    # fragment before the boilerplate.
+    cleaned = re.split(
+        r"\s*[;.+]?\s*(?:book\s+a\s+date|ticket\s+lisboa\s+card|please\s+enter|once\s+the\s+booking)",
+        cleaned,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip(" .;+")
+    if not cleaned:
+        return ""
     cleaned = re.sub(
         r"\bTickets\s+(?=(?:Children|Youngsters?|Adults?|Family|Seniors?|Students?)\b)",
         "",
@@ -1635,7 +1650,7 @@ def _format_event_filter_summary(
         else:
             scope_parts.append("pesquisa geral de eventos")
         return [
-            "### 🔵 **Eventos encontrados**",
+            "### 🎭 **Eventos encontrados**",
             f"🧭 **Filtro aplicado:** {', '.join(scope_parts)}.",
         ]
 
@@ -1648,7 +1663,7 @@ def _format_event_filter_summary(
     else:
         scope_parts.append("broad event discovery")
     return [
-        "### 🔵 **Events Found**",
+        "### 🎭 **Events Found**",
         f"🧭 **Filter used:** {', '.join(scope_parts)}.",
     ]
 
@@ -1716,6 +1731,11 @@ _KNOWN_PLACE_LOOKUP_ALIASES = {
     "pavilhao do conhecimento": "Pavilion of Knowledge",
     "pavilhao conhecimento": "Pavilion of Knowledge",
     "pavilion of knowledge": "Pavilion of Knowledge",
+    "jardim zoologico": "Lisbon Zoo",
+    "jardim zoologico de lisboa": "Lisbon Zoo",
+    "zoologico de lisboa": "Lisbon Zoo",
+    "zoo de lisboa": "Lisbon Zoo",
+    "lisbon zoo": "Lisbon Zoo",
 }
 
 
@@ -3042,7 +3062,7 @@ def _build_explicit_location_no_results_message(area_label: str, category: Optio
     """Build an honest no-result message for explicit AML municipality filters."""
     restaurant_request = "restaurant" in _normalize_place_hint_text(category)
     if language == "pt":
-        heading = "### 🍽️ **Restaurantes**" if restaurant_request else "### 🔵 **Locais e atrações**"
+        heading = "### 🍽️ **Restaurantes**" if restaurant_request else "### 🏛️ **Locais e atrações**"
         noun = "restaurantes" if restaurant_request else "locais da categoria pedida"
         return (
             f"{heading}\n\n"
@@ -3052,7 +3072,7 @@ def _build_explicit_location_no_results_message(area_label: str, category: Optio
             "⚠️ **Limitação dos dados:** evito substituir essa zona por resultados de Lisboa "
             "quando pediste explicitamente outro município da AML."
         )
-    heading = "### 🍽️ **Restaurants**" if restaurant_request else "### 🔵 **Places and Attractions**"
+    heading = "### 🍽️ **Restaurants**" if restaurant_request else "### 🏛️ **Places and Attractions**"
     noun = "restaurants" if restaurant_request else "places in the requested category"
     return (
         f"{heading}\n\n"
@@ -6347,13 +6367,13 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
             )
 
         if render_language == "pt":
-            heading = "### 🍽️ **Restaurantes**" if restaurant_output else "### 🔵 **Locais e atrações**"
+            heading = "### 🍽️ **Restaurantes**" if restaurant_output else "### 🏛️ **Locais e atrações**"
             output_parts = [
                 heading,
                 f"🧭 **Janela de resultados:** {offset + 1}-{offset + len(final_results)} de {len(all_results)}.",
             ]
         else:
-            heading = "### 🍽️ **Restaurants**" if restaurant_output else "### 🔵 **Places and Attractions**"
+            heading = "### 🍽️ **Restaurants**" if restaurant_output else "### 🏛️ **Places and Attractions**"
             output_parts = [
                 heading,
                 f"🧭 **Result window:** {offset + 1}-{offset + len(final_results)} of {len(all_results)}.",
@@ -6405,8 +6425,10 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
                 or 'Lisbon'
             )
 
-            # Source indicator
-            place_icon = _place_icon_for_category(place.get('category', cat))
+            # Source indicator. Use the resolved display category when the raw
+            # category is missing OR empty (≈170 places carry an empty category
+            # string), so a restaurant never falls back to the generic 🏛️ icon.
+            place_icon = _place_icon_for_category(place.get('category') or cat)
             output_parts.append("")
             output_parts.append(f"**{place_icon} {title}**")
 

@@ -562,7 +562,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
 
     origin_display = _format_location_display_name(origin)
     destination_display = _format_location_display_name(destination)
-    route_heading = f"🗺️ **Route: {origin_display} → {destination_display}**"
+    route_heading = f"🗺️ **Rota: {origin_display} → {destination_display}**"
     response = f"{ambiguity_note}\n\n{route_heading}\n\n" if ambiguity_note else f"{route_heading}\n\n"
     sources_used: List[str] = []
 
@@ -597,14 +597,14 @@ def get_route_between_stations(origin: str, destination: str) -> str:
         dest_landmark = None
         destination_display = metro_destination
     if origin_lines or dest_lines:
-        route_heading = f"🗺️ **Route: {origin_display} → {destination_display}**"
+        route_heading = f"🗺️ **Rota: {origin_display} → {destination_display}**"
         response = f"{ambiguity_note}\n\n{route_heading}\n\n" if ambiguity_note else f"{route_heading}\n\n"
 
     has_landmarks = bool(origin_landmark or dest_landmark)
 
     # Handle landmarks first
     if has_landmarks:
-        response += "📍 **Location information**\n\n"
+        response += "📍 **Localização**\n\n"
 
         def _render_landmark_block(label: str, landmark: Dict[str, Any]) -> str:
             """Render a landmark info block with safe Markdown.
@@ -620,21 +620,14 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                 sources_used.append("[*Metro de Lisboa*](https://www.metrolisboa.pt)")
                 line = str(landmark.get('line') or '').strip()
                 suffix = _format_metro_line_suffix(line)
-                block += f"    - 🚇 **Nearest Metro:** **{metro_name.title()}**{suffix}\n"
+                block += f"    - 🚇 **Metro mais próximo:** **{metro_name.title()}**{suffix}\n"
             elif landmark.get('alternative'):
-                alternative = str(landmark['alternative'])
-                normalized_alternative = normalize_location_text(alternative)
-                if "carris" in normalized_alternative:
-                    sources_used.append("[*Carris*](https://www.carris.pt)")
-                if re.search(r"\b(?:cp|train|comboio|rail)\b", normalized_alternative):
-                    sources_used.append("[*CP*](https://www.cp.pt)")
-                block += "    - ⚠️ **Metro:** No direct Metro!\n"
-                block += f"    - 🚌 **Alternative:** {alternative}\n"
+                block += "    - ⚠️ **Metro:** sem ligação direta.\n"
             description = str(landmark.get('description') or '').strip()
             if description and not description.lower().startswith(
                 'resolved dynamically'
             ):
-                block += f"    - ℹ️ **Note:** {description}\n"
+                block += f"    - ℹ️ **Nota:** {description}\n"
             return block + "\n"
 
         if origin_landmark:
@@ -858,15 +851,16 @@ def get_route_between_stations(origin: str, destination: str) -> str:
         if not has_landmarks:  # Only print if we haven't printed landmark info
             response += "❌ Neither location is a known Metro station.\n\n"
 
+    cp_no_direct_note = ""
+
     # Check for CP Train options (only when BOTH ends are CP stations)
     # If only one end is a CP station, the metro route above is sufficient.
     if eff_origin_cp and eff_dest_cp:
-        response += "🚆 **CP TRAINS**\n"
-        sources_used.append("[*CP*](https://www.cp.pt)")
-
         common_lines = set(eff_origin_cp.get("lines", [])) & set(eff_dest_cp.get("lines", []))
 
         if common_lines:
+            response += "🚆 **CP TRAINS**\n"
+            sources_used.append("[*CP*](https://www.cp.pt)")
             response += "✅ **Direct Train Route Available**\n\n"
             for line in common_lines:
                 line_info = CP_LINES.get(line, {"name": line.title()})
@@ -886,8 +880,11 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                 response += "\n"
             return response + _build_route_source_line(sources_used)
         else:
-            response += f"⚠️ No direct train line linking {origin_train_station} and {dest_train_station}.\n"
-            response += "   You may need to transfer at a major hub (e.g., Entrecampos, Oriente, Sete Rios).\n\n"
+            cp_no_direct_note = (
+                "🚆 **CP TRAINS**\n"
+                f"⚠️ No direct train line linking {origin_train_station} and {dest_train_station}.\n"
+                "   You may need to transfer at a major hub (e.g., Entrecampos, Oriente, Sete Rios).\n\n"
+            )
 
     needs_carris_fallback = (
         not any(("Metro de Lisboa" in source or "CP" in source or "Carris" in source) for source in sources_used)
@@ -895,11 +892,12 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     )
     has_carris_route_evidence = bool(
         re.search(
-            r"\b(?:CARRIS URBAN|TRAM\s*&\s*BUS OPTIONS|Carris\s+\*\*|Linhas?:|Lines?:)\b",
+            r"\b(?:CARRIS URBAN|TRAM\s*&\s*BUS OPTIONS|Carris(?::|\s+\*\*)|Linhas?:|Lines?:)\b",
             response,
             flags=re.IGNORECASE,
         )
     )
+    carris_added = has_carris_route_evidence
     if needs_carris_fallback and not has_carris_route_evidence:
         try:
             carris_output = str(
@@ -927,9 +925,14 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                 )
             ).strip()
             if carris_body:
-                response += "🚌 **CARRIS URBAN / TRAM & BUS OPTIONS**\n"
+                response += "🚌 **Carris: autocarros e elétricos**\n"
                 response += carris_body + "\n\n"
                 sources_used.append("[*Carris*](https://www.carris.pt)")
+                carris_added = True
+
+    if cp_no_direct_note and not carris_added:
+        response += cp_no_direct_note
+        sources_used.append("[*CP*](https://www.cp.pt)")
 
     return response + _build_route_source_line(sources_used)
 
@@ -994,7 +997,7 @@ def get_transport_summary(language: str = "pt") -> str:
     updated_label = "Atualizado" if is_pt else "Updated"
     response = "\n".join(
         [
-            f"### 🔵 **{title}**",
+            f"### 🚦 **{title}**",
             "",
             f"✅ **{'Resposta direta' if is_pt else 'Direct answer'}:** {direct_answer}",
             "",

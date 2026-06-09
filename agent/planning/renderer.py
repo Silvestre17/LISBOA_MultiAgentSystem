@@ -544,6 +544,12 @@ def _format_detail_bullet(detail: str, is_pt: bool) -> str:
 
     raw_label = match.group("label").strip().lower()
     value = match.group("value").strip()
+    # Card field values are plain data; the emphasis comes from the bold label.
+    # Strip stray bold markers the planner LLM sometimes injects into a value
+    # (e.g. "4.5/5** (2244 avaliações)**"), which otherwise render as misplaced
+    # bold. This mirrors the worker-card convention (bold label, plain value).
+    if "**" in value:
+        value = value.replace("**", "").strip()
     label_map = {
         "description": ("📝", "Descrição" if is_pt else "Description"),
         "descrição": ("📝", "Descrição" if is_pt else "Description"),

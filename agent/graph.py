@@ -994,6 +994,8 @@ class MultiAgentAssistant:
         is_pt = (language or "").lower().startswith("pt")
         if asks_cafe:
             if is_pt:
+                if re.search(r"\b(?:pastel|pasteis|nata|natas)\b", normalized_message):
+                    queries.append("pastel de nata Belém Lisboa pastelaria")
                 queries.extend(
                     [
                         "café tradicional pastelaria Lisboa",
@@ -1006,6 +1008,8 @@ class MultiAgentAssistant:
                     ]
                 )
             else:
+                if re.search(r"\b(?:custard|tart|tarts|nata|pastel)\b", normalized_message):
+                    queries.append("custard tart Belém Lisbon pastry shop")
                 queries.append("traditional cafe pastry shop Lisbon")
 
         if asks_lunch and re.search(r"\b(?:belem|torre de belem|padrao dos descobrimentos|jeronimos|museu de marinha)\b", normalized_context):
@@ -8414,7 +8418,43 @@ class MultiAgentAssistant:
             and not _planner_origin_target_leg_has_movement_detail(line)
         ]
         if not incomplete_indices:
-            return response
+            origin_only_indices = [
+                index
+                for index, line in enumerate(lines)
+                if (
+                    wants_transport_legs
+                    and origin_norm in _normalize_planner_text(line)
+                    and re.search(
+                        r"\b(?:primeira\s+paragem|first\s+stop|ligacao\s+exata|ligação\s+exata|"
+                        r"not\s+confirmed|unconfirmed|nao\s+ficou\s+confirmad|não\s+ficou\s+confirmad)\b",
+                        _normalize_planner_text(line),
+                    )
+                )
+            ]
+            if not origin_only_indices:
+                return response
+
+            route_args = {"origin": origin, "destination": target}
+            try:
+                route_output = str(get_route_between_stations.invoke(route_args) or "").strip()
+            except Exception as exc:
+                logger.warning("Final planner area-route repair failed for %s -> %s: %s", origin, target, exc)
+                return response
+
+            confirmed_leg = _extract_requested_origin_target_transport_bullet(
+                route_output,
+                origin,
+                target,
+                language,
+            )
+            if not confirmed_leg:
+                return response
+
+            lines[origin_only_indices[0]] = f"- {confirmed_leg}"
+            transport_agent = self.agents.get("transport")
+            if transport_agent is not None and hasattr(transport_agent, "_record_tool_call"):
+                transport_agent._record_tool_call("get_route_between_stations", route_args)
+            return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
         route_args = {"origin": origin, "destination": target}
         try:
@@ -9862,7 +9902,10 @@ class MultiAgentAssistant:
         if (
             "planner" in agents_to_call
             and "researcher" in agent_outputs
-            and "transport" in agents_to_call
+            and (
+                "transport" in agents_to_call
+                or self._planner_retry_should_fetch_transport(message)
+            )
         ):
             self._maybe_enrich_planner_transport_context(
                 user_message=message,
@@ -10775,6 +10818,16 @@ class MultiAgentAssistant:
                 response=response,
                 user_query=message,
                 language=effective_language,
+            )
+
+        # Safety net: never return an empty answer. If a worker raised and QA
+        # stripped the residual error string to nothing, substitute the vetted,
+        # language-consistent orchestration fallback instead of a blank screen.
+        if not response or not str(response).strip():
+            response = self._build_orchestration_failure_fallback(
+                message=message,
+                language=effective_language,
+                attempted_agents=response_agents_to_call,
             )
 
         try:

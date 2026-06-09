@@ -878,6 +878,57 @@ class WeatherAgent(BaseAgent):
         )
 
     @classmethod
+    def _is_specific_hour_query(cls, user_message: str) -> bool:
+        """Return whether the user asks for weather at a specific clock hour/time window.
+
+        IPMA only publishes DAILY-granularity forecasts for Lisbon, so an
+        hour-specific request (e.g. "entre as 17h e as 18h") can still be answered
+        at the day level but warrants an honest caveat that hour-by-hour precision
+        is not available. Deliberately conservative: only explicit clock times
+        trigger it (not vague "à tarde"/"de manhã"), to avoid over-firing on the
+        normal daily-forecast flow.
+        """
+        normalized = cls._normalize_weather_query(user_message)
+        # Full-day windows ("24 horas", "48h") describe a duration, not a specific hour.
+        if re.search(r"\b(?:24|36|48|72)\s*h(?:oras?)?\b", normalized):
+            return False
+        hour_patterns = (
+            r"\b\d{1,2}\s*h\d{2}\b",                                  # 17h30
+            r"\b\d{1,2}h\b",                                          # 17h
+            r"\b\d{1,2}:\d{2}\b",                                     # 17:00
+            r"\b\d{1,2}\s*(?:am|pm)\b",                               # 5pm / 5 pm
+            r"\b(?:as|pelas|por volta das|at|by|around)\s+\d{1,2}\s*(?:h|horas?|o'?clock)\b",  # às 17 horas
+            r"\bentre as\s+\d{1,2}\b[^\n]{0,20}\b(?:e as|e)\s+\d{1,2}\b",   # entre as 17 e as 18
+            r"\bbetween\s+\d{1,2}\b[^\n]{0,20}\b(?:and|to)\s+\d{1,2}\b",    # between 5 and 6
+        )
+        return any(re.search(pattern, normalized) for pattern in hour_patterns)
+
+    @staticmethod
+    def _build_hourly_granularity_caveat(language: str) -> str:
+        """Honest caveat appended when an hour-specific request is answered at day level."""
+        if language == "pt":
+            return (
+                "ℹ️ **Nota de granularidade:** o IPMA fornece previsão **diária** para Lisboa, "
+                "não hora a hora, por isso não consigo garantir o tempo exatamente para esse intervalo. "
+                "O resumo acima refere-se ao dia (temperaturas, precipitação e vento)."
+            )
+        return (
+            "ℹ️ **Granularity note:** IPMA provides a **daily** forecast for Lisbon, not hour-by-hour, "
+            "so I can't guarantee the weather precisely for that time window. "
+            "The summary above refers to the whole day (temperatures, rain, and wind)."
+        )
+
+    def _append_hourly_caveat(self, response: str, user_message: str, language: str) -> str:
+        """Append the daily-granularity caveat when the query targets a specific hour."""
+        if not response or not self._is_specific_hour_query(user_message):
+            return response
+        marker = "granularidade" if language == "pt" else "granularity note"
+        if marker in response.lower():
+            return response
+        caveat = self._build_hourly_granularity_caveat(language)
+        return f"{response.rstrip()}\n\n{caveat}"
+
+    @classmethod
     def _is_simple_forecast_query(cls, user_message: str) -> bool:
         """Detects standalone forecast/warnings queries that can skip free-form synthesis."""
         query = (user_message or "").lower()
@@ -1840,6 +1891,7 @@ class WeatherAgent(BaseAgent):
 
         if self._is_current_weather_query(user_message) or self._is_simple_forecast_query(user_message):
             response = self._run_direct_tool_fallback(user_message)
+            response = self._append_hourly_caveat(response, user_message, language)
             return finalize_worker_response(
                 response,
                 agent_name="weather",
@@ -1888,6 +1940,7 @@ class WeatherAgent(BaseAgent):
                 print("      [WEATHER] Detected language drift in EN response, switching to deterministic tool output...")
             response = self._run_direct_tool_fallback(user_message)
 
+        response = self._append_hourly_caveat(response, user_message, language)
         return finalize_worker_response(
             response,
             agent_name="weather",

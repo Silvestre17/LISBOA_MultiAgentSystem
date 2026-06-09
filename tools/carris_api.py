@@ -411,6 +411,13 @@ class CarrisGTFSManager:
         - Graceful fallback to stale data on errors
     """
 
+    # Class-level refresh cooldown shared across the per-request manager instances.
+    # A transiently slow/unreachable GTFS endpoint must not impose its 30s update
+    # check + 120s download timeout on EVERY user request: after a failed refresh
+    # we serve the valid stale DB and skip the network round-trip for a while.
+    _refresh_cooldown_until: float = 0.0
+    _REFRESH_COOLDOWN_S = 900  # 15 minutes
+
     def __init__(self, data_dir: str = CARRIS_DATA_DIR, db_path: str = CARRIS_DB_PATH):
         self.data_dir = data_dir
         self.db_path = db_path
@@ -578,7 +585,17 @@ class CarrisGTFSManager:
         self._ensure_data_dir()
 
         if os.path.exists(self.db_path):
-            os.remove(self.db_path)
+            try:
+                os.remove(self.db_path)
+            except PermissionError as exc:
+                logger.warning(
+                    "Carris database is locked during GTFS refresh; serving existing database: %s",
+                    exc,
+                )
+                CarrisGTFSManager._refresh_cooldown_until = (
+                    time.time() + CarrisGTFSManager._REFRESH_COOLDOWN_S
+                )
+                return False
 
         try:
             conn = sqlite3.connect(self.db_path)
@@ -853,6 +870,14 @@ class CarrisGTFSManager:
     def ensure_database(self, force_update: bool = False) -> bool:
         """Ensures database exists and is up-to-date."""
         if not force_update and os.path.exists(self.db_path):
+            # Fast path: if a recent refresh attempt failed and we still have a
+            # usable DB, serve it immediately instead of paying the network
+            # check + download timeout again on this request.
+            if (
+                time.time() < CarrisGTFSManager._refresh_cooldown_until
+                and self._database_has_stops()
+            ):
+                return True
             local_database_ready = self._database_has_stops()
             needs_update, remote_date = self.check_for_updates()
             if not needs_update:
@@ -874,6 +899,14 @@ class CarrisGTFSManager:
             if gtfs_content:
                 if self.convert_to_sqlite(gtfs_content, remote_date or "unknown"):
                     return True
+                if os.path.exists(self.db_path) and self._database_has_stops():
+                    CarrisGTFSManager._refresh_cooldown_until = (
+                        time.time() + CarrisGTFSManager._REFRESH_COOLDOWN_S
+                    )
+                    logger.warning(
+                        "Using existing Carris database after GTFS conversion could not replace it"
+                    )
+                    return True
                 if self.restore_database_from_seed():
                     logger.warning("Using Carris repository seed database after GTFS conversion failure")
                     return True
@@ -883,6 +916,11 @@ class CarrisGTFSManager:
                 return False
             else:
                 if os.path.exists(self.db_path) and self._database_has_stops():
+                    # Avoid re-attempting the slow download on every subsequent
+                    # request; retry only after the cooldown window elapses.
+                    CarrisGTFSManager._refresh_cooldown_until = (
+                        time.time() + CarrisGTFSManager._REFRESH_COOLDOWN_S
+                    )
                     logger.warning("Using stale database due to download failure")
                     return True
                 if self.restore_database_from_seed():
@@ -2102,8 +2140,7 @@ def carris_find_routes_between(
     try:
         cursor = conn.cursor()
 
-        response = f"Routes: {origin} -> {destination}\n"
-        response += "=" * 55 + "\n\n"
+        response = f"🚌 **Rota Carris: {origin} → {destination}**\n\n"
         ambiguity_note = build_location_ambiguity_preamble(origin, destination, language="pt")
         if ambiguity_note:
             conn.close()
@@ -2151,8 +2188,8 @@ def carris_find_routes_between(
             dest_name.split(",")[0] if dest_name else destination
         )
 
-        response += f"   From: {origin_display}\n"
-        response += f"   To: {dest_display}\n\n"
+        response += f"- **Origem:** {origin_display}\n"
+        response += f"- **Destino:** {dest_display}\n\n"
 
         def find_stops_near(lat: float, lon: float, radius: float) -> List[Dict]:
             cursor.execute("SELECT stop_id, stop_name, stop_lat, stop_lon FROM stops")
@@ -2268,7 +2305,7 @@ def carris_find_routes_between(
         for route in routes_found:
             unique_routes.setdefault(route["route_short_name"], dict(route))
 
-        response += f"✅ **Direct routes found:** {len(unique_routes)}\n\n"
+        response += f"✅ **Rotas diretas encontradas:** {len(unique_routes)}\n\n"
 
         now = datetime.now()
         requested_start = str(start_time or "").strip()
@@ -2426,7 +2463,7 @@ def carris_find_routes_between(
             if distance_km > 1.2:
                 return ""
             walking_minutes = max(1, round(distance_km * 12))
-            return f"     Caminhada final: ~{walking_minutes} min até {dest_display}.\n"
+            return f"    - Caminhada final: ~{walking_minutes} min até {dest_display}.\n"
 
         def format_initial_walk_line(stop_hint: Dict[str, str]) -> str:
             """Return an initial walking estimate from origin to boarding stop."""
@@ -2443,7 +2480,7 @@ def carris_find_routes_between(
                 return ""
             walking_minutes = max(1, round(distance_km * 12))
             origin_stop_name = stop_hint.get("origin_stop_name") or hinted_origin.get("name") or "paragem"
-            return f"     Caminhada inicial: ~{walking_minutes} min até {origin_stop_name}.\n"
+            return f"    - Caminhada inicial: ~{walking_minutes} min até {origin_stop_name}.\n"
 
         def format_route_line(r: Dict[str, Any]) -> str:
             """Format a single route entry with direction-safe departures and RT hints."""
@@ -2471,41 +2508,56 @@ def carris_find_routes_between(
             if not departures:
                 headsign = stop_hint.get("headsign")
                 route_summary = f"para {headsign}" if headsign else r["route_long_name"]
-                line = f"   {r['route_short_name']}: {route_summary}\n"
+                line = f"- **{r['route_short_name']}**: {route_summary}\n"
                 origin_stop_name = stop_hint.get("origin_stop_name")
                 dest_stop_name = stop_hint.get("destination_stop_name")
                 if origin_stop_name and dest_stop_name:
                     line += format_initial_walk_line(stop_hint)
-                    line += f"     Stops: board at {origin_stop_name}; leave at stop {dest_stop_name}.\n"
+                    line += f"    - Paragens: embarcar em **{origin_stop_name}**; sair em **{dest_stop_name}**.\n"
                     line += format_final_walk_line(stop_hint)
-                line += "     ℹ️ No upcoming departures were confirmed today at the matched origin stop.\n\n"
+                line += "    - ℹ️ Não foram confirmadas próximas partidas hoje na paragem de origem.\n\n"
                 return line
 
             first_dep = departures[0]
-            line = f"   {r['route_short_name']}: para {first_dep['headsign']}\n"
+            line = f"- **{r['route_short_name']}**: para {first_dep['headsign']}\n"
             origin_stop_name = stop_hint.get("origin_stop_name")
             dest_stop_name = stop_hint.get("destination_stop_name")
             if origin_stop_name and dest_stop_name:
                 line += format_initial_walk_line(stop_hint)
-                line += f"     Stops: board at {origin_stop_name}; leave at stop {dest_stop_name}.\n"
+                line += f"    - Paragens: embarcar em **{origin_stop_name}**; sair em **{dest_stop_name}**.\n"
                 line += format_final_walk_line(stop_hint)
             shown_times = []
             for dep in departures[:3]:
                 time_text = dep["estimated_departure"] if dep["is_realtime"] else dep["scheduled_departure"]
                 if dep["is_realtime"]:
-                    time_text = f"{time_text} {_format_delay_label(dep['delay_mins'])}"
+                    delay_mins = int(dep["delay_mins"])
+                    if delay_mins > 2:
+                        delay_text = f"({delay_mins} min de atraso)"
+                    elif delay_mins < -2:
+                        delay_text = f"({abs(delay_mins)} min adiantado)"
+                    else:
+                        delay_text = "(tempo real)"
+                    time_text = f"{time_text} {delay_text}"
                 shown_times.append(time_text)
 
-            line += f"     Next: {', '.join(shown_times)} (stop {first_dep['origin_stop_name']})\n"
+            line += f"    - Próximas partidas: {', '.join(shown_times)} (paragem {first_dep['origin_stop_name']})\n"
             if first_dep.get("travel_mins"):
-                line += f"     ~{first_dep['travel_mins']}min travel\n"
+                line += f"    - Tempo em veículo: ~{first_dep['travel_mins']} min\n"
             line += "\n"
             return line
 
         def score_formatted_route_line(route_line: str) -> int:
             """Score route bullets by current usefulness for passenger display."""
-            next_match = re.search(r"^\s*Next:\s*(?P<times>[^\n]+)", route_line, flags=re.MULTILINE)
-            travel_match = re.search(r"^\s*~(?P<travel>\d+)min travel", route_line, flags=re.MULTILINE)
+            next_match = re.search(
+                r"^\s*-\s*(?:Next|Próximas partidas):\s*(?P<times>[^\n]+)",
+                route_line,
+                flags=re.MULTILINE,
+            )
+            travel_match = re.search(
+                r"^\s*-\s*(?:~(?P<travel>\d+)min travel|Tempo em veículo:\s*~(?P<travel_pt>\d+)\s*min)",
+                route_line,
+                flags=re.MULTILINE,
+            )
             walk_minutes = [
                 int(match.group("walk"))
                 for match in re.finditer(r"Caminhada (?:inicial|final):\s*~(?P<walk>\d+)\s*min", route_line)
@@ -2523,7 +2575,11 @@ def carris_find_routes_between(
                     wait_minutes += 24 * 60
             else:
                 wait_minutes = _minutes_until_clock_time(clock_match.group(1)) if clock_match else None
-            travel_minutes = int(travel_match.group("travel")) if travel_match else 999
+            travel_minutes = (
+                int(travel_match.group("travel") or travel_match.group("travel_pt"))
+                if travel_match
+                else 999
+            )
             return (wait_minutes if wait_minutes is not None else 999) + travel_minutes + sum(walk_minutes)
 
         def choose_display_route_lines(route_lines: List[str], max_lines: int = 5) -> Tuple[List[str], int]:
@@ -2542,13 +2598,13 @@ def carris_find_routes_between(
             return visible_lines, max(0, len(route_lines) - len(visible_lines))
 
         if trams:
-            response += "TRAMS\n" + "-" * 40 + "\n"
+            response += "#### Elétricos\n"
             tram_lines, _ = choose_display_route_lines([format_route_line(r) for r in trams])
             for line in tram_lines:
                 response += line
 
         if buses:
-            response += "BUSES\n" + "-" * 40 + "\n"
+            response += "#### Autocarros\n"
             bus_lines, _ = choose_display_route_lines([format_route_line(r) for r in buses])
             for line in bus_lines:
                 response += line
