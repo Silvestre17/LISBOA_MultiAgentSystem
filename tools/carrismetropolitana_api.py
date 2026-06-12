@@ -66,9 +66,9 @@ CARRIS_METROPOLITANA_CITY_FALLBACKS = {
 }
 
 try:
-    from tools.utils import fetch_json_with_retry, haversine_distance
+    from tools.utils import fetch_json_with_retry, haversine_distance, lisbon_now
 except ImportError:
-    from utils import fetch_json_with_retry, haversine_distance
+    from utils import fetch_json_with_retry, haversine_distance, lisbon_now
 
 try:
     from tools.location_resolver import build_location_ambiguity_preamble
@@ -1088,6 +1088,14 @@ def find_common_routes(
                             "stops_between": dest_index - origin_index,
                         }
                     )
+
+            # Each pattern fetch is a synchronous HTTP request (up to 15s on
+            # failure). Direction validity is already enforced above, so once
+            # one pattern of this line yields valid candidates, skip the
+            # remaining patterns: they are variants of the same line and the
+            # latency cost outweighs the marginal stop-count optimization.
+            if pattern_candidates:
+                break
 
         if pattern_candidates:
             route_options.append(
@@ -2154,7 +2162,7 @@ def get_bus_realtime_locations(line_id: Optional[str] = None) -> str:
     }
     stop_map = {str(stop.get("id") or ""): stop for stop in stops_data}
     freshness_note = _build_vehicle_freshness_note(include_missing_coordinates=not normalized_line_id)
-    updated_at = datetime.now().strftime("%H:%M")
+    updated_at = lisbon_now().strftime("%H:%M")
 
     if normalized_line_id:
         line_info = line_map.get(normalized_line_id, {})
@@ -2283,11 +2291,11 @@ def get_bus_next_departures(
         except ValueError:
             return "Invalid time format. Use HH:MM."
     else:
-        now_dt = datetime.now()
+        now_dt = lisbon_now()
         ref_time = now_dt.strftime("%H:%M:%S")
         ref_time_display = "NOW"
 
-    today = datetime.now().strftime("%Y%m%d")
+    today = lisbon_now().strftime("%Y%m%d")
     today_trips = [t for t in trips if today in t.get("dates", [])]
 
     if today_trips:

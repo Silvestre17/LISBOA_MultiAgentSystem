@@ -10,7 +10,7 @@
 
 import re
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
@@ -98,7 +98,7 @@ _EVENT_HINTS_RE = re.compile(
     re.IGNORECASE,
 )
 _PLACE_HINTS_RE = re.compile(
-    r"\b(place|places|museum|museums|museu|museus|attraction|attractions|atração|atrações|atracao|atracoes|restaurant|restaurants|restaurante|restaurantes|monument|monuments|shopping|mall|store|stores|loja|lojas|centro\s+comercial|commercial\s+cent(?:re|er)|local|locais)\b",
+    r"\b(place|places|museum|museums|museu|museus|attraction|attractions|atração|atrações|atracao|atracoes|restaurant|restaurants|restaurante|restaurantes|monument|monuments|monumento|monumentos|tower|torre|monastery|mosteiro|castle|castelo|palace|pal[aá]cio|lisboa card|lisbon card|shopping|mall|store|stores|loja|lojas|centro\s+comercial|commercial\s+cent(?:re|er)|local|locais)\b",
     re.IGNORECASE,
 )
 
@@ -136,6 +136,16 @@ def _clean_history_context_subject(user_query: str, language: str) -> str:
         return "Lisboa por volta de 1800" if language == "pt" else "Lisbon around 1800"
 
     subject = query
+    for pattern in (
+        r"(?i)^.*?\bfala[- ]?me\s+(?:da|do|de|sobre\s+a|sobre\s+o)?\s*hist[oó]ria\s+(?:de|do|da|dos|das|sobre)?\s*(?P<subject>.+)$",
+        r"(?i)^.*?\bhist[oó]ria\s+(?:de|do|da|dos|das|sobre)\s+(?P<subject>.+)$",
+        r"(?i)^.*?\bhistory\s+(?:of|about)\s+(?P<subject>.+)$",
+        r"(?i)^.*?\bhistorical\s+(?:context|facts)?\s*(?:of|about|for|on)\s+(?P<subject>.+)$",
+    ):
+        match = re.search(pattern, subject)
+        if match:
+            subject = match.group("subject").strip(" .,:;?!")
+            break
     subject = re.sub(
         r"(?i)^\s*(?:explica|explique|resume|resuma|summarize|explain)\s+"
         r"(?:(?:em|in)\s+\d+\s+(?:linhas|lines)\s+)?",
@@ -4292,6 +4302,9 @@ def infer_researcher_source_kind(user_query: str = "", text: str = "") -> Option
     user_query_lower = (user_query or "").lower()
     text_lower = (text or "").lower()
 
+    if re.search(r"\b(?:lisboa card|lisbon card|cart[aã]o lisboa)\b", f"{user_query_lower}\n{text_lower}"):
+        return "places"
+
     if user_query_lower:
         if _has_researcher_place_hint(user_query_lower) and not _has_researcher_event_hint(user_query_lower):
             return "places"
@@ -4321,6 +4334,14 @@ def infer_researcher_source_kind(user_query: str = "", text: str = "") -> Option
             text_lower,
         ):
             return "events"
+
+    if re.search(
+        r"\b(?:morada|address|categoria|category|pre[cç]o|price|website|site oficial|"
+        r"mais detalhes|more details|lisboa card|lisbon card)\b",
+        combined,
+        flags=re.IGNORECASE,
+    ) and not re.search(r"\b(?:eventos encontrados|events found|data/hora|date/time)\b", combined, flags=re.IGNORECASE):
+        return "places"
 
     if "/eventos" in combined or "/events" in combined or _has_researcher_event_hint(combined):
         return "events"
@@ -4936,7 +4957,13 @@ def _has_visible_visitlisboa_place_content(text: str) -> bool:
         and "visitlisboa" not in normalized
     ):
         return False
-    if re.search(r"\b(?:evento|eventos|events found|eventos encontrados|data/hora|date/time)\b", normalized):
+    if re.search(r"\b(?:events found|eventos encontrados|data/hora|date/time)\b", normalized):
+        return False
+    if re.search(r"\b(?:evento|eventos)\b", normalized) and not re.search(
+        r"\b(?:morada|address|categoria|category|preco|pre[cç]o|price|"
+        r"website|site oficial|mais detalhes|more details|lisboa card|lisbon card)\b",
+        normalized,
+    ):
         return False
     has_transport_context = bool(re.search(r"\b(?:metro de lisboa|carris|cp trains|comboios suburbanos cp)\b", normalized))
     structured_place_field_re = re.compile(
@@ -12832,7 +12859,12 @@ def normalize_researcher_card_field_indentation(text: str) -> str:
         # these fragments, icons like 📚/🏛️/🌳 would cause the H3 to be
         # demoted into a bullet, breaking the combined-services rendering.
         " perto de ",
+        " perto do ",
+        " perto da ",
+        " perto dos ",
+        " perto das ",
         " near ",
+        " close to ",
         " proximos",
         " proximas",
         " encontrados",
@@ -13030,7 +13062,7 @@ def strip_clear_english_description_lines_from_pt_cards(text: str, language: str
         "preço", "horário", "entrada", "gratuita", "lisboa",
     )
     desc_line_re = re.compile(
-        r"(?mi)^\s*[-*]\s+📝\s+\*\*(?:Descri[cç][aã]o|Descricao|Description):\*\*\s*(?P<body>[^\n]+)\n?",
+        r"(?mi)^\s*(?:[-*]\s+)?📝\s+(?:\*\*)?(?:Descri[cç][aã]o|Descricao|Description):(?:\*\*)?\s*(?P<body>[^\n]+)\n?",
     )
 
     def _replace(match: re.Match[str]) -> str:
@@ -13073,21 +13105,6 @@ def refine_generic_researcher_direct_answer(text: str, language: str = "en") -> 
     )
     has_river_context = bool(re.search(r"\b(?:tagus|tejo|river|riverside|waterfront|view|vista|beira-rio|rio)\b", visible))
     has_seafood_context = bool(re.search(r"\b(?:seafood|marisco|peixe|fish|bacalhau)\b", visible))
-    has_asian_context = bool(
-        re.search(
-            r"\b(?:asiatic|asian|japanese|japones|japonesa|chinese|chines|"
-            r"chinesa|sushi|jncquoi\s+asia|noori\s+sushi)\b",
-            visible,
-        )
-    )
-    has_diet_context = bool(
-        re.search(
-            r"\b(?:vegetarian|vegetarianas?|vegetarianos?|vegetariana|vegetariano|"
-            r"vegan|veganas?|veganos?|vegana|vegano)\b",
-            visible,
-        )
-    )
-    has_fado_context = "fado" in visible
     has_restaurant_no_result = bool(
         re.search(
             r"\b(?:sem restaurantes confirmados|nao encontrei restaurantes confirmados|"
@@ -13115,19 +13132,6 @@ def refine_generic_researcher_direct_answer(text: str, language: str = "en") -> 
                 "✅ **Resposta direta:** encontrei opções de restauração relevantes; os dados confirmam detalhes dos locais, "
                 "mas não permitem verificar totalmente critérios subjetivos como serem pouco turísticos."
             )
-        elif has_diet_context:
-            direct = (
-                "✅ **Resposta direta:** encontrei opções de restauração relevantes, mas os dados disponíveis "
-                "não confirmam totalmente a preferência vegetariana/vegan e todos os critérios pedidos."
-            )
-        elif has_asian_context:
-            direct = "✅ **Resposta direta:** encontrei opções de restauração asiática confirmadas nos dados disponíveis."
-        elif has_seafood_context and has_river_context:
-            direct = "✅ **Resposta direta:** encontrei opções de restauração ligadas a peixe/marisco e zona ribeirinha que correspondem ao pedido."
-        elif has_seafood_context:
-            direct = "✅ **Resposta direta:** encontrei opções de restauração ligadas a peixe ou marisco que correspondem ao pedido."
-        elif has_fado_context:
-            direct = "✅ **Resposta direta:** encontrei restaurantes ou espaços com ligação a fado que correspondem ao pedido."
         else:
             direct = "✅ **Resposta direta:** encontrei opções de restauração relevantes para o pedido nos dados disponíveis."
         return re.sub(
@@ -13153,19 +13157,6 @@ def refine_generic_researcher_direct_answer(text: str, language: str = "en") -> 
             "✅ **Direct answer:** I found relevant restaurant options; the available data supports the venue details, "
             "but it does not fully verify subjective criteria such as how touristy each place feels."
         )
-    elif has_diet_context:
-        direct = (
-            "✅ **Direct answer:** I found relevant restaurant options, but the available data does not fully "
-            "confirm the vegetarian/vegan preference and all requested criteria."
-        )
-    elif has_asian_context:
-        direct = "✅ **Direct answer:** I found Asian restaurant options confirmed in the available data."
-    elif has_seafood_context and has_river_context:
-        direct = "✅ **Direct answer:** I found seafood or riverside restaurant options that match the request."
-    elif has_seafood_context:
-        direct = "✅ **Direct answer:** I found seafood-focused restaurant options that match the request."
-    elif has_fado_context:
-        direct = "✅ **Direct answer:** I found restaurant options with a fado connection that match the request."
     else:
         direct = "✅ **Direct answer:** I found relevant restaurant options in the available data."
     return re.sub(
@@ -16401,6 +16392,12 @@ def normalize_municipal_service_visual_contract(text: str) -> str:
         return text or ""
     plain = _strip_accents_compat(_strip_markdown_formatting(text)).lower()
     if re.search(r"\b(?:jardim\s+zoologico|zoo(?:\s+de\s+lisboa)?|lisbon\s+zoo)\b", plain):
+        return text
+    if (
+        re.search(r"\b(?:nao consegui confirmar|could not confirm)\b", plain)
+        and re.search(r"\b(?:perto|near|close to)\b", plain)
+        and re.search(r"\b(?:lisboa aberta|dados municipais|municipal data)\b", plain)
+    ):
         return text
     if not re.search(
         r"\b(?:servicos municipais|servicos mais proximos|farmacias perto|bibliotecas perto|"
@@ -20131,6 +20128,53 @@ def _strip_place_category_suffix_noise(text: str) -> str:
     return value
 
 
+def _ensure_weather_horizon_limit_date(text: str, language: str = "en") -> str:
+    """Add the concrete IPMA forecast-limit date to horizon-only answers."""
+    if not text:
+        return text or ""
+
+    body_without_sources = "\n".join(
+        line for line in str(text).splitlines() if not _SOURCE_LINE_RE.match(line.strip())
+    )
+    normalized = _strip_accents_compat(_strip_markdown_formatting(body_without_sources)).lower()
+    if not re.search(r"\b(?:ipma|previsao|forecast|meteorolog|tempo|weather)\b", normalized):
+        return text
+    if not re.search(
+        r"\b(?:horizonte|horizon|proximos\s+5\s+dias|next\s+5\s+days|"
+        r"5\s+dias|5\s+days|nao\s+consigo\s+confirmar|cannot\s+confirm|"
+        r"fora\s+do\s+horizonte|outside\s+the\s+horizon)\b",
+        normalized,
+    ):
+        return text
+    if re.search(r"\b20\d{2}-\d{2}-\d{2}\b", body_without_sources):
+        return text
+    if re.search(
+        r"\b\d{1,2}\s+(?:de\s+)?(?:janeiro|fevereiro|mar[cç]o|abril|maio|junho|"
+        r"julho|agosto|setembro|outubro|novembro|dezembro|"
+        r"january|february|march|april|may|june|july|august|"
+        r"september|october|november|december)\b",
+        body_without_sources,
+        flags=re.IGNORECASE,
+    ):
+        return text
+
+    limit_date = (datetime.now() + timedelta(days=5)).strftime("%Y-%m-%d")
+    note = (
+        f"- 🌦️ **Limite IPMA:** a data máxima atualmente confirmável é **{limit_date}**."
+        if language == "pt"
+        else f"- 🌦️ **IPMA limit:** the latest currently confirmable date is **{limit_date}**."
+    )
+    lines = str(text).splitlines()
+    for index, line in enumerate(lines):
+        if _SOURCE_LINE_RE.match(line.strip()):
+            prefix = "\n".join(lines[:index]).rstrip()
+            suffix = "\n".join(lines[index:]).lstrip()
+            if note in prefix:
+                return text
+            return f"{prefix}\n\n{note}\n\n{suffix}".strip()
+    return f"{str(text).rstrip()}\n\n{note}"
+
+
 def _final_contract_pass(text: str, language: str = "en") -> str:
     """Final non-generative output-contract pass shared by CLI and Streamlit."""
     if not text:
@@ -20140,6 +20184,7 @@ def _final_contract_pass(text: str, language: str = "en") -> str:
     value = canonicalize_weather_terms(text, lang) if weather_like else text
     value = _normalize_weather_warning_layout(value, lang) if weather_like else value
     value = normalize_weather_block_spacing(value) if weather_like else value
+    value = _ensure_weather_horizon_limit_date(value, lang) if weather_like else value
     if lang == "en":
         value = re.sub(r"\bgrounded\b", "supported", value, flags=re.IGNORECASE)
         value = re.sub(r"(?i)\b(Wind)-(resistant|proof)\b", r"wind-\2", value)
@@ -20398,6 +20443,8 @@ def dedupe_planner_cards_by_stable_fields(text: str, language: str = "en") -> st
                 if output and output[-1].strip():
                     output.append("")
                 output.append(note)
+                if _SOURCE_LINE_RE.match(stripped):
+                    output.append("")
                 inserted_note = True
             in_route_section = False
             output.append(raw_line)
@@ -22125,6 +22172,11 @@ def final_post_qa_guard(
         guarded,
     )
     guarded = re.sub(
+        r"\b(Embarque em|Embarca em|Sai em|Saia em|Apanha em):(?=\S)",
+        r"\1: ",
+        guarded,
+    )
+    guarded = re.sub(
         r"(?i)\babout\s+\*\*(?P<duration>\d+\s*min)\s+to\s+\*\*(?P<place>[^*\n]+)\*\*",
         r"about **\g<duration>** to **\g<place>**",
         guarded,
@@ -23002,6 +23054,38 @@ def final_post_qa_guard(
         guarded,
     )
     guarded = re.sub(
+        r"(?mi)^\s*✅\s+\*\*(Resposta direta|Direct answer):\*\*\s*-{2,}\s*$",
+        lambda match: (
+            "✅ **Resposta direta:** encontrei informação relevante para o pedido."
+            if match.group(1).lower().startswith("resposta")
+            else "✅ **Direct answer:** I found relevant information for the request."
+        ),
+        guarded,
+    )
+    weather_metric_icons = {
+        "temperature": "🌡️",
+        "temperatura": "🌡️",
+        "rain": "🌧️",
+        "chuva": "🌧️",
+        "wind": "💨",
+        "vento": "💨",
+        "humidity": "💧",
+        "humidade": "💧",
+    }
+
+    def repair_weather_metric_bullet(match: re.Match[str]) -> str:
+        label = match.group("label").strip()
+        value = match.group("value").strip()
+        icon = weather_metric_icons.get(label.lower(), "")
+        prefix = f"- {icon} " if icon else "- "
+        return f"{prefix}**{label}:** {value}"
+
+    guarded = re.sub(
+        r"(?mi)^-\s*(?P<label>Temperature|Temperatura|Rain|Chuva|Wind|Vento|Humidity|Humidade):\*\*\s*(?P<value>.*?)\s*\*\*\s*$",
+        repair_weather_metric_bullet,
+        guarded,
+    )
+    guarded = re.sub(
         r"(?mi)^\s*[-*]\s+\*\*(Resposta direta|Direct answer):\*\*\s*",
         r"✅ **\1:** ",
         guarded,
@@ -23055,6 +23139,11 @@ def final_post_qa_guard(
     guarded = re.sub(
         r"\*\*(Embarca em|Sai em|Saia em|Apanha em)(?=[A-ZÀ-ÖØ-Þ])",
         r"**\1 ",
+        guarded,
+    )
+    guarded = re.sub(
+        r"\*\*(Embarque em|Embarca em|Sai em|Saia em|Apanha em):(?=\S)",
+        r"**\1: ",
         guarded,
     )
     guarded = re.sub(

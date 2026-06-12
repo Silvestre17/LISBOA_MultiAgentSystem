@@ -10,11 +10,30 @@
 import logging
 import math
 import time
+from datetime import datetime
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+LISBON_TZ = ZoneInfo("Europe/Lisbon")
+
+
+def lisbon_now() -> datetime:
+    """Return the current Lisbon local time as a naive datetime.
+
+    Schedule data (GTFS calendars, IPMA forecast days, event date windows) is
+    authoritative for Europe/Lisbon local dates. ``datetime.now()`` uses the
+    host clock, which is wrong on UTC-configured deployments around midnight
+    and across DST changes. The tzinfo is stripped so existing naive-datetime
+    comparisons keep working.
+
+    Returns:
+        Naive datetime carrying the current Europe/Lisbon wall-clock time.
+    """
+    return datetime.now(LISBON_TZ).replace(tzinfo=None)
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

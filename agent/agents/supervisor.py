@@ -1664,11 +1664,14 @@ class SupervisorAgent(BaseAgent):
         ):
             agents.append("weather")
         if (
-            cls._planning_query_requires_transport_context(user_message)
-            or re.search(
-                r"\b(?:menos\s+caminhada|pouca\s+caminhada|low\s+walking|walk\s+less|"
-                r"transporte|transportes|metro|autocarro|comboio|bus|train|return|voltar|hotel)\b",
-                normalized,
+            not cls._planning_query_blocks_transport_enrichment(user_message)
+            and (
+                cls._planning_query_requires_transport_context(user_message)
+                or re.search(
+                    r"\b(?:menos\s+caminhada|pouca\s+caminhada|low\s+walking|walk\s+less|"
+                    r"transporte|transportes|metro|autocarro|comboio|bus|train|return|voltar|hotel)\b",
+                    normalized,
+                )
             )
         ):
             agents.append("transport")
@@ -1735,6 +1738,29 @@ class SupervisorAgent(BaseAgent):
         )
         if simple_lookup_with_preferences:
             return False
+        multi_stop_visit_request = bool(
+            re.search(
+                r"\b(?:quero\s+ir|queria\s+ir|gostava\s+de\s+ir|i\s+want\s+to\s+go|"
+                r"i\s+would\s+like\s+to\s+go|visitar|visit)\b",
+                message_lower,
+            )
+            and len(
+                re.findall(
+                    r"\b(?:museus?|museums?|mosteiro|mosteiros|monastery|monasteries|"
+                    r"torre|torres|tower|towers|maat|monumentos?|monuments?|"
+                    r"palacio|palace|castelo|castle|miradouro|viewpoint|jardim|garden)\b",
+                    message_lower,
+                )
+            )
+            >= 2
+        )
+        if multi_stop_visit_request and re.search(
+            r"\b(?:hoje|today|amanha|tomorrow|mobilidade|accessibility|accessible|"
+            r"pouca\s+caminhada|low\s+walking|menos\s+caminhada|roteiro|itinerary|"
+            r"almoco|lunch|jantar|dinner)\b",
+            message_lower,
+        ):
+            return True
         planning_patterns = [
             r"\bplan my day\b",
             r"\bday plan\b",
@@ -1916,6 +1942,7 @@ class SupervisorAgent(BaseAgent):
         normalized = cls._normalize_query(user_message)
         if not normalized:
             return False
+        normalized = cls._strip_negative_transport_generation_instruction(normalized)
         return bool(
             re.search(
                 r"\b(?:transportes?\s+p[úu]blicos?|public\s+transport|transit|metro|"
@@ -1926,16 +1953,62 @@ class SupervisorAgent(BaseAgent):
         )
 
     @classmethod
+    def _strip_negative_transport_generation_instruction(cls, normalized_message: str) -> str:
+        """Remove negative anti-invention transport wording from positive intent probes."""
+        normalized = re.sub(r"\s+", " ", str(normalized_message or "").lower()).strip()
+        if not normalized:
+            return ""
+        transport_targets = (
+            r"transportes?|transporte|rotas?|routes?|percursos?|trajetos?|trips?|"
+            r"linhas?|lines?|paragens?|stops?|horarios?|schedules?|partidas?|departures?|"
+            r"metro|autocarros?|bus|buses|comboios?|train|trains|tram|trams|eletricos?"
+        )
+        generation_verbs = (
+            r"inventar(?:es)?|inventes|inventa|invent|mak(?:e|ing)\s+up|assumir|assumas|assume|"
+            r"criar|create|adicionar|add"
+        )
+        negative_prefix = r"sem|nao|nunca|without|no|do\s+not|dont|don't"
+        # Strip only the forward form ("sem inventar ... transportes") with a short
+        # gap. A trailing negative after a transport noun ("quais os autocarros ...
+        # sem inventar") asks for real data; stripping the noun would flip intent.
+        cleaned = re.sub(
+            rf"\b(?:{negative_prefix})\s+(?:{generation_verbs})\b(?:\s+\w+){{0,3}}\s+\b(?:{transport_targets})\b",
+            " ",
+            normalized,
+        )
+        return re.sub(r"\s+", " ", cleaned).strip()
+
+    @classmethod
+    def _planning_query_blocks_transport_enrichment(cls, user_message: str) -> bool:
+        """Return whether transport is mentioned only to forbid invented details."""
+        normalized = cls._normalize_query(user_message)
+        if not normalized:
+            return False
+        cleaned = cls._strip_negative_transport_generation_instruction(normalized)
+        if cleaned == normalized:
+            return False
+        return not bool(
+            re.search(
+                r"\b(?:metro|carris|cp|autocarros?|bus|buses|comboios?|train|trains|tram|trams|"
+                r"transportes?\s+publicos?|public\s+transport|transit|"
+                r"como\s+(?:vou|chego|posso\s+ir|me\s+desloco)|how\s+(?:do\s+i\s+)?get|"
+                r"route\s+from|route\s+between|rota\s+de|rotas\s+entre|percurso\s+de|trajeto\s+de)\b",
+                cleaned,
+            )
+        )
+
+    @classmethod
     def _planning_query_requires_transport_context(cls, user_message: str) -> bool:
         """Return whether the itinerary request requires transport-tool evidence."""
         normalized = cls._normalize_query(user_message)
         has_origin_anchor = cls._planning_query_has_origin_anchor(user_message)
         has_route_constraint = cls._planning_query_has_route_constraint(user_message)
+        positive_transport_probe = cls._strip_negative_transport_generation_instruction(normalized)
         if cls._planning_query_explicitly_requests_transport(user_message):
             return True
         if has_origin_anchor and has_route_constraint:
             return True
-        if cls._looks_like_transport_query(normalized) and not has_origin_anchor:
+        if cls._looks_like_transport_query(positive_transport_probe) and not has_origin_anchor:
             return True
 
         named_far_zone_re = re.compile(

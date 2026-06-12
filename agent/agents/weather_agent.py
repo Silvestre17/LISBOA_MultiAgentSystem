@@ -26,7 +26,7 @@ from agent.utils.geographic_scope import (
 )
 from agent.utils.langsmith_tracing import traceable
 from agent.state import AgentState
-from agent.utils.langgraph_compat import ToolNode
+from langgraph.prebuilt import ToolNode
 from agent.utils.response_formatter import (
     finalize_worker_response,
     infer_response_language,

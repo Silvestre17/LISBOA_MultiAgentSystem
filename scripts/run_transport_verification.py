@@ -335,9 +335,6 @@ def run_transport_verification(
         return records
 
 
-run_transport_audit = run_transport_verification
-
-
 def summarize_audit(records: Iterable[TransportAuditRecord]) -> Dict[str, Any]:
     """Builds a small summary block for the verification report."""
     record_list = list(records)

@@ -489,8 +489,11 @@ def t_list(key: str) -> list[str]:
 
 
 def md_to_html(text: str) -> str:
-    """Convert minimal inline markdown to safe HTML for use in rendered blocks."""
-    html_text = re.sub(r"\*\*(.*?)\*\*", r"<strong>\1</strong>", text)
+    """Convert minimal inline markdown to safe HTML for use in rendered blocks.
+
+    The input is HTML-escaped here, so callers must pass raw (unescaped) text.
+    """
+    html_text = re.sub(r"\*\*(.*?)\*\*", r"<strong>\1</strong>", html.escape(text))
     return re.sub(r"(?<!\*)\*(?!\*)([^*]+?)(?<!\*)\*(?!\*)", r"<em>\1</em>", html_text)
 
 
@@ -3703,7 +3706,7 @@ def run_info_page() -> None:
         '<div class="info-system-copy">'
         f'<span class="info-system-badge">⚙️ {html.escape(t("info_architecture_title"))}</span>'
         f'<h3 class="info-system-title">{html.escape(t("info_flow_title"))}</h3>'
-        f'<p class="info-system-desc">{md_to_html(html.escape(t("info_architecture_desc")))}</p>'
+        f'<p class="info-system-desc">{md_to_html(t("info_architecture_desc"))}</p>'
         '</div>'
         f'<div class="info-flow-track">{flow_cards}</div>'
         '</section>'

@@ -145,6 +145,18 @@ _PLANNER_ROUTE_ARROW_RE = re.compile(
     r"\s*(?:\u2192|->|\u00e2\u2020\u2019|\u00c3\u00a2\u00e2\u20ac\u00a0\u00e2\u20ac\u2122)\s*"
 )
 _PLANNER_TRANSPORT_BULLET_SCAN_LIMIT = 18
+# Closure must mean "not usable now/today" (today-closed or renovation/maintenance),
+# never a weekly closing day ("Encerrado: segunda-feira"), a lunch break
+# ("fechado para almoco"), or an opening time ("closed until 10:00").
+_PLANNER_UNUSABLE_CLOSED_RE = re.compile(
+    r"\b(?:hoje fechado|fechado hoje|hoje encerrado|encerrado hoje|today closed|closed today|"
+    r"closed for renovation|closed for refurbishment|closure until|"
+    r"renovation until|temporarily closed|temporary closure|temporarily unavailable|"
+    r"encerrad[oa]s? temporariamente|temporariamente encerrad[oa]s?|"
+    r"(?:encerrad|fechad)[oa]s?\s+(?:para|por)\s+(?:obras|manutencao|renovacao|restauro|remodelacao)|"
+    r"horario hoje fechado|hours today closed)\b"
+    r"|\bclosed until\b(?!\s*\d{1,2}(?:\s*[:h]\s*\d{0,2}|\s+\d{2}|\s*[ap]\.?m\.?)?(?:\s|$))"
+)
 
 
 def _normalize_planner_text(text: str) -> str:
@@ -321,6 +333,14 @@ def _clean_requested_anchor_fragment(fragment: str) -> str:
         cleaned,
         flags=re.IGNORECASE,
     )
+    cleaned = re.sub(
+        r"\s+(?:hoje|amanh[aã]|today|tomorrow|esta\s+(?:manha|manh[aã]|tarde|noite)|"
+        r"this\s+(?:morning|afternoon|evening)|tenho|com\s+mobilidade|with\s+reduced|"
+        r"quero\s+pouca|low\s+walking)\b.*$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
     cleaned = _trim_planner_anchor_constraint_tail(cleaned)
     return re.sub(r"\s+", " ", cleaned).strip(" .:-")
 
@@ -405,13 +425,19 @@ def _split_requested_anchor_fragment(fragment: str) -> List[str]:
             raw_parts.append(route_split[0].strip(" .:-"))
             continue
         conjoined_parts = re.split(
-            r"\s+(?:e|and)\s+(?=[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ0-9])",
+            r"\s+(?:e|and)\s+(?=(?:(?:[oa]s?|the)\s+)?[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ0-9])",
             cleaned_part,
         )
         if len(conjoined_parts) <= 1:
             raw_parts.append(cleaned_part)
             continue
-        expanded_parts = [candidate.strip(" .:-") for candidate in conjoined_parts if candidate.strip(" .:-")]
+        expanded_parts = [
+            # Strip only lowercase grammatical articles; capitalized articles are
+            # part of official venue names ("Os Tibetanos", "A Brasileira").
+            re.sub(r"^(?:os?|as?|the)\s+", "", candidate.strip(" .:-")).strip(" .:-")
+            for candidate in conjoined_parts
+            if candidate.strip(" .:-")
+        ]
         starts_with_specific_venue_type = bool(re.match(
             r"(?i)^\s*(?:museu|museum|pal[aá]cio|palace|mosteiro|monastery|"
             r"igreja|church|teatro|theatre|theater|restaurante|restaurant)\b",
@@ -465,6 +491,7 @@ def _extract_requested_anchor_phrases(user_message: str) -> List[str]:
                 labels.append(candidate)
 
     endpoint_patterns = [
+        r"\b(?:de|do|da|desde)\s+(?P<origin>[^,.;]+?)\s+(?:para|ate|até|a|ao|aos|as|à|às)\s+(?P<destination>[^.;]+)",
         r"\bfrom\s+(?P<origin>[^,.;]+?)\s+(?:via|through)\s+(?P<waypoint>[^,.;]+?)\s+to\s+(?P<destination>[^,.;]+)",
         r"\bde\s+(?P<origin>[^,.;]+?)\s+(?:via|por|pela|pelo)\s+(?P<waypoint>[^,.;]+?)\s+(?:para|ate|até)\s+(?P<destination>[^,.;]+)",
         r"\bde\s+(?P<origin>[^,.;]+?)\s+(?:para|ate|até)\s+(?P<destination>[^,.;]+)",
@@ -670,7 +697,8 @@ def _requested_time_label_for_card(card: Dict[str, str], user_message: str) -> s
 _PLANNER_CENTRAL_AREA_RE = re.compile(
     r"\b(?:se de lisboa|catedral de lisboa|carmo|baixa|chiado|rossio|"
     r"praca do comercio|terreiro do paco|alfama|mouraria|castelo|"
-    r"bacalhoeiros|douradores|correeiros|santa cruz do castelo)\b",
+    r"santa luzia|portas do sol|bacalhoeiros|douradores|correeiros|"
+    r"santa cruz do castelo)\b",
     re.IGNORECASE,
 )
 _PLANNER_BELEM_AREA_RE = re.compile(
@@ -3087,6 +3115,38 @@ def _matches_allowed_place(activity_title: str, allowed_places: List[str]) -> bo
     return False
 
 
+def _extract_planner_activity_titles(response: str) -> List[str]:
+    """Extract stop/block titles from a Markdown planner draft.
+
+    The legacy Markdown contract renders each itinerary stop as a standalone
+    fully-bolded header line (``**📍 Place Name**``, optionally bulleted)
+    inside the "Suggested Route"/"Roteiro Sugerido" section. Headings
+    (``### ...``) and field bullets with trailing text never match because the
+    pattern requires the line to end at the closing ``**``.
+
+    Args:
+        response: Raw planner draft in Markdown.
+
+    Returns:
+        Block titles with any leading emoji/symbol cluster stripped.
+    """
+    text = response or ""
+    section_match = re.search(
+        r"(?msi)^###\s+[^\n]*(?:Suggested Route|Roteiro Sugerido)[^\n]*\n(?P<body>.*?)(?=^###\s|\Z)",
+        text,
+    )
+    scope = section_match.group("body") if section_match else text
+    titles: List[str] = []
+    for match in re.finditer(
+        r"(?m)^(?!\s*#)\s*(?:[-*]\s+)?\*\*(?P<title>[^*\n]+?)\*\*\s*$",
+        scope,
+    ):
+        title = re.sub(r"^[^\w(]+", "", match.group("title")).strip()
+        if title:
+            titles.append(title)
+    return titles
+
+
 def _find_planner_grounding_issues(
     response: str,
     allowed_places: List[str],
@@ -3096,7 +3156,7 @@ def _find_planner_grounding_issues(
     """Finds unsupported venue or accessibility claims in planner drafts."""
     issues: List[str] = []
 
-    activity_lines = re.findall(r"^🕐.*?-\s*\*\*(.+?)\*\*", response or "", flags=re.MULTILINE)
+    activity_lines = _extract_planner_activity_titles(response)
     for raw_title in activity_lines:
         title = _clean_activity_title(raw_title)
         normalized_title = _normalize_planner_text(title)
@@ -3160,9 +3220,27 @@ def _compact_planner_context_block(
         stripped = raw_line.strip()
         if not stripped or _PLANNER_SOURCE_LINE_RE.match(stripped):
             continue
+        normalized_line = _normalize_planner_text(stripped)
+        if re.search(
+            r"\b(?:proximas partidas|partidas previstas|next departures|upcoming departures)\b",
+            normalized_line,
+        ):
+            continue
+        line = raw_line.rstrip()
+        if len(line) > 420:
+            compact_line = re.sub(r"\*\*", "", stripped)
+            compact_line = re.sub(r"\s+", " ", compact_line).strip()
+            cut_at = max(compact_line.rfind(". ", 0, 360), compact_line.rfind("; ", 0, 360))
+            if cut_at >= 120:
+                compact_line = compact_line[: cut_at + 1]
+            else:
+                compact_line = compact_line[:360].rstrip(" ,;:-") + "."
+            line = compact_line
 
-        kept_lines.append(raw_line.rstrip())
-        char_count += len(raw_line)
+        if kept_lines and char_count + len(line) > max_chars:
+            break
+        kept_lines.append(line)
+        char_count += len(line) + 1
         if len(kept_lines) >= max_lines or char_count >= max_chars:
             break
 
@@ -4442,7 +4520,15 @@ def _build_structured_plan_fallback(
                 _planner_card_display_name(card) or card["name"],
                 language,
             )
-            icon = "🍽️" if _card_kind_for_plan_block(card) == "food" else "🏛️"
+            card_kind = _card_kind_for_plan_block(card)
+            if card_kind == "food" and _query_requests_food_stop(user_message):
+                normalized_display = _normalize_planner_text(display_name)
+                requested_meals = _requested_meal_kinds(user_message)
+                if "dinner" in requested_meals and not re.search(r"\b(?:jantar|dinner)\b", normalized_display):
+                    display_name = f"{'Jantar' if is_pt else 'Dinner'}: {display_name}"
+                elif "lunch" in requested_meals and not re.search(r"\b(?:almoco|almoço|lunch)\b", normalized_display):
+                    display_name = f"{'Almoço' if is_pt else 'Lunch'}: {display_name}"
+            icon = "🍽️" if card_kind == "food" else "🏛️"
             lines.extend(["", f"**{icon} {display_name}**"])
             if len(time_allocations) >= block_count and time_allocations[block_count - 1] > 0:
                 lines.append(
@@ -5195,11 +5281,13 @@ def _query_requests_return_to_origin(user_message: str) -> bool:
     return bool(
         re.search(
             r"\b(?:regress\w*|voltar|volta|retornar|return(?:ing)?|back)\b"
-            r".{0,80}\b(?:hotel|base|alojamento|accommodation|origem|origin|ponto de partida)\b",
+            r".{0,80}\b(?:hotel|base|alojamento|accommodation|origem|origin|ponto de partida|"
+            r"ponto inicial|inicio|starting point|there|la|ali)\b",
             normalized,
         )
         or re.search(
-            r"\b(?:hotel|base|alojamento|accommodation|origem|origin|ponto de partida)\b"
+            r"\b(?:hotel|base|alojamento|accommodation|origem|origin|ponto de partida|"
+            r"ponto inicial|inicio|starting point)\b"
             r".{0,80}\b(?:regress\w*|voltar|volta|retornar|return(?:ing)?|back)\b",
             normalized,
         )
@@ -5316,19 +5404,68 @@ def _planner_return_to_origin_item(
     )
 
 
+_PLAN_ORIGIN_NON_PLACE_RE = re.compile(
+    r"(?i)^(?:"
+    r"autocarros?|bus(?:es)?|metro|metropolitano|comboios?|trains?|trams?|"
+    r"el[eé]tricos?|eletricos?|barcos?|ferr(?:y|ies)|t[aá]xis?|uber|carros?|cars?|"
+    r"bicicletas?|bikes?|a\s+p[eé]|p[eé]|foot|walking|"
+    r"manh[aã]|tarde|noite|madrugada|morning|afternoon|evening|tonight|"
+    r"hoje|amanh[aã]|today|tomorrow|"
+    r"meio\s+dia|meio-dia|half\s+day|full\s+day|dia\s+inteiro|fim\s+de\s+semana|weekend|"
+    r"\d+\s+(?:paragens?|stops?|museus?|museums?|dias?|days?|horas?|hours?|"
+    r"minutos?|minutes?|pessoas?|people)|"
+    r"museus?|museums?|monumentos?|monuments?|miradouros?|viewpoints?|"
+    r"restaurantes?|restaurants?|igrejas?|churches|paragens?|stops?|"
+    r"lugares|locais|places|s[ií]tios?|sites"
+    r")$"
+)
+
+
+def _clean_plan_origin_candidate(origin: str) -> str:
+    """Keep an extracted origin only when it can plausibly name a place.
+
+    The broad "de X para/a Y" patterns also capture transport modes
+    ("de autocarro até Belém"), times of day ("de manhã ao Chiado"), and
+    quantities ("de 3 paragens até..."), which must never become a visible
+    plan origin.
+    """
+    cleaned = re.sub(r"\s+", " ", str(origin or "")).strip(" .:-")
+    cleaned = re.sub(
+        r"(?i)^(?:esta\s+)?(?:manh[aã]|tarde|noite|morning|afternoon|evening)\s+(?:d[eoa]s?\s+|em\s+|no\s+|na\s+)?",
+        "",
+        cleaned,
+    )
+    cleaned = re.sub(
+        r"(?i)^(?:de\s+)?(?:autocarro|bus|metro|comboio|train|tram|el[eé]trico|eletrico|barco|ferry|t[aá]xi|carro|bicicleta)\s+(?:d[eoa]s?\s+)",
+        "",
+        cleaned,
+    )
+    # Lowercase-only: a capitalized article is part of an official venue name
+    # ("A Brasileira", "Os Tibetanos") and must be preserved.
+    cleaned = re.sub(r"^(?:o|a|os|as)\s+", "", cleaned).strip(" .:-")
+    if not cleaned:
+        return ""
+    if _PLAN_ORIGIN_NON_PLACE_RE.match(cleaned):
+        return ""
+    if re.search(r"(?i)\b(?:quero|queria|gostava|gosto|vou|vamos|preciso|want|like|need)\b", cleaned):
+        return ""
+    return cleaned
+
+
 def _extract_requested_plan_origin(user_message: str) -> str:
     """Extract an origin anchor from a short planning request."""
     text = str(user_message or "").strip()
     patterns = [
-        r"\b(?:come[cç](?:ar|a|e|ando)|iniciar|iniciando|starting|start)\s+(?:perto\s+d(?:e|o|a|os|as)|junto\s+a|near|close\s+to|no|na|em|at|from|in)\s+(?P<origin>[^,.;]+?)(?:[,.;]|\s+às\b|\s+as\b|\s+at\b|$)",
+        r"\b(?:come[cç](?:o|ar|a|e|amos|ando)|part(?:o|imos|indo|ir)|saio|sa[ií]mos|iniciar|iniciando|starting|start)\s+(?:perto\s+d(?:e|o|a|os|as)|junto\s+a|near|close\s+to|no|na|em|at|from|in|d[eoa]s?)\s+(?P<origin>[^,.;]+?)(?:[,.;]|\s+(?:para|ate|até|to)\b|\s+às\b|\s+as\b|\s+at\b|$)",
         r"\bfrom\s+(?P<origin>[^,.;]+?)\s+to\b",
+        r"\b(?:de|do|da|desde)\s+(?P<origin>[^,.;]+?)\s+(?:para|ate|até|a|ao|aos|as|à|às)\b",
         r"\bstarting\s+from\s+(?P<origin>[^,.;]+?)(?:[,.;]?\s+with\b|[,.;]?\s+include\b|$)",
         r"\b(?:how\s+(?:i|we|to)\s+)?(?:get|go|travel)\s+there\s+from\s+(?P<origin>[^,.;]+?)(?:[,.;]|$)",
         r"\bfrom\s+(?P<origin>[^,.;]+?)(?:[,.;]?\s+(?:with|including|and|for|through|via|ending|end|finish)\b|[,.;]|$)",
-        r"\bdesde\s+(?:o|a|os|as)?\s*(?P<origin>[^,.;]+?)(?:[,.;]?\s+com\b|[,.;]?\s+inclui\b|$)",
+        r"\bdesde\s+(?:o|a|os|as)?\s*(?P<origin>[^,.;]+?)(?:[,.;]?\s+(?:faz|com|inclui|incluindo|para|e)\b|$)",
         r"\bcomo\s+(?:vou|vamos|chego|chegar|ir)\s+(?:la|lá|ali|a[ií])\s+(?:desde|a\s+partir\s+d(?:e|o|a|os|as))\s+(?P<origin>[^,.;]+?)(?:[,.;]|$)",
         r"\bcomo\s+(?:chegar|ir|vou|vamos)\s+(?:desde|a\s+partir\s+d(?:e|o|a|os|as))\s+(?P<origin>[^,.;]+?)(?:[,.;]|$)",
-        r"\ba partir d(?:e|o|a|os|as)\s+(?P<origin>[^,.;]+?)(?:[,.;]?\s+com\b|[,.;]?\s+inclui\b|$)",
+        r"\ba partir d(?:e|o|a|os|as)\s+(?P<origin>[^,.;]+?)(?:[,.;]?\s+(?:faz|com|inclui|incluindo|para|e)\b|$)",
         r"\bde\s+(?P<origin>[^,.;]+?)\s+para\b",
     ]
     for pattern in patterns:
@@ -5350,6 +5487,7 @@ def _extract_requested_plan_origin(user_message: str) -> str:
             ).strip(" .:-")
             origin = _clean_requested_anchor_fragment(origin)
             origin = _trim_planner_anchor_constraint_tail(origin)
+            origin = _clean_plan_origin_candidate(origin)
             if 2 <= len(origin) <= 80:
                 return origin
     return ""
@@ -7743,6 +7881,13 @@ def _build_card_based_renderer_fallback(
             event_food_request=event_food_request,
             language=language,
         )
+        if _card_kind_for_plan_block(card) == "food" and _query_requests_food_stop(user_message):
+            normalized_title = _normalize_planner_text(block_title)
+            requested_meals = _requested_meal_kinds(user_message)
+            if "dinner" in requested_meals and not re.search(r"\b(?:jantar|dinner)\b", normalized_title):
+                block_title = f"{'Jantar' if is_pt else 'Dinner'}: {block_title}"
+            elif "lunch" in requested_meals and not re.search(r"\b(?:almoco|almoço|lunch)\b", normalized_title):
+                block_title = f"{'Almoço' if is_pt else 'Lunch'}: {block_title}"
         if requested_time_label:
             block_title = re.sub(r"^\s*\d{1,2}:\d{2}\s*(?:[-\u00b7]|\u00b7)\s*", "", block_title).strip()
             if _card_kind_for_plan_block(card) == "food":
@@ -8593,6 +8738,10 @@ _PLANNER_COUNT_TOKEN_RE = (
 _PLANNER_COUNT_UNIT_RE = re.compile(
     rf"\b(?P<count>{_PLANNER_COUNT_TOKEN_RE})\s+"
     r"(?:(?:numero|number)\s+of\s+|(?:numero|n)\s+de\s+)?"
+    r"(?:(?:indoor|interior|inside|covered|cobert[oa]s?|fechad[oa]s?|"
+    r"accessible|acess[ií]ve(?:l|is)|nearby|local|central|cheap|budget|"
+    r"barat[oa]s?|gratuit[oa]s?|free|historic[oa]s?|historical|cultural|"
+    r"small|large|pequen[oa]s?|grand(?:e|es)|calm|quiet|tranquil[oa]s?)\s+){0,4}"
     r"(?P<unit>museus?|museums?|galerias?|galleries|monumentos?|monuments?|"
     r"atracoes|attractions?|locais|lugares|sitios|sites|places|stops|paragens|pois?|"
     r"restaurantes?|restaurants?|cafes?|cafeterias?|pastelarias?|food\s+stops?|meal\s+stops?|lunch\s+stops?|dinner\s+stops?|"
@@ -9433,11 +9582,26 @@ def _score_food_card_for_meal_context(
     plan_mentions_remote_east = bool(re.search(r"\b(?:parque das nacoes|oriente|olivais|expo)\b", plan_basis))
     hotel_or_end_near_saldanha = bool(re.search(r"\b(?:hotel|saldanha|avenidas novas|picoas)\b", plan_basis))
     preferred_area_key, _preferred_area_label, _preferred_blockers = _planner_local_area_profile(user_message)
+    compact_short_plan = bool(
+        route_cards
+        and re.search(
+            r"\b(?:curt[ao]|compact[ao]|meio\s+dia|half\s+day|short|small|pequeno)\b",
+            _normalize_planner_text(user_message),
+        )
+    )
     if preferred_area_key and _query_describes_single_area_plan(user_message):
         if _planner_food_card_allowed_for_requested_local_area(card, user_message):
             score += 220
         else:
             score -= 650
+
+    if compact_short_plan and plan_has_central:
+        if card_is_central:
+            score += 150
+        if card_is_remote_east and not plan_mentions_remote_east:
+            score -= 260
+        elif card_is_belem:
+            score -= 80
 
     if meal_kind == "lunch" and _query_has_explicit_anchor_sequence(user_message):
         anchors = _requested_anchor_labels(user_message)
@@ -9929,7 +10093,7 @@ def _query_treats_start_anchor_as_origin_only(user_message: str) -> bool:
     normalized_query = _normalize_planner_text(user_message)
     return bool(
         re.search(
-            r"\b(?:comeca|comece|comecar|comecando|inicia|iniciar|iniciando|start|starting)\b",
+            r"\b(?:comeco|comeca|comece|comecar|comecando|parto|partimos|saio|saimos|inicia|iniciar|iniciando|start|starting)\b",
             normalized_query,
         )
         and not re.search(
@@ -10318,15 +10482,7 @@ def _planner_dict_card_is_closed(card: Dict[str, str]) -> bool:
     basis = _normalize_planner_text(
         " ".join(str(card.get(key, "")) for key in ("name", "description", "category", "hours"))
     )
-    return bool(
-        re.search(
-            r"\b(?:hoje fechado|fechado hoje|today closed|closed today|"
-            r"temporarily closed|temporary closure|temporarily unavailable|"
-            r"encerrado temporariamente|temporariamente encerrado|"
-            r"horario hoje fechado|hours today closed)\b",
-            basis,
-        )
-    )
+    return bool(_PLANNER_UNUSABLE_CLOSED_RE.search(basis))
 
 
 def _planner_card_is_low_fit_infrastructure(card: Dict[str, str], user_message: str) -> bool:
@@ -11623,8 +11779,17 @@ def _evidence_field_value(card: EvidenceCard, label: str) -> str:
 
 def _evidence_card_is_closed(card: EvidenceCard) -> bool:
     """Return whether an evidence card explicitly marks the venue as closed."""
-    hours = _evidence_field_value(card, "Hours")
-    return bool(re.search(r"\b(closed|fechado|encerrado)\b", _normalize_planner_text(hours)))
+    basis = _normalize_planner_text(
+        " ".join(
+            str(value or "")
+            for value in (
+                card.title,
+                _evidence_field_value(card, "Description"),
+                _evidence_field_value(card, "Hours"),
+            )
+        )
+    )
+    return bool(_PLANNER_UNUSABLE_CLOSED_RE.search(basis))
 
 
 def _fallback_bullet_body(bullet: str) -> str:
@@ -12463,6 +12628,10 @@ def _planner_response_route_blocks(response: str) -> List[str]:
         if re.search(r"\b(?:roteiro sugerido|suggested route)\b", normalized_line):
             in_route = True
             continue
+        if in_route and not current and re.search(r"\b(?:resposta direta|direct answer)\b", normalized_line):
+            continue
+        if in_route and stripped == "---" and not current:
+            continue
         if in_route and (stripped == "---" or stripped.startswith("### ") or _PLANNER_SOURCE_LINE_RE.match(stripped)):
             break
         if not in_route:
@@ -12866,6 +13035,198 @@ def _ensure_planner_rhythm_guidance(
     return response
 
 
+def _ensure_missing_origin_note_in_plan_response(
+    response: str,
+    user_message: str,
+    language: str,
+) -> str:
+    """Disclose the missing starting point on itinerary answers without one.
+
+    When a roteiro/itinerary request names no origin, the rendered plan starts
+    at the first stop with no first movement leg. Instead of guessing an
+    origin, append a single scoped note before the source footer telling the
+    user where the plan starts and how to get the first leg added.
+
+    Args:
+        response: Final rendered planner answer in Markdown.
+        user_message: Original user request used to detect an origin anchor.
+        language: Response language ("pt" or "en").
+
+    Returns:
+        The response with at most one starting-point note added.
+    """
+    text = str(response or "")
+    if not text.strip():
+        return response
+    user_key = _normalize_planner_text(user_message)
+    if not re.search(
+        r"\b(?:roteiro|itinerario|itinerary|plano|plan|visitar|visit|paragens|stops|miradouro|viewpoint|jantar|dinner|almoco|lunch)\b",
+        user_key,
+    ):
+        return response
+    has_plan_signal = bool(
+        re.search(
+            r"(?mi)^\s*(?:#{1,4}\s*)?(?:📍\s*)?(?:\*\*)?"
+            r"(?:Roteiro sugerido|Suggested route|Suggested itinerary|Plano|Plan|Roteiro|Itinerary)",
+            text,
+        )
+        or re.search(r"(?m)^\s*(?:[-*]\s*)?\*\*(?:🏷️|🏛️|📍|🍽️|☕|🥐)\s+[^*\n]{3,120}\*\*\s*$", text)
+        or re.search(
+            r"\b(?:Tempo sugerido|Suggested time|Hor[aá]rio sugerido|Suggested schedule|"
+            r"Como te deslocas|How to move|Morada|Address|Mais detalhes|More details)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+    if not has_plan_signal:
+        return response
+    if re.search(r"\*\*(?:Ponto de partida|Starting point):\*\*", text):
+        return response
+    if _extract_requested_plan_origin(user_message):
+        return response
+    user_text = str(user_message or "")
+    if re.search(
+        r"\b(?:daqui|aqui perto|de onde estou|onde estou|from here|my location|"
+        r"minha localiza[cç][aã]o|current location)\b",
+        user_text,
+        flags=re.IGNORECASE,
+    ) and not re.search(
+        r"\b(?:n[aã]o\s+assumas?|sem\s+assumir|do\s+not\s+assume|don't\s+assume)\b",
+        user_text,
+        flags=re.IGNORECASE,
+    ):
+        return response
+    if language == "pt":
+        note = (
+            "- ⚠️ **Ponto de partida:** não indicaste onde começas, por isso o "
+            "roteiro arranca na primeira paragem sugerida. Diz-me o teu ponto de "
+            "partida (hotel, estação ou bairro) para eu acrescentar esse primeiro trajeto."
+        )
+    else:
+        note = (
+            "- ⚠️ **Starting point:** you did not say where you start, so the "
+            "route begins at the first suggested stop. Tell me your starting "
+            "point (hotel, station, or neighbourhood) and I will add that first leg."
+        )
+    lines = text.splitlines()
+    insert_at = len(lines)
+    for index, line in enumerate(lines):
+        if _PLANNER_SOURCE_LINE_RE.match(line.strip()):
+            insert_at = index
+            break
+    block = [note, ""] if insert_at < len(lines) else ["", note]
+    lines[insert_at:insert_at] = block
+    return "\n".join(lines)
+
+
+def _first_visible_plan_stop_name(response: str) -> str:
+    """Return the first visible stop name from a rendered route section."""
+    in_route_section = False
+    field_labels = {
+        "horario sugerido", "tempo sugerido", "categoria", "morada", "preco",
+        "avaliacao", "telefone", "email", "website", "mais detalhes",
+        "suggested time", "suggested duration", "category", "address", "price",
+        "rating", "phone", "more details",
+    }
+    for raw_line in str(response or "").splitlines():
+        stripped = raw_line.strip()
+        stripped = re.sub(r"^#{1,6}\s+", "", stripped).strip()
+        if re.search(r"\b(?:Roteiro sugerido|Suggested route|Suggested itinerary)\b", stripped, flags=re.IGNORECASE):
+            in_route_section = True
+            continue
+        if not in_route_section:
+            continue
+        if re.search(r"\b(?:Como te deslocas|How to move)\b", stripped, flags=re.IGNORECASE):
+            break
+        if not stripped or stripped == "---":
+            continue
+        if re.search(r"\b(?:Resposta direta|Direct answer)\b", stripped, flags=re.IGNORECASE):
+            continue
+        match = re.match(
+            r"^(?:[-*]\s*)?(?:🏷️|🏛️|📍|🍽️|☕|🥐)?\s*(?:\*\*)?(?P<name>[^*\n:][^*\n]{2,120}?)(?:\*\*)?\s*$",
+            stripped,
+        )
+        if not match:
+            continue
+        name = re.sub(r"\s+", " ", match.group("name")).strip(" .:-")
+        name = re.sub(r"^(?:🏷️|🏛️|📍|🍽️|☕|🥐)\s*", "", name).strip(" .:-")
+        normalized = _normalize_planner_text(name)
+        if not name or normalized in field_labels:
+            continue
+        if re.search(r"\b(?:horario|tempo|categoria|morada|preco|avaliacao|telefone|email|website|detalhes|"
+                     r"time|duration|category|address|price|rating|phone|details)\b", normalized):
+            continue
+        return name
+    return ""
+
+
+def _ensure_requested_origin_first_leg_in_plan_response(
+    response: str,
+    user_message: str,
+    language: str,
+) -> str:
+    """Ensure plans with an explicit origin show the first leg from that origin."""
+    text = str(response or "")
+    if not text.strip():
+        return response
+    origin = _extract_requested_plan_origin(user_message)
+    if not origin:
+        return response
+    movement_text = _planner_movement_section_text(text) or text
+    normalized_origin = _normalize_planner_text(origin)
+    has_origin_route_line = any(
+        normalized_origin in _normalize_planner_text(line)
+        and ("→" in line or "->" in line)
+        for line in movement_text.splitlines()
+    )
+    if normalized_origin and has_origin_route_line:
+        return response
+    first_stop = _first_visible_plan_stop_name(text)
+    if not first_stop:
+        return response
+    if _normalize_planner_text(first_stop) == normalized_origin:
+        return response
+    if language == "pt":
+        bullet = (
+            f"- 🚶 **{origin} → {first_stop}:** começa em **{origin}**; "
+            "a ligação exata para a primeira paragem não ficou confirmada nos dados recolhidos."
+        )
+        heading = "### 🚇 **Como te deslocas**"
+    else:
+        bullet = (
+            f"- 🚶 **{origin} → {first_stop}:** start at **{origin}**; "
+            "the exact first leg to the first stop was not confirmed in the gathered data."
+        )
+        heading = "### 🚇 **How to move**"
+    if _normalize_planner_text(bullet) in _normalize_planner_text(text):
+        return response
+
+    section_re = re.compile(
+        r"(?ms)(?P<header>^(?:###\s+)?[^\n]*(?:\*\*)?(?:Como te deslocas|How to move)(?:\*\*)?\s*(?:\n|$))"
+        r"(?P<body>.*?)(?=(?:\n---\s*\n|\n(?:###\s+)?[^\n]*(?:Dicas|Tips|Notas finais|Final notes|"
+        r"Adapta[cç][aã]o ao tempo|Weather adaptation)[^\n]*\n|\n📌\s+(?:\*\*)?(?:Fonte|Source):|\Z))"
+    )
+
+    def prepend_to_movement(match: re.Match[str]) -> str:
+        body = match.group("body").strip("\n")
+        if body:
+            return f"{match.group('header')}{bullet}\n\n{body}\n"
+        return f"{match.group('header')}{bullet}\n"
+
+    if section_re.search(text):
+        return section_re.sub(prepend_to_movement, text, count=1).strip()
+
+    lines = text.splitlines()
+    insert_at = len(lines)
+    for index, line in enumerate(lines):
+        if _PLANNER_SOURCE_LINE_RE.match(line.strip()):
+            insert_at = index
+            break
+    block = ["", "---", "", heading, bullet, ""]
+    lines[insert_at:insert_at] = block
+    return "\n".join(lines).strip()
+
+
 def _planner_response_block_matches_requested_type(block: str, count_type: str) -> bool:
     """Return whether a rendered itinerary block satisfies a requested count type."""
     type_block = "\n".join(
@@ -12990,6 +13351,13 @@ def _planner_route_block_ranges(response: str) -> List[tuple[int, int, str]]:
         if re.search(r"\b(?:roteiro sugerido|suggested route)\b", normalized_line):
             in_route = True
             continue
+        if in_route and current_start is None and re.search(r"\b(?:resposta direta|direct answer)\b", normalized_line):
+            continue
+        if in_route and current_start is None and stripped == "---":
+            continue
+        if in_route and current_start is not None and stripped == "---":
+            route_end = index
+            break
         if in_route and stripped.startswith("### "):
             route_end = index
             break
@@ -13169,7 +13537,7 @@ def _planner_response_has_closed_timed_stop(response: str, user_message: str) ->
             re.search(r"\b(?:hora pedida pelo utilizador|requested time)\b", normalized_block)
             or re.search(r"^\s*[-*]\s+\*\*\s*\d{1,2}:\d{2}\b", block)
         )
-        if has_requested_time and re.search(r"\b(?:hoje fechado|fechado hoje|today closed|closed today)\b", normalized_block):
+        if has_requested_time and _PLANNER_UNUSABLE_CLOSED_RE.search(normalized_block):
             return True
     return False
 
@@ -13180,10 +13548,43 @@ def _planner_response_has_unusable_closed_stop(response: str, user_message: str)
         return False
     for block in _planner_response_route_blocks(response):
         normalized_block = _normalize_planner_text(block)
-        if not re.search(r"\b(?:hoje fechado|fechado hoje|today closed|closed today)\b", normalized_block):
+        if not _PLANNER_UNUSABLE_CLOSED_RE.search(normalized_block):
             continue
-        if re.search(r"\b(?:restaurante|restaurant|almoco|lunch|jantar|dinner|museu|museum|visita|visit)\b", normalized_block):
+        if re.search(
+            r"\b(?:restaurante|restaurant|almoco|lunch|jantar|dinner|museu|museum|"
+            r"monumento|monument|mosteiro|monastery|torre|tower|maat|atracao|attraction|"
+            r"local|place|visita|visit)\b",
+            normalized_block,
+        ):
             return True
+    return False
+
+
+def _planner_response_has_generic_component_placeholder(response: str) -> bool:
+    """Return whether the visible plan exposes a generic missing-component slot."""
+    normalized = _normalize_planner_text(response)
+    return bool(
+        re.search(
+            r"\b(?:miradouro\s+em\s+lisboa|viewpoint\s+in\s+lisbon|"
+            r"jardim\s+em\s+lisboa|garden\s+in\s+lisbon|"
+            r"paragem\s+cultural\s+em\s+lisboa|cultural\s+stop\s+in\s+lisbon|"
+            r"selec[c]?ao\s+final\s+nao\s+manteve|final\s+selection\s+did\s+not\s+preserve)\b",
+            normalized,
+        )
+    )
+
+
+def _planner_response_has_duplicate_route_titles(response: str) -> bool:
+    """Return whether the suggested route repeats the same visible stop title."""
+    seen: set[str] = set()
+    for block in _planner_response_route_blocks(response):
+        title = _normalize_planner_text(_planner_response_block_title(block))
+        title = re.sub(r"^(?:almoco|lunch|jantar|dinner)\s+", "", title).strip()
+        if not title or title in {"lisboa", "lisbon"}:
+            continue
+        if title in seen:
+            return True
+        seen.add(title)
     return False
 
 
@@ -13227,6 +13628,8 @@ def _planner_response_violates_explicit_preference_contract(response: str, user_
         or _planner_response_violates_requested_end(response, user_message)
         or _planner_response_has_closed_timed_stop(response, user_message)
         or _planner_response_has_unusable_closed_stop(response, user_message)
+        or _planner_response_has_generic_component_placeholder(response)
+        or _planner_response_has_duplicate_route_titles(response)
         or _planner_response_missing_requested_time_constraints(response, user_message)
     )
 

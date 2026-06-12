@@ -27,6 +27,11 @@ import requests
 from langchain_core.tools import tool
 
 try:
+    from tools.utils import lisbon_now
+except ImportError:  # Standalone execution: python tools/ipma_api.py
+    from utils import lisbon_now
+
+try:
     from config import Config
 except ModuleNotFoundError:
     import sys
@@ -458,7 +463,7 @@ def get_weather_warnings(area: str = "LSB") -> str:
         response += f" for {area_label}"
     response += "**\n\n"
     response += "\n".join(_format_warning_item(warning) for warning in active_warnings)
-    response += "\n\n📌 **Source:** [*IPMA*](https://www.ipma.pt/en/) | **Updated:** " + datetime.now().strftime("%H:%M")
+    response += "\n\n📌 **Source:** [*IPMA*](https://www.ipma.pt/en/) | **Updated:** " + lisbon_now().strftime("%H:%M")
 
     return response
 
@@ -489,14 +494,14 @@ def get_weather_forecast(days: int = 3, day_offset: int = 0) -> str:
     """
 
     if day_offset < 0 or day_offset > 4:
-        max_supported_date = (datetime.now() + timedelta(days=4)).strftime("%Y-%m-%d")
+        max_supported_date = (lisbon_now() + timedelta(days=4)).strftime("%Y-%m-%d")
         return (
             "⚠️ Lisbon weather forecast from IPMA is only available for the next 5 days. "
             f"I can't confirm conditions beyond {max_supported_date}."
         )
 
     if days > 5 or days + day_offset > 5:
-        max_supported_date = (datetime.now() + timedelta(days=4)).strftime("%Y-%m-%d")
+        max_supported_date = (lisbon_now() + timedelta(days=4)).strftime("%Y-%m-%d")
         return (
             "⚠️ Lisbon weather forecast from IPMA is only available for the next 5 days. "
             f"I can't confirm conditions beyond {max_supported_date}."
@@ -513,9 +518,18 @@ def get_weather_forecast(days: int = 3, day_offset: int = 0) -> str:
     if not forecast_data:
         return "❌ No forecast data available."
 
+    # Anchor day_offset=0 to today's forecastDate instead of trusting the
+    # provider array position, so a stale leading entry never shifts the window.
+    today_str = lisbon_now().strftime("%Y-%m-%d")
+    today_index = next(
+        (index for index, entry in enumerate(forecast_data) if entry.get('forecastDate') == today_str),
+        0,
+    )
+    start = today_index + day_offset
+
     # Limit to requested window.
-    days = min(max(1, days), len(forecast_data) - day_offset, 5 - day_offset)
-    forecast_data = forecast_data[day_offset:day_offset + days]
+    days = min(max(1, days), len(forecast_data) - start, 5 - day_offset)
+    forecast_data = forecast_data[start:start + days]
 
     if not forecast_data:
         return "❌ No forecast data available for the requested forecast window."
@@ -675,9 +689,15 @@ def get_current_weather_summary() -> str:
     response = "🌤️ Lisbon Weather Summary\n"
     response += "=" * 40 + "\n\n"
 
-    # Today's forecast
+    # Today's forecast. The IPMA daily array is normally sorted with today
+    # first, but match on forecastDate instead of trusting the position so a
+    # stale leading entry never gets presented as "today".
     if forecast_data and forecast_data.get('data'):
-        today = forecast_data['data'][0]
+        today_str = lisbon_now().strftime("%Y-%m-%d")
+        today = next(
+            (entry for entry in forecast_data['data'] if entry.get('forecastDate') == today_str),
+            forecast_data['data'][0],
+        )
         update_time = forecast_data.get('dataUpdate', 'N/A')
         t_min = today.get('tMin', 'N/A')
         t_max = today.get('tMax', 'N/A')

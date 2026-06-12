@@ -609,7 +609,7 @@ def search_history_culture(query: str, language: str = "pt") -> str:
     # Context enhancement: Ensure search is localized to Lisbon/Portugal if needed
     # (Kept from original logic as it fits the project scope)
     search_query = query
-    if "Lisboa" not in query and "Portugal" not in query:
+    if not re.search(r"\b(?:lisboa|lisbon|portugal)\b", query, flags=re.IGNORECASE):
         search_query = f"{query} Lisboa Portugal"
 
     live_query = _is_live_info_query(query)

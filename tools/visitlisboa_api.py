@@ -54,6 +54,11 @@ except ModuleNotFoundError:
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
     from config import Config
 
+try:
+    from tools.utils import lisbon_now
+except ImportError:  # Standalone execution: python tools/visitlisboa_api.py
+    from utils import lisbon_now
+
 logger = logging.getLogger(__name__)
 
 # Collection names (must match vector_store.py)
@@ -107,7 +112,7 @@ def parse_date_range(date_query: Optional[str]) -> Tuple[Optional[datetime], Opt
     date_query = re.sub(r"[_-]+", " ", date_query.lower().strip())
     date_query_key = unicodedata.normalize("NFKD", date_query)
     date_query_key = date_query_key.encode("ascii", "ignore").decode("ascii")
-    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    today = lisbon_now().replace(hour=0, minute=0, second=0, microsecond=0)
 
     weekday_aliases = {
         "monday": (0, {"monday", "segunda", "segunda feira"}),
@@ -489,7 +494,7 @@ def _select_event_date_entries_for_display(
         if matching_entries:
             return matching_entries
 
-    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    today = lisbon_now().replace(hour=0, minute=0, second=0, microsecond=0)
     future_entries: List[Dict] = []
     for entry in date_entries:
         entry_start, entry_end = _event_date_entry_window(entry)
@@ -2612,7 +2617,11 @@ def _matches_open_data_keyword(query: Optional[str], keyword: str) -> bool:
     if len(keyword_token) <= 4:
         return keyword_token in query_tokens
 
-    return _best_token_similarity(keyword_token, query_tokens) >= 0.84
+    return any(
+        token[:1] == keyword_token[:1]
+        and _token_similarity_score(keyword_token, token) >= 0.84
+        for token in query_tokens
+    )
 
 
 def _should_search_dados_abertos(query: Optional[str]) -> bool:
@@ -2858,6 +2867,7 @@ def _load_places_json() -> List[Dict[str, Any]]:
 
 # Cached places data for enrichment lookup
 _places_cache: Optional[Dict[str, Dict]] = None
+_places_cache_lock = threading.Lock()
 
 
 def _get_place_by_url(url: str) -> Optional[Dict[str, Any]]:
@@ -2874,8 +2884,10 @@ def _get_place_by_url(url: str) -> Optional[Dict[str, Any]]:
     global _places_cache
 
     if _places_cache is None:
-        places = _load_places_json()
-        _places_cache = {p.get('url', ''): p for p in places if p.get('url')}
+        with _places_cache_lock:
+            if _places_cache is None:
+                places = _load_places_json()
+                _places_cache = {p.get('url', ''): p for p in places if p.get('url')}
 
     return _places_cache.get(url)
 
@@ -3928,10 +3940,15 @@ def _extract_specific_place_lookup_phrase(query: Optional[str]) -> Optional[str]
             return _normalize_lookup_text(candidate)
 
     normalized_raw_query = _normalize_lookup_text(query)
+    # Plural category nouns signal browsing intent ("3 miradouros em Lisboa"),
+    # never a venue name. Keep the new ones PLURAL-ONLY: singular forms appear
+    # in real venue names ("Miradouro de Santa Luzia", "Igreja de São Roque").
     if re.search(
         r"\b(?:restaurants|restaurantes|museums|museus|monuments|monumentos|"
         r"places|locais|attractions|atra[cç][oõ]es|hotels|hot[eé]is|"
-        r"beaches|praias|shops|lojas|shopping|malls?|centros?\s+comerciais?)\b",
+        r"beaches|praias|shops|lojas|shopping|malls?|centros?\s+comerciais?|"
+        r"miradouros|viewpoints|view\s+points|igrejas|pal[aá]cios|castelos|"
+        r"jardins|parques|caf[eé]s|bares|mercados|pra[cç]as)\b",
         normalized_raw_query,
     ):
         return None
@@ -4095,7 +4112,7 @@ def _extract_requested_schedule_days(query: Optional[str]) -> List[str]:
             "saturday",
             "sunday",
         ]
-        requested_days.append(weekday_keys[(datetime.now() + timedelta(days=1)).weekday()])
+        requested_days.append(weekday_keys[(lisbon_now() + timedelta(days=1)).weekday()])
     for canonical_day, aliases in _PLACE_QUERY_DAY_ALIASES.items():
         if any(alias in normalized_query for alias in aliases):
             requested_days.append(canonical_day)
@@ -4138,6 +4155,29 @@ def _schedule_day_matches(day_label: str, canonical_day: str) -> bool:
     return any(alias in normalized_label for alias in _PLACE_QUERY_DAY_ALIASES.get(canonical_day, []))
 
 
+def _today_hours_from_weekday_map(schedule: Dict[str, Any]) -> str:
+    """Compute today's opening hours from a schedule's per-weekday map.
+
+    The scraped ``today`` string is frozen at scrape time, so a venue scraped
+    on its weekly closing day claims "Today: Closed" forever. The per-weekday
+    ``hours`` map in the same record is authoritative; "today" is anchored to
+    Europe/Lisbon.
+    """
+    if re.search(r"(?i)\b(?:inactive|inativ)", str(schedule.get("today") or "")):
+        return ""
+    hours_by_day = schedule.get("hours")
+    if not isinstance(hours_by_day, dict) or not hours_by_day:
+        return ""
+    weekday_keys = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+    canonical_today = weekday_keys[lisbon_now().weekday()]
+    for day_label, hours in hours_by_day.items():
+        if _schedule_day_matches(str(day_label), canonical_today):
+            hours_text = re.sub(r"\s+", " ", str(hours or "")).strip()
+            if hours_text:
+                return hours_text
+    return ""
+
+
 def _format_place_schedule_previews(
     schedules: List[Dict[str, Any]],
     query: Optional[str],
@@ -4164,9 +4204,17 @@ def _format_place_schedule_previews(
             return previews[:2]
 
     for schedule in schedules:
-        if schedule.get('today'):
-            previews.append(_localize_visitlisboa_schedule_text(schedule['today'], language))
-            break
+        today_text = str(schedule.get('today') or "")
+        if not today_text or re.search(r"(?i)\b(?:inactive|inativ)", today_text):
+            continue
+        # Prefer hours computed from the weekday map: the scraped "today"
+        # snapshot lies on every weekday other than the scrape day.
+        computed_today = _today_hours_from_weekday_map(schedule)
+        if computed_today:
+            previews.append(_localize_visitlisboa_schedule_text(f"Today: {computed_today}", language))
+        else:
+            previews.append(_localize_visitlisboa_schedule_text(today_text, language))
+        break
 
     if previews:
         return previews[:1]
@@ -4402,7 +4450,8 @@ def _place_result_is_open_today(result: Dict[str, Any]) -> bool:
     if not isinstance(schedules, list):
         return False
     for schedule in schedules:
-        today = _normalize_place_hint_text(schedule.get("today"))
+        computed_today = _today_hours_from_weekday_map(schedule)
+        today = _normalize_place_hint_text(computed_today or schedule.get("today"))
         if not today:
             continue
         if re.search(r"\b(?:fechado|closed)\b", today):
@@ -4949,7 +4998,7 @@ def search_cultural_events(
 
         if not events_data:
             # No events in date range
-            today = datetime.now()
+            today = lisbon_now()
             if render_language == "pt":
                 if strict_theme_key:
                     return (
@@ -6506,7 +6555,6 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
 
             # Tickets/prices (from enriched data)
             price_values: List[str] = []
-            ticket_line_added = False
             lisboa_card_benefit = None
             if full_data:
                 lisboa_card_benefit = full_data.get('lisboa_card_benefit') or full_data.get('lisboa_card_discount')
@@ -6532,7 +6580,6 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
                         output_parts.append(f"    - 🎟️ **Bilhetes:** {_format_markdown_link('Comprar bilhetes', ticket_url)}")
                     else:
                         output_parts.append(f"    - 🎟️ **Tickets:** {_format_markdown_link('Buy tickets', ticket_url)}")
-                    ticket_line_added = True
             elif full_data and full_data.get('contact_info', {}).get('tickets_url') and _query_mentions_tickets(query or effective_query):
                 tickets_url = full_data['contact_info']['tickets_url']
                 if _is_ticket_http_link("", tickets_url):
@@ -6540,7 +6587,6 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
                         output_parts.append(f"    - 🎟️ **Bilhetes:** {_format_markdown_link('Comprar bilhetes', tickets_url)}")
                     else:
                         output_parts.append(f"    - 🎟️ **Tickets:** {_format_markdown_link('Buy tickets', tickets_url)}")
-                    ticket_line_added = True
 
             # TripAdvisor rating (from enriched data)
             if full_data and full_data.get('tripadvisor'):
@@ -6572,22 +6618,6 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
                     label = "Website"
                     link_text = "Website oficial" if render_language == "pt" else "Official website"
                     output_parts.append(f"    - 🌐 **{label}:** {_format_markdown_link(link_text, contact.get('website'))}")
-
-            if not ticket_line_added and full_data and full_data.get('tickets_offers') and full_data['tickets_offers'].get('links'):
-                ticket_link = _first_ticket_http_link(full_data['tickets_offers'].get('links'))
-                if ticket_link:
-                    _, ticket_url = ticket_link
-                    if render_language == "pt":
-                        output_parts.append(f"    - 🎟️ **Bilhetes:** {_format_markdown_link('Comprar bilhetes', ticket_url)}")
-                    else:
-                        output_parts.append(f"    - 🎟️ **Tickets:** {_format_markdown_link('Buy tickets', ticket_url)}")
-            elif not ticket_line_added and full_data and full_data.get('contact_info', {}).get('tickets_url') and _query_mentions_tickets(query or effective_query):
-                tickets_url = full_data['contact_info']['tickets_url']
-                if _is_ticket_http_link("", tickets_url):
-                    if render_language == "pt":
-                        output_parts.append(f"    - 🎟️ **Bilhetes:** {_format_markdown_link('Comprar bilhetes', tickets_url)}")
-                    else:
-                        output_parts.append(f"    - 🎟️ **Tickets:** {_format_markdown_link('Buy tickets', tickets_url)}")
 
             if place.get('url'):
                 details_label = "Mais detalhes" if render_language == "pt" else "More details"

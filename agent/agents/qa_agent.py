@@ -3614,6 +3614,16 @@ class QualityAssuranceAgent(BaseAgent):
             )
             for match in re.findall(cp_pattern, output_lower):
                 line_name = match.strip().lower()
+                # "linha de autocarro/metro/elétrico..." are generic mode phrases
+                # and long captures are prose, not CP corridor names.
+                if (
+                    re.match(
+                        r"^(?:autocarros?|bus|el[eé]tricos?|tram|metro|barcos?|ferry)\b",
+                        line_name,
+                    )
+                    or len(line_name.split()) > 3
+                ):
+                    continue
                 if len(line_name) > 2:
                     is_known = any(
                         line_name in key or key in line_name

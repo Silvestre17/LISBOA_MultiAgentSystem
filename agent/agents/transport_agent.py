@@ -30,7 +30,7 @@ from agent.utils.geographic_scope import (
 )
 from agent.utils.langsmith_tracing import traceable
 from agent.state import AgentState
-from agent.utils.langgraph_compat import ToolNode
+from langgraph.prebuilt import ToolNode
 from agent.utils.response_formatter import (
     finalize_worker_response,
     has_source_line,
@@ -5724,7 +5724,10 @@ def _parse_metro_wait_request(user_message: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _resolve_carris_stop(stop_reference: str) -> Tuple[Optional[str], Optional[str]]:
+def _resolve_carris_stop(
+    stop_reference: str,
+    route_short_name: Optional[str] = None,
+) -> Tuple[Optional[str], Optional[str]]:
     """Resolves a Carris stop name into a stop ID and canonical stop label."""
     from tools.carris_api import _get_db_connection, _search_stop_rows
 
@@ -5736,6 +5739,37 @@ def _resolve_carris_stop(stop_reference: str) -> Tuple[Optional[str], Optional[s
         rows = _search_stop_rows(conn, stop_reference, limit=5)
         if not rows:
             return None, None
+        route = str(route_short_name or "").upper().strip()
+        if route:
+            stop_ids = [str(row["stop_id"]) for row in rows if row["stop_id"]]
+            if stop_ids:
+                placeholders = ",".join("?" for _ in stop_ids)
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"""
+                    SELECT st.stop_id, COUNT(*) AS pass_count
+                    FROM stop_times st
+                    JOIN trips t ON st.trip_id = t.trip_id
+                    JOIN routes r ON t.route_id = r.route_id
+                    WHERE r.route_short_name = ?
+                      AND st.stop_id IN ({placeholders})
+                    GROUP BY st.stop_id
+                    """,
+                    [route, *stop_ids],
+                )
+                served_counts = {
+                    str(row["stop_id"]): int(row["pass_count"] or 0)
+                    for row in cursor.fetchall()
+                }
+                if served_counts:
+                    rows = sorted(
+                        rows,
+                        key=lambda row: (
+                            0 if str(row["stop_id"]) in served_counts else 1,
+                            -served_counts.get(str(row["stop_id"]), 0),
+                            str(row["stop_name"] or ""),
+                        ),
+                    )
         return rows[0]["stop_id"], rows[0]["stop_name"]
     finally:
         conn.close()
@@ -6459,7 +6493,7 @@ def _build_deterministic_carris_stop_response(user_message: str, language: str =
     stop_name = request.get("stop_name")
 
     if not stop_id and stop_name:
-        stop_id, resolved_stop_name = _resolve_carris_stop(stop_name)
+        stop_id, resolved_stop_name = _resolve_carris_stop(stop_name, line)
         stop_name = resolved_stop_name or stop_name
 
     if kind == "arrivals" and stop_id:

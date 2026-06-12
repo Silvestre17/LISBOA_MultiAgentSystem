@@ -3,18 +3,10 @@
 #   - André Filipe Gomes Silvestre, 20240502
 # ==========================================================================
 
-from agent.utils.optimization import (  # HTTP Session Pooling; Caching; Parallel Execution; Latency Tracking; Optimized Fetching
+from agent.utils.optimization import (  # HTTP Session Pooling; Caching
     HTTPSessionPool,
-    LatencyTracker,
     TTLCache,
-    cached,
-    execute_tools_parallel,
-    fetch_json_optimized,
-    get_cached_session,
     http_pool,
-    latency_tracker,
-    static_cache,
-    track_latency,
     transport_cache,
     weather_cache,
 )
@@ -30,15 +22,7 @@ __all__ = [
     "ensure_response_title",
     "HTTPSessionPool",
     "http_pool",
-    "get_cached_session",
     "TTLCache",
     "weather_cache",
     "transport_cache",
-    "static_cache",
-    "cached",
-    "execute_tools_parallel",
-    "LatencyTracker",
-    "latency_tracker",
-    "track_latency",
-    "fetch_json_optimized",
 ]

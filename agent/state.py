@@ -158,70 +158,6 @@ def create_initial_state(session_id: str = None) -> AgentState:
     )
 
 
-def update_weather_context(
-    state: AgentState,
-    temp_min: float,
-    temp_max: float,
-    precip_prob: float,
-    weather_type: str,
-    warnings: List[str] = None
-) -> AgentState:
-    """
-    Updates the weather context in the state.
-
-    Args:
-        state (AgentState): Current state.
-        temp_min (float): Minimum temperature.
-        temp_max (float): Maximum temperature.
-        precip_prob (float): Precipitation probability.
-        weather_type (str): Weather description.
-        warnings (List[str], optional): Active warnings.
-
-    Returns:
-        AgentState: Updated state with new weather context.
-    """
-    warnings = warnings or []
-
-    state["weather_context"] = WeatherContext(
-        temperature_min=temp_min,
-        temperature_max=temp_max,
-        precipitation_prob=precip_prob,
-        weather_type=weather_type,
-        has_warnings=len(warnings) > 0,
-        warnings=warnings
-    )
-
-    return state
-
-
-def update_user_location(
-    state: AgentState,
-    latitude: float,
-    longitude: float
-) -> AgentState:
-    """
-    Updates the user's location in the state.
-
-    Args:
-        state (AgentState): Current state.
-        latitude (float): User latitude.
-        longitude (float): User longitude.
-
-    Returns:
-        AgentState: Updated state with new location.
-    """
-    if state["user_context"] is None:
-        state["user_context"] = UserContext(
-            latitude=latitude,
-            longitude=longitude
-        )
-    else:
-        state["user_context"]["latitude"] = latitude
-        state["user_context"]["longitude"] = longitude
-
-    return state
-
-
 # ==========================================================================
 # Test Block
 # ==========================================================================
@@ -236,22 +172,5 @@ if __name__ == "__main__":
     print(f"   Session ID: {state['session_id']}")
     print(f"   Messages: {len(state['messages'])}")
     print(f"   User Context: {state['user_context']}")
-
-    # Update location
-    state = update_user_location(state, 38.7223, -9.1393)
-    print("\n\033[1m📍 After Location Update:\033[0m")
-    print(f"   User Context: {state['user_context']}")
-
-    # Update weather
-    state = update_weather_context(
-        state,
-        temp_min=15.0,
-        temp_max=22.0,
-        precip_prob=20.0,
-        weather_type="Partly cloudy",
-        warnings=[]
-    )
-    print("\n\033[1m🌤️ After Weather Update:\033[0m")
-    print(f"   Weather: {state['weather_context']}")
 
     print("\n\033[1;32m✅ State management working correctly!\033[0m")

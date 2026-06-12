@@ -38,6 +38,11 @@ import requests
 from langchain_core.tools import tool
 
 try:
+    from tools.utils import lisbon_now
+except ImportError:  # Standalone execution: python tools/cp_api.py
+    from utils import lisbon_now
+
+try:
     import config as _project_config
 except ModuleNotFoundError:
     import sys
@@ -140,17 +145,20 @@ CP_LINES = {
     }
 }
 
-# Key CP stations in the AML (for quick reference)
+# Key CP stations in the AML (for quick reference).
+# Station "lines" lists feed shared-line route suggestions, so they only carry
+# AML suburban lines; "norte" (long-distance Lisboa-Porto) stays out of them
+# and exists in CP_LINES purely as reference data for scope/validation checks.
 CP_KEY_STATIONS = {
     # Main hubs
-    "oriente": {"name": "Lisboa - Oriente", "lines": ["sintra", "azambuja", "norte"], "metro": "vermelha"},
-    "entrecampos": {"name": "Entrecampos", "lines": ["sintra", "azambuja", "fertagus", "norte"], "metro": "amarela"},
+    "oriente": {"name": "Lisboa - Oriente", "lines": ["sintra", "azambuja"], "metro": "vermelha"},
+    "entrecampos": {"name": "Entrecampos", "lines": ["sintra", "azambuja", "fertagus"], "metro": "amarela"},
     "rossio": {"name": "Rossio", "lines": ["sintra"], "metro": "verde"},
     "campolide": {"name": "Campolide", "lines": ["sintra"], "description": "Lisbon station on the Sintra suburban corridor"},
     "sete_rios": {"name": "Sete Rios", "lines": ["sintra", "azambuja"], "metro": "azul"},
     "sete rios": {"name": "Sete Rios", "lines": ["sintra", "azambuja"], "metro": "azul"},
     "cais_sodre": {"name": "Cais do Sodré", "lines": ["cascais"], "metro": "verde"},
-    "santa_apolonia": {"name": "Santa Apolónia", "lines": ["azambuja", "norte"], "metro": "azul"},
+    "santa_apolonia": {"name": "Santa Apolónia", "lines": ["azambuja"], "metro": "azul"},
 
     # Cascais Line
     "cascais": {"name": "Cascais", "lines": ["cascais"], "description": "Western terminus, beach town"},
@@ -1041,7 +1049,7 @@ class CPGTFSManager:
             List of active service IDs.
         """
         if date is None:
-            date = datetime.now()
+            date = lisbon_now()
 
         date_str = date.strftime('%Y%m%d')
         weekday = date.strftime('%A').lower()
@@ -1322,7 +1330,7 @@ def get_stop_departures(
         return []
 
     if date is None:
-        date = datetime.now()
+        date = lisbon_now()
 
     # Get active services for the date
     active_services = manager.get_active_services(date)
@@ -1359,17 +1367,24 @@ def get_stop_departures(
             LIMIT ?
         """
 
-        cursor.execute(query, [stop_id] + active_services + [current_time, limit])
+        # Over-fetch so dropping out-of-scope long-distance services (AP/IC/IR
+        # share hubs such as Oriente and Santa Apolónia) still fills `limit`.
+        cursor.execute(query, [stop_id] + active_services + [current_time, limit * 3])
 
         departures = []
         for row in cursor.fetchall():
+            route_name = row['route_short_name'] or row['route_long_name'] or ''
+            if not _is_aml_suburban_route(route_name):
+                continue
             departures.append({
                 'departure_time': row['departure_time'],
                 'headsign': row['stop_headsign'] or row['trip_headsign'],
-                'route_name': row['route_short_name'] or row['route_long_name'],
+                'route_name': route_name,
                 'route_id': row['route_id'],
                 'trip_id': row['trip_id']
             })
+            if len(departures) >= limit:
+                break
 
         conn.close()
         return departures
@@ -1805,7 +1820,7 @@ def get_train_schedule(station_name: str, limit: int = 10, language: str = "en")
                 "- Holiday schedule\n"
                 "- GTFS data not yet available")
 
-    now = datetime.now()
+    now = lisbon_now()
     title = f"Próximas partidas de {stop_name}" if is_pt else f"Departures from {stop_name}"
     # Clean markdown: heading + column-0 bullet list (no literal '='/'-' rules that
     # render as setext headings or floating text in Streamlit).
@@ -1814,7 +1829,7 @@ def get_train_schedule(station_name: str, limit: int = 10, language: str = "en")
 
     for dep in departures:
         dep_time = dep['departure_time']
-        headsign = dep['headsign'] or 'N/A'
+        headsign = str(dep['headsign'] or '').strip()
         route_name = dep['route_name'] or ''
 
         # Format time nicely
@@ -1826,7 +1841,7 @@ def get_train_schedule(station_name: str, limit: int = 10, language: str = "en")
         except (IndexError, ValueError):
             time_str = dep_time
 
-        line = f"- 🕐 **{time_str}** → {headsign}"
+        line = f"- 🕐 **{time_str}** → {headsign}" if headsign else f"- 🕐 **{time_str}**"
         if route_name:
             line += f" · 🚆 {route_name}"
         response += line + "\n"
@@ -1918,7 +1933,7 @@ def plan_train_trip(origin: str, destination: str) -> str:
     origin_name = origin_station['stop_name']
     dest_name = dest_station['stop_name']
 
-    now = datetime.now()
+    now = lisbon_now()
     current_time = now.strftime('%H:%M:%S')
 
     # Get active services for today

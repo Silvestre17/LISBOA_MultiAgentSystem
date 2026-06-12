@@ -30,6 +30,7 @@ import argparse
 import csv
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -39,7 +40,7 @@ import time
 import unicodedata
 import zipfile
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -59,9 +60,9 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 try:
-    from tools.utils import haversine_distance
+    from tools.utils import LISBON_TZ, haversine_distance, lisbon_now
 except ImportError:
-    from utils import haversine_distance
+    from utils import LISBON_TZ, haversine_distance, lisbon_now
 
 try:
     from tools.location_resolver import build_location_ambiguity_preamble, get_location_display_name
@@ -206,7 +207,7 @@ def _minutes_until_clock_time(clock_text: str) -> Optional[int]:
         target_minutes = time_str_to_minutes(clock_text)
     except (ValueError, IndexError):
         return None
-    now = datetime.now()
+    now = lisbon_now()
     current_minutes = now.hour * 60 + now.minute
     delta = target_minutes - current_minutes
     if delta < 0:
@@ -969,7 +970,7 @@ def _get_active_services(
 ) -> List[str]:
     """Gets active service_ids for a given date."""
     if date is None:
-        date = datetime.now()
+        date = lisbon_now()
 
     date_str = date.strftime("%Y%m%d")
     day_of_week = date.strftime("%A").lower()
@@ -1113,9 +1114,11 @@ def fetch_gtfs_rt_vehicles(use_cache: bool = True) -> List[Dict[str, Any]]:
             vehicles = []
             feed_timestamp = feed.header.timestamp
             generated_at = (
-                datetime.fromtimestamp(feed_timestamp)
+                datetime.fromtimestamp(feed_timestamp, tz=timezone.utc)
+                .astimezone(LISBON_TZ)
+                .replace(tzinfo=None)
                 if feed_timestamp
-                else datetime.now()
+                else lisbon_now()
             )
 
             for entity in feed.entity:
@@ -1348,7 +1351,7 @@ def get_vehicle_eta_at_stop(
     target_mins = time_str_to_minutes(target_scheduled_arr)
     scheduled_travel_mins = target_mins - current_mins
 
-    now = datetime.now()
+    now = lisbon_now()
     now_mins = now.hour * 60 + now.minute
     scheduled_now_mins = time_str_to_minutes(current_scheduled_dep)
     delay_mins = now_mins - scheduled_now_mins
@@ -1372,7 +1375,7 @@ def get_next_arrivals_at_stop(stop_id: str, limit: int = 10) -> List[Dict]:
         return []
 
     try:
-        now = datetime.now()
+        now = lisbon_now()
         current_time = now.strftime("%H:%M:%S")
 
         active_services = _get_active_services(conn, now)
@@ -1858,7 +1861,7 @@ def carris_get_arrivals(stop_id: str, limit: int = 10) -> str:
 
         response = f"Próximas Chegadas: {stop_name}\n"
         response += (
-            f"   ID: {stop_id} | Atualizado: {datetime.now().strftime('%H:%M')}\n"
+            f"   ID: {stop_id} | Atualizado: {lisbon_now().strftime('%H:%M')}\n"
         )
         response += "=" * 55 + "\n\n"
         freshness_note = _build_gtfs_rt_freshness_note()
@@ -1960,7 +1963,7 @@ def carris_get_next_departures(
                 current_time = f"{start_time}:00"
                 # If user asks for a specific time, assume they want static schedule or it's a future plan
                 # We'll still try to match RT if the time is close to now, but flagged as future query if distinct
-                now_str = datetime.now().strftime("%H:%M")
+                now_str = lisbon_now().strftime("%H:%M")
                 if (
                     start_time[:2] != now_str[:2]
                 ):  # Simple heuristic to detect future hours
@@ -1969,10 +1972,10 @@ def carris_get_next_departures(
                 conn.close()
                 return "Invalid time format. Use HH:MM."
         else:
-            now = datetime.now()
+            now = lisbon_now()
             current_time = now.strftime("%H:%M:%S")
 
-        active_services = _get_active_services(conn, datetime.now())
+        active_services = _get_active_services(conn, lisbon_now())
 
         if not active_services:
             conn.close()
@@ -2192,7 +2195,15 @@ def carris_find_routes_between(
         response += f"- **Destino:** {dest_display}\n\n"
 
         def find_stops_near(lat: float, lon: float, radius: float) -> List[Dict]:
-            cursor.execute("SELECT stop_id, stop_name, stop_lat, stop_lon FROM stops")
+            # Bounding-box SQL pre-filter (with margin) before the exact
+            # haversine check, instead of scanning the whole stops table.
+            lat_delta = (radius / 110.574) * 1.05
+            lon_delta = (radius / (111.320 * max(0.1, math.cos(math.radians(lat))))) * 1.05
+            cursor.execute(
+                "SELECT stop_id, stop_name, stop_lat, stop_lon FROM stops "
+                "WHERE stop_lat BETWEEN ? AND ? AND stop_lon BETWEEN ? AND ?",
+                (lat - lat_delta, lat + lat_delta, lon - lon_delta, lon + lon_delta),
+            )
             all_stops = cursor.fetchall()
 
             nearby = []
@@ -2307,7 +2318,7 @@ def carris_find_routes_between(
 
         response += f"✅ **Rotas diretas encontradas:** {len(unique_routes)}\n\n"
 
-        now = datetime.now()
+        now = lisbon_now()
         requested_start = str(start_time or "").strip()
         if requested_start:
             try:
@@ -2691,7 +2702,8 @@ def carris_get_realtime_vehicles(
 
         feed_time = filtered[0].get("feed_timestamp", 0)
         if feed_time:
-            response += f"Dados de: {datetime.fromtimestamp(feed_time).strftime('%H:%M:%S')}\n\n"
+            feed_local = datetime.fromtimestamp(feed_time, tz=timezone.utc).astimezone(LISBON_TZ)
+            response += f"Dados de: {feed_local.strftime('%H:%M:%S')}\n\n"
         freshness_note = _build_gtfs_rt_freshness_note()
         if freshness_note:
             response += freshness_note + "\n\n"
@@ -2802,7 +2814,7 @@ def carris_vehicle_eta(route_short_name: str, stop_name: str) -> str:
             response += "- ℹ️ **Live Arrival Estimate:** no active real-time vehicle was detected for this line right now.\n"
             response += "- 🕒 **Scheduled fallback:**\n"
 
-            now_dt = datetime.now()
+            now_dt = lisbon_now()
             active_services = _get_active_services(conn, now_dt)
             if active_services:
                 ph = ",".join(["?" for _ in active_services])
@@ -2846,7 +2858,7 @@ def carris_vehicle_eta(route_short_name: str, stop_name: str) -> str:
 
         vehicle_icon = "🚋" if route_short_name.upper().endswith("E") else "🚌"
         response = f"### {vehicle_icon} **{route_short_name} at {target_stop_name}**\n\n"
-        response += f"- 🕒 **Updated:** {datetime.now().strftime('%H:%M')}\n"
+        response += f"- 🕒 **Updated:** {lisbon_now().strftime('%H:%M')}\n"
         freshness_note = _build_gtfs_rt_freshness_note()
         if freshness_note:
             response += f"- {freshness_note}\n"
@@ -2868,7 +2880,7 @@ def carris_vehicle_eta(route_short_name: str, stop_name: str) -> str:
             response += "- ℹ️ **Live Arrival Estimate:** no active vehicle is currently matched to this stop.\n"
             response += "- 🕒 **Scheduled fallback:**\n"
 
-            now = datetime.now()
+            now = lisbon_now()
             active_services = _get_active_services(conn, now)
 
             if active_services:
