@@ -1,68 +1,78 @@
 # 📍 LISBOA Project Overview
 
-LISBOA is a Master's thesis project for the Lisbon Metropolitan Area that combines multi-agent orchestration, provider-backed data integrations, municipal open data, and semantic retrieval. The documented public entrypoint is `app.py`.
+LISBOA is the software artifact of a Master's thesis on grounded, context-aware assistance for tourism and urban mobility in Lisbon and the Lisbon Metropolitan Area (AML). It combines multi-agent orchestration, live and structured data integrations, municipal open data, and hybrid semantic and structured retrieval, served through the Streamlit entry point `app.py`.
 
 ## 👥 Who LISBOA Serves
 
-| Audience | Typical questions | Main data layers |
-|----------|-------------------|------------------|
-| **🧳 Tourists** | itineraries, museums, attractions, weather, events, transport between landmarks | VisitLisboa, IPMA, Metro, Carris, CP, multimodal routing |
-| **🏠 Residents** | daily mobility, nearby services, local events, urban information | Lisboa Aberta, Metro, Carris Metropolitana, Carris Urban, CP, IPMA |
+| Audience | Typical Needs | Main Data Sources |
+|---|---|---|
+| **🧳 Tourists** | Itineraries, attractions, events, weather, and transport between landmarks | VisitLisboa, the Lisboa Card guide, IPMA, Metro de Lisboa, Carris Urban, CP, and multimodal routing |
+| **🏠 Residents** | Daily mobility, nearby public services, local events, and municipal information | Lisboa Aberta, IPMA, Metro de Lisboa, Carris Urban, Carris Metropolitana, and CP |
+| **🧪 Researchers and developers** | Reproducible architecture, grounded-tool design, evaluation, and ablation | Source code, technical documentation, evaluation corpus, validators, results, and notebooks |
 
-## 🎓 Thesis Context
+## 🎓 Research Context
 
 | Item | Value |
-|------|-------|
-| Project name | **LISBOA** |
-| Thesis Title | *LISBOA: Lisbon Itinerary System Based On AI* |
-| Thesis Subtitle | *A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon* |
+|---|---|
+| Project | **LISBOA** (*Lisbon Itinerary System Based On AI*) |
+| Thesis title | *LISBOA: A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon* |
 | Author | André Filipe Gomes Silvestre |
-| Supervisors | Prof. Dr. Bruno Jardim; Prof. Dr. Miguel de Castro Neto |
-| Institution | NOVA IMS |
+| Supervisors | Prof. Dr. Bruno Jardim and Prof. Dr. Miguel de Castro Neto |
+| Degree | Master's in Data Science and Advanced Analytics, specialization in Data Science |
+| Institution | NOVA Information Management School (NOVA IMS), Universidade NOVA de Lisboa |
 | Academic year | 2025/2026 |
+| Evaluated version | Commit [`9235dd3`](https://github.com/Silvestre17/LISBOA_MultiAgentSystem/tree/9235dd3) (May 15, 2026) |
 
+The thesis research question is:
 
-| Category | Current implementation |
-|----------|------------------------|
-| Supported Streamlit entrypoint | `app.py` |
-| Runtime mode | Multi-agent by default |
-| Specialized agents | Supervisor, Weather, Transport, Researcher, Planner, QA |
-| Exported tools | **45** |
-| Worker-agent tool assignment | Weather **4**, Transport **30**, Researcher **11** |
+> How can an LLM-powered agent system effectively integrate diverse, real-time urban data sources (including transport status, weather, location, and schedule) to produce feasible, personalized, and context-aware tourist and mobility itineraries in Lisbon?
+
+## 📊 Current System Snapshot
+
+| Category | Implemented State |
+|---|---|
+| Runtime | `MultiAgentAssistant`, served through `app.py` |
+| Agent roles | Supervisor, Weather, Transport, Researcher, Quality Assurance, and Planner |
+| Specialist workers | Weather, Transport, and Researcher |
+| Exported tools | **45**: Weather 4, Transport 30, and Researcher 11 |
 | Knowledge base | ChromaDB with `BAAI/bge-m3` embeddings |
-| Indexed collections | `lisbon_pdf`, `lisbon_places`, `lisbon_events` |
-| Evaluation corpus | **72** ground-truth queries across 6 domains |
-| Evaluation artefacts | benchmark, ablation, statistics, and figure outputs under `eval/results/` |
-| Automation | daily scraping plus workflow-triggered vector sync |
+| Vector collections | `lisbon_pdf`, `lisbon_places`, and `lisbon_events` |
+| Evaluation corpus | **72** scenarios across 6 domains: weather 13, transport 36, researcher 13, multi-agent 3, greeting 3, and out-of-scope 4 |
+| Automation | 4 workflows: VisitLisboa refresh, vector sync, transport runtime assets, and Hugging Face deployment |
 
 ## ✨ Core Capabilities
 
-| Domain | What it covers |
-|--------|----------------|
-| 🌦️ **Weather & alerts** | current summary, 5-day forecast, Portugal-wide overview, active IPMA warnings |
-| 🚇 **Mobility** | Metro de Lisboa status / wait times / nearest station; Carris Metropolitana alerts, routes, live positions, departures; Carris Urban GTFS + GTFS-RT; CP schedules, routes, trip planning; multimodal summaries and routing |
-| 📚 **Knowledge & local services** | semantic search over VisitLisboa places & events; on-demand Lisboa Aberta service discovery; web fallback for history & culture |
-| 🧭 **Planning & synthesis** | constraint-aware itineraries integrating weather, transport, and user context (interests, mobility, location, available time) |
-| 🧪 **Evaluation & research** | benchmark and ablation runners under `eval/`; deterministic dataset and validator integrity checks; statistical analysis; reproducibility metadata and optional cost accounting |
+| Domain | Implemented Coverage |
+|---|---|
+| 🌦️ **Weather** | Today's IPMA forecast summary, forecasts within the five-day provider horizon, a Portugal-wide overview, and active warnings |
+| 🚇 **Mobility** | Status and routing for Metro de Lisboa, Carris Urban, Carris Metropolitana, CP suburban rail, and supported multimodal connections |
+| 📚 **Tourism and services** | Hybrid VisitLisboa retrieval, Lisboa Card knowledge, on-demand Lisboa Aberta service discovery, and a constrained web fallback |
+| 🧭 **Planning** | Itineraries built from gathered evidence and from the constraints stated in the request or its follow-ups, such as places, timing, mobility needs, weather, and transport preferences |
+| 🧪 **Evaluation** | Isolated worker benchmark, zero-shot versus full-system ablation, dual-judge scoring, deterministic integrity checks, paired statistics, and a separate formative user study |
 
-## 🤖 Why the System is Multi-Agent
+## 🤖 Why a Multi-Agent Approach
 
-The supported runtime separates responsibilities into clearer layers — **Supervisor** (routing and direct handling), **worker agents** (weather, transport, research), **QA validation** (completeness and factual safeguards), and **Planner synthesis** (itinerary responses). This reduces tool overload per worker, keeps domain prompts narrower, and makes final response assembly easier to control and evaluate.
+The runtime separates routing, domain retrieval, validation, and synthesis:
 
-## 🧱 Repository Highlights
+- `SupervisorAgent` interprets the request, answers direct cases, and selects the workers.
+- The Weather, Transport, and Researcher workers have narrower prompts and tool sets.
+- Deterministic checks preserve structured, source-backed outputs; generative QA runs only when required and can guide one targeted retry.
+- `PlannerAgent` synthesizes itineraries when the evidence is sufficient; guarded structured fallbacks cover blocked or failed synthesis.
+
+This division reduces the number of tools each worker must choose from and makes routing, evidence use, retries, and final responses easier to inspect and evaluate.
+
+## 🧱 Repository Map
 
 | Path | Role |
-|------|------|
-| `app.py` | Supported Streamlit UI entrypoint |
-| `agent/` | Orchestration, prompts, state, and shared agent utilities |
-| `tools/` | Exported tool registry plus vector-store internals |
-| `data_collection/` | Scrapers and source-acquisition scripts |
-| `data/` | Vector store and local transport support data |
-| `eval/` | Benchmarking, ablation, validators, and statistical analysis assets |
-| `scripts/` | Operational helpers (syntax check, prompt smoke runner, transport verification) |
-| `docs/` | This documentation set |
-
-## 📌 Documentation Boundary
+|---|---|
+| `app.py` | Streamlit interface and entry point |
+| `agent/` | Orchestration, agent roles, prompts, state, planning, and formatting |
+| `tools/` | Exported tools plus location, release, and vector-store support |
+| `data_collection/` | Source-acquisition scripts and static source documents |
+| `data/` | Local or release-hydrated vector and transport runtime data |
+| `eval/` | Evaluation corpus, benchmark, ablation, judges, statistics, and notebooks |
+| `scripts/` | Smoke tests, provider checks, data publishing, and hosted startup |
+| `docs/` | Technical documentation |
 
 > [!NOTE]
-> This overview intentionally documents the supported application path around `app.py` and the current runtime architecture. Auxiliary thesis materials may exist in the repository, but they are not treated as the public operating path unless explicitly stated.
+> LISBOA is a Lisbon-focused proof of concept, not a general city benchmark. Availability and freshness depend on the implemented providers and their upstream services.

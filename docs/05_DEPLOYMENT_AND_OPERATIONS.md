@@ -1,110 +1,97 @@
 # ⚙️ Deployment and Operations
 
-This guide covers local setup, environment configuration, runtime workflows, CI automation, validation, evaluation artefacts, and troubleshooting.
+This guide covers local setup, environment configuration, Docker and hosted deployment, vector-store operations, validation, automation, and troubleshooting.
 
 > [!IMPORTANT]
-> The supported Streamlit launch command is `streamlit run app.py`.
+> The supported launch command is `streamlit run app.py`.
 
 ## ✅ Setup Checklist
 
-| Requirement | Needed for | Notes |
-|-------------|------------|-------|
-| Python 3.10+ | All local workflows | Required by the repository and GitHub Actions |
+| Requirement | Needed For | Notes |
+|---|---|---|
+| Python 3.10 to 3.13 | All local workflows | Declared in `pyproject.toml` |
 | Git | Cloning and updating the repository | Standard prerequisite |
-| One configured LLM provider | Runtime assistant and evaluation | Azure OpenAI, OpenAI, or LM Studio |
-| Metro credentials | Full official Metro realtime experience | Optional; fallback status remains available |
-| Tavily API key | Web fallback for history and culture queries | Optional |
+| One configured LLM provider | The assistant and the evaluation | Azure OpenAI, OpenAI, or LM Studio |
+| Metro de Lisboa credentials | Official real-time Metro data | Optional; the public status fallback remains available |
+| Tavily API key | Web fallback for history and culture questions | Optional |
+| Hugging Face token | Reliable model downloads, for example `BAAI/bge-m3` | Optional for public models; recommended for hosted deployments |
+| LangSmith account | Tracing and monitoring | Optional |
 
 ## 🔐 Environment Configuration
 
-Start from the template:
+Start from the template and fill in only the services you plan to use:
 
 ```bash
-copy .env.example .env
+cp .env.example .env    # Windows PowerShell: Copy-Item .env.example .env
 ```
 
-Then fill in only the providers and services you plan to use.
+### Provider Selection
 
-### Provider Selection Guide
+| Provider | Variables | Best Fit | Notes |
+|---|---|---|---|
+| Azure OpenAI | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT_NAME` | Default path | `config.py` defaults to Azure and uses the v1 API, so no API version is needed |
+| OpenAI | `OPENAI_API_KEY`, optionally `OPENAI_MODEL_NAME` | Simplest cloud setup | Direct OpenAI API |
+| LM Studio | `LMSTUDIO_BASE_URL` and `LMSTUDIO_MODEL_NAME` in `config.py` | Offline or low-cost experimentation | No API key; start the local server on port 1234 |
 
-| Provider | What you need | Best fit | Notes |
-|----------|---------------|----------|-------|
-| Azure OpenAI | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT_NAME` | default documented path | `config.py` currently defaults to Azure |
-| OpenAI | `OPENAI_API_KEY`, optionally `OPENAI_MODEL_NAME` | simpler cloud setup | direct OpenAI API path |
-| LM Studio | local server URL and model name | offline or low-cost local experimentation | no API key required |
+To switch provider, change `Config.MODEL_PROVIDER` in `config.py`. Per-agent models are set in `AGENT_MODELS_AZURE`, `AGENT_MODELS_OPENAI`, and `AGENT_MODELS_LMSTUDIO`.
 
-### Runtime Environment Variables
+### Metro de Lisboa API
 
-#### LLM Providers
+| Variable | Purpose |
+|---|---|
+| `METRO_CONSUMER_KEY`, `METRO_CONSUMER_SECRET` | OAuth2 credentials from the Metro de Lisboa API Store (`EstadoServicoML` subscription) |
+| `METRO_CA_BUNDLE` | Optional custom trust bundle (PEM) |
+| `METRO_SSL_VERIFY` | Optional; `false` disables certificate verification and is meant only for local diagnosis |
+| `METRO_SSL_ALLOW_INSECURE_FALLBACK` | Optional; `true` allows one insecure retry after secure validation and dynamic chain completion both fail |
 
-- `OPENAI_API_KEY`
-- `OPENAI_MODEL_NAME`
-- `AZURE_OPENAI_API_KEY`
-- `AZURE_OPENAI_ENDPOINT`
-- `AZURE_OPENAI_DEPLOYMENT_NAME`
-
-#### Metro Official API
-
-- `METRO_CONSUMER_KEY`
-- `METRO_CONSUMER_SECRET`
-
-Optional Metro TLS overrides from `.env.example`:
-
-- `METRO_CA_BUNDLE`
-- `METRO_SSL_VERIFY`
-- `METRO_SSL_ALLOW_INSECURE_FALLBACK`
-
-Metro TLS notes:
-
-- By default, the runtime keeps certificate verification enabled.
-- If the Metro gateway serves an incomplete TLS chain, the code builds a temporary CA bundle dynamically from the live certificate's AIA issuer chain and retries securely.
-- No repository PEM file is required for this default path.
-- `METRO_CA_BUNDLE` is only for explicit custom trust bundles.
-- `METRO_SSL_VERIFY=false` disables verification outright and should be limited to local diagnosis.
-- `METRO_SSL_ALLOW_INSECURE_FALLBACK=true` allows one insecure retry only after secure validation and dynamic chain completion both fail.
+Certificate verification is enabled by default. When the Metro gateway serves an incomplete certificate chain, the code builds the missing issuer chain from the live certificate's AIA metadata and retries securely, so no PEM file is needed in the repository.
 
 > [!CAUTION]
-> Insecure TLS fallback is **not recommended for deployed environments**. Use it only as a temporary diagnostic measure.
+> The insecure TLS fallback is **not recommended for deployed environments**. Use it only as a temporary diagnostic measure.
 
-#### Optional Services and Observability
+### Runtime Data and Startup
 
-- `TAVILY_API_KEY`
-- `LANGSMITH_TRACING`
-- `LANGSMITH_API_KEY`
-- `LANGSMITH_PROJECT`
-- `LANGSMITH_ENDPOINT`
-- `LANGSMITH_WORKSPACE_ID` when the LangSmith API key is linked to multiple workspaces
-- `LANGSMITH_SYNC_FLUSH` to force a post-run tracer flush and `read_run` confirmation probe when tracing persistence needs active debugging
+| Variable | Purpose |
+|---|---|
+| `HF_TOKEN` | Read-only Hugging Face token for model downloads |
+| `VECTOR_DB_RELEASE_ENABLED`, `VECTOR_DB_RELEASE_REPO`, `VECTOR_DB_RELEASE_TAG`, `VECTOR_DB_RELEASE_ASSET` | Download `vector_db.zip` from a GitHub Release when no local vector database exists |
+| `VECTOR_DB_RELEASE_TOKEN` | Read-only GitHub token, needed only if the repository is private |
+| `TRANSPORT_DATA_RELEASE_REPO`, `TRANSPORT_DATA_RELEASE_TAG` | Release that holds the transport runtime assets |
+| `CARRIS_RUNTIME_RELEASE_ENABLED`, `CARRIS_RUNTIME_RELEASE_ASSET`, `CP_RUNTIME_RELEASE_ENABLED`, `CP_RUNTIME_RELEASE_ASSET` | Last-known-good Carris Urban and CP SQLite files, used when a live GTFS download fails |
+| `LISBOA_RUNTIME_DATA_DIR`, `VECTOR_DB_DIR` | Optional writable locations for generated data in hosted runtimes |
+| `LISBOA_REUSE_LOCAL_TRANSPORT_DATA` | Local smoke-test acceleration; ignored on Hugging Face Spaces |
+| `STREAMLIT_RESOURCE_CACHE_TTL_SECONDS` | Optional refresh interval for release-backed resources without a restart |
+| `LISBOA_STARTUP_PRELOAD_ENABLED`, `LISBOA_STARTUP_PRELOAD_REQUIRED`, `LISBOA_STARTUP_PRELOAD_LANGUAGE` | Startup preload in the Docker entry point |
 
-Legacy `LANGCHAIN_*` tracing aliases are still accepted by the runtime for backward compatibility, but the canonical `LANGSMITH_*` names above should be preferred for new setups.
+### Observability and Logging
 
-### Provider Behavior Notes
+| Variable | Purpose |
+|---|---|
+| `TAVILY_API_KEY` | Web search for the web fallback |
+| `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, `LANGSMITH_ENDPOINT` | LangSmith tracing; use the EU endpoint for EU accounts |
+| `LANGSMITH_WORKSPACE_ID` | Required when the API key is linked to several workspaces |
+| `LANGSMITH_SYNC_FLUSH` | Waits for trace ingestion after each run, for debugging only; it adds latency |
+| `SHOW_MARKDOWN_RESPONSE_IN_TERMINAL`, `SHOW_DETAILED_EXECUTION_LOGS` | Terminal output of final answers and execution details |
 
-- Runtime mode is **multi-agent** through `MultiAgentAssistant`.
-- Per-agent model mappings: `AGENT_MODELS_AZURE`, `AGENT_MODELS_OPENAI`, `AGENT_MODELS_LMSTUDIO` in `config.py`.
-- The Streamlit sidebar can override active provider and per-agent model at runtime.
-- UI provider connection tests use raw HTTP requests (not LangChain), so health checks do **not** create LangSmith traces.
+Legacy `LANGCHAIN_*` tracing aliases are still accepted, but new setups should use the `LANGSMITH_*` names.
 
-### LangSmith Tracing Notes
+### Tracing Behavior
 
-- A real user request should produce exactly one top-level LangSmith trace.
-- Nested spans then capture the supervisor, worker agents, LangChain model calls, and tool executions used to answer that request.
-- The connection-validation flow behind `Save & Connect` in `app.py` is intentionally excluded from tracing to avoid wasting the free-tier trace quota.
-- If your LangSmith API key is linked to multiple workspaces, set `LANGSMITH_WORKSPACE_ID` or the tracing preflight check may auto-disable tracing.
-- `LANGSMITH_SYNC_FLUSH=true` makes the runtime wait for the local tracer queue to flush and then attempt a `read_run` confirmation after each user-facing run. The default remains off so normal chat latency is not increased.
+- Each user request produces one top-level LangSmith trace, with nested spans for the supervisor, the workers, model calls, and tool executions.
+- Model connection checks, including the **Connect System** button when credential inputs are enabled, use raw HTTP requests and create no traces.
+- If the API key is linked to several workspaces and `LANGSMITH_WORKSPACE_ID` is missing, the tracing preflight check may disable tracing automatically.
 
 ## 🚀 First Run
 
-For the supported Streamlit runtime:
+For the Streamlit runtime:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 python tools/vector_store.py
 streamlit run app.py
 ```
 
-For the full local environment with scraping, tests, evaluation, notebooks,
-and CUDA-enabled PyTorch on NVIDIA systems:
+For the full local environment, with scraping, tests, evaluation, notebooks, and CUDA-enabled PyTorch on NVIDIA GPUs:
 
 ```bash
 conda env create -f environment_local_gpu.yml
@@ -113,25 +100,37 @@ python tools/vector_store.py
 streamlit run app.py
 ```
 
-If you already created the environment manually, install the extra local-only
-packages with:
+In an existing environment, the extra research packages can be installed with:
 
 ```bash
-pip install -r requirements_all.txt
+python -m pip install -r requirements_all.txt
 ```
 
-When `app.py` starts, it also:
-
-- Warms the Carris Urban support database, Metro station cache, CP GTFS plus AML station support data, and Carris Metropolitana caches.
-- Pre-warms the vector store for the multi-agent knowledge layer.
-- Loads environment values from `.env`.
+At startup, `app.py` loads `.env`, warms the Carris Urban database, the Metro station cache, the CP GTFS and AML station data, and the Carris Metropolitana caches, and pre-warms the vector store.
 
 > [!TIP]
-> First boot may take longer because of model downloads (`BAAI/bge-m3`) and cache warmup. Subsequent runs are noticeably faster.
+> The first start takes longer because `BAAI/bge-m3` is downloaded and the caches are warmed. Later starts are faster.
+
+## 🐳 Docker and Hosted Deployment
+
+### Local Docker
+
+```bash
+docker build -t lisboa .
+docker run --env-file .env -p 8501:8501 lisboa
+```
+
+The container starts `scripts/hf_space_entrypoint.py`, which runs the startup preload and then launches Streamlit on port 8501 (override with `PORT` or `STREAMLIT_SERVER_PORT`).
+
+### Hugging Face Spaces
+
+`deploy_huggingface_space.yml` builds a deployment bundle with the Dockerfile, the application code, and a Space README, and uploads it to the Space `AndreSilvestre17/lisboa`:
+
+- It requires an `HF_TOKEN` secret in the GitHub repository.
+- The Space is created as a private Docker Space on the first deployment.
+- The bundle includes the pricing metadata and the VisitLisboa and Lisboa Aberta source files, but not the vector database or the transport SQLite files. The Space downloads those from GitHub Releases at startup, into writable runtime storage.
 
 ## 🧰 Vector-Store Operations
-
-Useful commands:
 
 ```bash
 python tools/vector_store.py --stats
@@ -143,19 +142,18 @@ python tools/vector_store.py --rebuild-all
 python tools/vector_store.py --no-gpu --max-docs 200
 ```
 
-Resumable sync behaviour:
+Resumable sync behavior:
 
-- JSON source files remain the source of truth.
-- The sync process persists only checkpoint metadata under `data/vector_db/_sync_state/`.
-- Each checkpoint stores the collection name, semantic source fingerprint, sync mode, and pending document IDs that still need embedding.
-- If the source JSON changes before the pending queue finishes, the checkpoint is invalidated automatically and recomputed from the fresh JSON payload.
-- Modified records are updated with batched upserts, so the live collection is not mass-deleted before the replacement embeddings are ready.
+- The JSON source files remain the source of truth.
+- Checkpoints under `data/vector_db/_sync_state/` store the collection name, a semantic fingerprint of the source, the sync mode, and the document IDs still waiting for embeddings.
+- If the source JSON changes before the pending queue finishes, the checkpoint is invalidated and recomputed from the new payload.
+- Changed records are updated with batched upserts, so the live collection is never mass-deleted before the replacement embeddings are ready.
 - Rebuild flags clear the corresponding checkpoint before rebuilding.
 
 ## ✅ Validation Ladder
 
 > [!TIP]
-> Run these in order, escalating only when faster checks pass.
+> Run these in order and move to the next step only when the faster checks pass. On Windows consoles, add `-X utf8` if emoji or accented characters fail to print.
 
 ### 1. Syntax
 
@@ -163,52 +161,54 @@ Resumable sync behaviour:
 python scripts/syntax_check.py
 ```
 
-### 2. Prompt Smoke Runs (recommended for prompt/agent changes)
+### 2. Prompt Smoke Runs
+
+Recommended for any change to agents, prompts, formatters, the planner, QA, or routing:
 
 ```bash
 python scripts/run_prompts.py --suite smoke
 python scripts/run_prompts.py --prompt "How do I get from Baixa-Chiado to Aeroporto?" --language en --quiet
 ```
 
-For any change to agents, prompts, formatters, planner, QA, or routing logic, run at least one prompt plus one variant (different entity, language, or wording).
+Run at least one prompt and one variant with a different entity, language, or wording.
 
-### 3. Transport-specific verification
+### 3. Transport Verification
 
 ```bash
 python scripts/run_transport_verification.py
 ```
 
-### 4. Provider consistency
+### 4. Provider Consistency
 
 ```bash
 python scripts/run_provider_consistency.py
 ```
 
-### 5. Benchmark and ablation runs (research)
+### 5. Benchmark and Ablation
 
 ```bash
 python -m eval.run_benchmark --mode run_test
 python -m eval.run_benchmark --mode full
 python -m eval.run_benchmark --limit 5
-python -m eval.run_ablation  --mode run_test
-python -m eval.run_ablation  --mode full
+python -m eval.run_ablation --mode run_test
+python -m eval.run_ablation --mode full
 ```
 
 > [!IMPORTANT]
-> Benchmark and ablation runners must be invoked in module form (`python -m eval.run_benchmark`). Direct script invocation breaks `agent` import resolution.
+> The benchmark and ablation runners must be invoked as modules (`python -m eval.run_benchmark`); running the scripts directly breaks the `agent` imports.
 
-For judge-specific details and the output schema, refer to [`eval/README.md`](../eval/README.md).
+The judge details and output schemas are in the [Evaluation README](../eval/README.md).
 
-## 📦 Evaluation Artefacts and Notebook Exports
+## 📦 Evaluation Artifacts
 
-| Artefact family | Default location | Notes |
-|-----------------|------------------|-------|
-| Benchmark JSON outputs | `eval/results/benchmark/` | Produced by `eval/run_benchmark.py` |
-| Ablation JSON outputs | `eval/results/ablation/` | Produced by `eval/run_ablation.py` |
-| Statistical analysis JSON/CSV outputs | `eval/results/statistics/` | Produced by `eval/statistical_analysis.py` |
-| Figures | `eval/results/figures/` | Produced by the analysis notebook |
+| Artifact | Default Location | Produced By |
+|---|---|---|
+| Benchmark JSON outputs | `eval/results/benchmark/` | `eval/run_benchmark.py` |
+| Ablation JSON outputs | `eval/results/ablation/` | `eval/run_ablation.py` |
+| Statistical analysis (JSON and CSV) | `eval/results/statistics/` | `eval/statistical_analysis.py` |
+| Figures | `eval/results/figures/` | The analysis notebook |
 
-The analysis notebook `eval/benchmark_ablation_analysis.ipynb` also exports latest CSV summaries through `flatten_benchmark_results()` and `flatten_ablation_results()`:
+The analysis notebook `eval/benchmark_ablation_analysis.ipynb` also exports the latest CSV summaries through `flatten_benchmark_results()` and `flatten_ablation_results()`:
 
 - `eval/results/benchmark/benchmark_flat_latest.csv`
 - `eval/results/benchmark/benchmark_summary_latest.csv`
@@ -217,82 +217,70 @@ The analysis notebook `eval/benchmark_ablation_analysis.ipynb` also exports late
 
 ## 🔄 GitHub Actions Automation
 
-| Workflow | Trigger | Purpose | Main outputs |
-|----------|---------|---------|--------------|
-| `data_pipeline.yml` | daily at **04:00 Europe/Lisbon time**, plus manual trigger with `events` / `places` / `both` | scrape VisitLisboa events daily and places weekly on Mondays, while manual runs can target either dataset or both | updated JSON artefacts under `data_collection/webscraping/` |
-| `sync_vector_db.yml` | `workflow_run` after `Update Lisbon Data`, plus manual trigger | incrementally sync ChromaDB collections, persist pending checkpoints, and commit durable vector DB progress after each sync iteration | updated artefacts under `data/vector_db/`, including `_sync_state/` when work remains |
+| Workflow | Trigger | Purpose | Main Output |
+|---|---|---|---|
+| `data_pipeline.yml` | Daily at **04:00 UTC**; manual runs with `events`, `places`, or `both` | Scrape VisitLisboa events daily and places on Mondays | JSON artifacts committed under `data_collection/webscraping/` |
+| `sync_vector_db.yml` | After a successful `Update Lisbon Data` run; manual runs | Incremental ChromaDB sync in bounded batches | `vector_db.zip` (complete) or `vector_db_staging.zip` (in progress) on the `vector-db-latest` release |
+| `sync_transport_runtime_data.yml` | Daily at **03:25 UTC**; pushes that change the transport release code; manual runs | Refresh the Carris Urban and CP runtime assets | Fixed-name ZIP files and a manifest on the `transport-data-latest` release |
+| `deploy_huggingface_space.yml` | Pushes to `main` that change the app; completed vector or transport syncs; manual runs | Deploy the app | Updated Hugging Face Space |
 
-### Exit-code protocol used by the Sync Workflow
+GitHub Actions schedules run in UTC, so 04:00 UTC is 05:00 in Lisbon during summer time.
 
-| Exit code | Meaning |
-|----------:|---------|
-| `0` | sync complete |
-| `2` | more work pending, safe to continue in another iteration |
-| `143` | runner terminated the process, treated as a graceful partial stop |
+### Vector Sync Protocol
 
-Checkpoint semantics used by the sync workflow:
+| Exit Code | Meaning |
+|---:|---|
+| `0` | Sync complete; the complete asset is published |
+| `2` | More work pending; a staging asset is published and the next iteration continues |
+| `143` | The runner stopped the process; a staging asset is published and a new run resumes from it |
 
-- `sync_vector_db.yml` runs when scraped JSON changed and also when `_sync_state/` already contains pending work from an earlier run.
-- Each sync iteration stages and pushes `data/vector_db/` immediately after the Python sync command returns, so completed progress is durable before the next iteration starts.
-- Workflow concurrency is serialized per ref to avoid overlapping vector DB pushes.
-- The workflow timeout is configured below the GitHub-hosted 6-hour hard job limit, while still leaving room for dependency installation and final repository operations.
+- Each run restores the staging asset first, falling back to the latest complete asset.
+- A run processes up to 10 batches of 200 documents by default (`max_docs` can be changed in manual runs).
+- Runs are serialized per branch, and the job timeout stays below GitHub's six-hour limit.
+- Events are synchronized before places, so time-sensitive updates arrive first.
+- pip packages and Hugging Face models are cached between runs.
 
-## 🚦 Performance and Batching Notes
-
-- `sync_vector_db.yml` uses batched vector-store updates to avoid CI timeouts.
-- `--max-docs` limits the number of documents processed per collection in a single sync pass.
-- Lower `max_docs` values reduce per-run pressure when the collection changes are large.
-- The repository caches pip dependencies and Hugging Face model downloads during CI.
-- Event sync runs before places sync inside the Python orchestration so time-sensitive event updates are refreshed earlier in a constrained CI window.
 ## 🩺 Troubleshooting
 
 ### ChromaDB Database Locked
-
-**Typical symptom:**
 
 ```text
 sqlite3.OperationalError: database is locked
 ```
 
-**Typical response:**
-
-1. Stop concurrent Python processes using the vector store.
-2. Remove stale SQLite WAL and SHM lock files if they exist.
-3. Rerun the vector-store command once the database is free.
+1. Stop other Python processes that use the vector store.
+2. Remove stale SQLite WAL and SHM lock files, if any.
+3. Run the vector-store command again once the database is free.
 
 ### Missing Metro Credentials
 
-If `METRO_CONSUMER_KEY` and `METRO_CONSUMER_SECRET` are missing, the system can still use the public fallback for some metro functionality, but the full official API experience is not available.
+Without `METRO_CONSUMER_KEY` and `METRO_CONSUMER_SECRET`, the public fallback still covers part of the Metro functionality, but the official real-time data are not available.
 
-### Metro TLS Chain Fails Even With Valid Credentials
+### Metro TLS Fails with Valid Credentials
 
-Preferred behaviour:
+The expected sequence is:
 
 1. Normal certificate verification.
-2. Automatic dynamic completion of missing issuer certificates.
-3. Optional insecure retry only when `METRO_SSL_ALLOW_INSECURE_FALLBACK=true`.
+2. Automatic completion of missing issuer certificates.
+3. An optional insecure retry, only when `METRO_SSL_ALLOW_INSECURE_FALLBACK=true`.
 
 > [!WARNING]
-> If a deployed environment still fails after step 2, keep `METRO_SSL_VERIFY=true` and inspect outbound network policy or TLS interception. Use insecure fallback only as a temporary diagnostic measure.
+> If a deployed environment still fails after step 2, keep `METRO_SSL_VERIFY=true` and inspect the outbound network policy or any TLS interception.
 
-### Strict Live Coverage Fails Immediately
+### A Live Integration Seems Broken
 
-The legacy strict-live-coverage suite under `tests/` was retired during the 2026-05 cleanup. Per-tool live coverage is now exercised through real prompt smoke runs (`scripts/run_prompts.py`) and the operator-specific verification scripts under `scripts/`. If a live integration appears broken, run the targeted tool module directly (for example `python tools/ipma_api.py`) and check provider credentials in `.env`.
+Run the corresponding tool module directly (for example, `python tools/ipma_api.py`), check the credentials in `.env`, and then run the prompt smoke suite or the operator-specific scripts under `scripts/`.
 
-### CI Sync Taking Too Long
+### Vector Sync Takes Too Long in CI
 
-If vector synchronization repeatedly times out in GitHub Actions:
+- Lower `max_docs` in a manual run.
+- Run `python tools/vector_store.py --stats --no-gpu` locally to check for pending sync work.
+- Rerun the workflow manually if the previous run ended with exit code `2` or `143`.
+- Check whether the run reached the 10-iteration cap.
+- Inspect `data/vector_db/_sync_state/` only for diagnosis, and delete a checkpoint only if the source JSON changed and the saved queue is clearly stale or corrupted.
 
-- Reduce `max_docs`.
-- Inspect `python tools/vector_store.py --stats --no-gpu` to see whether any collection reports pending sync work.
-- Rerun the workflow manually if the previous run exited with `2`.
-- Inspect whether the workflow reached the iteration cap before completion.
-- Inspect `data/vector_db/_sync_state/` only when diagnosis is required, and delete a checkpoint manually only if the source JSON changed and the saved queue is demonstrably stale or corrupted.
+### LM Studio Connectivity
 
-### Local Model Connectivity
-
-If using LM Studio:
-
-- Ensure the local server is running.
-- Confirm the base URL matches `Config.LMSTUDIO_BASE_URL`.
-- Confirm the loaded model matches the model name expected by the runtime.
+- Make sure the local server is running.
+- Check that the base URL matches `Config.LMSTUDIO_BASE_URL`.
+- Check that the loaded model matches the model name the runtime expects.

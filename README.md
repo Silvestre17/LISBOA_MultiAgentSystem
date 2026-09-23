@@ -1,337 +1,357 @@
 <p align="center">
   <a href="https://github.com/Silvestre17/LISBOA_MultiAgentSystem">
-    <img src="./img/BannerLSIBOA_21-9.png" alt="LISBOA Project Banner" style="width: 100%; height: auto;">
+    <img src="./img/BannerLSIBOA_21-9.png" alt="LISBOA Project Banner" width="100%">
   </a>
 </p>
 
-# 🗺️ LISBOA: Lisbon Itinerary System Based On AI 🤖
+# 🗺️ LISBOA (Lisbon Itinerary System Based On AI): A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon 🤖
 
 <p align="center">
-  <a href="https://github.com/Silvestre17/LISBOA_MultiAgentSystem"><img src="https://img.shields.io/badge/Project_Repo-100000?style=for-the-badge&logo=github&logoColor=white" alt="GitHub Repo"></a>
-  <a href="https://silvestre17.github.io/LISBOA_MultiAgentSystem/"><img src="https://img.shields.io/badge/Streamlit_App-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white" alt="Streamlit App"></a>
-  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/LangGraph-Multi--Agent-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white" alt="LangGraph Multi-Agent">
-  <img src="https://img.shields.io/badge/Exported_Tools-45-0A7E07?style=for-the-badge" alt="45 exported tools">
+  <strong>Grounded Multi-Agent Assistance for Lisbon Tourism and Urban Mobility</strong>
 </p>
 
 <p align="center">
-  <strong>Multi-agent assistance for Lisbon tourism and urban mobility, grounded in RAG, provider-backed data integrations, municipal open data, and a research evaluation pipeline.</strong>
+  <a href="https://github.com/Silvestre17/LISBOA_MultiAgentSystem"><img src="https://img.shields.io/badge/Project_Repository-GitHub-181717?style=for-the-badge&logo=github&logoColor=white" alt="LISBOA GitHub repository"></a>
+  <a href="https://andresilvestre17-lisboa.hf.space/"><img src="https://img.shields.io/badge/Hosted_App-Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white" alt="Open the hosted LISBOA app"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-2EA44F?style=for-the-badge" alt="MIT License"></a>
 </p>
 
 <p align="center">
-  <a href="https://www.visitlisboa.com/"><img src="https://img.shields.io/badge/VisitLisboa-FED30E?style=for-the-badge" alt="VisitLisboa"></a>
-  <a href="https://dados.gov.pt/"><img src="https://img.shields.io/badge/Lisboa_Aberta-EF7E22?style=for-the-badge" alt="Lisboa Aberta"></a>
-  <a href="https://api.ipma.pt/"><img src="https://img.shields.io/badge/IPMA-257ABA?style=for-the-badge" alt="IPMA"></a>
-  <a href="https://www.metrolisboa.pt/"><img src="https://img.shields.io/badge/Metro_de_Lisboa-EF5A34?style=for-the-badge" alt="Metro de Lisboa"></a>
-  <a href="https://www.carrismetropolitana.pt/"><img src="https://img.shields.io/badge/Carris_Metropolitana-FFDD00?style=for-the-badge" alt="Carris Metropolitana"></a>
-  <a href="https://www.carris.pt/"><img src="https://img.shields.io/badge/Carris-00468F?style=for-the-badge" alt="Carris"></a>
-  <a href="https://www.cp.pt/"><img src="https://img.shields.io/badge/CP-388344?style=for-the-badge" alt="CP"></a>
+  <a href="./pyproject.toml"><img src="https://img.shields.io/badge/Python-3.10--3.13-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.10 to 3.13"></a>
+  <a href="./docs/02_SYSTEM_ARCHITECTURE.md"><img src="https://img.shields.io/badge/LangGraph-Multi--Agent-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white" alt="LangGraph multi-agent system"></a>
+  <a href="./tools/__init__.py"><img src="https://img.shields.io/badge/Grounded_Tools-45-0A7E07?style=for-the-badge" alt="45 exported grounded tools"></a>
+  <a href="#research-context"><img src="https://img.shields.io/badge/MSc_Thesis-NOVA_IMS-0EE071?style=for-the-badge" alt="NOVA IMS MSc thesis"></a>
 </p>
-
 
 <a id="overview"></a>
 ## 📍 Overview
 
-LISBOA is a Master's thesis project at NOVA IMS that implements a multi-agent system for personalized tourist planning and urban mobility support in the Lisbon Metropolitan Area. It combines Retrieval-Augmented Generation (RAG), weather and transport integrations, municipal open data, and a Streamlit interface to support grounded, context-aware answers.
+**LISBOA** (*Lisbon Itinerary System Based On AI*) is the software artifact of an MSc thesis at NOVA Information Management School (NOVA IMS). It provides grounded, context-aware assistance for tourism and urban mobility in Lisbon and the Lisbon Metropolitan Area (*Área Metropolitana de Lisboa*, AML).
+
+The system combines specialized LLM agents with on-demand weather and transport integrations, municipal open data, tourism datasets, multilingual retrieval-augmented generation (RAG), and a constrained web fallback. A bilingual Streamlit interface, in European Portuguese and English, serves both tourists planning a visit and residents looking for mobility or local-service information.
 
 > [!IMPORTANT]
-> The supported user-facing entrypoint is `app.py`. The runtime is the multi-agent system implemented by `MultiAgentAssistant` in [`agent/graph.py`](./agent/graph.py).
-
-<p align="center">
-  <img src="./img/LISBOA_Framework.png" alt="LISBOA framework figure" width="720">
-</p>
+> LISBOA is a Lisbon-focused research prototype. It is not a booking, ticketing, reservation, navigation, or emergency service.
 
 <a id="quick-links"></a>
 ## 🔗 Quick Links
 
-- [👥 Who the System Serves](#who-the-system-serves)
-- [📊 Current System Snapshot](#current-system-snapshot)
-- [🏗️ System Architecture](#system-architecture)
-- [🖼️ Framework Figure](./img/LISBOA_Framework.png)
-- [🌐 Data Sources and Tool Inventory](#data-sources-and-tool-inventory)
-- [🧪 Evaluation and Research Workflow](#evaluation-and-research-workflow)
-- [📚 Documentation Hub](#documentation-hub)
-- [🚀 Getting Started](#getting-started)
-- [📘 Docs Index](./docs/00_INDEX.md)
-- [🧭 Architecture Doc](./docs/02_SYSTEM_ARCHITECTURE.md)
-- [🛠️ Tools Reference](./docs/03_TOOLS_REFERENCE.md)
-- [⚙️ Operations Guide](./docs/05_DEPLOYMENT_AND_OPERATIONS.md)
-- [📊 Evaluation README](./eval/README.md)
+| System | Run, Research, and Reference |
+|---|---|
+| [📍 Overview](#overview) | [🚀 Quick Start](#quick-start) |
+| [👥 Who LISBOA Serves](#who-lisboa-serves) | [🧪 Validation and Evaluation](#validation-and-evaluation) |
+| [🎓 Research Context](#research-context) | [🗂️ Repository Structure](#repository-structure) |
+| [📊 Current System Snapshot](#current-system-snapshot) | [📚 Documentation](#documentation) |
+| [✨ Core Capabilities](#core-capabilities) | [⚙️ Automation](#automation) |
+| [🏗️ System Architecture](#system-architecture) | [⚠️ Limitations and Responsible Use](#limitations-and-responsible-use) |
+| [🌐 Data and Grounding](#data-and-grounding) | [📖 Citation](#citation) |
+| [🧰 Technology Stack](#technology-stack) | [📄 License](#license) |
 
-<a id="who-the-system-serves"></a>
-## 👥 Who the System Serves
+<a id="who-lisboa-serves"></a>
+## 👥 Who LISBOA Serves
 
-| Audience | Typical questions | Main data layers |
-|----------|-------------------|------------------|
-| Tourists | itineraries, museums, events, weather, transport between landmarks | VisitLisboa, IPMA, Metro, Carris, CP, multimodal routing |
-| Residents | daily transport, nearby services, local events, open urban data | Lisboa Aberta, Metro, Carris Metropolitana, Carris Urban, CP, IPMA |
+| Audience | Typical Needs | Main Data Sources |
+|---|---|---|
+| **🧳 Tourists** | Itineraries, attractions, museums, events, weather-aware plans, and transport between landmarks | VisitLisboa, the Lisboa Card guide, IPMA, Metro de Lisboa, Carris Urban, CP, and multimodal routing |
+| **🏠 Residents** | Daily mobility, nearby public services, local events, and municipal information | Lisboa Aberta, IPMA, Metro de Lisboa, Carris Urban, Carris Metropolitana, and CP |
+| **🧪 Researchers and developers** | Reproducible architecture, grounded-tool design, and evaluation workflows | Source code, technical documentation, evaluation corpus, validators, and results |
 
-<a id="project-context"></a>
-## 🎓 Project Context
+<a id="research-context"></a>
+## 🎓 Research Context
 
-- **Thesis title:** *LISBOA: Lisbon Itinerary System Based On AI*
-- **Subtitle:** *A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon*
-- **Author:** André Filipe Gomes Silvestre, 20240502
-- **Supervisors:** Prof. Dr. Bruno Jardim; Prof. Dr. Miguel de Castro Neto
-- **Institution:** NOVA IMS, Master's in Data Science and Advanced Analytics
+- **Thesis:** *LISBOA: A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon*
+- **Acronym:** *Lisbon Itinerary System Based On AI*
+- **Author:** André Filipe Gomes Silvestre
+- **Supervisors:** Prof. Dr. Bruno Jardim & Prof. Dr. Miguel de Castro Neto
+- **Degree:** Master's in Data Science and Advanced Analytics, specialization in Data Science
+- **Institution:** NOVA Information Management School (NOVA IMS), Universidade NOVA de Lisboa
 - **Academic year:** 2025/2026
 
 <a id="current-system-snapshot"></a>
 ## 📊 Current System Snapshot
 
-| Item | Current state |
-|------|---------------|
-| Supported UI entrypoint | `app.py` |
-| Runtime mode | Multi-agent |
-| Specialized agents | 6 total: Supervisor, Weather, Transport, Researcher, Planner, QA |
-| Exported LangChain tools | 45 |
-| Transport tool set | 30 tools |
-| Researcher tool set | 11 tools |
-| Vector collections | 3: `lisbon_pdf`, `lisbon_places`, `lisbon_events` |
-| Evaluation ground truth | 72 benchmark queries across 6 domains |
-| Evaluation artefacts | benchmark, ablation, statistics, and figure outputs under `eval/results/` |
-| Automation workflows | `data_pipeline.yml` and `sync_vector_db.yml` |
+| Item | Current Implementation |
+|---|---|
+| User-facing entry point | `app.py`, a bilingual Streamlit interface |
+| Runtime | `MultiAgentAssistant` orchestration in [`agent/graph.py`](./agent/graph.py) |
+| Agent roles | 6: Supervisor, Weather, Transport, Researcher, Quality Assurance, and Planner |
+| Exported tools | 45, registered in [`tools/__init__.py`](./tools/__init__.py) |
+| Vector collections | 3: `lisbon_pdf`, `lisbon_places`, and `lisbon_events` |
+| Evaluation corpus | 72 scenarios across 6 domains |
+| Automation | 4 GitHub Actions workflows: data refresh, vector sync, transport assets, and deployment |
 
+Counts refer to the current `main` branch. The thesis evaluation used the code at commit [`9235dd3`](https://github.com/Silvestre17/LISBOA_MultiAgentSystem/tree/9235dd3) (May 15, 2026).
+
+<a id="core-capabilities"></a>
 ## ✨ Core Capabilities
 
-- 🌦️ **Weather** (IPMA): warnings, 5-day forecast, current summary, Portugal-wide overview
-- 🚇 **Mobility**: Metro de Lisboa, Carris Metropolitana, Carris Urban, CP, and multimodal routing
-- 📚 **Local knowledge**: VisitLisboa events/places, Lisboa Aberta open data, indexed Lisbon guide PDF, web fallback
-- 🧭 **Itinerary synthesis** with weather, transport, and preference grounding
-- ✅ **QA validation** before final answers; prompt smoke validation for user-facing changes
+- 🌦️ **Weather:** IPMA forecasts, daily summaries, and warnings.
+- 🚇 **Urban mobility:** Metro de Lisboa, Carris Urban, Carris Metropolitana, CP suburban rail, and supported multimodal connections.
+- 📍 **Places and services:** VisitLisboa attractions, accommodation, restaurants, and events, plus Lisboa Aberta municipal services.
+- 📚 **Grounded knowledge:** Multilingual semantic retrieval over the VisitLisboa collections and the Lisboa Card guide.
+- 🧭 **Itinerary synthesis:** Plans built from the evidence gathered by the workers and the constraints stated in the request.
+- 💬 **Conversation:** Relevant follow-up context in European Portuguese or English, with current-turn constraints taking priority.
+- ✅ **Validation:** Deterministic checks and formatting guardrails, with generative QA and targeted retries when required.
 
 <a id="system-architecture"></a>
 ## 🏗️ System Architecture
 
-The default application flow is orchestrated by `MultiAgentAssistant` in `agent/graph.py`.
+<p align="center">
+  <img src="./img/LISBOA_Framework.svg" alt="LISBOA multi-agent architecture" width="760">
+</p>
 
-> Deep dive: [`docs/02_SYSTEM_ARCHITECTURE.md`](./docs/02_SYSTEM_ARCHITECTURE.md)
+[`MultiAgentAssistant`](./agent/graph.py) orchestrates six complementary roles:
 
-```text
-User query
-  -> SupervisorAgent
-  -> Specialized agents in parallel when needed
-  -> QualityAssuranceAgent validation
-  -> PlannerAgent synthesis for planning requests, or direct combined response
+```mermaid
+flowchart LR
+  U([User request]) --> S[Supervisor]
+  S -->|simple or unsupported| D[Direct response]
+  S -->|domain work| W[Weather, Transport, and Researcher workers]
+  W --> Q[Deterministic checks and conditional QA]
+  Q -->|itinerary request| P[Planner]
+  Q -->|other requests| C[Combined grounded response]
 ```
 
-### Runtime Roles
+| Agent | Responsibility |
+|---|---|
+| **Supervisor** | Classifies intent, resolves conversational context, and routes the request |
+| **Weather** | Retrieves IPMA forecasts and warnings |
+| **Transport** | Queries the supported Lisbon and AML transport operators |
+| **Researcher** | Retrieves tourism, event, municipal-service, RAG, and constrained web evidence |
+| **Quality Assurance** | Checks completeness, grounding, language, and response quality when generative QA is required |
+| **Planner** | Synthesizes multi-stop itineraries from the evidence gathered by the workers |
 
-| Agent | Role | Tools | Notes |
-|------|------|------:|------|
-| `SupervisorAgent` | intent classification, routing, direct responses for simple cases | 0 | handles greetings and out-of-scope requests directly |
-| `WeatherAgent` | IPMA weather retrieval | 4 | weather specialist with tool-calling flow |
-| `TransportAgent` | transport retrieval | 30 | covers Metro, Carris Metropolitana, Carris Urban, CP, and multimodal routing |
-| `ResearcherAgent` | tourism knowledge, open data, web fallback | 11 | combines VisitLisboa, Lisboa Aberta, PDF knowledge, and web search |
-| `QualityAssuranceAgent` | completeness and factual validation | 0 | validates worker outputs and can request retry paths |
-| `PlannerAgent` | final synthesis for itinerary requests | 0 | only produces the final itinerary when planning is required |
+Workers and tool calls can run concurrently when a request spans several domains and the selected provider supports it; LM Studio batches run sequentially to avoid overloading a local model server. The detailed control flow is in [System Architecture](./docs/02_SYSTEM_ARCHITECTURE.md).
 
-### Response Flow
+<a id="data-and-grounding"></a>
+## 🌐 Data and Grounding
 
-1. `SupervisorAgent.route()` decides whether to answer directly or invoke workers.
-2. Workers run **in parallel** when the query spans multiple domains.
-3. `QualityAssuranceAgent.validate()` enforces completeness, factual consistency, and language alignment.
-4. For planning queries, `PlannerAgent.synthesize()` writes the final itinerary; otherwise the supervisor or combined worker output is returned directly.
+<p align="center">
+  <strong>Integrated Data Sources</strong>
+</p>
 
-> The planner is **not** the universal final responder — it only synthesizes itineraries.
+<p align="center">
+  <a href="https://www.visitlisboa.com/"><img src="https://img.shields.io/badge/VisitLisboa-FED30E?style=for-the-badge" alt="VisitLisboa"></a>
+  <a href="https://lisboaaberta.cm-lisboa.pt/index.php/pt/"><img src="https://img.shields.io/badge/Lisboa_Aberta-EF7E22?style=for-the-badge" alt="Lisboa Aberta"></a>
+  <a href="https://api.ipma.pt/"><img src="https://img.shields.io/badge/IPMA-257ABA?style=for-the-badge" alt="IPMA"></a>
+  <a href="https://www.metrolisboa.pt/"><img src="https://img.shields.io/badge/Metro_de_Lisboa-EF5A34?style=for-the-badge" alt="Metro de Lisboa"></a>
+  <a href="https://www.carrismetropolitana.pt/"><img src="https://img.shields.io/badge/Carris_Metropolitana-FFDD00?style=for-the-badge" alt="Carris Metropolitana"></a>
+  <a href="https://www.carris.pt/"><img src="https://img.shields.io/badge/Carris-00468F?style=for-the-badge" alt="Carris"></a>
+  <a href="https://www.cp.pt/"><img src="https://img.shields.io/badge/CP-388344?style=for-the-badge" alt="CP"></a>
+  <a href="https://comboios.live/"><img src="https://img.shields.io/badge/Comboios.live-Real--Time-7B2CBF?style=for-the-badge" alt="Comboios.live"></a>
+</p>
 
+| Layer | Main Sources | Tools | Use |
+|---|---|---:|---|
+| Weather | IPMA | 4 | Forecasts, daily summaries, and warnings |
+| Public transport | Metro de Lisboa, Carris Urban, Carris Metropolitana, and CP/Comboios.live | 30 | Status, arrivals, schedules, stops, routes, and multimodal connections |
+| Tourism | VisitLisboa places and events, and the Lisboa Card guide | 5 | Attractions, accommodation, restaurants, events, and tourism knowledge |
+| Municipal services | Lisboa Aberta | 5 | Geospatial lookup of public services and urban datasets |
+| Web fallback | Wikipedia, Tavily, and DuckDuckGo | 1 | Lisbon history, culture, and very current context not covered by local sources |
+| **Total** | | **45** | |
+
+Semantic retrieval (ChromaDB with multilingual `BAAI/bge-m3` embeddings) serves the VisitLisboa and Lisboa Card collections. The other layers are queried directly through structured APIs, GTFS/GTFS-RT feeds, and GeoJSON datasets. Availability and freshness depend on each upstream provider and on the repository's refresh workflows.
+
+The detailed inventory and its boundaries are in the [Tools Reference](./docs/03_TOOLS_REFERENCE.md) and in [Data Sources and Schemas](./docs/04_DATA_SOURCES_AND_SCHEMAS.md).
+
+<a id="technology-stack"></a>
 ## 🧰 Technology Stack
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/LangChain-Orchestration-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white" alt="LangChain">
-  <img src="https://img.shields.io/badge/LangGraph-Agent_Graph-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white" alt="LangGraph">
+  <img src="https://img.shields.io/badge/Python-Runtime-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python runtime">
+  <img src="https://img.shields.io/badge/LangChain-Agent_Framework-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white" alt="LangChain">
+  <img src="https://img.shields.io/badge/LangGraph-Orchestration-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white" alt="LangGraph">
   <img src="https://img.shields.io/badge/ChromaDB-Vector_Store-FF6B6B?style=for-the-badge" alt="ChromaDB">
-  <img src="https://img.shields.io/badge/BAAI%2Fbge--m3-Multilingual_Embeddings-FFC700?style=for-the-badge&logo=huggingface&logoColor=black" alt="BAAI bge-m3">
-  <img src="https://img.shields.io/badge/Streamlit-UI-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white" alt="Streamlit">
+  <img src="https://img.shields.io/badge/BAAI%2Fbge--m3-Embeddings-FFC700?style=for-the-badge&logo=huggingface&logoColor=black" alt="BAAI bge-m3 embeddings">
+  <img src="https://img.shields.io/badge/Streamlit-Interface-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white" alt="Streamlit">
+  <a href="./Dockerfile"><img src="https://img.shields.io/badge/Docker-Container-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker container"></a>
 </p>
 
-- **LLM providers supported:** Azure OpenAI, OpenAI, LM Studio
-- **Embedding model:** `BAAI/bge-m3`
-- **Packaging:** `pyproject.toml` supports editable installs
-- **Evaluation:** deterministic dataset/validator suites under `eval/tests/`, plus benchmark and ablation runners
-- **Automation:** GitHub Actions for scraping and vector synchronization
+| Component | Implementation |
+|---|---|
+| LLM providers | Azure OpenAI, OpenAI, and LM Studio |
+| Agent framework | LangChain components, LangGraph worker graphs, and custom `MultiAgentAssistant` orchestration |
+| Retrieval | ChromaDB with multilingual `BAAI/bge-m3` embeddings |
+| Interface | Bilingual Streamlit application |
+| Data processing | Python, pandas, HTTP clients, GTFS/GTFS-RT, GeoJSON, and SQLite |
+| Evaluation | pytest checks, benchmark and ablation runners, dual LLM-as-a-Judge scoring, and statistical analysis |
+| Deployment | Docker image deployed to Hugging Face Spaces through GitHub Actions |
 
-<a id="data-sources-and-tool-inventory"></a>
-## 🌐 Data Sources and Tool Inventory
+<a id="quick-start"></a>
+## 🚀 Quick Start
 
-**45 exported LangChain tools** (`tools/__init__.py`), grouped by domain:
+> [!NOTE]
+> A hosted instance runs on Hugging Face Spaces, but access may be restricted. To try LISBOA, run it locally or with Docker.
 
-| Domain | Tools | Source |
-|--------|------:|--------|
-| Weather | **4** | IPMA |
-| Metro de Lisboa | **6** | Official API + public fallback |
-| Carris Metropolitana | **8** | REST API |
-| Carris Urban | **8** | GTFS + GTFS-RT |
-| CP / Comboios.live | **6** | Live API + local GTFS |
-| Multimodal routing | **2** | Composed cross-provider |
-| VisitLisboa | **5** | Scraped JSON + ChromaDB |
-| Lisboa Aberta | **5** | GeoJSON open data |
-| Web fallback | **1** | Tavily search |
+### Requirements
 
-The Lisbon guide PDF is served through internal vector search (not a separate exported tool). Tool counts can change; verify `tools/__init__.py` before making exact thesis or documentation claims.
+- Python **3.10 to 3.13**, as declared in [`pyproject.toml`](./pyproject.toml)
+- Git
+- One configured LLM provider: Azure OpenAI, OpenAI, or LM Studio
+- Internet access for provider calls and the first model and data downloads
 
-→ Detail: [`docs/03_TOOLS_REFERENCE.md`](./docs/03_TOOLS_REFERENCE.md) · [`docs/04_DATA_SOURCES_AND_SCHEMAS.md`](./docs/04_DATA_SOURCES_AND_SCHEMAS.md)
+Metro de Lisboa credentials, a Tavily key, a Hugging Face token, and LangSmith tracing are optional; each enables its own integration.
 
-<a id="evaluation-and-research-workflow"></a>
-## 🧪 Evaluation and Research Workflow
-
-Research-grade stack under `eval/` combining LLM-as-a-Judge, deterministic metrics, prompt smoke validation, and statistical analysis.
-
-| Layer | Entrypoint | Output |
-|------|-----------|--------|
-| Fast deterministic checks | `eval/tests/` | test output only |
-| Benchmark (isolated workers) | `eval/run_benchmark.py` | `eval/results/benchmark/` |
-| Ablation (zero-shot vs LISBOA) | `eval/run_ablation.py` | `eval/results/ablation/` |
-| Prompt smoke validation | `scripts/run_prompts.py` | terminal output / chosen artefacts |
-
-**Ground truth**: 72 entries across 6 domains — weather (13), transport (36), researcher (13), multi-agent (3), greeting (3), out-of-scope (4).
-
-**Measured**: factual accuracy, tool usage, completeness, relevance, response quality (LLM-as-a-Judge); tool *P/R/F1*, response heuristics, deterministic Metro route validation; reproducibility metadata, token usage, and optional cost accounting.
-
-→ Full schema and methodology: [`eval/README.md`](./eval/README.md) · Notebook: [`eval/benchmark_ablation_analysis.ipynb`](./eval/benchmark_ablation_analysis.ipynb)
-
-## 🧱 Repository Structure
-
-```text
-LISBOA_MultiAgentSystem/
-├── agent/                          # Multi-agent orchestration, prompts, utilities
-├── tools/                          # 45 exported LangChain tools + vector store internals
-├── data_collection/                # Scrapers and data acquisition scripts
-├── data/                           # Persistent vector DB and local transport data
-├── docs/                           # Repository documentation
-├── eval/                           # Benchmarking, ablation, judge, validators, statistics
-├── eval/tests/                     # Lean deterministic checks and dataset validators
-├── .github/workflows/              # Scraping and vector sync automation
-├── app.py                          # Supported Streamlit entrypoint
-├── config.py                       # Runtime configuration and provider selection
-├── pyproject.toml                  # Package metadata and local package discovery
-└── README.md                       # Project overview
-```
-
-Need a guided reading order? Open [`docs/00_INDEX.md`](./docs/00_INDEX.md).
-
-<a id="documentation-hub"></a>
-## 📚 Documentation Hub
-
-| Document | Purpose |
-|----------|---------|
-| [`docs/00_INDEX.md`](./docs/00_INDEX.md) | Start here, navigation hub for the full repository documentation |
-| [`docs/01_PROJECT_OVERVIEW.md`](./docs/01_PROJECT_OVERVIEW.md) | Scope, audiences, current snapshot, and project framing |
-| [`docs/02_SYSTEM_ARCHITECTURE.md`](./docs/02_SYSTEM_ARCHITECTURE.md) | Agent topology, orchestration, and runtime design |
-| [`docs/03_TOOLS_REFERENCE.md`](./docs/03_TOOLS_REFERENCE.md) | Exact tool inventory and agent-to-tool mapping |
-| [`docs/04_DATA_SOURCES_AND_SCHEMAS.md`](./docs/04_DATA_SOURCES_AND_SCHEMAS.md) | Data sources, refresh cadences, schemas, and vector collections |
-| [`docs/05_DEPLOYMENT_AND_OPERATIONS.md`](./docs/05_DEPLOYMENT_AND_OPERATIONS.md) | Environment setup, automation, troubleshooting, and operations |
-| [`eval/README.md`](./eval/README.md) | Evaluation pipeline, benchmark logic, live coverage, and artefact structure |
-| [`eval/benchmark_ablation_analysis.ipynb`](./eval/benchmark_ablation_analysis.ipynb) | Analysis notebook for benchmark and ablation outputs |
-
-### Suggested Reading Paths
-
-- **New to the repository:** [`docs/00_INDEX.md`](./docs/00_INDEX.md) -> [`docs/01_PROJECT_OVERVIEW.md`](./docs/01_PROJECT_OVERVIEW.md) -> [`docs/02_SYSTEM_ARCHITECTURE.md`](./docs/02_SYSTEM_ARCHITECTURE.md)
-- **Need the exact capabilities:** [`docs/03_TOOLS_REFERENCE.md`](./docs/03_TOOLS_REFERENCE.md) -> [`docs/04_DATA_SOURCES_AND_SCHEMAS.md`](./docs/04_DATA_SOURCES_AND_SCHEMAS.md)
-- **Want to run it locally:** [`docs/05_DEPLOYMENT_AND_OPERATIONS.md`](./docs/05_DEPLOYMENT_AND_OPERATIONS.md) -> [`.env.example`](./.env.example) -> [Getting started](#getting-started)
-- **Working on evaluation:** [`eval/README.md`](./eval/README.md) -> [`eval/benchmark_ablation_analysis.ipynb`](./eval/benchmark_ablation_analysis.ipynb)
-
-<a id="getting-started"></a>
-## 🚀 Getting Started
-
-**Prerequisites**: Python 3.10+, Git, and one configured LLM provider (***Azure OpenAI***, ***OpenAI***, or ***LM Studio***). ***Metro*** credentials and a ***Tavily API*** key are optional.
+### Local Installation
 
 ```bash
-# 1. Clone
 git clone https://github.com/Silvestre17/LISBOA_MultiAgentSystem.git
 cd LISBOA_MultiAgentSystem
 
-# 2. Install the supported runtime
-pip install -r requirements.txt
-# ...or full local env (scraping, eval, notebooks, CUDA-enabled PyTorch):
-# conda env create -f environment_local_gpu.yml && conda activate lisboa_thesis2026
+python -m venv .venv
 
-# 3. Configure secrets
-cp .env.example .env     # Windows PowerShell: Copy-Item .env.example .env
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
 
-# 4. Build vector store and launch
+# macOS/Linux
+source .venv/bin/activate
+
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Copy the environment template and fill in only the services you intend to use:
+
+```powershell
+# Windows PowerShell
+Copy-Item .env.example .env
+```
+
+```bash
+# macOS/Linux
+cp .env.example .env
+```
+
+The committed default provider is Azure OpenAI. To use OpenAI or LM Studio instead, change `Config.MODEL_PROVIDER` in [`config.py`](./config.py) and set the matching variables in `.env`. Provider selection and credential inputs are disabled in the production interface.
+
+Build or incrementally synchronize the vector store, then start the app:
+
+```bash
 python tools/vector_store.py
 streamlit run app.py
 ```
 
-Full provider, tracing, and TLS notes: [`docs/05_DEPLOYMENT_AND_OPERATIONS.md`](./docs/05_DEPLOYMENT_AND_OPERATIONS.md).
+The first run takes longer while the embedding model and transport data are prepared. Provider, vector-store, TLS, tracing, and troubleshooting details are in [Deployment and Operations](./docs/05_DEPLOYMENT_AND_OPERATIONS.md).
 
-## ✅ Testing and Evaluation
+### Docker
 
 ```bash
-# Fast deterministic checks
+docker build -t lisboa .
+docker run --env-file .env -p 8501:8501 lisboa
+```
+
+Open `http://localhost:8501` once Streamlit reports that it is ready.
+
+<a id="validation-and-evaluation"></a>
+## 🧪 Validation and Evaluation
+
+Install the full research dependency set first, or use the Conda environment described in [Deployment and Operations](./docs/05_DEPLOYMENT_AND_OPERATIONS.md):
+
+```bash
+python -m pip install -r requirements_all.txt
+```
+
+```bash
+# Syntax and deterministic integrity checks
 python scripts/syntax_check.py
 python -m pytest eval/tests/ -q
 
-# Single-prompt smoke test
+# End-to-end smoke suite (requires a configured LLM provider)
 python scripts/run_prompts.py --suite smoke
-python scripts/run_prompts.py --prompt "How do I get from Baixa-Chiado to Aeroporto?" --language en --quiet
 
-# Benchmark / ablation (module form required)
+# Research evaluation runners (module invocation is required)
 python -m eval.run_benchmark --mode run_test
-python -m eval.run_ablation  --mode run_test
+python -m eval.run_ablation --mode run_test
 ```
 
-> [!IMPORTANT]
-> Benchmark and ablation runners require module form (`python -m eval.run_benchmark`). Direct script invocation breaks `agent` import resolution.
+> [!TIP]
+> On Windows consoles, add `-X utf8` (for example, `python -X utf8 scripts/run_prompts.py --suite smoke`) if emoji or accented characters fail to print.
 
-Artefacts land under `eval/results/{benchmark,ablation,statistics,figures}/`. See [`eval/README.md`](./eval/README.md) for the current validation policy.
+The evaluation separates deterministic checks, isolated worker benchmarking, a paired zero-shot ablation, LLM-as-a-Judge scoring, prompt smoke tests, statistical analysis, and a formative user study. Outputs are written to `eval/results/`; the methodology and output schemas are documented in the [Evaluation README](./eval/README.md).
 
-## Known Limitations
+<a id="repository-structure"></a>
+## 🗂️ Repository Structure
 
-- LISBOA is a research prototype, not a production travel, booking, ticketing, reservation, or transaction service.
-- Live or current data is available only where the implemented provider integrations support it. VisitLisboa content, local vector stores, and transport runtime assets may be cached, scraped, scheduled, or release-based.
-- Mobility coverage is limited to implemented Lisbon/AML operators and tools: Metro de Lisboa, Carris Urban, Carris Metropolitana, CP suburban rail, and the repository's supported multimodal routing logic.
-- The planner synthesizes evidence gathered by the worker agents. It does not independently verify facts beyond the repository's QA and formatting guardrails.
-- Public evaluation artifacts cover the automated benchmark, ablation, statistics, figures, and deterministic checks included under `eval/`. User-study material should be treated as separate unless explicitly published.
+```text
+agent/              Multi-agent orchestration, prompts, planning, QA, and formatting
+tools/              Weather, transport, tourism, open-data, location, and RAG tools
+data_collection/    VisitLisboa scrapers and source documents
+data/               Local transport assets, pricing metadata, and vector-store data
+eval/               Evaluation corpus, benchmark and ablation runners, validators, and analyses
+scripts/            Smoke tests, provider checks, data publishing, and hosted startup
+docs/               Architecture, tools, data, deployment, and operations documentation
+img/                Banner, logos, and the framework figure
+.github/workflows/  Data refresh, vector sync, transport assets, and deployment
+app.py              Streamlit entry point
+config.py           Provider, model, path, and runtime configuration
+Dockerfile          Container image for local and hosted deployment
+```
 
+<a id="documentation"></a>
+## 📚 Documentation
+
+| Document | Purpose |
+|---|---|
+| [Documentation Index](./docs/00_INDEX.md) | Entry point to the repository documentation |
+| [Project Overview](./docs/01_PROJECT_OVERVIEW.md) | Scope, audiences, and research context |
+| [System Architecture](./docs/02_SYSTEM_ARCHITECTURE.md) | Agent roles, orchestration, and runtime design |
+| [Tools Reference](./docs/03_TOOLS_REFERENCE.md) | Tool inventory, agent ownership, and coverage boundaries |
+| [Data Sources and Schemas](./docs/04_DATA_SOURCES_AND_SCHEMAS.md) | Providers, freshness, schemas, and vector collections |
+| [Deployment and Operations](./docs/05_DEPLOYMENT_AND_OPERATIONS.md) | Setup, configuration, deployment, automation, and troubleshooting |
+| [Evaluation README](./eval/README.md) | Evaluation design, commands, outputs, and interpretation boundaries |
+
+<a id="automation"></a>
 ## ⚙️ Automation
 
-Two GitHub Actions workflows keep the knowledge base fresh:
+| Workflow | Trigger | Purpose |
+|---|---|---|
+| [`data_pipeline.yml`](./.github/workflows/data_pipeline.yml) | Daily at 04:00 UTC (places on Mondays) and manual runs | Refreshes the VisitLisboa events and places |
+| [`sync_vector_db.yml`](./.github/workflows/sync_vector_db.yml) | After a successful data refresh and manual runs | Synchronizes the ChromaDB collections incrementally and publishes them as a GitHub Release asset |
+| [`sync_transport_runtime_data.yml`](./.github/workflows/sync_transport_runtime_data.yml) | Daily at 03:25 UTC, relevant pushes to `main`, and manual runs | Publishes the Carris Urban and CP runtime assets |
+| [`deploy_huggingface_space.yml`](./.github/workflows/deploy_huggingface_space.yml) | Relevant pushes to `main`, completed vector or transport syncs, and manual runs | Deploys the Streamlit app to Hugging Face Spaces |
 
-1. [`data_pipeline.yml`](./.github/workflows/data_pipeline.yml) scrapes VisitLisboa content **daily at 04:00 Europe/Lisbon time**. Places are refreshed weekly on **Mondays** during scheduled runs. Manual runs can choose `events`, `places`, or `both` without changing the automatic behaviour.
-2. [`sync_vector_db.yml`](./.github/workflows/sync_vector_db.yml) runs after the scraping workflow completes successfully and performs incremental vector synchronization.
+<a id="limitations-and-responsible-use"></a>
+## ⚠️ Limitations and Responsible Use
 
-> [!NOTE]
-> Both workflows can also be triggered manually from the GitHub Actions tab.
+- Coverage is limited to Lisbon, the AML, and the providers implemented in this repository.
+- Live data may be unavailable, delayed, cached, scraped, or release-backed, depending on the source.
+- The planner synthesizes the evidence gathered by the workers; it is not an independent factual check.
+- The repository publishes the automated evaluation artifacts; the user-study data are not included.
+- Confirm departures, disruptions, opening hours, prices, tickets, accessibility, and reservations with the official provider before acting.
+- Do not enter credentials, sensitive personal data, private identifiers, or confidential information into prompts or logs.
 
-## 📄 License
+<a id="citation"></a>
+## 📖 Citation
 
-This project is licensed under the MIT License. See [`LICENSE`](./LICENSE) for details.
+Until the thesis or an article with a persistent identifier is available, cite the software as:
 
-### Citation
-
-If you use this repository before a final thesis, paper, or DOI-based citation is available, please cite it as software using APA 7th edition:
-
-> Silvestre, A. (2026). *LISBOA: Lisbon itinerary system based on AI: A multi-agent approach for personalized tourism and urban mobility in Lisbon* [Computer software]. GitHub. https://github.com/Silvestre17/LISBOA_MultiAgentSystem
-
-A BibTeX entry is also provided for convenience:
+> Silvestre, A., Jardim, B., & Neto, M. de C. (2026). *LISBOA: A multi-agent approach for personalized tourism and urban mobility in Lisbon* (Version 1.0.0) [Computer software]. GitHub. https://github.com/Silvestre17/LISBOA_MultiAgentSystem
 
 ```bibtex
-@software{silvestre2026lisboa,
-  author = {Silvestre, André},
-  title = {LISBOA: Lisbon Itinerary System Based On AI: A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon},
-  year = {2026},
-  type = {Computer software},
+@software{silvestre_jardim_castro_neto_2026_lisboa,
+  author    = {Silvestre, André and Jardim, Bruno and Neto, Miguel de Castro},
+  title     = {{LISBOA}: A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon},
+  year      = {2026},
+  version   = {1.0.0},
+  type      = {Computer software},
   publisher = {GitHub},
-  url = {https://github.com/Silvestre17/LISBOA_MultiAgentSystem}
+  url       = {https://github.com/Silvestre17/LISBOA_MultiAgentSystem}
 }
 ```
 
-### Responsible Use and Privacy
+Once the thesis or an article with a persistent identifier is published, cite that record for research claims and this repository for the software implementation.
 
-LISBOA is a research prototype developed for academic evaluation and demonstration purposes. Users should verify operational decisions, including departures, disruptions, opening hours, prices, accessibility conditions, and ticket information, with the official providers before acting.
+<a id="license"></a>
+## 📄 License
 
-Do not enter sensitive personal data, credentials, private identifiers, or confidential information in prompts, logs, notebooks, or evaluation artifacts.
+Released under the [MIT License](./LICENSE).
 
 ---
 
 <p align="center">
-  <i>Developed as part of the Master's Thesis in Data Science and Advanced Analytics at NOVA IMS (2025-2026)</i>
+  <a href="https://www.novaims.unl.pt/"><img src="https://img.shields.io/badge/Developed_at-NOVA_IMS-0EE071?style=for-the-badge" alt="NOVA Information Management School"></a>
 </p>
 
 <p align="center">
-  <a href="https://www.novaims.unl.pt/"><img src="https://img.shields.io/badge/NOVA_IMS-0ee071?style=for-the-badge&logo=university&logoColor=white" alt="NOVA IMS"></a>
+  <i>Master's in Data Science and Advanced Analytics, specialization in Data Science (2025/2026)</i>
 </p>
-

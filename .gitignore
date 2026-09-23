@@ -23,6 +23,7 @@ _/
 eval/results/user_study/
 .gemini/
 .agents/
+.codex/
 .ruff_cache/
 .github/agents/
 .pytest**/

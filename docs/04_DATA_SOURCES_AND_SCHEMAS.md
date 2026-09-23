@@ -1,137 +1,95 @@
 # 🌐 Data Sources and Schemas
 
-This page documents what is live, what is periodically refreshed, and what is stored locally for LISBOA.
+LISBOA combines live requests, short-lived caches, static local data, scheduled source snapshots, and release-backed fallbacks. "Grounded" therefore does not mean that every value is live or retrieved through RAG.
 
-> [!NOTE]
-> Refresh cadences below reflect the GitHub Actions workflows under `.github/workflows/`. Manual workflow dispatches can override the default schedule.
+## 🧾 Sources and Freshness
 
-## 🧾 Source Summary
+| Source | Runtime Access and Freshness | Main Consumer |
+|---|---|---|
+| IPMA | Forecasts and warnings requested at runtime, cached for 5 minutes; the provider horizon is five days | `WeatherAgent` |
+| Metro de Lisboa | Official API with a public status fallback; responses cached for 60 seconds and station data for 24 hours, with a static fallback | `TransportAgent` |
+| Carris Metropolitana | Live REST data; vehicles cached for 30 seconds and stops, lines, and routes for 24 hours, with a stale-cache fallback | `TransportAgent` |
+| Carris Urban | GTFS-RT cached for 30 seconds plus static GTFS in SQLite; freshness checks can keep a usable older database | `TransportAgent` |
+| CP / Comboios.live | Live status and schedule calls plus CP GTFS in SQLite; conditional static refresh and a one-hour station cache | `TransportAgent` |
+| VisitLisboa events | Scheduled JSON snapshot, ChromaDB and structured retrieval, and a direct JSON fallback | `ResearcherAgent`; the Planner through gathered evidence |
+| VisitLisboa places | Scheduled JSON snapshot, ChromaDB and structured retrieval, and a direct JSON fallback | `ResearcherAgent`; the Planner through gathered evidence |
+| Lisboa Card guide (PDF) | Static April 2024 edition, indexed in `lisbon_pdf` | `ResearcherAgent`; the Planner through gathered evidence |
+| Lisboa Aberta | Local metadata snapshot, with GeoJSON datasets fetched on demand | `ResearcherAgent` |
+| Location resolution | Local aliases, gazetteer, and station indices, then cached Nominatim and Photon lookups with ambiguity handling | The graph and several tool modules |
+| Web knowledge | Constrained Wikipedia, Tavily, and DuckDuckGo fallback for Lisbon history, culture, or very current context | `ResearcherAgent` |
 
-| Source | Type | Access pattern | Refresh model | Main consumers |
-|--------|------|----------------|---------------|----------------|
-| IPMA | Live API | Direct runtime call | Live on request | `WeatherAgent` |
-| Metro de Lisboa | Live API + Public Fallback | Direct runtime call | Live on request | `TransportAgent` |
-| Carris Metropolitana | Live REST API | Direct runtime call | Live on request | `TransportAgent` |
-| Carris Urban | GTFS + GTFS-RT | Local SQLite + live feed | Live plus cached static support data | `TransportAgent` |
-| CP / Comboios.live | Live API + GTFS Support Data | Direct runtime call plus local support files | Live on request | `TransportAgent` |
-| VisitLisboa places | Scraped JSON + Vector Store | Local JSON + semantic retrieval | Weekly on Mondays by workflow | `ResearcherAgent`, `PlannerAgent` |
-| VisitLisboa events | Scraped JSON + Vector Store | Local JSON + semantic retrieval | Daily by workflow | `ResearcherAgent`, `PlannerAgent` |
-| Official Lisbon guide PDF | Static Document + Vector Store | Local file + semantic retrieval | Rebuilt on demand | `ResearcherAgent`, `PlannerAgent` |
-| Lisboa Aberta | Open GeoJSON Datasets | Local metadata + on-demand dataset fetch | Metadata refreshed by collection scripts, datasets fetched live | `ResearcherAgent` |
-| Web knowledge | Web Search Fallback | Runtime lookup | On request | `ResearcherAgent` |
+> [!IMPORTANT]
+> Transport release assets are last-known-good startup fallbacks. They do not replace the live feeds queried at request time, and "no reported disruption" does not prove that a service is running at the requested time.
 
-## ⏱️ Refresh and Staleness Model
+## ⏱️ Automation and Delivery
 
-Not every source ages the same way. The runtime mixes **live-on-request** queries, **scheduled repository snapshots**, and **local support stores**.
+| Workflow | Trigger | Output |
+|---|---|---|
+| `data_pipeline.yml` | Daily at **04:00 UTC**; manual runs can target events, places, or both | Events refreshed daily and places on Mondays, committed as VisitLisboa JSON artifacts |
+| `sync_vector_db.yml` | After a successful `Update Lisbon Data` run; manual runs | Incremental events and places sync, published as complete or staging GitHub Release assets with manifests |
+| `sync_transport_runtime_data.yml` | Daily at **03:25 UTC**; pushes that change the transport release code; manual runs | Carris Urban and CP runtime ZIP files and a manifest, replaced in place |
+| `deploy_huggingface_space.yml` | Pushes to `main` that change the app; completed vector or transport syncs; manual runs | Deployment bundle uploaded to the Hugging Face Space |
 
-### Live on Request
+GitHub Actions schedules run in UTC, so 04:00 UTC is 05:00 in Lisbon during summer time. The Lisboa Aberta metadata snapshot is **not** part of the daily workflow: it is refreshed manually with its collection script, and the selected GeoJSON datasets are fetched at runtime.
 
-Queried at runtime, not versioned as scraped repository snapshots:
-IPMA · Metro de Lisboa · Carris Metropolitana · Carris GTFS-RT · Comboios.live · Lisboa Aberta dataset contents (when a specific dataset is fetched on demand).
+## 🗂️ VisitLisboa Artifacts
 
-### Scheduled Repository Refresh
-
-| Workflow | Schedule or trigger | What it updates |
-|----------|---------------------|-----------------|
-| `data_pipeline.yml` | daily at **04:00 UTC**, plus manual selector | VisitLisboa events daily, places weekly on Mondays; manual runs target events, places, or both |
-| `sync_vector_db.yml` | `workflow_run` after a successful data update, plus manual trigger | incremental ChromaDB sync for changed collections |
-
-Vector collections are updated **incrementally** rather than rebuilt from scratch.
-
-## 🗂️ Scraped JSON Artefacts
-
-### 🎭 *VisitLisboa* Events
+### 🎭 Events
 
 | Item | Value |
-|------|-------|
-| Script | `data_collection/webscraping/visitlisbon_events.py` |
-| Output | `data_collection/webscraping/events.json` |
-| Used by | vector sync, `ResearcherAgent`, `PlannerAgent` |
+|---|---|
+| Collector | `data_collection/webscraping/visitlisbon_events.py` |
+| Artifact | `data_collection/webscraping/events.json` |
+| Top-level fields | `url`, `title`, `category`, `short_description`, `full_description`, `image_urls`, `video_urls`, `dates`, `schedule_notes`, `price`, `venue_name`, `venue_locations`, `location`, `buy_tickets_url`, `information_links` |
 
-Common fields include:
-
-- `url`
-- `title`
-- `category`
-- `short_description`
-- `full_description`
-- `image_urls`
-- `video_urls`
-- `dates`
-- `price`
-- `venue_name`
-- `location`
-- `buy_tickets_url`
-- `information_links`
-
-### 🏛️ *VisitLisboa* Places
+### 🏛️ Places
 
 | Item | Value |
-|------|-------|
-| Script | `data_collection/webscraping/visitlisbon_places.py` |
-| Output | `data_collection/webscraping/places.json` |
-| Used by | vector sync, `ResearcherAgent`, `PlannerAgent` |
+|---|---|
+| Collector | `data_collection/webscraping/visitlisbon_places.py` |
+| Artifact | `data_collection/webscraping/places.json` |
+| Top-level fields | `url`, `title`, `category`, `short_description`, `full_description`, `image_urls`, `video_urls`, `features`, `location`, `contact_info`, `social_media`, `schedules`, `tickets_offers`, `tripadvisor`, `information_links`, `additional_sections`, `lisboa_card_benefit`, `lisboa_card_discount`, `lisbon_tourism_member` |
 
-Common fields include:
+Fields such as `dates`, `venue_locations`, `location`, `contact_info`, `schedules`, `tickets_offers`, and `tripadvisor` can hold nested objects or lists, and some fields are missing in part of the records. Consumers must handle absent values rather than render placeholders.
 
-- `url`
-- `title`
-- `category`
-- `short_description`
-- `full_description`
-- `image_urls`
-- `video_urls`
-- `features`
-- `location`
-- `contact_info`
-- `social_media`
-- `schedules`
-- `tickets_offers`
-- `tripadvisor`
-
-## 🏥 *Lisboa Aberta* Metadata Layer
+## 🏥 Lisboa Aberta Metadata
 
 | Item | Value |
-|------|-------|
-| Metadata file | `data_collection/webscraping/lisbon_datasets_clean.json` |
-| Retrieval model | structured local metadata + on-demand GeoJSON fetch |
-| Used by | dataset discovery, category browsing, keyword search, detail lookup |
+|---|---|
+| Collector | `data_collection/webscraping/dadosabertos.gov_lisboa.py` and the validation notebook `visitlisbon_dadosabertoslx.ipynb` |
+| Runtime snapshot | `data_collection/webscraping/lisbon_datasets_clean.json` |
+| Top-level fields | `title`, `description`, `file_formats`, `last_updated`, `stable_url`, `url_portal`; a few unavailable records also carry an explanatory `stable_url_comment` |
+| Retrieval | Local metadata ranking, then an on-demand GeoJSON fetch and schema-tolerant feature extraction |
 
-The system does **not** embed every Lisboa Aberta dataset into the vector store. Instead, it keeps metadata locally and fetches relevant datasets on demand.
+The system deliberately does not embed every municipal dataset in the vector store.
 
-## 🚍 Local Transport Support Data
+## 🚍 Local Transport Data
 
-These artefacts support faster local lookups and reduce repeated parsing of static transport files.
+| Operator | Local Development Files | Hosted Runtime |
+|---|---|---|
+| Carris Urban | `data/carris/carris.db`, `data/carris/metadata.json` | Writable runtime directory; live or static initialization first, with the release ZIP as a last-known-good fallback |
+| CP | `data/cp/cp_gtfs.db`, `data/cp/metadata.json`, `data/cp/gtfs.zip` | Writable runtime directory; live or static initialization first, with the release ZIP as a last-known-good fallback |
 
-| Layer | Local artefacts | Purpose |
-|-------|------------------|---------|
-| Carris Urban | `data/carris/carris.db`, `data/carris/metadata.json` | Runtime stop, Route, and GTFS support |
-| CP | `data/cp/cp_gtfs.db`, `data/cp/metadata.json`, `data/cp/gtfs.zip` | Local schedule support and Reproducible reference data |
+`LISBOA_RUNTIME_DATA_DIR` relocates the generated data. The transport workflow publishes fixed-name assets under the `transport-data-latest` release tag, so the release does not grow over time.
 
 ## 🧠 Vector Database
 
-### Storage and Collections
-
 | Item | Value |
-|------|-------|
-| Storage directory | `data/vector_db/` |
+|---|---|
+| Default local path | `data/vector_db/` |
+| Override | `VECTOR_DB_DIR` |
+| Hosted path | Writable runtime storage under `LISBOA_RUNTIME_DATA_DIR` |
+| Release hydration | The configured `vector_db.zip` is downloaded when no usable local `chroma.sqlite3` exists |
 | Embedding model | `BAAI/bge-m3` |
-| Collections | `lisbon_pdf`, `lisbon_places`, `lisbon_events` |
-| Language support | Multilingual Retrieval, with Portuguese and English coverage in the indexed material |
-
-The vector store supports multilingual retrieval, but the runtime emits final user-facing answers only in PT-PT or English.
+| Collections | `lisbon_pdf`, `lisbon_places`, and `lisbon_events` |
 
 ### Sync Semantics
 
-The vector-store update flow is incremental:
+- `lisbon_places` and `lisbon_events` use stable document IDs, content hashes, incremental inserts, updates, and deletions, and resumable `_sync_state` checkpoints.
+- `lisbon_pdf` is indexed once when absent and rebuilt explicitly with `--rebuild-pdf` when the source document changes.
+- The CI workflow restores the latest release, processes bounded batches, and publishes complete or staging release assets; `data/vector_db/` is never committed.
 
-- Documents receive stable identifiers.
-- Metadata stores a SHA-256 content hash.
-- New content is inserted; changed content is updated; removed content is deleted from the affected collection.
-
-This allows the GitHub Actions sync workflow to process updates in batches instead of rebuilding the full store every time.
-
-To inspect the current collection state locally:
+To inspect the local collections:
 
 ```bash
 python tools/vector_store.py --stats
@@ -139,7 +97,7 @@ python tools/vector_store.py --stats
 
 ## 📌 Operational Boundaries
 
-- Exported runtime tools are counted from `tools/__init__.py`.
-- `tools/vector_store.py` is operational infrastructure, not an exported runtime tool.
-- VisitLisboa semantic retrieval depends on both local JSON artefacts and the vector store.
-- Lisboa Aberta service discovery is intentionally handled through structured on-demand fetches rather than bulk embedding.
+- Metro de Lisboa, Carris Urban, Carris Metropolitana, and CP have distinct operator and geographic scopes; see the [Tools Reference](./03_TOOLS_REFERENCE.md).
+- Structured APIs, GTFS/GTFS-RT, geocoding, and GeoJSON are grounded integrations, but not vector retrieval.
+- Release-backed data makes startup more resilient; it does not guarantee the current service state.
+- `tools/vector_store.py` and `tools/location_resolver.py` support the runtime but are not counted among the 45 exported tools.

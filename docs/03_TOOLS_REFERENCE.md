@@ -1,163 +1,173 @@
 # 🛠️ LISBOA Tools Reference
 
-The authoritative exported tool registry is [`tools/__init__.py`](../tools/__init__.py), which currently exposes **45 LangChain tools** used by the runtime.
+The authoritative tool registry is [`tools/__init__.py`](../tools/__init__.py), which exports **45 LangChain tools** used by the runtime.
 
 > [!IMPORTANT]
-> `tools/vector_store.py` is operational support and CLI infrastructure. It matters for the system, but it is **not** counted as one of the 45 exported runtime tools.
+> `tools/vector_store.py` provides operational and CLI support. The system depends on it, but it is **not** one of the 45 exported tools.
 
 ## 📦 Inventory by Domain
 
-| Domain | Module | Count | Coverage |
-|--------|--------|------:|----------|
-| Weather | `tools/ipma_api.py` | 4 | Warnings, Forecast, Current Summary, Portugal-Wide Overview |
-| Metro de Lisboa | `tools/metrolisboa_api.py` | 6 | Line Status, Wait Times, Frequencies, Station Discovery |
-| Carris Metropolitana | `tools/carrismetropolitana_api.py` | 8 | Alerts, Stops, Lines, Routes, Live Bus Positions, Departures |
-| Carris Urban | `tools/carris_api.py` | 8 | Stops, Routes, Departures, Arrivals, ETA, Frequency, Realtime Vehicles |
-| CP trains | `tools/cp_api.py` | 6 | Station Search, Schedules, Routes, Trip Planning, Frequency, Status |
-| Multimodal transport | `tools/transport_api.py` | 2 | Combined Network Status and Route Planning |
-| Lisboa Aberta open data | `tools/dados_abertos.py` | 5 | Nearby Services, Dataset Discovery, Category Browsing |
-| VisitLisboa semantic search | `tools/visitlisboa_api.py` | 5 | Events, Places, Categories, Tourism Knowledge Search |
-| Web knowledge | `tools/web_knowledge.py` | 1 | History and Culture Fallback Search |
-| **Total exported tools** |  | **45** |  |
+| Domain | Module | Tools | Coverage |
+|---|---|---:|---|
+| Weather | `tools/ipma_api.py` | 4 | Warnings, daily forecast, today's summary, and a Portugal-wide overview |
+| Metro de Lisboa | `tools/metrolisboa_api.py` | 6 | Line status, wait times, frequencies, and station discovery |
+| Carris Metropolitana | `tools/carrismetropolitana_api.py` | 8 | Alerts, stops, lines, routes, live bus positions, and departures |
+| Carris Urban | `tools/carris_api.py` | 8 | Stops, routes, departures, arrivals, arrival estimates, frequency, and real-time vehicles |
+| CP suburban rail | `tools/cp_api.py` | 6 | Station search, schedules, supported routes, trip planning, frequency, and status |
+| Multimodal transport | `tools/transport_api.py` | 2 | Network status and route planning across the supported operators |
+| Lisboa Aberta open data | `tools/dados_abertos.py` | 5 | Nearby services, dataset discovery, and category browsing |
+| VisitLisboa hybrid retrieval | `tools/visitlisboa_api.py` | 5 | Semantic search, structured filtering, categories, and a JSON fallback |
+| Web knowledge | `tools/web_knowledge.py` | 1 | Constrained fallback for Lisbon history, culture, and very current context |
+| **Total** | | **45** | |
 
-## 🤖 Inventory by Runtime Agent
+## 🤖 Inventory by Agent
 
-| Agent | Assigned tools | Composition |
-|------|---------------:|-------------|
+| Agent | Tools | Composition |
+|---|---:|---|
 | `WeatherAgent` | 4 | IPMA only |
-| `TransportAgent` | 30 | Metro 6 + Carris Metropolitana 8 + Carris Urban 8 + CP 6 + multimodal 2 |
-| `ResearcherAgent` | 11 | VisitLisboa 5 + Lisboa Aberta 5 + web 1 |
-| `SupervisorAgent` | 0 | routing only |
-| `QualityAssuranceAgent` | 0 | validation only |
-| `PlannerAgent` | 0 | synthesis only |
+| `TransportAgent` | 30 | Metro de Lisboa 6, Carris Metropolitana 8, Carris Urban 8, CP 6, and multimodal 2 |
+| `ResearcherAgent` | 11 | VisitLisboa 5, Lisboa Aberta 5, and web 1 |
+| `SupervisorAgent` | 0 | Routing only |
+| `QualityAssuranceAgent` | 0 | Validation only |
+| `PlannerAgent` | 0 | Synthesis only |
 
 ## 🔍 Detailed Inventory
 
-### 🌦️ Weather, 4 Tools
+### 🌦️ Weather (4 Tools)
 
 | Tool | Purpose |
-|------|---------|
+|---|---|
 | `get_weather_warnings` | Retrieve active meteorological warnings |
-| `get_weather_forecast` | Retrieve a focused Lisbon forecast window, with `days` and optional `day_offset` within the 5-day IPMA horizon |
-| `get_current_weather_summary` | Summarize current conditions for Lisbon |
-| `get_portugal_weather_overview` | Compare weather across Portugal locations |
+| `get_weather_forecast` | Retrieve a Lisbon forecast window, with `days` and an optional `day_offset` within the five-day IPMA horizon |
+| `get_current_weather_summary` | Summarize today's IPMA forecast and active Lisbon warnings |
+| `get_portugal_weather_overview` | Compare the weather across locations in Portugal |
 
-### 🚇 Metro de Lisboa, 6 Tools
+### 🚇 Metro de Lisboa (6 Tools)
 
 | Tool | Purpose |
-|------|---------|
-| `get_metro_status` | Retrieve current line status |
-| `get_metro_wait_time` | Retrieve station-level wait times |
-| `get_metro_line_wait_times` | Retrieve wait times across a full line |
-| `find_nearest_metro` | Find the nearest metro station from coordinates |
+|---|---|
+| `get_metro_status` | Retrieve the current line status |
+| `get_metro_wait_time` | Retrieve wait times at a station |
+| `get_metro_line_wait_times` | Retrieve wait times along a whole line |
+| `find_nearest_metro` | Find the nearest station to given coordinates |
 | `get_metro_frequency` | Retrieve train frequency schedules |
-| `get_all_metro_stations` | List all metro stations |
+| `get_all_metro_stations` | List all stations |
 
-### 🚌 Carris Metropolitana, 8 Tools
+### 🚌 Carris Metropolitana (8 Tools)
 
 | Tool | Purpose |
-|------|---------|
+|---|---|
 | `get_carris_metropolitana_alerts` | List active service alerts |
 | `get_carris_metropolitana_stop_info` | Inspect stop metadata |
 | `search_carris_metropolitana_lines` | Search line information |
-| `find_bus_routes` | Discover bus routes between locations |
-| `get_real_time_bus_positions` | Inspect live bus positions with optional filtering |
+| `find_bus_routes` | Find bus routes between locations |
+| `get_real_time_bus_positions` | Inspect live bus positions, with optional filters |
 | `get_bus_realtime_locations` | Retrieve real-time GPS bus locations |
-| `get_bus_next_departures` | Retrieve upcoming departures or route stop information |
+| `get_bus_next_departures` | Retrieve upcoming departures or the stops on a route |
 | `find_direct_bus_lines` | Find direct bus connections |
 
-### 🚋 Carris Urban, 8 Tools
+### 🚋 Carris Urban (8 Tools)
 
 | Tool | Purpose |
-|------|---------|
+|---|---|
 | `carris_get_stops` | Search and inspect Carris stops |
 | `carris_get_routes` | Retrieve route details |
-| `carris_get_next_departures` | Retrieve next departures at a stop |
-| `carris_find_routes_between` | Find routes between stops |
-| `carris_get_realtime_vehicles` | Track live vehicles |
+| `carris_get_next_departures` | Retrieve the next departures at a stop |
+| `carris_find_routes_between` | Find routes between two stops |
+| `carris_get_realtime_vehicles` | Track vehicles in real time |
 | `carris_get_arrivals` | Retrieve arrivals at a stop |
-| `carris_vehicle_eta` | Estimate vehicle arrival time at a stop |
-| `carris_get_service_frequency` | Inspect service frequency and headway |
+| `carris_vehicle_eta` | Estimate when a vehicle will reach a stop |
+| `carris_get_service_frequency` | Inspect service frequency and headways |
 
-### 🚆 CP Trains, 6 Tools
+### 🚆 CP Suburban Rail (6 Tools)
 
 | Tool | Purpose |
-|------|---------|
+|---|---|
 | `get_train_status` | Retrieve train status and delays |
-| `search_cp_stations` | Search CP stations in the supported network |
-| `get_train_schedule` | Retrieve schedule departures |
+| `search_cp_stations` | Search stations in the supported network |
+| `get_train_schedule` | Retrieve scheduled departures |
 | `get_cp_routes` | Inspect train routes and lines |
 | `plan_train_trip` | Plan a train trip between stations |
-| `get_train_frequency` | Inspect service frequency and headway |
+| `get_train_frequency` | Inspect service frequency and headways |
 
-### 🔀 Multimodal Transport, 2 Tools
-
-| Tool | Purpose |
-|------|---------|
-| `get_transport_summary` | Summarize operational status across transport modes |
-| `get_route_between_stations` | Plan multimodal routes across providers |
-
-### 🏥 Lisboa Aberta, 5 Tools
+### 🔀 Multimodal Transport (2 Tools)
 
 | Tool | Purpose |
-|------|---------|
+|---|---|
+| `get_transport_summary` | Summarize the operational status across transport modes |
+| `get_route_between_stations` | Plan multimodal routes across the supported operators |
+
+### 🏥 Lisboa Aberta (5 Tools)
+
+| Tool | Purpose |
+|---|---|
 | `find_nearby_services` | Search nearby services by category and distance |
-| `list_available_datasets` | List available Lisboa Aberta datasets |
+| `list_available_datasets` | List the available Lisboa Aberta datasets |
 | `get_dataset_details` | Inspect dataset metadata |
 | `find_place_in_datasets` | Search place names across datasets |
-| `list_service_categories` | Browse service-category groupings |
+| `list_service_categories` | Browse service categories |
 
-### 🏛️ VisitLisboa Semantic Retrieval, 5 Tools
-
-| Tool | Purpose |
-|------|---------|
-| `search_cultural_events` | Semantic search for cultural events |
-| `search_places_attractions` | Semantic search for places and attractions |
-| `get_event_categories` | List supported event categories |
-| `get_place_categories` | List supported place categories |
-| `search_lisbon_knowledge` | General semantic tourism-knowledge search |
-
-### 🌍 Web Knowledge, 1 Tool
+### 🏛️ VisitLisboa Hybrid Retrieval (5 Tools)
 
 | Tool | Purpose |
-|------|---------|
-| `search_history_culture` | Fallback web search for Lisbon history and culture |
+|---|---|
+| `search_cultural_events` | Search events through semantic retrieval, date and category filters, and a JSON fallback |
+| `search_places_attractions` | Search places through semantic retrieval, structured ranking and filters, and a JSON fallback |
+| `get_event_categories` | List event categories from the local VisitLisboa artifact |
+| `get_place_categories` | List place categories from the local VisitLisboa artifact |
+| `search_lisbon_knowledge` | Search the indexed Lisboa Card guide and tourism knowledge |
 
-## 🔌 Upstream APIs and Feeds Behind the Tools
+### 🌍 Web Knowledge (1 Tool)
 
-The tool layer integrates with the following source families:
+| Tool | Purpose |
+|---|---|
+| `search_history_culture` | Constrained fallback for Lisbon history, culture, and very current context, through Wikipedia, Tavily, and DuckDuckGo |
+
+## 🔌 Upstream Sources
+
+The tool layer draws on the following sources:
 
 - **IPMA** open-data endpoints
-- **Metro de Lisboa** official API plus public fallback status endpoint
+- **Metro de Lisboa** official API, with a public status endpoint as fallback
 - **Carris Metropolitana** REST API
 - **Carris Urban** GTFS and GTFS-RT feeds
-- **Comboios.live** plus local **CP GTFS** support data
+- **Comboios.live**, with local **CP GTFS** support data
 - **Lisboa Aberta** GeoJSON datasets
-- **VisitLisboa** scraped JSON plus ChromaDB retrieval
+- **VisitLisboa** scraped JSON, with ChromaDB hybrid retrieval
+- **Location resolution** through a local gazetteer and aliases, Metro and CP station indices, Nominatim, and Photon
+- **Web fallback** through Wikipedia, Tavily, and DuckDuckGo; operator-specific tools remain the primary source for transport and weather
 
-## 🛡️ Reliability Patterns in the Tool Layer
+`tools/location_resolver.py` is shared support infrastructure used by the graph and several tool modules. It handles the AML scope, ambiguous place names, geocoding fallbacks, and transport-node enrichment, but it is not an exported tool.
 
-- Readable failure messages instead of hard crashes at tool level.
-- Targeted retries and caching for network-heavy sources; public fallback endpoints where available.
-- Local reference stores for Carris and CP support workflows.
-- Transport answers rebuild one canonical localized source footer from the operators actually invoked, collapsing duplicate footers and avoiding citation of operators that were not used.
+## 🚧 Coverage Boundaries
 
-## 🧠 Vector-Store CLI Support
+- **Metro de Lisboa** covers the four Metro lines.
+- **Carris Urban** covers Lisbon city buses and trams; **Carris Metropolitana** covers AML intermunicipal buses.
+- **CP** is limited to the supported AML suburban lines: Cascais, Sintra, Azambuja, and Sado.
+- Multimodal routing combines only the operators and modes implemented in the repository.
+- Long-distance rail, live Fertagus detail, ferries, ride-hailing, shared bikes and scooters, booking, and ticket purchase are not implemented.
 
-`tools/vector_store.py` supports the following operational flags:
+## 🛡️ Reliability Patterns
+
+- Readable failure messages instead of crashes at the tool level
+- Targeted retries and caching for network-heavy sources, and public fallback endpoints where available
+- Local reference stores for the Carris Urban and CP workflows
+- One canonical, localized source footer per transport answer, built from the operators actually used, with duplicates collapsed
+
+## 🧠 Vector-Store CLI
+
+`tools/vector_store.py` accepts the following flags:
 
 | Flag | Purpose |
-|------|---------|
-| `--rebuild-all` | force a full rebuild of all collections |
-| `--rebuild-pdf` | rebuild only the PDF collection |
-| `--rebuild-places` | rebuild only the places collection |
-| `--rebuild-events` | rebuild only the events collection |
-| `--test` | run search-oriented smoke checks |
-| `--stats` | show collection statistics |
-| `--no-gpu` | force CPU-only execution |
-| `--max-docs` | limit the number of documents processed in one pass |
-
-Example commands:
+|---|---|
+| `--rebuild-all` | Rebuild all collections |
+| `--rebuild-pdf` | Rebuild only the Lisboa Card guide collection (`lisbon_pdf`) |
+| `--rebuild-places` | Rebuild only the places collection |
+| `--rebuild-events` | Rebuild only the events collection |
+| `--test` | Run search smoke checks |
+| `--stats` | Show collection statistics |
+| `--no-gpu` | Force CPU-only execution |
+| `--max-docs` | Limit the documents processed per JSON collection in one run |
 
 ```bash
 python tools/vector_store.py
@@ -167,6 +177,8 @@ python tools/vector_store.py --no-gpu --max-docs 200
 ```
 
 ## ✅ Local Smoke Checks
+
+Each module below can be run directly to check its integration:
 
 ```bash
 python tools/ipma_api.py
