@@ -18,8 +18,10 @@ import os
 import re
 import warnings
 from datetime import datetime
-from typing import Optional
-from urllib.parse import quote, urlparse
+import unicodedata
+from functools import lru_cache
+from typing import Any, Dict, Optional
+from urllib.parse import quote, unquote, urlparse
 import sys
 
 import requests
@@ -480,6 +482,10 @@ def _search_duckduckgo(query: str, live_query: bool = False) -> tuple[Optional[s
         return None, False
 
 
+# Wikimedia asks API clients to identify themselves with a contact URL.
+_WIKI_HEADERS = {"User-Agent": "LISBOA-Thesis-Agent/1.0 (https://github.com/Silvestre17/LISBOA_MultiAgentSystem)"}
+
+
 def _search_wikipedia(query: str, language: str = "pt") -> Optional[str]:
     """
     Execute search using Wikipedia.
@@ -558,7 +564,7 @@ def _fetch_wikipedia_rest_summary(page_title: str, language: str = "pt") -> Opti
         return None
 
     url = f"https://{normalized_language}.wikipedia.org/api/rest_v1/page/summary/{quote(title, safe='')}"
-    headers = {"User-Agent": "LISBOA-Thesis-Agent/1.0 (academic research; contact via repository)"}
+    headers = _WIKI_HEADERS
     try:
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
@@ -583,6 +589,419 @@ def _fetch_wikipedia_rest_summary(page_title: str, language: str = "pt") -> Opti
             pass
     url_line = f"🔗 [Wikipedia]({page_url})"
     return f"📚 **Wikipédia: {resolved_title}**\n{url_line}\n\n{summary}\n"
+
+
+# Lisbon Metropolitan Area bounding box: a page outside it is another place.
+_AML_BOX = (38.40, 39.10, -9.55, -8.60)
+_TITLE_STOPWORDS = {"de", "do", "da", "dos", "das", "the", "of", "and", "e", "a", "o"}
+
+
+def _title_tokens(text: str) -> set[str]:
+    """Return accent-free lower-case word tokens without stop words."""
+    folded = unicodedata.normalize("NFKD", str(text or "")).encode("ascii", "ignore").decode("ascii").lower()
+    return {token for token in re.findall(r"[a-z0-9]+", folded) if token not in _TITLE_STOPWORDS}
+
+
+def _wikidata_coordinates(item: str) -> Optional[tuple[float, float]]:
+    """Return the coordinates (property P625) of a Wikidata item, or ``None``."""
+    if not re.fullmatch(r"Q\d+", str(item or "")):
+        return None
+    try:
+        response = requests.get(
+            f"https://www.wikidata.org/wiki/Special:EntityData/{item}.json",
+            headers=_WIKI_HEADERS,
+            timeout=6,
+        )
+        response.raise_for_status()
+        claims = response.json()["entities"][item]["claims"].get("P625") or []
+        value = claims[0]["mainsnak"]["datavalue"]["value"]
+        return float(value["latitude"]), float(value["longitude"])
+    except Exception as exc:
+        logger.info("Wikidata coordinates failed for %s: %s", item, exc)
+        return None
+
+
+# Place-type words, with their Portuguese forms, so "Cordoaria Nacional"
+# matches "National Cordoaria" and "Casa Roque Gameiro" (a house) does not
+# match "Jardim Roque Gameiro" (a garden).
+_PLACE_TYPE_SYNONYMS = {
+    "museu": "museum", "palacio": "palace", "paco": "palace", "igreja": "church", "convento": "convent",
+    "mosteiro": "monastery", "castelo": "castle", "forte": "fort", "fortaleza": "fort", "fortress": "fort",
+    "jardim": "garden", "jardins": "garden", "gardens": "garden", "parque": "park", "casa": "house",
+    "torre": "tower", "ponte": "bridge", "aqueduto": "aqueduct", "aqueducts": "aqueduct", "estacao": "station",
+    "gare": "station", "praca": "square", "mercado": "market", "teatro": "theatre", "theater": "theatre",
+    "capela": "chapel", "miradouro": "viewpoint", "praia": "beach", "beaches": "beach", "cabo": "cape",
+    "farol": "lighthouse", "galeria": "gallery", "centro": "centre", "center": "centre", "biblioteca": "library",
+    "cemiterio": "cemetery", "oceanario": "aquarium", "reserva": "reserve", "fragata": "frigate",
+    "necropole": "necropolis", "quinta": "estate", "monumento": "monument", "santuario": "sanctuary",
+    "shrine": "sanctuary", "mata": "forest", "se": "cathedral",
+}
+_PLACE_TYPES = set(_PLACE_TYPE_SYNONYMS.values()) | {"zoo", "chalet", "palace", "museum"}
+# Words that neither identify a place nor give its type.
+_GENERIC_NAME_WORDS = {
+    "national", "nacional", "municipal", "lisbon", "lisboa", "portugal", "portuguese", "portugues", "town", "city",
+    "nature", "natural", "dom", "d", "the", "of", "and", "de", "do", "da", "dos", "das", "e", "a", "o",
+}
+# Other-language forms of name words.
+_NAME_WORD_SYNONYMS = {"historias": "stories", "condes": "counts", "descobrimentos": "discoveries"}
+# Wikipedia descriptions of settlements and districts ("Civil parish in Lisbon").
+_SETTLEMENT_DESCRIPTION_RE = re.compile(
+    r"\b(?:city|town|village|municipality|parish|district|neighbou?rhood|region|capital|cidade|vila|freguesia|"
+    r"concelho|bairro|munic[ií]pio|localidade|aldeia|distrito|regi[ãa]o)\b",
+    re.IGNORECASE,
+)
+
+
+def _name_signature(text: str) -> tuple[set[str], set[str]]:
+    """Return the place types and the distinctive words of a place name."""
+    folded = unicodedata.normalize("NFKD", re.sub(r"\([^)]*\)", " ", str(text or ""))).encode("ascii", "ignore").decode("ascii").lower()
+    types: set[str] = set()
+    words: set[str] = set()
+    for token in re.findall(r"[a-z0-9]+", folded):
+        token = _PLACE_TYPE_SYNONYMS.get(token, token)
+        if token in _PLACE_TYPES:
+            types.add(token)
+        elif token not in _GENERIC_NAME_WORDS:
+            words.add(_NAME_WORD_SYNONYMS.get(token, token))
+    return types, words
+
+
+def wikipedia_title_matches(name: str, title: str, description: str = "") -> bool:
+    """Return whether a Wikipedia page title names the same place as ``name``.
+
+    The page title must not add distinctive words and may drop at most one
+    ("CAM" in "CAM – Centro de Arte Moderna Gulbenkian"), the place types must
+    not conflict unless three or more words agree, and a settlement page
+    ("Civil parish in Lisbon") never stands for a venue inside it.
+    """
+    if _compact_title(re.sub(r"\([^)]*\)", " ", title)) == _compact_title(name):
+        return True
+    if description and _SETTLEMENT_DESCRIPTION_RE.search(description):
+        return False
+    name_types, name_words = _name_signature(name)
+    page_types, page_words = _name_signature(title)
+    shared = name_words & page_words
+    if not shared or page_words - name_words or len(name_words - page_words) > 1:
+        return False
+    if name_types and page_types and not name_types & page_types and len(shared) < 3:
+        return False
+    return True
+
+
+def _compact_title(text: str) -> str:
+    """Return a title as accent-free letters and digits only ("LX Factory" -> "lxfactory")."""
+    folded = unicodedata.normalize("NFKD", str(text or "")).encode("ascii", "ignore").decode("ascii").lower()
+    return "".join(token for token in re.findall(r"[a-z0-9]+", folded) if token not in _TITLE_STOPWORDS)
+
+
+class _WikipediaUnavailable(Exception):
+    """A Wikipedia request failed, so the empty result must not be cached."""
+
+
+class _WikipediaUnavailablePartial(_WikipediaUnavailable):
+    """A Wikipedia request failed after some results were found; they are kept but not cached."""
+
+    def __init__(self, cards: tuple) -> None:
+        super().__init__("partial result")
+        self.cards = cards
+
+
+def wikipedia_place_card(name: str, language: str = "en", area: str = "") -> Optional[Dict[str, Any]]:
+    """Return a grounded summary of a named place the VisitLisboa catalogue lacks.
+
+    Found and not-found results are cached; a lookup that failed on the
+    network is not, so it is tried again on the next request.
+    """
+    try:
+        return _wikipedia_place_card_cached(name, language, area)
+    except _WikipediaUnavailable:
+        return None
+
+
+@lru_cache(maxsize=256)
+def _wikipedia_place_card_cached(name: str, language: str = "en", area: str = "") -> Optional[Dict[str, Any]]:
+    """Return a grounded summary of a named place the VisitLisboa catalogue lacks.
+
+    The place is searched on Wikipedia (with its area as a hint), in the
+    answer's edition first and then in the other one. A page is accepted only
+    when its coordinates (from the page or from Wikidata) fall inside the
+    Lisbon Metropolitan Area and its title carries the name's words, so
+    "Boca do Inferno" in Cascais is never confused with a namesake elsewhere.
+
+    Args:
+        name: Place name as the user wrote it.
+        language: Preferred Wikipedia edition (``pt`` or ``en``).
+        area: Area hint, such as "Cascais".
+
+    Returns:
+        ``{"title", "summary", "url", "lat", "lon"}``, or ``None``.
+
+    Raises:
+        _WikipediaUnavailable: When nothing was found and a request failed.
+    """
+    preferred = language if language in {"pt", "en"} else "en"
+    failed = False
+    for lang in dict.fromkeys([preferred, "en", "pt"]):
+        try:
+            card = _wikipedia_place_card_in(name, lang, area)
+        except _WikipediaUnavailable:
+            failed = True
+            continue
+        if card:
+            return card
+    if failed:
+        raise _WikipediaUnavailable(name)
+    return None
+
+
+def _wikipedia_place_card_in(name: str, lang: str, area: str) -> Optional[Dict[str, Any]]:
+    """Return the place card from one Wikipedia edition, or ``None``.
+
+    Raises:
+        _WikipediaUnavailable: When nothing was found and a request failed.
+    """
+    name_tokens = _title_tokens(name)
+    if not name_tokens:
+        return None
+    queries = list(dict.fromkeys([f"{name} {area}".strip(), name]))
+    failed = False
+    for query in queries:
+        try:
+            response = requests.get(
+                f"https://{lang}.wikipedia.org/w/rest.php/v1/search/page",
+                params={"q": query, "limit": 3},
+                headers=_WIKI_HEADERS,
+                timeout=6,
+            )
+            response.raise_for_status()
+            pages = response.json().get("pages") or []
+        except Exception as exc:
+            logger.info("Wikipedia place search failed for %r: %s", query, exc)
+            failed = True
+            continue
+        for page in pages:
+            title = str(page.get("title") or "")
+            if not wikipedia_title_matches(name, title, str(page.get("description") or "")):
+                continue
+            try:
+                card = _wikipedia_summary_card(lang, str(page.get("key") or title))
+            except _WikipediaUnavailable:
+                failed = True
+                continue
+            if card:
+                return card
+    if failed:
+        raise _WikipediaUnavailable(name)
+    return None
+
+
+def wikipedia_portuguese_title(page_url: str) -> str:
+    """Return the Portuguese Wikipedia title of a page, or "" (failures are not cached)."""
+    try:
+        return _wikipedia_portuguese_title_cached(page_url)
+    except _WikipediaUnavailable:
+        return ""
+
+
+@lru_cache(maxsize=256)
+def _wikipedia_portuguese_title_cached(page_url: str) -> str:
+    """Return the Portuguese Wikipedia title of a page, or "".
+
+    The VisitLisboa catalogue names places in Portuguese ("Torre de Belém"),
+    so an English name found on Wikipedia ("Belém Tower") is looked up again
+    under the title of the same page in the Portuguese edition.
+
+    Args:
+        page_url: Wikipedia page URL (any edition).
+
+    Returns:
+        The Portuguese title, the page's own title when it is already the
+        Portuguese edition, or "" when there is no Portuguese page.
+    """
+    match = re.match(r"https?://(?P<lang>[a-z]{2,3})\.wikipedia\.org/wiki/(?P<key>[^?#]+)", page_url or "")
+    if not match:
+        return ""
+    key = unquote(match.group("key")).replace("_", " ")
+    if match.group("lang") == "pt":
+        return key
+    try:
+        response = requests.get(
+            f"https://{match.group('lang')}.wikipedia.org/w/api.php",
+            params={"action": "query", "prop": "langlinks", "lllang": "pt", "titles": key, "format": "json"},
+            headers=_WIKI_HEADERS,
+            timeout=6,
+        )
+        response.raise_for_status()
+        pages = response.json().get("query", {}).get("pages", {})
+    except Exception as exc:
+        logger.info("Wikipedia language links failed for %r: %s", key, exc)
+        raise _WikipediaUnavailable(key) from exc
+    for page in pages.values():
+        for link in page.get("langlinks") or []:
+            title = str(link.get("*") or "").strip()
+            if title:
+                return title
+    return ""
+
+
+def _wikipedia_summary_card(lang: str, key: str) -> Optional[Dict[str, Any]]:
+    """Return a page's title, two-sentence summary, URL and AML coordinates, or ``None``.
+
+    Raises:
+        _WikipediaUnavailable: When the summary request failed.
+    """
+    try:
+        summary = requests.get(
+            f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{quote(key, safe='')}",
+            headers=_WIKI_HEADERS,
+            timeout=6,
+        )
+        summary.raise_for_status()
+        payload = summary.json()
+    except Exception as exc:
+        logger.info("Wikipedia summary failed for %r: %s", key, exc)
+        raise _WikipediaUnavailable(key) from exc
+    coordinates = payload.get("coordinates") or {}
+    lat, lon = coordinates.get("lat"), coordinates.get("lon")
+    if lat is None or lon is None:
+        # Many pages carry their coordinates only in Wikidata.
+        lat, lon = _wikidata_coordinates(str(payload.get("wikibase_item") or "")) or (None, None)
+    if lat is None or lon is None:
+        return None
+    if not (_AML_BOX[0] <= float(lat) <= _AML_BOX[1] and _AML_BOX[2] <= float(lon) <= _AML_BOX[3]):
+        return None
+    extract = re.sub(r"\s+", " ", str(payload.get("extract") or "")).strip()
+    sentences = re.split(r"(?<=[.!?])\s+", extract)
+    summary_text = " ".join(sentences[:2])[:320].strip()
+    page_url = str(payload.get("content_urls", {}).get("desktop", {}).get("page") or "").replace("(", "%28").replace(")", "%29")
+    if not summary_text or not page_url:
+        return None
+    return {
+        "title": str(payload.get("title") or key),
+        "summary": summary_text,
+        "url": page_url,
+        "lat": float(lat),
+        "lon": float(lon),
+    }
+
+
+# Stop types the VisitLisboa catalogue covers thinly or not at all, as the
+# words that request them and the words that name them in a page title.
+_STOP_TYPE_WORDS = (
+    (r"livrarias?|bookshops?|bookstores?|alfarrabistas?", ("livraria", "bookshop", "bookstore", "books", "alfarrabista")),
+    (r"igrejas?|churche?s?|basilicas?|capelas?|chapels?", ("igreja", "church", "basilica", "capela", "chapel")),
+    (r"jardins?|gardens?|parques?|parks?", ("jardim", "jardins", "garden", "gardens", "parque", "park", "tapada")),
+    (r"galerias?|galler(?:y|ies)", ("galeria", "gallery")),
+    (r"bibliotecas?|librar(?:y|ies)", ("biblioteca", "library")),
+    (r"mercados?|markets?", ("mercado", "market")),
+    (r"teatros?|theat(?:re|er)s?", ("teatro", "theatre", "theater")),
+    (r"conventos?|mosteiros?|convents?|monaster(?:y|ies)", ("convento", "mosteiro", "convent", "monastery")),
+    (r"cemiterios?|cemeter(?:y|ies)", ("cemiterio", "cemetery")),
+)
+
+
+def stop_type_title_words(text: str) -> tuple[str, ...]:
+    """Return the title words of the stop type a request names ("livraria histórica" -> bookshop words)."""
+    folded = unicodedata.normalize("NFKD", str(text or "")).encode("ascii", "ignore").decode("ascii").lower()
+    for pattern, words in _STOP_TYPE_WORDS:
+        if re.search(rf"\b(?:{pattern})\b", folded):
+            return words
+    return ()
+
+
+def wikipedia_places_near(
+    title_words: tuple[str, ...],
+    lat: float,
+    lon: float,
+    language: str = "en",
+    radius_m: int = 1200,
+    limit: int = 3,
+) -> tuple[Dict[str, Any], ...]:
+    """Return geotagged Wikipedia places of one type near a point (failures are not cached)."""
+    try:
+        return _wikipedia_places_near_cached(title_words, lat, lon, language, radius_m, limit)
+    except _WikipediaUnavailablePartial as partial:
+        return partial.cards
+
+
+@lru_cache(maxsize=128)
+def _wikipedia_places_near_cached(
+    title_words: tuple[str, ...],
+    lat: float,
+    lon: float,
+    language: str = "en",
+    radius_m: int = 1200,
+    limit: int = 3,
+) -> tuple[Dict[str, Any], ...]:
+    """Return geotagged Wikipedia places of one type near a point.
+
+    Fills stop types the VisitLisboa catalogue lacks (a historic bookshop in
+    Chiado, a church in Alfama): pages within ``radius_m`` whose title carries
+    one of ``title_words`` are summarized, nearest first, from the answer's
+    edition and then the other one, without repeating a place both have.
+
+    Args:
+        title_words: Accent-free words that name the stop type in a title.
+        lat: Latitude of the area.
+        lon: Longitude of the area.
+        language: Preferred Wikipedia edition (``pt`` or ``en``).
+        radius_m: Search radius in metres (the API allows up to 10 000).
+        limit: Maximum number of places.
+
+    Returns:
+        Cards as returned by :func:`wikipedia_place_card`, each with
+        ``distance_m``; empty when nothing matches.
+    """
+    preferred = language if language in {"pt", "en"} else "en"
+    cards: list[Dict[str, Any]] = []
+    failed = False
+    for lang in dict.fromkeys([preferred, "en", "pt"]):
+        try:
+            response = requests.get(
+                f"https://{lang}.wikipedia.org/w/api.php",
+                params={
+                    "action": "query",
+                    "list": "geosearch",
+                    "gscoord": f"{lat}|{lon}",
+                    "gsradius": min(int(radius_m), 10000),
+                    "gslimit": 100,
+                    "format": "json",
+                },
+                headers=_WIKI_HEADERS,
+                timeout=6,
+            )
+            response.raise_for_status()
+            pages = response.json().get("query", {}).get("geosearch") or []
+        except Exception as exc:
+            logger.info("Wikipedia geosearch failed near %.4f,%.4f: %s", lat, lon, exc)
+            failed = True
+            continue
+        for page in sorted(pages, key=lambda item: float(item.get("dist") or 0)):
+            if len(cards) >= limit:
+                break
+            title = str(page.get("title") or "")
+            if not _title_tokens(title) & set(title_words):
+                continue
+            if any(
+                abs(card["lat"] - float(page.get("lat") or 0)) < 0.0005
+                and abs(card["lon"] - float(page.get("lon") or 0)) < 0.0005
+                for card in cards
+            ):
+                continue
+            try:
+                card = _wikipedia_summary_card(lang, title.replace(" ", "_"))
+            except _WikipediaUnavailable:
+                failed = True
+                continue
+            if card:
+                cards.append({**card, "distance_m": int(float(page.get("dist") or 0))})
+        if len(cards) >= limit:
+            break
+    if failed and len(cards) < limit:
+        # A partial result after a failed request is returned but not cached.
+        raise _WikipediaUnavailablePartial(tuple(cards))
+    return tuple(cards)
+
 
 # ==========================================================================
 # Exported Tool

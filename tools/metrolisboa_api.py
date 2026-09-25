@@ -30,6 +30,7 @@ import re
 import socket
 import ssl
 import tempfile
+import threading
 import time
 import unicodedata
 import warnings
@@ -89,9 +90,6 @@ METRO_API_PORT = 8243
 # Metro de Lisboa - Fallback (unofficial, no auth required)
 METRO_STATUS_URL = "https://app.metrolisboa.pt/status/getLinhas.php"
 
-# Nominatim (OpenStreetMap) - Free geocoding service
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-
 # Cache expiration time (24 hours - station data doesn't change frequently)
 CACHE_EXPIRATION_HOURS = 24
 
@@ -110,9 +108,13 @@ METRO_LIVE_SERVICE_SAMPLE_STATIONS: tuple[str, ...] = ("CG", "MP", "SA", "BC", "
 
 _metro_access_token: Optional[str] = None
 _metro_token_expiry: Optional[datetime] = None
+# One token request at a time: the workers of one answer start together.
+_metro_token_lock = threading.Lock()
 _metro_stations_cache: Optional[List[Dict[str, Any]]] = None
 _metro_stations_last_load: Optional[datetime] = None
 _metro_runtime_ca_bundle: Optional[str] = None
+# CA bundle that last completed the Metro gateway's certificate chain.
+_metro_working_ca_bundle: Optional[str] = None
 _metro_runtime_ca_bundle_leaf_fingerprint: Optional[str] = None
 _metro_runtime_state: Dict[str, Optional[str]] = {
     "token_status": "unknown",
@@ -1057,7 +1059,13 @@ def _metro_request(method: str, url: str, **kwargs) -> requests.Response:
     AIA metadata. Only retry insecurely when the caller explicitly opted into
     METRO_SSL_ALLOW_INSECURE_FALLBACK.
     """
+    global _metro_working_ca_bundle
+    explicit_verify = "verify" in kwargs
     verify = kwargs.pop("verify", METRO_SSL_VERIFY)
+    if not explicit_verify and verify is True and _metro_working_ca_bundle and os.path.isfile(_metro_working_ca_bundle):
+        # The bundle that completed the chain last time: no failed handshake,
+        # issuer download and retry on every call. Still full verification.
+        verify = _metro_working_ca_bundle
 
     def _perform_request(verify_mode: bool | str) -> requests.Response:
         if verify_mode is False:
@@ -1078,11 +1086,19 @@ def _metro_request(method: str, url: str, **kwargs) -> requests.Response:
             raise
 
         ssl_error = exc
+        used_remembered_bundle = bool(_metro_working_ca_bundle) and verify == _metro_working_ca_bundle
+        if used_remembered_bundle:
+            # The remembered bundle no longer completes the chain (new certificate).
+            _metro_working_ca_bundle = None
         if verify is not False:
             dynamic_bundle = _build_runtime_metro_ca_bundle(force_refresh=True)
-            if dynamic_bundle and dynamic_bundle != verify:
+            # A rebuilt bundle may reuse the remembered file's path; its content
+            # is new, so it is still worth one retry.
+            if dynamic_bundle and (dynamic_bundle != verify or used_remembered_bundle):
                 try:
-                    return _perform_request(dynamic_bundle)
+                    response = _perform_request(dynamic_bundle)
+                    _metro_working_ca_bundle = dynamic_bundle
+                    return response
                 except requests.exceptions.SSLError as dynamic_exc:
                     ssl_error = dynamic_exc
 
@@ -1201,10 +1217,20 @@ def get_landmark_info(location: str) -> Optional[Dict[str, Any]]:
         if normalize_location_text(key) == location_norm:
             return info
 
+    # Whole words only: the key "ist" (Instituto Superior Técnico) sits inside
+    # "cristo rei". A one-word place is not read as a longer landmark that
+    # contains it ("Alvalade" is a district, not the Estádio José Alvalade).
+    partial_matches = []
     for key, info in LISBON_LANDMARKS.items():
         key_norm = normalize_location_text(key)
-        if key_norm in location_norm or location_norm in key_norm:
-            return info
+        if key_norm and location_norm and (
+            re.search(rf"\b{re.escape(key_norm)}\b", location_norm)
+            or (len(location_norm.split()) >= 2 and re.search(rf"\b{re.escape(location_norm)}\b", key_norm))
+        ):
+            partial_matches.append((len(key_norm), info))
+    if partial_matches:
+        # The most specific landmark named in the text wins.
+        return max(partial_matches, key=lambda item: item[0])[1]
 
     try:
         dynamic_info = build_dynamic_landmark_info(
@@ -1289,6 +1315,14 @@ def _get_metro_access_token(force_refresh: bool = False) -> Optional[str]:
     Returns:
         Access token if successful, None otherwise.
     """
+    if not force_refresh and _metro_access_token and _metro_token_expiry and datetime.now() < _metro_token_expiry:
+        return _metro_access_token
+    with _metro_token_lock:
+        return _get_metro_access_token_locked(force_refresh)
+
+
+def _get_metro_access_token_locked(force_refresh: bool = False) -> Optional[str]:
+    """Return a valid token, requesting one when needed (call with the token lock held)."""
     global _metro_access_token, _metro_token_expiry
 
     if not METRO_CONSUMER_KEY or not METRO_CONSUMER_SECRET:
@@ -1300,7 +1334,8 @@ def _get_metro_access_token(force_refresh: bool = False) -> Optional[str]:
         return None
 
     if not force_refresh and _metro_access_token and _metro_token_expiry:
-        if datetime.now() < _metro_token_expiry - timedelta(minutes=5):
+        # Another thread may have fetched it while this one waited.
+        if datetime.now() < _metro_token_expiry:
             return _metro_access_token
 
     try:
@@ -1331,7 +1366,11 @@ def _get_metro_access_token(force_refresh: bool = False) -> Optional[str]:
         token_data = response.json()
         _metro_access_token = token_data.get("access_token")
         expires_in = token_data.get("expires_in", 3600)
-        _metro_token_expiry = datetime.now() + timedelta(seconds=expires_in)
+        # Renew a little before expiry: 5 minutes for a normal token, a tenth
+        # of its life for a token the gateway reissues with little time left
+        # (a fixed 5-minute margin made such a token be re-requested on every call).
+        margin_seconds = min(300.0, float(expires_in) / 10.0)
+        _metro_token_expiry = datetime.now() + timedelta(seconds=float(expires_in) - margin_seconds)
         _metro_runtime_state["token_status"] = "ok"
         _metro_runtime_state["token_error"] = None
 

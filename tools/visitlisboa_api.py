@@ -33,6 +33,7 @@ import re
 import threading
 import unicodedata
 import warnings
+from functools import lru_cache
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
@@ -55,9 +56,11 @@ except ModuleNotFoundError:
     from config import Config
 
 try:
-    from tools.utils import lisbon_now
+    from tools.place_coordinates import lookup_place_coordinates
+    from tools.utils import lisbon_now, without_estate_names
 except ImportError:  # Standalone execution: python tools/visitlisboa_api.py
-    from utils import lisbon_now
+    from place_coordinates import lookup_place_coordinates
+    from utils import lisbon_now, without_estate_names
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +69,9 @@ COLLECTION_PDF = "lisbon_pdf"
 COLLECTION_PLACES = "lisbon_places"
 COLLECTION_EVENTS = "lisbon_events"
 MAX_USER_FACING_RESULTS = 5
-MAX_PROXIMITY_RANK_CANDIDATES = 120
+# Coordinates come from stored values or in-memory tables (no network), so
+# every candidate of a proximity query can be ranked.
+MAX_PROXIMITY_RANK_CANDIDATES = 3000
 _LISBON_POSTAL_PREFIX_COORDS: Dict[str, Tuple[float, float]] = {
     "1000": (38.7360, -9.1380),
     "1050": (38.7350, -9.1500),
@@ -926,12 +931,14 @@ def _localize_place_title(title: Optional[str], language: str = "en") -> str:
     }
     if raw in mapping:
         return mapping[raw]
+    # Only prefixes followed by a proper name are translated here. "Museum of
+    # the Presidency of the Republic" would become a half-English "Museu da
+    # Presidency of the Republic"; such titles are left to the Researcher's
+    # LLM title localization, which returns the official Portuguese name.
     generic_replacements = [
         (r"^Atelier-Museum\s+(.+)$", r"Atelier-Museu \1"),
         (r"^House-Museum\s+(.+)$", r"Casa-Museu \1"),
         (r"^Museum of Lisbon\s+(.+)$", r"Museu de Lisboa - \1"),
-        (r"^Museum of the\s+(.+)$", r"Museu da \1"),
-        (r"^Museum of\s+(.+)$", r"Museu de \1"),
         (r"^Beaches of\s+(.+)$", r"Praias de \1"),
     ]
     localized = raw
@@ -1602,19 +1609,21 @@ def _summarize_event_description(text: Optional[str], max_chars: int = 210) -> s
 
 
 def _format_event_duration_label(duration: int, language: str = "en") -> str:
-    """Formats event duration in a user-friendly way."""
+    """Formats how long an event runs (its programme, not one session)."""
+    # A programme of 344 days is a recurring show; say how long it is on.
+    months = max(1, round(duration / 30))
     if language == "pt":
         if duration == 1:
             return "🎯 Um só dia"
         if duration <= 30:
-            return f"📆 {duration} dias"
-        return f"🏛️ Longa duração ({duration} dias)"
+            return f"📆 Em cartaz durante {duration} dias"
+        return f"🗓️ Em cartaz durante cerca de {months} {'mês' if months == 1 else 'meses'}"
 
     if duration == 1:
         return "🎯 Single day"
     if duration <= 30:
-        return f"📆 {duration} days"
-    return f"🏛️ Long-running ({duration} days)"
+        return f"📆 Runs for {duration} days"
+    return f"🗓️ Runs for about {months} {'month' if months == 1 else 'months'}"
 
 
 def _format_event_filter_summary(
@@ -1702,7 +1711,21 @@ _TRAILING_LOOKUP_SUFFIX_RE = re.compile(
 
 
 def _normalize_lookup_text(text: Optional[str]) -> str:
-    """Normalizes lookup text for cross-language name matching."""
+    """Normalizes lookup text for cross-language name matching (cached: the same titles are compared many times)."""
+    try:
+        return _normalize_lookup_text_cached(text)
+    except TypeError:
+        return _normalize_lookup_text_uncached(text)
+
+
+@lru_cache(maxsize=16384)
+def _normalize_lookup_text_cached(text: Optional[str]) -> str:
+    """Cached form of :func:`_normalize_lookup_text` for hashable inputs."""
+    return _normalize_lookup_text_uncached(text)
+
+
+def _normalize_lookup_text_uncached(text: Optional[str]) -> str:
+    """Normalize lookup text: accents removed, lower case, alphanumeric words."""
     normalized = unicodedata.normalize("NFKD", text or "")
     normalized = "".join(c for c in normalized if not unicodedata.combining(c))
     normalized = normalized.lower()
@@ -1793,8 +1816,9 @@ def _minimum_token_similarity(query_token: str, candidate_token: str) -> float:
     return 0.74
 
 
+@lru_cache(maxsize=65536)
 def _token_similarity_score(query_token: str, candidate_token: str) -> float:
-    """Scores token similarity, including prefix and typo-friendly matches."""
+    """Scores token similarity, including prefix and typo-friendly matches (cached: tokens repeat across places)."""
     if not query_token or not candidate_token:
         return 0.0
     if query_token == candidate_token:
@@ -2010,10 +2034,37 @@ def _is_strong_specific_event_match(
 _PLACE_LOOKUP_SOFT_TOKENS = {"de", "do", "da", "dos", "das", "the", "of", "and"}
 
 
+# English place-type nouns and their Portuguese forms, so "Tower of Belém"
+# and "Torre de Belém" share one signature (catalogue titles mix languages).
+_PLACE_TYPE_TOKENS_EN_TO_PT = {
+    "tower": "torre",
+    "monastery": "mosteiro",
+    "castle": "castelo",
+    "palace": "palacio",
+    "museum": "museu",
+    "garden": "jardim",
+    "gardens": "jardins",
+    "church": "igreja",
+    "square": "praca",
+    "market": "mercado",
+    "viewpoint": "miradouro",
+    "cathedral": "se",
+    "aqueduct": "aqueduto",
+    "convent": "convento",
+    "theatre": "teatro",
+    "theater": "teatro",
+    "park": "parque",
+    "library": "biblioteca",
+    "fortress": "fortaleza",
+    "fort": "forte",
+    "bridge": "ponte",
+}
+
+
 def _normalize_specific_place_signature(text: Optional[str]) -> str:
     """Normalize a place name while ignoring lightweight connector tokens."""
     tokens = [
-        token for token in _extract_lookup_tokens(text)
+        _PLACE_TYPE_TOKENS_EN_TO_PT.get(token, token) for token in _extract_lookup_tokens(text)
         if not token.isdigit() and token not in _PLACE_LOOKUP_SOFT_TOKENS
     ]
     return " ".join(tokens)
@@ -2233,7 +2284,7 @@ _EVENT_SPECIFIC_LOOKUP_NOISE_TOKENS = {
     "that", "these", "those", "what", "which", "and", "how", "sobre", "diz",
     "fala", "para", "em", "e", "in", "from", "with", "there", "happening", "temos", "tem",
     "de", "do", "da", "dos", "das", "fim", "weekend",
-    "this", "week", "today", "tomorrow", "next", "year",
+    "week", "today", "tomorrow", "next", "year",
     "ano", "esta", "semana", "este", "proxima", "proximo",
     "que", "quais", "qual", "ha", "há", "quero", "queria", "algum", "alguma", "alguns", "algumas", "nao", "não", "sem",
     "mostra", "mostrar", "lista", "lisboa", "lisbon", "mas", "but",
@@ -2243,7 +2294,15 @@ _EVENT_SPECIFIC_LOOKUP_NOISE_TOKENS = {
     # Data-presence lead-ins ("X aparece nos dados?", "is X in the data?")
     "aparece", "aparecem", "dados", "base", "data", "available", "where", "onde",
     # Location lead-ins around category discovery ("theatre near Chiado")
-    "perto", "near", "nearby", "proximo", "proxima", "próximo", "próxima", "no", "na", "nos", "nas",
+    "perto", "near", "nearby", "próximo", "próxima", "no", "na", "nos", "nas",
+    # Request verbs and quantifiers ("Any music events...", "Encontra eventos...")
+    "any", "anything", "some", "encontra", "encontrar", "encontras", "procura", "procurar", "look", "looking",
+    "for", "can", "you", "i", "we", "give", "list", "going", "on", "tonight", "hoje", "amanha", "amanhã",
+    "sugere", "sugerir", "suggest", "recommend", "recomenda", "recomendas", "ver", "see", "good", "bons",
+    "boas", "interesting", "interessantes", "interessante", "fun",
+    # Days are date filters, not event names.
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "segunda", "terca", "terça", "quarta", "quinta", "sexta", "sabado", "sábado", "domingo",
 }
 _EVENT_SPECIFIC_LOOKUP_HINT_TOKENS = {
     "book", "fair", "feira", "fado", "concert", "concerto", "festival", "exhibition",
@@ -3043,7 +3102,7 @@ _PUBLIC_SERVICE_FOCUS_TERMS = {
     "parking": {"parking", "estacionamento", "parque de estacionamento", "car park"},
     "market": {"market", "markets", "mercado", "mercados", "feira", "feiras"},
     "garden": {"garden", "gardens", "jardim", "jardins", "park", "parks", "parque", "parques"},
-    "wc": {"wc", "toilet", "toilets", "sanitario", "sanitários", "sanitario", "sanitário", "restroom"},
+    "wc": {"wc", "toilet", "toilets", "sanitario", "sanitários", "sanitário", "restroom"},
     "embassy": {"embassy", "embassies", "embaixada", "embaixadas"},
 }
 _OUTSIDE_LISBON_CITY_MARKERS = {
@@ -3057,7 +3116,21 @@ _OUTSIDE_LISBON_CITY_MARKERS = {
 
 
 def _normalize_place_hint_text(text: Optional[str]) -> str:
-    """Normalizes text for location-hint comparisons."""
+    """Normalizes text for location-hint comparisons (cached for hashable inputs)."""
+    try:
+        return _normalize_place_hint_text_cached(text)
+    except TypeError:
+        return _normalize_place_hint_text_uncached(text)
+
+
+@lru_cache(maxsize=16384)
+def _normalize_place_hint_text_cached(text: Optional[str]) -> str:
+    """Cached form of :func:`_normalize_place_hint_text`."""
+    return _normalize_place_hint_text_uncached(text)
+
+
+def _normalize_place_hint_text_uncached(text: Optional[str]) -> str:
+    """Accent-free lower-case text for location-hint comparisons."""
     normalized = unicodedata.normalize("NFKD", text or "")
     normalized = "".join(c for c in normalized if not unicodedata.combining(c))
     return normalized.lower()
@@ -3138,53 +3211,6 @@ def _matches_place_location_hints(text: str, location_hints: List[str]) -> bool:
     return False
 
 
-def _geocoded_place_matches_location_text(location_text: str, geocoded: Dict[str, Any]) -> bool:
-    """Return whether a geocoder result still matches the source place address.
-
-    Provider geocoding can fall back to a broad Lisbon match when a catalogue
-    address is partially unresolved. Distance ranking should only use
-    coordinates when the resolved display still shares concrete address or
-    locality evidence with the source text.
-    """
-    normalized_location = _normalize_place_hint_text(location_text)
-    resolved_text = _normalize_place_hint_text(
-        _join_user_facing_parts(
-            [
-                geocoded.get("display_name", ""),
-                geocoded.get("full_display_name", ""),
-                " ".join(str(value) for value in (geocoded.get("address") or {}).values()),
-            ]
-        )
-    )
-    if not normalized_location or not resolved_text:
-        return False
-
-    postal_codes = re.findall(r"\b\d{4}[-\s]?\d{3}\b", normalized_location)
-    if postal_codes:
-        compact_resolved = re.sub(r"\D", "", resolved_text)
-        if any(re.sub(r"\D", "", postal_code) in compact_resolved for postal_code in postal_codes):
-            return True
-
-    ignored_tokens = {
-        "avenida", "av", "rua", "largo", "praca", "praça", "estrada", "travessa",
-        "beco", "calcada", "calçada", "edificio", "edifício", "loja", "lisboa",
-        "lisbon", "portugal", "pt", "campo", "centro", "hotel", "real",
-    } | _GENERIC_PLACE_QUERY_TOKENS | _PLACE_CATEGORY_QUERY_TOKENS
-    source_tokens = {
-        token
-        for token in re.findall(r"[a-z0-9]+", normalized_location)
-        if len(token) >= 4 and token not in ignored_tokens and not token.isdigit()
-    }
-    if not source_tokens:
-        return True
-
-    resolved_tokens = set(re.findall(r"[a-z0-9]+", resolved_text))
-    overlap = source_tokens & resolved_tokens
-    if len(source_tokens) == 1:
-        return bool(overlap)
-    return len(overlap) >= 2
-
-
 def _extract_place_proximity_reference(query: Optional[str]) -> str:
     """Extract a free-form reference point from a proximity place query."""
     normalized_query = re.sub(r"\s+", " ", str(query or "")).strip()
@@ -3215,6 +3241,26 @@ def _extract_place_proximity_reference(query: Optional[str]) -> str:
     return reference.strip(" :;-")
 
 
+def _query_topic_without_proximity_reference(query: Optional[str]) -> str:
+    """Return a proximity query without its "near <place>" clause.
+
+    Place names carry words such as "Parque" (Parque das Nações) or "Jardim"
+    that would otherwise read as a request for parks or public services.
+    """
+    text = re.sub(r"\s+", " ", str(query or "")).strip()
+    reference = _extract_place_proximity_reference(text)
+    if not reference:
+        return text
+    stripped = re.sub(
+        r"(?i)\b(?:perto\s+d[aeo]s?|perto\s+de|junto\s+a(?:o|a|os|as)?|ao\s+p[eé]\s+d[aeo]s?|na\s+zona\s+d[aeo]s?|"
+        r"à\s+volta\s+d[aeo]s?|a\s+volta\s+d[aeo]s?|near|nearby|around|close\s+to|next\s+to|in\s+the\s+area\s+of)\s+"
+        + re.escape(reference),
+        " ",
+        text,
+    )
+    return re.sub(r"\s+", " ", stripped).strip() or text
+
+
 def _is_broad_linear_proximity_reference(reference: str) -> bool:
     """Return whether a proximity anchor is too broad for point-distance ranking."""
     normalized = _normalize_place_hint_text(str(reference or "")).lower()
@@ -3229,52 +3275,6 @@ def _is_broad_linear_proximity_reference(reference: str) -> bool:
             normalized,
         )
     )
-
-
-def _place_result_coordinates(result: Dict[str, Any]) -> Tuple[float, float] | None:
-    """Resolve coordinates for a place result from metadata, catalog, or address."""
-    for source in (result, _place_result_full_data(result)):
-        if not isinstance(source, dict):
-            continue
-        lat = source.get("lat") or source.get("latitude")
-        lon = source.get("lon") or source.get("longitude")
-        try:
-            if lat is not None and lon is not None:
-                return float(lat), float(lon)
-        except (TypeError, ValueError):
-            continue
-
-    location_text = _join_user_facing_parts(
-        [
-            result.get("location", ""),
-            result.get("address", ""),
-            (_place_result_full_data(result) or {}).get("location", ""),
-            (_place_result_full_data(result) or {}).get("address", ""),
-        ]
-    )
-    if not location_text or _normalize_place_hint_text(location_text).strip(" ,.;") in {"lisboa", "lisbon"}:
-        return None
-
-    try:
-        from tools.location_resolver import geocode_location_name
-
-        geocoded = geocode_location_name(location_text, prefer_city=True, allow_aml=True)
-    except Exception as exc:
-        logger.info("Could not geocode VisitLisboa place '%s': %s", location_text, exc)
-        return None
-    if not geocoded:
-        return None
-    if not _geocoded_place_matches_location_text(location_text, geocoded):
-        logger.info(
-            "Rejected weak VisitLisboa geocode for '%s': %s",
-            location_text,
-            geocoded.get("display_name") or geocoded.get("full_display_name"),
-        )
-        return None
-    try:
-        return float(geocoded["lat"]), float(geocoded["lon"])
-    except (KeyError, TypeError, ValueError):
-        return None
 
 
 def _place_result_stored_coordinates(result: Dict[str, Any]) -> Tuple[float, float] | None:
@@ -3317,21 +3317,152 @@ def _place_result_coordinates_for_proximity(result: Dict[str, Any]) -> Tuple[flo
     exact_coordinates = _place_result_stored_coordinates(result)
     if exact_coordinates:
         return exact_coordinates[0], exact_coordinates[1], False
+    catalogue_url = result.get("url") or (_place_result_full_data(result) or {}).get("url")
+    geocoded_coordinates = lookup_place_coordinates(catalogue_url)
+    if geocoded_coordinates:
+        return geocoded_coordinates[0], geocoded_coordinates[1], False
     approximate_coordinates = _place_result_postal_centroid(result)
     if approximate_coordinates:
         return approximate_coordinates[0], approximate_coordinates[1], True
     return None
 
 
+# Bilingual term groups for the topic of a proximity query ("pastry shops
+# near Belém"). A place that shows a group's term in its title, category, or
+# description answers the topic; a nearer place that does not should not
+# outrank it. Terms are accent-free and matched as word prefixes; a trailing
+# space closes a short term ("park " is not "parking").
+_PROXIMITY_TOPIC_GROUPS: Dict[str, Tuple[str, ...]] = {
+    "pastry": ("pastry", "pastries", "pastelaria", "pasteis", "pastel de nata", "nata", "confeitaria", "bakery", "padaria", "docaria", "cake", "bolo"),
+    "cafe": ("cafe", "coffee", "cafetaria", "pastelaria", "tea house", "salao de cha"),
+    "viewpoint": ("miradouro", "viewpoint", "view point", "panoramic", "panoramica"),
+    "garden": ("jardim", "jardins", "garden", "parque", "park ", "parks", "tapada", "mata "),
+    "museum": ("museu", "museum", "galeria", "gallery", "ciencia viva"),
+    "monument": ("palacio", "palace", "castelo", "castle", "mosteiro", "monastery", "convento", "convent", "igreja", "church", "cathedral", "torre", "tower", "quinta", "monumento", "monument", "forte", "fortress", "aqueduto", "aqueduct", "historic", "historico"),
+    "music": ("fado", "live music", "musica ao vivo", "live entertainment", "concert", "concerto", "jazz"),
+    "bar": ("bar ", "bars", "cocktail", "rooftop", "pub ", "wine bar"),
+    "bookshop": ("livraria", "bookshop", "bookstore", "livros", "books", "alfarrabista"),
+    "market": ("mercado", "market", "feira"),
+    "beach": ("praia", "beach"),
+    "restaurant": ("restaurante", "restaurant", "tasca", "taberna", "cervejaria", "marisqueira", "bistro"),
+    "children": ("children", "kid", "famil", "crianca", "infantil", "aquarium", "oceanario", "zoo", "interactive", "interativ"),
+}
+# Broad "attractions / places to visit" topics prefer sights over shops and
+# restaurants that happen to be nearer.
+_PROXIMITY_SIGHTS_TOPIC_RE = re.compile(
+    r"\b(?:attraction|atrac|atracoes|places to visit|locais a visitar|sights|sightseeing|what to see|o que ver|pontos de interesse)"
+)
+_PROXIMITY_SEA_TOPIC_RE = re.compile(
+    r"\b(?:by the sea|seaside|sea view|ocean view|river view|beira.mar|junto ao mar|vista (?:de )?(?:mar|rio))"
+)
+_PROXIMITY_SEA_TERMS: Tuple[str, ...] = (
+    "sea or river view", "sea view", "river view", "vista mar", "vista rio", "beira-mar", "beira mar", "oceano", "praia", "beach", "marina",
+)
+_PROXIMITY_SIGHT_TERMS: Tuple[str, ...] = (
+    "museu", "museum", "monument", "palacio", "palace", "castelo", "castle", "igreja", "church", "mosteiro",
+    "monastery", "convento", "convent", "torre", "tower", "forte", "fort", "farol", "lighthouse", "cidadela",
+    "citadel", "miradouro", "viewpoint", "praia", "beach", "jardim", "garden", "parque", "park", "aquarium",
+    "oceanario", "pavilion", "pavilhao", "marina", "galeria", "gallery", "boca do inferno",
+)
+
+
+def _proximity_topic_groups(query: Optional[str], reference: str) -> List[Tuple[str, ...]]:
+    """Return the term groups that the topic of a proximity query asks for."""
+    topic = _normalize_lookup_text(str(query or ""))
+    reference_key = _normalize_lookup_text(reference)
+    if reference_key:
+        topic = topic.replace(reference_key, " ")
+    # "Where to park" asks for parking, not for a park.
+    topic = re.sub(r"\b(?:to|can i|could i|i can|we can) park\b", " ", topic)
+    topic = f" {topic} "
+    groups = [
+        terms for terms in _PROXIMITY_TOPIC_GROUPS.values()
+        if any(re.search(rf"\b{re.escape(term)}", topic) for term in terms)
+    ]
+    if _PROXIMITY_SIGHTS_TOPIC_RE.search(topic):
+        groups.append(_PROXIMITY_SIGHT_TERMS)
+    if _PROXIMITY_SEA_TOPIC_RE.search(topic):
+        groups.append(_PROXIMITY_SEA_TERMS)
+    return groups
+
+
+def _proximity_topic_relevance(result: Dict[str, Any], groups: List[Tuple[str, ...]], reference_key: str = "") -> float:
+    """Score how well a place answers the topic groups (title hits weigh most)."""
+    if not groups:
+        return 0.0
+    full_data = _place_result_full_data(result) or {}
+    title = f" {_normalize_lookup_text(str(result.get('title') or ''))} "
+    body = " ".join(
+        str(value or "")
+        for value in (
+            result.get("category"),
+            result.get("short_description"),
+            full_data.get("short_description"),
+            full_data.get("features") if isinstance(full_data.get("features"), str) else " ".join(map(str, full_data.get("features") or [])),
+        )
+    )
+    body = f" {_normalize_lookup_text(body)} "
+    if reference_key:
+        title = title.replace(reference_key, " ")
+        body = body.replace(reference_key, " ")
+    score = 0.0
+    for terms in groups:
+        if any(re.search(rf"\b{re.escape(term)}", title) for term in terms):
+            score += 0.30
+        elif any(re.search(rf"\b{re.escape(term)}", body) for term in terms):
+            score += 0.15
+    return score
+
+
+_ACCOMMODATION_QUERY_RE = re.compile(
+    r"\b(?:hotel|hoteis|hostel|alojamento|accommodation|guest house|apartment|apartamento|camping|campismo|pousada|stay|dormir)"
+)
+
+
+def _catalogue_reference_location(reference: str) -> Optional[Dict[str, Any]]:
+    """Return the stored coordinates of the catalogue place a reference names."""
+    reference_tokens = [token for token in _extract_lookup_tokens(reference) if len(token) >= 4]
+    if not reference_tokens:
+        return None
+    best: Tuple[float, Optional[Dict[str, Any]]] = (0.0, None)
+    for item in _load_places_json():
+        title_key = _normalize_lookup_text(str(item.get("title") or ""))
+        if not any(token in title_key for token in reference_tokens):
+            continue
+        score = _score_specific_place_lookup_match(item, reference)
+        if score > best[0]:
+            best = (score, item)
+    score, item = best
+    if item is None or not _is_strong_specific_place_match(score, reference):
+        return None
+    coordinates = lookup_place_coordinates(item.get("url"))
+    if not coordinates:
+        return None
+    return {"lat": coordinates[0], "lon": coordinates[1], "display_name": item.get("title") or reference}
+
+
+def _proximity_distance_penalty(distance_km: float) -> float:
+    """Penalty that keeps nearby places first and pushes far ones out quickly."""
+    return 0.08 * distance_km + 0.25 * max(0.0, distance_km - 1.5) + 0.30 * max(0.0, distance_km - 4.0)
+
+
 def _rank_place_results_by_proximity(
     results: List[Dict[str, Any]],
     query: Optional[str],
 ) -> Tuple[List[Dict[str, Any]], str]:
-    """Sort place results by distance when the user asks for proximity."""
+    """Rank place results by topic relevance and distance for a "near X" query.
+
+    Pure distance would list the nearest restaurant for "pastry shops near
+    Belém"; places whose title or description answers the topic are
+    preferred, and the distance penalty keeps the list local.
+    """
     reference = _extract_place_proximity_reference(query)
     if not reference or not results:
         return results, ""
     if _is_broad_linear_proximity_reference(reference):
+        return results, ""
+    # "Beaches near Lisbon" names the region, not a point to measure from.
+    if _normalize_lookup_text(reference) in {"lisboa", "lisbon", "lisbonne", "lissabon", "lisboa e arredores", "lisbon area"}:
         return results, ""
 
     try:
@@ -3341,7 +3472,10 @@ def _rank_place_results_by_proximity(
         reference_location = resolve_location_query(reference, prefer_city=True, allow_aml=True)
     except Exception as exc:
         logger.info("Could not resolve proximity reference '%s': %s", reference, exc)
-        return results, ""
+        reference_location = None
+    if not reference_location or reference_location.get("lat") is None or reference_location.get("lon") is None:
+        # A landmark from the catalogue ("near Jerónimos Monastery") has stored coordinates.
+        reference_location = _catalogue_reference_location(reference)
     if not reference_location:
         return results, ""
 
@@ -3353,31 +3487,81 @@ def _rank_place_results_by_proximity(
 
     candidate_results = results[:MAX_PROXIMITY_RANK_CANDIDATES]
     deferred_results = results[MAX_PROXIMITY_RANK_CANDIDATES:]
-    ranked: List[Tuple[float, float, int, Dict[str, Any]]] = []
+    topic_groups = _proximity_topic_groups(query, reference)
+    wants_accommodation = bool(_ACCOMMODATION_QUERY_RE.search(_normalize_lookup_text(query)))
+    reference_key = _normalize_lookup_text(reference)
+    ranked: List[Tuple[float, float, int, float, Dict[str, Any]]] = []
     unresolved: List[Tuple[int, Dict[str, Any]]] = []
     for index, result in enumerate(candidate_results):
+        if not wants_accommodation and _is_proximity_excluded_category(str(result.get("category") or "")):
+            continue
         coordinates = _place_result_coordinates_for_proximity(result)
         if not coordinates:
-            unresolved.append((index, result))
+            # Unknown location: keep it only when its address names the reference area.
+            location_key = _normalize_lookup_text(f"{result.get('title', '')} {result.get('location', '')}")
+            if reference_key and reference_key in location_key:
+                unresolved.append((index, result))
             continue
         distance_km = haversine_distance(ref_lat, ref_lon, coordinates[0], coordinates[1])
         enriched = dict(result)
         enriched["_distance_km"] = distance_km
         enriched["_distance_reference"] = reference_location.get("display_name") or reference
         enriched["_distance_approximate"] = coordinates[2]
-        ranked.append((distance_km, -float(result.get("ranking_score") or 0.0), index, enriched))
+        relevance = _proximity_topic_relevance(result, topic_groups, reference_key)
+        score = relevance - _proximity_distance_penalty(distance_km)
+        ranked.append((-score, distance_km, index, relevance, enriched))
 
     if not ranked:
         return results, ""
 
     ranked.sort(key=lambda item: (item[0], item[1], item[2]))
-    sorted_results = [item[3] for item in ranked] + [item[1] for item in unresolved] + deferred_results
+    # A "near X" answer lists nearby places only; the far ones stay out unless
+    # nothing is near. Towns outside Lisbon spread their sights wider.
+    limit_km = 5.0 if _query_explicitly_mentions_outside_lisbon(reference) else 3.0
+    nearby = [item for item in ranked if item[1] <= limit_km]
+    topical = [item for item in ranked if item[3] > 0]
+    if topical:
+        # Places that answer the topic come first; when none is near
+        # ("viewpoints near Campo Grande"), the nearest ones that do.
+        by_distance = sorted(topical, key=lambda item: item[1])
+        topical_nearby = (
+            [item for item in topical if item[1] <= limit_km]
+            or [item for item in by_distance if item[1] <= 3 * limit_km]
+            # "Beaches near Lisbon": the nearest ones, however far.
+            or by_distance
+        )
+        ranked = topical_nearby + [item for item in nearby if item[3] <= 0]
+    elif nearby:
+        ranked = nearby
+    sorted_results = [item[4] for item in ranked] + [item[1] for item in unresolved] + deferred_results
     return sorted_results, str(reference_location.get("display_name") or reference)
 
 
 def _query_requests_ranked_places(query: Optional[str]) -> bool:
-    """Detects broad ranking intents such as 'best museums' or 'top places'."""
-    return _text_contains_fuzzy_term(query, ["best", "top", "recommended", "recommend", "must-see", "must see"])
+    """Detects broad ranking intents such as 'best museums', 'top places', or 'principais museus'."""
+    if _text_contains_fuzzy_term(query, ["best", "top", "recommended", "recommend", "must-see", "must see"]):
+        return True
+    return bool(
+        re.search(
+            r"\b(?:principais|melhores|mais\s+(?:importantes|conhecid[oa]s|famos[oa]s|visitad[oa]s|populares)|"
+            r"imperd[ií]veis|obrigat[oó]ri[oa]s|main|most\s+(?:famous|popular|important|visited)|famous|popular)\b",
+            _normalize_place_hint_text(query or ""),
+        )
+    )
+
+
+# A rating from a handful of reviews is weak evidence: blend it with a typical
+# rating in proportion to the number of reviews (a Bayesian average).
+_RATING_PRIOR_MEAN = 4.2
+_RATING_PRIOR_REVIEWS = 100.0
+
+
+def _bayesian_rating(rating: float, reviews: float) -> float:
+    """Return the rating shrunk towards a typical rating when it has few reviews."""
+    if not rating:
+        return 0.0
+    weight = max(reviews, 0.0) / (max(reviews, 0.0) + _RATING_PRIOR_REVIEWS)
+    return weight * rating + (1.0 - weight) * _RATING_PRIOR_MEAN
 
 
 _PROMINENT_MUSEUM_MARKER_WEIGHTS: Tuple[Tuple[str, float], ...] = (
@@ -3460,7 +3644,7 @@ def _score_ranked_place_result(result: Dict[str, Any], query_intent: Optional[st
         tripadvisor.get("reviews_count"), default=0.0
     )
     if rating:
-        score += min(0.45, (rating / 5.0) * 0.45)
+        score += min(0.45, (_bayesian_rating(rating, reviews) / 5.0) * 0.45)
     if reviews:
         score += min(0.42, math.log10(reviews + 1) / 4.5)
 
@@ -3614,7 +3798,21 @@ def _infer_restaurant_preference_flags(
                 normalized,
             )
         ),
+        "view": bool(
+            re.search(
+                r"\b(?:views?|vistas?|panoramic\w*|panoramica|rooftop|terraco panoramico|"
+                r"waterfront|riverside|beira[\s-]rio|beira[\s-]mar|junto ao (?:rio|mar|tejo))\b",
+                normalized,
+            )
+        ),
+        "terrace": bool(
+            re.search(r"\b(?:terrace|terraco|esplanada|outdoor seating|al fresco|ao ar livre)\b", normalized)
+        ),
     }
+    # Seafood is a wish unless the user excluded it.
+    flags["seafood"] = not flags["no_seafood"] and bool(
+        re.search(r"\b(?:seafood|marisco|mariscos|marisqueira|peixe|fish|ostras|oysters|bacalhau)\b", normalized)
+    )
     return {name: requested for name, requested in flags.items() if requested}
 
 
@@ -3702,6 +3900,21 @@ def _score_restaurant_preference_result(
         else:
             score += 1.0
             matched_constraints += 1
+
+    if preference_flags.get("seafood") and seafood:
+        score += 4.0
+        matched_constraints += 1
+
+    if preference_flags.get("view") and re.search(
+        r"\b(?:sea or river view|river view|sea view|vista mar|vista rio|panoramic|panoramico|panoramica|rooftop|terraco)\b",
+        lookup_text,
+    ):
+        score += 3.0
+        matched_constraints += 1
+
+    if preference_flags.get("terrace") and re.search(r"\b(?:outdoor seating|esplanada|terrace|terraco)\b", lookup_text):
+        score += 2.0
+        matched_constraints += 1
 
     if non_traditional and not traditional and matched_constraints == 0:
         hard_negative = True
@@ -3902,8 +4115,37 @@ def _is_broad_specific_place_phrase(phrase: Optional[str]) -> bool:
     )
 
 
+# A second question joined to the first ("... and what are its opening hours",
+# "... e a que horas abre") asks for a field of the same place; the name is in
+# the first clause.
+_SECOND_QUESTION_RE = re.compile(
+    r"\s*(?:,\s*)?\b(?:and|e)\s+(?:what|when|how|where|which|is|are|does|do|at\s+what|"
+    r"a\s+que|quando|qual|quais|como|onde|quanto|que\s+horas?|o\s+hor[aá]rio|os\s+hor[aá]rios)\b.*$",
+    re.IGNORECASE,
+)
+
+
+def first_request_clause(query: Optional[str]) -> str:
+    """Return the first question of a message that joins two questions about one place.
+
+    Args:
+        query: User message or tool query.
+
+    Returns:
+        The text before a joined second question, or the text unchanged.
+    """
+    text = str(query or "").strip()
+    clause = _SECOND_QUESTION_RE.sub("", text).strip(" ,;")
+    return clause if len(clause) >= 3 else text
+
+
 def _extract_specific_place_lookup_phrase(query: Optional[str]) -> Optional[str]:
     """Extracts a specific place name from quoted or 'tell me about' queries."""
+    first_clause = first_request_clause(query)
+    if first_clause != str(query or "").strip():
+        focused = _extract_specific_place_lookup_phrase(first_clause)
+        if focused:
+            return focused
     raw_query = (query or '').strip()
     transactional_patterns = (
         r"\b(?:bilhetes?|tickets?|entradas?)\s+(?:para|for|to|at|em|no|na|nos|nas)?\s*(?:o|a|os|as|the)?\s+(?P<subject>[A-ZÀ-ÿ0-9][A-ZÀ-ÿ0-9 '&/.-]{1,80})",
@@ -4100,7 +4342,7 @@ def _query_mentions_schedule(query: Optional[str]) -> bool:
 
 def _extract_requested_schedule_days(query: Optional[str]) -> List[str]:
     """Extracts requested weekdays from a schedule-related place query."""
-    normalized_query = _normalize_place_hint_text(query)
+    normalized_query = _normalize_place_hint_text(without_estate_names(query or ""))
     requested_days = []
     if re.search(r"\b(?:tomorrow|amanha|amanhã)\b", normalized_query):
         weekday_keys = [
@@ -4114,7 +4356,8 @@ def _extract_requested_schedule_days(query: Optional[str]) -> List[str]:
         ]
         requested_days.append(weekday_keys[(lisbon_now() + timedelta(days=1)).weekday()])
     for canonical_day, aliases in _PLACE_QUERY_DAY_ALIASES.items():
-        if any(alias in normalized_query for alias in aliases):
+        # Plurals count too: "open on Sundays", "abre aos domingos".
+        if any(re.search(rf"\b{re.escape(alias)}s?\b", normalized_query) for alias in aliases):
             requested_days.append(canonical_day)
     return list(dict.fromkeys(requested_days))
 
@@ -4153,6 +4396,34 @@ def _schedule_day_matches(day_label: str, canonical_day: str) -> bool:
     """Checks whether a scraped day label matches a canonical weekday."""
     normalized_label = _normalize_place_hint_text(day_label)
     return any(alias in normalized_label for alias in _PLACE_QUERY_DAY_ALIASES.get(canonical_day, []))
+
+
+def place_hours_for_weekday(url: Optional[str], weekday_index: int) -> str:
+    """Return a catalogue place's opening hours for one weekday (0 = Monday).
+
+    Args:
+        url: VisitLisboa place URL.
+        weekday_index: Day of the week, Monday = 0.
+
+    Returns:
+        The hours text for that day ("10:00 - 18:00", "Closed"), or "" when
+        the catalogue has no weekly schedule for the place.
+    """
+    place = _get_place_by_url(str(url or "")) if url else None
+    schedules = (place or {}).get("schedules")
+    if not isinstance(schedules, list):
+        return ""
+    weekday_keys = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+    canonical_day = weekday_keys[weekday_index % 7]
+    for schedule in schedules:
+        if re.search(r"(?i)\b(?:inactive|inativ)", str(schedule.get("today") or "")):
+            continue
+        for day_label, hours in (schedule.get("hours") or {}).items():
+            if _schedule_day_matches(str(day_label), canonical_day):
+                text = re.sub(r"\s+", " ", str(hours or "")).strip()
+                if text:
+                    return text
+    return ""
 
 
 def _today_hours_from_weekday_map(schedule: Dict[str, Any]) -> str:
@@ -4408,6 +4679,133 @@ def _convert_raw_place_to_result(place: Dict[str, Any], source: str = "visitlisb
     }
 
 
+# Exclusions in a place request: "nada de fado", "nem sítios muito turísticos",
+# "not touristy", "except museums". "sem"/"without" often state a wish ("sem
+# glúten", "without stairs"), so they count only before the terms listed here.
+_PLACE_EXCLUSION_RE = re.compile(
+    r"\b(?:nada\s+de|nem|exceto|excepto|evitar|evita|excluindo|n[aã]o\s+quero|sem\s+ser|"
+    r"not|except|avoid|excluding|nothing)\s+(?P<term>[^,.;!?]+?)"
+    r"(?=\s+(?:nem|e|ou|mas|and|or|but|nor)\b|[,.;!?]|$)",
+    re.IGNORECASE,
+)
+_PLACE_WITHOUT_RE = re.compile(
+    r"\b(?:sem|without)\s+(?P<term>fado|m[uú]sica(?:\s+ao\s+vivo)?|live\s+music|music|karaoke|"
+    r"espet[aá]culos?|shows?|turistas?|tourists?)\b",
+    re.IGNORECASE,
+)
+# Wording that cannot be checked against the catalogue fields.
+_UNCHECKABLE_EXCLUSION_RE = re.compile(
+    r"\b(?:turistic|touristy|tourist|turistas?|caros?|caras?|expensive|pricey|barulhent|noisy|"
+    r"cheios?|cheias?|crowded|lotad|movimentad|busy)\w*",
+    re.IGNORECASE,
+)
+_EXCLUSION_GENERIC_WORDS = {
+    "sitios", "sitio", "locais", "local", "lugares", "lugar", "places", "place", "spots", "spot",
+    "restaurantes", "restaurante", "restaurants", "restaurant", "coisas", "things", "casas", "houses",
+    "muito", "muitos", "muitas", "very", "too", "de", "do", "da", "dos", "das", "the", "a", "o", "os", "as",
+}
+# Catalogue features are in English; a Portuguese exclusion also matches them.
+_EXCLUSION_FIELD_SYNONYMS = {
+    "musica": ("music", "musica"),
+    "live music": ("live entertainment", "music"),
+    "musica ao vivo": ("live entertainment", "music"),
+    "espetaculo": ("show", "entertainment"),
+    "espetaculos": ("show", "entertainment"),
+    "carne": ("meat", "steak", "carne"),
+    "peixe": ("fish", "peixe"),
+    "marisco": ("seafood", "marisco"),
+    "museus": ("museum", "museu"),
+    "museu": ("museum", "museu"),
+}
+
+
+# "not far from", "not open on Mondays": a negated condition, not an excluded kind.
+_EXCLUSION_CONDITION_RE = re.compile(
+    r"^(?:far|longe|distante|too|more|mais|open|abert|closed|fechad|available|dispon|sure|certain)",
+    re.IGNORECASE,
+)
+
+
+def _exclusion_term(match: "re.Match[str]") -> str:
+    """Return the excluded term of a match, or "" for a negated condition."""
+    term = match.group("term").strip()
+    return "" if _EXCLUSION_CONDITION_RE.search(_normalize_lookup_text(term)) else term
+
+
+def extract_place_exclusions(query: Optional[str]) -> Tuple[List[str], List[str]]:
+    """Split a place request's exclusions into checkable and uncheckable terms.
+
+    Args:
+        query: The place request.
+
+    Returns:
+        ``(checkable, uncheckable)``: normalized terms that can be matched on a
+        place's title, category, and features, and the original wording of
+        exclusions the catalogue cannot check (how touristy or busy a place is).
+    """
+    checkable: List[str] = []
+    uncheckable: List[str] = []
+    text = str(query or "")
+    for match in [*_PLACE_EXCLUSION_RE.finditer(text), *_PLACE_WITHOUT_RE.finditer(text)]:
+        term = _exclusion_term(match)
+        if not term:
+            continue
+        if _UNCHECKABLE_EXCLUSION_RE.search(_normalize_lookup_text(term)):
+            if term not in uncheckable:
+                uncheckable.append(term)
+            continue
+        words = [word for word in _normalize_lookup_text(term).split() if word not in _EXCLUSION_GENERIC_WORDS]
+        normalized = " ".join(words)
+        if normalized and len(normalized) >= 3 and normalized not in checkable:
+            checkable.append(normalized)
+    return checkable, uncheckable
+
+
+def strip_place_exclusions(query: Optional[str]) -> Optional[str]:
+    """Remove exclusion clauses so an excluded word does not steer the search.
+
+    Args:
+        query: The place request.
+
+    Returns:
+        The request without its exclusion clauses (and a dangling "mas"/"but").
+    """
+    if not query:
+        return query
+    text = _PLACE_EXCLUSION_RE.sub(lambda match: " " if _exclusion_term(match) else match.group(0), str(query))
+    text = _PLACE_WITHOUT_RE.sub(" ", text)
+    text = re.sub(r"\s*,?\s*\b(?:mas|but|and|e|nem|nor)\s*(?=[,.;!?]|$)", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+([,.;!?])", r"\1", re.sub(r"\s+", " ", text)).strip(" ,;")
+    return text or query
+
+
+def place_matches_exclusion(result: Dict[str, Any], exclusions: List[str]) -> bool:
+    """Return whether a place is named, categorized, or featured as an excluded kind.
+
+    Descriptions are not checked: "in Alfama, the home of fado" does not make
+    a fish restaurant a fado house.
+
+    Args:
+        result: Place result.
+        exclusions: Normalized checkable exclusion terms.
+
+    Returns:
+        True when the title, category, or a catalogue feature names an excluded term.
+    """
+    if not exclusions:
+        return False
+    full_data = _place_result_full_data(result)
+    features = full_data.get("features") if isinstance(full_data.get("features"), list) else []
+    fields = _normalize_lookup_text(
+        " ".join([str(result.get("title") or ""), str(result.get("category") or ""), *[str(item) for item in features]])
+    )
+    for term in exclusions:
+        variants = _EXCLUSION_FIELD_SYNONYMS.get(term, (term,))
+        if any(re.search(rf"\b{re.escape(_normalize_lookup_text(variant))}\b", fields) for variant in variants):
+            return True
+    return False
+
+
 def _place_result_full_data(result: Dict[str, Any]) -> Dict[str, Any]:
     """Return full VisitLisboa place data for a normalized result when available."""
     if result.get("source") != "visitlisboa" or not result.get("url"):
@@ -4459,6 +4857,32 @@ def _place_result_is_open_today(result: Dict[str, Any]) -> bool:
         if re.search(r"\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}", today):
             return True
     return False
+
+
+_PROXIMITY_EXCLUDED_CATEGORY_TERMS = (
+    "hotel", "guest house", "apartments", "accommodation", "hostel", "pousada",
+    "camping", "tourist office", "dmc", "pco", "meeting facilities",
+)
+
+
+def _is_proximity_excluded_category(item_category: str) -> bool:
+    """Return whether an untyped "near X" search should skip this category."""
+    category_lower = (item_category or "").lower()
+    return any(term in category_lower for term in _PROXIMITY_EXCLUDED_CATEGORY_TERMS)
+
+
+def _title_is_reference(title: str, reference: str) -> bool:
+    """Return whether a place title names the proximity reference itself."""
+    title_tokens = {token for token in _extract_lookup_tokens(title) if len(token) >= 3}
+    reference_tokens = {token for token in _extract_lookup_tokens(reference) if len(token) >= 3}
+    if not title_tokens or not reference_tokens:
+        return False
+    if len(title_tokens & reference_tokens) / len(title_tokens) >= 0.75:
+        return True
+    # The same place in the other language: "Jerónimos Monastery" is "Mosteiro dos Jerónimos".
+    from tools.web_knowledge import wikipedia_title_matches
+
+    return wikipedia_title_matches(reference, title)
 
 
 def _is_service_like_place_category(item_category: str) -> bool:
@@ -4605,33 +5029,6 @@ def _infer_specific_place_fallback_category(query: Optional[str], category: Opti
         return "View Points"
     if _text_contains_fuzzy_term(query, ["park", "parks", "garden", "gardens", "parque", "parques", "jardim", "jardins"]):
         return "Parks & Gardens"
-    return None
-
-
-def _infer_specific_event_fallback_category(query: Optional[str], category: Optional[str]) -> Optional[str]:
-    """Infer a same-type fallback category when a named event lookup has no exact match."""
-    if category:
-        return category
-
-    normalized_query = _normalize_lookup_text(query)
-    if not normalized_query:
-        return None
-
-    category_rules = [
-        (["summit", "conference", "congress", "forum", "expo", "technology", "tech", "startup"], "Main Events"),
-        (["music", "concert", "concerto", "fado", "jazz", "rock", "pop"], "Music"),
-        (["theatre", "theater", "teatro", "opera", "dance", "danca", "dança", "ballet"], "Theater Opera & Dance"),
-        (["festival", "festivals", "festivais"], "Festivals"),
-        (["exhibition", "exhibitions", "exposicao", "exposição", "art", "arte", "gallery", "galeria"], "Exhibitions"),
-        (["sport", "sports", "desporto", "desportos", "marathon", "maratona", "grand prix", "triathlon"], "Sports"),
-        (["cinema", "film", "movie", "movies"], "Cinema"),
-        (["fair", "fairs", "feira", "feiras", "market", "mercado"], "Fairs"),
-        (["food", "gastronomy", "gastronomia", "wine", "vinho", "culinary"], "Gastronomy"),
-    ]
-
-    for terms, fallback_category in category_rules:
-        if any(term in normalized_query for term in terms):
-            return fallback_category
     return None
 
 
@@ -5550,6 +5947,11 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
             if exclude_categories and str(exclude_categories).strip() and str(exclude_categories).lower() != 'none'
             else None
         )
+        # "Peixe em Alfama, mas nada de fado": the excluded word must not steer
+        # the search, and results of that kind are removed below.
+        place_exclusions, uncheckable_exclusions = extract_place_exclusions(query)
+        if place_exclusions or uncheckable_exclusions:
+            query = strip_place_exclusions(query)
         if (
             category
             and _normalize_place_category_filter(category) in {"museums_monuments", "museums & monuments"}
@@ -5586,6 +5988,21 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
         if specific_lookup_query:
             specific_lookup_query = _apply_known_place_lookup_alias(specific_lookup_query) or specific_lookup_query
         query_intent = _infer_place_query_intent(effective_query or query, category)
+        if (
+            not category
+            and not specific_lookup
+            and query_intent in {"food", "traditional_food"}
+            and re.search(
+                r"\b(?:restaurants?|restaurantes?|marisqueiras?|seafood|marisco|dinner|jantar|lunch|almo[cç]o)\b",
+                _normalize_lookup_text(query or ""),
+            )
+        ):
+            # A restaurant request searched without a category returned a
+            # history centre and cycle paths; the category keeps it to places to eat.
+            category = "Restaurants"
+        elif not category and not specific_lookup and re.search(r"\b(?:praias?|beach(?:es)?)\b", _normalize_lookup_text(query or "")):
+            # The same holds for beaches, which the catalogue files under surf spots.
+            category = "Beaches"
         query_context = query or effective_query or ""
         proximity_reference = _extract_place_proximity_reference(query) or _extract_place_proximity_reference(effective_query)
         if proximity_reference and not specific_lookup:
@@ -5611,10 +6028,15 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
         logger.info(
             f"search_places_attractions: query='{query}', effective_query='{effective_query}', category='{category}', max={max_results}, offset={offset}"
         )
-        required_service_terms = _extract_required_service_term_groups(effective_query or query)
+        service_intent_query = (
+            _query_topic_without_proximity_reference(effective_query or query)
+            if proximity_reference
+            else (effective_query or query)
+        )
+        required_service_terms = _extract_required_service_term_groups(service_intent_query)
 
         # Check if we should also search Dados Abertos (hybrid mode)
-        search_dados_abertos = _should_search_dados_abertos(effective_query or query)
+        search_dados_abertos = _should_search_dados_abertos(service_intent_query)
         requested_category_for_hybrid = _normalize_place_category_filter(category)
         if _category_should_suppress_open_data(requested_category_for_hybrid, effective_query or query):
             search_dados_abertos = False
@@ -5675,7 +6097,10 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
                 logger.info(f"search_places_attractions: searching VisitLisboa for '{search_query}'")
 
                 search_k = requested_window * 2
-                if query_intent in {"top_attractions", "museum_monument"} and not specific_lookup_query:
+                if (
+                    query_intent in {"top_attractions", "museum_monument"}
+                    or (query_intent == "museum_only" and ranking_requested)
+                ) and not specific_lookup_query:
                     search_k = max(search_k, requested_window * 5, 15)
                 if (
                     requested_category == "restaurants"
@@ -5935,12 +6360,16 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
             visitlisboa_results = combined_visitlisboa
 
         if proximity_reference and not specific_lookup:
-            proximity_items = _fallback_search(
-                query=None,
-                category=category,
-                data=_load_places_json(),
-                max_results=5000,
-            )
+            # Distance decides the geography, so the pool is the whole catalogue
+            # for the category (Sintra monuments for "near Sintra"), without the
+            # Lisbon-only filter; untyped searches leave out accommodation and
+            # trade-service entries.
+            proximity_items = [
+                item
+                for item in _load_places_json()
+                if _place_category_matches(item.get("category", ""), category)
+                and (category or not _is_proximity_excluded_category(item.get("category", "")))
+            ]
             proximity_results = [_convert_raw_place_to_result(item) for item in proximity_items]
             proximity_pool: List[Dict[str, Any]] = []
             seen_proximity_keys: set[str] = set()
@@ -5959,12 +6388,17 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
                         if full_place:
                             candidate = full_place
                     match_score = _score_specific_place_lookup_match(candidate, proximity_reference)
-                    if _is_strong_specific_place_match(match_score, proximity_reference):
+                    # Leave out the reference place itself ("near Jerónimos Monastery"),
+                    # not places that merely carry the area's name ("Torre de Belém").
+                    if _is_strong_specific_place_match(match_score, proximity_reference) and _title_is_reference(
+                        str(candidate.get("title") or result.get("title") or ""),
+                        proximity_reference,
+                    ):
                         continue
                     nearby_results.append(result)
                 visitlisboa_results = nearby_results[: max(requested_window, max_results)]
 
-        if query_intent == "top_attractions":
+        if query_intent == "top_attractions" and not (proximity_reference and not specific_lookup):
             supplemental_items = _fallback_search(
                 query=None,
                 category=category or "Museums & Monuments",
@@ -6395,12 +6829,31 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
         display_cap = min(max_results, MAX_USER_FACING_RESULTS)
         display_count = min(display_cap, 2) if exact_lookup_not_found_intro and offset == 0 else display_cap
 
-        if query_intent == "top_attractions":
+        if query_intent == "top_attractions" and not proximity_reference_label:
             all_results = sorted(
                 all_results,
                 key=lambda result: _score_ranked_place_result(result, query_intent),
                 reverse=True,
             )
+
+        excluded_count = 0
+        if place_exclusions:
+            kept_results = [result for result in all_results if not place_matches_exclusion(result, place_exclusions)]
+            excluded_count = len(all_results) - len(kept_results)
+            all_results = kept_results
+            if not all_results:
+                excluded_label = ", ".join(place_exclusions)
+                if render_language == "pt":
+                    return (
+                        f"❌ Não tenho uma opção que cumpra o pedido: os dados de locais que uso não são exaustivos "
+                        f"e todos os que encontrei para este pedido são do tipo que excluíste (**{excluded_label}**). "
+                        "Posso procurar numa zona próxima ou sem uma das restrições."
+                    )
+                return (
+                    f"❌ I have no option that meets the request: the place data I use is not exhaustive, and every "
+                    f"place I found for this request is of the kind you excluded (**{excluded_label}**). "
+                    "I can search a nearby area or drop one of the constraints."
+                )
 
         # Limit to the requested window.
         final_results = all_results[offset : offset + display_count]
@@ -6430,6 +6883,35 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
 
         if exact_lookup_not_found_intro and offset == 0:
             output_parts = [exact_lookup_not_found_intro, "", *output_parts]
+
+        if (place_exclusions or uncheckable_exclusions) and offset == 0:
+            if place_exclusions:
+                excluded_label = ", ".join(place_exclusions)
+                output_parts.append(
+                    f"🚫 **Exclusão aplicada:** {excluded_label}"
+                    + (f" ({excluded_count} resultado(s) retirado(s))." if excluded_count else ".")
+                    if render_language == "pt"
+                    else f"🚫 **Exclusion applied:** {excluded_label}"
+                    + (f" ({excluded_count} result(s) removed)." if excluded_count else ".")
+                )
+            if uncheckable_exclusions:
+                uncheckable_label = ", ".join(f'"{term}"' for term in uncheckable_exclusions)
+                output_parts.append(
+                    f"ℹ️ **Limitação:** os dados disponíveis não dizem quão turístico, caro ou movimentado é cada local, "
+                    f"por isso não consigo filtrar {uncheckable_label}; mostro os que cumprem o resto do pedido."
+                    if render_language == "pt"
+                    else f"ℹ️ **Limitation:** the available data does not say how touristy, expensive, or busy each place is, "
+                    f"so I cannot filter {uncheckable_label}; I show those that meet the rest of the request."
+                )
+
+        if offset == 0 and not proximity_reference_label and _query_requests_ranked_places(query):
+            output_parts.append(
+                "📏 **Ordenação:** pela avaliação e pelo número de avaliações nos dados disponíveis; "
+                "não reflete o número de visitantes nem uma lista oficial."
+                if render_language == "pt"
+                else "📏 **Sorting:** by rating and number of reviews in the available data; "
+                "it does not reflect visitor numbers or an official list."
+            )
 
         if proximity_reference_label and offset == 0:
             if render_language == "pt":
@@ -6508,6 +6990,14 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
             output_parts.append(f"    - 📂 **{'Categoria' if render_language == 'pt' else 'Category'}:** {cat}")
 
             location_line = _format_visitlisboa_location_line(loc, title, language=render_language)
+            exact_coordinates = _place_result_coordinates_for_proximity(place)
+            if location_line and exact_coordinates and not exact_coordinates[2]:
+                location_line = re.sub(
+                    r"query=[^)]*\)",
+                    f"query={exact_coordinates[0]:.6f},{exact_coordinates[1]:.6f})",
+                    location_line,
+                    count=1,
+                )
             if location_line:
                 output_parts.append(location_line)
             elif place.get('lat') and place.get('lon'):
@@ -6614,7 +7104,13 @@ def search_places_attractions(  # pyright: ignore[reportGeneralTypeIssues]
                     if email:
                         label = "Email"
                         output_parts.append(f"    - ✉️ **{label}:** [{email}](mailto:{email})")
-                if contact.get('website') and _is_http_url(contact.get('website')):
+                # A "website" that is the VisitLisboa page itself is the details
+                # link below, not the venue's official site.
+                if (
+                    contact.get('website')
+                    and _is_http_url(contact.get('website'))
+                    and "visitlisboa.com" not in str(contact.get('website')).lower()
+                ):
                     label = "Website"
                     link_text = "Website oficial" if render_language == "pt" else "Official website"
                     output_parts.append(f"    - 🌐 **{label}:** {_format_markdown_link(link_text, contact.get('website'))}")

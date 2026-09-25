@@ -3,7 +3,17 @@
 #   - André Filipe Gomes Silvestre, 20240502
 # ==========================================================================
 
-from agent.llm_factory import LLMFactory
+import re as _re
+
+# The response guards use a few thousand distinct inline regular expressions.
+# Python's module-level pattern cache keeps only 512, so each answer recompiled
+# most of them again and again (about 40% of a lookup's time was spent in the
+# regex compiler). A larger cache compiles each pattern once per process; the
+# matching itself is unchanged.
+if getattr(_re, "_MAXCACHE", 0) < 8192:
+    _re._MAXCACHE = 8192
+
+from agent.llm_factory import LLMFactory  # noqa: E402
 from agent.prompts import (  # Multi-Agent Prompts
     PLANNER_AGENT_PROMPT,
     QA_AGENT_PROMPT_EN,

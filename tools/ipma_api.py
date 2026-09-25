@@ -27,9 +27,9 @@ import requests
 from langchain_core.tools import tool
 
 try:
-    from tools.utils import lisbon_now
+    from tools.utils import lisbon_now, sunrise_sunset
 except ImportError:  # Standalone execution: python tools/ipma_api.py
-    from utils import lisbon_now
+    from utils import lisbon_now, sunrise_sunset
 
 try:
     from config import Config
@@ -584,6 +584,12 @@ def get_weather_forecast(days: int = 3, day_offset: int = 0) -> str:
         response += "\n"
         if wind_dir_desc:
             response += f"   💨 Wind: {wind_dir_desc} ({wind_speed_desc})\n"
+        try:
+            sun_times = sunrise_sunset(datetime.strptime(date, "%Y-%m-%d").date())
+        except (TypeError, ValueError):
+            sun_times = None
+        if sun_times:
+            response += f"   🌅 Sunrise/Sunset: {sun_times[0]} / {sun_times[1]}\n"
         response += "\n"
 
     return response

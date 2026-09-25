@@ -59,7 +59,9 @@ class EvidenceCard:
             Plain text representation consumed by the planner prompt.
         """
         lines = [f"- id: {self.id}", f"  kind: {self.kind}", f"  title: {self.title}"]
-        if self.summary:
+        # The summary repeats the labelled fields; print it only when a card
+        # has no fields, so the prompt does not carry every value twice.
+        if self.summary and not self.fields:
             lines.append(f"  summary: {self.summary}")
         for key, value in self.fields.items():
             if value:
@@ -84,6 +86,9 @@ class PlanBlock:
         weather: Weather adaptations relevant to this block.
         limitations: Block-level caveats or missing confirmations.
         source_ids: Public sources materially used by this block.
+        day: Day number within the plan, from 1 (the prompt asks for 1 on one-day
+            plans; 0 when the model left it out, which is read as day 1).
+        stay_minutes: Planned time at the stop, in minutes (0 when unknown).
     """
 
     title: str
@@ -94,6 +99,8 @@ class PlanBlock:
     weather: List[str] = field(default_factory=list)
     limitations: List[str] = field(default_factory=list)
     source_ids: List[str] = field(default_factory=list)
+    day: int = 0
+    stay_minutes: int = 0
 
 
 @dataclass
@@ -121,6 +128,9 @@ class PlanDraft:
     tips: List[str] = field(default_factory=list)
     limitations: List[str] = field(default_factory=list)
     source_ids: List[str] = field(default_factory=list)
+    # Filled by code, not by the model: e.g. other events found for an
+    # "events this weekend? pick one" request.
+    other_options: List[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "PlanDraft":
@@ -152,6 +162,8 @@ class PlanDraft:
                     weather=_string_list(raw_block.get("weather") or raw_block.get("weather_adaptation")),
                     limitations=_string_list(raw_block.get("limitations") or raw_block.get("caveats")),
                     source_ids=_string_list(raw_block.get("source_ids") or raw_block.get("sources")),
+                    day=_day_number(raw_block.get("day")),
+                    stay_minutes=_stay_minutes(raw_block.get("stay_minutes")),
                 )
             )
         return cls(
@@ -173,6 +185,24 @@ class PlanDraft:
             limitations=_string_list(payload.get("limitations") or payload.get("final_notes")),
             source_ids=_string_list(payload.get("source_ids") or payload.get("sources")),
         )
+
+
+def _stay_minutes(value: Any) -> int:
+    """Return a stop duration in minutes (5-480), or 0 when absent or invalid."""
+    try:
+        minutes = int(float(value))
+    except (TypeError, ValueError):
+        return 0
+    return minutes if 5 <= minutes <= 480 else 0
+
+
+def _day_number(value: Any) -> int:
+    """Return a block's day number (1-7), or 0 when absent or invalid."""
+    try:
+        day = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return day if 1 <= day <= 7 else 0
 
 
 def _string_list(value: Any) -> List[str]:

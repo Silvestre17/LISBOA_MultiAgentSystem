@@ -58,6 +58,7 @@ import gc
 import hashlib
 import json
 import logging
+import threading
 import time
 import warnings
 from dataclasses import dataclass
@@ -248,6 +249,12 @@ class KnowledgeBase:
 
         self.vector_db_path = str(Config.VECTOR_DB_DIR)
         os.makedirs(self.vector_db_path, exist_ok=True)
+        # One Chroma handle per collection, created once. Building a new
+        # client for every search was slow and not thread-safe: parallel tool
+        # calls raced inside chromadb's client initialisation and the searches
+        # were silently skipped.
+        self._collections: Dict[str, "Chroma"] = {}
+        self._collections_lock = threading.Lock()
         print(f"   DB Path: {self.vector_db_path}", flush=True)
 
     def _get_sync_state_dir(self) -> Path:
@@ -348,7 +355,7 @@ class KnowledgeBase:
 
     def _get_collection(self, collection_name: str) -> "Chroma":
         """
-        Retrieves a ChromaDB collection object.
+        Retrieves a ChromaDB collection object, creating it once per process.
 
         Args:
             collection_name (str): The name of the collection to retrieve.
@@ -356,11 +363,19 @@ class KnowledgeBase:
         Returns:
             Chroma: The ChromaDB collection object.
         """
-        return Chroma(
-            collection_name=collection_name,
-            persist_directory=self.vector_db_path,
-            embedding_function=self.embeddings,
-        )
+        vectorstore = self._collections.get(collection_name)
+        if vectorstore is not None:
+            return vectorstore
+        with self._collections_lock:
+            vectorstore = self._collections.get(collection_name)
+            if vectorstore is None:
+                vectorstore = Chroma(
+                    collection_name=collection_name,
+                    persist_directory=self.vector_db_path,
+                    embedding_function=self.embeddings,
+                )
+                self._collections[collection_name] = vectorstore
+        return vectorstore
 
     def _get_existing_docs(self, collection_name: str) -> Dict[str, str]:
         """
@@ -402,6 +417,8 @@ class KnowledgeBase:
         try:
             vectorstore = self._get_collection(collection_name)
             vectorstore.delete_collection()
+            with self._collections_lock:
+                self._collections.pop(collection_name, None)
             print(
                 f"   \033[1;33m🗑️ Deleted collection: {collection_name}\033[0m",
                 flush=True,

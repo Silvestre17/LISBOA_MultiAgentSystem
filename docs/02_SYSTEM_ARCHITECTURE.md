@@ -55,7 +55,7 @@ Step by step:
 3. Several workers run concurrently only when more than one is selected and none uses a local provider; LM Studio batches run sequentially.
 4. Source-backed structured outputs (weather, transport, municipal services, accessibility, checklists, and route-plus-place answers) can bypass generative QA after deterministic checks.
 5. Other worker outputs go through generative QA. Missing or repairable evidence can trigger one targeted worker retry, followed by one revalidation.
-6. Planning requests normally use `PlannerAgent.synthesize()` when the evidence is suitable. Critical QA findings, narrow requests that do not need a plan, or synthesis failures produce bounded, evidence-based outputs instead.
+6. Planning requests normally use `PlannerAgent.synthesize()` when the evidence is suitable. The Supervisor first reads the request into a plan brief (start point, areas, time window, requested stop types and counts, mode, constraints) that steers the Researcher's searches and the Transport route request. The Planner drafts the itinerary from the evidence, one review pass sends detected issues back to the model once, and the final plan is composed and rendered deterministically (`agent/planning/`). Critical QA findings, narrow requests that do not need a plan, or synthesis failures produce bounded, evidence-based outputs instead.
 7. Optional final QA repair, planner publication guards, response cleanup, and a single source footer run before rendering.
 
 ## 🤝 Agent Roles and Tool Ownership

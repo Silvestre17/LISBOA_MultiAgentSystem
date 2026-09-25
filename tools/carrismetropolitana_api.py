@@ -99,9 +99,6 @@ CARRIS_VEHICLES_URL = f"{CARRIS_BASE_URL}/vehicles"
 # Cache for real-time vehicle data (30 seconds TTL)
 _vehicle_cache: Dict[str, Any] = {"data": None, "timestamp": 0, "ttl": 30}
 
-# Nominatim (OpenStreetMap) - Free geocoding service
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-
 # ==========================================================================
 # Cache Variables
 

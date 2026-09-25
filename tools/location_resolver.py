@@ -17,7 +17,10 @@
 
 import logging
 import re
+import threading
+import time
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from difflib import SequenceMatcher
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
@@ -38,8 +41,20 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT = 10
+# A plausible candidate at or above this score ends the variant loop early;
+# a query whose first variants return nothing in scope is abandoned.
+_CONFIDENT_GEOCODE_SCORE = 10.0
+_MAX_EMPTY_GEOCODE_VARIANTS = 6
+# Shared pool for the two geocoding providers, so a slow provider never
+# blocks an answer that the other one already returned.
+_GEOCODER_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="geocoder")
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 NOMINATIM_USER_AGENT = "LisbonUrbanAssistant/1.0 (research@novaims.pt)"
+# Nominatim's usage policy allows one request per second per application;
+# geocoding runs from several threads, so every request takes its turn here.
+_NOMINATIM_MIN_INTERVAL_S = 1.0
+_nominatim_lock = threading.Lock()
+_nominatim_last_request = [0.0]
 PHOTON_URL = "https://photon.komoot.io/api/"
 
 LISBON_CITY_BOUNDS = {
@@ -702,6 +717,30 @@ def _strip_location_query_tail(value: str) -> str:
     return cleaned
 
 
+# "From the centre" names no place; Rossio is the conventional centre of Lisbon
+# (Baixa, served by Metro, Carris and CP), so routes start there and say so.
+CITY_CENTRE_REFERENCE = "Rossio"
+_VAGUE_CITY_CENTRE_RE = re.compile(
+    r"^(?:o\s+|the\s+|le\s+|el\s+)?(?:centro|centre|center|downtown|city\s+cent(?:re|er)|centre[-\s]ville|"
+    r"centro\s+(?:de\s+lisboa|da\s+cidade|hist[oó]rico)|cent(?:re|er)\s+of\s+(?:lisbon|the\s+city)|"
+    r"lisbon\s+cent(?:re|er)|downtown\s+lisbon|baixa\s+lisboeta)$",
+    re.IGNORECASE,
+)
+
+
+def is_vague_city_centre(location_name: str) -> bool:
+    """Return whether a location argument only says "the city centre".
+
+    Args:
+        location_name: Location fragment from the user or a tool argument.
+
+    Returns:
+        True for "centro", "the centre", "downtown" and similar phrases that
+        name no specific place.
+    """
+    return bool(_VAGUE_CITY_CENTRE_RE.match(str(location_name or "").strip(" .?!,;:")))
+
+
 def clean_location_query_fragment(location_name: str) -> str:
     """Extract the location phrase from a free-form user/tool argument.
 
@@ -719,6 +758,8 @@ def clean_location_query_fragment(location_name: str) -> str:
     raw = re.sub(r"\s+", " ", str(location_name or "")).strip(" .?!,;:")
     if not raw:
         return ""
+    if is_vague_city_centre(raw):
+        return CITY_CENTRE_REFERENCE
     if _is_generic_service_request_fragment(raw):
         return ""
 
@@ -808,6 +849,11 @@ _LOCATION_LOCALITY_TERMS = {
     "restelo", "chiado", "baixa", "alfama", "arroios", "saldanha",
     "campolide", "ajuda", "alcantara", "alcântara", "mouraria",
     "graca", "graça", "olivais", "benfica", "lumiar",
+    # Neighbourhood names that catalogue addresses append after the street.
+    "parque", "nacoes", "nações", "expo", "oriente", "lapa", "estrela",
+    "santos", "principe", "príncipe", "areeiro", "alvalade", "marvila",
+    "beato", "carnide", "telheiras", "ourique", "intendente", "anjos",
+    "rato", "amoreiras", "restauradores", "rossio", "sodre", "sodré",
 }
 _REQUESTED_PLACE_TYPE_COMPATIBILITY = {
     "bar": {"bar", "pub", "restaurant", "cafe", "café", "shop"},
@@ -977,10 +1023,16 @@ def _best_brand_cluster_candidate(cluster: List[Dict[str, Any]]) -> Dict[str, An
 
 
 def _meaningful_location_query_terms(normalized_query: str) -> set[str]:
-    """Return query terms that can distinguish one place from another."""
+    """Return query terms that can distinguish one place from another.
+
+    House numbers and postcodes are left out: geocoder display names rarely
+    repeat them, and requiring them rejected correct street matches.
+    """
     return {
         term for term in normalized_query.split()
-        if len(term) >= 3 and term not in _AMBIGUITY_GENERIC_LOCATION_TERMS
+        if len(term) >= 3
+        and term not in _AMBIGUITY_GENERIC_LOCATION_TERMS
+        and not re.fullmatch(r"[\d\-/.]+", term)
     }
 
 
@@ -1193,7 +1245,7 @@ def _build_dynamic_location_ambiguity_hints(raw_location: str) -> List[str]:
             *query_variants,
         ]
     for query in list(dict.fromkeys(query_variants))[:6]:
-        for result in _fetch_nominatim_results_cached(query):
+        for result in _fetch_nominatim_results(query):
             lat = _safe_float(result.get("lat"))
             lon = _safe_float(result.get("lon"))
             if lat is None or lon is None:
@@ -1219,7 +1271,7 @@ def _build_dynamic_location_ambiguity_hints(raw_location: str) -> List[str]:
                 prefer_city=True,
             )
             candidates.append(scored)
-        for result in _fetch_photon_results_cached(query):
+        for result in _fetch_photon_results(query):
             lat = _safe_float(result.get("lat"))
             lon = _safe_float(result.get("lon"))
             if lat is None or lon is None:
@@ -1743,39 +1795,109 @@ def _resolve_curated_location_point(location_name: str) -> Optional[Dict[str, An
     }
 
 
-@lru_cache(maxsize=256)
-def _fetch_nominatim_results_cached(query: str) -> List[Dict[str, Any]]:
-    """Fetches and caches raw Nominatim results for a query.
+class _GeocoderUnavailable(Exception):
+    """Raised when a geocoding provider cannot answer (network error or bad payload)."""
+
+
+def _nominatim_get(url: str, params: Dict[str, Any]) -> requests.Response:
+    """Send one Nominatim request, at most one per second across all threads."""
+    with _nominatim_lock:
+        wait = _NOMINATIM_MIN_INTERVAL_S - (time.monotonic() - _nominatim_last_request[0])
+        if wait > 0:
+            time.sleep(wait)
+        _nominatim_last_request[0] = time.monotonic()
+    return requests.get(url, params=params, headers={"User-Agent": NOMINATIM_USER_AGENT}, timeout=REQUEST_TIMEOUT)
+
+
+@lru_cache(maxsize=512)
+def _fetch_nominatim_results_cached(query: str) -> Tuple[Dict[str, Any], ...]:
+    """Fetch and cache raw Nominatim results for a query.
+
+    Only successful answers are cached: a network failure raises, so the same
+    query is tried again on a later request instead of staying empty.
 
     Args:
         query: Nominatim query string.
 
     Returns:
-        Raw list of result dictionaries.
-    """
-    headers = {"User-Agent": NOMINATIM_USER_AGENT}
-    params = _build_nominatim_search_params(query)
+        Raw result dictionaries.
 
+    Raises:
+        _GeocoderUnavailable: When Nominatim cannot be reached or answers badly.
+    """
+    params = _build_nominatim_search_params(query)
     try:
-        response = requests.get(
-            NOMINATIM_URL,
-            params=params,
-            headers=headers,
-            timeout=REQUEST_TIMEOUT,
-        )
+        response = _nominatim_get(NOMINATIM_URL, params)
         response.raise_for_status()
         payload = response.json()
-        if not isinstance(payload, list):
-            return []
-        return payload
-    except ValueError as exc:
-        logger.info("Invalid Nominatim JSON for '%s': %s", query, exc)
-        return []
-    except requests.RequestException as exc:
-        logger.info("Nominatim lookup failed for '%s': %s", query, exc)
-        return []
-    except Exception as exc:
-        logger.info("Unexpected Nominatim error for '%s': %s", query, exc)
+    except (requests.RequestException, ValueError) as exc:
+        raise _GeocoderUnavailable(f"Nominatim lookup failed for {query!r}: {exc}") from exc
+    return tuple(payload) if isinstance(payload, list) else ()
+
+
+def reverse_geocode_address(lat: float, lon: float) -> str:
+    """Return a street address for a point, or "" (see :func:`_reverse_geocode_address_cached`)."""
+    try:
+        return _reverse_geocode_address_cached(lat, lon)
+    except _GeocoderUnavailable as exc:
+        logger.info("%s", exc)
+        return ""
+
+
+@lru_cache(maxsize=512)
+def _reverse_geocode_address_cached(lat: float, lon: float) -> str:
+    """Return a street address for a point, in the catalogue's style, or "".
+
+    Places grounded from Wikipedia carry coordinates but no address; the
+    answer should still say where they are ("Rua Garrett, 73, 1200-203,
+    Lisboa"), not only link a map.
+
+    Args:
+        lat: Latitude.
+        lon: Longitude.
+
+    Returns:
+        "Street, number, postcode, town", or "" when OpenStreetMap has no
+        street for the point.
+
+    Raises:
+        _GeocoderUnavailable: When Nominatim cannot be reached.
+    """
+    address: Dict[str, Any] = {}
+    for attempt in range(2):
+        try:
+            response = _nominatim_get(
+                NOMINATIM_URL.replace("/search", "/reverse"),
+                {"lat": f"{lat:.6f}", "lon": f"{lon:.6f}", "format": "jsonv2", "zoom": 18, "addressdetails": 1},
+            )
+            response.raise_for_status()
+            address = (response.json() or {}).get("address") or {}
+            break
+        except (requests.RequestException, ValueError) as exc:
+            if attempt == 0:
+                # One more try, after the shared one-second spacing.
+                continue
+            # Raised, not returned, so a network failure is not cached as "no address".
+            raise _GeocoderUnavailable(f"Nominatim reverse lookup failed for {lat:.5f},{lon:.5f}: {exc}") from exc
+    street = address.get("road") or address.get("pedestrian") or address.get("square") or address.get("footway")
+    if not street:
+        return ""
+    town = address.get("city") or address.get("town") or address.get("village") or address.get("municipality") or ""
+    number = str(address.get("house_number") or "")
+    numbers = [item.strip() for item in re.split(r"[,;]", number) if item.strip()]
+    if len(numbers) > 1:
+        # "69,71,73,75" -> "69-75"
+        number = f"{numbers[0]}-{numbers[-1]}"
+    parts = [street, number, address.get("postcode") or "", town]
+    return ", ".join(part for part in parts if part)
+
+
+def _fetch_nominatim_results(query: str) -> List[Dict[str, Any]]:
+    """Return Nominatim results, or an empty list when the provider is unavailable."""
+    try:
+        return list(_fetch_nominatim_results_cached(query))
+    except _GeocoderUnavailable as exc:
+        logger.info("%s", exc)
         return []
 
 
@@ -1831,9 +1953,9 @@ def _photon_feature_to_result(feature: Dict[str, Any], query: str) -> Optional[D
     }
 
 
-@lru_cache(maxsize=256)
-def _fetch_photon_results_cached(query: str) -> List[Dict[str, Any]]:
-    """Fetch and cache Photon/OSM results as a fallback to Nominatim."""
+@lru_cache(maxsize=512)
+def _fetch_photon_results_cached(query: str) -> Tuple[Dict[str, Any], ...]:
+    """Fetch and cache Photon/OSM results; failures raise and are not cached."""
     headers = {"User-Agent": NOMINATIM_USER_AGENT}
     params = {
         "q": query,
@@ -1845,24 +1967,26 @@ def _fetch_photon_results_cached(query: str) -> List[Dict[str, Any]]:
         response = requests.get(PHOTON_URL, params=params, headers=headers, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         payload = response.json()
-        features = payload.get("features") if isinstance(payload, dict) else None
-        if not isinstance(features, list):
-            return []
-        results: List[Dict[str, Any]] = []
-        for feature in features:
-            if isinstance(feature, dict):
-                result = _photon_feature_to_result(feature, query)
-                if result:
-                    results.append(result)
-        return results
-    except ValueError as exc:
-        logger.info("Invalid Photon JSON for '%s': %s", query, exc)
-        return []
-    except requests.RequestException as exc:
-        logger.info("Photon lookup failed for '%s': %s", query, exc)
-        return []
-    except Exception as exc:
-        logger.info("Unexpected Photon error for '%s': %s", query, exc)
+    except (requests.RequestException, ValueError) as exc:
+        raise _GeocoderUnavailable(f"Photon lookup failed for {query!r}: {exc}") from exc
+    features = payload.get("features") if isinstance(payload, dict) else None
+    if not isinstance(features, list):
+        return ()
+    results: List[Dict[str, Any]] = []
+    for feature in features:
+        if isinstance(feature, dict):
+            result = _photon_feature_to_result(feature, query)
+            if result:
+                results.append(result)
+    return tuple(results)
+
+
+def _fetch_photon_results(query: str) -> List[Dict[str, Any]]:
+    """Return Photon results, or an empty list when the provider is unavailable."""
+    try:
+        return list(_fetch_photon_results_cached(query))
+    except _GeocoderUnavailable as exc:
+        logger.info("%s", exc)
         return []
 
 
@@ -1973,8 +2097,9 @@ def geocode_location_name(
     candidates: List[Dict[str, Any]] = []
     seen = set()
 
-    for query in _build_query_variants(query_clean):
-        for result in _fetch_nominatim_results_cached(query):
+    def collect(query: str, results: List[Dict[str, Any]]) -> None:
+        """Score and keep in-scope, non-duplicate geocoder results."""
+        for result in results:
             lat = _safe_float(result.get("lat"))
             lon = _safe_float(result.get("lon"))
             if lat is None or lon is None:
@@ -2006,38 +2131,32 @@ def geocode_location_name(
                 prefer_city=effective_prefer_city,
             )
             candidates.append(scored)
-        for result in _fetch_photon_results_cached(query):
-            lat = _safe_float(result.get("lat"))
-            lon = _safe_float(result.get("lon"))
-            if lat is None or lon is None:
-                continue
 
-            scope = classify_coordinate_scope(lat, lon)
-            if scope == "outside_scope":
-                continue
-            if not allow_aml and scope != "lisbon_city":
-                continue
+    def confident() -> bool:
+        return any(
+            candidate.get("score", 0.0) >= _CONFIDENT_GEOCODE_SCORE
+            and _candidate_is_plausible_for_location_query(query_clean, candidate)
+            for candidate in candidates
+        )
 
-            dedupe_key = (
-                round(lat, 5),
-                round(lon, 5),
-                normalize_location_text(result.get("display_name", "")),
-            )
-            if dedupe_key in seen:
-                continue
-            seen.add(dedupe_key)
-
-            scored = dict(result)
-            scored["lat"] = lat
-            scored["lon"] = lon
-            scored["scope"] = scope
-            scored["query_used"] = query
-            scored["score"] = _score_nominatim_result(
-                scored,
-                query_norm=query_norm,
-                prefer_city=effective_prefer_city,
-            )
-            candidates.append(scored)
+    # Each variant used to cost two sequential HTTP round-trips, and every
+    # variant was always queried, so one address took 7-24 s. The two providers
+    # are now queried together, a confident answer from either one is used
+    # without waiting for the other, and the loop stops at the first variant
+    # that yields a confident, plausible match.
+    for variant_index, query in enumerate(_build_query_variants(query_clean), start=1):
+        futures = [
+            _GEOCODER_POOL.submit(_fetch_nominatim_results, query),
+            _GEOCODER_POOL.submit(_fetch_photon_results, query),
+        ]
+        for future in as_completed(futures):
+            collect(query, future.result())
+            if confident():
+                break
+        if confident():
+            break
+        if not candidates and variant_index >= _MAX_EMPTY_GEOCODE_VARIANTS:
+            break
 
     distinctive_candidates = [
         candidate for candidate in candidates
@@ -2485,6 +2604,38 @@ def resolve_location_query(
     }
 
 
+def resolve_coordinates(lat: float, lon: float, label: str = "") -> Dict[str, Any]:
+    """Return the transport-aware payload of ``resolve_location_query`` for known coordinates.
+
+    Itinerary stops from the VisitLisboa catalogue have stored coordinates, so
+    their legs need neither geocoding nor its plausibility checks.
+
+    Args:
+        lat: Latitude.
+        lon: Longitude.
+        label: Display name of the place.
+
+    Returns:
+        Resolution payload with the nearest Metro and CP stations.
+    """
+    return {
+        "query": label,
+        "raw_query": label,
+        "normalized_query": normalize_location_text(label),
+        "success": True,
+        "display_name": label,
+        "full_display_name": label,
+        "lat": lat,
+        "lon": lon,
+        "scope": classify_coordinate_scope(lat, lon),
+        "match_source": "stored_coordinates",
+        "confidence": 1.0,
+        "nearest_metro": _find_nearest_metro_context(lat, lon),
+        "nearest_cp": _find_nearest_cp_context(lat, lon),
+        "warnings": [],
+    }
+
+
 def _estimate_walk_minutes(distance_km: float) -> int:
     """Estimates walking minutes using a practical urban pace.
 
@@ -2648,9 +2799,13 @@ def get_location_display_name(location_name: str, detailed: bool = False) -> str
                 return resolved_display
             return raw.title()
         resolved_display = str(resolved.get("display_name") or raw).strip()
-        if _query_terms_missing_from_display(raw, resolved_display):
-            return raw
-        return resolved_display
+        # The geocoder's name is used only to restore accents and casing
+        # ("marques de pombal" -> "Marquês de Pombal"). A longer name may be
+        # another place ("Jardins do Cristo Rei" for "Cristo Rei", "Spotters
+        # area Lisbon Airport Arrivals" for "Lisbon airport"): the user's words stay.
+        if normalize_location_text(resolved_display) == normalize_location_text(raw):
+            return resolved_display
+        return raw if raw != raw.lower() else raw.title()
 
     curated_display_name = _CURATED_DISPLAY_NAMES.get(normalize_location_text(raw))
     if curated_display_name:

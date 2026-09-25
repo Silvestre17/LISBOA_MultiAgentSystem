@@ -36,6 +36,7 @@ import re
 import shutil
 import sqlite3
 import stat
+import threading
 import time
 import unicodedata
 import zipfile
@@ -115,15 +116,6 @@ _gtfs_rt_feed_meta: Dict[str, Any] = {
     "vehicle_count": 0,
 }
 
-# Route type mapping (GTFS standard: 0=Tram, 3=Bus)
-ROUTE_TYPES = {
-    "tram": 0,
-    "elétrico": 0,
-    "eletrico": 0,
-    "bus": 3,
-    "autocarro": 3,
-}
-
 # Vehicle status mapping (GTFS-RT VehicleStopStatus)
 VEHICLE_STATUS = {
     0: "INCOMING_AT",  # Approaching stop
@@ -131,13 +123,19 @@ VEHICLE_STATUS = {
     2: "IN_TRANSIT_TO",  # In transit to next stop
 }
 
-# Nominatim geocoding
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-
 
 # ==========================================================================
 # Utility Functions
 # ==========================================================================
+
+
+_COORDINATE_TEXT_RE = re.compile(r"^\s*(-?\d{1,2}\.\d{3,})\s*,\s*(-?\d{1,2}\.\d{3,})\s*$")
+
+
+def _parse_coordinate_text(text: str) -> Optional[Tuple[float, float]]:
+    """Return ``(lat, lon)`` when a location is given as "lat,lon"."""
+    match = _COORDINATE_TEXT_RE.match(str(text or ""))
+    return (float(match.group(1)), float(match.group(2))) if match else None
 
 
 def geocode_location(
@@ -147,11 +145,15 @@ def geocode_location(
     Geocodes a place name using the shared Lisbon/AML resolver.
 
     Args:
-        place_name: Place name to geocode.
+        place_name: Place name to geocode, or "lat,lon" coordinates (used by
+            itinerary legs whose stops have stored coordinates).
 
     Returns:
         Tuple of (latitude, longitude, display_name) or (None, None, None) on error.
     """
+    coordinates = _parse_coordinate_text(place_name)
+    if coordinates:
+        return coordinates[0], coordinates[1], place_name
     try:
         from tools.location_resolver import resolve_location_query
     except ImportError:
@@ -384,15 +386,6 @@ def _search_stop_rows(
     return [row for _, row in scored_rows[:limit]]
 
 
-def _format_delay_label(delay_mins: int) -> str:
-    """Formats a delay indicator for live departure displays."""
-    if delay_mins > 2:
-        return f"({delay_mins}m late)"
-    if delay_mins < -2:
-        return f"({abs(delay_mins)}m early)"
-    return "(Live)"
-
-
 # ==========================================================================
 # GTFS Manager Class
 # ==========================================================================
@@ -418,6 +411,13 @@ class CarrisGTFSManager:
     # we serve the valid stale DB and skip the network round-trip for a while.
     _refresh_cooldown_until: float = 0.0
     _REFRESH_COOLDOWN_S = 900  # 15 minutes
+    # While a usable database exists, the remote freshness check runs at most
+    # once per interval and in a background thread, so a user request never
+    # waits on the update check, the ~34 MB download, or the SQLite rebuild.
+    _last_update_check_at: float = 0.0
+    _UPDATE_CHECK_INTERVAL_S = 6 * 3600
+    _background_refresh_lock = threading.Lock()
+    _background_refresh_thread: Optional[threading.Thread] = None
 
     def __init__(self, data_dir: str = CARRIS_DATA_DIR, db_path: str = CARRIS_DB_PATH):
         self.data_dir = data_dir
@@ -585,21 +585,14 @@ class CarrisGTFSManager:
         """
         self._ensure_data_dir()
 
-        if os.path.exists(self.db_path):
-            try:
-                os.remove(self.db_path)
-            except PermissionError as exc:
-                logger.warning(
-                    "Carris database is locked during GTFS refresh; serving existing database: %s",
-                    exc,
-                )
-                CarrisGTFSManager._refresh_cooldown_until = (
-                    time.time() + CarrisGTFSManager._REFRESH_COOLDOWN_S
-                )
-                return False
+        # Build next to the live database and swap it in only when complete,
+        # so concurrent readers never see a missing or half-written file.
+        build_path = f"{self.db_path}.building"
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(build_path)
 
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = sqlite3.connect(build_path)
             cursor = conn.cursor()
 
             # .IMPORTANT: Keep FKs OFF during import - real GTFS data often has
@@ -821,6 +814,11 @@ class CarrisGTFSManager:
                     cursor.execute(idx_sql)
                 except Exception as e:
                     logger.warning(f"Index warning: {e}")
+            conn.commit()
+
+            logger.info("Building stop patterns...")
+            for statement in _PATTERN_STOPS_STATEMENTS:
+                cursor.execute(statement)
 
             # =================================================================
             # Optimize Database
@@ -834,56 +832,129 @@ class CarrisGTFSManager:
 
             # VACUUM must be outside transaction (separate connection)
             logger.info("Running VACUUM to reclaim space...")
-            conn = sqlite3.connect(self.db_path)
+            conn = sqlite3.connect(build_path)
             conn.execute("VACUUM")
             conn.close()
 
-            self._save_metadata(
-                {
-                    "gtfs_date": gtfs_date,
-                    "updated_at": datetime.now().isoformat(),
-                    "db_path": os.path.basename(self.db_path),
-                    "schema_version": "2.0",  # Indicates optimized schema
-                    "features": [
-                        "primary_keys",
-                        "foreign_keys_declarative",
-                        "indexes",
-                        "analyzed",
-                    ],
-                }
-            )
-
-            db_size = os.path.getsize(self.db_path) / (1024 * 1024)
-            logger.info(
-                f"SQLite database created: {db_size:.1f} MB (optimized schema v2.0)"
-            )
-
-            if not self._database_has_stops():
-                logger.error("Carris GTFS conversion produced an empty stops table")
-                return False
-
-            return True
-
         except Exception as e:
             logger.error(f"Failed to convert GTFS to SQLite: {e}")
+            with contextlib.suppress(OSError):
+                os.remove(build_path)
             return False
 
-    def ensure_database(self, force_update: bool = False) -> bool:
-        """Ensures database exists and is up-to-date."""
-        if not force_update and os.path.exists(self.db_path):
-            # Fast path: if a recent refresh attempt failed and we still have a
-            # usable DB, serve it immediately instead of paying the network
-            # check + download timeout again on this request.
-            if (
-                time.time() < CarrisGTFSManager._refresh_cooldown_until
-                and self._database_has_stops()
-            ):
-                return True
-            local_database_ready = self._database_has_stops()
+        if not self._database_file_has_stops(build_path):
+            logger.error("Carris GTFS conversion produced an empty stops table")
+            with contextlib.suppress(OSError):
+                os.remove(build_path)
+            return False
+
+        try:
+            # Windows refuses the swap while another handle is open (a
+            # reader, an antivirus scan, a sync client); retry briefly.
+            for attempt in range(5):
+                try:
+                    os.replace(build_path, self.db_path)
+                    break
+                except PermissionError:
+                    if attempt == 4:
+                        raise
+                    time.sleep(3)
+        except PermissionError as exc:
+            # Windows keeps open SQLite files locked; serve the current
+            # database and retry after the cooldown.
+            logger.warning(
+                "Carris database is in use; keeping the current database until the next refresh: %s",
+                exc,
+            )
+            with contextlib.suppress(OSError):
+                os.remove(build_path)
+            CarrisGTFSManager._refresh_cooldown_until = (
+                time.time() + CarrisGTFSManager._REFRESH_COOLDOWN_S
+            )
+            return False
+
+        self._save_metadata(
+            {
+                "gtfs_date": gtfs_date,
+                "updated_at": datetime.now().isoformat(),
+                "db_path": os.path.basename(self.db_path),
+                "schema_version": "2.0",  # Indicates optimized schema
+                "features": [
+                    "primary_keys",
+                    "foreign_keys_declarative",
+                    "indexes",
+                    "analyzed",
+                ],
+            }
+        )
+
+        db_size = os.path.getsize(self.db_path) / (1024 * 1024)
+        logger.info(f"SQLite database created: {db_size:.1f} MB (optimized schema v2.0)")
+        return True
+
+    def _schedule_background_refresh(self) -> None:
+        """Start one background freshness check when the interval has elapsed."""
+        manager_cls = CarrisGTFSManager
+        now = time.time()
+        if (
+            now < manager_cls._refresh_cooldown_until
+            or now - manager_cls._last_update_check_at < manager_cls._UPDATE_CHECK_INTERVAL_S
+        ):
+            return
+        with manager_cls._background_refresh_lock:
+            if now - manager_cls._last_update_check_at < manager_cls._UPDATE_CHECK_INTERVAL_S:
+                return
+            running = manager_cls._background_refresh_thread
+            if running is not None and running.is_alive():
+                return
+            manager_cls._last_update_check_at = now
+            thread = threading.Thread(
+                target=self._refresh_in_background,
+                name="carris-gtfs-refresh",
+                daemon=True,
+            )
+            manager_cls._background_refresh_thread = thread
+            thread.start()
+
+    def _refresh_in_background(self) -> None:
+        """Download and swap in a newer GTFS snapshot without blocking requests.
+
+        A lock file keeps concurrent processes (for example parallel evaluation
+        runs) from downloading and building the same snapshot at once.
+        """
+        lock_path = f"{self.db_path}.refresh.lock"
+        try:
+            with contextlib.suppress(OSError):
+                if time.time() - os.path.getmtime(lock_path) > 3600:
+                    os.remove(lock_path)
+            lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except OSError:
+            return
+        try:
             needs_update, remote_date = self.check_for_updates()
             if not needs_update:
-                if local_database_ready:
-                    return True
+                return
+            gtfs_content = self.download_gtfs()
+            if not gtfs_content or not self.convert_to_sqlite(gtfs_content, remote_date or "unknown"):
+                CarrisGTFSManager._refresh_cooldown_until = (
+                    time.time() + CarrisGTFSManager._REFRESH_COOLDOWN_S
+                )
+        except Exception as exc:
+            logger.warning("Background Carris GTFS refresh failed; serving the current database: %s", exc)
+        finally:
+            os.close(lock_fd)
+            with contextlib.suppress(OSError):
+                os.remove(lock_path)
+
+    def ensure_database(self, force_update: bool = False) -> bool:
+        """Ensures the database exists; a usable one is refreshed in the background."""
+        if not force_update and os.path.exists(self.db_path):
+            local_database_ready = self._database_has_stops()
+            if local_database_ready:
+                self._schedule_background_refresh()
+                return True
+            needs_update, remote_date = self.check_for_updates()
+            if not needs_update:
                 if self.restore_database_from_seed():
                     logger.warning("Restored Carris repository seed database because local SQLite was empty")
                     return True
@@ -938,6 +1009,84 @@ class CarrisGTFSManager:
 # ==========================================================================
 # Database Query Helpers
 # ==========================================================================
+
+# One representative trip per distinct (route, headsign, stop sequence).
+# "Which routes serve stop A before stop B" then joins a few hundred stop
+# patterns (about 300 for Carris) instead of the 2.4M-row stop_times table.
+_PATTERN_STOPS_STATEMENTS = (
+    "CREATE TABLE IF NOT EXISTS pattern_stops AS "
+    "WITH trip_signatures AS ("
+    "    SELECT trip_id, group_concat(stop_id, '>') AS signature"
+    "    FROM (SELECT trip_id, stop_id FROM stop_times ORDER BY trip_id, stop_sequence)"
+    "    GROUP BY trip_id"
+    "), representatives AS ("
+    "    SELECT MIN(s.trip_id) AS trip_id"
+    "    FROM trip_signatures s JOIN trips t ON t.trip_id = s.trip_id"
+    "    GROUP BY t.route_id, COALESCE(t.trip_headsign, ''), s.signature"
+    ") "
+    "SELECT st.trip_id AS pattern_trip_id, t.route_id, t.trip_headsign, st.stop_id, st.stop_sequence "
+    "FROM representatives rep "
+    "JOIN stop_times st ON st.trip_id = rep.trip_id "
+    "JOIN trips t ON t.trip_id = rep.trip_id",
+    "CREATE INDEX IF NOT EXISTS idx_pattern_stops_stop ON pattern_stops (stop_id)",
+    "CREATE INDEX IF NOT EXISTS idx_pattern_stops_trip_seq ON pattern_stops (pattern_trip_id, stop_sequence)",
+)
+_pattern_build_lock = threading.Lock()
+_pattern_build_thread: Optional[threading.Thread] = None
+_pattern_build_failed_at = 0.0
+_PATTERN_BUILD_RETRY_S = 600
+
+
+def _create_pattern_stops(db_path: str) -> None:
+    """Create the stop-pattern table and its indexes in one transaction."""
+    conn = sqlite3.connect(db_path, timeout=60, isolation_level=None)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        for statement in _PATTERN_STOPS_STATEMENTS:
+            conn.execute(statement)
+        conn.execute("COMMIT")
+    except Exception:
+        with contextlib.suppress(sqlite3.Error):
+            conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
+
+
+def _build_pattern_stops_in_background(db_path: str) -> None:
+    global _pattern_build_failed_at
+    try:
+        _create_pattern_stops(db_path)
+        logger.info("Carris stop-pattern table ready")
+    except sqlite3.Error as exc:
+        _pattern_build_failed_at = time.time()
+        logger.warning("Could not build the Carris stop-pattern table: %s", exc)
+
+
+def _pattern_stops_ready(conn: sqlite3.Connection) -> bool:
+    """Return whether ``pattern_stops`` exists; if not, build it in the background.
+
+    Databases converted by this version already contain the table. Older ones
+    (repository seed, release backup) get it once, in a background thread, and
+    route searches use the ``stop_times`` join until it is ready.
+    """
+    global _pattern_build_thread
+    if conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'pattern_stops'"
+    ).fetchone():
+        return True
+    if time.time() - _pattern_build_failed_at < _PATTERN_BUILD_RETRY_S:
+        return False
+    with _pattern_build_lock:
+        if _pattern_build_thread is None or not _pattern_build_thread.is_alive():
+            _pattern_build_thread = threading.Thread(
+                target=_build_pattern_stops_in_background,
+                args=(CARRIS_DB_PATH,),
+                name="carris-pattern-stops",
+                daemon=True,
+            )
+            _pattern_build_thread.start()
+    return False
 
 
 def _get_db_connection() -> Optional[sqlite3.Connection]:
@@ -1624,8 +1773,16 @@ def carris_get_stops(query: str = "", limit: Optional[int] = None) -> str:
 
 
 def _compact_route_stop_names(stop_names: List[str], max_names: int = 12) -> List[str]:
-    """Return a compact representative stop sequence."""
-    cleaned = [str(name or "").strip() for name in stop_names if str(name or "").strip()]
+    """Return a compact representative stop sequence.
+
+    Consecutive GTFS stops often share a name (two platforms of "Cais Sodré");
+    a traveller reads them as one stop, so repeats are collapsed.
+    """
+    cleaned: List[str] = []
+    for name in stop_names:
+        label = str(name or "").strip()
+        if label and (not cleaned or cleaned[-1] != label):
+            cleaned.append(label)
     if len(cleaned) <= max_names:
         return cleaned
     head_count = max(3, max_names // 2)
@@ -1729,8 +1886,27 @@ def carris_get_routes(route_type: str = "", route_id: str = "", limit: int = 50)
                 conditions.append("route_short_name NOT LIKE '%E'")
 
         if route_id:
-            conditions.append("(route_id LIKE ? OR route_short_name LIKE ?)")
-            params.extend([f"%{route_id}%", f"%{route_id}%"])
+            # "28" names the 28E tram (or bus 28), not every line containing 28
+            # (728, 28B): an exact line name wins over the partial match.
+            wanted = str(route_id).strip().upper()
+            exact_names = [wanted]
+            if wanted.isdigit():
+                type_lower = str(route_type or "").lower().strip()
+                if type_lower in ["tram", "elétrico", "eletrico"]:
+                    exact_names = [f"{wanted}E"]
+                elif type_lower not in ["bus", "autocarro"]:
+                    exact_names.append(f"{wanted}E")
+            placeholders = ",".join("?" for _ in exact_names)
+            cursor.execute(
+                f"SELECT COUNT(*) FROM routes WHERE UPPER(route_short_name) IN ({placeholders})",
+                exact_names,
+            )
+            if cursor.fetchone()[0]:
+                conditions.append(f"UPPER(route_short_name) IN ({placeholders})")
+                params.extend(exact_names)
+            else:
+                conditions.append("(route_id LIKE ? OR route_short_name LIKE ?)")
+                params.extend([f"%{route_id}%", f"%{route_id}%"])
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 
@@ -1766,21 +1942,19 @@ def carris_get_routes(route_type: str = "", route_id: str = "", limit: int = 50)
             title_route = ", ".join(route_short_names) or route_id
             icon = "🚋" if any(name.endswith("E") for name in route_short_names) else "🚌"
             response = f"### {icon} **Carris Urban route {title_route}**\n\n"
-            response += "- **Operator:** Carris Urban\n"
-            response += "- **Source data:** official Carris data\n"
-            response += "- **Route variants:**\n"
-            for variant in variants[:6]:
-                response += f"    - {variant}\n"
+            response += "- 🚌 **Operator:** Carris Urban\n"
+            variant_text = "; ".join(variants[:6])
             if len(variants) > 6:
-                response += f"    - ... and {len(variants) - 6} more variants\n"
+                variant_text += f"; and {len(variants) - 6} more"
+            response += f"- 🔀 **Route variants:** {variant_text}\n"
             if stop_sequences:
-                response += "\n- **Representative stop sequences:**\n"
+                response += "\n"
                 for sample in stop_sequences:
-                    stops = " -> ".join(sample["stops"])
+                    stops = " → ".join(sample["stops"])
                     response += (
-                        f"    - **{sample['variant']}** "
-                        f"({sample['stop_count']} stops; {sample['first_stop']} -> {sample['last_stop']}): "
-                        f"{stops}\n"
+                        f"- 🚏 **{sample['variant']}** "
+                        f"({sample['stop_count']} stops; {sample['first_stop']} → {sample['last_stop']})\n"
+                        f"    - {stops}\n"
                     )
                 response += (
                     "\n- **Limitation:** these are representative stop sequences; "
@@ -2144,7 +2318,8 @@ def carris_find_routes_between(
         cursor = conn.cursor()
 
         response = f"🚌 **Rota Carris: {origin} → {destination}**\n\n"
-        ambiguity_note = build_location_ambiguity_preamble(origin, destination, language="pt")
+        coordinate_input = bool(_parse_coordinate_text(origin) or _parse_coordinate_text(destination))
+        ambiguity_note = "" if coordinate_input else build_location_ambiguity_preamble(origin, destination, language="pt")
         if ambiguity_note:
             conn.close()
             return ambiguity_note
@@ -2247,6 +2422,7 @@ def carris_find_routes_between(
         origin_stops = []
         dest_stops = []
         final_radius = search_radius_km
+        use_patterns = _pattern_stops_ready(conn)
 
         for r in [search_radius_km, search_radius_km * 2, search_radius_km * 3]:
             final_radius = r
@@ -2283,19 +2459,30 @@ def carris_find_routes_between(
             ph_o = ",".join(["?" for _ in origin_ids])
             ph_d = ",".join(["?" for _ in dest_ids])
 
-            sql = f"""
-                SELECT DISTINCT r.route_id, r.route_short_name, r.route_long_name
-                FROM routes r
-                WHERE r.route_id IN (
-                    SELECT t.route_id
-                    FROM stop_times st_o
-                    JOIN stop_times st_d ON st_o.trip_id = st_d.trip_id
-                        AND st_o.stop_sequence < st_d.stop_sequence
-                    JOIN trips t ON st_o.trip_id = t.trip_id
-                    WHERE st_o.stop_id IN ({ph_o})
-                      AND st_d.stop_id IN ({ph_d})
-                )
-            """
+            if use_patterns:
+                sql = f"""
+                    SELECT DISTINCT r.route_id, r.route_short_name, r.route_long_name
+                    FROM pattern_stops ps_o
+                    JOIN pattern_stops ps_d ON ps_o.pattern_trip_id = ps_d.pattern_trip_id
+                        AND ps_o.stop_sequence < ps_d.stop_sequence
+                    JOIN routes r ON r.route_id = ps_o.route_id
+                    WHERE ps_o.stop_id IN ({ph_o})
+                      AND ps_d.stop_id IN ({ph_d})
+                """
+            else:
+                sql = f"""
+                    SELECT DISTINCT r.route_id, r.route_short_name, r.route_long_name
+                    FROM routes r
+                    WHERE r.route_id IN (
+                        SELECT t.route_id
+                        FROM stop_times st_o
+                        JOIN stop_times st_d ON st_o.trip_id = st_d.trip_id
+                            AND st_o.stop_sequence < st_d.stop_sequence
+                        JOIN trips t ON st_o.trip_id = t.trip_id
+                        WHERE st_o.stop_id IN ({ph_o})
+                          AND st_d.stop_id IN ({ph_d})
+                    )
+                """
             cursor.execute(sql, origin_ids + dest_ids)
             routes_found = cursor.fetchall()
 
@@ -2351,14 +2538,10 @@ def carris_find_routes_between(
         def _build_route_stop_hints() -> Dict[str, Dict[str, Any]]:
             """Resolve the best boarding/alighting stop pair for every candidate route in one query.
 
-            The previous implementation issued one heavy ``stop_times`` self-join
-            per route (an N+1 pattern that dominated Carris route latency: with N
-            direct routes it ran N near-identical joins). Every per-route query
-            reused the same origin/destination stop-id filters and differed only
-            by ``route_short_name``, so the joins collapse into a single windowed
-            query. ``ROW_NUMBER() ... <= 80`` per route mirrors the prior
-            per-route ``ORDER BY ... LIMIT 80``, so the rows considered for each
-            route - and therefore the selected hint - are identical.
+            Uses the ``pattern_stops`` table (one row set per distinct stop
+            sequence), so every stop pair of every route is considered at a
+            fraction of the cost. Until that table exists, a windowed
+            ``stop_times`` join caps each route at its first 80 pairs.
 
             Returns:
                 Mapping of ``route_short_name`` to the chosen stop-hint row.
@@ -2374,42 +2557,29 @@ def carris_find_routes_between(
             ph_origin = ",".join(["?" for _ in origin_ids_hint])
             ph_dest = ",".join(["?" for _ in dest_ids_hint])
 
-            def _build_route_stop_hints_legacy() -> Dict[str, Dict[str, Any]]:
-                """Fallback for runtimes without SQLite window-function support."""
-                hints: Dict[str, Dict[str, Any]] = {}
-                for route_short_name in route_names:
-                    cursor.execute(
-                        f"""
-                        SELECT
-                            st_o.stop_id AS origin_stop_id,
-                            st_d.stop_id AS destination_stop_id,
-                            t.trip_headsign AS headsign,
-                            so.stop_name AS origin_stop_name,
-                            sd.stop_name AS destination_stop_name
-                        FROM stop_times st_o
-                        JOIN stop_times st_d ON st_o.trip_id = st_d.trip_id
-                            AND st_o.stop_sequence < st_d.stop_sequence
-                        JOIN trips t ON st_o.trip_id = t.trip_id
-                        JOIN routes r ON t.route_id = r.route_id
-                        JOIN stops so ON st_o.stop_id = so.stop_id
-                        JOIN stops sd ON st_d.stop_id = sd.stop_id
-                        WHERE r.route_short_name = ?
-                          AND st_o.stop_id IN ({ph_origin})
-                          AND st_d.stop_id IN ({ph_dest})
-                        ORDER BY st_o.stop_sequence, st_d.stop_sequence
-                        LIMIT 80
-                        """,
-                        [route_short_name, *origin_ids_hint, *dest_ids_hint],
-                    )
-                    rows = cursor.fetchall()
-                    if rows:
-                        hints[route_short_name] = dict(min(rows, key=_stop_pair_score))
-                return hints
-
-            if sqlite3.sqlite_version_info < (3, 25, 0):
-                return _build_route_stop_hints_legacy()
-
-            try:
+            if use_patterns:
+                cursor.execute(
+                    f"""
+                    SELECT r.route_short_name AS route_short_name,
+                           ps_o.stop_id AS origin_stop_id,
+                           ps_d.stop_id AS destination_stop_id,
+                           ps_o.trip_headsign AS headsign,
+                           so.stop_name AS origin_stop_name,
+                           sd.stop_name AS destination_stop_name
+                    FROM pattern_stops ps_o
+                    JOIN pattern_stops ps_d ON ps_o.pattern_trip_id = ps_d.pattern_trip_id
+                        AND ps_o.stop_sequence < ps_d.stop_sequence
+                    JOIN routes r ON r.route_id = ps_o.route_id
+                    JOIN stops so ON ps_o.stop_id = so.stop_id
+                    JOIN stops sd ON ps_d.stop_id = sd.stop_id
+                    WHERE r.route_short_name IN ({ph_routes})
+                      AND ps_o.stop_id IN ({ph_origin})
+                      AND ps_d.stop_id IN ({ph_dest})
+                    ORDER BY ps_o.stop_sequence, ps_d.stop_sequence
+                    """,
+                    [*route_names, *origin_ids_hint, *dest_ids_hint],
+                )
+            else:
                 cursor.execute(
                     f"""
                     SELECT route_short_name, origin_stop_id, destination_stop_id,
@@ -2441,11 +2611,6 @@ def carris_find_routes_between(
                     """,
                     [*route_names, *origin_ids_hint, *dest_ids_hint],
                 )
-            except sqlite3.OperationalError as exc:
-                message = str(exc).lower()
-                if "over" in message or "row_number" in message or "syntax" in message:
-                    return _build_route_stop_hints_legacy()
-                raise
             grouped: Dict[str, List[sqlite3.Row]] = {}
             for row in cursor.fetchall():
                 grouped.setdefault(row["route_short_name"], []).append(row)

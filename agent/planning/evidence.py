@@ -26,6 +26,7 @@ SOURCE_CATALOG: Dict[str, SourceRef] = {
     "carris_metropolitana": SourceRef("carris_metropolitana", "Carris Metropolitana", "Carris Metropolitana", "https://www.carrismetropolitana.pt"),
     "cp": SourceRef("cp", "CP", "CP", "https://www.cp.pt"),
     "lisboa_aberta": SourceRef("lisboa_aberta", "Lisboa Aberta", "Lisboa Aberta", "https://dados.cm-lisboa.pt/"),
+    "wikipedia": SourceRef("wikipedia", "Wikipedia", "Wikipédia", "https://www.wikipedia.org"),
 }
 
 
@@ -150,13 +151,22 @@ def _detect_sources(text: str, default: Sequence[str] = ()) -> List[str]:
     """
     lowered = (text or "").lower()
     sources = list(default)
+    if "wikipedia.org" in lowered:
+        sources.append("wikipedia")
     if "ipma" in lowered or "weather" in lowered or "meteorolog" in lowered:
         sources.append("ipma")
     if "visitlisboa.com" in lowered or "visitlisboa" in lowered:
-        if "/events" in lowered or "event" in lowered or "evento" in lowered:
-            sources.append("visitlisboa_events")
-        else:
+        # The VisitLisboa link path says which catalogue a card comes from; a
+        # ticket link such as ".../event/14759" on a place card does not.
+        if re.search(r"visitlisboa\.com/[a-z-]+/(?:places|locais)/", lowered):
             sources.append("visitlisboa_places")
+        if re.search(r"visitlisboa\.com/[a-z-]+/(?:events|eventos)/", lowered):
+            sources.append("visitlisboa_events")
+        if not re.search(r"visitlisboa\.com/[a-z-]+/(?:places|locais|events|eventos)/", lowered):
+            if "/events" in lowered or "event" in lowered or "evento" in lowered:
+                sources.append("visitlisboa_events")
+            else:
+                sources.append("visitlisboa_places")
     if "metrolisboa" in lowered or "metro de lisboa" in lowered:
         sources.append("metro")
     if re.search(r"\bmetro\b", lowered) or re.search(
@@ -200,8 +210,28 @@ def _clean_title(raw: str) -> str:
     return title
 
 
+_WEATHER_DAY_RE = re.compile(
+    r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow|"
+    r"segunda|terca|quarta|quinta|sexta|sabado|domingo|hoje|amanha)\b"
+)
+_WEATHER_FACT_RE = re.compile(
+    r"\b(?:warning|aviso|alert|alerta|temperature|temperatura|rain|chuva|precipit|wind|vento|"
+    r"conditions|condicoes|forecast|previsao|uv|sunset|por do sol|sunrise|nascer do sol|"
+    r"cloud|nublad|clear|limpo|sun|sol|storm|trovoada|hot|calor|cold|frio)\b|\d+\s*(?:°|º)\s*c"
+)
+_LIVE_WAIT_RE = re.compile(
+    r"\b(?:next train|following|real time wait|tempo real|proximo comboio|seguintes|proximas partidas|"
+    r"next departures|next bus|proximo autocarro|chega em|arrives in)\b"
+)
+_ROUTE_STEP_RE = re.compile(
+    r"\b(?:route|rota|line|linha|metro|carris|cp|train|comboio|bus|autocarro|tram|eletrico|board|embar|"
+    r"exit|saida|sair|alight|transfer|transbordo|walk|caminh|direction|direcao|station|estacao|paragem|stop|"
+    r"estimated|estimado|travel time|tempo|min|nearest|mais proximo|direct|direta|frequency|frequencia)\b"
+)
+
+
 def _extract_weather_cards(text: str) -> List[EvidenceCard]:
-    """Extract one compact weather evidence card from worker output.
+    """Extract one weather evidence card that keeps every forecast day.
 
     Args:
         text: Weather worker response text.
@@ -218,7 +248,7 @@ def _extract_weather_cards(text: str) -> List[EvidenceCard]:
         lowered = normalize_text(line)
         if lowered.startswith(("source", "fonte", "updated", "atualizado")) or set(line) == {"="}:
             continue
-        if any(token in lowered for token in ("warning", "aviso", "temperature", "temperatura", "rain", "chuva", "wind", "vento", "conditions", "condicoes", "condições", "forecast", "previsao", "previsão")):
+        if _WEATHER_DAY_RE.search(lowered) or _WEATHER_FACT_RE.search(lowered):
             useful.append(line)
     if not useful and lines:
         useful = lines[:5]
@@ -227,43 +257,70 @@ def _extract_weather_cards(text: str) -> List[EvidenceCard]:
             id="weather_1",
             kind="weather",
             title="Weather conditions for Lisbon",
-            summary="; ".join(useful[:5]),
+            summary="; ".join(useful[:16]),
             source_ids=sources,
         )
     ]
 
 
+def _split_transport_routes(text: str) -> List[List[str]]:
+    """Split transport output into one block per route heading."""
+    blocks: List[List[str]] = []
+    current: List[str] = []
+    for raw in text.splitlines():
+        line = _visible_line(raw)
+        if not line:
+            continue
+        is_heading = bool(re.match(r"^\s*(?:#{1,4}\s+|[\U0001F300-\U0001FAFF☀-➿️‍]+\s*\*\*)", raw.strip())) and bool(
+            re.search(r"(?:→|->|\broute\b|\brota\b|\bpercurso\b|\bligac|\bhow to\b|\bcomo\b)", normalize_text(raw) + raw)
+        )
+        if is_heading and current:
+            blocks.append(current)
+            current = []
+        current.append(line)
+    if current:
+        blocks.append(current)
+    return blocks
+
+
 def _extract_transport_cards(text: str) -> List[EvidenceCard]:
-    """Extract one compact transport evidence card from worker output.
+    """Extract one transport evidence card per route found by the Transport worker.
+
+    Each card keeps the route steps (lines, directions, transfers, exits,
+    walking notes, and estimated times) and drops live waiting times, which
+    are only valid for an immediate departure.
 
     Args:
         text: Transport worker response text.
 
     Returns:
-        A list containing a transport card when usable content is present.
+        Transport cards, one per route block.
     """
     if not text:
         return []
-    sources = _detect_sources(text)
-    lines = [_visible_line(line) for line in text.splitlines() if _visible_line(line)]
-    useful: List[str] = []
-    for line in lines:
-        lowered = normalize_text(line)
-        if lowered.startswith(("source", "fonte", "updated", "atualizado")) or set(line) == {"="}:
+    cards: List[EvidenceCard] = []
+    for index, block in enumerate(_split_transport_routes(text), start=1):
+        useful: List[str] = []
+        for line in block:
+            lowered = normalize_text(line)
+            if lowered.startswith(("source", "fonte", "updated", "atualizado")) or set(line) == {"="}:
+                continue
+            if _LIVE_WAIT_RE.search(lowered) or re.fullmatch(r"[\d\s:,min]+", lowered):
+                continue
+            if _ROUTE_STEP_RE.search(lowered) or "→" in line:
+                useful.append(line)
+        if not useful:
             continue
-        if any(token in lowered for token in ("route", "rota", "line", "linha", "metro", "carris", "cp", "train", "bus", "tram", "departure", "partida", "board", "embar", "alight", "exit", "transfer", "real time", "tempo real")):
-            useful.append(line)
-    if not useful and lines:
-        useful = lines[:6]
-    return [
-        EvidenceCard(
-            id="transport_1",
-            kind="transport",
-            title="Transport evidence",
-            summary="; ".join(useful[:7]),
-            source_ids=sources,
+        cards.append(
+            EvidenceCard(
+                id=f"transport_{index}",
+                kind="transport",
+                title=_clean_title(block[0]) or "Transport evidence",
+                summary="; ".join(useful[:18]),
+                source_ids=_detect_sources("\n".join(block)),
+            )
         )
-    ]
+    return cards[:6]
 
 
 def _extract_research_cards(text: str, *, default_kind: str) -> List[EvidenceCard]:
@@ -322,7 +379,11 @@ def _extract_research_cards(text: str, *, default_kind: str) -> List[EvidenceCar
                 if visible and not _is_noise_line(visible):
                     summary_parts.append(visible)
         kind = _infer_card_kind(title, fields, default_kind)
-        card_sources = _detect_sources("\n".join(section), default=sources or (["visitlisboa_events"] if kind == "event" else ["visitlisboa_places"]))
+        # A card that links its own source (VisitLisboa, Wikipedia) cites it;
+        # the others inherit the sources of the whole worker answer.
+        card_sources = _detect_sources("\n".join(section)) or sources or (
+            ["visitlisboa_events"] if kind == "event" else ["visitlisboa_places"]
+        )
         cards.append(
             EvidenceCard(
                 id=f"{kind}_{index}",
@@ -466,6 +527,10 @@ def _canonical_field_label(label: str) -> str:
         "mais detalhes": "More details",
         "tickets": "Tickets",
         "bilhetes": "Tickets",
+        "found for": "Found for",
+        "encontrado para": "Found for",
+        "nearest metro": "Nearest metro",
+        "metro mais proximo": "Nearest metro",
     }
     return mapping.get(normalized, label.strip())
 
@@ -492,7 +557,13 @@ def _is_metadata_field_label(label: str) -> bool:
 def _infer_card_kind(title: str, fields: Dict[str, str], default_kind: str) -> str:
     """Infer the evidence card kind from a title and extracted fields."""
     text = normalize_text(" ".join([title, *fields.keys(), *fields.values()]))
-    if any(token in text for token in ("when", "quando", "event", "evento", "exhibition", "festival", "fair", "feira")):
+    # The VisitLisboa page type decides first: a book fair or a market with a
+    # place page ("/places/feira-...") is a place, whatever its title says.
+    links = " ".join(fields.values())
+    if re.search(r"visitlisboa\.com/[a-z-]+/events/", links):
+        return "event"
+    place_page = bool(re.search(r"visitlisboa\.com/[a-z-]+/places/", links))
+    if not place_page and re.search(r"\b(?:when|quando|event|evento|exhibition|festival|fair|feira)\b", text):
         return "event"
     if any(
         token in text

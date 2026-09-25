@@ -1238,10 +1238,27 @@ def find_nearby_services(
             return f"✓ Fonte de dados '{selected_title}' carregada ({selected_feature_count} registos), mas não foi possível extrair dados de localização."
         return f"✓ Data source '{selected_title}' loaded ({selected_feature_count} features) but couldn't extract location data."
 
+    def _normalize_text(value: object) -> str:
+        folded = unicodedata.normalize("NFKD", str(value or ""))
+        return "".join(char for char in folded if not unicodedata.combining(char)).lower()
+
+    # Records without a name get the dataset's own kind; abbreviated dataset
+    # labels ("Inst. Sanit. Púb. Automáticas") are spelled out.
+    recycling_dataset = "recicl" in _normalize_text(selected_title) or "recycl" in _normalize_text(selected_title)
     for item in results:
         raw_name = str(item.get("name") or "").strip()
         if not raw_name or raw_name.lower() in {"n/a", "na", "none", "null", "unknown"}:
-            item["name"] = "Ponto de reciclagem" if is_pt else "Recycling point"
+            if recycling_dataset:
+                item["name"] = "Ponto de reciclagem" if is_pt else "Recycling point"
+            else:
+                item["name"] = str(selected_title or ("Local" if is_pt else "Place")).strip()
+            continue
+        if re.match(r"^inst\.?\s*sanit", _normalize_text(raw_name)):
+            automatic = "autom" in _normalize_text(raw_name)
+            if is_pt:
+                item["name"] = "Instalação sanitária pública automática" if automatic else "Instalação sanitária pública"
+            else:
+                item["name"] = "Automatic public toilet" if automatic else "Public toilet"
 
     name_counts: Dict[str, int] = {}
     for item in results:

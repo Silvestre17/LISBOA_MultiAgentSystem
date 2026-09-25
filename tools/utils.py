@@ -9,8 +9,9 @@
 
 import logging
 import math
+import re
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -34,6 +35,80 @@ def lisbon_now() -> datetime:
         Naive datetime carrying the current Europe/Lisbon wall-clock time.
     """
     return datetime.now(LISBON_TZ).replace(tzinfo=None)
+
+
+# "Quinta da Regaleira" is an estate, not a Thursday ("quinta-feira").
+# "Na quinta da próxima semana" is still a Thursday.
+_QUINTA_ESTATE_RE = re.compile(
+    r"\bquinta\s+d(?:a|o|as|os)\s+(?!(?:pr[oó]xima|semana|seguinte|outra)\b)\S+",
+    re.IGNORECASE,
+)
+
+
+def without_estate_names(text: str) -> str:
+    """Remove "Quinta da/do ..." estate names before looking for weekday names.
+
+    Args:
+        text: User message or query.
+
+    Returns:
+        The text with each estate name replaced by a space.
+    """
+    return _QUINTA_ESTATE_RE.sub(" ", text or "")
+
+
+LISBON_SUN_REFERENCE = (38.7223, -9.1393)
+
+
+def sunrise_sunset(day: "date", latitude: float = LISBON_SUN_REFERENCE[0], longitude: float = LISBON_SUN_REFERENCE[1]) -> Optional[tuple[str, str]]:
+    """Return local sunrise and sunset times (HH:MM, Lisbon time) for a date.
+
+    Uses the NOAA solar-position approximation (accurate to about a minute
+    at Lisbon's latitude), so no external service is needed.
+
+    Args:
+        day: Calendar date.
+        latitude: Latitude in degrees (default: central Lisbon).
+        longitude: Longitude in degrees, east positive (default: central Lisbon).
+
+    Returns:
+        ``(sunrise, sunset)`` as ``HH:MM`` strings, or ``None`` when the sun
+        does not rise or set on that date at that latitude.
+    """
+    gamma = 2 * math.pi / 365 * (day.timetuple().tm_yday - 1)
+    equation_of_time = 229.18 * (
+        0.000075
+        + 0.001868 * math.cos(gamma)
+        - 0.032077 * math.sin(gamma)
+        - 0.014615 * math.cos(2 * gamma)
+        - 0.040849 * math.sin(2 * gamma)
+    )
+    declination = (
+        0.006918
+        - 0.399912 * math.cos(gamma)
+        + 0.070257 * math.sin(gamma)
+        - 0.006758 * math.cos(2 * gamma)
+        + 0.000907 * math.sin(2 * gamma)
+        - 0.002697 * math.cos(3 * gamma)
+        + 0.00148 * math.sin(3 * gamma)
+    )
+    latitude_rad = math.radians(latitude)
+    cos_hour_angle = (
+        math.cos(math.radians(90.833)) / (math.cos(latitude_rad) * math.cos(declination))
+        - math.tan(latitude_rad) * math.tan(declination)
+    )
+    if not -1.0 <= cos_hour_angle <= 1.0:
+        return None
+    hour_angle = math.degrees(math.acos(cos_hour_angle))
+    midnight_utc = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
+
+    def _local(minutes_utc: float) -> str:
+        return (midnight_utc + timedelta(minutes=minutes_utc)).astimezone(LISBON_TZ).strftime("%H:%M")
+
+    return (
+        _local(720 - 4 * (longitude + hour_angle) - equation_of_time),
+        _local(720 - 4 * (longitude - hour_angle) - equation_of_time),
+    )
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

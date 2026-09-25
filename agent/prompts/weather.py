@@ -175,9 +175,6 @@ Data/hora atual para raciocínio: {current_date}, {current_time}
 """
 
 
-WEATHER_AGENT_PROMPT_SAFE = WEATHER_AGENT_PROMPT_SAFE_EN
-
-
 def get_weather_prompt(*, language: str = "en", safe_mode: bool = False) -> str:
     """Returns the weather prompt with current date/time in the requested language."""
     now = datetime.now()

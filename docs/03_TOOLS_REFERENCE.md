@@ -73,7 +73,7 @@ The authoritative tool registry is [`tools/__init__.py`](../tools/__init__.py), 
 | `carris_get_stops` | Search and inspect Carris stops |
 | `carris_get_routes` | Retrieve route details |
 | `carris_get_next_departures` | Retrieve the next departures at a stop |
-| `carris_find_routes_between` | Find routes between two stops |
+| `carris_find_routes_between` | Find routes between two stops; answers rank them door to door (walk, wait for the next reachable departure, ride, walk) and show departures, delays, and arrival |
 | `carris_get_realtime_vehicles` | Track vehicles in real time |
 | `carris_get_arrivals` | Retrieve arrivals at a stop |
 | `carris_vehicle_eta` | Estimate when a vehicle will reach a stop |
@@ -87,7 +87,7 @@ The authoritative tool registry is [`tools/__init__.py`](../tools/__init__.py), 
 | `search_cp_stations` | Search stations in the supported network |
 | `get_train_schedule` | Retrieve scheduled departures |
 | `get_cp_routes` | Inspect train routes and lines |
-| `plan_train_trip` | Plan a train trip between stations |
+| `plan_train_trip` | Plan a train trip between stations, with arrival times and the live delay status |
 | `get_train_frequency` | Inspect service frequency and headways |
 
 ### 🔀 Multimodal Transport (2 Tools)
@@ -95,7 +95,7 @@ The authoritative tool registry is [`tools/__init__.py`](../tools/__init__.py), 
 | Tool | Purpose |
 |---|---|
 | `get_transport_summary` | Summarize the operational status across transport modes |
-| `get_route_between_stations` | Plan multimodal routes across the supported operators |
+| `get_route_between_stations` | Plan multimodal routes across the supported operators; a Metro leg that rides a section stopped in the live status is marked, and answers then avoid it or recommend another mode |
 
 ### 🏥 Lisboa Aberta (5 Tools)
 
@@ -112,7 +112,7 @@ The authoritative tool registry is [`tools/__init__.py`](../tools/__init__.py), 
 | Tool | Purpose |
 |---|---|
 | `search_cultural_events` | Search events through semantic retrieval, date and category filters, and a JSON fallback |
-| `search_places_attractions` | Search places through semantic retrieval, structured ranking and filters, and a JSON fallback |
+| `search_places_attractions` | Search places through semantic retrieval, structured ranking and filters, and a JSON fallback; exclusions ("nada de fado") are removed from the query and applied to titles, categories, and features, and ranked requests weight the rating by the number of reviews |
 | `get_event_categories` | List event categories from the local VisitLisboa artifact |
 | `get_place_categories` | List place categories from the local VisitLisboa artifact |
 | `search_lisbon_knowledge` | Search the indexed Lisboa Card guide and tourism knowledge |
@@ -134,8 +134,8 @@ The tool layer draws on the following sources:
 - **Comboios.live**, with local **CP GTFS** support data
 - **Lisboa Aberta** GeoJSON datasets
 - **VisitLisboa** scraped JSON, with ChromaDB hybrid retrieval
-- **Location resolution** through a local gazetteer and aliases, Metro and CP station indices, Nominatim, and Photon
-- **Web fallback** through Wikipedia, Tavily, and DuckDuckGo; operator-specific tools remain the primary source for transport and weather
+- **Location resolution** through a local gazetteer and aliases, Metro and CP station indices, Nominatim, and Photon; Nominatim reverse geocoding also gives a street address to places grounded from Wikipedia
+- **Web fallback** through Wikipedia, Tavily, and DuckDuckGo; operator-specific tools remain the primary source for transport and weather. Inside the AML, Wikipedia pages also ground named places and stop types that VisitLisboa does not list, and are cited as such
 
 `tools/location_resolver.py` is shared support infrastructure used by the graph and several tool modules. It handles the AML scope, ambiguous place names, geocoding fallbacks, and transport-node enrichment, but it is not an exported tool.
 

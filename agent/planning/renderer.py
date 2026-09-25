@@ -15,35 +15,29 @@ from typing import Dict, Iterable, List
 from agent.planning.models import PlanDraft, SourceRef
 
 
-_BLOCK_KIND_EMOJI = {
-    "activity": "📍",
-    "place": "📍",
-    "museum": "🏛️",
-    "culture": "🏛️",
-    "event": "🎭",
-    "food": "🍽️",
-    "coffee": "☕",
-    "pastry": "🥐",
-    "transport": "🚇",
-    "walk": "🚶",
-    "service": "🏛️",
-}
-
-
-def render_plan_markdown(draft: PlanDraft, sources: Dict[str, SourceRef], language: str = "en") -> str:
+def render_plan_markdown(
+    draft: PlanDraft,
+    sources: Dict[str, SourceRef],
+    language: str = "en",
+    *,
+    infer_missing_walks: bool = True,
+) -> str:
     """Render a plan draft using the LISBOA visual response contract.
 
     Args:
         draft: Structured plan draft produced by PlannerAgent.
         sources: Public source references available for source-footers.
         language: Detected or requested response language.
+        infer_missing_walks: Whether to add generic walking lines between
+            adjacent stops in the same zone. Plans whose legs were resolved
+            by the Transport worker pass ``False``.
 
     Returns:
         Markdown answer ready for Streamlit rendering.
     """
     is_pt = (language or "en").lower().startswith("pt")
-    title = _clean_inline(draft.title) or ("Plano de Lisboa" if is_pt else "Lisbon Plan")
-    direct = _clean_inline(draft.direct_answer) or (
+    title = re.sub(r"\s+[—–]\s+", ": ", _clean_inline(draft.title)) or ("Plano de Lisboa" if is_pt else "Lisbon Plan")
+    direct = _clean_inline(draft.direct_answer, limit=600) or (
         "Plano limitado aos dados confirmados disponíveis." if is_pt else "Plan limited to the confirmed data available."
     )
 
@@ -58,13 +52,18 @@ def render_plan_markdown(draft: PlanDraft, sources: Dict[str, SourceRef], langua
         for item in constraint_items:
             lines.append(f"    - {item}")
 
-    visible_blocks = draft.blocks[:8]
+    multi_day = len({block.day for block in draft.blocks if getattr(block, "day", 0)}) > 1
+    visible_blocks = draft.blocks[:12] if multi_day else draft.blocks[:8]
     if visible_blocks:
         lines.extend(["", "---", "", f"### 📍 **{'Roteiro sugerido' if is_pt else 'Suggested route'}**"])
+        current_day = None
         for index, block in enumerate(visible_blocks, start=1):
+            if multi_day and getattr(block, "day", 0) and block.day != current_day:
+                current_day = block.day
+                lines.extend(["", f"#### 🗓️ **{'Dia' if is_pt else 'Day'} {current_day}**"])
             block_title = _clean_inline(block.title) or (f"Bloco {index}" if is_pt else f"Block {index}")
             block_title = re.sub(r"^(?:Block|Bloco)\s*\d+\s*[·:-]\s*", "", block_title, flags=re.IGNORECASE).strip()
-            lines.extend(["", f"**🏷️ {block_title}**"])
+            lines.extend(["", f"- **🏷️ {block_title}**"])
             if block.purpose:
                 lines.append(f"    - 📝 {_clean_inline(block.purpose)}")
             for detail in _clean_list(block.details, max_items=13):
@@ -78,18 +77,19 @@ def render_plan_markdown(draft: PlanDraft, sources: Dict[str, SourceRef], langua
 
     block_titles = [_clean_inline(block.title) for block in draft.blocks if block.title]
     movement_items = _filter_movement_items(
-        _clean_list(draft.movement_logic, max_items=6),
+        _clean_list(draft.movement_logic, max_items=12, limit=700),
         block_titles=block_titles,
     )
-    movement_items = _ensure_adjacent_short_walks(movement_items, visible_blocks, is_pt=is_pt)
+    if infer_missing_walks:
+        movement_items = _ensure_adjacent_short_walks(movement_items, visible_blocks, is_pt=is_pt)
     weather_items = [
         item for item in _clean_list(draft.weather_strategy, max_items=6)
         if not _is_placeholder_weather_item(item)
     ]
     limitation_items = _clean_list(draft.limitations, max_items=6) or [
-        "horários, bilhetes, preços, reservas e disponibilidade em tempo real só estão confirmados quando indicados acima"
+        "Horários, bilhetes, preços e reservas só estão confirmados quando indicados acima."
         if is_pt
-        else "opening hours, tickets, prices, bookings, and live availability are confirmed only where stated above"
+        else "Opening hours, tickets, prices, and bookings are confirmed only where stated above."
     ]
 
     _append_movement_section(lines, movement_items, is_pt=is_pt)
@@ -100,12 +100,50 @@ def render_plan_markdown(draft: PlanDraft, sources: Dict[str, SourceRef], langua
         "Dicas" if is_pt else "Tips",
         [item for item in draft.tips if not _is_generic_planner_note(item)],
     )
+    _append_section(
+        lines,
+        "🎭",
+        "Outros eventos encontrados" if is_pt else "Other events found",
+        list(getattr(draft, "other_options", []) or []),
+    )
     _append_section(lines, "⚠️", "Notas finais" if is_pt else "Final notes", limitation_items)
 
     footer = _source_footer(draft, sources, is_pt, rendered_body="\n".join(lines))
     if footer:
         lines.extend(["", footer])
-    return _clean_markdown("\n".join(lines))
+    markdown = _clean_markdown("\n".join(lines))
+    for block in draft.blocks:
+        title = re.sub(r"^\s*\d{1,2}[:h]\d{2}\s*·?\s*", "", str(block.title or "")).strip()
+        # The meal label ("Dinner: ") is not part of the card title used in the legs.
+        title = re.sub(r"^(?:Almoço|Jantar|Café|Pastelaria|Lunch|Dinner|Coffee|Pastry):\s+", "", title)
+        short = _display_title(title, is_pt=is_pt)
+        if short and short != title:
+            markdown = markdown.replace(title, short)
+    if is_pt:
+        # European Portuguese decimals: "16,4°C", "0,0%".
+        markdown = re.sub(r"(?<![\d.,/])(\d{1,3})\.(\d)(?=\s*(?:°C|%))", r"\1,\2", markdown)
+    return markdown
+
+
+# A trailing type label in a catalogue title ("Pap'Açorda | Restaurant").
+_TITLE_TYPE_SUFFIX_RE = re.compile(
+    r"\s+\|\s+(?:(?:panoramic|traditional|small luxury|luxury)\s+)?"
+    r"(?:restaurant|restaurante|bar|caf[eé]|hotel|catering & events)\s*$",
+    re.IGNORECASE,
+)
+
+
+# A trailing English alias ("Sé de Lisboa | Lisbon Cathedral"), dropped in Portuguese.
+_TITLE_ENGLISH_ALIAS_RE = re.compile(
+    r"\s+\|\s+[^|]*\b(?:Cathedral|Church|Museum|Palace|Castle|Monastery|Tower|Gardens?|House|Station|Bridge|"
+    r"Chapel|Convent|Theatre|Market)\b[^|]*$"
+)
+
+
+def _display_title(title: str, *, is_pt: bool = False) -> str:
+    """Return a stop title without a trailing type label (and, in Portuguese, an English alias)."""
+    text = _TITLE_TYPE_SUFFIX_RE.sub("", str(title or "")).strip()
+    return _TITLE_ENGLISH_ALIAS_RE.sub("", text).strip() if is_pt else text
 
 
 def _append_section(lines: List[str], emoji: str, title: str, items: Iterable[str]) -> None:
@@ -120,18 +158,18 @@ def _append_section(lines: List[str], emoji: str, title: str, items: Iterable[st
     cleaned = _clean_list(list(items), max_items=6)
     if not cleaned:
         return
-    lines.extend(["", "---", "", f"### {emoji} **{title}**"])
+    lines.extend(["", "---", "", f"### {emoji} **{title}**", ""])
     for item in cleaned:
         lines.append(f"- {item}")
 
 
 def _append_movement_section(lines: List[str], items: Iterable[str], *, is_pt: bool) -> None:
     """Append movement guidance with the same visual field style as route tools."""
-    cleaned = _clean_list(list(items), max_items=6)
+    cleaned = _clean_list(list(items), max_items=12, limit=700)
     if not cleaned:
         return
     emoji = _movement_section_emoji(cleaned)
-    lines.extend(["", "---", "", f"### {emoji} **{'Como te deslocas' if is_pt else 'How to move'}**"])
+    lines.extend(["", "---", "", f"### {emoji} **{'Como te deslocas' if is_pt else 'How to move'}**", ""])
     for item in cleaned:
         lines.append(_format_movement_bullet(item, is_pt=is_pt, indent=""))
 
@@ -152,7 +190,7 @@ def _movement_section_emoji(items: Iterable[str]) -> str:
 
 def _format_movement_bullet(item: str, *, is_pt: bool, indent: str = "    ") -> str:
     """Render one movement item as an icon-labelled nested bullet."""
-    text = _clean_inline(item)
+    text = _clean_inline(item, limit=700)
     text_for_match = re.sub(
         r"^[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+\s+",
         "",
@@ -169,7 +207,14 @@ def _format_movement_bullet(item: str, *, is_pt: bool, indent: str = "    ") -> 
     if route_bold_match:
         route = route_bold_match.group("route").strip()
         value = route_bold_match.group("value").strip()
-        icon = "⚠️" if re.match(r"^⚠️", text) or re.search(r"\b(?:not confirmed|não ficou confirmada|nao ficou confirmada)\b", text, re.IGNORECASE) else _movement_icon_for_text(text)
+        leading_icon = re.match(r"^([\U0001F300-\U0001FAFF☀-➿️‍]+)\s", text)
+        if re.match(r"^⚠️", text) or re.search(r"\b(?:not confirmed|não ficou confirmada|nao ficou confirmada)\b", text, re.IGNORECASE):
+            icon = "⚠️"
+        elif leading_icon:
+            # Legs resolved from transport tools already carry their mode icon.
+            icon = leading_icon.group(1)
+        else:
+            icon = _movement_icon_for_text(text)
         return f"{indent}- {icon} **{route}:** {value}"
     match = bold_match or re.match(r"^(?P<label>[A-Za-zÀ-ÿ0-9 /'-]{2,70})\s*:\s*(?P<value>.+)$", text_for_match)
     if not match:
@@ -333,7 +378,11 @@ def _movement_icon_for_text(text: str) -> str:
     normalized = _normalize_for_match(text)
     if re.search(r"^(?:walking plan|plano a pe|plano a pé)\b", normalized):
         return "🚶"
-    if re.search(r"\b(?:transport|transporte)\b", normalized):
+    if re.search(r"\b(?:take|apanha|apanhar|catch)\s+(?:o\s+|the\s+)?\d{2}e\b", normalized):
+        return "🚋"
+    if re.search(r"\b(?:take|apanha|apanhar|catch)\s+(?:o\s+|the\s+)?\d{3}\b", normalized):
+        return "🚌"
+    if re.search(r"\b(?:transport|transporte|metro)\b", normalized):
         return "🚇"
     if re.search(r"\b(?:bus|carris|autocarro)\b", normalized):
         return "🚌"
@@ -382,7 +431,7 @@ def _filter_movement_items(items: Iterable[str], *, block_titles: Iterable[str])
     )
 
     for item in items:
-        cleaned = _clean_inline(item)
+        cleaned = _clean_inline(item, limit=700)
         normalized = _normalize_for_match(cleaned)
         if not normalized:
             continue
@@ -592,6 +641,8 @@ def _format_detail_bullet(detail: str, is_pt: bool) -> str:
         "more details": ("🔗", "Mais detalhes" if is_pt else "More details"),
         "mais detalhes": ("🔗", "Mais detalhes" if is_pt else "More details"),
         "features": ("✨", "Características" if is_pt else "Features"),
+        "lisboa card": ("💳", "Lisboa Card"),
+        "nearest metro": ("🚇", "Metro mais próximo" if is_pt else "Nearest metro"),
         "características": ("✨", "Características" if is_pt else "Features"),
         "caracteristicas": ("✨", "Características" if is_pt else "Features"),
     }
@@ -719,8 +770,13 @@ def _source_is_materially_used(source_id: str, rendered_body: str) -> bool:
     return True
 
 
-def _clean_inline(value: str) -> str:
-    """Clean one inline value before rendering it into Markdown."""
+def _clean_inline(value: str, limit: int = 320) -> str:
+    """Clean one inline value before rendering it into Markdown.
+
+    Args:
+        value: Raw text.
+        limit: Maximum length; longer text is cut at a sentence end.
+    """
     text = str(value or "").strip()
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"^#{1,6}\s*", "", text).strip()
@@ -733,7 +789,13 @@ def _clean_inline(value: str) -> str:
         flags=re.IGNORECASE,
     )
     text = re.sub(r"[`{}]", "", text)
-    return text.strip(" -–—")[:260]
+    text = text.strip(" -–—")
+    if len(text) > limit:
+        # Keep whole sentences: a note cut mid-word reads as a rendering bug.
+        head = text[:limit]
+        cut = max(head.rfind(". "), head.rfind("! "), head.rfind("? "))
+        text = head[: cut + 1] if cut > 80 else head[: head.rfind(" ")].rstrip(",;:") + "…"
+    return text
 
 
 def _normalize_for_match(value: str) -> str:
@@ -745,12 +807,12 @@ def _normalize_for_match(value: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _clean_list(items: Iterable[str], max_items: int = 5) -> List[str]:
+def _clean_list(items: Iterable[str], max_items: int = 5, limit: int = 320) -> List[str]:
     """Clean, deduplicate, and limit a list of Markdown bullet values."""
     output: List[str] = []
     forbidden = {"", "n/a", "na", "none", "null", "unknown", "not available", "not provided", "+ info"}
     for item in items or []:
-        text = _clean_inline(str(item or ""))
+        text = _clean_inline(str(item or ""), limit=limit)
         if not text or text.lower().strip(" .:-_") in forbidden:
             continue
         if re.fullmatch(

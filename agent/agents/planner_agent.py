@@ -6,6 +6,7 @@
 #   into coherent travel plans.
 # ==========================================================================
 
+import logging
 import re
 import unicodedata
 from datetime import datetime
@@ -33,6 +34,25 @@ from agent.planning import (
     render_plan_markdown,
     validate_plan_draft,
 )
+from agent.planning.brief import PlanBrief, plan_brief_from_context
+from agent.planning.compose import (
+    clean_plan_notes,
+    curate_block_details,
+    drop_closed_cards,
+    drop_closed_stops,
+    drop_duplicate_stops,
+    drop_operator_cards,
+    drop_topic_cards,
+    label_meal_stops,
+    other_event_options,
+    plan_sources,
+    repair_messages,
+    resolve_plan_legs,
+)
+from agent.planning.prompts import build_brief_plan_messages
+from agent.planning.quality import review_plan_draft, unmet_component_notes, untimed_event_notes
+
+logger = logging.getLogger(__name__)
 
 _PLANNER_FIELD_LABELS = {
     "brief description",
@@ -5091,7 +5111,7 @@ def _planner_card_matches_area(card: Dict[str, str], area: str) -> bool:
                 basis,
             )
         )
-    if normalized_area in {"cais do sodre", "cais do sodré", "sodre", "sodre"}:
+    if normalized_area in {"cais do sodre", "cais do sodré", "sodre"}:
         return bool(
             re.search(
                 r"\b(?:cais\s+do\s+sodre|cais\s+do\s+sodré|sodre|sodré|"
@@ -13843,6 +13863,101 @@ class PlannerAgent(BaseAgent):
         super().__init__("planner")
         self.system_prompt = get_planner_prompt(language="en")
         self._system_prompt_dynamic = True
+        # Set by the orchestrator: turns consecutive stop pairs into movement
+        # lines through the Transport worker. The planner itself has no tools.
+        self.leg_resolver: Optional[Callable[..., List[str]]] = None
+        # "brief" when the last answer came from the brief-driven path,
+        # "legacy" otherwise; the orchestrator skips its legacy repairs for
+        # brief-driven plans.
+        self.last_synthesis_path = ""
+
+    def _compose_brief_plan(
+        self,
+        *,
+        user_message: str,
+        language: str,
+        brief: PlanBrief,
+        weather_data: str,
+        transport_data: str,
+        places_data: str,
+        events_data: str,
+        qa_disclaimers: Optional[list[str]],
+        conversation_context: str,
+    ) -> str:
+        """Compose an itinerary from the planning brief and the worker evidence.
+
+        The LLM picks and orders the stops and writes the text as JSON; the
+        draft is reviewed against the brief (stops must be evidence cards, in
+        the requested area, covering every requested component) and repaired
+        once if needed. Code then rebuilds the stop details from the cards,
+        adds the legs between stops through the Transport worker, and renders
+        the Markdown.
+
+        Returns:
+            Rendered Markdown, or an empty string when no usable plan could
+            be composed (the caller then falls back to the legacy path).
+        """
+        evidence = build_evidence_bundle(
+            weather_data=weather_data,
+            transport_data=transport_data,
+            places_data=places_data,
+            events_data=events_data,
+            qa_disclaimers=qa_disclaimers,
+        )
+        evidence = drop_closed_cards(drop_operator_cards(drop_topic_cards(evidence, brief), brief), brief)
+        if not any(card.kind not in {"weather", "transport"} for card in evidence.cards):
+            return ""
+        messages = build_brief_plan_messages(
+            user_message=user_message,
+            language=language,
+            evidence=evidence,
+            brief=brief,
+            conversation_context=conversation_context,
+        )
+        try:
+            response = self._safe_llm_invoke(self.llm, messages)
+        except Exception as exc:
+            logger.warning("Planner LLM call failed: %s", exc)
+            return ""
+        raw_answer = str(getattr(response, "content", "") or "")
+        draft = parse_plan_draft_json(raw_answer)
+        critical, repairable = review_plan_draft(draft, evidence, brief) if draft else (["invalid JSON"], [])
+        if critical or repairable:
+            try:
+                retry = self._safe_llm_invoke(self.llm, repair_messages(messages, raw_answer, [*critical, *repairable]), retries=1)
+                retried = parse_plan_draft_json(str(getattr(retry, "content", "") or ""))
+            except Exception as exc:
+                logger.warning("Planner repair call failed: %s", exc)
+                retried = None
+            if retried is not None:
+                retried_critical, _ = review_plan_draft(retried, evidence, brief)
+                if not retried_critical:
+                    draft, critical = retried, []
+        if draft is None or critical:
+            return ""
+
+        draft = drop_duplicate_stops(curate_block_details(draft, evidence, brief, language))
+        if not draft.blocks:
+            return ""
+        draft = clean_plan_notes(draft, brief, language)
+        draft = drop_closed_stops(draft, evidence, brief, language)
+        draft = resolve_plan_legs(draft, evidence, brief, self.leg_resolver, language)
+        draft = label_meal_stops(draft, evidence, language)
+        # Checked on the final plan: a requested stop type still missing after
+        # the repair round is stated, not silently dropped.
+        for note in [*unmet_component_notes(draft, evidence, brief, language), *untimed_event_notes(draft, evidence, language)]:
+            if note not in draft.limitations:
+                draft.limitations.append(note)
+        if any(component.kind == "event" for component in brief.components):
+            draft.other_options = other_event_options(draft, evidence, language)
+        # The renderer owns the final Markdown; the legacy post-QA guard was
+        # written for free-form answers and would rewrite this one.
+        return render_plan_markdown(
+            draft,
+            sources=plan_sources(draft, evidence),
+            language=language,
+            infer_missing_walks=False,
+        ).strip()
 
     def _get_runtime_system_prompt(self, language: str) -> str:
         """Return the prompt for the requested language while preserving explicit test overrides."""
@@ -14017,6 +14132,7 @@ class PlannerAgent(BaseAgent):
         qa_disclaimers: list[str] | None = None,
         conversation_context: str = "",
         output_language: str | None = None,
+        plan_brief: Optional[PlanBrief] = None,
     ) -> str:
         """
         Creates an itinerary from gathered data.
@@ -14029,11 +14145,29 @@ class PlannerAgent(BaseAgent):
             events_data: Output from researcher agent (events).
             qa_disclaimers: Optional list of QA-flagged data limitations.
             conversation_context: Previous-turn planning context for follow-ups.
+            output_language: Response language chosen by the orchestrator.
+            plan_brief: Structured reading of the request from the Supervisor.
 
         Returns:
             str: Formatted itinerary.
         """
         language = output_language if output_language in {"pt", "en"} else infer_response_language(user_query=user_message, default="en")
+        self.last_synthesis_path = "legacy"
+        if plan_brief is not None:
+            composed = self._compose_brief_plan(
+                user_message=user_message,
+                language=language,
+                brief=plan_brief,
+                weather_data=weather_data,
+                transport_data=transport_data,
+                places_data=places_data,
+                events_data=events_data,
+                qa_disclaimers=qa_disclaimers,
+                conversation_context=conversation_context,
+            )
+            if composed:
+                self.last_synthesis_path = "brief"
+                return composed
         # Preferred path: the planner decides content in JSON, then a deterministic
         # renderer guarantees LISBOA visual structure. This avoids asking the LLM
         # to simultaneously plan and hand-format Markdown. Fallbacks are only
@@ -14771,6 +14905,7 @@ class PlannerAgent(BaseAgent):
         if not isinstance(conversation_context, str):
             conversation_context = ""
         output_language = str(agent_outputs.get("_language") or "").strip().lower()
+        plan_brief = plan_brief_from_context(str(agent_outputs.get("_plan_brief") or ""))
 
         return self.invoke(
             user_message=user_message,
@@ -14781,6 +14916,7 @@ class PlannerAgent(BaseAgent):
             qa_disclaimers=qa_disclaimers,
             conversation_context=conversation_context,
             output_language=output_language if output_language in {"pt", "en"} else None,
+            plan_brief=plan_brief,
         )
 
 

@@ -46,7 +46,9 @@ from tools.cp_api import (
 )
 from tools.carris_api import carris_find_routes_between
 from tools.location_resolver import (
+    CITY_CENTRE_REFERENCE,
     build_location_ambiguity_preamble,
+    is_vague_city_centre,
     get_location_display_name,
     normalize_location_text,
 )
@@ -311,6 +313,13 @@ def _find_station_index(stations: list, station_name: str) -> int:
         if name_norm in s_norm or s_norm in name_norm:
             return i
 
+    # Spacing and separators differ between sources: the official names
+    # "Entre Campos" and "Baixa/Chiado" are "entrecampos" and "baixa-chiado" here.
+    name_compact = re.sub(r"[^a-z0-9]", "", name_norm)
+    for i, s in enumerate(stations):
+        if name_compact and re.sub(r"[^a-z0-9]", "", _normalize_station(s)) == name_compact:
+            return i
+
     return -1
 
 
@@ -418,8 +427,13 @@ def _find_best_transfer_route(
 
                 total_stations = leg1_count + leg2_count
                 estimated_minutes = total_stations * 2 + 3 + 2
+                interrupted = bool(
+                    metro_segment_interruption(first_line, origin_station, transfer_station)
+                    or metro_segment_interruption(second_line, transfer_station, destination_station)
+                )
                 candidates.append(
                     {
+                        "interrupted": interrupted,
                         "station": transfer_station,
                         "first_line": first_line,
                         "second_line": second_line,
@@ -433,8 +447,10 @@ def _find_best_transfer_route(
     if not candidates:
         return None
 
+    # A transfer that avoids a stopped line wins over a shorter one that uses it.
     candidates.sort(
         key=lambda item: (
+            item["interrupted"],
             item["estimated_minutes"],
             item["total_stations"],
             item["station"],
@@ -461,6 +477,75 @@ def _get_line_status(line_id: str) -> str:
     except Exception:
         pass
     return "unknown"
+
+
+# A status that stops trains (not a delay) and, when given, the stations that
+# bound the stopped section: "circulação interrompida entre as estações X e Y".
+_METRO_INTERRUPTION_RE = re.compile(r"interromp|interrupt|suspens|suspend", re.IGNORECASE)
+_METRO_INTERRUPTED_SECTION_RE = re.compile(
+    r"(?:entre(?:\s+as\s+esta[cç][oõ]es)?|between(?:\s+the\s+stations)?)\s+(?P<start>.+?)\s+(?:e|and)\s+(?P<end>.+?)(?:[.;,]|$)",
+    re.IGNORECASE,
+)
+
+
+def get_metro_interrupted_section(line_id: str) -> Optional[tuple]:
+    """Return the station-index range of a Metro line where trains are stopped.
+
+    Args:
+        line_id: Metro line identifier (``amarela``, ``azul``, ``verde``, ``vermelha``).
+
+    Returns:
+        ``(first_index, last_index)`` on the line's ordered station list, the
+        whole line when the status names no section (or names stations that
+        cannot be matched), or ``None`` when the line is running.
+    """
+    status = _get_line_status(line_id)
+    if not _METRO_INTERRUPTION_RE.search(status or ""):
+        return None
+    stations = METRO_LINES.get(line_id, {}).get("stations", [])
+    if not stations:
+        return None
+    section = _METRO_INTERRUPTED_SECTION_RE.search(status)
+    if section:
+        start = _find_station_index(stations, section.group("start"))
+        end = _find_station_index(stations, section.group("end"))
+        if start >= 0 and end >= 0 and start != end:
+            return (min(start, end), max(start, end))
+    return (0, len(stations) - 1)
+
+
+def metro_segment_interruption(line_id: str, start_station: str, end_station: str) -> str:
+    """Return the live status when a ride between two stations crosses a stopped section.
+
+    Args:
+        line_id: Metro line identifier.
+        start_station: Boarding station on that line.
+        end_station: Exit station on that line.
+
+    Returns:
+        The operator's status text when the ride uses an interrupted stretch,
+        otherwise an empty string.
+    """
+    section = get_metro_interrupted_section(line_id)
+    if not section:
+        return ""
+    stations = METRO_LINES.get(line_id, {}).get("stations", [])
+    start = _find_station_index(stations, start_station)
+    end = _find_station_index(stations, end_station)
+    whole_line = section == (0, len(stations) - 1)
+    if whole_line or start < 0 or end < 0:
+        return _get_line_status(line_id)
+    low, high = sorted((start, end))
+    # The ride and the stopped section share at least one track segment.
+    if max(low, section[0]) < min(high, section[1]):
+        return _get_line_status(line_id)
+    return ""
+
+
+def _route_interruption_line(line_label: str, status: str) -> str:
+    """Return the marker line the route answers and planner legs look for."""
+    short_label = line_label.split(" (")[0].strip()
+    return f"   ⛔ **Interrupted on this route ({short_label})**: {status}\n"
 
 
 def _build_route_source_line(sources: List[str]) -> str:
@@ -550,6 +635,11 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     """
     origin = _strip_transport_endpoint_qualifier(origin)
     destination = _strip_transport_endpoint_qualifier(destination)
+    centre_note = ""
+    if is_vague_city_centre(origin) or is_vague_city_centre(destination):
+        centre_note = f"ℹ️ **City centre taken as {CITY_CENTRE_REFERENCE} (Baixa).**\n\n"
+        origin = CITY_CENTRE_REFERENCE if is_vague_city_centre(origin) else origin
+        destination = CITY_CENTRE_REFERENCE if is_vague_city_centre(destination) else destination
 
     # Phase 1.4 ambiguity preamble: when a bare island/region name (currently
     # "Madeira") is used as origin or destination, Nominatim would silently
@@ -563,7 +653,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
     origin_display = _format_location_display_name(origin)
     destination_display = _format_location_display_name(destination)
     route_heading = f"🗺️ **Rota: {origin_display} → {destination_display}**"
-    response = f"{ambiguity_note}\n\n{route_heading}\n\n" if ambiguity_note else f"{route_heading}\n\n"
+    response = f"{ambiguity_note}\n\n{route_heading}\n\n" if ambiguity_note else f"{route_heading}\n\n{centre_note}"
     sources_used: List[str] = []
 
     if _normalize_station(origin) == _normalize_station(destination):
@@ -598,7 +688,7 @@ def get_route_between_stations(origin: str, destination: str) -> str:
         destination_display = metro_destination
     if origin_lines or dest_lines:
         route_heading = f"🗺️ **Rota: {origin_display} → {destination_display}**"
-        response = f"{ambiguity_note}\n\n{route_heading}\n\n" if ambiguity_note else f"{route_heading}\n\n"
+        response = f"{ambiguity_note}\n\n{route_heading}\n\n" if ambiguity_note else f"{route_heading}\n\n{centre_note}"
 
     has_landmarks = bool(origin_landmark or dest_landmark)
 
@@ -705,9 +795,13 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                 name = line_info.get('name', line.title())
                 direction = _get_metro_direction(line, eff_origin, eff_dest)
 
-                # B1: Check real-time line status
+                # B1: Check real-time line status. A stop on the section this
+                # route rides gets the interruption marker, not a plain alert.
                 line_status = _get_line_status(line)
-                if line_status.lower() not in ('ok', 'unknown', ''):
+                route_interruption = metro_segment_interruption(line, eff_origin, eff_dest)
+                if route_interruption:
+                    response += _route_interruption_line(name, route_interruption)
+                elif line_status.lower() not in ('ok', 'unknown', ''):
                     response += f"   ⚠️ **Line Alert**: {line_status}\n"
 
                 # B4: Travel time estimate
@@ -766,9 +860,15 @@ def get_route_between_stations(origin: str, destination: str) -> str:
                 l2_info = METRO_LINES[l2]
 
                 # B1: Check real-time status for both lines
-                for check_line, check_info in [(l1, l1_info), (l2, l2_info)]:
+                for check_line, check_info, leg_start, leg_end in [
+                    (l1, l1_info, eff_origin, best_hub),
+                    (l2, l2_info, best_hub, eff_dest),
+                ]:
                     status = _get_line_status(check_line)
-                    if status.lower() not in ('ok', 'unknown', ''):
+                    route_interruption = metro_segment_interruption(check_line, leg_start, leg_end)
+                    if route_interruption:
+                        response += _route_interruption_line(check_info["name"], route_interruption)
+                    elif status.lower() not in ('ok', 'unknown', ''):
                         response += f"   ⚠️ **{check_info['emoji']} {check_line.title()} Line Alert**: {status}\n"
 
                 # B4: Total travel time (leg 1 + transfer + leg 2)

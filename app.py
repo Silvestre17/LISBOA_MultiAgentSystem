@@ -1883,7 +1883,6 @@ def display_banner():
     )
 
 
-
 def build_sidebar():
     with st.sidebar:
         request_locked = request_capture_locked(
@@ -2371,8 +2370,15 @@ def normalize_streamlit_chat_markdown(text: str) -> str:
     return normalized
 
 
-def clean_response_for_display(text: str) -> str:
-    """Remove citation artefacts and apply the final render-safe Markdown guard."""
+def clean_response_for_display(text: str, *, rendered_plan: bool = False) -> str:
+    """Remove citation artefacts and apply the final render-safe Markdown guard.
+
+    Args:
+        text: Final assistant answer.
+        rendered_plan: Whether the answer is a plan rendered by the planner's
+            deterministic renderer; its Markdown is final, and the guard
+            written for free-form answers would rewrite it.
+    """
     from agent.utils.response_formatter import (
         final_post_qa_guard,
         final_visual_pass,
@@ -2381,6 +2387,8 @@ def clean_response_for_display(text: str) -> str:
 
     cleaned = re.sub(r"【.*?】", "", text or "")
     cleaned = cleaned.replace("\x00", "").strip()
+    if rendered_plan:
+        return cleaned
     display_language = ""
     assistant = st.session_state.get("assistant")
     if assistant is not None:
@@ -2756,7 +2764,11 @@ def run_interaction(
                 )
 
             status_placeholder.empty()
-            sanitized = clean_response_for_display(resp)
+            planner = getattr(st.session_state.assistant, "agents", {}).get("planner")
+            sanitized = clean_response_for_display(
+                resp,
+                rendered_plan=getattr(planner, "last_synthesis_path", "") == "brief",
+            )
             rendered_response = render_assistant_markdown(sanitized)
             st.session_state.messages.append(
                 {"role": "assistant", "content": rendered_response}

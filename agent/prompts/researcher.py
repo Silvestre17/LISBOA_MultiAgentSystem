@@ -318,9 +318,6 @@ Data/hora atual para raciocínio: {current_date}, {current_time}
 """
 
 
-RESEARCHER_AGENT_PROMPT_SAFE = RESEARCHER_AGENT_PROMPT_SAFE_EN
-
-
 def get_researcher_prompt(*, language: str = "en", safe_mode: bool = False) -> str:
     """Returns the researcher prompt with current date/time in the requested language."""
     now = datetime.now()

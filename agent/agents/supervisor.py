@@ -6,6 +6,7 @@
 #   agents to invoke. Only calls agents when necessary.
 # ==========================================================================
 
+import logging
 import re
 import unicodedata
 from contextlib import suppress
@@ -15,6 +16,7 @@ from typing import Any, Dict, List, Optional
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent.agents.base import BaseAgent, clean_response, parse_json_response
+from agent.planning.brief import PlanBrief, build_plan_brief_messages, parse_plan_brief, roll_past_window_to_tomorrow
 from agent.prompts.supervisor import get_supervisor_prompt
 from agent.utils.geographic_scope import (
     build_geographic_out_of_scope_response,
@@ -24,6 +26,15 @@ from agent.utils.geographic_scope import (
 )
 from agent.utils.langsmith_tracing import traceable
 from agent.utils.response_formatter import strip_unsupported_closing_offers
+
+logger = logging.getLogger(__name__)
+
+# Stop types that, two at a time within a part of the day, make a request a plan.
+_PLAN_STOP_WORDS = (
+    r"(?:almo[cç]o|lunch|jantar|dinner|miradouros?|viewpoints?|jardi(?:m|ns)|gardens?|caf[eé]s?|coffee|"
+    r"restaurantes?|restaurants?|museus?|museums?|igrejas?|churche?s?|livrarias?|bookshops?|mercados?|markets?|"
+    r"praias?|beach(?:es)?|monumentos?|monuments?|castelos?|castles?|pal[aá]cios?|palaces?|pastelarias?|pastry)"
+)
 
 
 class SupervisorAgent(BaseAgent):
@@ -41,6 +52,38 @@ class SupervisorAgent(BaseAgent):
         """Initializes the supervisor agent."""
         super().__init__("supervisor")
         # System prompt is now dynamic per request
+
+    def build_plan_brief(
+        self,
+        user_message: str,
+        language: str = "en",
+        conversation_context: str = "",
+    ) -> Optional[PlanBrief]:
+        """Read an itinerary request into a structured planning brief.
+
+        The brief (start point, visit areas, time window, requested components
+        with counts, transport mode, constraints) is shared with the workers
+        and the Planner, so every stage reads the request the same way.
+
+        Args:
+            user_message: The user's planning request.
+            language: Response language of the turn.
+            conversation_context: Earlier plan context for revision turns.
+
+        Returns:
+            The brief, or ``None`` when the model answer cannot be read.
+        """
+        messages = build_plan_brief_messages(user_message, language, conversation_context)
+        try:
+            response = self._safe_llm_invoke(self.llm, messages, retries=1)
+        except Exception:
+            return None
+        brief = parse_plan_brief(str(getattr(response, "content", "") or ""))
+        if brief is None:
+            return None
+        from tools.utils import lisbon_now
+
+        return roll_past_window_to_tomorrow(brief, lisbon_now())
 
     @staticmethod
     def _normalize_query(user_message: str) -> str:
@@ -208,10 +251,17 @@ class SupervisorAgent(BaseAgent):
     def _looks_like_weather_query(cls, message_lower: str) -> bool:
         """Detects weather queries without over-matching generic PT words like `tempo`."""
         normalized = cls._normalize_query(message_lower)
+        # "Should I take ..." is weather advice only when what to take is
+        # clothing or rain/sun gear ("what fallback should I take" is not).
+        weather_items = (
+            r"(?:an?\s+|um\s+|uma\s+|o\s+|a\s+|os\s+|as\s+)?(?:umbrellas?|jackets?|coats?|sweaters?|sunscreen|sun\s+cream|hats?|"
+            r"raincoats?|layers?|guarda[-\s]?chuvas?|casacos?|camisolas?|protetor\s+solar|chapeus?|impermeave(?:l|is)|agasalhos?)"
+        )
         explicit_weather_clothing_advice = bool(
             re.search(
-                r"\b(?:what\s+(?:should|do)\s+i\s+wear|what\s+to\s+wear|"
-                r"o\s+que\s+(?:devo|posso)\s+vestir|devo\s+levar|should\s+i\s+(?:take|bring|wear))\b",
+                r"\b(?:what\s+(?:should|do)\s+i\s+wear|what\s+to\s+wear|should\s+i\s+wear|"
+                r"o\s+que\s+(?:devo|posso)\s+vestir|"
+                rf"devo\s+levar\s+{weather_items}|should\s+i\s+(?:take|bring)\s+{weather_items})\b",
                 normalized,
                 flags=re.IGNORECASE,
             )
@@ -279,6 +329,8 @@ class SupervisorAgent(BaseAgent):
             r"\bjacket\b",
             r"\bmeteo\b",
             r"\bchover\b",
+            # Informal spellings seen in chat: "xover", "chuver", "vai chove".
+            r"\b(?:xover|xove|chuver|chove|choveu|chovera)\b",
             r"\bprevis[aã]o\b",
             r"\bchuva\b",
             r"\btemperatura\b",
@@ -441,7 +493,10 @@ class SupervisorAgent(BaseAgent):
                 r"\b(?:receita|recipe|cozinhar|cooking|ingredientes?|ingredients?|"
                 r"bom\s+para|boa\s+para|s[ií]tio\s+indoor|sitio\s+indoor|"
                 r"passar\s+\d+\s+hora|crian[cç]a|bilhetes?|tickets?|morada|address|"
-                r"pre[cç]o|price|abert[oa]|website)\b",
+                r"pre[cç]o|price|abert[oa]|website|"
+                # "Onde fica X e a que horas abre?" asks where a place is, not a route.
+                r"onde\s+fica|onde\s+[eé]|where\s+is|a\s+que\s+horas?\s+(?:abre|fecha)|"
+                r"at\s+what\s+time\s+does|opening\s+hours)\b",
                 normalized,
             )
             and not route_intent_markers
@@ -800,7 +855,7 @@ class SupervisorAgent(BaseAgent):
             r"\btell\s+me\s+what\s+you\s+(?:do|can)\b",
             r"\bwhat\s+(?:topics?|areas?|domains?)\s+(?:do\s+you|can\s+you)\s+cover\b",
             r"\bo\s+que\s+(?:e\s+que\s+o?\s*)?(?:o\s+)?(?:lisboa|assistente)?\s*consegue\s+fazer\b",
-            r"\bo\s+que\s+(?:sabes?|podes?)\s+fazer\b",
+            r"\bo\s+que\s+(?:sabes?|podes?|consegues?|es\s+capaz\s+de)\s+fazer\b",
             r"\bque\s+(?:capacidades?|funcionalidades?|funcoes?|fun[cç][oõ]es?)\s+(?:tens?|tem)\b",
             r"\bcomo\s+(?:me\s+podes?|podes?\s+me)\s+ajudar\b",
             r"\bo\s+que\s+posso\s+(?:pedir|perguntar|pedir-te)\b",
@@ -1099,8 +1154,8 @@ class SupervisorAgent(BaseAgent):
             return True
         return bool(
             re.search(
-                r"\b(?:destes|destas|desses|dessas|estes|estas|esses|essas|"
-                r"anteriores|previous|above|listed|these|those)\b",
+                r"\b(?:destes|destas|desses|dessas|estes|estas|esses|essas|deles|delas|"
+                r"anteriores|previous|above|listed|these|those|which\s+one|which\s+of\s+them)\b",
                 normalized,
             )
         )
@@ -1278,7 +1333,9 @@ class SupervisorAgent(BaseAgent):
         ):
             event_hit = False
         if weather_hit and event_hit and not re.search(
-            r"\b(?:weather|forecast|rain|temperature|wind|umbrella|tempo|meteo|previs[aã]o|chuva|temperatura|vento|guarda[-\s]?chuva)\b",
+            # Clothing advice ("should I bring a jacket to the concert?") is a weather question too.
+            r"\b(?:weather|forecast|rain|temperature|wind|umbrella|tempo|meteo|previs[aã]o|chuva|temperatura|vento|guarda[-\s]?chuva|"
+            r"jacket|coat|sweater|raincoat|sunscreen|wear|casaco|camisola|agasalho|imperme[aá]vel|vestir|protetor solar)\b",
             message_lower,
         ):
             weather_hit = False
@@ -1458,6 +1515,7 @@ class SupervisorAgent(BaseAgent):
 
         pure_weather_question = (
             weather_hit
+            and not transport_hit
             and re.search(
                 r"\b(?:que\s+tempo|como\s+est[aá]\s+o\s+tempo|vai\s+chover|"
                 r"previs[aã]o|forecast|weather|avisos?|warnings?)\b",
@@ -1480,6 +1538,26 @@ class SupervisorAgent(BaseAgent):
         if weather_hit and not any([transport_hit, event_hit, place_hit, service_hit]):
             return {
                 "reasoning": "Direct standalone weather override",
+                "agents": ["weather"],
+                "direct_response": None,
+            }
+
+        # "Should I bring a jacket to the outdoor concert tonight?" is about the
+        # user's own event: the answer is the weather, not an event search.
+        clothing_for_own_event = bool(
+            weather_hit
+            and event_hit
+            and re.search(r"\b(?:jacket|coat|umbrella|sweater|wear|casaco|guarda[-\s]?chuva|camisola|vestir|levar)\b", message_lower)
+            and re.search(
+                r"\b(?:to|for|at)\s+(?:the|my|our|this)\s+(?:\w+\s+){0,2}(?:concert|festival|event|show|game|match)\b|"
+                r"\b(?:para|ao|no|na)\s+(?:o|a|meu|minha)?\s*(?:concerto|festival|evento|espet[aá]culo|jogo)\b",
+                message_lower,
+            )
+            and not re.search(r"\b(?:what|which|any|find|quais|que|h[aá]|encontra)\b.{0,30}\b(?:events?|eventos?|concerts?|concertos?)\b", message_lower)
+        )
+        if clothing_for_own_event and not any([transport_hit, place_hit, service_hit]):
+            return {
+                "reasoning": "Direct weather override: clothing advice for the user's own event",
                 "agents": ["weather"],
                 "direct_response": None,
             }
@@ -1521,14 +1599,17 @@ class SupervisorAgent(BaseAgent):
                 "direct_response": None,
             }
 
-        if transport_hit and not any([weather_hit, event_hit, place_hit, service_hit]):
+        # Two questions with one recognised domain: the other question used
+        # words the heuristics do not know, so the routing model decides.
+        several_questions = message_lower.count("?") >= 2
+        if transport_hit and not any([weather_hit, event_hit, place_hit, service_hit]) and not several_questions:
             return {
                 "reasoning": "Direct standalone transport override",
                 "agents": ["transport"],
                 "direct_response": None,
             }
 
-        if (event_hit or place_hit or service_hit) and not any([weather_hit, transport_hit]):
+        if (event_hit or place_hit or service_hit) and not any([weather_hit, transport_hit]) and not several_questions:
             return {
                 "reasoning": "Direct standalone researcher override",
                 "agents": ["researcher"],
@@ -1628,6 +1709,21 @@ class SupervisorAgent(BaseAgent):
                 "agents": cls._planning_follow_up_agents(user_message),
                 "direct_response": None,
             }
+        # "Qual deles é melhor para o pôr do sol?" compares the places just
+        # listed; "sol" is not a weather question here.
+        comparative_reference = bool(
+            re.search(
+                r"\b(?:qual|quais)\s+(?:deles|delas|dos\s+dois|das\s+duas|destes|destas)\b|"
+                r"\bwhich\s+(?:one|of\s+them|of\s+these)\b",
+                cls._normalize_query(user_message),
+            )
+        )
+        if comparative_reference and previous_domain in {"researcher", None}:
+            return {
+                "reasoning": "Comparative follow-up about the places listed in the previous answer",
+                "agents": ["researcher"],
+                "direct_response": None,
+            }
         if current_domain:
             return {
                 "reasoning": f"Follow-up domain override from current query ({current_domain})",
@@ -1690,6 +1786,21 @@ class SupervisorAgent(BaseAgent):
             return False
         if cls._is_transport_line_route_query(user_message):
             return False
+        # "I'm planning my trip and want ideas: what kinds of places can I
+        # explore?" asks for suggestions, not for an itinerary, unless it also
+        # sets a time window, a start point, or stop counts.
+        if re.search(
+            r"\b(?:ideas?|ideias?|what kinds? of|que tipos? de|what (?:can|should) i (?:see|do|visit|explore)|"
+            r"o que (?:posso|devo|ha para) (?:ver|fazer|visitar))\b",
+            message_lower,
+        ) and not re.search(
+            r"\b(?:morning|afternoon|evening|full day|half day|manha|tarde|noite|dia inteiro|meio dia|"
+            r"\d+\s*(?:h|hours?|horas?|days?|dias?)|starting|a partir|parto|saindo|order|ordem|schedule|"
+            # An explicit plan ("Plan my day in Belém. What can I see there?") stays a plan.
+            r"plan|planeia\w*|planear|planeie|organiza\w*|roteiro|itinerar\w*|itinerary)\b",
+            message_lower,
+        ):
+            return False
         pure_weather_request = (
             cls._looks_like_weather_query(message_lower)
             and re.search(
@@ -1706,12 +1817,11 @@ class SupervisorAgent(BaseAgent):
         if pure_weather_request:
             return False
         if re.search(
-            r"\b(?:quero|queria|gostava|preciso|faz|fazer|planeia|organiza|monta)\b.*"
+            r"\b(?:quero|queria|gostava|preciso|faz|fazer|planeia|organiza|monta|"
+            r"i\s+want|i\s+would\s+like|i'?d\s+like|give\s+me)\b.*"
             r"\b(?:tarde|manh[aã]|noite|afternoon|morning|evening)\b.*"
-            r"\b(?:almo[cç]o|lunch|jantar|dinner|miradouro|viewpoint|jardim|garden|"
-            r"caf[eé]|coffee|restaurante|restaurant)\b.*"
-            r"\b(?:almo[cç]o|lunch|jantar|dinner|miradouro|viewpoint|jardim|garden|"
-            r"caf[eé]|coffee|restaurante|restaurant)\b",
+            rf"\b{_PLAN_STOP_WORDS}\b.*"
+            rf"\b{_PLAN_STOP_WORDS}\b",
             message_lower,
         ):
             return True
@@ -1731,8 +1841,8 @@ class SupervisorAgent(BaseAgent):
             and not re.search(
                 r"\b(?:planeia|plan(?:ear)?|organiza|organize|itinerary|itiner[a\u00e1]rio|"
                 r"roteiro|dia\s+inteiro|full\s+day|half\s+day|meio\s+dia|"
-                r"\d+\s*(?:dias?|days?)|v[a\u00e1]rios?\s+locais|multiple\s+places|"
-                r"ordem|order|schedule|agenda)\b",
+                r"\d+\s*(?:dias?|days?|h|hours?|horas?)|v[a\u00e1]rios?\s+locais|multiple\s+places|"
+                r"ordem|order|schedule|agenda|between\s+them|entre\s+eles|entre\s+elas)\b",
                 message_lower,
             )
         )
@@ -1761,6 +1871,112 @@ class SupervisorAgent(BaseAgent):
             message_lower,
         ):
             return True
+        # An explicit request to plan or organise, together with any itinerary
+        # element (a part of the day, a time budget, or a stop type), is a
+        # plan whatever the word order ("Plan a sunset walk in Graça with a
+        # viewpoint and dinner...", "... Organiza-me o plano.").
+        # Accent-folded but with punctuation, so sentence starts stay visible.
+        folded_with_punctuation = (
+            unicodedata.normalize("NFKD", str(user_message or "").lower()).encode("ascii", "ignore").decode("ascii")
+        )
+        explicit_planning_request = bool(
+            # The imperative may open any sentence: "I'm staying in Alfama. Plan a relaxed Sunday...".
+            re.search(
+                r"(?:^|[.!?;:]\s+)(?:please\s+|por\s+favor\s+)?(?:can\s+you\s+|could\s+you\s+|podes\s+)?"
+                r"(?:plan|planeia|planear|organiza|organizar|organize|organise|cria|monta)\b",
+                folded_with_punctuation,
+            )
+            or re.search(
+                r"\b(?:organiza|planeia|faz|monta|cria)(?:\s*-?\s*me)?\s+(?:o|um|uma|a)?\s*"
+                r"(?:plano|roteiro|itinerario|percurso)\b",
+                message_lower,
+            )
+        )
+        itinerary_element = bool(
+            re.search(
+                r"\b(?:morning|afternoon|evening|night|sunset|day|days|weekend|hours?|visits?|"
+                r"museums?|viewpoints?|gardens?|parks?|dinner|lunch|cafes?|coffee|restaurants?|"
+                r"beach(?:es)?|walk|stops?|monuments?|"
+                r"manha|tarde|noite|por do sol|dia|dias|fim de semana|horas?|visitas?|museus?|"
+                r"miradouros?|jardi(?:m|ns)|parques?|jantar|almoco|restaurantes?|praias?|"
+                r"passeio|paragens?|monumentos?)\b",
+                message_lower,
+            )
+        )
+        if explicit_planning_request and itinerary_element:
+            return True
+        # An itinerary described without the word "plan": several stop types
+        # (or "two museums") in a time window, with a start point or an order
+        # ("Quero ver o pôr do sol no miradouro e depois jantar. Parto do
+        # Saldanha."). A lookup such as "where can I have lunch and coffee in
+        # Alfama this afternoon?" has no start point or order and stays a lookup.
+        stop_types = set(
+            re.findall(
+                r"\b(museums?|museus?|miradouros?|viewpoints?|jardi(?:m|ns)|gardens?|parks?|cafes?|coffee|"
+                r"restaurants?|restaurantes?|jantar|dinner|almoco|lunch|pastelarias?|pastry|praias?|beach(?:es)?|"
+                r"monumentos?|monuments?|mercados?|markets?|feiras?|fado|livrarias?|bookshops?|por do sol|sunset|lanchar|lanche|snack|"
+                r"castelo|castle|palacio|palace)\b",
+                message_lower,
+            )
+        )
+        counted_stops = re.search(
+            r"\b(?:two|three|four|dois|duas|tres|quatro|[2-6])\s+(?:museums?|museus?|miradouros?|viewpoints?|"
+            r"jardins|gardens|parks|monumentos|monuments|visitas|visits|stops|paragens)\b",
+            message_lower,
+        )
+        time_window = re.search(
+            r"\b(?:morning|afternoon|evening|night|sunset|full day|half day|weekend|manha|tarde|noite|"
+            r"fim de tarde|por do sol|dia inteiro|meio dia|fim de semana|\d+\s*(?:h|hours?|horas?))\b",
+            message_lower,
+        )
+        start_or_order = re.search(
+            r"\b(?:starting (?:at|from)|start(?:ing)? from|from \w+(?: \w+){0,3} by (?:metro|bus|tram|train)|"
+            r"staying (?:in|at|near)|a partir d[eoa]s?|parto d[eoa]s?|partindo d[eoa]s?|saindo d[eoa]s?|"
+            r"estou (?:em|no|na)|and then|then|followed by|e depois|depois|em seguida|seguido de|"
+            r"voltar (?:ao|a|para)|return to|back to)\b",
+            message_lower,
+        )
+        if (len(stop_types) >= 2 or counted_stops) and time_window and start_or_order:
+            return True
+        # "I have 3 hours ... a museum and a garden and how to move between them":
+        # a time budget or the movement between the stops makes it a plan.
+        # "Tenho a manhã livre", "a free afternoon" are time budgets too.
+        time_budget = re.search(
+            r"\b(?:i have|we have|tenho|temos)\s+(?:\d+|um|uma|duas|dois|tres|quatro|two|three|four)\s*(?:h|hours?|horas?)\b|"
+            r"\b(?:manha|tarde|noite|dia|morning|afternoon|evening|day)\s+(?:livre|free)\b|"
+            r"\bfree\s+(?:morning|afternoon|evening|day)\b",
+            message_lower,
+        )
+        move_between = re.search(
+            r"\b(?:how to (?:move|get|go) between|between them|como (?:me )?(?:desloco|deslocar|ir|vou) entre|entre eles|entre elas)\b",
+            message_lower,
+        )
+        if (len(stop_types) >= 2 or counted_stops) and (time_budget or move_between):
+            return True
+        # "Quero um dia em Sintra com o Palácio da Pena, a Quinta da Regaleira e
+        # almoço, a partir do Rossio": a list of stops (at least one of a known
+        # type) for a day or part of the day, from a start place (not a clock
+        # time, as in "a partir das 20h").
+        enumeration = re.search(r"\b(?:com|with)\s+(?P<items>[^.?!]{3,140})", message_lower)
+        if enumeration and re.search(r",|\s+e\s+|\s+and\s+", enumeration.group("items")):
+            listed_stop_type = re.search(
+                r"\b(?:museums?|museus?|miradouros?|viewpoints?|jardi(?:m|ns)|gardens?|parks?|cafes?|coffee|"
+                r"restaurants?|restaurantes?|jantar|dinner|almoco|lunch|pastelarias?|pastry|praias?|beach(?:es)?|"
+                r"monumentos?|monuments?|mercados?|markets?|feiras?|fado|livrarias?|bookshops?|castelo|castle|"
+                r"palacio|palace|visitas?|visits?)\b",
+                enumeration.group("items"),
+            )
+            day_expression = re.search(
+                r"\b(?:um dia|a day|one day|dia|day|manha|tarde|noite|morning|afternoon|evening|night|"
+                r"fim de semana|weekend)\b",
+                message_lower,
+            )
+            place_start = re.search(
+                r"\b(?:a partir d[eoa]s?|parto d[eoa]s?|partindo d[eoa]s?|saindo d[eoa]s?|starting (?:at|from)|from)\s+(?!\d)\w",
+                message_lower,
+            )
+            if listed_stop_type and day_expression and place_start:
+                return True
         planning_patterns = [
             r"\bplan my day\b",
             r"\bday plan\b",
@@ -1769,7 +1985,7 @@ class SupervisorAgent(BaseAgent):
             r"\broteiro\b",
             r"\bday trip\b",
             r"\bpasseio\b",
-            r"\bplan\b.*\b(?:day|days|afternoon|morning|evening|itinerary|trip|route|visit|stops?|"
+            r"\bplan\b.*\b(?:day|days|afternoon|morning|evening|itinerary|trip|route|visits?|stops?|"
             r"rainy|museum|museums|restaurants?|hotel|transport|return|lisbon|lisboa|bel[eé]m)\b",
             r"\b(?:plane(?:ar|ia|ie)|organiza(?:r)?|organize|organise|organizing)\b.*\b(?:dia|day|"
             r"manh(?:a)?|morning|tarde|afternoon|noite|evening|horas?|hours?|roteiro|itiner[aá]rio|itinerary|"
@@ -1777,12 +1993,11 @@ class SupervisorAgent(BaseAgent):
             r"comer|eat|food|meal|refei[cç][aã]o|almo[cç]o|jantar|lunch|dinner)\b",
             r"\b(?:plano|plan)\b.*\b(?:dia|day|manh[aã]|tarde|noite|viagem|trip|visita|visit)\b",
             r"\bschedule\b.*\b(?:day|itinerary|route|visits?|stops?)\b",
-            r"\b(?:quero|queria|gostava|preciso|faz|fazer|planeia|organiza|monta)\b.*"
+            r"\b(?:quero|queria|gostava|preciso|faz|fazer|planeia|organiza|monta|"
+            r"i\s+want|i\s+would\s+like|i'?d\s+like|give\s+me)\b.*"
             r"\b(?:tarde|manh[aã]|noite|afternoon|morning|evening)\b.*"
-            r"\b(?:almo[cç]o|lunch|jantar|dinner|miradouro|viewpoint|jardim|garden|"
-            r"caf[eé]|coffee|restaurante|restaurant)\b.*"
-            r"\b(?:almo[cç]o|lunch|jantar|dinner|miradouro|viewpoint|jardim|garden|"
-            r"caf[eé]|coffee|restaurante|restaurant)\b",
+            rf"\b{_PLAN_STOP_WORDS}\b.*"
+            rf"\b{_PLAN_STOP_WORDS}\b",
             r"\b(?:cria|criar|monta|montar|faz|fazer)\b.*\b(?:itiner[aá]rio|itener[aá]rio|roteiro|plano|dia|manh(?:a)?|tarde)\b",
             r"\b(?:itiner[aá]rio|itener[aá]rio|roteiro|plano)\b.*\b(?:cria|criar|monta|montar|faz|fazer|inclui|incluir|comer|refei[cç][aã]o|almo[cç]o|jantar|hotel)\b",
             r"\b(?:estes|estas|esses|essas|these|those)\s+(?:locais|lugares|s[ií]tios|places|stops)\b.*\b(?:dia|day|amanh[aã]|tomorrow|almo[cç]o|jantar|lunch|dinner|hotel)\b",
@@ -1834,9 +2049,17 @@ class SupervisorAgent(BaseAgent):
         normalized = cls._normalize_query(user_message)
         if not normalized:
             return False
+        # A line is a number with a line word ("autocarro 728", "linha 12"), a
+        # tram code ("28E"), or a bare three-digit number that is not a
+        # quantity ("3 horas", "100 metros", "15:00" are not lines).
         has_line = bool(
             re.search(
-                r"\b(?:linha\s*)?(?:tram|eletrico|el[eé]trico|bus|autocarro|carris)?\s*\d{1,3}[a-z]?\b",
+                r"\b(?:linha|line|tram|eletrico|el[eé]trico|bus|autocarro|carris)\s*(?:n\.?o?\s*)?\d{1,3}[a-z]?\b",
+                normalized,
+            )
+            or re.search(r"\b\d{1,2}e\b", normalized)
+            or re.search(
+                r"\b\d{3}\b(?!\s*(?:h|hours?|horas?|min|minutes?|minutos?|dias?|days?|m|km|metros?|meters?|euros?|eur)\b)",
                 normalized,
             )
         )
@@ -2008,6 +2231,13 @@ class SupervisorAgent(BaseAgent):
             return True
         if has_origin_anchor and has_route_constraint:
             return True
+        # A start point means the first leg of the plan has to be routed,
+        # unless the user wants to go on foot.
+        walking_only = bool(
+            re.search(r"\b(?:a\s+p[eé]|walk(?:ing)?|on\s+foot|caminhar|caminhada|percurso\s+pedonal)\b", normalized)
+        )
+        if has_origin_anchor and not walking_only:
+            return True
         if cls._looks_like_transport_query(positive_transport_probe) and not has_origin_anchor:
             return True
 
@@ -2046,6 +2276,12 @@ class SupervisorAgent(BaseAgent):
             r"\broteiro\b",
             r"\bplano\s+(?:do|de)?\s*dia\b",
             r"\b(?:varios|vários|multiple)\s+(?:locais|places|stops)\b",
+            # Explicit requests to plan or order visits, or a time budget for
+            # visiting, are itineraries even when weather and transport are named.
+            r"\bplan\s+(?:the\s+|my\s+|our\s+)?(?:visits?|stops?|order|route|afternoon|morning|evening)\b",
+            r"\b(?:in\s+order|por\s+ordem|pela\s+ordem)\b",
+            r"\b(?:planeia|planear|organiza|organizar)\b",
+            r"\b(?:\d{1,2}|two|three|four|five|six|duas|tres|três|quatro|cinco|seis)\s+(?:hours?|horas)\b.*\b(?:visit|visitar|visitas?|plan|plano|roteiro)\b",
         ]
         if any(re.search(pattern, normalized) for pattern in full_planning_markers):
             return False
@@ -2091,6 +2327,32 @@ class SupervisorAgent(BaseAgent):
     def _is_weather_only_outdoor_decision_query(cls, user_message: str) -> bool:
         """Detect weather advice for an outdoor activity without a requested transport leg."""
         normalized = cls._normalize_query(user_message)
+        # "Can I have a picnic in Monsanto tomorrow?" names no weather word but
+        # asks whether the weather allows an outdoor activity on a day.
+        implicit_weather_decision = bool(
+            re.search(
+                r"\b(?:can\s+(?:i|we)|could\s+(?:i|we)|should\s+(?:i|we)|is\s+it\s+(?:ok|okay|a\s+good\s+day)|"
+                r"good\s+day\s+for|posso|podemos|da\s+para|devo|vale\s+a\s+pena|bom\s+dia\s+para)\b",
+                normalized,
+            )
+            and re.search(
+                r"\b(?:picnic|piquenique|beach|praia|sunbath\w*|hike|hiking|trilhos?|bike|bicicleta|cycling|"
+                r"sailing|vela|surf(?:ing)?|running|corrida|kayak|caiaque)\b",
+                normalized,
+            )
+            and re.search(r"\b(?:today|tomorrow|tonight|weekend|hoje|amanha|fim\s+de\s+semana|this\s+\w+day)\b", normalized)
+            and not re.search(r"\b(?:itinerary|roteiro|plan(?:ear)?|planeia|organiza|how\s+(?:do|can)\s+i\s+get|como\s+(?:vou|chego))\b", normalized)
+            # "Can I take the train to the beach tomorrow?" also asks for transport.
+            and not re.search(
+                r"\b(?:metro|autocarros?|bus(?:es)?|comboios?|trains?|tram|eletricos?|carris|cp|ferry|barco|"
+                r"take\s+the|apanhar|de\s+(?:metro|comboio|autocarro|eletrico))\b",
+                normalized,
+            )
+            # "Which beach can I visit tomorrow?" asks for places, not for the weather.
+            and not re.search(r"\b(?:which|what|where|quais?|onde)\b", normalized)
+        )
+        if implicit_weather_decision:
+            return True
         if not normalized or not cls._looks_like_weather_query(normalized):
             return False
         clothing_advice = bool(
@@ -2313,6 +2575,14 @@ class SupervisorAgent(BaseAgent):
 
         # Parse JSON response
         decision = parse_json_response(content)
+        if not decision:
+            # An empty or cut answer is usually transient; one more call is
+            # cheaper than routing a plan by keywords alone.
+            try:
+                retry = self._safe_llm_invoke(self.llm, messages)
+                decision = parse_json_response(clean_response(retry.content, _print=False))
+            except Exception as exc:
+                logger.info("Supervisor routing retry failed: %s", exc)
 
         if decision:
             agents = decision.get("agents", [])
@@ -2454,7 +2724,22 @@ class SupervisorAgent(BaseAgent):
                 "direct_response": self._sanitize_direct_response(oos_msg),
             }
 
-        # 2. AML municipalities are in scope. In fallback mode, route mobility
+        # 2. A plan stays a plan when the routing model's answer cannot be
+        # read: "Plan a day in Cascais from Cais do Sodré by train" routed to
+        # Transport alone lost the itinerary (the planner never ran).
+        if self._is_planning_query(user_message):
+            agents = ["researcher", "planner"]
+            if self._planning_query_requires_transport_context(user_message):
+                agents.insert(0, "transport")
+            if self._requires_weather_for_planning(user_message) or self._planning_query_mentions_weather(user_message):
+                agents.insert(0, "weather")
+            return {
+                "reasoning": "Fallback: itinerary request - using the planning agents",
+                "agents": agents,
+                "direct_response": None,
+            }
+
+        # 3. AML municipalities are in scope. In fallback mode, route mobility
         # requests to Transport and let unsupported-data answers be expressed
         # as data/source limitations, not geographic exclusions.
         if extract_aml_municipality_mentions(user_message) and self._looks_like_transport_query(message_lower):

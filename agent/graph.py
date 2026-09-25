@@ -32,6 +32,7 @@ from agent.agents.base import (
     clean_response,
     is_local_provider,
 )
+from agent.planning.brief import plan_brief_transport_request
 from agent.utils.langsmith_tracing import (
     LANGSMITH_AVAILABLE,
     ContextThreadPoolExecutor,
@@ -277,6 +278,44 @@ def _print_final_markdown_response(final_output: str) -> None:
     print(final_output)
     print("=" * 80 + "\n")
 
+
+def _with_booking_limitation(final_output: str, language: str) -> str:
+    """Open a booking request's answer with the fact that bookings are not supported.
+
+    "Can you book me a table at Ramiro?" is answered with the place details
+    found, but the first thing the user needs to know is that LISBOA cannot
+    make the booking.
+    """
+    text = str(final_output or "").strip()
+    is_pt = (language or "").lower().startswith("pt")
+    if re.search(r"\b(?:reserv\w*|book(?:ing|ings)?|n[aã]o fa[cç]o transa|cannot perform transactions)\b", text[:400], re.IGNORECASE):
+        return text
+    if re.search(
+        r"\b(?:No confirmed (?:events|places)|Sem (?:eventos|locais) confirmados|could not find a specific place|"
+        r"n[aã]o encontrei um local espec[ií]fico)\b",
+        text,
+        re.IGNORECASE,
+    ):
+        # The venue is not in the data: the limitation is the whole answer.
+        from agent.agents.supervisor import SupervisorAgent
+
+        return SupervisorAgent._build_unsupported_action_response("pt" if is_pt else "en")
+    note = (
+        "✅ **Resposta direta:** não consigo fazer reservas nem compras; contacta o local diretamente. "
+        "Abaixo estão os dados confirmados que encontrei."
+        if is_pt
+        else "✅ **Direct answer:** I can't make bookings or reservations; contact the venue directly. "
+        "Below is the confirmed information I found."
+    )
+    # The booking note replaces a generic direct answer, or opens the answer.
+    replaced, count = re.subn(r"(?m)^✅\s+\*\*(?:Resposta direta|Direct answer):\*\*[^\n]*$", note, text, count=1)
+    if count:
+        return replaced
+    lines = text.splitlines()
+    if lines and lines[0].startswith("#"):
+        return "\n".join([lines[0], "", note, "", *lines[1:]]).strip()
+    return f"{note}\n\n{text}"
+
 # ==========================================================================
 # Multi-Agent System
 # ==========================================================================
@@ -318,6 +357,9 @@ class MultiAgentAssistant:
             "researcher": ResearcherAgent(),
             "planner": PlannerAgent(),
         }
+        # The planner has no tools: the Transport worker resolves the legs
+        # between the stops the planner chooses.
+        self.agents["planner"].leg_resolver = self.agents["transport"].resolve_itinerary_legs
 
         # Initialize state
         self.state = create_initial_state()
@@ -383,19 +425,6 @@ class MultiAgentAssistant:
         ):
             return "restaurantes e gastronomia" if language == "pt" else "restaurants and food"
         return "locais, atrações e conhecimento de Lisboa" if language == "pt" else "places, attractions and Lisbon knowledge"
-
-    @classmethod
-    def _progress_agent_label(cls, agent_name: str, user_message: str, language: str) -> str:
-        """Build a concise user-facing label for the data layer used by an agent."""
-        if agent_name == "weather":
-            return "meteorologia IPMA" if language == "pt" else "IPMA weather"
-        if agent_name == "transport":
-            return "mobilidade e transportes" if language == "pt" else "mobility and transport"
-        if agent_name == "researcher":
-            return cls._progress_researcher_focus(user_message, language)
-        if agent_name == "planner":
-            return "planeamento do roteiro" if language == "pt" else "itinerary planning"
-        return agent_name
 
     @classmethod
     def _progress_lookup_status(
@@ -2218,7 +2247,10 @@ class MultiAgentAssistant:
                 r"\b(?:receita|recipe|cozinhar|cooking|ingredientes?|ingredients?|"
                 r"bom\s+para|boa\s+para|s[ií]tio\s+indoor|sitio\s+indoor|"
                 r"passar\s+\d+\s+hora|crian[cç]a|bilhetes?|tickets?|morada|address|"
-                r"pre[cç]o|price|abert[oa]|website)\b",
+                r"pre[cç]o|price|abert[oa]|website|"
+                # A place lookup ("onde fica X e a que horas abre") is not a route.
+                r"onde\s+fica|onde\s+e|where\s+is|a\s+que\s+horas?|at\s+what\s+time|"
+                r"opening\s+hours|abre|fecha|opens|closes)\b",
                 normalized,
             )
         ):
@@ -2255,8 +2287,12 @@ class MultiAgentAssistant:
             _norm_no_neg,
         ):
             return True
+        # "de X e a que horas" names an hour, not a destination.
         return bool(
-            re.search(r"\b(?:from\s+.+?\s+to\s+.+|de\s+.+?\s+(?:para|ate|a|ao)\s+.+)\b", normalized)
+            re.search(
+                r"\b(?:from\s+.+?\s+to\s+(?!what\s+time\b).+|de\s+.+?\s+(?:para|ate|a|ao)\s+(?!que\s+horas?\b).+)\b",
+                normalized,
+            )
         )
 
     @classmethod
@@ -2348,8 +2384,68 @@ class MultiAgentAssistant:
         destination: str,
         language: str,
     ) -> str:
-        """Build a direct high-level answer for walking-only point-to-point requests."""
-        if language == "pt":
+        """Build a direct answer for walking-only point-to-point requests.
+
+        Both ends are located with the location resolver; the answer gives the
+        straight-line distance and a walking time with a detour factor, and
+        points to public transport when the walk is long. Without both
+        locations it falls back to high-level guidance and says so.
+
+        Args:
+            origin: User-facing start.
+            destination: User-facing end.
+            language: Output language (``pt`` or ``en``).
+
+        Returns:
+            The Markdown answer.
+        """
+        from agent.planning.legs import walking_minutes
+        from tools.location_resolver import resolve_location_query
+        from tools.utils import haversine_distance
+
+        is_pt = language == "pt"
+        distance_km: Optional[float] = None
+        try:
+            start = resolve_location_query(origin)
+            end = resolve_location_query(destination)
+            if start.get("success") and end.get("success") and start.get("lat") is not None and end.get("lat") is not None:
+                distance_km = haversine_distance(start["lat"], start["lon"], end["lat"], end["lon"])
+        except Exception as exc:  # the answer still gives guidance without a distance
+            logger.debug("Walking distance lookup failed for %r -> %r: %s", origin, destination, exc)
+            distance_km = None
+
+        timestamp = datetime.now().strftime("%H:%M")
+        if distance_km is not None and distance_km > 0.05:
+            minutes = walking_minutes(distance_km)
+            distance_text = f"{distance_km:.1f}".replace(".", ",") if is_pt else f"{distance_km:.1f}"
+            long_walk = minutes > 35
+            if is_pt:
+                direct = f"são cerca de **{minutes} min** a pé ({distance_text} km em linha reta)."
+                if long_walk:
+                    direct += " É uma caminhada longa; se preferires, pergunta-me a opção de transportes públicos."
+                return (
+                    f"### 🚶 **A pé de {origin} para {destination}**\n\n"
+                    f"✅ **Resposta direta:** {direct}\n\n"
+                    "---\n\n"
+                    f"- 📏 **Distância em linha reta:** {distance_text} km\n"
+                    f"- ⏱️ **Tempo a pé estimado:** cerca de {minutes} min (inclui um desvio de cerca de 25% face à linha reta)\n"
+                    "- 🧭 **Limitação:** não tenho navegação pedonal curva-a-curva; o tempo real depende do percurso e das subidas.\n\n"
+                    f"📌 **Fonte:** [*OpenStreetMap*](https://www.openstreetmap.org) | **Atualizado:** {timestamp}"
+                )
+            direct = f"it is about a **{minutes} min** walk ({distance_text} km in a straight line)."
+            if long_walk:
+                direct += " It is a long walk; ask me for the public transport option if you prefer."
+            return (
+                f"### 🚶 **Walking from {origin} to {destination}**\n\n"
+                f"✅ **Direct answer:** {direct}\n\n"
+                "---\n\n"
+                f"- 📏 **Straight-line distance:** {distance_text} km\n"
+                f"- ⏱️ **Estimated walking time:** about {minutes} min (with a detour of about 25% over the straight line)\n"
+                "- 🧭 **Limitation:** I do not have turn-by-turn pedestrian navigation; the actual time depends on the path and the hills.\n\n"
+                f"📌 **Source:** [*OpenStreetMap*](https://www.openstreetmap.org) | **Updated:** {timestamp}"
+            )
+
+        if is_pt:
             guidance = (
                 f"Segue a pé de **{origin}** para **{destination}** usando o percurso pedonal mais direto "
                 "e mantendo margem para orientação local."
@@ -2359,7 +2455,7 @@ class MultiAgentAssistant:
                 f"✅ **Resposta direta:** {guidance}\n\n"
                 "---\n\n"
                 "### 🧭 **Limitação**\n\n"
-                "- O LISBOA não tem navegação pedonal curva-a-curva nem cálculo exato de distância para este percurso.\n"
+                "- Não consegui localizar os dois pontos com confiança, por isso não indico distância nem tempo.\n"
                 "- Trato isto como orientação pedonal de alto nível, não como rota GPS detalhada."
             )
 
@@ -2372,7 +2468,7 @@ class MultiAgentAssistant:
             f"✅ **Direct answer:** {guidance}\n\n"
             "---\n\n"
             "### 🧭 **Limitation**\n\n"
-            "- LISBOA does not currently provide turn-by-turn pedestrian navigation or exact walking distance for this route.\n"
+            "- I could not locate both points confidently, so I give no distance or time.\n"
             "- Treat this as high-level walking guidance, not a detailed GPS route."
         )
 
@@ -2494,9 +2590,10 @@ class MultiAgentAssistant:
 
         transport_follow_up_re = re.compile(
             r"\b(?:como|chego|vou|ir|rota|trajeto|percurso|tempo|horas?|quando|"
-            r"proximo|proxima|partida|partidas|apanhar|metro|autocarro|comboio|"
+            r"proximo|proxima|partida|partidas|apanhar|metro|autocarros?|comboios?|"
+            r"eletricos?|electricos?|a\s+pe|carris|barco|ferry|"
             r"transporte|transportes|meios|alternativa|alternativas|opcao|opcoes|outras?|outros?|sem|"
-            r"how|get|go|route|time|when|next|departure|catch|bus|train|transport|"
+            r"how|get|go|route|time|when|next|departure|catch|bus|buses|train|trains|trams?|walk|walking|foot|transport|"
             r"transit|modes?|option|options|alternative|without)\b",
             flags=re.IGNORECASE,
         )
@@ -2633,7 +2730,8 @@ class MultiAgentAssistant:
             r"(?:Rota\s+de\s+transporte\s+p[úu]blico|Public\s+transport\s+route|Trajeto|Route):\s*(?P<origin>[^→\n]{2,120})\s*→\s*(?P<destination>[^*\n]{2,160})",
             r"\bfrom\s+(?P<origin>.+?)\s+to\s+(?P<destination>[^?.!\n]{2,160})",
             r"\b(?:entre|between)\s+(?P<origin>.+?)\s+(?:e|and)\s+(?P<destination>[^?.!\n]{2,160})",
-            r"\b(?:de|do|da|desde|from)\s+(?P<origin>.+?)\s+(?:para|aos|às|ao|à|at[eé]|ate|a|to)\s+(?P<destination>[^?.!\n]{2,160})",
+            r"\b(?:de|do|da|desde|from)\s+(?P<origin>.+?)\s+(?:para|aos|às|ao|à|at[eé]|ate|a|to)\s+"
+            r"(?!que\s+horas?\b|what\s+time\b)(?P<destination>[^?.!\n]{2,160})",
         )
         for pattern in patterns:
             match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -2743,6 +2841,10 @@ class MultiAgentAssistant:
             normalized,
         ):
             return "outros elétricos" if language == "pt" else "other trams"
+        if re.search(r"\b(?:el[eé]tricos?|electricos?|trams?)\b", normalized):
+            return "de elétrico" if language == "pt" else "by tram"
+        if re.search(r"\b(?:a\s+pe|walk(?:ing)?|on\s+foot)\b", normalized):
+            return "a pé" if language == "pt" else "on foot"
         if re.search(r"\b(?:de\s+metro|metro)\b", normalized):
             return "de metro" if language == "pt" else "by metro"
         if re.search(r"\b(?:de\s+autocarro|autocarros?|bus|buses)\b", normalized):
@@ -2829,6 +2931,10 @@ class MultiAgentAssistant:
                     f"Quero ir de comboio de {origin} para {destination}. "
                     "Usa CP suburbano quando for aplicável e indica claramente se não houver ligação suportada."
                 )
+            if mode_hint == "de elétrico":
+                return f"Como vou de elétrico de {origin} para {destination}?"
+            if mode_hint == "a pé":
+                return f"Como vou a pé de {origin} para {destination}?"
             if mode_hint == "evitando autocarro":
                 return f"Quero ir de {origin} para {destination}, evitando autocarro. Dá-me a melhor alternativa suportada."
             if mode_hint == "evitando metro":
@@ -2872,6 +2978,10 @@ class MultiAgentAssistant:
                 f"I want to go by train from {origin} to {destination}. "
                 "Use CP suburban rail when applicable and say clearly if no supported connection exists."
             )
+        if mode_hint == "by tram":
+            return f"How do I get from {origin} to {destination} by tram?"
+        if mode_hint == "on foot":
+            return f"How do I walk from {origin} to {destination}?"
         if mode_hint == "avoiding bus":
             return f"I want to go from {origin} to {destination}, avoiding bus. Give me the best supported alternative."
         if mode_hint == "avoiding metro":
@@ -3526,6 +3636,8 @@ class MultiAgentAssistant:
             r"outros?\s+el[eé]tricos?|outras?\s+linhas?\s+de\s+el[eé]trico|"
             r"(?:metro|autocarro|comboio|bus|train)\s+(?:ou|or)\s+(?:metro|autocarro|comboio|bus|train)|"
             r"e\s+de\s+(?:metro|autocarro|comboio)|(?:ir|vou|preferia|prefiro|preferir|quiser)\s+de\s+(?:metro|autocarro|comboio)|"
+            r"e\s+(?:de\s+)?(?:el[eé]trico|electrico|tram)|e\s+a\s+pe|(?:ir|vou|preferia|prefiro)\s+(?:de\s+el[eé]trico|a\s+pe)|"
+            r"(?:and\s+)?by\s+tram|(?:and\s+)?on\s+foot|(?:and\s+)?walking|"
             r"(?:preferia|prefiro|preferir|quiser)\s+(?:metro|autocarro|comboio)|"
             r"sem\s+(?:ser\s+)?(?:com\s+|de\s+|usar\s+)?(?:metro|autocarros?|comboios?)|"
             r"alternative|another\s+(?:option|route|way)|other\s+(?:transport|transit)\s+modes?|other\s+ways?|"
@@ -3565,6 +3677,12 @@ class MultiAgentAssistant:
             )
             return {"clarification": clarification}
         mode_hint = self._transport_follow_up_mode_hint(message, language)
+        if mode_hint in {"a pé", "on foot"}:
+            # "E a pé?" after a route: the walking answer needs no worker.
+            return {
+                "direct_response": self._build_simple_walking_route_response(origin, destination, language),
+                "routing_reasoning": "Conversation route anchor answered as a walking estimate.",
+            }
         rewritten = self._rewrite_transport_alternative_request(
             origin=origin,
             destination=destination,
@@ -5108,12 +5226,33 @@ class MultiAgentAssistant:
                     # Mixed "weather + complete route" turn: keep the transport route AND
                     # answer the explicit weather question. Each worker gets a focused
                     # message so the weather worker is not handed the route-only rewrite.
+                    from agent.agents.supervisor import SupervisorAgent
+
+                    # "Quero visitar Belém amanhã. Como está o tempo e como vou...?"
+                    # also asks what there is to see, as the supervisor's override does.
+                    wants_visit_context = SupervisorAgent._direct_weather_transport_query_needs_local_context(
+                        message.lower()
+                    )
+                    # The researcher gets the visit question alone; the whole
+                    # turn ("... amanhã ...") reads as an event search.
+                    visit_target = re.search(
+                        r"\b(?:visitar|visit(?:ing)?)\s+(?:o\s+|a\s+|os\s+|as\s+|the\s+)?"
+                        # A connector ("de", "the") only joins two capitalised
+                        # words: "Belém de manhã" is Belém.
+                        r"(?P<place>[A-ZÀ-Ý][\w'’-]*(?:\s+(?:(?:d[aeo]s?|de|the|of)\s+)?[A-ZÀ-Ý][\w'’-]*)*)",
+                        message,
+                    )
+                    visit_place = (visit_target.group("place").strip() if visit_target else "") or current_route_pair[1]
+                    visit_message = (
+                        f"O que visitar em {visit_place}?" if language == "pt" else f"What to visit in {visit_place}?"
+                    )
                     return {
                         "message": rewritten_message,
-                        "agents": ["weather", "transport"],
+                        "agents": ["weather", "transport", *(["researcher"] if wants_visit_context else [])],
                         "worker_messages": {
                             "weather": message,
                             "transport": rewritten_message,
+                            **({"researcher": visit_message} if wants_visit_context else {}),
                         },
                         "routing_reasoning": "Current turn combines an explicit weather question with a complete transport route; both weather and the route are answered.",
                     }
@@ -6386,6 +6525,28 @@ class MultiAgentAssistant:
             ]
         )
 
+        # A plan composed from the planning brief is rendered from the curated
+        # evidence and the resolved legs by deterministic code; the Markdown
+        # repairs below were written for free-form LLM answers and would only
+        # rewrite it, so the rendered plan is published as it is.
+        if "planner" in effective_agents and getattr(self.agents.get("planner"), "last_synthesis_path", "") == "brief":
+            return self._publish_final_response(
+                self._with_bilingual_note(str(response or "").strip()),
+                message=message,
+                effective_agents=effective_agents,
+                routing_reasoning=routing_reasoning,
+                agents_to_call=agents_to_call,
+                agent_outputs=agent_outputs,
+                direct_response_used=direct_response_used,
+                workers=workers,
+                run_workers_in_parallel=run_workers_in_parallel,
+                qa_result=qa_result,
+                retry_agents_used=retry_agents_used,
+                final_repair_ran=final_repair_ran,
+                simple_weather_fact_check=simple_weather_fact_check,
+                start_time=start_time,
+            )
+
         sanitized_response = clean_response(response)
         if "transport" in effective_agents:
             sanitized_response = strip_technical_output_artifacts(sanitized_response)
@@ -6415,6 +6576,13 @@ class MultiAgentAssistant:
             final_output = formatted
 
         planner_involved = "planner" in effective_agents
+        # Plans composed from the planning brief are rendered and checked by
+        # the planner itself; the legacy plan repairs and card-template
+        # rebuilds below only apply to the legacy planner path.
+        brief_plan = bool(
+            planner_involved
+            and getattr(self.agents.get("planner"), "last_synthesis_path", "") == "brief"
+        )
         single_domain_agents = [
             agent_name for agent_name in effective_agents if agent_name in {"weather", "researcher", "transport"}
         ]
@@ -6452,6 +6620,15 @@ class MultiAgentAssistant:
                 language=language,
             )
             if activity_advice and "viabilidade da atividade" not in final_output.lower() and "activity feasibility" not in final_output.lower():
+                if [agent for agent in effective_agents if not str(agent).startswith("_")] == ["weather"]:
+                    # The advice already answers; the forecast's own title and
+                    # one-line summary would repeat it above the day card.
+                    final_output = re.sub(
+                        r"^\s*(?:###\s+🌤️\s+\*\*[^*\n]+\*\*\s*\n+)?(?:✅\s+[^\n]+\n+)?(?:---\s*\n+)?",
+                        "",
+                        final_output,
+                        count=1,
+                    )
                 final_output = f"{activity_advice}\n\n---\n\n{final_output.rstrip()}"
                 final_output = final_visual_pass(final_output)
 
@@ -6651,11 +6828,12 @@ class MultiAgentAssistant:
                 final_output = canonicalize_transport_terms(final_output, language=language)
                 final_output = final_visual_pass(final_output)
 
-        final_output = self._move_location_ambiguity_preamble_first(
-            response=final_output,
-            user_query=message,
-            language=language,
-        )
+        if "transport" in effective_agents:
+            final_output = self._move_location_ambiguity_preamble_first(
+                response=final_output,
+                user_query=message,
+                language=language,
+            )
 
         final_output = self._rebuild_single_transport_source_line(final_output, language, effective_agents)
 
@@ -6786,7 +6964,7 @@ class MultiAgentAssistant:
         plan_like_request = bool(
             re.search(r"\b(?:roteiro|plano|itiner[aá]rio|itinerary|plan)\b", message, flags=re.IGNORECASE)
         ) and not self.supervisor._negates_itinerary_request(message)
-        plan_response_needs_rebuild = bool(planner_involved or plan_like_request)
+        plan_response_needs_rebuild = bool((planner_involved or plan_like_request) and not brief_plan)
         if plan_response_needs_rebuild:
             from agent.agents.planner_agent import (
                 _build_card_based_itinerary_fallback,
@@ -7013,7 +7191,7 @@ class MultiAgentAssistant:
                     final_output = final_post_qa_guard(final_visual_pass(rebuilt_plan), language=language)
 
         final_output = final_post_qa_guard(final_output, language=language)
-        if "planner" in effective_agents:
+        if "planner" in effective_agents and not brief_plan:
             meal_places_data = "\n\n".join(
                 item for item in (
                     str(agent_outputs.get("researcher", "") or ""),
@@ -7199,7 +7377,7 @@ class MultiAgentAssistant:
                 logger.warning("Final QA response audit failed; keeping guarded output: %s", exc)
                 final_audit = None
 
-        if final_audit and final_audit.get("needs_repair"):
+        if final_audit and final_audit.get("needs_repair") and not brief_plan:
             qa_result = self._merge_qa_result_payloads(qa_result, final_audit)
             try:
                 final_output = qa_agent.repair_final_response(
@@ -7210,14 +7388,14 @@ class MultiAgentAssistant:
                     language=language,
                 )
                 final_output = final_post_qa_guard(final_visual_pass(final_output), language=language)
-                if planner_involved or plan_like_request:
+                if (planner_involved or plan_like_request) and not brief_plan:
                     final_output = canonicalize_planner_source_line(final_output, language=language)
                     final_output = final_post_qa_guard(final_visual_pass(final_output), language=language)
                 final_repair_ran = True
             except Exception as exc:
                 logger.warning("Final QA response repair failed; keeping guarded output: %s", exc)
 
-        if planner_involved or plan_like_request:
+        if (planner_involved or plan_like_request) and not brief_plan:
             # _extract_visitlisboa_place_cards/_card_kind_for_plan_block stay
             # bound from the first rebuild block import (same method scope).
             from agent.agents.planner_agent import (
@@ -7445,7 +7623,7 @@ class MultiAgentAssistant:
         final_output = final_post_qa_guard(final_visual_pass(final_output), language=language)
         final_output = self._rebuild_single_transport_source_line(final_output, language, effective_agents)
         final_output = final_post_qa_guard(final_output, language=language)
-        if planner_involved or plan_like_request:
+        if (planner_involved or plan_like_request) and not brief_plan:
             from agent.agents.planner_agent import (
                 _build_card_based_itinerary_fallback,
                 _build_structured_plan_fallback,
@@ -7583,7 +7761,7 @@ class MultiAgentAssistant:
                         language,
                     )
 
-        if planner_involved or plan_like_request:
+        if (planner_involved or plan_like_request) and not brief_plan:
             from agent.agents.planner_agent import (
                 _build_card_based_itinerary_fallback,
                 _build_structured_plan_fallback,
@@ -7751,7 +7929,7 @@ class MultiAgentAssistant:
             except Exception as exc:
                 logger.debug("Planner sequence movement final repair skipped: %s", exc)
 
-        if planner_involved or plan_like_request:
+        if (planner_involved or plan_like_request) and not brief_plan:
             try:
                 from agent.agents.planner_agent import (
                     _ensure_missing_origin_note_in_plan_response,
@@ -7895,6 +8073,20 @@ class MultiAgentAssistant:
                         if language == "pt"
                         else "✅ **Direct answer:** I found grounded historical context for the request, without suggesting events."
                     )
+                    # The worker's own direct answer (a synthesis of the sources)
+                    # answers the question; the generic sentence is only a fallback.
+                    worker_direct = re.search(
+                        r"(?m)^\s*✅\s+\*\*(?:Direct answer|Resposta direta):\*\*\s*(?P<text>\S.{20,})$",
+                        body,
+                    )
+                    if worker_direct and not re.search(
+                        r"grounded historical context|supported historical context|contexto hist[oó]rico fundamentado",
+                        worker_direct.group("text"),
+                        flags=re.IGNORECASE,
+                    ):
+                        direct = worker_direct.group(0).strip()
+                        body = (body[: worker_direct.start()] + body[worker_direct.end():]).strip()
+                        body = re.sub(r"^\s*---\s*\n", "", body).strip()
                     final_output = f"{title}\n\n{direct}\n\n---\n\n{body}".strip()
                     if source_lines:
                         final_output = f"{final_output}\n\n{source_lines[-1]}"
@@ -7905,31 +8097,7 @@ class MultiAgentAssistant:
                         final_output,
                     ).strip()
 
-        user_ctx = self.state.get("user_context") or {}
-        if user_ctx.get("requires_bilingual_note") and final_output.strip():
-            detected = user_ctx.get("detected_language") or "und"
-            note = build_bilingual_note(detected)
-            if note and note not in final_output:
-                direct_answer_match = re.search(
-                    r"(?s)^(?P<head>###\s+[^\n]+\n\n"
-                    r"✅\s+\*\*(?:Direct answer|Resposta direta):\*\*[^\n]+)"
-                    r"\n\n---\n\n",
-                    final_output,
-                )
-                if direct_answer_match:
-                    final_output = (
-                        f"{direct_answer_match.group('head')}\n\n{note}\n\n---\n\n"
-                        f"{final_output[direct_answer_match.end():].lstrip()}"
-                    )
-                elif final_output.lstrip().startswith("### "):
-                    final_output = re.sub(
-                        r"^(###\s+[^\n]+)\n+",
-                        lambda match: f"{match.group(1)}\n\n{note}\n\n---\n\n",
-                        final_output,
-                        count=1,
-                    )
-                else:
-                    final_output = f"{note}\n\n{final_output}"
+        final_output = self._with_bilingual_note(final_output)
 
         final_output = final_post_qa_guard(final_visual_pass(final_output), language=language)
         if (
@@ -7974,7 +8142,7 @@ class MultiAgentAssistant:
             language=language,
         )
         final_output = final_post_qa_guard(final_visual_pass(final_output), language=language)
-        if planner_involved or plan_like_request:
+        if (planner_involved or plan_like_request) and not brief_plan:
             try:
                 from agent.agents.planner_agent import (
                     _ensure_requested_origin_first_leg_in_plan_response,
@@ -8001,7 +8169,7 @@ class MultiAgentAssistant:
             except Exception as exc:
                 logger.debug("Planner explicit-origin publication repair skipped: %s", exc)
 
-        if planner_involved or plan_like_request:
+        if (planner_involved or plan_like_request) and not brief_plan:
             try:
                 from agent.agents.planner_agent import (
                     _build_card_based_itinerary_fallback,
@@ -8135,7 +8303,7 @@ class MultiAgentAssistant:
             except Exception as exc:
                 logger.warning("Planner publication fallback skipped: %s", exc, exc_info=True)
 
-        if planner_involved or plan_like_request:
+        if (planner_involved or plan_like_request) and not brief_plan:
             final_output = self._rebuild_planner_scope_fallback_source_line(
                 final_output,
                 language,
@@ -8193,6 +8361,96 @@ class MultiAgentAssistant:
             if not has_actionable_municipal_service or has_generic_service_destination:
                 final_output = self._build_municipal_service_near_metro_limitation(message, language)
 
+        if routing_reasoning.startswith("Unsupported transaction rewritten"):
+            final_output = _with_booking_limitation(final_output, language)
+
+        return self._publish_final_response(
+            final_output,
+            message=message,
+            effective_agents=effective_agents,
+            routing_reasoning=routing_reasoning,
+            agents_to_call=agents_to_call,
+            agent_outputs=agent_outputs,
+            direct_response_used=direct_response_used,
+            workers=workers,
+            run_workers_in_parallel=run_workers_in_parallel,
+            qa_result=qa_result,
+            retry_agents_used=retry_agents_used,
+            final_repair_ran=final_repair_ran,
+            simple_weather_fact_check=simple_weather_fact_check,
+            start_time=start_time,
+        )
+
+    def _with_bilingual_note(self, final_output: str) -> str:
+        """Add the bilingual note when the user wrote in a language other than PT or EN."""
+        user_ctx = self.state.get("user_context") or {}
+        if not (user_ctx.get("requires_bilingual_note") and final_output.strip()):
+            return final_output
+        detected = user_ctx.get("detected_language") or "und"
+        note = build_bilingual_note(detected)
+        if not note or note in final_output:
+            return final_output
+        direct_answer_match = re.search(
+            r"(?s)^(?P<head>###\s+[^\n]+\n\n"
+            r"✅\s+\*\*(?:Direct answer|Resposta direta):\*\*[^\n]+)"
+            r"\n\n---\n\n",
+            final_output,
+        )
+        if direct_answer_match:
+            return (
+                f"{direct_answer_match.group('head')}\n\n{note}\n\n---\n\n"
+                f"{final_output[direct_answer_match.end():].lstrip()}"
+            )
+        if final_output.lstrip().startswith("### "):
+            return re.sub(
+                r"^(###\s+[^\n]+)\n+",
+                lambda match: f"{match.group(1)}\n\n{note}\n\n---\n\n",
+                final_output,
+                count=1,
+            )
+        return f"{note}\n\n{final_output}"
+
+    def _publish_final_response(
+        self,
+        final_output: str,
+        *,
+        message: str,
+        effective_agents: List[str],
+        routing_reasoning: str,
+        agents_to_call: List[str],
+        agent_outputs: Dict[str, Any],
+        direct_response_used: bool,
+        workers: List[str],
+        run_workers_in_parallel: bool,
+        qa_result: Optional[Dict[str, Any]],
+        retry_agents_used: List[str],
+        final_repair_ran: bool,
+        simple_weather_fact_check: Optional[Dict[str, Any]],
+        start_time: float,
+    ) -> str:
+        """Record the final answer in the conversation and print the run analytics."""
+        # A weather answer that states IPMA data (a forecast-horizon limit
+        # included) always ends with its source, whatever pass removed it.
+        # A repaired footer without a link ("Fonte: IPMA (previsão de curto
+        # prazo)") is replaced by the standard one.
+        if "weather" in effective_agents:
+            final_output = re.sub(
+                r"(?m)^\s*📌\s+\*\*(?:Fonte|Source):\*\*\s*IPMA\b(?![^\n]*\]\()[^\n]*$",
+                "",
+                final_output or "",
+            ).rstrip()
+        if (
+            "weather" in effective_agents
+            and not re.search(r"(?m)^\s*📌\s+\*\*(?:Fonte|Source):\*\*", final_output or "")
+            and re.search(r"\b(?:IPMA|Limite IPMA|IPMA limit)\b", final_output or "")
+        ):
+            is_pt = bool(re.search(r"\b(?:Resposta direta|Previsão|Limite IPMA)\b", final_output or ""))
+            stamp = datetime.now().strftime("%H:%M")
+            final_output = (
+                f"{final_output.rstrip()}\n\n📌 **Fonte:** [*IPMA*](https://www.ipma.pt) | **Atualizado:** {stamp}"
+                if is_pt
+                else f"{final_output.rstrip()}\n\n📌 **Source:** [*IPMA*](https://www.ipma.pt/en/) | **Updated:** {stamp}"
+            )
         self._update_conversation_anchors(message, final_output, effective_agents)
 
         self._append_assistant_message(final_output)
@@ -10266,6 +10524,7 @@ class MultiAgentAssistant:
         self.qa_agent.reset_llm_usage_tracking()
         for _, agent in self.agents.items():
             agent.reset_llm_usage_tracking()
+        self.agents["planner"].last_synthesis_path = ""
 
         # Update user language preference in state
         user_ctx = self.state.get("user_context")
@@ -10420,6 +10679,24 @@ class MultiAgentAssistant:
             )
             on_status_change(status_msg)
 
+        # Planning requests get a structured brief (start point, areas, time
+        # window, components, mode). It is read in parallel with routing so it
+        # adds no latency, and it is used only if the route includes the planner.
+        plan_brief_future = None
+        brief_executor = None
+        if "planner" in set(forced_agents_from_context or []) or self.supervisor._is_planning_query(message):
+            brief_context = self._build_planning_follow_up_context(message) or contextual_conversation_context
+            earlier_timing = str(self._get_conversation_anchors().get("last_plan_timing") or "")
+            if earlier_timing and brief_context:
+                brief_context = f"{brief_context}\n{earlier_timing}"
+            brief_executor = ContextThreadPoolExecutor(max_workers=1)
+            plan_brief_future = brief_executor.submit(
+                self.supervisor.build_plan_brief,
+                message,
+                effective_language,
+                brief_context,
+            )
+
         # Step 1: Route the query (with conversation history for follow-up awareness)
         # Exclude the current message (last) from history
         history_for_routing = self.state["messages"][:-1] if len(self.state["messages"]) > 1 else None
@@ -10500,6 +10777,20 @@ class MultiAgentAssistant:
             # planner's request heuristics stay clean) reaches workers and the
             # planner through the existing conversation-context channel.
             planning_follow_up_context = contextual_conversation_context
+
+        plan_brief = None
+        if "planner" in set(agents_to_call or []):
+            if plan_brief_future is not None:
+                try:
+                    plan_brief = plan_brief_future.result(timeout=90)
+                except Exception as exc:
+                    logger.warning("Planning brief unavailable: %s", exc)
+            else:
+                plan_brief = self.supervisor.build_plan_brief(message, effective_language, planning_follow_up_context)
+        if brief_executor is not None:
+            brief_executor.shutdown(wait=False)
+        if verbose and plan_brief is not None:
+            print("      [PLAN BRIEF] " + plan_brief.to_prompt_text().replace("\n", " | "))
 
         if "transport" not in set(agents_to_call or []):
             transport_agent = self.agents.get("transport")
@@ -10594,6 +10885,28 @@ class MultiAgentAssistant:
         agent_outputs = {}
         agent_outputs["_language"] = effective_language
         qa_result = None
+        worker_contexts: Dict[str, str] = {}
+        if plan_brief is not None:
+            agent_outputs["_plan_brief"] = plan_brief.to_context_line()
+            # A later revision ("troca a segunda visita") keeps this plan's day
+            # and part of the day; "manhã" asked in the afternoon means tomorrow,
+            # and the revision turn alone no longer says so.
+            from agent.planning.brief import plan_date
+            from tools.utils import lisbon_now
+
+            self._get_conversation_anchors()["last_plan_timing"] = (
+                f"Earlier plan day: {plan_date(plan_brief, lisbon_now().date()).isoformat()}; "
+                f"time window: {plan_brief.time_window or 'not stated'}; "
+                f"start time: {plan_brief.start_time or 'not stated'}."
+            )
+            transport_request = plan_brief_transport_request(plan_brief, effective_language)
+            if transport_request and "transport" not in worker_messages_from_context:
+                worker_messages_from_context["transport"] = transport_request
+            elif not transport_request and "transport" not in worker_messages_from_context:
+                # No start-to-area route to check (a walking or city-wide plan):
+                # the legs, the first one included, are resolved by the
+                # Transport worker once the Planner has chosen the stops.
+                agents_to_call = [agent_name for agent_name in agents_to_call if agent_name != "transport"]
 
         # Identify worker agents (exclude planner which runs last)
         workers = [a for a in agents_to_call if a != "planner" and a in self.agents]
@@ -10641,6 +10954,10 @@ class MultiAgentAssistant:
                             )
                         break
 
+            worker_contexts = {name: agent_context for name in workers}
+            if plan_brief is not None and "researcher" in worker_contexts:
+                worker_contexts["researcher"] = f"{agent_context}\n{plan_brief.to_context_line()}"
+
             if run_workers_in_parallel:
                 # Use ContextThreadPoolExecutor to propagate LangSmith tracing context
                 with ContextThreadPoolExecutor(max_workers=len(workers)) as executor:
@@ -10674,7 +10991,7 @@ class MultiAgentAssistant:
                             executor.submit(
                                 self.agents[agent_name].invoke,
                                 worker_message,
-                                agent_context,  # Context with language
+                                worker_contexts.get(agent_name, agent_context),  # Context with language
                                 verbose,        # Verbose flag
                             )
                         ] = agent_name
@@ -10754,7 +11071,7 @@ class MultiAgentAssistant:
                         )
                         output = self.agents[agent_name].invoke(
                             worker_message,
-                            agent_context,
+                            worker_contexts.get(agent_name, agent_context),
                             verbose,
                         )
                         agent_outputs[agent_name] = output
@@ -10789,7 +11106,8 @@ class MultiAgentAssistant:
                             print(f"   [AGENT: {agent_name.upper()}] Failed ({error_type}): {str(e)}")
 
         if (
-            "planner" in agents_to_call
+            plan_brief is None
+            and "planner" in agents_to_call
             and "researcher" in agent_outputs
             and (
                 "transport" in agents_to_call
@@ -11103,6 +11421,16 @@ class MultiAgentAssistant:
                 agent_outputs=agent_outputs,
                 qa_result=qa_result,
             )
+            if plan_brief is not None:
+                # With a planning brief the workers already searched every
+                # requested component, and every leg (the first one included)
+                # is resolved after the planner picks the stops; re-run only
+                # failed search workers.
+                retry_agents = [
+                    agent_name for agent_name in retry_agents
+                    if agent_name != "transport"
+                    and not self._is_usable_worker_output(agent_outputs.get(agent_name))
+                ]
 
             qa_has_retryable_issue = bool(
                 qa_result.get("missing_data")
@@ -11136,7 +11464,7 @@ class MultiAgentAssistant:
                                     )
                                 # Use targeted feedback context when the agent is being retried after QA
                                 ctx = self._build_qa_retry_context(
-                                    base_context=agent_context,
+                                    base_context=worker_contexts.get(agent_name, agent_context),
                                     qa_result=qa_result,
                                     agent_name=agent_name,
                                 )
@@ -11185,7 +11513,7 @@ class MultiAgentAssistant:
                                     )
                                 )
                             ctx = self._build_qa_retry_context(
-                                base_context=agent_context,
+                                base_context=worker_contexts.get(agent_name, agent_context),
                                 qa_result=qa_result,
                                 agent_name=agent_name,
                             )
@@ -11297,7 +11625,7 @@ class MultiAgentAssistant:
             clean_outputs[aname] = aoutput
         agent_outputs = clean_outputs
         agent_outputs = self._prune_irrelevant_hybrid_outputs(agent_outputs, message)
-        if "planner" in agents_to_call:
+        if "planner" in agents_to_call and plan_brief is None:
             # On a plan revision, surface the previously grounded stops as planner
             # evidence so the planner can preserve them instead of dropping them as
             # ungrounded. Prepended so the preserved stops stay visible alongside
@@ -11342,8 +11670,13 @@ class MultiAgentAssistant:
             agent_outputs["_events_context"] = str(agent_outputs.get("researcher") or "")
 
         planner_requested = "planner" in agents_to_call
-        planner_blocked = planner_requested and self._should_block_planner_publication(
-            qa_result
+        # With a planning brief the planner reviews its own draft against the
+        # evidence and states what could not be confirmed, so QA gaps become
+        # limitations inside the plan instead of a generic fallback answer.
+        planner_blocked = (
+            planner_requested
+            and plan_brief is None
+            and self._should_block_planner_publication(qa_result)
         )
         preserve_direct_researcher_answer = (
             planner_requested
@@ -11365,6 +11698,7 @@ class MultiAgentAssistant:
 
         if (
             planner_requested
+            and plan_brief is None
             and not planner_blocked
             and not preserve_direct_researcher_answer
             and not preserve_weather_limitation_answer
@@ -11508,7 +11842,15 @@ class MultiAgentAssistant:
                 verbose=verbose
             )
 
-        should_run_final_repair = self._should_run_final_qa_repair(qa_result)
+        # A plan composed from the planning brief already carries the QA
+        # caveats and was checked against the brief and the evidence; the
+        # legacy LLM repair and card-template rebuilds below do not apply.
+        brief_plan_published = bool(
+            planner_executed
+            and not planner_fallback_used
+            and self.agents["planner"].last_synthesis_path == "brief"
+        )
+        should_run_final_repair = self._should_run_final_qa_repair(qa_result) and not brief_plan_published
         if should_run_final_repair and self.supervisor._negates_itinerary_request(message):
             should_run_final_repair = False
         if should_run_final_repair and re.search(
@@ -11602,7 +11944,7 @@ class MultiAgentAssistant:
                 language=effective_language,
             )
 
-        if planner_executed:
+        if planner_executed and not brief_plan_published:
             from agent.agents.planner_agent import (
                 _build_card_based_itinerary_fallback,
                 _build_structured_plan_fallback,
@@ -11784,11 +12126,15 @@ class MultiAgentAssistant:
             ):
                 response = strip_placeholder_field_lines(response)
 
-            response = self._move_location_ambiguity_preamble_first(
-                response=response,
-                user_query=message,
-                language=effective_language,
-            )
+            # The preamble is about route endpoints: only a transport answer has
+            # them, and a plan resolves its own start point ("um percurso a pé
+            # com uma livraria" is not a destination).
+            if "transport" in response_agents_to_call and "planner" not in response_agents_to_call:
+                response = self._move_location_ambiguity_preamble_first(
+                    response=response,
+                    user_query=message,
+                    language=effective_language,
+                )
 
         # Safety net: never return an empty answer. If a worker raised and QA
         # stripped the residual error string to nothing, substitute the vetted,
@@ -12124,14 +12470,17 @@ class MultiAgentAssistant:
             "sky",
         ]
 
+        # Whole words: "cp" inside "contemporânea" or "tempo" inside
+        # "contemporâneo" is not a transport or weather line.
+        transport_re = re.compile(r"(?<!\w)(?:" + "|".join(re.escape(marker) for marker in transport_markers) + r")(?!\w)")
+        weather_re = re.compile(r"(?<!\w)(?:" + "|".join(re.escape(marker) for marker in weather_markers) + r")(?!\w)")
         cleaned_lines: List[str] = []
         for line in body.splitlines():
             normalized = re.sub(r"\s+", " ", line.strip().lower())
-            if weather_has_transport_leak and any(marker in normalized for marker in transport_markers):
+            if weather_has_transport_leak and transport_re.search(normalized):
                 continue
             if researcher_has_weather_transport_leak and (
-                any(marker in normalized for marker in weather_markers)
-                or any(marker in normalized for marker in transport_markers)
+                weather_re.search(normalized) or transport_re.search(normalized)
             ):
                 continue
             cleaned_lines.append(line)
@@ -12353,8 +12702,8 @@ class MultiAgentAssistant:
             return ""
         asks_decision = bool(
             re.search(
-                r"\b(?:da para|d[aá]\s+para|posso|recomendas?|vale a pena|seguro|safe|"
-                r"should i|can i|is it ok|is it safe)\b",
+                r"\b(?:da para|d[aá]\s+para|posso|podemos|recomendas?|vale a pena|seguro|safe|"
+                r"should i|can i|can we|is it ok|is it safe|good day for|bom dia para)\b",
                 normalized_query,
             )
         )
@@ -12367,6 +12716,13 @@ class MultiAgentAssistant:
             )
         )
         if not (asks_decision and outdoor_activity and weather_output.strip()):
+            return ""
+        # "Should I bring an umbrella?" asks about an item, not whether the
+        # activity is feasible; the umbrella and clothing answers cover it.
+        if re.search(
+            r"\b(?:umbrella|guarda[- ]?chuva|jacket|casaco|coat|sunscreen|protetor solar)\b",
+            normalized_query,
+        ):
             return ""
 
         normalized_weather = MultiAgentAssistant._fold_context_text(weather_output)
@@ -12387,13 +12743,17 @@ class MultiAgentAssistant:
             if value
         ]
         max_probability = max(percentages) if percentages else None
+        low_rain = bool(
+            re.search(r"\b(?:sem precipitacao|sem chuva|no rain|unlikely|improvavel)\b", normalized_weather)
+            or (max_probability is not None and max_probability < 20)
+        )
         rain_possible = bool(
             re.search(r"\b(?:chuva|aguaceiros|precipitacao|rain|showers)\b", normalized_weather)
-            and not re.search(r"\b(?:sem precipitacao|sem chuva|no rain)\b", normalized_weather)
+            and not low_rain
         )
         wind_relevant = bool(
             re.search(r"\b(?:vento|wind)\b", normalized_weather)
-            and re.search(r"\b(?:moderad|forte|strong|moderate)\b", normalized_weather)
+            and re.search(r"\b(?:forte|strong)\b", normalized_weather)
         )
 
         risk_level = "low"
@@ -12414,18 +12774,29 @@ class MultiAgentAssistant:
                 folded,
             ):
                 continue
+            value = re.sub(r"^(?:[^\w*]+\s*)?(?:\*\*[^*\n]{1,30}:\*\*\s*)?(?:[^\w*]+\s*)?", "", line).strip()
+            # A one-line summary ("partly cloudy, 16°C to 31°C, no rain
+            # expected, moderate north wind") gives each field its own clause.
+            clauses = [clause.strip(" .") for clause in re.split(r"[,;]\s+", value) if clause.strip(" .")]
+
+            def clause_for(pattern: str) -> str:
+                matching = [
+                    clause for clause in clauses if re.search(pattern, MultiAgentAssistant._fold_context_text(clause))
+                ]
+                return matching[0] if len(clauses) > 1 and matching else value
+
             if not rain_line and re.search(r"\b(?:chuva|rain|precipitacao)\b", folded):
-                rain_line = line
+                rain_line = clause_for(r"\b(?:chuva|rain|precipitacao)\b")
             if not wind_line and re.search(r"\b(?:vento|wind)\b", folded):
-                wind_line = line
+                wind_line = clause_for(r"\b(?:vento|wind)\b")
 
         if language == "pt":
             if risk_level == "high":
-                direct = "não é a melhor opção sem plano alternativo coberto, porque a previsão aponta para chuva relevante."
+                direct = "Não é a melhor opção sem um plano alternativo coberto, porque a previsão aponta para chuva relevante."
             elif risk_level == "medium":
-                direct = "dá, mas eu faria com plano B coberto e confirmaria a previsão antes de sair."
+                direct = "Dá, mas convém ter um plano B coberto e confirmar a previsão antes de sair."
             else:
-                direct = "parece viável, mantendo a confirmação da previsão antes de sair."
+                direct = "Sim, parece viável: a previsão não indica chuva nem vento forte."
             lines = [
                 "### 🌤️ **Viabilidade da atividade**",
                 "",
@@ -12440,11 +12811,11 @@ class MultiAgentAssistant:
             return "\n".join(lines).strip()
 
         if risk_level == "high":
-            direct = "it is not ideal without a covered backup plan because the forecast points to meaningful rain."
+            direct = "It is not ideal without a covered backup plan, because the forecast points to meaningful rain."
         elif risk_level == "medium":
-            direct = "it is possible, but I would keep a covered backup plan and recheck the forecast before leaving."
+            direct = "It is possible, but keep a covered backup plan and recheck the forecast before leaving."
         else:
-            direct = "it looks feasible, while still rechecking the forecast before leaving."
+            direct = "Yes, it looks feasible: the forecast shows no rain and no strong wind."
         lines = [
             "### 🌤️ **Activity Feasibility**",
             "",

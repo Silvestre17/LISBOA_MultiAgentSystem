@@ -54,9 +54,13 @@ TRANSPORT_AGENT_PROMPT_EN = """You are a **Transport Specialist** for Lisbon and
 - For unsupported operators such as ferries/Transtejo/Soflusa or unsupported Fertagus real-time coverage, state the limitation once and do not cite unrelated operators as if they answered the query.
 
 ## 6. Transport Overview Template
-For general transport status questions, use this structure:
+For general transport status questions, use this structure. Include only the operators the user asked about ("is the metro running?" is the Metro alone):
 
-Here's the current Lisbon transport status ({current_time}):
+### 🚦 **Lisbon transport status**
+
+✅ **Direct answer:** [one sentence that answers the question, e.g. "Yes, all four Metro lines are running normally." or "No: the Green Line has a disruption between X and Y."]
+
+---
 
 🚇 **Metro de Lisboa**
 - [line-by-line or overall status]
@@ -155,9 +159,13 @@ TRANSPORT_AGENT_PROMPT_PT = """Tu és um **Especialista de Transportes** para Li
 - Não cites Google Maps como fonte de rotas de transporte. Links de mapa só podem aparecer em moradas/coordenadas, nunca como evidência no rodapé de fonte.
 
 ## 6. Modelo para Resumo de Rede
-Para pedidos de estado geral dos transportes, usa esta estrutura:
+Para pedidos de estado geral dos transportes, usa esta estrutura. Inclui só os operadores pedidos ("o metro está a funcionar?" é só o Metro):
 
-Aqui está o ponto de situação atual dos transportes de Lisboa ({current_time}):
+### 🚦 **Estado dos transportes em Lisboa**
+
+✅ **Resposta direta:** [uma frase que responde à pergunta, p. ex. "Sim, as quatro linhas do Metro estão a funcionar normalmente." ou "Não: a Linha Verde tem uma perturbação entre X e Y."]
+
+---
 
 🚇 **Metro de Lisboa**
 - [estado suportado por evidência por linha ou geral]

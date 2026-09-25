@@ -76,9 +76,6 @@ CP_VEHICLES_URL = "https://comboios.live/api/vehicles"
 SOURCE_DATA_DIR = Path(__file__).parent.parent / "data" / "cp"
 DATA_DIR = resolve_runtime_data_dir(SOURCE_DATA_DIR, "cp")
 seed_runtime_data_dir(SOURCE_DATA_DIR, DATA_DIR, ("cp_gtfs.db", "gtfs.zip", "metadata.json"))
-DB_PATH = DATA_DIR / "cp_gtfs.db"
-METADATA_PATH = DATA_DIR / "metadata.json"
-GTFS_ZIP_PATH = DATA_DIR / "gtfs.zip"
 CP_RUNTIME_RELEASE_ENV_PREFIX = "CP_RUNTIME_RELEASE"
 CP_RUNTIME_RELEASE_ASSET = "cp_runtime.zip"
 
@@ -182,9 +179,6 @@ CP_KEY_STATIONS = {
     "pragal": {"name": "Pragal", "lines": ["fertagus"], "description": "South bank, near Almada"},
 }
 
-# Alias for backward compatibility with transport_api.py
-CP_STATIONS = CP_KEY_STATIONS
-
 # User-facing LISBOA coverage is limited to Lisbon Metropolitan Area suburban rail.
 # Keep long-distance GTFS routes such as AP, IC, IR, R and regional branches out of
 # answers unless a dedicated tool is added for them.
@@ -237,18 +231,18 @@ _PT_WEEKDAY_NAMES = {
 }
 
 _PT_MONTH_NAMES = {
-    1: "Janeiro",
-    2: "Fevereiro",
-    3: "Março",
-    4: "Abril",
-    5: "Maio",
-    6: "Junho",
-    7: "Julho",
-    8: "Agosto",
-    9: "Setembro",
-    10: "Outubro",
-    11: "Novembro",
-    12: "Dezembro",
+    1: "janeiro",
+    2: "fevereiro",
+    3: "março",
+    4: "abril",
+    5: "maio",
+    6: "junho",
+    7: "julho",
+    8: "agosto",
+    9: "setembro",
+    10: "outubro",
+    11: "novembro",
+    12: "dezembro",
 }
 
 
@@ -1571,27 +1565,40 @@ def get_train_status(language: str = "en") -> str:
 
     title = "Comboios suburbanos CP em Lisboa" if is_pt else "CP Suburban Trains around Lisbon"
     response = f"### 🚆 **{title}**\n\n"
-    if delayed_trains > 0:
+    if total_trains == 0:
+        # No train in the snapshot says nothing about delays: service may have
+        # ended for the night or the feed may be empty.
         if is_pt:
             response += (
-                f"**Resposta curta:** Não — os comboios suburbanos da CP na zona de Lisboa "
+                "⚠️ **Resposta direta:** o retrato em tempo real não mostra comboios suburbanos da CP em circulação "
+                "neste momento, por isso não consigo confirmar se o serviço está normal; confirma na CP antes de sair.\n\n"
+            )
+        else:
+            response += (
+                "⚠️ **Direct answer:** the live snapshot shows no CP suburban trains running right now, so I cannot "
+                "confirm that service is normal; check with CP before leaving.\n\n"
+            )
+    elif delayed_trains > 0:
+        if is_pt:
+            response += (
+                f"✅ **Resposta direta:** Não, os comboios suburbanos da CP na zona de Lisboa "
                 f"**não estão a circular com normalidade** neste momento. O retrato em tempo real "
                 f"mostra **{total_trains} comboios** na AML, dos quais **{delayed_trains} com atraso**.\n\n"
             )
         else:
             response += (
-                f"**Short answer:** No — CP suburban trains around Lisbon are **not running normally right now**. "
+                f"✅ **Direct answer:** No, CP suburban trains around Lisbon are **not running normally right now**. "
                 f"The live snapshot shows **{total_trains} trains** serving AML, with **{delayed_trains} delayed**.\n\n"
             )
     else:
         if is_pt:
             response += (
-                f"**Resposta curta:** Sim — os comboios suburbanos da CP na zona de Lisboa estão neste momento "
+                f"✅ **Resposta direta:** Sim, os comboios suburbanos da CP na zona de Lisboa estão neste momento "
                 f"sem atrasos no retrato em tempo real (**{total_trains} comboios** na AML).\n\n"
             )
         else:
             response += (
-                f"**Short answer:** Yes — the supported CP suburban trains around Lisbon are currently shown without delays "
+                f"✅ **Direct answer:** Yes, the supported CP suburban trains around Lisbon are currently shown without delays "
                 f"in the live snapshot (**{total_trains} trains** serving AML).\n\n"
             )
 
@@ -1825,7 +1832,28 @@ def get_train_schedule(station_name: str, limit: int = 10, language: str = "en")
     # Clean markdown: heading + column-0 bullet list (no literal '='/'-' rules that
     # render as setext headings or floating text in Streamlit).
     response = f"### 🚆 **{title}**\n\n"
-    response += f"📅 {_format_pt_datetime(now)}\n\n"
+    date_text = _format_pt_datetime(now) if is_pt else now.strftime("%A, %d %B %Y")
+
+    # Direct answer: the next train on each line serving the station.
+    first_by_line: Dict[str, Dict[str, Any]] = {}
+    for dep in departures:
+        first_by_line.setdefault(dep['route_name'] or '', dep)
+    next_parts = []
+    for route_label, dep in list(first_by_line.items())[:3]:
+        clock_parts = str(dep['departure_time']).split(':')
+        dep_clock = f"{int(clock_parts[0]) % 24:02d}:{clock_parts[1]}" if len(clock_parts) >= 2 else str(dep['departure_time'])
+        towards = str(dep['headsign'] or '').strip()
+        line_note = f" ({route_label})" if route_label else ""
+        next_parts.append(
+            f"às **{dep_clock}** para {towards}{line_note}" if is_pt else f"at **{dep_clock}** to {towards}{line_note}"
+        )
+    if next_parts:
+        response += (
+            f"✅ **Resposta direta:** o próximo comboio sai {'; depois '.join(next_parts)}.\n\n---\n\n"
+            if is_pt
+            else f"✅ **Direct answer:** the next train leaves {'; then '.join(next_parts)}.\n\n---\n\n"
+        )
+    response += f"- 📅 **{'Data' if is_pt else 'Date'}:** {date_text}\n\n"
 
     for dep in departures:
         dep_time = dep['departure_time']

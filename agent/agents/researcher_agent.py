@@ -7,9 +7,11 @@
 #   Uses BaseAgent.execute_react_loop() for tool execution.
 # ==========================================================================
 
+import logging
 import re
 import unicodedata
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
@@ -19,6 +21,7 @@ from tools.visitlisboa_api import (
     _extract_specific_place_lookup_phrase,
     _load_places_json,
     _score_specific_place_lookup_match,
+    first_request_clause,
 )
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, StateGraph
@@ -26,7 +29,10 @@ from langgraph.graph import END, StateGraph
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
+    from agent.planning.brief import PlanBrief
+
 from agent.agents.base import BaseAgent, parse_json_response
+from agent.planning.brief import plan_brief_from_context, strip_plan_brief_from_context
 from agent.prompts.researcher import get_researcher_prompt
 from agent.utils.langsmith_tracing import traceable
 from agent.state import AgentState
@@ -40,6 +46,8 @@ from agent.utils.response_formatter import (
     infer_response_language,
     resolve_output_language,
 )
+
+logger = logging.getLogger(__name__)
 
 # Words that start interrogative sentences — not place names when they appear at token[0].
 _QUESTION_STARTER_WORDS: frozenset = frozenset({
@@ -82,6 +90,12 @@ _STRUCTURED_QUERY_PLAN_INTENTS: frozenset[str] = frozenset({
     "knowledge_search",
     "unknown",
 })
+
+# Opening of the place tool's answer when an exact named lookup finds nothing.
+_NAMED_PLACE_NOT_FOUND_RE = re.compile(
+    r"I could not find a specific place named|Não encontrei um local específico com o nome",
+    re.IGNORECASE,
+)
 
 _RESEARCHER_FOOD_INTENT_RE = re.compile(
     r"\b(?:restaurant|restaurante|restaurants|restaurantes|food|comida|comer|cuisine|cozinha|"
@@ -366,6 +380,51 @@ class ResearcherAgent(BaseAgent):
             " history ",
             " science ",
             " natural ",
+            " of the ",
+            " house ",
+            " fort ",
+            " convent ",
+            " basilica ",
+            " aqueduct ",
+            " cemetery ",
+            " library ",
+            " theatre ",
+            " decorative ",
+            " presidency ",
+            " republic ",
+            " contemporary ",
+            " modern ",
+            " ancient ",
+            " pavilion ",
+            " centre ",
+            " center ",
+            " knowledge ",
+            " lighthouse ",
+            " square ",
+            " market ",
+            " park ",
+            " gallery ",
+            " zoo ",
+            " station ",
+            " aqueducts ",
+            " bridge ",
+            " arch ",
+            " fortress ",
+            " chapel ",
+            " shrine ",
+            " sanctuary ",
+            " beach ",
+            " beaches ",
+            " viewpoint ",
+            " quarter ",
+            " fair ",
+            " mill ",
+            " frigate ",
+            " aquarium ",
+            " cape ",
+            " and ",
+            " stories ",
+            " discoveries ",
         )
         portuguese_markers = (
             " museu ",
@@ -382,9 +441,9 @@ class ResearcherAgent(BaseAgent):
             " jardins ",
             " nacional ",
         )
-        if any(marker in lowered for marker in portuguese_markers):
-            return False
-        return any(marker in lowered for marker in english_markers)
+        english_hits = sum(1 for marker in english_markers if marker in lowered)
+        portuguese_hits = sum(1 for marker in portuguese_markers if marker in lowered)
+        return english_hits > portuguese_hits
 
     @staticmethod
     def _valid_localized_place_title(original: str, candidate: str) -> bool:
@@ -400,50 +459,56 @@ class ResearcherAgent(BaseAgent):
         blocked = ("tradução", "translation", "não sei", "unknown", "official")
         return not any(token in lowered for token in blocked)
 
-    def _localize_place_title_with_llm(self, title: str, *, category: str = "", url: str = "") -> str:
-        """Use the Researcher LLM to localize one place-card title for PT output."""
-        raw_title = re.sub(r"\s+", " ", str(title or "").strip())
-        if not raw_title or not self._place_title_needs_llm_localization(raw_title):
-            return raw_title
+    def _localize_place_titles_batch(self, titles: List[str]) -> Dict[str, str]:
+        """Localize several English place titles to European Portuguese in one LLM call.
 
-        cache_key = f"{raw_title}|{category}|{url}"
-        if cache_key in self._place_title_localization_cache:
-            return self._place_title_localization_cache[cache_key]
+        Args:
+            titles: Card titles that still look English.
 
-        prompt = (
-            "Localize this Lisbon tourism place title to European Portuguese.\n"
-            "Return only the official/common Portuguese title, with no explanation.\n"
-            "If the title is a brand, already official as written, or you are not confident, return SAME.\n\n"
-            f"Title: {raw_title}\n"
-            f"Category: {category or 'unknown'}\n"
-            f"URL: {url or 'unknown'}"
-        )
-        try:
-            response = self._safe_llm_invoke(
-                self.llm,
-                [
-                    SystemMessage(content="You are a conservative Lisbon tourism title localizer. Do not invent uncertain names."),
-                    HumanMessage(content=prompt),
-                ],
+        Returns:
+            Mapping from each title to its localized title (the original when
+            the model is unsure or returns an invalid value).
+        """
+        pending = [
+            title for title in dict.fromkeys(titles)
+            if title and title not in self._place_title_localization_cache
+        ]
+        if pending:
+            prompt = (
+                "Localize these Lisbon tourism place titles to European Portuguese.\n"
+                "Return ONLY a JSON object that maps each input title to its official or common Portuguese title.\n"
+                "Map a title to itself when it is a brand, already official as written, or you are not confident.\n\n"
+                + "\n".join(f"- {title}" for title in pending)
             )
-            candidate = str(getattr(response, "content", "") or "").strip()
-        except Exception:
-            candidate = ""
-
-        if self._valid_localized_place_title(raw_title, candidate):
-            localized = re.sub(r"\s+", " ", candidate.strip().strip('"“”'))
-        else:
-            localized = raw_title
-        self._place_title_localization_cache[cache_key] = localized
-        return localized
+            try:
+                response = self._safe_llm_invoke(
+                    self.llm,
+                    [
+                        SystemMessage(content="You are a conservative Lisbon tourism title localizer. Do not invent uncertain names."),
+                        HumanMessage(content=prompt),
+                    ],
+                    retries=1,
+                )
+                payload = parse_json_response(str(getattr(response, "content", "") or ""))
+            except Exception as exc:
+                logger.warning("Batch place-title localization failed: %s", exc)
+                payload = None
+            mapping = payload if isinstance(payload, dict) else {}
+            for title in pending:
+                candidate = str(mapping.get(title) or "")
+                self._place_title_localization_cache[title] = (
+                    re.sub(r"\s+", " ", candidate.strip().strip('"“”'))
+                    if self._valid_localized_place_title(title, candidate)
+                    else title
+                )
+        return {title: self._place_title_localization_cache.get(title, title) for title in titles}
 
     def _localize_place_card_titles_with_llm(self, text: str, language: str) -> str:
-        """Localize unknown English place-card titles in PT Researcher outputs."""
+        """Localize English place-card titles in PT Researcher outputs with one LLM call."""
         if language != "pt" or not text or not re.search(r"(?i)(locais e atra|places and attractions|visitlisboa)", text):
             return text
 
         lines = str(text).splitlines()
-        output_lines: List[str] = []
         card_re = re.compile(
             r"^(?P<prefix>\s*(?:[-*]\s+)?)\*\*(?P<icon>🏛️|🍽️|☕|🥐|🌿|📍|🖼️|🎵|📚|🛍️)\s+"
             r"(?P<title>[^*\n]+?)\*\*(?P<suffix>\s*)$"
@@ -452,20 +517,24 @@ class ResearcherAgent(BaseAgent):
             r"^(?P<prefix>\s*#{1,6}\s+)(?P<icon>🏛️|🍽️|☕|🥐|🌿|📍|🖼️|🎵|📚|🛍️)\s+"
             r"(?P<title>.+?)(?P<suffix>\s*)$"
         )
-        for index, line in enumerate(lines):
+        titles = [
+            match.group("title").strip()
+            for line in lines
+            if (match := card_re.match(line) or h3_re.match(line))
+            and self._place_title_needs_llm_localization(match.group("title").strip())
+        ]
+        if not titles:
+            return text
+        localized_titles = self._localize_place_titles_batch(titles)
+
+        output_lines: List[str] = []
+        for line in lines:
             match = card_re.match(line) or h3_re.match(line)
             if not match:
                 output_lines.append(line)
                 continue
             title = match.group("title").strip()
-            nearby = "\n".join(lines[index + 1:index + 8])
-            category_match = re.search(r"\*\*(?:Categoria|Category):\*\*\s*([^\n]+)", nearby)
-            url_match = re.search(r"https://www\.visitlisboa\.com/[^\s)]+", nearby)
-            localized = self._localize_place_title_with_llm(
-                title,
-                category=category_match.group(1).strip() if category_match else "",
-                url=url_match.group(0) if url_match else "",
-            )
+            localized = localized_titles.get(title, title)
             if card_re.match(line):
                 output_lines.append(f"{match.group('prefix')}**{match.group('icon')} {localized}**{match.group('suffix')}")
             else:
@@ -2649,7 +2718,9 @@ class ResearcherAgent(BaseAgent):
         """Keep only cards that match the requested AML municipality."""
         scoped_cards = self._extract_area_scoped_card_blocks(result, area_label)
         if scoped_cards:
-            return "\n\n".join(scoped_cards).strip()
+            # Notes on how the list was ordered or filtered stay with it.
+            notes = re.findall(r"(?m)^(?:📏|🚫|ℹ️)\s+\*\*[^\n]+$", result or "")
+            return "\n\n".join([*notes, *scoped_cards]).strip()
 
         title = f"### 📍 **Locais em {area_label}**" if language == "pt" else f"### 📍 **Places in {area_label}**"
         line = self._build_area_no_results_line(area_label, category_label, language)
@@ -2770,7 +2841,9 @@ class ResearcherAgent(BaseAgent):
     @staticmethod
     def _extract_event_date_filter(user_message: str) -> Optional[str]:
         """Extracts a lightweight date filter for direct event tool lookups."""
-        query = (user_message or "").lower()
+        from tools.utils import without_estate_names
+
+        query = without_estate_names(user_message).lower()
         query_key = unicodedata.normalize("NFKD", query)
         query_key = query_key.encode("ascii", "ignore").decode("ascii")
         mappings = [
@@ -2960,7 +3033,7 @@ class ResearcherAgent(BaseAgent):
             "event", "events", "evento", "eventos", "this", "week", "esta", "semana",
             "este",
             "today", "hoje", "tomorrow", "amanhã", "amanha", "next", "weekend",
-            "fim", "de", "semana", "local", "locais", "culture", "cultura", "cultural",
+            "fim", "de", "local", "locais", "culture", "cultura", "cultural",
             "culturais", "quero", "queria", "gostava", "mas", "but", "avoid", "evita",
             "evitar", "without", "sem", "excluding", "exclui", "excluir",
             "nem", "nor", "neither",
@@ -3164,7 +3237,7 @@ class ResearcherAgent(BaseAgent):
             "avoid", "without", "excluding", "except", "no", "not", "sem",
             "nem", "nor", "neither",
             "evita", "evitar", "exclui", "excluir", "menos", "nao",
-            "seja", "sejam", "tambem", "tambem", "que",
+            "seja", "sejam", "tambem", "que",
             "quero", "queria", "gostava", "cultural", "culturais", "mas", "but",
             "mostra", "mostrar", "mais", "dois", "outro", "outros",
             "event", "events", "evento", "eventos", "concert", "concerts",
@@ -3324,6 +3397,13 @@ class ResearcherAgent(BaseAgent):
         query = (user_message or "").strip()
         if not query:
             return None
+        # "Where is X and what are its opening hours?": the name is in the
+        # first question; the whole sentence is not a venue name.
+        first_clause = first_request_clause(query)
+        if first_clause != query:
+            focused = ResearcherAgent._extract_place_focus_query(first_clause)
+            if focused:
+                return focused
 
         quoted_match = re.search(r'"([^"\n]{2,120})"|“([^”\n]{2,120})”', query)
         if quoted_match:
@@ -3426,7 +3506,10 @@ class ResearcherAgent(BaseAgent):
             area = re.sub(r"\s+", " ", match.group("area")).strip(" .?!,;:")
             area = re.sub(
                 r"\s+(?:with|including|for|that|where|which|com|incluindo|para|que|"
-                r"e\s+(?:com|usando|transporte)|and\s+(?:with|using|transport))\b.*$",
+                r"e\s+(?:com|usando|transporte)|and\s+(?:with|using|transport)|"
+                # "museums in Lisbon are open on Sundays": the area ends at the verb or the day.
+                r"are|is|open|opens|closed|abert[oa]s?|abre|abrem|fechad[oa]s?|est[aã]o?|ficam?|"
+                r"today|tomorrow|tonight|hoje|amanh[aã]|on\s+\w+days?|aos?\s+(?:domingos?|s[aá]bados?|fins?\s+de\s+semana|\w+-feiras?))\b.*$",
                 "",
                 area,
                 flags=re.IGNORECASE,
@@ -4687,6 +4770,73 @@ class ResearcherAgent(BaseAgent):
 
         return []
 
+    def _synthesize_history_answer(self, raw_history: str, subject: str, language: str) -> str:
+        """Write a short history answer from the retrieved text only, citing every source used.
+
+        The history tool returns encyclopaedia and web passages; pasting their
+        first sentences produced non-answers and page boilerplate. One model
+        call summarises the passages, under an instruction to add nothing that
+        they do not state.
+
+        Args:
+            raw_history: Output of the history/culture tool.
+            subject: The history subject extracted from the request.
+            language: Output language (``pt`` or ``en``).
+
+        Returns:
+            The complete answer with title, direct answer, key facts, and
+            source footer, or ``""`` when there is no usable text or the call fails.
+        """
+        text = str(raw_history or "").strip()
+        if len(text) < 200 or text.startswith(("❌", "Error:")):
+            return ""
+        sources: List[Tuple[str, str]] = []
+        for label, url in re.findall(r"\[([^\]]{2,80})\]\((https?://[^)\s]+)\)", text):
+            host = re.sub(r"^www\.", "", re.sub(r"^https?://", "", url).split("/")[0])
+            # Video and social pages are not citable history sources.
+            if re.search(r"(?:youtube|youtu\.be|facebook|instagram|tiktok|pinterest|reddit|x\.com|twitter)", host):
+                continue
+            name = ("Wikipédia" if language == "pt" else "Wikipedia") if "wikipedia.org" in host else host
+            if all(existing != name for existing, _ in sources):
+                sources.append((name, url))
+        if not sources:
+            return ""
+        is_pt = language == "pt"
+        instruction = (
+            "Responde em português europeu. Usa APENAS o texto das fontes abaixo; não acrescentes factos, datas ou "
+            "números que lá não estejam. Ignora menus, índices e texto de navegação das páginas. Formato exato:\n"
+            "RESPOSTA: <duas ou três frases que respondem diretamente ao pedido>\n"
+            "- <facto-chave 1>\n- <facto-chave 2>\n- <facto-chave 3> (até 5 factos, frases completas)"
+            if is_pt
+            else "Answer in English. Use ONLY the source text below; do not add facts, dates, or numbers it does not "
+            "state. Ignore page menus, tables of contents, and navigation text. Exact format:\n"
+            "ANSWER: <two or three sentences that answer the request directly>\n"
+            "- <key fact 1>\n- <key fact 2>\n- <key fact 3> (up to 5 facts, complete sentences)"
+        )
+        messages = [
+            SystemMessage(content=instruction),
+            HumanMessage(content=f"{'Pedido' if is_pt else 'Request'}: {subject}\n\n{'Fontes' if is_pt else 'Sources'}:\n{text[:6000]}"),
+        ]
+        try:
+            reply = str(getattr(self._safe_llm_invoke(self.llm, messages, retries=1), "content", "") or "").strip()
+        except Exception as exc:
+            logger.warning("History synthesis failed for %r: %s", subject, exc)
+            return ""
+        answer = re.search(r"(?im)^\s*(?:RESPOSTA|ANSWER)\s*:\s*(?P<answer>.+)$", reply)
+        facts = [line.strip() for line in reply.splitlines() if re.match(r"^\s*-\s+\S", line)]
+        if not answer or not facts:
+            return ""
+        timestamp = datetime.now().strftime("%H:%M")
+        heading = f"### 📚 **Contexto histórico: {subject}**" if is_pt else f"### 📚 **Historical Context: {subject}**"
+        label = "Resposta direta" if is_pt else "Direct answer"
+        footer_label, updated_label = ("Fonte", "Atualizado") if is_pt else ("Source", "Updated")
+        links = " | ".join(f"[*{name}*]({url})" for name, url in sources[:3])
+        return (
+            f"{heading}\n\n✅ **{label}:** {answer.group('answer').strip()}\n\n---\n\n"
+            + "\n".join(facts[:5])
+            + f"\n\n📌 **{footer_label}:** {links} | **{updated_label}:** {timestamp}"
+        )
+
     @staticmethod
     def _compact_history_result(raw_result: str, language: str, subject: str = "") -> str:
         """Build a short bullet list from a history/web result without leaking raw search noise."""
@@ -4747,7 +4897,13 @@ class ResearcherAgent(BaseAgent):
         )
         text = re.sub(r"(?m)^#{1,6}\s+", "", text)
         text = re.sub(r"\s+", " ", text).strip()
-        sentences = re.split(r"(?<=[.!?])\s+", text)
+        # "Cape St. Vincent", "D. Manuel", "Nov. 1": an abbreviation does not end a sentence.
+        sentences: List[str] = []
+        for chunk in re.split(r"(?<=[.!?])\s+", text):
+            if sentences and re.search(r"(?:\b(?:St|Sto|Sta|Sr|Sra|Dr|Dra|D|Mr|Mrs|Nov|Dec|Jan|Feb|Aug|Sept|Oct|No|nº|c|ca)\.)$", sentences[-1]):
+                sentences[-1] = f"{sentences[-1]} {chunk}"
+            else:
+                sentences.append(chunk)
         bullets: List[str] = []
         previous_sentence_was_related = False
         for sentence in sentences:
@@ -5411,12 +5567,17 @@ class ResearcherAgent(BaseAgent):
             if service_blocks:
                 combined = "\n\n".join(service_blocks).strip()
                 combined = self._strip_lisboa_aberta_source_lines(combined)
-                nearest_summary = self._build_nearby_services_direct_summary(
+                # When the tool states the nearest result itself, that sentence is
+                # the direct answer (below) and a second summary would repeat it.
+                tool_states_nearest = bool(
+                    re.search(r"(?m)^✅\s+\*\*(?:Resposta direta|Direct answer):\*\*", combined)
+                )
+                nearest_summary = "" if tool_states_nearest else self._build_nearby_services_direct_summary(
                     service_blocks,
                     language=language,
                 )
                 if nearest_summary and not re.search(
-                    r"\bCobertura\b|\*\*(?:Servi[cç]o|Service):\*\*",
+                    r"\b(?:Cobertura|Coverage)\b|\*\*(?:Servi[cç]o|Service):\*\*",
                     nearest_summary,
                     flags=re.IGNORECASE,
                 ):
@@ -5431,6 +5592,34 @@ class ResearcherAgent(BaseAgent):
                     if language == "pt"
                     else "✅ **Direct answer:** I found the requested municipal services in Lisboa Aberta data."
                 )
+                named_note = self._named_service_direct_answer(user_message, combined, language)
+                if named_note:
+                    direct_note = named_note
+                    named_place = re.search(r"\*\*(?P<name>[^*]+)\*\*\s+(?:fica em|is at)", named_note)
+                    if named_place:
+                        heading = f"### 🧭 **{named_place.group('name').strip()}**"
+                # The tool already states the nearest result of each service
+                # ("the closest result I found is X, 0.08 km from Rossio"); those
+                # sentences are the direct answer.
+                nearest_re = re.compile(r"(?m)^✅\s+\*\*(?:Resposta direta|Direct answer):\*\*\s*(?P<sentence>[^\n]+)\n?")
+                nearest_sentences = [match.group("sentence").strip() for match in nearest_re.finditer(combined)]
+                if nearest_sentences:
+                    label = "Resposta direta" if language == "pt" else "Direct answer"
+                    results = [
+                        re.sub(
+                            r"(?i)^(?:o resultado mais próximo que encontrei é|the closest result I found is)\s+",
+                            "",
+                            sentence,
+                        ).rstrip(".")
+                        for sentence in nearest_sentences
+                    ]
+                    if len(nearest_sentences) > 1 and all(result != sentence.rstrip(".") for result, sentence in zip(results, nearest_sentences)):
+                        # One sentence for several services: "the closest are X, ...; Y, ...".
+                        lead = "Os resultados mais próximos são" if language == "pt" else "The closest results are"
+                        direct_note = f"✅ **{label}:** {lead} " + "; ".join(results) + "."
+                    else:
+                        direct_note = f"✅ **{label}:** " + " ".join(sentence[0].upper() + sentence[1:] for sentence in nearest_sentences)
+                    combined = nearest_re.sub("", combined).strip()
                 # Answer an explicit "perto do metro?" sub-question with a
                 # grounded proximity note. The note is computed against the
                 # coordinates of the main result (first detected pair in the
@@ -5536,7 +5725,19 @@ class ResearcherAgent(BaseAgent):
             else:
                 connector = "em" if language == "pt" else "in"
                 query_text = f"{category_hint} {connector} {place_focus_query}"
-        if is_broad_attractions:
+        broad_area = self._extract_place_area_filter(user_message) if is_broad_attractions else None
+        if broad_area and self._normalize_for_deterministic_routing(broad_area) in {"lisboa", "lisbon", "lisbonne"}:
+            broad_area = None
+        if is_broad_attractions and broad_area:
+            # "Principais atrações em Belém" keeps its area; the city-wide
+            # must-see list put the Castelo in an answer about Belém.
+            query_text = (
+                f"principais atrações e monumentos perto de {broad_area}"
+                if language == "pt"
+                else f"top attractions and monuments near {broad_area}"
+            )
+            max_results = 6
+        elif is_broad_attractions:
             query_text = "must-see attractions first time visitors Lisbon iconic monuments museums palaces castles historic sites"
             max_results = 6
         elif self._is_visit_place_context_query(user_message) and place_focus_query and not category_hint and not zoo_lookup_subject:
@@ -6099,6 +6300,655 @@ class ResearcherAgent(BaseAgent):
         if not cultural_queries and not food_queries:
             return None
         return {"cultural_queries": cultural_queries, "food_queries": food_queries}
+
+    @staticmethod
+    def _split_place_result_cards(result: str) -> List[List[str]]:
+        """Split a place-search answer into cards (title line plus indented fields)."""
+        cards: List[List[str]] = []
+        current: Optional[List[str]] = None
+        for line in str(result or "").splitlines():
+            if re.match(r"^\*\*[^\s*][^*\n]*\*\*\s*$", line.strip()) and not line.startswith((" ", "\t")):
+                current = [line.strip()]
+                cards.append(current)
+            elif current is not None and line.startswith((" ", "\t")) and line.strip():
+                current.append(line.rstrip())
+            elif current is not None and line.strip():
+                current = None
+        return cards
+
+    @staticmethod
+    def _place_card_title(card: List[str]) -> str:
+        """Return a card title without emoji and bold markers."""
+        title = re.sub(r"\*\*", "", card[0] if card else "")
+        title = re.sub(r"^[^\w(\[]+", "", title, flags=re.UNICODE)
+        return re.sub(r"\s+", " ", title).strip()
+
+    def _run_brief_evidence_lookup(self, brief: "PlanBrief", language: str) -> str:
+        """Return place and event cards for every component of a planning brief.
+
+        Each requested component is searched near the visit area (or across
+        Lisbon), and all searches run concurrently. When the plan names no
+        area, meals and cafés are searched near the first stop found, so a
+        "dinner near the viewpoint" request gets restaurants next to the
+        viewpoint instead of anywhere in the city. Every card records which
+        search found it, so the Planner can match cards to components.
+
+        Args:
+            brief: Structured planning request from the Supervisor.
+            language: Output language (``pt`` or ``en``).
+
+        Returns:
+            Markdown evidence cards, or an empty string when nothing was found.
+        """
+        from agent.planning.brief import FOOD_COMPONENT_KINDS, plan_brief_event_request, plan_brief_search_requests
+
+        places_tool = self._get_tool_by_name("search_places_attractions")
+        events_tool = self._get_tool_by_name("search_cultural_events")
+        if not places_tool:
+            return ""
+        requests = plan_brief_search_requests(brief, language)
+        city_wide = not brief.activity_areas
+        deferred = [item for item in requests if city_wide and item.get("_kind") in FOOD_COMPONENT_KINDS]
+        immediate = [item for item in requests if item not in deferred]
+        event_args = plan_brief_event_request(brief, language) if events_tool else None
+
+        def run_places(args: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
+            call_args = {key: value for key, value in args.items() if not key.startswith("_") and value is not None}
+            try:
+                result = str(self._invoke_tool(places_tool, call_args, tool_name="search_places_attractions") or "").strip()
+            except Exception as exc:
+                logger.warning("Planner evidence search failed for %r: %s", call_args.get("query"), exc)
+                result = ""
+            return args, result
+
+        def run_events(args: Dict[str, Any]) -> str:
+            try:
+                return str(self._invoke_tool(events_tool, args, tool_name="search_cultural_events") or "").strip()
+            except Exception as exc:
+                logger.warning("Planner event search failed: %s", exc)
+                return ""
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            place_futures = [executor.submit(run_places, args) for args in immediate]
+            event_future = executor.submit(run_events, event_args) if event_args else None
+            place_results = [future.result() for future in place_futures]
+            event_result = event_future.result() if event_future else ""
+
+        if deferred:
+            anchors = self._meal_search_anchors(
+                [
+                    card
+                    for args, result in place_results
+                    if args.get("_kind") not in FOOD_COMPONENT_KINDS
+                    for card in self._split_place_result_cards(result)
+                ]
+            )
+            if not anchors and event_result:
+                # Plans built around an event: look for meals near the venues.
+                anchors = [
+                    re.sub(r"\s+", " ", venue).strip()
+                    for venue in re.findall(r"\*\*(?:Venue|Local):\*\*\s*\[([^\]]+)\]", event_result)
+                ][:2]
+            anchored: List[Dict[str, Any]] = []
+            for args in deferred:
+                for anchor in anchors or [""]:
+                    copy = dict(args)
+                    if anchor:
+                        copy["query"] = re.sub(
+                            r"\s+(?:em Lisboa|in Lisbon)$",
+                            f" perto de {anchor}" if language == "pt" else f" near {anchor}",
+                            str(args["query"]),
+                        )
+                    anchored.append(copy)
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                place_results.extend(executor.map(run_places, anchored))
+
+        seen_titles: set[str] = set()
+        card_blocks: List[str] = []
+        found_label = "Encontrado para" if language == "pt" else "Found for"
+        metro_label = "Metro mais próximo" if language == "pt" else "Nearest metro"
+        missing_places: List[str] = []
+        for args, result in place_results:
+            if args.get("specific_lookup") and _NAMED_PLACE_NOT_FOUND_RE.search(result[:200]):
+                # The tool offers places "of a similar type" instead; they are
+                # not the place the user named.
+                missing_places.append(str(args.get("query") or ""))
+                continue
+            for card in self._split_place_result_cards(result):
+                key = self._normalize_for_deterministic_routing(self._place_card_title(card))
+                if not key or key in seen_titles:
+                    continue
+                seen_titles.add(key)
+                card = self._card_with_plan_day_hours(card, brief, language)
+                metro_line = self._nearest_metro_line(card, metro_label, language)
+                card_blocks.append(
+                    "\n".join([card[0], f"    - 🔎 **{found_label}:** {args['query']}", *card[1:], *([metro_line] if metro_line else [])])
+                )
+        wikipedia_cards = self._wikipedia_cards_for_missing_places(missing_places, brief, language)
+        wikipedia_cards += self._wikipedia_cards_for_uncovered_types(place_results, seen_titles, language)
+        if not card_blocks and not event_result and not wikipedia_cards:
+            return ""
+
+        combined = "\n\n".join(card_blocks)
+        combined = self._localize_place_card_titles_with_llm(
+            "### 🏛️ **Locais e atrações**\n\n" + combined if language == "pt" else combined,
+            language,
+        )
+        if language == "pt":
+            combined = re.sub(r"^### 🏛️ \*\*Locais e atrações\*\*\n\n", "", combined)
+        heading = "### 🏛️ **Locais e atrações**" if language == "pt" else "### 🏛️ **Places and attractions**"
+        note = (
+            "✅ **Resposta direta:** Locais encontrados para cada parte do plano pedido."
+            if language == "pt"
+            else "✅ **Direct answer:** Places found for each part of the requested plan."
+        )
+        parts = [heading, note]
+        if combined:
+            parts.append(combined)
+        if wikipedia_cards:
+            parts.append("\n\n".join(wikipedia_cards))
+        if event_result:
+            parts.append(event_result)
+        if card_blocks and event_result:
+            parts.append(
+                "📌 **Fonte:** [*VisitLisboa Locais*](https://www.visitlisboa.com/pt-pt/locais) | [*VisitLisboa Eventos*](https://www.visitlisboa.com/pt-pt/eventos)"
+                if language == "pt"
+                else "📌 **Source:** [*VisitLisboa Places*](https://www.visitlisboa.com/en/places) | [*VisitLisboa Events*](https://www.visitlisboa.com/en/events)"
+            )
+        elif card_blocks:
+            parts.append(self._build_places_source_line(combined, language))
+        return "\n\n".join(part for part in parts if part).strip()
+
+    @staticmethod
+    def _card_with_plan_day_hours(card: List[str], brief: "PlanBrief", language: str) -> List[str]:
+        """Replace today's hours with the plan day's hours when the plan is for another day."""
+        from datetime import timedelta
+
+        from agent.planning.brief import plan_date
+        from tools.utils import lisbon_now
+        from tools.visitlisboa_api import place_hours_for_weekday
+
+        today = lisbon_now().date()
+        first_day = plan_date(brief, today)
+        days = [first_day + timedelta(days=offset) for offset in range(max(1, brief.days))]
+        if days == [today]:
+            return card
+        url = re.search(r"https?://www\.visitlisboa\.com/[^\s)]+", "\n".join(card))
+        if not url:
+            return card
+        weekdays = (
+            ("Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo")
+            if language == "pt"
+            else ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+        )
+        segments = []
+        for day in days:
+            hours = place_hours_for_weekday(url.group(0), day.weekday())
+            if hours:
+                if language == "pt":
+                    hours = re.sub(r"(?i)\bclosed\b", "Fechado", hours)
+                segments.append(f"{weekdays[day.weekday()]}: {hours}")
+        if not segments:
+            return card
+        label = "Horário" if language == "pt" else "Hours"
+        hours_line = f"    - 🕒 **{label}:** {' · '.join(segments)}"
+        output = [line for line in card if not re.match(r"^\s*-\s*🕒\s*\*\*(?:Hours|Horário|Horario)\b", line)]
+        return [output[0], hours_line, *output[1:]]
+
+    @staticmethod
+    def _nearest_metro_line(card: List[str], label: str, language: str) -> str:
+        """Return a card line naming the nearest Metro station within 800 m, or ""."""
+        from tools.metrolisboa_api import find_nearest_metro_station
+        from tools.place_coordinates import lookup_place_coordinates
+
+        url = re.search(r"https?://www\.visitlisboa\.com/[^\s)]+", "\n".join(card))
+        coordinates = lookup_place_coordinates(url.group(0)) if url else None
+        if not coordinates:
+            return ""
+        try:
+            stations = find_nearest_metro_station(coordinates[0], coordinates[1], max_results=1, max_dist_km=0.8)
+        except Exception as exc:
+            logger.debug("Nearest metro lookup failed: %s", exc)
+            return ""
+        if not stations:
+            return ""
+        station = stations[0]
+        name = str(station.get("stop_name") or "").strip()
+        if not name:
+            return ""
+        meters = int(round(float(station.get("distance_km") or 0) * 1000 / 50.0) * 50) or 50
+        return f"    - 🚇 **{label}:** {name} ({meters} m)"
+
+    def _meal_search_anchors(self, cards: List[List[str]]) -> List[str]:
+        """Return up to two stop titles in different areas to search meals near.
+
+        A city-wide plan often spans two areas (Baixa and Belém); searching
+        meals only near the first stop found puts lunch in the wrong one.
+        """
+        from tools.place_coordinates import lookup_place_coordinates
+        from tools.utils import haversine_distance
+
+        anchors: List[tuple[str, Optional[Tuple[float, float]]]] = []
+        for card in cards:
+            url = re.search(r"https?://www\.visitlisboa\.com/[^\s)]+", "\n".join(card))
+            coordinates = lookup_place_coordinates(url.group(0)) if url else None
+            title = self._place_card_title(card)
+            if not anchors:
+                anchors.append((title, coordinates))
+                continue
+            first = anchors[0][1]
+            if coordinates and first and haversine_distance(*first, *coordinates) > 2.5:
+                anchors.append((title, coordinates))
+                break
+        return [title for title, _coordinates in anchors]
+
+    def _wikipedia_cards_for_missing_places(self, places: List[str], brief: "PlanBrief", language: str) -> List[str]:
+        """Return Wikipedia cards for named places the VisitLisboa catalogue lacks."""
+        from tools.web_knowledge import wikipedia_place_card
+
+        names = [place for place in dict.fromkeys(places) if place]
+        if not names:
+            return []
+        area = brief.activity_areas[0] if brief.activity_areas else ""
+        with ThreadPoolExecutor(max_workers=min(4, len(names))) as executor:
+            found = list(executor.map(lambda name: wikipedia_place_card(name, language, area), names))
+        return [self._wikipedia_evidence_card(card, name, language) for name, card in zip(names, found) if card]
+
+    @staticmethod
+    def _location_hours_direct_answer(response: str, user_message: str, language: str) -> str:
+        """Answer "where is X" and "when does X open" from the first place card.
+
+        A named-place lookup was answered with the place's description; the
+        question asks for the address and, often, the hours. The first card's
+        fields answer it, and a missing schedule is said plainly.
+
+        Args:
+            response: Formatted place answer.
+            user_message: The request.
+            language: Output language (``pt`` or ``en``).
+
+        Returns:
+            The answer with its direct answer rewritten, or unchanged when the
+            request asks neither where nor when, or the card has no address.
+        """
+        asks_where = bool(re.search(r"\b(?:onde\s+fica|onde\s+[eé]|where\s+is|where\s+can\s+i\s+find|morada|address)\b", user_message or "", re.IGNORECASE))
+        asks_hours = bool(re.search(r"\b(?:hor[aá]rios?|a\s+que\s+horas|abre|fecha|opening\s+hours|when\s+does|open|close)\b", user_message or "", re.IGNORECASE))
+        if not (asks_where or asks_hours):
+            return response
+        # Only a single-place answer: "which museums are open on Sundays" is a list.
+        if len(re.findall(r"(?m)^[-*]\s+\*\*(?:[^\w\s*]+\s*)*[^*\n]{2,80}\*\*\s*$", response or "")) != 1:
+            return response
+        card = re.search(r"(?ms)^[-*]\s+\*\*(?:[^\w\s*]+\s*)*(?P<name>[^*\n]{2,80}?)\*\*\s*\n(?P<body>(?:\s{2,}[-*][^\n]*\n?)+)", response or "")
+        direct = re.search(r"(?m)^✅\s+\*\*(?:Resposta direta|Direct answer):\*\*[^\n]*$", response or "")
+        if not card:
+            return response
+        body = card.group("body")
+        address = re.search(r"\*\*(?:Morada|Address)[^:*]*:\*\*\s*\[?(?P<value>[^\]\n]+)", body)
+        hours = re.search(r"\*\*(?:Horário|Horários|Hours|Opening hours|Horário de funcionamento)[^:*]*:\*\*\s*(?P<value>[^\n]+)", body)
+        if not address:
+            return response
+        name = card.group("name").strip()
+        is_pt = language == "pt"
+        sentence = (
+            f"✅ **Resposta direta:** **{name}** fica em **{address.group('value').strip()}**"
+            if is_pt
+            else f"✅ **Direct answer:** **{name}** is at **{address.group('value').strip()}**"
+        )
+        if asks_hours:
+            if hours:
+                sentence += (f"; horário: {hours.group('value').strip()}" if is_pt else f"; opening hours: {hours.group('value').strip()}")
+            else:
+                sentence += (
+                    "; os dados disponíveis não indicam o horário, por isso confirma-o antes de ires"
+                    if is_pt
+                    else "; the available data gives no opening hours, so check them before you go"
+                )
+        sentence = sentence.rstrip(".") + "."
+        if direct:
+            return response[: direct.start()] + sentence + response[direct.end():]
+        title = re.match(r"^\s*###[^\n]*\n", response or "")
+        if title:
+            return f"{response[: title.end()]}\n{sentence}\n\n---\n\n{response[title.end():].lstrip()}"
+        return f"{sentence}\n\n---\n\n{response}"
+
+    @staticmethod
+    def _named_service_direct_answer(user_message: str, service_text: str, language: str) -> str:
+        """Answer a question about one named municipal place from a service list.
+
+        "Onde fica o Mercado de Campo de Ourique e a que horas abre?" returns the
+        city's market list; the answer is the one market it names, with its
+        address, and a clear note when the data holds no opening hours.
+
+        Args:
+            user_message: The request.
+            service_text: The formatted service results.
+            language: Output language (``pt`` or ``en``).
+
+        Returns:
+            The direct-answer line, or "" when no listed place is the one named.
+        """
+        def words(text: str) -> set:
+            folded = unicodedata.normalize("NFKD", str(text or "")).encode("ascii", "ignore").decode("ascii").lower()
+            return {word for word in re.findall(r"[a-z0-9]+", folded) if len(word) >= 4}
+
+        generic = {
+            "mercado", "mercados", "market", "biblioteca", "library", "farmacia", "pharmacy", "hospital", "escola",
+            "school", "jardim", "garden", "parque", "park", "onde", "where", "fica", "horas", "abre", "fecha",
+            "opening", "hours", "lisboa", "lisbon",
+        }
+        request_words = words(user_message)
+        cards = re.finditer(
+            r"(?m)^\s*-\s+\S+\s+\*\*(?P<name>[^*\n]{3,80})\*\*\s*\n\s+-\s+📍\s+\*\*(?:Morada|Address)[^:*]*:\*\*\s*"
+            r"\[?(?P<address>[^\]\n]+)",
+            service_text or "",
+        )
+        for card in cards:
+            distinctive = words(card.group("name")) - generic
+            if distinctive and distinctive <= request_words:
+                name = card.group("name").strip()
+                address = card.group("address").strip()
+                asks_hours = bool(re.search(r"\b(?:horas?|hor[aá]rio|abre|fecha|opening|hours|open|close)\b", user_message, re.IGNORECASE))
+                if language == "pt":
+                    note = f"✅ **Resposta direta:** o **{name}** fica em **{address}**"
+                    note += "; os dados municipais não indicam o horário, por isso confirma-o antes de ires." if asks_hours else "."
+                    return note
+                note = f"✅ **Direct answer:** **{name}** is at **{address}**"
+                note += "; the municipal data gives no opening hours, so check them before you go." if asks_hours else "."
+                return note
+        return ""
+
+    # Place types a request can name, with the icon and plural used as a title.
+    _PLACE_TYPE_TITLES = (
+        (r"miradouro|viewpoint", "🌅", "Miradouros", "Viewpoints"),
+        (r"museu|museum", "🏛️", "Museus", "Museums"),
+        (r"igreja|church", "⛪", "Igrejas", "Churches"),
+        (r"jardi|garden|parque|park", "🌳", "Jardins e parques", "Gardens and parks"),
+        (r"praia|beach", "🏖️", "Praias", "Beaches"),
+        (r"mercado|market", "🛒", "Mercados", "Markets"),
+        (r"palac|palác|palace", "🏰", "Palácios", "Palaces"),
+        (r"castel|castle", "🏰", "Castelos", "Castles"),
+        (r"monument", "🏛️", "Monumentos", "Monuments"),
+    )
+
+    def _place_type_title(self, user_message: str, normalized_request: str, language: str) -> str:
+        """Return a specific H3 title for a request that names one type of place.
+
+        Args:
+            user_message: The request.
+            normalized_request: The request normalized for routing.
+            language: Output language (``pt`` or ``en``).
+
+        Returns:
+            "### 🌅 **Miradouros na Graça**"-style title, or "" when the request
+            names no single known type (the generic title stays).
+        """
+        matches = [
+            (icon, plural_pt, plural_en)
+            for pattern, icon, plural_pt, plural_en in self._PLACE_TYPE_TITLES
+            if re.search(rf"\b(?:{pattern})\w*", normalized_request)
+        ]
+        if len(matches) != 1:
+            return ""
+        icon, plural_pt, plural_en = matches[0]
+        area = self._extract_place_area_filter(user_message) or ""
+        is_pt = language == "pt"
+        if not area or self._normalize_for_deterministic_routing(area) in {"lisboa", "lisbon"}:
+            area_text = " em Lisboa" if is_pt else " in Lisbon"
+        else:
+            area = area[:1].upper() + area[1:]
+            # Keep the user's preposition: "na Graça", "no Chiado", "em Belém".
+            preposition = re.search(rf"\b(em|no|na|nos|nas)\s+{re.escape(area)}", user_message, flags=re.IGNORECASE)
+            area_text = f" {(preposition.group(1).lower() if preposition else 'em')} {area}" if is_pt else f" in {area}"
+        return f"### {icon} **{plural_pt if is_pt else plural_en}{area_text}**"
+
+    def _title_area_attractions(self, response: str, user_message: str, language: str) -> str:
+        """Give an area's attraction list a specific title and a direct answer.
+
+        "O que visitar em Belém?" came back as "Locais e atrações" with no
+        direct answer; inside a combined answer (weather, route, places) that
+        generic section lost its heading. "Principais atrações em Belém" with
+        the first places named answers the question and keeps its heading.
+        """
+        heading = re.match(r"^\s*###\s+🏛️\s+\*\*(?:Locais e atrações|Places and [Aa]ttractions)\*\*\s*\n", response or "")
+        # A request for one type of place ("which museums ...") is not a list
+        # of top attractions: it is titled with that type ("Miradouros na Graça").
+        normalized_request = self._normalize_for_deterministic_routing(user_message)
+        if heading and re.search(
+            r"\b(?:museu|museum|igreja|church|restaurante|restaurant|miradouro|viewpoint|jardi|garden|park|parque|"
+            r"praia|beach|mercado|market|bar|hote|loja|shop|palac|palác|castel|castle|monument)\w*",
+            normalized_request,
+        ):
+            typed_title = self._place_type_title(user_message, normalized_request, language)
+            if typed_title:
+                body = response[heading.end():].lstrip()
+                names = [
+                    match.strip()
+                    for match in re.findall(r"(?m)^[-*]\s+\*\*(?:[^\w\s*]+\s*)*([^*\n]{2,80}?)\*\*\s*$", body)
+                ][:3]
+                if names and not re.search(r"(?:Resposta direta|Direct answer):", body):
+                    is_pt = language == "pt"
+                    joined = (
+                        ", ".join(f"**{name}**" for name in names[:-1]) + (" e " if is_pt else " and ") + f"**{names[-1]}**"
+                        if len(names) > 1
+                        else f"**{names[0]}**"
+                    )
+                    direct = (
+                        f"✅ **Resposta direta:** encontrei {joined}."
+                        if is_pt
+                        else f"✅ **Direct answer:** I found {joined}."
+                    )
+                    body = f"{direct}\n\n---\n\n{body}"
+                return f"{typed_title}\n\n{body}"
+            return response
+        area = self._extract_place_area_filter(user_message) if heading else None
+        if not heading or not area or self._normalize_for_deterministic_routing(area) in {"lisboa", "lisbon"}:
+            return response
+        area = area[:1].upper() + area[1:]
+        titles = [
+            match.strip()
+            for match in re.findall(r"(?m)^[-*]\s+\*\*(?:[^\w\s*]+\s*)*([^*\n]{2,80}?)\*\*\s*$", response)
+        ][:3]
+        is_pt = language == "pt"
+        title = f"### 🏛️ **Principais atrações em {area}**" if is_pt else f"### 🏛️ **Top attractions in {area}**"
+        body = response[heading.end():].lstrip("\n")
+        if titles and not re.search(r"(?:Resposta direta|Direct answer):", body):
+            names = ", ".join(f"**{name}**" for name in titles[:-1]) + (" e " if is_pt else " and ") + f"**{titles[-1]}**" if len(titles) > 1 else f"**{titles[0]}**"
+            direct = (
+                f"✅ **Resposta direta:** Em {area}, destacam-se {names}."
+                if is_pt
+                else f"✅ **Direct answer:** In {area}, the highlights are {names}."
+            )
+            body = f"{direct}\n\n---\n\n{body}"
+        return f"{title}\n\n{body}"
+
+    def _answer_for_missing_place(self, response: str, language: str) -> tuple[str, bool]:
+        """Answer a named-place lookup that the catalogue missed.
+
+        Two cases hide behind "no place named X": the catalogue has the place
+        under its Portuguese name ("Tower of Belém" is "Torre de Belém"), or it
+        does not list the place at all ("Livraria Bertrand"), and the tool then
+        offers places "of a similar type" (a comic library, a restaurant). The
+        Portuguese Wikipedia title settles the first case with a second
+        catalogue lookup; a geotagged Wikipedia page inside the AML whose title
+        names the same place answers the second.
+
+        Args:
+            response: The catalogue lookup answer.
+            language: Output language.
+
+        Returns:
+            ``(answer, from_catalogue)``: a catalogue answer (still to be
+            formatted), a finished Wikipedia answer, or ``("", False)`` to keep
+            the original answer and its limitation.
+        """
+        from tools.web_knowledge import (
+            _compact_title,
+            wikipedia_place_card,
+            wikipedia_portuguese_title,
+            wikipedia_title_matches,
+        )
+
+        missing = re.search(
+            r"(?:com o nome|named)\s+\*\*(?P<name>[^*\n]{2,80})\*\*",
+            (response or "")[:400],
+        )
+        if not missing or not _NAMED_PLACE_NOT_FOUND_RE.search((response or "")[:400]):
+            return "", False
+        name = missing.group("name").strip()
+        card = wikipedia_place_card(name, language)
+        if not card:
+            return "", False
+        portuguese_title = wikipedia_portuguese_title(card["url"])
+        places_tool = self._get_tool_by_name("search_places_attractions")
+        if portuguese_title and places_tool and _compact_title(portuguese_title) != _compact_title(name):
+            try:
+                retry = str(
+                    self._invoke_tool(
+                        places_tool,
+                        {"query": portuguese_title, "max_results": 3, "specific_lookup": True, "language": language},
+                        tool_name="search_places_attractions",
+                    )
+                    or ""
+                ).strip()
+            except Exception as exc:
+                logger.info("Catalogue retry with the Portuguese name failed: %s", exc)
+                retry = ""
+            if retry and not _NAMED_PLACE_NOT_FOUND_RE.search(retry[:400]):
+                return retry, True
+        # When an offered card is that place after all, the catalogue answer
+        # (hours, tickets) is the better one.
+        offered = re.findall(r"(?m)^\s*[-*]\s+\*\*(?:[^\w\s*]+\s*)*(?P<title>[^*\n]{2,90}?)\*\*\s*$", response or "")
+        if any(wikipedia_title_matches(card["title"], title) for title in offered):
+            return "", False
+        is_pt = language == "pt"
+        map_url = f"https://www.google.com/maps/search/?api=1&query={card['lat']:.5f},{card['lon']:.5f}"
+        from tools.location_resolver import reverse_geocode_address
+
+        address = reverse_geocode_address(round(card["lat"], 5), round(card["lon"], 5))
+        # The house shape for one place: title, direct answer, then one card.
+        if address:
+            direct = (
+                f"**{card['title']}** fica em {address}."
+                if is_pt
+                else f"**{card['title']}** is at {address}."
+            )
+        else:
+            direct = (
+                f"Encontrei **{card['title']}**; a localização está no mapa abaixo."
+                if is_pt
+                else f"I found **{card['title']}**; its location is on the map below."
+            )
+        return "\n".join(
+            [
+                "### 📍 **Local encontrado**" if is_pt else "### 📍 **Place found**",
+                "",
+                f"✅ **{'Resposta direta' if is_pt else 'Direct answer'}:** {direct}",
+                "",
+                "---",
+                "",
+                f"- **📍 {card['title']}**",
+                f"    - 📝 **{'Descrição' if is_pt else 'Description'}:** {card['summary']}",
+                self._wikipedia_address_line(card, language)
+                or f"    - 📍 **{'Localização' if is_pt else 'Location'}:** [{'Ver no mapa' if is_pt else 'View on map'}]({map_url})",
+                f"    - 🔗 **{'Mais detalhes' if is_pt else 'More details'}:** [Wikipedia]({card['url']})",
+                "",
+                (
+                    "⚠️ Este local não consta do catálogo turístico consultado; horários e preços não estão confirmados."
+                    if is_pt
+                    else "⚠️ This place is not in the tourism catalogue consulted; opening hours and prices are not confirmed."
+                ),
+                "",
+                f"📌 **{'Fonte' if is_pt else 'Source'}:** [*Wikipedia*]({card['url']})",
+            ]
+        ), False
+
+    @staticmethod
+    def _wikipedia_address_line(card: Dict[str, Any], language: str, indent: str = "    ") -> str:
+        """Return the address bullet of a Wikipedia place, linked to its map point, or ""."""
+        from tools.location_resolver import reverse_geocode_address
+
+        address = reverse_geocode_address(round(card["lat"], 5), round(card["lon"], 5))
+        if not address:
+            return ""
+        label = "Morada" if language == "pt" else "Address"
+        map_url = f"https://www.google.com/maps/search/?api=1&query={card['lat']:.6f},{card['lon']:.6f}"
+        return f"{indent}- 📍 **{label}:** [{address}]({map_url})"
+
+    @staticmethod
+    def _wikipedia_evidence_card(card: Dict[str, Any], found_for: str, language: str) -> str:
+        """Format a Wikipedia place as a planner evidence card, with its street address when OpenStreetMap has one."""
+        found_label = "Encontrado para" if language == "pt" else "Found for"
+        description_label = "Descrição" if language == "pt" else "Description"
+        details_label = "Mais detalhes" if language == "pt" else "More details"
+        address_line = ResearcherAgent._wikipedia_address_line(card, language)
+        return "\n".join(
+            [
+                f"**📍 {card['title']}**",
+                f"    - 🔎 **{found_label}:** {found_for}",
+                f"    - 📝 **{description_label}:** {card['summary']}",
+                *([address_line] if address_line else []),
+                f"    - 🧭 **Coordinates:** {card['lat']:.5f}, {card['lon']:.5f}",
+                f"    - 🔗 **{details_label}:** [Wikipedia]({card['url']})",
+            ]
+        )
+
+    def _wikipedia_cards_for_uncovered_types(
+        self,
+        place_results: List[Tuple[Dict[str, Any], str]],
+        seen_titles: set[str],
+        language: str,
+    ) -> List[str]:
+        """Return Wikipedia cards for stop types the catalogue search did not find.
+
+        "A historic bookshop in Chiado" returns cafés and museums from the
+        VisitLisboa catalogue, which lists no bookshops. When no card of a
+        search names the requested type (bookshop, church, garden, gallery,
+        ...), geotagged Wikipedia pages of that type near the search's area
+        are offered instead. Searches with no area are left alone.
+        """
+        from tools.location_resolver import geocode_location_name
+        from tools.web_knowledge import stop_type_title_words, wikipedia_places_near
+
+        gaps: List[Tuple[str, str, Tuple[str, ...]]] = []
+        for args, result in place_results:
+            anchor = str(args.get("_anchor") or "")
+            words = stop_type_title_words(f"{args.get('_detail') or ''} {args.get('_kind') or ''}")
+            if not anchor or not words or args.get("specific_lookup"):
+                continue
+            # Titles and categories, not descriptions: a museum that mentions a
+            # church is not a church. One match is not enough either: it may be
+            # closed on the plan's day (a monthly book fair) and leave the
+            # planner with nothing of the type.
+            names = [
+                self._normalize_for_deterministic_routing(
+                    " ".join([self._place_card_title(card), *(line for line in card if "Categor" in line)])
+                )
+                for card in self._split_place_result_cards(result)
+            ]
+            matches = sum(1 for name in names if any(re.search(rf"\b{re.escape(word)}", name) for word in words))
+            if matches >= 2:
+                continue
+            gaps.append((str(args["query"]), anchor, words))
+
+        def lookup(gap: Tuple[str, str, Tuple[str, ...]]) -> List[str]:
+            query, anchor, words = gap
+            point = geocode_location_name(anchor)
+            if not point or point.get("lat") is None or point.get("lon") is None:
+                return []
+            places = wikipedia_places_near(words, round(float(point["lat"]), 4), round(float(point["lon"]), 4), language)
+            return [self._wikipedia_evidence_card(place, query, language) for place in places]
+
+        if not gaps:
+            return []
+        with ThreadPoolExecutor(max_workers=min(4, len(gaps))) as executor:
+            found = list(executor.map(lookup, gaps))
+        cards: List[str] = []
+        for card in (card for group in found for card in group):
+            key = self._normalize_for_deterministic_routing(card.split("\n", 1)[0].strip("*📍 "))
+            if key and key not in seen_titles:
+                seen_titles.add(key)
+                cards.append(card)
+        return cards
 
     def _run_planner_evidence_lookup(self, user_message: str, language: str) -> str:
         """Return complete place/event cards for downstream planner synthesis."""
@@ -8167,7 +9017,7 @@ class ResearcherAgent(BaseAgent):
             )
 
         title = str(best_place.get("title") or subject).strip()
-        if language == "pt" and subject and _score_specific_place_lookup_match(best_place, subject) >= 55:
+        if language == "pt" and subject and _score_specific_place_lookup_match(best_place, subject) >= 140:
             title = subject
         raw_benefit = str(best_place.get("lisboa_card_benefit") or best_place.get("lisboa_card_discount") or "").strip()
         benefit_type = self._classify_lisboa_card_benefit(raw_benefit)
@@ -8648,6 +9498,15 @@ class ResearcherAgent(BaseAgent):
                 ),
             )
 
+        plan_brief = None if is_greeting else plan_brief_from_context(context)
+        if plan_brief is not None:
+            if verbose:
+                print("      [RESEARCHER] Searching evidence for each component of the planning brief...")
+            response = self._run_brief_evidence_lookup(plan_brief, language)
+            if response:
+                return response
+
+        context = strip_plan_brief_from_context(context)
         messages = self._build_messages(self.system_prompt, user_message, context, language=language)
 
         tool_enforcement_msg = "" if is_greeting else (
@@ -8786,8 +9645,11 @@ class ResearcherAgent(BaseAgent):
                         tool_name="search_history_culture",
                     )
                 ).strip()
-                compact_history = self._compact_history_result(raw_history, language, subject)
-                if compact_history:
+                synthesized = self._synthesize_history_answer(raw_history, subject, language)
+                compact_history = "" if synthesized else self._compact_history_result(raw_history, language, subject)
+                if synthesized:
+                    response = synthesized
+                elif compact_history:
                     timestamp = datetime.now().strftime("%H:%M")
                     heading = f"### 📚 Contexto histórico: {subject}" if language == "pt" else f"### 📚 Historical Context: {subject}"
                     source = (
@@ -8836,12 +9698,18 @@ class ResearcherAgent(BaseAgent):
                 print("      [RESEARCHER] Using deterministic direct place lookup before structured routing...")
 
             response = self._run_direct_place_lookup(user_message, language)
-            return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
+            found_answer, from_catalogue = self._answer_for_missing_place(response, language)
+            if found_answer and not from_catalogue:
+                # Complete and grounded on Wikipedia alone: the catalogue-card
+                # formatting would retitle it and cite VisitLisboa, unused here.
+                return self._remember_deterministic_response_for_retry(user_message, found_answer)
+            response = found_answer or response
+            return self._remember_deterministic_response_for_retry(user_message, self._location_hours_direct_answer(self._title_area_attractions(finalize_worker_response(
                 response,
                 agent_name="researcher",
                 user_query=user_message,
                 language=language,
-            ))
+            ), user_message, language), user_message, language))
 
         if not is_greeting and self._is_transactional_place_lookup_query(user_message):
             if verbose:
@@ -8894,12 +9762,12 @@ class ResearcherAgent(BaseAgent):
                 print("      [RESEARCHER] Using deterministic visit-area place lookup...")
 
             response = self._run_direct_place_lookup(user_message, language)
-            return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
+            return self._remember_deterministic_response_for_retry(user_message, self._title_area_attractions(finalize_worker_response(
                 response,
                 agent_name="researcher",
                 user_query=user_message,
                 language=language,
-            ))
+            ), user_message, language))
 
         event_followup_context = bool(
             getattr(self, "_last_search_context", None)
@@ -9009,12 +9877,12 @@ class ResearcherAgent(BaseAgent):
                 print("      [RESEARCHER] Using deterministic broad attractions lookup...")
 
             response = self._run_direct_place_lookup(user_message, language)
-            return self._remember_deterministic_response_for_retry(user_message, finalize_worker_response(
+            return self._remember_deterministic_response_for_retry(user_message, self._title_area_attractions(finalize_worker_response(
                 response,
                 agent_name="researcher",
                 user_query=user_message,
                 language=language,
-            ))
+            ), user_message, language))
 
         try:
             response = self.execute_react_loop(

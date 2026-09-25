@@ -1,0 +1,3966 @@
+{
+ "generated_at": "2026-09-24T14:55:20",
+ "source": "VisitLisboa places geocoded with OpenStreetMap (Photon); landmarks from Wikipedia/Wikidata",
+ "places": {
+  "https://www.visitlisboa.com/en/places/1147-lisboa": {
+   "title": "1147 Lisboa",
+   "lat": 38.713926,
+   "lon": -9.133483,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/25-de-abril-bridge": {
+   "title": "25 de Abril Bridge",
+   "lat": 38.689167,
+   "lon": -9.176944,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/5-oceanos": {
+   "title": "5 Oceanos",
+   "lat": 38.7008,
+   "lon": -9.176189,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/9-8-gravity-climbing-lisbon": {
+   "title": "9.8 Gravity Climbing Lisbon",
+   "lat": 38.785206,
+   "lon": -9.124319,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/a-outra-face-da-lua": {
+   "title": "A Outra Face da Lua",
+   "lat": 38.711438,
+   "lon": -9.139056,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/a-severa": {
+   "title": "A Severa",
+   "lat": 38.7117,
+   "lon": -9.143426,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/a-vela-passeios": {
+   "title": "À Vela Passeios",
+   "lat": 38.521004,
+   "lon": -8.886618,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/abc-travel": {
+   "title": "abc Travel",
+   "lat": 38.745353,
+   "lon": -9.217535,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/abobada-verde": {
+   "title": "Abóbada Verde",
+   "lat": 38.731342,
+   "lon": -9.142563,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/abreu-events": {
+   "title": "Abreu Events",
+   "lat": 38.717788,
+   "lon": -9.237516,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/acc-tours": {
+   "title": "ACC Tours",
+   "lat": 38.730549,
+   "lon": -9.140089,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/acrl-associacao-das-casas-regionais-em-lisboa": {
+   "title": "ACRL - Associação das Casas Regionais em Lisboa",
+   "lat": 38.73284,
+   "lon": -9.135828,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/adega-cooperativa-de-palmela": {
+   "title": "Adega Cooperativa de Palmela",
+   "lat": 38.578917,
+   "lon": -8.87287,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/adega-machado": {
+   "title": "Adega Machado",
+   "lat": 38.712251,
+   "lon": -9.143755,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/agic-tourist-guides-and-tour-managers": {
+   "title": "AGIC - Tourist Guides and Tour Managers",
+   "lat": 38.722739,
+   "lon": -9.149099,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/agrobio-organic-market": {
+   "title": "Agrobio Organic Market",
+   "lat": 38.742579,
+   "lon": -9.145639,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ahp-portuguese-hotels-association": {
+   "title": "AHP - Portuguese Hotels Association",
+   "lat": 38.735169,
+   "lon": -9.142467,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/aim-group-international-lisbon-office": {
+   "title": "AIM Portugal",
+   "lat": 38.735469,
+   "lon": -9.148531,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/aip-associacao-industrial-portuguesa": {
+   "title": "AIP - Associação Industrial Portuguesa",
+   "lat": 38.698552,
+   "lon": -9.183129,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/air-museum": {
+   "title": "Air Museum",
+   "lat": 38.837076,
+   "lon": -9.339162,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ajuda-national-palace": {
+   "title": "Ajuda National Palace",
+   "lat": 38.707594,
+   "lon": -9.198328,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/albuquerque-foundation": {
+   "title": "Albuquerque Foundation",
+   "lat": 38.765103,
+   "lon": -9.381759,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/alcantara-cafe": {
+   "title": "Alcântara Café",
+   "lat": 38.703653,
+   "lon": -9.176417,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/alfacinha-lx": {
+   "title": "Alfacinha LX",
+   "lat": 38.760668,
+   "lon": -9.108823,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/alfama": {
+   "title": "Alfama",
+   "lat": 38.71177,
+   "lon": -9.12838,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/alges-seafront-walk": {
+   "title": "Algés Seafront Walk",
+   "lat": 38.69838,
+   "lon": -9.229387,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/almadas-murals-in-the-maritime-stations-interpretative-centre": {
+   "title": "Almada's Murals in the Maritime Stations Interpretative Centre",
+   "lat": 38.701517,
+   "lon": -9.161898,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/altis-avenida-terrace": {
+   "title": "Altis Avenida (rooftop)",
+   "lat": 38.714945,
+   "lon": -9.140753,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/amelia-lisbon": {
+   "title": "Amélia Lisbon",
+   "lat": 38.717743,
+   "lon": -9.164149,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/amiroad-luxury-transports-tours-and-transfers": {
+   "title": "Amiroad Luxury Transports - Tours and Transfers",
+   "lat": 38.817319,
+   "lon": -9.095977,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/amoreiras-360-panoramic-view": {
+   "title": "Amoreiras 360º Panoramic View",
+   "lat": 38.723683,
+   "lon": -9.161387,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/amoreiras-shopping-center": {
+   "title": "Amoreiras Shopping Center",
+   "lat": 38.723674,
+   "lon": -9.162225,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ana-aeroportos-de-portugal-lisbon-airport": {
+   "title": "ANA Aeroportos de Portugal - Lisbon Airport",
+   "lat": 38.780998,
+   "lon": -9.131861,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/andre-tours-dmc": {
+   "title": "André Tours DMC",
+   "lat": 38.724143,
+   "lon": -9.151004,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/animagest-consulting-and-event-management-ltd": {
+   "title": "ANIMAGEST – Consulting and Event Management",
+   "lat": 38.646351,
+   "lon": -9.170282,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/anjos-teixeira-museum": {
+   "title": "Anjos Teixeira Museum",
+   "lat": 38.796842,
+   "lon": -9.387158,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/anthia-diving-center": {
+   "title": "Anthia Diving Center",
+   "lat": 38.440349,
+   "lon": -9.110831,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/aquarama": {
+   "title": "Aquarama",
+   "lat": 38.436554,
+   "lon": -9.115677,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/aqueduto-das-aguas-livres": {
+   "title": "Aqueduto das Águas Livres",
+   "lat": 38.728889,
+   "lon": -9.169167,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/archaeological-nucleus-in-rua-do-correeiros": {
+   "title": "Archaeological Nucleus in Rua do Correeiros",
+   "lat": 38.709975,
+   "lon": -9.137042,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/arco-da-rua-augusta": {
+   "title": "Arco da Rua Augusta",
+   "lat": 38.7084,
+   "lon": -9.1368,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/armazens-do-chiado": {
+   "title": "Armazéns do Chiado",
+   "lat": 38.711001,
+   "lon": -9.139386,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/arpad-szenes-vieira-da-silva-foundation": {
+   "title": "Arpad Szenes - Vieira da Silva Foundation",
+   "lat": 38.722237,
+   "lon": -9.15577,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/arrabida-experiences": {
+   "title": "Arrábida Experiences",
+   "lat": 38.435084,
+   "lon": -9.115521,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/arrabida-fort": {
+   "title": "Arrábida Fort",
+   "lat": 38.475355,
+   "lon": -8.98436,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/arrabida-nature-park": {
+   "title": "Arrábida Nature Park",
+   "lat": 38.481389,
+   "lon": -8.989167,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/ask-me-arrabida": {
+   "title": "Ask Me Arrábida",
+   "lat": 38.523481,
+   "lon": -8.890323,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ask-me-ericeira": {
+   "title": "Ask Me Ericeira",
+   "lat": 38.963566,
+   "lon": -9.417279,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ask-me-lisboa-aeroporto-de-lisboa": {
+   "title": "Ask Me Lisboa | Aeroporto de Lisboa",
+   "lat": 38.780998,
+   "lon": -9.131861,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/ask-me-lisboa-alcantara": {
+   "title": "Ask Me Lisboa | Alcântara",
+   "lat": 38.705839,
+   "lon": -9.175029,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ask-me-lisboa-arco-da-rua-augusta": {
+   "title": "Ask Me Lisboa | Arco da Rua Augusta",
+   "lat": 38.711928,
+   "lon": -9.138058,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ask-me-lisboa-cais-do-sodre": {
+   "title": "Ask Me Lisboa | Cais do Sodré",
+   "lat": 38.705988,
+   "lon": -9.144517,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ask-me-lisboa-campo-pequeno": {
+   "title": "Ask Me Lisboa | Campo Pequeno",
+   "lat": 38.742579,
+   "lon": -9.145639,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ask-me-lisboa-centro-tejo": {
+   "title": "Ask Me Lisboa | Centro Tejo",
+   "lat": 38.707455,
+   "lon": -9.13544,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ask-me-lisboa-doca-da-marinha": {
+   "title": "Ask Me Lisboa | Doca da Marinha",
+   "lat": 38.707886,
+   "lon": -9.130859,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/ask-me-lisboa-lisboa-shop": {
+   "title": "Ask Me Lisboa | Lisboa Shop",
+   "lat": 38.707651,
+   "lon": -9.139359,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ask-me-lisboa-lisboa-story-centre": {
+   "title": "Ask Me Lisboa | Lisboa Story Centre",
+   "lat": 38.707733,
+   "lon": -9.135286,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ask-me-lisboa-palacio-foz": {
+   "title": "Ask Me Lisboa | Palácio Foz",
+   "lat": 38.716011,
+   "lon": -9.142282,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ask-me-lisboa-parque-das-nacoes": {
+   "title": "Ask Me Lisboa | Parque das Nações",
+   "lat": 38.768046,
+   "lon": -9.095709,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ask-me-lisboa-rossio": {
+   "title": "Ask Me Lisboa | Rossio",
+   "lat": 38.714057,
+   "lon": -9.139807,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ask-me-lisboa-terreiro-do-paco": {
+   "title": "Ask Me Lisboa | Terreiro do Paço",
+   "lat": 38.707793,
+   "lon": -9.136554,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ask-me-lisboa-torre-de-belem": {
+   "title": "Ask Me Lisboa | Torre de Belém",
+   "lat": 38.691937,
+   "lon": -9.215184,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ask-me-sintra-mitos-e-lendas": {
+   "title": "Ask Me Sintra | Mitos e Lendas",
+   "lat": 38.796374,
+   "lon": -9.391521,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ask-me-sintra-news-museum": {
+   "title": "Ask Me Sintra | News Museum",
+   "lat": 38.796398,
+   "lon": -9.38993,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/associacao-comercial-e-empresarial-do-bairro-alto": {
+   "title": "Associação Comercial e Empresarial do Bairro Alto",
+   "lat": 38.713118,
+   "lon": -9.143489,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/associacao-do-fado-casto": {
+   "title": "Associação do Fado Casto",
+   "lat": 38.710604,
+   "lon": -9.132356,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/atelier-museum-julio-pomar": {
+   "title": "Atelier-Museum Júlio Pomar",
+   "lat": 38.71129,
+   "lon": -9.15042,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/av-fontes-pereira-de-melo-by-os-gemeos-blu-sam3": {
+   "title": "Av. Fontes Pereira de Melo - by Os Gêmeos, Blu & Sam3",
+   "lat": 38.726899,
+   "lon": -9.149178,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/badger-tours": {
+   "title": "Badger Tours",
+   "lat": 38.442229,
+   "lon": -9.097457,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/bairro-alto": {
+   "title": "Bairro Alto",
+   "lat": 38.713392,
+   "lon": -9.145552,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/bairro-do-avillez": {
+   "title": "Bairro do Avillez",
+   "lat": 38.712283,
+   "lon": -9.142302,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/baixa-chiado": {
+   "title": "Baixa",
+   "lat": 38.711316,
+   "lon": -9.137935,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/basilica-da-estrela": {
+   "title": "Basílica da Estrela",
+   "lat": 38.71316,
+   "lon": -9.16056,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/battuta-experiences": {
+   "title": "Battuta Experiences",
+   "lat": 38.723802,
+   "lon": -9.128372,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/beaches-of-arrabida-and-sesimbra": {
+   "title": "Beaches of Arrábida and Sesimbra",
+   "lat": 38.552527,
+   "lon": -9.051827,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/beaches-of-cascais": {
+   "title": "Beaches of Cascais",
+   "lat": 38.696892,
+   "lon": -9.42045,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/beaches-of-costa-da-caparica": {
+   "title": "Beaches of Costa da Caparica",
+   "lat": 38.644517,
+   "lon": -9.233607,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/beaches-of-ericeira": {
+   "title": "Beaches of Ericeira",
+   "lat": 38.963241,
+   "lon": -9.41708,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/beaches-of-sintra": {
+   "title": "Beaches of Sintra",
+   "lat": 38.835545,
+   "lon": -9.352237,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/bedeteca-de-lisboa-comic-strip-library": {
+   "title": "Bedeteca de Lisboa (Comic Strip Library)",
+   "lat": 38.763679,
+   "lon": -9.11272,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/bedriven": {
+   "title": "Bedriven",
+   "lat": 38.789029,
+   "lon": -9.1243,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/belas-clube-de-campo": {
+   "title": "Belas Clube de Campo",
+   "lat": 38.801805,
+   "lon": -9.281392,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/belcanto": {
+   "title": "Belcanto",
+   "lat": 38.710061,
+   "lon": -9.141488,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/belem-c9f84a77-b1cc-4d28-9160-2fa78caf5d37": {
+   "title": "Belém",
+   "lat": 38.705542,
+   "lon": -9.213226,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/benfica-handicrafts-market": {
+   "title": "Benfica Handicrafts Market",
+   "lat": 38.741734,
+   "lon": -9.170756,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/benfica-museum-cosme-damiao": {
+   "title": "Benfica Museum – Cosme Damião",
+   "lat": 38.751882,
+   "lon": -9.181494,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/bikeiberia-tours-rentals": {
+   "title": "bikeiberia Tours & Rentals",
+   "lat": 38.707463,
+   "lon": -9.142171,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/bikes-company": {
+   "title": "Bikes & Company",
+   "lat": 38.713418,
+   "lon": -9.137447,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/bolhas-tours": {
+   "title": "Bolhas Tours",
+   "lat": 38.437688,
+   "lon": -9.115402,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/bordalo-pinheiro-museum": {
+   "title": "Bordalo Pinheiro Museum",
+   "lat": 38.758899,
+   "lon": -9.154147,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/bounce": {
+   "title": "Bounce",
+   "lat": 38.712715,
+   "lon": -9.153809,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/boutique-dos-relogios-plus": {
+   "title": "Boutique dos Relógios Plus",
+   "lat": 38.720986,
+   "lon": -9.145602,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/brilhante": {
+   "title": "Brilhante",
+   "lat": 38.708017,
+   "lon": -9.146971,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/bubble-sea-events": {
+   "title": "Bubble Sea Events",
+   "lat": 38.691586,
+   "lon": -9.215929,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/buzz-dmc": {
+   "title": "Buzz DMC",
+   "lat": 38.738496,
+   "lon": -9.15056,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/cael-consorcio-de-automoveis-excelsior": {
+   "title": "Cael - Consórcio de Automóveis Excelsior",
+   "lat": 38.724143,
+   "lon": -9.151004,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/cafe-in": {
+   "title": "Café In",
+   "lat": 38.697065,
+   "lon": -9.187191,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/cafe-luso": {
+   "title": "Café Luso",
+   "lat": 38.713118,
+   "lon": -9.143489,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/cafe-martinho-da-arcada": {
+   "title": "Café Martinho da Arcada",
+   "lat": 38.707793,
+   "lon": -9.136554,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/cafe-paris": {
+   "title": "Café Paris",
+   "lat": 38.796374,
+   "lon": -9.391521,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/cafe-sao-bento": {
+   "title": "Café São Bento",
+   "lat": 38.713254,
+   "lon": -9.15303,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/cais-do-sodre": {
+   "title": "Cais do Sodré",
+   "lat": 38.706155,
+   "lon": -9.146827,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/cais-do-sodre-cacilhas-by-cacilheiro": {
+   "title": "Cais do Sodré - Cacilhas By Cacilheiro",
+   "lat": 38.680782,
+   "lon": -9.150571,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/calcada-portuguesa": {
+   "title": "Calçada Portuguesa",
+   "lat": 38.713594,
+   "lon": -9.139882,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/cam-centro-de-arte-moderna-gulbenkian": {
+   "title": "CAM – Centro de Arte Moderna Gulbenkian",
+   "lat": 38.7359,
+   "lon": -9.1536,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/camara-municipal-de-almada": {
+   "title": "Câmara Municipal de Almada",
+   "lat": 38.681433,
+   "lon": -9.159019,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/camara-municipal-de-cascais": {
+   "title": "Câmara Municipal de Cascais",
+   "lat": 38.737447,
+   "lon": -9.386851,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/camara-municipal-de-lisboa": {
+   "title": "Câmara Municipal de Lisboa",
+   "lat": 38.708143,
+   "lon": -9.138525,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/camara-municipal-de-sesimbra": {
+   "title": "Câmara Municipal de Sesimbra",
+   "lat": 38.443781,
+   "lon": -9.101559,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/camara-municipal-de-sintra": {
+   "title": "Câmara Municipal de Sintra",
+   "lat": 38.760509,
+   "lon": -9.318117,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/campo-pequeno": {
+   "title": "Campo Pequeno",
+   "lat": 38.742764,
+   "lon": -9.145244,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/campo-pequeno-museum": {
+   "title": "Campo Pequeno Museum",
+   "lat": 38.741514,
+   "lon": -9.144932,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/campo-pequeno-shopping-center": {
+   "title": "Campo Pequeno Shopping Center",
+   "lat": 38.742764,
+   "lon": -9.145244,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/can-the-can-lisboa": {
+   "title": "Can the Can Lisboa",
+   "lat": 38.707455,
+   "lon": -9.13544,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/caneca-de-prata-restaurante": {
+   "title": "Caneca de Prata Restaurante",
+   "lat": 38.711218,
+   "lon": -9.137108,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/cantinho-do-avillez": {
+   "title": "Cantinho do Avillez",
+   "lat": 38.707889,
+   "lon": -9.142008,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/cantinho-do-avillez-cascais": {
+   "title": "Cantinho do Avillez - Cascais",
+   "lat": 38.698768,
+   "lon": -9.420096,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/cantinho-do-avillez-parque-das-nacoes": {
+   "title": "Cantinho do Avillez - Parque das Nações",
+   "lat": 38.771552,
+   "lon": -9.092415,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/cape-roca": {
+   "title": "Cape Roca",
+   "lat": 38.780833,
+   "lon": -9.500556,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/capuchos-convent-sintra": {
+   "title": "Capuchos Convent (Sintra)",
+   "lat": 38.784436,
+   "lon": -9.438256,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/car2u": {
+   "title": "CAR2U",
+   "lat": 38.747988,
+   "lon": -9.184898,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/carmo-archaeological-museum": {
+   "title": "Carmo Archaeological Museum",
+   "lat": 38.712006,
+   "lon": -9.140586,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/carris-museum-public-transport-museum": {
+   "title": "Carris Museum (Public Transport Museum)",
+   "lat": 38.702,
+   "lon": -9.1806,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/casa-da-cerca-viewpoint": {
+   "title": "Casa da Cerca Viewpoint",
+   "lat": 38.684019,
+   "lon": -9.15919,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/casa-da-comida": {
+   "title": "Casa da Comida",
+   "lat": 38.736275,
+   "lon": -9.127493,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/casa-da-guia": {
+   "title": "Casa da Guia",
+   "lat": 38.695155,
+   "lon": -9.45238,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/casa-de-linhares": {
+   "title": "Casa de Linhares",
+   "lat": 38.709501,
+   "lon": -9.13083,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/casa-do-marques": {
+   "title": "Casa do Marquês",
+   "lat": 38.789029,
+   "lon": -9.1243,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/casa-fernando-pessoa": {
+   "title": "Casa Fernando Pessoa",
+   "lat": 38.7166,
+   "lon": -9.1624,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/casa-museu-amalia-rodrigues": {
+   "title": "Casa-Museu Amália Rodrigues",
+   "lat": 38.715396,
+   "lon": -9.154614,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/casa-museu-dr-anastacio-goncalves": {
+   "title": "Casa-Museu Dr. Anastácio Gonçalves",
+   "lat": 38.732583,
+   "lon": -9.146417,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/casa-museu-leal-da-camara": {
+   "title": "Casa-Museu Leal da Câmara",
+   "lat": 38.792044,
+   "lon": -9.322842,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/casa-roque-gameiro": {
+   "title": "Casa Roque Gameiro",
+   "lat": 38.7579,
+   "lon": -9.24235,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/casapiano-cultural-center": {
+   "title": "Casapiano Cultural Center",
+   "lat": 38.699413,
+   "lon": -9.205862,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/casino-estoril": {
+   "title": "Casino Estoril",
+   "lat": 38.7072,
+   "lon": -9.397438,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/casino-lisboa-15fd8da1-721e-40e8-afc3-f7eb62e0dfdd": {
+   "title": "Casino Lisboa",
+   "lat": 38.764878,
+   "lon": -9.096594,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/castelo-de-palmela": {
+   "title": "Castelo de Palmela",
+   "lat": 38.566111,
+   "lon": -8.901111,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/castelo-de-sao-jorge": {
+   "title": "Castelo de São Jorge",
+   "lat": 38.713889,
+   "lon": -9.133611,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/castle-museum": {
+   "title": "Castle Museum",
+   "lat": 38.713926,
+   "lon": -9.133483,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/castle-of-the-moors": {
+   "title": "Castle of the Moors",
+   "lat": 38.7925,
+   "lon": -9.389444,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/castro-rua-aurea": {
+   "title": "Castro Rua Áurea",
+   "lat": 38.712249,
+   "lon": -9.139092,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/castro-rua-garrett": {
+   "title": "Castro Rua Garrett",
+   "lat": 38.710922,
+   "lon": -9.140418,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ccdrlvt": {
+   "title": "CCDRLVT",
+   "lat": 38.722703,
+   "lon": -9.149485,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/celina-tours": {
+   "title": "Celina Tours",
+   "lat": 38.74869,
+   "lon": -9.147506,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/centro-cultural-de-belem": {
+   "title": "Centro Cultural de Belém",
+   "lat": 38.695278,
+   "lon": -9.208611,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/centro-nacional-de-cultura": {
+   "title": "Centro Nacional de Cultura",
+   "lat": 38.709631,
+   "lon": -9.142375,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/centro-vasco-da-gama": {
+   "title": "Centro Vasco da Gama",
+   "lat": 38.767665,
+   "lon": -9.096844,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/cervejaria-trindade": {
+   "title": "Cervejaria Trindade",
+   "lat": 38.712445,
+   "lon": -9.142412,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/chafarica-restaurante": {
+   "title": "Chafarica Restaurante",
+   "lat": 38.739989,
+   "lon": -9.14853,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/champalimaud-centre-for-the-unknown-1": {
+   "title": "Champalimaud Centre for the Unknown",
+   "lat": 38.693745,
+   "lon": -9.213462,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/chapel-of-nossa-senhora-da-saude": {
+   "title": "Chapel of Nossa Senhora da Saúde",
+   "lat": 38.792466,
+   "lon": -9.108405,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/chapito": {
+   "title": "Chapitô",
+   "lat": 38.71142,
+   "lon": -9.13379,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/chez-croissant-parque-das-nacoes": {
+   "title": "Chez Croissant Parque das Nações",
+   "lat": 38.766028,
+   "lon": -9.096062,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/chez-croissant-sao-pedro-de-alcantara": {
+   "title": "Chez Croissant São Pedro de Alcântara",
+   "lat": 38.714445,
+   "lon": -9.144209,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/chiado-41699ec3-eda7-414e-a9c1-e985f2f0efb7": {
+   "title": "Chiado",
+   "lat": 38.71033,
+   "lon": -9.140519,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/christ-the-king-shrine-and-monument": {
+   "title": "Christ the King Shrine and Monument",
+   "lat": 38.678549,
+   "lon": -9.171337,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/church-and-convent-of-sao-vicente-de-fora": {
+   "title": "Church and Convent of São Vicente de Fora",
+   "lat": 38.714722,
+   "lon": -9.127778,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/church-of-our-lady-of-the-purification": {
+   "title": "Church of Our Lady of the Purification",
+   "lat": 38.900774,
+   "lon": -9.119541,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/church-of-sao-domingos": {
+   "title": "Church of São Domingos",
+   "lat": 38.714736,
+   "lon": -9.138381,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/church-of-the-antigo-mosteiro-de-jesus": {
+   "title": "Church of the Antigo Mosteiro de Jesus",
+   "lat": 38.526756,
+   "lon": -8.895944,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/cicero": {
+   "title": "Cícero",
+   "lat": 38.715922,
+   "lon": -9.162726,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/cinemateca-portuguesa-museu-do-cinema": {
+   "title": "Cinemateca Portuguesa - Museu do Cinema",
+   "lat": 38.720922,
+   "lon": -9.148794,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/cipreia-dive-club-sesimbra": {
+   "title": "Cipreia Dive Club - Sesimbra",
+   "lat": 38.435705,
+   "lon": -9.115265,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/cires-centro-interpretativo-do-roaz-do-estuario-do-sado": {
+   "title": "CIRES - Centro Interpretativo do Roaz do Estuário do Sado",
+   "lat": 38.523153,
+   "lon": -8.898717,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/cit-global": {
+   "title": "Cit Global",
+   "lat": 38.771382,
+   "lon": -9.170677,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/cititravel-dmc": {
+   "title": "Cititravel DMC",
+   "lat": 38.718395,
+   "lon": -9.144223,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/citysightseeing-portugal": {
+   "title": "City Sightseeing",
+   "lat": 38.787152,
+   "lon": -9.122126,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/clube-de-fado": {
+   "title": "Clube de Fado",
+   "lat": 38.709639,
+   "lon": -9.131199,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/clube-de-golfe-quinta-da-marinha": {
+   "title": "Quinta da Marinha Golf",
+   "lat": 38.707202,
+   "lon": -9.457167,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/clueless-wines": {
+   "title": "Clueless Wines",
+   "lat": 38.717234,
+   "lon": -9.167112,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/colombo-shopping-center": {
+   "title": "Colombo Shopping Center",
+   "lat": 38.75332,
+   "lon": -9.189133,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/compasso": {
+   "title": "Compasso",
+   "lat": 38.701358,
+   "lon": -9.426375,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/confeitaria-nacional-river-cruise": {
+   "title": "Confeitaria Nacional River Cruise",
+   "lat": 38.691689,
+   "lon": -9.215906,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/convent-of-arrabida": {
+   "title": "Convent of Arrábida",
+   "lat": 38.670163,
+   "lon": -9.230915,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/convent-of-capuchos-almada": {
+   "title": "Convent of Capuchos (Almada)",
+   "lat": 38.645627,
+   "lon": -9.222309,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/convento-do-beato": {
+   "title": "Convento do Beato",
+   "lat": 38.734296,
+   "lon": -9.106199,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/convento-dos-cardaes": {
+   "title": "Convento dos Cardaes",
+   "lat": 38.713549,
+   "lon": -9.147548,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/cooltra-motos": {
+   "title": "Cooltra Motos",
+   "lat": 38.735346,
+   "lon": -9.145536,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/cooptaxis": {
+   "title": "Cooptáxis",
+   "lat": 38.738141,
+   "lon": -9.147037,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/countess-of-edla-chalet-and-gardens": {
+   "title": "Countess of Edla Chalet and Gardens",
+   "lat": 38.7851,
+   "lon": -9.3991,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/coyo-taco-cais-do-sodre": {
+   "title": "Coyo Taco Cais do Sodré",
+   "lat": 38.707562,
+   "lon": -9.145434,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/coyo-taco-principe-real": {
+   "title": "Coyo Taco Príncipe Real",
+   "lat": 38.715698,
+   "lon": -9.146362,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/creative-star-eventos-viagens-e-turismo": {
+   "title": "Creative Star Eventos Viagens e Turismo",
+   "lat": 38.696436,
+   "lon": -9.364808,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/culto-panoramico": {
+   "title": "Culto Panorâmico",
+   "lat": 38.566109,
+   "lon": -8.90115,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/culturgest-fundacao-caixa-geral-de-depositos": {
+   "title": "Culturgest- Fundação Caixa Geral de Depósitos",
+   "lat": 38.74126,
+   "lon": -9.142333,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/d-fernando-ii-e-gloria-frigate": {
+   "title": "D. Fernando II e Glória Frigate",
+   "lat": 38.686076,
+   "lon": -9.14695,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/darwin-s-cafe": {
+   "title": "Darwin's Café",
+   "lat": 38.69299,
+   "lon": -9.220909,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/dianatours-viagens-e-turismo": {
+   "title": "Dianatours - Viagens e Turismo",
+   "lat": 38.749718,
+   "lon": -9.148586,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/directorate-general-for-cultural-heritage-dgpc": {
+   "title": "Directorate-General for Cultural Heritage (DGPC)",
+   "lat": 38.707631,
+   "lon": -9.197833,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/doc-dmc-services-events-wine": {
+   "title": "Doc Dmc - Services, Events & Wine",
+   "lat": 38.731374,
+   "lon": -9.11181,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/doca-de-santo": {
+   "title": "Doca de Santo",
+   "lat": 38.7008,
+   "lon": -9.176189,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ec-travel": {
+   "title": "EC Travel",
+   "lat": 38.755779,
+   "lon": -9.097082,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ecmeetings-portugal": {
+   "title": "ECMeetings Portugal",
+   "lat": 38.710197,
+   "lon": -9.137719,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/eco-tuk-tours": {
+   "title": "Eco Tuk Tours",
+   "lat": 38.713418,
+   "lon": -9.137447,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/edward-vii-park-and-estufa-fria-greenhouse": {
+   "title": "Edward VII Park and Estufa Fria (Greenhouse)",
+   "lat": 38.728212,
+   "lon": -9.153014,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/egeac": {
+   "title": "Egeac",
+   "lat": 38.724708,
+   "lon": -9.160828,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/el-corte-ingles-grande-armazens": {
+   "title": "El Corte Inglés, Grande Armazéns",
+   "lat": 38.733042,
+   "lon": -9.153454,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/elevador-da-bica": {
+   "title": "Elevador da Bica (Closed temporarly)",
+   "lat": 38.709831,
+   "lon": -9.146187,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/elevador-de-santa-justa": {
+   "title": "Elevador de Santa Justa (Closed temporarly)",
+   "lat": 38.712117,
+   "lon": -9.139375,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/eleven": {
+   "title": "Eleven",
+   "lat": 38.730775,
+   "lon": -9.1558,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/eliseu-dos-leitoes-duque-de-palmela": {
+   "title": "Eliseu dos Leitões - Duque de Palmela",
+   "lat": 38.722996,
+   "lon": -9.149735,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/elohim-spa": {
+   "title": "Elohim Spa",
+   "lat": 38.720222,
+   "lon": -9.156032,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/emel": {
+   "title": "EMEL",
+   "lat": 38.770492,
+   "lon": -9.159382,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/encanto-jose-avillez": {
+   "title": "Encanto – José Avillez",
+   "lat": 38.709939,
+   "lon": -9.141471,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/entidade-regional-de-turismo-da-regiao-de-lisboa-ert-rl": {
+   "title": "Entidade Regional de Turismo da Região de Lisboa (ERT-RL)",
+   "lat": 38.707651,
+   "lon": -9.139359,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/epic-sana": {
+   "title": "Epic Sana",
+   "lat": 38.724282,
+   "lon": -9.158394,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/ericeira-world-surfing-reserve": {
+   "title": "Ericeira | World Surfing Reserve",
+   "lat": 38.963241,
+   "lon": -9.41708,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/escala25": {
+   "title": "Escala25",
+   "lat": 38.70038,
+   "lon": -9.179384,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/escape-game-over-escape-room": {
+   "title": "Escape Game Over Escape Room",
+   "lat": 38.713549,
+   "lon": -9.147548,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/escape-hunt-lisboa": {
+   "title": "Escape Hunt Lisboa",
+   "lat": 38.713418,
+   "lon": -9.137447,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/escola-de-hotelaria-e-turismo-de-lisboa": {
+   "title": "Escola de Hotelaria e Turismo de Lisboa",
+   "lat": 38.717159,
+   "lon": -9.159806,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/esporao": {
+   "title": "Esporão",
+   "lat": 38.429886,
+   "lon": -9.133867,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/essencia-da-latitude": {
+   "title": "Essência da Latitude",
+   "lat": 38.752151,
+   "lon": -9.166205,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/estacao-sul-sueste-doca-da-marinha": {
+   "title": "Estação Sul e Sueste / Doca da Marinha",
+   "lat": 38.707455,
+   "lon": -9.13544,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/estorias-na-casa-da-comida": {
+   "title": "Estórias na Casa da Comida",
+   "lat": 38.721548,
+   "lon": -9.155118,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/estufa-fria": {
+   "title": "Estufa Fria",
+   "lat": 38.7293,
+   "lon": -9.1555,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/estufa-fria-casa-do-marques": {
+   "title": "Estufa Fria - Casa do Marquês",
+   "lat": 38.730336,
+   "lon": -9.154395,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/euro-segway-lisbon": {
+   "title": "Euro Segway Lisbon",
+   "lat": 38.709306,
+   "lon": -9.130544,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/europalco": {
+   "title": "Europalco",
+   "lat": 38.82361,
+   "lon": -9.368133,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/europass-academy-portugal": {
+   "title": "Europass Academy Portugal",
+   "lat": 38.708527,
+   "lon": -9.15037,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/eventivos-dmc": {
+   "title": "Eventivos DMC",
+   "lat": 38.784816,
+   "lon": -9.09834,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/everything-is-new": {
+   "title": "Everything is New",
+   "lat": 38.702623,
+   "lon": -9.211404,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/evoa-tagus-estuary-birdwatching-and-conservation-area": {
+   "title": "EVOA – Tagus Estuary Birdwatching and Conservation Area",
+   "lat": 38.967241,
+   "lon": -8.98177,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/evowk": {
+   "title": "Evowk",
+   "lat": 38.710197,
+   "lon": -9.137719,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/exuberdirection": {
+   "title": "Exuberdirection",
+   "lat": 38.819499,
+   "lon": -9.123359,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/fado": {
+   "title": "Fado",
+   "lat": 38.711025,
+   "lon": -9.12766,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/fado-vadio": {
+   "title": "Fado Vadio",
+   "lat": 38.712747,
+   "lon": -9.135959,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/fados-fora-de-portas": {
+   "title": "Fados Fora de Portas",
+   "lat": 38.691506,
+   "lon": -9.310495,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/fairs-and-markets-of-principe-real": {
+   "title": "Fairs and Markets of Príncipe Real",
+   "lat": 38.716284,
+   "lon": -9.148616,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/feira-da-ladra-flea-market": {
+   "title": "Feira da Ladra (Flea Market)",
+   "lat": 38.715414,
+   "lon": -9.126276,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/feira-de-alfarrabistas-antique-book-fair": {
+   "title": "Feira de Alfarrabistas (Antique Book Fair)",
+   "lat": 38.710227,
+   "lon": -9.141169,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/feira-na-avenida-fair-in-the-avenue": {
+   "title": "Feira na Avenida (Fair in the Avenue)",
+   "lat": 38.720354,
+   "lon": -9.145717,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/feiralegria": {
+   "title": "Feiralegria",
+   "lat": 38.717881,
+   "lon": -9.145283,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/feitoria-restaurant-wine-bar": {
+   "title": "Feitoria Restaurant & Wine Bar",
+   "lat": 38.692598,
+   "lon": -9.213175,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/fertagus": {
+   "title": "Fertagus",
+   "lat": 38.666114,
+   "lon": -9.179135,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/festa-aluga": {
+   "title": "Festa Aluga",
+   "lat": 38.70932,
+   "lon": -9.166371,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/fort-of-st-jorge-de-oitavos": {
+   "title": "Fort of St. Jorge de Oitavos",
+   "lat": 38.695199,
+   "lon": -9.456764,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/freeport-lisboa-fashion-outlet": {
+   "title": "Freeport Lisboa Fashion Outlet",
+   "lat": 38.751478,
+   "lon": -8.943314,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/fried-cuttlefish-from-setubal": {
+   "title": "Fried Cuttlefish from Setúbal",
+   "lat": 38.473579,
+   "lon": -8.982972,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/fronteira-palace": {
+   "title": "Fronteira Palace",
+   "lat": 38.741071,
+   "lon": -9.180773,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/frs-portugal": {
+   "title": "FRS Portugal",
+   "lat": 38.707751,
+   "lon": -9.136592,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/fun-happens-food-events-network": {
+   "title": "Fun Happens - Food Events Network",
+   "lat": 38.771766,
+   "lon": -9.094957,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/fundacao-centro-cultural-de-belem": {
+   "title": "Fundação Centro Cultural de Belém",
+   "lat": 38.695845,
+   "lon": -9.207183,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/galeria-1758": {
+   "title": "Galeria 1758",
+   "lat": 38.702228,
+   "lon": -9.201844,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/garden-of-the-gulbenkian-foundation": {
+   "title": "Garden of the Gulbenkian Foundation",
+   "lat": 38.739908,
+   "lon": -9.151001,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/geographia": {
+   "title": "Geographia",
+   "lat": 38.705537,
+   "lon": -9.16174,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/geological-museum": {
+   "title": "Geological Museum",
+   "lat": 38.713436,
+   "lon": -9.147906,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/gn-cellar": {
+   "title": "GN Cellar",
+   "lat": 38.712727,
+   "lon": -9.137291,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/go-fishing-portugal": {
+   "title": "Go Fishing Portugal",
+   "lat": 38.671243,
+   "lon": -9.170305,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/gold-compass": {
+   "title": "Gold Compass",
+   "lat": 38.748814,
+   "lon": -9.211943,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/gold-limousine-luxury-transport": {
+   "title": "Gold Limousine - Luxury Transport",
+   "lat": 38.738281,
+   "lon": -9.218164,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/golf-aldeia-dos-capuchos": {
+   "title": "Golf Aldeia dos Capuchos",
+   "lat": 38.650158,
+   "lon": -9.226502,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/golf-do-estoril": {
+   "title": "Golf do Estoril",
+   "lat": 38.714586,
+   "lon": -9.393935,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/graca": {
+   "title": "Graça",
+   "lat": 38.718822,
+   "lon": -9.129191,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/graca-urban-handicrafts-fair": {
+   "title": "Graça Urban Handicrafts Fair",
+   "lat": 38.718306,
+   "lon": -9.12989,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/gulbenkian-museum": {
+   "title": "Gulbenkian Museum",
+   "lat": 38.73729,
+   "lon": -9.154801,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/haliotis-centro-escola-e-loja-de-mergulho": {
+   "title": "Haliotis - Centro, Escola e Loja de mergulho",
+   "lat": 38.436554,
+   "lon": -9.115677,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/happy-tours-portugal": {
+   "title": "Happy Tours Portugal",
+   "lat": 38.72415,
+   "lon": -9.120831,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/health-and-pharmacy-museum-lisbon": {
+   "title": "Health and Pharmacy Museum Lisbon",
+   "lat": 38.71009,
+   "lon": -9.147351,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/hertz": {
+   "title": "Hertz",
+   "lat": 38.785002,
+   "lon": -9.124556,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/hippotrip-turismo-anfibio": {
+   "title": "Hippotrip - Turismo Anfíbio",
+   "lat": 38.699338,
+   "lon": -9.17592,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/honorato-belem": {
+   "title": "Honorato | Belém",
+   "lat": 38.697525,
+   "lon": -9.203764,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/honorato-chiado": {
+   "title": "Honorato | Chiado",
+   "lat": 38.711547,
+   "lon": -9.141721,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/honorato-parque-das-nacoes": {
+   "title": "Honorato | Parque das Nações",
+   "lat": 38.763554,
+   "lon": -9.095747,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/honorato-saldanha": {
+   "title": "Honorato | Saldanha",
+   "lat": 38.733335,
+   "lon": -9.143904,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/honorato-telheiras": {
+   "title": "Honorato | Telheiras",
+   "lat": 38.760714,
+   "lon": -9.167137,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/hospital-da-luz-lisboa": {
+   "title": "Hospital da Luz Lisboa",
+   "lat": 38.756193,
+   "lon": -9.192415,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/hot-clube-de-portugal": {
+   "title": "Hot Clube de Portugal",
+   "lat": 38.717574,
+   "lon": -9.145015,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/hot-dog-lovers": {
+   "title": "Hot Dog Lovers",
+   "lat": 38.723335,
+   "lon": -9.148317,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/hotel-internacional-res-t-bastardo": {
+   "title": "Hotel Internacional (Res T. Bastardo)",
+   "lat": 38.713066,
+   "lon": -9.138424,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/hotel-mundial-rooftop": {
+   "title": "Hotel Mundial - Rooftop",
+   "lat": 38.714744,
+   "lon": -9.13706,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/house-of-corpo-santo-baroque-museum": {
+   "title": "House of Corpo Santo - Baroque Museum",
+   "lat": 38.524638,
+   "lon": -8.88804,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/igreja-da-graca": {
+   "title": "Igreja da Graça",
+   "lat": 38.717621,
+   "lon": -9.129949,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/igreja-de-santo-antonio": {
+   "title": "Igreja de Santo António",
+   "lat": 38.709975,
+   "lon": -9.133699,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/imagine-more-meetings-incentives": {
+   "title": "Imagine more - Meetings & Incentives",
+   "lat": 38.705224,
+   "lon": -9.199282,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/immersivus-gallery": {
+   "title": "Immersivus Gallery",
+   "lat": 38.722295,
+   "lon": -9.156053,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/imotion": {
+   "title": "iMotion",
+   "lat": 38.698239,
+   "lon": -9.29245,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/imperador-tours": {
+   "title": "Imperador Tours",
+   "lat": 38.435469,
+   "lon": -9.11372,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/inatel-turismo": {
+   "title": "INATEL Turismo",
+   "lat": 38.715981,
+   "lon": -9.140279,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/interpretative-center-of-the-history-of-cod": {
+   "title": "Interpretative Center of the History of Cod",
+   "lat": 38.707455,
+   "lon": -9.13544,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/jardim-botanico-da-ajuda": {
+   "title": "Jardim Botânico da Ajuda",
+   "lat": 38.706206,
+   "lon": -9.200806,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/jardim-botanico-da-faculdade-de-ciencias-de-lisboa": {
+   "title": "Jardim Botânico da Faculdade de Ciências de Lisboa",
+   "lat": 38.718534,
+   "lon": -9.148856,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/jardim-da-estrela": {
+   "title": "Jardim da Estrela",
+   "lat": 38.7146,
+   "lon": -9.15927,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/jardim-do-cerco-cerco-garden": {
+   "title": "Jardim do Cerco (Cerco Garden)",
+   "lat": 38.937332,
+   "lon": -9.321979,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/jardim-parque-das-nacoes": {
+   "title": "Jardim Parque das Nações",
+   "lat": 38.778736,
+   "lon": -9.094555,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/jardim-zoologico-de-lisboa": {
+   "title": "Lisbon Zoo",
+   "lat": 38.744833,
+   "lon": -9.1715,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/jeronimos-monastery": {
+   "title": "Jerónimos Monastery",
+   "lat": 38.697778,
+   "lon": -9.206111,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/jewish-cultural-center-rua-da-judiaria": {
+   "title": "Jewish Cultural Center Rua da Judiaria",
+   "lat": 38.710279,
+   "lon": -9.129504,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/jncquoi": {
+   "title": "JNcQUOI Avenida",
+   "lat": 38.720272,
+   "lon": -9.145024,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/jncquoi-asia": {
+   "title": "JNcQUOI Asia",
+   "lat": 38.719518,
+   "lon": -9.144237,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/jncquoi-fish": {
+   "title": "JNcQUOI Fish",
+   "lat": 38.724751,
+   "lon": -9.149713,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/jncquoi-frou-frou": {
+   "title": "JNcQUOI Frou Frou",
+   "lat": 38.719518,
+   "lon": -9.144237,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/joalharia-ferreira-marques-jewellery": {
+   "title": "Joalharia Ferreira Marques (Jewellery)",
+   "lat": 38.712871,
+   "lon": -9.1391,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/joao-de-deus-museum": {
+   "title": "João de Deus Museum",
+   "lat": 38.715848,
+   "lon": -9.1583,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/jose-saramago-foundation": {
+   "title": "José Saramago Foundation",
+   "lat": 38.7091,
+   "lon": -9.1327,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/jumbo-tours": {
+   "title": "Jumbo Tours",
+   "lat": 38.733945,
+   "lon": -9.301042,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/kislog": {
+   "title": "Kislog",
+   "lat": 38.925576,
+   "lon": -9.22406,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/la-brasserie-de-l-entrecote": {
+   "title": "La Brasserie de L’Entrecôte",
+   "lat": 38.710227,
+   "lon": -9.143175,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/lacs-community-of-creators": {
+   "title": "LACS - Community of Creators",
+   "lat": 38.703109,
+   "lon": -9.161957,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/lat-a": {
+   "title": "Lat.a",
+   "lat": 38.7008,
+   "lon": -9.176189,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/leading": {
+   "title": "Leading",
+   "lat": 38.713856,
+   "lon": -9.236342,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/leiveira-azulejos-de-azeitao": {
+   "title": "Leiveira - Azulejos de Azeitão",
+   "lat": 38.527302,
+   "lon": -8.991828,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/leonor-silva-jewellery": {
+   "title": "Leonor Silva Jewellery",
+   "lat": 38.737857,
+   "lon": -9.131055,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/liberty-portugal-dmc": {
+   "title": "Liberty Portugal DMC",
+   "lat": 38.724573,
+   "lon": -9.148025,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/limoutravel": {
+   "title": "Limoutravel",
+   "lat": 38.751612,
+   "lon": -9.172253,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/limoutravel-chauffer-service": {
+   "title": "Limoutravel Chauffer Service",
+   "lat": 38.751612,
+   "lon": -9.172253,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/lisboa-a-noite": {
+   "title": "Lisboa à Noite",
+   "lat": 38.712165,
+   "lon": -9.143457,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/lisboa-congress-centre": {
+   "title": "Lisboa Congress Centre (CCL)",
+   "lat": 38.698939,
+   "lon": -9.18425,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/lisboa-feiras-congressos-e-eventos-fce-associacao-empresarial": {
+   "title": "Lisboa Feiras Congressos e Eventos – FCE/Associação Empresarial",
+   "lat": 38.698552,
+   "lon": -9.183129,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/lisboa-sailing-cruises": {
+   "title": "Lisboa Sailing Cruises",
+   "lat": 38.702419,
+   "lon": -9.168299,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/lisboa-shop": {
+   "title": "Lisboa Shop",
+   "lat": 38.707651,
+   "lon": -9.139359,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/lisboatur-agencia-de-viagens": {
+   "title": "Lisboatur - Agência de Viagens",
+   "lat": 38.740501,
+   "lon": -9.143024,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/lisbon-bike-tour-outdoors": {
+   "title": "Lisbon Bike Tour & Outdoors",
+   "lat": 38.704135,
+   "lon": -9.276831,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/lisbon-by-segway": {
+   "title": "Lisbon by Segway",
+   "lat": 38.713418,
+   "lon": -9.137447,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/lisbon-cascais-by-train": {
+   "title": "Lisbon - Cascais By Train",
+   "lat": 38.696892,
+   "lon": -9.42045,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/lisbon-s-azulejos": {
+   "title": "Lisbon’s Azulejos",
+   "lat": 38.711857,
+   "lon": -9.130216,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/lisbon-sports-club": {
+   "title": "Lisbon Sports Club",
+   "lat": 38.798163,
+   "lon": -9.275436,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/lisbonfancytour": {
+   "title": "Lisbon Fancytour",
+   "lat": 38.769723,
+   "lon": -9.095759,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/lismarketing": {
+   "title": "Lismarketing",
+   "lat": 38.707651,
+   "lon": -9.139359,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/little-lisbon": {
+   "title": "Little Lisbon",
+   "lat": 38.729482,
+   "lon": -9.13009,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/live-company": {
+   "title": "Live Company",
+   "lat": 38.703422,
+   "lon": -9.209658,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/living-tours": {
+   "title": "Living Tours",
+   "lat": 38.709794,
+   "lon": -9.136425,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/local-tuk-tuk": {
+   "title": "Local Tuk Tuk",
+   "lat": 38.731406,
+   "lon": -9.146767,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/longevity-clinic-cascais": {
+   "title": "Longevity Clinic Cascais",
+   "lat": 38.699935,
+   "lon": -9.468088,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/loreto-underground-gallery": {
+   "title": "Galeria Subterrânea do Loreto",
+   "lat": 38.716271,
+   "lon": -9.14839,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/loures": {
+   "title": "Loures",
+   "lat": 38.830874,
+   "lon": -9.168451,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/loures-municipal-museum-quinta-do-conventinho": {
+   "title": "Loures Municipal Museum - Quinta do Conventinho",
+   "lat": 38.819252,
+   "lon": -9.162071,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/lpm-comunicacao": {
+   "title": "LPM Comunicação",
+   "lat": 38.76325,
+   "lon": -9.104973,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/luggage-city-center-luggage-storage": {
+   "title": "Luggage @ City Center luggage Storage",
+   "lat": 38.711282,
+   "lon": -9.14256,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/luggage-storage-lisbon": {
+   "title": "Luggage Storage Lisbon",
+   "lat": 38.70995,
+   "lon": -9.143093,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/lusanova-dmc": {
+   "title": "Lusanova DMC",
+   "lat": 38.739788,
+   "lon": -9.127297,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/lx-fabricas": {
+   "title": "Lx Fábricas",
+   "lat": 38.7026,
+   "lon": -9.178662,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/lx-market-feira-na-fabrica": {
+   "title": "Lx Market - Feira na Fábrica",
+   "lat": 38.7026,
+   "lon": -9.178662,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/maat-museum-of-art-architecture-and-technology": {
+   "title": "MAAT - Museum of Art, Architecture and Technology",
+   "lat": 38.69591,
+   "lon": -9.19464,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/macam-museu-de-arte-contemporanea-armando-martins": {
+   "title": "MACAM – Museu de Arte Contemporânea Armando Martins",
+   "lat": 38.700486,
+   "lon": -9.183303,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/macau-pavilion-vieira-da-silva-gallery": {
+   "title": "Macau Pavilion / Vieira da Silva Gallery",
+   "lat": 38.828392,
+   "lon": -9.160004,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/macau-scientific-and-cultural-centre": {
+   "title": "Macau Scientific and Cultural Centre",
+   "lat": 38.700833,
+   "lon": -9.1825,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/main-vision-media-solutions": {
+   "title": "Main Vision Media Solutions",
+   "lat": 38.758788,
+   "lon": -9.113237,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/mare-jose-avillez": {
+   "title": "Maré - José Avillez",
+   "lat": 38.699935,
+   "lon": -9.468088,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/maria-da-mouraria": {
+   "title": "Maria da Mouraria",
+   "lat": 38.716209,
+   "lon": -9.134551,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/maria-matos-municipal-theatre": {
+   "title": "Maria Matos Municipal Theatre",
+   "lat": 38.745833,
+   "lon": -9.138889,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/marina-de-cascais": {
+   "title": "Marina de Cascais",
+   "lat": 38.692307,
+   "lon": -9.4177,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/marina-parque-das-nacoes": {
+   "title": "Marina Parque das Nações",
+   "lat": 38.75639,
+   "lon": -9.092638,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/mario-coelho-house-museum": {
+   "title": "Mário Coelho House Museum",
+   "lat": 38.956647,
+   "lon": -8.989045,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/maritime-museum": {
+   "title": "Maritime Museum",
+   "lat": 38.697122,
+   "lon": -9.208026,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/marques-de-pombal-palace": {
+   "title": "Marquês de Pombal Palace",
+   "lat": 38.692294,
+   "lon": -9.314547,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/maxime-restaurante": {
+   "title": "Maxime Restaurante",
+   "lat": 38.718434,
+   "lon": -9.145377,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/meo-arena": {
+   "title": "MEO Arena",
+   "lat": 38.768469,
+   "lon": -9.0939,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/mesa-de-frades": {
+   "title": "Mesa de Frades",
+   "lat": 38.713039,
+   "lon": -9.126087,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ministerium": {
+   "title": "Ministerium",
+   "lat": 38.70812,
+   "lon": -9.135494,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/miradouro-da-graca": {
+   "title": "Miradouro da Graça",
+   "lat": 38.716375,
+   "lon": -9.131567,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/miradouro-da-senhora-do-monte": {
+   "title": "Miradouro da Senhora do Monte",
+   "lat": 38.718889,
+   "lon": -9.132778,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/miradouro-de-monte-agudo": {
+   "title": "Miradouro de Monte Agudo",
+   "lat": 38.725916,
+   "lon": -9.131146,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/miradouro-de-penha-de-franca": {
+   "title": "Miradouro de Penha de França",
+   "lat": 38.730889,
+   "lon": -9.131649,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/miradouro-de-s-pedro-de-alcantara": {
+   "title": "Miradouro de S. Pedro de Alcântara",
+   "lat": 38.715458,
+   "lon": -9.144037,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/miradouro-de-santa-catarina": {
+   "title": "Miradouro de Santa Catarina",
+   "lat": 38.70945,
+   "lon": -9.147724,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/miradouro-de-santa-luzia": {
+   "title": "Miradouro de Santa Luzia",
+   "lat": 38.711689,
+   "lon": -9.130209,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/miradouro-de-sao-jorge": {
+   "title": "Miradouro de São Jorge",
+   "lat": 38.712116,
+   "lon": -9.133735,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/miradouro-do-parque-eduardo-vii": {
+   "title": "Miradouro do Parque Eduardo VII",
+   "lat": 38.728333,
+   "lon": -9.152778,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/miradouro-do-torel": {
+   "title": "Miradouro do Torel",
+   "lat": 38.718738,
+   "lon": -9.14141,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/monastery-of-odivelas-convent-of-st-dinis": {
+   "title": "Monastery of Odivelas – Convent of St. Dinis",
+   "lat": 38.791059,
+   "lon": -9.181567,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/money-museum": {
+   "title": "Money Museum",
+   "lat": 38.708623,
+   "lon": -9.138785,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/monsanto-forest-park": {
+   "title": "Monsanto Forest Park",
+   "lat": 38.74,
+   "lon": -9.186528,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/monsantos-open-air-restaurant": {
+   "title": "Monsantos Open Air Restaurant",
+   "lat": 38.724995,
+   "lon": -9.208244,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/monserrate-palace-and-gardens": {
+   "title": "Monserrate Palace and Gardens",
+   "lat": 38.7942,
+   "lon": -9.4206,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/montado-golf": {
+   "title": "Montado Golf",
+   "lat": 38.566993,
+   "lon": -8.804998,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/monte-mar-cascais-restaurant": {
+   "title": "Monte Mar Cascais Restaurant",
+   "lat": 38.695155,
+   "lon": -9.45238,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/monte-mar-lisboa": {
+   "title": "Monte Mar Lisboa",
+   "lat": 38.705738,
+   "lon": -9.148348,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/monument-to-the-discoveries": {
+   "title": "Monument to the Discoveries",
+   "lat": 38.693606,
+   "lon": -9.205719,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/mother-church-of-loures": {
+   "title": "Mother Church of Loures",
+   "lat": 38.832366,
+   "lon": -9.179495,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/mother-church-of-povoa-de-santo-adriao": {
+   "title": "Mother Church of Póvoa de Santo Adrião",
+   "lat": 38.799979,
+   "lon": -9.159992,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/motoxplorers": {
+   "title": "Motoxplorers",
+   "lat": 38.745595,
+   "lon": -9.153423,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/mouraria": {
+   "title": "Mouraria",
+   "lat": 38.714991,
+   "lon": -9.134842,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/mouriscas-tidal-mill": {
+   "title": "Mouriscas Tidal Mill",
+   "lat": 38.528623,
+   "lon": -8.806037,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/mts-globe": {
+   "title": "MTS Globe",
+   "lat": 38.727821,
+   "lon": -9.14326,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/mude-museu-do-design": {
+   "title": "MUDE - Museu do Design",
+   "lat": 38.709145,
+   "lon": -9.1367,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/municipio-de-mafra": {
+   "title": "Município de Mafra",
+   "lat": 38.93281,
+   "lon": -9.327589,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/museu-da-marioneta-puppet-museum": {
+   "title": "Museu da Marioneta (Puppet Museum)",
+   "lat": 38.70811,
+   "lon": -9.15596,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/museu-do-oriente": {
+   "title": "Museu do Oriente",
+   "lat": 38.703035,
+   "lon": -9.170632,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/museu-do-tesouro-real": {
+   "title": "Royal Treasure Museum. Crown Jewels",
+   "lat": 38.707631,
+   "lon": -9.197833,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/museu-medeiros-e-almeida": {
+   "title": "Museu Medeiros e Almeida",
+   "lat": 38.72158,
+   "lon": -9.14911,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/museu-sporting": {
+   "title": "Museu Sporting",
+   "lat": 38.761202,
+   "lon": -9.160783,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/museum-of-aljube-resistance-and-freedom": {
+   "title": "Museum of Aljube – Resistance and Freedom",
+   "lat": 38.710159,
+   "lon": -9.132248,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/museum-of-communication": {
+   "title": "Museum of Communication",
+   "lat": 38.707825,
+   "lon": -9.150365,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/museum-of-fado": {
+   "title": "Museum of Fado",
+   "lat": 38.711128,
+   "lon": -9.127618,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/museum-of-fado-heritage": {
+   "title": "Museum of Fado - Heritage",
+   "lat": 38.711025,
+   "lon": -9.12766,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/museum-of-illusions": {
+   "title": "Museum of Illusions",
+   "lat": 38.710545,
+   "lon": -9.140444,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/museum-of-lisbon-archaeology-section": {
+   "title": "Museu de Lisboa - Casa dos Bicos",
+   "lat": 38.709111,
+   "lon": -9.132694,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/museum-of-lisbon-pimenta-palace": {
+   "title": "Museu de Lisboa - Palácio Pimenta",
+   "lat": 38.758452,
+   "lon": -9.156664,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/museum-of-lisbon-roman-theatre": {
+   "title": "Museu de Lisboa - Teatro Romano",
+   "lat": 38.710604,
+   "lon": -9.132356,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/museum-of-lisbon-santo-antonio": {
+   "title": "Museu de Lisboa - Santo António",
+   "lat": 38.710143,
+   "lon": -9.133925,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/museum-of-portuguese-decorative-arts": {
+   "title": "Museum of Portuguese Decorative Arts",
+   "lat": 38.712065,
+   "lon": -9.130546,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/museum-of-portuguese-music-verdades-de-faria": {
+   "title": "Museum of Portuguese Music - Verdades de Faria",
+   "lat": 38.710078,
+   "lon": -9.405258,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/museum-of-the-counts-of-castro-guimaraes": {
+   "title": "Museum of the Counts of Castro Guimarães",
+   "lat": 38.692,
+   "lon": -9.4214,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/museum-of-the-lisbon-geographical-society": {
+   "title": "Museum of the Lisbon Geographical Society",
+   "lat": 38.716626,
+   "lon": -9.140755,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/museum-of-the-presidency-of-the-republic": {
+   "title": "Museum of the Presidency of the Republic",
+   "lat": 38.69767,
+   "lon": -9.201615,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/museum-of-the-sea-rei-d-carlos": {
+   "title": "Museum of the Sea | Rei D. Carlos",
+   "lat": 38.695611,
+   "lon": -9.422877,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/my-lisbon-tours": {
+   "title": "My Lisbon Tours",
+   "lat": 38.744043,
+   "lon": -9.139105,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/national-ancient-art-museum": {
+   "title": "National Ancient Art Museum",
+   "lat": 38.704444,
+   "lon": -9.161667,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/national-coach-museum": {
+   "title": "National Coach Museum",
+   "lat": 38.697778,
+   "lon": -9.199722,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/national-cordoaria": {
+   "title": "National Cordoaria",
+   "lat": 38.6975,
+   "lon": -9.1903,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/national-military-museum": {
+   "title": "National Military Museum",
+   "lat": 38.713077,
+   "lon": -9.124381,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/national-museum-of-archaeology": {
+   "title": "National Museum of Archaeology",
+   "lat": 38.697122,
+   "lon": -9.208026,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/national-museum-of-contemporary-art-museu-do-chiado": {
+   "title": "National Museum of Contemporary Art - Museu do Chiado",
+   "lat": 38.708889,
+   "lon": -9.141111,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/national-museum-of-costume": {
+   "title": "National Museum of Costume",
+   "lat": 38.775427,
+   "lon": -9.16437,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/national-museum-of-ethnology": {
+   "title": "National Museum of Ethnology",
+   "lat": 38.706769,
+   "lon": -9.208319,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/national-museum-of-natural-history-and-science": {
+   "title": "National Museum of Natural History and Science",
+   "lat": 38.717711,
+   "lon": -9.1509,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/national-museum-of-theatre-and-dance": {
+   "title": "National Museum of Theatre and Dance",
+   "lat": 38.774589,
+   "lon": -9.166714,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/national-music-museum": {
+   "title": "National Music Museum",
+   "lat": 38.938162,
+   "lon": -9.327471,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/national-palace-and-gardens-of-queluz": {
+   "title": "National Palace and Gardens of Queluz",
+   "lat": 38.7506,
+   "lon": -9.2587,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/national-palace-of-mafra": {
+   "title": "National Palace of Mafra",
+   "lat": 38.9369,
+   "lon": -9.3258,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/national-palace-of-sintra": {
+   "title": "National Palace of Sintra",
+   "lat": 38.797057,
+   "lon": -9.390723,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/national-pantheon": {
+   "title": "National Pantheon",
+   "lat": 38.714299,
+   "lon": -9.124812,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/national-tile-museum": {
+   "title": "National Tile Museum",
+   "lat": 38.722898,
+   "lon": -9.115249,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/naturway": {
+   "title": "Naturway",
+   "lat": 38.730202,
+   "lon": -9.149442,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/nav": {
+   "title": "NAV Portugal",
+   "lat": 38.774451,
+   "lon": -9.125034,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/navy-planetarium": {
+   "title": "Navy Planetarium",
+   "lat": 38.697122,
+   "lon": -9.208026,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/necropolis-of-carenque": {
+   "title": "Necropolis of Carenque",
+   "lat": 38.773333,
+   "lon": -9.243889,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/neo-realism-museum": {
+   "title": "Neo-Realism Museum",
+   "lat": 38.954433,
+   "lon": -8.989338,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/new-creativity": {
+   "title": "New Creativity",
+   "lat": 38.702321,
+   "lon": -9.180893,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/no-12-tram": {
+   "title": "No. 12 Tram",
+   "lat": 38.7175,
+   "lon": -9.135793,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/no-15-tram": {
+   "title": "No. 15 Tram",
+   "lat": 38.713718,
+   "lon": -9.137789,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/no-24-tram": {
+   "title": "No. 24 Tram",
+   "lat": 38.710568,
+   "lon": -9.143427,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/no-25-tram": {
+   "title": "No. 25 Tram",
+   "lat": 38.713718,
+   "lon": -9.137789,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/no-28-tram": {
+   "title": "No. 28 Tram",
+   "lat": 38.715997,
+   "lon": -9.136346,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/no-convento": {
+   "title": "No Convento",
+   "lat": 38.708168,
+   "lon": -9.156236,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/nosolo-italia-praca-do-comercio": {
+   "title": "Nosolo Itália Praça do Comércio",
+   "lat": 38.707963,
+   "lon": -9.135423,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/not-digital": {
+   "title": "Not Digital",
+   "lat": 38.715547,
+   "lon": -9.362137,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/novo-mundo-restaurant": {
+   "title": "Novo Mundo Restaurant",
+   "lat": 38.708795,
+   "lon": -9.149289,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/nune-s-real-marisqueira": {
+   "title": "Nunes Real Marisqueira",
+   "lat": 38.69511,
+   "lon": -9.214542,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/oceanario-de-lisboa": {
+   "title": "Oceanário de Lisboa",
+   "lat": 38.76361,
+   "lon": -9.09389,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/odivelas-memorial": {
+   "title": "Odivelas Memorial",
+   "lat": 38.790465,
+   "lon": -9.18049,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/oeiras-golf": {
+   "title": "Oeiras Golf",
+   "lat": 38.740198,
+   "lon": -9.289029,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/oeiras-seafront-walk": {
+   "title": "Oeiras Seafront Walk",
+   "lat": 38.692578,
+   "lon": -9.312308,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/offbeat-portugal": {
+   "title": "Offbeat Portugal",
+   "lat": 38.722819,
+   "lon": -9.148488,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/oitavos-dunes": {
+   "title": "Oitavos Dunes",
+   "lat": 38.708506,
+   "lon": -9.467167,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/olga-cadaval-cultural-centre": {
+   "title": "Olga Cadaval Cultural Centre",
+   "lat": 38.803388,
+   "lon": -9.382441,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/olivauto": {
+   "title": "Olivauto",
+   "lat": 38.745291,
+   "lon": -9.136179,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/olivia-lisboa": {
+   "title": "Olivia Lisboa",
+   "lat": 38.737822,
+   "lon": -9.149967,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/on-pro-travel-solutions": {
+   "title": "On Pro Travel Solutions",
+   "lat": 38.733255,
+   "lon": -9.142858,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/once-upon-a-day": {
+   "title": "Once Upon a day",
+   "lat": 38.532236,
+   "lon": -8.91363,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ondas-de-angelo": {
+   "title": "Ondas de Ângelo",
+   "lat": 38.698931,
+   "lon": -9.179109,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/one-way-ahead": {
+   "title": "One Way Ahead",
+   "lat": 38.735005,
+   "lon": -9.216658,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/open-brasserie-mediterranica": {
+   "title": "Open Brasserie Mediterrânica",
+   "lat": 38.723222,
+   "lon": -9.145187,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/optica-olhar-de-prata": {
+   "title": "Óptica Olhar de Prata",
+   "lat": 38.729768,
+   "lon": -9.147563,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/oriente-station": {
+   "title": "Oriente Station",
+   "lat": 38.767778,
+   "lon": -9.099167,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/osiris-portugal-spain-dmc": {
+   "title": "Osiris - Portugal & Spain DMC",
+   "lat": 38.736312,
+   "lon": -9.149461,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ostras-sobre-rodas": {
+   "title": "Ostras Sobre Rodas | Lisboa",
+   "lat": 38.693745,
+   "lon": -9.213462,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ostras-sobre-rodas-setubal": {
+   "title": "Ostras Sobre Rodas | Setúbal",
+   "lat": 38.517338,
+   "lon": -8.906005,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ovation-portugal-dmc": {
+   "title": "Ovation Portugal DMC",
+   "lat": 38.743352,
+   "lon": -9.146624,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/p-s-travel": {
+   "title": "P&S Travel",
+   "lat": 38.793539,
+   "lon": -9.375295,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/palace-of-belem": {
+   "title": "Palace of Belém",
+   "lat": 38.697969,
+   "lon": -9.200686,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/palacio-biester": {
+   "title": "Palácio Biester",
+   "lat": 38.793889,
+   "lon": -9.394167,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/palacio-chiado": {
+   "title": "Palácio Chiado",
+   "lat": 38.709677,
+   "lon": -9.142904,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/palacio-nacional-da-pena": {
+   "title": "Pena National Palace",
+   "lat": 38.787778,
+   "lon": -9.390556,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/palaphita-cascais": {
+   "title": "Palaphita Cascais",
+   "lat": 38.695374,
+   "lon": -9.444579,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/panoramic-restaurant-varanda-de-lisboa": {
+   "title": "Varanda de Lisboa | Panoramic Restaurant",
+   "lat": 38.714962,
+   "lon": -9.136724,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/parque-linear-ribeirinho-do-estuario-do-tejo": {
+   "title": "Parque Linear Ribeirinho do Estuário do Tejo",
+   "lat": 38.954433,
+   "lon": -8.989338,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/parques-de-sintra-monte-da-lua": {
+   "title": "Parques de Sintra - Monte da Lua",
+   "lat": 38.771712,
+   "lon": -9.34909,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/parreirinha-de-alfama": {
+   "title": "Parreirinha de Alfama",
+   "lat": 38.711574,
+   "lon": -9.127932,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/pasteis-de-belem": {
+   "title": "Pastéis de Belém",
+   "lat": 38.69748,
+   "lon": -9.20332,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/pateo-alfacinha-restaurantes": {
+   "title": "Páteo Alfacinha - Restaurantes",
+   "lat": 38.706579,
+   "lon": -9.194419,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/pateo-de-alfama": {
+   "title": "Páteo de Alfama",
+   "lat": 38.709743,
+   "lon": -9.130752,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/patio-da-gale-sala-do-risco": {
+   "title": "Pátio da Galé & Sala do Risco",
+   "lat": 38.706759,
+   "lon": -9.137365,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/paula-rego-house-of-stories": {
+   "title": "Paula Rego House of Stories",
+   "lat": 38.69036,
+   "lon": -9.42133,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/pavilhao-carlos-lopes": {
+   "title": "Pavilhão Carlos Lopes",
+   "lat": 38.72993,
+   "lon": -9.151567,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/pavilhao-de-portugal": {
+   "title": "Pavilhão de Portugal",
+   "lat": 38.766558,
+   "lon": -9.095097,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/pavilion-of-knowledge": {
+   "title": "Pavilion of Knowledge – Ciência Viva Centre",
+   "lat": 38.762281,
+   "lon": -9.095582,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/penha-longa-golf-campo-atlantico": {
+   "title": "Penha Longa Golf Campo Atlântico",
+   "lat": 38.759525,
+   "lon": -9.40572,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/pestana-beloura-golf": {
+   "title": "Pestana Beloura Golf",
+   "lat": 38.76797,
+   "lon": -9.372173,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/pga-aroeira-n1": {
+   "title": "PGA Aroeira N.1",
+   "lat": 38.582187,
+   "lon": -9.175546,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/pga-aroeira-n2": {
+   "title": "PGA Aroeira N.2",
+   "lat": 38.582187,
+   "lon": -9.175546,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/piedade-municipal-a-state": {
+   "title": "Piedade Municipal a State",
+   "lat": 38.860618,
+   "lon": -9.069905,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/pirescouxe-castle": {
+   "title": "Pirescouxe Castle",
+   "lat": 38.837437,
+   "lon": -9.092266,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/planet-payment": {
+   "title": "Planet Payment",
+   "lat": 38.723382,
+   "lon": -9.150031,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/porta-d-alfama": {
+   "title": "Porta D'Alfama",
+   "lat": 38.710139,
+   "lon": -9.129912,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/portas-de-benfica-benfica-toll-booth": {
+   "title": "Portas de Benfica (Benfica Toll Booth)",
+   "lat": 38.753396,
+   "lon": -9.208431,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/portugal-by-traveltailors": {
+   "title": "Portugal by TravelTailors",
+   "lat": 38.762533,
+   "lon": -9.157077,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/portugal-dive": {
+   "title": "Portugal Dive",
+   "lat": 38.748489,
+   "lon": -9.147887,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/portugal-guided-tours": {
+   "title": "Portugal Guided Tours",
+   "lat": 38.707266,
+   "lon": -9.14607,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/portugal-jewels": {
+   "title": "Portugal Jewels",
+   "lat": 38.710395,
+   "lon": -9.141914,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/portugal-travel-team": {
+   "title": "Portugal Travel Team",
+   "lat": 38.721218,
+   "lon": -9.131499,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/portugalia-cervejaria-almirante-reis": {
+   "title": "Portugália Cervejaria Almirante Reis",
+   "lat": 38.731038,
+   "lon": -9.134774,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/portugalia-cervejaria-cais-do-sodre": {
+   "title": "Portugália Cervejaria Cais do Sodré",
+   "lat": 38.706151,
+   "lon": -9.149906,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/portugalrent-a-car": {
+   "title": "Portugalrent",
+   "lat": 38.763355,
+   "lon": -9.176066,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/portuguese-museum-of-freemasonry": {
+   "title": "Portuguese Museum of Freemasonry",
+   "lat": 38.713192,
+   "lon": -9.144723,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/povo": {
+   "title": "Povo",
+   "lat": 38.707235,
+   "lon": -9.143652,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/praca-do-comercio-terreiro-do-paco": {
+   "title": "Praça do Comércio (Terreiro do Paço)",
+   "lat": 38.7075,
+   "lon": -9.136389,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/prazeres-cemetery-and-museum": {
+   "title": "Prazeres Cemetery and Museum",
+   "lat": 38.71427,
+   "lon": -9.169159,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/principe-real": {
+   "title": "Príncipe Real",
+   "lat": 38.716576,
+   "lon": -9.148204,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/principe-real-organic-produce-fair": {
+   "title": "Príncipe Real Organic Produce Fair",
+   "lat": 38.716284,
+   "lon": -9.148616,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/proaudio": {
+   "title": "Proaudio",
+   "lat": 38.741321,
+   "lon": -9.15911,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/quake-lisbon-earthquake-centre": {
+   "title": "Quake - Lisbon Earthquake Centre",
+   "lat": 38.697202,
+   "lon": -9.197092,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/quinta-da-regaleira": {
+   "title": "Quinta da Regaleira",
+   "lat": 38.796353,
+   "lon": -9.396031,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/quinta-de-sant-ana": {
+   "title": "Quinta de Sant’Ana",
+   "lat": 38.829461,
+   "lon": -9.174,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/quinta-do-peru-golf-country-club": {
+   "title": "Quinta do Peru Golf & Country Club",
+   "lat": 38.542709,
+   "lon": -9.056211,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/quinta-real-de-caxias": {
+   "title": "Quinta Real de Caxias",
+   "lat": 38.703433,
+   "lon": -9.270017,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/real-cozinha-restaurante": {
+   "title": "Real Cozinha Restaurante",
+   "lat": 38.731966,
+   "lon": -9.150944,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/real-fado": {
+   "title": "Real Fado",
+   "lat": 38.716912,
+   "lon": -9.148382,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/real-sports-bar": {
+   "title": "Real Sports Bar",
+   "lat": 38.731499,
+   "lon": -9.15059,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/red-frog-speakeasy": {
+   "title": "Red Frog Speakeasy",
+   "lat": 38.718277,
+   "lon": -9.144855,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/restaurant-eleven": {
+   "title": "Restaurant Eleven",
+   "lat": 38.7325,
+   "lon": -9.154723,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/restaurant-gambrinus": {
+   "title": "Restaurant Gambrinus",
+   "lat": 38.715981,
+   "lon": -9.140279,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/restaurante-cozinha-velha-pousada-palacio-queluz": {
+   "title": "Cozinha Velha | Restaurant ( Pousada Palácio Queluz )",
+   "lat": 38.750524,
+   "lon": -9.258246,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/restaurante-d-bacalhau": {
+   "title": "D'Bacalhau | Restaurant",
+   "lat": 38.771239,
+   "lon": -9.092441,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/restaurante-dois-arcos": {
+   "title": "Dois Arcos | Restaurant",
+   "lat": 38.713418,
+   "lon": -9.137447,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/restaurante-fama-de-alfama": {
+   "title": "Fama de Alfama | Restaurant",
+   "lat": 38.710321,
+   "lon": -9.129056,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/restaurante-fortaleza-do-guincho": {
+   "title": "Restaurante Fortaleza do Guincho",
+   "lat": 38.695199,
+   "lon": -9.456764,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/restaurante-granja-velha": {
+   "title": "Granja Velha | Restaurant",
+   "lat": 38.713418,
+   "lon": -9.137447,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/restaurante-pap-acorda": {
+   "title": "Pap'Açorda | Restaurant",
+   "lat": 38.706994,
+   "lon": -9.145693,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/restaurante-sea-senses": {
+   "title": "Restaurante Sea Senses",
+   "lat": 38.699935,
+   "lon": -9.468088,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/restaurante-senhor-peixe": {
+   "title": "Senhor Peixe | Restaurant",
+   "lat": 38.77105,
+   "lon": -9.092456,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/restaurante-solar-dos-presuntos": {
+   "title": "Solar dos Presuntos Restaurant",
+   "lat": 38.716626,
+   "lon": -9.140755,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/restaurante-tipico-o-faia": {
+   "title": "Restaurante Típico O Faia",
+   "lat": 38.711669,
+   "lon": -9.14445,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/restaurante-tipico-o-forcado": {
+   "title": "O Forcado Restaurant",
+   "lat": 38.710934,
+   "lon": -9.145585,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/restaurante-tipico-o-madeirense": {
+   "title": "O Madeirense Restaurant Típico",
+   "lat": 38.723674,
+   "lon": -9.162225,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/restaurante-tipico-senhor-vinho": {
+   "title": "Senhor Vinho Restaurant Típico",
+   "lat": 38.71001,
+   "lon": -9.157804,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/restaurante-valle-flor": {
+   "title": "Valle-Flôr Restaurant",
+   "lat": 38.703725,
+   "lon": -9.186723,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/rib-beef-wine-lisboa": {
+   "title": "RIB Beef & Wine Lisboa",
+   "lat": 38.707793,
+   "lon": -9.136554,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ribeira-das-naus": {
+   "title": "Ribeira das Naus",
+   "lat": 38.707281,
+   "lon": -9.138222,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/rive-rouge": {
+   "title": "Rive Rouge",
+   "lat": 38.707093,
+   "lon": -9.145897,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/rocco": {
+   "title": "Rocco",
+   "lat": 38.709575,
+   "lon": -9.140203,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/rodoviaria-de-lisboa": {
+   "title": "Rodoviária de Lisboa",
+   "lat": 38.758899,
+   "lon": -9.154147,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/rossio": {
+   "title": "Rossio",
+   "lat": 38.713756,
+   "lon": -9.139343,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/rota-de-vinhos-da-peninsula-de-setubal": {
+   "title": "Rota de Vinhos da Península de Setúbal",
+   "lat": 38.571476,
+   "lon": -8.902715,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/rota-dos-petiscos": {
+   "title": "Rota dos Petiscos",
+   "lat": 38.701621,
+   "lon": -9.199727,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/rtp-radio-and-television-museum": {
+   "title": "RTP - Radio and Television Museum",
+   "lat": 38.756175,
+   "lon": -9.113576,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/rua-augusta": {
+   "title": "Rua Augusta",
+   "lat": 38.711316,
+   "lon": -9.137935,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/rua-cor-de-rosa-rua-nova-do-carvalho": {
+   "title": "Rua Cor de Rosa (Rua Nova do Carvalho)",
+   "lat": 38.707411,
+   "lon": -9.144313,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/sabados-da-ribeira-saturdays-at-the-ribeira": {
+   "title": "Sábados da Ribeira (Saturdays at the Ribeira)",
+   "lat": 38.706994,
+   "lon": -9.145693,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/sacavem-ceramics-museum": {
+   "title": "Sacavém Ceramics Museum",
+   "lat": 38.794187,
+   "lon": -9.102438,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/sado-estuary-nature-reserve": {
+   "title": "Sado Estuary Nature Reserve",
+   "lat": 38.522076,
+   "lon": -8.89156,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/sal-walking-and-cultural-tours": {
+   "title": "SAL Walking and Cultural Tours",
+   "lat": 38.525724,
+   "lon": -8.885141,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/sala-de-corte": {
+   "title": "Sala de Corte",
+   "lat": 38.706952,
+   "lon": -9.147338,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/salamaleques": {
+   "title": "Salamaleques",
+   "lat": 38.443387,
+   "lon": -9.099807,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/santa-marta-lighthouse-museum": {
+   "title": "Santa Marta Lighthouse Museum",
+   "lat": 38.690361,
+   "lon": -9.421333,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/santa-marta-park": {
+   "title": "Santa Marta Park",
+   "lat": 38.961825,
+   "lon": -9.418087,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/santiago-church": {
+   "title": "Santiago Church",
+   "lat": 38.566356,
+   "lon": -8.900648,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/santiago-fortress": {
+   "title": "Santiago Fortress",
+   "lat": 38.443024,
+   "lon": -9.100966,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/sao-juliao-da-barra-fort": {
+   "title": "São Julião da Barra Fort",
+   "lat": 38.674605,
+   "lon": -9.325363,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/sao-miguel-d-alfama": {
+   "title": "São Miguel D'Alfama",
+   "lat": 38.711194,
+   "lon": -9.128567,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/sao-miguel-de-odrinhas-archaeological-museum": {
+   "title": "São Miguel de Odrinhas Archaeological Museum",
+   "lat": 38.8871,
+   "lon": -9.3663,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/sao-miguel-grandes-cantorias": {
+   "title": "São Miguel Grandes Cantorias",
+   "lat": 38.711103,
+   "lon": -9.129558,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/sao-roque-museum": {
+   "title": "São Roque Museum",
+   "lat": 38.713227,
+   "lon": -9.143175,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/sao-vicente-de-fora-museum": {
+   "title": "São Vicente de Fora Museum",
+   "lat": 38.714722,
+   "lon": -9.127778,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/sardinha-do-tejo": {
+   "title": "Sardinha do Tejo",
+   "lat": 38.706991,
+   "lon": -9.168075,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/se-catedral-cathedral": {
+   "title": "Sé de Lisboa | Lisbon Cathedral",
+   "lat": 38.709818,
+   "lon": -9.1328,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/seatru-clear-experiences": {
+   "title": "Seatru - Clear Experiences",
+   "lat": 38.472134,
+   "lon": -9.075309,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/seaventy": {
+   "title": "Seaventy",
+   "lat": 38.703109,
+   "lon": -9.161957,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/seaview-nautical-events": {
+   "title": "Seaview Nautical Events",
+   "lat": 38.706431,
+   "lon": -9.194346,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/segundo-muelle": {
+   "title": "Segundo Muelle",
+   "lat": 38.707707,
+   "lon": -9.14683,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/segway-tejo": {
+   "title": "Segway Tejo",
+   "lat": 38.716991,
+   "lon": -9.133236,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/selection-tours": {
+   "title": "Selection Tours",
+   "lat": 38.722625,
+   "lon": -9.162751,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/selllva": {
+   "title": "Selllva",
+   "lat": 38.723079,
+   "lon": -9.150457,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/selo-de-mar-restaurant": {
+   "title": "Selo de Mar restaurant",
+   "lat": 38.517338,
+   "lon": -8.906005,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/semana-ousada": {
+   "title": "Semana Ousada",
+   "lat": 38.71277,
+   "lon": -9.145033,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/serafina-children-s-playground": {
+   "title": "Serafina Children’s Playground",
+   "lat": 38.736361,
+   "lon": -9.181544,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/sesimbra-castle": {
+   "title": "Sesimbra Castle",
+   "lat": 38.452778,
+   "lon": -9.106667,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/setubal-alive": {
+   "title": "Setúbal Alive",
+   "lat": 38.521447,
+   "lon": -8.885185,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/setubal-municipal-gallery": {
+   "title": "Setúbal Municipal Gallery",
+   "lat": 38.554635,
+   "lon": -8.862086,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/setubal-museum-convent-of-jesus": {
+   "title": "Setúbal Museum (Convent of Jesus)",
+   "lat": 38.526756,
+   "lon": -8.895944,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/shaare-tikvah-synagogue": {
+   "title": "Shaaré Tikvah Synagogue",
+   "lat": 38.720337,
+   "lon": -9.153177,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/sidetours": {
+   "title": "Sidetours",
+   "lat": 38.724573,
+   "lon": -9.148025,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/sifra-sushi-grill": {
+   "title": "Sifra Sushi & Grill",
+   "lat": 38.699673,
+   "lon": -9.189856,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/silk-club": {
+   "title": "Silk Club",
+   "lat": 38.711383,
+   "lon": -9.142757,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/sintra-cascais-nature-park": {
+   "title": "Sintra-Cascais Nature Park",
+   "lat": 38.707409,
+   "lon": -9.344467,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/sintra-myths-and-legends-interactive-centre": {
+   "title": "Sintra Myths and Legends Interactive Centre",
+   "lat": 38.796374,
+   "lon": -9.391521,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/sintra-natural-history-museum": {
+   "title": "Sintra Natural History Museum",
+   "lat": 38.798156,
+   "lon": -9.3899,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/sixt-rent-a-car": {
+   "title": "Sixt rent a car",
+   "lat": 38.730134,
+   "lon": -9.147709,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/sky-bar-tivoli-liberdade": {
+   "title": "Sky Bar | Tivoli Liberdade",
+   "lat": 38.721027,
+   "lon": -9.147265,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/sobralinho-municipal-a-state": {
+   "title": "Sobralinho Municipal a State",
+   "lat": 38.918579,
+   "lon": -9.025814,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/solar-dos-bicos-restaurant": {
+   "title": "Solar dos Bicos Restaurant",
+   "lat": 38.70924,
+   "lon": -9.134657,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/sophia-natural-italian": {
+   "title": "Sophia Natural Italian",
+   "lat": 38.707634,
+   "lon": -9.146328,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/spinach-tours": {
+   "title": "Spinach Tours",
+   "lat": 38.713418,
+   "lon": -9.137447,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/sport-lisboa-e-benfica": {
+   "title": "Sport Lisboa e Benfica",
+   "lat": 38.751283,
+   "lon": -9.182819,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/sporting-clube-de-portugal": {
+   "title": "Sporting Clube de Portugal",
+   "lat": 38.761202,
+   "lon": -9.160783,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/st-pedro-s-church": {
+   "title": "St. Pedro’s Church",
+   "lat": 38.567394,
+   "lon": -8.898785,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/strolls-through-history": {
+   "title": "Strolls through history",
+   "lat": 38.95373,
+   "lon": -8.98769,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/subserra-municipal-a-state": {
+   "title": "Subserra Municipal a State",
+   "lat": 38.930419,
+   "lon": -9.027738,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/sud-lisboa-hall": {
+   "title": "SUD Lisboa Hall",
+   "lat": 38.695953,
+   "lon": -9.198698,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/surf-pro-surf-school": {
+   "title": "Surf Pro Surf School",
+   "lat": 38.64929,
+   "lon": -9.244382,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ta-dmc-portugal": {
+   "title": "TA DMC Portugal",
+   "lat": 38.776816,
+   "lon": -9.1284,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/tagus-estuary-natural-reserve": {
+   "title": "Tagus Estuary Natural Reserve",
+   "lat": 38.757355,
+   "lon": -8.958793,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/taguscruises": {
+   "title": "Taguscruises",
+   "lat": 38.693123,
+   "lon": -9.211953,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/take-lisboa-free-tours": {
+   "title": "Take Lisboa Free Tours",
+   "lat": 38.714539,
+   "lon": -9.122775,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/tap-air-portugal": {
+   "title": "TAP AIR Portugal",
+   "lat": 38.776816,
+   "lon": -9.1284,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/tapada-nacional-de-mafra": {
+   "title": "Tapada Nacional de Mafra",
+   "lat": 38.952737,
+   "lon": -9.292968,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/tapisco": {
+   "title": "Tapisco",
+   "lat": 38.715761,
+   "lon": -9.146611,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/tasting-fado": {
+   "title": "Tasting Fado",
+   "lat": 38.720272,
+   "lon": -9.145024,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/taverna-d-el-rey": {
+   "title": "Taverna d’El Rey",
+   "lat": 38.710969,
+   "lon": -9.128222,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/team-dynamics": {
+   "title": "Team Dynamics",
+   "lat": 38.730692,
+   "lon": -9.436454,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/teatro-municipal-s-luiz": {
+   "title": "Teatro Municipal S. Luiz",
+   "lat": 38.709268,
+   "lon": -9.142298,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/teatro-nacional-d-maria-ii": {
+   "title": "Teatro Nacional D. Maria II",
+   "lat": 38.7148,
+   "lon": -9.1398,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/teatro-nacional-de-sao-carlos": {
+   "title": "Teatro Nacional de São Carlos",
+   "lat": 38.709444,
+   "lon": -9.141667,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/teatro-politeama": {
+   "title": "Teatro Politeama",
+   "lat": 38.716556,
+   "lon": -9.140944,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/tejo-tours": {
+   "title": "Tejo Tours",
+   "lat": 38.716991,
+   "lon": -9.133236,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/telecabine-lisboa": {
+   "title": "Telecabine Lisboa",
+   "lat": 38.764709,
+   "lon": -9.091955,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/tempovip-dmc": {
+   "title": "TempoVip DMC",
+   "lat": 38.706401,
+   "lon": -9.162107,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/terra-incognita-centro-nautico": {
+   "title": "Terra Incógnita - Centro Náutico",
+   "lat": 38.7008,
+   "lon": -9.176189,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/terra-nova-by-populi": {
+   "title": "Terra Nova By Populi",
+   "lat": 38.707536,
+   "lon": -9.135207,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/the-boutique-traveler": {
+   "title": "The Boutique Traveler",
+   "lat": 38.762921,
+   "lon": -9.109171,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/the-chapel-by-convento-do-beato": {
+   "title": "The Chapel by Convento do Beato",
+   "lat": 38.734296,
+   "lon": -9.106199,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/the-classic-van": {
+   "title": "The Classic Van",
+   "lat": 38.764097,
+   "lon": -9.189045,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/the-decadente": {
+   "title": "The Decadente",
+   "lat": 38.71488,
+   "lon": -9.144599,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/the-lingerie-restaurant": {
+   "title": "The Lingerie Restaurant",
+   "lat": 38.731448,
+   "lon": -9.151365,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/the-little-orange": {
+   "title": "The Little Orange",
+   "lat": 38.724122,
+   "lon": -9.152387,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/the-local-affair": {
+   "title": "The Local Affair",
+   "lat": 38.73615,
+   "lon": -9.216667,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/the-mad-kitchen": {
+   "title": "The Mad Kitchen",
+   "lat": 38.729672,
+   "lon": -9.120374,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/the-michel-giacometti-museum-of-labour": {
+   "title": "The Michel Giacometti Museum of Labour",
+   "lat": 38.523457,
+   "lon": -8.886876,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/the-mitra-or-archbishops-palace": {
+   "title": "The Mitra or Archbishops’ Palace",
+   "lat": 38.851544,
+   "lon": -9.14046,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/the-spot": {
+   "title": "The Spot",
+   "lat": 38.713518,
+   "lon": -9.136814,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/time-out-market-lisboa": {
+   "title": "Time Out Market Lisboa",
+   "lat": 38.706994,
+   "lon": -9.145693,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/time-travellers": {
+   "title": "Time Travellers",
+   "lat": 38.727823,
+   "lon": -9.128255,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/torre-da-igreja-do-castelo-de-sao-jorge": {
+   "title": "Torre da Igreja do Castelo de São Jorge",
+   "lat": 38.713889,
+   "lon": -9.133611,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/torre-de-belem": {
+   "title": "Torre de Belém",
+   "lat": 38.691667,
+   "lon": -9.216111,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/torres-das-amoreiras-amoreiras-towers": {
+   "title": "Torres das Amoreiras (Amoreiras Towers)",
+   "lat": 38.724667,
+   "lon": -9.158973,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/tour-line": {
+   "title": "Tour-Line",
+   "lat": 38.781916,
+   "lon": -9.149431,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/tourismforall": {
+   "title": "TourismForAll",
+   "lat": 38.797418,
+   "lon": -9.355645,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/town-hall-vila-franca-de-xira": {
+   "title": "Town Hall Vila Franca de Xira",
+   "lat": 38.954433,
+   "lon": -8.989338,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/travel-lider": {
+   "title": "Travel Lider DMC Portugal",
+   "lat": 38.929734,
+   "lon": -9.250372,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/travel-reality": {
+   "title": "Travel Reality",
+   "lat": 38.710431,
+   "lon": -9.169804,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/travelsquare": {
+   "title": "Travelsquare",
+   "lat": 38.74915,
+   "lon": -9.171067,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/treasures-of-the-tagus": {
+   "title": "Treasures of the Tagus",
+   "lat": 38.682773,
+   "lon": -9.157185,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/tropical-botanical-garden": {
+   "title": "Tropical Botanical Garden",
+   "lat": 38.698238,
+   "lon": -9.204573,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/true-odysseys": {
+   "title": "True Odysseys",
+   "lat": 38.791957,
+   "lon": -9.350782,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/truly-amazing": {
+   "title": "Truly Amazing",
+   "lat": 38.658117,
+   "lon": -9.238113,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/tuk-guide-portugal": {
+   "title": "Tuk Guide Portugal",
+   "lat": 38.708527,
+   "lon": -9.15037,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/tuk-tuk-tejo": {
+   "title": "Tuk Tuk Tejo",
+   "lat": 38.716991,
+   "lon": -9.133236,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/tuper-turismo-alternativo": {
+   "title": "Tuper, Turismo Alternativo",
+   "lat": 38.731342,
+   "lon": -9.142563,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/uacs": {
+   "title": "UACS",
+   "lat": 38.720647,
+   "lon": -9.148961,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/uppartner-comunicacao-de-marketing": {
+   "title": "Uppartner - Comunicação de Marketing",
+   "lat": 38.734839,
+   "lon": -9.144688,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/uzerx": {
+   "title": "Uzerx",
+   "lat": 38.711021,
+   "lon": -9.400796,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/vandelli-botanical-garden": {
+   "title": "Vandelli Botanical Garden",
+   "lat": 38.700022,
+   "lon": -9.203213,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/vasco-da-gama-aquarium": {
+   "title": "Vasco da Gama Aquarium",
+   "lat": 38.699,
+   "lon": -9.238,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/vasco-da-gama-tower": {
+   "title": "Vasco da Gama Tower",
+   "lat": 38.774722,
+   "lon": -9.091389,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/vasco-da-gama-tower-babylon-360": {
+   "title": "Vasco da Gama Tower Babylon 360º",
+   "lat": 38.77474,
+   "lon": -9.091259,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/vega-dmc": {
+   "title": "Vega DMC",
+   "lat": 38.72387,
+   "lon": -9.146841,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/vela-branca-restaurant": {
+   "title": "Vela Branca Restaurant",
+   "lat": 38.711316,
+   "lon": -9.137386,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/venuesin": {
+   "title": "Venuesin",
+   "lat": 38.744212,
+   "lon": -9.144858,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/vertente-natural": {
+   "title": "Vertente Natural",
+   "lat": 38.436554,
+   "lon": -9.115677,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/viagens-el-corte-ingles": {
+   "title": "Viagens El Corte Inglés",
+   "lat": 38.743119,
+   "lon": -9.142792,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/vila-franca-de-xira-municipal-museum": {
+   "title": "Vila Franca de Xira Municipal Museum",
+   "lat": 38.954018,
+   "lon": -8.987707,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/voqin-experiences-events": {
+   "title": "VOQIN´ Experiences & Events",
+   "lat": 38.705729,
+   "lon": -9.178196,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/water-museum-aguas-livres-aqueduct": {
+   "title": "Water Museum - Águas Livres Aqueduct",
+   "lat": 38.728889,
+   "lon": -9.169167,
+   "source": "wikipedia"
+  },
+  "https://www.visitlisboa.com/en/places/water-museum-barbadinhos-steam-pumping-station": {
+   "title": "Water Museum - Barbadinhos Steam Pumping Station",
+   "lat": 38.719906,
+   "lon": -9.119649,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/water-museum-mae-d-agua-das-amoreiras-reservoir": {
+   "title": "Water Museum - Mãe d´Água das Amoreiras Reservoir",
+   "lat": 38.721323,
+   "lon": -9.155696,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/water-museum-patriarchal-reservoir": {
+   "title": "Water Museum - Patriarchal Reservoir",
+   "lat": 38.716863,
+   "lon": -9.14876,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/water-museum-underground-galleries-of-the-aguas-livres-aqueduct": {
+   "title": "Water Museum - Underground galleries of the Águas Livres Aqueduct",
+   "lat": 38.722295,
+   "lon": -9.156053,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/waterx-powering-nautical-events": {
+   "title": "WaterX - Powering Nautical Events",
+   "lat": 38.7008,
+   "lon": -9.176189,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/welcome-madeira": {
+   "title": "Welcome Madeira",
+   "lat": 38.787152,
+   "lon": -9.122126,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/wind-sports-nature-and-adventure": {
+   "title": "Wind - Sports, Nature and Adventure",
+   "lat": 38.660848,
+   "lon": -9.0456,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/wine-and-vine-museum-bucelas": {
+   "title": "Wine and Vine Museum - Bucelas",
+   "lat": 38.901795,
+   "lon": -9.120422,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/wines-filipe-palhoca": {
+   "title": "Wines Filipe Palhoça",
+   "lat": 38.620323,
+   "lon": -8.727104,
+   "source": "title"
+  },
+  "https://www.visitlisboa.com/en/places/wines-of-portugal-viniportugal": {
+   "title": "Wines of Portugal / ViniPortugal",
+   "lat": 38.707455,
+   "lon": -9.13544,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/words-factory": {
+   "title": "Words Factory",
+   "lat": 38.952312,
+   "lon": -8.987931,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/ycon-events": {
+   "title": "Ycon Events",
+   "lat": 38.710519,
+   "lon": -9.210785,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/yellow-tours-and-experiences": {
+   "title": "Yellow Tours and Experiences",
+   "lat": 38.711521,
+   "lon": -9.135739,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/zero-zero-parque-das-nacoes": {
+   "title": "Zero Zero - Parque das Nações",
+   "lat": 38.767758,
+   "lon": -9.092325,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/zero-zero-principe-real": {
+   "title": "Zero Zero - Príncipe Real",
+   "lat": 38.717556,
+   "lon": -9.150878,
+   "source": "address"
+  },
+  "https://www.visitlisboa.com/en/places/zion-creative-artisans": {
+   "title": "Zion - Creative Artisans",
+   "lat": 38.733222,
+   "lon": -9.142692,
+   "source": "address"
+  }
+ }
+}
