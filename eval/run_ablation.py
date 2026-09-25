@@ -19,11 +19,17 @@
 #       Restrict the ablation run to a repeated set of specific domains.
 #   > python -m eval.run_ablation --open-model-spec azure::Kimi-K2.5 --judge-model-spec openai::gpt-5.4-mini
 #       Add an explicit open-model comparison profile and override the evaluation judge.
+#   > python -m eval.run_ablation --dataset eval/evaluation_groundtruth_queries_paper_eval.json --fresh-session --output-prefix ablation_final
+#       Paper evaluation protocol: every LISBOA query starts in a new session, and each
+#       finished comparison is appended to a .partial.jsonl checkpoint.
+#   > python -m eval.run_ablation --resume eval/results/ablation/<prefix>_<timestamp>.partial.jsonl --fresh-session --dataset <same dataset>
+#       Resume an interrupted run (or run the other profile after --only-profile) from its checkpoint.
 # ==========================================================================
 
 import io
 import json
 import os
+import sys
 import time
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from copy import deepcopy
@@ -53,10 +59,13 @@ from eval.runtime_utils import (
     build_multi_judge_manifest,
     build_results_output_path,
     build_run_metadata,
+    build_run_provenance,
     build_usage_payload,
     categorize_error,
+    collect_runtime_data_provenance,
     combine_cost_payloads,
     combine_usage_payloads,
+    compute_dataset_fingerprint,
     compute_tool_metrics,
     get_pricing_metadata,
     load_pricing_catalog,
@@ -84,6 +93,21 @@ ABLATION_PRIMARY_SCORE_FIELDS = (
     "completeness",
     "relevance",
     "response_quality",
+)
+# Paper evaluation (RINENG revision): annotations, checkpoints, and end-to-end fields.
+PAPER_EVAL_ANNOTATIONS_PATH = Path(__file__).with_name("paper_eval_annotations.json")
+CHECKPOINT_SUFFIX = ".partial.jsonl"
+EXECUTION_SUMMARY_FIELDS = (
+    "selected_agents",
+    "execution_type",
+    "worker_mode",
+    "qa_path",
+    "retry_agents_used",
+    "relevant_agents",
+    "total_tool_invocations",
+    "models_used",
+    "elapsed_time",
+    "routing_reasoning",
 )
 ZERO_SHOT_BASELINE_SYSTEM_PROMPT = """You are LISBOA's no-tool baseline for an academic ablation study.
 
@@ -182,6 +206,103 @@ def _describe_response_telemetry(
     }
 
 
+def _compact_execution_summary(summary: dict | None) -> dict | None:
+    """Keep the orchestration fields of LISBOA's execution summary (routing, workers, QA path)."""
+    if not isinstance(summary, dict):
+        return None
+    return {field: deepcopy(summary.get(field)) for field in EXECUTION_SUMMARY_FIELDS}
+
+
+def _agents_not_using_model(system: MultiAgentAssistant, expected_model: str) -> dict[str, str]:
+    """Return the LISBOA agents whose live LLM client does not use the profile model."""
+    mismatched = {}
+    for agent_name, model_info in (getattr(system, "model_info", {}) or {}).items():
+        actual_model = model_info.get("model") if isinstance(model_info, dict) else model_info
+        if str(actual_model).lower() != str(expected_model).lower():
+            mismatched[agent_name] = str(actual_model)
+    return mismatched
+
+
+def _comparison_has_error(block: dict) -> bool:
+    """Return whether a stored comparison lacks a response or a judge score in either arm."""
+    metrics = block.get("metrics") or {}
+    for arm in ("zero_shot", "lisboa"):
+        arm_metrics = metrics.get(arm) or {}
+        if arm_metrics.get("error") is not None:
+            return True
+        if any(judge_run.get("error") for judge_run in arm_metrics.get("judge_runs") or []):
+            return True
+    return False
+
+
+def _append_checkpoint(checkpoint_path: Path, entry: dict) -> None:
+    """Append one JSON line to the run checkpoint and flush it to disk."""
+    with checkpoint_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _load_checkpoint(checkpoint_path: Path, *, retry_errors: bool = False) -> dict:
+    """Read a .partial.jsonl checkpoint: sessions, profile metadata, and finished comparisons.
+
+    Args:
+        checkpoint_path: Checkpoint written by an earlier run.
+        retry_errors: Drop comparisons whose response or judge call failed, so they run again.
+
+    Returns:
+        dict: Sessions, per-profile metadata, finished comparisons keyed by
+        ``(query_id, profile)``, the number dropped for a retry, and the query
+        fingerprint, ``fresh_session`` option, judge list, and system-code
+        fingerprint of the first session.
+    """
+    sessions: list[dict] = []
+    profiles: dict[str, dict] = {}
+    completed: dict[tuple[str, str], dict] = {}
+    raw_text = checkpoint_path.read_text(encoding="utf-8")
+    for line_number, line in enumerate(raw_text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            # An interrupted write can truncate the last line; every earlier line is intact.
+            print(f"[Checkpoint] Ignoring unreadable line {line_number} in {checkpoint_path.name}.")
+            continue
+        entry_type = entry.get("type")
+        if entry_type in {"session", "session_end"}:
+            session = {key: value for key, value in entry.items() if key != "provenance"}
+            if entry_type == "session":
+                git_provenance = (entry.get("provenance") or {}).get("git") or {}
+                session["git_commit"] = git_provenance.get("commit")
+                session["has_uncommitted_changes"] = git_provenance.get("has_uncommitted_changes")
+                session["system_code_sha256"] = git_provenance.get("system_code_sha256")
+            sessions.append(session)
+        elif entry_type == "profile":
+            profiles[str(entry["profile_key"])] = entry["metadata"]
+        elif entry_type == "comparison":
+            # Later lines win, so a retried comparison replaces the failed one.
+            completed[(str(entry["id"]), str(entry["profile_key"]))] = entry["block"]
+    if raw_text and not raw_text.endswith("\n"):
+        with checkpoint_path.open("a", encoding="utf-8") as handle:
+            handle.write("\n")
+    retried = 0
+    if retry_errors:
+        retried = sum(1 for block in completed.values() if _comparison_has_error(block))
+        completed = {key: block for key, block in completed.items() if not _comparison_has_error(block)}
+    first_session = next((session for session in sessions if session.get("type") == "session"), {})
+    return {
+        "sessions": sessions,
+        "profiles": profiles,
+        "completed": completed,
+        "retried_errors": retried,
+        "groundtruth_fingerprint": first_session.get("groundtruth_fingerprint"),
+        "fresh_session": (first_session.get("options") or {}).get("fresh_session"),
+        "judge_model_specs": (first_session.get("options") or {}).get("judge_model_specs"),
+        "system_code_sha256": first_session.get("system_code_sha256"),
+    }
+
+
 def resolve_groundtruth_path(dataset_path: str | Path | None = None) -> Path:
     """Resolve an optional ground-truth dataset path relative to the repository root."""
     if dataset_path is None:
@@ -230,6 +351,7 @@ def temporary_lisboa_provider(
 ):
     """Temporarily override the provider family and optional model profile used by LISBOA agents."""
     original_provider = Config.MODEL_PROVIDER
+    original_azure_deployment = Config.AZURE_OPENAI_DEPLOYMENT_NAME
     original_agent_maps = {
         "azure": deepcopy(Config.AGENT_MODELS_AZURE),
         "openai": deepcopy(Config.AGENT_MODELS_OPENAI),
@@ -238,6 +360,11 @@ def temporary_lisboa_provider(
     normalized_provider = normalize_model_provider(provider)
     if normalized_provider is not None:
         Config.MODEL_PROVIDER = normalized_provider
+        if normalized_provider == "azure" and model_name is not None:
+            # LLMFactory.get_agent_llm gives the Azure deployment name precedence over
+            # the per-agent model, and it defaults to GPT-5.4 Mini; the app's model
+            # selector sets it the same way.
+            Config.AZURE_OPENAI_DEPLOYMENT_NAME = str(model_name)
         if model_name is not None or temperature is not None:
             agent_map_attr = f"AGENT_MODELS_{normalized_provider.upper()}"
             current_agent_map = deepcopy(getattr(Config, agent_map_attr))
@@ -253,6 +380,7 @@ def temporary_lisboa_provider(
         yield Config.MODEL_PROVIDER
     finally:
         Config.MODEL_PROVIDER = original_provider
+        Config.AZURE_OPENAI_DEPLOYMENT_NAME = original_azure_deployment
         Config.AGENT_MODELS_AZURE = deepcopy(original_agent_maps["azure"])
         Config.AGENT_MODELS_OPENAI = deepcopy(original_agent_maps["openai"])
         Config.AGENT_MODELS_LMSTUDIO = deepcopy(original_agent_maps["lmstudio"])
@@ -437,13 +565,20 @@ def load_groundtruth_queries(
     filepath: str | Path = GROUNDTRUTH_QUERIES_PATH,
     limit: int | None = None,
     include_domains: Sequence[str] | None = DEFAULT_ABLATION_DOMAINS,
+    query_ids: Sequence[str] | None = None,
 ):
-    """Load the ablation corpus, optionally filtering domains and selecting a balanced subset."""
+    """Load the ablation corpus, optionally filtering domains or ids and selecting a balanced subset."""
     with open(filepath, "r", encoding="utf-8") as f:
         data = json.load(f)
     if include_domains is not None:
         allowed_domains = {str(domain) for domain in include_domains}
         data = [item for item in data if item.get("domain") in allowed_domains]
+    if query_ids:
+        wanted = {str(query_id) for query_id in query_ids}
+        missing = sorted(wanted - {str(item["id"]) for item in data})
+        if missing:
+            raise ValueError(f"Query ids not found in the selected corpus: {missing}")
+        data = [item for item in data if str(item["id"]) in wanted]
     if limit is None:
         return data
     return select_balanced_subset(data, limit, group_key="domain")
@@ -473,6 +608,10 @@ def run_zero_shot(
                 model_id=model_id,
                 call_count=1,
             )
+            # The deployment name hides the model version; the API reports it per response.
+            api_model_name = (getattr(response, "response_metadata", None) or {}).get("model_name")
+            if api_model_name:
+                response_usage["api_model_name"] = str(api_model_name)
             return response.content, [], "", latency, None, response_usage
         except Exception as e:
             last_error = e
@@ -496,8 +635,22 @@ def run_zero_shot(
     )
 
 
-def run_lisboa(query: str, system: MultiAgentAssistant, *, language: str = "en"):
-    """Run the full LISBOA system while instrumenting tool calls for evaluation."""
+def run_lisboa(
+    query: str,
+    system: MultiAgentAssistant,
+    *,
+    language: str = "en",
+    fresh_session: bool = False,
+):
+    """Run the full LISBOA system while instrumenting tool calls for evaluation.
+
+    With ``fresh_session`` the conversation state is reset first, so the query
+    cannot inherit routes, places, or clarifications from the previous query.
+    """
+    if fresh_session:
+        system.reset()
+    # Only read back for the evaluation record; the pipeline never consumes it.
+    system.last_execution_summary = None
     start = time.time()
     tools_called = []
     retrieved_context_blocks = []
@@ -555,6 +708,7 @@ def run_lisboa(query: str, system: MultiAgentAssistant, *, language: str = "en")
                 "agent_usage": agent_usage_snapshot,
                 "agent_tool_logs": agent_tool_logs,
                 "agents_used": agents_used,
+                "execution_summary": _compact_execution_summary(system.last_execution_summary),
             },
         )
     except Exception as e:
@@ -579,6 +733,7 @@ def run_lisboa(query: str, system: MultiAgentAssistant, *, language: str = "en")
                     },
                 },
                 "agents_used": [],
+                "execution_summary": _compact_execution_summary(system.last_execution_summary),
             },
         )
     finally:
@@ -889,6 +1044,12 @@ def run_ablation(
     groundtruth_path: str | Path | None = None,
     include_domains: Sequence[str] | None = DEFAULT_ABLATION_DOMAINS,
     output_prefix: str = "ablation_results",
+    fresh_session: bool = False,
+    only_profiles: Sequence[str] | None = None,
+    resume_path: str | Path | None = None,
+    retry_errors: bool = False,
+    annotations_path: str | Path | None = None,
+    query_ids: Sequence[str] | None = None,
 ):
     """
     Execute the ablation study and save the results JSON.
@@ -911,6 +1072,19 @@ def run_ablation(
             the ablation excludes ``greeting`` and ``out_of_scope`` because LISBOA
             answers those through hard-coded supervisor shortcuts rather than the
             grounded pipeline under study.
+        fresh_session: Reset LISBOA's conversation state before every query. Off by
+            default, which reproduces the May 2026 runs, where one conversation
+            carried over from query to query.
+        only_profiles: Optional subset of comparison profiles to run
+            (``closed_source``, ``open_source``).
+        resume_path: Optional ``.partial.jsonl`` checkpoint of an earlier run with the
+            same query selection. Finished comparisons are reused, and new ones are
+            appended to the same checkpoint.
+        retry_errors: With ``resume_path``, run again the comparisons whose response
+            or judge call failed.
+        annotations_path: Optional annotation file, recorded in the run provenance.
+        query_ids: Optional query ids to run, for example only the queries added in a
+            revision; the corpus order is kept.
     """
     ablation_langsmith_project = get_langsmith_scoped_project_name(
         ABLATION_LANGSMITH_SCOPE_LABEL,
@@ -942,9 +1116,77 @@ def run_ablation(
             resolved_groundtruth_path,
             limit=limit,
             include_domains=include_domains,
+            query_ids=query_ids,
         )
         active_domains = sorted({item["domain"] for item in groundtruth_queries})
         print(f"[Ablation] Domains in scope: {active_domains}")
+        groundtruth_fingerprint = compute_dataset_fingerprint(groundtruth_queries)
+        resolved_annotations_path = (
+            Path(annotations_path)
+            if annotations_path is not None
+            else (PAPER_EVAL_ANNOTATIONS_PATH if PAPER_EVAL_ANNOTATIONS_PATH.is_file() else None)
+        )
+
+        if resume_path is not None:
+            checkpoint_path = Path(resume_path)
+            if not checkpoint_path.is_file():
+                print(f"[Checkpoint] Resume file not found: {checkpoint_path}")
+                return
+            checkpoint = _load_checkpoint(checkpoint_path, retry_errors=retry_errors)
+            if checkpoint["groundtruth_fingerprint"] not in (None, groundtruth_fingerprint):
+                print(
+                    "[Checkpoint] The query selection (dataset, --limit, --include-domain) differs from "
+                    "the checkpoint. Aborting so that two corpora are never mixed in one run."
+                )
+                return
+            if checkpoint["fresh_session"] is not None and bool(checkpoint["fresh_session"]) != bool(fresh_session):
+                print(
+                    f"[Checkpoint] --fresh-session must match the checkpoint ({checkpoint['fresh_session']}). "
+                    "Aborting so that one run keeps one protocol."
+                )
+                return
+            print(
+                f"[Checkpoint] Resuming {checkpoint_path.name}: {len(checkpoint['completed'])} comparisons reused"
+                + (f", {checkpoint['retried_errors']} failed ones to run again" if retry_errors else "")
+                + "."
+            )
+        else:
+            checkpoint_path = build_results_output_path(
+                "ablation",
+                output_prefix,
+                run_started_at.strftime("%Y%m%d_%H%M%S"),
+                suffix=CHECKPOINT_SUFFIX,
+            )
+            checkpoint = {"sessions": [], "profiles": {}, "completed": {}, "retried_errors": 0}
+
+        run_provenance = build_run_provenance(
+            dataset_path=resolved_groundtruth_path,
+            annotations_path=resolved_annotations_path,
+        )
+        if run_provenance["git"].get("has_uncommitted_changes"):
+            print(
+                "[Provenance] Warning: code or evaluation files have uncommitted changes, so the stored "
+                "commit does not fully describe the evaluated code."
+            )
+        if resume_path is not None:
+            # A resumed run must evaluate the same system with the same judges,
+            # or the reused and the new comparisons would describe two systems.
+            stored_code = checkpoint.get("system_code_sha256")
+            current_code = run_provenance["git"].get("system_code_sha256")
+            if stored_code and current_code and stored_code != current_code:
+                print(
+                    "[Checkpoint] The system code differs from the code of the checkpoint. Aborting so that "
+                    "one run evaluates one version of the system."
+                )
+                return
+            stored_judges = checkpoint.get("judge_model_specs")
+            current_judges = list(judge_model_specs) if judge_model_specs else None
+            if stored_judges != current_judges:
+                print(
+                    f"[Checkpoint] The judge models must match the checkpoint ({stored_judges}). "
+                    "Aborting so that every comparison is scored by the same judges."
+                )
+                return
 
         if lisboa_provider is not None:
             print(
@@ -967,7 +1209,16 @@ def run_ablation(
                 model_spec=open_model_spec,
             ),
         ]
-        primary_profile_key = str(comparison_profiles[0]["profile_name"])
+        known_profile_keys = [str(profile["profile_name"]) for profile in comparison_profiles]
+        unknown_profiles = sorted(set(only_profiles or ()) - set(known_profile_keys))
+        if unknown_profiles:
+            print(f"[Ablation] Unknown --only-profile value(s): {unknown_profiles}. Expected one of {known_profile_keys}.")
+            return
+        profiles_to_run = [
+            profile
+            for profile in comparison_profiles
+            if not only_profiles or str(profile["profile_name"]) in set(only_profiles)
+        ]
 
         judge_configs = resolve_judge_models(
             judge_model_specs,
@@ -1012,17 +1263,57 @@ def run_ablation(
                     expected_facts=item.get("expected_facts", []),
                     expected_behavior=item.get("expected_behavior"),
                 ),
-                "primary_comparison_profile": primary_profile_key,
+                "primary_comparison_profile": None,
                 "comparisons": {},
             }
             for item in groundtruth_queries
         }
-        profile_metadata: dict[str, dict[str, object]] = {}
+        for (query_id, stored_profile_key), stored_block in checkpoint["completed"].items():
+            if query_id in results_by_id:
+                results_by_id[query_id]["comparisons"][stored_profile_key] = stored_block
+        profile_metadata: dict[str, dict[str, object]] = dict(checkpoint["profiles"])
 
-        for profile in comparison_profiles:
+        run_options = {
+            "fresh_session": bool(fresh_session),
+            "only_profiles": list(only_profiles) if only_profiles else None,
+            "retry_errors": bool(retry_errors),
+            "limit": limit,
+            "include_domains": list(include_domains) if include_domains is not None else None,
+            "zero_shot_model": f"{zero_shot_provider}::{zero_shot_model}",
+            "open_model_spec": open_model_spec,
+            "judge_model_specs": list(judge_model_specs) if judge_model_specs else None,
+            "resumed_from_checkpoint": resume_path is not None,
+            "checkpoint_path": str(checkpoint_path),
+            "annotations_path": str(resolved_annotations_path) if resolved_annotations_path else None,
+            "query_ids": list(query_ids) if query_ids else None,
+        }
+        _append_checkpoint(
+            checkpoint_path,
+            {
+                "type": "session",
+                "started_at": run_started_at.isoformat(),
+                "argv": sys.argv[1:],
+                "options": run_options,
+                "groundtruth_path": str(resolved_groundtruth_path),
+                "groundtruth_fingerprint": groundtruth_fingerprint,
+                "provenance": run_provenance,
+            },
+        )
+        print(f"[Checkpoint] Each finished comparison is appended to {checkpoint_path}")
+        print(f"[Checkpoint] If the run stops, resume with: --resume \"{checkpoint_path}\" and the same options")
+        comparisons_this_session = 0
+
+        for profile in profiles_to_run:
             profile_key = str(profile["profile_name"])
+            pending_count = sum(
+                1 for item in groundtruth_queries if profile_key not in results_by_id[item["id"]]["comparisons"]
+            )
+            if pending_count == 0:
+                print(f"\n[Checkpoint] PROFILE {profile_key}: all {len(groundtruth_queries)} queries already done.")
+                continue
             print(
-                f"\n{'=' * 60}\nPROFILE: {profile_key} -> {profile['provider']}::{profile['model']}\n{'=' * 60}"
+                f"\n{'=' * 60}\nPROFILE: {profile_key} -> {profile['provider']}::{profile['model']}"
+                f" ({pending_count} of {len(groundtruth_queries)} queries to run)\n{'=' * 60}"
             )
 
             profile_consecutive_errors = 0
@@ -1032,6 +1323,13 @@ def run_ablation(
                 temperature=float(profile.get("temperature", 0.0) or 0.0),
             ) as active_lisboa_provider:
                 lisboa_system = MultiAgentAssistant()
+                mismatched_models = _agents_not_using_model(lisboa_system, str(profile["model"]))
+                if mismatched_models:
+                    print(
+                        f"\nABORTING: in profile {profile_key}, these LISBOA agents do not use "
+                        f"{profile['model']}: {mismatched_models}. Nothing was run for this profile."
+                    )
+                    return
                 zero_shot_model_manifest = build_model_manifest(
                     str(profile["provider"]),
                     str(profile["model"]),
@@ -1053,8 +1351,14 @@ def run_ablation(
                     "lisboa_response_model_config": deepcopy(lisboa_response_model_config),
                     "lisboa_provider": active_lisboa_provider,
                 }
+                _append_checkpoint(
+                    checkpoint_path,
+                    {"type": "profile", "profile_key": profile_key, "metadata": profile_metadata[profile_key]},
+                )
 
                 for idx, item in enumerate(groundtruth_queries):
+                    if profile_key in results_by_id[item["id"]]["comparisons"]:
+                        continue
                     print(f"\n[{idx + 1}/{len(groundtruth_queries)}] [{profile_key}] ABLATING: {item['query']}")
 
                     zs_resp, zs_tools, zs_ctx, zs_lat, zs_err, zs_response_usage = run_zero_shot(
@@ -1123,6 +1427,7 @@ def run_ablation(
                         item["query"],
                         lisboa_system,
                         language=item.get("language", "en"),
+                        fresh_session=fresh_session,
                     )
                     ls_response_cost = build_cost_payload(
                         ls_response_usage,
@@ -1291,26 +1596,54 @@ def run_ablation(
                                 "error_type": categorize_error(ls_err),
                                 "tool_metrics": ls_tool_metrics,
                                 "heuristics": ls_heuristics,
+                                "fresh_session": bool(fresh_session),
+                                "execution_summary": (
+                                    deepcopy(ls_runtime.get("execution_summary")) if isinstance(ls_runtime, dict) else None
+                                ),
                             },
                         },
                     }
 
-                    result_record = results_by_id[item["id"]]
-                    result_record["comparisons"][profile_key] = comparison_block
-                    result_record["comparison_profiles"] = sorted(result_record["comparisons"].keys())
-                    if profile_key == primary_profile_key:
-                        result_record["comparison_usage"] = comparison_usage
-                        result_record["comparison_cost_usd"] = comparison_cost
-                        result_record["metrics"] = deepcopy(comparison_block["metrics"])
+                    results_by_id[item["id"]]["comparisons"][profile_key] = comparison_block
+                    _append_checkpoint(
+                        checkpoint_path,
+                        {"type": "comparison", "id": item["id"], "profile_key": profile_key, "block": comparison_block},
+                    )
+                    comparisons_this_session += 1
 
                     if profile_consecutive_errors >= 2:
                         print(f"\nABORTING PROFILE {profile_key}: API or models are failing continuously.")
                         break
 
+        # Profiles with at least one comparison, from this session or from the checkpoint.
+        profile_order = [
+            key
+            for key in known_profile_keys
+            if any(key in record["comparisons"] for record in results_by_id.values())
+        ]
+        primary_profile_key = profile_order[0] if profile_order else known_profile_keys[0]
+        for record in results_by_id.values():
+            record["primary_comparison_profile"] = primary_profile_key
+            record["comparison_profiles"] = sorted(record["comparisons"].keys())
+            primary_block = record["comparisons"].get(primary_profile_key)
+            if primary_block is not None:
+                record["comparison_usage"] = primary_block.get("comparison_usage")
+                record["comparison_cost_usd"] = primary_block.get("comparison_cost_usd")
+                record["metrics"] = deepcopy(primary_block.get("metrics"))
+
         results = list(results_by_id.values())
-        profile_summaries = {
-            str(profile["profile_name"]): _build_profile_summary(results, str(profile["profile_name"]))
-            for profile in comparison_profiles
+        profile_summaries = {key: _build_profile_summary(results, key) for key in profile_order}
+        api_model_names = {
+            key: sorted(
+                {
+                    str(usage["api_model_name"])
+                    for record in results
+                    if key in record["comparisons"]
+                    for usage in [record["comparisons"][key]["metrics"]["zero_shot"].get("response_usage") or {}]
+                    if usage.get("api_model_name")
+                }
+            )
+            for key in profile_order
         }
         summary = deepcopy(profile_summaries.get(primary_profile_key, {}))
         summary["primary_score"] = {
@@ -1321,13 +1654,34 @@ def run_ablation(
         }
         summary["comparison_profiles"] = profile_summaries
         summary["primary_comparison_profile"] = primary_profile_key
-        summary["comparison_profile_order"] = [str(profile["profile_name"]) for profile in comparison_profiles]
+        summary["comparison_profile_order"] = profile_order
 
         primary_profile_metadata = profile_metadata.get(primary_profile_key, {})
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path = build_results_output_path("ablation", output_prefix, timestamp)
         run_finished_at = datetime.now()
         total_runtime_s = round(time.perf_counter() - run_started_perf, 3)
+        session_end_entry = {
+            "type": "session_end",
+            "started_at": run_started_at.isoformat(),
+            "finished_at": run_finished_at.isoformat(),
+            "runtime_s": total_runtime_s,
+            "comparisons_completed": comparisons_this_session,
+            "git_commit": run_provenance["git"].get("commit"),
+            "output_file": str(output_path),
+        }
+        _append_checkpoint(checkpoint_path, session_end_entry)
+        run_sessions = [
+            *checkpoint["sessions"],
+            {
+                "type": "session",
+                "started_at": run_started_at.isoformat(),
+                "options": run_options,
+                "git_commit": run_provenance["git"].get("commit"),
+                "has_uncommitted_changes": run_provenance["git"].get("has_uncommitted_changes"),
+            },
+            session_end_entry,
+        ]
         write_json_artifact(
             {
                 "ablation_metadata": build_run_metadata(
@@ -1343,9 +1697,16 @@ def run_ablation(
                             "zero_shot": primary_profile_metadata.get("zero_shot_model_config"),
                             "lisboa": primary_profile_metadata.get("lisboa_response_model_config"),
                         },
-                        "comparison_profiles": profile_metadata,
-                        "comparison_profile_order": [str(profile["profile_name"]) for profile in comparison_profiles],
+                        "comparison_profiles": {
+                            key: profile_metadata[key] for key in profile_order if key in profile_metadata
+                        },
+                        "comparison_profile_order": profile_order,
                         "primary_comparison_profile": primary_profile_key,
+                        "run_options": run_options,
+                        "provenance": run_provenance,
+                        "runtime_data_at_end": collect_runtime_data_provenance(),
+                        "run_sessions": run_sessions,
+                        "api_model_names": api_model_names,
                         "evaluation_models": list(evaluation_model_manifest.get("judge_models", [])),
                         "judge_model_configs": judge_model_manifests,
                         "evaluation_model_config": evaluation_model_manifest,
@@ -1377,6 +1738,7 @@ def run_ablation(
         )
 
         print(f"\nAblation Study complete. Results saved to {output_path}")
+        print(f"Checkpoint kept at {checkpoint_path}")
         runtime_failure = get_last_langsmith_runtime_failure()
         if runtime_failure:
             print(
@@ -1456,7 +1818,50 @@ if __name__ == "__main__":
         default="ablation_results",
         help="Output filename prefix inside eval/results/ablation/.",
     )
+    parser.add_argument(
+        "--fresh-session",
+        action="store_true",
+        help="Reset LISBOA's conversation state before every query (paper evaluation protocol).",
+    )
+    parser.add_argument(
+        "--only-profile",
+        action="append",
+        dest="only_profiles",
+        choices=["closed_source", "open_source"],
+        help="Repeatable. Run only this comparison profile, for example to split a long run over two sessions.",
+    )
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        help="Resume from a .partial.jsonl checkpoint. Use the same dataset and filters as the original run.",
+    )
+    parser.add_argument(
+        "--retry-errors",
+        action="store_true",
+        help="With --resume, run again the comparisons whose response or judge call failed.",
+    )
+    parser.add_argument(
+        "--annotations",
+        type=str,
+        default=None,
+        help="Annotation file recorded in the provenance. Defaults to eval/paper_eval_annotations.json when present.",
+    )
+    parser.add_argument(
+        "--query-id",
+        action="append",
+        dest="query_ids",
+        help="Repeatable or comma-separated. Run only these query ids, for example M04,M05.",
+    )
     args = parser.parse_args()
+    if args.retry_errors and not args.resume:
+        parser.error("--retry-errors requires --resume.")
+    query_ids = [
+        query_id.strip()
+        for value in (args.query_ids or [])
+        for query_id in value.split(",")
+        if query_id.strip()
+    ]
 
     limit = 5 if args.mode == "run_test" else args.limit
 
@@ -1472,4 +1877,10 @@ if __name__ == "__main__":
         groundtruth_path=args.dataset,
         include_domains=args.include_domains or DEFAULT_ABLATION_DOMAINS,
         output_prefix=args.output_prefix,
+        fresh_session=args.fresh_session,
+        only_profiles=args.only_profiles,
+        resume_path=args.resume,
+        retry_errors=args.retry_errors,
+        annotations_path=args.annotations,
+        query_ids=query_ids or None,
     )

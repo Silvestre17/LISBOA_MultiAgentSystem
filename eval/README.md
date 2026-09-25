@@ -11,10 +11,16 @@ This folder contains the evaluation stack used for the LISBOA thesis workflow. I
 eval/
 |-- evaluation_groundtruth_queries.json
 |-- evaluation_groundtruth_queries_demo.json
+|-- evaluation_groundtruth_queries_paper_eval.json
+|-- paper_eval_annotations.json
 |-- run_benchmark.py
 |-- run_ablation.py
 |-- runtime_utils.py
 |-- llm_judge.py
+|-- constraint_judge.py
+|-- merge_ablation.py
+|-- statistical_analysis.py
+|-- paper_eval_analysis.py
 |-- validators/
 |   |-- response_heuristics.py
 |-- tests/
@@ -59,6 +65,47 @@ The corpus is for realistic evaluation scenarios, not exhaustive exported-tool c
 > [!TIP]
 > Tool counts can change. Verify [`tools/__init__.py`](../tools/__init__.py).
 
+## 📝 Paper Evaluation (RINENG Revision)
+
+The revision adds ten itinerary requests (`M04` to `M13`) to the ablation corpus and
+reruns the whole ablation on the revised system under one protocol: the same two model
+profiles, the same judges and judge prompt as the May 2026 run, and a fresh LISBOA
+session for every query. The May artefacts stay in `results/` as the record of the
+submitted version; they are not pooled with the rerun, because the May run shared one
+conversation across queries and evaluated older code.
+
+| File | Content |
+|---|---|
+| `evaluation_groundtruth_queries_paper_eval.json` | The 72 original queries, unchanged, plus the ten itinerary requests |
+| `paper_eval_annotations.json` | Expected agents for every ablation query; explicit constraints for every itinerary request |
+| `constraint_judge.py` | Checklist judge: marks each itinerary constraint as met, not met, or not assessable, blind to the condition |
+| `paper_eval_analysis.py` | Provenance, quality tests, latency and cost, routing and QA paths, judge reliability, and constraints, as JSON and Markdown |
+| `merge_ablation.py` | Joins runs of the same protocol and code that cover different queries (for example, a run split by query); refuses mixed protocols unless `--allow-mixed-protocol` is given for an archival merge |
+
+Run order (the ablation takes about five to six hours for both profiles; split it by profile if needed):
+
+```powershell
+python -X utf8 -m pytest eval/tests/ -q
+$env:VECTOR_DB_RELEASE_FORCE_DOWNLOAD = 'true'
+python -X utf8 -u -m eval.run_ablation --dataset eval/evaluation_groundtruth_queries_paper_eval.json --fresh-session --only-profile closed_source --output-prefix ablation_final
+python -X utf8 -u -m eval.run_ablation --dataset eval/evaluation_groundtruth_queries_paper_eval.json --fresh-session --only-profile open_source --resume eval/results/ablation/ablation_final_<timestamp>.partial.jsonl
+python -X utf8 -u -m eval.run_benchmark --dataset eval/evaluation_groundtruth_queries_paper_eval.json --output-prefix benchmark_final
+python -X utf8 -m eval.constraint_judge --ablation eval/results/ablation/ablation_final_<timestamp>.json
+python -X utf8 -m eval.statistical_analysis --ablation eval/results/ablation/ablation_final_<timestamp>.json --benchmark eval/results/benchmark/benchmark_final_<timestamp>.json --output-prefix statistical_analysis_final
+python -X utf8 -m eval.paper_eval_analysis --ablation eval/results/ablation/ablation_final_<timestamp>.json --benchmark eval/results/benchmark/benchmark_final_<timestamp>.json --constraints eval/results/constraints/constraint_checklist_<timestamp>.json
+```
+
+The benchmark and the ablation run on the same commit, so every reported number comes from one version of the system. The benchmark runs the 62 worker queries of the same corpus (multi-agent, greeting, and out-of-scope rows have no isolated worker). The newest `ablation_final_<timestamp>.json` and `benchmark_final_<timestamp>.json` are the ones the notebook reads. `paper_eval_analysis` reports latency and cost for both: per model inside the workers (benchmark) and per model with and without LISBOA (ablation). Keep only the final run in `eval/results/`: remove interim and superseded result files before committing the new ones.
+
+- `--fresh-session` resets LISBOA's conversation state before every query. Without it, the runner behaves as in May 2026, when one conversation carried over from query to query.
+- `--query-id` runs only the listed queries, in corpus order.
+- Each finished comparison is appended to `<prefix>_<timestamp>.partial.jsonl`. If a run stops, repeat the command with `--resume <checkpoint>`; add `--retry-errors` to rerun comparisons where a response or a judge call failed. A resume is refused when the query selection, the session protocol, the judges, or the system code differ from the checkpoint.
+- The runner sets the Azure deployment to the model of each profile and refuses to start a profile whose agents use another model.
+- Every artefact records its provenance: commit, branch, every uncommitted or new code and evaluation file, a SHA-256 over the system code as it was on disk, the last commit that touched the system code, package versions, the model version reported by the API, input-file hashes, the tool registry, and the local data snapshots.
+
+> [!IMPORTANT]
+> Commit the code, corpus, and annotations before the run, so the provenance points to a clean commit. The runtime never refreshes the local vector database; set `VECTOR_DB_RELEASE_FORCE_DOWNLOAD=true` for the first start on the day of the run so events and places come from the latest release. Run in daytime: "now" transport questions asked at night receive closed-service answers.
+
 ## ☑️ Recommended Validation
 
 Use this sequence after code changes:
@@ -85,6 +132,7 @@ subfolders:
 
 - `benchmark/`
 - `ablation/`
+- `constraints/`
 - `statistics/`
 - `figures/`
 

@@ -11,15 +11,24 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
+import platform
 import re
 import ast
+import subprocess
 from collections import Counter
 from copy import deepcopy
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Any, Iterable, Optional, Sequence
 
 RESULTS_ROOT = Path(__file__).with_name("results")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+# System code whose last commit dates the evaluated LISBOA version.
+SYSTEM_CODE_PATHS = ("agent", "tools", "config.py", "app.py")
+PROVENANCE_PACKAGES = ("langchain-core", "langchain-openai", "langgraph", "openai", "chromadb")
 SUPPORTED_MODEL_PROVIDERS = frozenset({"azure", "openai", "lmstudio"})
 JUDGE_NUMERIC_SCORE_FIELDS = (
     "factual_accuracy",
@@ -1022,6 +1031,182 @@ def build_run_metadata(
     if extra:
         metadata.update(extra)
     return metadata
+
+
+# ---------------------------------------------------------------------------
+# Run provenance: which code, data, and environment produced an artefact.
+# ---------------------------------------------------------------------------
+
+def _display_path(path: str | Path) -> str:
+    """Return a repository-relative path when possible, otherwise the absolute path."""
+    resolved = Path(path).resolve()
+    try:
+        return resolved.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
+def compute_file_sha256(path: str | Path) -> str | None:
+    """Return the SHA-256 of a file's bytes, or None when it cannot be read."""
+    try:
+        digest = hashlib.sha256()
+        with Path(path).open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def describe_file(path: str | Path, *, include_sha256: bool = True) -> dict[str, Any]:
+    """Describe one input file by path, size, modification time, and content hash."""
+    file_path = Path(path)
+    description: dict[str, Any] = {"path": _display_path(file_path), "exists": file_path.is_file()}
+    if not description["exists"]:
+        return description
+    stat = file_path.stat()
+    description["size_bytes"] = stat.st_size
+    description["modified_at"] = datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds")
+    if include_sha256:
+        description["sha256"] = compute_file_sha256(file_path)
+    return description
+
+
+def _run_git(*args: str) -> str | None:
+    """Run one read-only git command in the repository root."""
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    # rstrip only: porcelain status lines start with a meaningful space.
+    return completed.stdout.rstrip()
+
+
+def compute_system_code_fingerprint() -> str | None:
+    """Return one SHA-256 over the working-tree bytes of every system-code file.
+
+    Covers tracked and untracked (but not ignored) Python files under
+    ``SYSTEM_CODE_PATHS``, so a run made on uncommitted code can still be
+    matched to the exact code that produced it.
+    """
+    listing = _run_git("ls-files", "--cached", "--others", "--exclude-standard", "--", *SYSTEM_CODE_PATHS)
+    if listing is None:
+        return None
+    digest = hashlib.sha256()
+    for relative in sorted({line.strip() for line in listing.splitlines() if line.strip().endswith(".py")}):
+        file_hash = compute_file_sha256(REPO_ROOT / relative)
+        if file_hash is None:
+            continue
+        digest.update(f"{relative}\0{file_hash}\n".encode("utf-8"))
+    return digest.hexdigest()
+
+
+def collect_git_provenance() -> dict[str, Any]:
+    """Describe the evaluated code version: commit, branch, and uncommitted changes.
+
+    Untracked files count as uncommitted changes: a new, uncommitted module
+    changes the evaluated system as much as an edited one. Only the system
+    code and the evaluation code and inputs are checked; result files that
+    runs write under ``eval/results`` do not change what is evaluated.
+    """
+    status = _run_git(
+        "status", "--porcelain", "--untracked-files=all", "--",
+        *SYSTEM_CODE_PATHS, "eval", ":(exclude)eval/results",
+    )
+    changed_paths = [line[3:] for line in (status or "").splitlines() if line.strip()]
+    last_system_commit = (_run_git("log", "-1", "--format=%H|%cI|%s", "--", *SYSTEM_CODE_PATHS) or "").split("|", 2)
+    return {
+        "commit": _run_git("rev-parse", "HEAD"),
+        "branch": _run_git("rev-parse", "--abbrev-ref", "HEAD"),
+        "commit_date": _run_git("log", "-1", "--format=%cI"),
+        "has_uncommitted_changes": bool(changed_paths) if status is not None else None,
+        "uncommitted_paths": changed_paths,
+        "system_code_sha256": compute_system_code_fingerprint(),
+        "system_code_last_commit": {
+            "commit": last_system_commit[0] or None,
+            "date": last_system_commit[1] if len(last_system_commit) > 1 else None,
+            "subject": last_system_commit[2] if len(last_system_commit) > 2 else None,
+            "paths": list(SYSTEM_CODE_PATHS),
+        },
+    }
+
+
+def collect_runtime_data_provenance() -> dict[str, Any]:
+    """Describe the local data snapshots that the live tools read during a run."""
+    runtime_root = Path(os.getenv("LISBOA_RUNTIME_DATA_DIR") or REPO_ROOT / "data")
+    vector_db_dir = Path(os.getenv("VECTOR_DB_DIR") or runtime_root / "vector_db")
+    operators: dict[str, Any] = {}
+    for operator in ("carris", "cp"):
+        metadata_path = runtime_root / operator / "metadata.json"
+        try:
+            operators[operator] = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            operators[operator] = None
+    webscraping_dir = REPO_ROOT / "data_collection" / "webscraping"
+    return {
+        "collected_at": datetime.now().isoformat(timespec="seconds"),
+        "vector_db": describe_file(vector_db_dir / "chroma.sqlite3"),
+        "transport_metadata": operators,
+        "events_json": describe_file(webscraping_dir / "events.json"),
+        "places_json": describe_file(webscraping_dir / "places.json"),
+    }
+
+
+def collect_environment_provenance() -> dict[str, Any]:
+    """Describe the Python environment used for a run."""
+    packages: dict[str, str | None] = {}
+    for package_name in PROVENANCE_PACKAGES:
+        try:
+            packages[package_name] = importlib_metadata.version(package_name)
+        except importlib_metadata.PackageNotFoundError:
+            packages[package_name] = None
+    return {
+        "python": platform.python_version(),
+        "platform": platform.platform(),
+        "packages": packages,
+    }
+
+
+def build_run_provenance(
+    *,
+    dataset_path: str | Path,
+    annotations_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Build the provenance block stored with paper-evaluation artefacts.
+
+    Args:
+        dataset_path: Query corpus used by the run.
+        annotations_path: Optional annotation file used by the run.
+
+    Returns:
+        dict[str, Any]: Git state, Python environment, input-file hashes, tool
+        registry, and local data snapshots at collection time.
+    """
+    return {
+        "collected_at": datetime.now().isoformat(timespec="seconds"),
+        "git": collect_git_provenance(),
+        "environment": collect_environment_provenance(),
+        "input_files": {
+            "dataset": describe_file(dataset_path),
+            "annotations": describe_file(annotations_path) if annotations_path else None,
+        },
+        "tool_registry": {
+            "count": len(EXPORTED_TOOL_NAMES),
+            "fingerprint": compute_tool_registry_fingerprint(),
+        },
+        "runtime_data": collect_runtime_data_provenance(),
+    }
 
 
 # Keep evaluation cost/usage helpers aligned with the runtime-safe shared module.

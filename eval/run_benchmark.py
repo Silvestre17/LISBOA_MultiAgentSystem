@@ -48,8 +48,10 @@ from eval.runtime_utils import (
     build_multi_judge_manifest,
     build_results_output_path,
     build_run_metadata,
+    build_run_provenance,
     build_usage_payload,
     categorize_error,
+    collect_runtime_data_provenance,
     combine_cost_payloads,
     combine_usage_payloads,
     compute_tool_metrics,
@@ -163,19 +165,6 @@ def resolve_pricing_catalog(pricing_by_model: dict | None = None) -> dict | None
     if pricing_by_model is not None:
         return pricing_by_model
     return load_pricing_catalog()
-
-
-def parse_response_model_spec(
-    model_spec: str,
-    *,
-    temperature: float | None = None,
-) -> dict[str, str | float]:
-    """Parse a CLI response-model spec into the benchmark matrix format."""
-    return parse_model_spec(
-        model_spec,
-        temperature=temperature,
-        supported_providers=SUPPORTED_MODEL_PROVIDERS,
-    )
 
 
 def resolve_response_models(
@@ -483,6 +472,8 @@ def run_benchmark(
         resolved_groundtruth_path = resolve_groundtruth_path(groundtruth_path)
         pricing_by_model = resolve_pricing_catalog(pricing_by_model)
         groundtruth_queries = load_groundtruth_queries(resolved_groundtruth_path)
+        # Evaluated commit, environment, and data snapshots, taken before any query runs.
+        run_provenance = build_run_provenance(dataset_path=resolved_groundtruth_path)
         if limit:
             groundtruth_queries = select_balanced_subset(
                 groundtruth_queries,
@@ -687,6 +678,8 @@ def run_benchmark(
                 "pricing_model_count": len(pricing_catalog),
                 "output_directory": str(output_path.parent),
                 "output_file": str(output_path),
+                "provenance": run_provenance,
+                "runtime_data_at_end": collect_runtime_data_provenance(),
                 **get_pricing_metadata(pricing_by_model),
             },
         )
