@@ -51,11 +51,11 @@ Abstract; highlights; 5.2; 7.1,Kimi-K2.5: all-domain gain (zero-shot -> LISBOA),
 5.2; 7.1; letter,"GPT-5.4-mini: multi-agent zero-shot -> LISBOA (delta, p), LISBOA ahead on","3.558 -> 4.202 (+0.644, p 0.005), 11 of 13"
 5.2; 7.1; letter,"Kimi-K2.5: multi-agent zero-shot -> LISBOA (delta, p), LISBOA ahead on","3.750 -> 4.327 (+0.577, p 0.012), 10 of 13"
 5.2; letter R2.7,GPT-5.4-mini LISBOA: unanimous met / constraints; disagreements; not assessable,55/58 (0.948); 1; 0
-5.2; letter R2.7,GPT-5.4-mini Zero-shot: unanimous met / constraints; disagreements; not assessable,55/58 (0.948); 0; 0
-5.2; letter R2.7,Kimi-K2.5 LISBOA: unanimous met / constraints; disagreements; not assessable,53/58 (0.914); 1; 0
-5.2; letter R2.7,Kimi-K2.5 Zero-shot: unanimous met / constraints; disagreements; not assessable,55/58 (0.948); 3; 0
-5.2,"Each judge's LISBOA met rate, range",0.914 to 0.966
-5.2,"Judge agreement on constraint verdicts (%), Cohen's kappa","97.8%, 0.772"
+5.2; letter R2.7,GPT-5.4-mini Zero-shot: unanimous met / constraints; disagreements; not assessable,55/58 (0.948); 1; 0
+5.2; letter R2.7,Kimi-K2.5 LISBOA: unanimous met / constraints; disagreements; not assessable,54/58 (0.931); 3; 0
+5.2; letter R2.7,Kimi-K2.5 Zero-shot: unanimous met / constraints; disagreements; not assessable,57/58 (0.983); 1; 0
+5.2,"Each judge's LISBOA met rate, range",0.948 to 0.966
+5.2,"Judge agreement on constraint verdicts (%), Cohen's kappa","97.4%, 0.613"
 5.2; letter R2.7,GPT-5.4-mini: routing correct of 62 (expected worker + boundary declined),62 (59 + 3); misses: none
 5.2; letter R2.7,"GPT-5.4-mini: every annotated agent called, of 13",7
 5.2; letter R2.7,GPT-5.4-mini: planner in the 11 itinerary requests,11

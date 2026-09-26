@@ -1,6 +1,6 @@
 # Paper evaluation analysis
 
-Generated 2026-09-26T15:05:31 from `eval/results/ablation/ablation_final_20260926_141018.json`.
+Generated 2026-09-26T21:30:09 from `eval/results/ablation/ablation_final_20260926_141018.json`.
 
 ## Provenance
 
@@ -132,9 +132,9 @@ Benchmark own-family interaction: 0.061; first minus second model, by judge: {'a
 | Cell | Queries | Constraints | Met | Not met | Cannot assess | Disagreements | Met / all constraints | Met / unanimous assessable |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | closed_source::lisboa | 11 | 58 | 55 | 2 | 0 | 1 | 0.948 | 0.965 |
-| closed_source::zero_shot | 11 | 58 | 55 | 3 | 0 | 0 | 0.948 | 0.948 |
-| open_source::lisboa | 11 | 58 | 53 | 4 | 0 | 1 | 0.914 | 0.930 |
-| open_source::zero_shot | 11 | 58 | 55 | 0 | 0 | 3 | 0.948 | 1.000 |
+| closed_source::zero_shot | 11 | 58 | 55 | 2 | 0 | 1 | 0.948 | 0.965 |
+| open_source::lisboa | 11 | 58 | 54 | 1 | 0 | 3 | 0.931 | 0.982 |
+| open_source::zero_shot | 11 | 58 | 57 | 0 | 0 | 1 | 0.983 | 1.000 |
 
 Per judge:
 
@@ -143,10 +143,10 @@ Per judge:
 | closed_source::lisboa | azure::Kimi-K2.5 | 58 | 55 | 3 | 0 | 0.948 | 0.948 |
 | closed_source::lisboa | azure::gpt-5.4-mini | 58 | 56 | 2 | 0 | 0.966 | 0.966 |
 | closed_source::zero_shot | azure::Kimi-K2.5 | 58 | 55 | 3 | 0 | 0.948 | 0.948 |
-| closed_source::zero_shot | azure::gpt-5.4-mini | 58 | 55 | 3 | 0 | 0.948 | 0.948 |
-| open_source::lisboa | azure::Kimi-K2.5 | 58 | 54 | 4 | 0 | 0.931 | 0.931 |
-| open_source::lisboa | azure::gpt-5.4-mini | 58 | 53 | 5 | 0 | 0.914 | 0.914 |
-| open_source::zero_shot | azure::Kimi-K2.5 | 58 | 55 | 2 | 1 | 0.948 | 0.965 |
+| closed_source::zero_shot | azure::gpt-5.4-mini | 58 | 56 | 2 | 0 | 0.966 | 0.966 |
+| open_source::lisboa | azure::Kimi-K2.5 | 58 | 55 | 3 | 0 | 0.948 | 0.948 |
+| open_source::lisboa | azure::gpt-5.4-mini | 58 | 56 | 2 | 0 | 0.966 | 0.966 |
+| open_source::zero_shot | azure::Kimi-K2.5 | 58 | 57 | 1 | 0 | 0.983 | 0.983 |
 | open_source::zero_shot | azure::gpt-5.4-mini | 58 | 58 | 0 | 0 | 1.000 | 1.000 |
 
-Inter-judge agreement on verdicts: {'judges': ['azure::Kimi-K2.5', 'azure::gpt-5.4-mini'], 'paired_verdicts': 232, 'exact_agreement': 0.9784, 'cohen_kappa': 0.7719}
+Inter-judge agreement on verdicts: {'judges': ['azure::Kimi-K2.5', 'azure::gpt-5.4-mini'], 'paired_verdicts': 232, 'exact_agreement': 0.9741, 'cohen_kappa': 0.6125}

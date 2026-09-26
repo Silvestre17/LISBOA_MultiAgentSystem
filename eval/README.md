@@ -78,7 +78,7 @@ and interim artefacts remain in the Git history.
 |---|---|
 | `evaluation_groundtruth_queries_paper_eval.json` | The 72 original queries, unchanged, plus the ten itinerary requests |
 | `paper_eval_annotations.json` | Expected agents for every ablation query; explicit constraints for every itinerary request |
-| `constraint_judge.py` | Checklist judge: marks each itinerary constraint as met, not met, or not assessable, blind to the condition |
+| `constraint_judge.py` | Checklist judge: marks each itinerary constraint as met, not met, or not assessable, blind to the condition; it receives the day of the run so that "tomorrow" or "this weekend" can be checked |
 | `paper_eval_analysis.py` | Provenance and protocol checks, quality tests, latency and cost, routing and QA paths, judge reliability, and constraints, as JSON and Markdown |
 | `benchmark_ablation_analysis.ipynb` | Figures 3 and 4, Tables 5 to 7, a value sheet with every number of the manuscript and the response letter, and an extended analysis of both runs per model and for both models together (distributions, every breakdown, per-query gains, latency, cost, tokens, pipeline paths, constraints, judges) |
 | `merge_ablation.py` | Joins runs of the same protocol and code that cover different queries (for example, a run split by query); refuses mixed protocols unless `--allow-mixed-protocol` is given for an archival merge |

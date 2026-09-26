@@ -54,6 +54,9 @@ CONSTRAINT_PROMPT_TEMPLATE = """You check whether a response to a trip-planning 
 REQUEST:
 {query}
 
+DATE OF THE REQUEST:
+{request_date}
+
 CONSTRAINTS:
 {constraints}
 
@@ -65,7 +68,7 @@ For each constraint, choose one verdict:
 - "not_met": the response does not address the constraint, or contradicts it.
 - "cannot_assess": the response addresses the constraint, but too ambiguously to decide.
 
-Judge only what the response states; do not infer what it leaves unsaid. Do not use outside knowledge to check facts, travel times, or opening hours: this check is about whether the plan does what was asked, not whether its details are correct. When a constraint accepts a stated limitation (for example, "or says when a connection cannot be confirmed"), the constraint is met if the response states that limitation explicitly.
+Read relative dates such as "today", "tomorrow", or "this weekend" from the date of the request: a response that names the matching day or date meets such a constraint. Judge only what the response states; do not infer what it leaves unsaid. Do not use outside knowledge to check facts, travel times, or opening hours: this check is about whether the plan does what was asked, not whether its details are correct. When a constraint accepts a stated limitation (for example, "or says when a connection cannot be confirmed"), the constraint is met if the response states that limitation explicitly.
 
 Return ONLY a JSON object, without markdown fences, in this form:
 {{"verdicts": [{{"constraint": 1, "verdict": "met", "justification": "One short sentence."}}]}}
@@ -90,6 +93,24 @@ def resolve_judges(ablation_payload: dict, judge_model_specs: list[str] | None) 
     ]
 
 
+def request_date_text(ablation_payload: dict) -> str:
+    """Describe the day the ablation requests were answered, so judges can read "tomorrow" or "this weekend".
+
+    The runner stores the start of every session and the end of the run; a run
+    that crosses midnight is described as a range of days.
+    """
+    metadata = ablation_payload.get("ablation_metadata") or {}
+    stamps = [session.get("started_at") for session in metadata.get("run_sessions") or [] if session.get("started_at")]
+    stamps += [metadata.get(key) for key in ("run_started_at", "run_finished_at") if metadata.get(key)]
+    days = sorted({datetime.fromisoformat(stamp).date() for stamp in stamps})
+    if not days:
+        raise ValueError("The ablation file records no run dates, so relative dates cannot be judged.")
+    first, last = days[0], days[-1]
+    if first == last:
+        return f"{first:%A}, {first.day} {first:%B %Y}"
+    return f"between {first:%A}, {first.day} {first:%B %Y} and {last:%A}, {last.day} {last:%B %Y}"
+
+
 def collect_checklist_items(ablation_payload: dict, annotations: dict, limit: int | None = None) -> list[dict]:
     """List every (itinerary request, profile, arm) response to check.
 
@@ -110,6 +131,7 @@ def collect_checklist_items(ablation_payload: dict, annotations: dict, limit: in
     records = [record for record in ablation_payload.get("ablation_results", []) if record.get("id") in itinerary]
     if limit is not None:
         records = records[:limit]
+    request_date = request_date_text(ablation_payload)
 
     items = []
     for record in records:
@@ -120,6 +142,7 @@ def collect_checklist_items(ablation_payload: dict, annotations: dict, limit: in
                     {
                         "id": record["id"],
                         "query": record["query"],
+                        "request_date": request_date,
                         "language": record.get("language"),
                         "profile": profile_key,
                         "arm": arm,
@@ -176,6 +199,7 @@ def check_item(item: dict, judge: dict, llm: Any, pricing_by_model: dict | None)
 
     prompt = CONSTRAINT_PROMPT_TEMPLATE.format(
         query=item["query"],
+        request_date=item["request_date"],
         constraints="\n".join(f"{index}. {text}" for index, text in enumerate(item["constraints"], start=1)),
         response=item["response"],
         count=len(item["constraints"]),
@@ -349,6 +373,7 @@ def run_constraint_checklist(
                 "finished_at": datetime.now().isoformat(),
                 "ablation_file": describe_file(ablation_path),
                 "ablation_run_started_at": (ablation_payload.get("ablation_metadata") or {}).get("run_started_at"),
+                "request_date": request_date_text(ablation_payload),
                 "judges": judges,
                 "verdicts": list(VERDICTS),
                 "prompt_template": CONSTRAINT_PROMPT_TEMPLATE,

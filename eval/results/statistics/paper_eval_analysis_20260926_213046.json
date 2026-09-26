@@ -1,33 +1,33 @@
 {
-  "generated_at": "2026-09-26T15:05:31",
+  "generated_at": "2026-09-26T21:30:09",
   "inputs": {
     "ablation": {
       "path": "eval/results/ablation/ablation_final_20260926_141018.json",
       "exists": true,
       "size_bytes": 17833497,
-      "modified_at": "2026-09-26T14:10:19",
+      "modified_at": "2026-09-26T16:47:09",
       "sha256": "3f5ba4337df6e6fe7669a6ba9137ac1f803a939581ed68009810ea656995608f"
     },
     "annotations": {
       "path": "eval/paper_eval_annotations.json",
       "exists": true,
-      "size_bytes": 12816,
-      "modified_at": "2026-09-23T21:44:43",
-      "sha256": "ea9e5f777148156f4f21968b7eac7a91816cb17b2a52b68664ec27a06090189c"
+      "size_bytes": 13397,
+      "modified_at": "2026-09-26T16:47:09",
+      "sha256": "689deeb045acc11d4135485261c3697fe38bcd74398669c432ba567f913bdab5"
     },
     "benchmark": {
       "path": "eval/results/benchmark/benchmark_final_20260926_145914.json",
       "exists": true,
       "size_bytes": 2564005,
-      "modified_at": "2026-09-26T14:59:14",
+      "modified_at": "2026-09-26T16:47:09",
       "sha256": "18293523700af4063d0f9211dbb59f292e3b49d036a6ab992ab5658a993b8eaa"
     },
     "constraints": {
-      "path": "eval/results/constraints/constraint_checklist_20260926_145926.json",
+      "path": "eval/results/constraints/constraint_checklist_20260926_212640.json",
       "exists": true,
-      "size_bytes": 220890,
-      "modified_at": "2026-09-26T15:02:43",
-      "sha256": "ef8224ab12af922519b49312589ba6f3653d63c59fd5828269d44969b38b9532"
+      "size_bytes": 222485,
+      "modified_at": "2026-09-26T21:29:14",
+      "sha256": "b7e4c631b99306a10eff2dd037120b30bafbb9d4dccd6513e4d389f166cb8c30"
     },
     "bootstrap_iterations": 5000,
     "seed": 20240502
@@ -2657,7 +2657,7 @@
       }
     ],
     "errors": 0,
-    "cost_usd": 0.41308245,
+    "cost_usd": 0.39410775,
     "cells": {
       "closed_source::lisboa": {
         "profile": "closed_source",
@@ -2707,22 +2707,22 @@
             "met_rate_all": 0.9483
           },
           "azure::gpt-5.4-mini": {
-            "met": 55,
-            "not_met": 3,
+            "met": 56,
+            "not_met": 2,
             "cannot_assess": 0,
             "total": 58,
-            "met_rate_assessable": 0.9483,
-            "met_rate_all": 0.9483
+            "met_rate_assessable": 0.9655,
+            "met_rate_all": 0.9655
           }
         },
         "consensus": {
           "met": 55,
-          "not_met": 3,
+          "not_met": 2,
           "cannot_assess": 0,
-          "total": 58,
-          "met_rate_assessable": 0.9483,
-          "met_rate_all": 0.9483,
-          "judge_disagreements": 0,
+          "total": 57,
+          "met_rate_assessable": 0.9649,
+          "met_rate_all": 0.9649,
+          "judge_disagreements": 1,
           "all_constraints": 58,
           "met_rate_all_constraints": 0.9483
         }
@@ -2733,32 +2733,32 @@
         "queries": 11,
         "per_judge": {
           "azure::Kimi-K2.5": {
-            "met": 54,
-            "not_met": 4,
+            "met": 55,
+            "not_met": 3,
             "cannot_assess": 0,
             "total": 58,
-            "met_rate_assessable": 0.931,
-            "met_rate_all": 0.931
+            "met_rate_assessable": 0.9483,
+            "met_rate_all": 0.9483
           },
           "azure::gpt-5.4-mini": {
-            "met": 53,
-            "not_met": 5,
+            "met": 56,
+            "not_met": 2,
             "cannot_assess": 0,
             "total": 58,
-            "met_rate_assessable": 0.9138,
-            "met_rate_all": 0.9138
+            "met_rate_assessable": 0.9655,
+            "met_rate_all": 0.9655
           }
         },
         "consensus": {
-          "met": 53,
-          "not_met": 4,
+          "met": 54,
+          "not_met": 1,
           "cannot_assess": 0,
-          "total": 57,
-          "met_rate_assessable": 0.9298,
-          "met_rate_all": 0.9298,
-          "judge_disagreements": 1,
+          "total": 55,
+          "met_rate_assessable": 0.9818,
+          "met_rate_all": 0.9818,
+          "judge_disagreements": 3,
           "all_constraints": 58,
-          "met_rate_all_constraints": 0.9138
+          "met_rate_all_constraints": 0.931
         }
       },
       "open_source::zero_shot": {
@@ -2767,12 +2767,12 @@
         "queries": 11,
         "per_judge": {
           "azure::Kimi-K2.5": {
-            "met": 55,
-            "not_met": 2,
-            "cannot_assess": 1,
+            "met": 57,
+            "not_met": 1,
+            "cannot_assess": 0,
             "total": 58,
-            "met_rate_assessable": 0.9649,
-            "met_rate_all": 0.9483
+            "met_rate_assessable": 0.9828,
+            "met_rate_all": 0.9828
           },
           "azure::gpt-5.4-mini": {
             "met": 58,
@@ -2784,15 +2784,15 @@
           }
         },
         "consensus": {
-          "met": 55,
+          "met": 57,
           "not_met": 0,
           "cannot_assess": 0,
-          "total": 55,
+          "total": 57,
           "met_rate_assessable": 1.0,
           "met_rate_all": 1.0,
-          "judge_disagreements": 3,
+          "judge_disagreements": 1,
           "all_constraints": 58,
-          "met_rate_all_constraints": 0.9483
+          "met_rate_all_constraints": 0.9828
         }
       }
     },
@@ -2802,8 +2802,8 @@
         "azure::gpt-5.4-mini"
       ],
       "paired_verdicts": 232,
-      "exact_agreement": 0.9784,
-      "cohen_kappa": 0.7719
+      "exact_agreement": 0.9741,
+      "cohen_kappa": 0.6125
     }
   },
   "benchmark_provenance": {

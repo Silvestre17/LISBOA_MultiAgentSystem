@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from eval import paper_eval_analysis as pea  # noqa: E402
-from eval import run_ablation, run_benchmark  # noqa: E402
+from eval import constraint_judge, run_ablation, run_benchmark  # noqa: E402
 
 
 def test_resume_keeps_checkpoint_prefix():
@@ -93,3 +93,16 @@ def test_latency_and_agreement_figures():
     assert row["exact_agreement"] == 0.5
     assert row["within_one_point"] == 0.75
     assert row["mean_absolute_difference"] == 0.75
+
+
+def test_constraint_request_date_follows_the_run_days():
+    same_day = {"ablation_metadata": {
+        "run_sessions": [{"started_at": "2026-09-26T10:55:45"}],
+        "run_started_at": "2026-09-26T12:17:09",
+        "run_finished_at": "2026-09-26T14:10:18",
+    }}
+    assert constraint_judge.request_date_text(same_day) == "Saturday, 26 September 2026"
+    overnight = {"ablation_metadata": {"run_started_at": "2026-09-26T23:30:00", "run_finished_at": "2026-09-27T01:10:00"}}
+    assert constraint_judge.request_date_text(overnight) == (
+        "between Saturday, 26 September 2026 and Sunday, 27 September 2026"
+    )
