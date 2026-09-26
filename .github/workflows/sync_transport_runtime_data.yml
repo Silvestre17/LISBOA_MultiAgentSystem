@@ -27,6 +27,9 @@ on:
       - "scripts/publish_transport_runtime_data.py"
       - "tools/carris_api.py"
       - "tools/cp_api.py"
+      - "tools/geographic_scope.py"
+      - "tools/location_resolver.py"
+      - "tools/utils.py"
       - "tools/runtime_paths.py"
       - "tools/transport_release_assets.py"
 
@@ -130,3 +133,17 @@ jobs:
             --clobber
 
           echo "Published ${#ASSETS[@]} transport runtime asset(s) to $TRANSPORT_DATA_RELEASE_TAG"
+
+      - name: Fail visibly when an operator was not rebuilt
+        # The publish step keeps the previous asset for an operator that failed, so the
+        # release stays usable; this step turns that silent fallback into a failed run.
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, sys
+          manifest = json.load(open("${{ env.TRANSPORT_ARTIFACT_DIR }}/transport_runtime_manifest.json", encoding="utf-8"))
+          failed = [a for a in manifest.get("artifacts", []) if not a.get("ok")]
+          for a in failed:
+              print(f"::error title={a.get('operator')} runtime not rebuilt::{a.get('error')}")
+          sys.exit(1 if failed else 0)
+          PY

@@ -27,11 +27,18 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-from agent.utils.geographic_scope import (
-    AML_MUNICIPALITY_CENTROIDS,
-    AML_MUNICIPALITY_NAMES,
-    normalize_scope_text,
-)
+try:
+    from tools.geographic_scope import (
+        AML_MUNICIPALITY_CENTROIDS,
+        AML_MUNICIPALITY_NAMES,
+        normalize_scope_text,
+    )
+except ImportError:
+    from geographic_scope import (
+        AML_MUNICIPALITY_CENTROIDS,
+        AML_MUNICIPALITY_NAMES,
+        normalize_scope_text,
+    )
 
 try:
     from tools.utils import haversine_distance
