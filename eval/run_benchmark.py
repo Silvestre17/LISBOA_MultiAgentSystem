@@ -19,11 +19,17 @@
 #       Override the benchmark response-model set with one or more explicit provider::model identifiers.
 #   > python -m eval.run_benchmark --judge-model-spec openai::gpt-5.4-mini
 #       Override the evaluation judge with one or more explicit provider::model identifiers.
+#   > python -m eval.run_benchmark --dataset eval/evaluation_groundtruth_queries_paper_eval.json --output-prefix benchmark_final
+#       Paper evaluation run; each finished response is appended to a .partial.jsonl checkpoint.
+#   > python -m eval.run_benchmark --dataset <same dataset> --resume eval/results/benchmark/<prefix>_<timestamp>.partial.jsonl
+#       Resume an interrupted run from its checkpoint (add --retry-errors to rerun failed responses).
 # ==========================================================================
 
 import json
 import os
+import sys
 import time
+from statistics import median
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
@@ -41,6 +47,7 @@ from agent.utils.langsmith_tracing import (
 from eval.llm_judge import LLMJudge
 from eval.runtime_utils import (
     aggregate_judge_runs,
+    append_checkpoint_line,
     build_reference_context,
     build_cost_payload,
     build_model_id,
@@ -54,6 +61,7 @@ from eval.runtime_utils import (
     collect_runtime_data_provenance,
     combine_cost_payloads,
     combine_usage_payloads,
+    compute_dataset_fingerprint,
     compute_tool_metrics,
     get_pricing_metadata,
     load_pricing_catalog,
@@ -62,6 +70,7 @@ from eval.runtime_utils import (
     select_balanced_subset,
     split_pricing_config,
     summarize_error_categories,
+    warm_up_runtime_resources,
     write_json_artifact,
 )
 from eval.validators.response_heuristics import run_all_heuristics
@@ -71,6 +80,8 @@ BENCHMARK_DOMAINS = ("weather", "transport", "researcher")
 BENCHMARK_LANGSMITH_PROJECT_ENV = "LISBOA_LANGSMITH_BENCHMARK_PROJECT"
 BENCHMARK_LANGSMITH_SCOPE_LABEL = "Benchmark"
 SUPPORTED_MODEL_PROVIDERS = {"azure", "openai", "lmstudio"}
+DEFAULT_OUTPUT_PREFIX = "benchmark_results"
+CHECKPOINT_SUFFIX = ".partial.jsonl"
 
 
 def _average_tool_f1(records: list[dict]) -> float:
@@ -141,6 +152,150 @@ def _describe_response_telemetry(
         "response_usage_status": "not_applicable_no_llm",
         "response_usage_note": "The worker answered through a deterministic non-LLM path, so response-side tokens and cost are zero by design.",
     }
+
+
+def _record_has_error(record: dict) -> bool:
+    """Return whether a stored benchmark response failed or lacks a judge score."""
+    if record.get("error") is not None:
+        return True
+    return any(judge_run.get("error") for judge_run in record.get("judge_runs") or [])
+
+
+def _prefix_from_checkpoint(checkpoint_path: Path) -> str:
+    """Return the output prefix of a ``<prefix>_<YYYYmmdd>_<HHMMSS>.partial.jsonl`` checkpoint."""
+    stem = checkpoint_path.name[: -len(CHECKPOINT_SUFFIX)] if checkpoint_path.name.endswith(CHECKPOINT_SUFFIX) else checkpoint_path.stem
+    parts = stem.rsplit("_", 2)
+    return parts[0] if len(parts) == 3 and parts[1].isdigit() and parts[2].isdigit() else DEFAULT_OUTPUT_PREFIX
+
+
+def _load_checkpoint(checkpoint_path: Path, *, retry_errors: bool = False) -> dict:
+    """Read a benchmark checkpoint: sessions and finished responses keyed by (query id, model).
+
+    Args:
+        checkpoint_path: ``.partial.jsonl`` file written by an earlier run.
+        retry_errors: Drop responses whose generation or judge call failed, so they run again.
+
+    Returns:
+        dict: Sessions, finished records, the number dropped for a retry, and the
+        query fingerprint, judge list, and system-code fingerprint of the first session.
+    """
+    sessions: list[dict] = []
+    completed: dict[tuple[str, str], dict] = {}
+    raw_text = checkpoint_path.read_text(encoding="utf-8")
+    for line_number, line in enumerate(raw_text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            # An interrupted write can truncate the last line; every earlier line is intact.
+            print(f"[Checkpoint] Ignoring unreadable line {line_number} in {checkpoint_path.name}.")
+            continue
+        if entry.get("type") in {"session", "session_end"}:
+            session = {key: value for key, value in entry.items() if key != "provenance"}
+            if entry.get("type") == "session":
+                git_provenance = (entry.get("provenance") or {}).get("git") or {}
+                session["git_commit"] = git_provenance.get("commit")
+                session["has_uncommitted_changes"] = git_provenance.get("has_uncommitted_changes")
+                session["system_code_sha256"] = git_provenance.get("system_code_sha256")
+            sessions.append(session)
+        elif entry.get("type") == "result":
+            # Later lines win, so a retried response replaces the failed one.
+            completed[(str(entry["id"]), str(entry["response_model"]))] = entry["record"]
+    if raw_text and not raw_text.endswith("\n"):
+        with checkpoint_path.open("a", encoding="utf-8") as handle:
+            handle.write("\n")
+    retried = 0
+    if retry_errors:
+        retried = sum(1 for record in completed.values() if _record_has_error(record))
+        completed = {key: record for key, record in completed.items() if not _record_has_error(record)}
+    first_session = next((session for session in sessions if session.get("type") == "session"), {})
+    return {
+        "sessions": sessions,
+        "completed": completed,
+        "retried_errors": retried,
+        "groundtruth_fingerprint": first_session.get("groundtruth_fingerprint"),
+        "judge_model_ids": first_session.get("judge_model_ids"),
+        "system_code_sha256": first_session.get("system_code_sha256"),
+    }
+
+
+def _format_duration(seconds: float) -> str:
+    """Render seconds as ``1h05m`` or ``12m30s``."""
+    seconds = int(max(seconds, 0))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours}h{minutes:02d}m" if hours else f"{minutes}m{secs:02d}s"
+
+
+def _format_record_log(record: dict) -> str:
+    """One console line per response: score per judge, latency, cost, tools, and failures."""
+    scores = record.get("scores") or {}
+    quality = scores.get("composite_score")
+    by_judge = [
+        f"{judge_id.split('::')[-1]} {float(judge_scores['composite_score']):.2f}"
+        for judge_id, judge_scores in (record.get("scores_by_judge") or {}).items()
+        if judge_scores.get("composite_score") is not None
+    ]
+    usage = record.get("response_usage") or {}
+    cost = float((record.get("response_cost_usd") or {}).get("total_cost_usd") or 0.0)
+    tool_f1 = (record.get("tool_metrics") or {}).get("tool_f1")
+    line = (f"          -> QS {quality:.2f}" if quality is not None else "          -> QS n/a") + (
+        f" ({' / '.join(by_judge)})" if by_judge else ""
+    )
+    line += f" | {float(record.get('latency_s') or 0.0):.1f} s"
+    line += f" | USD {cost:.4f}" if usage.get("call_count") else " | no model call"
+    line += f" | tools {','.join(record.get('tools_used') or []) or 'none'}"
+    line += f" | tool F1 {tool_f1:.2f}" if tool_f1 is not None else ""
+    if record.get("model_call_mismatches"):
+        line += f"\n          MODEL MISMATCH: calls served by {record['model_call_mismatches']}"
+    if record.get("error") is not None:
+        line += f"\n          RESPONSE ERROR ({record.get('error_type')}): {str(record['error'])[:240]}"
+    for judge_run in record.get("judge_runs") or []:
+        if judge_run.get("error") and record.get("error") is None:
+            line += f"\n          JUDGE ERROR {judge_run.get('judge_model')}: {str(judge_run['error'])[:240]}"
+    return line
+
+
+def _print_run_summary(results: list[dict], model_ids: list[str], query_count: int, checkpoint_path: Path) -> None:
+    """Print, per response model, what the paper reports: quality, latency, cost, and failures."""
+    print("\n" + "=" * 60 + "\nRUN SUMMARY (response cost only; judge calls excluded)\n" + "=" * 60)
+    incomplete = False
+    for model_id in model_ids:
+        records = [record for record in results if record["response_model"] == model_id]
+        if len(records) < query_count:
+            incomplete = True
+        qualities = [r["scores"]["composite_score"] for r in records if (r.get("scores") or {}).get("composite_score") is not None]
+        latencies = sorted(float(r.get("latency_s") or 0.0) for r in records)
+        model_calls = [r for r in records if (r.get("response_usage") or {}).get("call_count")]
+        costs = [float((r.get("response_cost_usd") or {}).get("total_cost_usd") or 0.0) for r in model_calls]
+        print(
+            f"\n{model_id}: {len(records)} of {query_count} queries"
+            + (f" ({query_count - len(records)} STILL TO RUN)" if len(records) < query_count else "")
+        )
+        if qualities:
+            print(f"  QS {sum(qualities) / len(qualities):.3f} (n={len(qualities)})", end="")
+            for domain in BENCHMARK_DOMAINS:
+                domain_scores = [r["scores"]["composite_score"] for r in records if r["domain"] == domain and r["scores"].get("composite_score") is not None]
+                if domain_scores:
+                    print(f" | {domain} {sum(domain_scores) / len(domain_scores):.3f}", end="")
+            print()
+        if latencies:
+            print(f"  latency median {median(latencies):.1f} s, P90 {latencies[int(0.9 * (len(latencies) - 1))]:.1f} s")
+        print(
+            f"  model-calling responses {len(model_calls)}/{len(records)}"
+            + (f" | cost USD {sum(costs):.3f} total, {sum(costs) / len(costs):.4f} per model-calling response" if costs else "")
+        )
+        print(
+            f"  response errors {sum(1 for r in records if r.get('error') is not None)}"
+            f" | judge errors {sum(1 for r in records if r.get('error') is None and any(j.get('error') for j in r.get('judge_runs') or []))}"
+            f" | responses with calls to another model {sum(1 for r in records if r.get('model_call_mismatches'))}"
+        )
+    if incomplete:
+        print(
+            f"\nThis file is INCOMPLETE. Finish it with: --resume \"{checkpoint_path}\" and the same --dataset "
+            "(add --retry-errors to rerun failed responses)."
+        )
 
 
 def resolve_groundtruth_path(dataset_path: str | Path | None = None) -> Path:
@@ -383,6 +538,20 @@ def run_isolated_agent(domain: str, query: str, config: dict):
     error = None
     agent.reset_llm_usage_tracking()
 
+    # Record the model name the API reports for every call, next to the
+    # configured one, so the artefact shows which model actually answered.
+    served_model_names: list[str] = []
+    original_record_usage = agent._record_llm_usage
+
+    def _record_usage_with_served_model(llm, response):
+        raw = response.get("raw") if isinstance(response, dict) else response
+        served = (getattr(raw, "response_metadata", None) or {}).get("model_name")
+        if served:
+            served_model_names.append(str(served))
+        return original_record_usage(llm, response)
+
+    object.__setattr__(agent, "_record_llm_usage", _record_usage_with_served_model)
+
     original_tool_invokes = []
     try:
         for tool in getattr(agent, "tools", []):
@@ -418,6 +587,7 @@ def run_isolated_agent(domain: str, query: str, config: dict):
         agent.get_llm_usage_summary(),
         model_id=response_model_id,
     )
+    response_usage["api_model_names"] = sorted(set(served_model_names))
     return final_response, tools_called, retrieved_context_str, latency, error, response_usage
 
 
@@ -429,7 +599,10 @@ def run_benchmark(
     judge_provider: str | None = None,
     judge_model: str | None = None,
     groundtruth_path: str | Path | None = None,
-    output_prefix: str = "benchmark_results",
+    output_prefix: str | None = None,
+    resume_path: str | Path | None = None,
+    retry_errors: bool = False,
+    query_ids: list[str] | None = None,
 ):
     """
     Execute the academic benchmark and save the results JSON.
@@ -444,6 +617,14 @@ def run_benchmark(
         judge_model_specs: Optional repeatable list of judge model specs.
         judge_provider: Optional provider override for a single evaluation judge.
         judge_model: Optional model override for a single evaluation judge.
+        groundtruth_path: Optional dataset path; the worker domains are kept.
+        output_prefix: File prefix inside ``eval/results/benchmark/``. With
+            ``resume_path`` and no prefix, the checkpoint's prefix is kept.
+        resume_path: Optional ``.partial.jsonl`` checkpoint of an earlier run with the
+            same queries, judges, and system code. Finished responses are reused.
+        retry_errors: With ``resume_path``, run again the responses whose generation
+            or judge call failed.
+        query_ids: Optional query ids to run, in corpus order.
     """
     benchmark_langsmith_project = get_langsmith_scoped_project_name(
         BENCHMARK_LANGSMITH_SCOPE_LABEL,
@@ -474,12 +655,26 @@ def run_benchmark(
         groundtruth_queries = load_groundtruth_queries(resolved_groundtruth_path)
         # Evaluated commit, environment, and data snapshots, taken before any query runs.
         run_provenance = build_run_provenance(dataset_path=resolved_groundtruth_path)
+        if run_provenance["git"].get("has_uncommitted_changes"):
+            print(
+                "[Provenance] Warning: code or evaluation files have uncommitted changes, so the stored "
+                "commit does not fully describe the evaluated code."
+            )
+        if query_ids:
+            wanted = set(query_ids)
+            unknown = sorted(wanted - {item["id"] for item in groundtruth_queries})
+            if unknown:
+                print(f"[Benchmark] Unknown or non-worker query ids: {unknown}. Aborting.")
+                return
+            groundtruth_queries = [item for item in groundtruth_queries if item["id"] in wanted]
         if limit:
             groundtruth_queries = select_balanced_subset(
                 groundtruth_queries,
                 limit,
                 group_key="domain",
             )
+        groundtruth_fingerprint = compute_dataset_fingerprint(groundtruth_queries)
+        print(f"[Benchmark] {len(groundtruth_queries)} worker queries x {len(models)} response models.")
 
         judge_configs = resolve_judge_models(
             judge_model_specs,
@@ -510,6 +705,76 @@ def run_benchmark(
         ]
         evaluation_model_manifest = build_multi_judge_manifest(judge_model_manifests)
         evaluation_model_id = str(evaluation_model_manifest["model_id"])
+        judge_model_ids = [str(manifest["model_id"]) for manifest in judge_model_manifests]
+
+        if resume_path is not None:
+            checkpoint_path = Path(resume_path)
+            if not checkpoint_path.is_file():
+                print(f"[Checkpoint] Resume file not found: {checkpoint_path}")
+                return
+            checkpoint = _load_checkpoint(checkpoint_path, retry_errors=retry_errors)
+            if checkpoint["groundtruth_fingerprint"] not in (None, groundtruth_fingerprint):
+                print("[Checkpoint] The query selection differs from the checkpoint. Aborting so that two corpora are never mixed.")
+                return
+            stored_code = checkpoint.get("system_code_sha256")
+            current_code = run_provenance["git"].get("system_code_sha256")
+            if stored_code and current_code and stored_code != current_code:
+                print("[Checkpoint] The system code differs from the code of the checkpoint. Aborting so that one run evaluates one version.")
+                return
+            if checkpoint.get("judge_model_ids") not in (None, judge_model_ids):
+                print(f"[Checkpoint] The judges must match the checkpoint ({checkpoint['judge_model_ids']}). Aborting.")
+                return
+            output_prefix = output_prefix or _prefix_from_checkpoint(checkpoint_path)
+            print(
+                f"[Checkpoint] Resuming {checkpoint_path.name}: {len(checkpoint['completed'])} responses reused"
+                + (f", {checkpoint['retried_errors']} failed ones to run again" if retry_errors else "")
+                + "."
+            )
+        else:
+            output_prefix = output_prefix or DEFAULT_OUTPUT_PREFIX
+            checkpoint_path = build_results_output_path(
+                "benchmark", output_prefix, run_started_at.strftime("%Y%m%d_%H%M%S"), suffix=CHECKPOINT_SUFFIX
+            )
+            checkpoint = {"sessions": [], "completed": {}, "retried_errors": 0}
+
+        run_options = {
+            "limit": limit,
+            "query_ids": list(query_ids) if query_ids else None,
+            "response_models": [build_model_id(config["provider"], config["model"]) for config in models],
+            "judge_model_ids": judge_model_ids,
+            "resumed_from_checkpoint": resume_path is not None,
+            "retry_errors": bool(retry_errors),
+            "checkpoint_path": str(checkpoint_path),
+        }
+        append_checkpoint_line(
+            checkpoint_path,
+            {
+                "type": "session",
+                "started_at": run_started_at.isoformat(),
+                "argv": sys.argv[1:],
+                "options": run_options,
+                "groundtruth_path": str(resolved_groundtruth_path),
+                "groundtruth_fingerprint": groundtruth_fingerprint,
+                "judge_model_ids": judge_model_ids,
+                "provenance": run_provenance,
+            },
+        )
+        print(f"[Checkpoint] Each finished response is appended to {checkpoint_path}")
+        print(f"[Checkpoint] If the run stops, resume with: --resume \"{checkpoint_path}\" and the same --dataset")
+        responses_to_run = sum(
+            1
+            for config in models
+            for item in groundtruth_queries
+            if (item["id"], build_model_id(config["provider"], config["model"])) not in checkpoint["completed"]
+        )
+        responses_this_session = 0
+        warm_up = warm_up_runtime_resources()
+        print(
+            f"[Warm-up] Vector store and transport data loaded in {warm_up['seconds']} s "
+            f"(vector store {'OK' if warm_up['kb_ok'] else 'FAILED'}, transport {'OK' if warm_up['transport_ok'] else 'FAILED'}); "
+            "as in the app, this one-time start-up stays out of the timed answers."
+        )
+        loop_started_perf = time.perf_counter()
 
         response_model_manifests = [
             build_model_manifest(
@@ -535,7 +800,11 @@ def run_benchmark(
             model_consecutive_errors = 0
 
             for idx, item in enumerate(groundtruth_queries):
-                print(f"  [{idx + 1}/{len(groundtruth_queries)}] [{item['domain'].upper()}] {item['query'][:50]}...")
+                stored_record = checkpoint["completed"].get((item["id"], response_model_id))
+                if stored_record is not None:
+                    results.append(stored_record)
+                    continue
+                print(f"  [{idx + 1}/{len(groundtruth_queries)}] [{item['id']}] [{item['domain'].upper()}] {item['query'][:70]}")
 
                 response, tools, retrieved_context, latency, error, response_usage = run_isolated_agent(
                     domain=item['domain'],
@@ -639,11 +908,28 @@ def run_benchmark(
                     "tool_metrics": tool_metrics,
                     "heuristics": heuristics,
                     "sla_met": latency <= SLA_THRESHOLDS.get(item["domain"], 15.0),
+                    "api_model_names": response_usage.get("api_model_names", []),
+                    # Calls whose configured model is not the response model of this row.
+                    "model_call_mismatches": sorted(
+                        {
+                            str(call.get("model_id"))
+                            for call in response_usage.get("llm_usage_breakdown") or []
+                            if str(call.get("model_id") or "").lower() != str(response_model_id).lower()
+                        }
+                    ),
                 }
                 results.append(record)
-
-                score_display = f"{judge_scores['composite_score']:.2f}/5.0" if judge_scores['composite_score'] is not None else "N/A"
-                print(f"          -> Score: {score_display} | Latency: {latency:.2f}s | Reason: {judge_scores['reasoning']}")
+                append_checkpoint_line(
+                    checkpoint_path,
+                    {"type": "result", "id": item["id"], "response_model": response_model_id, "record": record},
+                )
+                responses_this_session += 1
+                print(_format_record_log(record))
+                elapsed = time.perf_counter() - loop_started_perf
+                print(
+                    f"          [Progress] {responses_this_session}/{responses_to_run} responses this session | "
+                    f"elapsed {_format_duration(elapsed)} | ETA {_format_duration(elapsed / responses_this_session * (responses_to_run - responses_this_session))}"
+                )
 
                 if error is not None and ("Setup Error" in error or model_consecutive_errors >= 2):
                     print(f"          -> ABORTING {response_model_id}: Model is failing continuously. Saving costs.")
@@ -657,6 +943,34 @@ def run_benchmark(
         output_path = build_results_output_path("benchmark", output_prefix, timestamp)
         run_finished_at = datetime.now()
         total_runtime_s = round(time.perf_counter() - run_started_perf, 3)
+        session_end_entry = {
+            "type": "session_end",
+            "started_at": run_started_at.isoformat(),
+            "finished_at": run_finished_at.isoformat(),
+            "runtime_s": total_runtime_s,
+            "responses_completed": responses_this_session,
+            "git_commit": run_provenance["git"].get("commit"),
+            "output_file": str(output_path),
+        }
+        append_checkpoint_line(checkpoint_path, session_end_entry)
+        run_sessions = [
+            *checkpoint["sessions"],
+            {
+                "type": "session",
+                "started_at": run_started_at.isoformat(),
+                "options": run_options,
+                "git_commit": run_provenance["git"].get("commit"),
+                "has_uncommitted_changes": run_provenance["git"].get("has_uncommitted_changes"),
+                "system_code_sha256": run_provenance["git"].get("system_code_sha256"),
+            },
+            session_end_entry,
+        ]
+        api_model_names = {
+            manifest["model_id"]: sorted(
+                {name for r in results if r["response_model"] == manifest["model_id"] for name in r.get("api_model_names") or []}
+            )
+            for manifest in response_model_manifests
+        }
         benchmark_metadata = build_run_metadata(
             resolved_groundtruth_path,
             groundtruth_queries,
@@ -680,6 +994,11 @@ def run_benchmark(
                 "output_file": str(output_path),
                 "provenance": run_provenance,
                 "runtime_data_at_end": collect_runtime_data_provenance(),
+                "run_options": run_options,
+                "warm_up": warm_up,
+                "run_sessions": run_sessions,
+                "api_model_names": api_model_names,
+                "groundtruth_ids": [item["id"] for item in groundtruth_queries],
                 **get_pricing_metadata(pricing_by_model),
             },
         )
@@ -692,7 +1011,14 @@ def run_benchmark(
             output_path,
         )
 
+        _print_run_summary(
+            results,
+            [manifest["model_id"] for manifest in response_model_manifests],
+            len(groundtruth_queries),
+            checkpoint_path,
+        )
         print(f"\nBenchmark complete. Results saved to {output_path}")
+        print(f"Checkpoint kept at {checkpoint_path}")
         runtime_failure = get_last_langsmith_runtime_failure()
         if runtime_failure:
             print(
@@ -902,10 +1228,35 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output-prefix",
         type=str,
-        default="benchmark_results",
-        help="Output filename prefix inside eval/results/benchmark/.",
+        default=None,
+        help="Output filename prefix inside eval/results/benchmark/ (default benchmark_results; with --resume, the checkpoint's prefix).",
+    )
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        help="Resume from a .partial.jsonl checkpoint. Use the same dataset as the original run.",
+    )
+    parser.add_argument(
+        "--retry-errors",
+        action="store_true",
+        help="With --resume, run again the responses whose generation or judge call failed.",
+    )
+    parser.add_argument(
+        "--query-id",
+        action="append",
+        dest="query_ids",
+        help="Repeatable or comma-separated. Run only these worker query ids, for example W01,T05.",
     )
     args = parser.parse_args()
+    if args.retry_errors and not args.resume:
+        parser.error("--retry-errors requires --resume.")
+    query_ids = [
+        query_id.strip()
+        for value in (args.query_ids or [])
+        for query_id in value.split(",")
+        if query_id.strip()
+    ]
 
     limit = 5 if args.mode == "run_test" else args.limit
     selected_models = resolve_response_models(
@@ -921,4 +1272,7 @@ if __name__ == "__main__":
         judge_model=args.judge_model,
         groundtruth_path=args.dataset,
         output_prefix=args.output_prefix,
+        resume_path=args.resume,
+        retry_errors=args.retry_errors,
+        query_ids=query_ids or None,
     )

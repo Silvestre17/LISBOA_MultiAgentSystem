@@ -24,7 +24,9 @@ from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Any, Iterable, Optional, Sequence
 
-RESULTS_ROOT = Path(__file__).with_name("results")
+# LISBOA_EVAL_RESULTS_DIR redirects every artefact, for example to rehearse the
+# pipeline on a few queries without touching eval/results/.
+RESULTS_ROOT = Path(os.getenv("LISBOA_EVAL_RESULTS_DIR") or Path(__file__).with_name("results"))
 REPO_ROOT = Path(__file__).resolve().parents[1]
 # System code whose last commit dates the evaluated LISBOA version.
 SYSTEM_CODE_PATHS = ("agent", "tools", "config.py", "app.py")
@@ -790,6 +792,43 @@ def aggregate_judge_runs(judge_runs: Sequence[dict[str, Any]]) -> dict[str, Any]
             ],
         },
     }
+
+
+def warm_up_runtime_resources() -> dict[str, Any]:
+    """Load the vector store and transport databases before any timed answer.
+
+    The Streamlit app loads these once at start-up, so a user never waits for
+    them; loading them first keeps that one-time cost out of the first timed
+    answer of a run.
+
+    Returns:
+        dict[str, Any]: Whether each resource loaded and how long it took.
+    """
+    import time
+
+    from agent.utils.startup_resources import run_startup_preload
+
+    started = time.perf_counter()
+    status = run_startup_preload(language="en")
+    return {
+        "ok": bool(status.get("ok")),
+        "kb_ok": bool(status.get("kb_ok")),
+        "transport_ok": bool(status.get("transport_ok")),
+        "seconds": round(time.perf_counter() - started, 1),
+    }
+
+
+def append_checkpoint_line(checkpoint_path: str | Path, entry: dict[str, Any]) -> None:
+    """Append one JSON line to a run checkpoint and flush it to disk.
+
+    Args:
+        checkpoint_path: ``.partial.jsonl`` file of the run.
+        entry: JSON-serializable record (session, profile, or finished result).
+    """
+    with Path(checkpoint_path).open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def ensure_results_dir(result_type: str) -> Path:

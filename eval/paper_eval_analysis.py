@@ -3,7 +3,8 @@
 #   - André Filipe Gomes Silvestre, 20240502
 #
 #   Turns one ablation run into every number the revised paper reports:
-#     - provenance: evaluated commit, sessions, models, data, protocol checks;
+#     - provenance: evaluated commit, sessions, models, data, protocol checks,
+#       for the ablation and the benchmark, and whether both ran on one system;
 #     - quality: paired Wilcoxon, rank-biserial r, and bootstrap CI per model
 #       and domain (eval/statistical_analysis.py), plus itinerary and
 #       cross-domain subsets from the annotations;
@@ -78,6 +79,19 @@ def _describe(values: Sequence[float]) -> dict[str, Any]:
     }
 
 
+def _slowest_decile_share(values: Sequence[float]) -> float | None:
+    """Share of the total time spent in the slowest tenth of the responses."""
+    ordered = sorted((float(value) for value in values), reverse=True)
+    total = sum(ordered)
+    if not ordered or total <= 0:
+        return None
+    return _round(sum(ordered[: max(1, math.ceil(len(ordered) / 10))]) / total)
+
+
+def _query_types(annotations: dict | None) -> dict[str, str]:
+    return {query_id: str(annotation.get("query_type")) for query_id, annotation in ((annotations or {}).get("queries") or {}).items()}
+
+
 def _arm_block(record: dict, profile: str, arm: str) -> dict | None:
     return (((record.get("comparisons") or {}).get(profile) or {}).get("metrics") or {}).get(arm)
 
@@ -132,12 +146,15 @@ def icc2(a: Sequence[float], b: Sequence[float]) -> tuple[float, float]:
 
 def _agreement_row(a: Sequence[int], b: Sequence[int]) -> dict[str, Any]:
     single, average = icc2(a, b)
+    differences = np.abs(np.asarray(a) - np.asarray(b))
     return {
         "n": len(a),
         "qwk": _round(qwk(a, b)),
         "icc_2_1": _round(single),
         "icc_2_2": _round(average),
-        "exact_agreement": _round(float(np.mean(np.asarray(a) == np.asarray(b)))),
+        "exact_agreement": _round(float(np.mean(differences == 0))),
+        "within_one_point": _round(float(np.mean(differences <= 1))),
+        "mean_absolute_difference": _round(float(np.mean(differences))),
     }
 
 
@@ -252,6 +269,68 @@ def provenance_section(payload: dict) -> dict[str, Any]:
     }
 
 
+def benchmark_provenance_section(benchmark: dict, ablation: dict | None = None) -> dict[str, Any]:
+    """Protocol checks for the benchmark run, and whether it evaluated the ablation's system.
+
+    Args:
+        benchmark: Benchmark results payload.
+        ablation: Optional ablation payload of the same revision.
+
+    Returns:
+        Run dates, sessions, commit, served model names, error counts, calls to a
+        model other than the row's, and checks, including one system-code
+        fingerprint and one corpus file for both runs.
+    """
+    metadata = benchmark.get("benchmark_metadata") or {}
+    git = (metadata.get("provenance") or {}).get("git") or {}
+    records = benchmark.get("benchmark_results", [])
+    sessions = metadata.get("run_sessions") or []
+    session_codes = sorted({s.get("system_code_sha256") for s in sessions if s.get("type") == "session" and s.get("system_code_sha256")})
+    errors = Counter(str(r.get("response_model")) for r in records if r.get("error") is not None)
+    judge_errors = Counter(
+        str(r.get("response_model"))
+        for r in records
+        if r.get("error") is None and any(j.get("error") for j in r.get("judge_runs") or [])
+    )
+    mismatches = Counter(str(r.get("response_model")) for r in records if r.get("model_call_mismatches"))
+    expected = len(metadata.get("groundtruth_ids") or []) * len(metadata.get("response_models") or [])
+    output = {
+        "run_started_at": metadata.get("run_started_at"),
+        "run_finished_at": metadata.get("run_finished_at"),
+        "sessions": len([s for s in sessions if s.get("type") == "session"]) or 1,
+        "commit": git.get("commit"),
+        "has_uncommitted_changes": git.get("has_uncommitted_changes"),
+        "responses": len(records),
+        "expected_responses": expected or None,
+        "api_model_names": metadata.get("api_model_names"),
+        "response_errors": dict(errors),
+        "judge_errors": dict(judge_errors),
+        "responses_with_calls_to_another_model": dict(mismatches),
+        "checks": {
+            "complete": None if not expected else len(records) == expected,
+            "single_system_code": None if not session_codes else len(session_codes) == 1,
+            "clean_working_tree": None if git.get("has_uncommitted_changes") is None else not git["has_uncommitted_changes"],
+            "no_response_errors": not errors,
+            "no_judge_errors": not judge_errors,
+            "calls_use_row_model": None if "model_call_mismatches" not in (records[0] if records else {}) else not mismatches,
+        },
+    }
+    if ablation is not None:
+        ablation_metadata = ablation.get("ablation_metadata") or {}
+        ablation_provenance = ablation_metadata.get("provenance") or {}
+        ablation_code = (ablation_provenance.get("git") or {}).get("system_code_sha256")
+        benchmark_code = git.get("system_code_sha256")
+        ablation_dataset = ((ablation_provenance.get("input_files") or {}).get("dataset") or {}).get("sha256")
+        benchmark_dataset = (((metadata.get("provenance") or {}).get("input_files") or {}).get("dataset") or {}).get("sha256")
+        output["checks"]["same_system_code_as_ablation"] = (
+            None if not (ablation_code and benchmark_code) else ablation_code == benchmark_code
+        )
+        output["checks"]["same_corpus_file_as_ablation"] = (
+            None if not (ablation_dataset and benchmark_dataset) else ablation_dataset == benchmark_dataset
+        )
+    return output
+
+
 def quality_section(
     payload: dict,
     annotations: dict | None,
@@ -293,12 +372,37 @@ def quality_section(
                         seed=seed,
                     )
                 )
-    return {"by_domain": domain_tests, "by_query_type": subset_tests}
+    # How many queries LISBOA wins, ties, or loses, per model and subset.
+    types = _query_types(annotations)
+    paired_outcomes = []
+    for profile in _profiles(payload):
+        label = _profile_model_id(payload, profile).split("::")[-1]
+        subsets: dict[str, list[tuple[float, float]]] = {}
+        for record in records:
+            zero_shot = _quality_score(_arm_block(record, profile, "zero_shot"))
+            lisboa = _quality_score(_arm_block(record, profile, "lisboa"))
+            if zero_shot is None or lisboa is None:
+                continue
+            for subset in {"all", str(record.get("domain")), types.get(record["id"], "")} - {""}:
+                subsets.setdefault(subset, []).append((zero_shot, lisboa))
+        for subset, pairs in sorted(subsets.items()):
+            paired_outcomes.append(
+                {
+                    "profile": label,
+                    "subset": subset,
+                    "n": len(pairs),
+                    "lisboa_higher": sum(1 for zero_shot, lisboa in pairs if lisboa > zero_shot),
+                    "ties": sum(1 for zero_shot, lisboa in pairs if lisboa == zero_shot),
+                    "zero_shot_higher": sum(1 for zero_shot, lisboa in pairs if lisboa < zero_shot),
+                }
+            )
+    return {"by_domain": domain_tests, "by_query_type": subset_tests, "paired_outcomes": paired_outcomes}
 
 
-def operational_section(payload: dict, pricing: dict | None) -> dict[str, Any]:
+def operational_section(payload: dict, pricing: dict | None, annotations: dict | None = None) -> dict[str, Any]:
     """Latency and response cost per model and condition; judges excluded from cost."""
     models = (pricing or {}).get("models") or {}
+    types = _query_types(annotations)
     rows = []
     worst_difference = 0.0
     recomputed = 0
@@ -337,6 +441,7 @@ def operational_section(payload: dict, pricing: dict | None) -> dict[str, Any]:
                 "deterministic_responses": len(blocks) - len(llm_blocks),
                 "latency_s_all": _describe([block.get("latency_s", block.get("latency", 0.0)) for block in blocks]),
                 "latency_s_llm_only": _describe([block.get("latency_s", block.get("latency", 0.0)) for block in llm_blocks]),
+                "slowest_decile_time_share": _slowest_decile_share([block.get("latency_s", block.get("latency", 0.0)) for block in blocks]),
                 "cost_usd_per_llm_response": {
                     **_describe(costs),
                     "mean": _round(mean(costs), 5) if costs else None,
@@ -359,6 +464,12 @@ def operational_section(payload: dict, pricing: dict | None) -> dict[str, Any]:
                     ]
                     by_domain[domain] = _describe([block.get("latency_s", 0.0) for block in domain_blocks])
                 row["latency_s_by_domain"] = by_domain
+                by_type: dict[str, list[float]] = {}
+                for record in payload.get("ablation_results", []):
+                    block = _arm_block(record, profile, arm)
+                    if block is not None and types.get(record["id"]):
+                        by_type.setdefault(types[record["id"]], []).append(block.get("latency_s", 0.0))
+                row["latency_s_by_query_type"] = {query_type: _describe(values) for query_type, values in sorted(by_type.items())}
             rows.append(row)
     total_response = sum(row["cost_usd_per_llm_response"]["total"] or 0.0 for row in rows)
     total_judges = sum(row["judge_cost_usd_total"] or 0.0 for row in rows)
@@ -445,11 +556,21 @@ def end_to_end_section(payload: dict, annotations: dict | None) -> dict[str, Any
     annotated = (annotations or {}).get("queries") or {}
     output = {}
     for profile in _profiles(payload):
-        routing = {"n": 0, "expected_selected": 0, "exact": 0, "misses": [], "with_extra_agents": []}
+        routing = {
+            "n": 0,
+            "expected_selected": 0,
+            "boundary_declined_without_worker": 0,
+            "exact": 0,
+            "misses": [],
+            "with_extra_agents": [],
+            "boundary_declined_ids": [],
+        }
         coverage_rows = []
         execution_types = Counter()
         qa_paths = Counter()
         qa_scores: dict[str, list[float]] = {}
+        # "final-repair" also marks edits of the deterministic final guard; these made no QA model call.
+        final_repair_without_qa_call = 0
         sources = Counter()
         for record in payload.get("ablation_results", []):
             block = _arm_block(record, profile, "lisboa")
@@ -461,6 +582,9 @@ def end_to_end_section(payload: dict, annotations: dict | None) -> dict[str, Any
             execution_types[summary.get("execution_type") or "not_recorded"] += 1
             qa_path = summary.get("qa_path") or "not_recorded"
             qa_paths[qa_path] += 1
+            qa_calls = int(((block.get("agent_usage") or {}).get("qa") or {}).get("call_count", 0) or 0)
+            if "final-repair" in qa_path and qa_calls == 0:
+                final_repair_without_qa_call += 1
             score = _quality_score(block)
             if score is not None:
                 qa_scores.setdefault(qa_path, []).append(score)
@@ -470,8 +594,15 @@ def end_to_end_section(payload: dict, annotations: dict | None) -> dict[str, Any
             query_type = (annotation or {}).get("query_type") or ("single_domain" if record["domain"] in WORKER_DOMAINS else record["domain"])
             if query_type == "single_domain":
                 routing["n"] += 1
+                workers_selected = [agent for agent in selected if agent in WORKER_DOMAINS or agent == "planner"]
+                # A boundary query (no tool expected: unsupported area, field, action, or entity)
+                # answered directly, before any worker, is the intended behaviour.
+                boundary = not record.get("expected_tools")
                 if set(expected) <= set(selected):
                     routing["expected_selected"] += 1
+                elif boundary and not workers_selected:
+                    routing["boundary_declined_without_worker"] += 1
+                    routing["boundary_declined_ids"].append(record["id"])
                 else:
                     routing["misses"].append(record["id"])
                 if set(selected) == set(expected):
@@ -499,6 +630,7 @@ def end_to_end_section(payload: dict, annotations: dict | None) -> dict[str, Any
             "agent_source": dict(sources),
             "routing_single_domain": {
                 **routing,
+                "correct": routing["expected_selected"] + routing["boundary_declined_without_worker"],
                 "expected_selected_rate": _round(routing["expected_selected"] / routing["n"]) if routing["n"] else None,
                 "exact_rate": _round(routing["exact"] / routing["n"]) if routing["n"] else None,
             },
@@ -522,6 +654,9 @@ def end_to_end_section(payload: dict, annotations: dict | None) -> dict[str, Any
                 if set(qa_paths) == {"not_recorded"}
                 else sum(count for path, count in qa_paths.items() if "retry" in path or "final-repair" in path)
             ),
+            "qa_worker_retry": None if set(qa_paths) == {"not_recorded"} else sum(count for path, count in qa_paths.items() if "retry" in path),
+            "qa_final_repair": None if set(qa_paths) == {"not_recorded"} else sum(count for path, count in qa_paths.items() if "final-repair" in path),
+            "qa_final_repair_deterministic_only": None if set(qa_paths) == {"not_recorded"} else final_repair_without_qa_call,
         }
     return output
 
@@ -530,6 +665,7 @@ def judges_section(payload: dict, benchmark: dict | None) -> dict[str, Any]:
     """Inter-judge reliability and the gain measured by each judge alone."""
     judges = _judge_ids(payload)
     output: dict[str, Any] = {"judges": judges, "ablation_agreement": {}, "gain_by_judge": [], "benchmark_agreement": {}}
+    # Pooled over the five judged dimensions, as in the submitted version of Section 5.3.
     if len(judges) != 2:
         return output
     first, second = judges
@@ -545,6 +681,17 @@ def judges_section(payload: dict, benchmark: dict | None) -> dict[str, Any]:
                         b.append(int(by_judge[second][dimension]))
         if a:
             output["ablation_agreement"][dimension] = _agreement_row(a, b)
+    pooled_a, pooled_b = [], []
+    for record in records:
+        for profile in record.get("comparisons") or {}:
+            for arm in ARMS:
+                by_judge = (_arm_block(record, profile, arm) or {}).get("scores_by_judge") or {}
+                for dimension in BENCHMARK_DIMENSIONS:
+                    if by_judge.get(first, {}).get(dimension) is not None and by_judge.get(second, {}).get(dimension) is not None:
+                        pooled_a.append(int(by_judge[first][dimension]))
+                        pooled_b.append(int(by_judge[second][dimension]))
+    if pooled_a:
+        output["ablation_pooled"] = _agreement_row(pooled_a, pooled_b)
 
     for profile in _profiles(payload):
         generator = _profile_model_id(payload, profile)
@@ -590,6 +737,15 @@ def judges_section(payload: dict, benchmark: dict | None) -> dict[str, Any]:
             ]
             if pairs:
                 output["benchmark_agreement"][dimension] = _agreement_row([p[0] for p in pairs], [p[1] for p in pairs])
+        pooled = [
+            (int(r["scores_by_judge"][first][dimension]), int(r["scores_by_judge"][second][dimension]))
+            for r in results
+            for dimension in BENCHMARK_DIMENSIONS
+            if (r.get("scores_by_judge") or {}).get(first, {}).get(dimension) is not None
+            and (r.get("scores_by_judge") or {}).get(second, {}).get(dimension) is not None
+        ]
+        if pooled:
+            output["benchmark_pooled"] = _agreement_row([p[0] for p in pooled], [p[1] for p in pooled])
         cells: dict[tuple[str, str], list[float]] = {}
         for r in results:
             for judge in (first, second):
@@ -600,6 +756,10 @@ def judges_section(payload: dict, benchmark: dict | None) -> dict[str, Any]:
         if all((judge, model) in means for judge in (first, second) for model in (first, second)):
             output["benchmark_own_family"] = {
                 "cell_means": {f"{judge} judges {model}": _round(value) for (judge, model), value in means.items()},
+                # How much higher each judge rates the first family's answers than the second's.
+                "first_minus_second_model_by_judge": {
+                    judge: _round(means[(judge, first)] - means[(judge, second)]) for judge in (first, second)
+                },
                 "own_family_interaction": _round(
                     (means[(first, first)] - means[(first, second)]) - (means[(second, first)] - means[(second, second)])
                 ),
@@ -649,6 +809,18 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"{name} {'unknown' if ok is None else ('OK' if ok else 'FAILED')}" for name, ok in provenance["checks"].items()
         ),
         f"- Response errors: {_fmt(provenance['response_errors'] or 'none')}; judge errors: {_fmt(provenance['judge_errors'] or 'none')}",
+    ]
+    benchmark_provenance = report.get("benchmark_provenance")
+    if benchmark_provenance:
+        lines += [
+            f"- Benchmark: {benchmark_provenance['responses']} of {_fmt(benchmark_provenance['expected_responses'])} responses; "
+            f"run {_fmt(benchmark_provenance['run_started_at'])} to {_fmt(benchmark_provenance['run_finished_at'])}; "
+            f"API model names: {_fmt(benchmark_provenance['api_model_names'])}",
+            "- Benchmark checks: " + ", ".join(
+                f"{name} {'unknown' if ok is None else ('OK' if ok else 'FAILED')}" for name, ok in benchmark_provenance["checks"].items()
+            ),
+        ]
+    lines += [
         "",
         "## Quality (ablation quality score; LISBOA minus zero-shot)",
         "",
@@ -663,6 +835,9 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"{_fmt(row['mean_diff_b_minus_a'])} | [{_fmt(row['bootstrap_ci_low'])}, {_fmt(row['bootstrap_ci_high'])}] | "
             f"{row['wilcoxon_p_value']:.2e} | {_fmt(row['rank_biserial_correlation'])} |"
         )
+    lines += ["", "LISBOA ahead / tied / behind, per query:", ""]
+    for row in report["quality"].get("paired_outcomes", []):
+        lines.append(f"- {row['profile']}, {row['subset']}: {row['lisboa_higher']} / {row['ties']} / {row['zero_shot_higher']} of {row['n']}")
     lines += ["", "## Latency and cost per response", "", "| Model | Condition | Latency mean ± SD (s) | Median | P90 | LLM responses | Cost mean ± SD (USD) | Tokens in / out |", "|---|---|---|---:|---:|---:|---|---|"]
     for row in report["operational"]["rows"]:
         latency = row["latency_s_all"]
@@ -673,6 +848,13 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"{_fmt(row['tokens_mean']['input'], 0)} / {_fmt(row['tokens_mean']['output'], 0)} |"
         )
     run_cost = report["operational"]["run_cost_usd"]
+    for row in report["operational"]["rows"]:
+        extra = f"slowest tenth holds {_fmt(row.get('slowest_decile_time_share'))} of the time"
+        if row.get("latency_s_by_domain"):
+            extra += "; mean by domain " + ", ".join(f"{d} {_fmt(v.get('mean'), 1)}" for d, v in row["latency_s_by_domain"].items())
+        if row.get("latency_s_by_query_type"):
+            extra += "; mean by query type " + ", ".join(f"{t} {_fmt(v.get('mean'), 1)}" for t, v in row["latency_s_by_query_type"].items())
+        lines.append(f"- {row['model']} {row['arm']}: {extra}")
     lines += ["", f"Run cost: responses USD {_fmt(run_cost['responses'], 2)}, judges USD {_fmt(run_cost['judges'], 2)}, total USD {_fmt(run_cost['total'], 2)}. "
               f"Cost recomputed from tokens for {report['operational']['cost_recomputation']['responses_recomputed']} responses; largest difference USD {report['operational']['cost_recomputation']['max_abs_difference_usd']:.2e}.", ""]
     lines += ["Zero-shot vs LISBOA per query (answers without a model call count as zero cost):", "", "| Model | Zero-shot latency median (s) | LISBOA latency median (s) | Zero-shot cost per query (USD) | LISBOA cost per query (USD) | Cost ratio |", "|---|---:|---:|---:|---:|---:|"]
@@ -714,16 +896,35 @@ def render_markdown(report: dict[str, Any]) -> str:
         )
     for profile, section in report["end_to_end"].items():
         lines.append(f"\nQA paths, {profile}: " + "; ".join(f"{path} n={value['n']} (QS {_fmt(value['mean_quality_score'])})" for path, value in section["qa_paths"].items()))
-        lines.append(f"Routing misses, {profile}: {section['routing_single_domain']['misses'] or 'none'}")
-    lines += ["", "## Judges", "", "| Set | Dimension | n | QWK | ICC(2,1) | ICC(2,2) | Exact |", "|---|---|---:|---:|---:|---:|---:|"]
+        routing = section["routing_single_domain"]
+        lines.append(
+            f"Routing, {profile}: correct {routing['correct']}/{routing['n']} (expected worker {routing['expected_selected']}, "
+            f"boundary queries declined before any worker {routing['boundary_declined_without_worker']} {routing['boundary_declined_ids']}); "
+            f"misses {routing['misses'] or 'none'}; QA worker retry {_fmt(section.get('qa_worker_retry'))}, final repair {_fmt(section.get('qa_final_repair'))} ({_fmt(section.get('qa_final_repair_deterministic_only'))} by the deterministic guard alone)"
+        )
+    lines += ["", "## Judges", "", "| Set | Dimension | n | QWK | ICC(2,1) | ICC(2,2) | Exact | Within one | Mean abs. diff. |", "|---|---|---:|---:|---:|---:|---:|---:|---:|"]
     for set_name, key in (("ablation", "ablation_agreement"), ("benchmark", "benchmark_agreement")):
         for dimension, row in report["judges"].get(key, {}).items():
-            lines.append(f"| {set_name} | {dimension} | {row['n']} | {_fmt(row['qwk'])} | {_fmt(row['icc_2_1'])} | {_fmt(row['icc_2_2'])} | {_fmt(row['exact_agreement'])} |")
+            lines.append(
+                f"| {set_name} | {dimension} | {row['n']} | {_fmt(row['qwk'])} | {_fmt(row['icc_2_1'])} | {_fmt(row['icc_2_2'])} | "
+                f"{_fmt(row['exact_agreement'])} | {_fmt(row.get('within_one_point'))} | {_fmt(row.get('mean_absolute_difference'))} |"
+            )
     lines += ["", "| Generator | Judges | Family | Zero-shot | LISBOA | Gain | p |", "|---|---|---|---:|---:|---:|---:|"]
     for row in report["judges"].get("gain_by_judge", []):
         lines.append(f"| {row['generator']} | {row['judges']} | {row['family'] or 'both'} | {_fmt(row['zero_shot_mean'])} | {_fmt(row['lisboa_mean'])} | {_fmt(row['gain'])} | {row['wilcoxon_p']:.1e} |")
+    for key, label in (("benchmark_pooled", "Benchmark"), ("ablation_pooled", "Ablation")):
+        pooled = report["judges"].get(key)
+        if pooled:
+            lines.append(
+                f"\n{label}, all five dimensions pooled: exact {_fmt(pooled['exact_agreement'])}, within one {_fmt(pooled['within_one_point'])}, "
+                f"mean abs. diff. {_fmt(pooled['mean_absolute_difference'])} (n={pooled['n']})"
+            )
     if report["judges"].get("benchmark_own_family"):
-        lines.append(f"\nBenchmark own-family interaction: {_fmt(report['judges']['benchmark_own_family']['own_family_interaction'])}")
+        own = report["judges"]["benchmark_own_family"]
+        lines.append(
+            f"\nBenchmark own-family interaction: {_fmt(own['own_family_interaction'])}; first minus second model, by judge: "
+            f"{_fmt(own.get('first_minus_second_model_by_judge'))}"
+        )
     constraints = report.get("constraints")
     if constraints:
         lines += ["", "## Itinerary constraints (judge consensus)", "", "| Cell | Queries | Constraints | Met | Not met | Cannot assess | Disagreements | Met / all constraints | Met / unanimous assessable |", "|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
@@ -782,12 +983,13 @@ def run_paper_eval_analysis(
         },
         "provenance": provenance_section(payload),
         "quality": quality_section(payload, annotations, bootstrap_iterations=bootstrap_iterations, seed=seed),
-        "operational": operational_section(payload, load_pricing_catalog()),
+        "operational": operational_section(payload, load_pricing_catalog(), annotations),
         "end_to_end": end_to_end_section(payload, annotations),
         "judges": judges_section(payload, benchmark),
         "constraints": constraints_section(constraints),
     }
     if benchmark:
+        report["benchmark_provenance"] = benchmark_provenance_section(benchmark, payload)
         report["benchmark_model_tests"] = benchmark_model_tests(benchmark, bootstrap_iterations=bootstrap_iterations, seed=seed)
         report["benchmark_operational"] = benchmark_operational_section(benchmark)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

@@ -31,6 +31,7 @@ import json
 import os
 import sys
 import time
+from statistics import median
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from copy import deepcopy
 from datetime import datetime
@@ -52,6 +53,7 @@ from config import Config
 from eval.llm_judge import LLMJudge
 from eval.runtime_utils import (
     aggregate_judge_runs,
+    append_checkpoint_line,
     build_reference_context,
     build_cost_payload,
     build_model_id,
@@ -73,6 +75,7 @@ from eval.runtime_utils import (
     resolve_model_specs,
     select_balanced_subset,
     split_pricing_config,
+    warm_up_runtime_resources,
     write_json_artifact,
 )
 from eval.validators.response_heuristics import run_all_heuristics
@@ -97,6 +100,7 @@ ABLATION_PRIMARY_SCORE_FIELDS = (
 # Paper evaluation (RINENG revision): annotations, checkpoints, and end-to-end fields.
 PAPER_EVAL_ANNOTATIONS_PATH = Path(__file__).with_name("paper_eval_annotations.json")
 CHECKPOINT_SUFFIX = ".partial.jsonl"
+DEFAULT_OUTPUT_PREFIX = "ablation_results"
 EXECUTION_SUMMARY_FIELDS = (
     "selected_agents",
     "execution_type",
@@ -237,10 +241,80 @@ def _comparison_has_error(block: dict) -> bool:
 
 def _append_checkpoint(checkpoint_path: Path, entry: dict) -> None:
     """Append one JSON line to the run checkpoint and flush it to disk."""
-    with checkpoint_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
-        handle.flush()
-        os.fsync(handle.fileno())
+    append_checkpoint_line(checkpoint_path, entry)
+
+
+def _prefix_from_checkpoint(checkpoint_path: Path) -> str:
+    """Return the output prefix of a ``<prefix>_<YYYYmmdd>_<HHMMSS>.partial.jsonl`` checkpoint."""
+    stem = checkpoint_path.name[: -len(CHECKPOINT_SUFFIX)] if checkpoint_path.name.endswith(CHECKPOINT_SUFFIX) else checkpoint_path.stem
+    parts = stem.rsplit("_", 2)
+    return parts[0] if len(parts) == 3 and parts[1].isdigit() and parts[2].isdigit() else DEFAULT_OUTPUT_PREFIX
+
+
+def _format_arm_log(label: str, block: dict) -> str:
+    """One console line per answer: score per judge, latency, response cost, and errors."""
+    scores = block.get("scores") or {}
+    quality = scores.get("ablation_quality_score")
+    by_judge = []
+    for judge_id, judge_scores in (block.get("scores_by_judge") or {}).items():
+        values = [judge_scores.get(field) for field in ABLATION_PRIMARY_SCORE_FIELDS]
+        if all(value is not None for value in values):
+            by_judge.append(f"{judge_id.split('::')[-1]} {sum(float(v) for v in values) / len(values):.2f}")
+    cost = float((block.get("response_cost_usd") or {}).get("total_cost_usd") or 0.0)
+    line = (
+        f"  [{label}] QS {quality:.2f}" if quality is not None else f"  [{label}] QS n/a"
+    ) + (f" ({' / '.join(by_judge)})" if by_judge else "") + f" | {float(block.get('latency_s') or 0.0):.1f} s | USD {cost:.4f}"
+    summary = block.get("execution_summary") or {}
+    if summary:
+        line += (
+            f" | tools {len(block.get('tools_used') or [])}"
+            f" | agents {','.join(summary.get('selected_agents') or []) or 'none'}"
+            f" | {summary.get('execution_type') or 'n/a'} | QA {summary.get('qa_path') or 'n/a'}"
+        )
+    if block.get("error") is not None:
+        line += f"\n      RESPONSE ERROR ({block.get('error_type')}): {str(block['error'])[:240]}"
+    for judge_run in block.get("judge_runs") or []:
+        if judge_run.get("error") and block.get("error") is None:
+            line += f"\n      JUDGE ERROR {judge_run.get('judge_model')}: {str(judge_run['error'])[:240]}"
+    return line
+
+
+def _format_duration(seconds: float) -> str:
+    """Render seconds as ``1h05m`` or ``12m30s``."""
+    seconds = int(max(seconds, 0))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours}h{minutes:02d}m" if hours else f"{minutes}m{secs:02d}s"
+
+
+def _print_run_summary(results: list[dict], profile_keys: Sequence[str], query_count: int, checkpoint_path: Path) -> None:
+    """Print, per profile, what the paper reports: quality, latency, cost, and failures."""
+    print("\n" + "=" * 60 + "\nRUN SUMMARY (response cost only; judge calls excluded)\n" + "=" * 60)
+    for profile_key in profile_keys:
+        blocks = [record["comparisons"][profile_key] for record in results if profile_key in record["comparisons"]]
+        pending = query_count - len(blocks)
+        print(f"\n{profile_key}: {len(blocks)} of {query_count} queries" + (f" ({pending} STILL TO RUN)" if pending else ""))
+        for arm, label in (("zero_shot", "Zero-shot"), ("lisboa", "LISBOA")):
+            arm_blocks = [(block.get("metrics") or {}).get(arm) or {} for block in blocks]
+            qualities = [b["scores"]["ablation_quality_score"] for b in arm_blocks if (b.get("scores") or {}).get("ablation_quality_score") is not None]
+            latencies = sorted(float(b.get("latency_s") or 0.0) for b in arm_blocks)
+            costs = [float((b.get("response_cost_usd") or {}).get("total_cost_usd") or 0.0) for b in arm_blocks]
+            errors = sum(1 for b in arm_blocks if b.get("error") is not None)
+            judge_errors = sum(1 for b in arm_blocks if b.get("error") is None and any(r.get("error") for r in b.get("judge_runs") or []))
+            print(
+                f"  {label:<9} QS {sum(qualities) / len(qualities):.3f} (n={len(qualities)})" if qualities else f"  {label:<9} QS n/a",
+                f"| latency median {median(latencies):.1f} s" if latencies else "",
+                f"| cost USD {sum(costs):.3f} total, {sum(costs) / len(costs):.4f} per query" if costs else "",
+                f"| response errors {errors} | judge errors {judge_errors}",
+            )
+    missing = [key for key in profile_keys if not any(key in record["comparisons"] for record in results)]
+    if missing or any(
+        sum(1 for record in results if key in record["comparisons"]) < query_count for key in profile_keys
+    ):
+        print(
+            f"\nThis file is INCOMPLETE. Finish it with: --resume \"{checkpoint_path}\" and the same --dataset and --fresh-session "
+            "(add --only-profile for the profile still to run, --retry-errors to rerun failed comparisons)."
+        )
 
 
 def _load_checkpoint(checkpoint_path: Path, *, retry_errors: bool = False) -> dict:
@@ -1043,7 +1117,7 @@ def run_ablation(
     judge_model: str | None = None,
     groundtruth_path: str | Path | None = None,
     include_domains: Sequence[str] | None = DEFAULT_ABLATION_DOMAINS,
-    output_prefix: str = "ablation_results",
+    output_prefix: str | None = None,
     fresh_session: bool = False,
     only_profiles: Sequence[str] | None = None,
     resume_path: str | Path | None = None,
@@ -1068,6 +1142,9 @@ def run_ablation(
             zero-shot and LISBOA within the same provider/model family per profile.
         judge_provider: Optional provider override for a single evaluation judge.
         judge_model: Optional model override for a single evaluation judge.
+        output_prefix: File prefix inside ``eval/results/ablation/``. With
+            ``resume_path`` and no prefix, the prefix of the checkpoint is kept, so
+            the finished file carries the same name as the run it completes.
         include_domains: Optional domain filter for the shared corpus. By default
             the ablation excludes ``greeting`` and ``out_of_scope`` because LISBOA
             answers those through hard-coded supervisor shortcuts rather than the
@@ -1145,12 +1222,14 @@ def run_ablation(
                     "Aborting so that one run keeps one protocol."
                 )
                 return
+            output_prefix = output_prefix or _prefix_from_checkpoint(checkpoint_path)
             print(
                 f"[Checkpoint] Resuming {checkpoint_path.name}: {len(checkpoint['completed'])} comparisons reused"
                 + (f", {checkpoint['retried_errors']} failed ones to run again" if retry_errors else "")
                 + "."
             )
         else:
+            output_prefix = output_prefix or DEFAULT_OUTPUT_PREFIX
             checkpoint_path = build_results_output_path(
                 "ablation",
                 output_prefix,
@@ -1302,6 +1381,20 @@ def run_ablation(
         print(f"[Checkpoint] Each finished comparison is appended to {checkpoint_path}")
         print(f"[Checkpoint] If the run stops, resume with: --resume \"{checkpoint_path}\" and the same options")
         comparisons_this_session = 0
+        warm_up = warm_up_runtime_resources()
+        print(
+            f"[Warm-up] Vector store and transport data loaded in {warm_up['seconds']} s "
+            f"(vector store {'OK' if warm_up['kb_ok'] else 'FAILED'}, transport {'OK' if warm_up['transport_ok'] else 'FAILED'}); "
+            "as in the app, this one-time start-up stays out of the timed answers."
+        )
+        loop_started_perf = time.perf_counter()
+        comparisons_to_run = sum(
+            1
+            for profile in profiles_to_run
+            for item in groundtruth_queries
+            if str(profile["profile_name"]) not in results_by_id[item["id"]]["comparisons"]
+        )
+        print(f"[Ablation] {comparisons_to_run} comparisons to run in this session ({len(groundtruth_queries)} queries per profile).")
 
         for profile in profiles_to_run:
             profile_key = str(profile["profile_name"])
@@ -1420,9 +1513,6 @@ def run_ablation(
                         error=zs_err,
                     )
 
-                    score_disp_zs = f"{zs_score['composite_score']:.2f}/5.0" if zs_score.get("composite_score") is not None else "N/A"
-                    print(f"  [Zero-Shot] Score: {score_disp_zs} | Lat: {zs_lat:.2f}s")
-
                     ls_resp, ls_tools, ls_ctx, ls_lat, ls_err, ls_response_usage, ls_runtime = run_lisboa(
                         item["query"],
                         lisboa_system,
@@ -1481,9 +1571,6 @@ def run_ablation(
                         tools_used=ls_tools,
                         error=ls_err,
                     )
-
-                    score_disp_ls = f"{ls_score['composite_score']:.2f}/5.0" if ls_score.get("composite_score") is not None else "N/A"
-                    print(f"  [LISBOA]    Score: {score_disp_ls} | Lat: {ls_lat:.2f}s | Tools: {len(ls_tools)}")
 
                     if zs_err is not None or ls_err is not None:
                         profile_consecutive_errors += 1
@@ -1610,6 +1697,14 @@ def run_ablation(
                         {"type": "comparison", "id": item["id"], "profile_key": profile_key, "block": comparison_block},
                     )
                     comparisons_this_session += 1
+                    print(_format_arm_log("Zero-shot", comparison_block["metrics"]["zero_shot"]))
+                    print(_format_arm_log("LISBOA   ", comparison_block["metrics"]["lisboa"]))
+                    elapsed = time.perf_counter() - loop_started_perf
+                    remaining = comparisons_to_run - comparisons_this_session
+                    print(
+                        f"  [Progress] {comparisons_this_session}/{comparisons_to_run} comparisons this session | "
+                        f"elapsed {_format_duration(elapsed)} | ETA {_format_duration(elapsed / comparisons_this_session * remaining)}"
+                    )
 
                     if profile_consecutive_errors >= 2:
                         print(f"\nABORTING PROFILE {profile_key}: API or models are failing continuously.")
@@ -1703,6 +1798,7 @@ def run_ablation(
                         "comparison_profile_order": profile_order,
                         "primary_comparison_profile": primary_profile_key,
                         "run_options": run_options,
+                        "warm_up": warm_up,
                         "provenance": run_provenance,
                         "runtime_data_at_end": collect_runtime_data_provenance(),
                         "run_sessions": run_sessions,
@@ -1737,6 +1833,7 @@ def run_ablation(
             output_path,
         )
 
+        _print_run_summary(results, known_profile_keys, len(groundtruth_queries), checkpoint_path)
         print(f"\nAblation Study complete. Results saved to {output_path}")
         print(f"Checkpoint kept at {checkpoint_path}")
         runtime_failure = get_last_langsmith_runtime_failure()
@@ -1815,8 +1912,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output-prefix",
         type=str,
-        default="ablation_results",
-        help="Output filename prefix inside eval/results/ablation/.",
+        default=None,
+        help="Output filename prefix inside eval/results/ablation/ (default ablation_results; with --resume, the checkpoint's prefix).",
     )
     parser.add_argument(
         "--fresh-session",

@@ -41,7 +41,9 @@ ABLATION_PRIMARY_DIMENSIONS = (
     "response_quality",
 )
 ABLATION_SUPPORTING_DIMENSIONS = ("tool_usage",)
-DEFAULT_BOOTSTRAP_ITERATIONS = 10_000
+# 5000 resamples, as the paper reports (Section 4.2) and the notebook uses, so the
+# CLI outputs, paper_eval_analysis, and the notebook give identical intervals.
+DEFAULT_BOOTSTRAP_ITERATIONS = 5_000
 DEFAULT_CONFIDENCE_LEVEL = 0.95
 DEFAULT_RANDOM_SEED = 20240502
 
