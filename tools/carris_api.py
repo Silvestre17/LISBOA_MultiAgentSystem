@@ -69,7 +69,11 @@ try:
     from tools.location_resolver import build_location_ambiguity_preamble, get_location_display_name
     from tools.runtime_paths import resolve_runtime_data_dir, seed_runtime_data_dir
     from tools.transport_release_assets import ensure_runtime_data_from_release
-except ImportError:
+except ModuleNotFoundError as exc:
+    # Only a missing tools package (running this file from tools/) falls back;
+    # a missing dependency must surface with its own name, not as location_resolver.
+    if exc.name != "tools":
+        raise
     from location_resolver import build_location_ambiguity_preamble, get_location_display_name
     from runtime_paths import resolve_runtime_data_dir, seed_runtime_data_dir
     from transport_release_assets import ensure_runtime_data_from_release
