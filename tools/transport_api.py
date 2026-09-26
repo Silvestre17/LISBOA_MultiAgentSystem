@@ -40,7 +40,10 @@ else:
     del _project_config
 
 from tools.cp_api import (
+    CP_LATE_THRESHOLD_S,
     CP_LINES,
+    _is_lisbon_urban_service,
+    _is_significant_cp_disruption,
     get_cp_aml_trains,
     get_cp_station_info,
 )
@@ -1263,21 +1266,41 @@ def get_transport_summary(language: str = "pt") -> str:
     try:
         aml_trains = get_cp_aml_trains()
         if aml_trains:
-            total = len(aml_trains)
-            delayed = sum(1 for t in aml_trains if (t.get('delay') or 0) > 60)
+            # Same scope and thresholds as get_train_status: Lisbon suburban trains only,
+            # long-distance services excluded; normal while no train is 5 min or more late.
+            suburban = [t for t in aml_trains if _is_lisbon_urban_service((t.get('service') or {}).get('designation'))]
+            total = len(suburban)
+            delayed = sum(1 for t in suburban if (t.get('delay') or 0) >= CP_LATE_THRESHOLD_S)
+            significant = sum(
+                1 for t in suburban if _is_significant_cp_disruption(t)
+            )
 
-            trains_metric = "Comboios a circular na AML" if is_pt else "Trains currently in the AML"
+            trains_metric = "Comboios suburbanos a circular na AML" if is_pt else "Suburban trains currently in the AML"
             if is_pt:
                 train_word = "comboio" if total == 1 else "comboios"
             else:
                 train_word = "train" if total == 1 else "trains"
             response += f"    - 📊 **{trains_metric}:** {total} {train_word}\n"
-            if delayed > 0:
-                delay_metric = "Atrasos superiores a 1 min" if is_pt else "Delays over 1 min"
-                response += f"    - ⚠️ **{delay_metric}:** {delayed} {train_word}\n"
-            else:
+            if significant > 0:
+                delay_metric = "Com 5 min ou mais de atraso, perturbações ou suprimidos" if is_pt else "5 min or more late, disrupted or cancelled"
+                response += f"    - ⚠️ **{delay_metric}:** {significant} {train_word}\n"
+            elif delayed > 0:
+                status_text = (
+                    f"a circular com normalidade; {delayed} com pequenos atrasos (menos de 5 min)"
+                    if is_pt
+                    else f"running normally; {delayed} with minor delays (under 5 min)"
+                )
+                response += f"    - ✅ **{'Estado' if is_pt else 'Status'}:** {status_text}\n"
+            elif total:
                 status_text = "Comboios a operar normalmente" if is_pt else "Trains operating normally"
                 response += f"    - ✅ **{'Estado' if is_pt else 'Status'}:** {status_text}\n"
+            else:
+                status_text = (
+                    "sem comboios suburbanos no retrato em tempo real; não é possível confirmar o serviço"
+                    if is_pt
+                    else "no suburban trains in the live snapshot; service cannot be confirmed"
+                )
+                response += f"    - ⚠️ **{'Estado' if is_pt else 'Status'}:** {status_text}\n"
         else:
             response += f"    - ⚠️ **{'Estado' if is_pt else 'Status'}:** {'Dados indisponíveis' if is_pt else 'Data unavailable'}\n"
     except Exception as e:

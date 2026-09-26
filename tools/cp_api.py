@@ -25,6 +25,7 @@ import io
 import json
 import logging
 import os
+import re
 import sqlite3
 import time
 import unicodedata
@@ -1511,6 +1512,31 @@ def get_routes_at_stop(stop_id: str) -> List[Dict[str, Any]]:
 # ==========================================================================
 
 
+# The live feed has named the Lisbon suburban service both "Urbanos Lisboa" and
+# "Urbano de Lisboa"; match the family, not one spelling.
+CP_LISBON_URBAN_SERVICE = "Urbanos Lisboa"
+# A train counts as late from one minute (the unit shown to the user); service
+# counts as normal while no train is five minutes or more late, the usual
+# railway punctuality threshold, and no train reports a disruption.
+CP_LATE_THRESHOLD_S = 60
+CP_SIGNIFICANT_DELAY_S = 300
+_CP_LISBON_URBAN_SERVICE_RE = re.compile(r"^urbanos?\s+(?:de\s+)?lisboa$", re.IGNORECASE)
+
+
+def _is_lisbon_urban_service(designation: Any) -> bool:
+    """Return whether a live-feed service designation is the Lisbon suburban (urban) service."""
+    return bool(_CP_LISBON_URBAN_SERVICE_RE.match(re.sub(r"\s+", " ", str(designation or "")).strip()))
+
+
+def _is_significant_cp_disruption(train: dict) -> bool:
+    """Return whether a live train is 5 min or more late, reports a disruption, or is cancelled."""
+    return (
+        (train.get('delay') or 0) >= CP_SIGNIFICANT_DELAY_S
+        or bool(train.get('hasDisruptions'))
+        or str(train.get('status') or '').upper() == 'CANCELLED'
+    )
+
+
 def _format_gtfs_clock(total_minutes: int) -> str:
     """Format GTFS minutes, marking after-midnight times explicitly."""
     hour = total_minutes // 60
@@ -1552,15 +1578,18 @@ def get_train_status(language: str = "en") -> str:
     by_service = defaultdict(list)
 
     for train in aml_trains:
-        service_name = train.get('service', {}).get('designation', 'Unknown')
-        if service_name != 'Urbanos Lisboa':
+        if not _is_lisbon_urban_service(train.get('service', {}).get('designation')):
             continue
-        by_service[service_name].append(train)
+        by_service[CP_LISBON_URBAN_SERVICE].append(train)
 
     # Count stats
     visible_trains = [train for trains in by_service.values() for train in trains]
     total_trains = len(visible_trains)
-    delayed_trains = sum(1 for t in visible_trains if (t.get('delay') or 0) > 0)
+    delayed_trains = sum(1 for t in visible_trains if (t.get('delay') or 0) >= CP_LATE_THRESHOLD_S)
+    significant_trains = sum(
+        1 for t in visible_trains if _is_significant_cp_disruption(t)
+    )
+    largest_delay_min = max(((t.get('delay') or 0) // 60 for t in visible_trains), default=0)
     on_time_trains = max(total_trains - delayed_trains, 0)
 
     title = "Comboios suburbanos CP em Lisboa" if is_pt else "CP Suburban Trains around Lisbon"
@@ -1578,17 +1607,32 @@ def get_train_status(language: str = "en") -> str:
                 "⚠️ **Direct answer:** the live snapshot shows no CP suburban trains running right now, so I cannot "
                 "confirm that service is normal; check with CP before leaving.\n\n"
             )
-    elif delayed_trains > 0:
+    elif significant_trains > 0:
         if is_pt:
             response += (
                 f"✅ **Resposta direta:** Não, os comboios suburbanos da CP na zona de Lisboa "
                 f"**não estão a circular com normalidade** neste momento. O retrato em tempo real "
-                f"mostra **{total_trains} comboios** na AML, dos quais **{delayed_trains} com atraso**.\n\n"
+                f"mostra **{total_trains} comboios** na AML, dos quais **{significant_trains} com 5 min ou mais "
+                f"de atraso, com perturbações ou suprimidos** (atraso máximo de {largest_delay_min} min).\n\n"
             )
         else:
             response += (
                 f"✅ **Direct answer:** No, CP suburban trains around Lisbon are **not running normally right now**. "
-                f"The live snapshot shows **{total_trains} trains** serving AML, with **{delayed_trains} delayed**.\n\n"
+                f"The live snapshot shows **{total_trains} trains** serving AML, **{significant_trains} of them 5 min "
+                f"or more late, disrupted or cancelled** (largest delay {largest_delay_min} min).\n\n"
+            )
+    elif delayed_trains > 0:
+        if is_pt:
+            response += (
+                f"✅ **Resposta direta:** Sim, os comboios suburbanos da CP na zona de Lisboa estão a circular com "
+                f"normalidade: o retrato em tempo real mostra **{total_trains} comboios** na AML, **{delayed_trains} "
+                f"com pequenos atrasos** (máximo de {largest_delay_min} min, abaixo de 5 min).\n\n"
+            )
+        else:
+            response += (
+                f"✅ **Direct answer:** Yes, CP suburban trains around Lisbon are running normally: the live snapshot shows "
+                f"**{total_trains} trains** serving AML, **{delayed_trains} with minor delays** (at most "
+                f"{largest_delay_min} min, under 5 min).\n\n"
             )
     else:
         if is_pt:
@@ -1609,10 +1653,11 @@ def get_train_status(language: str = "en") -> str:
     response += f"**{'Situação atual' if is_pt else 'Current situation'}**\n\n"
     response += f"- **📊 {'Comboios monitorizados' if is_pt else 'Tracked suburban trains'}:** {total_trains}\n"
     response += f"- **✅ {'Sem atraso' if is_pt else 'Shown without delay'}:** {on_time_trains}\n"
-    response += f"- **⚠️ {'Com atraso' if is_pt else 'Delayed'}:** {delayed_trains}\n\n"
+    response += f"- **⚠️ {'Com atraso' if is_pt else 'Delayed'}:** {delayed_trains}\n"
+    response += f"- **🔴 {'Com 5 min ou mais de atraso, perturbações ou suprimidos' if is_pt else '5 min or more late, disrupted or cancelled'}:** {significant_trains}\n\n"
 
     # Display by service type
-    service_order = ['Urbanos Lisboa']
+    service_order = [CP_LISBON_URBAN_SERVICE]
 
     for service_name in service_order:
         if service_name not in by_service:
@@ -1628,7 +1673,7 @@ def get_train_status(language: str = "en") -> str:
             'Alfa Pendular': '🚅'
         }.get(service_name, '🚆')
 
-        delayed_service_trains = [train for train in trains if (train.get('delay') or 0) > 0]
+        delayed_service_trains = [train for train in trains if (train.get('delay') or 0) >= CP_LATE_THRESHOLD_S]
 
         response += f"**{service_emoji} {service_name}**\n\n"
 
@@ -1665,7 +1710,7 @@ def get_train_status(language: str = "en") -> str:
                 'IN_TRANSIT': '🚆',
                 'AT_STATION': '🚉',
                 'STOPPED': '⏸️'
-            }.get(status, '❓')
+            }.get(status, '🚆')
 
             if has_disruptions:
                 disruption_note = " (com perturbações)" if is_pt else " (with disruptions)"

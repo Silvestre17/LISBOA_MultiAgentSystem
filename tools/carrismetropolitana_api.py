@@ -1421,7 +1421,7 @@ def get_real_time_bus_positions(
         lon = vehicle.get("lon", 0)
         speed = vehicle.get("speed")
         bearing = vehicle.get("bearing", 0)
-        license_plate = vehicle.get("license_plate") or "vehicle id unavailable"
+        license_plate = vehicle.get("license_plate") or ""
         vehicle_model = vehicle.get("vehicle_model", "")
         door_status = vehicle.get("door_status", "")
 
@@ -1432,10 +1432,10 @@ def get_real_time_bus_positions(
             stale_vehicle_timestamps += 1
 
         response += f"- {status_icon} **Line {line_short}**\n"
-        response += f"    - 🚗 **Vehicle:** {license_plate}"
-        if vehicle_model:
-            response += f" ({vehicle_model})"
-        response += "\n"
+        # The feed does not always identify the vehicle; omit the field rather than print a placeholder.
+        vehicle_label = " ".join(part for part in (license_plate, f"({vehicle_model})" if vehicle_model else "") if part)
+        if vehicle_label:
+            response += f"    - 🚗 **Vehicle:** {vehicle_label}\n"
         response += f"    - 📍 **Position:** ({lat:.5f}, {lon:.5f})\n"
         if speed is not None:
             response += f"    - 💨 **Speed:** {float(speed):.1f} km/h · **Bearing:** {bearing}°\n"
