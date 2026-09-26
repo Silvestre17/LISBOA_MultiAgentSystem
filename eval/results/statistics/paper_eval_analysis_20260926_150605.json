@@ -1,0 +1,3288 @@
+{
+  "generated_at": "2026-09-26T15:05:31",
+  "inputs": {
+    "ablation": {
+      "path": "eval/results/ablation/ablation_final_20260926_141018.json",
+      "exists": true,
+      "size_bytes": 17833497,
+      "modified_at": "2026-09-26T14:10:19",
+      "sha256": "3f5ba4337df6e6fe7669a6ba9137ac1f803a939581ed68009810ea656995608f"
+    },
+    "annotations": {
+      "path": "eval/paper_eval_annotations.json",
+      "exists": true,
+      "size_bytes": 12816,
+      "modified_at": "2026-09-23T21:44:43",
+      "sha256": "ea9e5f777148156f4f21968b7eac7a91816cb17b2a52b68664ec27a06090189c"
+    },
+    "benchmark": {
+      "path": "eval/results/benchmark/benchmark_final_20260926_145914.json",
+      "exists": true,
+      "size_bytes": 2564005,
+      "modified_at": "2026-09-26T14:59:14",
+      "sha256": "18293523700af4063d0f9211dbb59f292e3b49d036a6ab992ab5658a993b8eaa"
+    },
+    "constraints": {
+      "path": "eval/results/constraints/constraint_checklist_20260926_145926.json",
+      "exists": true,
+      "size_bytes": 220890,
+      "modified_at": "2026-09-26T15:02:43",
+      "sha256": "ef8224ab12af922519b49312589ba6f3653d63c59fd5828269d44969b38b9532"
+    },
+    "bootstrap_iterations": 5000,
+    "seed": 20240502
+  },
+  "provenance": {
+    "run_started_at": "2026-09-26T10:55:45.937928",
+    "run_finished_at": "2026-09-26T14:10:18.369642",
+    "sessions": 2,
+    "commit": "2a84c3933da96d639a2aa57abbf2029341884cd1",
+    "branch": "lisboa-paper-eval",
+    "has_uncommitted_changes": true,
+    "session_commits": [
+      "2a84c3933da96d639a2aa57abbf2029341884cd1"
+    ],
+    "system_code_last_commit": {
+      "commit": "d04680e5629452af67c2fe169e36d527e734bcba",
+      "date": "2026-09-25T22:02:04+01:00",
+      "subject": "LISBOA - 25/09/2026 (General fixes and improvements)",
+      "paths": [
+        "agent",
+        "tools",
+        "config.py",
+        "app.py"
+      ]
+    },
+    "dataset": "C:\\Users\\andre\\OneDrive - NOVAIMS\\[MDSAA-DS]_Thesis\\LISBOA_MultiAgentSystem\\eval\\evaluation_groundtruth_queries_paper_eval.json",
+    "dataset_fingerprint": "d1df95a4d7cd46fc6346c00fee51ccabd2b53597243677457b9e27b8ba35226a",
+    "queries": 75,
+    "tool_registry": {
+      "count": 45,
+      "fingerprint": "e0a23b55c2dfdc8d328162e28dfbbf4e6770e989ae90bbabc5525229ab157666"
+    },
+    "api_model_names": {
+      "closed_source": [
+        "gpt-5.4-mini-2026-03-17"
+      ],
+      "open_source": [
+        "Kimi-K2.5"
+      ]
+    },
+    "judges": [
+      "azure::gpt-5.4-mini",
+      "azure::Kimi-K2.5"
+    ],
+    "pricing_snapshot_date": "2026-04-17",
+    "runtime_data_at_start": {
+      "collected_at": "2026-09-26T12:17:10",
+      "vector_db": {
+        "path": "data/vector_db/chroma.sqlite3",
+        "exists": true,
+        "size_bytes": 89522176,
+        "modified_at": "2026-09-26T11:45:24",
+        "sha256": "77bc49cd648393ce19df61b8d08f22ea28d72b05aa506c009dad5fd7459566a6"
+      },
+      "transport_metadata": {
+        "carris": {
+          "gtfs_date": "2026-09-24",
+          "updated_at": "2026-09-25T02:44:21.769331",
+          "db_path": "carris.db",
+          "schema_version": "2.0",
+          "features": [
+            "primary_keys",
+            "foreign_keys_declarative",
+            "indexes",
+            "analyzed"
+          ]
+        },
+        "cp": {
+          "last_download": "2026-09-26T10:44:48.181465",
+          "db_created": "2026-09-26T10:44:48.769887",
+          "etag": "\"49e57-65c5794f44e69\"",
+          "last_modified": "Sat, 26 Sep 2026 00:04:51 GMT",
+          "content_length": "302679"
+        }
+      },
+      "events_json": {
+        "path": "data_collection/webscraping/events.json",
+        "exists": true,
+        "size_bytes": 533555,
+        "modified_at": "2026-09-26T10:42:55",
+        "sha256": "ff6d4cbd7cbeac9487746c5ba5bb46af88118d6a195c0c095230fb96c8385498"
+      },
+      "places_json": {
+        "path": "data_collection/webscraping/places.json",
+        "exists": true,
+        "size_bytes": 4306707,
+        "modified_at": "2026-09-23T17:36:30",
+        "sha256": "6d434a00297dd3e35684d80101725ae8b6c400fcdd04f3d9f8ccf86ed3bed5cf"
+      }
+    },
+    "runtime_data_at_end": {
+      "collected_at": "2026-09-26T14:10:18",
+      "vector_db": {
+        "path": "data/vector_db/chroma.sqlite3",
+        "exists": true,
+        "size_bytes": 89522176,
+        "modified_at": "2026-09-26T13:13:35",
+        "sha256": "f761dab7adcb998eb64d063daffcb8568221f67c8bfabe98da9f375cb7a55f62"
+      },
+      "transport_metadata": {
+        "carris": {
+          "gtfs_date": "2026-09-25",
+          "updated_at": "2026-09-26T12:19:16.842384",
+          "db_path": "carris.db",
+          "schema_version": "2.0",
+          "features": [
+            "primary_keys",
+            "foreign_keys_declarative",
+            "indexes",
+            "analyzed"
+          ]
+        },
+        "cp": {
+          "last_download": "2026-09-26T10:44:48.181465",
+          "db_created": "2026-09-26T10:44:48.769887",
+          "etag": "\"49e57-65c5794f44e69\"",
+          "last_modified": "Sat, 26 Sep 2026 00:04:51 GMT",
+          "content_length": "302679"
+        }
+      },
+      "events_json": {
+        "path": "data_collection/webscraping/events.json",
+        "exists": true,
+        "size_bytes": 533555,
+        "modified_at": "2026-09-26T10:42:55",
+        "sha256": "ff6d4cbd7cbeac9487746c5ba5bb46af88118d6a195c0c095230fb96c8385498"
+      },
+      "places_json": {
+        "path": "data_collection/webscraping/places.json",
+        "exists": true,
+        "size_bytes": 4306707,
+        "modified_at": "2026-09-23T17:36:30",
+        "sha256": "6d434a00297dd3e35684d80101725ae8b6c400fcdd04f3d9f8ccf86ed3bed5cf"
+      }
+    },
+    "fresh_session": {
+      "requested": true,
+      "lisboa_responses": 150,
+      "with_fresh_session": 150,
+      "with_execution_summary": 150,
+      "per_run": {
+        "single_run": {
+          "queries": 75,
+          "lisboa_responses_fresh": 150
+        }
+      }
+    },
+    "merged_runs": [],
+    "response_errors": {},
+    "judge_errors": {},
+    "lisboa_model_calls": {
+      "total": 362,
+      "not_profile_model": {}
+    },
+    "checks": {
+      "single_commit": true,
+      "clean_working_tree": false,
+      "fresh_session_where_requested": true,
+      "no_response_errors": true,
+      "no_judge_errors": true,
+      "lisboa_calls_use_profile_model": true
+    }
+  },
+  "quality": {
+    "by_domain": [
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "all",
+        "dimension": "ablation_quality_score",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 75,
+        "mean_a": 3.595,
+        "mean_b": 4.46,
+        "mean_diff_b_minus_a": 0.865,
+        "median_diff_b_minus_a": 1.0,
+        "wilcoxon_statistic": 257.0,
+        "wilcoxon_p_value": 1.1031666001079113e-09,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.8148,
+        "bootstrap_ci_low": 0.6683,
+        "bootstrap_ci_high": 1.055,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "all",
+        "dimension": "factual_accuracy",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 75,
+        "mean_a": 2.94,
+        "mean_b": 4.22,
+        "mean_diff_b_minus_a": 1.28,
+        "median_diff_b_minus_a": 1.5,
+        "wilcoxon_statistic": 122.0,
+        "wilcoxon_p_value": 1.742922514053036e-11,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.9072,
+        "bootstrap_ci_low": 1.04,
+        "bootstrap_ci_high": 1.5133,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "all",
+        "dimension": "completeness",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 75,
+        "mean_a": 3.1333,
+        "mean_b": 4.4,
+        "mean_diff_b_minus_a": 1.2667,
+        "median_diff_b_minus_a": 1.5,
+        "wilcoxon_statistic": 254.0,
+        "wilcoxon_p_value": 3.743581373905782e-09,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.8013,
+        "bootstrap_ci_low": 0.9533,
+        "bootstrap_ci_high": 1.5667,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "all",
+        "dimension": "relevance",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 75,
+        "mean_a": 4.32,
+        "mean_b": 4.7267,
+        "mean_diff_b_minus_a": 0.4067,
+        "median_diff_b_minus_a": 0.5,
+        "wilcoxon_statistic": 201.0,
+        "wilcoxon_p_value": 1.915815359425399e-06,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.7293,
+        "bootstrap_ci_low": 0.22,
+        "bootstrap_ci_high": 0.58,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "all",
+        "dimension": "response_quality",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 75,
+        "mean_a": 3.9867,
+        "mean_b": 4.4933,
+        "mean_diff_b_minus_a": 0.5067,
+        "median_diff_b_minus_a": 0.5,
+        "wilcoxon_statistic": 226.5,
+        "wilcoxon_p_value": 4.1509029537795786e-07,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.7441,
+        "bootstrap_ci_low": 0.3467,
+        "bootstrap_ci_high": 0.66,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "multi_agent",
+        "dimension": "ablation_quality_score",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 3.75,
+        "mean_b": 4.3269,
+        "mean_diff_b_minus_a": 0.5769,
+        "median_diff_b_minus_a": 0.625,
+        "wilcoxon_statistic": 8.0,
+        "wilcoxon_p_value": 0.01220703125,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.7949,
+        "bootstrap_ci_low": 0.2212,
+        "bootstrap_ci_high": 0.9231,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "multi_agent",
+        "dimension": "factual_accuracy",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 3.0385,
+        "mean_b": 3.9615,
+        "mean_diff_b_minus_a": 0.9231,
+        "median_diff_b_minus_a": 1.0,
+        "wilcoxon_statistic": 7.0,
+        "wilcoxon_p_value": 0.005615234375,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.8462,
+        "bootstrap_ci_low": 0.4615,
+        "bootstrap_ci_high": 1.3462,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "multi_agent",
+        "dimension": "completeness",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 3.4231,
+        "mean_b": 4.1923,
+        "mean_diff_b_minus_a": 0.7692,
+        "median_diff_b_minus_a": 1.0,
+        "wilcoxon_statistic": 12.0,
+        "wilcoxon_p_value": 0.0302734375,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.6923,
+        "bootstrap_ci_low": 0.1538,
+        "bootstrap_ci_high": 1.3462,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "multi_agent",
+        "dimension": "relevance",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 4.4615,
+        "mean_b": 4.6154,
+        "mean_diff_b_minus_a": 0.1538,
+        "median_diff_b_minus_a": 0.0,
+        "wilcoxon_statistic": 12.0,
+        "wilcoxon_p_value": 0.3828125,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.3333,
+        "bootstrap_ci_low": -0.1923,
+        "bootstrap_ci_high": 0.5,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "multi_agent",
+        "dimension": "response_quality",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 4.0769,
+        "mean_b": 4.5385,
+        "mean_diff_b_minus_a": 0.4615,
+        "median_diff_b_minus_a": 0.5,
+        "wilcoxon_statistic": 3.5,
+        "wilcoxon_p_value": 0.013671875,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.8727,
+        "bootstrap_ci_low": 0.1923,
+        "bootstrap_ci_high": 0.6923,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "researcher",
+        "dimension": "ablation_quality_score",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 3.6154,
+        "mean_b": 4.4327,
+        "mean_diff_b_minus_a": 0.8173,
+        "median_diff_b_minus_a": 1.0,
+        "wilcoxon_statistic": 11.5,
+        "wilcoxon_p_value": 0.014404296875,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.7473,
+        "bootstrap_ci_low": 0.2596,
+        "bootstrap_ci_high": 1.2885,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "researcher",
+        "dimension": "factual_accuracy",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 2.8462,
+        "mean_b": 4.3462,
+        "mean_diff_b_minus_a": 1.5,
+        "median_diff_b_minus_a": 1.5,
+        "wilcoxon_statistic": 1.5,
+        "wilcoxon_p_value": 0.000732421875,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.967,
+        "bootstrap_ci_low": 1.0,
+        "bootstrap_ci_high": 2.0,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "researcher",
+        "dimension": "completeness",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 3.3462,
+        "mean_b": 4.3077,
+        "mean_diff_b_minus_a": 0.9615,
+        "median_diff_b_minus_a": 1.0,
+        "wilcoxon_statistic": 14.0,
+        "wilcoxon_p_value": 0.02685546875,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.6923,
+        "bootstrap_ci_low": 0.1923,
+        "bootstrap_ci_high": 1.6923,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "researcher",
+        "dimension": "relevance",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 4.2692,
+        "mean_b": 4.6538,
+        "mean_diff_b_minus_a": 0.3846,
+        "median_diff_b_minus_a": 0.5,
+        "wilcoxon_statistic": 12.0,
+        "wilcoxon_p_value": 0.13671875,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.5636,
+        "bootstrap_ci_low": -0.2308,
+        "bootstrap_ci_high": 0.9615,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "researcher",
+        "dimension": "response_quality",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 4.0,
+        "mean_b": 4.4231,
+        "mean_diff_b_minus_a": 0.4231,
+        "median_diff_b_minus_a": 0.5,
+        "wilcoxon_statistic": 9.0,
+        "wilcoxon_p_value": 0.09375,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.6,
+        "bootstrap_ci_low": -0.0769,
+        "bootstrap_ci_high": 0.8462,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "transport",
+        "dimension": "ablation_quality_score",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 36,
+        "mean_a": 3.5694,
+        "mean_b": 4.4965,
+        "mean_diff_b_minus_a": 0.9271,
+        "median_diff_b_minus_a": 1.0,
+        "wilcoxon_statistic": 50.0,
+        "wilcoxon_p_value": 8.60324560050918e-06,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.8498,
+        "bootstrap_ci_low": 0.6458,
+        "bootstrap_ci_high": 1.1875,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "transport",
+        "dimension": "factual_accuracy",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 36,
+        "mean_a": 2.875,
+        "mean_b": 4.2917,
+        "mean_diff_b_minus_a": 1.4167,
+        "median_diff_b_minus_a": 1.5,
+        "wilcoxon_statistic": 20.0,
+        "wilcoxon_p_value": 1.8264701907288488e-06,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.9328,
+        "bootstrap_ci_low": 1.0556,
+        "bootstrap_ci_high": 1.7778,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "transport",
+        "dimension": "completeness",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 36,
+        "mean_a": 3.0972,
+        "mean_b": 4.4444,
+        "mean_diff_b_minus_a": 1.3472,
+        "median_diff_b_minus_a": 1.25,
+        "wilcoxon_statistic": 39.0,
+        "wilcoxon_p_value": 1.4453522637745497e-05,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.861,
+        "bootstrap_ci_low": 0.9167,
+        "bootstrap_ci_high": 1.75,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "transport",
+        "dimension": "relevance",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 36,
+        "mean_a": 4.375,
+        "mean_b": 4.7639,
+        "mean_diff_b_minus_a": 0.3889,
+        "median_diff_b_minus_a": 0.5,
+        "wilcoxon_statistic": 32.0,
+        "wilcoxon_p_value": 0.0003200019055499078,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.8031,
+        "bootstrap_ci_low": 0.125,
+        "bootstrap_ci_high": 0.5972,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "transport",
+        "dimension": "response_quality",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 36,
+        "mean_a": 3.9306,
+        "mean_b": 4.4861,
+        "mean_diff_b_minus_a": 0.5556,
+        "median_diff_b_minus_a": 0.5,
+        "wilcoxon_statistic": 34.0,
+        "wilcoxon_p_value": 8.728094179819544e-05,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.8325,
+        "bootstrap_ci_low": 0.3472,
+        "bootstrap_ci_high": 0.7639,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "weather",
+        "dimension": "ablation_quality_score",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 3.4904,
+        "mean_b": 4.5192,
+        "mean_diff_b_minus_a": 1.0288,
+        "median_diff_b_minus_a": 1.5,
+        "wilcoxon_statistic": 8.0,
+        "wilcoxon_p_value": 0.006103515625,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.8242,
+        "bootstrap_ci_low": 0.4808,
+        "bootstrap_ci_high": 1.5192,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "weather",
+        "dimension": "factual_accuracy",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 3.1154,
+        "mean_b": 4.1538,
+        "mean_diff_b_minus_a": 1.0385,
+        "median_diff_b_minus_a": 1.5,
+        "wilcoxon_statistic": 8.5,
+        "wilcoxon_p_value": 0.01513671875,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.7821,
+        "bootstrap_ci_low": 0.3846,
+        "bootstrap_ci_high": 1.6538,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "weather",
+        "dimension": "completeness",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 2.7308,
+        "mean_b": 4.5769,
+        "mean_diff_b_minus_a": 1.8462,
+        "median_diff_b_minus_a": 2.5,
+        "wilcoxon_statistic": 6.0,
+        "wilcoxon_p_value": 0.0029296875,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.8681,
+        "bootstrap_ci_low": 1.0,
+        "bootstrap_ci_high": 2.5769,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "weather",
+        "dimension": "relevance",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 4.0769,
+        "mean_b": 4.8077,
+        "mean_diff_b_minus_a": 0.7308,
+        "median_diff_b_minus_a": 1.0,
+        "wilcoxon_statistic": 2.5,
+        "wilcoxon_p_value": 0.0048828125,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.9242,
+        "bootstrap_ci_low": 0.3846,
+        "bootstrap_ci_high": 1.0769,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "Kimi-K2.5",
+        "domain": "weather",
+        "dimension": "response_quality",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 4.0385,
+        "mean_b": 4.5385,
+        "mean_diff_b_minus_a": 0.5,
+        "median_diff_b_minus_a": 1.0,
+        "wilcoxon_statistic": 15.5,
+        "wilcoxon_p_value": 0.07421875,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.6026,
+        "bootstrap_ci_low": 0.0385,
+        "bootstrap_ci_high": 0.9231,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "all",
+        "dimension": "ablation_quality_score",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 75,
+        "mean_a": 3.58,
+        "mean_b": 4.4233,
+        "mean_diff_b_minus_a": 0.8433,
+        "median_diff_b_minus_a": 1.0,
+        "wilcoxon_statistic": 241.0,
+        "wilcoxon_p_value": 6.385218317961289e-10,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.8263,
+        "bootstrap_ci_low": 0.6533,
+        "bootstrap_ci_high": 1.0267,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "all",
+        "dimension": "factual_accuracy",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 75,
+        "mean_a": 3.1867,
+        "mean_b": 4.16,
+        "mean_diff_b_minus_a": 0.9733,
+        "median_diff_b_minus_a": 1.0,
+        "wilcoxon_statistic": 211.0,
+        "wilcoxon_p_value": 3.3251601315705605e-09,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.8201,
+        "bootstrap_ci_low": 0.7267,
+        "bootstrap_ci_high": 1.2133,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "all",
+        "dimension": "completeness",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 75,
+        "mean_a": 2.9067,
+        "mean_b": 4.3733,
+        "mean_diff_b_minus_a": 1.4667,
+        "median_diff_b_minus_a": 1.5,
+        "wilcoxon_statistic": 166.5,
+        "wilcoxon_p_value": 2.616758769851074e-10,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.866,
+        "bootstrap_ci_low": 1.1733,
+        "bootstrap_ci_high": 1.76,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "all",
+        "dimension": "relevance",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 75,
+        "mean_a": 4.3467,
+        "mean_b": 4.6933,
+        "mean_diff_b_minus_a": 0.3467,
+        "median_diff_b_minus_a": 0.5,
+        "wilcoxon_statistic": 407.5,
+        "wilcoxon_p_value": 0.00023227602410937564,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.5395,
+        "bootstrap_ci_low": 0.1667,
+        "bootstrap_ci_high": 0.52,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "all",
+        "dimension": "response_quality",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 75,
+        "mean_a": 3.88,
+        "mean_b": 4.4667,
+        "mean_diff_b_minus_a": 0.5867,
+        "median_diff_b_minus_a": 0.5,
+        "wilcoxon_statistic": 210.0,
+        "wilcoxon_p_value": 8.430201112467095e-08,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.7779,
+        "bootstrap_ci_low": 0.42,
+        "bootstrap_ci_high": 0.7467,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "multi_agent",
+        "dimension": "ablation_quality_score",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 3.5577,
+        "mean_b": 4.2019,
+        "mean_diff_b_minus_a": 0.6442,
+        "median_diff_b_minus_a": 0.875,
+        "wilcoxon_statistic": 7.5,
+        "wilcoxon_p_value": 0.00537109375,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.8352,
+        "bootstrap_ci_low": 0.2981,
+        "bootstrap_ci_high": 0.9519,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "multi_agent",
+        "dimension": "factual_accuracy",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 2.8077,
+        "mean_b": 3.8462,
+        "mean_diff_b_minus_a": 1.0385,
+        "median_diff_b_minus_a": 1.0,
+        "wilcoxon_statistic": 5.0,
+        "wilcoxon_p_value": 0.002685546875,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.8901,
+        "bootstrap_ci_low": 0.5769,
+        "bootstrap_ci_high": 1.4615,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "multi_agent",
+        "dimension": "completeness",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 2.9231,
+        "mean_b": 4.2308,
+        "mean_diff_b_minus_a": 1.3077,
+        "median_diff_b_minus_a": 1.5,
+        "wilcoxon_statistic": 0.0,
+        "wilcoxon_p_value": 0.0009765625,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 1.0,
+        "bootstrap_ci_low": 0.8846,
+        "bootstrap_ci_high": 1.6923,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "multi_agent",
+        "dimension": "relevance",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 4.4231,
+        "mean_b": 4.4231,
+        "mean_diff_b_minus_a": 0.0,
+        "median_diff_b_minus_a": 0.0,
+        "wilcoxon_statistic": 27.5,
+        "wilcoxon_p_value": 1.0,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.0,
+        "bootstrap_ci_low": -0.3462,
+        "bootstrap_ci_high": 0.3462,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "multi_agent",
+        "dimension": "response_quality",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 4.0769,
+        "mean_b": 4.3077,
+        "mean_diff_b_minus_a": 0.2308,
+        "median_diff_b_minus_a": 0.5,
+        "wilcoxon_statistic": 12.0,
+        "wilcoxon_p_value": 0.21484375,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.4667,
+        "bootstrap_ci_low": -0.1538,
+        "bootstrap_ci_high": 0.5769,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "researcher",
+        "dimension": "ablation_quality_score",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 3.7404,
+        "mean_b": 4.3269,
+        "mean_diff_b_minus_a": 0.5865,
+        "median_diff_b_minus_a": 0.75,
+        "wilcoxon_statistic": 22.0,
+        "wilcoxon_p_value": 0.107177734375,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.5165,
+        "bootstrap_ci_low": -0.0192,
+        "bootstrap_ci_high": 1.1635,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "researcher",
+        "dimension": "factual_accuracy",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 3.1154,
+        "mean_b": 4.2308,
+        "mean_diff_b_minus_a": 1.1154,
+        "median_diff_b_minus_a": 1.0,
+        "wilcoxon_statistic": 8.0,
+        "wilcoxon_p_value": 0.01318359375,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.7949,
+        "bootstrap_ci_low": 0.4615,
+        "bootstrap_ci_high": 1.8077,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "researcher",
+        "dimension": "completeness",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 3.4231,
+        "mean_b": 4.0769,
+        "mean_diff_b_minus_a": 0.6538,
+        "median_diff_b_minus_a": 1.0,
+        "wilcoxon_statistic": 22.0,
+        "wilcoxon_p_value": 0.19775390625,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.4359,
+        "bootstrap_ci_low": -0.2308,
+        "bootstrap_ci_high": 1.5,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "researcher",
+        "dimension": "relevance",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 4.4231,
+        "mean_b": 4.5,
+        "mean_diff_b_minus_a": 0.0769,
+        "median_diff_b_minus_a": 0.5,
+        "wilcoxon_statistic": 31.0,
+        "wilcoxon_p_value": 0.89453125,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.0606,
+        "bootstrap_ci_low": -0.4615,
+        "bootstrap_ci_high": 0.6154,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "researcher",
+        "dimension": "response_quality",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 4.0,
+        "mean_b": 4.5,
+        "mean_diff_b_minus_a": 0.5,
+        "median_diff_b_minus_a": 0.5,
+        "wilcoxon_statistic": 10.5,
+        "wilcoxon_p_value": 0.10546875,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.6182,
+        "bootstrap_ci_low": 0.0,
+        "bootstrap_ci_high": 1.0,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "transport",
+        "dimension": "ablation_quality_score",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 36,
+        "mean_a": 3.5312,
+        "mean_b": 4.4722,
+        "mean_diff_b_minus_a": 0.941,
+        "median_diff_b_minus_a": 1.0625,
+        "wilcoxon_statistic": 42.0,
+        "wilcoxon_p_value": 4.700869729331686e-06,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.8739,
+        "bootstrap_ci_low": 0.6806,
+        "bootstrap_ci_high": 1.1806,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "transport",
+        "dimension": "factual_accuracy",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 36,
+        "mean_a": 3.2222,
+        "mean_b": 4.2639,
+        "mean_diff_b_minus_a": 1.0417,
+        "median_diff_b_minus_a": 1.0,
+        "wilcoxon_statistic": 36.0,
+        "wilcoxon_p_value": 1.8192662748736585e-05,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.8636,
+        "bootstrap_ci_low": 0.7083,
+        "bootstrap_ci_high": 1.375,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "transport",
+        "dimension": "completeness",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 36,
+        "mean_a": 2.8472,
+        "mean_b": 4.375,
+        "mean_diff_b_minus_a": 1.5278,
+        "median_diff_b_minus_a": 1.5,
+        "wilcoxon_statistic": 28.0,
+        "wilcoxon_p_value": 3.7040290801074093e-06,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.9059,
+        "bootstrap_ci_low": 1.1528,
+        "bootstrap_ci_high": 1.875,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "transport",
+        "dimension": "relevance",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 36,
+        "mean_a": 4.3194,
+        "mean_b": 4.7778,
+        "mean_diff_b_minus_a": 0.4583,
+        "median_diff_b_minus_a": 0.5,
+        "wilcoxon_statistic": 53.5,
+        "wilcoxon_p_value": 0.0004880131158213635,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.7365,
+        "bootstrap_ci_low": 0.1944,
+        "bootstrap_ci_high": 0.6944,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "transport",
+        "dimension": "response_quality",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 36,
+        "mean_a": 3.7361,
+        "mean_b": 4.4722,
+        "mean_diff_b_minus_a": 0.7361,
+        "median_diff_b_minus_a": 1.0,
+        "wilcoxon_statistic": 32.5,
+        "wilcoxon_p_value": 1.909726395380089e-05,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.869,
+        "bootstrap_ci_low": 0.5,
+        "bootstrap_ci_high": 0.9583,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "weather",
+        "dimension": "ablation_quality_score",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 3.5769,
+        "mean_b": 4.6058,
+        "mean_diff_b_minus_a": 1.0288,
+        "median_diff_b_minus_a": 1.25,
+        "wilcoxon_statistic": 2.0,
+        "wilcoxon_p_value": 0.00146484375,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.9487,
+        "bootstrap_ci_low": 0.6154,
+        "bootstrap_ci_high": 1.4135,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "weather",
+        "dimension": "factual_accuracy",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 3.5385,
+        "mean_b": 4.1154,
+        "mean_diff_b_minus_a": 0.5769,
+        "median_diff_b_minus_a": 1.0,
+        "wilcoxon_statistic": 14.5,
+        "wilcoxon_p_value": 0.125,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.5606,
+        "bootstrap_ci_low": 0.0,
+        "bootstrap_ci_high": 1.1538,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "weather",
+        "dimension": "completeness",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 2.5385,
+        "mean_b": 4.8077,
+        "mean_diff_b_minus_a": 2.2692,
+        "median_diff_b_minus_a": 3.0,
+        "wilcoxon_statistic": 1.0,
+        "wilcoxon_p_value": 0.00048828125,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.978,
+        "bootstrap_ci_low": 1.5769,
+        "bootstrap_ci_high": 2.9231,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "weather",
+        "dimension": "relevance",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 4.2692,
+        "mean_b": 4.9231,
+        "mean_diff_b_minus_a": 0.6538,
+        "median_diff_b_minus_a": 0.5,
+        "wilcoxon_statistic": 0.0,
+        "wilcoxon_p_value": 0.001953125,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 1.0,
+        "bootstrap_ci_low": 0.3846,
+        "bootstrap_ci_high": 0.9231,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot",
+        "profile": "gpt-5.4-mini",
+        "domain": "weather",
+        "dimension": "response_quality",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 13,
+        "mean_a": 3.9615,
+        "mean_b": 4.5769,
+        "mean_diff_b_minus_a": 0.6154,
+        "median_diff_b_minus_a": 0.5,
+        "wilcoxon_statistic": 3.0,
+        "wilcoxon_p_value": 0.005859375,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.9091,
+        "bootstrap_ci_low": 0.3077,
+        "bootstrap_ci_high": 0.8846,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      }
+    ],
+    "by_query_type": [
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot_subset",
+        "profile": "gpt-5.4-mini",
+        "domain": "itinerary",
+        "dimension": "ablation_quality_score",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 11,
+        "mean_a": 3.5909,
+        "mean_b": 4.1477,
+        "mean_diff_b_minus_a": 0.5568,
+        "median_diff_b_minus_a": 0.5,
+        "wilcoxon_statistic": 7.5,
+        "wilcoxon_p_value": 0.021484375,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.7727,
+        "bootstrap_ci_low": 0.1705,
+        "bootstrap_ci_high": 0.9091,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot_subset",
+        "profile": "gpt-5.4-mini",
+        "domain": "cross_domain",
+        "dimension": "ablation_quality_score",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 2,
+        "mean_a": 3.375,
+        "mean_b": 4.5,
+        "mean_diff_b_minus_a": 1.125,
+        "median_diff_b_minus_a": 1.125,
+        "wilcoxon_statistic": 0.0,
+        "wilcoxon_p_value": 0.5,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 1.0,
+        "bootstrap_ci_low": 1.0,
+        "bootstrap_ci_high": 1.25,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot_subset",
+        "profile": "Kimi-K2.5",
+        "domain": "itinerary",
+        "dimension": "ablation_quality_score",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 11,
+        "mean_a": 3.8182,
+        "mean_b": 4.2386,
+        "mean_diff_b_minus_a": 0.4205,
+        "median_diff_b_minus_a": 0.5,
+        "wilcoxon_statistic": 8.0,
+        "wilcoxon_p_value": 0.048828125,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 0.7091,
+        "bootstrap_ci_low": 0.0795,
+        "bootstrap_ci_high": 0.75,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      },
+      {
+        "comparison_type": "ablation_lisboa_vs_zero_shot_subset",
+        "profile": "Kimi-K2.5",
+        "domain": "cross_domain",
+        "dimension": "ablation_quality_score",
+        "label_a": "Zero-shot",
+        "label_b": "LISBOA",
+        "n_pairs": 2,
+        "mean_a": 3.375,
+        "mean_b": 4.8125,
+        "mean_diff_b_minus_a": 1.4375,
+        "median_diff_b_minus_a": 1.4375,
+        "wilcoxon_statistic": 0.0,
+        "wilcoxon_p_value": 0.5,
+        "wilcoxon_method": "scipy_wilcoxon_two_sided",
+        "rank_biserial_correlation": 1.0,
+        "bootstrap_ci_low": 1.375,
+        "bootstrap_ci_high": 1.5,
+        "bootstrap_iterations": 5000,
+        "confidence_level": 0.95
+      }
+    ],
+    "paired_outcomes": [
+      {
+        "profile": "gpt-5.4-mini",
+        "subset": "all",
+        "n": 75,
+        "lisboa_higher": 63,
+        "ties": 1,
+        "zero_shot_higher": 11
+      },
+      {
+        "profile": "gpt-5.4-mini",
+        "subset": "cross_domain",
+        "n": 2,
+        "lisboa_higher": 2,
+        "ties": 0,
+        "zero_shot_higher": 0
+      },
+      {
+        "profile": "gpt-5.4-mini",
+        "subset": "itinerary",
+        "n": 11,
+        "lisboa_higher": 9,
+        "ties": 0,
+        "zero_shot_higher": 2
+      },
+      {
+        "profile": "gpt-5.4-mini",
+        "subset": "multi_agent",
+        "n": 13,
+        "lisboa_higher": 11,
+        "ties": 0,
+        "zero_shot_higher": 2
+      },
+      {
+        "profile": "gpt-5.4-mini",
+        "subset": "researcher",
+        "n": 13,
+        "lisboa_higher": 9,
+        "ties": 0,
+        "zero_shot_higher": 4
+      },
+      {
+        "profile": "gpt-5.4-mini",
+        "subset": "single_domain",
+        "n": 62,
+        "lisboa_higher": 52,
+        "ties": 1,
+        "zero_shot_higher": 9
+      },
+      {
+        "profile": "gpt-5.4-mini",
+        "subset": "transport",
+        "n": 36,
+        "lisboa_higher": 32,
+        "ties": 0,
+        "zero_shot_higher": 4
+      },
+      {
+        "profile": "gpt-5.4-mini",
+        "subset": "weather",
+        "n": 13,
+        "lisboa_higher": 11,
+        "ties": 1,
+        "zero_shot_higher": 1
+      },
+      {
+        "profile": "Kimi-K2.5",
+        "subset": "all",
+        "n": 75,
+        "lisboa_higher": 63,
+        "ties": 1,
+        "zero_shot_higher": 11
+      },
+      {
+        "profile": "Kimi-K2.5",
+        "subset": "cross_domain",
+        "n": 2,
+        "lisboa_higher": 2,
+        "ties": 0,
+        "zero_shot_higher": 0
+      },
+      {
+        "profile": "Kimi-K2.5",
+        "subset": "itinerary",
+        "n": 11,
+        "lisboa_higher": 8,
+        "ties": 1,
+        "zero_shot_higher": 2
+      },
+      {
+        "profile": "Kimi-K2.5",
+        "subset": "multi_agent",
+        "n": 13,
+        "lisboa_higher": 10,
+        "ties": 1,
+        "zero_shot_higher": 2
+      },
+      {
+        "profile": "Kimi-K2.5",
+        "subset": "researcher",
+        "n": 13,
+        "lisboa_higher": 12,
+        "ties": 0,
+        "zero_shot_higher": 1
+      },
+      {
+        "profile": "Kimi-K2.5",
+        "subset": "single_domain",
+        "n": 62,
+        "lisboa_higher": 53,
+        "ties": 0,
+        "zero_shot_higher": 9
+      },
+      {
+        "profile": "Kimi-K2.5",
+        "subset": "transport",
+        "n": 36,
+        "lisboa_higher": 31,
+        "ties": 0,
+        "zero_shot_higher": 5
+      },
+      {
+        "profile": "Kimi-K2.5",
+        "subset": "weather",
+        "n": 13,
+        "lisboa_higher": 10,
+        "ties": 0,
+        "zero_shot_higher": 3
+      }
+    ]
+  },
+  "operational": {
+    "rows": [
+      {
+        "profile": "closed_source",
+        "model": "azure::gpt-5.4-mini",
+        "arm": "zero_shot",
+        "responses": 75,
+        "llm_responses": 75,
+        "deterministic_responses": 0,
+        "latency_s_all": {
+          "n": 75,
+          "mean": 2.009,
+          "sd": 0.826,
+          "median": 1.814,
+          "p90": 3.014,
+          "max": 5.578
+        },
+        "latency_s_llm_only": {
+          "n": 75,
+          "mean": 2.009,
+          "sd": 0.826,
+          "median": 1.814,
+          "p90": 3.014,
+          "max": 5.578
+        },
+        "slowest_decile_time_share": 0.206,
+        "cost_usd_per_llm_response": {
+          "n": 75,
+          "mean": 0.00117,
+          "sd": 0.00078,
+          "median": 0.001,
+          "p90": 0.002,
+          "max": 0.005,
+          "total": 0.0874
+        },
+        "tokens_mean": {
+          "input": 154.0,
+          "output": 233.0
+        },
+        "cost_usd_per_query": 0.00117,
+        "judge_cost_usd_total": 1.0016
+      },
+      {
+        "profile": "closed_source",
+        "model": "azure::gpt-5.4-mini",
+        "arm": "lisboa",
+        "responses": 75,
+        "llm_responses": 50,
+        "deterministic_responses": 25,
+        "latency_s_all": {
+          "n": 75,
+          "mean": 7.561,
+          "sd": 7.448,
+          "median": 5.792,
+          "p90": 12.448,
+          "max": 43.729
+        },
+        "latency_s_llm_only": {
+          "n": 50,
+          "mean": 9.822,
+          "sd": 8.195,
+          "median": 7.253,
+          "p90": 15.992,
+          "max": 43.729
+        },
+        "slowest_decile_time_share": 0.346,
+        "cost_usd_per_llm_response": {
+          "n": 50,
+          "mean": 0.01051,
+          "sd": 0.00749,
+          "median": 0.008,
+          "p90": 0.02,
+          "max": 0.031,
+          "total": 0.5253
+        },
+        "tokens_mean": {
+          "input": 10167.0,
+          "output": 640.0
+        },
+        "cost_usd_per_query": 0.007,
+        "judge_cost_usd_total": 0.9811,
+        "latency_s_by_domain": {
+          "multi_agent": {
+            "n": 13,
+            "mean": 17.214,
+            "sd": 12.21,
+            "median": 11.09,
+            "p90": 29.58,
+            "max": 43.729
+          },
+          "researcher": {
+            "n": 13,
+            "mean": 8.752,
+            "sd": 4.529,
+            "median": 7.995,
+            "p90": 12.448,
+            "max": 17.891
+          },
+          "transport": {
+            "n": 36,
+            "mean": 5.085,
+            "sd": 3.137,
+            "median": 4.058,
+            "p90": 7.313,
+            "max": 15.992
+          },
+          "weather": {
+            "n": 13,
+            "mean": 3.573,
+            "sd": 2.385,
+            "median": 2.684,
+            "p90": 5.906,
+            "max": 9.178
+          }
+        },
+        "latency_s_by_query_type": {
+          "cross_domain": {
+            "n": 2,
+            "mean": 19.462,
+            "sd": 14.308,
+            "median": 19.462,
+            "p90": 9.345,
+            "max": 29.58
+          },
+          "itinerary": {
+            "n": 11,
+            "mean": 16.805,
+            "sd": 12.539,
+            "median": 11.09,
+            "p90": 38.552,
+            "max": 43.729
+          },
+          "single_domain": {
+            "n": 62,
+            "mean": 5.537,
+            "sd": 3.734,
+            "median": 4.357,
+            "p90": 9.863,
+            "max": 17.891
+          }
+        }
+      },
+      {
+        "profile": "open_source",
+        "model": "azure::Kimi-K2.5",
+        "arm": "zero_shot",
+        "responses": 75,
+        "llm_responses": 75,
+        "deterministic_responses": 0,
+        "latency_s_all": {
+          "n": 75,
+          "mean": 6.373,
+          "sd": 4.595,
+          "median": 4.769,
+          "p90": 11.012,
+          "max": 26.176
+        },
+        "latency_s_llm_only": {
+          "n": 75,
+          "mean": 6.373,
+          "sd": 4.595,
+          "median": 4.769,
+          "p90": 11.012,
+          "max": 26.176
+        },
+        "slowest_decile_time_share": 0.288,
+        "cost_usd_per_llm_response": {
+          "n": 75,
+          "mean": 0.00276,
+          "sd": 0.00177,
+          "median": 0.002,
+          "p90": 0.004,
+          "max": 0.012,
+          "total": 0.2072
+        },
+        "tokens_mean": {
+          "input": 159.0,
+          "output": 889.0
+        },
+        "cost_usd_per_query": 0.00276,
+        "judge_cost_usd_total": 0.9921
+      },
+      {
+        "profile": "open_source",
+        "model": "azure::Kimi-K2.5",
+        "arm": "lisboa",
+        "responses": 75,
+        "llm_responses": 50,
+        "deterministic_responses": 25,
+        "latency_s_all": {
+          "n": 75,
+          "mean": 30.441,
+          "sd": 31.238,
+          "median": 14.933,
+          "p90": 80.925,
+          "max": 118.397
+        },
+        "latency_s_llm_only": {
+          "n": 50,
+          "mean": 44.048,
+          "sd": 30.096,
+          "median": 43.59,
+          "p90": 85.309,
+          "max": 118.397
+        },
+        "slowest_decile_time_share": 0.329,
+        "cost_usd_per_llm_response": {
+          "n": 50,
+          "mean": 0.03228,
+          "sd": 0.02256,
+          "median": 0.032,
+          "p90": 0.061,
+          "max": 0.101,
+          "total": 1.6138
+        },
+        "tokens_mean": {
+          "input": 15683.0,
+          "output": 7622.0
+        },
+        "cost_usd_per_query": 0.02152,
+        "judge_cost_usd_total": 0.9715,
+        "latency_s_by_domain": {
+          "multi_agent": {
+            "n": 13,
+            "mean": 69.743,
+            "sd": 20.754,
+            "median": 73.428,
+            "p90": 88.167,
+            "max": 104.056
+          },
+          "researcher": {
+            "n": 13,
+            "mean": 48.033,
+            "sd": 32.2,
+            "median": 48.566,
+            "p90": 66.821,
+            "max": 118.397
+          },
+          "transport": {
+            "n": 36,
+            "mean": 12.787,
+            "sd": 13.805,
+            "median": 6.258,
+            "p90": 38.183,
+            "max": 52.353
+          },
+          "weather": {
+            "n": 13,
+            "mean": 22.432,
+            "sd": 31.319,
+            "median": 5.542,
+            "p90": 51.438,
+            "max": 100.571
+          }
+        },
+        "latency_s_by_query_type": {
+          "cross_domain": {
+            "n": 2,
+            "mean": 70.962,
+            "sd": 24.332,
+            "median": 70.962,
+            "p90": 53.756,
+            "max": 88.167
+          },
+          "itinerary": {
+            "n": 11,
+            "mean": 69.521,
+            "sd": 21.385,
+            "median": 73.428,
+            "p90": 88.24,
+            "max": 104.056
+          },
+          "single_domain": {
+            "n": 62,
+            "mean": 22.2,
+            "sd": 26.473,
+            "median": 9.765,
+            "p90": 55.615,
+            "max": 118.397
+          }
+        }
+      }
+    ],
+    "run_cost_usd": {
+      "responses": 2.43,
+      "judges": 3.95,
+      "total": 6.38
+    },
+    "cost_recomputation": {
+      "responses_recomputed": 250,
+      "max_abs_difference_usd": 1.3877787807814457e-17
+    },
+    "note": "Cost is list price x tokens for the model calls of each response; judge calls are an evaluation cost and are reported apart."
+  },
+  "end_to_end": {
+    "closed_source": {
+      "agent_source": {
+        "execution_summary": 75
+      },
+      "routing_single_domain": {
+        "n": 62,
+        "expected_selected": 59,
+        "boundary_declined_without_worker": 3,
+        "exact": 58,
+        "misses": [],
+        "with_extra_agents": [
+          "R13"
+        ],
+        "boundary_declined_ids": [
+          "W07",
+          "T07",
+          "T09"
+        ],
+        "correct": 62,
+        "expected_selected_rate": 0.952,
+        "exact_rate": 0.935
+      },
+      "coverage_multi_agent": {
+        "n": 13,
+        "mean_coverage": 0.878,
+        "full_coverage": 7,
+        "itinerary_n": 11,
+        "itinerary_planner_selected": 11,
+        "cross_domain_n": 2,
+        "cross_domain_planner_selected": 0,
+        "rows": [
+          {
+            "id": "M01",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "weather",
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "researcher",
+              "planner",
+              "weather"
+            ],
+            "coverage": 0.75,
+            "missing_agents": [
+              "transport"
+            ],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 3.875
+          },
+          {
+            "id": "M02",
+            "query_type": "cross_domain",
+            "expected_agents": [
+              "weather",
+              "researcher",
+              "transport"
+            ],
+            "selected_agents": [
+              "weather",
+              "transport",
+              "researcher"
+            ],
+            "coverage": 1.0,
+            "missing_agents": [],
+            "planner_selected": false,
+            "execution_type": "hybrid",
+            "quality_score": 4.25
+          },
+          {
+            "id": "M03",
+            "query_type": "cross_domain",
+            "expected_agents": [
+              "researcher",
+              "weather"
+            ],
+            "selected_agents": [
+              "weather",
+              "researcher"
+            ],
+            "coverage": 1.0,
+            "missing_agents": [],
+            "planner_selected": false,
+            "execution_type": "hybrid",
+            "quality_score": 4.75
+          },
+          {
+            "id": "M04",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "weather",
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "weather",
+              "researcher",
+              "planner"
+            ],
+            "coverage": 0.75,
+            "missing_agents": [
+              "transport"
+            ],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 3.625
+          },
+          {
+            "id": "M05",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "weather",
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "researcher",
+              "planner",
+              "transport",
+              "weather"
+            ],
+            "coverage": 1.0,
+            "missing_agents": [],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 4.875
+          },
+          {
+            "id": "M06",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "weather",
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "researcher",
+              "planner",
+              "weather"
+            ],
+            "coverage": 0.75,
+            "missing_agents": [
+              "transport"
+            ],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 4.5
+          },
+          {
+            "id": "M07",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "weather",
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "weather",
+              "transport",
+              "researcher",
+              "planner"
+            ],
+            "coverage": 1.0,
+            "missing_agents": [],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 3.0
+          },
+          {
+            "id": "M08",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "weather",
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "weather",
+              "transport",
+              "researcher",
+              "planner"
+            ],
+            "coverage": 1.0,
+            "missing_agents": [],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 4.5
+          },
+          {
+            "id": "M09",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "researcher",
+              "planner",
+              "transport"
+            ],
+            "coverage": 1.0,
+            "missing_agents": [],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 4.25
+          },
+          {
+            "id": "M10",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "weather",
+              "researcher",
+              "planner"
+            ],
+            "coverage": 0.667,
+            "missing_agents": [
+              "transport"
+            ],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 3.25
+          },
+          {
+            "id": "M11",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "researcher",
+              "planner",
+              "transport"
+            ],
+            "coverage": 1.0,
+            "missing_agents": [],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 4.625
+          },
+          {
+            "id": "M12",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "weather",
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "researcher",
+              "planner",
+              "weather"
+            ],
+            "coverage": 0.75,
+            "missing_agents": [
+              "transport"
+            ],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 4.375
+          },
+          {
+            "id": "M13",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "weather",
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "weather",
+              "researcher",
+              "planner"
+            ],
+            "coverage": 0.75,
+            "missing_agents": [
+              "transport"
+            ],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 4.75
+          }
+        ]
+      },
+      "execution_types": {
+        "single-worker": 58,
+        "planner": 12,
+        "direct": 3,
+        "hybrid": 2
+      },
+      "qa_paths": {
+        "validated -> final-repair": {
+          "n": 30,
+          "mean_quality_score": 4.529
+        },
+        "validated": {
+          "n": 23,
+          "mean_quality_score": 4.174
+        },
+        "validated -> retry -> final-repair": {
+          "n": 10,
+          "mean_quality_score": 4.463
+        },
+        "fast-weather-fact-check -> final-repair": {
+          "n": 7,
+          "mean_quality_score": 4.786
+        },
+        "not-applicable -> final-repair": {
+          "n": 2,
+          "mean_quality_score": 4.5
+        },
+        "fast-weather-fact-check": {
+          "n": 1,
+          "mean_quality_score": 4.875
+        },
+        "fast-weather-fact-check -> retry -> final-repair": {
+          "n": 1,
+          "mean_quality_score": 3.875
+        },
+        "not-applicable": {
+          "n": 1,
+          "mean_quality_score": 4.0
+        }
+      },
+      "qa_intervened": 50,
+      "qa_worker_retry": 11,
+      "qa_final_repair": 50,
+      "qa_final_repair_deterministic_only": 17
+    },
+    "open_source": {
+      "agent_source": {
+        "execution_summary": 75
+      },
+      "routing_single_domain": {
+        "n": 62,
+        "expected_selected": 59,
+        "boundary_declined_without_worker": 3,
+        "exact": 58,
+        "misses": [],
+        "with_extra_agents": [
+          "R13"
+        ],
+        "boundary_declined_ids": [
+          "W07",
+          "T07",
+          "T09"
+        ],
+        "correct": 62,
+        "expected_selected_rate": 0.952,
+        "exact_rate": 0.935
+      },
+      "coverage_multi_agent": {
+        "n": 13,
+        "mean_coverage": 0.878,
+        "full_coverage": 7,
+        "itinerary_n": 11,
+        "itinerary_planner_selected": 11,
+        "cross_domain_n": 2,
+        "cross_domain_planner_selected": 0,
+        "rows": [
+          {
+            "id": "M01",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "weather",
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "weather",
+              "researcher",
+              "planner"
+            ],
+            "coverage": 0.75,
+            "missing_agents": [
+              "transport"
+            ],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 4.625
+          },
+          {
+            "id": "M02",
+            "query_type": "cross_domain",
+            "expected_agents": [
+              "weather",
+              "researcher",
+              "transport"
+            ],
+            "selected_agents": [
+              "weather",
+              "transport",
+              "researcher"
+            ],
+            "coverage": 1.0,
+            "missing_agents": [],
+            "planner_selected": false,
+            "execution_type": "hybrid",
+            "quality_score": 4.625
+          },
+          {
+            "id": "M03",
+            "query_type": "cross_domain",
+            "expected_agents": [
+              "researcher",
+              "weather"
+            ],
+            "selected_agents": [
+              "weather",
+              "researcher"
+            ],
+            "coverage": 1.0,
+            "missing_agents": [],
+            "planner_selected": false,
+            "execution_type": "hybrid",
+            "quality_score": 5.0
+          },
+          {
+            "id": "M04",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "weather",
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "weather",
+              "researcher",
+              "planner"
+            ],
+            "coverage": 0.75,
+            "missing_agents": [
+              "transport"
+            ],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 3.875
+          },
+          {
+            "id": "M05",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "weather",
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "researcher",
+              "planner",
+              "transport",
+              "weather"
+            ],
+            "coverage": 1.0,
+            "missing_agents": [],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 4.375
+          },
+          {
+            "id": "M06",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "weather",
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "researcher",
+              "planner",
+              "weather"
+            ],
+            "coverage": 0.75,
+            "missing_agents": [
+              "transport"
+            ],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 4.25
+          },
+          {
+            "id": "M07",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "weather",
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "weather",
+              "transport",
+              "researcher",
+              "planner"
+            ],
+            "coverage": 1.0,
+            "missing_agents": [],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 3.25
+          },
+          {
+            "id": "M08",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "weather",
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "weather",
+              "researcher",
+              "planner",
+              "transport"
+            ],
+            "coverage": 1.0,
+            "missing_agents": [],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 4.375
+          },
+          {
+            "id": "M09",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "researcher",
+              "planner",
+              "transport"
+            ],
+            "coverage": 1.0,
+            "missing_agents": [],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 4.25
+          },
+          {
+            "id": "M10",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "weather",
+              "researcher",
+              "planner"
+            ],
+            "coverage": 0.667,
+            "missing_agents": [
+              "transport"
+            ],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 3.625
+          },
+          {
+            "id": "M11",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "researcher",
+              "planner",
+              "transport"
+            ],
+            "coverage": 1.0,
+            "missing_agents": [],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 4.5
+          },
+          {
+            "id": "M12",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "weather",
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "weather",
+              "researcher",
+              "planner"
+            ],
+            "coverage": 0.75,
+            "missing_agents": [
+              "transport"
+            ],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 4.75
+          },
+          {
+            "id": "M13",
+            "query_type": "itinerary",
+            "expected_agents": [
+              "weather",
+              "researcher",
+              "transport",
+              "planner"
+            ],
+            "selected_agents": [
+              "weather",
+              "researcher",
+              "planner"
+            ],
+            "coverage": 0.75,
+            "missing_agents": [
+              "transport"
+            ],
+            "planner_selected": true,
+            "execution_type": "planner",
+            "quality_score": 4.75
+          }
+        ]
+      },
+      "execution_types": {
+        "single-worker": 58,
+        "planner": 12,
+        "direct": 3,
+        "hybrid": 2
+      },
+      "qa_paths": {
+        "validated -> final-repair": {
+          "n": 30,
+          "mean_quality_score": 4.55
+        },
+        "validated": {
+          "n": 22,
+          "mean_quality_score": 4.256
+        },
+        "validated -> retry -> final-repair": {
+          "n": 10,
+          "mean_quality_score": 4.45
+        },
+        "fast-weather-fact-check -> final-repair": {
+          "n": 7,
+          "mean_quality_score": 4.768
+        },
+        "not-applicable -> final-repair": {
+          "n": 2,
+          "mean_quality_score": 4.438
+        },
+        "fast-weather-fact-check": {
+          "n": 1,
+          "mean_quality_score": 4.875
+        },
+        "fast-weather-fact-check -> retry -> final-repair": {
+          "n": 1,
+          "mean_quality_score": 3.375
+        },
+        "not-applicable": {
+          "n": 1,
+          "mean_quality_score": 4.5
+        },
+        "validated -> retry": {
+          "n": 1,
+          "mean_quality_score": 4.875
+        }
+      },
+      "qa_intervened": 51,
+      "qa_worker_retry": 12,
+      "qa_final_repair": 50,
+      "qa_final_repair_deterministic_only": 17
+    }
+  },
+  "judges": {
+    "judges": [
+      "azure::gpt-5.4-mini",
+      "azure::Kimi-K2.5"
+    ],
+    "ablation_agreement": {
+      "factual_accuracy": {
+        "n": 300,
+        "qwk": 0.548,
+        "icc_2_1": 0.549,
+        "icc_2_2": 0.709,
+        "exact_agreement": 0.32,
+        "within_one_point": 0.86,
+        "mean_absolute_difference": 0.833
+      },
+      "completeness": {
+        "n": 300,
+        "qwk": 0.732,
+        "icc_2_1": 0.732,
+        "icc_2_2": 0.845,
+        "exact_agreement": 0.473,
+        "within_one_point": 0.907,
+        "mean_absolute_difference": 0.62
+      },
+      "relevance": {
+        "n": 300,
+        "qwk": 0.443,
+        "icc_2_1": 0.444,
+        "icc_2_2": 0.615,
+        "exact_agreement": 0.637,
+        "within_one_point": 0.963,
+        "mean_absolute_difference": 0.403
+      },
+      "response_quality": {
+        "n": 300,
+        "qwk": 0.3,
+        "icc_2_1": 0.301,
+        "icc_2_2": 0.462,
+        "exact_agreement": 0.477,
+        "within_one_point": 0.95,
+        "mean_absolute_difference": 0.573
+      }
+    },
+    "gain_by_judge": [
+      {
+        "profile": "closed_source",
+        "generator": "azure::gpt-5.4-mini",
+        "judges": "both judges",
+        "family": "",
+        "n": 75,
+        "zero_shot_mean": 3.58,
+        "lisboa_mean": 4.423,
+        "gain": 0.843,
+        "wilcoxon_p": 6.385218317961289e-10
+      },
+      {
+        "profile": "closed_source",
+        "generator": "azure::gpt-5.4-mini",
+        "judges": "azure::gpt-5.4-mini",
+        "family": "same family",
+        "n": 75,
+        "zero_shot_mean": 3.567,
+        "lisboa_mean": 4.28,
+        "gain": 0.713,
+        "wilcoxon_p": 1.8813282846882843e-09
+      },
+      {
+        "profile": "closed_source",
+        "generator": "azure::gpt-5.4-mini",
+        "judges": "azure::Kimi-K2.5",
+        "family": "other family",
+        "n": 75,
+        "zero_shot_mean": 3.593,
+        "lisboa_mean": 4.567,
+        "gain": 0.973,
+        "wilcoxon_p": 7.017856608696661e-09
+      },
+      {
+        "profile": "open_source",
+        "generator": "azure::Kimi-K2.5",
+        "judges": "both judges",
+        "family": "",
+        "n": 75,
+        "zero_shot_mean": 3.595,
+        "lisboa_mean": 4.46,
+        "gain": 0.865,
+        "wilcoxon_p": 1.1031666001079113e-09
+      },
+      {
+        "profile": "open_source",
+        "generator": "azure::Kimi-K2.5",
+        "judges": "azure::gpt-5.4-mini",
+        "family": "other family",
+        "n": 75,
+        "zero_shot_mean": 3.357,
+        "lisboa_mean": 4.277,
+        "gain": 0.92,
+        "wilcoxon_p": 1.0253584579392365e-10
+      },
+      {
+        "profile": "open_source",
+        "generator": "azure::Kimi-K2.5",
+        "judges": "azure::Kimi-K2.5",
+        "family": "same family",
+        "n": 75,
+        "zero_shot_mean": 3.833,
+        "lisboa_mean": 4.643,
+        "gain": 0.81,
+        "wilcoxon_p": 1.3098020749220598e-07
+      }
+    ],
+    "benchmark_agreement": {
+      "factual_accuracy": {
+        "n": 124,
+        "qwk": 0.323,
+        "icc_2_1": 0.325,
+        "icc_2_2": 0.49,
+        "exact_agreement": 0.347,
+        "within_one_point": 0.903,
+        "mean_absolute_difference": 0.75
+      },
+      "tool_usage": {
+        "n": 124,
+        "qwk": 0.813,
+        "icc_2_1": 0.815,
+        "icc_2_2": 0.898,
+        "exact_agreement": 0.911,
+        "within_one_point": 0.968,
+        "mean_absolute_difference": 0.121
+      },
+      "completeness": {
+        "n": 124,
+        "qwk": 0.749,
+        "icc_2_1": 0.75,
+        "icc_2_2": 0.857,
+        "exact_agreement": 0.661,
+        "within_one_point": 0.992,
+        "mean_absolute_difference": 0.347
+      },
+      "relevance": {
+        "n": 124,
+        "qwk": 0.675,
+        "icc_2_1": 0.676,
+        "icc_2_2": 0.807,
+        "exact_agreement": 0.79,
+        "within_one_point": 1.0,
+        "mean_absolute_difference": 0.21
+      },
+      "response_quality": {
+        "n": 124,
+        "qwk": 0.384,
+        "icc_2_1": 0.386,
+        "icc_2_2": 0.557,
+        "exact_agreement": 0.492,
+        "within_one_point": 0.992,
+        "mean_absolute_difference": 0.516
+      }
+    },
+    "ablation_pooled": {
+      "n": 1500,
+      "qwk": 0.755,
+      "icc_2_1": 0.755,
+      "icc_2_2": 0.861,
+      "exact_agreement": 0.505,
+      "within_one_point": 0.921,
+      "mean_absolute_difference": 0.58
+    },
+    "benchmark_pooled": {
+      "n": 620,
+      "qwk": 0.594,
+      "icc_2_1": 0.594,
+      "icc_2_2": 0.746,
+      "exact_agreement": 0.64,
+      "within_one_point": 0.971,
+      "mean_absolute_difference": 0.389
+    },
+    "benchmark_own_family": {
+      "cell_means": {
+        "azure::gpt-5.4-mini judges azure::gpt-5.4-mini": 4.471,
+        "azure::Kimi-K2.5 judges azure::gpt-5.4-mini": 4.661,
+        "azure::gpt-5.4-mini judges azure::Kimi-K2.5": 4.458,
+        "azure::Kimi-K2.5 judges azure::Kimi-K2.5": 4.71
+      },
+      "first_minus_second_model_by_judge": {
+        "azure::gpt-5.4-mini": 0.013,
+        "azure::Kimi-K2.5": -0.048
+      },
+      "own_family_interaction": 0.061
+    }
+  },
+  "constraints": {
+    "file_judges": [
+      {
+        "provider": "azure",
+        "model": "gpt-5.4-mini",
+        "temperature": 0.0
+      },
+      {
+        "provider": "azure",
+        "model": "Kimi-K2.5",
+        "temperature": 0.0
+      }
+    ],
+    "errors": 0,
+    "cost_usd": 0.41308245,
+    "cells": {
+      "closed_source::lisboa": {
+        "profile": "closed_source",
+        "arm": "lisboa",
+        "queries": 11,
+        "per_judge": {
+          "azure::Kimi-K2.5": {
+            "met": 55,
+            "not_met": 3,
+            "cannot_assess": 0,
+            "total": 58,
+            "met_rate_assessable": 0.9483,
+            "met_rate_all": 0.9483
+          },
+          "azure::gpt-5.4-mini": {
+            "met": 56,
+            "not_met": 2,
+            "cannot_assess": 0,
+            "total": 58,
+            "met_rate_assessable": 0.9655,
+            "met_rate_all": 0.9655
+          }
+        },
+        "consensus": {
+          "met": 55,
+          "not_met": 2,
+          "cannot_assess": 0,
+          "total": 57,
+          "met_rate_assessable": 0.9649,
+          "met_rate_all": 0.9649,
+          "judge_disagreements": 1,
+          "all_constraints": 58,
+          "met_rate_all_constraints": 0.9483
+        }
+      },
+      "closed_source::zero_shot": {
+        "profile": "closed_source",
+        "arm": "zero_shot",
+        "queries": 11,
+        "per_judge": {
+          "azure::Kimi-K2.5": {
+            "met": 55,
+            "not_met": 3,
+            "cannot_assess": 0,
+            "total": 58,
+            "met_rate_assessable": 0.9483,
+            "met_rate_all": 0.9483
+          },
+          "azure::gpt-5.4-mini": {
+            "met": 55,
+            "not_met": 3,
+            "cannot_assess": 0,
+            "total": 58,
+            "met_rate_assessable": 0.9483,
+            "met_rate_all": 0.9483
+          }
+        },
+        "consensus": {
+          "met": 55,
+          "not_met": 3,
+          "cannot_assess": 0,
+          "total": 58,
+          "met_rate_assessable": 0.9483,
+          "met_rate_all": 0.9483,
+          "judge_disagreements": 0,
+          "all_constraints": 58,
+          "met_rate_all_constraints": 0.9483
+        }
+      },
+      "open_source::lisboa": {
+        "profile": "open_source",
+        "arm": "lisboa",
+        "queries": 11,
+        "per_judge": {
+          "azure::Kimi-K2.5": {
+            "met": 54,
+            "not_met": 4,
+            "cannot_assess": 0,
+            "total": 58,
+            "met_rate_assessable": 0.931,
+            "met_rate_all": 0.931
+          },
+          "azure::gpt-5.4-mini": {
+            "met": 53,
+            "not_met": 5,
+            "cannot_assess": 0,
+            "total": 58,
+            "met_rate_assessable": 0.9138,
+            "met_rate_all": 0.9138
+          }
+        },
+        "consensus": {
+          "met": 53,
+          "not_met": 4,
+          "cannot_assess": 0,
+          "total": 57,
+          "met_rate_assessable": 0.9298,
+          "met_rate_all": 0.9298,
+          "judge_disagreements": 1,
+          "all_constraints": 58,
+          "met_rate_all_constraints": 0.9138
+        }
+      },
+      "open_source::zero_shot": {
+        "profile": "open_source",
+        "arm": "zero_shot",
+        "queries": 11,
+        "per_judge": {
+          "azure::Kimi-K2.5": {
+            "met": 55,
+            "not_met": 2,
+            "cannot_assess": 1,
+            "total": 58,
+            "met_rate_assessable": 0.9649,
+            "met_rate_all": 0.9483
+          },
+          "azure::gpt-5.4-mini": {
+            "met": 58,
+            "not_met": 0,
+            "cannot_assess": 0,
+            "total": 58,
+            "met_rate_assessable": 1.0,
+            "met_rate_all": 1.0
+          }
+        },
+        "consensus": {
+          "met": 55,
+          "not_met": 0,
+          "cannot_assess": 0,
+          "total": 55,
+          "met_rate_assessable": 1.0,
+          "met_rate_all": 1.0,
+          "judge_disagreements": 3,
+          "all_constraints": 58,
+          "met_rate_all_constraints": 0.9483
+        }
+      }
+    },
+    "inter_judge_agreement": {
+      "judges": [
+        "azure::Kimi-K2.5",
+        "azure::gpt-5.4-mini"
+      ],
+      "paired_verdicts": 232,
+      "exact_agreement": 0.9784,
+      "cohen_kappa": 0.7719
+    }
+  },
+  "benchmark_provenance": {
+    "run_started_at": "2026-09-26T14:10:32.548891",
+    "run_finished_at": "2026-09-26T14:59:14.294090",
+    "sessions": 1,
+    "commit": "2a84c3933da96d639a2aa57abbf2029341884cd1",
+    "has_uncommitted_changes": true,
+    "responses": 124,
+    "expected_responses": 124,
+    "api_model_names": {
+      "azure::gpt-5.4-mini": [
+        "gpt-5.4-mini-2026-03-17"
+      ],
+      "azure::Kimi-K2.5": [
+        "Kimi-K2.5"
+      ]
+    },
+    "response_errors": {},
+    "judge_errors": {},
+    "responses_with_calls_to_another_model": {},
+    "checks": {
+      "complete": true,
+      "single_system_code": true,
+      "clean_working_tree": false,
+      "no_response_errors": true,
+      "no_judge_errors": true,
+      "calls_use_row_model": true,
+      "same_system_code_as_ablation": true,
+      "same_corpus_file_as_ablation": true
+    }
+  },
+  "benchmark_model_tests": [
+    {
+      "comparison_type": "benchmark_model_pair",
+      "domain": "researcher",
+      "dimension": "composite_score",
+      "label_a": "gpt-5.4-mini",
+      "label_b": "Kimi-K2.5",
+      "n_pairs": 13,
+      "mean_a": 4.6231,
+      "mean_b": 4.6692,
+      "mean_diff_b_minus_a": 0.0462,
+      "median_diff_b_minus_a": 0.0,
+      "wilcoxon_statistic": 22.5,
+      "wilcoxon_p_value": 0.642578125,
+      "wilcoxon_method": "scipy_wilcoxon_two_sided",
+      "rank_biserial_correlation": 0.1818,
+      "bootstrap_ci_low": -0.0769,
+      "bootstrap_ci_high": 0.1692,
+      "bootstrap_iterations": 5000,
+      "confidence_level": 0.95
+    },
+    {
+      "comparison_type": "benchmark_model_pair",
+      "domain": "researcher",
+      "dimension": "factual_accuracy",
+      "label_a": "gpt-5.4-mini",
+      "label_b": "Kimi-K2.5",
+      "n_pairs": 13,
+      "mean_a": 4.3846,
+      "mean_b": 4.4231,
+      "mean_diff_b_minus_a": 0.0385,
+      "median_diff_b_minus_a": 0.0,
+      "wilcoxon_statistic": 6.0,
+      "wilcoxon_p_value": 1.0,
+      "wilcoxon_method": "scipy_wilcoxon_two_sided",
+      "rank_biserial_correlation": 0.2,
+      "bootstrap_ci_low": -0.1154,
+      "bootstrap_ci_high": 0.1923,
+      "bootstrap_iterations": 5000,
+      "confidence_level": 0.95
+    },
+    {
+      "comparison_type": "benchmark_model_pair",
+      "domain": "researcher",
+      "dimension": "tool_usage",
+      "label_a": "gpt-5.4-mini",
+      "label_b": "Kimi-K2.5",
+      "n_pairs": 13,
+      "mean_a": 4.8462,
+      "mean_b": 4.8462,
+      "mean_diff_b_minus_a": 0.0,
+      "median_diff_b_minus_a": 0.0,
+      "wilcoxon_statistic": 1.5,
+      "wilcoxon_p_value": 1.0,
+      "wilcoxon_method": "scipy_wilcoxon_two_sided",
+      "rank_biserial_correlation": 0.0,
+      "bootstrap_ci_low": -0.1154,
+      "bootstrap_ci_high": 0.1154,
+      "bootstrap_iterations": 5000,
+      "confidence_level": 0.95
+    },
+    {
+      "comparison_type": "benchmark_model_pair",
+      "domain": "researcher",
+      "dimension": "completeness",
+      "label_a": "gpt-5.4-mini",
+      "label_b": "Kimi-K2.5",
+      "n_pairs": 13,
+      "mean_a": 4.3846,
+      "mean_b": 4.5385,
+      "mean_diff_b_minus_a": 0.1538,
+      "median_diff_b_minus_a": 0.0,
+      "wilcoxon_statistic": 4.0,
+      "wilcoxon_p_value": 0.5,
+      "wilcoxon_method": "scipy_wilcoxon_two_sided",
+      "rank_biserial_correlation": 0.4667,
+      "bootstrap_ci_low": -0.1538,
+      "bootstrap_ci_high": 0.4615,
+      "bootstrap_iterations": 5000,
+      "confidence_level": 0.95
+    },
+    {
+      "comparison_type": "benchmark_model_pair",
+      "domain": "researcher",
+      "dimension": "relevance",
+      "label_a": "gpt-5.4-mini",
+      "label_b": "Kimi-K2.5",
+      "n_pairs": 13,
+      "mean_a": 4.9231,
+      "mean_b": 4.8846,
+      "mean_diff_b_minus_a": -0.0385,
+      "median_diff_b_minus_a": 0.0,
+      "wilcoxon_statistic": 2.0,
+      "wilcoxon_p_value": 1.0,
+      "wilcoxon_method": "scipy_wilcoxon_two_sided",
+      "rank_biserial_correlation": -0.3333,
+      "bootstrap_ci_low": -0.1538,
+      "bootstrap_ci_high": 0.0769,
+      "bootstrap_iterations": 5000,
+      "confidence_level": 0.95
+    },
+    {
+      "comparison_type": "benchmark_model_pair",
+      "domain": "researcher",
+      "dimension": "response_quality",
+      "label_a": "gpt-5.4-mini",
+      "label_b": "Kimi-K2.5",
+      "n_pairs": 13,
+      "mean_a": 4.5769,
+      "mean_b": 4.6538,
+      "mean_diff_b_minus_a": 0.0769,
+      "median_diff_b_minus_a": 0.0,
+      "wilcoxon_statistic": 2.5,
+      "wilcoxon_p_value": 0.625,
+      "wilcoxon_method": "scipy_wilcoxon_two_sided",
+      "rank_biserial_correlation": 0.5,
+      "bootstrap_ci_low": -0.0769,
+      "bootstrap_ci_high": 0.2308,
+      "bootstrap_iterations": 5000,
+      "confidence_level": 0.95
+    },
+    {
+      "comparison_type": "benchmark_model_pair",
+      "domain": "transport",
+      "dimension": "composite_score",
+      "label_a": "gpt-5.4-mini",
+      "label_b": "Kimi-K2.5",
+      "n_pairs": 36,
+      "mean_a": 4.4944,
+      "mean_b": 4.4778,
+      "mean_diff_b_minus_a": -0.0167,
+      "median_diff_b_minus_a": 0.0,
+      "wilcoxon_statistic": 151.0,
+      "wilcoxon_p_value": 0.7556851292621414,
+      "wilcoxon_method": "scipy_wilcoxon_two_sided",
+      "rank_biserial_correlation": -0.0708,
+      "bootstrap_ci_low": -0.0778,
+      "bootstrap_ci_high": 0.0417,
+      "bootstrap_iterations": 5000,
+      "confidence_level": 0.95
+    },
+    {
+      "comparison_type": "benchmark_model_pair",
+      "domain": "transport",
+      "dimension": "factual_accuracy",
+      "label_a": "gpt-5.4-mini",
+      "label_b": "Kimi-K2.5",
+      "n_pairs": 36,
+      "mean_a": 4.2639,
+      "mean_b": 4.2083,
+      "mean_diff_b_minus_a": -0.0556,
+      "median_diff_b_minus_a": 0.0,
+      "wilcoxon_statistic": 39.5,
+      "wilcoxon_p_value": 0.3784674199021233,
+      "wilcoxon_method": "scipy_wilcoxon_two_sided",
+      "rank_biserial_correlation": -0.2476,
+      "bootstrap_ci_low": -0.1806,
+      "bootstrap_ci_high": 0.0694,
+      "bootstrap_iterations": 5000,
+      "confidence_level": 0.95
+    },
+    {
+      "comparison_type": "benchmark_model_pair",
+      "domain": "transport",
+      "dimension": "tool_usage",
+      "label_a": "gpt-5.4-mini",
+      "label_b": "Kimi-K2.5",
+      "n_pairs": 36,
+      "mean_a": 4.6389,
+      "mean_b": 4.6528,
+      "mean_diff_b_minus_a": 0.0139,
+      "median_diff_b_minus_a": 0.0,
+      "wilcoxon_statistic": 6.0,
+      "wilcoxon_p_value": 1.0,
+      "wilcoxon_method": "scipy_wilcoxon_two_sided",
+      "rank_biserial_correlation": 0.2,
+      "bootstrap_ci_low": -0.0417,
+      "bootstrap_ci_high": 0.0694,
+      "bootstrap_iterations": 5000,
+      "confidence_level": 0.95
+    },
+    {
+      "comparison_type": "benchmark_model_pair",
+      "domain": "transport",
+      "dimension": "completeness",
+      "label_a": "gpt-5.4-mini",
+      "label_b": "Kimi-K2.5",
+      "n_pairs": 36,
+      "mean_a": 4.4306,
+      "mean_b": 4.4167,
+      "mean_diff_b_minus_a": -0.0139,
+      "median_diff_b_minus_a": 0.0,
+      "wilcoxon_statistic": 42.5,
+      "wilcoxon_p_value": 0.959716796875,
+      "wilcoxon_method": "scipy_wilcoxon_two_sided",
+      "rank_biserial_correlation": -0.0659,
+      "bootstrap_ci_low": -0.1389,
+      "bootstrap_ci_high": 0.1111,
+      "bootstrap_iterations": 5000,
+      "confidence_level": 0.95
+    },
+    {
+      "comparison_type": "benchmark_model_pair",
+      "domain": "transport",
+      "dimension": "relevance",
+      "label_a": "gpt-5.4-mini",
+      "label_b": "Kimi-K2.5",
+      "n_pairs": 36,
+      "mean_a": 4.7222,
+      "mean_b": 4.7083,
+      "mean_diff_b_minus_a": -0.0139,
+      "median_diff_b_minus_a": 0.0,
+      "wilcoxon_statistic": 6.0,
+      "wilcoxon_p_value": 1.0,
+      "wilcoxon_method": "scipy_wilcoxon_two_sided",
+      "rank_biserial_correlation": -0.2,
+      "bootstrap_ci_low": -0.0694,
+      "bootstrap_ci_high": 0.0417,
+      "bootstrap_iterations": 5000,
+      "confidence_level": 0.95
+    },
+    {
+      "comparison_type": "benchmark_model_pair",
+      "domain": "transport",
+      "dimension": "response_quality",
+      "label_a": "gpt-5.4-mini",
+      "label_b": "Kimi-K2.5",
+      "n_pairs": 36,
+      "mean_a": 4.4167,
+      "mean_b": 4.4028,
+      "mean_diff_b_minus_a": -0.0139,
+      "median_diff_b_minus_a": 0.0,
+      "wilcoxon_statistic": 42.0,
+      "wilcoxon_p_value": 0.734130859375,
+      "wilcoxon_method": "scipy_wilcoxon_two_sided",
+      "rank_biserial_correlation": -0.0769,
+      "bootstrap_ci_low": -0.1389,
+      "bootstrap_ci_high": 0.0972,
+      "bootstrap_iterations": 5000,
+      "confidence_level": 0.95
+    },
+    {
+      "comparison_type": "benchmark_model_pair",
+      "domain": "weather",
+      "dimension": "composite_score",
+      "label_a": "gpt-5.4-mini",
+      "label_b": "Kimi-K2.5",
+      "n_pairs": 13,
+      "mean_a": 4.7077,
+      "mean_b": 4.7923,
+      "mean_diff_b_minus_a": 0.0846,
+      "median_diff_b_minus_a": 0.1,
+      "wilcoxon_statistic": 2.5,
+      "wilcoxon_p_value": 0.0390625,
+      "wilcoxon_method": "scipy_wilcoxon_two_sided",
+      "rank_biserial_correlation": 0.8611,
+      "bootstrap_ci_low": 0.0154,
+      "bootstrap_ci_high": 0.1846,
+      "bootstrap_iterations": 5000,
+      "confidence_level": 0.95
+    },
+    {
+      "comparison_type": "benchmark_model_pair",
+      "domain": "weather",
+      "dimension": "factual_accuracy",
+      "label_a": "gpt-5.4-mini",
+      "label_b": "Kimi-K2.5",
+      "n_pairs": 13,
+      "mean_a": 4.6538,
+      "mean_b": 4.7308,
+      "mean_diff_b_minus_a": 0.0769,
+      "median_diff_b_minus_a": 0.0,
+      "wilcoxon_statistic": 1.5,
+      "wilcoxon_p_value": 0.75,
+      "wilcoxon_method": "scipy_wilcoxon_two_sided",
+      "rank_biserial_correlation": 0.5,
+      "bootstrap_ci_low": -0.0769,
+      "bootstrap_ci_high": 0.2692,
+      "bootstrap_iterations": 5000,
+      "confidence_level": 0.95
+    },
+    {
+      "comparison_type": "benchmark_model_pair",
+      "domain": "weather",
+      "dimension": "tool_usage",
+      "label_a": "gpt-5.4-mini",
+      "label_b": "Kimi-K2.5",
+      "n_pairs": 13,
+      "mean_a": 4.8462,
+      "mean_b": 4.8462,
+      "mean_diff_b_minus_a": 0.0,
+      "median_diff_b_minus_a": 0.0,
+      "wilcoxon_statistic": 0.0,
+      "wilcoxon_p_value": 1.0,
+      "wilcoxon_method": "all_zero_differences",
+      "rank_biserial_correlation": 0.0,
+      "bootstrap_ci_low": 0.0,
+      "bootstrap_ci_high": 0.0,
+      "bootstrap_iterations": 5000,
+      "confidence_level": 0.95
+    },
+    {
+      "comparison_type": "benchmark_model_pair",
+      "domain": "weather",
+      "dimension": "completeness",
+      "label_a": "gpt-5.4-mini",
+      "label_b": "Kimi-K2.5",
+      "n_pairs": 13,
+      "mean_a": 4.6154,
+      "mean_b": 4.6923,
+      "mean_diff_b_minus_a": 0.0769,
+      "median_diff_b_minus_a": 0.0,
+      "wilcoxon_statistic": 2.5,
+      "wilcoxon_p_value": 0.625,
+      "wilcoxon_method": "scipy_wilcoxon_two_sided",
+      "rank_biserial_correlation": 0.5,
+      "bootstrap_ci_low": -0.0769,
+      "bootstrap_ci_high": 0.2308,
+      "bootstrap_iterations": 5000,
+      "confidence_level": 0.95
+    },
+    {
+      "comparison_type": "benchmark_model_pair",
+      "domain": "weather",
+      "dimension": "relevance",
+      "label_a": "gpt-5.4-mini",
+      "label_b": "Kimi-K2.5",
+      "n_pairs": 13,
+      "mean_a": 4.8846,
+      "mean_b": 4.9615,
+      "mean_diff_b_minus_a": 0.0769,
+      "median_diff_b_minus_a": 0.0,
+      "wilcoxon_statistic": 0.0,
+      "wilcoxon_p_value": 1.0,
+      "wilcoxon_method": "scipy_wilcoxon_two_sided",
+      "rank_biserial_correlation": 1.0,
+      "bootstrap_ci_low": 0.0,
+      "bootstrap_ci_high": 0.2308,
+      "bootstrap_iterations": 5000,
+      "confidence_level": 0.95
+    },
+    {
+      "comparison_type": "benchmark_model_pair",
+      "domain": "weather",
+      "dimension": "response_quality",
+      "label_a": "gpt-5.4-mini",
+      "label_b": "Kimi-K2.5",
+      "n_pairs": 13,
+      "mean_a": 4.5385,
+      "mean_b": 4.7308,
+      "mean_diff_b_minus_a": 0.1923,
+      "median_diff_b_minus_a": 0.0,
+      "wilcoxon_statistic": 0.0,
+      "wilcoxon_p_value": 0.0625,
+      "wilcoxon_method": "scipy_wilcoxon_two_sided",
+      "rank_biserial_correlation": 1.0,
+      "bootstrap_ci_low": 0.0769,
+      "bootstrap_ci_high": 0.3462,
+      "bootstrap_iterations": 5000,
+      "confidence_level": 0.95
+    }
+  ],
+  "benchmark_operational": {
+    "rows": [
+      {
+        "model": "azure::Kimi-K2.5",
+        "responses": 62,
+        "llm_responses": 8,
+        "deterministic_responses": 54,
+        "errors": 0,
+        "latency_s_all": {
+          "n": 62,
+          "mean": 1.156,
+          "sd": 2.337,
+          "median": 0.36,
+          "p90": 2.89,
+          "max": 10.49
+        },
+        "latency_s_llm_only": {
+          "n": 8,
+          "mean": 6.54,
+          "sd": 2.976,
+          "median": 6.335,
+          "p90": 10.29,
+          "max": 10.49
+        },
+        "cost_usd_per_llm_response": {
+          "mean": 0.01189,
+          "sd": 0.00768,
+          "total": 0.0952
+        },
+        "cost_usd_per_query": 0.00153,
+        "tokens_mean": {
+          "input": 15467.0,
+          "output": 871.0
+        },
+        "latency_s_median_by_domain": {
+          "researcher": 0.38,
+          "transport": 0.44,
+          "weather": 0.09
+        },
+        "judge_cost_usd_total": 0.6834
+      },
+      {
+        "model": "azure::gpt-5.4-mini",
+        "responses": 62,
+        "llm_responses": 8,
+        "deterministic_responses": 54,
+        "errors": 0,
+        "latency_s_all": {
+          "n": 62,
+          "mean": 1.291,
+          "sd": 2.31,
+          "median": 0.415,
+          "p90": 3.93,
+          "max": 14.51
+        },
+        "latency_s_llm_only": {
+          "n": 8,
+          "mean": 4.705,
+          "sd": 0.933,
+          "median": 4.515,
+          "p90": 5.44,
+          "max": 6.39
+        },
+        "cost_usd_per_llm_response": {
+          "mean": 0.00889,
+          "sd": 0.0034,
+          "total": 0.0711
+        },
+        "cost_usd_per_query": 0.00115,
+        "tokens_mean": {
+          "input": 10742.0,
+          "output": 185.0
+        },
+        "latency_s_median_by_domain": {
+          "researcher": 0.41,
+          "transport": 0.515,
+          "weather": 0.1
+        },
+        "judge_cost_usd_total": 0.6795
+      }
+    ],
+    "run_cost_usd": {
+      "responses": 0.17,
+      "judges": 1.36
+    },
+    "note": "Worker-level latency (one worker with each model); response cost is list price x tokens; judges excluded."
+  }
+}

@@ -162,6 +162,12 @@ def _agreement_row(a: Sequence[int], b: Sequence[int]) -> dict[str, Any]:
 # Sections
 # ---------------------------------------------------------------------------
 
+def _first_session_start(metadata: dict) -> str | None:
+    """Start of the first session of a run that was resumed; the run's own start otherwise."""
+    starts = [str(s.get("started_at")) for s in metadata.get("run_sessions") or [] if s.get("type") == "session" and s.get("started_at")]
+    return min(starts) if starts else metadata.get("run_started_at")
+
+
 def provenance_section(payload: dict) -> dict[str, Any]:
     """Protocol and provenance checks for the run."""
     metadata = payload.get("ablation_metadata") or {}
@@ -224,7 +230,7 @@ def provenance_section(payload: dict) -> dict[str, Any]:
                 if str(call.get("model_id") or "").lower() != expected_model:
                     wrong_model_calls[f"{profile}::{call.get('model_id')}"] += 1
     return {
-        "run_started_at": metadata.get("run_started_at"),
+        "run_started_at": _first_session_start(metadata),
         "run_finished_at": metadata.get("run_finished_at"),
         "sessions": len([s for s in sessions if s.get("type") == "session"]) or 1,
         "commit": git.get("commit"),
@@ -295,7 +301,7 @@ def benchmark_provenance_section(benchmark: dict, ablation: dict | None = None) 
     mismatches = Counter(str(r.get("response_model")) for r in records if r.get("model_call_mismatches"))
     expected = len(metadata.get("groundtruth_ids") or []) * len(metadata.get("response_models") or [])
     output = {
-        "run_started_at": metadata.get("run_started_at"),
+        "run_started_at": _first_session_start(metadata),
         "run_finished_at": metadata.get("run_finished_at"),
         "sessions": len([s for s in sessions if s.get("type") == "session"]) or 1,
         "commit": git.get("commit"),

@@ -1,0 +1,97 @@
+﻿Location,Quantity,Value
+Table 5,"Weather: queries, scored responses, mean QS, mean factual accuracy, mean tool F1","13, 26, 4.750, 4.692, 1.000"
+Table 5,"Researcher: queries, scored responses, mean QS, mean factual accuracy, mean tool F1","13, 26, 4.646, 4.404, 1.000"
+Table 5,"Transport: queries, scored responses, mean QS, mean factual accuracy, mean tool F1","36, 72, 4.486, 4.236, 0.833"
+Table 5,"Overall: queries, scored responses, mean QS, mean factual accuracy, mean tool F1","62, 124, 4.575, 4.367, 0.906"
+Abstract; 5.1; 7.1,Benchmark mean QS (out of 5),4.575
+5.1,Benchmark mean tool F1,0.906
+5.1,Benchmark execution errors,none
+5.1,Domain order by QS (highest first),Weather (4.750) > Researcher (4.646) > Transport (4.486)
+Table 6,"Weather: n, GPT-5.4-mini QS, Kimi-K2.5 QS, delta (B-A) [95% CI], p, r_rb","13, 4.708, 4.792, +0.085 [0.015, 0.185], 0.039 *, 0.861"
+Table 6,"Transport: n, GPT-5.4-mini QS, Kimi-K2.5 QS, delta (B-A) [95% CI], p, r_rb","36, 4.494, 4.478, -0.017 [-0.078, 0.042], 0.756 n.s., -0.071"
+Table 6,"Researcher: n, GPT-5.4-mini QS, Kimi-K2.5 QS, delta (B-A) [95% CI], p, r_rb","13, 4.623, 4.669, +0.046 [-0.077, 0.169], 0.643 n.s., 0.182"
+5.1,Domains with a significant model difference,"Weather (delta +0.085, p 0.039)"
+5.1,"GPT-5.4-mini: worker latency median (P90), s",0.41 (3.93)
+5.1,GPT-5.4-mini: model-calling responses of 62,8
+5.1; letter R1,"GPT-5.4-mini: cost per model-calling response, USD",0.00889
+5.1,"GPT-5.4-mini: median latency by domain, fastest first (s)","weather 0.10, researcher 0.41, transport 0.52"
+5.1,"Kimi-K2.5: worker latency median (P90), s",0.36 (2.89)
+5.1,Kimi-K2.5: model-calling responses of 62,8
+5.1; letter R1,"Kimi-K2.5: cost per model-calling response, USD",0.01189
+5.1,"Kimi-K2.5: median latency by domain, fastest first (s)","weather 0.09, researcher 0.38, transport 0.44"
+5.1,"Kimi / GPT worker latency (median ratio), all answers",0.87
+5.1,"Kimi / GPT worker latency (median ratio), model-calling answers only",1.40
+5.1,Kimi / GPT cost per model-calling response (ratio),1.34
+Table 7,"GPT-5.4-mini, all: n, zero-shot QS, LISBOA QS, delta [95% CI], p, r_rb","75, 3.580, 4.423, +0.843 [0.653, 1.027], < 0.001 ***, 0.826"
+Table 7,"GPT-5.4-mini, weather: n, zero-shot QS, LISBOA QS, delta [95% CI], p, r_rb","13, 3.577, 4.606, +1.029 [0.615, 1.413], 0.001 **, 0.949"
+Table 7,"GPT-5.4-mini, transport: n, zero-shot QS, LISBOA QS, delta [95% CI], p, r_rb","36, 3.531, 4.472, +0.941 [0.681, 1.181], < 0.001 ***, 0.874"
+Table 7,"GPT-5.4-mini, researcher: n, zero-shot QS, LISBOA QS, delta [95% CI], p, r_rb","13, 3.740, 4.327, +0.587 [-0.019, 1.163], 0.107 n.s., 0.516"
+Table 7,"GPT-5.4-mini, multi_agent: n, zero-shot QS, LISBOA QS, delta [95% CI], p, r_rb","13, 3.558, 4.202, +0.644 [0.298, 0.952], 0.005 **, 0.835"
+Table 7,"Kimi-K2.5, all: n, zero-shot QS, LISBOA QS, delta [95% CI], p, r_rb","75, 3.595, 4.460, +0.865 [0.668, 1.055], < 0.001 ***, 0.815"
+Table 7,"Kimi-K2.5, weather: n, zero-shot QS, LISBOA QS, delta [95% CI], p, r_rb","13, 3.490, 4.519, +1.029 [0.481, 1.519], 0.006 **, 0.824"
+Table 7,"Kimi-K2.5, transport: n, zero-shot QS, LISBOA QS, delta [95% CI], p, r_rb","36, 3.569, 4.497, +0.927 [0.646, 1.188], < 0.001 ***, 0.850"
+Table 7,"Kimi-K2.5, researcher: n, zero-shot QS, LISBOA QS, delta [95% CI], p, r_rb","13, 3.615, 4.433, +0.817 [0.260, 1.288], 0.014 *, 0.747"
+Table 7,"Kimi-K2.5, multi_agent: n, zero-shot QS, LISBOA QS, delta [95% CI], p, r_rb","13, 3.750, 4.327, +0.577 [0.221, 0.923], 0.012 *, 0.795"
+Abstract; highlights; 5.2; 7.1,GPT-5.4-mini: all-domain gain (zero-shot -> LISBOA),"3.580 -> 4.423 (+0.843), p < 0.001, r_rb 0.826"
+5.2,GPT-5.4-mini: weather gain and significance,"+1.029, p 0.001 **"
+5.2,GPT-5.4-mini: transport gain and significance,"+0.941, p < 0.001 ***"
+5.2,GPT-5.4-mini: researcher gain and significance,"+0.587, p 0.107 n.s."
+Abstract; highlights; 5.2; 7.1,Kimi-K2.5: all-domain gain (zero-shot -> LISBOA),"3.595 -> 4.460 (+0.865), p < 0.001, r_rb 0.815"
+5.2,Kimi-K2.5: weather gain and significance,"+1.029, p 0.006 **"
+5.2,Kimi-K2.5: transport gain and significance,"+0.927, p < 0.001 ***"
+5.2,Kimi-K2.5: researcher gain and significance,"+0.817, p 0.014 *"
+5.2,GPT-5.4-mini: Response quality gain [95% CI],"+0.587 [0.420, 0.747]"
+5.2,GPT-5.4-mini: Relevance gain [95% CI],"+0.347 [0.167, 0.520]"
+5.2,GPT-5.4-mini: Completeness gain [95% CI],"+1.467 [1.173, 1.760]"
+5.2,GPT-5.4-mini: Factual accuracy gain [95% CI],"+0.973 [0.727, 1.213]"
+5.2,Kimi-K2.5: Response quality gain [95% CI],"+0.507 [0.347, 0.660]"
+5.2,Kimi-K2.5: Relevance gain [95% CI],"+0.407 [0.220, 0.580]"
+5.2,Kimi-K2.5: Completeness gain [95% CI],"+1.267 [0.953, 1.567]"
+5.2,Kimi-K2.5: Factual accuracy gain [95% CI],"+1.280 [1.040, 1.513]"
+5.2; 7.1; letter,"GPT-5.4-mini: multi-agent zero-shot -> LISBOA (delta, p), LISBOA ahead on","3.558 -> 4.202 (+0.644, p 0.005), 11 of 13"
+5.2; 7.1; letter,"Kimi-K2.5: multi-agent zero-shot -> LISBOA (delta, p), LISBOA ahead on","3.750 -> 4.327 (+0.577, p 0.012), 10 of 13"
+5.2; letter R2.7,GPT-5.4-mini LISBOA: unanimous met / constraints; disagreements; not assessable,55/58 (0.948); 1; 0
+5.2; letter R2.7,GPT-5.4-mini Zero-shot: unanimous met / constraints; disagreements; not assessable,55/58 (0.948); 0; 0
+5.2; letter R2.7,Kimi-K2.5 LISBOA: unanimous met / constraints; disagreements; not assessable,53/58 (0.914); 1; 0
+5.2; letter R2.7,Kimi-K2.5 Zero-shot: unanimous met / constraints; disagreements; not assessable,55/58 (0.948); 3; 0
+5.2,"Each judge's LISBOA met rate, range",0.914 to 0.966
+5.2,"Judge agreement on constraint verdicts (%), Cohen's kappa","97.8%, 0.772"
+5.2; letter R2.7,GPT-5.4-mini: routing correct of 62 (expected worker + boundary declined),62 (59 + 3); misses: none
+5.2; letter R2.7,"GPT-5.4-mini: every annotated agent called, of 13",7
+5.2; letter R2.7,GPT-5.4-mini: planner in the 11 itinerary requests,11
+5.2; letter R2.7,GPT-5.4-mini: QA worker retry / final repair (of which the deterministic guard alone),11 / 50 (17)
+5.2; letter R2.7,Kimi-K2.5: routing correct of 62 (expected worker + boundary declined),62 (59 + 3); misses: none
+5.2; letter R2.7,"Kimi-K2.5: every annotated agent called, of 13",7
+5.2; letter R2.7,Kimi-K2.5: planner in the 11 itinerary requests,11
+5.2; letter R2.7,Kimi-K2.5: QA worker retry / final repair (of which the deterministic guard alone),12 / 50 (17)
+5.2,LISBOA responses with an execution error,none
+5.2; letter R1,"GPT-5.4-mini: LISBOA latency mean +- SD (median), s",7.56 +- 7.45 (5.79)
+5.2; letter R1,"GPT-5.4-mini: zero-shot latency mean +- SD (median), s",2.01 +- 0.83 (1.81)
+5.2; letter R1,"GPT-5.4-mini: LISBOA mean latency, weather and itinerary, s",3.57 and 16.80
+5.2,"GPT-5.4-mini: slowest tenth of LISBOA answers, share of total time",0.346
+5.2,GPT-5.4-mini: LISBOA model-calling responses of 75,50
+5.2; letter R1,"GPT-5.4-mini: LISBOA cost per model-calling response, USD mean +- SD",0.0105 +- 0.0075
+5.2; letter R1,GPT-5.4-mini: LISBOA / zero-shot cost per model-calling response,9.0
+5.2; 6,GPT-5.4-mini: input tokens LISBOA / zero-shot; output tokens LISBOA,10167 / 154; 640
+5.2; letter R1,"Kimi-K2.5: LISBOA latency mean +- SD (median), s",30.44 +- 31.24 (14.93)
+5.2; letter R1,"Kimi-K2.5: zero-shot latency mean +- SD (median), s",6.37 +- 4.59 (4.77)
+5.2; letter R1,"Kimi-K2.5: LISBOA mean latency, weather and itinerary, s",22.43 and 69.52
+5.2,"Kimi-K2.5: slowest tenth of LISBOA answers, share of total time",0.329
+5.2,Kimi-K2.5: LISBOA model-calling responses of 75,50
+5.2; letter R1,"Kimi-K2.5: LISBOA cost per model-calling response, USD mean +- SD",0.0323 +- 0.0226
+5.2; letter R1,Kimi-K2.5: LISBOA / zero-shot cost per model-calling response,11.7
+5.2; 6,Kimi-K2.5: input tokens LISBOA / zero-shot; output tokens LISBOA,15683 / 159; 7622
+6,Kimi / GPT inside LISBOA: mean latency ratio; median latency ratio,4.0; 2.6
+6,Kimi / GPT inside LISBOA: cost per model-calling response ratio,3.1
+5.3,"Worker benchmark: exact %, within one %, mean absolute difference","64.0%, 97.1%, 0.389"
+5.3,"Ablation: exact %, within one %, mean absolute difference","50.5%, 92.1%, 0.580"
+5.3; letter R2.9,Ablation: QWK range (lowest and highest dimension),0.30 (response_quality) to 0.73 (completeness)
+5.3; letter R2.9,"Ablation: ICC(2,2) range (lowest and highest dimension)",0.46 (response_quality) to 0.84 (completeness)
+5.3; letter R2.9,Worker benchmark: QWK range (lowest and highest dimension),0.32 (factual_accuracy) to 0.81 (tool_usage)
+5.3; letter R2.9,"Worker benchmark: ICC(2,2) range (lowest and highest dimension)",0.49 (factual_accuracy) to 0.90 (tool_usage)
+5.3; letter R2.9,"Benchmark: first-listed model minus second-listed model, by judge",judge GPT-5.4-mini +0.013; judge Kimi-K2.5 -0.048 (first = GPT-5.4-mini)
+5.3; letter R2.9,Benchmark own-family interaction,+0.061
+5.3; letter R2.9,"GPT-5.4-mini: gain scored by the same family judge (GPT-5.4-mini), p","+0.713, p < 0.001"
+5.3; letter R2.9,"GPT-5.4-mini: gain scored by the other family judge (Kimi-K2.5), p","+0.973, p < 0.001"
+5.3; letter R2.9,"Kimi-K2.5: gain scored by the other family judge (GPT-5.4-mini), p","+0.920, p < 0.001"
+5.3; letter R2.9,"Kimi-K2.5: gain scored by the same family judge (Kimi-K2.5), p","+0.810, p < 0.001"
