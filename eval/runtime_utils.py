@@ -24,9 +24,11 @@ from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Any, Iterable, Optional, Sequence
 
+# Artefacts go to the paper evaluation folder, eval/results/Paper_2026-09/; the MSc
+# thesis run of May 2026 is kept apart in eval/results/MScThesis_2026-05/.
 # LISBOA_EVAL_RESULTS_DIR redirects every artefact, for example to rehearse the
 # pipeline on a few queries without touching eval/results/.
-RESULTS_ROOT = Path(os.getenv("LISBOA_EVAL_RESULTS_DIR") or Path(__file__).with_name("results"))
+RESULTS_ROOT = Path(os.getenv("LISBOA_EVAL_RESULTS_DIR") or Path(__file__).with_name("results") / "Paper_2026-09")
 REPO_ROOT = Path(__file__).resolve().parents[1]
 # System code whose last commit dates the evaluated LISBOA version.
 SYSTEM_CODE_PATHS = ("agent", "tools", "config.py", "app.py")
@@ -844,7 +846,7 @@ def build_results_output_path(
     timestamp: str,
     suffix: str = ".json",
 ) -> Path:
-    """Build an output path inside eval/results/<result_type>/."""
+    """Build an output path inside eval/results/Paper_2026-09/<result_type>/ (or LISBOA_EVAL_RESULTS_DIR)."""
     return ensure_results_dir(result_type) / f"{prefix}_{timestamp}{suffix}"
 
 

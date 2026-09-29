@@ -4,7 +4,7 @@
 #
 #   Compares a zero-shot baseline against the full LISBOA multi-agent system
 #   and writes the JSON artefacts into:
-#   eval/results/ablation/
+#   eval/results/Paper_2026-09/ablation/
 #
 # Usage:
 #   > python -m eval.run_ablation --mode run_test
@@ -22,7 +22,7 @@
 #   > python -m eval.run_ablation --dataset eval/evaluation_groundtruth_queries_paper_eval.json --fresh-session --output-prefix ablation_final
 #       Paper evaluation protocol: every LISBOA query starts in a new session, and each
 #       finished comparison is appended to a .partial.jsonl checkpoint.
-#   > python -m eval.run_ablation --resume eval/results/ablation/<prefix>_<timestamp>.partial.jsonl --fresh-session --dataset <same dataset>
+#   > python -m eval.run_ablation --resume eval/results/Paper_2026-09/ablation/<prefix>_<timestamp>.partial.jsonl --fresh-session --dataset <same dataset>
 #       Resume an interrupted run (or run the other profile after --only-profile) from its checkpoint.
 # ==========================================================================
 
@@ -1142,7 +1142,7 @@ def run_ablation(
             zero-shot and LISBOA within the same provider/model family per profile.
         judge_provider: Optional provider override for a single evaluation judge.
         judge_model: Optional model override for a single evaluation judge.
-        output_prefix: File prefix inside ``eval/results/ablation/``. With
+        output_prefix: File prefix inside ``eval/results/Paper_2026-09/ablation/``. With
             ``resume_path`` and no prefix, the prefix of the checkpoint is kept, so
             the finished file carries the same name as the run it completes.
         include_domains: Optional domain filter for the shared corpus. By default
@@ -1913,7 +1913,7 @@ if __name__ == "__main__":
         "--output-prefix",
         type=str,
         default=None,
-        help="Output filename prefix inside eval/results/ablation/ (default ablation_results; with --resume, the checkpoint's prefix).",
+        help="Output filename prefix inside eval/results/Paper_2026-09/ablation/ (default ablation_results; with --resume, the checkpoint's prefix).",
     )
     parser.add_argument(
         "--fresh-session",

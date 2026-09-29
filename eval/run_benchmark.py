@@ -4,7 +4,7 @@
 #
 #   Runs the academic LISBOA benchmark over isolated worker agents
 #   (weather, transport, researcher) and writes the JSON artefacts into:
-#   eval/results/benchmark/
+#   eval/results/Paper_2026-09/benchmark/
 #
 # Usage:
 #   > python -m eval.run_benchmark --mode run_test
@@ -21,7 +21,7 @@
 #       Override the evaluation judge with one or more explicit provider::model identifiers.
 #   > python -m eval.run_benchmark --dataset eval/evaluation_groundtruth_queries_paper_eval.json --output-prefix benchmark_final
 #       Paper evaluation run; each finished response is appended to a .partial.jsonl checkpoint.
-#   > python -m eval.run_benchmark --dataset <same dataset> --resume eval/results/benchmark/<prefix>_<timestamp>.partial.jsonl
+#   > python -m eval.run_benchmark --dataset <same dataset> --resume eval/results/Paper_2026-09/benchmark/<prefix>_<timestamp>.partial.jsonl
 #       Resume an interrupted run from its checkpoint (add --retry-errors to rerun failed responses).
 # ==========================================================================
 
@@ -618,7 +618,7 @@ def run_benchmark(
         judge_provider: Optional provider override for a single evaluation judge.
         judge_model: Optional model override for a single evaluation judge.
         groundtruth_path: Optional dataset path; the worker domains are kept.
-        output_prefix: File prefix inside ``eval/results/benchmark/``. With
+        output_prefix: File prefix inside ``eval/results/Paper_2026-09/benchmark/``. With
             ``resume_path`` and no prefix, the checkpoint's prefix is kept.
         resume_path: Optional ``.partial.jsonl`` checkpoint of an earlier run with the
             same queries, judges, and system code. Finished responses are reused.
@@ -1229,7 +1229,7 @@ if __name__ == "__main__":
         "--output-prefix",
         type=str,
         default=None,
-        help="Output filename prefix inside eval/results/benchmark/ (default benchmark_results; with --resume, the checkpoint's prefix).",
+        help="Output filename prefix inside eval/results/Paper_2026-09/benchmark/ (default benchmark_results; with --resume, the checkpoint's prefix).",
     )
     parser.add_argument(
         "--resume",

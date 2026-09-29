@@ -1,9 +1,26 @@
 # 🧪 LISBOA Evaluation Pipeline
 
-This folder contains the evaluation stack used for the LISBOA thesis workflow. It supports benchmark runs, ablation runs, response validators, statistical analysis artefacts, and analysis notebooks.
+This folder contains the evaluation stack used for the LISBOA thesis and the journal article. It supports benchmark runs, ablation runs, response validators, statistical analysis artefacts, and analysis notebooks.
 
 > [!IMPORTANT]
 > The evaluation stack is **not** the same thing as the app quality gate. User-facing changes to agents, prompts, routing, QA, planners, or final response formatting must be validated with real LISBOA prompt runs through `scripts/run_prompts.py` and, where rendering matters, through Streamlit/browser inspection.
+
+## 🔖 Versions
+
+LISBOA was evaluated twice. Both runs are kept in `results/`, each in its own folder with a README.
+
+| | MSc thesis | Journal article (*Results in Engineering*, revision) |
+|---|---|---|
+| Results | [`results/MScThesis_2026-05/`](./results/MScThesis_2026-05/) | [`results/Paper_2026-09/`](./results/Paper_2026-09/) |
+| Run date | 2026-05-15 | 2026-09-26 |
+| Corpus | `evaluation_groundtruth_queries.json`, 72 queries | `evaluation_groundtruth_queries_paper_eval.json`, 82 queries (the 72, plus ten itinerary requests) |
+| Worker benchmark | 62 queries, 124 responses | 62 queries, 124 responses |
+| Ablation | 65 queries, 3 of them multi-agent | 75 queries, 13 of them multi-agent |
+| LISBOA session | One conversation per model across the ablation queries | A fresh session for every query (`--fresh-session`) |
+| Itinerary constraint checklist | Not run | `constraint_judge.py` |
+| Response models and judges | GPT-5.4-mini and Kimi-K2.5 | GPT-5.4-mini and Kimi-K2.5 |
+
+The runners, the analyses, and the notebook read and write in `results/Paper_2026-09/` by default; `LISBOA_EVAL_RESULTS_DIR` points them elsewhere. The thesis folder is a record and is never written to.
 
 ## 📍 What Lives Here
 
@@ -28,6 +45,9 @@ eval/
 |   |-- test_dataset_integrity.py
 |   |-- test_paper_eval_pipeline.py
 `-- results/
+    |-- README.md
+    |-- MScThesis_2026-05/
+    `-- Paper_2026-09/
 ```
 
 `eval/tests/` is intentionally lean. It protects deterministic integrity only:
@@ -49,8 +69,10 @@ and `python -m eval.run_ablation`) so repository imports resolve correctly.
 
 ## 🧪 Shared Evaluation Corpus
 
-The primary corpus is `evaluation_groundtruth_queries.json`. It currently
-contains 72 entries across 6 domains:
+The primary corpus is `evaluation_groundtruth_queries.json`, used in the MSc thesis. It
+contains 72 entries across 6 domains; the paper corpus,
+`evaluation_groundtruth_queries_paper_eval.json`, keeps them unchanged and adds ten
+`multi_agent` itinerary requests (82 entries):
 
 | Domain | Count |
 |---|---:|
@@ -69,10 +91,11 @@ The corpus is for realistic evaluation scenarios, not exhaustive exported-tool c
 ## 📝 Paper Evaluation (RINENG Revision)
 
 The revision adds ten itinerary requests (`M04` to `M13`) to the ablation corpus and
-reruns the benchmark and the whole ablation on the revised system under one protocol:
+reruns the benchmark and the whole ablation on the current system under one protocol:
 the same two model profiles, the same judges and judge prompt as the May 2026 run, and a
-fresh LISBOA session for every query. Only the final run is kept in `results/`; the May
-and interim artefacts remain in the Git history.
+fresh LISBOA session for every query. The final run is kept in `results/Paper_2026-09/`
+and the May 2026 thesis run in `results/MScThesis_2026-05/`; interim artefacts remain in
+the Git history.
 
 | File | Content |
 |---|---|
@@ -97,15 +120,15 @@ $env:VECTOR_DB_RELEASE_FORCE_DOWNLOAD = 'false'
 
 # 2. Ablation, one profile per session; the second call completes the same file.
 python -X utf8 -u -m eval.run_ablation --dataset eval/evaluation_groundtruth_queries_paper_eval.json --fresh-session --only-profile closed_source --output-prefix ablation_final
-python -X utf8 -u -m eval.run_ablation --dataset eval/evaluation_groundtruth_queries_paper_eval.json --fresh-session --only-profile open_source --resume eval/results/ablation/ablation_final_<timestamp>.partial.jsonl
+python -X utf8 -u -m eval.run_ablation --dataset eval/evaluation_groundtruth_queries_paper_eval.json --fresh-session --only-profile open_source --resume eval/results/Paper_2026-09/ablation/ablation_final_<timestamp>.partial.jsonl
 
 # 3. Worker benchmark, both response models.
 python -X utf8 -u -m eval.run_benchmark --dataset eval/evaluation_groundtruth_queries_paper_eval.json --output-prefix benchmark_final
 
 # 4. Constraint checklist, statistics, and the paper analysis on the final files.
-python -X utf8 -m eval.constraint_judge --ablation eval/results/ablation/ablation_final_<timestamp>.json
-python -X utf8 -m eval.statistical_analysis --ablation eval/results/ablation/ablation_final_<timestamp>.json --benchmark eval/results/benchmark/benchmark_final_<timestamp>.json --output-prefix statistical_analysis_final
-python -X utf8 -m eval.paper_eval_analysis --ablation eval/results/ablation/ablation_final_<timestamp>.json --benchmark eval/results/benchmark/benchmark_final_<timestamp>.json --constraints eval/results/constraints/constraint_checklist_<timestamp>.json
+python -X utf8 -m eval.constraint_judge --ablation eval/results/Paper_2026-09/ablation/ablation_final_<timestamp>.json
+python -X utf8 -m eval.statistical_analysis --ablation eval/results/Paper_2026-09/ablation/ablation_final_<timestamp>.json --benchmark eval/results/Paper_2026-09/benchmark/benchmark_final_<timestamp>.json --output-prefix statistical_analysis_final
+python -X utf8 -m eval.paper_eval_analysis --ablation eval/results/Paper_2026-09/ablation/ablation_final_<timestamp>.json --benchmark eval/results/Paper_2026-09/benchmark/benchmark_final_<timestamp>.json --constraints eval/results/Paper_2026-09/constraints/constraint_checklist_<timestamp>.json
 
 # 5. Notebook: figures, tables, and the value sheet.
 python -X utf8 -m jupyter nbconvert --to notebook --execute --inplace --ExecutePreprocessor.timeout=1800 --ExecutePreprocessor.kernel_name=lisboa_thesis2026 eval/benchmark_ablation_analysis.ipynb
@@ -135,7 +158,7 @@ Remove-Item Env:LISBOA_EVAL_RESULTS_DIR
 ```
 
 > [!IMPORTANT]
-> Commit the code, corpus, and annotations before the run, so the provenance points to a clean commit, and do not pull or edit code until the run ends. Keep only the final run in `eval/results/`: remove interim and superseded result files before committing the new ones.
+> Commit the code, corpus, and annotations before the run, so the provenance points to a clean commit, and do not pull or edit code until the run ends. Keep only the final run in `eval/results/Paper_2026-09/`: remove interim and superseded result files before committing the new ones. Never write to `eval/results/MScThesis_2026-05/`.
 
 ## ☑️ Recommended Validation
 
@@ -158,8 +181,8 @@ python -X utf8 scripts/run_transport_verification.py
 
 ## 📂 Outputs
 
-Evaluation artefacts are written under `eval/results/`, usually in one of these
-subfolders:
+Evaluation artefacts are written under `eval/results/Paper_2026-09/` (or under
+`LISBOA_EVAL_RESULTS_DIR`), usually in one of these subfolders:
 
 - `benchmark/`
 - `ablation/`

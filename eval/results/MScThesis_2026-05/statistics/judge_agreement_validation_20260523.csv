@@ -1,0 +1,4 @@
+Scope,Dimension-level comparisons,Exact agreement (%),Within one point (%),Mean absolute difference
+Worker benchmark,620,64.0,96.1,0.4
+"Ablation, unique outputs",1300,52.3,93.2,0.555
+Benchmark and ablation combined,1920,56.1,94.1,0.505

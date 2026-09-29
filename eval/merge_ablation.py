@@ -17,8 +17,8 @@
 #   commit, and protocol.
 #
 # Usage:
-#   > python -m eval.merge_ablation --base eval/results/ablation/ablation_final_20260515_154508.json --add eval/results/ablation/ablation_new_queries_<timestamp>.json
-#       Write eval/results/ablation/ablation_final_<timestamp>.json, which the notebook picks up as the latest artefact.
+#   > python -m eval.merge_ablation --base eval/results/MScThesis_2026-05/ablation/ablation_final_20260515_154508.json --add eval/results/Paper_2026-09/ablation/ablation_new_queries_<timestamp>.json
+#       Write eval/results/Paper_2026-09/ablation/ablation_final_<timestamp>.json, which the notebook picks up as the latest artefact.
 # ==========================================================================
 
 from __future__ import annotations
@@ -163,8 +163,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Merge ablation artefacts that cover different queries.")
     parser.add_argument("--base", required=True, help="Earlier ablation artefact.")
     parser.add_argument("--add", required=True, action="append", dest="added", help="Repeatable. Later artefact to add.")
-    parser.add_argument("--output-prefix", default="ablation_final", help="Prefix inside eval/results/ablation/.")
-    parser.add_argument("--output-file", default=None, help="Explicit output path, instead of eval/results/ablation/.")
+    parser.add_argument("--output-prefix", default="ablation_final", help="Prefix inside eval/results/Paper_2026-09/ablation/.")
+    parser.add_argument("--output-file", default=None, help="Explicit output path, instead of eval/results/Paper_2026-09/ablation/.")
     parser.add_argument(
         "--allow-mixed-protocol",
         action="store_true",

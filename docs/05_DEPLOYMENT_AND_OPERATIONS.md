@@ -203,17 +203,19 @@ The judge details and output schemas are in the [Evaluation README](../eval/READ
 
 | Artifact | Default Location | Produced By |
 |---|---|---|
-| Benchmark JSON outputs | `eval/results/benchmark/` | `eval/run_benchmark.py` |
-| Ablation JSON outputs | `eval/results/ablation/` | `eval/run_ablation.py` |
-| Statistical analysis (JSON and CSV) | `eval/results/statistics/` | `eval/statistical_analysis.py` |
-| Figures | `eval/results/figures/` | The analysis notebook |
+| Benchmark JSON outputs | `eval/results/Paper_2026-09/benchmark/` | `eval/run_benchmark.py` |
+| Ablation JSON outputs | `eval/results/Paper_2026-09/ablation/` | `eval/run_ablation.py` |
+| Statistical analysis (JSON and CSV) | `eval/results/Paper_2026-09/statistics/` | `eval/statistical_analysis.py` |
+| Figures | `eval/results/Paper_2026-09/figures/` | The analysis notebook |
+
+These are the paper evaluation (September 2026). The MSc thesis results (May 2026) are kept, unchanged, in `eval/results/MScThesis_2026-05/`; see the [Evaluation README](../eval/README.md#-versions).
 
 The analysis notebook `eval/benchmark_ablation_analysis.ipynb` also exports the latest CSV summaries through `flatten_benchmark_results()` and `flatten_ablation_results()`:
 
-- `eval/results/benchmark/benchmark_flat_latest.csv`
-- `eval/results/benchmark/benchmark_summary_latest.csv`
-- `eval/results/ablation/ablation_flat_latest.csv`
-- `eval/results/ablation/ablation_summary_latest.csv`
+- `eval/results/Paper_2026-09/benchmark/benchmark_flat_latest.csv`
+- `eval/results/Paper_2026-09/benchmark/benchmark_summary_latest.csv`
+- `eval/results/Paper_2026-09/ablation/ablation_flat_latest.csv`
+- `eval/results/Paper_2026-09/ablation/ablation_summary_latest.csv`
 
 ## 🔄 GitHub Actions Automation
 

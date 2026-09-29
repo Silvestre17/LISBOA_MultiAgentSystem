@@ -13,7 +13,7 @@
 #   a plan does what was asked, not whether the plan is feasible in practice.
 #
 # Usage:
-#   > python -m eval.constraint_judge --ablation eval/results/ablation/ablation_final_<timestamp>.json
+#   > python -m eval.constraint_judge --ablation eval/results/Paper_2026-09/ablation/ablation_final_<timestamp>.json
 #       Check every itinerary response with the judges recorded in the ablation file.
 #   > python -m eval.constraint_judge --ablation <file> --limit 2 --output-prefix constraint_checklist_test
 #       Check only the first two itinerary requests (smoke test).
@@ -331,7 +331,7 @@ def run_constraint_checklist(
             judges recorded in the ablation file.
         limit: Optional number of itinerary requests to check.
         workers: Parallel judge calls.
-        output_prefix: File prefix inside ``eval/results/constraints/``.
+        output_prefix: File prefix inside ``eval/results/Paper_2026-09/constraints/``.
 
     Returns:
         Path: The JSON file with metadata, summary, and every verdict.
@@ -406,7 +406,7 @@ def main() -> None:
     )
     parser.add_argument("--limit", type=int, default=None, help="Check only the first N itinerary requests.")
     parser.add_argument("--workers", type=int, default=4, help="Parallel judge calls.")
-    parser.add_argument("--output-prefix", default="constraint_checklist", help="Output prefix in eval/results/constraints/.")
+    parser.add_argument("--output-prefix", default="constraint_checklist", help="Output prefix in eval/results/Paper_2026-09/constraints/.")
     args = parser.parse_args()
     run_constraint_checklist(
         args.ablation,

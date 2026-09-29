@@ -18,7 +18,7 @@
 #   Nothing here calls a model.
 #
 # Usage:
-#   > python -m eval.paper_eval_analysis --ablation eval/results/ablation/ablation_final_<timestamp>.json
+#   > python -m eval.paper_eval_analysis --ablation eval/results/Paper_2026-09/ablation/ablation_final_<timestamp>.json
 #   > python -m eval.paper_eval_analysis --ablation <file> --benchmark <file> --constraints <file>
 # ==========================================================================
 
@@ -968,7 +968,7 @@ def run_paper_eval_analysis(
         constraints_path: Optional output of ``eval.constraint_judge``.
         bootstrap_iterations: Bootstrap resamples for the confidence intervals.
         seed: Random seed shared with ``eval.statistical_analysis``.
-        output_prefix: File prefix inside ``eval/results/statistics/``.
+        output_prefix: File prefix inside ``eval/results/Paper_2026-09/statistics/``.
 
     Returns:
         tuple[Path, Path]: The JSON report and its Markdown rendering.
