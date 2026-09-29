@@ -1,0 +1,581 @@
+{
+  "description": "End-to-end annotations for the RINENG revision ablation. expected_agents lists the LISBOA agents a query needs: the domain worker for single-domain queries, and, for multi-agent queries, the workers and, for itinerary requests, the planner. constraints lists the explicit requests of each itinerary query, used by eval/constraint_judge.py.",
+  "created": "2026-09-23",
+  "corpus": "eval/evaluation_groundtruth_queries_paper_eval.json",
+  "query_types": {
+    "single_domain": "Weather, transport, or researcher query answered by one worker.",
+    "cross_domain": "Asks for information from several domains without asking for a plan.",
+    "itinerary": "Asks for a plan, schedule, or route through several stops."
+  },
+  "agents": [
+    "weather",
+    "transport",
+    "researcher",
+    "planner"
+  ],
+  "queries": {
+    "W01": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "weather"
+      ]
+    },
+    "W02": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "weather"
+      ]
+    },
+    "W03": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "weather"
+      ]
+    },
+    "W04": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "weather"
+      ]
+    },
+    "W05": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "weather"
+      ]
+    },
+    "W06": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "weather"
+      ]
+    },
+    "W07": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "weather"
+      ]
+    },
+    "W08": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "weather"
+      ]
+    },
+    "W09": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "weather"
+      ]
+    },
+    "W10": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "weather"
+      ]
+    },
+    "W11": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "weather"
+      ]
+    },
+    "W12": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "weather"
+      ]
+    },
+    "W13": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "weather"
+      ]
+    },
+    "T01": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T02": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T03": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T04": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T05": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T06": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T07": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T08": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T09": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T10": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T11": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T12": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T13": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T14": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T15": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T16": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T17": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T18": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T19": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T20": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T21": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T22": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T23": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T24": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T25": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T26": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T27": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T28": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T29": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T30": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T31": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T32": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T33": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T34": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T35": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "T36": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "transport"
+      ]
+    },
+    "R01": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "researcher"
+      ]
+    },
+    "R02": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "researcher"
+      ]
+    },
+    "R03": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "researcher"
+      ]
+    },
+    "R04": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "researcher"
+      ]
+    },
+    "R05": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "researcher"
+      ]
+    },
+    "R06": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "researcher"
+      ]
+    },
+    "R07": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "researcher"
+      ]
+    },
+    "R08": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "researcher"
+      ]
+    },
+    "R09": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "researcher"
+      ]
+    },
+    "R10": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "researcher"
+      ]
+    },
+    "R11": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "researcher"
+      ]
+    },
+    "R12": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "researcher"
+      ]
+    },
+    "R13": {
+      "query_type": "single_domain",
+      "expected_agents": [
+        "researcher"
+      ]
+    },
+    "M01": {
+      "query_type": "itinerary",
+      "expected_agents": [
+        "weather",
+        "researcher",
+        "transport",
+        "planner"
+      ],
+      "constraints": [
+        "Covers a full day",
+        "Plans for tomorrow",
+        "Focuses on museums",
+        "Starts in Rossio",
+        "Uses public transport between stops, or says when a connection cannot be confirmed"
+      ]
+    },
+    "M02": {
+      "query_type": "cross_domain",
+      "expected_agents": [
+        "weather",
+        "researcher",
+        "transport"
+      ]
+    },
+    "M03": {
+      "query_type": "cross_domain",
+      "expected_agents": [
+        "researcher",
+        "weather"
+      ]
+    },
+    "M04": {
+      "query_type": "itinerary",
+      "expected_agents": [
+        "weather",
+        "researcher",
+        "transport",
+        "planner"
+      ],
+      "constraints": [
+        "Starts at Marquês de Pombal",
+        "Covers the afternoon only",
+        "Proposes indoor visits",
+        "Uses the metro between stops, or says when a metro connection cannot be confirmed",
+        "Takes the weather forecast into account"
+      ]
+    },
+    "M05": {
+      "query_type": "itinerary",
+      "expected_agents": [
+        "weather",
+        "researcher",
+        "transport",
+        "planner"
+      ],
+      "constraints": [
+        "Plans tomorrow morning only",
+        "Proposes two visits",
+        "Keeps the visits in Parque das Nações",
+        "Starts at Cais do Sodré",
+        "Travels by metro, or says when a metro connection cannot be confirmed"
+      ]
+    },
+    "M06": {
+      "query_type": "itinerary",
+      "expected_agents": [
+        "weather",
+        "researcher",
+        "transport",
+        "planner"
+      ],
+      "constraints": [
+        "Suits children",
+        "Includes one museum and one garden",
+        "Plans tomorrow morning",
+        "Starts at Alvalade",
+        "Travels by metro, or says when a metro connection cannot be confirmed"
+      ]
+    },
+    "M07": {
+      "query_type": "itinerary",
+      "expected_agents": [
+        "weather",
+        "researcher",
+        "transport",
+        "planner"
+      ],
+      "constraints": [
+        "Starts at Cais do Sodré",
+        "Travels to Cascais by train",
+        "Covers a day in Cascais",
+        "Includes a beach stop only if the forecast allows it, with an alternative otherwise"
+      ]
+    },
+    "M08": {
+      "query_type": "itinerary",
+      "expected_agents": [
+        "weather",
+        "researcher",
+        "transport",
+        "planner"
+      ],
+      "constraints": [
+        "Fits in about four hours",
+        "Plans for tomorrow",
+        "Keeps the visits in Belém",
+        "Orders the visits",
+        "Starts at Rossio",
+        "Uses public transport, or says when a connection cannot be confirmed",
+        "Takes the weather forecast into account"
+      ]
+    },
+    "M09": {
+      "query_type": "itinerary",
+      "expected_agents": [
+        "researcher",
+        "transport",
+        "planner"
+      ],
+      "constraints": [
+        "Includes two viewpoints",
+        "Includes one café",
+        "Keeps the route in Alfama",
+        "Starts at Martim Moniz",
+        "Names the tram to take, or says when it cannot be confirmed"
+      ]
+    },
+    "M10": {
+      "query_type": "itinerary",
+      "expected_agents": [
+        "researcher",
+        "transport",
+        "planner"
+      ],
+      "constraints": [
+        "Lists events taking place this weekend, or says that none are available",
+        "Chooses one event",
+        "Plans the evening around the chosen event",
+        "Starts at Saldanha",
+        "Travels by metro, or says when a metro connection cannot be confirmed"
+      ]
+    },
+    "M11": {
+      "query_type": "itinerary",
+      "expected_agents": [
+        "researcher",
+        "transport",
+        "planner"
+      ],
+      "constraints": [
+        "Plans an evening",
+        "Keeps the plan in Chiado and Bairro Alto",
+        "Includes dinner",
+        "Includes a viewpoint",
+        "Starts at Oriente station",
+        "Uses public transport from Oriente, or says when a connection cannot be confirmed"
+      ]
+    },
+    "M12": {
+      "query_type": "itinerary",
+      "expected_agents": [
+        "weather",
+        "researcher",
+        "transport",
+        "planner"
+      ],
+      "constraints": [
+        "Plans for tomorrow",
+        "Includes a viewpoint for the sunset",
+        "Includes dinner near the viewpoint",
+        "Starts at Campo Grande",
+        "Travels by metro, or says when a metro connection cannot be confirmed"
+      ]
+    },
+    "M13": {
+      "query_type": "itinerary",
+      "expected_agents": [
+        "weather",
+        "researcher",
+        "transport",
+        "planner"
+      ],
+      "constraints": [
+        "Covers two days",
+        "Plans for this weekend",
+        "Suits a first-time visitor",
+        "Starts near Avenida da Liberdade",
+        "Uses public transport",
+        "Offers indoor options if it rains"
+      ]
+    }
+  }
+}

@@ -8,6 +8,7 @@ transport_runtime_artifacts/
 LISBOA_Survey_Forms_*.xlsx
 eval/results/figures/user_study_*.png
 eval/results/figures/user_study_*.svg
+eval/results/**/*.partial.jsonl
 .github/copilot-instructions.md
 .claude/
 desktop.ini
