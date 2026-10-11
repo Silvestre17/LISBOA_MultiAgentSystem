@@ -18,18 +18,19 @@
 # Required libraries:
 # pip install requests langchain-core
 
-import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
+from zoneinfo import ZoneInfo
 
-import requests
 from langchain_core.tools import tool
 
 try:
     from tools.utils import lisbon_now, sunrise_sunset
+    from tools.ipma_client import IPMA_CLIENT
 except ImportError:  # Standalone execution: python tools/ipma_api.py
     from utils import lisbon_now, sunrise_sunset
+    from ipma_client import IPMA_CLIENT
 
 try:
     from config import Config
@@ -37,11 +38,6 @@ except ModuleNotFoundError:
     import sys
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
     from config import Config
-
-logger = logging.getLogger(__name__)
-
-# Request configuration
-REQUEST_TIMEOUT = 10  # seconds
 
 # ==========================================================================
 # IPMA API Endpoints
@@ -186,11 +182,22 @@ def _format_warning_period(start_time: str, end_time: str) -> str:
     try:
         start_dt = datetime.fromisoformat(str(start_time or "").replace('Z', '+00:00'))
         end_dt = datetime.fromisoformat(str(end_time or "").replace('Z', '+00:00'))
+        start_dt = (start_dt if start_dt.tzinfo else start_dt.replace(tzinfo=timezone.utc)).astimezone(ZoneInfo("Europe/Lisbon"))
+        end_dt = (end_dt if end_dt.tzinfo else end_dt.replace(tzinfo=timezone.utc)).astimezone(ZoneInfo("Europe/Lisbon"))
         return f"{start_dt.strftime('%b %d, %H:%M')} → {end_dt.strftime('%b %d, %H:%M')}"
     except (ValueError, AttributeError):
         safe_start = str(start_time or "").strip() or "not confirmed"
         safe_end = str(end_time or "").strip() or "not confirmed"
         return f"{safe_start} → {safe_end}"
+
+
+def _warning_is_current(warning: Dict[str, Any]) -> bool:
+    """Check a validated warning's UTC interval against the current instant."""
+    start = datetime.fromisoformat(warning["startTime"].replace("Z", "+00:00"))
+    end = datetime.fromisoformat(warning["endTime"].replace("Z", "+00:00"))
+    start = start if start.tzinfo else start.replace(tzinfo=timezone.utc)
+    end = end if end.tzinfo else end.replace(tzinfo=timezone.utc)
+    return start <= datetime.now(timezone.utc) < end
 
 
 def _format_warning_item(warning: Dict[str, Any], *, include_description: bool = True) -> str:
@@ -229,10 +236,12 @@ WIND_DIRECTIONS = {
 # Source: https://api.ipma.pt/open-data/wind-speed-daily-classe.json
 WIND_SPEED_CLASSES = {
     -99: "--",
+    0: "Calm",
     1: "Weak",
     2: "Moderate",
     3: "Strong",
-    4: "Very strong"
+    4: "Very strong",
+    5: "Exceptionally strong",
 }
 
 # Precipitation Intensity Classes
@@ -250,60 +259,36 @@ PRECIPITATION_INTENSITY_CLASSES = {
 # Helper Functions with Optimizations
 # ==========================================================================
 
-# Import optimization utilities for caching and connection pooling
-try:
-    from agent.utils.optimization import http_pool, weather_cache
-    OPTIMIZATION_AVAILABLE = True
-except ImportError:
-    OPTIMIZATION_AVAILABLE = False
-    weather_cache = None
-
-
-def fetch_json(url: str, use_cache: bool = True) -> Optional[Dict[str, Any]]:
-    """
-    Fetches JSON data from a URL with timeout handling.
-    Uses connection pooling and optional caching for performance.
+def fetch_json(url: str, use_cache: bool = True) -> Optional[Any]:
+    """Fetch validated IPMA data while preserving forecast recovery metadata.
 
     Args:
-        url (str): URL to fetch from.
-        use_cache (bool): Whether to use cached results (default True).
+        url: Official IPMA resource URL.
+        use_cache: Whether a fresh successful snapshot can satisfy the request.
 
     Returns:
-        Optional[Dict]: JSON data if successful, None otherwise.
+        Normalized data, or None when usable evidence is unavailable.
     """
-    # Check cache first (5 minute TTL for weather data)
-    if use_cache and OPTIMIZATION_AVAILABLE and weather_cache:
-        import hashlib
-        cache_key = hashlib.md5(url.encode()).hexdigest()
-        cached_result = weather_cache.get(cache_key)
-        if cached_result is not None:
-            logger.debug(f"Cache hit for {url}")
-            return cached_result
+    result = IPMA_CLIENT.fetch(url, use_cache=use_cache)
+    if isinstance(result.data, dict):
+        return {
+            **result.data,
+            "_ipma_stale": result.stale,
+            "_ipma_retrieved_at": result.retrieved_at,
+        }
+    return result.data
 
-    try:
-        # Use pooled connection if available
-        if OPTIMIZATION_AVAILABLE:
-            response = http_pool.get(url, timeout=REQUEST_TIMEOUT)
-        else:
-            response = requests.get(url, timeout=REQUEST_TIMEOUT)
 
-        response.raise_for_status()
-        data = response.json()
-
-        # Cache the result
-        if use_cache and OPTIMIZATION_AVAILABLE and weather_cache:
-            weather_cache.set(cache_key, data, ttl=300)  # 5 minutes
-
-        return data
-    except requests.exceptions.Timeout:
-        logger.error(f"Timeout fetching {url}")
-        return None
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Request error: {e}")
-        return None
-    except ValueError:
-        logger.error("Invalid JSON response")
-        return None
+def _forecast_recovery_note(data: Dict[str, Any]) -> str:
+    """Disclose when a previous forecast substitutes for a failed refresh."""
+    if not data.get("_ipma_stale"):
+        return ""
+    retrieved = data.get("_ipma_retrieved_at")
+    timestamp = retrieved.isoformat(timespec="seconds") if isinstance(retrieved, datetime) else str(retrieved)
+    return (
+        f"⚠️ Earlier forecast retrieved at {timestamp}; a newer forecast could not be obtained. "
+        "Current weather warnings must be confirmed separately.\n\n"
+    )
 
 
 def get_weather_description(weather_type_id: int) -> str:
@@ -425,7 +410,7 @@ def get_weather_warnings(area: str = "LSB") -> str:
     """
     data = fetch_json(IPMA_WARNINGS_URL)
 
-    if not data:
+    if data is None:
         return "❌ Failed to fetch weather warnings from IPMA."
 
     if not isinstance(data, list):
@@ -458,10 +443,13 @@ def get_weather_warnings(area: str = "LSB") -> str:
 
     # Format response using render-safe Markdown. Keep the tool text in English;
     # language localization is applied by the worker/final formatter.
-    response = "### ⚠️ **Active weather warnings"
+    has_current = any(_warning_is_current(warning) for warning in active_warnings)
+    response = "### ⚠️ **Active weather warnings" if has_current else "### ⚠️ **Published weather warnings"
     if area_label:
         response += f" for {area_label}"
     response += "**\n\n"
+    if not has_current:
+        response += "✅ No active weather warnings right now; warnings are published for upcoming periods.\n\n"
     response += "\n".join(_format_warning_item(warning) for warning in active_warnings)
     response += "\n\n📌 **Source:** [*IPMA*](https://www.ipma.pt/en/) | **Updated:** " + lisbon_now().strftime("%H:%M")
 
@@ -521,15 +509,12 @@ def get_weather_forecast(days: int = 3, day_offset: int = 0) -> str:
     # Anchor day_offset=0 to today's forecastDate instead of trusting the
     # provider array position, so a stale leading entry never shifts the window.
     today_str = lisbon_now().strftime("%Y-%m-%d")
-    today_index = next(
-        (index for index, entry in enumerate(forecast_data) if entry.get('forecastDate') == today_str),
-        0,
-    )
-    start = today_index + day_offset
-
-    # Limit to requested window.
-    days = min(max(1, days), len(forecast_data) - start, 5 - day_offset)
-    forecast_data = forecast_data[start:start + days]
+    requested_start = datetime.fromisoformat(today_str).date() + timedelta(days=day_offset)
+    requested_end = requested_start + timedelta(days=min(max(1, days), 5 - day_offset))
+    forecast_data = [
+        entry for entry in forecast_data
+        if requested_start.isoformat() <= entry.get('forecastDate', '') < requested_end.isoformat()
+    ]
 
     if not forecast_data:
         return "❌ No forecast data available for the requested forecast window."
@@ -540,6 +525,7 @@ def get_weather_forecast(days: int = 3, day_offset: int = 0) -> str:
     response = "🌤️ Weather Forecast for Lisbon\n"
     response += f"{'=' * 40}\n"
     response += f"📅 Updated: {update_time}\n\n"
+    response += _forecast_recovery_note(data)
 
     for day in forecast_data:
         date = day.get('forecastDate', 'N/A')
@@ -638,6 +624,7 @@ def get_portugal_weather_overview(day: int = 0) -> str:
     response += f"📅 Forecast date — {forecast_date}\n"
     response += f"🔄 Updated: {update_time}\n"
     response += f"📊 Locations — {len(forecast_data)}\n\n"
+    response += _forecast_recovery_note(data)
 
     # Find Lisbon in the data (globalIdLocal = 1110600)
     lisbon_data = None
@@ -698,12 +685,12 @@ def get_current_weather_summary() -> str:
     # Today's forecast. The IPMA daily array is normally sorted with today
     # first, but match on forecastDate instead of trusting the position so a
     # stale leading entry never gets presented as "today".
-    if forecast_data and forecast_data.get('data'):
-        today_str = lisbon_now().strftime("%Y-%m-%d")
-        today = next(
-            (entry for entry in forecast_data['data'] if entry.get('forecastDate') == today_str),
-            forecast_data['data'][0],
-        )
+    today_str = lisbon_now().strftime("%Y-%m-%d")
+    today = next(
+        (entry for entry in (forecast_data or {}).get('data', []) if entry.get('forecastDate') == today_str),
+        None,
+    )
+    if today:
         update_time = forecast_data.get('dataUpdate', 'N/A')
         t_min = today.get('tMin', 'N/A')
         t_max = today.get('tMax', 'N/A')
@@ -719,6 +706,7 @@ def get_current_weather_summary() -> str:
         precip_intensity_desc = get_precipitation_intensity_description(precip_intensity_class)
 
         response += f"📅 Updated: {update_time}\n"
+        response += _forecast_recovery_note(forecast_data)
         response += f"📅 Today ({today.get('forecastDate', 'N/A')}):\n"
         response += f"   🌡️ Temperature: {t_min}°C to {t_max}°C\n"
         response += f"   🌤️ Conditions: {weather_desc}\n"
@@ -733,10 +721,11 @@ def get_current_weather_summary() -> str:
         response += "❌ Could not fetch today's forecast.\n\n"
 
     # Active warnings
-    if warnings_data and isinstance(warnings_data, list):
+    if isinstance(warnings_data, list):
         active = [w for w in warnings_data
                   if w.get('idAreaAviso') == Config.LISBON_AREA_AVISO
-                  and w.get('awarenessLevelID', 'green').lower() != 'green']
+                  and w.get('awarenessLevelID', 'green').lower() != 'green'
+                  and _warning_is_current(w)]
 
         if active:
             response += "⚠️ Active Warnings:\n"

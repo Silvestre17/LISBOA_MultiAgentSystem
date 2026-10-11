@@ -8,7 +8,6 @@ from agent.utils.optimization import (  # HTTP Session Pooling; Caching
     TTLCache,
     http_pool,
     transport_cache,
-    weather_cache,
 )
 from agent.utils.response_formatter import (
     ensure_response_title,
@@ -23,6 +22,5 @@ __all__ = [
     "HTTPSessionPool",
     "http_pool",
     "TTLCache",
-    "weather_cache",
     "transport_cache",
 ]

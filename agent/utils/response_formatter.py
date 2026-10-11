@@ -1085,15 +1085,22 @@ def _is_pure_weather_limitation(text: str) -> bool:
     has_limit = bool(
         re.search(
             r"\b(?:so tenho|only have|nao consigo|can't|cannot|fora do horizonte|outside.*horizon|"
-            r"sem inventar dados|without inventing data|cobertura meteorologica disponivel|available weather coverage)\b",
+            r"sem inventar dados|without inventing data|cobertura meteorologica disponivel|available weather coverage|"
+            r"nao foi possivel|could not|failed to fetch|warning status.*unavailable)\b",
             visible,
         )
+    )
+    # An unavailable-warning sentence can mention "active warnings" without
+    # asserting their existence. Exclude those limitations from factual evidence.
+    fact_text = "\n".join(
+        line for line in visible.splitlines()
+        if not re.search(r"nao foi possivel|nao esta confirmado|could not|failed to fetch|unavailable", line)
     )
     has_live_weather_fact = bool(
         re.search(
             r"\b(?:\d+(?:\.\d+)?\s*(?:°|º)?c\b|chuva\s*:|rain\s*:|vento\s*:|wind\s*:|"
             r"temperatura\s*:|temperature\s*:|avisos meteorologicos ativos|active weather warnings)\b",
-            visible,
+            fact_text,
         )
     )
     return has_limit and not has_live_weather_fact
@@ -4777,6 +4784,10 @@ def _source_material_body(text: str) -> str:
 def _has_material_weather_source_evidence(text: str) -> bool:
     """Return whether visible text contains concrete weather facts worth citing."""
     normalized = _strip_accents_compat(text or "").lower()
+    normalized = "\n".join(
+        line for line in normalized.splitlines()
+        if not re.search(r"nao foi possivel|could not|failed to fetch|nao esta confirmado", line)
+    )
     if not normalized:
         return False
 

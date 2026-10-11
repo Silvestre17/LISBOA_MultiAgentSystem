@@ -592,6 +592,24 @@ class WeatherAgent(BaseAgent):
         return areas
 
     @staticmethod
+    def _warning_tool_result_status(tool_result: str) -> str:
+        """Distinguish confirmed warnings, a clear status, and unavailable evidence."""
+        if re.search(
+            r"failed to fetch weather warnings|could not fetch weather warnings|"
+            r"unexpected response format.*warnings|warning status.*unavailable",
+            tool_result or "", re.IGNORECASE,
+        ):
+            return "unavailable"
+        if re.search(
+            r"no active weather warnings|sem avisos meteorol|n[aã]o h[aá] avisos meteorol",
+            tool_result or "", re.IGNORECASE,
+        ):
+            return "none"
+        if WeatherAgent._warning_tool_result_has_active_warning(tool_result):
+            return "active"
+        return "unavailable"
+
+    @staticmethod
     def _warning_tool_result_has_active_warning(tool_result: str) -> bool:
         """Return whether a warnings tool response contains active warning details."""
         normalized = unicodedata.normalize("NFKD", tool_result or "")
@@ -1143,10 +1161,20 @@ class WeatherAgent(BaseAgent):
             if warnings_tool and len(requested_warning_areas) > 1:
                 area_lines: list[str] = []
                 has_any_active = False
+                has_any_unavailable = False
                 for area_code, area_label in requested_warning_areas:
                     tool_result = str(self._invoke_tool(warnings_tool, {"area": area_code}))
-                    has_active = self._warning_tool_result_has_active_warning(tool_result)
+                    status = self._warning_tool_result_status(tool_result)
+                    has_active = status == "active"
                     has_any_active = has_any_active or has_active
+                    has_any_unavailable = has_any_unavailable or status == "unavailable"
+                    if status == "unavailable":
+                        area_lines.append(
+                            f"- ⚠️ **{area_label}:** não foi possível confirmar os avisos meteorológicos."
+                            if language == "pt" else
+                            f"- ⚠️ **{area_label}:** weather warning status could not be confirmed."
+                        )
+                        continue
                     if language == "pt":
                         if has_active:
                             area_lines.append(f"- ⚠️ **{area_label}:** há avisos ativos; consulta o detalhe no IPMA.")
@@ -1161,6 +1189,8 @@ class WeatherAgent(BaseAgent):
                     direct = (
                         "⚠️ **Resposta direta:** há pelo menos um aviso ativo nas áreas pedidas."
                         if has_any_active
+                        else "⚠️ **Resposta direta:** não foi possível confirmar os avisos em todas as áreas pedidas."
+                        if has_any_unavailable
                         else "✅ **Resposta direta:** não há avisos meteorológicos ativos nas áreas pedidas neste momento."
                     )
                     return "\n".join([
@@ -1175,6 +1205,8 @@ class WeatherAgent(BaseAgent):
                 direct = (
                     "⚠️ **Direct answer:** at least one requested area has active warnings."
                     if has_any_active
+                    else "⚠️ **Direct answer:** weather warnings could not be confirmed in every requested area."
+                    if has_any_unavailable
                     else "✅ **Direct answer:** there are no active weather warnings in the requested areas right now."
                 )
                 return "\n".join([
@@ -1238,6 +1270,20 @@ class WeatherAgent(BaseAgent):
         body = "\n\n---\n\n".join(section for section in sections if section).strip()
         body = cls._strip_redundant_body_heading(body)
         direct_answer = cls._build_direct_weather_answer(user_message, original_body, language, forecast_window)
+        if language == "pt":
+            replacements = {
+                "❌ Failed to fetch weather warnings from IPMA.": "⚠️ Não foi possível obter os avisos do IPMA; o estado atual não está confirmado.",
+                "⚠️ Could not fetch weather warnings.": "⚠️ Não foi possível obter os avisos do IPMA; o estado atual não está confirmado.",
+                "❌ Failed to fetch weather forecast from IPMA.": "⚠️ Não foi possível obter a previsão do IPMA.",
+                "❌ Could not fetch today's forecast.": "⚠️ Não foi possível obter a previsão do IPMA para hoje.",
+                "Earlier forecast retrieved at ": "Previsão anterior obtida em ",
+                "; a newer forecast could not be obtained.": "; não foi possível obter uma previsão mais recente.",
+                "Current weather warnings must be confirmed separately.": "Os avisos meteorológicos atuais precisam de confirmação separada.",
+                "Published weather warnings": "Avisos meteorológicos publicados",
+                "warnings are published for upcoming periods.": "existem avisos publicados para períodos futuros.",
+            }
+            for original, translated in replacements.items():
+                body = body.replace(original, translated)
         title = cls._weather_title_for_query(
             user_message,
             language,
@@ -1292,6 +1338,8 @@ class WeatherAgent(BaseAgent):
 
         combined_direct = cls._normalize_weather_query(direct_answer)
         combined_body = cls._normalize_weather_query(body)
+        if re.search(r"published weather warnings|avisos meteorologicos publicados|\bperiod\s*:|\bperiodo\s*:", combined_body):
+            return False
         clear_warning_pattern = r"no active weather warnings|sem avisos meteorol|n[aã]o h[aá] avisos meteorol"
         direct_says_clear = bool(re.search(clear_warning_pattern, combined_direct))
         body_says_clear = bool(re.search(clear_warning_pattern, combined_body))
@@ -1370,6 +1418,23 @@ class WeatherAgent(BaseAgent):
         """Build a concise first answer tailored to the user's weather question."""
         normalized = cls._normalize_weather_query(user_message)
         is_pt = language == "pt"
+        asks_warnings = any(term in normalized for term in _WARNING_QUERY_TERMS)
+        if asks_warnings and cls._warning_tool_result_status(tool_text) == "unavailable":
+            return (
+                "⚠️ Não foi possível confirmar se existem **avisos meteorológicos ativos** para Lisboa."
+                if is_pt else
+                "⚠️ I could not confirm whether **weather warnings are active** for Lisbon."
+            )
+        forecast_unavailable = bool(re.search(
+            r"failed to fetch weather forecast|could not fetch today's forecast|"
+            r"no forecast data available", tool_text, re.IGNORECASE,
+        ))
+        if not asks_warnings and forecast_unavailable:
+            return (
+                "⚠️ Não foi possível obter a previsão do IPMA para responder à tua pergunta."
+                if is_pt else
+                "⚠️ I could not obtain the IPMA forecast needed to answer your question."
+            )
         no_warnings = bool(
             re.search(
                 r"no active weather warnings|sem avisos meteorol|n[aã]o h[aá] avisos meteorol",
@@ -1910,7 +1975,7 @@ class WeatherAgent(BaseAgent):
         the requested day does not cover it. Returns an empty string when the
         question is about "now" or the periods cannot be read.
         """
-        if not forecast_window or forecast_window.get("label") in {None, "today", "tonight"} or no_warnings:
+        if not forecast_window or forecast_window.get("label") in {None, "today", "tonight"}:
             return ""
         windows = cls._active_warning_windows(tool_text)
         if not windows:

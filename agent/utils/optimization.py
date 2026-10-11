@@ -136,8 +136,7 @@ class TTLCache:
             self._last_cleanup = current_time
 
 
-# Global cache instances with different TTLs for different data types
-weather_cache = TTLCache(default_ttl=300)     # 5 minutes for weather
+# Shared cache for transport responses.
 transport_cache = TTLCache(default_ttl=60)    # 1 minute for transport
 
 
