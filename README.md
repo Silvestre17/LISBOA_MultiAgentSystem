@@ -23,10 +23,15 @@
   <a href="#research-context"><img src="https://img.shields.io/badge/MSc_Thesis-NOVA_IMS-0EE071?style=for-the-badge" alt="NOVA IMS MSc thesis"></a>
 </p>
 
+<p align="center">
+  <a href="https://doi.org/10.1016/j.rineng.2026.113369"><img src="https://img.shields.io/badge/Article-Results_in_Engineering-431F6C?style=for-the-badge&logo=elsevier&logoColor=white" alt="Article in Results in Engineering"></a>
+  <a href="https://doi.org/10.5281/zenodo.23322220"><img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.23322220-1682D4?style=for-the-badge&logo=zenodo&logoColor=white" alt="Software DOI on Zenodo"></a>
+</p>
+
 <a id="overview"></a>
 ## 📍 Overview
 
-**LISBOA** (*Lisbon Itinerary System Based On AI*) is the software artifact of an MSc thesis at NOVA Information Management School (NOVA IMS). It provides grounded, context-aware assistance for tourism and urban mobility in Lisbon and the Lisbon Metropolitan Area (*Área Metropolitana de Lisboa*, AML).
+**LISBOA** (*Lisbon Itinerary System Based On AI*) is the software artifact of an MSc thesis at NOVA Information Management School (NOVA IMS) and of an article published in [*Results in Engineering*](https://doi.org/10.1016/j.rineng.2026.113369). It provides grounded, context-aware assistance for tourism and urban mobility in Lisbon and the Lisbon Metropolitan Area (*Área Metropolitana de Lisboa*, AML).
 
 The system combines specialized LLM agents with on-demand weather and transport integrations, municipal open data, tourism datasets, multilingual retrieval-augmented generation (RAG), and a constrained web fallback. A bilingual Streamlit interface, in European Portuguese and English, serves both tourists planning a visit and residents looking for mobility or local-service information.
 
@@ -66,6 +71,8 @@ The system combines specialized LLM agents with on-demand weather and transport 
 - **Degree:** Master's in Data Science and Advanced Analytics, specialization in Data Science
 - **Institution:** NOVA Information Management School (NOVA IMS), Universidade NOVA de Lisboa
 - **Academic year:** 2025/2026
+- **Article:** *A multi-agent approach for context-aware tourism and urban mobility guidance*, *Results in Engineering*, 32 (2026), 113369, [doi:10.1016/j.rineng.2026.113369](https://doi.org/10.1016/j.rineng.2026.113369)
+- **Software archive:** Zenodo, [doi:10.5281/zenodo.23322220](https://doi.org/10.5281/zenodo.23322220)
 
 <a id="current-system-snapshot"></a>
 ## 📊 Current System Snapshot
@@ -323,23 +330,36 @@ Dockerfile          Container image for local and hosted deployment
 <a id="citation"></a>
 ## 📖 Citation
 
-Until the thesis or an article with a persistent identifier is available, cite the software as:
+For research claims, cite the article:
 
-> Silvestre, A., Jardim, B., & Neto, M. de C. (2026). *LISBOA: A multi-agent approach for personalized tourism and urban mobility in Lisbon* (Version 1.0.0) [Computer software]. GitHub. https://github.com/Silvestre17/LISBOA_MultiAgentSystem
+> Silvestre, A., Jardim, B., & de Castro Neto, M. (2026). A multi-agent approach for context-aware tourism and urban mobility guidance. *Results in Engineering*, *32*, 113369. https://doi.org/10.1016/j.rineng.2026.113369
 
 ```bibtex
-@software{silvestre_jardim_castro_neto_2026_lisboa,
-  author    = {Silvestre, André and Jardim, Bruno and Neto, Miguel de Castro},
-  title     = {{LISBOA}: A Multi-Agent Approach for Personalized Tourism and Urban Mobility in Lisbon},
-  year      = {2026},
-  version   = {1.0.0},
-  type      = {Computer software},
-  publisher = {GitHub},
-  url       = {https://github.com/Silvestre17/LISBOA_MultiAgentSystem}
+@article{silvestre_2026_lisboa,
+  author  = {Silvestre, André and Jardim, Bruno and {de Castro Neto}, Miguel},
+  title   = {A multi-agent approach for context-aware tourism and urban mobility guidance},
+  journal = {Results in Engineering},
+  volume  = {32},
+  pages   = {113369},
+  year    = {2026},
+  doi     = {10.1016/j.rineng.2026.113369}
 }
 ```
 
-Once the thesis or an article with a persistent identifier is published, cite that record for research claims and this repository for the software implementation.
+For the software itself, cite the archived release on Zenodo:
+
+> Silvestre, A., Jardim, B., & de Castro Neto, M. (2026). *LISBOA (Lisbon Itinerary System Based On AI): Source code and evaluation artifacts* (Version 1.0.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.23322220
+
+```bibtex
+@software{silvestre_2026_lisboa_software,
+  author    = {Silvestre, André and Jardim, Bruno and {de Castro Neto}, Miguel},
+  title     = {{LISBOA} (Lisbon Itinerary System Based On AI): Source code and evaluation artifacts},
+  year      = {2026},
+  version   = {1.0.0},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.23322220}
+}
+```
 
 <a id="license"></a>
 ## 📄 License

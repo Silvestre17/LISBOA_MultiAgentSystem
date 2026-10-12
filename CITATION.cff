@@ -3,6 +3,8 @@ message: "If you use this software, please cite the article below."
 type: software
 title: "LISBOA (Lisbon Itinerary System Based On AI): source code and evaluation artifacts"
 version: 1.0.0
+date-released: 2026-10-12
+doi: "10.5281/zenodo.23322220"
 license: MIT
 repository-code: "https://github.com/Silvestre17/LISBOA_MultiAgentSystem"
 url: "https://andresilvestre17-lisboa.hf.space/"
@@ -38,6 +40,7 @@ preferred-citation:
     - family-names: de Castro Neto
       given-names: Miguel
   journal: "Results in Engineering"
+  volume: 32
   year: 2026
   start: 113369
   doi: "10.1016/j.rineng.2026.113369"
